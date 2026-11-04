@@ -85,6 +85,9 @@ export const PACE_SECOND_MS = 1_100;
  * SOLANA_CALL_TIMEOUT_MS (packages/kit/src/trade/solana/send.ts:61).]
  */
 export const HOLD_WAIT_MS = 1_500;
+/** Past a hold's end, the wait's margin: Node's timers and Date.now() round to whole ms, so a wait of exactly the
+ *  hold's length can wake 1 ms inside it (seen on the box: every caller of a crowd woke inside a 1 s hold). */
+const HOLD_MARGIN_MS = 5;
 
 /**
  * Each keyed provider URL's sends, booked for the last second and ahead, oldest first (card helper-crowd-429): one per
@@ -321,7 +324,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const t = now();
     if (until <= t) return true;
     if (until > Math.min(deadline, t + HOLD_WAIT_MS)) return false;
-    await sleep(until - t);
+    // a timer can fire a few ms before the clock reads its end: the wait is the hold's end plus HOLD_MARGIN_MS
+    await sleep(until - t + HOLD_MARGIN_MS);
     return budget.heldFor(key) === 0;
   };
   const drawsOf = (c: string, methods: readonly string[]): [string, number][] => {

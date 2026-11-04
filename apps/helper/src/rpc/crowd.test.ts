@@ -18,7 +18,7 @@ const read = (id: number, method = "getBalance") => JSON.stringify({ jsonrpc: "2
  *  the helper reads that as 1 s); `first429` answers the first N requests 429 whatever the count (a crowd's burst the
  *  helper did not send, or the provider's own counting). */
 function provider(perSecond: number, first429 = 0) {
-  const p = { calls: 0, throttled: 0, sent: [] as number[], all: [] as number[] };
+  const p = { calls: 0, throttled: 0, sent: [] as number[], all: [] as number[], ids: [] as unknown[] };
   const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
     const t = Date.now();
     const body = JSON.parse(String(init.body)) as { id: unknown } | { id: unknown }[];
@@ -26,6 +26,7 @@ function provider(perSecond: number, first429 = 0) {
     p.sent = p.sent.filter((x) => x > t - 1000);
     for (let i = 0; i < n; i++) p.sent.push(t), p.all.push(t);
     p.calls += n;
+    p.ids.push(Array.isArray(body) ? body.map((b) => b.id) : body.id);
     if (p.calls <= first429 || p.sent.length > perSecond) return (p.throttled++, new Response("slow down", { status: 429 }));
     const one = (r: { id: unknown }) => ({ jsonrpc: "2.0", id: r.id, result: 1 });
     return new Response(JSON.stringify(Array.isArray(body) ? body.map(one) : one(body)), { status: 200, headers: { "content-type": JSON_T } });
@@ -52,7 +53,8 @@ test("card helper-crowd-429: the trade walks' sends to the keyed provider caller
   const callers = Array.from({ length: 10 }, (_, i) => r.handle("solana", JSON_T, read(i + 1), `198.51.100.${i}`));
   const answers = await Promise.all(callers);
   const walked = await Promise.all(walks);
-  assert.equal(pv.p.throttled, 0, `the provider never throttled (peak ${peak(pv.p.all)} in a second, ${walked.filter((w) => w === "skipped").length} walks skipped to the next provider)`);
+  const rel = pv.p.all.map((x, k) => `${x - pv.p.all[0]!}#${String(pv.p.ids[k])}`).join(",");
+  assert.equal(pv.p.throttled, 0, `the provider never throttled (peak ${peak(pv.p.all)} in a second, ${walked.filter((w) => w === "skipped").length} walks skipped to the next provider; sends at ms ${rel})`);
   assert.ok(peak(pv.p.all) <= 10, `peak ${peak(pv.p.all)} in a second`);
   assert.deepEqual(answers.map((a) => a.status), Array(10).fill(200), `every caller served: ${answers.map((a) => `${a.status} ${a.why ?? ""}`).join(", ")}`);
   assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), [], "no hold");
