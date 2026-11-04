@@ -68,6 +68,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-solana-trade.mjs",
   "scripts/live-checks/signpage-withdraw-form.mjs",
   "scripts/live-checks/solana-jupiter-build.mjs",
+  "scripts/live-checks/trade-box-bal-cash.mjs",
   "scripts/live-checks/trade-box-pool.mjs",
   "scripts/live-checks/vault-setup-files.mjs",
   "scripts/live-checks/vault-testnet-t02.mjs",

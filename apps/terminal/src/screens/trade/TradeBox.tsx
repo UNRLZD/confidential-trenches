@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Chain } from "@blindfill/kit";
+import { useBalance } from "../portfolio/source.tsx";
 import { headerModel } from "../signin/model.ts";
 import { useSigninSheet } from "../signin/source.tsx";
 import {
@@ -15,6 +16,7 @@ import {
   poolView,
   PRESETS,
   proofStatus,
+  tradeBal,
   presetOn,
   progress,
   READY,
@@ -108,8 +110,10 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   const pool = onPool ? poolView(pools, chain, price) : null;
   // the proof's state reads state.pools alone: it draws with no price
   const proof = onPool ? proofStatus(pools, chain) : "none";
-  // signed out there is no balance to show: the signing page sends a state with a zero one, which is not "$0" of anyone's
-  const balance = onPool ? (pool?.balance ?? null) : snapshot.state && !signedOut ? parseUsd(snapshot.state.vault_balance) : null;
+  // Bal: the header's Cash (the one balance) on a chain with no pool, the pool's on a chain with one; one number for the
+  // amount gate. Signed out there is none to show: the signing page sends a state with a zero one, which is not "$0" of anyone's
+  const cash = useBalance(snapshot);
+  const balance = tradeBal(onPool, pool, signedOut ? null : cash).cents;
   const maxText = onPool ? null : kit.maxBuy(chain);
   const max = onPool ? (pool?.tapMax ?? null) : maxText === null ? null : parseUsd(maxText);
   const askable = (c: Cents | null) => c !== null && (!onPool || poolBuyAsk(pools, chain, token, c, price, slippageBps).ok);
