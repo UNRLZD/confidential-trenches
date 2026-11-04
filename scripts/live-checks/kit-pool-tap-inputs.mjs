@@ -15,6 +15,7 @@
 //   - poolUsdToUnits turns $100 into base units on each chain, rounded down, within 0.5% of 100 / the price read.
 //   node scripts/live-checks/kit-pool-tap-inputs.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read and the time of the run, for the test's replay (kit-pool-tap-inputs.answers.json).
+// Runs: once, it reads no host: the kit at the checkout against the public price feeds; signpage-pool-price checks SIGN_HOST's own read
 import "../net-window.mjs";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

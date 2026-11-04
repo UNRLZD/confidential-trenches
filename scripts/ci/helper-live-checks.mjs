@@ -27,6 +27,8 @@ export const LIVE_CHECKS = [
   "helper-solana-failover",
   "app-console-429",
   "helper-token-page-cold",
+  "solana-jupiter-build",
+  "wallet-per-buy",
 ];
 
 // `{commit}` is the deployed commit

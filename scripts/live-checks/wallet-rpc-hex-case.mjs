@@ -13,6 +13,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of wallet-rpc-hex-case.answers.json, and its bad run: the same
 // answers with drpc's eth_chainId one higher ("0xB627", another chain in the same case), which the wallet must refuse.
+// Runs: once, it reads no host: the wallet parser at the checkout against two Robinhood testnet RPCs; the wallet tests hold the parse
 import "../net-window.mjs";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";

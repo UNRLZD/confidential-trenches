@@ -25,6 +25,7 @@
 // default is contracts/vault/deployments/testnet-v1.json, mainnet names its own. --record writes every RPC answer the
 // run read to <file>, so the check's test can replay it, each NEAR signature replaced (delete-refund-readback.mjs's
 // recorder: a 64-byte signature has a secret key's shape, and the check reads none).
+// Runs: once, a contract deploy read back on chain: the script vault-readback runs after each vault deploy, with that vault's --account; no host deploy changes it
 import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";

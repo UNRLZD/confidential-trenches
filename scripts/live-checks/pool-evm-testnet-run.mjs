@@ -34,6 +34,7 @@
 // run, as a good run, and its bad run: the same answers with every nullifierHashes read false on both RPCs (a spend
 // the pool never marked), which must fail. --write-record, on PASS, writes the run record pool-evm-testnet-run.md
 // (Money path: yes, one Tx line per transaction of every run).
+// Runs: once, a recorded testnet money run read back on chain; no host deploy changes it
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
