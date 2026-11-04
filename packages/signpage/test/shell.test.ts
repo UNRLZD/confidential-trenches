@@ -139,7 +139,23 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
   };
   return { doc, loc, calls, posted, children, frames, send };
 }
-const flush = () => new Promise((ok) => setTimeout(ok, 10));
+// The shell answers after an off-thread SHA-256 of each message (src/api.ts), so on a loaded runner an answer comes when
+// it comes: every wait below waits until its condition holds, bounded at 2 s with a named failure, never for a set time.
+// `quiet` is only for a check that nothing came: a wait there can let a late post through (a false pass), never fail.
+async function until(cond: () => boolean, what: string, ms = 2_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > end) assert.fail(`not within ${ms} ms: ${what}`);
+    await new Promise((ok) => setTimeout(ok, 1));
+  }
+}
+/** Waits for the shell's answer to `id` in `d.posted`, and gives it. */
+async function answerTo(d: { posted: { msg: unknown }[] }, id: string): Promise<unknown> {
+  const find = () => d.posted.find((p) => (p.msg as { id?: unknown } | null)?.id === id);
+  await until(() => find() !== undefined, `the answer to ${id}`);
+  return find()!.msg;
+}
+const quiet = () => new Promise((ok) => setTimeout(ok, 50));
 
 test("mountShell: one frame, sandboxed exactly, no allow, no referrer, at appSrc of the top window's path and query; the layer hidden", () => {
   for (const href of [`${SIGN_ORIGIN}/token/solana/So111?tab=trades`, `${SIGN_ORIGIN}//evil.com/x?y=1`, `${SIGN_ORIGIN}/@evil.com`, `${SIGN_ORIGIN}/`]) {
@@ -166,13 +182,12 @@ test("open takes the frame out of the document and nothing reaches the old windo
   assert.equal(sh.layer.hidden, false);
   assert.equal(d.frames().length, 1, "the frame stays FRAME_LEAVE_MS, for the answer that opened the layer");
   assert.equal((old as unknown as { inert?: boolean }).inert, true, "inert in the same task as the layer shows");
-  await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
-  assert.equal(d.frames().length, 0);
+  await until(() => d.frames().length === 0, "the frame leaves after FRAME_LEAVE_MS");
   const before = d.posted.length;
   // the removed frame's window asks: dropped; a late load of it posts nothing
   d.send(ask(), old.contentWindow);
   old.fire("load");
-  await flush();
+  await quiet();
   assert.equal(d.posted.length, before);
   d.loc.href = `${SIGN_ORIGIN}/portfolio?x=1`;
   sh.close();
@@ -184,7 +199,7 @@ test("open takes the frame out of the document and nothing reaches the old windo
   const q = ask();
   d.send(q, f.contentWindow);
   d.send(ask(), old.contentWindow);
-  await flush();
+  await answerTo(d, q.id);
   const after = d.posted.slice(before);
   assert.deepEqual(after.map((p) => p.msg), [READY, { v: 1, id: q.id, ok: true, result: signedOutState() }]);
   assert.ok(after.every((p) => p.win === f.contentWindow && p.to === APP_ORIGIN));
@@ -193,6 +208,7 @@ test("open takes the frame out of the document and nothing reaches the old windo
   assert.equal(d.frames().length, 1);
   sh.open();
   sh.close();
+  // a check that nothing came: this timer is due after the shell's FRAME_LEAVE_MS timer, so that one has run
   await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
   assert.equal(d.frames().length, 1);
   assert.equal((d.frames()[0] as unknown as { inert?: boolean }).inert, false, "a frame kept by a quick close is live again");
@@ -205,19 +221,16 @@ test("nav: the top window's address becomes APP_HOST's path and query, by replac
   const nav = (path: unknown) => ({ v: 1, id: crypto.randomUUID(), type: "nav", path });
   const ok = nav("/token/base/0xabc?tab=holders");
   d.send(ok, win);
-  await flush();
-  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: ok.id, ok: true, result: {} });
+  assert.deepEqual(await answerTo(d, ok.id), { v: 1, id: ok.id, ok: true, result: {} });
   assert.deepEqual(d.calls.replace, [`${SIGN_ORIGIN}/token/base/0xabc?tab=holders`]);
   for (const path of ["//evil.example/x", "https://evil.example/x", "/\\evil.example", "x", `/${"a".repeat(2_048)}`, "/a\nb"]) {
     const m = nav(path);
     d.send(m, win);
-    await flush();
-    assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: m.id, ok: false, error: { code: "not_allowed" } }, path);
+    assert.deepEqual(await answerTo(d, m.id), { v: 1, id: m.id, ok: false, error: { code: "not_allowed" } }, path);
   }
   const extra = { ...nav("/x"), extra: 1 };
   d.send(extra, win);
-  await flush();
-  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: extra.id, ok: false, error: { code: "not_allowed" } });
+  assert.deepEqual(await answerTo(d, extra.id), { v: 1, id: extra.id, ok: false, error: { code: "not_allowed" } });
   assert.equal(d.calls.replace.length, 1);
   assert.equal(d.calls.assign + d.calls.reload, 0, "never a navigation");
 });
@@ -271,13 +284,12 @@ test("reload: answered first, then the top window reloads", async () => {
   const view = d.doc.defaultView as unknown as { location: { reload(): void } };
   view.location.reload = () => void (atReload = d.posted.length);
   d.send(m, win);
-  await flush();
-  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: m.id, ok: true, result: {} });
+  assert.deepEqual(await answerTo(d, m.id), { v: 1, id: m.id, ok: true, result: {} });
+  await until(() => atReload >= 0, "the reload");
   assert.equal(atReload, d.posted.length, "the answer was posted before the reload");
   const bad = { v: 1, id: crypto.randomUUID(), type: "reload", x: 1 };
   d.send(bad, win);
-  await flush();
-  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: bad.id, ok: false, error: { code: "not_allowed" } });
+  assert.deepEqual(await answerTo(d, bad.id), { v: 1, id: bad.id, ok: false, error: { code: "not_allowed" } });
 });
 
 test("reload waits for a running trade to settle (the review's reload finding): answered first, reloaded only after", async () => {
@@ -288,11 +300,11 @@ test("reload waits for a running trade to settle (the review's reload finding): 
   const win = d.frames()[0]!.contentWindow;
   const m = { v: 1, id: crypto.randomUUID(), type: "reload" };
   d.send(m, win);
-  await flush();
-  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: m.id, ok: true, result: {} });
+  assert.deepEqual(await answerTo(d, m.id), { v: 1, id: m.id, ok: true, result: {} });
+  await quiet();
   assert.equal(d.calls.reload, 0, "no reload while the trade runs");
   settle();
-  await flush();
+  await until(() => d.calls.reload === 1, "the reload once the trade settled");
   assert.equal(d.calls.reload, 1);
 });
 
@@ -307,18 +319,32 @@ test("a kind the host answers (signin.open): its answer goes to the frame before
   const win = d.frames()[0]!.contentWindow;
   const m = { v: 1, id: crypto.randomUUID(), type: "signin.open", return_key: "deposit", way: "words" };
   d.send(m, win);
-  await flush();
-  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: m.id, ok: true, result: { pending: true } });
+  assert.deepEqual(await answerTo(d, m.id), { v: 1, id: m.id, ok: true, result: { pending: true } });
+  await until(() => order.length > 0, "then() opens the layer");
   assert.deepEqual(order, [`open after ${d.posted.length} posts`]);
-  await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
-  assert.equal(d.frames().length, 0);
+  await until(() => d.frames().length === 0, "the frame leaves after FRAME_LEAVE_MS");
   // backup.open has no handler: refused, and so is a signin.open the handler refuses (a new frame first)
   sh.close();
   const w2 = d.frames()[0]!.contentWindow;
   for (const r of [{ type: "backup.open", return_key: "settings" }, { type: "signin.open", return_key: "deposit", way: "wallet" }]) {
     const q = { v: 1, id: crypto.randomUUID(), ...r };
     d.send(q, w2);
-    await flush();
-    assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: q.id, ok: false, error: { code: "not_allowed" } }, r.type);
+    assert.deepEqual(await answerTo(d, q.id), { v: 1, id: q.id, ok: false, error: { code: "not_allowed" } }, r.type);
   }
+});
+
+test("the waits hold on a loaded runner: every answer read when the shell's SHA-256 comes 50 ms late (CI job 126429473907)", async (t) => {
+  const subtle = globalThis.crypto.subtle;
+  const digest = subtle.digest.bind(subtle);
+  Object.defineProperty(subtle, "digest", { configurable: true, value: async (...a: Parameters<SubtleCrypto["digest"]>) => (await new Promise((ok) => setTimeout(ok, 50)), digest(...a)) });
+  t.after(() => delete (subtle as unknown as { digest?: unknown }).digest);
+  const d = fakeDom();
+  mountShell(d.doc, { state: () => signedOutState() });
+  const win = d.frames()[0]!.contentWindow;
+  const nav = { v: 1, id: crypto.randomUUID(), type: "nav", path: "/portfolio" };
+  d.send(nav, win);
+  assert.deepEqual(await answerTo(d, nav.id), { v: 1, id: nav.id, ok: true, result: {} });
+  const q = ask();
+  d.send(q, win);
+  assert.deepEqual(await answerTo(d, q.id), { v: 1, id: q.id, ok: true, result: signedOutState() });
 });
