@@ -22,7 +22,7 @@ import { bindSenderFromEnv } from "../src/bind/env.ts";
 import { tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
 import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
-import { evmSwapsFromEnv, solanaTokenFromEnv, solanaTradesFromEnv } from "../src/server.ts";
+import { evmSwapsFromEnv, sendersFromEnv, solanaTokenFromEnv, solanaTradesFromEnv } from "../src/server.ts";
 import { solanaPoolSendersFromEnv } from "../src/pool/solana.ts";
 import { evmPoolSendersFromEnv } from "../src/pool/evm.ts";
 import { releaseOf } from "../src/health.ts";
@@ -77,6 +77,8 @@ export const ENV_READERS = {
   evmPoolSendersFromEnv,
   evmSwapsFromEnv: (env) => evmSwapsFromEnv(env, noEvmLists),
   solanaTradesFromEnv: (env) => solanaTradesFromEnv(env, noLists, noToken).stop(),
+  // the senders' handover (card helper-ready-gate): the store folder and the fee quoter's names
+  sendersFromEnv: (env) => sendersFromEnv(env),
 };
 
 /** An env that records every name read from it (a get, an `in`), holding `values`. */

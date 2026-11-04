@@ -81,8 +81,9 @@ swap_helper() {
   count="$(printf '%s\n' "$old" | grep -c .)"
   echo "redeploy: starting the new helper beside the old one (bound $wait_s s)"
   if ! docker compose up -d --no-deps --no-recreate --scale "helper=$((count + 1))" --wait --wait-timeout "$wait_s" helper; then
-    # the containers now running that were not before; the old ones are left alone
-    new="$(docker compose ps -q helper | grep -vxF -f <(printf '%s\n' "$old") || true)"
+    # every container of the service that was not running before, a stopped or restarting one included; the old ones
+    # are left alone
+    new="$(docker compose ps -a -q helper | grep -vxF -f <(printf '%s\n' "$old") || true)"
     for id in $new; do docker rm -f "$id" >/dev/null || true; done
     echo "redeploy: the new helper was not ready within $wait_s s; the old one keeps serving" >&2
     exit 1

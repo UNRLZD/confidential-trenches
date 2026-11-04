@@ -673,7 +673,7 @@ if (import.meta.main) {
     console.error("helper: HELPER_COMMIT must be a full 40-hex commit");
     process.exit(2);
   }
-  const storeDir = process.env[STORE_ENV] ?? "";
+  const storeDir = process.env.HELPER_STORE_DIR ?? ""; // withdraw/fee.ts STORE_ENV
   let server: Server | null = null;
   let saveWarm = () => undefined as void;
   try {
