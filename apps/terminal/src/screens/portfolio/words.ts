@@ -100,6 +100,9 @@ export const WORDS = {
   ready: ok("Ready", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: the part with a proof ready to buy"),
   pending: ok("Pending", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: the part still being proved"),
   noBalance: ok("No balance", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: no pool holds anything"),
+  // card app-export-every-wallet: drafts in research board/words-pending.json until the owner's next picks page
+  exportKey: draft("Export key", "card app-export-every-wallet draft: the export icon's hover label and accessible name (words-pending)"),
+  wallets: draft("Wallets", "card app-export-every-wallet draft: the heading over the wallets that hold money and no position (words-pending)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
