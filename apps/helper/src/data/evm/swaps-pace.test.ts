@@ -7,7 +7,7 @@
 // refusing; and a caller of /v1/rpc/robinhood must not pay for the helper's own reads.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CURVE_TOKEN, fakeChain, open, POOL_CURVE, POOL_MAG, REC } from "../../../test/evm-swaps/robinhood.ts";
+import { CURVE_TOKEN, fakeChain, open, POOL_CURVE, POOL_MAG, REC, URLS } from "../../../test/evm-swaps/robinhood.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { CALLER_ROOM, PROVIDER_PACE, providerHolds } from "../../limits/limits.ts";
 import { HEADER_TIMED, SWAP_RPCS, type Pool } from "./swaps.ts";
@@ -145,4 +145,17 @@ test("card helper-robinhood-capacity fold 2: a caller of /v1/rpc/robinhood never
   assert.equal(a.status, 429, a.body);
   assert.deepEqual(asked, [], "nothing sent to a held provider");
   assert.equal(a.headers?.["Retry-After"], "5");
+});
+
+test("card helper-robinhood-capacity fold 3: every provider's bucket spent at once (each read passed at PACE_WAIT_MAX_MS everywhere, as on the loaded box) still answers 200: a read fails on a refusal or a disagreement, never on the pace alone", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const clock = realClock();
+  const tight = { perS: 3, burst: 3, unit: "post" as const };
+  const holds = providerHolds(() => clock.t, Object.fromEntries(URLS.map((u) => [u, tight])));
+  const s = open(chain, clock, { pools: new Map([[CURVE_TOKEN, { pool: POOL_CURVE, decimals: 18 }]]), fetch: chain.fetch, holds });
+  const got = await Promise.all([s.trades(CURVE_TOKEN, 50), s.trades(CURVE_TOKEN, 50)]);
+  s.stop();
+  for (const a of got) assert.equal(a.status, 200, a.body);
+  assert.ok(JSON.parse(got[0]!.body).trades.length > 0);
 });
