@@ -8,6 +8,9 @@
 // - ready: the chunks of the proof queue's ready proofs for the pool whose note is still in the store, HELD by the same
 //   attempt (a proof whose note moved is not ready), each note counted once. Absent from every entry when no ready list
 //   is given (no queue runs), never "0" in its place.
+// - tap_max: the most one tap can spend on the chain. A tap spends one ready proof, one note's chunk (./queue.ts
+//   header, ./ladder.ts chunkOf), so it is the largest chunk among the proofs `ready` counts, across the chain's pools,
+//   never their sum. Present exactly when ready is, "0" when ready is "0".
 // - One entry per chain, in the order the chain first appears in the pool table, carrying the chain's pool asset; pools
 //   on one chain sum into it. Two assets on one chain are refused: the kit's state keeps one entry per chain.
 // - Amounts: exact decimals of base units / the asset's 1.0, 10^POOL_ASSET_DECIMALS[asset] from the kit's one table
@@ -24,7 +27,7 @@ import type { ReadyProof } from "./pool.ts";
 export type BalancePool = { id: string; chain: Chain; scope: bigint; asset: PoolAsset };
 /** What poolBalances reads of a ready proof. */
 export type BalanceProof = Pick<ReadyProof, "noteId" | "attempt" | "poolId" | "chunk">;
-export type PoolBalance = { chain: Chain; asset: PoolAsset; balance: string; ready?: string };
+export type PoolBalance = { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string };
 
 /** The Solana pool's table entry: it holds SOL (the wrapped-SOL mint its scope hashes, ./solana.ts SOL_NATIVE_MINT). */
 export function solanaBalancePool(id: string, scope: bigint): BalancePool {
@@ -55,7 +58,7 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
   const ids = new Set<string>();
   const scopes = new Set<bigint>();
   // per chain, in table order: its asset's decimals, then the sums in base units
-  const chains = new Map<Chain, { asset: PoolAsset; d: number; balance: bigint; ready: bigint }>();
+  const chains = new Map<Chain, { asset: PoolAsset; d: number; balance: bigint; ready: bigint; tapMax: bigint }>();
   for (const p of pools) {
     if (typeof p.id !== "string" || p.id.length === 0) throw new Error("pool: no id");
     if (!(CHAINS as readonly unknown[]).includes(p.chain)) throw new Error(`pool ${p.id}: unknown chain ${String(p.chain)}`);
@@ -66,7 +69,7 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
     ids.add(p.id);
     scopes.add(p.scope);
     const c = chains.get(p.chain);
-    if (c === undefined) chains.set(p.chain, { asset: p.asset, d, balance: 0n, ready: 0n });
+    if (c === undefined) chains.set(p.chain, { asset: p.asset, d, balance: 0n, ready: 0n, tapMax: 0n });
     else if (c.asset !== p.asset) throw new Error(`pool ${p.id}: chain ${p.chain} holds asset ${c.asset}, not ${p.asset}: one asset per chain`);
   }
   const byId = new Map(notes.map((n) => [n.id, n]));
@@ -86,12 +89,13 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
       if (typeof r.chunk !== "bigint" || r.chunk < 0n) throw new Error(`ready proof for note ${r.noteId}: chunk is not a bigint`);
       counted.add(r.noteId);
       c.ready += r.chunk;
+      if (r.chunk > c.tapMax) c.tapMax = r.chunk;
     }
   }
   return [...chains].map(([chain, c]) => ({
     chain,
     asset: c.asset,
     balance: decimal(c.balance, c.d),
-    ...(ready === undefined ? {} : { ready: decimal(c.ready, c.d) }),
+    ...(ready === undefined ? {} : { ready: decimal(c.ready, c.d), tap_max: decimal(c.tapMax, c.d) }),
   }));
 }

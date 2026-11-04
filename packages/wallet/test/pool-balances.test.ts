@@ -63,8 +63,8 @@ test("ready: the chunks of ready proofs whose note is still HELD by the same att
     proof(SOL, baseHeld, WEI / 2n), // names the Solana pool, but its note is Base's
   ];
   assert.deepEqual(poolBalances([held, moved, sent, freed, baseHeld], [SOL, BASE], ready), [
-    { chain: "solana", asset: "SOL", balance: "42", ready: "20" },
-    { chain: "base", asset: "ETH", balance: "0.5", ready: "0.25" },
+    { chain: "solana", asset: "SOL", balance: "42", ready: "20", tap_max: "20" },
+    { chain: "base", asset: "ETH", balance: "0.5", ready: "0.25", tap_max: "0.25" },
   ]);
 });
 
@@ -72,11 +72,39 @@ test("ready absent: no ready key on any entry, never \"0\" in its place; an empt
   const notes = [note(SOL.scope, "HELD", LAMPORTS)];
   const out = poolBalances(notes, [SOL, BASE]);
   assert.deepEqual(out, [{ chain: "solana", asset: "SOL", balance: "1" }, { chain: "base", asset: "ETH", balance: "0" }]);
-  for (const e of out) assert.equal(Object.hasOwn(e, "ready"), false, e.chain);
+  for (const e of out) assert.equal(Object.hasOwn(e, "ready") || Object.hasOwn(e, "tap_max"), false, e.chain);
   assert.deepEqual(poolBalances(notes, [SOL, BASE], []), [
-    { chain: "solana", asset: "SOL", balance: "1", ready: "0" },
-    { chain: "base", asset: "ETH", balance: "0", ready: "0" },
+    { chain: "solana", asset: "SOL", balance: "1", ready: "0", tap_max: "0" },
+    { chain: "base", asset: "ETH", balance: "0", ready: "0", tap_max: "0" },
   ]);
+});
+
+test("tap_max: the most one tap can spend, the largest chunk among the chain's counted ready proofs, across its pools", () => {
+  // one tap spends one ready proof (src/pool/queue.ts header): the largest counted chunk, never their sum
+  const SOL2: BalancePool = { id: "sol-pool-2", chain: "solana", scope: 44n, asset: "SOL" };
+  const a = note(SOL.scope, "HELD", 25n * LAMPORTS);
+  const b = note(SOL.scope, "HELD", 3n * LAMPORTS);
+  const c = note(SOL2.scope, "HELD", 12n * LAMPORTS);
+  const moved = note(SOL.scope, "HELD", 90n * LAMPORTS, "a-new"); // its proof is not counted, so neither is its chunk
+  const sent = note(SOL.scope, "RESERVED", 80n * LAMPORTS); // taken already
+  const e = note(BASE.scope, "HELD", WEI);
+  const ready = [
+    proof(SOL, a, 20n * LAMPORTS),
+    proof(SOL, b, 2n * LAMPORTS),
+    proof(SOL2, c, 10n * LAMPORTS),
+    proof(SOL, moved, 90n * LAMPORTS, "a-old"),
+    proof(SOL, sent, 80n * LAMPORTS),
+    proof(SOL, { ...a, id: "gone" }, 70n * LAMPORTS), // a note no longer in the store
+    proof(BASE, e, 1_000_000_000_000_001n), // 0.001000000000000001 ETH: exact at 18 decimals
+    proof(SOL, e, 60n * LAMPORTS), // names the Solana pool, but its note is Base's
+  ];
+  assert.deepEqual(poolBalances([a, b, c, moved, sent, e], [SOL, BASE, SOL2], ready), [
+    { chain: "solana", asset: "SOL", balance: "130", ready: "32", tap_max: "20" },
+    { chain: "base", asset: "ETH", balance: "1", ready: "0.001000000000000001", tap_max: "0.001000000000000001" },
+  ]);
+  // the key sits next to ready: absent with it, "0" with a ready of "0"
+  assert.deepEqual(poolBalances([a], [SOL]), [{ chain: "solana", asset: "SOL", balance: "25" }]);
+  assert.deepEqual(poolBalances([a], [SOL], []), [{ chain: "solana", asset: "SOL", balance: "25", ready: "0", tap_max: "0" }]);
 });
 
 test("one entry per chain in the order of the pool table: a configured chain with no notes is \"0\", two pools of one asset on one chain sum", () => {
@@ -85,9 +113,9 @@ test("one entry per chain in the order of the pool table: a configured chain wit
   const b = note(SOL2.scope, "HELD", 1_250_000_001n);
   const out = poolBalances([a, b], [NEAR, SOL, BASE, SOL2], [proof(SOL2, b, LAMPORTS)]);
   assert.deepEqual(out, [
-    { chain: "near", asset: "USDC", balance: "0", ready: "0" },
-    { chain: "solana", asset: "SOL", balance: "4.250000001", ready: "1" },
-    { chain: "base", asset: "ETH", balance: "0", ready: "0" },
+    { chain: "near", asset: "USDC", balance: "0", ready: "0", tap_max: "0" },
+    { chain: "solana", asset: "SOL", balance: "4.250000001", ready: "1", tap_max: "1" },
+    { chain: "base", asset: "ETH", balance: "0", ready: "0", tap_max: "0" },
   ]);
   assert.deepEqual(poolBalances([], []), []);
 });

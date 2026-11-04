@@ -600,6 +600,35 @@ test("state.pools: the private balance per chain's pool is optional; each entry 
   for (const [name, v] of Object.entries(bad)) assert.equal(ok({ ...STATE, pools: v }), false, name);
 });
 
+test("state.pools tap_max: the most one tap can spend, optional next to ready, exact at the asset's decimals, never over ready", () => {
+  const ok = S.SIGNPAGE_RESULT_SCHEMAS.state;
+  const at = (e) => ok({ ...STATE, pools: [e] });
+  // present
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "8" }), true, "a tap_max under ready");
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "10" }), true, "a tap_max equal to ready");
+  assert.equal(at({ chain: "base", asset: "ETH", balance: "1", ready: "0.001", tap_max: "0.000000000000000001" }), true, "ETH at 18 decimals");
+  assert.equal(at({ chain: "near", asset: "USDC", balance: "1", ready: "0", tap_max: "0" }), true, "\"0\" with a ready of \"0\"");
+  // absent: an older page's entry with a ready and no tap_max, and an entry with neither
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "12.5", ready: "10" }), true, "ready, no tap_max");
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "12.5" }), true, "neither");
+  // malformed: refused
+  const bad = {
+    "a tap_max with no ready": { chain: "solana", asset: "SOL", balance: "12.5", tap_max: "1" },
+    "a tap_max over ready": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "10.000000001" },
+    "a tap_max of 0 with a ready above 0": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "0" },
+    "a tap_max above 0 with a ready of 0": { chain: "solana", asset: "SOL", balance: "12.5", ready: "0", tap_max: "1" },
+    "a SOL tap_max past 9 decimals": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "0.0000000001" },
+    "a USDC tap_max past 6 decimals": { chain: "near", asset: "USDC", balance: "12", ready: "10", tap_max: "1.0000001" },
+    "a negative tap_max": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "-1" },
+    "an exponent": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "1e1" },
+    "an empty tap_max": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "" },
+    "a bare point": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "1." },
+    "a number, not a string": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: 1 },
+    "null": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: null },
+  };
+  for (const [name, e] of Object.entries(bad)) assert.equal(at(e), false, name);
+});
+
 // ------------------------------------------------------------------------------------------------ refusals
 test("answers dropped with no state change: wrong origin, wrong source, wrong id, bad keys, bad arrays, over 4 MiB, not plain", async () => {
   const { h, c } = await readyClient();

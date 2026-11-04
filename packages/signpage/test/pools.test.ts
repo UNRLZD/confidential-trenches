@@ -64,7 +64,7 @@ test("an empty pool table: pools [] and the notes never read", async () => {
 test("ready: passed through when given, absent when not", async () => {
   const held: NoteRecord = { ...note("h", SOL.scope, 20_000_000_000n), state: "HELD", attempt: "a1", deadlineMs: 1n };
   const ready = [{ noteId: "h", attempt: "a1", poolId: SOL.id, chunk: 20_000_000_000n }];
-  assert.deepEqual((await withPools(SIGNED_IN, async () => [held], [SOL], ready)).pools, [{ chain: "solana", asset: "SOL", balance: "20", ready: "20" }]);
+  assert.deepEqual((await withPools(SIGNED_IN, async () => [held], [SOL], ready)).pools, [{ chain: "solana", asset: "SOL", balance: "20", ready: "20", tap_max: "20" }]);
   assert.deepEqual((await withPools(SIGNED_IN, async () => [held], [SOL])).pools, [{ chain: "solana", asset: "SOL", balance: "20" }]);
 });
 
