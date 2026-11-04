@@ -114,3 +114,27 @@ test("held head (review of 4830f1f, L): timed on a clock that never steps back, 
   await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
   assert.equal(c.heads(), 6, "heads read again: the hold is past 5 s on the clock that never steps back");
 });
+
+test("held head: under 5 s since it was read but past 30 s by its age then plus that time, the quote agrees on a block again", async () => {
+  const c = chain();
+  const now = blockMs() + 27_000; // the device's clock stays (stepped back by what passed), so only the age bound reads again
+  let mono = 0;
+  const watch = evmHeadWatch(c.rpcs, MAX_LAG, () => now, false, () => mono);
+  await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
+  mono += 4_000;
+  await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
+  assert.equal(c.heads(), 6, "heads read again: 27 s old when read, 31 s now");
+});
+
+test("held head: a device asleep (its never-stepped-back clock paused) wakes past 30 s on its own clock, and the quote reads the heads again instead of reusing or refusing the held one", async () => {
+  const c = chain();
+  let now = C.now;
+  let mono = 0;
+  const watch = evmHeadWatch(c.rpcs, MAX_LAG, () => now, false, () => mono);
+  await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
+  now = blockMs() + 30_001;
+  mono += 1_000;
+  // the recording holds only that block, so the new read is refused too, but only after the heads are read again
+  await assert.rejects(evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
+  assert.equal(c.heads(), 5, "both heads read again (the stale block is refused before its confirmation)");
+});

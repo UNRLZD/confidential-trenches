@@ -508,9 +508,13 @@ export function evmHeadWatch(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, cl
       // the device's clock now: a quote asks after its scan, which may have run for seconds since `nowMs`
       const t = Math.max(nowMs, clock());
       const h = held;
+      // fresh on both clocks: `mono` cannot be stepped back, and the device's clock still runs while `mono` pauses in
+      // a sleep, so a block past 30 s on either is read again, never reused
       const m = mono();
       const since = h === null ? -1 : m - h.at;
-      if (h !== null && since >= 0 && since <= EVM_HEAD_REUSE_MS && h.age + since <= EVM_QUOTE_MAX_AGE_MS) return { block: h.block, confirm: async () => {} };
+      if (h !== null && since >= 0 && since <= EVM_HEAD_REUSE_MS && h.age + since <= EVM_QUOTE_MAX_AGE_MS && t - Number(h.block.timestamp) * 1000 <= EVM_QUOTE_MAX_AGE_MS) {
+        return { block: h.block, confirm: async () => {} };
+      }
       const a = await agreedBlock(rpcs, maxLag, t);
       return {
         block: a.block,
@@ -922,13 +926,10 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // liquidity, which a narrow range inflates for the price of a dust position) decides what is read, quoted or
   // refused (review of 2afa8b6): a bound only leaves pools unread, and what is read is priced by its quote at the
   // user's own amount
-  // the agreed block, picked once (the held head while fresh), after the token's scan has its logs; a held head is
-  // checked against the 30 s rule like a new one
+  // the agreed block, picked once (the held head while fresh), after the token's scan has its logs; a new one is held
+  // to the 30 s rule in agreedBlock, a held one in the watch's reuse bound on both clocks
   let agreed: ReturnType<typeof agreedBlock> | undefined;
-  const agreedOnce = () =>
-    (agreed ??= (watch === undefined ? agreedBlock(rpcs, v.maxLag, nowMs) : watch.head(nowMs)).then((x) =>
-      nowMs - Number(x.block.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS ? refuse("stale_quote", `block ${x.block.number} is more than 30 s old`) : x,
-    ));
+  const agreedOnce = () => (agreed ??= watch === undefined ? agreedBlock(rpcs, v.maxLag, nowMs) : watch.head(nowMs));
   const agreedNumber = () => agreedOnce().then((x) => x.block.number);
   const gate = gateOf(v.scan?.parallel ?? 1);
   let headOfScan: Promise<bigint> | undefined;
