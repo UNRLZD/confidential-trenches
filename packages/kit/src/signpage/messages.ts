@@ -213,17 +213,23 @@ export interface StateEvent {
  */
 export type BuyRoute = { wallet: string } | { venue: string; pool: string } | { out: string };
 
-/**
- * A request still running, by its id: its stage, or (with no stage) one fact of its route (BuyRoute). The route events
- * are separate events, never fields on a stage event: a client of an earlier kit checks a progress event with exact
- * keys and drops any other shape, so it drops a route event and still reads every stage. A page of an earlier release
- * sends no route event, and a client reads its stages as before.
- */
-export type ProgressEvent =
-  | { v: 1; type: "progress"; id: string; stage: Stage }
-  | ({ v: 1; type: "progress"; id: string } & BuyRoute);
+/** The stage of a request still running, by its id. */
+export interface ProgressEvent {
+  v: 1;
+  type: "progress";
+  id: string;
+  stage: Stage;
+}
 
-export type SignpageEvent = ReadyEvent | StateEvent | ProgressEvent;
+/**
+ * One fact of a running buy's route (BuyRoute), by its id: a progress event with no stage. Its own event, never fields
+ * on a stage event: a client of an earlier kit checks a progress event with exact keys and drops any other shape, so it
+ * drops a route event and still reads every stage. A page of an earlier release sends none, and a client reads its
+ * stages as before.
+ */
+export type ProgressRouteEvent = { v: 1; type: "progress"; id: string } & BuyRoute;
+
+export type SignpageEvent = ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent;
 
 /** Anything the page posts to the app. */
 export type SignpageMessage = SignpageAnswer | SignpageEvent;

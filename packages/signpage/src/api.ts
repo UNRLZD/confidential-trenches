@@ -19,7 +19,7 @@
 //
 // src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
-import type { BuyRoute, ErrorCode, ProgressEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
+import type { BuyRoute, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_PARAM_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
@@ -234,7 +234,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
   // answer null: a Running kind's id whose answer is not posted yet; `held` keeps its progress events until it is
   const answered = new Map<string, { sha: string; answer: SignpageAnswer | null }>();
   const held = new Map<string, Stage[]>();
-  const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent) => host.parent.postMessage(msg, APP_ORIGIN);
+  const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent) => host.parent.postMessage(msg, APP_ORIGIN);
   // the JSON of the last state sent; null until the first `state` answer
   let sent: string | null = null;
   const read = async (): Promise<SignpageState> => {
