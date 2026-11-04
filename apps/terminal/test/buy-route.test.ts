@@ -5,7 +5,8 @@
 // times on the button and the toast are the buy's own measured ones.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fromOutcome, fromStage, IDLE, routeEvent, routeTap, stepView, toastLine } from "../src/screens/trade/route.ts";
+import { fromBuyRoute, fromOutcome, fromStage, IDLE, liveRoute, routeEvent, routeTap, stepView, toastLine } from "../src/screens/trade/route.ts";
+import type { BuyRoute } from "@blindfill/kit";
 import type { Route } from "../src/screens/trade/route.ts";
 
 const T0 = Date.parse("2026-11-04T16:00:00Z");
@@ -130,4 +131,32 @@ test("the toast carries this buy's own time, never a fixed one, and only what is
   assert.equal(toastLine(1_234, "10.6K", "NEARKAT", "$25.00"), "Filled 1.2s · 10.6K NEARKAT · $25.00");
   assert.equal(toastLine(3_777, "10.6K", "NEARKAT", "$25.00"), "Filled 3.7s · 10.6K NEARKAT · $25.00");
   assert.equal(toastLine(3_777, null, "NEARKAT", "$25.00"), "Filled 3.7s · $25.00");
+});
+
+// Card signpage-buy-route-events: the live source reads the kit's route events (client.onRoute), each by its buy's id.
+test("the live seam: the kit's route events by id become the strip's wallet, venue and pool, and filled amount", () => {
+  const subs = new Set<(id: string, r: BuyRoute) => void>();
+  const route = liveRoute((fn) => (subs.add(fn), () => void subs.delete(fn)));
+  let r = tap();
+  const off = route((d) => (r = routeEvent(r, d)));
+  const post = (id: string, x: BuyRoute) => subs.forEach((f) => f(id, x));
+  post("b1", { wallet: WALLET });
+  post("b1", { venue: "pump-curve", pool: POOL });
+  post("other", { out: "1" });
+  r = fromStage(r, "b1", "sent", "sig");
+  post("b1", { out: "10600.5" });
+  r = fromStage(r, "b1", "filled");
+  assert.deepEqual(values(r), ["$25.00", "9DJa…Zst6", "G19c…TQki", "10600.5"]);
+  assert.equal(r.venue, "pump.fun");
+  off();
+  assert.equal(subs.size, 0);
+});
+
+test("a venue id with no name already on screen names no venue (the bare label), never the raw id", () => {
+  assert.deepEqual(fromBuyRoute("b1", { venue: "pump-curve", pool: POOL }), { t: "route", id: "b1", venue: "pump.fun", pool: POOL });
+  for (const venue of ["pumpswap", "Raydium", "__proto__", "constructor", ""]) {
+    assert.deepEqual(fromBuyRoute("b1", { venue, pool: POOL }), { t: "route", id: "b1", venue: null, pool: POOL });
+  }
+  assert.deepEqual(fromBuyRoute("b1", { wallet: WALLET }), { t: "wallet", id: "b1", address: WALLET });
+  assert.deepEqual(fromBuyRoute("b1", { out: "7" }), { t: "out", id: "b1", amount: "7" });
 });

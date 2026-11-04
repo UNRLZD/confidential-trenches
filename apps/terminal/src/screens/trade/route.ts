@@ -9,13 +9,14 @@
 //   proves it: the app has no earlier event for it;
 // - `sent`: the buy's one-time wallet signed and the transaction went out (the kit's `sent`, with its tx);
 // - `filled`: the transaction read back on chain as the buy (the kit's `filled`); the pool and the token check on it.
-// - data: the buy's wallet, the quote's venue and pool address, the filled amount. The signing page does not send them
-//   yet (its progress carries a stage and nothing else), so they come only through TradeKit.route; with none, a step
-//   checks and its value stays empty, never made up.
+// - data: the buy's wallet, the quote's venue and pool address, the filled amount: the signing page's route events for
+//   the buy's id (the kit's BuyRoute, card signpage-buy-route-events), through TradeKit.route (fromBuyRoute). A page of
+//   an earlier release sends none: a step checks and its value stays empty, never made up.
 // A step checks only when it is the one waiting and its own event comes: an event out of order is ignored. A failure
 // marks the step that was waiting and nothing after it ever checks. No time is held here: an animation runs on its own
 // clock from the event, and the times on the button and the toast are the buy's own measured ones (model.ts).
-import type { Stage } from "@blindfill/kit";
+import type { BuyRoute, Stage } from "@blindfill/kit";
+import { padOf } from "../market/pads.ts";
 import { centsToDecimal, secs } from "./model.ts";
 import type { Cents } from "./model.ts";
 import { WORDS } from "./words.ts";
@@ -51,7 +52,7 @@ export type RouteEvent =
   | { t: "filled"; id: string }
   | { t: "fail"; id: string }
   | { t: "wallet"; id: string; address: string }
-  | { t: "route"; id: string; venue: string; pool: string }
+  | { t: "route"; id: string; venue: string | null; pool: string }
   | { t: "out"; id: string; amount: string };
 
 /** The Buy release: a new strip, the wallet step grown in, Private balance waiting. */
@@ -117,8 +118,28 @@ export function fromOutcome(
   return o.error.code === "client_timeout" ? r : fromStage(r, id, "refused");
 }
 
-/** What the signing page is to tell the app of a buy besides its stage (not sent yet: TradeKit.route). */
+/** What the signing page tells the app of a buy besides its stage (TradeKit.route). */
 export type RouteData = Extract<RouteEvent, { t: "wallet" | "route" | "out" }>;
+
+/** The kit's venue ids the strip names, each by a name already on screen (market/pads.ts): the bonding curve is
+ *  pump.fun's own. An id with none names no venue, so the pool's label stays the bare one: never the raw id. */
+const VENUE_PAD: Readonly<Record<string, string>> = { "pump-curve": "pump.fun" };
+
+/** One route event of the kit (the signing page's own reads, by the buy's id) as the strip's data. */
+export function fromBuyRoute(id: string, r: BuyRoute): RouteData {
+  if ("wallet" in r) return { t: "wallet", id, address: r.wallet };
+  if ("venue" in r) {
+    const pad = Object.hasOwn(VENUE_PAD, r.venue) ? padOf(VENUE_PAD[r.venue]) : null;
+    return { t: "route", id, venue: pad ? pad.name : null, pool: r.pool };
+  }
+  return { t: "out", id, amount: r.out };
+}
+
+/** TradeKit.route on the kit's route events (client.onRoute): each one, by its buy's id, as the strip's data. */
+export const liveRoute =
+  (onRoute: (fn: (id: string, r: BuyRoute) => void) => () => void) =>
+  (on: (d: RouteData) => void): (() => void) =>
+    onRoute((id, r) => on(fromBuyRoute(id, r)));
 
 const short = (a: string): string => `${a.slice(0, 4)}…${a.slice(-4)}`;
 
