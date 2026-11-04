@@ -1,16 +1,17 @@
 // node --test scripts/live-checks/helper-token-page-cold.test.mjs: the live check's verdict replays recorded runs
 // (helper-token-page-cold.answers.json):
-//   good:         this card's token page at 11c37c5 (createSolanaToken behind the helper's own proxy and RPC path:
-//                 Jupiter with no key, the public Solana RPC, no Discover lists), served on the Mac at 127.0.0.1:18788
-//                 and read by helper-token-page-cold.mjs --record from 4 Nov 14:46Z: PASS (p95 681 ms, n=32);
-//   bad_pre_card: the deployed helper at 50e15a6, before this card, read the same way from the Mac from 4 Nov 14:37Z:
-//                 the second read of each pair waits out the 4 s batch gap (p50 3957 ms): FAIL.
+//   good:         this card's token page at 68c91b2 (createSolanaToken behind the helper's own proxy and RPC path:
+//                 Jupiter with no key, PublicNode's keyless Solana RPC as the provider, no Discover lists), served on
+//                 the Mac at 127.0.0.1:18788 and read by helper-token-page-cold.mjs --record from 4 Nov 15:18Z: PASS
+//                 (the helper's time p50 368 ms, p95 621 ms, n=32; the second of each pair p50 291 ms);
+//   bad_pre_card: the deployed helper at 50e15a6, before this card, read the same way from the Mac at the same time:
+//                 the second read of each pair waits out the 4 s batch gap (p50 3146 ms; all reads p95 4347 ms): FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { COLD_MIN, judge, LIMIT_MS, pct, read } from "./helper-token-page-cold.mjs";
+import { COLD_MIN, helperMs, judge, LIMIT_MS, pct, read } from "./helper-token-page-cold.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-token-page-cold.answers.json"), "utf8"));
@@ -25,11 +26,11 @@ test("the recorded bad answer (the deployed helper before this card) fails on th
   const r = judge(A.bad_pre_card);
   assert.equal(r.ok, false, r.lines.join("\n"));
   assert.ok(bad(r).some((l) => /^BAD (cold page reads|asked right after a search)/.test(l)), bad(r).join("\n"));
-  const second = A.bad_pre_card.reads.filter((x) => x.order === 1 && x.status === 200).map((x) => x.ms);
+  const second = A.bad_pre_card.reads.filter((x) => x.order === 1 && x.status === 200).map(helperMs);
   assert.ok(pct(second, 95) > LIMIT_MS, "the second of a pair waited the gap");
 });
 
-test("planted on the good answer: a slow read past p95, a 429, warm reads and a dead list fail", () => {
+test("planted on the good answer: a slow read past p95, a 429, warm reads, a missing round trip and a dead list fail", () => {
   const edit = (f) => {
     const run = structuredClone(A.good);
     f(run);
@@ -43,6 +44,11 @@ test("planted on the good answer: a slow read past p95, a 429, warm reads and a 
   // a read whose Jupiter row is older than its send was served from what the helper held: not cold
   r = edit((run) => run.reads.slice(0, run.reads.length - COLD_MIN + 1).forEach((x) => (x.jupAt = x.sentAt - 60_000)));
   assert.ok(bad(r).some((l) => /read cold/.test(l)), r.lines.join("\n"));
+  r = edit((run) => Object.assign(run.reads[5], { rttMs: null }));
+  assert.ok(bad(r).some((l) => /31 of 32 round trips read/.test(l)), r.lines.join("\n"));
+  // a far runner's round trip is not the helper's time: 900 ms of trip on a read of 1.2 s is 300 ms of helper
+  r = edit((run) => run.reads.forEach((x) => Object.assign(x, { ms: 1_200, rttMs: 900 })));
+  assert.equal(r.ok, true, r.lines.join("\n"));
   r = edit((run) => Object.assign(run, { lists: { status: 503, size: 0 } }));
   assert.ok(bad(r).some((l) => l.startsWith("BAD GET /v1/market/lists")), r.lines.join("\n"));
 });
@@ -64,4 +70,6 @@ test("read() draws distinct mints off the helper's lists, reads them in pairs, a
   assert.ok(run.reads.every((x) => x.mint !== listedMint), "never a listed token");
   assert.ok(run.reads.every((x) => !("body" in x)));
   assert.equal(asked.filter((u) => u.includes("/v1/market/token")).length, 6);
+  assert.equal(asked.filter((u) => u.endsWith("/v1/health")).length, 12, "two round trips before each page read");
+  assert.ok(run.reads.every((x) => Number.isSafeInteger(x.rttMs)));
 });
