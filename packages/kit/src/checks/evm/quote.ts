@@ -383,8 +383,9 @@ async function readBoth(rpcs: readonly [EvmRpc, EvmRpc], hash: string, reads: re
 }
 
 /** One provider's answer to `calls`, asked up to 3 more times 0.5, 1 and 1.5 s apart while it answers 429 (Too Many
- *  Requests: rpc.mainnet.chain.robinhood.com, 2026-11-04 06:53Z, to the reads of one quote) or a call's error names its
- *  rate limit ("25/second request limit reached", mainnet.base.org, 07:4xZ); any other failure, or a fourth, refuses. */
+ *  Requests: rpc.mainnet.chain.robinhood.com, 2026-11-04 06:53Z, to the reads of one quote), a call's error names its
+ *  rate limit ("25/second request limit reached", mainnet.base.org, 07:4xZ) or no connection is made (Unreachable: a
+ *  read is asked again, as it sends nothing); any other failure, or a fourth, refuses. */
 async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly unknown[]> {
   let out: unknown;
   for (let i = 0; ; i++) {
@@ -393,7 +394,7 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly 
       if (i < 3 && Array.isArray(out) && out.some(limited)) throw new RateLimited("a call's error names the provider's rate limit");
       break;
     } catch (e) {
-      if (!(e instanceof RateLimited) || i === 3) return refuse("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
+      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) return refuse("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
       await new Promise((r) => setTimeout(r, 500 * (i + 1)));
     }
   }
@@ -629,6 +630,18 @@ function keyOfRoute(r: EvmV4Route): EvmPoolKey {
 // candidate. "all": every pool of the currency; "markets": its pools with the native asset or WETH.
 const INITIALIZE = "dd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"; // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
 const SCANS = new Map<string, { to: number; pools: EvmPoolKey[] }>();
+// The warm round (card evm-quote-warm-round): what a token's last quote read after its first round, kept per chain,
+// side and token for EVM_WARM_RANGE_S of block time. The next quote of the token asks those reads in its own first
+// round and starts those scans beside the token's, so where nothing changed every later round finds its reads already
+// answered and the quote takes one round of reads. A kept read is only asked earlier: it counts only where the quote,
+// run as it always runs at its own block, asks it again, so every check reads the new block (a pool that vanished is
+// not held, one seeded since is found by the scan and read in a round of its own).
+const PLANS = new Map<string, { ts: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[] }>();
+/** The block time a token's kept reads are asked for (card evm-quote-warm-round: 60 s). */
+export const EVM_WARM_RANGE_S = 60n;
+/** The most tokens whose reads are kept, the oldest dropped first. */
+const PLANS_MAX = 64;
+const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null, r.state ?? null, r.tx ?? null], (_, x) => (typeof x === "bigint" ? String(x) : x));
 const SCAN_TOKENS = 4096;
 const SCAN_MAX_LOGS = 10_000;
 /** A scan request that fails or answers SCAN_MAX_LOGS logs or more is asked again as its two halves, at most
@@ -1186,10 +1199,25 @@ async function routeSet(a: {
   const agreedHead = () => agreedOnce().then((x) => x.block);
   const gate = gateOf(v.scan?.parallel ?? 1);
   let headOfScan: Promise<bigint> | undefined;
-  const scanOf = (cs: readonly string[], kind: ScanKind) =>
+  const scanAt = (cs: readonly string[], kind: ScanKind) =>
     scan !== undefined && v.poolManager !== undefined && v.scan !== undefined && cs.length > 0
       ? scanPools(chain, cs, kind, lower(v.weth), v.poolManager, scan, v.scan, agreedHead, v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)))
       : null;
+  // the warm round: the token's kept reads and scans; a scan asked again in this quote is the one started here
+  const planKey = `${chain}:${a.sell ? "sell" : "buy"}:${lower(token)}`;
+  const plan = PLANS.get(planKey);
+  const scans = new Map<string, ReturnType<typeof scanAt>>();
+  const asked: { cs: string[]; kind: ScanKind }[] = [];
+  const scanOf = (cs: readonly string[], kind: ScanKind) => {
+    const k = `${kind}:${cs.join(",")}`;
+    if (!scans.has(k)) scans.set(k, scanAt(cs, kind));
+    if (cs.length > 0 && !(kind === "all" && cs.length === 1 && cs[0] === lower(token))) asked.push({ cs: [...cs], kind });
+    return scans.get(k)!;
+  };
+  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind));
+  if (plan !== undefined) plan.scans.forEach((p, i) => scans.set(`${p.kind}:${p.cs.join(",")}`, early[i]!));
+  // a kept scan that fails refuses only where the quote asks it again
+  for (const e of early) e?.catch(() => {});
   const scanned = await scanOf([lower(token)], "all");
   const { block, confirm } = await agreedOnce();
   // a pool's hook is trusted as it is only where the sell builder takes it: a listed launchpad's hook with that
@@ -1212,7 +1240,19 @@ async function routeSet(a: {
   type Quote = { route: EvmRoute; at: number; twice: number; real?: { at: number; twice: number } };
   type Found = { key: EvmPoolKey; id: string; other: string; price: number; liquidity: number; quotes: Quote[] };
   // a read into `into`: the reads of this round (`reads`) or of a later one, answered after the ones before
-  const put = (into: Read[], r: Read) => (into === reads ? 0 : reads.length) + into.push(r) - 1;
+  // a read a later round asks that the first round already asked from the kept ones: its answer there (the warm round)
+  const kept = new Map<string, number>();
+  const hit = new Set<number>();
+  const put = (into: Read[], r: Read) => {
+    if (into !== reads) {
+      const i = kept.get(readKey(r));
+      if (i !== undefined) {
+        hit.add(i);
+        return i;
+      }
+    }
+    return (into === reads ? 0 : reads.length) + into.push(r) - 1;
+  };
   // (each pool id once: USDG's 9,942 pools on Robinhood spent about a second of the device's time on repeats)
   const foundOf = (k: EvmPoolKey, of: string, into: Read[], id = poolId(k)): Found => {
     const slot = BigInt("0x" + stateSlot(id));
@@ -1270,6 +1310,16 @@ async function routeSet(a: {
     }
   }
 
+  // the kept reads of the token's last quote within EVM_WARM_RANGE_S of block time, after this quote's own
+  const first = reads.length;
+  if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {
+    const own = new Set(reads.map(readKey));
+    for (const r of plan.reads) {
+      const k = readKey(r);
+      if (own.has(k) || kept.has(k)) continue;
+      kept.set(k, reads.push(r) - 1);
+    }
+  }
   // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
   const ans = await readAgreed(confirm, rpcs, block.hash, reads);
   // the block is the same on both providers: the scan keeps what it read up to it
@@ -1538,6 +1588,10 @@ async function routeSet(a: {
     const x = bought.route.venue === "uniswap-v3" ? (fills(bought, true) ? out(bought.at) : null) : valueOf(bought);
     if (x !== null) filled.push({ route: bought.route, amountOut: x });
   }
+  // what the next quote of the token asks in its first round: this one's later reads, and the kept ones it asked again
+  PLANS.delete(planKey);
+  PLANS.set(planKey, { ts: block.timestamp, reads: [...reads.slice(first).filter((_, j) => !kept.has(readKey(reads[first + j]!)) || hit.has(first + j))], scans: asked });
+  while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled };
 }
 
@@ -1712,10 +1766,18 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 
 /** A provider's 429: ask asks again, a little later. */
 class RateLimited extends Error {}
+/** A request that made no connection, so no answer can have started: ask asks again, a little later. mainnet.base.org
+ *  failed one connection in about every quote from this Mac ("fetch failed", ETIMEDOUT about 505 ms in: Node tries each
+ *  of the host's addresses for 250 ms, and this network has no IPv6 route), 2026-11-04 15:45-16:00Z; a request that ran
+ *  out of time (TimeoutError) is not one: it may have been served. */
+class Unreachable extends Error {}
 const limited = (a: unknown) => {
   const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
   return typeof m === "string" && /request limit|rate limit|too many requests/i.test(m);
 };
+// the errors of a connection that was never made (Node's net and undici: a timed-out or refused connect, an
+// unreachable network, a name that did not resolve)
+const CONNECT_ERRORS = new Set(["ETIMEDOUT", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"]);
 /** Each JSON-RPC request's time limit (the NEAR client's RPC_TIMEOUT_MS and Solana's SOLANA_CALL_TIMEOUT_MS do the same). */
 export const EVM_RPC_TIMEOUT_MS = 10_000;
 /** A provider from a JSON-RPC URL: one POST per batch, answers matched to calls by id, at most `maxBytes` read. */
@@ -1724,7 +1786,15 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
   return async (calls) => {
     const body = JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params })));
     // a request that never returns is a refusal once its time runs out, never a quote (and a buy button) that hangs
-    const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(timeoutMs) });
+    let res: Response;
+    try {
+      res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      // fetch's own TypeError ("fetch failed") with a connection error as its cause: no connection was made
+      const code = (e as { cause?: { code?: unknown } } | null)?.cause?.code;
+      if (e instanceof TypeError && typeof code === "string" && CONNECT_ERRORS.has(code)) throw new Unreachable(`no connection (${code})`);
+      throw e;
+    }
     if (res.status === 429) throw new RateLimited("the provider answered 429 Too Many Requests");
     const text = await res.text();
     if (text.length > maxBytes) throw new Error("the answer is too long");

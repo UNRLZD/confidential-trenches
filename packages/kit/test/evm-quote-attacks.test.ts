@@ -1247,6 +1247,39 @@ test("T7 a provider that answers 429 is asked again a little later; one that kee
   assert.equal(w.accepted, true, String((w as { code?: string }).code));
 });
 
+test("T7b a request that made no connection (fetch failed, a connect error as its cause) is asked again; one that timed out is not, nor a connection that keeps failing (card evm-quote-warm-round)", { timeout: 20_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000fe8ff";
+  const inner = chain([best(token)], 1);
+  // provider 2's fetch: its first `n` requests fail as `fail` makes them, then it answers as the chain does
+  const failing = (n: number, fail: () => Error) => {
+    let left = n;
+    const asked = { n: 0 };
+    const rpc = evmJsonRpc("https://b.example", (async (_u: string, init: { body: string }) => {
+      asked.n++;
+      if (left-- > 0) throw fail();
+      const calls = JSON.parse(init.body) as { id: number; method: string; params: unknown[] }[];
+      const answers = await inner(calls.map((c) => ({ method: c.method, params: c.params })));
+      return new Response(JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+    }) as unknown as typeof fetch);
+    return { rpc, asked };
+  };
+  // undici's form: TypeError("fetch failed") with the socket's error as its cause (mainnet.base.org, 2026-11-04 15:45Z)
+  const unconnected = () => new TypeError("fetch failed", { cause: Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }) });
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  const once = failing(1, unconnected);
+  const v = await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), once.rpc], NOW));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  // every request fails to connect: a refusal after the fourth
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), failing(1000, unconnected).rpc], NOW)), { accepted: false, code: "rpc_error" });
+  // a request that ran out of time may have been served: never asked again
+  const timedOut = failing(1, () => new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), timedOut.rpc], NOW)), { accepted: false, code: "rpc_error" });
+  assert.equal(timedOut.asked.n, 1);
+  // a fetch failure with no connect error (a TLS or protocol failure after the connection): never asked again
+  const other = failing(1, () => new TypeError("fetch failed", { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) }));
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), other.rpc], NOW)), { accepted: false, code: "rpc_error" });
+});
+
 test("T8 a quote's reads go to each provider at most the chain's limit at once (Robinhood's own RPC answers 429 to four)", async () => {
   const token = "0x00000000000000000000000000000000000fe9fe";
   const inner = chain([best(token)], 1, 50_000_000);
@@ -2007,4 +2040,92 @@ test("PE8 a sender too low to pay the sale's gas drops the hooked route and free
   atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, short), chain(pools, 1, 5_000_000, undefined, short)], NOW, logs, DELEGATED)));
   // and one with no ETH at all
   atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, {}), chain(pools, 1, 5_000_000, undefined, {})], NOW, logs, DELEGATED)));
+});
+
+// ------------------------------------------------------------------ the warm round (card evm-quote-warm-round)
+// A token's next quote within EVM_WARM_RANGE_S of block time asks its last quote's later reads in its first round:
+// where nothing changed it takes one round of reads; whatever changed, it decides as a quote with nothing kept.
+// a provider that counts its rounds of reads: the eth_call requests sent while none of its others is in flight (a
+// round's batches go out at once), with every block's time moved by `late` seconds
+const counted = (rpc: EvmRpc, late = 0) => {
+  const n = { calls: 0 };
+  let flying = 0;
+  const at = (r: unknown) => {
+    const b = (r as { result?: { timestamp?: string } } | null)?.result;
+    return b && typeof b.timestamp === "string" ? { ...(r as object), result: { ...b, timestamp: "0x" + (Number(b.timestamp) + late).toString(16) } } : r;
+  };
+  const wrapped: EvmRpc = async (calls) => {
+    if (!calls.some((c) => c.method === "eth_call")) return (await rpc(calls)).map(at);
+    if (flying++ === 0) n.calls++;
+    try {
+      return (await rpc(calls)).map(at);
+    } finally {
+      flying--;
+    }
+  };
+  return { rpc: wrapped, n };
+};
+// the token, its pool with X (bought through X's market) and a pool of it behind a hook the venue does not list: a
+// cold quote takes a round for the pools' state, one for X's markets and the hooked pool, and one for the route via X
+const warmCase = (token: string, x: string) => {
+  // each at the best pool's price, so the prune keeps it
+  const viaX: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => 10n * a, state: pricedAt(10n) };
+  const hooked: ModelPool = { key: keyOf(token, NATIVE, 7000, 7, UNPINNED), give: (a) => 10n * a, state: pricedAt(10n) };
+  return { pools: [best(token), viaX, marketOf(x), hooked], logs: [{ key: viaX.key, at: 4_100_000 }, { key: marketOf(x).key, at: 4_100_001 }, { key: hooked.key, at: 4_100_002 }] };
+};
+const warmReq = (token: string) => ({ chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) });
+
+test("W1 a token's second quote within the range takes one round of reads, and decides as the first", async () => {
+  const token = "0x00000000000000000000000000000000000ee0e1";
+  const { pools, logs } = warmCase(token, xAt(0x3a00));
+  const first = counted(chain(pools, 0));
+  const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [first.rpc, chain(pools, 1)], NOW, scanner(5_000_000, logs)));
+  assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+  assert.ok(first.n.calls >= 3, `the first quote's rounds: ${first.n.calls}`);
+  const second = counted(chain(pools, 0));
+  const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [second.rpc, chain(pools, 1)], NOW, scanner(5_000_000, logs)));
+  assert.deepEqual(v2, v1);
+  assert.equal(second.n.calls, 1, "one round of reads");
+});
+
+test("W2 a pool seeded inside the range is found by the scan and read: it sets the reference the second quote is held to", async () => {
+  const token = "0x00000000000000000000000000000000000ee0e2";
+  const x = xAt(0x3a10);
+  // the token's pools at a twentieth of the price, and the user's route at a tenth; a pool at the full price appears
+  // only after the first quote
+  const viaX: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a / 20n };
+  const hooked: ModelPool = { key: keyOf(token, NATIVE, 7000, 7, UNPINNED), give: (a) => a / 20n };
+  const pools = [seeded(token), viaX, marketOf(x), hooked];
+  const logs = [{ key: viaX.key, at: 4_100_000 }, { key: marketOf(x).key, at: 4_100_001 }, { key: hooked.key, at: 4_100_002 }];
+  const v1 = await verdict(evmPoolBuyQuoteWith({ ...warmReq(token), route: seededRoute(token) }, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)));
+  assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+  const better: ModelPool = { key: keyOf(token, NATIVE, 9000, 9, NATIVE), give: (a) => a };
+  const now = [...pools, better];
+  const v2 = await verdict(evmPoolBuyQuoteWith({ ...warmReq(token), route: seededRoute(token) }, [chain(now, 0, 5_000_010), chain(now, 1, 5_000_010)], NOW, scanner(5_000_010, [...logs, { key: better.key, at: 5_000_005 }])));
+  assert.deepEqual(v2, below);
+});
+
+test("W3 a kept route whose pool vanished inside the range counts for nothing: the second quote decides without it", async () => {
+  const token = "0x00000000000000000000000000000000000ee0e3";
+  const x = xAt(0x3a20);
+  // the real route goes through X; the user's at a tenth of it
+  const viaX: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const pools = [seeded(token), viaX, marketOf(x)];
+  const logs = [{ key: viaX.key, at: 4_100_000 }, { key: marketOf(x).key, at: 4_100_001 }];
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith({ ...warmReq(token), route: seededRoute(token) }, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs))), below);
+  // X's market is gone (no state at the new block): the route through X is not held, so the seeded route is the best
+  const gone = [seeded(token), viaX];
+  const v2 = await verdict(evmPoolBuyQuoteWith({ ...warmReq(token), route: seededRoute(token) }, [chain(gone, 0), chain(gone, 1)], NOW, scanner(5_000_000, logs)));
+  assert.equal(v2.accepted, true, String((v2 as { code?: string }).code));
+});
+
+test("W4 past EVM_WARM_RANGE_S of block time nothing kept is asked: the quote takes its rounds again", async () => {
+  const token = "0x00000000000000000000000000000000000ee0e4";
+  const { pools, logs } = warmCase(token, xAt(0x3a30));
+  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)));
+  // 61 s of block time later, on both providers and the device's clock
+  const late = counted(chain(pools, 0), 61);
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [late.rpc, counted(chain(pools, 1), 61).rpc], NOW + 61_000, scanner(5_000_000, logs)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(late.n.calls >= 3, `rounds: ${late.n.calls}`);
 });
