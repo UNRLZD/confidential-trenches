@@ -176,8 +176,9 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
     if (!ready || busy(phaseRef.current) || !amountOk(c, max, balance)) return;
     let h;
     if (onPool) {
-      // only an ask the box's own checks passed: a proof ready, at most one tap's spend, the device's price
-      const ask = poolBuyAsk(pools, chain, token, c, price, slippageBps);
+      // only an ask the box's own checks passed: a proof ready, at most one tap's spend, the device's price as it is at
+      // the tap (a price past its bound since the last render prices nothing)
+      const ask = poolBuyAsk(pools, chain, token, c, kit.poolPrice(chain), slippageBps);
       if (!ask.ok) return;
       h = kit.request!(ask.kind, ask.params);
     } else h = kit.request!("buy", { chain, token, side: "buy", amount: centsToDecimal(c), slippage_bps: slippageBps });

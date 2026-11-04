@@ -1,7 +1,7 @@
 import type { Chain, SignpageClient, SignpageClientSnapshot } from "@blindfill/kit";
-import { createContext, useContext, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
-import type { PoolPrice, Slice } from "./model.ts";
+import { poolPriceEnd, statePoolPrice, type PoolPrice, type Slice } from "./model.ts";
 import type { RouteData } from "./route.ts";
 import type { PartCount } from "./States.tsx";
 
@@ -50,9 +50,10 @@ export interface TradeKit {
    *  part fill draws without a count. */
   part?: (id: string) => PartCount | null;
   /** The pool asset's USD price on the chain, the device's own read (the kit's poolUsdPrice: two RPCs of two providers
-   *  that agree, fresh). Null: not read, so the pool path draws no USD and keeps Buy off. The live source has none yet:
-   *  APP_HOST's connect-src reaches no Solana, Base or Robinhood RPC, so the signing page reads it and puts it in its
-   *  state (card signpage-pool-price). */
+   *  that agree, fresh). Null: not read or past its bound, so the pool path draws no USD and keeps Buy off. APP_HOST's
+   *  connect-src reaches no Solana, Base or Robinhood RPC, so the signing page reads it and puts it in its state; the
+   *  live source reads state.pools[chain].price only, checked against its feed's bound at each call (card
+   *  signpage-pool-price, model.ts statePoolPrice). */
   poolPrice: (chain: Chain) => PoolPrice | null;
   /** Missing kit call (card app-buy-route-strip): what the signing page is to tell the app of a running buy besides its
    *  stage, by the request's id: the fresh wallet it assigned, the quote's venue and pool address, the amount filled
@@ -73,20 +74,30 @@ const Fixture = createContext<TradeSource | null>(null);
 export const TradeSourceProvider = Fixture.Provider;
 
 const noMax = () => null;
-const noPrice = () => null;
 
 export function useTradeSource(): TradeSource {
   const fixture = useContext(Fixture);
   const { client, snapshot, moneyOn } = useSignpage();
+  const pools = snapshot.state?.pools;
+  // a price that passes its bound with no new state after it: one more render then, which draws it gone and Buy off
+  const [, expire] = useState(0);
+  useEffect(() => {
+    if (fixture) return;
+    const now = Date.now();
+    const ends = (pools ?? []).map(poolPriceEnd).filter((e): e is number => e !== null && e >= now);
+    if (ends.length === 0) return;
+    const t = setTimeout(() => expire((n) => n + 1), Math.min(...ends) - now + 1);
+    return () => clearTimeout(t);
+  }, [fixture, pools]);
   const kit = useMemo<TradeKit>(
     () => ({
       setPreview: null,
       maxBuy: noMax,
-      poolPrice: noPrice,
+      poolPrice: (chain) => statePoolPrice(pools, chain, Date.now()),
       request: client ? client.request.bind(client) : null,
       onProgress: client ? client.onProgress.bind(client) : null,
     }),
-    [client],
+    [client, pools],
   );
   return fixture ?? { snapshot, moneyOn, kit, now: Date.now };
 }
