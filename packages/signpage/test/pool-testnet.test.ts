@@ -8,7 +8,7 @@ import { after, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
-import { base58 } from "@scure/base";
+import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
@@ -526,4 +526,38 @@ test("an owed onward send's finish: a sign out never waits on its slow RPC read,
   const before = reads;
   await t.stateRead();
   assert.equal(reads, before, "not tried again at once");
+});
+
+// Review #232b fold 3, HIGH 1: the page's own withdraw run, its tab closed while the release's read-back is out (the
+// run never answers): the op owes the send from before the release leaves, in_transit, and the reopened page's state
+// read sends it on, W at 0 and To given the amount.
+test("a withdraw whose tab closed during the release's read-back: the reopened page sends the part on, W at 0, To the amount", async () => {
+  const { world, TO, COST } = await import("./pool-withdraw-world.ts");
+  const wd = await world([30_000_000n], { hangReadBack: true });
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    const answer = await wd.host.send(pool, base64.decode(tx));
+    return new Response(JSON.stringify(answer), { status: 200 });
+  }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn };
+  const page = { store: async () => wd.w, seed64: async () => SEED64.slice() };
+  const amount = 5_000_000n;
+  const t1 = testnetPool(page, over);
+  void t1.withdraw({ chain: "solana", to: TO, amount, maxFee: COST }, "op-w");
+  while (wd.releases.length === 0) await new Promise((r) => setTimeout(r, 5));
+  await new Promise((r) => setTimeout(r, 20));
+  const W = wd.binds[0]!.recipient;
+  const rec = (await wd.w.get("ops", "op-w")) as { stage: string; pending?: unknown };
+  assert.equal(rec.stage, "in_transit", "never proving while a release is out");
+  assert.ok(rec.pending, "the send owed");
+  assert.equal(wd.balance.get(W), amount + 5_000n, "the part on W");
+  // the tab is gone (its run never answers); the page opened again reads its state
+  const t2 = testnetPool(page, { ...over, fetch: undefined });
+  await t2.stateRead();
+  assert.equal(wd.balance.get(W), 0n);
+  assert.equal(wd.balance.get(TO), amount);
+  const after = (await wd.w.get("ops", "op-w")) as { stage: string; pending?: unknown; txs: { hash: string }[] };
+  assert.equal(after.stage, "sent");
+  assert.equal(after.pending, undefined);
+  assert.equal(after.txs.length, 1, "the onward send's tx");
 });

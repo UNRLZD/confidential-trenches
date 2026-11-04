@@ -182,16 +182,26 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
   /** The onward send a part owes, written once its note is RESERVED and before its release leaves (awaited): a crash
    *  from there on leaves the op owing it, for the state reads' finishPoolOnward. */
   owe?(pending: PendingOnward): Promise<void>;
+  /** The notes an op still owes an onward send for (any tab's): never planned again until that op is settled, since a
+   *  note's W is the same for every spend of it (review #232b MEDIUM 1). */
+  owedNotes?(): Promise<ReadonlySet<string>>;
   /** The op's stage, its txs so far, the onward send still owed and what reached To, by onward signature. */
   stage?(stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals): void;
 };
 
 /** A part's onward send still owed: its note (W is the note's own W_{sol, label, j}, derived on the device; the op
- *  record names no label, so it links no withdraw to its deposit), To, and whether it is the run's last part. */
-export type PendingOnward = { noteId: string; to: string; last: boolean };
+ *  record names no label, so it links no withdraw to its deposit), the attempt whose release owes it and that
+ *  attempt's context (the note keeps its attempts' contexts once SPENT, its attempt id only while RESERVED), To, whether
+ *  it is the run's last part, and W's fee ceiling for it (lamports, a decimal): the drawn Max fee's share of the part
+ *  less the relay fee, never exceeded. */
+export type PendingOnward = { noteId: string; attempt: string; context: string; to: string; last: boolean; feeCap: string };
 /** What reached To, by onward signature (lamports as a decimal): what each send moved, read from its own bytes. */
 export type Arrivals = Record<string, string>;
-export type PoolWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: PendingOnward | null; arrived: Arrivals };
+/** feeNeeded: W's fee the network reads now when it is over the part's ceiling (lamports, a decimal): the send stays
+ *  owed until the Max fee is drawn again. */
+export type PoolWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: PendingOnward | null; arrived: Arrivals; feeNeeded?: string };
+/** A finish's verdict: the op's stage and what its send added; feeNeeded set keeps the send owed. */
+export type PoolOnwardFinish = { stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string };
 
 class Stop extends Error {}
 const stop = (why: string): never => {
@@ -201,6 +211,21 @@ const u32le = (n: number): number[] => [n & 255, (n >>> 8) & 255, (n >>> 16) & 2
 const u64le = (v: bigint): number[] => Array.from({ length: 8 }, (_, i) => Number((v >> BigInt(8 * i)) & 255n));
 const lamports = (x: unknown): bigint => (typeof x === "number" && Number.isSafeInteger(x) && x >= 0 ? BigInt(x) : stop("read"));
 const agree = <T>(a: T, b: T): T => (a === b ? a : stop("reads"));
+const slotOf = (x: unknown): number => (typeof x === "number" && Number.isSafeInteger(x) && x >= 0 ? x : stop("read"));
+
+/** The higher of both RPCs' finalized slots, read once a spend was read at finalized: a balance read at or past it
+ *  (minContextSlot, on both RPCs) holds that spend's credit to W, never a lagging node's older 0 (review #232b LOW 2). */
+async function finalSlot(rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<number> {
+  const s = await Promise.all(rpcs.map((rpc) => rpc("getSlot", [{ commitment: "finalized" }])));
+  return Math.max(...s.map(slotOf));
+}
+
+/** W's balance, the same on both RPCs, read at or past `minSlot` when one is given. */
+async function balanceOf(rpcs: readonly [SolanaRpc, SolanaRpc], address: string, minSlot?: number): Promise<{ balance: bigint; each: [bigint, bigint] }> {
+  const opts = minSlot === undefined ? { commitment: "confirmed" } : { commitment: "confirmed", minContextSlot: minSlot };
+  const bal = await Promise.all(rpcs.map(async (rpc) => lamports(((await rpc("getBalance", [address, opts])) as { value?: unknown } | null)?.value)));
+  return { balance: agree(bal[0]!, bal[1]!), each: [bal[0]!, bal[1]!] };
+}
 const transferIx = (from: string, to: string, v: bigint) => ({
   program: SOLANA_SYSTEM_PROGRAM,
   accounts: [{ key: from, signer: true, writable: true }, { key: to, signer: false, writable: true }],
@@ -274,8 +299,9 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
   const txs: TxRef[] = [];
   const arrived: Arrivals = {};
   let pending: PendingOnward | null = null;
+  let feeNeeded: bigint | null = null;
   const say = (s: WithdrawStage): void => h.stage?.(s, txs.slice(), pending, { ...arrived });
-  const end = (s: WithdrawStage): PoolWithdrawAnswer => (say(s), { stage: s, txs: txs.slice(), pending, arrived: { ...arrived } });
+  const end = (s: WithdrawStage): PoolWithdrawAnswer => (say(s), { stage: s, txs: txs.slice(), pending, arrived: { ...arrived }, ...(feeNeeded !== null ? { feeNeeded: feeNeeded.toString() } : {}) });
   try {
     if (ask.kind !== "pool.withdraw" || ask.chain !== "solana") stop("kind");
     if (typeof maxFee !== "bigint" || maxFee < 0n) stop("max_fee");
@@ -286,10 +312,15 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     const wFee = await solanaOnwardFee(h.rpcs, h.pin);
     const costs: WithdrawCosts = { fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee) };
     const notes = await h.notes();
-    const plan = planPoolWithdraw(withdrawSources(await notes.list(), scope, mine), amount, costs);
+    // a note an op still owes a send for stays out of the plan: its W is this spend's W too (review #232b MEDIUM 1)
+    const owedNotes = (await h.owedNotes?.()) ?? new Set<string>();
+    const plan = planPoolWithdraw(withdrawSources(await notes.list(), scope, mine).filter((n) => !owedNotes.has(n.id)), amount, costs);
     if (plan === null) stop("plan");
     // review #232 MEDIUM 1: never more than the Max fee the screen showed
     if (BigInt(plan!.length) * (fee + wFee) > maxFee) stop("max_fee");
+    // review #232b LOW 4: the Max fee is a ceiling: each part's onward pays at most its share of it less the relay fee
+    // (at least the planned wFee), so To never gets less than the amount less the Max fee drawn
+    const wCap = maxFee / BigInt(plan!.length) - fee;
     // To checked before any note moves, so no release is made for a send that could never land: never the pool's own
     // keys, a read-only key or one of the plan's own Ws, and on both RPCs never executable nor the pool program's
     const ws = await seedUse(h)(async (seed) => {
@@ -305,9 +336,9 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     await checkTo(h, to);
     for (const [i, p] of plan!.entries()) {
       say("proving");
-      const owed: PendingOnward = { noteId: p.noteId, to, last: i === plan!.length - 1 };
-      // the release's take writes the note RESERVED, then this pending: from then on a crash leaves it owed
-      const got = await onePart(h, ask, notes, p, fee, wFee, pool, owed, () => void (pending = owed));
+      // the release's take writes the note RESERVED, then the pending (with the attempt): from then on a crash leaves
+      // it owed
+      const got = await onePart(h, ask, notes, p, fee, wFee, pool, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (owed) => void (pending = owed));
       if (got.signature !== "") txs.push({ chain: "solana", hash: got.signature });
       if (got.stage === "refused" || got.stage === "not_landed") {
         // the release can never land (failed on both RPCs, or its blockhash past on both with no spend): nothing on W
@@ -317,10 +348,11 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
       // review #232b HIGH 1: any other answer short of filled (the release read back but its spend not yet read at
       // finalized, or the helper's error while it may still land) keeps the part owed, for finishPoolOnward
       if (got.stage !== "filled") return end(pending ? "in_transit" : "stopped");
-      // the release landed: the part is on W
+      // the release landed: the part is on W; W read at or past both RPCs' finalized slot after the spend was read there
       say("in_transit");
-      const on = await sendOnward(h, ask, got.l, got.j, to, got.releaseAccounts);
+      const on = await sendOnward(h, ask, got.l, got.j, to, got.releaseAccounts, { minSlot: await finalSlot(h.rpcs), feeCap: wCap });
       if (on.signature !== "") txs.push({ chain: "solana", hash: on.signature });
+      if (on.state === "fee") feeNeeded = on.need;
       if (on.state === "ok") arrived[on.signature] = on.amount.toString();
       // empty: another tab's finish sent it already (its signature in its own write of the op); never the run's end
       else if (on.state !== "empty") return end("in_transit");
@@ -333,35 +365,56 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
   }
 }
 
-/** The state reads' pass for an op left in_transit (the part owed on W): settles every case, never waits forever.
- *  - W holds lamports: its send onward, all it holds less its fee, to To.
- *  - W at 0 and the note spent: the release landed and its send went (this tab's or another's): sent, or stopped
- *    when parts were left after it.
- *  - W at 0 and the note back UNSPENT (the state reads' solanaSettleReserved frees a RESERVED note once both RPCs'
- *    block time is past its deadline with no spend: the release never landed), HELD again or gone: stopped.
- *  - W at 0 and the note still RESERVED with no spend read: null, read again by the next pass.
- *  null also when a read or the send fails: the money is on W, so the pass goes on trying. */
+/** The state reads' pass for an op that owes a part's onward send (any stage: a tab closed while the release was out
+ *  leaves "proving" or "in_transit"): settles every case, never waits forever, never sends another spend's money.
+ *  - The note not this pending's attempt's (RESERVED by another attempt, back UNSPENT, HELD, SPENT after a later
+ *    attempt, gone): that attempt never landed, or its send is settled: stopped, nothing sent (review #232b MEDIUM 1).
+ *  - W read first (LOW 3), at or past both RPCs' finalized slot once the spend is read (LOW 2):
+ *    - W holds lamports: its send onward, all it holds less its fee, to To; a fee over the part's ceiling keeps it
+ *      owed (feeNeeded), and so does a To the checks now refuse (null): the money is on W, so nothing drops it;
+ *    - W at 0 and the note spent by this attempt: its send went (this tab's or another's): sent, or stopped when parts
+ *      were left after it;
+ *    - W at 0 and the note still RESERVED by this attempt with no spend read: null, read again by the next pass (the
+ *      reserved pass frees it once both RPCs' block time is past its deadline: the note store's rule for every
+ *      RESERVED note, packages/wallet/src/notes/store.ts, a sent proof can land until its deadline).
+ *  null also when a read or the send fails: the money may be on W, so the pass goes on trying. */
 export async function finishPoolOnward(
   h: Pick<PoolWithdrawHost, "rpcs" | "pin" | "seed64" | "withSeed" | "now" | "wait" | "notes" | "settle">,
   pending: PendingOnward,
-): Promise<{ stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals } | null> {
-  const done = (stage: WithdrawStage, txs: TxRef[] = [], arrived: Arrivals = {}) => ({ stage, txs, arrived });
+): Promise<PoolOnwardFinish | null> {
+  const done = (stage: WithdrawStage, txs: TxRef[] = [], arrived: Arrivals = {}): PoolOnwardFinish => ({ stage, txs, arrived });
   try {
     const ask: PoolAsk = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 };
     const notes = await h.notes();
     const n = await notes.get(pending.noteId);
     if (n?.leaf === undefined) return done("stopped");
+    // an owed send names its attempt and that attempt's context; one that names neither is no attempt's
+    if (typeof pending.attempt !== "string" || pending.attempt === "" || typeof pending.context !== "string" || pending.context === "") return done("stopped");
+    const mine = (x: NoteRecord): boolean =>
+      (x.state === "RESERVED" && x.attempt === pending.attempt) || (x.state === "SPENT" && x.contexts?.at(-1)?.context === pending.context);
+    if (!mine(n)) return done("stopped");
     const l = n.leaf.label;
     const j = jOf(n.ref);
     const W = await seedUse(h)((seed) => wOf(seed, n));
-    if (toRefused(pending.to, h.pin, solanaPoolAccount(h.pin.program), [W])) return done("stopped");
+    // a 0 is believed only at or past both RPCs' finalized slot read after the spend was read (LOW 2); lamports on W
+    // while the note is RESERVED by this attempt are its release's (any earlier attempt never landed)
+    let spent = n.state === "SPENT";
+    let minSlot = spent ? await finalSlot(h.rpcs) : undefined;
+    let { balance } = await balanceOf(h.rpcs, W, minSlot);
+    if (balance === 0n && !spent) {
+      spent = (await h.settle(pending.noteId)).kind === "spent";
+      const now = await notes.get(pending.noteId);
+      if (now === undefined || !mine(now)) return done("stopped");
+      if (!spent) return null;
+      minSlot = await finalSlot(h.rpcs);
+      ({ balance } = await balanceOf(h.rpcs, W, minSlot));
+    }
+    if (balance === 0n) return done(pending.last ? "sent" : "stopped");
+    if (toRefused(pending.to, h.pin, solanaPoolAccount(h.pin.program), [W])) return null;
     await checkTo(h, pending.to);
-    const on = await sendOnward(h, ask, l, j, pending.to, []);
+    const on = await sendOnward(h, ask, l, j, pending.to, [], { ...(minSlot !== undefined ? { minSlot } : {}), feeCap: BigInt(pending.feeCap) });
     if (on.state === "ok") return done(pending.last ? "sent" : "stopped", [{ chain: "solana", hash: on.signature }], { [on.signature]: on.amount.toString() });
-    if (on.state !== "empty") return null;
-    const now = await notes.get(pending.noteId);
-    if (now?.state === "SPENT" || (now?.state === "RESERVED" && (await h.settle(pending.noteId)).kind === "spent")) return done(pending.last ? "sent" : "stopped");
-    if (now === undefined || now.state === "UNSPENT" || now.state === "HELD") return done("stopped");
+    if (on.state === "fee") return { stage: "in_transit", txs: [], arrived: {}, feeNeeded: on.need.toString() };
     return null;
   } catch {
     return null;
@@ -376,7 +429,15 @@ export const POOL_ONWARD_RESEND_MS = 2_000;
  *  checked by the rule (checkSolanaOnwardSend), signed by W, sent and read back on both of the page's RPCs. The fee is
  *  the network's for this very message: a fee other than the one planned changes what reaches To (`amount`, kept in
  *  the op's record), never W's end at 0, so no part is ever left on W for it (review #232b LOW 1). */
-async function sendOnward(h: Pick<PoolWithdrawHost, "rpcs" | "pin" | "seed64" | "withSeed" | "now" | "wait">, ask: PoolAsk, l: bigint, j: number, to: string, releaseAccounts: readonly string[]): Promise<{ state: "ok" | "failed" | "empty" | "unknown"; signature: string; amount: bigint }> {
+async function sendOnward(
+  h: Pick<PoolWithdrawHost, "rpcs" | "pin" | "seed64" | "withSeed" | "now" | "wait">,
+  ask: PoolAsk,
+  l: bigint,
+  j: number,
+  to: string,
+  releaseAccounts: readonly string[],
+  o: { minSlot?: number; feeCap: bigint },
+): Promise<{ state: "ok" | "failed" | "empty" | "unknown"; signature: string; amount: bigint } | { state: "fee"; signature: string; amount: 0n; need: bigint }> {
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   const use = seedUse(h);
   let signature = "";
@@ -387,12 +448,14 @@ async function sendOnward(h: Pick<PoolWithdrawHost, "rpcs" | "pin" | "seed64" | 
       return w.address;
     });
     for (let attempt = 0; attempt < POOL_ONWARD_TRIES; attempt++) {
-      const bal = await Promise.all(h.rpcs.map(async (rpc) => lamports(((await rpc("getBalance", [address, { commitment: "confirmed" }])) as { value?: unknown } | null)?.value)));
-      const balance = agree(bal[0]!, bal[1]!);
+      // at or past the spend's finalized slot on both RPCs (o.minSlot): a 0 is W's own, never a lagging node's
+      const { balance, each: bal } = await balanceOf(h.rpcs, address, o.minSlot);
       if (balance === 0n) return { state: "empty", signature, amount: 0n };
       const bh = await blockhashOf(h.rpcs);
       // the fee is per signature: the same for the draft and the send, whose amount alone differs
       const fee = await feeOf(h.rpcs, onwardMessage(address, to, balance, bh.blockhash));
+      // the Max fee drawn is a ceiling (review #232b LOW 4): over it, nothing is sent and the send stays owed
+      if (fee > o.feeCap) return { state: "fee", signature, amount: 0n, need: fee };
       if (balance <= fee) return { state: "failed", signature, amount: 0n };
       const exec = await checkTo(h, to);
       const message = onwardMessage(address, to, balance - fee, bh.blockhash);
@@ -439,7 +502,7 @@ async function sendOnward(h: Pick<PoolWithdrawHost, "rpcs" | "pin" | "seed64" | 
 
 /** One part's release to W: hold the note, prove part + fees to W, build, check, sign, RESERVED, then the send and
  *  its settle. The release is alone in its transaction (review #232 HIGH 1). */
-async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, owed: PendingOnward, owing: () => void): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
+async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
   const P = h.pool;
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
@@ -533,7 +596,8 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       take: async () => {
         await notes.move(p.noteId, "HELD", "RESERVED", { attempt: attempt! });
         reserved = true;
-        owing();
+        const owed: PendingOnward = { noteId: p.noteId, attempt: attempt!, context: binding.context.toString(), ...base };
+        owing(owed);
         await h.owe?.(owed);
         return r;
       },

@@ -37,7 +37,7 @@ import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/sr
 import { poolDepositKind, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { TRADE_HELPER } from "./trade.ts";
-import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { poolSellKind, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
@@ -60,21 +60,31 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
 });
 const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinhood: "robinhood-testnet" } as const);
 
+/** A withdraw stage's order: a write never moves an op back (review #232b LOW 1). A stale finish's stopped never
+ *  overwrites sent, nor a later part's proving its earlier part's in_transit. */
+const STAGE_RANK: Readonly<Record<WithdrawStage, number>> = { proving: 0, submitted: 1, in_transit: 1, stopped: 2, refunded: 2, sent: 3 };
+
 /** A withdraw op record's next state, merged into what the store holds (another tab may have written it since): the
- *  stage, every tx either wrote (by hash, never one dropped), every arrival, and the onward send owed: set by
- *  `pending`, cleared by `clear` only while it is still that note's (a later part's, another tab's, stays). */
+ *  stage (never back, STAGE_RANK), every tx either wrote (by hash, never one dropped), every arrival, the fee a send
+ *  over its ceiling needs (`fee_needed`), and the onward send owed: set by `pending`, cleared by `clear` only while it
+ *  is still that note's (a later part's, another tab's, stays), and its fee_needed with it. */
 export function mergeWithdrawOp(
   v: unknown,
-  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; pending?: PendingOnward; clear?: string },
+  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; pending?: PendingOnward; clear?: string; feeNeeded?: string },
 ): Record<string, unknown> {
   const r = { ...(v as Record<string, unknown>) };
-  if (w.stage !== undefined) r.stage = w.stage;
+  const was = STAGE_RANK[r.stage as WithdrawStage] ?? -1;
+  if (w.stage !== undefined && STAGE_RANK[w.stage] >= was) r.stage = w.stage;
+  if (w.feeNeeded !== undefined) r.fee_needed = w.feeNeeded;
   const txs = [...((r.txs as TxRef[] | undefined) ?? [])];
   for (const t of w.txs ?? []) if (!txs.some((x) => x.hash === t.hash)) txs.push(t);
   r.txs = txs;
   if (w.arrived && Object.keys(w.arrived).length > 0) r.arrived = { ...((r.arrived as Arrivals | undefined) ?? {}), ...w.arrived };
   if (w.pending) r.pending = w.pending;
-  else if (w.clear !== undefined && (r.pending as PendingOnward | undefined)?.noteId === w.clear) delete r.pending;
+  else if (w.clear !== undefined && (r.pending as PendingOnward | undefined)?.noteId === w.clear) {
+    delete r.pending;
+    delete r.fee_needed;
+  }
   return r;
 }
 
@@ -106,6 +116,8 @@ export type TestnetOver = {
   table?: string | null;
   /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
   locks?: Pick<LockManager, "request" | "query"> | null;
+  /** The Solana pool's pin (SOL_POOLS.devnet otherwise): tests run the page's own flow on a fake pool. */
+  pin?: SolanaPoolPin;
 };
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
@@ -195,10 +207,21 @@ export type TestnetPool = {
 
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
 export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetPool {
-  const pin = SOL_POOLS.devnet;
+  const pin = over.pin ?? SOL_POOLS.devnet;
   const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? [pageRpc(TESTNET_RPCS.solana[0]), pageRpc(TESTNET_RPCS.solana[1])];
   const prover = over.prover ?? proverHost();
 
+  // the notes a withdraw op (any tab's) still owes an onward send for: out of every plan and of the proof queue until
+  // that op is settled, since a note's W is the same for every spend of it (review #232b MEDIUM 1)
+  const owedNotes = async (): Promise<ReadonlySet<string>> => {
+    const ops = await page.store();
+    const out = new Set<string>();
+    for (const k of await ops.keys("ops")) {
+      const rec = (await ops.get("ops", k)) as { kind?: unknown; pending?: PendingOnward } | undefined;
+      if (rec?.kind === "withdraw" && rec.pending) out.add(rec.pending.noteId);
+    }
+    return out;
+  };
   // the proof queue: opened at the first landing, closed at sign out
   let open: Promise<{ queue: ProofQueue<unknown>; notes: NoteStore }> | null = null;
   const openQueue = async (): Promise<{ queue: ProofQueue<unknown>; notes: NoteStore }> => {
@@ -208,7 +231,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64 = await page.seed64();
       const pool = over.pool ?? solanaPool({ pin: pin!, rpcs: rpcs(), relayFee: (e, s) => devnetRelayFee(solanaPoolOf(pin!.program).pool, e, s, over.fetch) });
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
-      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency }), notes };
+      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes };
     } catch (e) {
       notes.close();
       throw e;
@@ -383,6 +406,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       try {
         seed64 = await page.seed64();
         const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: rpcs() });
+        // a freed note's release never landed: an op owing its send is settled stopped, nothing sent, before the note
+        // can be spent again
+        if (pass.freed.length > 0) {
+          const ops = await page.store();
+          for (const k of await ops.keys("ops")) {
+            const rec = (await ops.get("ops", k)) as { kind?: unknown; pending?: PendingOnward } | undefined;
+            const id = rec?.kind === "withdraw" ? rec.pending?.noteId : undefined;
+            if (id !== undefined && pass.freed.includes(id)) await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: "stopped", clear: id }));
+          }
+        }
         if (pass.freed.length > 0 && open !== null) void proofs();
       } finally {
         seed64?.fill(0);
@@ -418,7 +451,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const owed: [string, PendingOnward][] = [];
     for (const k of await ops.keys("ops")) {
       const rec = (await ops.get("ops", k)) as { kind?: unknown; stage?: unknown; pending?: PendingOnward } | undefined;
-      if (rec?.kind === "withdraw" && rec.stage === "in_transit" && rec.pending && !withdrawing.has(k)) owed.push([k, rec.pending]);
+      // any stage: pending is the owed send's own record (a tab closed during the release leaves "proving")
+      if (rec?.kind === "withdraw" && rec.pending && !withdrawing.has(k)) owed.push([k, rec.pending]);
     }
     if (owed.length === 0) return;
     const notes = await openNoteStore(await page.store());
@@ -440,7 +474,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           },
           pending,
         );
-        if (got) {
+        if (got?.feeNeeded !== undefined) {
+          // over the drawn Max fee: still owed, the fee it needs in the op for the screen to draw again
+          await ops.update("ops", k, (v) => mergeWithdrawOp(v, { feeNeeded: got.feeNeeded! }));
+          const waitMs = Math.min(Math.max(2_000, (retry?.waitMs ?? 1_000) * 2), 60_000);
+          owedRetry.set(k, { at: Date.now() + waitMs, waitMs });
+          owedScan = true;
+        } else if (got) {
           owedRetry.delete(k);
           await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: got.stage, txs: got.txs, arrived: got.arrived, clear: pending.noteId }));
         } else {
@@ -461,7 +501,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (settling) return await settling;
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
         if (mine.some((n) => n.state === "INCOMING")) await settle();
-        if (mine.some((n) => n.state === "RESERVED")) await settleReserved();
+        // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
+        if (mine.some((n) => n.state === "RESERVED")) await settleReserved().catch(() => {});
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R")))) await settleSells();
         await finishOnward();
         // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
@@ -490,7 +531,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const mine = new Set((await queued())?.ready().map((p) => p.noteId) ?? []);
       const fee = solanaPoolFee(rent);
       const wFee = await solanaOnwardFee(r, pin!);
-      return { notes: withdrawSources(await notes.list(), scope!, mine), fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee) };
+      const owed = await owedNotes();
+      return { notes: withdrawSources(await notes.list(), scope!, mine).filter((n) => !owed.has(n.id)), fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee) };
     } finally {
       notes.close();
     }
@@ -516,10 +558,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       void (writes = writes
         .then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage, txs, arrived, ...(pending ? { pending } : owedNote ? { clear: owedNote } : {}) })))
         .catch(() => {}));
-    // written before the part's release leaves, and awaited: a failed write sends nothing
+    // written before the part's release leaves, and awaited: a failed write sends nothing; in_transit with it, so the
+    // stage is never "proving" while a release is out (review #232b HIGH 1)
     const owe = async (pending: PendingOnward): Promise<void> => {
       owedNote = pending.noteId;
-      const w = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { pending })));
+      const w = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage: "in_transit", pending })));
       writes = w.catch(() => {});
       await w;
     };
@@ -549,6 +592,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             },
             stage: write,
             owe,
+            owedNotes,
           },
           { ...ask },
           ready.to,
@@ -557,6 +601,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           mine,
         );
         write(end.stage, end.txs, end.pending, end.arrived);
+        if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
         if (end.pending) owedScan = true;
       } finally {
         notes.close();
