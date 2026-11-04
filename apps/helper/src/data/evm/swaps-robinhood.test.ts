@@ -162,3 +162,36 @@ test("a Pons record the providers fail to answer is no answer (503, read again),
   assert.equal(next.status, 200, next.body);
   assert.ok(JSON.parse(next.body).trades.length > 0, "the curve's trades are served");
 });
+
+// card helper-rpc-hex-case: robinhood-testnet.drpc.org writes hex in upper case (eth_chainId "0xB626", read 3 Nov 23:07Z)
+test("providers that write hex in upper case: the Pons curve is found and its tape is the same, trade for trade, as from lower-case ones", async () => {
+  const up = (v: unknown): unknown =>
+    typeof v === "string" && /^0x[0-9a-f]+$/.test(v) ? `0x${v.slice(2).toUpperCase()}` : Array.isArray(v) ? v.map(up) : v !== null && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === "jsonrpc" ? x : up(x)])) : v;
+  const tapeWith = async (upper: readonly string[]) => {
+    const chain = fakeChain();
+    chain.st.head = REC.lastHead;
+    const fetch = chain.fetch;
+    let seen = 0;
+    const c = {
+      ...chain,
+      fetch: async (url: string, init: RequestInit) => {
+        const r = await fetch(url, init);
+        if (!upper.includes(url) || r.status !== 200) return r;
+        const text = JSON.stringify(up(await r.json()));
+        if (/0x[0-9A-F]*[A-F]/.test(text)) seen++;
+        return new Response(text, { status: 200, headers: { "content-type": "application/json" } });
+      },
+    };
+    const s = open(c, undefined, { pools: new Map() });
+    const tape = await bodyOf(s.trades(CURVE_TOKEN, 50));
+    s.stop();
+    return { tape, seen };
+  };
+  const lower = await tapeWith([]);
+  assert.ok(lower.tape.trades.length > 0);
+  const one = await tapeWith(["https://a.test"]);
+  assert.ok(one.seen > 0, "the upper-case provider answered");
+  assert.deepEqual(one.tape.trades, lower.tape.trades, "one provider in upper case agrees with the others");
+  const all = await tapeWith(["https://a.test", "https://b.test", "https://c.test"]);
+  assert.deepEqual(all.tape.trades, lower.tape.trades, "every provider in upper case");
+});

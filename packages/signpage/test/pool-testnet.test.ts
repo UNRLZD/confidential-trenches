@@ -394,3 +394,19 @@ test("helperPoolSend posts {pool, tx} to the helper and takes only a 200 within 
   const big = (async () => new Response(JSON.stringify({ signature: "x".repeat(5000) }), { status: 200 })) as unknown as typeof fetch;
   await assert.rejects(helperPoolSend("P", Uint8Array.of(1), big), /over 4096 B/);
 });
+
+// ---- card signpage-pool-sell: pool.sell on the devnet pool ----
+
+test("pool.sell on the devnet pool runs the sell kind: a page whose buys left no W holding the token answers not_funded with no read", async () => {
+  const { w } = await wallet();
+  const reads: string[] = [];
+  const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [offline("a"), offline("b")] });
+  const ask: Ask = { kind: "pool.sell", chain: "solana", token: SOL_TOKEN, amount: 1n, slippageBps: 100, decimals: 9 };
+  const r = t.flow(ask, ctx as never) as { running?: true; after: Promise<unknown>; answer: () => unknown };
+  assert.equal(r.running, true, "the sell runs");
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "not_funded" });
+  assert.deepEqual(reads, [], "no W: no read");
+  assert.deepEqual(t.flow({ ...ask, chain: "base" }, ctx as never), { error: "not_allowed" });
+});
