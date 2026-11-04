@@ -443,10 +443,10 @@ test("busy every time and both RPCs stuck below the blockhash: the sends stop at
   assert.ok(waited <= POOL_BUY_SETTLE_MS + 1_000, `waited ${waited} ms`);
 });
 
-test("a pool.buy whose amount an app priced with a planted price (ten times the USD asked, over what one ready proof funds) is refused not_funded: nothing taken, signed or sent (card signpage-pool-price)", async () => {
-  // the box's USD at a price one tenth of the page's own read asks ten times the units; pool.buy's amount is in the
-  // pool asset's units, and the page spends only from a ready proof whose chunk funds it after the fee, tip and W's
-  // accounts (solanaPoolBuyFunds), so no app's price spends over one tap's most
+test("a pool.buy over one proof's funds (an app's planted price asking ten times the units) is refused not_funded: nothing taken, signed or sent (card signpage-pool-price)", async () => {
+  // the box's USD at a price one tenth of the page's own read asks ten times the units; pool.buy carries only its amount
+  // in the pool asset's units, and the page spends it only from a ready proof whose chunk funds it after the fee, tip and
+  // W's accounts (solanaPoolBuyFunds): an amount over one proof's funds is refused, whatever USD the app showed
   const lie = { ...ASK, amount: BigInt(r.withdrawn) };
   for (const amount of [lie.amount, SPEND * 10n > lie.amount ? SPEND * 10n : lie.amount + 1n]) {
     const w = await world();

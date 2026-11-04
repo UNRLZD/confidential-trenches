@@ -14,8 +14,9 @@
 // - The app hears each new price: a read that ends calls the watchers (the API posts a state event when the state read
 //   then differs), and POOL_PRICE_REFRESH_MS after it calls them again, so a state read starts the next read while a
 //   pool shows. Signed out, or with no pool, no state names a chain and no read is made.
-// - The price only labels USD: pool.buy's amount is in the pool asset's units and the page spends it only from a ready
-//   proof that funds it (src/pool-buy.ts), so a price an app planted cannot spend over a tap's most.
+// - The price only labels USD: pool.buy carries only its amount, in the pool asset's units, and the page spends it only
+//   from a ready proof that funds it (src/pool-buy.ts), so an amount an app priced with a planted price is refused when
+//   it is over one proof's funds; the page does not hold it to the USD the app showed.
 import { POOL_USD_FEEDS, POOL_USD_MAX_AHEAD_S, poolUsdGoodUntilS, poolUsdPrice, type PoolUsdArgs, type PoolUsdChain, type PoolUsdPrice } from "../../kit/src/price/pool-usd.ts";
 import type { Chain } from "../../kit/src/orders/record.ts";
 import type { PoolStatePrice } from "../../kit/src/signpage/messages.ts";
