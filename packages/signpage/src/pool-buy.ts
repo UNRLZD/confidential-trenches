@@ -251,14 +251,15 @@ const BLOCKHASH_LIFE = 151;
 
 /** The blockhash on RPC 0 and its slot (the device's own slot for the quote's age), valid on RPC 1; and `lastHeight`,
  *  a block height past which no transaction on it can land, whichever RPC lies: the higher of RPC 0's
- *  lastValidBlockHeight and RPC 1's height (read after it) + 151. A liar can only raise it, which only waits longer. */
-async function blockhashOf(h: PoolBuyHost): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number; lastHeight: number }> {
-  const r = (await h.rpcs[0]("getLatestBlockhash", [{ commitment: "confirmed" }])) as { context?: { slot?: unknown }; value?: { blockhash?: unknown; lastValidBlockHeight?: unknown } };
+ *  lastValidBlockHeight and RPC 1's height (read after it) + 151. A liar can only raise it, which only waits longer.
+ *  pool-sell.ts reads its blockhash here too. */
+export async function blockhashOf(rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number; lastHeight: number }> {
+  const r = (await rpcs[0]("getLatestBlockhash", [{ commitment: "confirmed" }])) as { context?: { slot?: unknown }; value?: { blockhash?: unknown; lastValidBlockHeight?: unknown } };
   const blockhash = r?.value?.blockhash;
   if (typeof blockhash !== "string") return no();
   const [ok, height] = await Promise.all([
-    h.rpcs[1]("isBlockhashValid", [blockhash, { commitment: "confirmed" }]) as Promise<{ value?: unknown }>,
-    h.rpcs[1]("getBlockHeight", [{ commitment: "confirmed" }]),
+    rpcs[1]("isBlockhashValid", [blockhash, { commitment: "confirmed" }]) as Promise<{ value?: unknown }>,
+    rpcs[1]("getBlockHeight", [{ commitment: "confirmed" }]),
   ]);
   if (ok?.value !== true) return no();
   const said = int(r.value!.lastValidBlockHeight);
@@ -268,9 +269,9 @@ async function blockhashOf(h: PoolBuyHost): Promise<{ blockhash: string; lastVal
 
 /** True once both RPCs' finalized block height is past `last`: no transaction on that blockhash can land after, and
  *  any that did is final, so a spent mark read now at finalized is the whole answer. A failed read is "not yet". */
-async function pastOnBoth(h: PoolBuyHost, last: number): Promise<boolean> {
+export async function pastOnBoth(rpcs: readonly [SolanaRpc, SolanaRpc], last: number): Promise<boolean> {
   try {
-    const hs = await both(h, (rpc) => rpc("getBlockHeight", [{ commitment: "finalized" }]));
+    const hs = await Promise.all(rpcs.map((rpc) => rpc("getBlockHeight", [{ commitment: "finalized" }])));
     return hs.every((x) => int(x) > last);
   } catch {
     return false;
@@ -278,7 +279,7 @@ async function pastOnBoth(h: PoolBuyHost, last: number): Promise<boolean> {
 }
 
 /** The transaction under `signature` on one RPC: "none" (not seen yet), "ok", "failed" or "other" (not ours). */
-async function readBack(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<"none" | "ok" | "failed" | "other"> {
+export async function readBack(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<"none" | "ok" | "failed" | "other"> {
   const r = (await rpc("getTransaction", [signature, { encoding: "base64", commitment: "confirmed", maxSupportedTransactionVersion: 0 }])) as { transaction?: unknown; meta?: { err?: unknown } } | null;
   if (r === null) return "none";
   const t = r?.transaction;
@@ -332,7 +333,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
       if (!ref || !best) return no("quote_check_failed");
       const venue: SolanaPoolBuyVenue = await readSolanaPoolBuyVenue(h.rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : []));
-      const bh = await blockhashOf(h);
+      const bh = await blockhashOf(h.rpcs);
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
       // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
       // reads): the smallest chunk that pays the spend and W's accounts; filtered and claimed in one turn, so two runs
@@ -398,7 +399,7 @@ async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolReleas
   const unlanded = async (txs: TxRef[]): Promise<PoolBuyAnswer> => {
     for (let i = 0; i < reads; i++) {
       if (i > 0) await wait(POOL_BUY_WAIT_MS);
-      const past = await pastOnBoth(h, lastHeight); // before the settle: a spend final by then is in its read
+      const past = await pastOnBoth(h.rpcs, lastHeight); // before the settle: a spend final by then is in its read
       if (await spent()) return { stage: "filled", txs };
       if (past) return { stage: "not_landed", txs };
     }

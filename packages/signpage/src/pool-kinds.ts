@@ -8,7 +8,10 @@
 //   yet) and a pool.withdraw (its onward send from W to the typed address has no EVM check yet).
 // - The flows that build, prove, sign and send each op land with the pools; until a pinned pool has its flow, a
 //   request that passed every check is refused not_allowed too, never half run.
-import type { KindContext, Deferred, HostRefusal, Running } from "./api.ts";
+// - A sell is a trade: answered as one that runs (Running), so the api's queue never waits on its decimals read or
+//   its run, and a flow that runs is answered with its run's own answer once that run's wait settles (card
+//   signpage-pool-sell).
+import type { KindContext, Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, type PoolAsk, type PoolChain, type PoolRequest, type TokenDecimalsReads } from "./rules/pool.ts";
 
 /** One provider's JSON-RPC call: the method's result, or a throw. */
@@ -71,18 +74,21 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
       if (!(["solana", "base", "robinhood"] as const).includes(chain as never) || !deps.pinned(chain)) return NO;
       const rpcs = deps.rpcs(chain);
       if (!rpcs || !poolTokenAddress(chain, p.token)) return NO;
-      let answer: HostRefusal = NO;
+      let answer: HostAnswer<K> | HostRefusal = NO;
       const after = readTokenDecimals(chain, p.token, rpcs).then(
-        (reads) => {
+        async (reads) => {
           const ask = checked(p, reads);
-          // a sell's flow answers a refusal until its card (signpage-pool-sell) runs one: testnetPoolFlow refuses it
-          answer = (ask && deps.flow ? deps.flow(ask, ctx) : NO) as HostRefusal;
+          const got = ask && deps.flow ? deps.flow(ask, ctx) : NO;
+          if (!("after" in got)) return void (answer = got);
+          // the flow runs: its answer once its own wait settles (the send, or the run's end)
+          await got.after.catch(() => {});
+          answer = (got.answer() ?? NO) as HostAnswer<K> | HostRefusal;
         },
         () => {
           answer = NO;
         },
       );
-      return { after, answer: () => answer };
+      return { running: true, after, answer: () => answer };
     };
   return { "pool.deposit": handler("pool.deposit"), "pool.buy": handler("pool.buy"), "pool.sell": handler("pool.sell"), "pool.withdraw": handler("pool.withdraw") };
 }
