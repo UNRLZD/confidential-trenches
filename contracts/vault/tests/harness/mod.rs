@@ -706,6 +706,33 @@ impl Harness {
         Ok(v.as_str().ok_or("ft_balance_of: not a string")?.parse()?)
     }
 
+    /// VT-S11 (vault.md 5; invariant I1, 4): the vault's token balance is at least `deposited - spent + returned`
+    /// (`totals()`), and equal to it once no spend is `in_flight` (every `spends` page read). An error names the
+    /// figures. Prints one line: `I1: balance <b> = deposited <d> - spent <s> + returned <r> (<k> in flight)`.
+    pub async fn i1(&self) -> R<()> {
+        let t = self.view(&self.vault, "totals", json!({})).await?;
+        let n = |k: &str| -> R<u128> { Ok(t[k].as_str().ok_or_else(|| format!("totals: {t}"))?.parse()?) };
+        let (deposited, spent, returned) = (n("deposited")?, n("spent")?, n("returned")?);
+        let held = deposited.checked_add(returned).and_then(|x| x.checked_sub(spent)).ok_or_else(|| format!("I1: totals {t} sum below 0"))?;
+        let (mut from, mut in_flight) = (0u64, 0usize);
+        loop {
+            let page = self.view(&self.vault, "spends", json!({"from": from, "limit": blindfill_vault::constants::PAGE_MAX})).await?;
+            let rows = page.as_array().ok_or_else(|| format!("spends: {page}"))?;
+            if rows.is_empty() {
+                break;
+            }
+            in_flight += rows.iter().filter(|r| r["status"] == "in_flight").count();
+            from += rows.len() as u64;
+        }
+        let balance = self.token_balance(&self.vault).await?;
+        let line = format!("I1: balance {balance} {} deposited {deposited} - spent {spent} + returned {returned} ({in_flight} in flight)", if balance == held { "=" } else { "vs" });
+        println!("{line}");
+        if balance < held || (in_flight == 0 && balance != held) {
+            return Err(format!("{line}: want balance >= the sum, and equal with nothing in flight").into());
+        }
+        Ok(())
+    }
+
     // ---- NEP-366: a call signed by one account, sent and paid for by another ----
 
     /// The NEAR-implicit account (64 hex, its ed25519 public key) of a fresh random key, made as the kit's U is: by a

@@ -5,106 +5,77 @@
 //! (`contracts/vault/tests/harness/run.sh --test withdraw_spend`); a plain `cargo test` builds this file empty.
 //!
 //! The proofs are tests/fixtures/withdraw-spends.json (the kit's input builder and snarkjs, made by
-//! make-withdraw-spends.mjs) over six test deposits on vault.test.near, the harness's vault. The six deposits' tree
-//! state is made by the vault's own tree code (`insert_commitment`, `insert_label`) in near-sdk's mocked chain at
-//! vault.test.near, with `deposited` their sum, and put into the deployed vault by the sandbox's state patch, so these
-//! tests need no token and no prepay; the account's storage use is raised by exactly those records' bytes. The
-//! vault's code comes only from the 2.8 deploy recipe. Deposits through `ft_on_transfer` are tests/s02.rs's.
+//! make-withdraw-spends.mjs) over six test deposits on vault.test.near, the harness's vault. Every test runs twice
+//! (vault.md 5, V3.2), on the mock token and on the real USDC wasm at TOKEN: the six deposits are made through each
+//! token's `ft_transfer_call` (`ft_on_transfer`, each on its 904 B prepay), as tests/settle.rs makes them, and their
+//! leaves and labels are checked against the fixture's. After each test I1 holds (VT-S11, `Harness::i1`).
 //!
 //! 1. `vt_s05_one_nullifier_spends_once`: the same call twice; a second proof with the same nullifier; two proofs of
 //!    one nullifier sent at once by two relayers, landing in one block. Each time exactly one succeeds and the others
 //!    are refused with `NullifierAlreadySpent`; a refused call changes no byte of the vault's state and logs nothing.
 //! 2. `vt_s06_unknown_zero_and_other_vault_roots_are_refused`: a state root or ASP root that is unknown, 0, or another
 //!    vault's (the same notes under another scope) is refused (`UnknownStateRoot`, `UnknownLabelRoot`) with no byte
-//!    changed; a proof against an older root (4 of the 6 deposits) lands.
+//!    changed; a proof against an older root (4 of the 6 deposits) lands. VT-S07's last case rides here (V:1134): that
+//!    withdrawal's refund precommitment is a stranger's pending deposit precommitment (the stranger prepaid it first);
+//!    the withdrawal lands and the stranger's deposit on it still lands.
 //! 3. `rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes`: rows 4, 7, 8, 9 and 10 refuse with no state byte,
 //!    no storage use and no log changed; three landed calls each write 2.3's bytes for their account ids (+74 B when
 //!    the state tree grows a level) and log exactly `leaf_inserted`, `withdrawn` then `withdrawal_relayed`.
 //!
-//! No token is deployed at TOKEN here, so both payout parts of a landed withdrawal fail and `on_payout` turns them
-//! into a refund-pending amount (the payouts themselves are tests/payouts.rs'). Each call attaches 1 NEAR, over row
-//! 14's charge. Each test prints its gas table: `vault::withdraw` is the vault's own work through the payouts' promises,
+//! The proofs' recipients and fee recipient (alice, newcomer, the relayer) are not registered on the token, so both
+//! payout parts of a landed withdrawal bounce and `on_payout` turns them into a refund-pending amount, on either token
+//! (the payouts themselves are tests/payouts.rs'). Each call attaches 1 NEAR, over row 14's charge. Each test prints its gas table: `vault::withdraw` is the vault's own work through the payouts' promises,
 //! against vault.md 2.11's 41.202-41.828 Tgas at depth 3.
 #![cfg(feature = "sandbox")]
 
 mod harness;
 
-use blindfill_vault::poseidon::PoseidonT3;
-use blindfill_vault::{field, Bytes32, Vault};
-use harness::{Harness, Outcome, R};
+use harness::{Harness, Outcome, TokenKind, R, YOCTO_PER_BYTE};
 use near_sdk::json_types::Base64VecU8;
 use near_sdk::serde_json::{self, json, Value};
-use near_sdk::test_utils::VMContextBuilder;
-use near_sdk::{env, testing_env};
-use near_workspaces::types::{AccountDetailsPatch, Gas, NearToken};
+use near_workspaces::types::{Gas, NearToken};
 use near_workspaces::Account;
 
 const SPENDS: &str = include_str!("fixtures/withdraw-spends.json");
 const GAS: Gas = Gas::from_tgas(300);
 /// Over row 14's charge: (at most 784 B + REFUND_RESERVE_BYTES) x 1e19 + 2 yocto; the rest stays in the reserve.
 const ATTACHED: NearToken = NearToken::from_near(1);
-/// NEAR's 40 extra bytes per record (`storage_num_extra_bytes_record`).
-const RECORD_EXTRA: u64 = 40;
+/// The kit's prepay whenever a tree may grow (2.10 (h)).
+const PREPAY: NearToken = NearToken::from_yoctonear(904 * YOCTO_PER_BYTE);
 
 fn fixture() -> Value {
     serde_json::from_str(SPENDS).unwrap()
 }
 
-fn be(dec: &str) -> Bytes32 {
-    field::to_be(&field::from_decimal(dec).unwrap())
-}
-
-/// The vault's raw records after the fixture's six deposits, made by the vault's own code in the mocked chain.
-fn deposits_state(vault: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
-    let f = fixture();
-    assert_eq!(f["vault"], vault, "the fixture's proofs name vault.test.near");
-    testing_env!(VMContextBuilder::new().current_account_id(vault.parse().unwrap()).build());
-    let mut v = Vault::default();
-    let mut h = PoseidonT3::new();
-    for (leaf, label) in f["leaves"].as_array().unwrap().iter().zip(f["labels"].as_array().unwrap()) {
-        let _ = v.insert_commitment(&mut h, &be(leaf.as_str().unwrap()));
-        let _ = v.insert_label(&mut h, &be(label.as_str().unwrap()));
-    }
-    env::state_write(&v);
-    let mut kv: Vec<(Vec<u8>, Vec<u8>)> = near_sdk::mock::with_mocked_blockchain(|b| b.take_storage()).into_iter().collect();
-    kv.sort();
-    // `totals` is the state struct's last field: three u128 (deposited, spent, returned), little-endian
-    let state = kv.iter_mut().find(|(k, _)| k.as_slice() == b"STATE").expect("STATE written");
-    let n = state.1.len();
-    assert_eq!(state.1[n - 48..], [0u8; 48], "totals start at 0");
-    let deposited: u128 = f["deposited"].as_str().unwrap().parse().unwrap();
-    state.1[n - 48..n - 32].copy_from_slice(&deposited.to_le_bytes());
-    kv
-}
-
-/// The deployed vault with the six deposits' records patched in, and its storage use raised by their bytes.
-async fn vault_with_deposits() -> R<Harness> {
-    let h = Harness::start().await?;
-    let _ = h.deploy_vault().await?;
-    let records = deposits_state(h.vault.as_str());
-    let bytes: u64 = records.iter().map(|(k, v)| k.len() as u64 + v.len() as u64 + RECORD_EXTRA).sum();
-    let before = h.account_view(&h.vault, "final").await?;
-    assert!(before["storage_usage"].as_u64().is_some());
-    h.worker
-        .patch(&h.vault)
-        .account_from_current(move |a| {
-            let su = a.storage_usage;
-            // 1 N more, as the deposits' prepays would have brought
-            let bal = a.balance.saturating_add(NearToken::from_near(1));
-            AccountDetailsPatch::from(a).storage_usage(su + bytes).balance(bal)
-        })
-        .states(records.iter().map(|(k, v)| (k.as_slice(), v.as_slice())))
-        .transact()
+/// `depositor`'s deposit of `value` on `precommitment`: its prepay by `payer`, then its own `ft_transfer_call` with the
+/// kit's message; an error unless both land and the vault took the amount (`ft_on_transfer` ran once).
+async fn deposit(h: &Harness, payer: &Account, depositor: &Account, precommitment: &str, value: &str) -> R<()> {
+    let _ = h.call(payer, &h.vault, "storage_prepay", json!({"precommitment": precommitment}), PREPAY, Gas::from_tgas(30)).await?;
+    let msg = format!(r#"{{"precommitment":"{precommitment}","depositor":"{}"}}"#, depositor.id());
+    let o = h
+        .call(depositor, &h.token, "ft_transfer_call", json!({"receiver_id": h.vault, "amount": value, "msg": msg}), NearToken::from_yoctonear(1), Gas::from_tgas(180))
         .await?;
-    h.wait_final(&h.vault).await?;
-    let st = h.view(&h.vault, "state_tree", json!({})).await?;
-    let lt = h.view(&h.vault, "label_tree", json!({})).await?;
-    assert_eq!((st["size"].as_u64(), lt["size"].as_u64()), (Some(6), Some(6)), "{st} {lt}");
+    let _ = o.calls_exactly(&h.vault, "ft_on_transfer", 1)?;
+    Ok(())
+}
+
+/// The vault by the 2.8 recipe on `kind`'s token, holding the fixture's six deposits, made through the token by u.
+async fn vault_with_deposits(kind: TokenKind) -> R<Harness> {
+    let h = Harness::with_vault_and(kind).await?;
+    let f = fixture();
+    assert_eq!(f["vault"], h.vault.as_str(), "the fixture's proofs name vault.test.near");
+    let u = h.account("u", 50).await?;
+    let payer = h.account("payer", 50).await?;
+    h.mint(u.id(), f["deposited"].as_str().unwrap().parse()?).await?;
+    for (p, value) in f["precommitments"].as_array().unwrap().iter().zip(f["values"].as_array().unwrap()) {
+        deposit(&h, &payer, &u, p.as_str().unwrap(), value.as_str().unwrap()).await?;
+    }
+    assert_eq!(h.view(&h.vault, "leaves", json!({"from": 0, "limit": 10})).await?, f["leaves"], "the deposits' leaves are the fixture's");
+    assert_eq!(h.view(&h.vault, "labels", json!({"from": 0, "limit": 10})).await?, f["labels"], "the deposits' labels are the fixture's");
     let t = h.view(&h.vault, "totals", json!({})).await?;
-    assert_eq!(t["deposited"], fixture()["deposited"], "{t}");
-    // the patch touched state and storage use only: the code and the keys are the recipe's
+    assert_eq!(t["deposited"], f["deposited"], "{t}");
     assert!(h.access_keys(&h.vault, "final").await?.is_empty(), "the vault has a key");
-    println!("vault {}: six deposits patched in ({bytes} B), state root {}", h.vault, st["root"]);
+    println!("{kind:?}: vault {} holds the six deposits, state root {}", h.vault, h.view(&h.vault, "state_tree", json!({})).await?["root"]);
     Ok(h)
 }
 
@@ -174,8 +145,17 @@ async fn spend_row(h: &Harness, nullifier: &str) -> R<Value> {
 }
 
 #[tokio::test]
-async fn vt_s05_one_nullifier_spends_once() -> R<()> {
-    let h = vault_with_deposits().await?;
+async fn vt_s05_one_nullifier_spends_once_mock() -> R<()> {
+    vt_s05_one_nullifier_spends_once(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn vt_s05_one_nullifier_spends_once_usdc() -> R<()> {
+    vt_s05_one_nullifier_spends_once(TokenKind::Usdc).await
+}
+
+async fn vt_s05_one_nullifier_spends_once(kind: TokenKind) -> R<()> {
+    let h = vault_with_deposits(kind).await?;
     let relayer = h.account("relayer", 50).await?;
     let other = h.account("relayer2", 50).await?;
 
@@ -195,7 +175,7 @@ async fn vt_s05_one_nullifier_spends_once() -> R<()> {
     let r = spend_row(&h, &signal("same_call", 1)).await?;
     assert_eq!(r["withdrawn"], "2000000");
     assert_eq!(r["new_leaf_index"], 6);
-    // no token at TOKEN: both parts failed and came back (2.5.4)
+    // alice and the relayer are not registered on the token: both parts bounced and came back (2.5.4)
     assert_eq!((r["status"].as_str(), r["refund_value"].as_str()), (Some("refund_pending"), Some("2000000")));
     assert_eq!(r["payer"], relayer.id().as_str());
     assert_eq!((&r["recipient"], &r["fee"], &r["refund_precommitment"]), (&w["recipient"], &w["relay_fee"], &w["refund_precommitment"]));
@@ -235,12 +215,22 @@ async fn vt_s05_one_nullifier_spends_once() -> R<()> {
     assert_eq!(spent(&after), 3_000_000 + won);
     assert_eq!(h.view(&h.vault, "state_tree", json!({})).await?["size"], 9);
     println!("{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused() -> R<()> {
-    let h = vault_with_deposits().await?;
+async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused_mock() -> R<()> {
+    vt_s06_unknown_zero_and_other_vault_roots_are_refused(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused_usdc() -> R<()> {
+    vt_s06_unknown_zero_and_other_vault_roots_are_refused(TokenKind::Usdc).await
+}
+
+async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused(kind: TokenKind) -> R<()> {
+    let h = vault_with_deposits(kind).await?;
     let relayer = h.account("relayer", 50).await?;
     let f = fixture();
     let other = &f["other_vault"];
@@ -256,21 +246,64 @@ async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused() -> R<()> {
         refused(&h, &relayer, args("same_call", Some((5, x))), "UnknownLabelRoot").await?;
         println!("ASP root {label}: refused (UnknownLabelRoot)");
     }
-    // a proof against the roots of 4 of the 6 deposits lands
+    // a proof against the roots of 4 of the 6 deposits lands; VT-S07's last case: its refund precommitment is a
+    // stranger's pending deposit precommitment, prepaid before it
+    let stranger = h.account("stranger", 50).await?;
+    let pending = args("old_root", None)["withdrawal"]["refund_precommitment"].as_str().unwrap().to_string();
+    let _ = h.call(&stranger, &h.vault, "storage_prepay", json!({"precommitment": pending}), PREPAY, Gas::from_tgas(30)).await?;
     assert_ne!(signal("old_root", 3), h.view(&h.vault, "state_tree", json!({})).await?["root"]);
     let o = withdraw(&h, &relayer, args("old_root", None)).await?;
     let gas = landed(&h, &o)?.map_err(|f| format!("old_root: {f}"))?;
     println!("older root (4 of 6 deposits): landed, {:.3} Tgas", gas as f64 / 1e12);
+    // the stranger's deposit on that precommitment still lands (its prepay is the one above)
+    let leaves = h.view(&h.vault, "state_tree", json!({})).await?["size"].as_u64().ok_or("state_tree size")?;
+    let held = h.token_balance(&h.vault).await?;
+    h.mint(stranger.id(), 1_000_000).await?;
+    let msg = format!(r#"{{"precommitment":"{pending}","depositor":"{}"}}"#, stranger.id());
+    let d = h
+        .call(&stranger, &h.token, "ft_transfer_call", json!({"receiver_id": h.vault, "amount": "1000000", "msg": msg}), NearToken::from_yoctonear(1), Gas::from_tgas(180))
+        .await?;
+    let _ = d.calls_exactly(&h.vault, "ft_on_transfer", 1)?;
+    assert_eq!(h.view(&h.vault, "state_tree", json!({})).await?["size"].as_u64(), Some(leaves + 1), "the stranger's deposit wrote no leaf");
+    assert_eq!(h.token_balance(&h.vault).await? - held, 1_000_000, "the vault did not keep the stranger's deposit");
+    println!("a refund precommitment equal to a stranger's pending deposit precommitment: the withdrawal landed, then the stranger's deposit landed");
+    // and the withdrawal's refund is not lost to that deposit: its row holds P, refund_pending, and settle writes the
+    // refund note on P (settle reads no precommitment set, src/settle.rs)
+    let n = signal("old_root", 1);
+    let r = spend_row(&h, &n).await?;
+    assert_eq!((r["refund_precommitment"].as_str(), r["status"].as_str()), (Some(pending.as_str()), Some("refund_pending")), "{r}");
+    let refund = r["refund_value"].as_str().ok_or("refund_value")?.to_string();
+    assert_eq!(refund, r["withdrawn"].as_str().ok_or("withdrawn")?, "both parts bounce: the whole withdrawal comes back, {r}");
+    let size = h.view(&h.vault, "state_tree", json!({})).await?["size"].as_u64().ok_or("state_tree size")?;
+    let o = h.call_outcome(&stranger, &h.vault, "settle", json!({"nullifier_hash": n}), NearToken::from_yoctonear(0), Gas::from_tgas(100)).await?;
+    o.expect_all_ok("settle old_root")?;
+    let r = spend_row(&h, &n).await?;
+    assert_eq!(
+        (r["refund_precommitment"].as_str(), r["status"].as_str(), r["refund_value"].as_str(), r["refund_leaf_index"].as_u64()),
+        (Some(pending.as_str()), Some("settled"), Some(refund.as_str()), Some(size)),
+        "{r}"
+    );
+    println!("settle old_root: the refund note of {refund} on P is leaf {size}, after the stranger's deposit on P");
     // and the unchanged same_call lands after its refusals
     let o = withdraw(&h, &relayer, args("same_call", None)).await?;
     landed(&h, &o)?.map_err(|f| format!("same_call: {f}"))?;
     println!("{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes() -> R<()> {
-    let h = vault_with_deposits().await?;
+async fn rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes_mock() -> R<()> {
+    rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes_usdc() -> R<()> {
+    rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes(TokenKind::Usdc).await
+}
+
+async fn rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes(kind: TokenKind) -> R<()> {
+    let h = vault_with_deposits(kind).await?;
     let relayer = h.account("relayer", 50).await?;
     let old = args("old_root", None)["public_signals"].clone();
     let at = |i: usize| old[i].as_str().unwrap().to_string();
@@ -309,5 +342,6 @@ async fn rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes() -> R<()>
     }
     assert_eq!(wrote, vec![710 - short, 710 - short, 710 - short + 74]);
     println!("{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }

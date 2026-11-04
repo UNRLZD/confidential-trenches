@@ -454,6 +454,8 @@ async fn vt_s04(kind: TokenKind) -> R<()> {
     if let Some(p) = plant() {
         return Err(format!("VT_S04_PLANT={p} names no check that ran").into());
     }
+    scout_w.h.i1().await?;
+    main_w.h.i1().await?;
     Ok(())
 }
 

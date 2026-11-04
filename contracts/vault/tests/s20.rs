@@ -308,5 +308,6 @@ async fn the_deploy_script_lands_the_recipe_keyless() -> R<()> {
     println!("vault after the first deposit: amount {amount2}, storage {usage2} B ({:+} B); free {free2} yocto", usage2 as i128 - usage1 as i128);
     assert!(free2 >= 0, "the vault's free NEAR is below 0 after the first deposit");
     println!("\ngas table\n{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }

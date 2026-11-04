@@ -481,6 +481,7 @@ async fn happy(kind: TokenKind) -> R<()> {
     let w = World::new(kind, 3, "a").await?;
     happy_one(&w, "a1", "424242001", B756).await?;
     happy_one(&w, "a2", "424242002", B904).await?;
+    w.h.i1().await?;
     Ok(())
 }
 
@@ -511,6 +512,7 @@ async fn resend(kind: TokenKind) -> R<()> {
     assert_eq!(w.deposits().await?.len(), n0, "resend: a new deposit");
     assert_eq!(w.rows_for(p).await?.len(), 1);
     println!("[b {kind:?}] the same call again: 200, tx {send}, relayer nonce {rn0} unmoved, nothing new on chain");
+    w.h.i1().await?;
     Ok(())
 }
 
@@ -557,6 +559,7 @@ async fn twin(kind: TokenKind) -> R<()> {
     let rb1 = w.relayer_balance().await?;
     report(&w, "c", rb0, rb1, &sp);
     assert!(rb0 - rb1 <= STRUCK_MAX + sp.landed_gas);
+    w.h.i1().await?;
     Ok(())
 }
 
@@ -594,6 +597,7 @@ async fn halted(kind: TokenKind) -> R<()> {
     assert_eq!(ub, HELD, "halted: U's balance moved");
     assert!(out["record"].is_null(), "halted: a record {}", out["record"]);
     println!("[d {kind:?}] halted: 503 token_halted, relayer nonce {rn0} and balance {} unmoved, no record", near(rb0));
+    w.h.i1().await?;
     Ok(())
 }
 
@@ -688,6 +692,7 @@ async fn three_failed_sends(kind: TokenKind) -> R<()> {
     assert_eq!(sp.landed_gas, 0);
     assert!(rb0 - rb1 <= STRUCK_MAX, "struck U: the relayer spent {}, over {}", near(rb0 - rb1), near(STRUCK_MAX));
     let _ = refuse(&w, u.acct.id(), false).await?;
+    w.h.i1().await?;
     Ok(())
 }
 
@@ -791,6 +796,7 @@ async fn paused_send_does_not_count_usdc() -> R<()> {
     let rb1 = w.relayer_balance().await?;
     report(&w, "f", rb0, rb1, &sp);
     assert!(rb0 - rb1 <= STRUCK_MAX + sp.landed_gas + t.burnt()?, "paused: the relayer spent {}", near(rb0 - rb1));
+    w.h.i1().await?;
     Ok(())
 }
 
@@ -810,6 +816,7 @@ async fn bad_nonce(kind: TokenKind) -> R<()> {
     assert_eq!(w.relayer_balance().await?, rb0, "bad nonce: the relayer spent NEAR");
     assert!(out["record"].is_null(), "bad nonce: a record {}", out["record"]);
     println!("[g {kind:?}] a call at U's key nonce {n}: 400 bad_nonce, relayer nonce {rn0} unmoved");
+    w.h.i1().await?;
     Ok(())
 }
 
@@ -884,6 +891,7 @@ async fn overtaken(kind: TokenKind) -> R<()> {
     assert_eq!(w.rows_for(p).await?.len(), 1, "overtaken: P not in the pages once");
     assert_eq!(w.prepaid(p, "final").await?, None, "overtaken: P's prepaid record not used by its deposit");
     println!("[h {kind:?}] (a2): the stored prepay dropped, never on chain; fresh prepay {} and send {send} landed", prepays[0]);
+    w.h.i1().await?;
     Ok(())
 }
 
