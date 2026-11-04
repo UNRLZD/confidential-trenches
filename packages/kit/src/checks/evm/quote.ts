@@ -883,7 +883,7 @@ const SCAN_BACKOFF_MAX_MS = 8_000;
  *  first), at most `limit` in flight, `limit` starting at the venue's `parallel` (nine scans that each sent their own
  *  `parallel` at once drew 429s on rpc.mainnet.chain.robinhood.com, 2026-11-03 21:20Z: 89 of 125 requests). A throttle
  *  (HTTP 429, or a call's error naming the rate limit) or a request that ran out of time halves `limit`, to 1 at
- *  least, and a throttle holds every request not yet sent until its Retry-After, or the backoff where it names none;
+ *  least, once per event (a request sent before the last cut never cuts again), and a throttle holds every request not yet sent until its Retry-After, or the backoff where it names none;
  *  each answer then adds 1 back up to half the limit at the last congestion, and 1 / limit past it, up to `parallel`
  *  (TCP Reno's additive increase, multiplicative decrease: at 1 added an answer, a provider that slows past 5 in
  *  flight was sent 11 at once again and again, and a span ran out its four tries). A throttled request is asked again whole and spends none of its
@@ -897,6 +897,8 @@ function scanGateOf(parallel: number, untilMs: number): ScanGate {
   let flying = 0;
   let resumeAt = 0;
   let strikes = 0;
+  // the cuts so far: a request records the count when it is sent
+  let cuts = 0;
   const waiting: (() => void)[] = [];
   // every request waiting looks again: one sent, an answer back, a wait ended
   const wake = () => waiting.splice(0).forEach((r) => r());
@@ -916,10 +918,15 @@ function scanGateOf(parallel: number, untilMs: number): ScanGate {
     flying--;
     wake();
   };
-  // a congestion signal halves the requests at once
-  const congest = () => void (limit = sst = Math.max(1, Math.floor(limit / 2)));
-  const throttle = (afterMs: number | null) => {
-    congest();
+  // a congestion signal halves the limit once per event, as TCP NewReno does: only a request sent after the last cut
+  // cuts again, so the twenty answers of one burst take 20 to 10, not to 1
+  const congest = (sent: number) => {
+    if (sent !== cuts) return;
+    cuts++;
+    limit = sst = Math.max(1, Math.floor(limit / 2));
+  };
+  const throttle = (sent: number, afterMs: number | null) => {
+    congest(sent);
     const wait = afterMs ?? Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** strikes);
     strikes++;
     resumeAt = Math.max(resumeAt, performance.now() + wait);
@@ -928,25 +935,26 @@ function scanGateOf(parallel: number, untilMs: number): ScanGate {
     async ask(rpc, calls, tries) {
       for (let i = 0; ; ) {
         await take();
+        const sent = cuts;
         let out: unknown;
         try {
           out = await rpc(calls);
         } catch (e) {
           done();
           if (e instanceof RateLimited) {
-            throttle(e.afterMs);
+            throttle(sent, e.afterMs);
             continue;
           }
           // a timeout is a congestion signal too (GitHub's runner, 7d6ec94: 14 of 128 and 7 of 114 of a cold quote's
           // getLogs ran out of time at 20 at once, no 429); it and any other failure spend a try
-          if ((e as Error | null)?.name === "TimeoutError") congest();
+          if ((e as Error | null)?.name === "TimeoutError") congest(sent);
           if (++i >= tries) throw e instanceof EvmQuoteError ? e : new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
           await new Promise((r) => setTimeout(r, 500 * i));
           continue;
         }
         done();
         if (Array.isArray(out) && out.some(limited)) {
-          throttle(null);
+          throttle(sent, null);
           continue;
         }
         strikes = 0;

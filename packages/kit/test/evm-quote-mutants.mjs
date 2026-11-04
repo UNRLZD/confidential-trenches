@@ -238,15 +238,16 @@ export const MUTANTS = [
   // it again; a throttle holds the next requests for its Retry-After or a doubling backoff, spends no try, and past
   // the quote's bound refuses (re-review of 037627c, MEDIUM-1; GitHub's runner at 7d6ec94: the cold quote's getLogs
   // timed out at 20 at once)
-  [QUOTE, "          if (e instanceof RateLimited) {\n            throttle(e.afterMs);\n            continue;", "          if (e instanceof RateLimited) {\n            throttle(e.afterMs);\n            if (++i >= tries) throw e;\n            continue;", R, "TH1 "],
-  [QUOTE, "        if (Array.isArray(out) && out.some(limited)) {\n          throttle(null);\n          continue;", "        if (false) {\n          throttle(null);\n          continue;", R, "J2 "],
+  [QUOTE, "          if (e instanceof RateLimited) {\n            throttle(sent, e.afterMs);\n            continue;", "          if (e instanceof RateLimited) {\n            throttle(sent, e.afterMs);\n            if (++i >= tries) throw e;\n            continue;", R, "TH1 "],
+  [QUOTE, "        if (Array.isArray(out) && out.some(limited)) {\n          throttle(sent, null);\n          continue;", "        if (false) {\n          throttle(sent, null);\n          continue;", R, "J2 "],
   [QUOTE, 'retryAfterMs(res.headers.get("retry-after"))', "null", R, "TH1 "],
   [QUOTE, "Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** strikes)", "SCAN_BACKOFF_MS", R, "TH2 "],
-  [QUOTE, "const congest = () => void (limit = sst = Math.max(1, Math.floor(limit / 2)));", "const congest = () => void (sst = limit);", R, "TH3 "],
+  [QUOTE, "    limit = sst = Math.max(1, Math.floor(limit / 2));", "    sst = limit;", R, "TH3 "],
   [QUOTE, "      else if (flying < Math.floor(limit)) {", "      else if (true) {", R, "TH3 "],
   [QUOTE, "limit = Math.min(parallel, limit < sst ? limit + 1 : limit + 1 / limit);", "limit = Math.min(parallel, limit);", R, "TH3 "],
   [QUOTE, "      if (resumeAt > untilMs) return refuse(", "      if (false) return refuse(", R, "TH4 "],
-  [QUOTE, '          if ((e as Error | null)?.name === "TimeoutError") congest();', "", R, "TH5 "],
+  [QUOTE, '          if ((e as Error | null)?.name === "TimeoutError") congest(sent);', "", R, "TH5 "],
+  [QUOTE, "    if (sent !== cuts) return;", "", R, "TH6 "],
   [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "X3 "],
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
   [QUOTE, "    return x < y ? x : y;", "    return x;", R, "H2 "],

@@ -2758,17 +2758,23 @@ test("V15 a confirm that can no longer reach a majority stops asking", async () 
 // request spends no try; past the scan's bound the quote refuses, never hangs.
 const { evmScanBound } = quoteMod as unknown as { evmScanBound?: (ms?: number) => void };
 /** The scan provider over HTTP (evmJsonRpc on a fake fetch), answering 429 while `throttled()` says so, with
- *  `retryAfter` as its Retry-After header (none when null); `seen` gets each request's in-flight count on arrival and
- *  each 429 and 200 as it is answered. */
-function throttlingScan(logs: { key: EvmPoolKey; at: number }[], throttled: () => boolean, retryAfter: string | null, seen: (string | number)[] = [], at: number[] = []): EvmRpc {
+ *  `retryAfter` as its Retry-After header (none when null), each 429 after `burstMs`; `seen` gets each request's
+ *  in-flight count on arrival and each answer as it is sent: "cut" for a 429 that is a new congestion event (its
+ *  request arrived after the last cut was answered), "429" for one of a burst already cut, "200". */
+function throttlingScan(logs: { key: EvmPoolKey; at: number }[], throttled: () => boolean, retryAfter: string | null, seen: (string | number)[] = [], at: number[] = [], burstMs = 0): EvmRpc {
   const inner = scanner(5_000_000, logs);
-  let flying = 0;
+  let [flying, arrived, boundary] = [0, 0, 0];
   return evmJsonRpc("https://scan.throttle.test", (async (_u: string, init: RequestInit) => {
     flying++;
     seen.push(flying);
+    const me = arrived++;
     try {
       if (throttled()) {
-        seen.push("429");
+        if (burstMs > 0) await pause(burstMs);
+        if (me >= boundary) {
+          seen.push("cut");
+          boundary = arrived;
+        } else seen.push("429");
         at.push(performance.now());
         return new Response("", { status: 429, headers: retryAfter === null ? {} : { "retry-after": retryAfter } });
       }
@@ -2806,23 +2812,38 @@ for (const [name, header] of [["TH1 ", "1"], ["TH2 ", null]] as const) {
 test("TH3 after a 429 the scan never has more requests in flight than its halved limit, which answers raise again", async () => {
   const token = freshToken();
   const { pools, logs } = warmCase(token, xAt(0x3e40));
-  // the first 20 getLogs are throttled, the rest answered
+  // the first 20 getLogs are throttled (in flight together, answered after 20 ms), the rest answered
   let n = 0;
   const seen: (string | number)[] = [];
-  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, throttlingScan(logs, () => ++n > 1 && n <= 21, "0", seen)));
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, throttlingScan(logs, () => ++n > 1 && n <= 21, "0", seen, [], 20)));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
-  // the provider's own count of the limit: 20, halved at each 429 to 1 at least, one more at each answer, up to 20
+  // the provider's own count of the limit: 20, halved at each cut to 1 at least, one more at each answer, up to 20
   let lim = 20;
   let worst = 0;
   for (const s of seen) {
-    if (s === "429") lim = Math.max(1, Math.floor(lim / 2));
+    if (s === "cut") lim = Math.max(1, Math.floor(lim / 2));
+    else if (s === "429") continue;
     else if (s === "200") lim = Math.min(20, lim + 1);
     else worst = Math.max(worst, (s as number) - lim);
   }
-  assert.ok(seen.includes("429"), "the provider throttled");
-  // and the limit grows back: the later requests go out more than one at once
-  assert.ok(Math.max(...(seen.slice(seen.lastIndexOf("429")).filter((x) => typeof x === "number") as number[])) >= 4, `in flight after the 429s: ${seen.join(" ")}`);
+  assert.ok(seen.includes("cut"), "the provider throttled");
+  // and the limit grows back past the halved 10: the later requests go out more than ten at once
+  assert.ok(Math.max(...(seen.slice(Math.max(seen.lastIndexOf("429"), seen.lastIndexOf("cut"))).filter((x) => typeof x === "number") as number[])) >= 12, `in flight after the 429s: ${seen.join(" ")}`);
   assert.ok(worst <= 0, `a request arrived with ${worst} more in flight than the halved limit: ${seen.join(" ")}`);
+});
+
+test("TH6 twenty requests in flight that all answer 429 at once are one congestion event: the limit goes from 20 to 10, not to 1", async () => {
+  const token = freshToken();
+  const { pools, logs } = warmCase(token, xAt(0x3e50));
+  // the scan's first 20 getLogs (after its head read), all in flight together, answered 429 after 20 ms
+  let n = 0;
+  const seen: (string | number)[] = [];
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, throttlingScan(logs, () => ++n > 1 && n <= 21, "0", seen, [], 20)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.equal(seen.filter((x) => x === "cut").length + seen.filter((x) => x === "429").length, 20);
+  // the next ten requests go out together, at the halved limit of 10 and no more
+  const after = seen.slice(seen.lastIndexOf("429") + 1).filter((x) => typeof x === "number").slice(0, 10) as number[];
+  assert.equal(Math.max(...after), 10, `in flight as the ten after the burst arrive: ${after.join(" ")}`);
 });
 
 test("TH4 a scan provider that throttles past the scan's bound refuses at the bound, rpc_error naming it, never a hang", { timeout: 30_000 }, async () => {
@@ -2883,11 +2904,13 @@ test("TH5 a scan provider that slows past the deadline with more than 5 requests
   const ms = performance.now() - t0;
   console.log(`TH5: ${String((v as { code?: string }).code ?? "ok")}, ${timedOut} of ${arrivals.length} requests timed out, ${Math.round(ms)} ms`);
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
-  // after the first timeout the scan probes past K by two at most (the sawtooth of additive increase, which grows for
-  // the deadline's 300 ms before a timeout is seen), never the 20 at once whose every wave sent 15 past K
-  const late = arrivals.slice(firstTimeout);
+  // a cut per congestion event halves 20 to 10 to 5 in two waves after the first timeout; past those the scan probes
+  // past K by two at most (the sawtooth of additive increase, which grows for the deadline's 300 ms before a timeout is
+  // seen), never the 20 at once whose every wave sent 15 past K
+  const late = arrivals.slice(firstTimeout + 30);
   const sorted = [...late].sort((a, b) => a - b);
-  assert.ok(Math.max(...late) <= K + 2 && sorted[sorted.length >> 1]! <= K, `in flight on arrival after the first timeout: most ${Math.max(...late)}, median ${sorted[sorted.length >> 1]}, of ${late.length}`);
-  // at 7d6ec94's fixed 20: rpc_error after 18.4 s, 790 of 1,541 requests timed out; with the gate: ok in 5.1 s, 93 of 387
-  assert.ok(timedOut <= 120 && ms < 10_000, `${timedOut} requests ran out of time in ${Math.round(ms)} ms`);
+  assert.ok(Math.max(...late) <= K + 2 && sorted[sorted.length >> 1]! <= K, `in flight on arrival past the first two waves after the first timeout: most ${Math.max(...late)}, median ${sorted[sorted.length >> 1]}, of ${late.length}`);
+  // at 7d6ec94's fixed 20: rpc_error after 18.4 s, 790 of 1,541 requests timed out; with the gate, halving at every
+  // timeout (f9bd53c): ok in 5.1 s, 93 of 387; halving once per event: ok in 6.9 s, 126 of 447
+  assert.ok(timedOut <= 160 && ms < 10_000, `${timedOut} requests ran out of time in ${Math.round(ms)} ms`);
 });
