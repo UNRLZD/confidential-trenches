@@ -398,6 +398,13 @@ test("the deadline is unix seconds: 59 s away is deadline_near, 60 s is fine, 60
     assert.equal(code(a), want, `${name}: ${JSON.stringify(a.body)}`);
     if (want !== "ok") assert.equal(calls.length, 0, name);
   }
+  // a Sell 59 s from its deadline at a (W, nonce) already sent is refused before the repeat's lookup, never answered
+  // with the first hash
+  const calls: Calls = [];
+  const s = senderOf(calls);
+  assert.equal((await s.sell(body())).status, 200);
+  const near = await s.sell(body({ sell: { deadline: NOW_S + 59n } }));
+  assert.equal(code(near), "deadline_near", JSON.stringify(near.body));
 });
 
 test("bad_shape: one trailing byte, a byte short, another selector, a changed offset, length or padding, a 64-byte signature, too long, any other key; nothing read", async () => {
