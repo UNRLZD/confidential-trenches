@@ -70,7 +70,7 @@ export const WORDS = {
   proofMaking: draft("Making proof", "card trade-box-pool (plan v2 A2): notes landed, their first proof still being made"),
   // the buy route strip (card app-buy-route-strip): the spec's words (docs/drafts/buy-route-strip-spec.md, "Words on
   // screen", owner 3 Nov 10:11Z, the film's still) and the locked design's PV-01 and PV-02 (round-3 proposals, unsigned),
-  // drafts until the owner's words page. "Private balance" is Portfolio's approved entry. The venue is data: the pool's
+  // drafts until the words are picked. "Private balance" is Portfolio's approved entry. The venue is data: the pool's
   // label is the venue's name and "pool"; `poolBare` is the label while no event has named the venue.
   privateBalance: PF.privateBalance,
   newWallet: draft("New one-time wallet", "buy-route-strip-spec.md Words on screen; design-lock-r5 P.pvTrade PV-02"),
