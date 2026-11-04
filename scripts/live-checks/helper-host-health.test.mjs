@@ -5,6 +5,10 @@
 // deployed_no_release: the live helper before this card, with no release: FAIL. bad_no_bind: apps/helper at 6aa24c5 in its image behind deploy/Caddyfile, before /v1/bind was mounted (delegate
 // "down", POST /v1/bind 404): FAIL. bad_commit: a real answer from the same image built with another commit (854f02d):
 // FAIL. bad_star: an answer with Access-Control-Allow-Origin: * on every read: FAIL.
+// Card helper-ready-gate: good is re-recorded from the helper of this card, run locally (its note says how) once it
+// said ready: PASS. bad_warming: the same helper read while it warmed (ready: false), the read a deploy that moved
+// traffic to a cold helper would give: FAIL, on ready alone. The answers recorded before the card carry no ready, so
+// each of their own refusals is asserted apart from it.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -46,7 +50,7 @@ test("recorded bad answer: the helper before /v1/bind was mounted (delegate down
   assert.ok(r.lines.includes('BAD POST /v1/bind with no SignedDelegateAction answers 404 none, want 400 "bad_shape"'), r.lines.join("\n"));
   // and nothing else in it fails: the bind reads are what this answer is refused on (and the release, which no helper
   // reported before card helper-release-bump)
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).filter((l) => !l.includes("delegate") && !l.includes("/v1/bind") && !l.includes("release")), []);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).filter((l) => !l.includes("delegate") && !l.includes("/v1/bind") && !l.includes("release") && !l.includes("] ready: ")), []);
 });
 
 test("recorded good answer against its --since record: another commit, release 2 up from 1: PASS; against the deployed helper's answer with no release: PASS", async () => {
@@ -68,14 +72,14 @@ test("recorded bad answer: a new commit with the record's release (nothing raise
   assert.equal(r.ok, false);
   assert.ok(r.lines.includes("BAD another commit than the record's (3e6cde60b504): release 1, want above 1"), r.lines.join("\n"));
   // the release is what it is refused on
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), ["BAD another commit than the record's (3e6cde60b504): release 1, want above 1"]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD") && !l.includes("] ready: ")), ["BAD another commit than the record's (3e6cde60b504): release 1, want above 1"]);
 });
 
 test("recorded bad answer: the deployed helper before this card reports no release: FAIL", async () => {
   const r = judge(await read(undefined, replay(A.deployed_no_release)), A.deployed_no_release.commit);
   assert.equal(r.ok, false);
   assert.ok(r.lines.includes("BAD [https://confidential.unrealized.trade] release none is a whole number, 1 or more"), r.lines.join("\n"));
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).filter((l) => !l.includes("release")), [], "only the release fails it");
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).filter((l) => !l.includes("release") && !l.includes("] ready: ")), [], "only the release (and the ready it predates) fails it");
 });
 
 test("the --since comparison: the same commit keeps the release, another raises it, never down; a bad record fails", () => {
@@ -101,6 +105,20 @@ test("the --since comparison: the same commit keeps the release, another raises 
   // a record that holds no health answer, or a release that is no whole number
   assert.equal(judge(A.good, COMMIT, { reads: [] }).ok, false);
   assert.equal(judge(A.good, COMMIT, withRelease(A.since_before, "1")).ok, false);
+});
+
+test("card helper-ready-gate: recorded good answer says ready: PASS; the same helper read while it warmed (ready: false): FAIL, on ready alone", async () => {
+  const good = judge(await read(undefined, replay(A.good)), COMMIT);
+  assert.equal(good.ok, true, good.lines.join("\n"));
+  for (const o of ["https://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade", "https://example.com"]) assert.ok(good.lines.includes(`ok  [${o}] ready: true`), good.lines.join("\n"));
+  const r = judge(await read(undefined, replay(A.bad_warming)), A.bad_warming.commit);
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD"));
+  assert.ok(bad.length === 3 && bad.every((l) => l.endsWith("ready: false, want true (the helper took traffic before its warm-up was done)")), bad.join("\n"));
+  // and a helper before this card, with no ready at all, fails on it too
+  const none = structuredClone(A.good);
+  for (const x of none.reads) x.body = JSON.stringify({ ...JSON.parse(x.body), ready: undefined });
+  assert.ok(judge(none, COMMIT).lines.includes("BAD [https://confidential.unrealized.trade] ready: none, want true (the helper took traffic before its warm-up was done)"));
 });
 
 test("recorded bad answer: X-Helper-Commit is not main's: FAIL", async () => {
