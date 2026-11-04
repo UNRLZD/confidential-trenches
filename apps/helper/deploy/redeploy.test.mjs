@@ -1,7 +1,8 @@
 // node --test apps/helper/deploy/redeploy.test.mjs: the redeploy (card helper-release-bump) raises HELPER_RELEASE by one
 // for every new commit and keeps it for the same one. Each test runs the real script on a temp "server": a git
 // checkout that fetches from a local repository (REDEPLOY_REMOTE) holding two commits of this script, and a stub
-// `docker` on PATH that records what compose would be run with. Nothing reaches a network or a real server.
+// `docker` on PATH that records every call and models the running containers (card helper-ready-gate: the swap starts the
+// new container beside the old one, waits bounded for it, then stops the old one). Nothing reaches a network or a real server.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -48,7 +49,36 @@ function server() {
   git(root, "checkout", "-q", "--detach", A);
   mkdirSync(bin);
   const log = path.join(dir, "docker.log");
-  writeFileSync(path.join(bin, "docker"), `#!/bin/sh\necho "$PWD|$*|$HELPER_COMMIT|$HELPER_RELEASE" >> "${log}"\n`, { mode: 0o755 });
+  // The stub keeps the running container ids in `state` (one per line). `compose ps -q helper` prints them; `compose build`
+  // only logs; `compose up` adds one new-<n> and exits 1 after adding it when STUB_READY=0 (compose does the same when
+  // --wait times out); `rm -f`, `rm` and `stop -t <s>` take an id out. Every call is logged as
+  // "<cwd>|<args>|<HELPER_COMMIT>|<HELPER_RELEASE>".
+  const state = path.join(dir, "running");
+  writeFileSync(state, "");
+  writeFileSync(
+    path.join(bin, "docker"),
+    `#!/bin/sh
+echo "$PWD|$*|$HELPER_COMMIT|$HELPER_RELEASE" >> "${log}"
+S="${state}"
+drop() { grep -vxF "$1" "$S" > "$S.tmp" || true; mv "$S.tmp" "$S"; }
+case "$1 $2" in
+  "compose ps") cat "$S" ;;
+  "compose build") ;;
+  "compose up")
+    n=$(cat "$S.n" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$S.n"
+    echo "new-$n" >> "$S"
+    [ "\${STUB_READY:-1}" = 0 ] && exit 1
+    ;;
+  "rm -f") drop "$3" ;;
+  "stop -t") drop "$4" ;;
+  "rm "*) drop "$2" ;;
+esac
+exit 0
+`,
+    { mode: 0o755 },
+  );
+  const running = () => readFileSync(state, "utf8").split("\n").filter(Boolean);
+  const seed = (...ids) => writeFileSync(state, ids.map((i) => `${i}\n`).join(""));
   const env = path.join(root, "apps/helper/deploy/.env");
   // `shell`: variables for the operator's shell; null takes one out. The vendor keys are test values (the start and the
   // redeploy refuse a vendor with no key and no keyless plan).
@@ -69,7 +99,7 @@ function server() {
     const t = readFileSync(env, "utf8");
     return { commit: /^HELPER_COMMIT=(.*)$/m.exec(t)?.[1], release: /^HELPER_RELEASE=(.*)$/m.exec(t)?.[1] };
   };
-  return { dir, root, A, B, env, git, run, runWith, docker, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, root, A, B, env, git, run, runWith, docker, running, seed, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const mode = (f) => statSync(f).mode & 0o777;
@@ -91,10 +121,15 @@ test("a missing release starts at 1; one commit twice keeps n; another commit ge
       assert.equal(s.head(), sha, "the checkout is the commit");
       assert.deepEqual(s.values(), { commit: sha, release });
       assert.equal(mode(s.env), 0o600);
-      // compose ran in deploy/ with the written values, not the operator's stray ones
-      assert.equal(s.docker()[i], `${s.deployDir}|compose up -d --build|${sha}|${release}`);
+      // compose built and ran in deploy/ with the written values, not the operator's stray ones: the first deploy brings the
+      // stack up, each later one adds a second helper beside the running one
+      const ups = s.docker().filter((l) => l.includes("|compose up "));
+      const up = i === 0 ? "compose up -d --wait --wait-timeout 300" : "compose up -d --no-deps --no-recreate --scale helper=2 --wait --wait-timeout 300 helper";
+      assert.equal(ups[i], `${s.deployDir}|${up}|${sha}|${release}`);
+      assert.ok(s.docker().includes(`${s.deployDir}|compose build helper|${sha}|${release}`), "built with the written values");
+      assert.equal(s.running().length, 1, "one helper runs after each deploy");
     }
-    assert.equal(s.docker().length, deploys.length);
+    assert.equal(s.docker().filter((l) => l.includes("|compose up ")).length, deploys.length);
     // no temp file is left next to the .env
     assert.deepEqual(readdirSync(s.deployDir).filter((f) => f.startsWith(".env")), [".env"]);
   } finally {
@@ -252,7 +287,7 @@ test("a budget variable the helper would refuse, in deploy/.env or in the shell,
     assert.notEqual(r.status, 0, r.out);
     assert.match(r.out, /RPC_BUDGET_BASE in deploy\/\.env is not one plain RPC_BUDGET_BASE=<value> line; nothing changed/);
     const taken = ["RPC_BUDGET_SOLANA", "PROXY_BUDGET_JUPITER"].reduce((k, name) => k + values.filter((v) => helperTakes(name, v)).length, 0);
-    assert.equal(s.docker().length, 2 * taken, "compose ran only for the values the helper takes");
+    assert.equal(s.docker().filter((l) => l.includes("|compose up ")).length, 2 * taken, "compose ran only for the values the helper takes");
   } finally {
     s.done();
   }
@@ -334,4 +369,135 @@ test("a commit the remote does not have fails before the .env is written", () =>
   } finally {
     s.done();
   }
+});
+
+// card helper-ready-gate: the swap has no gap. The new helper starts beside the old one (docker-rollout's pattern:
+// `up --no-recreate --scale helper=<n+1>`), compose waits bounded for its healthcheck, and only then is the old one stopped.
+const lines = (s) => s.docker().map((l) => l.split("|")[1]);
+
+test("a new helper that never gets ready: the deploy fails naming the bound, the new container is removed, the old one is never stopped or removed and still runs", () => {
+  const s = server();
+  try {
+    s.seed("old-1");
+    const r = s.runWith({ STUB_READY: "0", REDEPLOY_READY_S: "45" }, s.B);
+    assert.notEqual(r.status, 0, r.out);
+    assert.match(r.out, /redeploy: the new helper was not ready within 45 s; the old one keeps serving/);
+    const calls = lines(s);
+    assert.ok(calls.includes("compose up -d --no-deps --no-recreate --scale helper=2 --wait --wait-timeout 45 helper"), calls.join("\n"));
+    assert.ok(calls.includes("rm -f new-1"), "the new container was removed");
+    assert.ok(!calls.some((c) => /^(stop|rm)\b.*\bold-1\b/.test(c)), `the old one was touched:\n${calls.join("\n")}`);
+    assert.deepEqual(s.running(), ["old-1"], "the old one still runs, the new one is gone");
+  } finally {
+    s.done();
+  }
+});
+
+test("a new helper that gets ready: the old one is stopped (-t 30) and removed after the up --wait line, and the new one is left running", () => {
+  const s = server();
+  try {
+    s.seed("old-1");
+    const r = s.run(s.B);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(s);
+    const up = calls.findIndex((c) => c.startsWith("compose up ") && c.includes("--wait"));
+    const stop = calls.indexOf("stop -t 30 old-1");
+    const rm = calls.indexOf("rm old-1");
+    assert.ok(up >= 0 && stop > up && rm > stop, `order up < stop < rm:\n${calls.join("\n")}`);
+    assert.ok(calls.indexOf("compose build helper") < up, "built before the new one starts");
+    assert.ok(!calls.some((c) => c.startsWith("rm -f")), "nothing force-removed on success");
+    assert.deepEqual(s.running(), ["new-1"]);
+    assert.ok(r.out.includes("old-1") && r.out.includes("new-1"), `the swap is named:\n${r.out}`);
+  } finally {
+    s.done();
+  }
+});
+
+test("two old helpers running: the new one is scale 3, and both old ones are stopped and removed once it is ready", () => {
+  const s = server();
+  try {
+    s.seed("old-1", "old-2");
+    const r = s.run(s.B);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(s);
+    assert.ok(calls.includes("compose up -d --no-deps --no-recreate --scale helper=3 --wait --wait-timeout 300 helper"), calls.join("\n"));
+    for (const id of ["old-1", "old-2"]) assert.ok(calls.indexOf(`stop -t 30 ${id}`) > 0 && calls.indexOf(`rm ${id}`) > calls.indexOf(`stop -t 30 ${id}`), id);
+    assert.deepEqual(s.running(), ["new-1"]);
+  } finally {
+    s.done();
+  }
+});
+
+test("a first deploy (no helper running) brings the whole stack up with --wait and the default bound, and stops nothing", () => {
+  const s = server();
+  try {
+    const r = s.run(s.A);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(s);
+    assert.ok(calls.includes("compose up -d --wait --wait-timeout 300"), calls.join("\n"));
+    assert.ok(!calls.some((c) => /^(stop|rm)\b/.test(c)), "nothing stopped or removed");
+    // a first deploy that is not ready in time fails with one line naming the bound
+    const first = server();
+    try {
+      const r2 = first.runWith({ STUB_READY: "0", REDEPLOY_READY_S: "9" }, first.A);
+      assert.notEqual(r2.status, 0, r2.out);
+      assert.match(r2.out, /redeploy: the helper was not ready within 9 s/);
+    } finally {
+      first.done();
+    }
+  } finally {
+    s.done();
+  }
+});
+
+test("REDEPLOY_READY_S that is not whole seconds from 1 to 9999 exits 2 before anything changes; 45 reaches --wait-timeout 45", () => {
+  const s = server();
+  try {
+    for (const v of ["abc", "0", "01", "-5", "1.5", "10000", " 5", "5s", "1e3"]) {
+      const r = s.runWith({ REDEPLOY_READY_S: v }, s.B);
+      assert.equal(r.status, 2, `${JSON.stringify(v)}: ${r.out}`);
+      assert.match(r.out, /usage: redeploy\.sh <40-hex commit>.*REDEPLOY_READY_S/);
+      assert.equal(existsSync(s.env), false, "no .env write");
+      assert.equal(s.head(), s.A, "no checkout");
+      assert.deepEqual(s.docker(), [], "no docker call");
+    }
+    const ok = s.runWith({ REDEPLOY_READY_S: "45" }, s.B);
+    assert.equal(ok.status, 0, ok.out);
+    assert.ok(lines(s).some((c) => c.startsWith("compose up ") && c.includes("--wait-timeout 45")));
+    const max = s.runWith({ REDEPLOY_READY_S: "9999" }, s.B);
+    assert.equal(max.status, 0, max.out);
+    assert.ok(lines(s).some((c) => c.includes("--wait-timeout 9999")));
+  } finally {
+    s.done();
+  }
+});
+
+/** The helper service's healthcheck in compose.yaml; throws unless it passes only when /v1/health says ready === true. */
+export function healthcheckProblem(yml) {
+  const service = /^ {2}helper:\n([\s\S]*?)(?=^ {2}[a-z_]+:\n|^\S)/m.exec(yml)?.[1] ?? "";
+  const block = /^ {4}healthcheck:\n((?: {6}.*\n|\s*#.*\n)+)/m.exec(service)?.[1];
+  if (!block) return "no healthcheck under services.helper";
+  const field = (k) => new RegExp(`^ {6}${k}: (.*)$`, "m").exec(block)?.[1]?.trim();
+  let cmd;
+  try {
+    cmd = JSON.parse(field("test") ?? "");
+  } catch {
+    return "healthcheck test is not one JSON list";
+  }
+  if (!Array.isArray(cmd) || cmd[0] !== "CMD" || cmd[1] !== "node" || cmd[2] !== "-e" || typeof cmd[3] !== "string" || cmd.length !== 4) return "healthcheck test is not CMD node -e <script>";
+  const js = cmd[3];
+  if (!js.includes("http://127.0.0.1:8080/v1/health")) return "healthcheck does not read /v1/health on 8080";
+  if (!/process\.exit\(j\.ready===true\?0:1\)/.test(js)) return "healthcheck does not exit 0 only on ready===true";
+  if (!/,\(\)=>process\.exit\(1\)\)/.test(js)) return "healthcheck does not fail when the read fails";
+  for (const [k, v] of [["interval", "2s"], ["timeout", "2s"], ["retries", "3"], ["start_period", "300s"]]) if (field(k) !== v) return `healthcheck ${k} is not ${v}`;
+  return "";
+}
+
+test("compose.yaml's helper healthcheck passes only on ready === true; a copy that drops it fails the parser", () => {
+  const yml = readFileSync(path.join(path.dirname(SCRIPT), "compose.yaml"), "utf8");
+  assert.equal(healthcheckProblem(yml), "");
+  assert.match(healthcheckProblem(yml.replace("j.ready===true?0:1", "0")), /ready===true/);
+  assert.match(healthcheckProblem(yml.replace("j.ready===true?0:1", "j.ready!==false?0:1")), /ready===true/);
+  assert.match(healthcheckProblem(yml.replace(/^ {4}healthcheck:\n(?: {6}.*\n)+/m, "")), /no healthcheck/);
+  assert.match(healthcheckProblem(yml.replace("start_period: 300s", "start_period: 5s")), /start_period/);
+  assert.match(healthcheckProblem(yml.replaceAll("/v1/health", "/v1/other")), /\/v1\/health/);
 });
