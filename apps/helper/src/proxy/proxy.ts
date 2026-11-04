@@ -81,7 +81,8 @@ export const CACHE_ENTRIES = 256;
 export const CACHE_BYTES = 32 * 1024 * 1024;
 const KEY_SHAPE = /^[\x21-\x7e]{8,4096}$/; // printable ASCII, no space or line break, so it can never split a header
 
-export type ProxyAnswer = { status: number; headers: Record<string, string>; body: string };
+/** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
+export type ProxyAnswer = { status: number; headers: Record<string, string>; body: string; why?: string };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 type Read = { status: number; body: string; fetchedAt: string };
 type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void> };
@@ -182,7 +183,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     for (let attempt = 0; ; attempt++) {
       // the vendor's reset holds every call to it
       const held = budget.heldFor(name);
-      if (held > 0) return throttled(held);
+      if (held > 0) return throttled(held, undefined, `${name} held`);
       const headers: Record<string, string> = { accept: "application/json" };
       const key = keys[name];
       if (key) headers[v.header] = key;
@@ -207,10 +208,10 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
             await sleep(wait);
             // the retry reaches the vendor again, so it draws from the total too
             const again = budget.take(name, undefined, 1, false, reserved);
-            if (again > 0) return throttled(again);
+            if (again > 0) return throttled(again, undefined, budget.refusedBy());
             continue;
           }
-          return throttled(Math.max(budget.heldFor(name), 1));
+          return throttled(Math.max(budget.heldFor(name), 1), undefined, `${name} provider 429`);
         }
         text = await readBody(r);
       } catch {
@@ -257,12 +258,12 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       const hit = cache.get(id);
       if (hit && hit.expires > now()) {
         const wait = draw(true);
-        if (wait > 0) return source(throttled(wait));
+        if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
         out = hit;
       } else {
         let p = inflight.get(id);
         const wait = draw(p !== undefined);
-        if (wait > 0) return source(throttled(wait));
+        if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
         if (!p) {
           p = call(name, v, up, path, qs, "", reserved).then((read) => {
             if ("fetchedAt" in read && read.status === 200) remember(id, read, up.cacheMs!);
@@ -275,7 +276,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       }
     } else {
       const wait = draw();
-      if (wait > 0) return source(throttled(wait));
+      if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
       out = await call(name, v, up, path, qs, up.method === "POST" ? body : "", reserved);
     }
     if (!("fetchedAt" in out)) return source(out);

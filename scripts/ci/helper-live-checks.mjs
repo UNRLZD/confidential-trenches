@@ -25,6 +25,7 @@ export const LIVE_CHECKS = [
   "relayer-withdraw-send",
   "relayer-withdraw-fee",
   "helper-solana-failover",
+  "app-console-429",
 ];
 
 // `{commit}` is the deployed commit

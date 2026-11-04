@@ -336,7 +336,8 @@ type Answer = { status: number; headers: Record<string, string>; body: string };
 type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean): Promise<Answer> };
 type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved?: boolean): Promise<{ status: number; body: string }> };
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
-export type ListsAnswer = { status: number; body: string; gzip?: Buffer; asOfMs?: number; retryAfterS?: number };
+/** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
+export type ListsAnswer = { status: number; body: string; gzip?: Buffer; asOfMs?: number; retryAfterS?: number; why?: string };
 
 const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
 
@@ -353,7 +354,7 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
 
   async function read(path: string): Promise<{ rows: Row[]; hints: Map<string, Hint>; at: number } | null> {
     const a = await proxy.handle("jupiter", path, "limit=100", "", undefined, true); // proxy.ts PROXY_RESERVE
-    if (a.status === 429) throw new Throttled(retryAfterOf(a.headers));
+    if (a.status === 429) throw new Throttled(retryAfterOf(a.headers), (a as { why?: string }).why);
     if (a.status !== 200) return null;
     const at = Date.parse(a.headers["X-Fetched-At"] ?? "");
     const asOf = Number.isFinite(at) ? at : now();
@@ -383,7 +384,7 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
   function start(): Promise<ListsAnswer> {
     if (!running) {
       running = refresh()
-        .catch((e) => (last !== null && now() - last.asOfMs <= STALE_MS ? last : e instanceof Throttled ? { status: 429, body: JSON.stringify({ error: { code: "rate_limited" } }), retryAfterS: e.retryAfterS } : UPSTREAM))
+        .catch((e) => (last !== null && now() - last.asOfMs <= STALE_MS ? last : e instanceof Throttled ? { status: 429, body: JSON.stringify({ error: { code: "rate_limited" } }), retryAfterS: e.retryAfterS, why: e.why } : UPSTREAM))
         .finally(() => (running = null));
     }
     return running;

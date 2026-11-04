@@ -822,7 +822,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       if (found === "unlisted") return NOT_FOUND;
       if (found === null) return "none";
-      if (books.size >= OPEN_MAX) return limited(5);
+      if (books.size >= OPEN_MAX) return limited(5, `${chain} trades open`);
       e = books.get(token);
       if (e === undefined) {
         e = { pool: found.pool, decimals: found.decimals, book: createBook({ decimals: found.decimals, quote: found.pool.quote }), touched: now(), readAt: null, headN: 0 };
@@ -845,7 +845,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const err = (status: number, code: string): DataAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
-  const limited = (s: number): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS: s });
+  const limited = (s: number, why: string): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS: s, why });
   /** A listed token with no pool our reads find: an empty answer from our own reads, timed now. */
   const empty = (fields: Record<string, unknown>): DataAnswer => {
     const at = now();
@@ -872,7 +872,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const cut = (kept.get(`${e.pool.id}:${tf}`)?.bars ?? []).filter((c) => before === null || c[0] < before);
       return cut.length > 0 ? cut : fail;
     };
-    const wait = () => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S));
+    const wait = (why = "geckoterminal budget") => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
     if (!gecko.take("pages")) return fallback(wait());
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
@@ -881,7 +881,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (r.status === 429) {
         await r.body?.cancel();
         throttledUntil(gecko, r.headers.get("retry-after"), now());
-        return fallback(wait());
+        return fallback(wait("geckoterminal 429"));
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
         await r.body?.cancel();

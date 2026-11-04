@@ -332,7 +332,9 @@ type Entry = {
 export function createSolanaTrades(deps: {
   fetch?: Fetch;
   now?: () => number;
-  listed: (mint: string) => Promise<boolean>;
+  /** Whether Discover's lists hold the token; null while the lists have no answer (a cold start), which is no "not
+   *  listed": the tape answers 503, so the page reads again, never a 404 for a listed token (card app-console-429). */
+  listed: (mint: string) => Promise<boolean | null>;
   rpcs?: readonly string[];
   wsUrl?: string;
   source?: (on: SourceEvents) => Source;
@@ -614,8 +616,10 @@ export function createSolanaTrades(deps: {
 
   /** A first read: the token's decimals, its subscription in force, then its newest COLD_SIGS signatures walked. */
   async function first(mint: string): Promise<Entry | DataAnswer> {
-    if (!(await deps.listed(mint))) return NOT_FOUND;
-    if (entries.size >= OPEN_MAX) return { ...err(429, "rate_limited"), retryAfterS: 5 };
+    const listed = await deps.listed(mint);
+    if (listed === null) return UPSTREAM;
+    if (!listed) return NOT_FOUND;
+    if (entries.size >= OPEN_MAX) return { ...err(429, "rate_limited"), retryAfterS: 5, why: "solana trades open" };
     let decimals: number;
     try {
       const a = await account(mint);
@@ -657,7 +661,10 @@ export function createSolanaTrades(deps: {
 
   const opening = new Map<string, Promise<Entry | DataAnswer>>();
   async function open(mint: string): Promise<Entry | DataAnswer> {
-    let e = entries.get(mint);
+    // a first read in flight is joined before the entry is looked at: first() holds the entry from its mint read on, but
+    // it serves only once the stream holds the token (readAt), so a caller that came in between would read it as down
+    // (card app-console-429: 4 of 25 reads at once answered 503 on the deployed helper, 11:19Z)
+    let e = opening.has(mint) ? undefined : entries.get(mint);
     if (e === undefined) {
       let p = opening.get(mint);
       if (p === undefined) {
@@ -689,7 +696,7 @@ export function createSolanaTrades(deps: {
       const mint = address(token);
       if (mint === null || !(TFS as readonly string[]).includes(tf) || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
       // a mint the lists do not hold has no bars of ours: its candles are the history source's own answer, as before
-      if (!entries.has(mint) && deps.history !== undefined && !(await deps.listed(mint))) return deps.history(mint, tf, to, limit);
+      if (!entries.has(mint) && deps.history !== undefined && (await deps.listed(mint)) !== true) return deps.history(mint, tf, to, limit);
       const e = await open(mint);
       if (!("mint" in e)) return e;
       const own: Candle[] = e.book === null ? [] : e.book.candles(tf as Tf, to, limit);

@@ -46,9 +46,41 @@ export function keyOf(address: string): string {
 /** 0: go ahead; otherwise the whole seconds (1 or more) the caller is told to wait. */
 export type Take = number;
 
-/** The 429 every throttle answers: the code only, and the wait. */
-export function throttled(retryAfterS: number, code = "rate_limited"): { status: 429; headers: Record<string, string>; body: string } {
-  return { status: 429, headers: { "Retry-After": String(retryAfterS) }, body: JSON.stringify({ error: { code } }) };
+/** The 429 every throttle answers: the code only, and the wait. `why` names the limit that refused (card
+ *  app-console-429: "<budget key> share", "geckoterminal budget", ...) for the helper's refusal log (refusalLog below);
+ *  it is never sent: the server answers the status, the headers and the body only. */
+export function throttled(retryAfterS: number, code = "rate_limited", why?: string): { status: 429; headers: Record<string, string>; body: string; why?: string } {
+  return { status: 429, headers: { "Retry-After": String(retryAfterS) }, body: JSON.stringify({ error: { code } }), ...(why === undefined ? {} : { why }) };
+}
+
+/**
+ * The helper's caller refusals as log lines (card app-console-429): count(route, why) for every 429 a caller is
+ * answered, one line a window per route and reason with its count, "refused <route> <why> <n> in 10 s", never one per
+ * request and never the caller (route and why are the helper's own names: a mounted route, a budget key of a listed
+ * chain, vendor or method, a limit's name). A window with no refusal writes nothing.
+ */
+export function refusalLog(log: (line: string) => void = (l) => console.log(`helper: ${l}`), windowMs = LIMIT_WINDOW_MS): { count(route: string, why: string): void; flush(): void } {
+  const counts = new Map<string, number>();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    for (const [k, n] of counts) log(`refused ${k} ${n} in ${windowMs / 1000} s`);
+    counts.clear();
+  };
+  return {
+    count(route, why) {
+      const k = `${route} ${why}`;
+      // the keys are the helper's own names, a few dozen at most; the bound only keeps a bug from growing the map
+      if (!counts.has(k) && counts.size >= 256) return;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+      if (timer === null) {
+        timer = setTimeout(flush, windowMs);
+        timer.unref?.();
+      }
+    },
+    flush,
+  };
 }
 
 /** A provider read that threw for a throttle (the kit's RPC clients throw "HTTP 429"; a JSON-RPC error naming a rate
@@ -69,9 +101,12 @@ export const EVM_LIMIT_CODE = -32005;
  * cache answers 429 with `retryAfterS` instead of 503 when it has nothing good to serve. */
 export class Throttled extends Error {
   readonly retryAfterS: number;
-  constructor(retryAfterS: number) {
+  /** The limit that refused, for the refusal log (throttled() above). */
+  readonly why: string | undefined;
+  constructor(retryAfterS: number, why?: string) {
     super("throttled");
     this.retryAfterS = retryAfterS;
+    this.why = why;
   }
 }
 
@@ -161,6 +196,8 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   };
   /** The seconds a draw on `key` waits for a provider's reset: a background draw also for a background read's. */
   const heldFor = (key: string, t: number, background = false): number => Math.max(heldIn(heldUntil, key, t), background ? heldIn(backgroundHeldUntil, key, t) : 0);
+  /** What refused the last draw that was refused: "<key> held", "<key> share" or "<key> total" (card app-console-429). */
+  let refusedBy = "";
   /** The seconds until `n` more fit (0: they fit now): every draw under the key's total, and a draw not reserved also
    * with every other such draw under the total less the reserve, so the helper's own reads always find their room. A
    * request sent in second s may still be in the provider's window until the end of second s + W, W its window in
@@ -190,7 +227,10 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     for (const [key, n] of draws) want.set(key, (want.get(key) ?? 0) + n);
     let wait = 0;
     const background = client === undefined && !reserved;
-    for (const key of want.keys()) wait = Math.max(wait, heldFor(key, t, background));
+    for (const key of want.keys()) {
+      const h = heldFor(key, t, background);
+      if (h > wait) (wait = h), (refusedBy = `${key} held`);
+    }
     if (wait > 0) return wait;
     const w = Math.floor(t / windowMs);
     if (w !== window) {
@@ -199,8 +239,12 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     }
     for (const [key, n] of want) {
       const lim = limitsOf(key);
-      if (client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient) wait = Math.max(wait, toWindowEnd(t, windowMs));
-      if (!shareOnly) wait = Math.max(wait, totalWait(key, n, t, lim, reserved, background));
+      if (client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient) {
+        const s = toWindowEnd(t, windowMs);
+        if (s > wait) (wait = s), (refusedBy = `${key} share`);
+      }
+      const tw = shareOnly ? 0 : totalWait(key, n, t, lim, reserved, background);
+      if (tw > wait) (wait = tw), (refusedBy = `${key} total`);
     }
     if (wait > 0) return wait;
     const sec = Math.floor(t / 1000);
@@ -224,6 +268,8 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   }
   return {
     takeEach,
+    /** What refused the last refused draw (read right after it): "<key> held", "<key> share" or "<key> total". */
+    refusedBy: (): string => refusedBy,
     /** One key: n requests for `client` (undefined: the helper's own read, which draws from the total only). */
     take: (key: string, client: string | undefined, n = 1, shareOnly = false, reserved = false): Take => takeEach([[key, n]], client, shareOnly, reserved),
     /** The seconds a draw on `key` must still wait for the provider's reset (`background`: a background draw); 0 when none. */
