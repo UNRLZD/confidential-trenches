@@ -451,7 +451,7 @@
  },
  "bad": {
   "url": "https://confidential.unrealized.trade",
-  "source": "harness, /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/main-cf7b85a/apps/terminal/dist",
+  "source": "harness, <build>",
   "at": "2026-11-01T14:08:16.267Z",
   "browser": "153.0.8010.12",
   "headers": {
@@ -527,7 +527,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-token.png"
+    "shot": "<shots>/phone-token.png"
    },
    {
     "width": "phone",
@@ -548,7 +548,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-discover.png"
+    "shot": "<shots>/phone-discover.png"
    },
    {
     "width": "phone",
@@ -569,7 +569,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-portfolio.png"
+    "shot": "<shots>/phone-portfolio.png"
    },
    {
     "width": "phone",
@@ -590,7 +590,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-orders.png"
+    "shot": "<shots>/phone-orders.png"
    },
    {
     "width": "phone",
@@ -611,7 +611,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-profile.png"
+    "shot": "<shots>/phone-profile.png"
    },
    {
     "width": "phone",
@@ -632,7 +632,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-verify.png"
+    "shot": "<shots>/phone-verify.png"
    },
    {
     "width": "phone",
@@ -652,7 +652,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-privacy.png"
+    "shot": "<shots>/phone-privacy.png"
    },
    {
     "width": "phone",
@@ -673,7 +673,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-terms.png"
+    "shot": "<shots>/phone-terms.png"
    },
    {
     "width": "desktop",
@@ -693,7 +693,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-token.png"
+    "shot": "<shots>/desktop-token.png"
    },
    {
     "width": "desktop",
@@ -713,7 +713,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-discover.png"
+    "shot": "<shots>/desktop-discover.png"
    },
    {
     "width": "desktop",
@@ -734,7 +734,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-portfolio.png"
+    "shot": "<shots>/desktop-portfolio.png"
    },
    {
     "width": "desktop",
@@ -755,7 +755,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-orders.png"
+    "shot": "<shots>/desktop-orders.png"
    },
    {
     "width": "desktop",
@@ -775,7 +775,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-profile.png"
+    "shot": "<shots>/desktop-profile.png"
    },
    {
     "width": "desktop",
@@ -796,7 +796,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-verify.png"
+    "shot": "<shots>/desktop-verify.png"
    },
    {
     "width": "desktop",
@@ -817,7 +817,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-privacy.png"
+    "shot": "<shots>/desktop-privacy.png"
    },
    {
     "width": "desktop",
@@ -838,7 +838,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-terms.png"
+    "shot": "<shots>/desktop-terms.png"
    }
   ],
   "inShell": [
@@ -931,11 +931,11 @@
     ]
    }
   ],
-  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad"
+  "shots": "<shots>"
  },
  "badIntegrity": {
   "url": "https://confidential.unrealized.trade",
-  "source": "harness, /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/b-int",
+  "source": "harness, <build>",
   "at": "2026-11-01T14:11:23.707Z",
   "browser": "153.0.8010.12",
   "headers": {
@@ -965,7 +965,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-token.png"
+    "shot": "<shots>/phone-token.png"
    },
    {
     "width": "phone",
@@ -981,7 +981,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-discover.png"
+    "shot": "<shots>/phone-discover.png"
    },
    {
     "width": "phone",
@@ -997,7 +997,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-portfolio.png"
+    "shot": "<shots>/phone-portfolio.png"
    },
    {
     "width": "phone",
@@ -1013,7 +1013,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-orders.png"
+    "shot": "<shots>/phone-orders.png"
    },
    {
     "width": "phone",
@@ -1029,7 +1029,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-profile.png"
+    "shot": "<shots>/phone-profile.png"
    },
    {
     "width": "phone",
@@ -1045,7 +1045,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-verify.png"
+    "shot": "<shots>/phone-verify.png"
    },
    {
     "width": "phone",
@@ -1061,7 +1061,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-privacy.png"
+    "shot": "<shots>/phone-privacy.png"
    },
    {
     "width": "phone",
@@ -1077,7 +1077,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-terms.png"
+    "shot": "<shots>/phone-terms.png"
    },
    {
     "width": "desktop",
@@ -1093,7 +1093,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-token.png"
+    "shot": "<shots>/desktop-token.png"
    },
    {
     "width": "desktop",
@@ -1109,7 +1109,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-discover.png"
+    "shot": "<shots>/desktop-discover.png"
    },
    {
     "width": "desktop",
@@ -1125,7 +1125,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-portfolio.png"
+    "shot": "<shots>/desktop-portfolio.png"
    },
    {
     "width": "desktop",
@@ -1141,7 +1141,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-orders.png"
+    "shot": "<shots>/desktop-orders.png"
    },
    {
     "width": "desktop",
@@ -1157,7 +1157,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-profile.png"
+    "shot": "<shots>/desktop-profile.png"
    },
    {
     "width": "desktop",
@@ -1173,7 +1173,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-verify.png"
+    "shot": "<shots>/desktop-verify.png"
    },
    {
     "width": "desktop",
@@ -1189,7 +1189,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-privacy.png"
+    "shot": "<shots>/desktop-privacy.png"
    },
    {
     "width": "desktop",
@@ -1205,7 +1205,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-terms.png"
+    "shot": "<shots>/desktop-terms.png"
    }
   ],
   "inShell": [
@@ -1226,6 +1226,6 @@
     "consoleErrors": []
    }
   ],
-  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int"
+  "shots": "<shots>"
  }
 }

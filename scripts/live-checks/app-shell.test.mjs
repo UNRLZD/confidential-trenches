@@ -9,9 +9,9 @@
 //                 shell's frame-ancestors 'none' refuses: FAIL on every load;
 //   badIntegrity: app-in-shell's build with the script tag's integrity taken out: FAIL on the integrity
 //                 (Integrity-Policy then blocks the script, so nothing moves to the shell and no route draws).
-// A late layout shift is planted on the good answer (a recorded plant moved the shell's bars by 0.06 at most, under the
-// limit, since every screen is empty today).
-// Screenshot paths are kept as <shots>/<file>.
+// Layout shifts are planted on the good answer: any shift on a load at either width fails, as BAR-10's 0.0806 phone tab
+// bar and 0.0008 Verify reads did (card app-shell-tabbar-cls).
+// Screenshot paths are kept as <shots>/<file>, a build's path as <build>.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -44,16 +44,16 @@ test("recorded bad answer: today's APP_HOST stays top-level, not inside SIGN_HOS
   }
 });
 
-test("planted on the good answer: a late shift above 0.1 on a desktop load, and inside the shell: FAIL", () => {
+test("planted on the good answer: a late shift on a desktop load, and inside the shell: FAIL", () => {
   const rec = structuredClone(ANSWERS.good);
   const desk = rec.loads.findIndex((l) => l.width === "desktop");
   rec.loads[desk].cls = 0.1422;
   rec.inShell[0].cls = 0.05;
   const b = bad(judge(rec).lines);
-  assert.deepEqual(b, [`BAD desktop ${rec.loads[desk].path} (${rec.loads[desk].expect}): CLS 0.1422 above 0.1`, "BAD phone inside the shell, 4 link(s): CLS 0.0500 inside the shell"]);
+  assert.deepEqual(b, [`BAD desktop ${rec.loads[desk].path} (${rec.loads[desk].expect}): CLS 0.1422 above 0`, "BAD phone inside the shell, 4 link(s): CLS 0.0500 inside the shell"]);
 });
 
-test("planted on the good answer: any shift on a phone load, BAR-10's 0.0806 tab bar and 0.0008 Verify reads: FAIL", () => {
+test("planted on the good answer: any shift on a load at either width, BAR-10's 0.0806 tab bar and 0.0008 Verify reads: FAIL", () => {
   const rec = structuredClone(ANSWERS.good);
   const at = (p) => rec.loads.findIndex((l) => l.width === "phone" && l.path === p);
   Object.assign(rec.loads[at("/profile")], { cls: 0.0806, shifts: [{ at: 28, value: 0.0806, input: false, sources: ["div.tabbar 0,0 0x0 -> 0,776 390x68"] }] });
@@ -62,10 +62,10 @@ test("planted on the good answer: any shift on a phone load, BAR-10's 0.0806 tab
     "BAD phone /profile (profile): CLS 0.0806 above 0 [+28ms 0.0806: div.tabbar 0,0 0x0 -> 0,776 390x68]",
     "BAD phone /verify (verify): CLS 0.0008 above 0 [+65ms 0.0008: dd.num 282,212 90x14 -> 365,212 7x14]",
   ]);
-  // the same shift on a desktop load stays under its 0.1
+  // the same shift on a desktop load fails too
   const d = structuredClone(ANSWERS.good);
-  d.loads.find((l) => l.width === "desktop").cls = 0.0806;
-  assert.equal(judge(d).ok, true);
+  Object.assign(d.loads.find((l) => l.width === "desktop" && l.path === "/verify"), { cls: 0.0008, shifts: [{ at: 65, value: 0.0008, input: false, sources: ["dd.num 1170,212 90x14 -> 1253,212 7x14"] }] });
+  assert.deepEqual(bad(judge(d).lines), ["BAD desktop /verify (verify): CLS 0.0008 above 0 [+65ms 0.0008: dd.num 1170,212 90x14 -> 1253,212 7x14]"]);
 });
 
 test("planted on the good answer: a shift inside the shell names its element and its rects", () => {
