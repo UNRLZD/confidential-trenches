@@ -8,8 +8,9 @@
 //     refusal never counts as a fast quote;
 //   - the warm quotes' p95 is under P95_MS;
 //   - every listed provider of each chain answers the browser's CORS preflight from the app's origin (APP_ORIGIN) with an
-//     access-control-allow-origin of * or that origin and content-type allowed: the device runs the quote in the
-//     browser, and a provider without them is one it never reaches (review of bc189de, L-5: base-public.nodies.app).
+//     access-control-allow-origin of * or that origin and content-type allowed, and its answer to a POST from there
+//     carries the same allow-origin: the device runs the quote in the browser, and a provider without them is one it
+//     never reaches (review of bc189de, L-5: base-public.nodies.app; re-review of fd9dd16, LOW-3: the POST's own).
 //   node scripts/live-checks/evm-quote-warm-round.mjs [--record <file>] [--only <case,...>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (each quote's time and outcome) to <file>, for the
 // test's replay (evm-quote-warm-round.answers.json);
@@ -59,8 +60,9 @@ export function check(run, venues = evmPoolVenues()) {
     say(urls.length >= 3 && hosts.size === urls.length, `${chain} lists ${urls.length} providers on ${hosts.size} hosts (three at least, each its own host)`);
     for (const u of urls) {
       const p = run?.preflight?.[u];
-      const allowed = p !== undefined && p.status >= 200 && p.status < 300 && (p.allow === "*" || p.allow === APP_ORIGIN) && (p.headers === "*" || /(^|,)\s*content-type\s*(,|$)/i.test(p.headers ?? ""));
-      say(allowed, `${chain} ${new URL(u).hostname} preflight from ${APP_ORIGIN}: ${p === undefined ? "not read" : `${p.status}, allow-origin ${p.allow ?? "none"}, allow-headers ${p.headers ?? "none"}`}`);
+      const origin = (o) => o === "*" || o === APP_ORIGIN;
+      const allowed = p !== undefined && p.status >= 200 && p.status < 300 && origin(p.allow) && (p.headers === "*" || /(^|,)\s*content-type\s*(,|$)/i.test(p.headers ?? "")) && origin(p.post);
+      say(allowed, `${chain} ${new URL(u).hostname} preflight from ${APP_ORIGIN}: ${p === undefined ? "not read" : `${p.status}, allow-origin ${p.allow ?? "none"}, allow-headers ${p.headers ?? "none"}; POST allow-origin ${p.post ?? "none"}`}`);
     }
   }
   for (const [name, , want] of CASES) {
@@ -77,16 +79,19 @@ export function check(run, venues = evmPoolVenues()) {
   return { ok, lines };
 }
 
-/** Each listed provider's answer to the browser's preflight of a JSON POST from APP_ORIGIN. */
+/** Each listed provider's answer to the browser's preflight of a JSON POST from APP_ORIGIN, and the POST's own
+ *  allow-origin. */
 export async function preflight(venues = evmPoolVenues()) {
   const out = {};
   for (const chain of ["base", "robinhood"]) {
     for (const u of venues[chain]?.providers ?? []) {
       try {
         const r = await fetch(u, { method: "OPTIONS", headers: { Origin: APP_ORIGIN, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type" }, signal: AbortSignal.timeout(10_000) });
-        out[u] = { status: r.status, allow: r.headers.get("access-control-allow-origin"), headers: r.headers.get("access-control-allow-headers") };
+        const post = await fetch(u, { method: "POST", headers: { Origin: APP_ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), signal: AbortSignal.timeout(10_000) });
+        await post.text();
+        out[u] = { status: r.status, allow: r.headers.get("access-control-allow-origin"), headers: r.headers.get("access-control-allow-headers"), post: post.headers.get("access-control-allow-origin") };
       } catch (e) {
-        out[u] = { status: 0, allow: null, headers: null, error: String(e?.cause?.code ?? e?.message ?? e).slice(0, 120) };
+        out[u] = { status: 0, allow: null, headers: null, post: null, error: String(e?.cause?.code ?? e?.message ?? e).slice(0, 120) };
       }
     }
   }
