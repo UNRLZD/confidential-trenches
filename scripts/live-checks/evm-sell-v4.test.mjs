@@ -60,10 +60,11 @@ test("the recorded good answers pass on both chains, every read on both RPCs", a
 });
 
 test("the v1 delegate's code fails: this check takes only the current build, never the frozen one", async () => {
-  // the v1 delegate as deployed on Base Sepolia, read on chain by evm-venues-pin (its recording of 2026-11-03)
-  const V = JSON.parse(readFileSync(new URL("./evm-venues-pin.answers.json", import.meta.url), "utf8"));
+  // the v1 delegate as deployed on Base Sepolia, read on both RPCs (sell-delegate-v1.code.json)
+  const V = JSON.parse(readFileSync(new URL("./sell-delegate-v1.code.json", import.meta.url), "utf8"));
   const f = BUILD.frozen.SellDelegate;
-  const v1 = V.good.find((a) => a.method === "eth_getCode" && lower(a.params[0]) === f.at["base-sepolia"]).json.result;
+  assert.equal(lower(V.address), f.at["base-sepolia"]);
+  const v1 = V.code;
   const r1 = runtimeOf(v1, f.immutables);
   assert.equal(r1.masked, f.masked, "the recorded code is the frozen v1 build");
   for (const chain of CHAIN_NAMES) fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = v1))), /SellDelegate \S+ code is the current build's: 4119 bytes/);
