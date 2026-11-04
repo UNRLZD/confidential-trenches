@@ -357,6 +357,15 @@ class Fault extends Error {
   }
 }
 const timedOut = (e: unknown): boolean => e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+/** ": RPC error <code>: <message>" when `text` is a JSON-RPC error object, else "". */
+function rpcErrorWords(text: string): string {
+  try {
+    const e = (JSON.parse(text) as { error?: { code?: unknown; message?: unknown } } | null)?.error;
+    return e && typeof e === "object" && (typeof e.code === "number" || typeof e.message === "string") ? `: RPC error ${String(e.code)}: ${String(e.message).slice(0, 120)}` : "";
+  } catch {
+    return "";
+  }
+}
 /** Retry-After in ms: delta-seconds or an HTTP date (RFC 9110 10.2.3); null when absent or unreadable. */
 function retryAfterMs(h: string | null, now: number): number | null {
   if (h === null || h.trim() === "") return null;
@@ -397,7 +406,10 @@ export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: R
         }
         if (r.status === 429) throw new Fault("http_429", "HTTP 429", new Error("HTTP 429"), retryAfterMs(r.headers.get("retry-after"), Date.now()));
         if (r.status >= 500 && r.status <= 599) throw new Fault("http_5xx", `HTTP ${r.status}`, new Error(`HTTP ${r.status}`), retryAfterMs(r.headers.get("retry-after"), Date.now()));
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        // a refusal's own words, when its body is a JSON-RPC error, after the status: a provider's range cap (dRPC answers
+        // its cap as HTTP 400, code 35 "ranges over 10000 blocks are not supported on free plan", read 4 Nov 12:41Z) is
+        // then told apart from any other 400; the "HTTP <status>" start every caller matches stays
+        if (!r.ok) throw new Error(`HTTP ${r.status}${rpcErrorWords(text)}`);
         let j: unknown;
         try {
           j = JSON.parse(text) as unknown;

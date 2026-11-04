@@ -585,7 +585,8 @@ test("hex in either case: a Transfer pair that differs by more than case is stil
 
 /** base-sepolia.drpc.org's answer to an eth_getLogs past its cap, read 4 Nov 12:41-12:43Z: HTTP 400 with this body, at
  * 6,832 (54304922..54311753), 10,001, 9,999, 501, 200 and 106 blocks; 101 and 53 blocks answered. The words name 10,000
- * blocks whatever the size refused. The kit's client (solanaJsonRpc) throws "HTTP 400" before it reads the body. */
+ * blocks whatever the size refused. The kit's client (solanaJsonRpc) keeps a refusal's JSON-RPC words after its status:
+ * "HTTP 400: RPC error 35: ranges over 10000 blocks are not supported on free plan", which RANGE_CAP reads as a cap. */
 const drpcRefusal = (b: Body) => new Response(JSON.stringify({ id: Number(b.id), jsonrpc: "2.0", error: { message: "ranges over 10000 blocks are not supported on free plan", code: 35 } }), { status: 400 });
 const span = (b: Body) => {
   const p = b.params[0] as { fromBlock: string; toBlock: string };
@@ -654,8 +655,8 @@ test("D2 a range no page can read is never counted as read: that W is unread, ne
     assert.deepEqual(r.wallets.find((w) => w.w === W1)!.tokens, [TY], name);
     assert.equal(r.notes.length, 10, name);
   }
-  // through the kit's client: an HTTP 400 at every size, one block too, is that W's failure after its pages shrink to
-  // one block, never a page of no block and never a W read
+  // through the kit's client: dRPC's cap at every size, one block too, is that W's failure (named by its code) after its
+  // pages shrink to one block, never a page of no block and never a W read
   const sizes: number[] = [];
   const always = (b: Body) => {
     if (!namesW(b, W0)) return undefined;
@@ -666,7 +667,7 @@ test("D2 a range no page can read is never counted as read: that W is unread, ne
   const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), always)]);
   const w0 = r.wallets.find((w) => w.w === W0)!;
   assert.equal(w0.tokens, null);
-  assert.equal(w0.error, "http 400");
+  assert.equal(w0.error, "rpc error 35");
   assert.ok(sizes.every((n) => n >= 1) && sizes.includes(1), `pages: ${sizes}`);
   assert.deepEqual(r.wallets.find((w) => w.w === W1)!.tokens, [TY]);
   assert.equal(r.notes.length, 10);
