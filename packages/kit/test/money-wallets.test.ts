@@ -73,6 +73,15 @@ test("one address on two chains is two wallets", () => {
   assert.deepEqual(moneyWallets(s).map((w) => `${w.chain}:${w.address}`), ["base:0xsame", "robinhood:0xsame"]);
 });
 
+test("a page of an earlier release, whose state has no deposit_wallets key, still passes the schema, and moneyWallets of it names the position and fresh wallets only", () => {
+  const { deposit_wallets: _, ...earlier } = STATE;
+  assert.equal(Object.hasOwn(earlier, "deposit_wallets"), false);
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(earlier), true);
+  const named = moneyWallets(earlier as SignpageState);
+  assert.deepEqual(named.map((w) => `${w.chain}:${w.address}`), ["solana:SoPos1", "solana:SoPos2", "solana:SoReady", "base:0xpos", "base:0xarming", "near:back.near"]);
+  assert.ok(named.every((w) => w.role === "trade"));
+});
+
 test("state.deposit_wallets: optional; each entry exact, its asset its chain's pool asset, its amount within the asset's decimals, one entry per wallet", () => {
   const ok = SIGNPAGE_RESULT_SCHEMAS.state;
   assert.equal(ok(BASE), true, "a state without deposit_wallets passes");
