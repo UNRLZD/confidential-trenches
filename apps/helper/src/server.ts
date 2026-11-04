@@ -189,7 +189,8 @@ export function handler(
   release: number | null = releaseOf(process.env),
   pools: ReadonlyMap<string, SolanaPoolSender> = solanaPoolSendersFromEnv(process.env),
   evmPools: ReadonlyMap<string, EvmPoolSender> = evmPoolSendersFromEnv(process.env),
-  now: () => number = Date.now,
+  // read at each call, so a test's mocked Date is the one clock its timers and the bind's bound share
+  now: () => number = () => Date.now(),
   evmLists: EvmLists = {},
   evmSwaps: Swaps = {},
   ready: () => boolean = () => true,

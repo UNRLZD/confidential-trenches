@@ -244,7 +244,11 @@ test("a bind answers within HELPER_BIND_ANSWER_MS of its arrival: the wait for t
   let clock = 1_800_000_000_000;
   const senders = pending();
   let carried = 0;
-  const bind = { carry: () => (carried++, new Promise(() => undefined)), warm: () => undefined };
+  // a loaded runner's real time before the carry is entered moves no clock the test drives (`clock` is the only one)
+  const stall = () => {
+    for (const until = performance.now() + 5; performance.now() < until; );
+  };
+  const bind = { carry: () => (stall(), carried++, new Promise(() => undefined)), warm: () => undefined };
   const port = await listenOn(t, { bind }, senders.p, () => clock);
   let answer: { status: number; body: string } | undefined;
   void get(port, "POST", "/v1/bind", "{}").then((a) => (answer = a));

@@ -373,6 +373,8 @@ test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the de
   const bind: BindSender = {
     carry: async () => {
       const gate = new Promise<void>((ok) => (finish = ok));
+      // a loaded runner: real time passes between the bind's arrival and its carry, none on the clock the test drives
+      for (const until = performance.now() + 5; performance.now() < until; );
       entered();
       await gate; // the prepay and the delegate, read at final
       finished++;
@@ -385,7 +387,8 @@ test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the de
   t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
-  mock.timers.enable({ apis: ["setTimeout"] });
+  // one clock: the bound's timer and the helper's now() (which reads Date.now when called) both move only by tick
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
   try {
     // a carry still running at the bound
     let inside = new Promise<void>((ok) => (entered = ok));
