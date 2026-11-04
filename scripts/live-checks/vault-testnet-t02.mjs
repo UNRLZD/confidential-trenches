@@ -15,6 +15,7 @@
 //   - the vault holds at least what its totals owe (deposited - spent + returned, I1: equal once nothing is in flight).
 //   node scripts/live-checks/vault-testnet-t02.mjs [--run <file>] [--record <file>]   PASS exit 0, FAIL 1, error 2
 // --record writes every RPC answer the run read to <file>, so the check's test can replay it.
+// Runs: once, a recorded testnet vault run read back on chain; no host deploy changes it
 import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";

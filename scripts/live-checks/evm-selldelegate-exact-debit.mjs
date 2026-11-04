@@ -17,6 +17,7 @@
 // --record writes { notes, rpcs, deployments, good, runs } to <file> (evm-selldelegate-exact-debit.answers.json, which
 // the test replays); --write-record, on PASS, writes the run record evm-selldelegate-exact-debit.md (Money path: yes,
 // one Tx line per transaction of the redeploys and the runs), which the money gate reads back.
+// Runs: once, a contract deploy and its testnet runs read back on chain; no host deploy changes them
 import "../net-window.mjs";
 import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";

@@ -4,6 +4,7 @@
 // gate's scripts/live-checks/<key>.mjs is that one check; its recorded runs are vault-mainnet.*.answers.json, replayed
 // by vault-mainnet.test.mjs.
 //   node scripts/live-checks/vault-readback.mjs <vault-mainnet.mjs's arguments>
+// Runs: once, a contract deploy read back on chain: after each vault deploy (testnet, the mainnet test vault, the mainnet vault), with that vault's --account; no host deploy changes it
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
