@@ -87,3 +87,9 @@ svg { display: block; flex: none; }
 @media (max-width: 767.98px) {
   .boot-tb, .boot-screen, .boot-ft { display: none; }
 }
+/* a frame's document starts with a 0 x 0 viewport until its shell's size lands (every load, a few ms; on a busy device
+   the first layout can come first): nothing is drawn at that size, so no box drawn then (the phone tab bar, fixed to a
+   bottom at 0) moves when the size lands. Every box is first laid out at the real size (card app-shell-tabbar-cls). */
+@media (max-width: 0.98px), (max-height: 0.98px) {
+  body { display: none; }
+}
