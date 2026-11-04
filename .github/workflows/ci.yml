@@ -440,10 +440,12 @@ jobs:
       - name: the four wasm, built once for every shard, and the pinned two
         if: steps.wasm.outputs.cache-hit != 'true'
         run: contracts/vault/tests/harness/run.sh --build-only "$RUNNER_TEMP/vault-wasm"
-      # the shards' dependencies, built here when the cache had no exact entry, so no shard builds them cold
+      # the shards' dependencies, built here when the cache had no exact entry, so no shard builds them cold: the lib's
+      # test build takes every dev-dependency with the sandbox feature, as each test target does, and links one binary
+      # (every target's took 7m23s in run 41792397381, most of it linking the vault's own targets, which no cache keeps)
       - name: every sandbox test target's dependencies
         if: steps.deps.outputs.cache-hit != 'true'
-        run: cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml --features sandbox --tests --no-run
+        run: cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml --features sandbox --lib --no-run
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vault-wasm
@@ -474,10 +476,20 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
-      # the same toolchains as vault-sandbox-build (rust-cache hashes every installed rustc into its key); no wasm target,
-      # since a shard builds no wasm
+      # the same toolchains as vault-sandbox-build (rust-cache hashes every installed rustc into its key), with the wasm
+      # target: s20 runs contracts/vault/scripts/deploy.mjs, whose two clean builds of the recipe (cargo-near, in their
+      # own target dirs) are what it proves, so every shard has cargo-near (vault-sandbox.test.mjs fails otherwise)
       - name: rust 1.96.0
-        run: rustup toolchain install 1.96.0 --profile minimal
+        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
+      - name: install cargo-near
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/cargo-near.tgz" \
+            https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          echo "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
+          cargo +1.96.0 near --version
       # vault-sandbox-build's cache, read only
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
