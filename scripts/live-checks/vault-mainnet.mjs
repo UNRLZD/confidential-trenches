@@ -49,7 +49,8 @@ const P = 2188824287183927522224640574525727508854836440041603434369820418657580
 // A NEAR account id (nearcore's AccountId rules: 2 to 64 characters, lowercase parts joined by "." with "-" or "_"
 // inside a part). A 64-hex implicit account is an account on both networks. Otherwise a testnet account is `testnet`
 // or a sub-account of it, and a mainnet account is any other id, so a top-level name (sweat), another suffix (.tg) and
-// an 0x id pass.
+// an 0x id pass. On testnet an 0x (ETH-implicit) id is refused although it exists there too: that only refuses a
+// read-back, never lets one through, so it is left so.
 const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 const isTestnetName = (s) => s === "testnet" || s.endsWith(".testnet");
 const accountOf = (network) => ({ test: (s) => typeof s === "string" && ACCOUNT_ID.test(s) && (/^[0-9a-f]{64}$/.test(s) || (network === "testnet") === isTestnetName(s)) });
@@ -61,6 +62,8 @@ export const NETWORKS = {
   mainnet: { rpcs: MAINNET_RPCS, token: MAINNET_USDC, version: /^blindfill-vault \S+ mainnet$/, account: accountOf("mainnet"), deployment: null },
 };
 
+// one shell word, as sh reads it back: the owner copies the read-back line whole, a path with a space or a quote included
+const shq = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
 const isDecimal = (s) => typeof s === "string" && /^(0|[1-9]\d*)$/.test(s);
 /** A precommitment the vault takes: one canonical decimal below p. */
 export const isPrecommitment = (s) => isDecimal(s) && BigInt(s) < P;
@@ -113,12 +116,10 @@ export async function readPrepay({ fetchFn, url, hash, signer, account, precommi
   const t = r.transaction ?? {};
   say(t.hash === hash && t.signer_id === signer && t.receiver_id === account, `the tx is ${hash} from ${signer} to ${account} ${at}: ${t.hash} from ${t.signer_id} to ${t.receiver_id}`);
   const fc = t.actions?.length === 1 ? t.actions[0]?.FunctionCall : null;
-  let pc = null;
-  try {
-    pc = JSON.parse(Buffer.from(fc?.args ?? "", "base64").toString("utf8")).precommitment;
-  } catch {}
-  const call = fc?.method_name === "storage_prepay" && pc === precommitment && fc?.deposit === String(deposit);
-  say(call, `the tx is one storage_prepay of precommitment ${precommitment} with exactly ${deposit} yocto ${at}: ${t.actions?.length ?? 0} action(s), ${fc?.method_name ?? "no call"}, precommitment ${pc ?? "none"}, deposit ${fc?.deposit ?? "none"}`);
+  // the args bytes are exactly the printed line's, so no other field (or spelling) rides along
+  const args = Buffer.from(typeof fc?.args === "string" ? fc.args : "", "base64").toString("utf8");
+  const call = fc?.method_name === "storage_prepay" && args === JSON.stringify({ precommitment }) && fc?.deposit === String(deposit);
+  say(call, `the tx is one storage_prepay of precommitment ${precommitment} with exactly ${deposit} yocto ${at}: ${t.actions?.length ?? 0} action(s), ${fc?.method_name ?? "no call"}, args ${args.slice(0, 200) || "none"}, deposit ${fc?.deposit ?? "none"}`);
   const outcomes = [r.transaction_outcome, ...(r.receipts_outcome ?? [])];
   const ran = outcomes.filter((o) => succeeded(o?.outcome?.status));
   const success = r.status !== null && typeof r.status === "object" && "SuccessValue" in r.status;
@@ -215,7 +216,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       console.log(r.line);
       console.log(`live-check ${KEY}: or with a Ledger:`);
       console.log(r.ledgerLine);
-      console.log(`live-check ${KEY}: then: node scripts/live-checks/vault-mainnet.mjs --network ${network} --account ${account} --signer ${signer}${opt("--deployment") ? ` --deployment ${opt("--deployment")}` : ""} --precommitment ${r.prepay.precommitment} --tx <its Transaction Id>`);
+      console.log(`live-check ${KEY}: then: node scripts/live-checks/vault-mainnet.mjs --network ${network} --account ${account} --signer ${signer}${opt("--deployment") ? ` --deployment ${shq(opt("--deployment"))}` : ""} --precommitment ${r.prepay.precommitment} --tx <its Transaction Id>`);
       process.exit(3);
     }
     console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"}`);

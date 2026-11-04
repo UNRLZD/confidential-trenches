@@ -22,6 +22,12 @@ import { loadKey } from "./deploy.mjs";
 import { NETWORKS, PREPAY_GAS, check } from "../../../scripts/live-checks/vault-mainnet.mjs";
 import { recorder } from "../../../scripts/live-checks/delete-refund-readback.mjs";
 
+// Testnet only, by name: a 64-hex implicit account (or a 0x one) is the same account on mainnet, and "testnet" itself is
+// the registrar. Every exported entry refuses another signer before it reads or signs anything.
+function namedTestnet(signer) {
+  if (typeof signer !== "string" || !/^[a-z\d_-]+(\.[a-z\d_-]+)*\.testnet$/.test(signer)) throw new Error(`signer ${signer} is no named .testnet account: nothing read or signed`);
+}
+
 async function rpc(fetchFn, url, method, params) {
   const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "prepay", method, params }) });
   const j = await r.json();
@@ -33,6 +39,7 @@ async function rpc(fetchFn, url, method, params) {
 /** Signs one storage_prepay with `key` and sends it to `url`, waiting for FINAL, only once `url` answers chain_id
  * testnet. { hash, error }: the hash whatever send_tx answered, and its refusal's name when it refused. */
 export async function sendPrepay({ fetchFn, url, signer, key, account, precommitment, deposit }) {
+  namedTestnet(signer);
   const chain = (await rpc(fetchFn, url, "status", [])).chain_id;
   if (chain !== "testnet") throw new Error(`${url} answers chain_id ${chain}, not testnet: nothing signed`);
   const ak = await rpc(fetchFn, url, "query", { request_type: "view_access_key", account_id: signer, public_key: `ed25519:${b58encode(key.pub)}`, finality: "final" });
@@ -50,6 +57,7 @@ export async function sendPrepay({ fetchFn, url, signer, key, account, precommit
 
 /** The reads, then (only when they pass) the write and its read-back. { ok, lines, tx } */
 export async function prepay({ account, deployment, signer, key, fetchFn = fetch, wait = 3000 }) {
+  namedTestnet(signer);
   const first = await check({ network: "testnet", account, deployment, fetchFn, write: { signer }, wait });
   if (!first.pending) return { ok: false, lines: first.lines };
   const url = NETWORKS.testnet.rpcs[0];
