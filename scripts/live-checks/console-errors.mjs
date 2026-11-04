@@ -6,6 +6,7 @@
 // text is cut the same way. A page error (an uncaught exception, from any frame of the page) is kept the same way, named
 // by the address of its stack's top frame (card live-pageerror-hooks); watchErrors() hooks both on a page.
 // Not a check of its own; scripts/live-checks/console-errors.test.mjs holds it.
+// Runs: once, no check of its own: the console collector the browser checks share (console-errors.test.mjs holds it)
 
 /** The address a console line names: origin and path for http(s) and ws(s), the scheme (and a blob's origin) for any
  *  other, "" for none or one that does not parse. */

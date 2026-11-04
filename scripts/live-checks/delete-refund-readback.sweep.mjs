@@ -13,6 +13,7 @@
 //       --live, the owner's paste: F's key from --funder-key (opened only here); A's fresh key is written first to
 //       ~/.confidential-trenches/keys/<A>.json (mode 600, never overwritten), so a stop resumes with --a <A>.
 // Prints the record lines (Tx: and Deleted:) and the DeleteAccount's id on a line of its own. Prints no key.
+// Runs: once, no check: the sweep tool that made delete-refund-readback's txs; it sends real txs
 import "../net-window.mjs";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";

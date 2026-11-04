@@ -18,6 +18,7 @@
 // With no --deployment it checks every chain's record present. --rpc applies to a single record. --record writes
 // { notes, rpcs, deployments, good } to <file>: every RPC answer read, with the records and the RPCs they were read on,
 // the shape evm-sell-v4.test.mjs replays (evm-sell-v4.answers.json).
+// Runs: once, a contract deploy's read-back (the SellDelegate on two EVM testnets); no host deploy changes it
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";

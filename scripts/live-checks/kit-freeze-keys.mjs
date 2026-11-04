@@ -9,6 +9,7 @@
 // kit's own test WU-03 derives them.
 //   node scripts/live-checks/kit-freeze-keys.mjs [--tag <freeze tag>] [--record <file>]   PASS 0, FAIL 1, error 2
 // No key, secret or mnemonic is printed: a line names an entry and says ok or BAD.
+// Runs: once, the kit freeze: the wallet's key vectors on GitHub at the freeze tag, not what a host serves
 import "../net-window.mjs";
 import { createECDH, createHash, createHmac, createPrivateKey, createPublicKey, hkdfSync, pbkdf2Sync } from "node:crypto";
 import { realpathSync, writeFileSync } from "node:fs";

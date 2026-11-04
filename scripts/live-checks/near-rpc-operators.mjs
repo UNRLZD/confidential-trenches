@@ -8,6 +8,7 @@
 //   node scripts/live-checks/near-rpc-operators.mjs [--rounds <n>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer the run read to <file>, so the check's test can replay it.
+// Runs: once, the money gate's NEAR RPC operator map (scripts/ci) against the RPC hosts; no host serves it, run when the map changes
 import "../net-window.mjs";
 import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
