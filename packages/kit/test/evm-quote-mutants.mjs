@@ -142,7 +142,7 @@ export const MUTANTS = [
   [BUY, "if (!QUOTED_BUILDS.has(built)) throw", "if (false) throw", Q, "Q7 "],
   // the request and the providers
   [QUOTE, "amountIn <= 0n || amountIn >= MAX_IN", "amountIn <= 0n", Q, "Q8 "],
-  [QUOTE, "slippageBps < 0 || slippageBps >= 10000", "slippageBps < 0", Q, "Q8 "],
+  [QUOTE, "(slippageBps as number) < 0 || (slippageBps as number) >= 10000", "(slippageBps as number) < 0", Q, "Q8 "],
   [QUOTE, "|| rpcsIn[0] === rpcsIn[1]) {", ") {", Q, "Q8 "],
   [QUOTE, 'if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);', "", Q, "Q8 "],
   [QUOTE, 'if (hosts[0] === hosts[1]) return refuse("bad_request", "the two providers are on one host");', "", Q, "Q8 "],

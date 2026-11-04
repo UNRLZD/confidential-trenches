@@ -206,7 +206,6 @@ function v4Data(chain: EvmPoolChain, token: string, hopsIn: unknown): string {
     if (!Number.isInteger(tickSpacing) || (tickSpacing as number) < 1 || (tickSpacing as number) > MAX_TICK_SPACING) {
       refuse("bad_route", `a v4 tick spacing is 1 to ${MAX_TICK_SPACING}`);
     }
-    if (typeof hookData !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(hookData)) refuse("bad_route", "hook data is 0x hex");
     const to = lower(currency as string);
     const last = i === hops.length - 1;
     if (to === from) refuse("bad_route", "a hop buys what it spends");

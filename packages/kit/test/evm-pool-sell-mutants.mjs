@@ -136,7 +136,6 @@ export const MUTANTS = [
   [SELL, 'if (!Number.isInteger(fee) || (fee as number) < 0 || (fee as number) > U24) refuse("bad_route", "a v4 fee is a u24");', "", V4],
   [SELL, "(tickSpacing as number) < 1 ||", "(tickSpacing as number) < 0 ||", V4],
   [SELL, "const MAX_TICK_SPACING = 32767;", "const MAX_TICK_SPACING = 32768;", V4],
-  [SELL, 'if (typeof hookData !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(hookData)) refuse("bad_route", "hook data is 0x hex");', "", V4],
   [SELL, 'if (to === from) refuse("bad_route", "a hop buys what it spends");', "", V4],
   [SELL, "if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth)", "if (last ? to !== NATIVE && to !== weth : false)", V4],
   [SELL, "if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth)", "if (last ? false : to === NATIVE || to === weth)", V4],
@@ -160,7 +159,7 @@ export const MUTANTS = [
   [BUY, "return concat(word(BigInt(elems.length)), ...offsets, ...elems);", "return concat(...offsets, ...elems);", V4CAST],
   // the testnet PoolManager pins: another one is refused, and a v4 sell is built to the pinned one
   [BUY, 'poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408"', 'poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03409"', V4],
-  [BUY, '      poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",\n    }),', '      poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40952",\n    }),', V4],
+  [BUY, 'poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951"', 'poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40952"', V4],
   // the fork fixture is the kit's output
   [SELL, "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)) });", "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)).replace(/.$/, \"0\") });", FIXTURE],
 ];

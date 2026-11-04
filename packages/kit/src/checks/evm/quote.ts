@@ -689,27 +689,46 @@ export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): [E
   return [evmJsonRpc(urls[0]!, fetchFn), evmJsonRpc(urls[1]!, fetchFn)];
 }
 
-/** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
- *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
-export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc): Promise<EvmPoolBuyQuote> {
-  if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
+/** What every quote checks before any read, buy or sell: the device's clock, two different providers, the amount in
+ *  and the slippage. */
+function checkAsk(nowMs: number, rpcsIn: unknown, amountIn: unknown, slippageBps: unknown): void {
   if (!Number.isFinite(nowMs)) return refuse("bad_request", "the device's clock");
-  const { chain, token, amountIn, slippageBps } = req;
-  const route = copyRoute(req.route);
   if (!Array.isArray(rpcsIn) || rpcsIn.length !== 2 || typeof rpcsIn[0] !== "function" || typeof rpcsIn[1] !== "function" || rpcsIn[0] === rpcsIn[1]) {
     return refuse("bad_request", "two different providers");
   }
   if (typeof amountIn !== "bigint" || amountIn <= 0n || amountIn >= MAX_IN) return refuse("bad_request", "the amount in is above 0 and below 2^127");
-  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10000) return refuse("bad_request", "the slippage is 0 to 9,999 bps");
-  if (!isAddress(token) || lower(token) === NATIVE) return refuse("bad_request", "the token is not an address");
-  const v = venue(chain);
-  // every request of this quote to each provider, its head, its block's confirmation and its reads, at most the scan
-  // provider's limit at once: on each chain one of the two providers is the scan provider's host (Base's publicnode
-  // takes 20 at once, Robinhood's own RPC answers 429 to 4)
-  const rpcs = rpcsIn.map((rpc) => {
-    const g = gateOf(v.scan?.parallel ?? 2);
+  if (!Number.isInteger(slippageBps) || (slippageBps as number) < 0 || (slippageBps as number) >= 10000) return refuse("bad_request", "the slippage is 0 to 9,999 bps");
+}
+
+/** The two providers, every request of a quote to each (its head, its block's confirmation and its reads) at most the
+ *  scan provider's limit at once: on each chain one of the two providers is the scan provider's host (Base's publicnode
+ *  takes 20 at once, Robinhood's own RPC answers 429 to 4). */
+function gated(rpcsIn: readonly [EvmRpc, EvmRpc], parallel: number): readonly [EvmRpc, EvmRpc] {
+  return rpcsIn.map((rpc) => {
+    const g = gateOf(parallel);
     return (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));
   }) as unknown as readonly [EvmRpc, EvmRpc];
+}
+
+/** The reads at the agreed block's hash and that block's confirmation in one round; the confirmation is judged first,
+ *  so nothing read is used before it passes. */
+async function readAgreed(confirm: () => Promise<void>, rpcs: readonly [EvmRpc, EvmRpc], hash: string, reads: readonly Read[]): Promise<Answer[]> {
+  const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, hash, reads)]);
+  if (confirmed.status === "rejected") throw confirmed.reason;
+  if (read.status === "rejected") throw read.reason;
+  return read.value;
+}
+
+/** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
+ *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
+export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc): Promise<EvmPoolBuyQuote> {
+  if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
+  const { chain, token, amountIn, slippageBps } = req;
+  checkAsk(nowMs, rpcsIn, amountIn, slippageBps);
+  const route = copyRoute(req.route);
+  if (!isAddress(token) || lower(token) === NATIVE) return refuse("bad_request", "the token is not an address");
+  const v = venue(chain);
+  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2);
   const { token: buys } = evmPoolRouteDataQuoted(chain, route);
   if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);
 
@@ -853,12 +872,9 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   }
 
   // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
-  const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, block.hash, reads)]);
-  if (confirmed.status === "rejected") throw confirmed.reason;
-  if (read.status === "rejected") throw read.reason;
+  const ans = await readAgreed(confirm, rpcs, block.hash, reads);
   // the block is the same on both providers: the scan keeps what it read up to it
   scanned?.commit();
-  const ans = read.value;
   const out = (i: number) => (ans[i]!.kind === "out" ? (ans[i] as { amountOut: bigint }).amountOut : null);
 
   // The route: a quote, and one that grows with its input
@@ -1156,13 +1172,8 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
 export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number): Promise<EvmPoolSellQuote> {
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
   if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");
-  if (!Number.isFinite(nowMs)) return refuse("bad_request", "the device's clock");
   const { chain, token, w, amountIn, slippageBps } = req;
-  if (!Array.isArray(rpcsIn) || rpcsIn.length !== 2 || typeof rpcsIn[0] !== "function" || typeof rpcsIn[1] !== "function" || rpcsIn[0] === rpcsIn[1]) {
-    return refuse("bad_request", "two different providers");
-  }
-  if (typeof amountIn !== "bigint" || amountIn <= 0n || amountIn >= MAX_IN) return refuse("bad_request", "the amount in is above 0 and below 2^127");
-  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10000) return refuse("bad_request", "the slippage is 0 to 9,999 bps");
+  checkAsk(nowMs, rpcsIn, amountIn, slippageBps);
   const v = venue(chain);
   if (!isAddress(token) || lower(token) === NATIVE || lower(token) === lower(v.weth)) return refuse("bad_request", "the token is not an address, or is WETH");
   // the probe replaces W's code: never an address the reads call, nor the token
@@ -1172,10 +1183,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const v3 = v.v3 !== undefined && router !== undefined ? v.v3 : undefined;
   const v4 = v.v4 !== undefined && v.poolManager !== undefined ? v.v4 : undefined;
   if (v3 === undefined && v4 === undefined) return refuse("no_quoter", `${chain} has no pinned quoter with a sell target`);
-  const rpcs = rpcsIn.map((rpc) => {
-    const g = gateOf(v.scan?.parallel ?? 2);
-    return (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));
-  }) as unknown as readonly [EvmRpc, EvmRpc];
+  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2);
 
   const t = lower(token);
   const weth = lower(v.weth);
@@ -1209,10 +1217,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const factory = v3 !== undefined ? reads.push({ to: v3, data: "0x" + SEL_FACTORY }) - 1 : -1;
 
   const { block, confirm } = await agreedBlock(rpcs, v.maxLag, nowMs);
-  const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, block.hash, reads)]);
-  if (confirmed.status === "rejected") throw confirmed.reason;
-  if (read.status === "rejected") throw read.reason;
-  const ans = read.value;
+  const ans = await readAgreed(confirm, rpcs, block.hash, reads);
   const out = (i: number) => (ans[i]!.kind === "out" ? (ans[i] as { amountOut: bigint }).amountOut : null);
   const fills = (c: { route: EvmSellRoute; at: number; twice: number }) => {
     const a = out(c.at);
