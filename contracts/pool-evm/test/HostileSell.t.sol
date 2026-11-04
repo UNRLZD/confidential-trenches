@@ -13,6 +13,7 @@ import {stdError} from 'forge-std/StdError.sol';
 
 import {PrivacyPoolSimple} from '../src/PrivacyPoolSimple.sol';
 import {SellDelegate, IWETH} from '../src/SellDelegate.sol';
+import {IPoolManager} from '../src/adapters/UniswapV4Adapter.sol';
 import {WithdrawalVerifier} from '../src/verifiers/WithdrawalVerifier.sol';
 import {IPrivacyPool} from 'interfaces/IPrivacyPool.sol';
 
@@ -264,7 +265,7 @@ contract HostileSellTest is SellBase {
     weth = new MockWETH();
     router = new MockRouter(weth);
     vm.deal(address(router), 100 ether);
-    delegate = new SellDelegate(IWETH(address(weth)));
+    delegate = new SellDelegate(IWETH(address(weth)), IPoolManager(address(0)));
     _setUpW();
     vm.signAndAttachDelegation(address(delegate), W_KEY);
     assertEq(SellDelegate(payable(W)).nonce(), 0);
@@ -309,7 +310,7 @@ contract HostileSellTest is SellBase {
   /// revert, never a miscount. Same when the target is WETH.withdraw itself.
   function test_R_sellingWethIsAnUnderflowRevert() public {
     HookWETH _hw = new HookWETH();
-    SellDelegate _d = new SellDelegate(IWETH(address(_hw)));
+    SellDelegate _d = new SellDelegate(IWETH(address(_hw)), IPoolManager(address(0)));
     vm.signAndAttachDelegation(address(_d), W_KEY);
     _w().nonce();
     vm.deal(address(this), 2 ether);
@@ -523,7 +524,7 @@ contract HostileSellTest is SellBase {
     vm.signAndAttachDelegation(address(_o), W_KEY);
     OtherDelegate(W).poke();
     assertEq(OtherDelegate(W).a(), 7);
-    SellDelegate _d2 = new SellDelegate(IWETH(address(weth)));
+    SellDelegate _d2 = new SellDelegate(IWETH(address(weth)), IPoolManager(address(0)));
     vm.signAndAttachDelegation(address(_d2), W_KEY);
     assertEq(_w().nonce(), 1, 'the nonce survived');
     vm.expectRevert(SellDelegate.InvalidNonce.selector);
