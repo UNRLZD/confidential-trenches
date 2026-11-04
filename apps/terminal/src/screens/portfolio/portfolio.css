@@ -269,8 +269,8 @@
 }
 
 /* the pools (card balances-per-chain, v2 A1): each chain's private balance, ready and pending, in Where it is */
-.pools { display: grid; grid-template-columns: minmax(max-content, 1fr) auto auto auto; column-gap: 8px; row-gap: 5px; align-items: baseline; margin-top: 4px; font: 500 12px var(--font-ui); }
-.pools .plk { grid-column: 1 / -1; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pools { display: grid; grid-template-columns: minmax(max-content, 1fr) auto auto auto auto; column-gap: 8px; row-gap: 5px; align-items: baseline; margin-top: 4px; font: 500 12px var(--font-ui); }
+.pools .plk { grid-column: 1 / -1; grid-row: 1; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .pools .plc { color: var(--text-3); font-size: 11px; text-align: right; white-space: nowrap; }
 .pools .plst { grid-column: 1 / -1; color: var(--text-2); white-space: nowrap; }
 .pools .plr { display: contents; }
@@ -281,11 +281,20 @@
 .pools .plr > .num .gain { color: var(--acc); }
 .pools .plr > .sk { justify-self: end; }
 .pools .plr > .sk:first-child { justify-self: start; }
+.pools .plw { align-self: center; justify-self: end; display: grid; place-items: center; width: 22px; height: 22px; margin: -4px 0; border-radius: 6px; color: var(--text-2); box-shadow: inset 0 0 0 1px var(--line); }
+.pools .plw:hover:not(:disabled) { color: var(--text-1); }
+.pools .plw:disabled { color: var(--text-3); opacity: 0.4; }
+/* a pool Withdraw that did not open: on the heading's row, right side, so the block never grows inside its panel */
+.pools .hopline { grid-row: 1; grid-column: 1 / -1; justify-self: end; min-height: 0; padding: 0; gap: 8px; font-size: 12px; }
+.pools .hopline .retry { height: 22px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
 @media (max-width: 767.98px) {
   .pools.ph { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--m-line); row-gap: 8px; font-size: 13px; }
   .pools.ph .plk { font-size: 13px; color: var(--m-text-3); }
   .pools.ph .plc { font-size: 12px; }
   .pools.ph .plr > .num { font-size: 13px; }
+  .pools.ph .plw { width: 44px; height: 44px; margin: -14px -12px -14px 0; box-shadow: none; }
+  .pools.ph .hopline { min-height: 44px; margin: -12px 0; font-size: 13px; }
+  .pools.ph .hopline .retry { height: 44px; border-radius: 14px; font-size: 13px; }
 }
 /* desktop: the header row is fixed (the positions bar needs its 9 rows), so Where it is gives its dot strips' height
    to the pool rows; the phone keeps them (placement on the owner's picks page) */

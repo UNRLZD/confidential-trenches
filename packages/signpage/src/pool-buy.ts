@@ -111,6 +111,31 @@ export type PoolBuyHost = {
 
 export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" };
 
+/** The helper's busy answer to a send (its 429: rate_limited when a pool provider throttled a read, in_flight when this
+ *  caller holds too many sends open, or its per-caller throttle), with the wait its Retry-After names. The send is
+ *  made again, the same signed bytes, after that wait, until the blockhash is past on both RPCs (the card
+ *  signpage-pool-flow-run, run 6: the page answered not_landed to a helper that said "wait 1 s"). */
+export class PoolSendBusy extends Error {
+  readonly code: "rate_limited" | "in_flight" | "throttled";
+  readonly retryAfterMs: number;
+  constructor(code: "rate_limited" | "in_flight" | "throttled", retryAfterMs: number) {
+    super(`pool send: busy (${code}), again in ${retryAfterMs} ms`);
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+/** The wait between two sends of one transaction: the helper's Retry-After, at least 1 s, at most 5 s. */
+export const POOL_SEND_BUSY_WAIT_MS = { min: 1_000, max: 5_000 } as const;
+/** The most sends of one transaction: past a blockhash's life at the shortest wait, so the height decides first. */
+export const POOL_SEND_TRIES_MAX = 120;
+/** A blockhash's life on the wall clock, from the signature: 151 blocks (~60 s at 400 ms) with room for slower slots.
+ *  Past it, a busy send is not made again, whatever an RPC that is down or stuck reads. */
+export const POOL_BLOCKHASH_LIFE_MS = 90_000;
+/** The read-back's bound on the wall clock, from the signature: the blockhash's life and a finalization (~32 slots).
+ *  Past it, the answer is "sent" (the note RESERVED, settled by the state reads), so one RPC down or stuck never holds
+ *  the seed's lock, and sign out, for minutes. */
+export const POOL_BUY_SETTLE_MS = 120_000;
+
 /** Read-back reads a buy gets, a second apart: past a blockhash's life (~60 to 90 s) and a finalization. */
 export const POOL_BUY_READS = 120;
 export const POOL_BUY_WAIT_MS = 1_000;
@@ -278,6 +303,16 @@ export async function pastOnBoth(rpcs: readonly [SolanaRpc, SolanaRpc], last: nu
   }
 }
 
+/** True once either RPC's finalized block height is past `last`: that RPC's chain can no longer take the blockhash, so
+ *  sending it again is no use (the not_landed verdict still waits for both, pastOnBoth). A failed read is "not yet". */
+export async function pastOnEither(rpcs: readonly [SolanaRpc, SolanaRpc], last: number): Promise<boolean> {
+  const one = (rpc: SolanaRpc): Promise<boolean> =>
+    Promise.resolve()
+      .then(() => rpc("getBlockHeight", [{ commitment: "finalized" }]))
+      .then((x) => int(x) > last, () => false);
+  return (await Promise.all(rpcs.map(one))).some(Boolean);
+}
+
 /** The transaction under `signature` on one RPC: "none" (not seen yet), "ok", "failed" or "other" (not ours). */
 export async function readBack(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<"none" | "ok" | "failed" | "other"> {
   const r = (await rpc("getTransaction", [signature, { encoding: "base64", commitment: "confirmed", maxSupportedTransactionVersion: 0 }])) as { transaction?: unknown; meta?: { err?: unknown } } | null;
@@ -390,6 +425,10 @@ async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolReleas
   const taken = await h.take(r.noteId, r.attempt);
   if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();
   const reads = h.reads ?? POOL_BUY_READS;
+  // the wall clock from the signature (the page's clock, h.now, in tests): bounds the resends and the read-back
+  const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
+  const signedAt = clock();
+  const inTime = (): boolean => clock() - signedAt < POOL_BUY_SETTLE_MS;
   const spent = async (): Promise<boolean> => (await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }))).kind === "spent";
   // the chain's word on the note (its spent mark and change on both RPCs) over the helper's or one RPC's: spent is
   // filled, shown with the helper's signature only when it read back as this transaction. not_landed only once both
@@ -397,7 +436,7 @@ async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolReleas
   // not_landed while the transaction may still land, packages/kit/src/trade/solana/flow.ts finishSolanaSet); until then
   // the reads go on, and past them the answer is "sent", the note RESERVED for the state reads' pass to settle or free
   const unlanded = async (txs: TxRef[]): Promise<PoolBuyAnswer> => {
-    for (let i = 0; i < reads; i++) {
+    for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
       if (i > 0) await wait(POOL_BUY_WAIT_MS);
       const past = await pastOnBoth(h.rpcs, lastHeight); // before the settle: a spend final by then is in its read
       if (await spent()) return { stage: "filled", txs };
@@ -406,18 +445,26 @@ async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolReleas
     return { stage: "sent", txs };
   };
   let answer: unknown;
-  try {
-    answer = await h.send(pool, signed);
-  } catch {
-    // the helper's error says nothing of the chain: a broken-in helper may answer 502 and send it anyway
-    return unlanded([]);
+  for (let tries = 1; ; tries++) {
+    try {
+      answer = await h.send(pool, signed);
+      break;
+    } catch (e) {
+      // the helper's error says nothing of the chain: a broken-in helper may answer 502 and send it anyway
+      if (!(e instanceof PoolSendBusy) || tries >= POOL_SEND_TRIES_MAX) return unlanded([]);
+      // busy: the same bytes again after its wait, while the blockhash lives: never once either RPC reads it past, nor
+      // past its life on the wall clock (an RPC down or stuck reads nothing); then the read-back rules decide
+      // (not_landed only once both RPCs read it past and the settle finds no spend)
+      if (clock() - signedAt >= POOL_BLOCKHASH_LIFE_MS || (await pastOnEither(h.rpcs, lastHeight))) return unlanded([]);
+      await wait(Math.min(Math.max(e.retryAfterMs, POOL_SEND_BUSY_WAIT_MS.min), POOL_SEND_BUSY_WAIT_MS.max));
+    }
   }
   const signature = (answer as { signature?: unknown } | null)?.signature;
   if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature) || base58.decode(signature).length !== 64) return unlanded([]);
   h.sent?.(signature);
   const txs: TxRef[] = [{ chain: "solana", hash: signature }];
   let landed = false;
-  for (let i = 0; i < reads && !landed; i++) {
+  for (let i = 0; i < reads && !landed && (i === 0 || inTime()); i++) {
     if (i > 0) await wait(POOL_BUY_WAIT_MS);
     const got: readonly Got[] = await both(h, (rpc) => readBack(rpc, signature, signed)).catch((): Got[] => ["none", "none"]);
     // another transaction under that name on both RPCs: the helper's signature is not this one's
@@ -428,7 +475,7 @@ async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolReleas
   }
   if (!landed) return unlanded(txs);
   // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized)
-  for (let i = 0; i < reads; i++) {
+  for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
     if (i > 0) await wait(POOL_BUY_WAIT_MS);
     const s = await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }));
     if (s.kind === "spent") return { stage: "filled", txs };

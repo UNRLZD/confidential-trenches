@@ -24,7 +24,7 @@ import {
   type SolanaPoolRelease,
 } from "../../kit/src/trade/solana/pool-buy.ts";
 import { evmPoolVenues, pinnedBuild, type EvmPoolVenue } from "../../kit/src/trade/evm/buy-unpinned.ts";
-import { pinnedBuildSell } from "../../kit/src/trade/evm/sell-unpinned.ts";
+import { evmPoolBuildSimSellUnpinned, pinnedBuildSell } from "../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import { FEE_PAYER, PROGRAM as FX_PROGRAM, W as FX_W, release as fxRelease, setup } from "../../kit/test/solana-pool-buy-fx.ts";
 import {
@@ -33,6 +33,8 @@ import {
   checkEvmAuthorization,
   checkEvmBuy,
   checkEvmSell,
+  checkEvmSellSim,
+  signEvmSellSim,
   checkEvmWithdraw,
   checkPoolRequest,
   checkSolanaBuy,
@@ -504,6 +506,44 @@ test("EVM sell and authorization: W's own Sell into the pinned pool and the pinn
   assert.throws(() => checkEvmAuthorization(ask, ctx, 4n, [4n, 5n]), refusedAs("nonce"));
   assert.throws(() => checkEvmAuthorization(ask, ctx, 3n, [4n, 4n]), refusedAs("nonce"));
   assert.throws(() => checkEvmAuthorization(ask, { ...ctx, evm: { venues: { base: pin(B, { pool: EVM_POOL }) }, feeRecipient: FEE_TO } }, 4n, [4n, 4n]), refusedAs("delegate_not_pinned"));
+});
+
+test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the agreed block's time, that time at most the device's clock; each planted attack is refused", () => {
+  const t = BigInt(Math.floor(Date.now() / 1000)) - 2n;
+  const hops = [{ currency: "0x0000000000000000000000000000000000000000", fee: 3000, tickSpacing: 60, hooks: "0x00000000000000000000000000000000000020cc", hookData: "0x" }];
+  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: 10n ** 18n, slippageBps: 100, decimals: 18 };
+  const ctx = evmCtx({ nowMs: t * 1000n + 2000n });
+  const sim = (o: Partial<{ deadline: bigint; amount: bigint; w: string }> = {}) => evmPoolBuildSimSellUnpinned("base", { w: EVM_W, token: X, amount: 10n ** 18n, hops, minOut: 1n, nonce: 0n, deadline: t, ...o });
+  const s = sim();
+  checkEvmSellSim(s, t, ask, ctx);
+  assert.equal(signEvmSellSim(EVM_SECRET, ctx, s).length, 65);
+  const other = "0x2222222222222222222222222222222222222222";
+  for (const [f, rule] of [
+    // a live deadline: one second past the agreed block, so the signature could land in the next block
+    [() => checkEvmSellSim(sim({ deadline: t + 1n }), t, ask, ctx), "sim_deadline"],
+    // the real pool: a sim into the pinned pool would deposit there
+    [() => checkEvmSellSim({ ...s, pool: EVM_POOL }, t, ask, ctx), "sim_pool"],
+    // a block timestamp past the device's clock
+    [() => checkEvmSellSim(s, t, ask, evmCtx({ nowMs: t * 1000n - 1n })), "sim_block_after_clock"],
+    // a sim for another chain than the one asked
+    [() => checkEvmSellSim({ ...s, chain: "robinhood" }, t, ask, ctx), "chain"],
+    [() => checkEvmSellSim(sim({ w: other }), t, ask, ctx), "wallet"],
+    [() => checkEvmSellSim(s, t, { ...ask, token: other }, ctx), "token"],
+    [() => checkEvmSellSim(sim({ amount: 1n }), t, ask, ctx), "amount"],
+    [() => checkEvmSellSim(s, t, { ...ask, kind: "pool.buy" }, ctx), "kind"],
+    [() => checkEvmSellSim(s, t, ask, evmCtx({ nowMs: t * 1000n + 2000n, evm: { venues: { base: pin(B, { pool: EVM_POOL }) }, feeRecipient: FEE_TO } })), "delegate_not_pinned"],
+  ] as const) {
+    assert.throws(f, refusedAs(rule), rule);
+  }
+  // only the sim the check passed is signed: a copy is not it, and a real sell is never signed as a sim
+  assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, { ...s }), refusedAs("unchecked"));
+  // a real sell (the kit's sell builder, into the pinned pool, live for 120 s), even one the sell check passed, is
+  // refused by the sim check and by the sim signer
+  const real = pinnedBuildSell(VENUES, "base", { w: EVM_W, token: X, amount: 10n ** 18n, target: B.routers[0]!, route: v3([X, B.weth]), minOut: 10n ** 15n, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n });
+  assert.throws(() => checkEvmSellSim(real as never, t, ask, ctx), refusedAs("sim_pool"));
+  assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));
+  checkEvmSell(real, ask, { ...ctx, precommitment: 5n }, 10n ** 15n);
+  assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));
 });
 
 // ---------- no rule reads a server ----------

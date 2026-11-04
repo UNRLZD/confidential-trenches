@@ -492,7 +492,11 @@ export async function runPoolSell(h: PoolSellHost, ask: PoolAsk): Promise<PoolSe
     const txs: TxRef[] = [{ chain: "solana", hash: signature }];
     // the verdict: the chain's word on the note's mark, never an RPC's tx history alone
     const reads = h.reads ?? POOL_SELL_READS;
-    for (let i = 0; i < reads; i++) {
+    // the reads are a time budget too (POOL_SELL_READS a second apart): one RPC down, each read's retry its own 3.5 s,
+    // never holds the seed's lock past it; the note, INCOMING, settles at the next load or sell
+    const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
+    const sentAt = clock();
+    for (let i = 0; i < reads && (i === 0 || clock() - sentAt < POOL_SELL_READS * POOL_SELL_WAIT_MS); i++) {
       if (i > 0) await wait(POOL_SELL_WAIT_MS);
       const got = await both(rpcs, (r) => readBack(r, signature, signed)).catch(() => ["none", "none"] as const);
       // this very transaction failed on chain, on both RPCs: the sale and the deposit are one, nothing moved

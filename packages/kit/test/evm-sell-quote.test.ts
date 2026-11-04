@@ -6,6 +6,7 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { hmac } from "@noble/hashes/hmac.js";
 import { pbkdf2 } from "@noble/hashes/pbkdf2.js";
 import { sha512 } from "@noble/hashes/sha2.js";
@@ -14,9 +15,10 @@ import * as kit from "../src/index.ts";
 import * as quoteMod from "../src/checks/evm/quote.ts";
 import type { EvmRpc, EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { evmPoolVenues, type EvmPoolChain } from "../src/trade/evm/buy-unpinned.ts";
-import { pinnedBuildSell } from "../src/trade/evm/sell-unpinned.ts";
+import { evmPoolBuildSimSellUnpinned, evmPoolSignSellUnpinned, evmPoolSignSimSellUnpinned, evmSellCallData, pinnedBuildSell, pinnedSignSimSell } from "../src/trade/evm/sell-unpinned.ts";
 
 const W = (v: bigint) => v.toString(16).padStart(64, "0");
+const keccak = (t: string) => keccak_256(new TextEncoder().encode(t));
 const NATIVE = "0x0000000000000000000000000000000000000000";
 const TOKEN = "0x1111111111111111111111111111111111111111";
 const WALLET = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"; // Hardhat account 0, a published test key
@@ -309,4 +311,60 @@ test("the sell quote reads each field of its request once (review of c71a4d0..a9
     f.mock.restore();
   }
   assert.equal(reads, 1);
+});
+
+// card evm-quote-exec-sim: W signs a sim sell only into EVM_SELL_SIM, with a deadline at most the agreed block's time,
+// itself at most the device's clock. Such a signature can never land for one reason: the deposit into the codeless
+// sim pool reverts when its empty answer is decoded. The deadline does not stop it: later blocks can share the agreed
+// block's timestamp (Robinhood blocks 105948851-105948858 share one), and SellDelegate.sol:140 refuses only after it
+test("planted: the sim signer refuses a live deadline, the real pool, a block past the device's clock, and a real sell", () => {
+  const key = hardhatAccount0();
+  const ts = 1_793_798_391n;
+  const hops = [{ currency: NATIVE, fee: 3000, tickSpacing: 60, hooks: "0x00000000000000000000000000000000000020cc", hookData: "0x" }];
+  const sim = (o: Partial<{ deadline: bigint }> = {}) => evmPoolBuildSimSellUnpinned("base-sepolia", { w: WALLET, token: TOKEN, amount: AMOUNT, hops, minOut: 1n, nonce: 3n, deadline: ts, ...o });
+  const now = Number(ts) * 1000 + 2000;
+  // the sim pool: the low 20 bytes of keccak256("blindfill.sell.sim.v1")
+  assert.equal(kit.EVM_SELL_SIM, "0x" + Buffer.from(keccak("blindfill.sell.sim.v1")).subarray(12).toString("hex"));
+  const s = sim();
+  assert.equal(s.pool, kit.EVM_SELL_SIM);
+  const sig = evmPoolSignSimSellUnpinned(key, "base-sepolia", s, ts, now);
+  assert.equal(sig.length, 65);
+  // the signature is W's, over the sim as SellDelegate digests it (its EIP-712 digest written out here, as
+  // SellDelegate._sellDigest makes it under W's own address and Base Sepolia's chain id), and its calldata carries the
+  // sim exactly
+  const w32 = (v: bigint) => Buffer.from(v.toString(16).padStart(64, "0"), "hex");
+  const a32 = (a: string) => w32(BigInt(a));
+  const domain = keccak_256(Buffer.concat([keccak("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"), keccak("Blindfill"), keccak("1"), w32(84532n), a32(WALLET)]));
+  const struct = keccak_256(Buffer.concat([
+    keccak("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)"),
+    a32(s.token), w32(s.amount), a32(s.target), keccak_256(Buffer.from(s.data.slice(2), "hex")), w32(s.minOut), a32(s.pool), w32(s.precommitment), w32(s.feeCap), w32(s.deadline), w32(s.nonce),
+  ]));
+  const digest = keccak_256(Buffer.concat([Uint8Array.of(0x19, 0x01), domain, struct]));
+  assert.ok(sig[64] === 27 || sig[64] === 28, "v is 27 or 28");
+  const pub = secp256k1.recoverPublicKey(Uint8Array.of(sig[64]! - 27, ...sig.subarray(0, 64)), digest, { prehash: false });
+  const signer = "0x" + Buffer.from(keccak_256(secp256k1.Point.fromBytes(pub).toBytes(false).subarray(1)).subarray(12)).toString("hex");
+  assert.equal(signer, WALLET, "the sim's signature recovers to W");
+  const data = evmSellCallData(s, 0n, sig);
+  assert.equal(data.slice(2, 10), Buffer.from(keccak("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)")).subarray(0, 4).toString("hex"));
+  const code = (f: () => unknown) => {
+    try {
+      f();
+      return "signed";
+    } catch (e) {
+      return (e as { code?: string }).code;
+    }
+  };
+  // a live deadline: one second past the block
+  assert.equal(code(() => evmPoolSignSimSellUnpinned(key, "base-sepolia", sim({ deadline: ts + 1n }), ts, now)), "bad_deadline");
+  // the agreed block past the device's clock
+  assert.equal(code(() => evmPoolSignSimSellUnpinned(key, "base-sepolia", s, ts, Number(ts) * 1000 - 1)), "bad_deadline");
+  // the real pool: a copy of the sim into it is no sim the builder made, and the builder makes none
+  assert.equal(code(() => evmPoolSignSimSellUnpinned(key, "base-sepolia", { ...s, pool: evmPoolVenues()["base-sepolia"].pool! }, ts, now)), "not_built");
+  // the sell signer never signs a sim, the sim signer never a real sell
+  assert.equal(code(() => evmPoolSignSellUnpinned(key, "base-sepolia", s)), "not_built");
+  const real = pinnedBuildSell(evmPoolVenues(), "base-sepolia", { w: WALLET, token: TOKEN, amount: AMOUNT, target: evmPoolVenues()["base-sepolia"].poolManager!, route: { venue: "uniswap-v4", hops: [{ ...hops[0]!, hooks: NATIVE }] }, minOut: 2n, precommitment: 1n, feeCap: 1n, deadline: BigInt(Math.floor(Date.now() / 1000) + 120), nonce: 3n });
+  assert.equal(code(() => evmPoolSignSimSellUnpinned(key, "base-sepolia", real as never, ts, now)), "not_built");
+  // a key not W's; a chain with no pinned sell delegate
+  assert.equal(code(() => evmPoolSignSimSellUnpinned(new Uint8Array(32).fill(7), "base-sepolia", s, ts, now)), "bad_key");
+  assert.equal(code(() => pinnedSignSimSell(evmPoolVenues(), key, "base", s, ts, now)), "not_deployed");
 });

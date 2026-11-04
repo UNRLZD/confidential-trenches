@@ -1,4 +1,4 @@
-import type { Chain, SignpageClientSnapshot } from "@blindfill/kit";
+import type { Chain, PoolChain, SignpageClientSnapshot } from "@blindfill/kit";
 import { createContext, useContext } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
 import { balanceOf, NO_DATA } from "./model.ts";
@@ -16,6 +16,7 @@ import type { PortfolioData } from "./model.ts";
 export type PortfolioAction =
   | { kind: "deposit" }
   | { kind: "withdraw" }
+  | { kind: "pool-withdraw"; chain: PoolChain }
   | { kind: "sell"; chain: Chain; token: string; part: "25" | "50" | "100" | "initials" | "box" }
   | { kind: "exit" | "share" | "export"; chain: Chain; token: string }
   | { kind: "view-key"; id: string };

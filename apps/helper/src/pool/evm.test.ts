@@ -7,7 +7,8 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_FEE_STEP, EVM_GAS_MAX, EVM_WITHDRAW_GAS, evmAddressOf, evmEpochFee, evmFirstBlockAtOrAfter, evmPoolSender, evmReadWithdraw, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, type EvmRpc } from "./evm.ts";
+import { evmPoolVenues } from "@blindfill/kit";
+import { EVM_FEE_STEP, EVM_GAS_MAX, EVM_WITHDRAW_GAS, evmAddressOf, evmEpochFee, evmFirstBlockAtOrAfter, evmPoolSender, evmPoolSendersFromEnv, evmReadWithdraw, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
@@ -297,4 +298,27 @@ test("a provider that writes hex in upper case: drpc's 0xB626 reads as 46630, an
   const junk: EvmRpc = async (m, p) => (m === "eth_chainId" ? "0xG626" : rpc([])(m, p));
   const j = evmPoolSender({ network: "robinhood-testnet", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [junk, rpc([])], () => NOW);
   assert.equal(code(await j.carry(req())), "upstream");
+});
+
+// card evm-quote-exec-sim (review of the exec sim, HIGH 1): the device sims each sale as sent from the kit's pinned sell
+// sender, so the helper starts a network's sender only with the key of that pin, where the kit pins one
+test("the EVM pool sender's address is the kit's pinned sell sender for its chain, or the helper does not start", () => {
+  const env = {
+    POOL_EVM_ADDRESS_BASE_SEPOLIA: POOL,
+    POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
+    POOL_EVM_FEE_BASE_SEPOLIA: "1000",
+    POOL_EVM_RPCS_BASE_SEPOLIA: "https://sepolia.base.org,https://base-sepolia-rpc.publicnode.com",
+  };
+  const kit = evmPoolVenues();
+  const pinned = (sellSender: string) => ({ ...kit, "base-sepolia": { ...kit["base-sepolia"], sellSender } });
+  // the pin is the sender's own address: it starts, in either case of hex
+  const own = evmAddressOf(KEY);
+  assert.equal(evmPoolSendersFromEnv(env, pinned(own)).get(POOL)!.sender, own);
+  assert.equal(evmPoolSendersFromEnv(env, pinned(own.toUpperCase().replace("0X", "0x"))).get(POOL)!.sender, own);
+  // another address pinned: refused at start, naming the env name and the pin, never the key
+  const other = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
+  assert.throws(() => evmPoolSendersFromEnv(env, pinned(other)), (e: Error) => e.message.includes("POOL_EVM_SENDER_KEY_BASE_SEPOLIA") && e.message.includes(other) && !e.message.includes(Buffer.from(KEY).toString("hex")));
+  // the kit's own list pins no sell sender on any chain yet (no public read of the helper's sender address): it starts
+  for (const c of ["base", "robinhood", "base-sepolia", "robinhood-testnet"] as const) assert.equal(Object.hasOwn(kit[c], "sellSender"), false, c);
+  assert.equal(evmPoolSendersFromEnv(env).get(POOL)!.sender, own);
 });
