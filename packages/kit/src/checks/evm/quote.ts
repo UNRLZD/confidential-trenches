@@ -318,10 +318,13 @@ const STATE_READS_PER_CALL = 64;
 // 2,000 slots each, an answer inside MAX_ANSWER_HEX (v4-core Extsload; selector dbd035ff, 2,048 slots answered on
 // base-rpc.publicnode.com, mainnet.base.org, robinhood.drpc.org and rpc.mainnet.chain.robinhood.com, 2026-11-03
 // 22:22Z; about 4.2M gas a call):
-// USDG on Robinhood has 9,942 pools in the scan's depth, and every one's state is read before any bound applies
+// USDG on Robinhood has 9,942 pools in the scan's depth, and every one's state is read before any bound applies. A
+// provider answers smaller calls sent at once sooner (card evm-quote-warm-round: 6,000 slots as 1 batch of 3 calls of
+// 2,000, or 4 batches of 3 of 500 at once, p50 of 6 rounds on Base 2026-11-04 17:2xZ: base-mainnet.public.blastapi.io
+// 1,900 and 610 ms, mainnet.base.org 848 and 523 ms, base.public.blockpi.network 1,050 and 725 ms), so 500 a call
 const SEL_EXTSLOADS = "dbd035ff";
 const SLOTS_FROM = 2 * STATE_READS_PER_CALL;
-const SLOTS_PER_CALL = 2000;
+const SLOTS_PER_CALL = 500;
 
 /** Both providers' answers to `reads` at `hash`, which must be the same: the reads without a state override in
  *  aggregate3 calls of READS_PER_CALL, the grouped reads of each hook in their own aggregate3 calls with that hook's
@@ -1537,8 +1540,8 @@ async function routeSet(a: {
   const first = reads.length;
   if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {
     const own = new Set(reads.map(readKey));
+    // the plan holds no read with a state override (below)
     for (const r of plan.reads) {
-      if (r.override !== undefined) continue;
       const k = readKey(r);
       if (own.has(k) || kept.has(k)) continue;
       kept.set(k, reads.push(r) - 1);
