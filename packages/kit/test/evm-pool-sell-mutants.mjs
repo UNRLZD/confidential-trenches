@@ -139,20 +139,19 @@ export const MUTANTS = [
   [SELL, 'if (to === from) refuse("bad_route", "a hop buys what it spends");', "", V4],
   [SELL, "if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth)", "if (last ? to !== NATIVE && to !== weth : false)", V4],
   [SELL, "if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth)", "if (last ? false : to === NATIVE || to === weth)", V4],
-  [SELL, 'if (!last && !listed.has(to)) refuse("middle_not_listed", `${currency} is not on the venue list`);', "", V4],
-  // the review of a22060d: hook data is the device's own, empty (item 5); a listed hook only on the hop that spends the
-  // token sold (item 2)
+  // the review of a22060d: hook data is the device's own, empty (item 5); a listed hook only in its launchpad's own
+  // shape, on any hop (item 2 as card evm-route-parity narrowed it: evmHookListed, the one rule the quotes use too)
   [SELL, 'if (hookData !== "0x") refuse("bad_route", "a sell\'s hook data is the device\'s own: empty");', "", V4],
   [SELL, 'if (hookData !== "0x") refuse(', 'if (hookData !== "0x" && lower(hooks as string) === NATIVE) refuse(', V4],
-  [SELL, "const on = from === lower(token) && ", "const on = ", V4],
-  [SELL, "const on = from === lower(token) && ", "const on = ", V4CAST],
   [SELL, "if (lower(hooks as string) !== NATIVE) {", "if (false) {", V4],
-  [SELL, "lower(p.hooks) === lower(hooks as string) && ", "", V4],
+  [SELL, "lower(p.hooks) === lower(hooks) && ", "", V4],
+  [SELL, "lower(p.hooks) === lower(hooks) && ", "", V4CAST],
+  // the shape check dropped: the listed hook at any fee or tick spacing (card evm-route-parity)
+  [SELL, " && p.fee === fee && p.tickSpacing === tickSpacing);", ");", V4],
+  [SELL, " && p.fee === fee && p.tickSpacing === tickSpacing);", ");", V4CAST],
   [SELL, "p.fee === fee && ", "", V4],
-  [SELL, "p.tickSpacing === tickSpacing && ", "", V4],
-  [SELL, ' && to === (p.from === "native" ? NATIVE : weth)', "", V4],
-  [SELL, 'to === (p.from === "native" ? NATIVE : weth)', 'to === (p.from === "native" ? weth : NATIVE)', V4],
-  [SELL, "if (!on) refuse(", "if (false) refuse(", V4],
+  [SELL, " && p.tickSpacing === tickSpacing", "", V4],
+  [SELL, "if (!evmHookListed(chain, hooks as string, fee as number, tickSpacing as number)) refuse(", "if (false) refuse(", V4],
   [SELL, "return toHex(concat(word(0x20n), pathKeysAbi(hops as EvmV4Hop[])));", "return toHex(pathKeysAbi(hops as EvmV4Hop[]));", V4CAST],
   [BUY, "let at = 32 * elems.length;", "let at = 0;", V4CAST],
   [BUY, "concat(addressWord(h.currency), word(BigInt(h.fee)), word(BigInt(h.tickSpacing))", "concat(addressWord(h.currency), word(BigInt(h.tickSpacing)), word(BigInt(h.fee))", V4CAST],

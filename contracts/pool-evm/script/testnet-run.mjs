@@ -304,7 +304,7 @@ export async function main(args, io = {}) {
 
   // the run's notes: { ref, value, label, commitment, block, spent }
   const notes = [];
-  const bought = []; // { l, j, w, out, v }
+  const bought = []; // { l, j, w, out, v, route }
   const wallets = new Set(); // Ws a withdraw paid, swept at the end
 
   /** The trees once the pool's agreed time is past `block`'s, so the cut holds that block's leaves. */
@@ -359,7 +359,7 @@ export async function main(args, io = {}) {
         const ev = poolLog(r, T.Bought);
         if (!ev) throw new Error(`${step}: no Bought event`);
         const d = words(ev.data);
-        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref, v });
+        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref, v, route: q.route });
         Object.assign(steps.at(-1), { out: String(d[6]), newCommitment: String(d[4]), value: String(withdrawn), fee: String(fee) });
       } else {
         const sig = sign65(withdrawDigest(chainId, pool, nullifier, b.context, withdrawn), W.secretKey);
@@ -389,7 +389,8 @@ export async function main(args, io = {}) {
       const fee = f0 > FEE_STEP ? f0 : FEE_STEP;
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
       const { q, built } = await fresh(
-        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS }),
+        // `bought`: the route of the buy that paid W the token, which the sell quote requires
+        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route }),
         (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, feeCap: fee, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
       );
       const sv = q.route.venue === "uniswap-v4" ? "v4" : "v3";

@@ -14,10 +14,10 @@
 //     listed middle allowed, as in the buy; WETH only at the end);
 //   - v4: abi.encode(PathKey[]), the path SellDelegate.unlockCallback swaps hop by hop, exact input, inside one
 //     PoolManager unlock (contracts/pool-evm/src/SellDelegate.sol): from the token, each hop's currency the next, the
-//     last the native asset or the chain's WETH and neither one before it, a middle only from the venue list; each
-//     hop's fee a u24, tick spacing 1 to 32,767, and hooks either none (no hook data) or exactly a launchpad pool the
-//     venue lists (evmPoolVenues().hookedPools: hook, fee, tick spacing, and the asset it pairs the token with) on the
-//     hop that spends the token sold; every hop's hook data empty (the device's own, never a route's). A hook is part of
+//     last the native asset or the chain's WETH and neither one before it, a middle any other currency (as on the
+//     quoted buy); each hop's fee a u24, tick spacing 1 to 32,767, and hooks either none or the hook of a launchpad the
+//     venue lists (evmPoolVenues().hookedPools) with that launchpad's own fee and tick spacing, on any hop, as the buy
+//     takes a pinned hook (card evm-route-parity); every hop's hook data empty (the device's own, never a route's). A hook is part of
 //     the price, so an unlisted hook, or a listed one with another fee or tick spacing, is refused rather than bounded
 //     by minOut alone; the kit's index builds a sell only from the device's own quote (checks/evm/quote.ts
 //     evmPoolSellQuote, card evm-sell-device-quote). A key that names no initialized pool reverts the whole sell in the
@@ -196,8 +196,6 @@ function v4Data(chain: EvmPoolChain, token: string, hopsIn: unknown): string {
   });
   if (hops.length < 1 || hops.length > EVM_POOL_MAX_HOPS) return refuse("bad_route", `a v4 sell is 1 to ${EVM_POOL_MAX_HOPS} hops`);
   const weth = lower(venue.weth);
-  const listed = new Set(venue.middles.map(lower));
-  const shapes = Object.hasOwn(venue, "hookedPools") ? venue.hookedPools! : [];
   let from = lower(token);
   hops.forEach((h, i) => {
     const { currency, fee, tickSpacing, hooks, hookData } = h;
@@ -210,15 +208,19 @@ function v4Data(chain: EvmPoolChain, token: string, hopsIn: unknown): string {
     const last = i === hops.length - 1;
     if (to === from) refuse("bad_route", "a hop buys what it spends");
     if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth) refuse("bad_route", "a v4 sell ends at the native asset or the chain's WETH, and only there");
-    if (!last && !listed.has(to)) refuse("middle_not_listed", `${currency} is not on the venue list`);
+    // a v4 middle need not be listed, as on the quoted buy (buy-unpinned.ts checkRoute): SellDelegate.unlockCallback
+    // swaps hop by hop inside one unlock and each hop must spend all the hop before gave (PartialFill), so a middle's
+    // deltas net to zero there and no middle token moves (card evm-route-parity: the sell leaves through every pool the
+    // buy enters through)
     // hook data is the device's, and the device makes none: a listed hook that reads a trade referrer from it would
     // let whoever wrote it name itself (review of a22060d, item 5)
     if (hookData !== "0x") refuse("bad_route", "a sell's hook data is the device's own: empty");
     if (lower(hooks as string) !== NATIVE) {
-      // a hook only on a launchpad pool the venue lists, with its own fee and tick spacing, that spends the token sold
-      // and pays the asset the venue pairs it with (review of a22060d, item 2: a listed hook on a USDC/WETH pool built)
-      const on = from === lower(token) && shapes.some((p) => lower(p.hooks) === lower(hooks as string) && p.fee === fee && p.tickSpacing === tickSpacing && to === (p.from === "native" ? NATIVE : weth));
-      if (!on) refuse("bad_route", `the hook ${hooks} with fee ${fee} and tick spacing ${tickSpacing} is not a pool of the token the venue lists`);
+      // a hook only of a launchpad the venue lists, with that launchpad's own fee and tick spacing, on any hop: the buy
+      // takes a pinned hook on any pool the device finds (checks/evm/quote.ts `pinned`), and the sell leaves through
+      // every pool the buy enters through (card evm-route-parity; a Zora coin pairs its creator coin, which pairs ZORA,
+      // each through Zora's hook). An unlisted hook, or a listed one with another fee or tick spacing, is refused
+      if (!evmHookListed(chain, hooks as string, fee as number, tickSpacing as number)) refuse("bad_route", `the hook ${hooks} with fee ${fee} and tick spacing ${tickSpacing} is not a launchpad pool the venue lists`);
     }
     from = to;
   });
@@ -253,6 +255,24 @@ function v3Data(chain: EvmPoolChain, token: string, route: object, w: string, am
   // then path, length and right-padded bytes
   const selector = keccak_256(utf8("exactInput((bytes,address,uint256,uint256))")).slice(0, 4);
   return toHex(concat(selector, word(0x20n), word(0x80n), addressWord(w), word(amount), word(minOut), word(BigInt(p.length)), padded));
+}
+
+/** True when `hooks` is the hook of a launchpad the venue lists for `chain`, with that launchpad's own fee and tick
+ *  spacing: the one rule for a hooked pool, which the sell builder takes on any hop and the device's buy and sell
+ *  quotes trust as it is (checks/evm/quote.ts routeSet; card evm-route-parity). */
+export function evmHookListed(chain: EvmPoolChain, hooks: string, fee: number, tickSpacing: number): boolean {
+  const venue = venueOf(chain);
+  const shapes = Object.hasOwn(venue, "hookedPools") ? venue.hookedPools! : [];
+  return isAddress(hooks) && shapes.some((p) => lower(p.hooks) === lower(hooks) && p.fee === fee && p.tickSpacing === tickSpacing);
+}
+
+/** Refuses (throws EvmPoolSellError) a sell route the builder would not take for `token` on `chain`, checked as the
+ *  builder checks it; the device's quote (checks/evm/quote.ts) picks only among the routes this takes. */
+export function evmSellRouteCheck(chain: EvmPoolChain, token: string, route: EvmSellRoute): void {
+  if (typeof route !== "object" || route === null) return refuse("bad_route", "a sell route is an object");
+  if (route.venue === "uniswap-v4") v4Data(chain, token, route.hops);
+  else if (route.venue === "uniswap-v3") v3Data(chain, token, route, token, 1n, 1n);
+  else refuse("bad_route", "a sell runs on Uniswap v3's SwapRouter02 or v4's PoolManager");
 }
 
 /** The sell W asked for on `chain`, after every check (see the header); refused with its own code otherwise. */
