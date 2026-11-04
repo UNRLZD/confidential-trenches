@@ -11,7 +11,7 @@
 //     both of them itself, each answered 200, and asked no other NEAR RPC: the rows are reads of this session;
 //   - with no vault named (mainnet until its vault is deployed): every check Unverified, no RPC named and no request
 //     to any NEAR RPC at all, so nothing is drawn as read;
-//   - no CSP violation and no console error in the terminal's frame;
+//   - no CSP violation, no console error and no page error in the terminal's frame (one with no address counts);
 //   - every open of the panel starts from loading and leaves it only after every NEAR read that open began has been
 //     answered, both RPCs among them (the frame's data-state changes and its resource timing, on one clock), so no
 //     earlier read is drawn while this open reads;
@@ -36,7 +36,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
 import { launchBrowser } from "../browsers.mjs";
-import { consoleError } from "./console-errors.mjs";
+import { watchErrors } from "./console-errors.mjs";
 
 const KEY = "app-verify-mount";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -125,10 +125,11 @@ function judgeAllRequests(say, n, r, rec, named) {
   say(bad.length === 0, `${n}: ${posts.length} NEAR request(s) over the run, each to the pair, each of ${[...accounts].join(" or ")}, Verify's only while open${bad.length ? `; not so: ${bad.join("; ")}` : ""}`);
 }
 
-/** The check's console hook: every error the terminal's frame (an APP_HOST address) logs, kept through the shared
- *  collector (console-errors.mjs) as its text and its address's origin and path. */
-export function onConsole(errors) {
-  return (m) => m.type() === "error" && (m.location()?.url ?? "").startsWith(APP_HOST) && errors.push(consoleError(m));
+/** The check's error hooks on its page: every console error and page error of the terminal's frame (an APP_HOST
+ *  address), and every one with no address, kept through the shared collector (console-errors.mjs) as its text and its
+ *  address's origin and path (card live-pageerror-hooks). */
+export function watch(page, errors) {
+  watchErrors(page, errors, (url) => url.startsWith(APP_HOST));
 }
 
 export function judge(rec) {
@@ -260,7 +261,7 @@ async function runOne({ browser, w, shots, route, beforeReopen, duringReopen }) 
       const e = byReq.get(res.request());
       if (e) e.status = res.status();
     });
-    page.on("console", onConsole(run.errors));
+    watch(page, run.errors);
     await page.goto(APP_HOST + PATH, { waitUntil: "commit" });
     const f = await appFrame(page);
     if (!f) return run;
