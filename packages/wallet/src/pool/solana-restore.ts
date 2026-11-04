@@ -68,8 +68,8 @@ import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/sto
 import { checkSolanaRpcs, type SolanaLagWait, solanaLagRetry, solanaPda, solanaPoolOf, solanaTreeSync } from "./solana.ts";
 
 const U32 = 0xffffffff;
-const CHAIN_TAGS = Object.keys(CHAINS) as Chain[];
-const enc = new TextEncoder();
+const CHAIN_TAGS = /* @__PURE__ */ Object.keys(CHAINS) as Chain[];
+const enc = /* @__PURE__ */ new TextEncoder();
 const be32 = (x: bigint): Uint8Array => {
   const b = new Uint8Array(32);
   for (let i = 31, v = x; i >= 0; i--, v >>= 8n) b[i] = Number(v & 255n);

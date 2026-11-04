@@ -54,7 +54,7 @@ export const RESTORE_GAP = 10_000;
 /** The device lanes: a device names only deposit indices ≡ d (mod 8) (wallet.md l.249-250). */
 export const RESTORE_LANES = 8;
 const U32 = 0xffffffff;
-const CHAIN_TAGS = Object.keys(CHAINS) as Chain[];
+const CHAIN_TAGS = /* @__PURE__ */ Object.keys(CHAINS) as Chain[];
 
 /** A note restore found, as the device writes it: its ref, scope, precommitment and leaf, and its state. */
 export type RestoredNote = {

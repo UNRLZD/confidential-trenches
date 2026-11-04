@@ -23,7 +23,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend } = await import("../src/pool-testnet.ts");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
 
 const RECORD = JSON.parse(readFileSync(new URL("../../../scripts/live-checks/pool-sol-deploy.devnet.json", import.meta.url), "utf8")) as { cluster: string; program_id: string; pool: string };
@@ -80,7 +80,7 @@ test("the testnet flow (card signpage-pool-notes): a Solana pool.deposit runs th
   await d.after;
   assert.deepEqual(d.answer(), { error: "failed" });
   assert.equal(opened, 1);
-  assert.deepEqual(k["pool.buy"](buy("solana"), ctx), { error: "not_allowed" }, "a pool buy waits for its card");
+  assert.deepEqual(k["pool.buy"](buy("solana"), ctx), { error: "not_allowed" }, "no lookup table is pinned for the devnet pool: no read, refused");
   assert.deepEqual(k["pool.deposit"]({ chain: "base", amount: "0.01" }, ctx), { error: "not_allowed" });
 });
 
@@ -244,4 +244,35 @@ test("the page's queue runs on solanaPool with the devnet pin and the page's two
   assert.ok(calls.every((c) => c.every((m) => ["getSlot", "getBlockTime", "getBlockHeight", "getMultipleAccounts", "getAccountInfo"].includes(m))), calls.flat().join(","));
   assert.deepEqual(await states(ns), ["UNSPENT"], "a pass that cannot read the pool holds no note");
   await t.signedOut();
+});
+
+// ---- card signpage-pool-buy: pool.buy on the devnet pool once its lookup table is pinned ----
+
+test("pool.buy runs on the pinned devnet pool once a lookup table is pinned; with none it is refused with no read", async () => {
+  let opened = 0;
+  const page = { store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) };
+  const reads: string[] = [];
+  const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
+  const k = poolKinds(testnetPoolDeps(testnetPool(page, { table: base58.encode(new Uint8Array(32).fill(9)), rpcs: [offline("a"), offline("b")] }).flow));
+  const r = k["pool.buy"](buy("solana"), ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
+  assert.equal(r.running, true, "the buy runs");
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "failed" }, "a queue that cannot open: failed, nothing sent");
+  assert.equal(opened, 1);
+  assert.deepEqual(reads, [], "no proof ready: no read");
+  const none = poolKinds(testnetPoolDeps(testnetPool(page, { table: null }).flow));
+  assert.deepEqual(none["pool.buy"](buy("solana"), ctx), { error: "not_allowed" });
+  assert.equal(opened, 1, "no table: no store opened, no read");
+});
+
+test("helperPoolSend posts {pool, tx} to the helper and takes only a 200 within the v1 table's limit", async () => {
+  const seen: { url: string; body: unknown }[] = [];
+  const ok = (async (url: string, init: RequestInit) => (seen.push({ url, body: JSON.parse(String(init.body)) }), new Response(JSON.stringify({ signature: "x" }), { status: 200 }))) as unknown as typeof fetch;
+  assert.deepEqual(await helperPoolSend("P", Uint8Array.of(1, 2, 3), ok), { signature: "x" });
+  assert.match(seen[0]!.url, /\/v1\/pool\/solana\/send$/);
+  assert.deepEqual(seen[0]!.body, { pool: "P", tx: "AQID" });
+  const refused = (async () => new Response("{}", { status: 422 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSend("P", Uint8Array.of(1), refused), /HTTP 422/);
+  const big = (async () => new Response(JSON.stringify({ signature: "x".repeat(5000) }), { status: 200 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSend("P", Uint8Array.of(1), big), /over 4096 B/);
 });

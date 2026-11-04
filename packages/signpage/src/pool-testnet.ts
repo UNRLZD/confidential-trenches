@@ -13,7 +13,12 @@
 //   (../../wallet/src/pool/solana.ts solanaPool: the pin, the two devnet RPCs, the helper's GET /v1/pool/fee). The queue
 //   proves only UNSPENT notes, so none for a note still INCOMING. Sign out (this tab's or another's) closes the queue,
 //   which frees its notes and zeroes its seed copy, and ends the prover's worker; a landing after it finds no seed.
+// - pool.buy (card signpage-pool-buy): src/pool-buy.ts on the queue's ready proofs, sent through the helper's POST
+//   /v1/pool/solana/send and settled through the wallet's solanaSettleSpent once it reads back. A tag 3 loads its
+//   accounts from the pin's lookup table: none is pinned for the devnet pool yet (DEVNET_TABLE), so pool.buy is refused
+//   not_allowed, with no read, until one is.
 // main.ts takes these only in the testnet build; SIGN_HOST's build keeps its mainnet deps and carries none of this.
+import { base64 } from "@scure/base";
 import { solanaJsonRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
@@ -24,7 +29,9 @@ import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/sr
 import { poolDepositKind, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { TRADE_HELPER } from "./trade.ts";
-import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer } from "../../wallet/src/pool/solana.ts";
+import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
+import { poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import type { PoolChain } from "./rules/pool.ts";
@@ -57,7 +64,31 @@ export type TestnetOver = {
   rpcs?: readonly [SolanaRpc, SolanaRpc];
   fetch?: typeof fetch;
   hardwareConcurrency?: number;
+  /** The lookup table pool.buy loads (DEVNET_TABLE otherwise). */
+  table?: string | null;
 };
+
+/** The devnet pool's lookup table: none is created and pinned yet (scripts/live-checks/pool-sol-deploy.devnet.json
+ *  records the pool and no table), so pool.buy is refused until it is. */
+const DEVNET_TABLE: string | null = null;
+const SEND_TIMEOUT_MS = 90_000;
+
+/** POST /v1/pool/solana/send: the helper's answer as it came (pool-buy.ts reads it back on two RPCs). */
+export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: typeof fetch = fetch): Promise<unknown> {
+  const res = await fetchFn(`${TRADE_HELPER}/v1/pool/solana/send`, {
+    ...HELPER_FETCH_INIT,
+    redirect: "error",
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pool, tx: base64.encode(tx) }),
+    signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+  });
+  if (res.status !== 200) throw new Error(`pool send: HTTP ${res.status}`);
+  const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/solana/send")!.limitBytes!;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.length > SEND_ANSWER_MAX) throw new Error(`pool send: an answer over ${SEND_ANSWER_MAX} B`);
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+}
 
 const FEE_TIMEOUT_MS = 10_000;
 
@@ -154,6 +185,49 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
 
   const deposit = poolDepositKind(() => host());
+  // pool.buy: the open queue's ready proofs; one run per tap, each picking a proof no other run of this page holds
+  const table = over.table === undefined ? DEVNET_TABLE : over.table;
+  const claimed = new Set<string>();
+  const buyHost = (): PoolBuyHost & { end(): void } => {
+    let notes: NoteStore | null = null;
+    // the queue, opened when it is not; one that cannot open (signed out) is dropped, so the next tap opens it again
+    const q = async (): Promise<ProofQueue<SolanaReleaseRequest>> => {
+      const p = (open ??= openQueue());
+      try {
+        return (await p).queue as ProofQueue<SolanaReleaseRequest>;
+      } catch (e) {
+        if (open === p) open = null;
+        throw e;
+      }
+    };
+    return {
+      pin: pin!,
+      table,
+      cluster: "devnet",
+      rpcs: rpcs(),
+      claimed,
+      // none ready (a page that has landed no deposit since it loaded has run no pass): a pass starts for the next tap
+      ready: async () => {
+        const list = (await q()).ready();
+        if (list.length === 0) void proofs();
+        return list;
+      },
+      take: async (id) => (await q()).take(id),
+      seed64: page.seed64,
+      send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
+      settle: async (noteId) => {
+        const seed64 = await page.seed64();
+        try {
+          notes ??= await openNoteStore(await page.store());
+          return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, rpcs: rpcs() });
+        } finally {
+          seed64.fill(0);
+        }
+      },
+      end: () => notes?.close(),
+    };
+  };
+  const buy = poolBuyKind(() => buyHost());
   let settling: Promise<void> | null = null;
   const settle = (): Promise<void> => {
     if (pin === undefined) return Promise.resolve();
@@ -195,7 +269,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return p;
   };
   return {
-    flow: (ask, ctx) => (ask.kind === "pool.deposit" && ask.chain === "solana" && pin !== undefined ? deposit(ask, ctx) : { error: "not_allowed" }),
+    flow: (ask, ctx) =>
+      ask.chain !== "solana" || pin === undefined
+        ? { error: "not_allowed" }
+        : ask.kind === "pool.deposit"
+          ? deposit(ask, ctx)
+          : ask.kind === "pool.buy" && table !== null
+            ? buy(ask, ctx)
+            : { error: "not_allowed" },
     host: () => host(),
     settle,
     stateRead,

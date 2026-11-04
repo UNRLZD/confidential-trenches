@@ -364,8 +364,11 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   // armed W signs a buy (arming/records.ts solanaArmedSigner: it derives W_{sol,l,j} of the arm record, refuses unless
   // the address is the record's, signs the one message and zeroes the key, test/arm-key-zero.test.ts). The other
   // callers zero W's key at once and export no signer, so the signer derives W itself rather than through a pass-through.
+  // And where a pool buy signs at the tap (signpage src/pool-buy.ts runPoolBuy: W_{sol,l,j} of the ready proof, refused
+  // unless it is the proof's recipient, signs only the message signSolana's check passed, its key zeroed in a finally;
+  // card signpage-pool-buy).
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts"]);
+  assert.deepEqual(calls, ["packages/signpage/src/pool-buy.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts"]);
 });
 
 // ---------- fold 2 ----------
