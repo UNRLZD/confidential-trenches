@@ -15,6 +15,7 @@
 // --live writes the card's live record (CARD / live: PASS|FAIL, Money path: yes, one Tx line per tx) for the money gate,
 // and beside it the tx-bytes file (<record>.tx-bytes.json) with each tx's signed bytes the deploy script kept (the
 // faucet's tx has none), which a tx one operator reads needs to be proven.
+// Runs: once, the team's testnet USDC deploy read back on chain; no host deploy changes it
 import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";

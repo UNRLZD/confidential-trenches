@@ -16,6 +16,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --account checks another account against the same record (the recorded bad answers). --record writes every RPC
 // answer the run read to <file>, so the check's test can replay it.
+// Runs: once, a contract deploy's read-back (the testnet vault, keys []); the vault has no deploy path after it
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
@@ -36,19 +37,24 @@ export const MAINNET_USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6a
 export const CIRCLE_TESTNET_USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
 export { RPCS, TESTNET_VERSION };
 
-// What makes a wasm not this testnet build, read from its bytes: it holds TESTNET_TOKEN and neither other token id.
-// No bare word is read, so a later string that says "mainnet" cannot refuse a correct build.
-export function networkProblems(buf) {
+// The three token ids a vault build can name, each with its name in a check's lines.
+export const TOKEN_NAMES = { [TESTNET_TOKEN]: "the testnet token", [MAINNET_USDC]: "mainnet USDC", [CIRCLE_TESTNET_USDC]: "Circle's testnet USDC" };
+
+// What makes a wasm not the build for token `want`, read from its bytes: it holds `want` and no other id of
+// TOKEN_NAMES. No bare word is read, so a later string that says "mainnet" cannot refuse a correct build.
+export function tokenProblems(buf, want) {
   const b = Buffer.from(buf);
   const problems = [];
-  if (!b.includes(TESTNET_TOKEN)) problems.push(`does not hold the testnet token ${TESTNET_TOKEN}`);
-  if (b.includes(MAINNET_USDC)) problems.push(`holds mainnet USDC ${MAINNET_USDC}`);
-  if (b.includes(CIRCLE_TESTNET_USDC)) problems.push(`holds Circle's testnet USDC ${CIRCLE_TESTNET_USDC}`);
+  if (!b.includes(want)) problems.push(`does not hold ${TOKEN_NAMES[want] ?? "the token"} ${want}`);
+  for (const [id, name] of Object.entries(TOKEN_NAMES)) if (id !== want && b.includes(id)) problems.push(`holds ${name} ${id}`);
   return problems;
 }
 
+// What makes a wasm not this testnet build: it holds TESTNET_TOKEN and neither other token id.
+export const networkProblems = (buf) => tokenProblems(buf, TESTNET_TOKEN);
+
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-function b58(buf) {
+export function b58(buf) {
   let n = BigInt(`0x${Buffer.from(buf).toString("hex") || "0"}`);
   let s = "";
   while (n > 0n) {
@@ -62,7 +68,7 @@ function b58(buf) {
   return s;
 }
 
-async function query(fetchFn, url, params) {
+export async function query(fetchFn, url, params) {
   const r = await fetchFn(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -75,10 +81,56 @@ async function query(fetchFn, url, params) {
   return json.result;
 }
 
-const view = async (fetchFn, url, account_id, method_name, args) => {
+export const view = async (fetchFn, url, account_id, method_name, args) => {
   const r = await query(fetchFn, url, { request_type: "call_function", account_id, method_name, args_base64: Buffer.from(JSON.stringify(args)).toString("base64"), finality: "final" });
   return { value: JSON.parse(Buffer.from(r.result).toString("utf8")), block: r.block_height };
 };
+
+// The reads of a deployed vault on one RPC `url`, at the final block, each told to `say(good, line)`: its key list is [];
+// its code hash (view_account) and its code's sha256 (view_code) are the record's; the code passes wasmProblems and
+// names `token` and no other token id (tokenProblems); config() answers with `token` as its asset and a version
+// matching `version`. vault-mainnet.mjs reads a vault on either network with these same reads.
+export async function readVault({ fetchFn, url, account, deployment, token, version, say }) {
+  const at = `on ${url}`;
+  try {
+    const k = await query(fetchFn, url, { request_type: "view_access_key_list", account_id: account, finality: "final" });
+    const keys = Array.isArray(k.keys) ? k.keys : null;
+    say(keys !== null && keys.length === 0, `${account} key list is [] ${at}: ${keys === null ? "no list" : `${keys.length} key(s)${keys.length ? ` (${keys.map((x) => { const p = x.access_key?.permission; return typeof p === "string" ? p : Object.keys(p ?? {})[0]; }).join(", ")})` : ""}`} at block ${k.block_height}`);
+  } catch (e) {
+    say(false, `${account} key list ${at}: ${e.message}`);
+  }
+  try {
+    const a = await query(fetchFn, url, { request_type: "view_account", account_id: account, finality: "final" });
+    say(a.code_hash === deployment.code_hash, `${account} code hash ${a.code_hash} equals the record's ${deployment.code_hash} ${at} at block ${a.block_height}`);
+  } catch (e) {
+    say(false, `${account} code hash ${at}: ${e.message}`);
+  }
+  try {
+    const c = await query(fetchFn, url, { request_type: "view_code", account_id: account, finality: "final" });
+    const code = Buffer.from(c.code_base64, "base64");
+    const sha = createHash("sha256").update(code).digest("hex");
+    say(sha === deployment.wasm_sha256, `code sha256 ${sha} equals the record's ${deployment.wasm_sha256} ${at} (${code.length} B)`);
+    const w = wasmProblems(code);
+    say(w.banned.length === 0, `no banned import ${at}: ${w.banned.length ? w.banned.join(", ") : "none"}`);
+    say(w.promises.length === 0, `promise imports are a subset of the seven ${at}: [${w.promiseImports.join(", ")}]${w.promises.length ? `, not allowed: ${w.promises.join(", ")}` : ""}`);
+    say(w.exports.length === 0, `function exports are inside vault.md 2.5.7's list ${at}: [${w.functionExports.join(", ")}]${w.exports.length ? `, not allowed: ${w.exports.join(", ")}` : ""}`);
+    say(w.withdrawWithoutPayout.length === 0, `withdraw is exported only with on_payout ${at}: ${w.withdrawWithoutPayout.length ? "withdraw without on_payout" : "yes"}`);
+    say(w.testBuild.length === 0, `not the out-of-gas test build ${at}: ${w.testBuild.length ? `holds "${w.testBuild[0]}"` : "no test mark"}`);
+    const n = tokenProblems(code, token);
+    say(n.length === 0, `the code names ${TOKEN_NAMES[token]} and no other ${at}: ${n.length ? n.join("; ") : "yes"}`);
+  } catch (e) {
+    say(false, `code ${at}: ${e.message}`);
+  }
+  let cfg = null;
+  try {
+    ({ value: cfg } = await view(fetchFn, url, account, "config", {}));
+    const good = cfg.asset === token && /^\d+$/.test(cfg.scope) && version.test(cfg.version);
+    say(good, `config() answers ${at}: asset ${cfg.asset}, scope ${cfg.scope}, version ${cfg.version}`);
+  } catch (e) {
+    say(false, `config() ${at}: ${e.message}`);
+  }
+  return { config: cfg };
+}
 
 export async function check({ deployment, account = deployment.account_id, fetchFn = fetch, rpcs = RPCS }) {
   const lines = [];
@@ -94,42 +146,7 @@ export async function check({ deployment, account = deployment.account_id, fetch
   say(deployment.asset === TESTNET_TOKEN, `the record's asset ${deployment.asset} is the testnet token ${TESTNET_TOKEN}`);
   for (const url of rpcs) {
     const at = `on ${url}`;
-    try {
-      const k = await query(fetchFn, url, { request_type: "view_access_key_list", account_id: account, finality: "final" });
-      const keys = Array.isArray(k.keys) ? k.keys : null;
-      say(keys !== null && keys.length === 0, `${account} key list is [] ${at}: ${keys === null ? "no list" : `${keys.length} key(s)${keys.length ? ` (${keys.map((x) => { const p = x.access_key?.permission; return typeof p === "string" ? p : Object.keys(p ?? {})[0]; }).join(", ")})` : ""}`} at block ${k.block_height}`);
-    } catch (e) {
-      say(false, `${account} key list ${at}: ${e.message}`);
-    }
-    try {
-      const a = await query(fetchFn, url, { request_type: "view_account", account_id: account, finality: "final" });
-      say(a.code_hash === deployment.code_hash, `${account} code hash ${a.code_hash} equals the record's ${deployment.code_hash} ${at} at block ${a.block_height}`);
-    } catch (e) {
-      say(false, `${account} code hash ${at}: ${e.message}`);
-    }
-    try {
-      const c = await query(fetchFn, url, { request_type: "view_code", account_id: account, finality: "final" });
-      const code = Buffer.from(c.code_base64, "base64");
-      const sha = createHash("sha256").update(code).digest("hex");
-      say(sha === deployment.wasm_sha256, `code sha256 ${sha} equals the record's ${deployment.wasm_sha256} ${at} (${code.length} B)`);
-      const w = wasmProblems(code);
-      say(w.banned.length === 0, `no banned import ${at}: ${w.banned.length ? w.banned.join(", ") : "none"}`);
-      say(w.promises.length === 0, `promise imports are a subset of the seven ${at}: [${w.promiseImports.join(", ")}]${w.promises.length ? `, not allowed: ${w.promises.join(", ")}` : ""}`);
-      say(w.exports.length === 0, `function exports are inside vault.md 2.5.7's list ${at}: [${w.functionExports.join(", ")}]${w.exports.length ? `, not allowed: ${w.exports.join(", ")}` : ""}`);
-      say(w.withdrawWithoutPayout.length === 0, `withdraw is exported only with on_payout ${at}: ${w.withdrawWithoutPayout.length ? "withdraw without on_payout" : "yes"}`);
-      say(w.testBuild.length === 0, `not the out-of-gas test build ${at}: ${w.testBuild.length ? `holds "${w.testBuild[0]}"` : "no test mark"}`);
-      const n = networkProblems(code);
-      say(n.length === 0, `the code names the testnet token and no other ${at}: ${n.length ? n.join("; ") : "yes"}`);
-    } catch (e) {
-      say(false, `code ${at}: ${e.message}`);
-    }
-    try {
-      const { value: cfg } = await view(fetchFn, url, account, "config", {});
-      const good = cfg.asset === TESTNET_TOKEN && /^\d+$/.test(cfg.scope) && TESTNET_VERSION.test(cfg.version);
-      say(good, `config() answers ${at}: asset ${cfg.asset}, scope ${cfg.scope}, version ${cfg.version}`);
-    } catch (e) {
-      say(false, `config() ${at}: ${e.message}`);
-    }
+    await readVault({ fetchFn, url, account, deployment, token: TESTNET_TOKEN, version: TESTNET_VERSION, say });
     try {
       const { value: bal, block } = await view(fetchFn, url, TESTNET_TOKEN, "storage_balance_of", { account_id: account });
       const good = bal !== null && /^\d+$/.test(bal.total ?? "") && BigInt(bal.total) > 0n;

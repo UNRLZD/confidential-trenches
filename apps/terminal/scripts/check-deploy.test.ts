@@ -307,7 +307,7 @@ test("deploy.mjs's live runs name every live check that reads APP_HOST, and its 
   writeFileSync(join(t, "_headers"), headersFor("testnet", readFileSync(join(BUILD, "_headers"), "utf8")));
   assert.deepEqual([networkOfBuild(BUILD), networkOfBuild(t)], ["mainnet", "testnet"]);
   const { LIVE_CHECKS } = await import("./deploy.mjs");
-  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash", "signpage-pool-price", "signpage-buy-route-events"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool, trade-box-bal-cash, signpage-pool-price and signpage-buy-route-events");
+  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash", "signpage-pool-price", "signpage-buy-route-events", "balances-per-chain"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool, trade-box-bal-cash, signpage-pool-price, signpage-buy-route-events and balances-per-chain");
 });
 
 // A build like BUILD with `edit` applied to a fresh copy; its problems from checkDir.
@@ -366,43 +366,4 @@ test("deploy.mjs refuses a build whose script bytes differ from their integrity:
   assert.equal(r.code, 1);
   assert.match(r.err.join("\n"), /REFUSED index\.html: script \/assets\/index-a1\.js: integrity [\s\S]*nothing was uploaded/);
   assert.equal(s.uploads().length, 0);
-});
-
-// Card app-live-list-complete: a live check that holds APP_HOST's address is a claim about what APP_HOST serves, so a host's
-// deploy list runs it after every deploy (the app's LIVE_CHECKS, the signing page's, the helper's), or ONE_OFF names it
-// with the reason it is not run per deploy. trade-box-pool shipped at 27d7ce0 in no list, its check never run.
-const APP_ADDRESS = /["'`]https:\/\/confidential\.unrealized\.trade\/?["'`]/;
-/** The live checks in `dir` that hold APP_HOST's address and that no list in `listed` names. */
-const unlisted = (dir: string, listed: Set<string>) =>
-  readdirSync(dir)
-    .filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs") && APP_ADDRESS.test(readFileSync(join(dir, f), "utf8")))
-    .map((f) => f.replace(/\.mjs$/, ""))
-    .filter((k) => !listed.has(k))
-    .sort();
-
-test("every live check that holds APP_HOST's address runs after a deploy, or ONE_OFF names it with its reason", async () => {
-  const app = await import("./deploy.mjs");
-  // the signing page's list read as text: a file outside Blindfill imports only the kit's entry (check:imports)
-  const signText = readFileSync(join(HERE, "..", "..", "..", "packages", "signpage", "scripts", "deploy.mjs"), "utf8");
-  const signList = /^export const LIVE_CHECKS = (\[[^\]]*\]);$/m.exec(signText)?.[1];
-  assert.ok(signList, "the signing page's deploy.mjs holds no one-line LIVE_CHECKS literal");
-  const sign = { LIVE_CHECKS: JSON.parse(signList) as string[] };
-  assert.ok(sign.LIVE_CHECKS.includes("signpage-release") && sign.LIVE_CHECKS.length >= 10, signList);
-  const helper = await import("../../../scripts/ci/helper-live-checks.mjs");
-  const oneOff: Record<string, string> = app.ONE_OFF ?? {};
-  for (const [k, why] of Object.entries(oneOff)) assert.ok(typeof why === "string" && why.length > 20, `ONE_OFF ${k} gives no reason`);
-  const listed = new Set<string>([...app.LIVE_CHECKS, ...sign.LIVE_CHECKS, ...helper.LIVE_CHECKS, ...Object.keys(oneOff)]);
-  const dir = join(HERE, "..", "..", "..", "scripts", "live-checks");
-  assert.deepEqual(unlisted(dir, listed), [], "a live check holds APP_HOST's address and no deploy list runs it: add it to its host's LIVE_CHECKS, or to ONE_OFF with its reason");
-  assert.ok(app.LIVE_CHECKS.includes("trade-box-pool"), "the app's deploy does not run trade-box-pool");
-  // planted: a check file holding APP_HOST's address in no list is caught, under each quote; one that holds only the
-  // helper's or the signing page's address is not APP_HOST's
-  const t = mkdtempSync(join(tmpdir(), "check-deploy-unlisted-"));
-  writeFileSync(join(t, "planted-check.mjs"), 'export const APP_HOST = "https://confidential.unrealized.trade";\n');
-  writeFileSync(join(t, "planted-slash.mjs"), "const u = `https://confidential.unrealized.trade/`;\n");
-  writeFileSync(join(t, "planted-check.test.mjs"), 'const APP_HOST = "https://confidential.unrealized.trade";\n');
-  writeFileSync(join(t, "helper-only.mjs"), 'const H = "https://api.confidential.unrealized.trade";\n');
-  writeFileSync(join(t, "listed.mjs"), 'const A = "https://confidential.unrealized.trade";\n');
-  assert.deepEqual(unlisted(t, new Set(["listed"])), ["planted-check", "planted-slash"]);
-  rmSync(t, { recursive: true, force: true });
 });

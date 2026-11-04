@@ -691,12 +691,12 @@ export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promis
   }
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools, undefined, undefined, evmLists, evmSwaps, ready, senders, solana),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana),
   );
   server.listen(port);
   // the relayers start once this process holds the senders (sendersFromEnv): a restart resends their open sends and
@@ -800,6 +800,12 @@ if (import.meta.main) {
     // a Solana pool whose configured fee is not the kit's for the rent both providers read stops the helper (at the
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
     const pools = solanaPoolSendersFromEnv(process.env);
+    // card helper-ready-without-gt: every part read from the environment is read here, at the start, so a value the
+    // helper refuses stops it at once (exit 2, naming the variable). Left to handler()'s defaults they were read only at
+    // listen(), which a peer runs once warm, inside a promise: an unhandled rejection, exit 1 with no line of ours, and
+    // a restart loop until redeploy.sh's bound (18:55-18:58Z: a partial POOL_EVM_*_BASE_SEPOLIA set)
+    const evmPools = evmPoolSendersFromEnv(process.env);
+    const release = releaseOf(process.env);
     for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
     const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     lists.warm();
@@ -811,7 +817,7 @@ if (import.meta.main) {
     let ready = false;
     const warmed = warmUntilReady({ lists, evmLists, token }).then(() => void (ready = true));
     const listen = () => {
-      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()]))); // warms both relayers once the senders are ours
+      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools); // warms both relayers once the senders are ours
       drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready ? "" : ", warming"}`));
     };

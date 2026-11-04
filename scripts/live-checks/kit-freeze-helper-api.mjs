@@ -32,6 +32,7 @@
 //   node scripts/live-checks/kit-freeze-helper-api.mjs [--tag <06:00Z tag>] [--require-health] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2 (after 06:00Z, --tag is required)
 // --record writes every answer the run read to <file>, so the check's test can replay it.
+// Runs: once, the kit freeze: the kit's /v1 file on GitHub at a tag, not what a host serves; APP_HOST is only the Origin of its health read
 import "../net-window.mjs";
 import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
