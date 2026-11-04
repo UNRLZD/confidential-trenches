@@ -13,8 +13,9 @@
 // PoolManager logs) and pairs the token with USDC, WETH or ETH: the key is the PositionManager's poolKeys() when it knows
 // the pool, and for a pool it never made (Doppler) v4Key works the key out from the swap's fee and the addresses in its
 // transaction, trusted only when the hash equals the id. A token with
-// no such pool (Zora's creator-coin pairs, a cbBTC or VIRTUAL pair, a venue not listed here: slice 2 of the card) answers
-// 404, never a guess.
+// no such pool (Zora's creator-coin pairs, a cbBTC or VIRTUAL pair, a Pons curve quoted in a stock token, a venue not listed
+// here) answers an empty chart and tape from our own reads (200, src "chain"), never a guess; 404 is only for a token off
+// the lists or a malformed request. A read that fails is never kept as "no pool": it answers 503 and is read again.
 //
 // Venues on Base, each address read from the chain on 2026-11-03 17:0xZ (a pool's factory() on base-rpc.publicnode.com,
 // and a PoolCreated or Initialize log of the factory decoded against the pool's token0() and token1()):
@@ -651,6 +652,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
     if (V.pons.length > 0) {
       const recs = await callsAgreed(head.n, V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` })));
+      // a record not read is no answer: never kept as "no pool" (a token with none answers the empty record)
+      if (recs.some((r) => r === undefined)) throw new Error("pons records not agreed");
       for (const r of recs) {
         if (r === undefined || !/^0x[0-9a-f]{960}$/.test(r) || wordAddr(r, 0) !== token || BigInt(`0x${r.slice(2 + 64 * 14)}`) !== 1n) continue;
         const [curve, pair] = [wordAddr(r, 1)!, wordAddr(r, 4)!];
@@ -674,10 +677,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return { pool: best.c, decimals, seed: refOk || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs: swaps[best.i]! } : undefined };
   }
 
-  async function mainPool(token: string): Promise<Found | null> {
+  /** A listed token's main pool, null when our reads find none (served as an empty chart), "unlisted" off the lists. */
+  async function mainPool(token: string): Promise<Found | null | "unlisted"> {
     const kept = pools.get(token);
-    if (kept !== undefined && now() - kept.at < (kept.found === null ? NONE_MS : POOL_KEEP_MS)) return kept.found === null ? null : { ...kept.found };
-    if (!(await deps.listed(token))) return null;
+    if (kept !== undefined && kept.found !== null && now() - kept.at < POOL_KEEP_MS) return { ...kept.found };
+    if (!(await deps.listed(token))) return "unlisted";
+    if (kept !== undefined && kept.found === null && now() - kept.at < NONE_MS) return null;
     let p = resolving.get(token);
     if (p === undefined) {
       p = findPool(token).finally(() => resolving.delete(token));
@@ -801,11 +806,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     timer.unref();
   }
 
-  /** The book of a listed token, read once before it is served (a first open waits for its cold read). */
-  async function open(token: string): Promise<Entry | DataAnswer> {
+  /** The book of a listed token, read once before it is served (a first open waits for its cold read); "none" for a
+   *  listed token our reads find no pool of, served as an empty chart and tape from our own reads, never a 404. */
+  async function open(token: string): Promise<Entry | DataAnswer | "none"> {
     let e = books.get(token);
     if (e === undefined) {
-      let found: Found | null = null;
+      let found: Found | null | "unlisted" = null;
       for (let attempt = 0; attempt < 2 && found === null; attempt++) {
         try {
           found = await mainPool(token);
@@ -814,7 +820,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           if (attempt === 1) return UPSTREAM;
         }
       }
-      if (found === null) return NOT_FOUND;
+      if (found === "unlisted") return NOT_FOUND;
+      if (found === null) return "none";
       if (books.size >= OPEN_MAX) return limited(5);
       e = books.get(token);
       if (e === undefined) {
@@ -839,6 +846,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
   const limited = (s: number): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS: s });
+  /** A listed token with no pool our reads find: an empty answer from our own reads, timed now. */
+  const empty = (fields: Record<string, unknown>): DataAnswer => {
+    const at = now();
+    return { status: 200, body: JSON.stringify({ ...fields, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+  };
 
   // -------------------------------------------------------------------------------------------------------------
   // History before our first bar: GeckoTerminal's OHLCV for our pool, through the one budget
@@ -911,6 +923,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = evmAddress(token);
       if (t === null || !(TFS as readonly string[]).includes(tf) || tf === "1s" || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
       const e = await open(t);
+      if (e === "none") return empty({ tf, candles: [] });
       if (!("book" in e)) return e;
       const own = e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book.ownFrom(tf as Tf);
@@ -936,6 +949,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = evmAddress(token);
       if (t === null || !Number.isSafeInteger(limit) || limit < 1 || limit > TRADES_MAX) return NOT_FOUND;
       const e = await open(t);
+      if (e === "none") return empty({ trades: [] });
       if (!("book" in e)) return e;
       const rows = e.book.tape(limit);
       await tradersOf(rows.map((r) => r.tx));

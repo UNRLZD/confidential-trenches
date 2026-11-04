@@ -6,7 +6,8 @@
 //     of the record's wasm_sha256, the reproducible build's;
 //   - view_code: its sha256 equals the record's wasm_sha256; its imports and exports pass vault-skeleton.mjs's
 //     wasmProblems (none of 2.8's banned imports, promise imports inside the seven, exports inside 2.5.7's list,
-//     withdraw only with on_payout); its bytes name the testnet token and no other (networkProblems);
+//     withdraw only with on_payout, not VT-S17's out-of-gas test build); its bytes name the testnet token and no other
+//     (networkProblems);
 //   - config(): asset is the team's testnet USDC and version a testnet one. Both are pinned here, never taken from the
 //     record (which the deploy script writes from config() itself);
 //   - storage_balance_of(vault) on that token: set, so a deposit's ft_transfer_call and a payout's ft_transfer can land
@@ -116,6 +117,7 @@ export async function check({ deployment, account = deployment.account_id, fetch
       say(w.promises.length === 0, `promise imports are a subset of the seven ${at}: [${w.promiseImports.join(", ")}]${w.promises.length ? `, not allowed: ${w.promises.join(", ")}` : ""}`);
       say(w.exports.length === 0, `function exports are inside vault.md 2.5.7's list ${at}: [${w.functionExports.join(", ")}]${w.exports.length ? `, not allowed: ${w.exports.join(", ")}` : ""}`);
       say(w.withdrawWithoutPayout.length === 0, `withdraw is exported only with on_payout ${at}: ${w.withdrawWithoutPayout.length ? "withdraw without on_payout" : "yes"}`);
+      say(w.testBuild.length === 0, `not the out-of-gas test build ${at}: ${w.testBuild.length ? `holds "${w.testBuild[0]}"` : "no test mark"}`);
       const n = networkProblems(code);
       say(n.length === 0, `the code names the testnet token and no other ${at}: ${n.length ? n.join("; ") : "yes"}`);
     } catch (e) {

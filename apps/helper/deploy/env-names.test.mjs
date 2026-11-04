@@ -22,7 +22,7 @@ import { bindSenderFromEnv } from "../src/bind/env.ts";
 import { tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
 import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
-import { evmSwapsFromEnv, solanaTokenFromEnv } from "../src/server.ts";
+import { evmSwapsFromEnv, solanaTokenFromEnv, solanaTradesFromEnv } from "../src/server.ts";
 import { solanaPoolSendersFromEnv } from "../src/pool/solana.ts";
 import { evmPoolSendersFromEnv } from "../src/pool/evm.ts";
 import { releaseOf } from "../src/health.ts";
@@ -60,6 +60,8 @@ const noProxy = { handle: async () => ({ status: 503, headers: {}, body: "" }) }
 const noLists = { get: async () => ({ status: 503, body: "" }), warm: () => () => {} };
 // evmSwapsFromEnv takes the server's EVM lists and reads its names only for a chain that has them: a base entry
 const noEvmLists = { base: noLists };
+// solanaTradesFromEnv takes the server's Solana lists and token page (its history); its own names are read with stubs
+const noToken = { candles: async () => ({ status: 503, body: "" }) };
 export const ENV_READERS = {
   // the start's check reads every vendor's key and budget; each read answers "set" so none stops it half way
   checkVendorPlans: (env) => checkVendorPlans(new Proxy(env, { get: (t, k) => (t[k], "set") })),
@@ -74,6 +76,7 @@ export const ENV_READERS = {
   solanaPoolSendersFromEnv,
   evmPoolSendersFromEnv,
   evmSwapsFromEnv: (env) => evmSwapsFromEnv(env, noEvmLists),
+  solanaTradesFromEnv: (env) => solanaTradesFromEnv(env, noLists, noToken).stop(),
 };
 
 /** An env that records every name read from it (a get, an `in`), holding `values`. */
@@ -136,6 +139,9 @@ test("every environment name the helper's code reads when it runs is passed by c
   assert.deepEqual([...atRun].filter((n) => !passed.has(n)).sort(), []);
   // Base's swap reads (data/evm/swaps.ts) read the host's BASE_RPC_URL themselves, apart from createRpc's read
   assert.ok(namesReadAtRun({ evmSwapsFromEnv: ENV_READERS.evmSwapsFromEnv }).has("BASE_RPC_URL"));
+  // Solana's own trade reads (data/solana/trades.ts): the keyed stream and request provider, each optional
+  const sol = namesReadAtRun({ solanaTradesFromEnv: ENV_READERS.solanaTradesFromEnv });
+  assert.ok(["SOLANA_STREAM_WS_URL", "SOLANA_TRADES_RPC_URL"].every((n) => sol.has(n)), `the run read ${[...sol].join(", ")}`);
   // POST /v1/withdraw's names (withdraw/send.ts), read when nothing is set: a compose without one is caught
   assert.ok(["HELPER_RELEASE", "WITHDRAW_VAULT_MAINNET", "WITHDRAW_RELAYER_KEYS_TESTNET"].every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
   const without = passedNames(read("deploy/compose.yaml").replace(/^ {6}WITHDRAW_RELAYER_KEYS_TESTNET:.*\n/m, ""), read("Dockerfile"));

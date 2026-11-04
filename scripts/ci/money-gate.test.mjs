@@ -545,6 +545,22 @@ test("the pool programs are money code: a change under each, with \"Money path: 
   }
 });
 
+test("the signing page is money code: a change under it, with \"Money path: no\" or no card, is refused; with no record it merges", async () => {
+  const f = "packages/signpage/src/pool-deposit.ts";
+  const esc = f.replace(/[.\/]/g, "\\$&");
+  const r = moneyRepo();
+  try {
+    const plain = r.commit("Card arm: code", { [f]: "// code\n" });
+    assert.deepEqual((await gate(r, r.base, plain)).refusals, []);
+    const no = r.commit("Card arm: code", { [f]: "// two\n", "scripts/live-checks/arm.md": liveRec("arm", "Money path: no\n") });
+    assert.match((await gate(r, plain, no)).refusals.join("\n"), new RegExp(`"Money path: no", but card arm changes money code \\(${esc}\\)`));
+    const nameless = r.commit("tweak the page", { [f]: "// three\n" });
+    assert.match((await gate(r, no, nameless)).refusals.join("\n"), new RegExp(`changes money code \\(${esc}\\) and names no card`));
+  } finally {
+    r.done();
+  }
+});
+
 test("a docs-only change passes with no record, and screen code is not money code", async () => {
   const r = moneyRepo();
   try {

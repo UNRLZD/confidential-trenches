@@ -244,13 +244,25 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     const snap = JSON.parse(l.body);
     candidates = [...new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token)))];
   }
+  // the first listed token with trades to check (a listed token with no pool our reads find answers an empty 200); else
+  // the first that answered, whose empty tape the check then fails, never a pass
   let reads;
+  let quiet;
   for (const t of candidates.slice(0, 12)) {
     const candles = await get(base, CANDLES_PATH(t, net), fetchFn);
     if (candles.status !== 200) continue;
-    reads = { token: t, candles, trades: await get(base, TRADES_PATH(t, net), fetchFn) };
-    break;
+    const r = { token: t, candles, trades: await get(base, TRADES_PATH(t, net), fetchFn) };
+    let n = 0;
+    try {
+      n = r.trades.status === 200 ? JSON.parse(r.trades.body).trades.length : 0;
+    } catch {}
+    if (n > 0) {
+      reads = r;
+      break;
+    }
+    quiet ??= r;
   }
+  reads ??= quiet;
   const at = net === "base" ? {} : { net };
   if (reads === undefined) {
     // the first candidate's answers, so a run that found none shows why

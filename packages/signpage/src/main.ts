@@ -74,7 +74,7 @@ import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
 import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
 import { releaseTradeDeps, SOLANA_PROVIDER_A, TRADE_HELPER, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
-import { testnetPoolDeps } from "./pool-testnet.ts";
+import { testnetPoolDeps, testnetPoolFlow, testnetPoolSettle } from "./pool-testnet.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import type { PoolChain } from "./rules/pool.ts";
 import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
@@ -152,10 +152,10 @@ else {
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (mainnet: none yet, every one refused not_allowed, no read made; the testnet build: the devnet
-      // pool, src/pool-testnet.ts); a sell's decimals read on two providers
+      // pool, src/pool-testnet.ts, whose flow deposits into it); a sell's decimals read on two providers
       ...poolKinds(
         POOL_TESTNET
-          ? testnetPoolDeps()
+          ? testnetPoolDeps(testnetPoolFlow({ store: () => open(), seed64: () => openSeed64() }))
           : {
               pinned: poolPinned,
               rpcs: (chain) => (chain === "solana" ? [solanaJsonRpc(SOLANA_PROVIDER_A), solanaHelperRpc(TRADE_HELPER)] : null),
@@ -499,6 +499,8 @@ function notesMoved(e: WalletEvent): void {
 // stored, which may be another tab's (never its words then).
 async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
+  // the testnet build: a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
+  if (POOL_TESTNET && !framed) testnetPoolSettle({ store: () => open(), seed64: () => openSeed64() });
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }
