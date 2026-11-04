@@ -280,7 +280,9 @@ function check(chain: RpcChain, r: unknown): Record<string, unknown> | undefined
 
 export function createRpc(env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
-  const now = deps.now ?? Date.now;
+  // the budgets', holds' and paces' clock: monotonic, in epoch ms (a wall clock that steps back would hold callers
+  // for the step's length; card helper-crowd-429)
+  const now = deps.now ?? (() => performance.timeOrigin + performance.now());
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
   // a keyed Solana provider's slot: its fallback is the public endpoint, on a budget of its own
