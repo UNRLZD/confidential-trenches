@@ -1,10 +1,12 @@
 // node --test scripts/live-checks/helper-evm-sender.test.mjs: the live check replays recorded runs
 // (helper-evm-sender.answers.json). good: apps/helper with both EVM testnet pools set: PASS. bad_deployed: HELPER_HOST
-// before its redeploy, which carries no EVM pool (404): FAIL. Made from the good run: a sender other than the kit's pin,
-// a field missing or added, a plant sent (200 with a hash), a plant refused with another code, an answer with no full-sha
+// before its redeploy, which carries no EVM pool (404): FAIL. Made from the good run: a
+// sell_sender other than the kit's pin, or null where the kit pins one, a field missing or added, a plant sent (200 with a hash), a plant refused with another code, an answer with no full-sha
 // X-Helper-Commit, a pool or a plant not read: each FAIL.
 // The plants are checked against the helper's own sell checks (apps/helper/src/pool/evm.ts), so the check plants what
-// the route reads, and each differs from a sell that passes every static check in its one field.
+// the route reads, and each differs from a sell that passes every static check in its one field. The sells the helper
+// sent (checkSells) are checked on the recorded testnet runs of pool-evm-testnet-run: read back as if the helper had
+// sent them, they pass every check but the gas limit, which the run's own sender estimated.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -12,7 +14,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolSender, evmReadSell } from "../../apps/helper/src/pool/evm.ts";
 import { evmPoolSignSellAuthorization, evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { evmPoolRecords, FIELDS, judge, NETWORKS, PLANTS, plantsOf, randomKey, read } from "./helper-evm-sender.mjs";
+import { checkSells, evmPoolRecords, FIELDS, judge, NETWORKS, PLANTS, plantsOf, randomKey, read, SELL_GAS, SENDER_FIELD, sendersOf } from "./helper-evm-sender.mjs";
+import { replayer } from "./notes-per-pool-evm.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-evm-sender.answers.json"), "utf8"));
@@ -22,7 +25,7 @@ const edit = (run, asked, f, network) => ({ ...run, pools: run.pools.map((p) => 
 const body = (x, f) => ({ ...x, body: JSON.stringify(f(JSON.parse(x.body))) });
 const OTHER = "0x000000000000000000000000000000000000beef";
 
-test("recorded good run: both testnet pools' fee answers name a sender, every plant refused with its own code: PASS", () => {
+test("recorded good run: both testnet pools' fee answers name a sell sender, every plant refused with its own code: PASS", () => {
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.deepEqual(A.good.pools.map((p) => p.network), Object.keys(evmPoolRecords()), "a pool for each deploy record");
@@ -34,9 +37,11 @@ test("recorded bad run: HELPER_HOST with no EVM pool (404 on the fee and on ever
   assert.ok(bad(r).includes("BAD [base-sepolia fee] GET /v1/pool/fee answers 404"), bad(r).join("\n"));
 });
 
-test("the sender: where the kit pins one, the fee answer's sender must be it", () => {
+test("the sell sender: where the kit pins one, the fee answer's sell_sender must be it; null only where none is pinned", () => {
   const g = A.good;
-  const sender = JSON.parse(g.pools[0].reads.find((x) => x.asked === "fee").body).sender;
+  assert.equal(SENDER_FIELD, "sell_sender");
+  const sender = JSON.parse(g.pools[0].reads.find((x) => x.asked === "fee").body)[SENDER_FIELD];
+  assert.match(sender, /^0x[0-9a-f]{40}$/);
   const venues = evmPoolVenues();
   const pinned = (pin) => ({ ...venues, [g.pools[0].network]: { ...venues[g.pools[0].network], sellSender: pin } });
   assert.equal(judge(g, { venues: pinned(sender) }).ok, true, "the pin is the sender");
@@ -44,7 +49,12 @@ test("the sender: where the kit pins one, the fee answer's sender must be it", (
   const other = judge(g, { venues: pinned(OTHER) });
   assert.equal(other.ok, false);
   assert.ok(bad(other).some((l) => l.includes(`the kit's pin ${OTHER}`)), bad(other).join("\n"));
-  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, sender: "0x1234" })))).ok, false, "a sender that is no address");
+  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, [SENDER_FIELD]: "0x1234" })))).ok, false, "a sell sender that is no address");
+  const none = edit(g, "fee", (x) => body(x, (b) => ({ ...b, [SENDER_FIELD]: null })), g.pools[0].network);
+  assert.equal(judge(none).ok, true, "no sell key and no pin: null");
+  assert.equal(judge(none, { venues: pinned(sender) }).ok, false, "no sell key where the kit pins one");
+  assert.deepEqual(sendersOf(none), { ...sendersOf(g), [g.pools[0].network]: null });
+  assert.equal(sendersOf(g)[g.pools[0].network], sender);
 });
 
 test("the fee answer: a field missing or added, another chain, network or pool, an off-grid epoch: each FAIL", () => {
@@ -107,7 +117,7 @@ test("plantsOf() builds what the helper's sell checks read: each plant its own s
   assert.deepEqual(Object.keys(records), ["base-sepolia", "robinhood-testnet"]);
   for (const [network, pool] of Object.entries(records)) {
     const p = plantsOf({ network, pool, nowMs: NOW });
-    const sender = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), floor: 10n ** 13n }, [recording(calls), recording(calls)], () => NOW);
+    const sender = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey: randomKey(), floor: 10n ** 13n }, [recording(calls), recording(calls)], () => NOW);
     {
       const calls = [];
       const a = await sender(calls).sell(p.base);
@@ -138,6 +148,7 @@ test("each plant differs from the base sell in its one field (and the signature 
     deadline_near: ["sell.deadline", "sell.signature"],
     sell_other_pool: ["sell.pool", "sell.signature"],
     fee_over_cap: ["sell.fee"],
+    route_other_target: ["sell.target", "sell.signature"],
   };
   for (const [network, pool] of Object.entries(evmPoolRecords())) {
     const p = plantsOf({ network, pool, nowMs: NOW });
@@ -149,6 +160,7 @@ test("each plant differs from the base sell in its one field (and the signature 
     assert.equal(p.base.authorization.address, v.sellDelegate);
     assert.equal(base["sell.pool"], pool);
     assert.equal(base["sell.target"], v.poolManager);
+    assert.equal(read2(p.plants.route_other_target)["sell.target"], "0x000000000000000000000000000000000000dead");
     for (const [asked, fields] of Object.entries(WANT)) {
       const got = read2(p.plants[asked]);
       assert.deepEqual(Object.keys(base).filter((k) => base[k] !== got[k]), fields, `${network} ${asked}`);
@@ -181,4 +193,72 @@ test("read() asks each record's pool for its fee, then posts every plant to the 
   const records = evmPoolRecords();
   assert.deepEqual(asked, Object.values(records).flatMap((pool) => [`GET /v1/pool/fee?pool=${pool}`, ...PLANTS.map(() => "POST /v1/pool/evm/sell")]));
   assert.deepEqual(run.pools.map((p) => [p.network, p.pool, p.reads.map((x) => x.asked)]), Object.entries(records).map(([n, pool]) => [n, pool, ["fee", ...PLANTS.map(([a]) => a)]]));
+});
+
+// ---- The sells the helper sent ----
+
+const RUN = JSON.parse(readFileSync(path.join(HERE, "pool-evm-testnet-run.answers.json"), "utf8"));
+/** The recorded whole runs (pool-evm-testnet-run), each sell read as one the helper sent, with `f` applied to its log. */
+const helperRuns = (f = (log) => log) => RUN.runs.filter((r) => !r.record.stopped).map((r) => ({ record: { ...r.record, txs: r.record.txs.map((t) => (t.kind === "sell" ? { ...t, via: "helper", landed: true } : t)) }, urls: r.urls, log: f(structuredClone(r.good)) }));
+const relayers = (runs) => Object.fromEntries(runs.map((r) => [r.record.chain, r.record.relayer]));
+const replayOf = (x) => replayer(x.log);
+/** the log with each sell's transaction read at the helper's gas limit */
+const atSellGas = (runs) => (log) => {
+  const sells = new Set(runs.flatMap((r) => r.record.txs.filter((t) => t.kind === "sell").map((t) => t.hash)));
+  for (const e of log) if (e.method === "eth_getTransactionByHash" && sells.has(e.params[0]) && e.result) e.result.gas = `0x${SELL_GAS.toString(16)}`;
+  return log;
+};
+
+test("checkSells on the recorded testnet runs: every check reads real sells; the run's own sender estimated its gas, so the 1,000,000 limit fails each", async () => {
+  const runs = helperRuns();
+  assert.deepEqual(runs.map((r) => r.record.chain).sort(), [...NETWORKS].sort());
+  const r = await checkSells(runs, replayOf, relayers(runs));
+  assert.equal(r.ok, false);
+  const sells = runs.flatMap((x) => x.record.txs.filter((t) => t.kind === "sell"));
+  assert.ok(sells.length >= 3);
+  assert.deepEqual(bad(r).map((l) => l.replace(/ gas limit \d+,.*/, "")), sells.map((t) => `BAD [${runs.find((x) => x.record.txs.includes(t)).record.chain} sell ${t.hash}]`), bad(r).join("\n"));
+  for (const t of sells) {
+    assert.ok(r.lines.some((l) => l.startsWith(`ok  [`) && l.includes(`${t.hash}] the authorization is signed by ${t.w}`)), `${t.hash}: W signed the authorization`);
+    assert.ok(r.lines.some((l) => l.startsWith(`ok  [`) && l.includes(`${t.hash}] the fee ${t.fee} covers the cost`)), `${t.hash}: the fee covers the cost`);
+  }
+});
+
+test("checkSells: the same reads at the helper's gas limit pass; another sender, a fee under the cost, a spoiled run, or a testnet with no helper sell: each FAIL", async () => {
+  const runs = helperRuns();
+  const at = helperRuns(atSellGas(runs));
+  const good = await checkSells(at, replayOf, relayers(at));
+  assert.equal(good.ok, true, good.lines.join("\n"));
+  // another sell sender, or none named
+  for (const n of NETWORKS) {
+    assert.equal((await checkSells(at, replayOf, { ...relayers(at), [n]: "0x000000000000000000000000000000000000beef" })).ok, false, `${n}: another sender`);
+    assert.equal((await checkSells(at, replayOf, { ...relayers(at), [n]: null })).ok, false, `${n}: no sell sender`);
+  }
+  // a fee word under the cost: the sell's input with fee 1 wei
+  const cheap = helperRuns((log) => {
+    atSellGas(runs)(log);
+    for (const e of log) if (e.method === "eth_getTransactionByHash" && e.result?.input?.startsWith("0x") && runs.some((r) => r.record.txs.some((t) => t.kind === "sell" && t.hash === e.params[0]))) e.result.input = `${e.result.input.slice(0, 74)}${"0".repeat(63)}1${e.result.input.slice(138)}`;
+    return log;
+  });
+  const c = await checkSells(cheap, replayOf, relayers(cheap));
+  assert.equal(c.ok, false);
+  assert.ok(bad(c).some((l) => l.includes("the fee 1 covers the cost")), bad(c).join("\n"));
+  // a sell's receipt reverted on one RPC
+  const reverted = helperRuns((log) => {
+    atSellGas(runs)(log);
+    const h = runs[0].record.txs.find((t) => t.kind === "sell").hash;
+    const e = log.find((x) => x.method === "eth_getTransactionReceipt" && x.params[0] === h && x.url === runs[0].urls[0]);
+    if (e) e.result.status = "0x0"; // the base-sepolia run's log (each run's log is edited in turn)
+    return log;
+  });
+  assert.equal((await checkSells(reverted, replayOf, relayers(reverted))).ok, false, "a sell that reverted");
+  // a testnet with no helper sell
+  for (const n of NETWORKS) {
+    const only = at.filter((x) => x.record.chain !== n);
+    const r = await checkSells(only, replayOf, relayers(at));
+    assert.equal(r.ok, false);
+    assert.ok(bad(r).includes(`BAD [${n}] a sell the helper sent, read back (helper-evm-sender.run.${n}.json)`), bad(r).join("\n"));
+  }
+  const notHelper = at.map((x) => ({ ...x, record: { ...x.record, txs: x.record.txs.map((t) => ({ ...t, via: undefined })) } }));
+  assert.equal((await checkSells(notHelper, replayOf, relayers(at))).ok, false, "sells the run's own key sent");
+  assert.equal((await checkSells([], replayOf, {})).ok, false, "no run");
 });

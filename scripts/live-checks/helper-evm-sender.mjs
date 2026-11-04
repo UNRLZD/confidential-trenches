@@ -3,10 +3,11 @@
 // refuses a planted bad sell on POST /v1/pool/evm/sell without reading a provider or sending anything
 // (apps/helper/src/pool/evm.ts sellHeld). The pools are the ones pool-evm-deploy's records name
 // (pool-evm-deploy.<network>.json, PrivacyPoolSimple); a network with no record has no pool to check.
-// For each pool it reads GET /v1/pool/fee?pool=<pool>, then POSTs eight sells it builds with a throwaway W key made at
+// For each pool it reads GET /v1/pool/fee?pool=<pool>, then POSTs nine sells it builds with a throwaway W key made at
 // run time, each good but for one field. The sell they are made from passes every static check: W's Sell signed over
-// SellDelegate's digest, W's authorization of the kit's pinned sell delegate (evmPoolSignSellAuthorization), the pool
-// the record names, fee <= feeCap < minOut, a deadline 300 s away. Its authorization nonce is 2^62, which no fresh W
+// SellDelegate's digest, W's authorization of the kit's pinned sell delegate (evmPoolSignSellAuthorization), a swap the
+// kit's sell builder makes (one v4 hop through the PoolManager, read back by evmSellRouteOf), the pool the record
+// names, fee <= feeCap < minOut, a deadline 300 s away. Its authorization nonce is 2^62, which no fresh W
 // holds, so a helper that skipped a static check still stops at auth_nonce, before any send.
 //   - "auth_chain_zero": the authorization signed with chainId 0 (bad_authorization);
 //   - "auth_other_delegate": the authorization of another delegate (bad_authorization);
@@ -15,14 +16,19 @@
 //   - "deadline_near": the deadline 59 s away (deadline_near: the helper sends only 60 s or more before it);
 //   - "sell_other_pool": the Sell's pool another address (not_pool);
 //   - "fee_over_cap": the fee one wei over the Sell's feeCap (fee_over_cap);
-//   - "trailing_byte": the calldata and one byte more (400 bad_shape).
+//   - "trailing_byte": the calldata and one byte more (400 bad_shape);
+//   - "route_other_target": the swap's target 0x...dead, neither the PoolManager nor a listed router (bad_route).
 // It passes only when:
-//   - the fee answers 200 with exactly EvmFeeAnswer's fields, chain "evm", the network and pool asked, a sender and a
-//     fee recipient address, a 60 s epoch on its grid, a block, a fee in wei and the 10^13 step; and where the kit pins a
+//   - the fee answers 200 with exactly EvmFeeAnswer's fields, chain "evm", the network and pool asked, a sell_sender (an
+//     address, or null where no sell key is set) and a fee recipient address, a 60 s epoch on its grid, a block, a fee in wei and the 10^13 step; and where the kit pins a
 //     sell sender for the network (evmPoolVenues() sellSender), the sender is that pin (the device sims each sale from
 //     it, so a sale from any other key runs where the sim did not);
 //   - every plant answers its own status and code (PLANTS), so none was sent;
-//   - every answer carries a full-sha X-Helper-Commit.
+//   - every answer carries a full-sha X-Helper-Commit;
+//   - each testnet has a run of contracts/pool-evm/script/testnet-run.mjs --sell-helper through this helper
+//     (helper-evm-sender.run.<network>.json), whole on both of its chain's RPCs (pool-evm-testnet-run's check), and
+//     each sell the helper sent was sent by the fee answer's sell_sender, with gas limit 1,000,000, W's authorization of
+//     the pinned delegate on the chain's id, and a fee at least its cost, so the sender's balance rose by fee - cost.
 //   node scripts/live-checks/helper-evm-sender.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -30,7 +36,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolSignSellAuthorization, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolSignSellAuthorization, evmPoolVenues, evmSellRouteOf } from "../../packages/kit/src/index.ts";
+import { recorder as runRecorder } from "./notes-per-pool-evm.mjs";
+import { check as runCheck, RPCS as RUN_RPCS } from "./pool-evm-testnet-run.mjs";
 
 // @noble from the helper's own dependencies (apps/ is outside Blindfill), for W's keys, its signatures and the digests
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
@@ -42,8 +50,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The EVM testnets a pool is deployed on, each with its deploy record. */
 export const NETWORKS = ["base-sepolia", "robinhood-testnet"];
 export const poolRecord = (network) => `pool-evm-deploy.${network}.json`;
+/** The fee answer's field naming the helper's sell sender: an address, or null where no sell key is set */
+export const SENDER_FIELD = "sell_sender";
 /** EvmFeeAnswer's fields (apps/helper/src/pool/evm.ts). */
-export const FIELDS = ["chain", "network", "pool", "fee_recipient", "sender", "epoch_ms", "epoch_start_ms", "block", "fee", "step"];
+export const FIELDS = ["chain", "network", "pool", "fee_recipient", SENDER_FIELD, "epoch_ms", "epoch_start_ms", "block", "fee", "step"];
 /** Each plant, the status and the code it must get. */
 export const PLANTS = [
   ["auth_chain_zero", 422, "bad_authorization"],
@@ -54,6 +64,7 @@ export const PLANTS = [
   ["sell_other_pool", 422, "not_pool"],
   ["fee_over_cap", 422, "fee_over_cap"],
   ["trailing_byte", 400, "bad_shape"],
+  ["route_other_target", 422, "bad_route"],
 ];
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const SHA = /^[0-9a-f]{40}$/;
@@ -101,8 +112,11 @@ export function judge(run, { records = evmPoolRecords(), venues = evmPoolVenues(
     say(b?.chain === "evm" && b?.network === n && b?.pool === p.pool, `[${n} fee] chain ${show(b?.chain)}, network ${show(b?.network)}, pool ${show(b?.pool)} (asked ${p.pool})`);
     const v = Object.hasOwn(venues, n) ? venues[n] : undefined;
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
-    const sender = typeof b?.sender === "string" && ADDRESS.test(b.sender) ? b.sender : null;
-    say(sender !== null && (pin === undefined || pin.toLowerCase() === sender), `[${n} fee] sender ${show(b?.sender)}, ${pin === undefined ? "the kit pins none for this network" : `the kit's pin ${pin}`}`);
+    // the sell sender: an address, or null where the helper holds no sell key (every sale then answers 503); where the
+    // kit pins one, exactly the pin, since the device sims each sale from it
+    const sender = b?.[SENDER_FIELD];
+    const isAddress = typeof sender === "string" && ADDRESS.test(sender);
+    say((sender === null || isAddress) && (pin === undefined || (isAddress && pin.toLowerCase() === sender)), `[${n} fee] ${SENDER_FIELD} ${show(sender)}, ${pin === undefined ? "the kit pins none for this network" : `the kit's pin ${pin}`}`);
     say(typeof b?.fee_recipient === "string" && ADDRESS.test(b.fee_recipient), `[${n} fee] fee recipient ${show(b?.fee_recipient)}`);
     say(b?.epoch_ms === 60_000 && Number.isSafeInteger(b?.epoch_start_ms) && b.epoch_start_ms > 0 && b.epoch_start_ms % 60_000 === 0, `[${n} fee] epoch ${show(b?.epoch_ms)} ms from ${show(b?.epoch_start_ms)}`);
     say(typeof b?.block === "string" && QUANTITY.test(b.block) && typeof b?.fee === "string" && DEC.test(b.fee) && b.fee !== "0" && b?.step === "10000000000000", `[${n} fee] block ${show(b?.block)}, fee ${show(b?.fee)} wei on its step ${show(b?.step)}`);
@@ -164,6 +178,10 @@ function authOf(key, chainId, address, nonce) {
 /** W's authorization nonce in every plant: under 2^64 - 1, so it passes the static check, and far over any fresh W's. */
 export const AUTH_NONCE = 1n << 62n;
 const OTHER_ADDRESS = "0x000000000000000000000000000000000000dead";
+/** One v4 hop to the native coin, fee 3000, tick spacing 60, no hook, as abi.encode(PathKey[]) writes it: the swap data
+ *  the kit's sell builder makes for that route through the PoolManager. */
+const ZERO = "0x0000000000000000000000000000000000000000";
+const V4_NATIVE_PATH = `0x${w32(0x20n)}${w32(1n)}${w32(0x20n)}${a32(ZERO)}${w32(3000n)}${w32(60n)}${a32(ZERO)}${w32(0xa0n)}${w32(0n)}`;
 
 /**
  * The base sell for `pool` on `network` at `nowMs`, and each plant made from it, as POST /v1/pool/evm/sell bodies.
@@ -180,7 +198,7 @@ export function plantsOf({ network, pool, nowMs = Date.now(), wKey = randomKey()
     token: "0x0000000000000000000000000000000000007070", // no static check reads it, and W holds none of it
     amount: 10n ** 18n,
     target: v.poolManager.toLowerCase(),
-    data: `0x${"ab".repeat(100)}`,
+    data: V4_NATIVE_PATH,
     minOut: 10n ** 15n,
     pool,
     precommitment: 12_345n,
@@ -188,6 +206,8 @@ export function plantsOf({ network, pool, nowMs = Date.now(), wKey = randomKey()
     deadline: nowS + 300n,
     nonce: 0n,
   };
+  // the swap is one the kit's sell builder makes, so the route check passes and every plant gets its own code
+  evmSellRouteOf(network, { w, token: sell.token, amount: sell.amount, minOut: sell.minOut, target: sell.target, data: sell.data });
   const fee = sell.feeCap;
   const a = evmPoolSignSellAuthorization(wKey, network, AUTH_NONCE);
   const auth = { chainId: `0x${a.chainId.toString(16)}`, address: a.address, nonce: `0x${a.nonce.toString(16)}`, yParity: `0x${a.yParity.toString(16)}`, r: a.r, s: a.s };
@@ -202,11 +222,87 @@ export function plantsOf({ network, pool, nowMs = Date.now(), wKey = randomKey()
     sell_other_pool: bodyOf({ s: { ...sell, pool: "0x000000000000000000000000000000000000beef" } }),
     fee_over_cap: bodyOf({ f: sell.feeCap + 1n }),
     trailing_byte: { ...base, data: `${base.data}00` },
+    route_other_target: bodyOf({ s: { ...sell, target: OTHER_ADDRESS } }),
   };
   return { base, plants, wKey };
 }
 
+// ---- The sells the helper sent (a run of contracts/pool-evm/script/testnet-run.mjs --sell-helper) ----
+
+/** Each testnet's run through the deployed helper: helper-evm-sender.run.<network>.json, testnet-run.mjs --out */
+export const sellRunFile = (network, dir = HERE) => path.join(dir, `helper-evm-sender.run.${network}.json`);
+/** The gas limit the helper signs every sale with, the kit's EVM_POOL_SELL_GAS */
+export const SELL_GAS = 1_000_000n;
+
+/**
+ * The runs' sells through the helper, each read back on both RPCs of its chain: pool-evm-testnet-run's check of the
+ * whole run (every transaction landed on both, each sell a type-4 transaction to W whose one authorization names the
+ * chain's pinned SellDelegate with the chain's id, W's Deposited into the pool), and for each sell the helper sent:
+ * the sender is the helper's sell sender (`senders[network]`, its fee answer's sell_sender), the gas limit exactly
+ * 1,000,000, the authorization's signer W, and the fee it took (the call's fee word, which SellDelegate pays its caller)
+ * at least the sale's cost (gasUsed x effectiveGasPrice, plus the receipt's L1 fee on Base), so the sender's balance
+ * rose by fee - cost; and every testnet has one such sell.
+ */
+export async function checkSells(runs, transportOf, senders) {
+  const lines = [];
+  const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  for (const run of runs) {
+    const rec = run.record;
+    const n = rec.chain;
+    const transport = transportOf(run);
+    const urls = run.urls ?? RUN_RPCS[n];
+    const r = await runCheck(rec, transport, urls);
+    for (const l of r.lines) say(r.ok, `[${n} run] ${l}`);
+    if (!r.ok) continue;
+    for (const t of rec.txs.filter((x) => x.kind === "sell" && x.via === "helper")) {
+      // the fields read here, equal on both RPCs (one Robinhood RPC adds blockTimestamp to a transaction, the other not)
+      const both = async (method, params, fields) => {
+        const rs = await Promise.all(urls.map((u) => transport(u, method, params)));
+        if (rs.some((x) => "error" in x || x.result == null)) throw new Error(`${method} ${t.hash}: ${show(rs.map((x) => x.error ?? null))}`);
+        const [a, b] = rs.map((x) => JSON.stringify(fields.map((f) => x.result[f] ?? null)));
+        if (a !== b) throw new Error(`${method} ${t.hash}: the two RPCs answer ${a} and ${b}`);
+        return rs[0].result;
+      };
+      try {
+        const tx = await both("eth_getTransactionByHash", [t.hash], ["hash", "blockHash", "type", "from", "to", "gas", "input", "authorizationList"]);
+        const rc = await both("eth_getTransactionReceipt", [t.hash], ["transactionHash", "blockHash", "status", "gasUsed", "effectiveGasPrice", "l1Fee"]);
+        const from = String(tx.from).toLowerCase();
+        say(senders[n] != null && from === senders[n], `[${n} sell ${t.hash}] sent by ${from}, the helper's sell sender ${show(senders[n])}`);
+        say(BigInt(tx.gas) === SELL_GAS, `[${n} sell ${t.hash}] gas limit ${BigInt(tx.gas)}, want ${SELL_GAS}`);
+        const a = (tx.authorizationList ?? [])[0];
+        const items = cat(rlpShort([int(BigInt(a.chainId)), unhex(a.address), int(BigInt(a.nonce))]));
+        const digest = keccak_256(cat(Uint8Array.of(5), items));
+        const sig = Uint8Array.from([Number(BigInt(a.yParity ?? a.v)), ...unhex(w32(BigInt(a.r))), ...unhex(w32(BigInt(a.s)))]);
+        const pub = secp256k1.Point.fromBytes(secp256k1.recoverPublicKey(sig, digest, { prehash: false })).toBytes(false);
+        const signer = `0x${hex(keccak_256(pub.subarray(1)).subarray(12))}`;
+        say(signer === String(t.w).toLowerCase(), `[${n} sell ${t.hash}] the authorization is signed by ${signer}, W ${t.w}`);
+        const fee = BigInt(`0x${String(tx.input).slice(10 + 64, 10 + 128)}`);
+        const cost = BigInt(rc.gasUsed) * BigInt(rc.effectiveGasPrice) + (rc.l1Fee ? BigInt(rc.l1Fee) : 0n);
+        say(fee >= cost, `[${n} sell ${t.hash}] the fee ${fee} covers the cost ${cost}: the sender's balance rose by ${fee - cost}`);
+      } catch (e) {
+        say(false, `[${n} sell ${t.hash}] ${e.message}`);
+      }
+    }
+  }
+  for (const n of NETWORKS) {
+    const sold = runs.some((x) => x.record.chain === n && x.record.txs.some((t) => t.kind === "sell" && t.via === "helper" && t.landed));
+    say(sold, `[${n}] a sell the helper sent, read back (${path.basename(sellRunFile(n))})`);
+  }
+  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+}
+
 // ---- The reads ----
+
+/** Each network's sell sender from its fee answer in `run` (null where the answer names none) */
+export function sendersOf(run) {
+  const out = {};
+  for (const p of run.pools ?? []) {
+    const b = json(p.reads.find((r) => r.asked === "fee")?.body ?? "");
+    const a = typeof b?.[SENDER_FIELD] === "string" ? b[SENDER_FIELD].toLowerCase() : null;
+    out[p.network] = a !== null && ADDRESS.test(a) ? a : null;
+  }
+  return out;
+}
 
 export async function read(base, fetchFn = fetch) {
   const pools = [];
@@ -233,11 +329,16 @@ if (import.meta.main) {
   };
   try {
     const run = await read(opt("--base") ?? BASE);
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     const r = judge(run);
-    for (const l of r.lines) console.log(l);
-    console.log(r.ok ? "PASS helper-evm-sender" : "FAIL helper-evm-sender");
-    process.exit(r.ok ? 0 : 1);
+    // the sells the helper sent, each run's chain reads recorded with it
+    const runs = NETWORKS.filter((n) => existsSync(sellRunFile(n))).map((n) => ({ record: JSON.parse(readFileSync(sellRunFile(n), "utf8")), rec: runRecorder() }));
+    const s = await checkSells(runs, (x) => x.rec.transport, sendersOf(run));
+    run.sells = runs.map((x) => ({ record: x.record, urls: RUN_RPCS[x.record.chain], log: x.rec.log }));
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
+    for (const l of [...r.lines, ...s.lines]) console.log(l);
+    const ok = r.ok && s.ok;
+    console.log(ok ? "PASS helper-evm-sender" : "FAIL helper-evm-sender");
+    process.exit(ok ? 0 : 1);
   } catch (e) {
     console.error(`helper-evm-sender: ${e.message}`);
     process.exit(2);
