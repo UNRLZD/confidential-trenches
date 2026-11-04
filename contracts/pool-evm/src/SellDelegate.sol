@@ -35,8 +35,9 @@ interface IPoolDeposit {
  *         directly instead, as v4-periphery's V4Router does: W unlocks the PoolManager, which calls W's
  *         unlockCallback; that swaps exactly the amount along the signed route (abi.encode(PathKey[]), ending in the
  *         native asset or WETH), settles the token with a transfer from W (no approval at all) and takes the whole
- *         output to W. The callback runs only from the PoolManager and only once inside W's own sell (a one-shot
- *         transient flag the sell sets), and the PoolManager reverts the unlock unless nothing is left owed. Then
+ *         output to W. The callback runs only from the PoolManager, only once inside W's own sell and only with the
+ *         payload that sell passed (a one-shot transient flag holding its keccak256), and the PoolManager reverts the
+ *         unlock unless nothing is left owed. Then
  *         minOut, the fee and the deposit are as above. No owner, no setter, no selfdestruct, no config in storage:
  *         WETH and the PoolManager are immutables (code), and the one stored value is W's sell nonce at an ERC-7201
  *         slot of W's own account, so no other delegate's storage meets it.
@@ -66,8 +67,9 @@ contract SellDelegate {
   /// @notice The reentrancy guard's transient slot in W's account, ERC-7201 for 'blindfill.sell.guard' (as
   ///         OpenZeppelin's ReentrancyGuardTransient keeps its own), so no other code W runs meets it at slot 0
   bytes32 internal constant SELL_GUARD = 0x440bd9ccab75449a1500e3c92e1ea82c77befa0047a75538597e7e92c1806400;
-  /// @notice The v4 sell's one-shot flag, the ERC-7201 transient slot for 'blindfill.sell.v4': set by the sell just
-  ///         before it unlocks the PoolManager, cleared by the one callback it allows
+  /// @notice The v4 sell's one-shot flag, the ERC-7201 transient slot for 'blindfill.sell.v4': the keccak256 of the
+  ///         exact payload the sell passes to unlock, set just before it, cleared by the one callback it allows; a
+  ///         callback with any other payload (a PoolManager that hands back another token, amount or route) is refused
   bytes32 internal constant SELL_V4 = 0xa182b9e3e55bed52dc0b28ee8cc4d7e4ceccf229db5eeab43bb8c656cc982500;
   /// v4-core TickMath's MIN_SQRT_PRICE + 1 and MAX_SQRT_PRICE - 1: no price limit of our own (minOut is the bound)
   uint160 internal constant MIN_PRICE_LIMIT = 4_295_128_740;
@@ -147,9 +149,11 @@ contract SellDelegate {
     uint256 _weth = WETH.balanceOf(address(this));
 
     if (_sell.target == address(POOL_MANAGER)) {
-      // v4: no approval; the PoolManager calls unlockCallback back once, and reverts unless nothing is left owed
-      _setV4(true);
-      POOL_MANAGER.unlock(abi.encode(_sell.token, _sell.amount, _sell.data));
+      // v4: no approval; the PoolManager calls unlockCallback back once, with this payload, and reverts unless
+      // nothing is left owed
+      bytes memory _payload = abi.encode(_sell.token, _sell.amount, _sell.data);
+      _setV4(keccak256(_payload));
+      POOL_MANAGER.unlock(_payload);
     } else {
       // Exactly the amount, and the router must take all of it: the approval ends at 0
       _approve(_sell.token, _sell.target, _sell.amount);
@@ -180,14 +184,14 @@ contract SellDelegate {
    * @notice The v4 sell, inside the PoolManager's unlock: each hop swaps exactly what the hop before gave (the first,
    *         the signed amount of the signed token), and must take all of it; the token is settled by W's transfer and
    *         the route's whole output, in the native asset or WETH, is taken to W. Runs only from the PoolManager and
-   *         only once inside W's own sell.
+   *         once inside W's own sell, with the payload that sell passed to unlock.
    * @param _raw abi.encode(token, amount, data) as the sell passed it to unlock, data being abi.encode(PathKey[])
    * @return Nothing
    */
   function unlockCallback(bytes calldata _raw) external returns (bytes memory) {
     if (msg.sender != address(POOL_MANAGER)) revert NotPoolManager();
-    if (!_v4()) revert NotInSell();
-    _setV4(false);
+    if (_v4() != keccak256(_raw)) revert NotInSell();
+    _setV4(bytes32(0));
     (address _token, uint256 _amount, bytes memory _data) = abi.decode(_raw, (address, uint256, bytes));
     PathKey[] memory _path = abi.decode(_data, (PathKey[]));
     if (_path.length == 0) revert InvalidRoute();
@@ -293,22 +297,22 @@ contract SellDelegate {
   }
 
   /**
-   * @notice Whether a v4 sell's callback is due: W's transient storage at SELL_V4
-   * @return _on True between the sell's unlock and its one callback
+   * @notice The payload hash a v4 sell's callback must carry: W's transient storage at SELL_V4
+   * @return _hash keccak256 of the payload between the sell's unlock and its one callback, else 0
    */
-  function _v4() internal view returns (bool _on) {
+  function _v4() internal view returns (bytes32 _hash) {
     assembly ("memory-safe") {
-      _on := tload(SELL_V4)
+      _hash := tload(SELL_V4)
     }
   }
 
   /**
    * @notice Sets or clears the v4 flag
-   * @param _on True from the sell's unlock until its callback
+   * @param _hash keccak256 of the unlock payload from the sell's unlock until its callback, then 0
    */
-  function _setV4(bool _on) internal {
+  function _setV4(bytes32 _hash) internal {
     assembly ("memory-safe") {
-      tstore(SELL_V4, _on)
+      tstore(SELL_V4, _hash)
     }
   }
 

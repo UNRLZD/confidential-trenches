@@ -142,7 +142,8 @@ contract ReenterHook {
   }
 }
 
-contract SellV4Test is SellBase {
+/// What the v4 sell tests share: the etched PoolManager, WETH, the pool, W delegated, planted pools and the helpers
+abstract contract SellV4Base is SellBase {
   address internal constant PM_ADDR = 0x498581fF718922c3f8e6A244956aF099B2652b2b;
   bytes32 internal constant PM_HASH = 0x83b2af6e9f3158defc2811cbcb0db71ecf8b2ba2abea39c39e370ac5c6f43eb6;
   address internal constant WETH = 0x4200000000000000000000000000000000000006;
@@ -263,7 +264,8 @@ contract SellV4Test is SellBase {
     assertEq(IAllowance(_token).allowance(W, PM_ADDR), 0, 'no approval was given');
     assertEq(W.balance, 0, 'W keeps no ether');
     assertEq(IWETH9Sell(WETH).balanceOf(W), 0, 'nor WETH');
-    if (_path[_path.length - 1].intermediateCurrency == address(0)) {
+    // (a hook on the last hop may take its own cut of the output from the PoolManager too)
+    if (_path[_path.length - 1].intermediateCurrency == address(0) && _path[_path.length - 1].hooks == address(0)) {
       assertEq(PM_ADDR.balance, _pmEth - _quoted, 'the PoolManager paid out exactly the proceeds');
     }
     assertEq(SellDelegate(payable(W)).nonce(), 1);
@@ -281,6 +283,9 @@ contract SellV4Test is SellBase {
     assertEq(SellDelegate(payable(W)).nonce(), 0, 'the nonce is not used');
   }
 
+}
+
+contract SellV4Test is SellV4Base {
   // ----- the sells -----
 
   function test_v4SellToTheNativeAssetLands() public {
@@ -346,9 +351,9 @@ contract SellV4Test is SellBase {
     assertEq(IERC20Balance(T).balanceOf(W), AMOUNT * 10);
   }
 
-  /// The callback is one-shot: after a sell lands, the PoolManager calling back again (W unlocking it in the same
-  /// transaction) is refused
-  function test_v4TheFlagDoesNotOutliveTheSell() public {
+  /// After a sell lands, W's account unlocking the PoolManager in a later transaction gets its callback refused: the
+  /// sell's flag does not stay set
+  function test_v4AnUnlockByWAfterASellIsRefused() public {
     PathKey[] memory _p = _deep(T, address(0), address(0));
     _send(_v4Sell(T, _p, 1, 0));
     vm.expectRevert(NOT_IN_SELL);
@@ -394,7 +399,7 @@ contract SellV4Test is SellBase {
     _refused(_v4Sell(T, _p, 1, 0), INVALID_ROUTE);
   }
 
-  function test_v4AnEmptyRouteIsRefused() public {
+  function test_v4AnEmptySellRouteIsRefused() public {
     _refused(_v4Sell(T, new PathKey[](0), 1, 0), INVALID_ROUTE);
   }
 
