@@ -277,6 +277,9 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     take: (key: string, client: string | undefined, n = 1, shareOnly = false, reserved = false): Take => takeEach([[key, n]], client, shareOnly, reserved),
     /** The seconds a draw on `key` must still wait for the provider's reset (`background`: a background draw); 0 when none. */
     heldFor: (key: string, background = false): Take => heldFor(key, now(), background),
+    /** When the provider's reset on `key` ends, in ms on the budget's clock, for every draw; 0 when none holds it (card
+     *  helper-crowd-429: a caller waits out a short one, ../rpc/rpc.ts). */
+    heldUntil: (key: string): number => (heldIn(heldUntil, key, now()) > 0 ? heldUntil.get(key)! : 0),
     /** The provider throttled: no draw on `key` until `untilMs`, held to at most RETRY_AFTER_MAX_S from now; with
      *  `background`, it throttled a background read, and only background draws wait. */
     hold(key: string, untilMs: number, background = false): void {
