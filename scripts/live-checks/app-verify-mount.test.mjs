@@ -14,12 +14,14 @@
 //               before either RPC answered it.
 // Each answer's `at` is when it was recorded. Each planted bad case is a recorded run with one thing changed.
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
-import { APP_HOST, CHECKS, judge, onConsole, pinsOf, pinsProblems, releaseRecord, WIDTHS } from "./app-verify-mount.mjs";
+import * as check from "./app-verify-mount.mjs";
+import { APP_HOST, CHECKS, judge, pinsOf, pinsProblems, releaseRecord, WIDTHS } from "./app-verify-mount.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-verify-mount.answers.json"), "utf8"));
@@ -213,20 +215,54 @@ test("planted: rows drawn with no read of this open, a failed read, a CSP violat
   assert.equal(mut("good", (rec) => rec.runs.forEach((run) => (run.panel = null))).ok, false);
 });
 
-test("planted on the good answer: a recorded 429 names its resource's origin and path in the BAD line, and an error with no location still fails (card live-console-url)", () => {
-  const text = "Failed to load resource: the server responded with a status of 429 ()";
-  const msg = (t, location) => ({ type: () => "error", text: () => t, location: () => location });
+// a page as the check hooks it: Playwright's console and pageerror events, emitted by hand
+const SHELL = "https://sign.confidential.unrealized.trade";
+const msg = (t, location, type = "error") => ({ type: () => type, text: () => t, location: () => location });
+const thrown = (Name, message, at) => {
+  const e = new Name(message);
+  e.stack = `${e.name}: ${message}${at.map((a) => `\n    at ${a}`).join("")}`;
+  return e;
+};
+function hooked() {
+  assert.equal(typeof check.watch, "function", "the check hooks no page errors: it has no watch(page, errors) for its page");
+  const page = new EventEmitter();
   const kept = [];
-  const hook = onConsole(kept);
-  hook(msg(text, { url: `${APP_HOST}/assets/index-abc.js?v=1` }));
-  hook(msg("the shell's own", { url: "https://sign.confidential.unrealized.trade/assets/shell.js" }));
-  hook({ type: () => "warning", text: () => "a warning", location: () => ({ url: `${APP_HOST}/` }) });
+  check.watch(page, kept);
+  return { page, kept };
+}
+
+test("planted on the good answer: a recorded 429 names its resource's origin and path in the BAD line, and the shell's own and a warning are not the terminal's (card live-console-url)", () => {
+  const text = "Failed to load resource: the server responded with a status of 429 ()";
+  const { page, kept } = hooked();
+  page.emit("console", msg(text, { url: `${APP_HOST}/assets/index-abc.js?v=1` }));
+  page.emit("console", msg("the shell's own", { url: `${SHELL}/assets/shell.js` }));
+  page.emit("console", msg("a warning", { url: `${APP_HOST}/` }, "warning"));
   assert.deepEqual(kept, [`${text} (${APP_HOST}/assets/index-abc.js)`]);
-  let r = mut("good", (rec) => rec.runs[1].errors.push(kept[0]));
+  const r = mut("good", (rec) => rec.runs[1].errors.push(kept[0]));
   assert.equal(r.ok, false);
   assert.ok(bad(r).some((l) => l.endsWith(`console ${text} (${APP_HOST}/assets/index-abc.js)`)), r.lines.join("\n"));
   assert.ok(!r.lines.some((l) => l.includes("?v=1")), "no query in a line");
-  r = mut("good", (rec) => rec.runs[0].errors.push("Uncaught boom"));
+});
+
+test("planted on the good answer: an uncaught exception in the terminal's frame is kept and fails the run, named by its top frame's origin and path; the shell's own is not the terminal's (card live-pageerror-hooks)", () => {
+  const { page, kept } = hooked();
+  page.emit("pageerror", thrown(TypeError, "Cannot read properties of undefined (reading 'pools')", [`Ft (${APP_HOST}/assets/index-abc.js?v=1:1:2345)`, `${APP_HOST}/assets/index-abc.js:1:99`]));
+  page.emit("pageerror", thrown(Error, "the shell's own", [`boot (${SHELL}/assets/shell.js:1:2)`]));
+  const line = `pageerror TypeError: Cannot read properties of undefined (reading 'pools') (${APP_HOST}/assets/index-abc.js)`;
+  assert.deepEqual(kept, [line]);
+  const r = mut("good", (rec) => rec.runs[0].errors.push(...kept));
   assert.equal(r.ok, false);
-  assert.ok(bad(r).some((l) => l.endsWith(": console Uncaught boom")), r.lines.join("\n"));
+  assert.ok(bad(r).some((l) => l.endsWith(`console ${line}`)), r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => l.includes("?v=1")), "no query in a line");
+});
+
+test("planted on the good answer: an error with no location (a console error, a page error with no stack) is kept and fails the run (card live-pageerror-hooks)", () => {
+  const { page, kept } = hooked();
+  page.emit("console", msg("Uncaught boom", undefined));
+  page.emit("console", msg("no url", { url: "", lineNumber: 0, columnNumber: 0 }));
+  page.emit("pageerror", thrown(Error, "no stack", []));
+  assert.deepEqual(kept, ["Uncaught boom", "no url", "pageerror Error: no stack"]);
+  const r = mut("good", (rec) => rec.runs[1].errors.push(...kept));
+  assert.equal(r.ok, false);
+  for (const k of kept) assert.ok(bad(r).some((l) => l.includes(`console ${k}`)), `${k}: ${r.lines.join("\n")}`);
 });
