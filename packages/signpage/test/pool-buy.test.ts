@@ -19,6 +19,8 @@ import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
 import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
+import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
+import type { IncomingMessage } from "../src/api.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
 const L = 7n;
@@ -79,6 +81,11 @@ type World = {
   sends: Uint8Array[];
   /** each wait the run asked for */
   waits: number[];
+  /** the venue's expected out for the spend and the min out the device asks (the kit's fixture setup) */
+  E: bigint;
+  minOut: bigint;
+  /** the venue's pool address: the bonding curve's account */
+  curve: string;
 };
 type Plant = {
   /** the slot of the device's blockhash read, past the quote's */
@@ -102,6 +109,9 @@ type Plant = {
   landsAtSettle?: number | "never";
   /** RPC p's finalized block height at its i-th read (1,000 when not given: past the blockhash's last height) */
   finalHeight?: (p: 0 | 1, i: number) => number;
+  /** the token W received as each RPC's getTransaction meta says it (raw units, 6 decimals); absent: a meta with no
+   *  token balances. Each meta also lists the fee payer's account of the mint and W's of another mint, never W's fill */
+  received?: readonly [bigint, bigint];
 };
 
 async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
@@ -161,7 +171,18 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         const tx = sent.slice();
         tx.set(base58.decode(SIG), 1);
         if (how === "other" || (how === "lieOne" && p === 1)) tx[tx.length - 1]! ^= 1;
-        return { transaction: [base64.encode(tx), "base64"], meta: { err: how === "failed" ? { InstructionError: [2, { Custom: 6 }] } : null } };
+        const err = how === "failed" ? { InstructionError: [2, { Custom: 6 }] } : null;
+        if (!plant.received) return { transaction: [base64.encode(tx), "base64"], meta: { err } };
+        const bal = (owner: string, mint: string, amount: bigint) => ({ accountIndex: 3, mint, owner, programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", uiTokenAmount: { amount: amount.toString(), decimals: 6, uiAmount: Number(amount) / 1e6, uiAmountString: String(Number(amount) / 1e6) } });
+        const other = base58.encode(new Uint8Array(32).fill(3));
+        return {
+          transaction: [base64.encode(tx), "base64"],
+          meta: {
+            err,
+            preTokenBalances: [bal(FEE_PAYER, fx.pump.mint, 10n), bal(W.address, other, 5n)],
+            postTokenBalances: [bal(FEE_PAYER, fx.pump.mint, 999_999_999n), bal(W.address, other, 99n), bal(W.address, fx.pump.mint, plant.received[p])],
+          },
+        };
       }
       throw new Error(`unexpected ${method}`);
     }) as SolanaRpc;
@@ -208,7 +229,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
     wait: async (ms: number) => void waits.push(ms),
     pick: () => 2,
   };
-  return { host, log, state: () => st, sentTx: () => sent, sends, waits };
+  return { host, log, state: () => st, sentTx: () => sent, sends, waits, E: s.E, minOut: s.minOut, curve: (s.venue as { curve: string }).curve };
 }
 
 const ASK: PoolAsk = { kind: "pool.buy", chain: "solana", token: fx.pump.mint, amount: SPEND, slippageBps: 300, decimals: 6 };
@@ -454,4 +475,84 @@ test("a pool.buy over one proof's funds (an app's planted price asking ten times
     assert.equal(w.state(), "HELD", "the proof stays ready");
     assert.ok(!w.log.includes("send") && !w.log.includes("seed") && !w.log.some((x) => x.startsWith("take")));
   }
+});
+
+// Card signpage-buy-route-events: the buy strip draws a real buy's one-time wallet, venue, pool and filled amount from
+// the page's own route events (messages.ts BuyRoute), each once, in order, under the buy's id; the stage events keep
+// their exact shape, so an app of an earlier kit (exact keys) drops the route events and still reads every stage.
+const LOCKS = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+// a raw amount of 6 decimals as whole units, worked out here apart from the page's own formatting
+const whole6 = (x: bigint): string => {
+  const f = (x % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
+  return f ? `${x / 1_000_000n}.${f}` : `${x / 1_000_000n}`;
+};
+
+test("a fixture buy posts its route under its id, each once and in order: W, the venue and its pool, the amount W received on both RPCs", async () => {
+  const w0 = await world();
+  const w = await world({ received: [w0.E, w0.E] });
+  const posted: unknown[] = [];
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  const api = startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: () => signedOutState(),
+    kinds: { "pool.buy": (_params, ctx) => poolBuyKind(() => w.host, LOCKS)(ASK, ctx) },
+  });
+  const id = crypto.randomUUID();
+  listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "pool.buy", chain: "solana", token: fx.pump.mint, amount: "0.005", slippage_bps: 300 } });
+  const end = Date.now() + 2_000;
+  while (!posted.some((m) => (m as { stage?: string }).stage === "filled")) {
+    if (Date.now() > end) assert.fail(`no filled: ${JSON.stringify(posted)}`);
+    await new Promise((ok) => setTimeout(ok, 1));
+  }
+  await api.idle();
+  const mine = posted.filter((m) => (m as { id?: string }).id === id);
+  const route = mine.filter((m) => (m as { type?: string }).type === "progress" && !("stage" in (m as object)));
+  assert.deepEqual(route, [
+    { v: 1, type: "progress", id, wallet: W.address },
+    { v: 1, type: "progress", id, venue: "pump-curve", pool: w.curve },
+    { v: 1, type: "progress", id, out: whole6(w.E) },
+  ]);
+  assert.ok(w.E >= w.minOut);
+  // the answer and the stage events as before: exact keys, no route field on any of them
+  const stages = mine.filter((m) => !(route as unknown[]).includes(m));
+  assert.deepEqual(stages, [
+    { v: 1, id, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } },
+    { v: 1, type: "progress", id, stage: "filled" },
+  ]);
+  // W and the venue are told before anything leaves the device; the amount only once both RPCs read the transaction back
+  const out = posted.indexOf(route[2]);
+  assert.ok(posted.indexOf(route[1]) < out);
+  // nothing posted carries more than an address, a venue name or an amount
+  assert.ok(!JSON.stringify(posted).includes(Buffer.from(SEED64).toString("hex")));
+});
+
+test("the amount W received is not told when the two RPCs differ on it or it is under the min out; W and the venue still are", async () => {
+  const base = await world();
+  for (const received of [[base.E, base.E - 1n], [base.minOut - 1n, base.minOut - 1n]] as const) {
+    const w = await world({ received });
+    const told: unknown[] = [];
+    const a = await runPoolBuy({ ...w.host, route: (x) => void told.push(x) }, ASK);
+    assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+    assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: w.curve }], String(received));
+  }
+  // a meta with no token balances: no amount
+  const w = await world();
+  const told: unknown[] = [];
+  await runPoolBuy({ ...w.host, route: (x) => void told.push(x) }, ASK);
+  assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: w.curve }]);
+});
+
+test("a buy refused before its check passes tells no route; a route listener that throws never stops a buy", async () => {
+  const w = await world({ venueOff: "reserves" });
+  const told: unknown[] = [];
+  const a = await runPoolBuy({ ...w.host, route: (x) => void told.push(x) }, ASK);
+  assert.ok("error" in a);
+  assert.deepEqual(told, []);
+  assert.equal(w.state(), "HELD");
+  const ok = await world({ received: [w.E, w.E] });
+  const b = await runPoolBuy({ ...ok.host, route: () => { throw new Error("app display"); } }, ASK);
+  assert.deepEqual(b, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal(ok.state(), "SPENT");
 });

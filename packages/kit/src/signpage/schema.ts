@@ -283,6 +283,12 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
 export const signpageReadySchema = obj({ v: lit(1), type: lit("ready"), release: str, api: uint });
 export const signpageStateEventSchema = obj({ v: lit(1), type: lit("state"), state });
 export const signpageProgressSchema = obj({ v: lit(1), type: lit("progress"), id: str, stage: oneOf(STAGES) });
+/** A route event (messages.ts BuyRoute): a progress event with no stage and exactly one of its three shapes. */
+const routeHead = { v: lit(1), type: lit("progress"), id: str };
+const routeWallet = obj({ ...routeHead, wallet: str });
+const routeVenue = obj({ ...routeHead, venue: str, pool: str });
+const routeOut = obj({ ...routeHead, out: dec });
+export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v) || routeVenue(v) || routeOut(v);
 
 /** An answer's envelope; the result inside is checked against its kind's schema by the client. */
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
