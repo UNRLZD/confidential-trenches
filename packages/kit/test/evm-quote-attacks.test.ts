@@ -382,6 +382,118 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   assert.deepEqual(await quoteOn(pools, "0x00000000000000000000000000000000000a22a2", seededRoute("0x00000000000000000000000000000000000a22a2"), broken), { accepted: false, code: "rpc_error" });
 });
 
+test("card evm-quote-head-watch: a scan provider that fails a full span (a timeout, too many logs) is asked by halves, and the real pool it finds still holds a seeded one", async () => {
+  const token = "0x00000000000000000000000000000000000e71e7";
+  const pools = [seeded(token), real(token)];
+  const asked: [number, number][] = [];
+  const inner = scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked);
+  // base-rpc.publicnode.com, 2026-11-04 10:50Z: a 50,000-block span of USDC's logs took up to 10.8 s, past the timeout
+  const slow: EvmRpc = async (calls) => {
+    const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
+    if (calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 12_500) throw new Error("The operation was aborted due to timeout");
+    return inner(calls);
+  };
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), slow), below);
+  assert.ok(asked.length > 0 && asked.every(([a, b]) => b - a + 1 <= 12_500), "every answered request is a half, a quarter or an eighth of a span");
+  // a span answered with more logs than SCAN_MAX_LOGS is asked by halves too
+  const token2 = "0x00000000000000000000000000000000000e72e7";
+  const pools2 = [seeded(token2), real(token2)];
+  const inner2 = scanner(5_000_000, [{ key: real(token2).key, at: 4_500_000 }]);
+  const full: EvmRpc = async (calls) => {
+    const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
+    const out = await inner2(calls);
+    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 25_000 ? out.map((o) => ({ ...(o as object), result: new Array(10_001).fill(null) })) : out;
+  };
+  assert.deepEqual(await quoteOn(pools2, token2, seededRoute(token2), full), below);
+});
+
+test("card evm-quote-head-watch: the agreed block is picked once the token's scan has its logs, so the reads land at a block no older than the scan", async () => {
+  const token = "0x00000000000000000000000000000000000e73e7";
+  const pools = [seeded(token), real(token)];
+  const order: string[] = [];
+  const inner = scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }]);
+  const scan: EvmRpc = async (calls) => {
+    const out = await inner(calls);
+    if (calls[0]!.method === "eth_getLogs") order.push("logs");
+    return out;
+  };
+  const watched = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest")) order.push("head");
+    return rpc(calls);
+  };
+  const v = await verdict(
+    evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [watched(chain(pools, 0)), watched(chain(pools, 1))], NOW, scan),
+  );
+  assert.deepEqual(v, below);
+  assert.equal(order.filter((x) => x === "logs").length, 20);
+  assert.ok(order.lastIndexOf("logs") < order.indexOf("head"), `the heads after every log read: ${order.join(" ")}`);
+});
+
+test("card evm-quote-head-watch: a scan that ends more than maxLag blocks behind the agreed block is scanned on up to it, and a pool made in those blocks still holds a seeded one", async () => {
+  const token = "0x00000000000000000000000000000000000c44c4";
+  const pools = [seeded(token), real(token)];
+  const asked: [number, number][] = [];
+  // the scan provider's head 4,999,990, ten blocks behind the agreed 5,000,000 (Base's maxLag 5); the real pool at 4,999,995
+  const late = scanner(4_999_990, [{ key: real(token).key, at: 4_999_995 }], asked);
+  const caught = scanner(5_000_000, [{ key: real(token).key, at: 4_999_995 }], asked);
+  // asked again after its logs are in, the scan provider names 5,000,000 (review of 4830f1f, H1)
+  let heads = 0;
+  const both: EvmRpc = (calls) => (calls[0]!.method === "eth_blockNumber" && heads++ > 0 ? caught(calls) : late(calls));
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), both), below);
+  assert.equal(heads, 2);
+  assert.deepEqual(asked.slice(-2), [[4_999_991, 5_000_000], [4_999_991, 5_000_000]]);
+});
+
+test("review of 4830f1f, H1: a scan backend more than maxLag behind that answers [] past its own head refuses as main did, and never keeps a scan its provider did not name", async () => {
+  const token = "0x00000000000000000000000000000000000e74e7";
+  const pools = [seeded(token), real(token)];
+  const full = scanner(4_999_990, [{ key: real(token).key, at: 4_999_995 }]);
+  // a backend at 4,999,990: logs past it are not there yet, answered as [] with no error
+  const lagging: EvmRpc = async (calls) => {
+    const out = (await full(calls)) as { result?: unknown }[];
+    return out.map((o, i) => (calls[i]!.method !== "eth_getLogs" ? o : { ...o, result: (o.result as { blockNumber: string }[]).filter((l) => Number(l.blockNumber) <= 4_999_990) }));
+  };
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), lagging), { accepted: false, code: "rpc_disagree" });
+  // the next quote, the scan backend caught up and honest: the real pool holds the seeded route
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_002, [{ key: real(token).key, at: 4_999_995 }]), undefined, "base", 5_000_002), below);
+});
+
+test("review of 4830f1f, H2: 16,384 pools only initialized, with ids ground below the real pool's, refuse the quote (too_many_pools); never a seeded route bought from a cut set", async () => {
+  const token = "0x00000000000000000000000000000000000e75e7";
+  const pools = [seeded(token), real(token)];
+  const realId = pidOf(real(token).key);
+  const logs: { key: EvmPoolKey; at: number }[] = [{ key: real(token).key, at: 4_500_000 }];
+  for (let fee = 1, n = 0; n < 16_384; fee++) {
+    if (fee === 100 || fee === 500 || fee === 3000 || fee === 10000) continue;
+    const k = keyOf(token, NATIVE, fee, 7, NATIVE);
+    if (pidOf(k) < realId) logs.push({ key: k, at: 4_100_000 + 40 * n++ });
+  }
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_000, logs)), { accepted: false, code: "too_many_pools" });
+});
+
+test("review of 4830f1f, L: a scan head more than a span behind the agreed block refuses before any catch-up request; a span answered at exactly SCAN_MAX_LOGS is asked by halves", async () => {
+  const token = "0x00000000000000000000000000000000000e76e7";
+  const pools = [seeded(token), real(token)];
+  const asked: [number, number][] = [];
+  // a scan provider that names block 1, then the agreed block when asked again
+  const stale = scanner(1, [], asked);
+  const fresh = scanner(5_000_000, [], asked);
+  let heads = 0;
+  const jump: EvmRpc = (calls) => (calls[0]!.method === "eth_blockNumber" && heads++ > 0 ? fresh(calls) : stale(calls));
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), jump), { accepted: false, code: "rpc_disagree" });
+  assert.ok(asked.length <= 2, `${asked.length} requests`);
+  const token2 = "0x00000000000000000000000000000000000e77e7";
+  const pools2 = [seeded(token2), real(token2)];
+  const inner = scanner(5_000_000, [{ key: real(token2).key, at: 4_500_000 }]);
+  // a provider that cuts an answer at the cap: the real pool's log is past the cut
+  const capped: EvmRpc = async (calls) => {
+    const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
+    const out = await inner(calls);
+    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 25_000 ? out.map((o) => ({ ...(o as object), result: new Array(10_000).fill(null) })) : out;
+  };
+  assert.deepEqual(await quoteOn(pools2, token2, seededRoute(token2), capped), below);
+});
+
 test("N1b a seeded standard pool is held to the token's real pool the caller lists", async () => {
   const token = "0x00000000000000000000000000000000000b11b1";
   assert.deepEqual(await quoteOn([seeded(token), real(token)], token, seededRoute(token), undefined, [real(token).key]), below);
@@ -679,11 +791,11 @@ test("X3 an X with more markets than a quote reads prices nothing, and refuses n
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
 });
 
-test("T1b a crowd of 20,000 junk pools of the token still quotes its standard route, and holds a seeded one to it", async () => {
+test("T1b a crowd of 16,000 junk pools of the token still quotes its standard route and holds a seeded one to it; past EVM_QUOTE_MAX_KEYS the quote refuses (too_many_pools)", async () => {
   const token = "0x00000000000000000000000000000000000fe5fe";
-  // 20,000 pools of the token with the native asset, past every bound (EVM_QUOTE_MAX_KEYS 16,384): 19,400 empty and
-  // 600 that hold a dust position (past EVM_QUOTE_MAX_QUOTED, 64)
-  const junk = Array.from({ length: 20_000 }, (_, i) => keyOf(token, NATIVE, 1000 + i, 1, NATIVE));
+  // 16,000 pools of the token with the native asset, under EVM_QUOTE_MAX_KEYS (16,384): 15,400 empty and 600 that hold
+  // a dust position (past EVM_QUOTE_MAX_QUOTED, 64)
+  const junk = Array.from({ length: 16_000 }, (_, i) => keyOf(token, NATIVE, 1000 + i, 1, NATIVE));
   const dust = junk.slice(0, 600).map((key): ModelPool => ({ key, give: (a) => a / 1000n }));
   // spread over the scan's depth (a span's answer holds at most 10,000 logs)
   const logs = junk.map((k, i) => ({ key: k, at: 4_000_001 + 49 * i }));
@@ -695,6 +807,10 @@ test("T1b a crowd of 20,000 junk pools of the token still quotes its standard ro
   const seeded1: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
   const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
   assert.deepEqual(await quoteOn([best(token), seeded1, ...dust], token, route, scanner(5_000_000, logs)), below);
+  // 20,000 found pools: a set the bound cuts is never quoted from (review of 4830f1f, H2)
+  const many = "0x00000000000000000000000000000000000e78e7";
+  const crowd = Array.from({ length: 20_000 }, (_, i) => ({ key: keyOf(many, NATIVE, 1000 + i, 1, NATIVE), at: 4_000_001 + 49 * i }));
+  assert.deepEqual(await quoteOn([best(many)], many, bestRoute(many), scanner(5_000_000, crowd)), { accepted: false, code: "too_many_pools" });
 });
 test("G1 every scan of one quote, the token's and each X's, shares the chain's limit of requests at once", async () => {
   const token = "0x00000000000000000000000000000000000ff3ff";

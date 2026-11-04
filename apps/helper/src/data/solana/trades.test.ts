@@ -403,3 +403,16 @@ test("card helper-ready-gate: walks that would draw the whole public Solana budg
   for (let i = 0; i < 16; i++) assert.equal((await rpc.handle("solana", "application/json", read, "198.51.100.7")).status, 200, `the caller's read ${i + 1}`);
   assert.ok(sent[PUBLIC]! <= 100, "the provider never throttled us");
 });
+
+test("card app-console-429: while Discover's lists have no answer (a cold start) a listed token's tape answers 503, never 404 not_found, and its candles are the history's; a token the lists lack is still 404", async () => {
+  let listed: boolean | null = null;
+  const asked: string[] = [];
+  const t = createSolanaTrades({ fetch: (async (u: string) => (asked.push(u), new Response("{}", { status: 503 }))) as never, now: () => Date.now(), listed: async () => listed, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, history: async () => ({ status: 200, body: JSON.stringify({ tf: "15m", candles: [], src: "geckoterminal", as_of_ms: 1 }), src: "geckoterminal", asOfMs: 1 }) } as never);
+  const mint = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
+  assert.equal((await t.trades(mint, 10)).status, 503, "unknown is not 'not listed'");
+  assert.equal((await t.candles(mint, "15m", null, 10)).status, 200, "the history answers");
+  assert.deepEqual(asked, [], "no walk opened for a token not known listed");
+  listed = false;
+  assert.equal((await t.trades(mint, 10)).status, 404);
+  t.stop();
+});

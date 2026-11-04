@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, ROUTES, WIDTHS } from "./app-shell.mjs";
+import { consoleError, judge, ROUTES, WIDTHS } from "./app-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-shell.answers.json"), "utf8"));
@@ -122,4 +122,21 @@ test("scripts: only APP_HOST's documents' count; the shell's are left to SIGN_HO
   assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)), r.lines.join("\n"));
   r = mut((rec) => rec.loadedScripts.push({ url: `${rec.url}/assets/late.js` }));
   assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)), r.lines.join("\n"));
+});
+
+test("planted on the good answer: a console error names the resource that failed (card app-console-429: run 41816576115 said only 'a status of 429')", () => {
+  const url = "https://api.confidential.unrealized.trade/v1/market/candles?chain=solana&token=6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN&tf=15m&limit=500";
+  const msg = (text, u) => ({ type: () => "error", text: () => text, location: () => ({ url: u }) });
+  const failed = consoleError(msg("Failed to load resource: the server responded with a status of 429 ()", url));
+  assert.equal(failed, `Failed to load resource: the server responded with a status of 429 () (${url})`);
+  assert.equal(consoleError(msg("Uncaught boom", "")), "Uncaught boom", "no address: the text alone");
+  assert.equal(consoleError({ text: () => "x", location: () => undefined }), "x");
+  const rec = structuredClone(ANSWERS.good);
+  rec.loads.find((l) => l.width === "phone" && l.path === "/").consoleErrors.push(failed);
+  rec.inShell.find((s) => s.width === "desktop").consoleErrors.push(failed);
+  const r = judge(rec);
+  assert.equal(r.ok, false);
+  const esc = url.replace(/[.?&/]/g, "\\$&");
+  assert.ok(bad(r.lines).some((l) => new RegExp(`^BAD phone / \\(token\\): console error: .*status of 429 \\(\\) \\(${esc}\\)$`).test(l)), r.lines.join("\n"));
+  assert.ok(bad(r.lines).some((l) => new RegExp(`^BAD desktop inside the shell, 5 link\\(s\\): 0 CSP violation\\(s\\), 1 console error\\(s\\): .*\\(${esc}\\)$`).test(l)), r.lines.join("\n"));
 });

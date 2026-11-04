@@ -143,3 +143,24 @@ test("the stream: a keyed slot that has not failed is never probed (no probe soc
   assert.equal(slot.state(), "keyed");
   src.close();
 });
+
+test("card app-console-429: a crowd opening one token at once shares its first read: a caller that comes while the stream is still being joined waits for it, never a 503 (the deployed helper answered 4 of 25 such reads 503 at 11:19Z)", async () => {
+  let joined!: () => void;
+  const watching = new Promise<void>((r) => (joined = r));
+  const t = createSolanaTrades({
+    fetch: (async (_u: string, init: RequestInit) => publicAnswer(init)) as never,
+    now: () => Date.now(),
+    listed: async () => true,
+    rpcs: [PUBLIC],
+    source: () => ({ watch: () => watching, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+  });
+  const first = t.trades(MINT, 10);
+  await settle(); // the first read has the mint and is joining the stream
+  const crowd = Array.from({ length: 24 }, () => t.trades(MINT, 10));
+  const candles = Array.from({ length: 24 }, () => t.candles(MINT, "1s", null, 10));
+  joined();
+  const all = await Promise.all([first, ...crowd, ...candles]);
+  assert.deepEqual(all.map((a) => a.status), all.map(() => 200));
+  t.stop();
+});
