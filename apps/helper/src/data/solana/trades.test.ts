@@ -305,3 +305,30 @@ test("the tape never waits on the RPC: after a dropped stream, a stream trade is
   assert.deepEqual((await tape(s.t)).trades.map((r) => r.tx), [BUY.signature]);
   s.release();
 });
+
+test("a listed token with no priced trade for over a minute answers its empty tape while the stream is live, not 503", async () => {
+  // live run 4 Nov 06:23Z (run4): a quiet token the box had open answered 503 upstream on the read after its first trade
+  let ms = TS * 1000;
+  let on: SourceEvents | null = null;
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }),
+    now: () => ms,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+  });
+  assert.equal((await t.trades(MINT, 50)).status, 200);
+  await settle();
+  assert.ok(on);
+  for (let s = 0; s < 61; s++) {
+    ms += 1_000;
+    t.tick(); // the stream is live and the token is read: nothing traded
+    if (s % 20 === 0) await t.trades(MINT, 50);
+  }
+  const a = await t.trades(MINT, 50);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).trades, []);
+  assert.equal(a.asOfMs, ms);
+  t.stop();
+});

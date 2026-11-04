@@ -6,6 +6,7 @@ import { useSigninSheet, useSigninSource } from "../screens/signin/source.tsx";
 import { W } from "../screens/signin/Word.tsx";
 import { TokenRoute } from "../screens/token/TokenPage.tsx";
 import { VerifyRoute } from "../screens/verify/VerifyRoute.tsx";
+import { PortfolioMount } from "./PortfolioMount.tsx";
 import type { RouteId } from "./routes.ts";
 
 // The route map: the screen each route draws. No link or tab opens an empty main (card app-no-blank-pages): a page
@@ -49,8 +50,8 @@ const SCREENS: Partial<Record<RouteId, ComponentType>> = {
   verify: VerifyOverTrenches,
   // the account rows (S1.16 at 390) for the phone's Account tab
   profile: needsAccount(PhoneAccountMenu),
-  // the screen itself is card app-portfolio-mount's
-  portfolio: needsAccount(null),
+  // Portfolio and Activity, each tap mounted (PortfolioMount.tsx)
+  portfolio: needsAccount(PortfolioMount),
 };
 
 export function Screen({ id }: { id: RouteId }) {

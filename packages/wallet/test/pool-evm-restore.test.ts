@@ -10,7 +10,7 @@ import { solanaJsonRpc, VaultTree, vaultLabelOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { refKey } from "../src/notes/store.ts";
-import { EVM_LAG_TRIES, EVM_POOL_EVENTS, EVM_TRANSFER_TOPIC, EvmLagError, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
+import { EVM_LAG_TRIES, EVM_POOL_EVENTS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
 import { evmRestore, evmRestoreNotes } from "../src/pool/evm-restore.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -532,4 +532,51 @@ test("evmRestore refuses what a correct pool cannot make: a precommitment twice,
   // a change that is not the release's is no refusal: the release is listed elsewhere and the change not kept
   const r = run((e) => e.map((x, k) => (k === 4 ? { ...x, state: 99n } : x)));
   assert.deepEqual(r.elsewhere.map((x) => x.changeOurs), [false]);
+});
+
+// ---- card wallet-rpc-hex-case: an RPC's hex in either case ----
+
+/** robinhood-testnet.drpc.org's case: it answers eth_chainId "0xB626" (read 3 Nov 23:07Z; the 3 Nov 22:55Z
+ * pool-evm-testnet-run restore found all 3 notes but left both Ws unread on it). Every hex digit of every answer
+ * upper-cased, "0x" kept. */
+const upper = (v: unknown): unknown =>
+  typeof v === "string" && /^0x[0-9a-f]+$/.test(v) ? `0x${v.slice(2).toUpperCase()}`
+  : Array.isArray(v) ? v.map(upper)
+  : v !== null && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, upper(x)]))
+  : v;
+const drpc = (r: EvmRpc): EvmRpc => Object.assign(async (m: string, p: readonly unknown[]) => upper(await r(m, p)), { url: `${(r as { url?: string }).url}/drpc` });
+
+test("hex in either case: the Transfer pair on drpc's upper case (eth_chainId \"0xB626\") holds the anchor and lists every W's tokens", async () => {
+  const { world } = seeded();
+  // the Transfer pair's own check on Robinhood testnet, drpc's real answer on one side
+  const rh = (url: string) => rpc(world, { url, chainId: 46630n });
+  const anchor = { number: 100n, hash: world.hashOf(100), timestamp: T0 + 200n, baseFeePerGas: 1n };
+  assert.equal(await drpc(rh("https://c.example"))("eth_chainId", []), "0xB626");
+  await evmHoldsAnchor([drpc(rh("https://c.example")), rh("https://d.example")], 46630n, anchor);
+  await evmHoldsAnchor([rh("https://c.example"), drpc(rh("https://d.example"))], 46630n, anchor);
+  // the whole restore, one side of each pair upper-cased: the same notes and the same tokens as lower case
+  const want = await restore(pair(world, world), wpair(world));
+  assert.ok(want.wallets.every((w) => w.tokens !== null && w.tokens.length > 0));
+  const [a, b] = pair(world, world), [c, d] = wpair(world);
+  for (const [rpcs, wallets] of [[[a, b], [drpc(c), d]], [[drpc(a), b], [c, drpc(d)]], [[a, drpc(b)], [drpc(c), drpc(d)]]] as [[EvmRpc, EvmRpc], [EvmRpc, EvmRpc]][]) {
+    const r = await restore(rpcs, wallets);
+    assert.deepEqual(r.wallets, want.wallets);
+    assert.deepEqual(byKey(r), byKey(want));
+  }
+});
+
+test("hex in either case: a Transfer pair that differs by more than case is still refused, that W unread", async () => {
+  const { world, W0 } = seeded();
+  const rh = (url: string, chainId: bigint) => rpc(world, { url, chainId });
+  const anchor = { number: 100n, hash: world.hashOf(100), timestamp: T0 + 200n, baseFeePerGas: 1n };
+  // another chain in upper case ("0xB627") is another chain
+  await assert.rejects(evmHoldsAnchor([drpc(rh("https://c.example", 46631n)), rh("https://d.example", 46630n)], 46630n, anchor), /rpcs: chain 46631 and 46630, not 46630/);
+  // one Transfer log's value 500 on the upper-case side, 1 on the other: W0 unread, the notes stand
+  const at25 = (l: Record<string, unknown>[]) => l.map((x) => (x.blockNumber === q(25) ? { ...x, data: `0x${w64(1n)}` } : x));
+  const [c, d] = wpair(world, world, {}, { xfer: at25 });
+  const r = await restore(pair(world, world), [drpc(c), d]);
+  const w0 = r.wallets.find((w) => w.w === W0)!;
+  assert.equal(w0.tokens, null);
+  assert.match(w0.error!, /the two RPCs differ at log 1/);
+  assert.equal(r.notes.length, 10);
 });

@@ -195,6 +195,7 @@ async fn release(kind: TokenKind) -> R<u64> {
         burns.push(cb.gas_burnt);
     }
     assert_eq!(h.view(&h.vault, "totals", json!({})).await?, json!({"deposited": "31000000", "spent": "9000000", "returned": "1600000"}));
+    h.i1().await?;
     let max = *burns.iter().max().unwrap();
     println!("{kind:?} release build: on_payout burnt {} Tgas (fee_bounces, recipient_bounces)", burns.iter().map(|b| format!("{:.3}", *b as f64 / TGAS)).collect::<Vec<_>>().join(", "));
     Ok(max)
@@ -277,6 +278,7 @@ async fn out_of_gas(kind: TokenKind) -> R<()> {
         top_up.as_yoctonear()
     );
     println!("{kind:?} test build: VT-S17 holds\n{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 

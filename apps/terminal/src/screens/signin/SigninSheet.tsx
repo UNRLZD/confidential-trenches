@@ -6,6 +6,7 @@ import { ROUTES } from "../../routes/routes.ts";
 import { HopLine } from "./HopLine.tsx";
 import { Icon } from "./Icon.tsx";
 import type { IconName } from "./Icon.tsx";
+import { useBalance } from "../portfolio/source.tsx";
 import { restoreModel, showRestore, signinWays, usd } from "./model.ts";
 import type { RestoreModel } from "./model.ts";
 import { useSigninSheet, useSigninSource } from "./source.tsx";
@@ -36,7 +37,7 @@ export function SigninSheet() {
   const { open, setOpen } = useSigninSheet();
   const { pathname } = useLocation();
   const state = src.snapshot.state;
-  const r = restoreModel(state);
+  const r = restoreModel(state, useBalance(src.snapshot));
   const seen = useRef(new Set<string>());
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
   if (r && (r.kind === "scanning" || r.kind === "offline")) seen.current.add(r.id);

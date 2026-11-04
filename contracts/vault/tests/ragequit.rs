@@ -250,6 +250,7 @@ async fn vt_s09(kind: TokenKind) -> R<()> {
     assert_eq!(t, json!({"deposited": "31000000", "spent": "25000000", "returned": "4000000"}), "{t}");
     assert_eq!(h.token_balance(&h.vault).await?, 31_000_000 - 3_000_000 - 14_000_000 - 4_000_000);
     println!("{kind:?}: VT-S09 holds\n{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 
