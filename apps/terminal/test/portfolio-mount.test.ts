@@ -22,3 +22,13 @@ test("Export with no wallet known opens nothing; sell, exit plan, share and view
     { kind: "view-key", id: "op1" },
   ] as const) assert.deepEqual(tapOf(a, held), { to: "none" }, a.kind);
 });
+
+test("a pool row's Withdraw opens SIGN_HOST's pool withdraw with its chain only: never an address or an amount", () => {
+  for (const chain of ["solana", "base", "robinhood"] as const) {
+    const t = tapOf({ kind: "pool-withdraw", chain }, held);
+    assert.deepEqual(t, { to: "pool.withdraw", params: { chain } }, chain);
+    if (t.to === "pool.withdraw") assert.deepEqual(Object.keys(t.params), ["chain"], chain);
+  }
+  // a chain with no pool opens nothing
+  assert.deepEqual(tapOf({ kind: "pool-withdraw", chain: "near" } as never, held), { to: "none" });
+});
