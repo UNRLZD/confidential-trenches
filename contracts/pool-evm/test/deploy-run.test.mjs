@@ -12,11 +12,14 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { DUST, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
+import { CHAINS, DUST, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
 import { ORDER, createAddress, main } from "../script/deploy.mjs";
 
 const OUT_DIR = new URL("../out/", import.meta.url);
 const runtime = (name) => JSON.parse(readFileSync(new URL(`${name}.sol/${name}.json`, OUT_DIR), "utf8")).deployedBytecode.object;
+const init = (name) => JSON.parse(readFileSync(new URL(`${name}.sol/${name}.json`, OUT_DIR), "utf8")).bytecode.object;
+/** the contract a create transaction's data deploys: the one whose init code it starts with */
+const createdBy = (data) => ORDER.find((n) => data.startsWith(init(n)));
 const E = "0x49f2425b7f33f3a10912de8add6839226ce663a2"; // a stand-in return address with no code
 const TMP = mkdtempSync(path.join(tmpdir(), "pool-evm-run-"));
 
@@ -49,12 +52,12 @@ const num = (u) => (u.length ? BigInt(hex(u)) : 0n);
 const parse = (raw) => {
   const b = bytes(raw);
   const [f] = dec(b, 1);
-  return { nonce: num(f[1]), tip: num(f[2]), maxFee: num(f[3]), gas: num(f[4]), to: f[5].length ? hex(f[5]) : null, value: num(f[6]), len: BigInt(b.length) };
+  return { nonce: num(f[1]), tip: num(f[2]), maxFee: num(f[3]), gas: num(f[4]), to: f[5].length ? hex(f[5]) : null, value: num(f[6]), data: hex(f[7]), len: BigInt(b.length) };
 };
 
 /** A mock chain and a virtual clock. `on` hooks: lose(t) -> true loses that send's answer; afterMine(chain). */
 function chain(on = {}) {
-  const c = { base: 5_000_000n, tip: on.tip ?? 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), pool: [], receipts: new Map(), seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
+  const c = { base: 5_000_000n, tip: on.tip ?? 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), created: [], pool: [], receipts: new Map(), seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
   const g = (m, k) => m.get(k.toLowerCase()) ?? 0n;
   const l1Of = (len) => c.l1Scale * (len > 100n ? len : 100n);
   const costOf = (t) => t.gas * t.maxFee + t.value + l1Of(t.len);
@@ -75,7 +78,7 @@ function chain(on = {}) {
       c.bal.set(c.deployer, g(c.bal, c.deployer) - t.value - fee);
       let ca = null;
       if (t.to) c.bal.set(t.to, g(c.bal, t.to) + t.value);
-      else c.code.set((ca = createAddress(c.deployer, t.nonce)), runtime(ORDER[Number(t.nonce)]));
+      else c.code.set((ca = createAddress(c.deployer, t.nonce)), runtime(createdBy(t.data))), c.created.push(t.data);
       c.nonce.set(c.deployer, t.nonce + 1n);
       c.receipts.set(hash, { status: "0x1", contractAddress: ca, gasUsed: "0x" + used.toString(16), from: c.deployer });
       on.afterMine?.(c, t);
@@ -135,7 +138,7 @@ function chain(on = {}) {
 
 /** Runs main() on the mock with the funder sending the printed need `fundDelay` virtual ms after the waiting line;
  * `onLine(line, c)` sees every printed line. Returns the run's outcome and the chain. */
-async function run(t, c, { ret = E, fundDelay = 0, onLine } = {}) {
+async function run(t, c, { ret = E, fundDelay = 0, onLine, args = [] } = {}) {
   const exits = [];
   t.mock.method(process, "exit", (code) => void exits.push(code));
   const realFetch = globalThis.fetch;
@@ -153,7 +156,7 @@ async function run(t, c, { ret = E, fundDelay = 0, onLine } = {}) {
   let error = null;
   const before = process.exitCode;
   try {
-    await main(["--chain", "base-sepolia", "--return", ret, "--rpc", "https://mock.invalid", "--out", out, "--no-build"], c.io);
+    await main(["--chain", "base-sepolia", "--return", ret, "--rpc", "https://mock.invalid", "--out", out, "--no-build", ...args], c.io);
   } catch (e) {
     error = e;
   } finally {
@@ -277,4 +280,26 @@ test("a stuck deploy on a chain whose suggested tip is 0 is cancelled with a tip
   settled(c, r);
   assert.ok(r.record.txs.some((x) => x.step.startsWith("cancel (replaces deploy PrivacyPoolSimple")), why(c));
   assert.ok(c.balanceOf(E) > 0n);
+});
+
+test("--only SellDelegate deploys the delegate alone at nonce 0, constructed with the chain's WETH and v4 PoolManager; its record names it alone; the sweep lands", OPTS, async (t) => {
+  const c = chain();
+  const r = await run(t, c, { args: ["--only", "SellDelegate"] });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  assert.deepEqual(Object.keys(r.record.contracts), ["SellDelegate"]);
+  assert.equal(r.record.contracts.SellDelegate.address, createAddress(r.record.deployer, 0));
+  assert.deepEqual(r.record.txs.map((x) => x.step), ["deploy SellDelegate", "sweep (the run key's rest back)"]);
+  const word = (a) => a.slice(2).padStart(64, "0");
+  assert.deepEqual(c.created, [init("SellDelegate") + word(CHAINS["base-sepolia"].weth.address) + word(CHAINS["base-sepolia"].poolManager.address)]);
+  assert.ok(c.logs.some((l) => /^deploy: done\. Next: node scripts\/live-checks\/evm-sell-v4\.mjs --deployment /.test(l)), why(c));
+});
+
+test("--only takes the sell delegate alone: any other contract, or none named, is refused before a key is made", OPTS, async (t) => {
+  for (const only of ["UniswapV4Adapter", "PrivacyPoolSimple", "--no-build", undefined]) {
+    const c = chain();
+    const r = await run(t, c, { args: only === undefined ? ["--only"] : ["--only", only] });
+    assert.match(String(r.error?.message), /--only is one of SellDelegate/, String(only));
+    assert.equal(c.deployer, null, "no run key");
+  }
 });

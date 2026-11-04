@@ -1,15 +1,17 @@
 // node --test scripts/live-checks/app-shell.test.mjs: the live check's verdict replays recorded runs
-// (app-shell.answers.json), each read on 2026-11-01 by app-shell.mjs --harness --record in headless Chromium 153 on the
-// Mac, the hosts' real names answered by route (APP_HOST: a terminal build under its own _headers; SIGN_HOST:
-// app-in-shell's stand-in shell):
-//   good:         card app-in-shell's build: every load runs inside the shell: PASS;
+// (app-shell.answers.json), the hosts' real names answered by route (APP_HOST: a terminal build under its own _headers;
+// SIGN_HOST: app-in-shell's stand-in shell):
+//   good:         card app-shell-tabbar-cls's build, read on 2026-11-04 by apps/terminal/test/bar10/run.mjs --record (its
+//                 answers-at-once pass: the helper's reads answered, signed in) in Chrome 157 on the Mac, the 4th BAR-10
+//                 PASS in a row: every load inside the shell, every phone load at CLS 0: PASS;
+// the two bad answers read on 2026-11-01 by app-shell.mjs --harness --record in headless Chromium 153 on the Mac:
 //   bad:          main cf7b85a's build, before app-in-shell: APP_HOST stays top-level and frames SIGN_HOST, which the
 //                 shell's frame-ancestors 'none' refuses: FAIL on every load;
 //   badIntegrity: app-in-shell's build with the script tag's integrity taken out: FAIL on the integrity
 //                 (Integrity-Policy then blocks the script, so nothing moves to the shell and no route draws).
-// A late layout shift is planted on the good answer (a recorded plant moved the shell's bars by 0.06 at most, under the
-// limit, since every screen is empty today).
-// Screenshot paths are kept as <shots>/<file>.
+// Layout shifts are planted on the good answer: any shift on a load at either width fails, as BAR-10's 0.0806 phone tab
+// bar and 0.0008 Verify reads did (card app-shell-tabbar-cls).
+// Screenshot paths are kept as <shots>/<file>, a build's path as <build>.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -27,10 +29,10 @@ test("recorded good answer: every route at both widths, integrity equal, CLS 0, 
   assert.match(r.lines[0], /^ok  served with a CSP and an Integrity-Policy: CSP, Integrity-Policy blocked-destinations=\(script\)$/);
   assert.ok(r.lines.some((l) => /^ok  \S+\/assets\/index-[\w-]+\.js integrity equals the sha384 of the bytes served$/.test(l)));
   assert.ok(r.lines.includes(`ok  ${ROUTES.length * WIDTHS.length} loads of ${ROUTES.length * WIDTHS.length} (every route at both widths)`));
-  // the phone's header swaps Sign in for the balance when the shell's signed-in state lands: a shift of 0.0004 at most
-  for (const w of WIDTHS) for (const [id, p] of ROUTES) assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} ${p} \\(${id}\\): CLS 0\\.000\\d, no violation, no error$`).test(l)), `${w.name} ${p}`);
+  // every phone load holds still; a desktop load moved 0.0009 at most
+  for (const w of WIDTHS) for (const [id, p] of ROUTES) assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} ${p} \\(${id}\\): CLS 0\\.000${w.name === "phone" ? "0" : "\\d"}, no violation, no error$`).test(l)), `${w.name} ${p}`);
   assert.ok(r.lines.some((l) => /^ok  phone inside the shell, 4 link\(s\): CLS 0, no reload$/.test(l)));
-  assert.ok(r.lines.some((l) => /^ok  desktop inside the shell, 6 link\(s\): CLS 0, no reload$/.test(l)));
+  assert.ok(r.lines.some((l) => /^ok  desktop inside the shell, 5 link\(s\): CLS 0, no reload$/.test(l)));
 });
 
 test("recorded bad answer: today's APP_HOST stays top-level, not inside SIGN_HOST's shell: FAIL on every load", () => {
@@ -42,19 +44,35 @@ test("recorded bad answer: today's APP_HOST stays top-level, not inside SIGN_HOS
   }
 });
 
-test("planted on the good answer: a late shift above 0.1 on one load, and inside the shell: FAIL", () => {
+test("planted on the good answer: a late shift on a desktop load, and inside the shell: FAIL", () => {
   const rec = structuredClone(ANSWERS.good);
-  rec.loads[0].cls = 0.1422;
+  const desk = rec.loads.findIndex((l) => l.width === "desktop");
+  rec.loads[desk].cls = 0.1422;
   rec.inShell[0].cls = 0.05;
   const b = bad(judge(rec).lines);
-  assert.deepEqual(b, [`BAD phone / (token): CLS 0.1422 above 0.1`, "BAD phone inside the shell, 4 link(s): CLS 0.0500 inside the shell"]);
+  assert.deepEqual(b, [`BAD desktop ${rec.loads[desk].path} (${rec.loads[desk].expect}): CLS 0.1422 above 0`, "BAD phone inside the shell, 4 link(s): CLS 0.0500 inside the shell"]);
+});
+
+test("planted on the good answer: any shift on a load at either width, BAR-10's 0.0806 tab bar and 0.0008 Verify reads: FAIL", () => {
+  const rec = structuredClone(ANSWERS.good);
+  const at = (p) => rec.loads.findIndex((l) => l.width === "phone" && l.path === p);
+  Object.assign(rec.loads[at("/profile")], { cls: 0.0806, shifts: [{ at: 28, value: 0.0806, input: false, sources: ["div.tabbar 0,0 0x0 -> 0,776 390x68"] }] });
+  Object.assign(rec.loads[at("/verify")], { cls: 0.0008, shifts: [{ at: 65, value: 0.0008, input: false, sources: ["dd.num 282,212 90x14 -> 365,212 7x14"] }] });
+  assert.deepEqual(bad(judge(rec).lines), [
+    "BAD phone /profile (profile): CLS 0.0806 above 0 [+28ms 0.0806: div.tabbar 0,0 0x0 -> 0,776 390x68]",
+    "BAD phone /verify (verify): CLS 0.0008 above 0 [+65ms 0.0008: dd.num 282,212 90x14 -> 365,212 7x14]",
+  ]);
+  // the same shift on a desktop load fails too
+  const d = structuredClone(ANSWERS.good);
+  Object.assign(d.loads.find((l) => l.width === "desktop" && l.path === "/verify"), { cls: 0.0008, shifts: [{ at: 65, value: 0.0008, input: false, sources: ["dd.num 1170,212 90x14 -> 1253,212 7x14"] }] });
+  assert.deepEqual(bad(judge(d).lines), ["BAD desktop /verify (verify): CLS 0.0008 above 0 [+65ms 0.0008: dd.num 1170,212 90x14 -> 1253,212 7x14]"]);
 });
 
 test("planted on the good answer: a shift inside the shell names its element and its rects", () => {
   const rec = structuredClone(ANSWERS.good);
   rec.inShell[1].cls = 0.0047;
   rec.inShell[1].shifts = [{ at: 490, value: 0.0047, input: false, sources: ["div.tkp-strip 234,50 861x49 -> 548,50 547x49", "div.tkp-idtext 59,59 165x30 -> 59,56 479x37"] }];
-  assert.deepEqual(bad(judge(rec).lines), ["BAD desktop inside the shell, 6 link(s): CLS 0.0047 inside the shell [+490ms 0.0047: div.tkp-strip 234,50 861x49 -> 548,50 547x49 | div.tkp-idtext 59,59 165x30 -> 59,56 479x37]"]);
+  assert.deepEqual(bad(judge(rec).lines), ["BAD desktop inside the shell, 5 link(s): CLS 0.0047 inside the shell [+490ms 0.0047: div.tkp-strip 234,50 861x49 -> 548,50 547x49 | div.tkp-idtext 59,59 165x30 -> 59,56 479x37]"]);
 });
 
 test("recorded bad answer: one script without its integrity: FAIL", () => {

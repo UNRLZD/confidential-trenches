@@ -21,6 +21,7 @@ export const LIVE_CHECKS = [
   "market-data-evm",
   "helper-launchpad-origin",
   "index-evm-swaps",
+  "index-sol-trades",
   "relayer-withdraw-send",
   "relayer-withdraw-fee",
 ];

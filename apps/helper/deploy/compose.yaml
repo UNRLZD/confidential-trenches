@@ -1,6 +1,7 @@
 # The helper and Caddy on one host. Only Caddy is published (80, 443 and 443/udp for HTTP/3).
 #   HELPER_COMMIT=<40 hex> docker compose up -d --build
-# On the server, deploy/redeploy.sh <40 hex> runs it, with HELPER_COMMIT and HELPER_RELEASE written to deploy/.env.
+# On the server, deploy/redeploy.sh <40 hex> runs it, with HELPER_COMMIT and HELPER_RELEASE written to deploy/.env (a
+# first start with this command; a later deploy swaps the helper with no gap, see the script).
 name: ct-helper
 services:
   helper:
@@ -25,6 +26,10 @@ services:
       # the token page's holder rows (src/data/solana/token.ts, D-S11): a keyed provider that answers
       # getTokenLargestAccounts; empty: holders is Jupiter's count and top-10 share, with no rows
       SOLANA_HOLDERS_RPC_URL: ${SOLANA_HOLDERS_RPC_URL:-}
+      # Solana's own trade reads (src/data/solana/trades.ts): a keyed provider's websocket for the per-token log stream
+      # and its HTTP endpoint for the reads, asked first; empty: the public endpoints
+      SOLANA_STREAM_WS_URL: ${SOLANA_STREAM_WS_URL:-}
+      SOLANA_TRADES_RPC_URL: ${SOLANA_TRADES_RPC_URL:-}
       BASE_RPC_URL: ${BASE_RPC_URL:-}
       ROBINHOOD_RPC_URL: ${ROBINHOOD_RPC_URL:-}
       NEAR_RPC_URL: ${NEAR_RPC_URL:-}
@@ -98,10 +103,21 @@ services:
     volumes:
       - helper_data:/app/data
     restart: unless-stopped
+    # any stop of the helper lets its drain finish (src/server.ts STOP_MS, 50 s), as redeploy.sh's `docker stop -t 60` does
+    stop_grace_period: 60s
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     expose: ["8080"]
+    # Healthy only when GET /v1/health answers ready: true (src/server.ts listens on 8080 only once the helper is ready).
+    # deploy/redeploy.sh starts a new helper beside the running one and stops the old one only after this passes, so the
+    # swap has no gap; start_period lets a slow start run without counting its failed checks.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/v1/health').then(r=>r.json()).then(j=>process.exit(j.ready===true?0:1),()=>process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 3
+      start_period: 300s
     logging:
       driver: json-file
       options: { max-size: "1m", max-file: "2" }

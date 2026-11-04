@@ -6,11 +6,21 @@
 // checks here are what keep it to the sell the user asked for (M363 (3)).
 //
 // The builder takes the sell's fields and a route, and checks, before anything is signed:
-// - the target is on the chain's router list (evmPoolVenues().routers);
-// - the swap data is made here from the route, never taken from a caller: SwapRouter02's
-//   exactInput((bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum)) with recipient W, amountIn
-//   the amount, amountOutMinimum minOut, and a path from the token to the chain's WETH (a listed middle allowed, as in
-//   the buy; WETH only at the end);
+// - the target: a v3 route's is on the chain's router list (evmPoolVenues().routers), a v4 route's is the chain's
+//   pinned PoolManager (evmPoolVenues().poolManager, card evm-sell-v4-kit), and nothing else;
+// - the swap data is made here from the route, never taken from a caller:
+//   - v3: SwapRouter02's exactInput((bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum)) with
+//     recipient W, amountIn the amount, amountOutMinimum minOut, and a path from the token to the chain's WETH (a
+//     listed middle allowed, as in the buy; WETH only at the end);
+//   - v4: abi.encode(PathKey[]), the path SellDelegate.unlockCallback swaps hop by hop, exact input, inside one
+//     PoolManager unlock (contracts/pool-evm/src/SellDelegate.sol): from the token, each hop's currency the next, the
+//     last the native asset or the chain's WETH and neither one before it, a middle only from the venue list; each
+//     hop's fee a u24, tick spacing 1 to 32,767, and hooks either none (no hook data) or exactly a launchpad pool the
+//     venue lists (evmPoolVenues().hookedPools: hook, fee, tick spacing, and the asset it pairs the token with), its
+//     hook data at most EVM_POOL_MAX_HOOK_DATA bytes. A hook is part of the price, and the sell has no quote of its
+//     own yet (card evm-sell-device-quote), so an unlisted hook, or a listed one with another fee or tick spacing, is
+//     refused rather than bounded by minOut alone. A key that names no initialized pool reverts the whole sell in the
+//     PoolManager (PoolNotInitialized), so W keeps its token;
 // - the deadline is unix seconds, at least EVM_POOL_SELL_DEADLINE_MIN_S and at most EVM_POOL_SELL_DEADLINE_MAX_S past
 //   now;
 // - the fee cap is above 0 and under minOut, so the deposit always holds something;
@@ -24,7 +34,22 @@
 // precommitment by signing again with a fresh one.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_MAX_HOPS, evmPoolVenues, venuePins, type EvmPoolChain, type EvmPoolVenueList, type EvmV3Route } from "./buy-unpinned.ts";
+import {
+  EVM_POOL_MAX_HOOK_DATA,
+  EVM_POOL_MAX_HOPS,
+  evmPoolVenues,
+  pathKeysAbi,
+  venuePins,
+  type EvmPoolChain,
+  type EvmPoolVenueList,
+  type EvmV3Route,
+  type EvmV4Hop,
+} from "./buy-unpinned.ts";
+
+/** A v4 sell's route: from the token sold, one PathKey per hop (its `currency` the hop's output), ending at the native
+ *  asset or the chain's WETH. */
+export type EvmV4SellRoute = { venue: "uniswap-v4"; hops: readonly EvmV4Hop[] };
+export type EvmSellRoute = EvmV3Route | EvmV4SellRoute;
 
 /** A sell's deadline, seconds past now: at least the helper's send margin (apps/helper pool/evm.ts
  *  EVM_POOL_SEND_MARGIN_MS, 60 s, card helper-pool-senders: a send needs time to be mined before the deadline), at
@@ -34,10 +59,10 @@ export const EVM_POOL_SELL_DEADLINE_MIN_S = 60;
 export const EVM_POOL_SELL_DEADLINE_MAX_S = 600;
 
 export type EvmPoolSellErrorCode =
-  | "bad_target" // the target is not on the chain's router list
+  | "bad_target" // a v3 sell's target is not on the router list, or a v4 sell's is not the pinned PoolManager
   | "token_mismatch" // the route does not start at the token sold
   | "middle_not_listed" // a middle token that is not on the venue list
-  | "bad_route" // the route's shape, or it does not end at the chain's WETH; or the chain, W or the pool
+  | "bad_route" // the route's shape, its end, a hook not on a listed pool; or the chain, W or the pool
   | "bad_amount" // amount, minOut, precommitment or nonce out of range
   | "bad_fee" // the fee cap is 0, or not under minOut
   | "bad_deadline" // the deadline is not seconds within the window past now
@@ -59,6 +84,7 @@ const refuse = (code: EvmPoolSellErrorCode, m: string): never => {
 
 const NATIVE = "0x0000000000000000000000000000000000000000";
 const U24 = 0xffffff;
+const MAX_TICK_SPACING = 32767;
 // literals, not expressions: the kit's index reaches the signing page's bundle, which keeps a top-level computation
 const U256 = 0x10000000000000000000000000000000000000000000000000000000000000000n;
 const U64 = 0x10000000000000000n;
@@ -103,7 +129,7 @@ export type EvmPoolSellRequest = {
   token: string;
   amount: bigint;
   target: string;
-  route: EvmV3Route;
+  route: EvmSellRoute;
   minOut: bigint;
   precommitment: bigint;
   feeCap: bigint;
@@ -144,12 +170,65 @@ const copyList = (a: unknown): unknown[] => {
   return out;
 };
 
-/** SwapRouter02's exactInput call for a checked path (one frozen copy, each field read once). */
-function swapData(chain: EvmPoolChain, token: string, route: unknown, w: string, amount: bigint, minOut: bigint): string {
+/** The target's call data for a checked route: SwapRouter02's exactInput (v3) or SellDelegate's PathKey[] (v4). The
+ *  route is read once, into a copy; the target must be the venue's for the route's kind. */
+function swapData(chain: EvmPoolChain, token: string, route: unknown, target: string, w: string, amount: bigint, minOut: bigint): string {
   const venue = venueOf(chain);
   if (typeof route !== "object" || route === null) return refuse("bad_route", "a route is an object");
-  const { venue: kind, tokens: t, fees: f } = route as Record<string, unknown>;
-  if (kind !== "uniswap-v3") return refuse("bad_route", "a sell runs on Uniswap v3's SwapRouter02");
+  const kind = (route as Record<string, unknown>).venue;
+  const pm = Object.hasOwn(venue, "poolManager") && isAddress(venue.poolManager) ? lower(venue.poolManager) : undefined;
+  if (kind === "uniswap-v4") {
+    if (pm === undefined || lower(target) !== pm) return refuse("bad_target", `a v4 sell goes only to ${chain}'s pinned PoolManager, not ${target}`);
+    return v4Data(chain, token, (route as Record<string, unknown>).hops);
+  }
+  if (kind !== "uniswap-v3") return refuse("bad_route", "a sell runs on Uniswap v3's SwapRouter02 or v4's PoolManager");
+  if (!venue.routers.some((r) => lower(r) === lower(target))) return refuse("bad_target", `a v3 sell goes only to a listed router, not ${target}`);
+  return v3Data(chain, token, route, w, amount, minOut);
+}
+
+/** SellDelegate's v4 data: abi.encode(PathKey[]) of a checked copy of `hopsIn` (see the header). */
+function v4Data(chain: EvmPoolChain, token: string, hopsIn: unknown): string {
+  const venue = venueOf(chain);
+  const hops = copyList(hopsIn).map((h) => {
+    if (typeof h !== "object" || h === null) return refuse("bad_route", "a hop is an object");
+    const { currency, fee, tickSpacing, hooks, hookData } = h as Record<string, unknown>;
+    return Object.freeze({ currency, fee, tickSpacing, hooks, hookData });
+  });
+  if (hops.length < 1 || hops.length > EVM_POOL_MAX_HOPS) return refuse("bad_route", `a v4 sell is 1 to ${EVM_POOL_MAX_HOPS} hops`);
+  const weth = lower(venue.weth);
+  const listed = new Set(venue.middles.map(lower));
+  const shapes = Object.hasOwn(venue, "hookedPools") ? venue.hookedPools! : [];
+  let from = lower(token);
+  hops.forEach((h, i) => {
+    const { currency, fee, tickSpacing, hooks, hookData } = h;
+    if (!isAddress(currency) || !isAddress(hooks)) refuse("bad_route", "a hop's currency or hooks is not an address");
+    if (!Number.isInteger(fee) || (fee as number) < 0 || (fee as number) > U24) refuse("bad_route", "a v4 fee is a u24");
+    if (!Number.isInteger(tickSpacing) || (tickSpacing as number) < 1 || (tickSpacing as number) > MAX_TICK_SPACING) {
+      refuse("bad_route", `a v4 tick spacing is 1 to ${MAX_TICK_SPACING}`);
+    }
+    if (typeof hookData !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(hookData)) refuse("bad_route", "hook data is 0x hex");
+    const to = lower(currency as string);
+    const last = i === hops.length - 1;
+    if (to === from) refuse("bad_route", "a hop buys what it spends");
+    if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth) refuse("bad_route", "a v4 sell ends at the native asset or the chain's WETH, and only there");
+    if (!last && !listed.has(to)) refuse("middle_not_listed", `${currency} is not on the venue list`);
+    if (lower(hooks as string) === NATIVE) {
+      if (hookData !== "0x") refuse("bad_route", "a hop with no hook carries no hook data");
+    } else {
+      if (((hookData as string).length - 2) / 2 > EVM_POOL_MAX_HOOK_DATA) refuse("bad_route", `hook data is at most ${EVM_POOL_MAX_HOOK_DATA} bytes`);
+      // a hook only on a launchpad pool the venue lists, with its own fee and tick spacing, paired with its asset
+      const on = shapes.some((p) => lower(p.hooks) === lower(hooks as string) && p.fee === fee && p.tickSpacing === tickSpacing && to === (p.from === "native" ? NATIVE : weth));
+      if (!on) refuse("bad_route", `the hook ${hooks} with fee ${fee} and tick spacing ${tickSpacing} is not a pool the venue lists`);
+    }
+    from = to;
+  });
+  return toHex(concat(word(0x20n), pathKeysAbi(hops as EvmV4Hop[])));
+}
+
+/** SwapRouter02's exactInput call for a checked path (one frozen copy, each field read once). */
+function v3Data(chain: EvmPoolChain, token: string, route: object, w: string, amount: bigint, minOut: bigint): string {
+  const venue = venueOf(chain);
+  const { tokens: t, fees: f } = route as Record<string, unknown>;
   const tokens = copyList(t);
   const fees = copyList(f);
   if (fees.length < 1 || fees.length > EVM_POOL_MAX_HOPS || tokens.length !== fees.length + 1) {
@@ -184,7 +263,7 @@ export function evmPoolBuildSellUnpinned(chain: EvmPoolChain, req: EvmPoolSellUn
   if (!isWallet(w)) return refuse("bad_route", "W is not an address");
   if (!isWallet(token) || lower(token) === lower(venue.weth)) return refuse("bad_route", "the token is not an address, or is WETH");
   if (!isWallet(pool)) return refuse("bad_route", "the pool is not an address");
-  if (!isAddress(target) || !venue.routers.some((r) => lower(r) === lower(target))) return refuse("bad_target", `${target} is not on the router list`);
+  if (!isAddress(target)) return refuse("bad_target", `${target} is not an address`);
   if (!isUint(amount, U256) || amount === 0n) return refuse("bad_amount", "amount is a uint256 above 0");
   if (!isUint(minOut, U256) || minOut === 0n) return refuse("bad_amount", "minOut is a uint256 above 0");
   if (!isUint(precommitment, FIELD_P)) return refuse("bad_amount", "the precommitment is a field element");
@@ -195,7 +274,7 @@ export function evmPoolBuildSellUnpinned(chain: EvmPoolChain, req: EvmPoolSellUn
   if (typeof deadline !== "bigint" || deadline < BigInt(t + EVM_POOL_SELL_DEADLINE_MIN_S) || deadline > BigInt(t + EVM_POOL_SELL_DEADLINE_MAX_S)) {
     return refuse("bad_deadline", `the deadline is ${EVM_POOL_SELL_DEADLINE_MIN_S} to ${EVM_POOL_SELL_DEADLINE_MAX_S} seconds past now (${t})`);
   }
-  const data = swapData(chain, token, route, w, amount, minOut);
+  const data = swapData(chain, token, route, target, w, amount, minOut);
   const built: EvmPoolSell = Object.freeze({ chain, w, token, amount, target, data, minOut, pool, precommitment, feeCap, deadline, nonce });
   BUILT.add(built);
   return built;

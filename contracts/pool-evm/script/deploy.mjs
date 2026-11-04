@@ -5,9 +5,14 @@
 // delegate. The deployer is a run key made in memory; it is never printed, written or passed to another process.
 //
 //   node contracts/pool-evm/script/deploy.mjs --chain <base-sepolia|robinhood-testnet> --return <address>
-//     [--rpc <url>] [--out <file>] [--no-build]
+//     [--only SellDelegate] [--rpc <url>] [--out <file>] [--no-build]
 //   node contracts/pool-evm/script/deploy.mjs --write-build      rewrites scripts/live-checks/pool-evm-deploy.build.json
-//     from forge's output (out/), after a forge build
+//     from forge's output (out/), after a forge build; its `frozen` map (code already deployed from an older build,
+//     pinned to the addresses that hold it) is kept as it is
+//
+// --only SellDelegate (card evm-sell-v4) deploys the sell delegate alone, constructed with the chain's WETH and v4
+// PoolManager, with every step below the same (a fresh run key at nonce 0, so the delegate is CREATE(key, 0)); its
+// record goes to scripts/live-checks/evm-sell-v4.<chain>.json (or --out), and its live check is evm-sell-v4.mjs.
 //
 // Steps:
 //  1. The chain from eth_chainId: the named testnet's id, on its RPC or on a loopback URL (an anvil fork of it, the dry
@@ -35,11 +40,12 @@
 //     counts). A sweep at a nonce with something pending (after a settle that ran out) is priced the same way. Then the sweep: the key's balance, less the transfer's fee bound (the L1 fee bound
 //     read on each pass, doubled), goes to --return, again while what is left is more than two such bounds; a failed
 //     pass is retried with backoff over WAITS.sweep. Every hash is printed.
-//  7. Writes the deployment record (scripts/live-checks/pool-evm-deploy.<chain>.json, or --out) with every
+//  7. Writes the deployment record (scripts/live-checks/pool-evm-deploy.<chain>.json, evm-sell-v4.<chain>.json with
+//     --only SellDelegate, or --out) with every
 //     transaction that landed, in nonce order, and prints the live check to run next.
 import "../../../scripts/net-window.mjs";
 import { spawnSync } from "node:child_process";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -61,8 +67,11 @@ const argsOf = (name, chain, addrs) => ({
   PrivacyPoolSimple: [addrs.WithdrawalVerifier],
   UniswapV4Adapter: [chain.poolManager.address, chain.weth.address],
   UniswapV3Adapter: [chain.router?.address],
-  SellDelegate: [chain.weth.address],
+  SellDelegate: [chain.weth.address, chain.poolManager.address],
 })[name];
+// The contracts a run may deploy alone (--only): the sell delegate, whose constructor needs no other contract of the run
+export const ALONE = Object.freeze({ SellDelegate: { key: "evm-sell-v4" } });
+export const onlyFile = (name, chain) => path.join(REPO, "scripts/live-checks", `${ALONE[name].key}.${chain}.json`);
 const GAS_MARGIN = (g) => (g * 12n) / 10n;
 const OP_ORACLE = "0x420000000000000000000000000000000000000f"; // the OP Stack GasPriceOracle predeploy
 const SWEEP_TX_BYTES = 200n; // an EIP-1559 transfer signed is about 110 bytes
@@ -168,9 +177,11 @@ export async function main(args, io = {}) {
   const chain = CHAINS[chainName];
   if (!chain) throw new Error(`--chain is one of ${Object.keys(CHAINS).join(", ")}`);
   const ret = returnAddress(opt("--return"));
+  const only = args.includes("--only") ? opt("--only") : null;
+  if (only !== null && !(Object.hasOwn(ALONE, only) && chain.contracts.includes(only))) throw new Error(`--only is one of ${Object.keys(ALONE).join(", ")}`);
   const url = opt("--rpc") ?? chain.rpcs[0];
   const dryRun = isLoopback(url);
-  const out = opt("--out") ?? (dryRun ? null : deploymentFile(chainName));
+  const out = opt("--out") ?? (dryRun ? null : only ? onlyFile(only, chainName) : deploymentFile(chainName));
   if (!out) throw new Error("a dry run (a loopback RPC) needs --out, so it never writes the real record");
   const call = (method, params, u = url) => rpc(fetchFn, u, method, params, sleep);
 
@@ -201,7 +212,8 @@ export async function main(args, io = {}) {
   if (deployer === ret) throw new Error("--return is the run key itself");
   console.log(`deploy: run key ${deployer} (made in this run, never printed)`);
   if (big(await call("eth_getTransactionCount", [deployer, "pending"])) !== 0n) throw new Error(`${deployer} has sent transactions already`);
-  const names = chain.contracts;
+  const names = only ? [only] : chain.contracts;
+  if (only) console.log(`deploy: ${only} alone (--only), to ${path.relative(process.cwd(), out)}`);
   const addrs = Object.fromEntries(names.map((n, i) => [n, createAddress(deployer, i)]));
   const datas = Object.fromEntries(names.map((n) => [n, initOf(n) + argsOf(n, chain, addrs).map(addrArg).join("")]));
 
@@ -381,7 +393,7 @@ export async function main(args, io = {}) {
   }
   if (!done) throw new Error("the deploy stopped; the record lists what landed");
   const rpcArg = dryRun ? ` --rpc ${url},${url.replace("127.0.0.1", "localhost")}` : "";
-  console.log(`deploy: done. Next: node scripts/live-checks/pool-evm-deploy.mjs --deployment ${path.relative(process.cwd(), out)}${rpcArg}`);
+  console.log(`deploy: done. Next: node scripts/live-checks/${only ? ALONE[only].key : "pool-evm-deploy"}.mjs --deployment ${path.relative(process.cwd(), out)}${rpcArg}`);
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -390,10 +402,12 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (args.includes("--write-build")) {
       const file = {
         notes: [
-          "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03.",
+          "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04.",
         ],
         contracts: buildOf(),
       };
+      const frozen = existsSync(BUILD_FILE) ? JSON.parse(readFileSync(BUILD_FILE, "utf8")).frozen : undefined;
+      if (frozen) file.frozen = frozen;
       writeFileSync(BUILD_FILE, JSON.stringify(file, null, 2) + "\n");
       console.log(`deploy: wrote ${path.relative(process.cwd(), BUILD_FILE)}`);
     } else {

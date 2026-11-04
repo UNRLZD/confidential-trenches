@@ -9,6 +9,7 @@ import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
 import { geckoBudget, PAGE_RESERVE, WINDOW_MS } from "../gecko.ts";
 import { createProxy } from "../../proxy/proxy.ts";
+import { createRpc } from "../../rpc/rpc.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
   CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
@@ -540,4 +541,111 @@ test("page: a LaunchLab token on its curve trades in its LaunchLab pool, read on
   assert.equal(p.risk.lp.v.class, "curve");
   const q = JSON.parse((await t.page(md.mint)).body);
   assert.equal(q.row.launchpad, null, "Jupiter's metadao tag with no launch read on chain");
+});
+
+test("candles: a GeckoTerminal 429 after one good read serves the last good bars of that mint and tf (cut at `to`), read time the good read's; with no good read, 429, never an empty 200", async () => {
+  // app live run 41787804457 (4 Nov 06:49Z): wNEAR's chart drew no bars while GeckoTerminal was throttled
+  let now = NOW;
+  let refuse = false;
+  const g = fakeGecko();
+  const fetchFn = async (url: string) => (refuse ? new Response("{}", { status: 429, headers: { "retry-after": "30" } }) : g.fetch(url));
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: fetchFn as never });
+  const good = await t.candles(CURVE, "1m", null, 500);
+  assert.equal(good.status, 200);
+  const bars = JSON.parse(good.body).candles as [number, ...string[]][];
+  assert.ok(bars.length > 2);
+  now += 10 * 60_000; // past the cache and its stale window
+  refuse = true;
+  const kept = await t.candles(CURVE, "1m", null, 500);
+  assert.equal(kept.status, 200, kept.body);
+  assert.deepEqual(JSON.parse(kept.body).candles, bars);
+  assert.equal(kept.src, "geckoterminal");
+  assert.equal(kept.asOfMs, NOW, "the good read's time, not now");
+  const to = bars.at(-2)![0];
+  const cut = await t.candles(CURVE, "1m", to, 500);
+  assert.equal(cut.status, 200);
+  assert.deepEqual(JSON.parse(cut.body).candles, bars.filter((b) => b[0] < to));
+  const none = await t.candles(CURVE, "15m", null, 500); // never read: nothing kept
+  assert.equal(none.status, 429);
+  assert.ok((none.retryAfterS ?? 0) > 0);
+});
+
+test("card helper-ready-gate: under a walk at full draw all along, a burst of 15 callers opening token pages and holders answers 200 every time, never 429", async () => {
+  // one public provider for every read the helper makes: 100 requests per 10 s from our address, then 429 Retry-After 5
+  // (4 Nov 06:24-06:30Z and the 07:50Z live run 41794726819); the clock stands still, so nothing leaves its window
+  const PUBLIC = "https://api.mainnet-beta.solana.com";
+  const fr = fakeRpc();
+  let sent = 0;
+  const provider = (async (_url: string, init: RequestInit) => {
+    sent++;
+    if (sent > 100) return new Response("", { status: 429, headers: { "retry-after": "5" } });
+    const a = await fr.handle("solana", "application/json", String(init.body));
+    return new Response(a.body, { status: a.status, headers: { "content-type": "application/json" } });
+  }) as never;
+  const rpc = createRpc({}, { now: () => NOW, fetch: provider });
+  const r = rpc as unknown as { background?: (chain: string, url: string, method: string) => number };
+  // the trade walks (trades.ts: signature pages, transactions, pools and the SOL price): every request they can take,
+  // each one to the provider; a helper with no budget for them (before this card) takes as many as its tokens need,
+  // here 200 a round
+  const METHODS = ["getTransaction", "getSignaturesForAddress", "getAccountInfo"];
+  const walk = () => {
+    let n = 0;
+    while (n < 200 && (r.background?.("solana", PUBLIC, METHODS[n % 3]!) ?? 0) === 0) n++;
+    sent += n;
+    return n;
+  };
+  assert.ok(walk() > 0, "the walk draws");
+  // fifteen callers, each a token page and its holders of a token no one opened yet (a token page each: no shared cache)
+  const statuses: number[] = [];
+  for (let i = 0; i < 15; i++) {
+    const t = createSolanaToken(fakeProxy(), rpc, { now: () => NOW });
+    const mint = i % 2 === 0 ? PUMP : CURVE;
+    const [page, holders] = await Promise.all([t.page(mint, `198.51.100.${i}`), t.holders(mint, `198.51.100.${i}`)]);
+    statuses.push(page.status, holders.status);
+    walk(); // the walk takes whatever is left after each caller
+  }
+  assert.deepEqual(statuses, Array(30).fill(200), "every caller's read answered");
+  assert.ok(sent <= 100, `the provider was sent ${sent}, never past its limit`);
+});
+
+test("fold 3 (card helper-ready-gate): the walks at full draw and the provider's 429 on a walk's read: a caller's token page and holders still answer 200; the walks wait out the reset; one log line per hold", async () => {
+  // after a restart (4 Nov 09:10:06Z) the token routes answered 429 from 09:15 to 09:19Z in three live runs: a 429 the
+  // public provider answered a walk's read held the whole chain, so every caller's read was refused for its reset
+  const PUBLIC = "https://api.mainnet-beta.solana.com";
+  const fr = fakeRpc();
+  const provider = (async (_url: string, init: RequestInit) => {
+    const a = await fr.handle("solana", "application/json", String(init.body));
+    return new Response(a.body, { status: a.status, headers: { "content-type": "application/json" } });
+  }) as never;
+  const lines: string[] = [];
+  let t = NOW;
+  const rpc = createRpc({}, { now: () => t, fetch: provider, log: (l: string) => lines.push(l) } as never);
+  const METHODS = ["getTransaction", "getSignaturesForAddress", "getAccountInfo"];
+  const walk = () => {
+    let n = 0;
+    while (n < 200 && rpc.background("solana", PUBLIC, METHODS[n % 3]!) === 0) n++;
+    return n;
+  };
+  assert.ok(walk() > 0, "the walks draw at full tilt");
+  // the provider answers one of the walk's reads 429, Retry-After 30 (trades.ts calls this on its 429)
+  rpc.backgroundThrottled("solana", PUBLIC, new Headers({ "retry-after": "30" }));
+  t += 10_000; // the walks' draws leave the window; the reset still has 20 s
+  const statuses: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    const tok = createSolanaToken(fakeProxy(), rpc, { now: () => t });
+    const mint = i % 2 === 0 ? PUMP : CURVE;
+    const [page, holders] = await Promise.all([tok.page(mint, `198.51.100.${i}`), tok.holders(mint, `198.51.100.${i}`)]);
+    statuses.push(page.status, holders.status);
+  }
+  assert.deepEqual(statuses, Array(8).fill(200), "a walk's 429 never refuses a caller");
+  const left = rpc.background("solana", PUBLIC, "getTransaction");
+  assert.ok(left >= 19 && left <= 20, `the walks wait out the provider's reset: ${left} s`);
+  assert.deepEqual(lines, ["rpc hold solana background 30 s"]);
+  // a caller's own 429 still holds every read on the chain, the walks' too, and is logged as the caller's
+  t += 20_000;
+  const once = createRpc({}, { now: () => t, fetch: (async () => new Response("", { status: 429, headers: { "retry-after": "7" } })) as never, log: (l: string) => lines.push(l) } as never);
+  const a = await once.handle("solana", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: ["x"] }), "198.51.100.9");
+  assert.deepEqual([a.status, a.headers?.["Retry-After"]], [429, "7"]);
+  assert.equal(once.background("solana", PUBLIC, "getTransaction"), 7);
+  assert.equal(lines.at(-1), "rpc hold solana caller 7 s");
 });

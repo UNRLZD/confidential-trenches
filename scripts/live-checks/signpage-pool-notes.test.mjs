@@ -1,0 +1,75 @@
+// node --test scripts/live-checks/signpage-pool-notes.test.mjs: the live check replays recorded answers
+// (signpage-pool-notes.answers.json). good: the signing page's devnet deposit (signpage-pool-notes.run.json) read on two
+// devnet RPCs, and SIGN_HOST's /app.js with no testnet pin and no deposit flow: PASS. bad: the same reads with another
+// precommitment in the run's place, whose mark does not exist: FAIL. Planted on the good one: SIGN_HOST serving the
+// deposit flow, the deposit tx failed, the mark's value another, a state leaf another, U not emptied, a record naming
+// another deposit's leaf and commitment: FAIL.
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { RUN, check } from "./signpage-pool-notes.mjs";
+
+const A = JSON.parse(readFileSync(new URL("./signpage-pool-notes.answers.json", import.meta.url), "utf8"));
+const R = JSON.parse(readFileSync(RUN, "utf8"));
+
+/** Answers served in recorded order by (url, method, params); `plant` may change one recorded result. */
+function replay(answers, plant = (a) => a.json) {
+  const used = new Set();
+  return async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const i = answers.findIndex((a, j) => !used.has(j) && a.url === url && a.method === method && JSON.stringify(a.params) === JSON.stringify(params));
+    if (i < 0) throw new Error(`no recorded answer for ${method} ${JSON.stringify(params).slice(0, 80)} on ${url}`);
+    used.add(i);
+    const a = answers[i];
+    const json = plant(structuredClone(a));
+    return { ok: a.status === 200, status: a.status, json: async () => json };
+  };
+}
+const run = (rec, plant, sign = rec.sign) => check({ run: R, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign });
+const bad = (r, start) => {
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${start}`)), r.lines.join("\n"));
+};
+
+test("recorded good answer: the run's deposit, mark and both leaves on two devnet RPCs, SIGN_HOST the mainnet build: PASS", async () => {
+  assert.equal(A.good.precommitment, R.precommitment);
+  const r = await run(A.good);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(new Set(A.good.answers.map((a) => a.url)).size, 2, "two RPCs");
+  for (const s of ["deposit ", "mark ", "label page ", "state page ", "U "]) assert.equal(r.lines.filter((l) => l.startsWith(`ok   ${s}`)).length, 2, s);
+});
+
+test("recorded bad answer: another precommitment in the run's place: FAIL", async () => {
+  const r = await run(A.bad);
+  bad(r, "the precommitment read is the run's");
+  bad(r, "mark ");
+});
+
+test("planted on the good answer: SIGN_HOST serving the deposit flow or a testnet pin, or not read: FAIL", async () => {
+  for (const sign of [{ ...A.good.sign, flow: true }, { ...A.good.sign, found: [R.program] }, { ...A.good.sign, status: 404 }, null]) bad(await run(A.good, undefined, sign), "SIGN_HOST's /app.js");
+});
+
+test("planted on the good answer: the deposit failed, the mark another value, a state leaf another, U not emptied: FAIL", async () => {
+  bad(await run(A.good, (a) => (a.method === "getTransaction" && a.json?.result ? ((a.json.result.meta.err = { InstructionError: [0, "Custom"] }), a.json) : a.json)), "deposit ");
+  const account = (pick, edit) => (a) => {
+    const v = a.json?.result?.value;
+    if (a.method !== "getAccountInfo" || !v || !pick(Buffer.from(v.data[0], "base64"))) return a.json;
+    const d = Buffer.from(v.data[0], "base64");
+    edit(d);
+    v.data[0] = d.toString("base64");
+    return a.json;
+  };
+  bad(await run(A.good, account((d) => d.length === 17, (d) => d.writeBigUInt64LE(d.readBigUInt64LE(0) + 1n, 0))), "mark ");
+  const o = 16 + Number(BigInt(R.leafIndex) % 1024n) * 72;
+  bad(await run(A.good, account((d) => d.subarray(0, 8).toString() === "bfpage01" && d[8] === 0, (d) => (d[o + 31] ^= 1))), "state page ");
+  bad(await run(A.good, (a) => (a.method === "getBalance" ? ((a.json.result.value = 1), a.json) : a.json)), "U ");
+});
+
+test("planted: a record naming another deposit's leaf (the deploy run's, state leaf 0) and its commitment: FAIL", async () => {
+  const page = A.good.answers.find((a) => a.method === "getAccountInfo" && a.json?.result?.value?.owner === R.program && Buffer.from(a.json.result.value.data[0], "base64").subarray(0, 9).equals(Buffer.concat([Buffer.from("bfpage01"), Buffer.of(0)])));
+  const other = Buffer.from(page.json.result.value.data[0], "base64").subarray(16, 48).toString("hex");
+  assert.notEqual(other, R.commitment);
+  const r = await check({ run: { ...R, leafIndex: "0", commitment: other }, precommitment: R.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign });
+  bad(r, "the run's recorded commitment");
+  bad(r, "state page 0 entry 0");
+});

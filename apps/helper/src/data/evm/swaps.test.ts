@@ -356,3 +356,64 @@ test("a tick that outlasts the period is followed at once by the next, never a s
   const ticks = st.heads / 2; // each tick reads two providers' heads
   assert.ok(ticks >= 4, `${ticks} ticks in 1.5 s`);
 });
+
+test("a listed token whose pool our reads do not find answers 200 empty from our own reads (src chain), never 404; an unlisted one stays 404", async () => {
+  const chain = fakeChain();
+  const NOPOOL = `0x${"34".repeat(20)}`;
+  // the chain holds no transfer of the token in the window, so no address is a pool of it
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const calls = JSON.parse(String(init.body)) as { id: number; method: string; params: { address?: string }[] }[];
+    if (calls.every((c) => c.method === "eth_getLogs" && c.params[0]?.address === NOPOOL)) return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, result: [] }))), { status: 200 });
+    return chain.fetch(url, init);
+  };
+  const s = createSwaps("base", { fetch, now: () => 1_000_000, listed: async (t) => t === NOPOOL, rpcs: URLS, pools: new Map(), tickMs: 0 });
+  chain.st.head = REC.firstHead + 100;
+  const c = await s.candles(NOPOOL, "1m", null, 10);
+  const t = await s.trades(NOPOOL, 10);
+  // a second ask is served from the kept "no pool" the same way
+  const again = await s.trades(NOPOOL, 10);
+  const off = await s.candles(`0x${"56".repeat(20)}`, "1m", null, 10);
+  s.stop();
+  assert.equal(c.status, 200, c.body);
+  assert.deepEqual(JSON.parse(c.body), { tf: "1m", candles: [], src: "chain", as_of_ms: 1_000_000 });
+  assert.equal((c as { src?: string }).src, "chain");
+  assert.equal((c as { asOfMs?: number }).asOfMs, 1_000_000);
+  assert.equal(t.status, 200, t.body);
+  assert.deepEqual(JSON.parse(t.body), { trades: [], src: "chain", as_of_ms: 1_000_000 });
+  assert.equal(again.status, 200, again.body);
+  assert.equal(off.status, 404);
+});
+
+test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later serves the last good bars of that pool and tf; with none kept and no bars of ours, 429 with the wait, never an empty 200", async () => {
+  // app live run 41787804457 (4 Nov 06:49Z): a throttled GeckoTerminal read left a chart with no bars (the Solana
+  // path; the EVM path merged GeckoTerminal the same way)
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget } = await import("../gecko.ts");
+  const chain = fakeChain();
+  const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
+  let refuse = false;
+  const gt: string[] = [];
+  const fetchFn = (async (url: string, init: RequestInit) => {
+    if (!url.includes("geckoterminal")) return chain.fetch(url, init);
+    gt.push(url);
+    return refuse ? new Response("{}", { status: 429, headers: { "retry-after": "30" } }) : new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  }) as typeof chain.fetch;
+  const s = open(chain, clock, { fetch: fetchFn, gecko: geckoBudget(() => clock.t) });
+  const first = await bodyOf(s.candles(ICNT, "1m", null, 500));
+  assert.equal(first.own_from_s, undefined, "no bars of ours yet");
+  assert.equal(first.src, "chain,geckoterminal");
+  assert.ok(first.candles.length > 2);
+  assert.ok(!gt[0]!.includes("before_timestamp"), "the newest range, one cache key");
+  clock.t += 2 * 3_600_000; // past GeckoTerminal's freshness
+  await s.tick();
+  refuse = true;
+  const kept = await s.candles(ICNT, "1m", null, 500);
+  assert.equal(kept.status, 200, kept.body);
+  assert.deepEqual(JSON.parse(kept.body).candles, first.candles);
+  assert.equal(kept.src, "chain,geckoterminal");
+  const none = await s.candles(ICNT, "5m", null, 500); // paused by the 429, nothing kept for 5m
+  assert.equal(none.status, 429, none.body);
+  assert.ok((none.retryAfterS ?? 0) > 0);
+  s.stop();
+});

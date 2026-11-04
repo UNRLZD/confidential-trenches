@@ -29,12 +29,19 @@ function pkgWith(headers, extra = {}) {
   return d;
 }
 
-// a spawnSync stand-in that records every call
-function recorder() {
+// a spawnSync stand-in that records every call: git answers HEAD `head` and the tree's status `status`; `uploads` are
+// the calls that would send bytes (git reads the tree, which any run may do)
+function recorder({ head = "abc", status = "", install = 0 } = {}) {
   const calls = [];
-  const run = (cmd, args, opts) => (calls.push({ cmd, args, opts }), { status: 0, stdout: cmd === "git" ? "abc\n" : "" });
-  return { calls, run };
+  const run = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    if (cmd === "pnpm" && args[0] === "install") return { status: install, stdout: "", stderr: install ? "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" : "" };
+    return { status: 0, stdout: cmd !== "git" ? "" : args.includes("rev-parse") ? (head ? `${head}\n` : "") : status };
+  };
+  return { calls, run, uploads: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "dlx"), installs: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "install") };
 }
+// a package folder that is not there: build() throws on it, so a deploy that returns on it never built
+const NO_PKG = join(tmpdir(), "ct-signpage-test-no-such-package");
 
 const WORKER_RULE = "/prover-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\n";
 const THREAD_RULE = "/prover-thread.js\n  Content-Security-Policy: default-src 'none'; script-src 'wasm-unsafe-eval'\n";
@@ -50,14 +57,14 @@ test("the real _headers passes the gate", () => {
 });
 
 test("a CSP with no frame-ancestors is refused, and nothing is uploaded", () => {
-  const { calls, run } = recorder();
+  const { uploads, run } = recorder();
   const r = deploy([], ENV, run, pkgWith(swap(" frame-ancestors 'none';", "")));
   assert.equal(r.code, 1);
   assert.ok(r.err.includes(`REFUSED _headers: CSP frame-ancestors: none, want "'none'"`), r.err.join("\n"));
   assert.ok(r.err.includes("REFUSED _headers: framed from https://confidential.unrealized.trade: allowed (no frame-ancestors)"), r.err.join("\n"));
   assert.ok(r.err.includes("REFUSED _headers: framed from https://example.com: allowed (no frame-ancestors)"), r.err.join("\n"));
   assert.equal(r.err.at(-1), "nothing was uploaded");
-  assert.equal(calls.length, 0);
+  assert.equal(uploads().length, 0);
 });
 
 test("other policy breaks are refused", () => {
@@ -124,48 +131,90 @@ test("other policy breaks are refused", () => {
 });
 
 test("a build carrying _worker.js or .well-known/webauthn is refused", () => {
-  const { calls, run } = recorder();
+  const { uploads, run } = recorder();
   for (const f of ["_worker.js", ".well-known/webauthn"]) {
     const r = deploy([], ENV, run, pkgWith(REAL, { [f]: "x" }));
     assert.equal(r.code, 1, f);
     assert.ok(r.err.some((e) => e.includes(f)), r.err.join("\n"));
   }
-  assert.equal(calls.length, 0);
+  assert.equal(uploads().length, 0);
 });
 
 test("--dry-run stops after the gate and keeps the build, whose _headers is the package's", () => {
-  const { calls, run } = recorder();
+  const { uploads, run } = recorder();
   const r = deploy(["--dry-run"], {}, run);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   const dir = /gate ok on (\S+);/.exec(r.out[0])[1];
   try {
     assert.deepEqual(checkDir(dir), []);
     assert.equal(readFileSync(join(dir, "_headers"), "utf8"), REAL);
-    assert.equal(calls.length, 0);
+    assert.equal(uploads().length, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("with the gate passed and no token, nothing is uploaded", () => {
-  const { calls, run } = recorder();
+  const { uploads, run } = recorder();
   const r = deploy([], {}, run);
   assert.equal(r.code, 2);
   assert.match(r.err[0], /CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set/);
-  assert.equal(calls.length, 0);
+  assert.equal(uploads().length, 0);
 });
 
-test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder", () => {
-  const { calls, run } = recorder();
+test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder, named by HEAD", () => {
+  const { uploads, run } = recorder();
   const r = deploy([], ENV, run);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
-  const up = calls.find((c) => c.cmd === "pnpm");
+  const up = uploads().find((c) => c.cmd === "pnpm");
+  assert.deepEqual(up.args.slice(9), ["--commit-hash", "abc", "--commit-dirty=false"]);
   assert.deepEqual(up.args.slice(0, 4), ["dlx", WRANGLER, "pages", "deploy"]);
   assert.equal(WRANGLER, "wrangler@4.151.1");
   assert.deepEqual(up.args.slice(5, 9), ["--project-name", PROJECT, "--branch", BRANCH]);
   assert.equal(PROJECT, "confidential-trenches-sign");
   assert.notEqual(up.opts.cwd, up.args[4]);
   assert.equal(up.opts.env.WRANGLER_SEND_METRICS, "false");
+});
+
+test("an uncommitted tree or no HEAD is refused before the token: the upload is named by HEAD's commit, so it must be HEAD's build", () => {
+  const dirty = recorder({ status: " M packages/kit/src/prover/worker.js" });
+  const r = deploy([], {}, dirty.run, NO_PKG);
+  assert.equal(r.code, 1, (r.out ?? []).join("\n"));
+  assert.match(r.err.join("\n"), /REFUSED the tree has uncommitted changes[\s\S]*packages\/kit\/src\/prover\/worker\.js[\s\S]*nothing was uploaded/);
+  assert.deepEqual([dirty.installs().length, dirty.uploads().length], [0, 0], "refused before the install and the build");
+  const headless = recorder({ head: "" });
+  const r2 = deploy([], ENV, headless.run);
+  assert.equal(r2.code, 1);
+  assert.match(r2.err.join("\n"), /REFUSED no HEAD commit/);
+  assert.equal(headless.uploads().length, 0);
+  // --dry-run still builds and gates a work in progress, and says a deploy would refuse it
+  const dry = recorder({ status: " M packages/signpage/index.html" });
+  const d = deploy(["--dry-run"], {}, dry.run);
+  assert.equal(d.code, 0, (d.err ?? []).join("\n"));
+  rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
+  assert.match(d.out[0], /uncommitted changes: a deploy would refuse/);
+});
+
+test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the repository root) after the tree reads and before the build", () => {
+  const { calls, run, installs } = recorder();
+  // the build of a missing package throws: the install was already asked for, after the two tree reads
+  assert.throws(() => deploy([], ENV, run, NO_PKG), /ENOENT/);
+  assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? 2 : 0)].join(" ")), ["git rev-parse", "git status", "pnpm install"]);
+  assert.deepEqual(installs()[0].args, ["install", "--frozen-lockfile"]);
+  assert.equal(installs()[0].opts.cwd, dirname(dirname(PKG)));
+  const dry = recorder();
+  assert.throws(() => deploy(["--dry-run"], {}, dry.run, NO_PKG), /ENOENT/);
+  assert.equal(dry.installs().length, 1, "--dry-run builds what a deploy would, so it installs too");
+});
+
+test("a failed install refuses before a token is read: no build, no upload", () => {
+  for (const argv of [[], ["--dry-run"]]) {
+    const { run, uploads } = recorder({ install: 1 });
+    const r = deploy(argv, {}, run, NO_PKG);
+    assert.equal(r.code, 1, (r.out ?? []).join("\n"));
+    assert.match(r.err.join("\n"), /REFUSED the install failed \(pnpm exit 1\): ERR_PNPM_OUTDATED_LOCKFILE[\s\S]*nothing was uploaded/);
+    assert.equal(uploads().length, 0);
+  }
 });
 
 test("an unknown argument is a usage error", () => {
@@ -184,7 +233,7 @@ test("a deploy's live runs name every live check that reads SIGN_HOST, and its s
   assert.ok(own.length >= 3, own.join(" "));
   for (const k of own) assert.ok(LIVE_CHECKS.includes(k), `LIVE_CHECKS does not name ${k}`);
   for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /sign\.confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
-  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-withdraw-form", "wallet-passkey-prf"]);
+  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "signpage-pool-flow", "signpage-pool-kinds", "signpage-pool-notes", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-solana-trade", "signpage-withdraw-form", "wallet-passkey-prf"]);
   for (const k of LIVE_CHECKS) assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
   // the release check reads SIGN_HOST alone, against this commit's build
   assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host sign"), `the success line does not run signpage-release on SIGN_HOST alone: ${out}`);

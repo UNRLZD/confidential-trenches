@@ -24,6 +24,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { CARGO_NEAR, LIVE_CHECK, STOP_SIGNALS, chainProblems, deployProblems, loadKey, MAX_FUNCTION_BODY, MAX_REGISTRATION, nextLine, registrationProblems, repoRoots, rpcProblems } from "./deploy.mjs";
 import { b58encode } from "./near-tx.mjs";
 import { TESTNET_TOKEN } from "../../../scripts/live-checks/vault-testnet-t01.mjs";
+import { TEST_BUILD_MARK } from "../../../scripts/live-checks/vault-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "deploy.mjs");
@@ -272,6 +273,23 @@ test("a wasm exporting withdraw without on_payout is refused before any send, na
   neverSent(r);
   targetsGone(buildDir);
   assert.deepEqual(deployProblems(wasm({ exports: ["config", "withdraw", "on_payout"] }), "testnet"), []);
+});
+
+test("the out-of-gas test build (VT-S17, feature test-on-payout-out-of-gas) is refused before any send, naming testBuild", () => {
+  // the stub build stands in for `cargo near build ... --features test-on-payout-out-of-gas`: its bytes hold the mark
+  // that build's on_payout logs; tests/s17.rs runs deployProblems on the real build
+  const dir = fresh();
+  const k = keyFile(dir);
+  const buildDir = path.join(dir, "build");
+  const r = run(dir, testnet(dir, k.file, buildDir), stubs(dir, wasm({ strings: [TESTNET_TOKEN, TEST_BUILD_MARK] })));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /refused before any send: testBuild \(vault\.md 2\.8, 2\.5\.7\): blindfill-vault test build: on_payout runs out of gas/);
+  neverSent(r);
+  targetsGone(buildDir);
+  for (const network of ["sandbox", "testnet"]) {
+    assert.deepEqual(deployProblems(wasm({ strings: [TESTNET_TOKEN, TEST_BUILD_MARK] }), network).filter((x) => x.startsWith("testBuild")).length, 1, network);
+    assert.deepEqual(deployProblems(wasm(), network), [], network);
+  }
 });
 
 // ---- the pinned tools ----

@@ -270,5 +270,6 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
 
     let near1 = w.h.near_balance(w.relayer.id()).await?;
     println!("relayer NEAR: {near0} before, {near1} after ({} spent on three withdrawals, three settles and its registration)", near0 - near1);
+    w.h.i1().await?;
     Ok(())
 }

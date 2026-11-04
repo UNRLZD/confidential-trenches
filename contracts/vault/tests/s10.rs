@@ -441,6 +441,7 @@ async fn vault_a(kind: TokenKind, m: &mut Meter) -> R<()> {
     }
     assert_eq!(h.token_balance(d.id()).await?, 10_000_000, "the ragequit did not pay D");
     println!("{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 
@@ -453,6 +454,7 @@ async fn vault_b(kind: TokenKind, m: &mut Meter) -> R<()> {
     assert_eq!((tree(h, "state_tree").await?, tree(h, "label_tree").await?), ((2, 1), (1, 0)));
     let _ = settle_measured(h, m, &s.stranger, "fee_bounces", 2 * LEVEL * YOCTO_PER_BYTE, "B settle, both trees grow a level").await?;
     assert_eq!((tree(h, "state_tree").await?, tree(h, "label_tree").await?), ((3, 2), (2, 1)));
+    h.i1().await?;
     Ok(())
 }
 

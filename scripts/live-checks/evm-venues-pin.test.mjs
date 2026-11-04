@@ -1,14 +1,15 @@
-// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, 2026-11-03) through the live check: the
-// recorded good answers pass on both testnets; the same recording with one thing changed fails: a pin's code with one
-// byte flipped, a pin that differs between the two RPCs, a router or WETH with other code, another chain id, a kit
-// pin that is not the record's, and two RPCs of one operator.
+// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-04 for card
+// evm-sell-v4-kit) through the live check: the recorded good answers pass on both testnets; the same recording with one
+// thing changed fails: a pin's code with one byte flipped, a pin that differs between the two RPCs, a router or WETH
+// with other code, another chain id, a kit pin that is not the record's (the sell delegate's record is card
+// evm-sell-v4's; the PoolManager is pool-evm-deploy's CHAINS one), and two RPCs of one operator.
 //   node --test scripts/live-checks/evm-venues-pin.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { check, deployed } from "./evm-venues-pin.mjs";
-import { BUILD, CHAINS, EIP1967 } from "./pool-evm-deploy.mjs";
+import { CHAINS, EIP1967, pinnedBuild } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-venues-pin.answers.json", import.meta.url), "utf8"));
 const RECORD = Object.fromEntries(deployed());
@@ -72,6 +73,10 @@ test("WETH or the router with other code, another chain id, a kit pin that is no
   const v = evmPoolVenues()[b];
   const other = "0x000000000000000000000000000000000000bad0";
   fails(await run(b, { venue: { ...v, sellDelegate: other } }), /the sell delegate pin 0x0+bad0/);
+  // the v1 delegate (pool-evm-deploy's record), which sells through no PoolManager, is no longer the pin (card evm-sell-v4-kit)
+  fails(await run(b, { venue: { ...v, sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef88" } }), /the sell delegate pin 0x23ad\w+ is the record's SellDelegate 0xfa14/);
+  fails(await run(b, { venue: { ...v, poolManager: other } }), /the PoolManager 0x0+bad0 is pool-evm-deploy's/);
+  fails(await run(b, { venue: { ...v, poolManager: undefined } }), /the PoolManager \(none\) is pool-evm-deploy's/);
   fails(await run(b, { venue: { ...v, pool: other } }), /the pool pin 0x0+bad0/);
   fails(await run(b, { venue: { ...v, adapters: { v4: v.adapters.v4 } } }), /the v3 adapter pin \(none\)/);
   fails(await run(b, { venue: { ...v, routers: [other] } }), /the routers/);
@@ -82,14 +87,15 @@ test("WETH or the router with other code, another chain id, a kit pin that is no
 // the review of c473b3d: the build's code with other immutables, consistent on both RPCs, must fail
 const HOSTILE = "000000000000000000000000" + "ba".repeat(20);
 const word = (a) => "000000000000000000000000" + lower(a).slice(2);
-/** the recording with the immutable of `name` at `pin` that holds `from` rewritten to HOSTILE, on both RPCs */
-function swapImmutable(pin, name, from) {
+/** the recording with the immutable of `name` at `pin` on `chain` (its build: pinnedBuild) that holds `from` rewritten
+ * to HOSTILE, on both RPCs */
+function swapImmutable(chain, pin, name, from) {
   const out = structuredClone(A.good);
   let n = 0;
   for (const a of out) {
     if (a.method !== "eth_getCode" || lower(a.params[0]) !== lower(pin)) continue;
     let h = a.json.result.slice(2);
-    const starts = BUILD.contracts[name].immutables.find((g) => h.slice(2 * g[0], 2 * g[0] + 64) === from);
+    const starts = pinnedBuild(chain, name, pin).immutables.find((g) => h.slice(2 * g[0], 2 * g[0] + 64) === from);
     assert.ok(starts, `${name} holds ${from}`);
     for (const s of starts) h = h.slice(0, 2 * s) + HOSTILE + h.slice(2 * s + 64);
     a.json.result = "0x" + h;
@@ -107,7 +113,7 @@ test("a pin with the build's code but other immutables fails: the pool's verifie
     [v.pool, "PrivacyPoolSimple", word(d.contracts.WithdrawalVerifier.address), /PrivacyPoolSimple's immutables/],
     [v.adapters.v3, "UniswapV3Adapter", word(CHAINS[chain].router.address), /UniswapV3Adapter's immutables/],
     [v.sellDelegate, "SellDelegate", word(CHAINS[chain].weth.address), /SellDelegate's immutables/],
-  ]) fails(await run(chain, { answers: swapImmutable(pin, name, from) }), re);
+  ]) fails(await run(chain, { answers: swapImmutable(chain, pin, name, from) }), re);
 });
 
 test("the pool's verifier, the PoolManager or Robinhood testnet WETH's implementation with other code, or another WETH implementation, fails", async () => {

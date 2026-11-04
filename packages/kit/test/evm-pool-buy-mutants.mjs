@@ -1,16 +1,22 @@
 // Removes each of src/trade/evm/buy-unpinned.ts's checks, one at a time, and runs the test named for it in
 // test/evm-pool-buy.test.ts, test/evm-pool-buy-hostile.test.ts or test/evm-venues-pin.test.ts: each named test passes on the code as it is and fails
-// on every mutant. The file is changed in place and put back after each mutant (and checked to be back); exits 1 when a
+// on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each mutant (and checked to be back); exits 1 when a
 // named test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in the file
 // exactly once. R1-R14 are the evm-pool-buy-tx review's mutants (R10 moved with the digest's data check, now the hook
 // data hex check); K1-K16 are the fold's (merge note M366).
 //   node packages/kit/test/evm-pool-buy-mutants.mjs     (a heavy job: run it on a machine with spare cores)
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { KIT, kitCopy } from "./mutant-copy.mjs";
 
-const SRC = fileURLToPath(new URL("../src/trade/evm/buy-unpinned.ts", import.meta.url));
-const TESTS = ["./evm-pool-buy.test.ts", "./evm-pool-buy-hostile.test.ts", "./evm-venues-pin.test.ts"].map((f) => fileURLToPath(new URL(f, import.meta.url)));
+// the sweep runs in a copy of the kit; imported (for its MUTANTS), the paths are the kit's own
+const BASE = process.argv[1] === fileURLToPath(import.meta.url) ? kitCopy() : KIT;
+const at = (rel) => path.join(BASE, rel);
+
+const SRC = at("src/trade/evm/buy-unpinned.ts");
+const TESTS = ["./evm-pool-buy.test.ts", "./evm-pool-buy-hostile.test.ts", "./evm-venues-pin.test.ts"].map((f) => at(`test/${f.slice(2)}`));
 
 const ROUTES = "each fork test's route builds";
 const PINS = "the testnet chains' pins are";
@@ -79,7 +85,7 @@ export const MUTANTS = [
   ['if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);', "", "F1 "],
   ["if (!BUILT.has(built) || built.chain !== chain)", "if (built.chain !== chain)", "F2b "],
   ["if (!BUILT.has(built) || built.chain !== chain)", "if (!BUILT.has(built))", "F3 "],
-  ["const r = copyRoute(route);\n  const token = checkRoute(chain, r);", "const r = copyRoute(route);\n  const token = checkRoute(chain, copyRoute(route));", "F4 "],
+  ["const r = copyRoute(route);\n  const token = checkRoute(chain, r, quoted);", "const r = copyRoute(route);\n  const token = checkRoute(chain, copyRoute(route), quoted);", "F4 "],
   ['if (typeof h !== "object" || h === null) return refuse("bad_route", "a hop is an object");', "", "F5 "],
   ['if (typeof route !== "object" || route === null) return refuse("bad_route", "a route is an object");', "", "F5 "],
   ["if (!Number.isSafeInteger(n) || n > COPY_MAX)", "if (!Number.isSafeInteger(n))", "R8 "],
@@ -97,7 +103,10 @@ export const MUTANTS = [
   ['if (pin === undefined) return refuse("not_deployed", `${chain} has no pinned ${r.venue} adapter yet`);', "", "M370 a pinned build"],
   ['if (!samePin(adapter, pin)) return refuse("not_pinned", `the adapter is not ${chain}\'s pinned ${r.venue} adapter`);', "", "M370 a pinned build"],
   ['const pin = r.venue === "uniswap-v3" ? v.v3 : v.v4;', 'const pin = r.venue === "uniswap-v3" ? v.v4 : v.v3;', "M370 a pinned build"],
-  ["return evmPoolBuildUnpinned(chain, adapter, r, minOut, token);", "return evmPoolBuildUnpinned(chain, adapter, route, minOut, token);", "M370 a pinned build"],
+  // the quoted pinned build (buy.ts evmPoolBuildQuoted) admits a v4 route through a middle that is not listed
+  ["return pinnedBuild(venues, chain, adapter, route, minOut, token, true);", "return pinnedBuild(venues, chain, adapter, route, minOut, token, false);", "Q1 "],
+  ["return evmPoolBuildUnpinned(chain, adapter, r, minOut, token, quoted);", "return evmPoolBuildUnpinned(chain, adapter, r, minOut, token);", "Q1 "],
+  ["return evmPoolBuildUnpinned(chain, adapter, r, minOut, token, quoted);", "return evmPoolBuildUnpinned(chain, adapter, route, minOut, token, quoted);", "M370 a pinned build"],
   ['if (v.pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);', "", "M370 a pinned signature"],
   ['if (!samePin(pool, v.pool)) return refuse("not_pinned", `the pool is not ${chain}\'s pinned pool`);', "", "M370 a pinned signature"],
   ["if (BUILT.has(built) && !((v.v3 !== undefined && samePin(built.adapter, v.v3)) || (v.v4 !== undefined && samePin(built.adapter, v.v4)))) {", "if (false) {", "M370 a pinned signature"],
@@ -117,11 +126,11 @@ export const MUTANTS = [
   ['pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5"', 'pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe6"', BUYPIN],
   ['v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645"', 'v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5646"', BUYPIN],
   ['v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb1"', 'v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb2"', BUYPIN],
-  ['sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef88"', 'sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef89"', SELLPIN],
+  ['sellDelegate: "0xfa1442419b6984b8e3aa8933c690f80f063b6adf"', 'sellDelegate: "0xfa1442419b6984b8e3aa8933c690f80f063b6ade"', SELLPIN],
   ['pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5"', 'pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d6"', BUYPIN],
   ['adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" })', 'adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669798" })', BUYPIN],
   ['adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" })', 'adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645", v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" })', BUYPIN],
-  ['sellDelegate: "0x0ec8c6627939624aeaac3b2f0276136e6e289e23"', 'sellDelegate: "0x0ec8c6627939624aeaac3b2f0276136e6e289e24"', SELLPIN],
+  ['sellDelegate: "0xaafb86fed9b651933773a0750d5dba22ca8b8a02"', 'sellDelegate: "0xaafb86fed9b651933773a0750d5dba22ca8b8a03"', SELLPIN],
   ["chainId: 84532,", "chainId: 8453,", PINS],
   ["chainId: 46630,", "chainId: 4663,", PINS],
   ['routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"])', 'routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc5"])', PINS],
@@ -134,11 +143,14 @@ export const MUTANTS = [
   ['middles: Object.freeze([]),\n      // no Uniswap v3 on Robinhood testnet', 'middles: Object.freeze(["0x036CbD53842c5426634e7929541eC2318f3dCF7e"]),\n      // no Uniswap v3 on Robinhood testnet', PINS],
 ];
 
+// a child test run must not inherit this process's own node --test context (when the sweep runs as a test, the child
+// would report to the parent's runner and print no summary of its own)
+const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`
 function run(name) {
   const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, ...TESTS];
   try {
-    const out = execFileSync("node", args, { stdio: "pipe", encoding: "utf8" });
+    const out = execFileSync("node", args, { stdio: "pipe", encoding: "utf8", env: CHILD_ENV });
     return /^# pass ([1-9]\d*)$/m.test(out) ? "pass" : "none";
   } catch {
     return "fail";
@@ -158,7 +170,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (bad > 0) process.exit(1);
   MUTANTS.forEach(([find, repl, t], i) => {
     if (src.split(find).length !== 2) {
-      console.log(`FAIL mutant ${i + 1}: its text is not in buy.ts exactly once`);
+      console.log(`FAIL mutant ${i + 1}: its text is not in buy-unpinned.ts exactly once`);
       bad++;
       return;
     }
@@ -169,7 +181,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     } finally {
       writeFileSync(SRC, src);
     }
-    if (readFileSync(SRC, "utf8") !== src) throw new Error(`mutant ${i + 1} left buy.ts changed`);
+    if (readFileSync(SRC, "utf8") !== src) throw new Error(`mutant ${i + 1} left buy-unpinned.ts changed`);
     console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
     if (r !== "fail") bad++;
   });

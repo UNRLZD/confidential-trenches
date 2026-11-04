@@ -1,6 +1,6 @@
 // Card evm-venues-pin: the kit's venue list pins each testnet chain's deployed pool, v3 and v4 adapters and sell
-// delegate, equal to pool-evm-deploy's records (scripts/live-checks/pool-evm-deploy.<chain>.json), and the kit's index
-// builds and signs only for them: another pool or adapter is refused (not_pinned), a venue with no adapter
+// delegate, equal to pool-evm-deploy's records (scripts/live-checks/pool-evm-deploy.<chain>.json), and the pinned
+// builder and signer the kit's index runs build and sign only for them: another pool or adapter is refused (not_pinned), a venue with no adapter
 // (Robinhood testnet's v3, M365) is refused (not_deployed), and W's 7702 authorization names only the pinned delegate.
 // scripts/live-checks/evm-venues-pin.mjs reads each pin's code on the chain's two RPCs.
 import { mock, test } from "node:test";
@@ -10,6 +10,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import * as kit from "../src/index.ts";
 import { EvmPoolBuyError, EvmPoolSellError, evmPoolVenues, type EvmPoolChain, type EvmRoute } from "../src/index.ts";
+import { pinnedBuild, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
 
 const code = (f: () => unknown): string => {
   try {
@@ -22,9 +23,12 @@ const code = (f: () => unknown): string => {
 };
 const record = (chain: string) =>
   JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/pool-evm-deploy.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
+// the SellDelegate that sells through the v4 PoolManager, deployed again by card evm-sell-v4
+const sellRecord = (chain: string) =>
+  JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/evm-sell-v4.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
 
 // pool-evm-deploy's pinned chain table: the WETH each testnet's contracts were deployed with
-const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string } }> };
+const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string }; poolManager: { address: string } }> };
 
 const NOW = 1_800_000_000;
 mock.timers.enable({ apis: ["Date"], now: NOW * 1000 });
@@ -56,7 +60,9 @@ test("the testnet chains' pins are pool-evm-deploy's records: pool, v3 and v4 ad
     assert.equal(lower(v.pool), lower(r.PrivacyPoolSimple!.address), chain);
     assert.equal(lower(v.adapters?.v4), lower(r.UniswapV4Adapter!.address), chain);
     assert.equal(lower(v.adapters?.v3), lower(r.UniswapV3Adapter?.address), chain); // none on Robinhood testnet (M365)
-    assert.equal(lower(v.sellDelegate), lower(r.SellDelegate!.address), chain);
+    assert.equal(lower(v.sellDelegate), lower(sellRecord(chain).SellDelegate!.address), chain);
+    assert.notEqual(lower(v.sellDelegate), lower(r.SellDelegate!.address), chain); // the v1 delegate sells through no PoolManager
+    assert.equal(lower(v.poolManager), lower(DEPLOY.CHAINS[chain]!.poolManager.address), chain);
     assert.equal(Object.getPrototypeOf(v), null, chain);
     assert.equal(Object.getPrototypeOf(v.adapters), null, chain);
     assert.ok(Object.isFrozen(v) && Object.isFrozen(v.adapters) && Object.isFrozen(v.middles) && Object.isFrozen(v.routers), chain);
@@ -73,21 +79,23 @@ test("a buy builds only through the chain's pinned adapter for its venue, and W 
     const v = evmPoolVenues()[c];
     const r = record(chain);
     // v4: the pinned adapter only
-    assert.equal(code(() => kit.evmPoolBuild(c, OTHER, v4(), 1n, X)), "not_pinned", chain);
-    assert.equal(code(() => kit.evmPoolBuild(c, r.PrivacyPoolSimple!.address, v4(), 1n, X)), "not_pinned", chain);
-    const built = kit.evmPoolBuild(c, r.UniswapV4Adapter!.address, v4(), 1n, X);
+    assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, OTHER, v4(), 1n, X)), "not_pinned", chain);
+    assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, r.PrivacyPoolSimple!.address, v4(), 1n, X)), "not_pinned", chain);
+    const built = pinnedBuild(evmPoolVenues(), c, r.UniswapV4Adapter!.address, v4(), 1n, X);
     // the pool: the pinned one only
-    assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, c, OTHER, built, PROOF)), "not_pinned", chain);
-    assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, c, r.UniswapV4Adapter!.address, built, PROOF)), "not_pinned", chain);
-    assert.equal(kit.evmPoolSignBuy(W_KEY, c, r.PrivacyPoolSimple!.address.toUpperCase().replace("0X", "0x"), built, PROOF).length, 65, chain);
+    assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, c, OTHER, built, PROOF)), "not_pinned", chain);
+    assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, c, r.UniswapV4Adapter!.address, built, PROOF)), "not_pinned", chain);
+    assert.equal(pinnedSignBuy(evmPoolVenues(), W_KEY, c, r.PrivacyPoolSimple!.address.toUpperCase().replace("0X", "0x"), built, PROOF).length, 65, chain);
+    // the kit's signer takes only a buy evmPoolBuildQuoted returned, from a device quote (the testnets have no quoter)
+    assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, c, r.PrivacyPoolSimple!.address, built, PROOF)), "not_built", chain);
     // v3: Base Sepolia's pinned adapter only; Robinhood testnet has none
     if (r.UniswapV3Adapter) {
-      assert.equal(code(() => kit.evmPoolBuild(c, OTHER, v3(v.weth), 1n, X)), "not_pinned", chain);
-      assert.equal(code(() => kit.evmPoolBuild(c, r.UniswapV4Adapter!.address, v3(v.weth), 1n, X)), "not_pinned", chain);
-      const b3 = kit.evmPoolBuild(c, r.UniswapV3Adapter.address, v3(v.weth), 1n, X);
-      assert.equal(kit.evmPoolSignBuy(W_KEY, c, r.PrivacyPoolSimple!.address, b3, PROOF).length, 65, chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, OTHER, v3(v.weth), 1n, X)), "not_pinned", chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, r.UniswapV4Adapter!.address, v3(v.weth), 1n, X)), "not_pinned", chain);
+      const b3 = pinnedBuild(evmPoolVenues(), c, r.UniswapV3Adapter.address, v3(v.weth), 1n, X);
+      assert.equal(pinnedSignBuy(evmPoolVenues(), W_KEY, c, r.PrivacyPoolSimple!.address, b3, PROOF).length, 65, chain);
     } else {
-      assert.equal(code(() => kit.evmPoolBuild(c, OTHER, v3(v.weth), 1n, X)), "not_deployed", chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, OTHER, v3(v.weth), 1n, X)), "not_deployed", chain);
     }
   }
 });
@@ -107,14 +115,19 @@ test("a sell pays only into the chain's pinned pool, and W's authorization names
       assert.equal(lower(built.pool), lower(r.PrivacyPoolSimple!.address), chain);
       assert.equal(kit.evmPoolSignSell(W_KEY, c, built).length, 65, chain);
     } else {
-      // Robinhood testnet has no v3 router (M365), so no sell is built there
+      // Robinhood testnet has no v3 router (M365), so no v3 sell is built there
       assert.equal(code(() => kit.evmPoolBuildSell(c, req)), "bad_target", chain);
     }
+    // a v4 sell goes through the pinned PoolManager on every testnet (card evm-sell-v4-kit)
+    const v4sell = { ...req, target: v.poolManager!, route: { venue: "uniswap-v4" as const, hops: [{ currency: ZERO, fee: 10000, tickSpacing: 200, hooks: ZERO, hookData: "0x" }] } };
+    const built4 = kit.evmPoolBuildSell(c, v4sell);
+    assert.equal(lower(built4.target), lower(v.poolManager), chain);
+    assert.equal(lower(built4.pool), lower(r.PrivacyPoolSimple!.address), chain);
     const a = kit.evmPoolSignSellAuthorization(W_KEY, c, 0n);
-    assert.equal(lower(a.address), lower(r.SellDelegate!.address), chain);
+    assert.equal(lower(a.address), lower(sellRecord(chain).SellDelegate!.address), chain);
     assert.equal(a.chainId, chainId, chain);
     // the authorization takes no delegate: a fourth argument is not read
     const b = (kit.evmPoolSignSellAuthorization as (...x: unknown[]) => typeof a)(W_KEY, c, 0n, OTHER);
-    assert.equal(lower(b.address), lower(r.SellDelegate!.address), chain);
+    assert.equal(lower(b.address), lower(sellRecord(chain).SellDelegate!.address), chain);
   }
 });

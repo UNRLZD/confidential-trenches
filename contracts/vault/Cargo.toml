@@ -16,6 +16,10 @@ crate-type = ["cdylib", "rlib"]
 # The testnet build: TOKEN names the team's testnet USDC (deployments/testnet-usdc.json). Every other byte of behaviour
 # is the mainnet build's.
 testnet = []
+# VT-S17's test build only (tests/s17.rs): `on_payout` logs src/payout.rs OUT_OF_GAS_BUILD_MARK, then runs out of gas.
+# tests/harness/run.sh builds it apart, as VAULT_OOG_WASM. It must never ship: scripts/deploy.mjs refuses any wasm
+# holding the mark (scripts/live-checks/vault-skeleton.mjs wasmProblems.testBuild) and the vault's live check fails it.
+test-on-payout-out-of-gas = []
 # The near-sandbox suite (tests/harness, VT-S*): its tests are `[[test]]` targets that need this feature, so a plain
 # `cargo test` (CI) neither builds nor runs them, and nothing here reaches the wasm build. Run through
 # tests/harness/run.sh.

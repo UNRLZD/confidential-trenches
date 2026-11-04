@@ -6,7 +6,11 @@
 # script prints and is the --return address:
 #   1. each chain: the whole run (build, need, deploys, sweep), then the live check on two loopback URLs, recorded;
 #   2. Base Sepolia again, sent SIGTERM as soon as it is funded: a deploy already sent lands, no other is sent, the
-#      sweep runs; its record lists what landed, and the live check fails it (contracts missing).
+#      sweep runs; its record lists what landed, and the live check fails it (contracts missing);
+#   3. each chain: the sell delegate redeployed alone (--only SellDelegate, card evm-sell-v4), then its live check
+#      evm-sell-v4.mjs on two loopback URLs, recorded.
+# Then it writes $OUT/pool-evm-deploy.answers.json and $OUT/evm-sell-v4.answers.json, the replay files of the two
+# checks' tests (scripts/live-checks/), each with a note naming this dry run.
 # After each, the run key's balance is printed. Outputs go to contracts/pool-evm/out/dry-run/ (ignored by git), or $DRY_RUN_OUT.
 #   bash contracts/pool-evm/script/dry-run.sh   (with anvil, forge and cast on PATH, and the workspace installed)
 set -euo pipefail
@@ -28,14 +32,16 @@ for chain in base-sepolia robinhood-testnet; do
   for _ in $(seq 60); do cast chain-id --rpc-url "http://127.0.0.1:$port" >/dev/null 2>&1 && break; sleep 1; done
   cast rpc anvil_setBalance "$STANDIN" 0xde0b6b3a7640000 --rpc-url "http://127.0.0.1:$port" >/dev/null
   cast rpc anvil_impersonateAccount "$STANDIN" --rpc-url "http://127.0.0.1:$port" >/dev/null
-  echo "dry-run: $chain fork at http://127.0.0.1:$port, chain id $(cast chain-id --rpc-url "http://127.0.0.1:$port"), block $(cast block-number --rpc-url "http://127.0.0.1:$port")"
+  block=$(cast block-number --rpc-url "http://127.0.0.1:$port")
+  eval "FORK_BLOCK_${chain//-/_}=$block"
+  echo "dry-run: $chain fork at http://127.0.0.1:$port, chain id $(cast chain-id --rpc-url "http://127.0.0.1:$port"), block $block"
 done
 
-# run <name> <chain> [stop]: starts the script, funds exactly the printed need from the stand-in, waits
+# run <name> <chain> [stop] [deploy.mjs args...]: starts the script, funds exactly the printed need from the stand-in, waits
 run() {
   local name=$1 chain=$2 stop=${3:-}
   local url="http://127.0.0.1:$(port_of "$chain")" log="$OUT/$name.log"
-  node "$ROOT/contracts/pool-evm/script/deploy.mjs" --chain "$chain" --return "$STANDIN" --rpc "$url" --out "$OUT/$name.json" --no-build >"$log" 2>&1 &
+  node "$ROOT/contracts/pool-evm/script/deploy.mjs" --chain "$chain" --return "$STANDIN" --rpc "$url" --out "$OUT/$name.json" --no-build "${@:4}" >"$log" 2>&1 &
   local pid=$!
   for _ in $(seq 600); do grep -q "^deploy: waiting for" "$log" && break; kill -0 $pid 2>/dev/null || break; sleep 0.5; done
   local line; line=$(grep "^deploy: waiting for" "$log")
@@ -64,3 +70,34 @@ for chain in base-sepolia robinhood-testnet; do
   port=$(port_of "$chain")
   node "$ROOT/scripts/live-checks/pool-evm-deploy.mjs" --deployment "$OUT/$chain.json" --rpc "http://127.0.0.1:$port,http://localhost:$port" --record "$OUT/$chain-answers.json"
 done
+for chain in base-sepolia robinhood-testnet; do
+  port=$(port_of "$chain")
+  run "sell-v4-$chain" "$chain" "" --only SellDelegate
+  node "$ROOT/scripts/live-checks/evm-sell-v4.mjs" --deployment "$OUT/sell-v4-$chain.json" --rpc "http://127.0.0.1:$port,http://localhost:$port" --record "$OUT/sell-v4-$chain-answers.json"
+done
+# the two replay files, from the recordings above
+node --input-type=module -e '
+import { readFileSync, writeFileSync } from "node:fs";
+const [out, forge, base, rh] = process.argv.slice(1);
+const read = (f) => JSON.parse(readFileSync(`${out}/${f}`, "utf8"));
+const chains = ["base-sepolia", "robinhood-testnet"];
+const at = `on anvil forks of Base Sepolia (block ${base}) and Robinhood testnet (block ${rh}), ${forge}, ${new Date().toISOString()}`;
+const ports = (c) => read(`${c}-answers.json`)[0].url;
+const pool = { notes: [`The dry run of contracts/pool-evm/script/deploy.mjs (script/dry-run.sh) ${at}, each record read by this live check on two loopback URLs of its fork, recorded with --record: the good answers. The test makes each bad answer from them.`], rpcs: {}, deployments: {}, good: {} };
+for (const c of chains) {
+  const u = ports(c);
+  Object.assign(pool.rpcs, { [c]: [u, u.replace("127.0.0.1", "localhost")] });
+  Object.assign(pool.deployments, { [c]: read(`${c}.json`) });
+  Object.assign(pool.good, { [c]: read(`${c}-answers.json`) });
+}
+writeFileSync(`${out}/pool-evm-deploy.answers.json`, JSON.stringify(pool) + "\n");
+const sell = { notes: [`A DRY-RUN recording: deploy.mjs --only SellDelegate (script/dry-run.sh) ${at}, each record read by evm-sell-v4.mjs on two loopback URLs of its fork with --record: the good answers. After the real redeploy, re-record on the chains: node scripts/live-checks/evm-sell-v4.mjs --record scripts/live-checks/evm-sell-v4.answers.json`], rpcs: {}, deployments: {}, good: {} };
+for (const c of chains) {
+  const r = read(`sell-v4-${c}-answers.json`);
+  Object.assign(sell.rpcs, r.rpcs);
+  Object.assign(sell.deployments, r.deployments);
+  Object.assign(sell.good, r.good);
+}
+writeFileSync(`${out}/evm-sell-v4.answers.json`, JSON.stringify(sell) + "\n");
+console.log(`dry-run: wrote ${out}/pool-evm-deploy.answers.json and ${out}/evm-sell-v4.answers.json`);
+' "$OUT" "$(forge --version | head -1)" "$FORK_BLOCK_base_sepolia" "$FORK_BLOCK_robinhood_testnet"

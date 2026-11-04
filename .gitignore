@@ -16,3 +16,7 @@ dist/
 target/
 coverage/
 .DS_Store
+# a mutant sweep's copies (packages/kit/test/mutant-copy.mjs, packages/signpage/test/rules-pool-mutants.mjs), removed when it exits
+packages/.kit-mutants-*/
+**/.pool-mutant-*.ts
+**/.rules-pool-mutant-*.test.ts

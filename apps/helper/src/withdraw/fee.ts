@@ -361,9 +361,10 @@ export const RELAYER_ENV = {
 /**
  * The quoter from the host's environment: mainnet's pair as USDC's watch reads it (NEAR_RPC_URL, NEAR_RPC_URL_B), each
  * read bounded by the relayers' RPC_TIMEOUT_MS (bind/send.ts): a full block from rpc.mainnet.near.org took 3.3 s from
- * a Mac (curl, 2026-11-02 09:27Z), so token-status's 2 s would refuse an honest provider.
+ * a Mac (curl, 2026-11-02 09:27Z), so token-status's 2 s would refuse an honest provider. `lockWaitMs`: the store's
+ * lock wait (store/durable.ts openDurableDir; 0 for a retry that must not block, server.ts sendersFromEnv).
  */
-export function feeQuoterFromEnv(env: Record<string, string | undefined>, fetchFn: typeof fetch = fetch): FeeQuoter {
+export function feeQuoterFromEnv(env: Record<string, string | undefined>, fetchFn: typeof fetch = fetch, lockWaitMs?: number): FeeQuoter {
   const mainnet = readUrls(env, "mainnet").map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as [Rpc, Rpc];
   const testnetUrls = TESTNET_RPCS.map(({ env: k, fallback }) => {
     const v = env[k];
@@ -389,6 +390,6 @@ export function feeQuoterFromEnv(env: Record<string, string | undefined>, fetchF
   // the relayers' durable store (store/durable.ts), its own folder under HELPER_STORE_DIR; none set: memory only. Opened
   // only for a relayer network: a helper that quotes nothing never stops at start on a store it does not use.
   const dir = env[STORE_ENV] ?? "";
-  const store = dir === "" || Object.keys(networks).length === 0 ? undefined : openDurableDir(join(dir, "withdraw-fee"), nodeFs, (d) => d);
+  const store = dir === "" || Object.keys(networks).length === 0 ? undefined : openDurableDir(join(dir, "withdraw-fee"), nodeFs, (d) => d, lockWaitMs);
   return createFeeQuoter({ priceRpcs: mainnet, networks, ...(store ? { store } : {}) });
 }

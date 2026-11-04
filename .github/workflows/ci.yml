@@ -2,7 +2,9 @@
 # Every action is pinned by commit sha, each read from its own repo on 2026-10-26 at 11:24Z:
 #   actions/checkout v7.0.1, actions/setup-node v7.1.0, pnpm/action-setup v6.1.0;
 #   actions/cache v6.1.0 read from its repo on 2026-11-02 at 12:40Z;
-#   foundry-rs/foundry-toolchain v1.9.1 read from its repo on 2026-11-02 at 20:12Z.
+#   foundry-rs/foundry-toolchain v1.9.1 read from its repo on 2026-11-02 at 20:12Z;
+#   Swatinem/rust-cache v2.9.3 (d1527c8, released 2026-10-20) and actions/download-artifact v8.0.2 (9000827, released
+#   2026-10-07) read from their repos on 2026-11-04 at 07:20Z.
 # The five job ids are the required checks of main's ruleset: gitleaks, deep-import, verify-gate, money-gate, test.
 # The sixth, vault-sandbox, and the seventh, pool-solana, join them when the owner adds them to the ruleset.
 name: ci
@@ -342,9 +344,19 @@ jobs:
   # probe built with cargo-near, the pinned mainnet USDC and intents.near wasm, near-sandbox 2.13.4), which the test
   # job's plain cargo test builds empty. It runs when a change touches a file the suite reads (scripts/ci/vault-sandbox.mjs,
   # whose planted tests fail on a file the suite reads and the rule misses), on every push to main that does, nightly
-  # and by hand; otherwise vault-sandbox passes with a printed skip. The targets run on four shards
-  # (vault-sandbox.mjs SHARDS, each target in exactly one), each with its own cache of cargo's registry, its target dirs
-  # (near-sandbox's binary is downloaded into the vault's) and the pinned wasm. vault-sandbox is the one check to require.
+  # and by hand; otherwise vault-sandbox passes with a printed skip. vault-sandbox-build builds the four wasm once
+  # (run.sh --build-only) and hands them, with the pinned two, to the four shards as one artifact; the targets run on
+  # the shards (vault-sandbox.mjs SHARDS, each target in exactly one), which build no wasm. vault-sandbox is the one
+  # check to require.
+  #
+  # Caches. Every key names its inputs and never the commit, so a key is saved once and read until an input changes
+  # (each per-commit key once took 4 x 790 MB a push and the repo's 10 GB evicted them, so main ran cold: 641-691 s a
+  # shard in run 41732950792, against 404-427 s warm in run 41786418173). The wasm: keyed on every file under
+  # contracts/vault/ (run.sh's build recipe, the sources, the locks, the pinned wasm's fixture), rustc and cargo-near.
+  # cargo's registry and the dependencies built in the three target dirs: one Swatinem/rust-cache (keyed on rustc, the
+  # CARGO_*/RUST* env and the locks, falling back to the newest entry for the same rustc and env), saved only by
+  # vault-sandbox-build, which also builds every test target's dependencies when its key had no exact entry, so a shard
+  # never builds them cold. The vault's own crates are never cached (rust-cache drops them), so each shard compiles them.
   vault-sandbox-plan:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -379,17 +391,79 @@ jobs:
             *) node scripts/ci/vault-sandbox.mjs decide "$EVENT" "$BASE" "$HEAD" ;;
           esac
 
-  vault-sandbox-shard:
+  vault-sandbox-build:
     needs: vault-sandbox-plan
     if: needs.vault-sandbox-plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
+    # rust-cache hashes every CARGO_*/RUST* variable into its key, so the build and the shards hold the same env
+    # (vault-sandbox.test.mjs fails otherwise): smaller target dirs to cache, and neither changes what a test does
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # the four built wasm and the pinned two; hashed before anything is built, so no target dir is in the hash
+      - id: wasm
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vault-wasm
+          key: vault-wasm-rustc-1.96.0-cargo-near-0.22.0-${{ hashFiles('contracts/vault/**') }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # rustc 1.96.0 with the wasm target the three contracts build for (rustup is on the image, see the test job)
+      - name: rust 1.96.0
+        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
+      - name: install cargo-near
+        if: steps.wasm.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/cargo-near.tgz" \
+            https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          echo "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
+          cargo +1.96.0 near --version
+      - id: deps
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: vault-sandbox
+          workspaces: |
+            contracts/vault -> target
+            contracts/vault/tests/mock-token -> target
+            contracts/vault/tests/harness/probe -> target
+          # ~/.cargo/bin keeps the sha256-checked cargo-near the step above installed, never a cached one
+          cache-bin: "false"
+      - name: the four wasm, built once for every shard, and the pinned two
+        if: steps.wasm.outputs.cache-hit != 'true'
+        run: contracts/vault/tests/harness/run.sh --build-only "$RUNNER_TEMP/vault-wasm"
+      # the shards' dependencies, built here when the cache had no exact entry, so no shard builds them cold: the lib's
+      # test build takes every dev-dependency with the sandbox feature, as each test target does, and links one binary
+      # (every target's took 7m23s in run 41792397381, most of it linking the vault's own targets, which no cache keeps)
+      - name: every sandbox test target's dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml --features sandbox --lib --no-run
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vault-wasm
+          path: ${{ runner.temp }}/vault-wasm
+          if-no-files-found: error
+          retention-days: 1
+
+  vault-sandbox-shard:
+    needs: [vault-sandbox-plan, vault-sandbox-build]
+    if: needs.vault-sandbox-plan.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+    # the same env as vault-sandbox-build's (rust-cache's key)
     env:
-      # smaller target dirs to cache; neither changes what a test does
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
@@ -402,7 +476,9 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
-      # rustc 1.96.0 with the wasm target the three contracts build for (rustup is on the image, see the test job)
+      # the same toolchains as vault-sandbox-build (rust-cache hashes every installed rustc into its key), with the wasm
+      # target: s20 runs contracts/vault/scripts/deploy.mjs, whose two clean builds of the recipe (cargo-near, in their
+      # own target dirs) are what it proves, so every shard has cargo-near (vault-sandbox.test.mjs fails otherwise)
       - name: rust 1.96.0
         run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
       # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
@@ -414,29 +490,29 @@ jobs:
           tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
           install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
           cargo +1.96.0 near --version
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # vault-sandbox-build's cache, read only
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            contracts/vault/target
-            contracts/vault/tests/mock-token/target
-            contracts/vault/tests/harness/probe/target
-            ~/.cache/blindfill-vault-harness
-          key: vault-sandbox-${{ matrix.shard }}-${{ hashFiles('contracts/vault/Cargo.lock', 'contracts/vault/tests/mock-token/Cargo.lock', 'contracts/vault/tests/harness/probe/Cargo.lock', 'contracts/vault/tests/fixtures/real-wasm.json') }}-${{ github.sha }}
-          restore-keys: |
-            vault-sandbox-${{ matrix.shard }}-${{ hashFiles('contracts/vault/Cargo.lock', 'contracts/vault/tests/mock-token/Cargo.lock', 'contracts/vault/tests/harness/probe/Cargo.lock', 'contracts/vault/tests/fixtures/real-wasm.json') }}-
-            vault-sandbox-${{ matrix.shard }}-
-      - name: the shard's sandbox tests
+          shared-key: vault-sandbox
+          workspaces: |
+            contracts/vault -> target
+            contracts/vault/tests/mock-token -> target
+            contracts/vault/tests/harness/probe -> target
+          cache-bin: "false"
+          save-if: "false"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vault-wasm
+          path: ${{ runner.temp }}/vault-wasm
+      - name: the shard's sandbox tests, on the wasm vault-sandbox-build built
         env:
           SHARD: ${{ matrix.shard }}
         run: |
           read -ra ARGS <<<"$(node scripts/ci/vault-sandbox.mjs shard "$SHARD")"
-          contracts/vault/tests/harness/run.sh "${ARGS[@]}"
+          VAULT_WASM_DIR="$RUNNER_TEMP/vault-wasm" contracts/vault/tests/harness/run.sh "${ARGS[@]}"
 
   vault-sandbox:
-    needs: [vault-sandbox-plan, vault-sandbox-shard]
+    needs: [vault-sandbox-plan, vault-sandbox-build, vault-sandbox-shard]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -445,10 +521,12 @@ jobs:
         env:
           PLAN: ${{ needs.vault-sandbox-plan.result }}
           RUN: ${{ needs.vault-sandbox-plan.outputs.run }}
+          BUILD: ${{ needs.vault-sandbox-build.result }}
           SHARDS: ${{ needs.vault-sandbox-shard.result }}
         run: |
           if [ "$PLAN" != success ]; then echo "the plan job ended $PLAN"; exit 1; fi
           if [ "$RUN" != true ]; then echo "skip: this change touches no file the vault's sandbox suite reads"; exit 0; fi
+          if [ "$BUILD" != success ]; then echo "the wasm build ended $BUILD"; exit 1; fi
           if [ "$SHARDS" != success ]; then echo "a shard ended $SHARDS"; exit 1; fi
           echo "every shard passed"
 
@@ -483,9 +561,9 @@ jobs:
             ~/.cache/solana
             contracts/pool-solana/target
             contracts/pool-solana/svm-tests/target
-          key: pool-solana-${{ hashFiles('contracts/pool-solana/Cargo.lock', 'contracts/pool-solana/svm-tests/Cargo.lock') }}-${{ github.sha }}
+          # keyed on its inputs, never the commit (see the vault's sandbox suite above): saved once per toolchain and locks
+          key: pool-solana-rustc-1.96.0-1.97.1-agave-4.4.0-${{ hashFiles('contracts/pool-solana/Cargo.lock', 'contracts/pool-solana/svm-tests/Cargo.lock') }}
           restore-keys: |
-            pool-solana-${{ hashFiles('contracts/pool-solana/Cargo.lock', 'contracts/pool-solana/svm-tests/Cargo.lock') }}-
             pool-solana-
       - name: the pool program's unit tests
         run: cargo +1.96.0 test --locked --manifest-path contracts/pool-solana/Cargo.toml

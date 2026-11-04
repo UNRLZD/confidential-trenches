@@ -615,6 +615,25 @@ test("never two proofs for one note: two queues on one store prove each note onc
   assert.equal(proves(p1) + proves(p2), 3);
 });
 
+test("take with the attempt a transaction was built on: refused before any write once a remake swapped it, the note HELD", async () => {
+  const v = await vaultWith([usd(5), usd(10)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  await q.refresh();
+  const [x] = q.ready();
+  pool.t.now = START + E + 10n; // the next epoch: the ready set is made again
+  await q.refresh();
+  const x2 = q.ready().find((r) => r.noteId === x!.noteId)!;
+  assert.notEqual(x2.attempt, x!.attempt, "a remake swapped the note's proof");
+  await assert.rejects(q.take(x!.noteId, x!.attempt), /another attempt/);
+  const held = await state(v, x!.noteId);
+  assert.equal(held.state, "HELD", "never RESERVED for bytes no one sends");
+  assert.equal(held.attempt, x2.attempt);
+  assert.equal(q.ready().find((r) => r.noteId === x!.noteId), x2, "the new proof stays ready");
+  assert.equal((await q.take(x!.noteId, x2.attempt)).attempt, x2.attempt);
+  assert.equal((await state(v, x!.noteId)).state, "RESERVED");
+});
+
 test("HELD until sent or dropped: take writes RESERVED before handing out; drop frees; a failed proof frees", async () => {
   const v = await vaultWith([usd(2), usd(5), usd(10)]);
   const q = queue(v, fakePool(v));

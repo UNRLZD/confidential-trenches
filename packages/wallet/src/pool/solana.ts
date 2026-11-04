@@ -42,6 +42,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
 import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
+import { POOL_TESTNET } from "./network.ts";
 import type { Ladder } from "./ladder.ts";
 import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
@@ -185,8 +186,14 @@ export const solanaEpochFee = (rent: SolanaRent): { cost: bigint; fee: bigint } 
 
 /** A cluster's pool, pinned on the device: its program id and the relayer's fee payer, which every proof binds. */
 export type SolanaPoolPin = { readonly program: string; readonly feePayer: string };
-/** The pinned pools by cluster: pool-sol-deploy writes each one (a fresh program id per cluster, lib.rs deploy rule). */
-export const SOL_POOLS: Readonly<Partial<Record<"devnet" | "mainnet", SolanaPoolPin>>> = Object.freeze({});
+/** The pinned pools by cluster: pool-sol-deploy writes each one (a fresh program id per cluster, lib.rs deploy rule).
+ *  Mainnet: none until pool-sol-deploy-mainnet pins it. Devnet, in the testnet build only (./network.ts, card
+ *  signpage-pool-flow): the program of scripts/live-checks/pool-sol-deploy.devnet.json (its pool 2S5wpE7U…, read back
+ *  on two devnet RPCs by scripts/live-checks/signpage-pool-flow.mjs) and the helper's devnet fee payer, which
+ *  GET /v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef answered on 3 Nov 21:07Z. */
+export const SOL_POOLS: Readonly<Partial<Record<"devnet" | "mainnet", SolanaPoolPin>>> = Object.freeze(
+  POOL_TESTNET ? { devnet: Object.freeze({ program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" }) } : {},
+);
 
 export type SolanaPoolArgs = {
   /** The cluster's pin (SOL_POOLS[cluster]): the program id and the fee payer, never the helper's word. */
@@ -399,10 +406,15 @@ export function solanaPoolTrees(rpcs: readonly [SolanaRpc, SolanaRpc], program: 
   return solanaTreeSync(rpcs, program).trees(beforeMs, signal);
 }
 
+/** Each of two RPCs' finalized slot and that block's time, ms. */
+export async function solanaFinalTimes(rpcs: readonly [SolanaRpc, SolanaRpc], signal?: AbortSignal): Promise<[{ slot: number; ms: bigint }, { slot: number; ms: bigint }]> {
+  checkSolanaRpcs(rpcs);
+  return both(rpcs, (rpc) => finalTime(rpc), signal);
+}
+
 /** The pool's time: the lower of two RPCs' finalized block times, ms. */
 export async function solanaNow(rpcs: readonly [SolanaRpc, SolanaRpc], signal?: AbortSignal): Promise<bigint> {
-  checkSolanaRpcs(rpcs);
-  const [a, b] = await both(rpcs, (rpc) => finalTime(rpc), signal);
+  const [a, b] = await solanaFinalTimes(rpcs, signal);
   return a.ms < b.ms ? a.ms : b.ms;
 }
 

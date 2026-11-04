@@ -1,0 +1,105 @@
+{
+ "good": {
+  "base": "http://127.0.0.1:8799",
+  "coin": "GAtQEYEvkPHMbspPivN4GUVXSg2PVwYXSHSprPEtpump",
+  "fresh": {
+   "sig": "4GDDDxQ1zXdP3BtjMPYgga4Eh8mZDZ8s9gQ1vQkV2dwh8dHgdPWNGobq9zHBc1Nq6tjBSDYoY1k7QyB3MjS3TM9Y",
+   "heldAtMs": 1793741219011,
+   "side": "s",
+   "ts": 1793741218,
+   "user": "ocBBRKb13iTq9UJUSMhWLKpDcwAvi3FWR3vHr7wH1qa"
+  },
+  "polls": [
+   {
+    "atMs": 1793741219012,
+    "answeredMs": 1793741219013,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "287",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Tue, 03 Nov 2026 21:26:59 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-fetched-at": "2026-11-03T21:26:58.322Z",
+     "x-helper-commit": "0123456789abcdef0123456789abcdef01234567",
+     "x-helper-source": "chain"
+    },
+    "body": "{\"trades\":[{\"t_ms\":1793741163000,\"side\":\"s\",\"usd\":\"8.8608006887919845\",\"amt\":\"3121064.816911\",\"trader\":\"FjwxQcpqLsvq6izzE7bh1Lhqc9dda5QedX6TuPXCyUPG\",\"tx\":\"3dwoPgSHomVT2JV2sqqT4FJt31dr7D5fRqj3Z4e7jSqeQp9ncrbzCMR8qH7EQxF84pLf3fhaPe2TpCdcs9K5rrm8\"}],\"src\":\"chain\",\"as_of_ms\":1793741218322}"
+   },
+   {
+    "atMs": 1793741219214,
+    "answeredMs": 1793741219215,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "523",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Tue, 03 Nov 2026 21:26:59 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-fetched-at": "2026-11-03T21:26:59.062Z",
+     "x-helper-commit": "0123456789abcdef0123456789abcdef01234567",
+     "x-helper-source": "chain"
+    },
+    "body": "{\"trades\":[{\"t_ms\":1793741218000,\"side\":\"s\",\"usd\":\"48.289376400998843\",\"amt\":\"17344377.089931\",\"trader\":\"ocBBRKb13iTq9UJUSMhWLKpDcwAvi3FWR3vHr7wH1qa\",\"tx\":\"4GDDDxQ1zXdP3BtjMPYgga4Eh8mZDZ8s9gQ1vQkV2dwh8dHgdPWNGobq9zHBc1Nq6tjBSDYoY1k7QyB3MjS3TM9Y\"},{\"t_ms\":1793741163000,\"side\":\"s\",\"usd\":\"8.8608006887919845\",\"amt\":\"3121064.816911\",\"trader\":\"FjwxQcpqLsvq6izzE7bh1Lhqc9dda5QedX6TuPXCyUPG\",\"tx\":\"3dwoPgSHomVT2JV2sqqT4FJt31dr7D5fRqj3Z4e7jSqeQp9ncrbzCMR8qH7EQxF84pLf3fhaPe2TpCdcs9K5rrm8\"}],\"src\":\"chain\",\"as_of_ms\":1793741219062}"
+   }
+  ],
+  "candles": {
+   "atMs": 1793741219215,
+   "answeredMs": 1793741219216,
+   "status": 200,
+   "headers": {
+    "access-control-allow-origin": "https://confidential.unrealized.trade",
+    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+    "cache-control": "no-store",
+    "connection": "keep-alive",
+    "content-length": "430",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Tue, 03 Nov 2026 21:26:59 GMT",
+    "keep-alive": "timeout=65",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-fetched-at": "2026-11-03T21:26:59.062Z",
+    "x-helper-commit": "0123456789abcdef0123456789abcdef01234567",
+    "x-helper-source": "chain"
+   },
+   "body": "{\"tf\":\"1s\",\"candles\":[[1793741163,\"0.00000283903129495457007846273\",\"0.00000283903129495457007846273\",\"0.00000283903129495457007846273\",\"0.00000283903129495457007846273\",\"8.8608006887919845\"],[1793741218,\"0.000002784151667748994349446232\",\"0.000002784151667748994349446232\",\"0.000002784151667748994349446232\",\"0.000002784151667748994349446232\",\"48.289376400998843\"]],\"src\":\"chain\",\"own_from_s\":1793741163,\"as_of_ms\":1793741219062}"
+  }
+ },
+ "bad_not_deployed": {
+  "base": "https://api.confidential.unrealized.trade",
+  "coin": "6XWAopwaU2zL9AyQgQYejYSSAKaPh39zwXj5EP3hpump",
+  "fresh": null,
+  "polls": [
+   {
+    "atMs": 1793739552905,
+    "answeredMs": 1793739553079,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-length": "30",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Tue, 03 Nov 2026 20:59:13 GMT",
+     "vary": "Origin",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "5584fdf22ecd856ce7505b9acd7798bfc15cb088"
+    },
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   }
+  ],
+  "candles": null
+ }
+}

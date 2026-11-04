@@ -3,12 +3,11 @@ import { AccountCluster, PhoneAccount } from "../screens/signin/Account.tsx";
 import { Logo } from "./Logo.tsx";
 
 // The desktop top bar's pages, R5's labels (design/proto/assets/app.js:349 at design-lock-r5), each to its route.
-// R5's "Copy trade" joins when its screen has a route.
+// R5's "Copy trade" and "Orders" join when their screens ship: no link opens an empty page (card app-no-blank-pages).
 const PAGES = [
   { to: "/", label: "Trenches" },
   { to: "/discover", label: "Discover" },
   { to: "/portfolio", label: "Portfolio" },
-  { to: "/orders", label: "Orders" },
 ] as const;
 
 const on = ({ isActive }: { isActive: boolean }) => (isActive ? "on" : undefined);

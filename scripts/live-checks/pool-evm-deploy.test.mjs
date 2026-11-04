@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { BUILD, CHAINS, DUST, EIP1967, check, operatorProblems, runRecord, selector } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, DUST, EIP1967, check, gettersOf, operatorProblems, pinnedBuild, runRecord, runtimeOf, selector } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-evm-deploy.answers.json", import.meta.url), "utf8"));
 
@@ -66,7 +66,7 @@ test("other code bytes fail, outside the immutables and in the code's length", a
 test("an immutable that differs between its places fails, though the zeroed code and the getter agree", async () => {
   const del = A.deployments["robinhood-testnet"].contracts.SellDelegate.address;
   const at = BUILD.contracts.SellDelegate.immutables[0][1];
-  fails(await run("robinhood-testnet", mutate("robinhood-testnet", isCode(del), (j) => (j.result = flip(j.result, at + 31)))), /SellDelegate's 1 immutable\(s\) each hold one word.*: 2 words/);
+  fails(await run("robinhood-testnet", mutate("robinhood-testnet", isCode(del), (j) => (j.result = flip(j.result, at + 31)))), /SellDelegate's 2 immutable\(s\) each hold one word.*2 words/);
 });
 
 test("a getter's other answer fails: the adapter's PoolManager, the delegate's WETH, the pool's scope", async () => {
@@ -121,4 +121,25 @@ test("the run record lists every transaction as a testnet Tx line, and refuses a
   assert.equal(lines.length, real.reduce((n, d) => n + d.txs.length, 0));
   for (const l of lines) assert.match(l, /^Tx: (base-sepolia|robinhood-testnet) 0x[0-9a-f]{64}$/);
   assert.throws(() => runRecord([A.deployments["base-sepolia"]]), /a dry run/);
+});
+
+test("the frozen v1 sell delegate is the build only at the addresses the build file pins it to; anywhere else its code fails", async () => {
+  const f = BUILD.frozen.SellDelegate;
+  for (const [chain, a] of Object.entries(f.at)) {
+    assert.equal(pinnedBuild(chain, "SellDelegate", a), f, chain);
+    assert.equal(pinnedBuild(chain, "SellDelegate", a.toUpperCase().replace("0X", "0x")), f, `${chain}, any case`);
+    assert.deepEqual(gettersOf({ chain, contracts: { SellDelegate: { address: a } } }).SellDelegate.map(([s]) => s), ["WETH()"], `${chain}: v1 has no POOL_MANAGER`);
+    for (const other of CHAIN_NAMES.filter((c) => c !== chain)) assert.equal(pinnedBuild(other, "SellDelegate", a), BUILD.contracts.SellDelegate, `${a} on ${other}`);
+  }
+  assert.equal(pinnedBuild("base-sepolia", "SellDelegate", "0x" + "12".repeat(20)), BUILD.contracts.SellDelegate);
+  assert.equal(pinnedBuild("base-sepolia", "PrivacyPoolSimple", f.at["base-sepolia"]), BUILD.contracts.PrivacyPoolSimple);
+  assert.notEqual(f.masked, BUILD.contracts.SellDelegate.masked, "the frozen build is not the current one");
+  // the v1 delegate's code as deployed on Base Sepolia (sell-delegate-v1.code.json, read on both RPCs), served for the
+  // dry run's delegate, an address the build file does not freeze: it fails
+  const V = JSON.parse(readFileSync(new URL("./sell-delegate-v1.code.json", import.meta.url), "utf8"));
+  assert.equal(lower(V.address), f.at["base-sepolia"]);
+  const v1 = V.code;
+  assert.equal(runtimeOf(v1, f.immutables).masked, f.masked, "the recorded code is the frozen v1 build");
+  const del = A.deployments["base-sepolia"].contracts.SellDelegate.address;
+  fails(await run("base-sepolia", mutate("base-sepolia", isCode(del), (j) => (j.result = v1))), /SellDelegate \S+ code is the build's: 4119 bytes/);
 });

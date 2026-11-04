@@ -91,7 +91,7 @@ test("every state, and every edge: the legal ones move, every other is refused w
   }
   // the row's chain, the two ways back to UNSPENT and the other device's spend; nothing else
   assert.deepEqual(legal.sort(), [
-    "HELD>HELD", "HELD>RESERVED", "HELD>SPENT", "HELD>UNSPENT", "INCOMING>UNSPENT", "PLANNED>INCOMING", "PLANNED>TAKEN",
+    "HELD>HELD", "HELD>RESERVED", "HELD>SPENT", "HELD>UNSPENT", "INCOMING>TAKEN", "INCOMING>UNSPENT", "PLANNED>INCOMING", "PLANNED>TAKEN",
     "RESERVED>SPENT", "RESERVED>UNSPENT", "UNSPENT>HELD", "UNSPENT>SPENT",
   ]);
 });
@@ -428,6 +428,35 @@ test("F4: a PLANNED deposit index with history this store did not record is TAKE
   const r: NoteRef = { kind: "return", c: "sol", l: 5n, j: 0 };
   const ret = await t.ns.add({ ref: r, scope: 931n, precommitment: pc(r), state: "PLANNED" });
   await assert.rejects(t.ns.move(ret.id, "PLANNED", "TAKEN"), /only a deposit index/);
+});
+
+test("pool sends (card signpage-pool-notes): the first with PLANNED -> INCOMING, more by addSend at the same value, compare-and-set; a taken note's next arrival plans", async () => {
+  const t = await tab();
+  const a = await t.ns.planDeposit(951n, pc);
+  const S = (k: number, value = 10_000_000n) => ({ signature: "1".repeat(63) + String(k), value, last_valid_block_height: 100n + BigInt(k) });
+  await assert.rejects(t.ns.addSend(a.id, S(1), 1), /only for an INCOMING note/);
+  const inc = await t.ns.move(a.id, "PLANNED", "INCOMING", { send: S(1) });
+  assert.deepEqual(inc.sends, [S(1)]);
+  assert.deepEqual((await t.ns.get(a.id))!.sends, [S(1)]);
+  assert.deepEqual((await t.ns.addSend(a.id, S(2), 0)).sends, [S(1)], "a stale count writes nothing");
+  await assert.rejects(t.ns.addSend(a.id, S(3, 20_000_000n), 1), /another value/);
+  assert.deepEqual((await t.ns.addSend(a.id, S(2), 1)).sends, [S(1), S(2)]);
+  await assert.rejects(t.ns.addSend(a.id, S(2), 2), /written twice/);
+  await assert.rejects(t.ns.addSend(a.id, { ...S(4), key: 1 } as never, 2), /may not hold key/);
+  // a send rides only on PLANNED -> INCOMING
+  const b = await t.ns.planDeposit(952n, pc);
+  await assert.rejects(t.ns.move(b.id, "PLANNED", "TAKEN", { send: S(5) }), /PLANNED -> INCOMING only/);
+  // another deposit took its precommitment: INCOMING -> TAKEN, terminal, and U's next arrival plans
+  const taken = await t.ns.move(a.id, "INCOMING", "TAKEN");
+  assert.equal(taken.state, "TAKEN");
+  assert.deepEqual(taken.sends, [S(1), S(2)]);
+  const id = { id: "U" as const, s: 951n, i: (a.ref as { i: number }).i };
+  const r: NoteRef = { kind: "second", id, n: 0 };
+  const sec = await t.ns.add({ ref: r, scope: 951n, precommitment: pc(r), state: "PLANNED" });
+  const sInc = await t.ns.move(sec.id, "PLANNED", "INCOMING", { send: S(6) });
+  assert.equal((await t.ns.move(sInc.id, "INCOMING", "TAKEN")).state, "TAKEN");
+  const r1: NoteRef = { kind: "second", id, n: 1 };
+  assert.equal((await t.ns.add({ ref: r1, scope: 951n, precommitment: pc(r1), state: "PLANNED" })).state, "PLANNED");
 });
 
 test("F5: a precommitmentOf that throws burns no index", async () => {

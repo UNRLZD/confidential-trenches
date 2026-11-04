@@ -15,8 +15,12 @@
 #      there, one more when it is another (a rollback included), 1 when there was none. Every other line is kept byte
 #      for byte, the file is replaced in one rename and stays mode 600. A HELPER_COMMIT or HELPER_RELEASE line not in
 #      the plain NAME=value form, or written twice, is refused with nothing changed;
-#   3. docker compose up -d --build with those two values.
-# It prints names, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local repository).
+#   3. swaps the helper with no gap, with those two values: builds the image (docker compose build helper); with no helper
+#      running (a first deploy) docker compose up -d --wait brings the stack up; otherwise starts the new helper beside the
+#      old one (docker compose up --no-deps --no-recreate --scale helper=<old + 1> --wait), waits for its healthcheck
+#      (compose.yaml: /v1/health says ready), and only then stops (30 s) and removes each old container. Past the bound
+#      (REDEPLOY_READY_S seconds, default 300) the new container is removed, the old one keeps serving, and it exits 1.
+# It prints names and container ids, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local repository).
 # The release is read, raised and written here rather than computed from the commit's place on main: the number orders
 # what this host ran, with its store, so a rollback gets the next number; a count on main would go down on a rollback.
 set -euo pipefail
@@ -25,7 +29,13 @@ set -euo pipefail
 main() {
   local sha="${1:-}"
   if [[ $# -ne 1 || ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "usage: redeploy.sh <40-hex commit>" >&2
+    echo "usage: redeploy.sh <40-hex commit> (REDEPLOY_READY_S, if set: whole seconds, 1 to 9999)" >&2
+    exit 2
+  fi
+  # the bound for step 3, checked with the other pre-checks so a bad one changes nothing
+  local wait_s="${REDEPLOY_READY_S:-300}"
+  if [[ ! "$wait_s" =~ ^[1-9][0-9]{0,3}$ ]]; then
+    echo "usage: redeploy.sh <40-hex commit> (REDEPLOY_READY_S, if set: whole seconds, 1 to 9999)" >&2
     exit 2
   fi
   local deploy root remote
@@ -47,9 +57,66 @@ main() {
 
   write_env "$env" "$sha" "$release"
 
-  echo "redeploy: docker compose up -d --build"
   cd "$deploy"
-  HELPER_COMMIT="$sha" HELPER_RELEASE="$release" docker compose up -d --build
+  export HELPER_COMMIT="$sha" HELPER_RELEASE="$release"
+  swap_helper "$wait_s" "$sha"
+}
+
+# Step 3. The new helper starts next to the old one (docker-rollout's pattern: --no-recreate keeps the running container
+# and --scale adds one from the new image), compose waits for its healthcheck up to the bound, and only then is each old
+# container stopped. Past the bound, or when what runs new is not this commit's image, the new container is removed and
+# no old one is touched. The old ones get `docker stop -t 60`: past the helper's own drain (src/server.ts STOP_MS, 50 s),
+# so a bind's answer (45 s) is never cut. Prints ids, never values.
+swap_helper() {
+  local wait_s="$1" sha="$2" old new id count stale
+  echo "redeploy: docker compose build helper"
+  docker compose build helper
+  # a stopped container of the service (a start that failed, a crash) is counted by --scale and started again in place
+  # of one from the new image, so the swap would report a helper that never came: each is removed first
+  stale="$(docker compose ps -a -q --status exited --status created --status dead helper)"
+  for id in $stale; do
+    docker rm "$id" >/dev/null
+    echo "redeploy: removed the stopped helper $id"
+  done
+  old="$(docker compose ps -q helper)"
+  if [[ -z "$old" ]]; then
+    echo "redeploy: no helper running; docker compose up -d --wait (bound $wait_s s)"
+    if ! docker compose up -d --wait --wait-timeout "$wait_s"; then
+      echo "redeploy: the helper was not ready within $wait_s s" >&2
+      exit 1
+    fi
+    return 0
+  fi
+  count="$(printf '%s\n' "$old" | grep -c .)"
+  echo "redeploy: starting the new helper beside the old one (bound $wait_s s)"
+  if ! docker compose up -d --no-deps --no-recreate --scale "helper=$((count + 1))" --wait --wait-timeout "$wait_s" helper; then
+    # every container of the service that was not running before, a stopped or restarting one included; the old ones
+    # are left alone
+    new="$(docker compose ps -a -q helper | grep -vxF -f <(printf '%s\n' "$old") || true)"
+    for id in $new; do docker rm -f "$id" >/dev/null || true; done
+    echo "redeploy: the new helper was not ready within $wait_s s; the old one keeps serving" >&2
+    exit 1
+  fi
+  new="$(docker compose ps -q helper | grep -vxF -f <(printf '%s\n' "$old") || true)"
+  if ! from_image "ct-helper:$sha" "$new"; then
+    for id in $new; do docker rm -f "$id" >/dev/null || true; done
+    echo "redeploy: no new helper from ct-helper:$sha is running; the old one keeps serving" >&2
+    exit 1
+  fi
+  for id in $old; do
+    docker stop -t 60 "$id" >/dev/null
+    docker rm "$id" >/dev/null
+  done
+  echo "redeploy: swapped: the new helper $(printf '%s' "$new" | tr '\n' ' ' | sed 's/ $//') is ready; stopped and removed the old $(printf '%s' "$old" | tr '\n' ' ' | sed 's/ $//')"
+}
+
+# Whether $2 names at least one container and every one runs image $1.
+from_image() {
+  local id
+  [[ -n "$2" ]] || return 1
+  for id in $2; do
+    [[ "$(docker inspect -f '{{.Config.Image}}' "$id")" == "$1" ]] || return 1
+  done
 }
 
 # The lines that set NAME in a .env, in any form compose may read (spaces, export, and its "NAME: value" form).

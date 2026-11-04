@@ -1,5 +1,5 @@
 // The signing-page client's unit tests (APU-02, APU-03, app.md:1327-1328; the client half of AX-05, AX-06; BAR-09):
-// a fake window, document and iframe, Node's fake clock. Every kind of the seventeen has its fixture (a kind with no
+// a fake window, document and iframe, Node's fake clock. Every kind of the twenty-one has its fixture (a kind with no
 // fixture fails the suite, matching "a kind with no row is refused", W:894). Every dropped message is checked for "no
 // state change": the snapshot is the same object and the request it targets is still open.
 //   node --test test/signpage-client.test.mjs
@@ -455,8 +455,8 @@ test("a request's id is known at once and is the id posted, so progress events c
   assert.deepEqual(seen, [[id, "filled"]]);
 });
 
-// ------------------------------------------------------------------------------------------------ the seventeen kinds
-test("every kind of the seventeen has a fixture, and only the seventeen do", () => {
+// ---------------------------------------------------------------------------------------------- the twenty-one kinds
+test("every kind of the twenty-one has a fixture, and only the twenty-one do", () => {
   assert.deepEqual(Object.keys(FIXTURES).sort(), [...SIGNPAGE_KINDS].sort());
 });
 
@@ -501,7 +501,29 @@ for (const kind of SIGNPAGE_KINDS) {
   });
 }
 
-test("a kind not in the seventeen cannot be built", () => {
+test("the pool kinds (card signpage-pool-kinds): each builds from its own fields on a pool chain only; NEAR, another chain, a field it does not take, an amount that is not a decimal, a slippage over 10,000, a missing field and an address from the app cannot be built", () => {
+  const T = "0xF111111111111111111111111111111111111111";
+  for (const [kind, good] of [
+    ["pool.deposit", { chain: "solana", amount: "1.5" }],
+    ["pool.buy", { chain: "base", token: T, amount: "0.01", slippage_bps: 300 }],
+    ["pool.sell", { chain: "robinhood", token: T, amount: "2", slippage_bps: 0 }],
+    ["pool.withdraw", { return_key: "withdraw", chain: "solana" }],
+  ]) {
+    assert.deepEqual(C.signpageBuildRequest(kind, good, "id"), { ...good, v: 1, id: "id", type: kind }, kind);
+    const bad = [
+      { ...good, chain: "near" },
+      { ...good, chain: "ethereum" },
+      { ...good, extra: "x" },
+      ...(kind === "pool.withdraw"
+        ? [{ ...good, address: "0xattacker" }, { ...good, to: "0xattacker" }, { chain: "solana" }]
+        : [{ ...good, amount: "1e5" }, { ...good, amount: "-1" }, { ...good, amount: 5 }, { chain: good.chain }]),
+      ...(kind === "pool.buy" || kind === "pool.sell" ? [{ ...good, slippage_bps: 10_001 }, { ...good, slippage_bps: 1.5 }, { ...good, token: 7 }] : []),
+    ];
+    for (const b of bad) assert.throws(() => C.signpageBuildRequest(kind, b, "id"), TypeError, `${kind} ${JSON.stringify(b)}`);
+  }
+});
+
+test("a kind not in the twenty-one cannot be built", () => {
   for (const k of ["sign", "eth_sendTransaction", "ready", "", "__proto__"]) {
     assert.throws(() => C.signpageBuildRequest(k, {}, "id"), TypeError, k);
   }
@@ -576,6 +598,36 @@ test("state.pools: the private balance per chain's pool is optional; each entry 
     "not an array": { chain: "solana", asset: "SOL", balance: "1" },
   };
   for (const [name, v] of Object.entries(bad)) assert.equal(ok({ ...STATE, pools: v }), false, name);
+});
+
+test("state.pools tap_max: the most one ready proof can spend at the tap, optional next to ready, exact at the asset's decimals, never over ready", () => {
+  const ok = S.SIGNPAGE_RESULT_SCHEMAS.state;
+  const at = (e) => ok({ ...STATE, pools: [e] });
+  // present
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "8" }), true, "a tap_max under ready");
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "10" }), true, "a tap_max equal to ready");
+  assert.equal(at({ chain: "base", asset: "ETH", balance: "1", ready: "0.001", tap_max: "0.000000000000000001" }), true, "ETH at 18 decimals");
+  assert.equal(at({ chain: "near", asset: "USDC", balance: "1", ready: "0", tap_max: "0" }), true, "\"0\" with a ready of \"0\"");
+  // a ready proof whose fee and W's new accounts eat its chunk spends 0: the chain's tap_max is "0" with a ready above 0
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "12.5", ready: "0.001", tap_max: "0" }), true, "\"0\" with a ready above 0");
+  // absent: an older page's entry with a ready and no tap_max, and an entry with neither
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "12.5", ready: "10" }), true, "ready, no tap_max");
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "12.5" }), true, "neither");
+  // malformed: refused
+  const bad = {
+    "a tap_max with no ready": { chain: "solana", asset: "SOL", balance: "12.5", tap_max: "1" },
+    "a tap_max over ready": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "10.000000001" },
+    "a tap_max above 0 with a ready of 0": { chain: "solana", asset: "SOL", balance: "12.5", ready: "0", tap_max: "1" },
+    "a SOL tap_max past 9 decimals": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "0.0000000001" },
+    "a USDC tap_max past 6 decimals": { chain: "near", asset: "USDC", balance: "12", ready: "10", tap_max: "1.0000001" },
+    "a negative tap_max": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "-1" },
+    "an exponent": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "1e1" },
+    "an empty tap_max": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "" },
+    "a bare point": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "1." },
+    "a number, not a string": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: 1 },
+    "null": { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: null },
+  };
+  for (const [name, e] of Object.entries(bad)) assert.equal(at(e), false, name);
 });
 
 // ------------------------------------------------------------------------------------------------ refusals
@@ -834,6 +886,8 @@ test("each kind's timeout is the table's (app.md §2.1 item 3); restore has none
     "deposit.quote": 15_000, "deposit.confirm": 15_000, arm: 5_000, buy: 10_000, hop: 10_000, "orders.set": 15_000,
     "orders.cancel": 15_000, return: 15_000, "withdraw.open": 5_000, "signin.open": 5_000, "backup.open": 5_000,
     "export.open": 5_000, signout: 5_000, restore: null, state: 5_000, nav: 5_000, reload: 5_000,
+    // the pool kinds (card signpage-pool-kinds): a trade's time, the withdraw screen an open's
+    "pool.deposit": 10_000, "pool.buy": 10_000, "pool.sell": 10_000, "pool.withdraw": 5_000,
   });
 });
 

@@ -13,8 +13,9 @@
 // PoolManager logs) and pairs the token with USDC, WETH or ETH: the key is the PositionManager's poolKeys() when it knows
 // the pool, and for a pool it never made (Doppler) v4Key works the key out from the swap's fee and the addresses in its
 // transaction, trusted only when the hash equals the id. A token with
-// no such pool (Zora's creator-coin pairs, a cbBTC or VIRTUAL pair, a venue not listed here: slice 2 of the card) answers
-// 404, never a guess.
+// no such pool (Zora's creator-coin pairs, a cbBTC or VIRTUAL pair, a Pons curve quoted in a stock token, a venue not listed
+// here) answers an empty chart and tape from our own reads (200, src "chain"), never a guess; 404 is only for a token off
+// the lists or a malformed request. A read that fails is never kept as "no pool": it answers 503 and is read again.
 //
 // Venues on Base, each address read from the chain on 2026-11-03 17:0xZ (a pool's factory() on base-rpc.publicnode.com,
 // and a PoolCreated or Initialize log of the factory decoded against the pool's token0() and token1()):
@@ -651,6 +652,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
     if (V.pons.length > 0) {
       const recs = await callsAgreed(head.n, V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` })));
+      // a record not read is no answer: never kept as "no pool" (a token with none answers the empty record)
+      if (recs.some((r) => r === undefined)) throw new Error("pons records not agreed");
       for (const r of recs) {
         if (r === undefined || !/^0x[0-9a-f]{960}$/.test(r) || wordAddr(r, 0) !== token || BigInt(`0x${r.slice(2 + 64 * 14)}`) !== 1n) continue;
         const [curve, pair] = [wordAddr(r, 1)!, wordAddr(r, 4)!];
@@ -674,10 +677,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return { pool: best.c, decimals, seed: refOk || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs: swaps[best.i]! } : undefined };
   }
 
-  async function mainPool(token: string): Promise<Found | null> {
+  /** A listed token's main pool, null when our reads find none (served as an empty chart), "unlisted" off the lists. */
+  async function mainPool(token: string): Promise<Found | null | "unlisted"> {
     const kept = pools.get(token);
-    if (kept !== undefined && now() - kept.at < (kept.found === null ? NONE_MS : POOL_KEEP_MS)) return kept.found === null ? null : { ...kept.found };
-    if (!(await deps.listed(token))) return null;
+    if (kept !== undefined && kept.found !== null && now() - kept.at < POOL_KEEP_MS) return { ...kept.found };
+    if (!(await deps.listed(token))) return "unlisted";
+    if (kept !== undefined && kept.found === null && now() - kept.at < NONE_MS) return null;
     let p = resolving.get(token);
     if (p === undefined) {
       p = findPool(token).finally(() => resolving.delete(token));
@@ -801,11 +806,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     timer.unref();
   }
 
-  /** The book of a listed token, read once before it is served (a first open waits for its cold read). */
-  async function open(token: string): Promise<Entry | DataAnswer> {
+  /** The book of a listed token, read once before it is served (a first open waits for its cold read); "none" for a
+   *  listed token our reads find no pool of, served as an empty chart and tape from our own reads, never a 404. */
+  async function open(token: string): Promise<Entry | DataAnswer | "none"> {
     let e = books.get(token);
     if (e === undefined) {
-      let found: Found | null = null;
+      let found: Found | null | "unlisted" = null;
       for (let attempt = 0; attempt < 2 && found === null; attempt++) {
         try {
           found = await mainPool(token);
@@ -814,7 +820,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           if (attempt === 1) return UPSTREAM;
         }
       }
-      if (found === null) return NOT_FOUND;
+      if (found === "unlisted") return NOT_FOUND;
+      if (found === null) return "none";
       if (books.size >= OPEN_MAX) return limited(5);
       e = books.get(token);
       if (e === undefined) {
@@ -839,39 +846,63 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
   const limited = (s: number): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS: s });
+  /** A listed token with no pool our reads find: an empty answer from our own reads, timed now. */
+  const empty = (fields: Record<string, unknown>): DataAnswer => {
+    const at = now();
+    return { status: 200, body: JSON.stringify({ ...fields, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+  };
 
   // -------------------------------------------------------------------------------------------------------------
   // History before our first bar: GeckoTerminal's OHLCV for our pool, through the one budget
   // -------------------------------------------------------------------------------------------------------------
 
   const history = new Map<string, { at: number; bars: Candle[] }>();
-  async function geckoBars(e: Entry, tf: Tf, before: number): Promise<Candle[]> {
+  /** The last good bars per pool and tf (the newest range read): served when a read is throttled or fails. */
+  const kept = new Map<string, { at: number; bars: Candle[] }>();
+  /** GeckoTerminal's bars before `before` (unix seconds; null: its newest range, one cache key however often asked),
+   *  or, when the read is refused, throttled or fails, the last good bars of the pool and tf cut there; with none of
+   *  those, the 429 (with the wait to the next call) or 503 to answer. */
+  async function geckoBars(e: Entry, tf: Tf, before: number | null): Promise<Candle[] | DataAnswer> {
     if (!Object.hasOwn(GT_TF, tf) || deps.gecko === undefined) return [];
-    const k = `${e.pool.id}:${tf}:${before}`;
-    const kept = history.get(k);
-    if (kept !== undefined && now() - kept.at < GT_FRESH_MS) return kept.bars;
-    if (!deps.gecko.take("pages")) return [];
+    const gecko = deps.gecko;
+    const k = `${e.pool.id}:${tf}:${before ?? ""}`;
+    const fresh = history.get(k);
+    if (fresh !== undefined && now() - fresh.at < GT_FRESH_MS) return fresh.bars;
+    const fallback = (fail: DataAnswer): Candle[] | DataAnswer => {
+      const cut = (kept.get(`${e.pool.id}:${tf}`)?.bars ?? []).filter((c) => before === null || c[0] < before);
+      return cut.length > 0 ? cut : fail;
+    };
+    const wait = () => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S));
+    if (!gecko.take("pages")) return fallback(wait());
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
-      const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}&before_timestamp=${before}`;
+      const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;
       const r = await doFetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
         await r.body?.cancel();
-        throttledUntil(deps.gecko, r.headers.get("retry-after"), now());
-        return [];
+        throttledUntil(gecko, r.headers.get("retry-after"), now());
+        return fallback(wait());
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
         await r.body?.cancel();
-        return [];
+        return fallback(UPSTREAM);
       }
       const text = await r.text();
-      if (text.length > ANSWER_MAX) return [];
-      const bars = toCandles(JSON.parse(text), tf as keyof typeof GT_TF, 1_000, now()) ?? [];
+      if (text.length > ANSWER_MAX) return fallback(UPSTREAM);
+      const bars = toCandles(JSON.parse(text), tf as keyof typeof GT_TF, 1_000, now());
+      if (bars === null) return fallback(UPSTREAM);
       if (history.size >= 500) history.delete(history.keys().next().value!);
       history.set(k, { at: now(), bars });
+      const kk = `${e.pool.id}:${tf}`;
+      const had = kept.get(kk);
+      if (bars.length > 0 && (had === undefined || bars.at(-1)![0] >= had.bars.at(-1)![0])) {
+        kept.delete(kk);
+        if (kept.size >= 500) kept.delete(kept.keys().next().value!);
+        kept.set(kk, { at: now(), bars });
+      }
       return bars;
     } catch {
-      return [];
+      return fallback(UPSTREAM);
     }
   }
 
@@ -911,6 +942,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = evmAddress(token);
       if (t === null || !(TFS as readonly string[]).includes(tf) || tf === "1s" || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
       const e = await open(t);
+      if (e === "none") return empty({ tf, candles: [] });
       if (!("book" in e)) return e;
       const own = e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book.ownFrom(tf as Tf);
@@ -919,7 +951,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a range we do not hold: bars before our first
       if (own.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
-        const old = (await geckoBars(e, tf as Tf, before)).filter((c) => c[0] < before);
+        const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before);
+        // nothing of ours and no history to serve: GeckoTerminal's 429 or 503, so the page retries, never an empty chart
+        if (!Array.isArray(got) && own.length === 0) return got;
+        const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);
           src = "chain,geckoterminal";
@@ -936,6 +971,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = evmAddress(token);
       if (t === null || !Number.isSafeInteger(limit) || limit < 1 || limit > TRADES_MAX) return NOT_FOUND;
       const e = await open(t);
+      if (e === "none") return empty({ trades: [] });
       if (!("book" in e)) return e;
       const rows = e.book.tape(limit);
       await tradersOf(rows.map((r) => r.tx));

@@ -9,7 +9,10 @@
 
 import type { Chain, OrderTrigger } from "../orders/record.ts";
 
-/** The seventeen request kinds, app to page. The last two, nav and reload, are to SIGN_HOST's shell (card signpage-shell). */
+/**
+ * The twenty-one request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the last four
+ * are the pool kinds (card signpage-pool-kinds), added after kit-v1 without changing any other kind.
+ */
 export const SIGNPAGE_KINDS = [
   "deposit.quote",
   "deposit.confirm",
@@ -28,12 +31,20 @@ export const SIGNPAGE_KINDS = [
   "state",
   "nav",
   "reload",
+  "pool.deposit",
+  "pool.buy",
+  "pool.sell",
+  "pool.withdraw",
 ] as const;
 
 export type SignpageKind = (typeof SIGNPAGE_KINDS)[number];
 
 /** The kinds that open a SIGN_HOST top-level screen: the app posts one, then moves the same tab to SIGN_HOST. */
-export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout"] as const satisfies readonly SignpageKind[];
+export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout", "pool.withdraw"] as const satisfies readonly SignpageKind[];
+
+/** The chains a pool runs on: NEAR's money is the vault's, never a pool's. */
+export type PoolChain = "solana" | "base" | "robinhood";
+export const POOL_CHAINS: readonly PoolChain[] = Object.freeze(["solana", "base", "robinhood"] as const);
 
 /** The events, page to app. */
 export const SIGNPAGE_EVENTS = ["ready", "state", "progress"] as const;
@@ -105,6 +116,14 @@ export interface SignpageParams {
   nav: { path: string };
   /** Reload the top window: the shell and the app in it (a reload of the frame alone would keep the old shell). */
   reload: Record<never, never>;
+  /** Move `amount` of the chain pool's asset (POOL_ASSET_DECIMALS) that the device holds on that chain into the pool. */
+  "pool.deposit": { chain: PoolChain; amount: string };
+  /** A release from the chain's pool to a fresh wallet that buys `token` with `amount` of the pool's asset. */
+  "pool.buy": { chain: PoolChain; token: string; amount: string; slippage_bps: number };
+  /** The fresh wallet sells `amount` of `token`; the proceeds go back into the chain's pool in the same transaction. */
+  "pool.sell": { chain: PoolChain; token: string; amount: string; slippage_bps: number };
+  /** Open SIGN_HOST's withdraw screen for the chain's pool. The address is typed there, never sent by the app. */
+  "pool.withdraw": Open & { chain: PoolChain };
 }
 
 export interface TxRef {
@@ -145,6 +164,10 @@ export interface SignpageResults {
   state: SignpageState;
   nav: Record<never, never>;
   reload: Record<never, never>;
+  "pool.deposit": { stage: TradeStage; txs: TxRef[] };
+  "pool.buy": { stage: TradeStage; txs: TxRef[] };
+  "pool.sell": { stage: TradeStage; txs: TxRef[] };
+  "pool.withdraw": OpenResult;
 }
 
 /**
@@ -233,10 +256,16 @@ export interface SignpageState {
    * per chain, each amount a decimal string in whole units of the pool's asset, as vault_balance is for USDC (12.5 SOL
    * is "12.5"). `asset` is the pool's, set by the device from the pool's kind; its decimals are POOL_ASSET_DECIMALS's
    * alone. `ready` is how much of it is ready to buy (chunks with a proof ready); absent while no proof
-   * queue runs, never "0" in its place. Absent when the page is signed out or the notes could not be read. Totals
+   * queue runs, never "0" in its place. `tap_max` is the most one tap can spend on the chain, in the same whole units:
+   * a tap spends one ready proof, so it is the largest spend among the ready proofs, never their sum: the chunk less
+   * what comes out of it before the venue (Solana: the relay fee, the tip and W's new accounts on the costliest venue,
+   * the kit's solanaPoolBuyMaxSpend; EVM: nothing, since an EVM tap asks for a whole chunk and the signing page refuses
+   * any other amount, rules/pool.ts checkEvmBuy). At most `ready`, never below "0". It
+   * comes only with `ready`, and a page of an earlier release, or one that cannot price a pool, sends `ready` without it.
+   * Absent when the page is signed out or the notes could not be read. Totals
    * only, never a note; the app sees them each time the store changes, so two in a row can show one note's value.
    */
-  pools?: { chain: Chain; asset: PoolAsset; balance: string; ready?: string }[];
+  pools?: { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string }[];
   wallets: { chain: Chain; address: string; role: "fresh" | "hop"; size: string; state: WalletState }[];
   positions: { chain: Chain; token: string; amount: string; cost: string; wallets: string[] }[];
   orders: {

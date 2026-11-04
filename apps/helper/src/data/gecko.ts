@@ -34,6 +34,13 @@ export type GeckoBudget = {
   /** When a page call can next be taken (now when it can now): the pause's end or the minute's oldest call leaving
    *  the window; what a refused page names as its wait. */
   retryAt(lane: string): number;
+  /** The calls in the window, oldest first: what a restart's next process seeds from (../data/warm.ts). */
+  calls(): number[];
+  /** Calls another process made from our address (a deploy's old helper, read from its warm file): counted as ours. */
+  seed(times: readonly number[]): void;
+  /** No lane calls until release(): another helper on our address may still be calling (card helper-ready-gate). */
+  hold(): void;
+  release(): void;
 };
 
 /** GeckoTerminal answered 429: pause every lane for its Retry-After (at most 300 s), or WINDOW_MS when it names none or
@@ -49,6 +56,7 @@ export function throttledUntil(b: GeckoBudget, retryAfter: string | null, nowMs:
 export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): GeckoBudget {
   const calls: { at: number; lane: string }[] = [];
   let pausedUntil = 0;
+  let held = false;
   const prune = (t: number) => {
     while (calls.length > 0 && t - calls[0]!.at >= WINDOW_MS) calls.shift();
   };
@@ -56,10 +64,10 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     take(lane, urgent = false) {
       const t = now();
       prune(t);
-      if (t < pausedUntil || calls.length >= perMin) return false;
+      if (held || t < pausedUntil || calls.length >= perMin) return false;
       if (lane === "lists") {
         const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
-        if (!floor && (calls.length >= perMin - PAGE_RESERVE || calls.some((c) => c.lane !== "lists" && t - c.at < YIELD_MS))) return false;
+        if (!floor && (calls.length >= perMin - PAGE_RESERVE || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && t - c.at < YIELD_MS))) return false;
       }
       calls.push({ at: t, lane });
       return true;
@@ -71,8 +79,25 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       const t = now();
       prune(t);
       let at = Math.max(t, pausedUntil);
+      if (held) at = Math.max(at, t + WINDOW_MS);
       if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + WINDOW_MS);
       return at;
+    },
+    calls() {
+      prune(now());
+      return calls.map((c) => c.at);
+    },
+    seed(times) {
+      const t = now();
+      for (const at of times) if (Number.isFinite(at) && at <= t && t - at < WINDOW_MS) calls.push({ at, lane: "seed" });
+      calls.sort((a, b) => a.at - b.at);
+      prune(t);
+    },
+    hold() {
+      held = true;
+    },
+    release() {
+      held = false;
     },
   };
 }

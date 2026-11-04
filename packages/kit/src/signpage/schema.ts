@@ -5,7 +5,7 @@
 // The types these schemas mirror are messages.ts's; the test checks one valid and several invalid values per kind.
 
 import { CHAINS, type Chain } from "../orders/record.ts";
-import { POOL_ASSET_DECIMALS, POOL_ASSETS, SIGNPAGE_KINDS } from "./messages.ts";
+import { POOL_ASSET_DECIMALS, POOL_ASSETS, POOL_CHAINS, SIGNPAGE_KINDS } from "./messages.ts";
 import type { PoolAsset, SignpageKind } from "./messages.ts";
 
 /** A check of one value. */
@@ -128,6 +128,7 @@ const by = (key: string, cases: Record<string, SignpageSchema>): SignpageSchema 
 
 // ------------------------------------------------------------------------------------------------ messages.ts's types
 const chain = oneOf(CHAINS);
+const poolChain = oneOf(POOL_CHAINS);
 const way = oneOf(["passkey", "words", "wallet"]);
 const DEPOSIT = ["quote_checked", "waiting", "in_transit", "into_vault", "done", "refunded", "held", "halted"] as const;
 const WITHDRAW = ["proving", "submitted", "in_transit", "sent", "refunded", "stopped"] as const;
@@ -154,18 +155,22 @@ const unitsAt = (s: string, d: number): bigint | null => {
 };
 /** The private balance per chain's pool: each entry exact, its asset one of POOL_ASSETS (no decimals key: they come
  * from POOL_ASSET_DECIMALS only) and the one its chain's pool holds, its amounts with no more fraction digits than the
- * asset has decimals, its ready at most its balance, one entry per chain (a chain twice is refused). */
-const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec });
+ * asset has decimals, its ready at most its balance, its tap_max only with a ready and at most that ready (one
+ * proof's spend, at most its chunk; "0" when the fee and W's new accounts eat every chunk), one entry per chain (a chain twice is refused). */
+const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec });
 const poolFits: SignpageSchema = (v) => {
   if (!poolEntry(v)) return false;
-  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string };
+  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string };
   if (POOL_CHAIN_ASSET[p.chain] !== p.asset) return false;
   const d = POOL_ASSET_DECIMALS[p.asset];
   const balance = unitsAt(p.balance, d);
   if (balance === null) return false;
-  if (p.ready === undefined) return true;
+  if (p.ready === undefined) return p.tap_max === undefined;
   const ready = unitsAt(p.ready, d);
-  return ready !== null && ready <= balance;
+  if (ready === null || ready > balance) return false;
+  if (p.tap_max === undefined) return true;
+  const tapMax = unitsAt(p.tap_max, d);
+  return tapMax !== null && tapMax <= ready;
 };
 const poolList = arr(poolFits);
 const pools: SignpageSchema = (v) =>
@@ -230,6 +235,10 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   state,
   nav: obj({}),
   reload: obj({}),
+  "pool.deposit": obj({ stage: oneOf(TRADE), txs }),
+  "pool.buy": obj({ stage: oneOf(TRADE), txs }),
+  "pool.sell": obj({ stage: oneOf(TRADE), txs }),
+  "pool.withdraw": open,
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 
 const exit = obj({ trigger_price: dec, share_bps: bps(1) });
@@ -253,6 +262,10 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   state: obj({}),
   nav: obj({ path: navPath }),
   reload: obj({}),
+  "pool.deposit": obj({ chain: poolChain, amount: dec }),
+  "pool.buy": obj({ chain: poolChain, token: str, amount: dec, slippage_bps: bps(0) }),
+  "pool.sell": obj({ chain: poolChain, token: str, amount: dec, slippage_bps: bps(0) }),
+  "pool.withdraw": obj({ return_key: returnKey, chain: poolChain }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 
 /** The handshake, page to app. Any whole `api` passes here; the client refuses one it does not speak. */
@@ -264,6 +277,6 @@ export const signpageProgressSchema = obj({ v: lit(1), type: lit("progress"), id
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
 export const signpageAnswerErrorSchema = obj({ v: lit(1), id: str, ok: lit(false), error: obj({ code: errorCode }) });
 
-/** True when `kind` is one of the seventeen. */
+/** True when `kind` is one of the twenty-one. */
 export const signpageIsKind = (kind: unknown): kind is SignpageKind =>
   typeof kind === "string" && (SIGNPAGE_KINDS as readonly string[]).includes(kind);

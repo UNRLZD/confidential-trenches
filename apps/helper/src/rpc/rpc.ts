@@ -15,9 +15,13 @@
 // more than RPC_CLIENT_MAX of them a window, a batch drawing one per request in it), and where the provider also limits
 // one method (Solana's public endpoint, RPC_METHOD_MAX), each method a budget of its own drawn in the same step. The
 // totals sit at the provider's own limits, so no set of callers can make the provider throttle us; a draw past a share
-// or a total answers 429 rate_limited with the seconds until it would go ahead. If the provider throttles anyway (its 429), the helper, its one client, holds the chain until the reset
-// it named (at most a minute): every draw on that chain, the helper's own reads included, answers 429 with the seconds
-// left and nothing reaches the provider. A 503 is never a wait.
+// or a total answers 429 rate_limited with the seconds until it would go ahead. If the provider throttles a caller's
+// read anyway (its 429), the helper, its one client, holds the chain until the reset it named (at most RETRY_AFTER_MAX_S):
+// every draw on that chain, the helper's own reads included, answers 429 with the seconds left and nothing reaches the
+// provider. If it throttles a background read (the trade walks), only the background reads wait out the reset: they go
+// behind callers, so a caller is not refused for their 429 (4 Nov 09:15-09:19Z, after a restart's cold walks); a
+// caller's read it throttles in turn holds the chain. Each hold is one log line: the chain, whose read (caller or
+// background) and the seconds. A 503 is never a wait.
 //
 // Refusals, in the kit's error shape { error: { code } } (v1.ts HelperRpcCode and the common codes):
 //   404 not_found           a chain that is not one of RPC_CHAINS;
@@ -65,6 +69,15 @@ export const RPC_METHOD_MAX = 40;
  * one per token a caller opens, so they draw that caller's share and stop at the total less this, as callers do.
  */
 export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0 };
+/**
+ * The part of each chain's total, and of each method's, the helper's own background reads never draw (card
+ * helper-ready-gate): the trade walks and the SOL price reads (data/solana/trades.ts) go only while half stays free,
+ * whatever callers drew, so a walk that would take the whole budget leaves a caller's read its room (4 Nov 06:24-06:30Z:
+ * the walks, outside this budget, drew the public endpoint's 100 and every token read answered 429 for six minutes).
+ * [design: half: the public 100 keeps 50 for callers, three at their full RPC_CLIENT_MAX share; the walks keep 47, a cold
+ * read of COLD_SIGS transactions a few seconds, and move to their next provider when it is spent.]
+ */
+export const userRoomOf = (limit: number): number => Math.ceil(limit / 2);
 /** Each chain's budget unless RPC_BUDGET_<CHAIN> says; only Solana's public endpoint publishes a limit per method. */
 export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?: number }>> = {
   solana: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX, perMethod: RPC_METHOD_MAX },
@@ -106,7 +119,7 @@ export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: s
 
 export type RpcAnswer = { status: number; body: string };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-type Deps = { fetch?: Fetch; now?: () => number };
+type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void };
 type Answer = RpcAnswer & { headers?: Record<string, string> };
 type Upstream = { url: string; forms: Buffer[] };
 
@@ -179,13 +192,30 @@ function check(chain: RpcChain, r: unknown): Record<string, unknown> | undefined
 export function createRpc(env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
+  const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
-  const limits = Object.fromEntries(RPC_CHAINS.map((ch) => [ch, { ...budgetFromEnv(env, rpcBudgetEnv(ch), RPC_BUDGETS[ch], { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE[ch] }), reserve: RPC_RESERVE[ch] }])) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
+  const limits = Object.fromEntries(
+    RPC_CHAINS.map((ch) => {
+      const b = budgetFromEnv(env, rpcBudgetEnv(ch), RPC_BUDGETS[ch], { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE[ch] });
+      return [ch, { ...b, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(b.total) }];
+    }),
+  ) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
   // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
   const budget = upstreamBudget((key) => {
     const [ch, method] = key.split(" ") as [RpcChain, string | undefined];
-    return method === undefined ? limits[ch] : { total: limits[ch].perMethod!, perClient: Infinity, reserve: RPC_RESERVE[ch] };
+    return method === undefined ? limits[ch] : { total: limits[ch].perMethod!, perClient: Infinity, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(limits[ch].perMethod!) };
   }, now);
+  /** The provider throttled `whose` read on `c` for `seconds`: the chain is held (every draw for a caller's, the
+   *  background draws for a background read's), logged as one line with no caller in it. */
+  const hold = (c: RpcChain, seconds: number, whose: "caller" | "background"): void => {
+    budget.hold(c, now() + seconds * 1000, whose === "background");
+    log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s`);
+  };
+  const drawsOf = (c: RpcChain, methods: readonly string[]): [string, number][] => {
+    const draws: [string, number][] = [[c, methods.length]];
+    if (limits[c].perMethod !== undefined) for (const m of methods) draws.push([`${c} ${m}`, 1]);
+    return draws;
+  };
 
   async function readAnswer(r: Response): Promise<string | undefined> {
     if (Number(r.headers.get("content-length") ?? "0") > RPC_ANSWER_MAX) return undefined;
@@ -240,9 +270,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const held = budget.heldFor(c);
     if (held > 0) return throttled(held);
     const reqs = (Array.isArray(out) ? out : [out]) as { method: string }[];
-    const draws: [string, number][] = [[c, reqs.length]];
-    if (limits[c].perMethod !== undefined) for (const r of reqs) draws.push([`${c} ${r.method}`, 1]);
-    const wait = budget.takeEach(draws, client, false, reserved);
+    const wait = budget.takeEach(drawsOf(c, reqs.map((r) => r.method)), client, false, reserved);
     if (wait > 0) return throttled(wait);
     const up = upstreams[c];
     let r: Response;
@@ -257,7 +285,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       });
       if (r.status === 429) {
         await r.body?.cancel();
-        budget.hold(c, now() + upstreamRetryAfterS(r.headers, now()) * 1000);
+        hold(c, upstreamRetryAfterS(r.headers, now()), "caller");
         return throttled(budget.heldFor(c));
       }
       text = await readAnswer(r);
@@ -276,7 +304,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
     const limited = evmLimited(c, answer);
     if (limited > 0) {
-      budget.hold(c, now() + limited * 1000);
+      hold(c, limited, "caller");
       return throttled(budget.heldFor(c));
     }
     const b = Buffer.from(text, "utf8");
@@ -284,5 +312,20 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     return { status: r.status, body: text };
   }
 
-  return { handle };
+  /**
+   * The helper's own background reads that reach a chain's provider by another path (data/solana/trades.ts, with the
+   * provider's URL): `url` is this chain's provider when it is the one configured here, and then each request draws
+   * from the chain's budget as a background read (userRoomOf), waiting out any hold on it. A URL that is another
+   * provider draws nothing here. Returns the seconds to wait, 0 to go.
+   */
+  function background(chain: RpcChain, url: string, method: string): number {
+    if (url !== upstreams[chain].url) return 0;
+    return budget.takeEach(drawsOf(chain, [method]), undefined, false, false);
+  }
+  /** That provider answered 429 to a background read: the background reads wait out its reset; callers go on. */
+  function backgroundThrottled(chain: RpcChain, url: string, headers: Headers): void {
+    if (url === upstreams[chain].url) hold(chain, upstreamRetryAfterS(headers, now()), "background");
+  }
+
+  return { handle, background, backgroundThrottled };
 }

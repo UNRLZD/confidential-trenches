@@ -5,6 +5,7 @@
 //   - the wasm's imports: none of vault.md 2.8's banned actions, and its promise imports a subset of the seven allowed;
 //   - the wasm's function exports: nothing outside vault.md 2.5.7's list (no init, no setter, no __contract_abi), and
 //     never withdraw without on_payout (a build that spends a note but cannot pay it out);
+//   - the wasm's bytes: not VT-S17's out-of-gas test build (TEST_BUILD_MARK: every payout callback of that build fails);
 //   - config(): it answers, naming Circle's testnet USDC as its asset and a testnet version. Both are pinned here, never
 //     taken from the deployment record (which the deploy script writes from config() itself);
 //   - storage_balance_of(vault) on that USDC: the vault is registered on its token, so a deposit's ft_transfer_call and a
@@ -161,9 +162,14 @@ export function networkProblems(buf) {
   return problems;
 }
 
-// What a wasm breaks of vault.md 2.8 and 2.5.7: { banned, promises, exports, withdrawWithoutPayout } (each the names
-// out of line). withdrawWithoutPayout names `withdraw` when the wasm exports it without `on_payout`: a build that spends
-// a note but cannot pay it out (2.5.2 rows 13-15, 2.5.4), which must never be deployed.
+// VT-S17's test build (contracts/vault feature `test-on-payout-out-of-gas`): its on_payout logs this mark (src/payout.rs
+// OUT_OF_GAS_BUILD_MARK), then runs out of gas, so the mark is in its bytes and in no other build's.
+export const TEST_BUILD_MARK = "blindfill-vault test build: on_payout runs out of gas";
+
+// What a wasm breaks of vault.md 2.8 and 2.5.7: { banned, promises, exports, withdrawWithoutPayout, testBuild } (each
+// the names out of line). withdrawWithoutPayout names `withdraw` when the wasm exports it without `on_payout`: a build
+// that spends a note but cannot pay it out (2.5.2 rows 13-15, 2.5.4), which must never be deployed. testBuild names
+// TEST_BUILD_MARK when the bytes hold it: VT-S17's build, whose every payout callback fails, must never be deployed.
 export function wasmProblems(buf) {
   const { imports, exports } = wasmLists(buf);
   const names = imports.filter((i) => i.kind === 0).map((i) => i.name);
@@ -173,6 +179,7 @@ export function wasmProblems(buf) {
     promises: names.filter((n) => n.startsWith("promise_") && !PROMISE_ALLOWED.has(n)),
     exports: exports.filter((e) => e.kind === 0 && !EXPORTS_ALLOWED.has(e.name)).map((e) => e.name),
     withdrawWithoutPayout: fns.includes("withdraw") && !fns.includes("on_payout") ? ["withdraw"] : [],
+    testBuild: Buffer.from(buf).includes(TEST_BUILD_MARK) ? [TEST_BUILD_MARK] : [],
     functionExports: exports.filter((e) => e.kind === 0).map((e) => e.name),
     promiseImports: names.filter((n) => n.startsWith("promise_")),
   };
@@ -219,6 +226,7 @@ export async function check({ deployment, account = deployment.account_id, fetch
       say(w.promises.length === 0, `promise imports are a subset of the seven ${at}: [${w.promiseImports.join(", ")}]${w.promises.length ? `, not allowed: ${w.promises.join(", ")}` : ""}`);
       say(w.exports.length === 0, `function exports are inside vault.md 2.5.7's list ${at}: [${w.functionExports.join(", ")}]${w.exports.length ? `, not allowed: ${w.exports.join(", ")}` : ""}`);
       say(w.withdrawWithoutPayout.length === 0, `withdraw is exported only with on_payout ${at}: ${w.withdrawWithoutPayout.length ? "withdraw without on_payout" : "yes"}`);
+      say(w.testBuild.length === 0, `not the out-of-gas test build ${at}: ${w.testBuild.length ? `holds "${w.testBuild[0]}"` : "no test mark"}`);
     } catch (e) {
       say(false, `code ${at}: ${e.message}`);
     }

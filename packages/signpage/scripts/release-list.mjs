@@ -2,8 +2,8 @@
 // Writes a release's list: every file SIGN_HOST and APP_HOST serve, at its published path, with its size, sha256 and
 // sha384 and the headers its _headers rules give it, plus each host's _headers file itself (wallet.md W4.5 and §2.7
 // items 3-4, W:852-858; E2E-22). The list is made from this checkout's own builds, by the hosts' own build steps:
-// SIGN_HOST's is deploy.mjs build() (index.html, public/ and the prover's setup files), APP_HOST's is the terminal's
-// `vite build` into an empty folder (its SRI plugin, card app-release-sri); each build must pass its own deploy gate
+// SIGN_HOST's is deploy.mjs build() (index.html, public/ and the prover's setup files), APP_HOST's is the terminal
+// deploy's build(), its `vite build` into an empty folder (its SRI plugin, card app-release-sri); each build must pass its own deploy gate
 // first. So anyone with the release tag can run this at the tag and get the same list, byte for byte.
 // check-signpage.mjs reads both hosts over HTTPS against the list.
 //   node packages/signpage/scripts/release-list.mjs <release-N>        writes packages/signpage/releases/<release-N>.json
@@ -23,11 +23,11 @@
 // written here and added to RELEASED by hand; the verify gate refuses a change to a list or a ledger entry on main.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkDir as checkApp } from "../../../apps/terminal/scripts/check-deploy.ts";
+import { build as buildTerminal } from "../../../apps/terminal/scripts/deploy.mjs";
 import { HOST_ARGS, readList, RELEASES, TAG } from "./check-signpage.mjs";
 import { build as buildSign, checkDir as checkSign } from "./deploy.mjs";
 
@@ -103,13 +103,11 @@ export function listDir(dir) {
   return { headers_file: digests(headersText), files };
 }
 
-/** APP_HOST's build: the terminal's own `vite build` into an empty folder. */
+/** APP_HOST's build: the terminal deploy's own build() (its `vite build` into an empty folder), so the list and the
+ *  deploy are one build; it installs nothing (a deploy installs first). */
 function buildApp(repo) {
-  const app = mkdtempSync(join(tmpdir(), "ct-release-app-"));
-  const term = join(repo, "apps", "terminal");
-  const vite = join(term, "node_modules", "vite", "bin", "vite.js");
-  const r = spawnSync(process.execPath, [vite, "build", "--outDir", app, "--emptyOutDir", "--logLevel", "warn"], { cwd: term, encoding: "utf8" });
-  return { dir: app, problems: r.status !== 0 ? [`vite build failed (exit ${r.status ?? r.signal}): ${r.stderr}`] : checkApp(app) };
+  const b = buildTerminal(process.env, spawnSync, repo);
+  return { dir: b.dir, problems: b.problems.length ? b.problems : checkApp(b.dir) };
 }
 
 /** Builds the hosts named (both by default) with their own build steps, each passed by its own deploy gate: { [name]: dir }. */
@@ -188,6 +186,9 @@ export const RELEASED = Object.freeze({
   "release-7": "3cfbdb08286fb3083aa761f9fe28442cecfa8f1c77bac7e5f86026aadd6a3a63",
   "release-8": "098a30323b1b5ef4fadddd6aaa90724ccbb0aa87570d505636fc70057f89d98a",
   "release-9": "cedcd955c26364ea2b7bec862581b5ba725756788825430cb5dec23bfc077f78",
+  "release-11": "60cbfd1024a316ba34bec78fd8cb71ab880340b03b427a784e895084e6c3efd6",
+  "release-12": "6d54691cf78370b6afa438fe1c4c8833913ada26b287d813f961bfc986f8541c",
+  "release-13": "9cce86b67f5230679fec7acc6a666c1540db896f8ca9fea5250d549eb5df628b",
 });
 
 /**

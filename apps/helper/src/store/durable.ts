@@ -43,9 +43,11 @@ const HELD_LOCKS = new Set<DatabaseSync>();
 
 /**
  * Takes `dir`'s lock and sweeps the temps a crash left. `start` runs once the lock is held and the temps are gone; a
- * throw there, or in the sweep, gives the lock up, so this process can open the store again.
+ * throw there, or in the sweep, gives the lock up, so this process can open the store again. `waitMs`: how long to wait
+ * for another holder, blocking the thread (SQLite's busy timeout); 0 tries once (card helper-ready-gate: a helper that
+ * retries while the one it replaces holds the store must never stall its event loop).
  */
-export function openDurableDir<T>(dir: string, fs: StoreFs, start: (d: DurableDir) => T): T {
+export function openDurableDir<T>(dir: string, fs: StoreFs, start: (d: DurableDir) => T, waitMs = LOCK_WAIT_MS): T {
   fs.mkdirSync(dir, { recursive: true });
   const path = (name: string) => join(dir, name);
 
@@ -53,7 +55,7 @@ export function openDurableDir<T>(dir: string, fs: StoreFs, start: (d: DurableDi
   // file when any descriptor of that file in the process closes, so nothing else in this process may ever open it
   // (no record name can be "lock"; the truncate below runs only before the lock is held).
   const take = (): DatabaseSync => {
-    const db = new DatabaseSync(path("lock"), { timeout: LOCK_WAIT_MS });
+    const db = new DatabaseSync(path("lock"), { timeout: waitMs });
     try {
       db.exec("BEGIN EXCLUSIVE");
       return db;

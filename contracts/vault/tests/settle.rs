@@ -294,6 +294,7 @@ async fn vt_s08(kind: TokenKind) -> R<()> {
     // 5. an unknown nullifier
     refused(&h, &stranger, &relayer, "12345", 0, "UnknownSpend").await?;
     println!("{kind:?}: VT-S08 holds\n{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 

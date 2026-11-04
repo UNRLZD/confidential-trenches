@@ -7,8 +7,11 @@
 // (scripts/live-checks/signpage-skeleton.mjs) on the headers it sets for every path, checks the worker's own policy
 // rule (W:880) and the thread file's (card signpage-prover-threads), and reads every setup file back against its pin
 // and the worker and the thread file against a fresh build of the kit's;
-// any refusal stops here, before a token is read or a byte is uploaded.
-// --dry-run stops after the gate and keeps the build folder, so `wrangler pages dev` can serve it. The upload is
+// any refusal stops here, before a token is read or a byte is uploaded. So does an uncommitted change anywhere in the
+// tree (the build carries the kit's prover too), no HEAD, or a failed `pnpm install --frozen-lockfile` (run first, so
+// the build reads HEAD's lockfile): the upload is named by HEAD's commit, so it is HEAD's build.
+// --dry-run stops after the gate and keeps the build folder, so `wrangler pages dev` can serve it; it builds a work in
+// progress too, and says a deploy would refuse it. The upload is
 // wrangler's `pages deploy`, at an exact version, run from an empty folder so no functions/ folder can ride along
 // (Pages applies no _headers rule to a Function's response). It needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
 // in the environment; neither is printed.
@@ -24,7 +27,7 @@ import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/bui
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
-export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-withdraw-form", "app-harness-signin-e2e"];
+export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-withdraw-form", "signpage-solana-trade", "signpage-pool-kinds", "signpage-pool-flow", "signpage-pool-notes", "app-harness-signin-e2e"];
 // the arguments a check is run with after this deploy (a list: one run for each, each its own job in live.yml):
 // signpage-release reads SIGN_HOST alone against this commit's own build, and app-harness-signin-e2e SIGN_HOST's
 // backdrop alone, so an APP_HOST that lags does not fail this deploy; signpage-shell takes an engine and runs live on
@@ -151,24 +154,33 @@ export function checkProver(dir) {
 export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
   const dryRun = argv.includes("--dry-run");
   if (argv.some((a) => a !== "--dry-run")) return { code: 2, err: ["usage: node packages/signpage/scripts/deploy.mjs [--dry-run]"] };
+  // the tree the build reads, before it reads it: a deploy is HEAD's commit and nothing else (--dry-run builds a work in
+  // progress too, and says a deploy would refuse it)
+  const sha = run("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout?.trim();
+  const dirty = run("git", ["-C", REPO, "status", "--porcelain"], { encoding: "utf8" }).stdout?.trimEnd();
+  if (!dryRun && !sha) return { code: 1, err: ["REFUSED no HEAD commit to name the upload by", "nothing was uploaded"] };
+  if (!dryRun && dirty) return { code: 1, err: [`REFUSED the tree has uncommitted changes, and the upload would carry HEAD's name (${sha}):`, ...dirty.split("\n").slice(0, 20), "commit them first; nothing was uploaded"] };
+  // HEAD's lockfile, exactly: the prover worker and thread file are built from the kit's installed packages
+  const inst = run("pnpm", ["install", "--frozen-lockfile"], { cwd: REPO, env, encoding: "utf8" });
+  if (inst.status !== 0) {
+    const why = `${inst.stderr ?? ""}`.trim().split("\n").slice(-5).join(" | ");
+    return { code: 1, err: [`REFUSED the install failed (pnpm exit ${inst.status ?? inst.signal})${why ? `: ${why}` : ""}`, "nothing was uploaded"] };
+  }
   const dir = build(pkg);
   try {
     const problems = checkDir(dir);
     if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
-    if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded`] };
+    if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded${dirty ? "; the tree has uncommitted changes: a deploy would refuse it" : ""}`] };
     const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
     if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
-    const sha = run("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout?.trim();
-    const dirty = run("git", ["-C", REPO, "status", "--porcelain", "--", "packages/signpage"], { encoding: "utf8" }).stdout?.trim();
-    const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH];
-    if (sha) args.push("--commit-hash", sha, `--commit-dirty=${dirty ? "true" : "false"}`);
+    const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH, "--commit-hash", sha, "--commit-dirty=false"];
     const r = run("pnpm", args, {
       cwd: mkdtempSync(join(tmpdir(), "ct-deploy-")),
       env: { ...env, WRANGLER_SEND_METRICS: "false" },
       stdio: "inherit",
     });
     if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-    return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}${dirty ? " from a tree with uncommitted changes in packages/signpage: the live checks read the commit's own build, not yours" : ""}`, ...liveCommands(sha || "$(git rev-parse HEAD)")] };
+    return { code: 0, out: [`deployed HEAD ${sha} to ${PROJECT} on ${BRANCH}`, ...liveCommands(sha)] };
   } finally {
     if (!dryRun) rmSync(dir, { recursive: true, force: true }); // the build holds 24 MB of setup files; --dry-run keeps it to serve
   }
