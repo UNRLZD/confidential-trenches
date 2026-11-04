@@ -43,7 +43,7 @@ import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender }
 import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
 import { clientOf, clientWindow, throttled, throttleOf } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
-import { readWarm, writeWarm } from "./data/warm.ts";
+import { readWarm, writeWarm, type Warm } from "./data/warm.ts";
 import { TICK_MS } from "./data/evm/lists.ts";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
@@ -73,23 +73,30 @@ export const BIND_BODY_MAX = BIND_MAX_BYTES;
  * then answers in_flight (the call is out and its end not known yet, so the device reads the deposits pages) and goes on
  * to its own end and record, as it does when the client closes.
  */
-function bindAnswerWithin<A>(carry: Promise<A>, late: A): Promise<A> {
+function bindAnswerWithin<A>(carry: Promise<A>, late: A, ms = HELPER_BIND_ANSWER_MS): Promise<A> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const bound = new Promise<A>((ok) => (timer = setTimeout(() => ok(late), HELPER_BIND_ANSWER_MS)));
+  const bound = new Promise<A>((ok) => (timer = setTimeout(() => ok(late), Math.max(0, ms))));
   return Promise.race([carry, bound]).finally(() => clearTimeout(timer));
 }
 const BIND_LATE = { status: (HELPER_CODE_STATUS as Record<string, number>).in_flight ?? 400, body: { error: { code: "in_flight" as const } } };
 /**
- * How long a send waits for this process to hold the senders (sendersFromEnv): during a deploy's swap the new helper
- * takes traffic a moment before the old one has finished its last request and exited, which hands the store over
- * [design: past docker stop's 30 s (deploy/redeploy.sh), after which the old one is killed and its lock is gone].
+ * A stop's longest drain (card helper-ready-gate): the requests in flight at SIGTERM finish, the longest a bind's
+ * HELPER_BIND_ANSWER_MS (45 s), then the process exits; deploy/redeploy.sh's `docker stop -t 60` kills only past it.
  */
-export const SENDERS_WAIT_MS = 35_000;
+export const STOP_MS = HELPER_BIND_ANSWER_MS + 5_000;
+/**
+ * How long a send, a withdrawal fee quote or a bind waits for this process to hold the senders (sendersFromEnv): during
+ * a deploy's swap the new helper takes traffic while the old one drains its last requests and exits, which hands the
+ * store over: at most STOP_MS, or docker stop's 60 s when it is killed. Each send's own deadline check runs after the
+ * wait (pool/solana.ts and pool/evm.ts deadline_near, withdraw/send.ts check 9), so a wait can cost a refusal the
+ * device re-proves after, never a late send. A bind waits only within its own HELPER_BIND_ANSWER_MS (the BIND route).
+ */
+export const SENDERS_WAIT_MS = 60_000;
 const SENDERS_LATE = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
-/** Whether `held` settles fulfilled within SENDERS_WAIT_MS. */
-function heldWithin(held: Promise<unknown>): Promise<boolean> {
+/** Whether `held` settles fulfilled within `ms` (SENDERS_WAIT_MS). */
+function heldWithin(held: Promise<unknown>, ms = SENDERS_WAIT_MS): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<boolean>((ok) => (timer = setTimeout(() => ok(false), SENDERS_WAIT_MS)));
+  const late = new Promise<boolean>((ok) => (timer = setTimeout(() => ok(false), Math.max(0, ms))));
   return Promise.race([held.then(() => true, () => false), late]).finally(() => clearTimeout(timer));
 }
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
@@ -254,8 +261,9 @@ export function handler(
         // disagree answer upstream (503) and quote nothing; a provider's throttle answers 429 with its wait
         const tokens = new URL(req.url ?? "/", "http://helper.invalid").searchParams.getAll("token");
         if (tokens.length !== 1 || fee.networkOf(tokens[0]!) === null) return send(404, { error: { code: "not_found" } }, cors(req));
-        void fee
-          .quote(tokens[0]!)
+        // a quote is the senders' (their store keeps it): it waits for them, bounded, as a send does
+        void heldWithin(senders)
+          .then((held) => (held ? fee.quote(tokens[0]!) : Promise.reject(new FeeReadRefused("the senders are not this helper's yet"))))
           .then((a) => send(200, a, cors(req)))
           .catch((e) => (res.headersSent ? res.destroy() : e instanceof FeeReadRefused ? (throttleOf(e) > 0 ? reply(throttled(throttleOf(e))) : send(503, { error: { code: "upstream" } }, cors(req))) : send(500, { error: "internal" }, cors(req))));
         return;
@@ -366,8 +374,11 @@ export function handler(
             } catch {
               return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
             }
-            if (!(await heldWithin(senders))) return SENDERS_LATE;
-            const a = await bindAnswerWithin(bind.carry(body), BIND_LATE);
+            // the answer's bound runs from here, the wait for the senders inside it: a bind not carried by the bound is
+            // refused (nothing sent), one carried answers within what is left of it (in_flight past it)
+            const t0 = now();
+            if (!(await heldWithin(senders, HELPER_BIND_ANSWER_MS))) return SENDERS_LATE;
+            const a = await bindAnswerWithin(bind.carry(body), BIND_LATE, HELPER_BIND_ANSWER_MS - (now() - t0));
             return { status: a.status, body: JSON.stringify(a.body) };
           })
           .then(reply)
@@ -578,10 +589,11 @@ export function sendersFromEnv(env: Record<string, string | undefined>, retryMs 
   const attempt = (): boolean => {
     try {
       if (!sendersLock) {
-        openDurableDir(join(dir, "senders"), nodeFs, () => undefined);
+        openDurableDir(join(dir, "senders"), nodeFs, () => undefined, 0);
         sendersLock = true;
       }
-      real = feeQuoterFromEnv(env);
+      // both tries take no wait: a retry runs on the event loop every retryMs, and a lock wait blocks it whole
+      real = feeQuoterFromEnv(env, fetch, 0);
       return true;
     } catch (e) {
       if (isHeld(e)) return false;
@@ -607,6 +619,24 @@ export function sendersFromEnv(env: Record<string, string | undefined>, retryMs 
     reads: (network) => ({ feeMin: async (w) => (await held, real!.reads(network).feeMin(w)) }),
   };
   return { fee, held, peer };
+}
+
+/**
+ * The warm file's writer (data/warm.ts). The file is the holder's: a peer writes none until `held` (the senders are its
+ * own), so the file the old helper writes at its stop is the one the next seeds from, never overwritten by the next
+ * one's warm-up before it. A write that fails is skipped: the next helper reads its lists from GeckoTerminal.
+ */
+export function warmWriter(storeDir: string, held: Promise<unknown>, state: () => Warm): () => void {
+  let holds = false;
+  void held.then(() => void (holds = true), () => undefined);
+  return () => {
+    if (!holds) return;
+    try {
+      writeWarm(storeDir, state());
+    } catch {
+      // nothing kept
+    }
+  };
 }
 
 /** A token page read is part of being ready: one of the Solana list's tokens. */
@@ -655,9 +685,33 @@ export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, wa
   return server;
 }
 
-/** A stop (SIGTERM, docker stop) lets the requests in flight finish for at most this long, then exits [design: under
- *  docker stop's 30 s in deploy/redeploy.sh, which then kills]. */
-export const STOP_MS = 25_000;
+/**
+ * A stop's drain (card helper-ready-gate): `server` takes no new connection, and every connection closes once its answer
+ * is out. server.close() alone leaves a connection that is busy at the stop on keep-alive (Node 24), so the proxy sends
+ * it more requests and the old helper never drains: an answer that is not out yet says Connection: close, and one
+ * already under way ends its connection when it finishes; a request that arrives on a busy connection meanwhile is
+ * answered the same way. Returns the drain; call it once at the stop.
+ */
+export function drainer(server: Server): () => void {
+  const inFlight = new Set<ServerResponse>();
+  let stopping = false;
+  const last = (res: ServerResponse) => {
+    if (!res.headersSent) res.setHeader("Connection", "close");
+    else res.once("finish", () => res.socket?.end());
+  };
+  server.prependListener("request", (_req: IncomingMessage, res: ServerResponse) => {
+    if (stopping) return last(res);
+    inFlight.add(res);
+    res.once("close", () => inFlight.delete(res));
+  });
+  return () => {
+    stopping = true;
+    for (const res of inFlight) last(res);
+    server.close();
+    server.closeIdleConnections();
+  };
+}
+
 
 /** How long each outbound connect may try one address before the next (node's default is 250 ms): long enough for one
  *  lost SYN (resent at 1 s), so a slow connect is not turned into a 503. Seen 2026-11-03 15:25Z: GeckoTerminal's IPv4
@@ -676,6 +730,7 @@ if (import.meta.main) {
   const storeDir = process.env.HELPER_STORE_DIR ?? ""; // withdraw/fee.ts STORE_ENV
   let server: Server | null = null;
   let saveWarm = () => undefined as void;
+  let drain = () => undefined as void;
   try {
     checkVendorPlans(process.env);
     const proxy = createProxy(process.env);
@@ -701,13 +756,7 @@ if (import.meta.main) {
         void senders.held.then(() => (gecko.seed(readWarm(storeDir, Date.now())?.gecko ?? []), gecko.release()));
       }
     } else if (senders.peer) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => Date.now()));
-    saveWarm = () => {
-      try {
-        writeWarm(storeDir, { at: Date.now(), gecko: gecko.calls(), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])) });
-      } catch {
-        // the next helper reads its lists from GeckoTerminal
-      }
-    };
+    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])) }));
     const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko);
     const watches = tokenWatchesFromEnv(process.env);
     const fee = senders.fee;
@@ -729,6 +778,7 @@ if (import.meta.main) {
     const warmed = warmUntilReady({ lists, evmLists, token }).then(() => void (ready = true));
     const listen = () => {
       server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held); // warms both relayers once the senders are ours
+      drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready ? "" : ", warming"}`));
     };
     if (senders.peer) void warmed.then(listen);
@@ -742,8 +792,8 @@ if (import.meta.main) {
   const stop = () => {
     saveWarm();
     if (server === null) process.exit(0);
-    server.close(() => process.exit(0));
-    server.closeIdleConnections();
+    server.once("close", () => process.exit(0));
+    drain();
     setTimeout(() => process.exit(0), STOP_MS).unref();
   };
   process.on("SIGTERM", stop);

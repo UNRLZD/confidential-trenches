@@ -59,16 +59,25 @@ main() {
 
   cd "$deploy"
   export HELPER_COMMIT="$sha" HELPER_RELEASE="$release"
-  swap_helper "$wait_s"
+  swap_helper "$wait_s" "$sha"
 }
 
 # Step 3. The new helper starts next to the old one (docker-rollout's pattern: --no-recreate keeps the running container
 # and --scale adds one from the new image), compose waits for its healthcheck up to the bound, and only then is each old
-# container stopped. Past the bound the new container is removed and no old one is touched. Prints ids, never values.
+# container stopped. Past the bound, or when what runs new is not this commit's image, the new container is removed and
+# no old one is touched. The old ones get `docker stop -t 60`: past the helper's own drain (src/server.ts STOP_MS, 50 s),
+# so a bind's answer (45 s) is never cut. Prints ids, never values.
 swap_helper() {
-  local wait_s="$1" old new id count
+  local wait_s="$1" sha="$2" old new id count stale
   echo "redeploy: docker compose build helper"
   docker compose build helper
+  # a stopped container of the service (a start that failed, a crash) is counted by --scale and started again in place
+  # of one from the new image, so the swap would report a helper that never came: each is removed first
+  stale="$(docker compose ps -a -q --status exited --status created --status dead helper)"
+  for id in $stale; do
+    docker rm "$id" >/dev/null
+    echo "redeploy: removed the stopped helper $id"
+  done
   old="$(docker compose ps -q helper)"
   if [[ -z "$old" ]]; then
     echo "redeploy: no helper running; docker compose up -d --wait (bound $wait_s s)"
@@ -89,11 +98,25 @@ swap_helper() {
     exit 1
   fi
   new="$(docker compose ps -q helper | grep -vxF -f <(printf '%s\n' "$old") || true)"
+  if ! from_image "ct-helper:$sha" "$new"; then
+    for id in $new; do docker rm -f "$id" >/dev/null || true; done
+    echo "redeploy: no new helper from ct-helper:$sha is running; the old one keeps serving" >&2
+    exit 1
+  fi
   for id in $old; do
-    docker stop -t 30 "$id" >/dev/null
+    docker stop -t 60 "$id" >/dev/null
     docker rm "$id" >/dev/null
   done
   echo "redeploy: swapped: the new helper $(printf '%s' "$new" | tr '\n' ' ' | sed 's/ $//') is ready; stopped and removed the old $(printf '%s' "$old" | tr '\n' ' ' | sed 's/ $//')"
+}
+
+# Whether $2 names at least one container and every one runs image $1.
+from_image() {
+  local id
+  [[ -n "$2" ]] || return 1
+  for id in $2; do
+    [[ "$(docker inspect -f '{{.Config.Image}}' "$id")" == "$1" ]] || return 1
+  done
 }
 
 # The lines that set NAME in a .env, in any form compose may read (spaces, export, and its "NAME: value" form).

@@ -49,36 +49,57 @@ function server() {
   git(root, "checkout", "-q", "--detach", A);
   mkdirSync(bin);
   const log = path.join(dir, "docker.log");
-  // The stub keeps the running container ids in `state` (one per line). `compose ps -q helper` prints them; `compose build`
-  // only logs; `compose up` adds one new-<n> and exits 1 after adding it when STUB_READY=0 (compose does the same when
-  // --wait times out); `rm -f`, `rm` and `stop -t <s>` take an id out. Every call is logged as
-  // "<cwd>|<args>|<HELPER_COMMIT>|<HELPER_RELEASE>".
-  const state = path.join(dir, "running");
+  // The stub models the service's containers in `state`, one "<id> <status> <image>" line each, as compose does with
+  // --no-recreate: `compose ps -q helper` prints the running ids, `-a` every id, `--status <s>` (any number) those in one
+  // of the statuses; `compose up --scale helper=<n>` first starts the stopped containers it counts (as compose does),
+  // then adds new-<k> from ct-helper:$HELPER_COMMIT until there are n, and with no --scale adds one; it exits 1 after
+  // that when STUB_READY=0 (compose does the same when --wait times out). STUB_ADD=0 makes it add none and STUB_IMAGE
+  // names the image it adds. `inspect -f <fmt> <id>` prints the id's image; `stop -t <s> <id>` leaves it exited;
+  // `rm [-f] <id>` takes it out. Every call is logged as "<cwd>|<args>|<HELPER_COMMIT>|<HELPER_RELEASE>".
+  const state = path.join(dir, "containers");
   writeFileSync(state, "");
   writeFileSync(
     path.join(bin, "docker"),
     `#!/bin/sh
 echo "$PWD|$*|$HELPER_COMMIT|$HELPER_RELEASE" >> "${log}"
 S="${state}"
-drop() { grep -vxF "$1" "$S" > "$S.tmp" || true; mv "$S.tmp" "$S"; }
+drop() { awk -v id="$1" '$1 != id' "$S" > "$S.tmp"; mv "$S.tmp" "$S"; }
+mark() { awk -v id="$1" -v st="$2" '$1 == id { $2 = st } { print }' "$S" > "$S.tmp"; mv "$S.tmp" "$S"; }
 case "$1 $2" in
-  "compose ps") cat "$S" ;;
+  "compose ps")
+    all=0; want=""
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in -a) all=1 ;; --status) want="$want $2"; shift ;; esac
+      shift
+    done
+    if [ -n "$want" ]; then awk -v w="$want " 'index(" " w, " " $2 " ") { print $1 }' "$S"
+    elif [ $all = 1 ]; then awk '{ print $1 }' "$S"
+    else awk '$2 == "running" { print $1 }' "$S"; fi ;;
   "compose build") ;;
   "compose up")
-    n=$(cat "$S.n" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$S.n"
-    echo "new-$n" >> "$S"
+    want=$(echo "$*" | sed -n 's/.*--scale helper=\\([0-9]*\\).*/\\1/p')
+    if [ -n "$want" ]; then
+      for id in $(awk '$2 != "running" { print $1 }' "$S"); do mark "$id" running; done
+    else want=$(( $(wc -l < "$S") + 1 )); fi
+    while [ "\${STUB_ADD:-1}" = 1 ] && [ "$(wc -l < "$S")" -lt "$want" ]; do
+      n=$(cat "$S.n" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$S.n"
+      echo "new-$n running \${STUB_IMAGE:-ct-helper:$HELPER_COMMIT}" >> "$S"
+    done
     [ "\${STUB_READY:-1}" = 0 ] && exit 1
     ;;
+  "inspect -f") awk -v id="$4" '$1 == id { print $3 }' "$S" ;;
   "rm -f") drop "$3" ;;
-  "stop -t") drop "$4" ;;
+  "stop -t") mark "$4" exited ;;
   "rm "*) drop "$2" ;;
 esac
 exit 0
 `,
     { mode: 0o755 },
   );
-  const running = () => readFileSync(state, "utf8").split("\n").filter(Boolean);
-  const seed = (...ids) => writeFileSync(state, ids.map((i) => `${i}\n`).join(""));
+  const running = () => readFileSync(state, "utf8").split("\n").filter((l) => l.split(" ")[1] === "running").map((l) => l.split(" ")[0]);
+  const all = () => readFileSync(state, "utf8").split("\n").filter(Boolean);
+  const seed = (...ids) => writeFileSync(state, ids.map((i) => (i.includes(" ") ? `${i}\n` : `${i} running ct-helper:${"e".repeat(40)}\n`)).join(""));
   const env = path.join(root, "apps/helper/deploy/.env");
   // `shell`: variables for the operator's shell; null takes one out. The vendor keys are test values (the start and the
   // redeploy refuse a vendor with no key and no keyless plan).
@@ -99,7 +120,7 @@ exit 0
     const t = readFileSync(env, "utf8");
     return { commit: /^HELPER_COMMIT=(.*)$/m.exec(t)?.[1], release: /^HELPER_RELEASE=(.*)$/m.exec(t)?.[1] };
   };
-  return { dir, root, A, B, env, git, run, runWith, docker, running, seed, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, root, A, B, env, git, run, runWith, docker, running, all, seed, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const mode = (f) => statSync(f).mode & 0o777;
@@ -392,7 +413,7 @@ test("a new helper that never gets ready: the deploy fails naming the bound, the
   }
 });
 
-test("a new helper that gets ready: the old one is stopped (-t 30) and removed after the up --wait line, and the new one is left running", () => {
+test("a new helper that gets ready: the old one is stopped (-t 60) and removed after the up --wait line, and the new one is left running", () => {
   const s = server();
   try {
     s.seed("old-1");
@@ -400,7 +421,7 @@ test("a new helper that gets ready: the old one is stopped (-t 30) and removed a
     assert.equal(r.status, 0, r.out);
     const calls = lines(s);
     const up = calls.findIndex((c) => c.startsWith("compose up ") && c.includes("--wait"));
-    const stop = calls.indexOf("stop -t 30 old-1");
+    const stop = calls.indexOf("stop -t 60 old-1");
     const rm = calls.indexOf("rm old-1");
     assert.ok(up >= 0 && stop > up && rm > stop, `order up < stop < rm:\n${calls.join("\n")}`);
     assert.ok(calls.indexOf("compose build helper") < up, "built before the new one starts");
@@ -420,10 +441,43 @@ test("two old helpers running: the new one is scale 3, and both old ones are sto
     assert.equal(r.status, 0, r.out);
     const calls = lines(s);
     assert.ok(calls.includes("compose up -d --no-deps --no-recreate --scale helper=3 --wait --wait-timeout 300 helper"), calls.join("\n"));
-    for (const id of ["old-1", "old-2"]) assert.ok(calls.indexOf(`stop -t 30 ${id}`) > 0 && calls.indexOf(`rm ${id}`) > calls.indexOf(`stop -t 30 ${id}`), id);
+    for (const id of ["old-1", "old-2"]) assert.ok(calls.indexOf(`stop -t 60 ${id}`) > 0 && calls.indexOf(`rm ${id}`) > calls.indexOf(`stop -t 60 ${id}`), id);
     assert.deepEqual(s.running(), ["new-1"]);
   } finally {
     s.done();
+  }
+});
+
+test("a stopped helper left from before is removed first: --scale counts it and would start it in place of the new one", () => {
+  const s = server();
+  try {
+    s.seed("old-1", `stale-1 exited ct-helper:${"d".repeat(40)}`);
+    const r = s.run(s.B);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(s);
+    const up = calls.findIndex((c) => c.startsWith("compose up "));
+    assert.ok(calls.indexOf("rm stale-1") >= 0 && calls.indexOf("rm stale-1") < up, `the stopped one removed before the up:\n${calls.join("\n")}`);
+    assert.deepEqual(s.running(), ["new-1"], "a new helper from this commit's image runs, the stale one never started");
+    assert.deepEqual(s.all(), [`new-1 running ct-helper:${s.B}`]);
+  } finally {
+    s.done();
+  }
+});
+
+test("compose answers ready but no new helper from this commit's image runs: the deploy fails and no old one is stopped", () => {
+  for (const [shell, what] of [[{ STUB_ADD: "0" }, "none added"], [{ STUB_IMAGE: "ct-helper:wrong" }, "another image"]]) {
+    const s = server();
+    try {
+      s.seed("old-1");
+      const r = s.runWith(shell, s.B);
+      assert.notEqual(r.status, 0, `${what}: ${r.out}`);
+      assert.match(r.out, new RegExp(`redeploy: no new helper from ct-helper:${s.B} is running; the old one keeps serving`), what);
+      const calls = lines(s);
+      assert.ok(!calls.some((c) => /^(stop|rm)\b.*\bold-1\b/.test(c)), `${what}: the old one was touched:\n${calls.join("\n")}`);
+      assert.deepEqual(s.running(), ["old-1"], what);
+    } finally {
+      s.done();
+    }
   }
 });
 

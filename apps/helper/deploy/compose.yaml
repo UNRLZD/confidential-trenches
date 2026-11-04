@@ -103,6 +103,8 @@ services:
     volumes:
       - helper_data:/app/data
     restart: unless-stopped
+    # any stop of the helper lets its drain finish (src/server.ts STOP_MS, 50 s), as redeploy.sh's `docker stop -t 60` does
+    stop_grace_period: 60s
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
