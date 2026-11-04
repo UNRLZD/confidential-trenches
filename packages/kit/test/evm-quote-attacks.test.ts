@@ -2372,3 +2372,21 @@ test("J3 a failed scan whose provider named a head past maxLag of the agreed blo
   const blocks = [...new Set(asked.map((r) => r.join("-")))].reduce((n, r) => n + Number(r.split("-")[1]) - Number(r.split("-")[0]) + 1, 0);
   assert.equal(blocks, 1_000_000, "the token's whole depth is read again");
 });
+
+test("V5 a spare is asked only once the second provider is late: as long again as the first took, at least EVM_HEDGE_MS, never on a timer from the start", { timeout: 30_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000ee0f9";
+  const pools = [best(token)];
+  const late = (rpc: EvmRpc, ms: number): EvmRpc => async (calls) => {
+    await new Promise((r) => setTimeout(r, ms));
+    return rpc(calls);
+  };
+  let spare = 0;
+  const counted: EvmRpc = async (calls) => {
+    spare++;
+    return chain(pools, 1)(calls);
+  };
+  // every request: the first in 600 ms, the second in 1,100 ms (inside 600 + 600)
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [late(chain(pools, 0), 600), late(chain(pools, 1), 1_100), counted], NOW));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.equal(spare, 0, "the spare is never asked");
+});

@@ -382,10 +382,12 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
 }
 
 /** The answers of two of the providers `rpcs` that are `same`: the first two are asked at once, and one more of the
- *  rest, in order, whenever one asked fails, two that answered differ, or EVM_HEDGE_MS pass with no two alike (card
+ *  rest, in order, whenever one asked fails, two that answered differ, or the others are late: once one has answered,
+ *  as long again as it took and at least EVM_HEDGE_MS, and while none has, 4 x EVM_HEDGE_MS (card
  *  evm-quote-warm-round: a provider that is slow or has dropped out is never waited on while two others agree, the
- *  industry's hedged request). Every answer used is one two different providers gave. With none left to ask it throws
- *  the first failure, or, where two answered and none agree, `differ` on the first two. */
+ *  industry's hedged request; a spare asked a fixed time after the start ran every provider of a cbBTC quote's round,
+ *  whose heaviest batch takes 0.65 s on the fastest). Every answer used is one two different providers gave. With none
+ *  left to ask it throws the first failure, or, where two answered and none agree, `differ` on the first two. */
 export const EVM_HEDGE_MS = 400;
 function agreeing<T>(rpcs: readonly EvmRpc[], one: (rpc: EvmRpc, k: number) => Promise<T>, same: (a: T, b: T) => boolean, differ: (a: T, b: T) => never): Promise<{ a: T; b: T; i: number; j: number }> {
   const list = [...rpcs];
@@ -407,10 +409,12 @@ function agreeing<T>(rpcs: readonly EvmRpc[], one: (rpc: EvmRpc, k: number) => P
         }
       } else reject(failed?.e);
     };
+    const t0 = performance.now();
+    let first = -1;
     const arm = () => {
       clearTimeout(timer);
       if (started < list.length) {
-        timer = setTimeout(() => (done ? undefined : start()), EVM_HEDGE_MS);
+        timer = setTimeout(() => (done ? undefined : start()), first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));
         (timer as { unref?: () => void }).unref?.();
       }
     };
@@ -435,6 +439,10 @@ function agreeing<T>(rpcs: readonly EvmRpc[], one: (rpc: EvmRpc, k: number) => P
           }
           got.push({ k, v });
           if (got.length >= 2) start();
+          else if (first < 0) {
+            first = performance.now() - t0;
+            arm();
+          }
           end();
         },
         (e) => {
