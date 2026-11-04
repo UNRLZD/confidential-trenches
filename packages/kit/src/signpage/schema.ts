@@ -157,11 +157,22 @@ const unitsAt = (s: string, d: number): bigint | null => {
  * from POOL_ASSET_DECIMALS only) and the one its chain's pool holds, its amounts with no more fraction digits than the
  * asset has decimals, its ready at most its balance, its tap_max only with a ready and at most that ready (one
  * proof's spend, at most its chunk; "0" when the fee and W's new accounts eat every chunk), one entry per chain (a chain twice is refused). */
-const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec });
+/** The pool asset's USD price as the page read it (card signpage-pool-price): one asset is price x 10^expo USD, price a
+ * positive integer with no leading zero, expo an integer in -18..0 (poolUsdPrice's bounds), published_s the feed's own
+ * time and read_ms the device's clock at the read; only on a chain with a feed (POOL_USD_FEEDS: not NEAR). */
+const poolPrice = obj({
+  price: (v) => typeof v === "string" && /^[1-9]\d{0,77}$/.test(v),
+  expo: (v) => Number.isInteger(v) && (v as number) <= 0 && (v as number) >= -18,
+  published_s: uint,
+  read_ms: uint,
+});
+const PRICED: readonly Chain[] = ["solana", "base", "robinhood"];
+const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec, price: poolPrice });
 const poolFits: SignpageSchema = (v) => {
   if (!poolEntry(v)) return false;
-  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string };
+  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; price?: unknown };
   if (POOL_CHAIN_ASSET[p.chain] !== p.asset) return false;
+  if (p.price !== undefined && !PRICED.includes(p.chain)) return false;
   const d = POOL_ASSET_DECIMALS[p.asset];
   const balance = unitsAt(p.balance, d);
   if (balance === null) return false;
