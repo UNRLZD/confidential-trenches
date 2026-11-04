@@ -28,7 +28,7 @@ function provider(faults: Answer[]) {
   return { fetch, tries: () => n };
 }
 
-const FAST: SolanaRpcRetry = { deadlineMs: 1_500, attemptMs: 200, backoffMs: 10 };
+const FAST: SolanaRpcRetry = { deadlineMs: 1_500, backoffMs: 10 };
 const rpcError = (code: number) => ({ body: JSON.stringify({ jsonrpc: "2.0", id: "$ID", error: { code, message: "too many requests" } }) });
 
 const FORMS: [string, Answer][] = [
@@ -38,8 +38,12 @@ const FORMS: [string, Answer][] = [
   ["HTTP 503", { status: 503, body: "" }],
   ["-32029 in a 200", rpcError(-32029)],
   ["-32429 in a 200", rpcError(-32429)],
+  // -429 and dRPC's code 15, as recorded in scripts/live-checks/vault-testnet-t02.mjs (dRPC's real answer: "You reached
+  // Public endpoint rate limit, please upgrade to paid plan", code 15) and scripts/ci/money-gate.mjs (code -429)
+  ["-429 in a 200", rpcError(-429)],
+  ["dRPC's code 15 in a 200", { body: JSON.stringify({ id: "$ID", jsonrpc: "2.0", error: { message: "You reached Public endpoint rate limit, please upgrade to paid plan", code: 15 } }) }],
+  ["dRPC's code 15 in its HTTP 429", { status: 429, body: JSON.stringify({ id: "$ID", jsonrpc: "2.0", error: { message: "You reached Public endpoint rate limit, please upgrade to paid plan", code: 15 } }) }],
   ["a 200 that is not JSON", { body: "<html>rate limited</html>" }],
-  ["a stall (no answer)", { stall: true }],
   ["no connection", { reject: true }],
 ];
 
@@ -95,7 +99,6 @@ test("the quote's age: the page's retry stops two calls (the venue, then the blo
   // own; each call ends within its deadline, waits included, so the two together end inside the rule's window at a
   // 360 ms slot (the cluster's target is 400 ms)
   assert.ok(2 * SOLANA_RPC_RETRY.deadlineMs < SOLANA_POOL_QUOTE_MAX_AGE_SLOTS * 360);
-  assert.ok(SOLANA_RPC_RETRY.attemptMs < SOLANA_RPC_RETRY.deadlineMs, "a stall leaves room for a second attempt");
 });
 
 test("with retry, a forever-throttled read ends inside the quote's window, measured", async () => {
@@ -160,4 +163,22 @@ test("a refusal whose body is a JSON-RPC error keeps its words after the status:
   }
   const bare = provider([{ status: 400, body: "<html>bad request</html>" }]);
   await assert.rejects(solanaJsonRpc("https://rpc.example", { fetch: bare.fetch })("eth_getLogs", []), (e: Error) => e.message === "HTTP 400");
+});
+
+test("with retry, a slow answer inside the deadline lands: an answer at 2.5 s, which the client without retry takes, resolves", async () => {
+  const slow = (_u: string, i: RequestInit): Promise<Response> =>
+    new Promise((res, rej) => {
+      const id = (JSON.parse(String(i.body)) as { id: string }).id;
+      const t = setTimeout(() => res(new Response(JSON.stringify({ jsonrpc: "2.0", id, result: 7 }), { status: 200 })), 2_500);
+      i.signal?.addEventListener("abort", () => (clearTimeout(t), rej(i.signal!.reason)), { once: true });
+    });
+  assert.equal(await solanaJsonRpc("https://rpc.example", { fetch: slow })("getSlot", []), 7);
+  assert.equal(await solanaJsonRpc("https://rpc.example", { fetch: slow, retry: SOLANA_RPC_RETRY })("getSlot", []), 7);
+});
+
+test("with retry, Retry-After 0 is never a burst: the backoff is its floor (at most 5 requests in one call)", async () => {
+  const p = provider(Array.from({ length: 1000 }, () => ({ status: 429, body: "", headers: { "retry-after": "0" } })));
+  const e = await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getSlot", []).catch((x: unknown) => x);
+  assert.ok(e instanceof SolanaRpcTransportError);
+  assert.ok(p.tries() <= 5, `${p.tries()} requests`);
 });

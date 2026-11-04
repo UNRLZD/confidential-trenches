@@ -318,15 +318,16 @@ function httpsUrl(raw: string, what: string): URL {
 
 let nextId = 1;
 
-/** A JSON-RPC client's retry of transport faults (card signpage-rpc-throttle-retry): each attempt ends within
- * `attemptMs`, the call within `deadlineMs` of its start, waits and attempts counted, and no wait is begun that would end
- * past it. A wait is the provider's Retry-After when it names one, else `backoffMs` doubled per try. */
-export type SolanaRpcRetry = { readonly deadlineMs: number; readonly attemptMs: number; readonly backoffMs: number };
+/** A JSON-RPC client's retry of transport faults (card signpage-rpc-throttle-retry): the call ends within `deadlineMs` of
+ * its start, waits and attempts counted; an attempt may take all the time left (a slow answer inside it lands, as the
+ * client without retry takes it), and no wait is begun that would end past it. A wait is `backoffMs` doubled per try,
+ * or the provider's Retry-After when that is longer (a Retry-After of 0 still waits the backoff). */
+export type SolanaRpcRetry = { readonly deadlineMs: number; readonly backoffMs: number };
 /** The signing page's: a pool buy reads the venue and then the blockhash (its slot the device's own) after the reference,
  * so two calls at their deadline (7 s) stay inside SOLANA_POOL_QUOTE_MAX_AGE_SLOTS (25) at a slot of 360 ms (9 s; the
  * cluster's target is 400 ms, agave sdk clock.rs DEFAULT_MS_PER_SLOT), and the quote rule never sees a retry age it. */
-export const SOLANA_RPC_RETRY: SolanaRpcRetry = Object.freeze({ deadlineMs: 3_500, attemptMs: 2_000, backoffMs: 250 });
-/** A fault the retry takes: HTTP 429 or 5xx, a JSON-RPC throttle (-32029, -32429) in a 200, an answer that is not JSON,
+export const SOLANA_RPC_RETRY: SolanaRpcRetry = Object.freeze({ deadlineMs: 3_500, backoffMs: 250 });
+/** A fault the retry takes: HTTP 429 or 5xx, a JSON-RPC throttle (RPC_THROTTLE_CODES) in a 200, an answer that is not JSON,
  * an attempt with no answer in time, or no connection. */
 export type SolanaRpcFault = "http_429" | "http_5xx" | "rpc_throttled" | "not_json" | "timeout" | "network";
 /** A call whose transport faults outlasted its retry: the fault named, with the tries and the provider's host. */
@@ -342,8 +343,10 @@ export class SolanaRpcTransportError extends Error {
     this.host = host;
   }
 }
-/** The JSON-RPC throttle codes a provider may answer inside an HTTP 200 (the card's brief names -32029 and -32429). */
-const RPC_THROTTLE_CODES: ReadonlySet<number> = new Set([-32029, -32429]);
+/** The JSON-RPC throttle codes a provider may answer inside an HTTP 200: -32029 and -32429 (the card's brief), -429 and
+ * dRPC's 15 "You reached Public endpoint rate limit" (the answers recorded in scripts/live-checks/vault-testnet-t02.mjs
+ * and scripts/ci/money-gate.mjs). */
+const RPC_THROTTLE_CODES: ReadonlySet<number> = new Set([-32029, -32429, -429, 15]);
 /** A transport fault inside one attempt; `orig` is what the call rejected with before the retry (and still does without it). */
 class Fault extends Error {
   readonly fault: SolanaRpcFault;
@@ -446,10 +449,11 @@ export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: R
         const go = async (tries: number): Promise<unknown> => {
           const left = end - Date.now();
           try {
-            return await once(method, params, Math.max(1, Math.min(timeoutMs, retry.attemptMs, left)));
+            return await once(method, params, Math.max(1, Math.min(timeoutMs, left)));
           } catch (e) {
             if (!(e instanceof Fault)) throw e;
-            const waitMs = e.afterMs ?? retry.backoffMs * 2 ** (tries - 1);
+            // the backoff is a floor: a Retry-After of 0 never makes a throttled call a burst
+            const waitMs = Math.max(e.afterMs ?? 0, retry.backoffMs * 2 ** (tries - 1));
             // a wait that ends past the deadline is not begun: the call answers now, its fault named
             if (Date.now() + waitMs >= end) throw new SolanaRpcTransportError(e.fault, e.message, tries, host);
             await new Promise((res) => setTimeout(res, waitMs));
