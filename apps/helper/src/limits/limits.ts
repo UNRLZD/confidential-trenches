@@ -163,7 +163,13 @@ export function clientWindow(max: number, now: () => number = Date.now, windowMs
  * `userRoom` of the total is kept for callers (card helper-ready-gate): the helper's own background reads (no caller,
  * not reserved: the trade walks) go only while every draw in the window, callers' included, leaves it free, so callers
  * go ahead of them and a walk never makes a caller wait for room it took. */
-export type BudgetLimits = { total: number; perClient: number; windowMs?: number; reserve?: number; userRoom?: number };
+/** `lend` (card helper-crowd-429): the share is work-conserving. A caller past its 10 s share, or whose draws in the
+ * vendor's window already took half the callers' part, still draws while the total, less the reserve, keeps a share
+ * free for the next caller and one for each other caller drawing in this 10 s window: the share only orders callers
+ * when the total is contended (the heavy one goes behind), and a device's second trade inside 10 s is no longer
+ * refused while the budget sits idle. A draw that reaches no vendor (a cache hit) keeps its share. The total and the
+ * reserve are unchanged. */
+export type BudgetLimits = { total: number; perClient: number; windowMs?: number; reserve?: number; userRoom?: number; lend?: boolean };
 
 /**
  * A shared upstream budget per key (a chain's RPC provider, one RPC method on it, a vendor). Every call that reaches
@@ -183,6 +189,15 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   let window = -1;
   /** Per key and client: the share drawn in the current fixed window. */
   const shares = new Map<string, Map<string, number>>();
+  /** Per lending key and client: when each of its draws reached the vendor, kept for the vendor's window. */
+  const drawn = new Map<string, Map<string, number[]>>();
+  const drawnBy = (key: string, client: string, t: number, lim: BudgetLimits): number => {
+    const d = drawn.get(key)?.get(client);
+    if (d === undefined) return 0;
+    const from = t - (lim.windowMs ?? windowMs);
+    while (d.length > 0 && d[0]! <= from) d.shift();
+    return d.length;
+  };
   /** Per key: [second, requests sent in it, of them not reserved], oldest first, kept while the provider's window may
    * still count them. */
   const sent = new Map<string, [number, number, number][]>();
@@ -242,7 +257,16 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     }
     for (const [key, n] of want) {
       const lim = limitsOf(key);
-      if (client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient) {
+      const overShare = client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient;
+      // a lending key's caller past its share, or past half the callers' part in the vendor's window (its draws so far
+      // took that much), is lent only while a share stays free for the caller asking next and for each other caller
+      // drawing in this window (card helper-crowd-429): it goes behind them when the total is contended, never ahead
+      const heavy = lim.lend === true && client !== undefined && !shareOnly && (overShare || drawnBy(key, client, t, lim) + n > Math.ceil((lim.total - (lim.reserve ?? 0)) / 2));
+      if (heavy) {
+        const keep = lim.perClient * (1 + [...(shares.get(key)?.keys() ?? [])].filter((c) => c !== client).length);
+        const tk = totalWait(key, n + keep, t, lim, reserved, background);
+        if (tk > wait) (wait = tk), (refusedBy = `${key} ${overShare ? "share" : "total"}`);
+      } else if (overShare) {
         const s = toWindowEnd(t, windowMs);
         if (s > wait) (wait = s), (refusedBy = `${key} share`);
       }
@@ -260,6 +284,14 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
         k.set(client, c + n);
       }
       if (shareOnly) continue;
+      if (client !== undefined && limitsOf(key).lend === true) {
+        let m = drawn.get(key);
+        if (m === undefined) drawn.set(key, (m = new Map()));
+        const d = m.get(client) ?? [];
+        if (d.length === 0 && m.size >= clients) m.delete(m.keys().next().value as string);
+        for (let i = 0; i < n; i++) d.push(t);
+        m.set(client, d);
+      }
       let q = sent.get(key);
       if (q === undefined) sent.set(key, (q = []));
       const last = q[q.length - 1];
