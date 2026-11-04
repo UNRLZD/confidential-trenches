@@ -62,7 +62,7 @@ test("the trade box's own words stay drafts: none names a pick unless it is Port
     if (shared.has(w)) continue;
     for (const p of PICKS) assert.ok(!w.source.includes(p), `trade.${k}`);
   }
-  assert.deepEqual(Object.entries(trade.WORDS as Record<string, Word>).filter(([, w]) => shared.has(w)).map(([k]) => k), ["sending", "landing"]);
+  assert.deepEqual(Object.entries(trade.WORDS as Record<string, Word>).filter(([, w]) => shared.has(w)).map(([k]) => k), ["sending", "landing", "privateBalance"]);
 });
 
 test("data-draft-copy is drawn only for a word whose draft flag is set, on every listed screen", () => {
