@@ -878,3 +878,60 @@ test("F9 dRPC's cap (base.drpc.org, read live 3 Nov 07:05Z: \"ranges over 10000 
   const t = await evmTreeSync({ rpcs: pair(c, c, {}, drpc), pin: PIN, sleep: async () => {} }).trees(after(25));
   assert.equal(t.stateTree.size, 4);
 });
+
+// ---- card wallet-rpc-hex-case: an RPC's hex in either case ----
+
+/** robinhood-testnet.drpc.org's case: it answers eth_chainId "0xB626" (read 3 Nov 23:07Z; rpc.testnet.chain.robinhood.com
+ * and robinhood-sepolia-rpc.publicnode.com answer "0xb626"). Here every hex digit of every answer is upper-cased, "0x" kept. */
+const upper = (v: unknown): unknown =>
+  typeof v === "string" && /^0x[0-9a-f]+$/.test(v) ? `0x${v.slice(2).toUpperCase()}`
+  : Array.isArray(v) ? v.map(upper)
+  : v !== null && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, upper(x)]))
+  : v;
+const drpc = (r: EvmRpc): EvmRpc => Object.assign(async (m: string, p: readonly unknown[]) => upper(await r(m, p)), { url: `${(r as { url?: string }).url}/drpc` });
+const answering = (r: EvmRpc, method: string, v: unknown): EvmRpc => Object.assign(async (m: string, p: readonly unknown[]) => (m === method ? v : r(m, p)), { url: `${(r as { url?: string }).url}/x` });
+
+test("hex in either case: drpc's real eth_chainId \"0xB626\" and every field upper-cased read as lower case, the same trees on Robinhood testnet", async () => {
+  const c = C3();
+  const rh = { chainId: 46630n };
+  const [a, b] = pair(c, c, rh, rh);
+  assert.equal(await drpc(a)("eth_chainId", []), "0xB626");
+  const s = (rpcs: [EvmRpc, EvmRpc]) => evmTreeSync({ rpcs, pin: { ...PIN, network: "robinhood-testnet" }, ...noWait }).trees(after(25));
+  const want = await s([a, b]);
+  assert.equal(want.stateTree.size, 4);
+  for (const rpcs of [[drpc(a), b], [a, drpc(b)], [drpc(a), drpc(b)]] as [EvmRpc, EvmRpc][]) {
+    const t = await s(rpcs);
+    assert.deepEqual([t.stateRoot, t.labelRoot, t.stateTree.size, t.labelTree.size], [want.stateRoot, want.labelRoot, want.stateTree.size, want.labelTree.size]);
+  }
+});
+
+test("hex in either case: a case-only difference never fails agreement, any other difference still does", async () => {
+  const c = C3();
+  const rh = { chainId: 46630n };
+  const s = (rpcs: [EvmRpc, EvmRpc]) => evmTreeSync({ rpcs, pin: { ...PIN, network: "robinhood-testnet" }, ...noWait }).trees(after(25));
+  // another chain written in upper case is still another chain
+  const [a, b] = pair(c, c, rh, rh);
+  await assert.rejects(s([answering(a, "eth_chainId", "0xB627"), b]), /chain 46631 and 46630, not robinhood-testnet's 46630/);
+  // not 0x hex: an upper-case prefix (viem's and ethers' rule is "0x"), a digit that is not hex, a leading zero
+  for (const v of ["0XB626", "0xB62G", "0x0B626", "B626", "0x"]) await assert.rejects(s([answering(a, "eth_chainId", v), b]), /eth_chainId: not a quantity/, v);
+  // one leaf's value changed on the other RPC, the first in upper case: refused as before
+  const flip = (l: Record<string, unknown>[]) => l.map((x, i) => (i === 2 ? { ...x, data: `${(x.data as string).slice(0, 65)}${(x.data as string)[65] === "1" ? "2" : "1"}${(x.data as string).slice(66)}` } : x));
+  const [a2, b2] = pair(c, c, rh, { ...rh, logs: flip });
+  await assert.rejects(s([drpc(a2), b2]), /the two RPCs differ at log 2/);
+  // a hash that differs by more than its case is another block: refused as in lower case, word for word
+  const [a3, b3] = pair(c, c, rh, { ...rh, hashOf: (n) => (n === 15 ? h32("other 15") : c.hashOf(n)) });
+  const lowerWhy = await s([a3, b3]).then(() => assert.fail("another block 15 read"), (e: Error) => e.message);
+  await assert.rejects(s([drpc(a3), b3]), (e: Error) => e.message === lowerWhy);
+});
+
+test("hex in either case: bind on an upper-case RPC and the helper's block \"0x1E\" is the lower-case bind; \"0x1F\" is still another block", async () => {
+  const c = CB();
+  const [a, b] = pair(c, c);
+  const salt = () => Uint8Array.from(Buffer.from(PP.relayed.request.salt.slice(2), "hex"));
+  const want = await poolOf(c).bind(bindArgs());
+  const p = (block: string) => evmPool({ pin: PIN, rpcs: [drpc(a), b], relayFee: async () => answer({ block }), epochFee: feeRule([]), salt, ...noWait });
+  const got = await p("0x1E").bind(bindArgs());
+  assert.deepEqual([got.context, got.feeCap, got.request], [want.context, want.feeCap, want.request]);
+  await assert.rejects(p("0x1F").bind(bindArgs()), /not its first block/);
+  await assert.rejects(p("0X1E").bind(bindArgs()), /not its first block/);
+});
