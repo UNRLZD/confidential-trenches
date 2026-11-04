@@ -37,7 +37,7 @@ const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { solanaJsonRpc } = await import("../../kit/src/trade/solana/send.ts");
-const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolSellNeed } = await import("../../kit/src/trade/solana/pool-buy.ts");
+const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
 const { TESTNET_RPCS, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
@@ -157,6 +157,12 @@ const balance = async () => {
     }
   }
 };
+// the coin's venue and what a buy on it leaves W for its sell, read before U is funded: a run that cannot compute its
+// own spend fails here, before any money moves (run 6's first try deposited, then threw on a stale call here, and its
+// seed went with it)
+const VENUE = SPEND === "max" ? await readSolanaPoolBuyVenue(rpcs, "pump-curve", MINT) : null;
+const KEEPS = VENUE === null ? null : solanaPoolBuySellNeed(VENUE, rent);
+if (VENUE !== null) log(`venue ${VENUE.kind} (token account ${VENUE.tokenAccountSize} B, cashback ${VENUE.cashback}); a buy leaves W ${KEEPS} for its sell on any venue the coin sells on`);
 log(`pool ${pool}; table ${TABLE}; fund U ${U} with exactly ${NEED} lamports (or at least ${NEED + EMPTY}) on devnet`);
 for (let b = await balance(); !(b === NEED || b >= NEED + EMPTY); b = await balance()) {
   if (b > 0n) log(`U holds ${b}: waiting for exactly ${NEED} or at least ${NEED + EMPTY}`);
@@ -174,10 +180,9 @@ if (landed) {
   log(`pass ${JSON.stringify(pass, (k, v) => (typeof v === "bigint" ? String(v) : v))}`);
   let spend = SPEND;
   if (SPEND === "max") {
-    const venue = await readSolanaPoolBuyVenue(rpcs, "pump-curve", MINT);
-    const max = solanaPoolBuyMaxSpend({ withdrawnValue: RUNG, relayFee }, venue, 0n, rent);
+    const max = solanaPoolBuyMaxSpend({ withdrawnValue: RUNG, relayFee }, VENUE, 0n, rent);
     spend = `0.${String(max).padStart(9, "0")}`;
-    log(`max spend on ${venue.kind} (token account ${venue.tokenAccountSize} B, cashback ${venue.cashback}): ${max} lamports at relay fee ${relayFee}; W keeps ${solanaPoolSellNeed(venue.kind, rent)}, its sell's need`);
+    log(`max spend on ${VENUE.kind}: ${max} lamports at relay fee ${relayFee}; W keeps ${KEEPS}, its sell's need on any venue`);
   }
   log(`pool.buy of ${spend} SOL of ${MINT}`);
   buy = await run("pool.buy", { chain: "solana", token: MINT, amount: spend, slippage_bps: 300 });
