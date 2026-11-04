@@ -34,6 +34,7 @@
 // rlp([chainId, delegate, nonce])) with the chain's own id from the venue list, never 0 (M363 (4)). No export here takes
 // a digest. A stuck sell is replaced by building and signing again with the same nonce and a new deadline; a burned
 // precommitment by signing again with a fresh one.
+import { EVM_POOL_FEE_STEP, evmPoolFee } from "./pool-fee.ts";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
@@ -422,17 +423,12 @@ export const evmPoolSellTip = (chain: EvmPoolChain): bigint => (chain === "base"
  *  sale's is. */
 export const EVM_7702_AUTH_GAS = 25_000n;
 
-/** The step every EVM relay fee rounds up to: the helper's EVM_FEE_STEP (apps/helper pool/evm.ts), 1e13 wei. */
-export const EVM_POOL_FEE_STEP = 10_000_000_000_000n;
-/** The device's own cap on what the sender takes from a sale (card evm-buy-hookdata-fee): the relay fee rule the device
- *  computes for a withdraw (M356 (4), as the helper's evmEpochFee: 2 x the gas x the base fee, rounded up to the step),
- *  with the sale's gas limit EVM_POOL_SELL_GAS and the sale's tip, at `baseFeePerGas`, the base fee of the sell quote's
- *  agreed block (the same on both providers); at least one step. Never a caller's figure: the kit's sell builder
- *  refuses a fee cap above it (trade/evm/sell.ts). */
-export function evmPoolSellFeeMax(chain: EvmPoolChain, baseFeePerGas: bigint): bigint {
-  const f = 2n * EVM_POOL_SELL_GAS * (baseFeePerGas + evmPoolSellTip(chain));
-  const stepped = ((f + EVM_POOL_FEE_STEP - 1n) / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP;
-  return stepped > EVM_POOL_FEE_STEP ? stepped : EVM_POOL_FEE_STEP;
+/** The device's own cap on what the sender takes from a sale (card evm-buy-hookdata-fee): the kit's relay fee rule
+ *  (pool-fee.ts evmPoolFee) with the sale's gas limit EVM_POOL_SELL_GAS at the base fee of the sell quote's agreed block
+ *  plus the sale's tip, the chain fee read at that block on both providers (evmPoolChainFeeReads), and a floor of one
+ *  step. Never a caller's figure: the kit's sell builder refuses a fee cap above it (quoted.ts). */
+export function evmPoolSellFeeMax(chain: EvmPoolChain, baseFeePerGas: bigint, chainFee: bigint): bigint {
+  return evmPoolFee({ floor: EVM_POOL_FEE_STEP, gas: EVM_POOL_SELL_GAS, gasPrice: baseFeePerGas + evmPoolSellTip(chain), chainFee });
 }
 
 /** A sim sell: as EvmPoolSell, into EVM_SELL_SIM, with no fee and no precommitment. */

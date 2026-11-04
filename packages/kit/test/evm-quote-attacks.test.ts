@@ -331,6 +331,8 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     overridden.has(to.toLowerCase()) && d.length === 192 ? BigInt("0x" + d.slice(128))
     // QuoterV2.factory(): no v3 in the model
     : d.startsWith("c45a0155") ? null
+    // the chain fee oracle (pool-fee.ts evmPoolChainFeeReads): none beside the gas in the model
+    : d.startsWith("f1c7a58b") || d.startsWith("275aedd2") || d.startsWith("f5d6ded7") ? 0n
     // Multicall3.getEthBalance(address): the account's ETH at the block
     : to.toLowerCase() === "0xca11bde05977b3631167028862be2a173976ca11" && d.startsWith("4d2301cc") ? (balances["0x" + d.slice(32, 72)] ?? 0n)
     : to.toLowerCase() === PM || to.toLowerCase() === RH_PM
@@ -2023,6 +2025,8 @@ test("HD1 a helper route carrying hook data on any hop is refused bad_request be
     { venue: "uniswap-v4", currencyIn: WETH, hops: [{ currency: TOKEN, fee: 0x800000, tickSpacing: 200, hooks: clanker, hookData: "0xdeadbeef" }] },
     { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x00" }] },
     { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: USDC, fee: 500, tickSpacing: 10, hooks: NATIVE, hookData: "0x" }, { currency: TOKEN, fee: 0x800000, tickSpacing: 200, hooks: clanker, hookData: "0x" + "ab".repeat(32) }] },
+    // on the first hop only (review fold 1, L3)
+    { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: USDC, fee: 500, tickSpacing: 10, hooks: NATIVE, hookData: "0x01" }, { currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] },
   ];
   for (const route of routes) assert.deepEqual(await verdict(evmPoolBuyQuoteWith({ chain: "base", token: TOKEN, amountIn: AMOUNT, slippageBps: 100, route }, [none(), none()], NOW)), { accepted: false, code: "bad_request" });
   assert.equal(asked, 0);
@@ -2039,7 +2043,7 @@ const BUY_AT = 5_000_000;
 const blockHash = (n: number) => "0x" + W(0xb10c000000000000n + BigInt(n));
 /** `rpc` with its heads `heads` ("latest" answers each in turn, then the last), every block named by its number, and W
  *  holding the token only from BUY_AT on: the fee-on-transfer probe at an earlier block reverts. */
-function landed(rpc: EvmRpc, heads: number[], asked: { heads: number } = { heads: 0 }): EvmRpc {
+function landed(rpc: EvmRpc, heads: number[], asked: { heads: number } = { heads: 0 }, timestamp = T): EvmRpc {
   let k = 0;
   return async (calls) => {
     const out = await rpc(calls);
@@ -2048,7 +2052,7 @@ function landed(rpc: EvmRpc, heads: number[], asked: { heads: number } = { heads
         const latest = c.params[0] === "latest";
         if (latest) asked.heads++;
         const n = latest ? heads[Math.min(k++, heads.length - 1)]! : Number(BigInt(c.params[0] as string));
-        return { jsonrpc: "2.0", id, result: head("0x" + n.toString(16), blockHash(n)) };
+        return { jsonrpc: "2.0", id, result: head("0x" + n.toString(16), blockHash(n), timestamp) };
       }
       const at = Number(BigInt((c.params[1] as { blockHash: string }).blockHash) - 0xb10c000000000000n);
       const probe = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code === quoteMod.EVM_SELL_PROBE_CODE;
@@ -2073,23 +2077,63 @@ test("L5 a sell at its buy's block, one provider a block behind it: the quote wa
   assert.equal(r.block.number, BigInt(BUY_AT));
 });
 
-test("L5b a buy's block no provider reaches within EVM_MIN_BLOCK_WAIT_MS is refused not_landed, never quoted at an older block", async () => {
-  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba6ba");
-  const asked = { heads: 0 };
-  mock.timers.enable({ apis: ["setTimeout"] });
+/** The sell quote's verdict and the mocked time it took, ms: the clock (Date, the wait's monotonic clock here) and
+ *  every timer mocked, ticked `step` ms at a time until the quote settles (so the time read is up to two steps late). */
+async function timed(run: (mono: () => number) => Promise<unknown>, ticks = 4_000, step = 500) {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
   try {
     let done = false;
-    const p = sellVerdict(evmPoolSellQuoteWith({ ...req, boughtBlock: BigInt(BUY_AT + 1) }, [landed(chain([pool], 0), [BUY_AT], asked), landed(chain([pool], 1), [BUY_AT + 1], asked)], NOW)).finally(() => (done = true));
-    for (let i = 0; i < 200 && !done; i++) {
+    const p = sellVerdict(run(() => Date.now()) as ReturnType<typeof sellOn>).finally(() => (done = true));
+    for (let i = 0; i < ticks && !done; i++) {
       await new Promise((r) => setImmediate(r));
-      mock.timers.tick(500);
+      mock.timers.tick(step);
     }
-    assert.deepEqual(await p, { accepted: false, code: "not_landed" });
+    await new Promise((r) => setImmediate(r));
+    // a quote still waiting after every tick is the wait's own failure, never a test that hangs
+    if (!done) return { verdict: { accepted: false, code: "still waiting" }, ms: Date.now() };
+    return { verdict: await p, ms: Date.now() };
   } finally {
     mock.timers.reset();
   }
+}
+/** `rpc`, each answer `ms` later */
+const slow = (rpc: EvmRpc, ms: number): EvmRpc => async (calls) => {
+  await new Promise((r) => setTimeout(r, ms));
+  return rpc(calls);
+};
+
+test("L5b a buy's block no provider reaches within EVM_MIN_BLOCK_WAIT_MS is refused not_landed, never quoted at an older block", async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba6ba");
+  const asked = { heads: 0 };
+  const r = await timed((mono) => evmPoolSellQuoteWith({ ...req, boughtBlock: BigInt(BUY_AT + 1) }, [landed(chain([pool], 0), [BUY_AT], asked), landed(chain([pool], 1), [BUY_AT + 1], asked)], NOW, undefined, undefined, mono), 200);
+  assert.deepEqual(r.verdict, { accepted: false, code: "not_landed" });
   // asked every 500 ms for 30 s (EVM_MIN_BLOCK_WAIT_MS, as long as a quote's block may be old), both providers each
-  // time: 61 rounds
+  // time: 61 rounds, and refused only once that time has passed (review fold 1, L3)
   assert.equal(quoteMod.EVM_MIN_BLOCK_WAIT_MS, quoteMod.EVM_QUOTE_MAX_AGE_MS);
   assert.equal(asked.heads, 2 * 61);
+  assert.ok(r.ms >= quoteMod.EVM_MIN_BLOCK_WAIT_MS, `refused after ${r.ms} ms`);
+});
+
+test("M2 the wait for a buy's block ends at EVM_MIN_BLOCK_WAIT_MS whatever a provider's latency: 400 ms and 10 s an answer", async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba7ba");
+  for (const latency of [400, 10_000]) {
+    // provider 1 at the buy's block at once, provider 2 a block below it and `latency` ms an answer
+    // (within a second of 30 s: the last sleep, 500 ms, may pass the deadline, and the ticks are 100 ms)
+    const r = await timed((mono) => evmPoolSellQuoteWith({ ...req, boughtBlock: BigInt(BUY_AT + 1) }, [landed(chain([pool], 0), [BUY_AT + 1]), slow(landed(chain([pool], 1), [BUY_AT]), latency)], NOW, undefined, undefined, mono), 8_000, 100);
+    assert.deepEqual(r.verdict, { accepted: false, code: "not_landed" }, `at ${latency} ms an answer`);
+    assert.ok(r.ms >= quoteMod.EVM_MIN_BLOCK_WAIT_MS && r.ms <= quoteMod.EVM_MIN_BLOCK_WAIT_MS + 1_000, `at ${latency} ms an answer, not_landed after ${r.ms} ms, not about 30 s`);
+  }
+});
+
+test("L2 a block old enough to be stale once the wait for the buy's block is over is refused stale_quote, judged at the clock then", async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba8ba");
+  // the block is 25 s old when the quote starts (the mocked clock starts at 0, so its time is NOW's)
+  const ts = "0x" + ((NOW - 25_000) / 1000).toString(16);
+  const lagging = (rounds: number) => [...Array(rounds).fill(BUY_AT - 1), BUY_AT];
+  const run = (rounds: number) => (mono: () => number) =>
+    evmPoolSellQuoteWith(req, [landed(chain([pool], 0), [BUY_AT], { heads: 0 }, ts), landed(chain([pool], 1), lagging(rounds), { heads: 0 }, ts)], NOW, undefined, undefined, () => mono());
+  // provider 2 reaches the buy's block after 10 s: the block is 35 s old then
+  assert.deepEqual((await timed(run(21))).verdict, { accepted: false, code: "stale_quote" });
+  // after 4 s it is 29 s old, and quotes
+  assert.equal(((await timed(run(9))).verdict as { accepted: boolean }).accepted, true);
 });

@@ -74,6 +74,8 @@ export type Model = {
   headSec?: number;
   /** the block's base fee (Base's 5,000,000 wei by default); null: the block names none */
   baseFee?: bigint | null;
+  /** what the chain fee oracle answers, by selector (pool-fee.ts evmPoolChainFeeReads; 0 by default); null: it reverts */
+  chainFee?: Record<string, bigint | null>;
 };
 export type Seen = { pools: Pool[]; probes: { w: string; token: string; to: string; amount: bigint; code: string }[] };
 /** A provider on the modelled chain; every quote it is asked lands in `seen`. */
@@ -84,6 +86,8 @@ export function provider(m: Model, seen: Seen = { pools: [], probes: [] }): EvmR
     const sel = data.slice(0, 8);
     if (sel === "c45a0155") return BigInt(FACTORY);
     if (sel === "1698ee82") return BigInt(V3_POOL);
+    // the chain fee oracle: GasPriceOracle getL1FeeUpperBound, getOperatorFee; ArbGasInfo getL1BaseFeeEstimate
+    if (sel === "f1c7a58b" || sel === "275aedd2" || sel === "f5d6ded7") return m.chainFee?.[sel] === undefined ? 0n : m.chainFee[sel]!;
     const p = poolOf(data);
     seen.pools.push(p);
     return m.price(p);

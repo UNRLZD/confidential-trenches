@@ -24,6 +24,8 @@ const S = "test/evm-sell-quote.test.ts";
 // the sim sell's builder and signer (card evm-quote-exec-sim)
 const SELLU = "src/trade/evm/sell-unpinned.ts";
 const QD = "src/trade/evm/quoted.ts";
+const PF = "src/trade/evm/pool-fee.ts";
+const E = "test/evm-pool-fee.test.ts";
 
 // [file, text, replacement, test file, the test that must fail]
 export const MUTANTS = [
@@ -249,7 +251,7 @@ export const MUTANTS = [
   [QUOTE, "const pick = best(routes.filter((r) => evmSellExits(chain, t, r.route)));", "const pick = best(routes);", R, "P2 "],
   [QUOTE, "  if (bought !== null) {\n    const x = bought.route.venue", "  if (false) {\n    const x = bought.route.venue", R, "P3 "],
   [QUOTE, 'if (lower(evmPoolRouteDataQuoted(chain, bought).token) !== lower(token)) return refuse("token_mismatch", "the bought route buys another token");', "", R, "P3 "],
-  [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock });", "rpcs, scan: undefined, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock });", R, "P1 "],
+  [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono });", "rpcs, scan: undefined, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono });", R, "P1 "],
   // the review of edb4dbb: F1 the sell goes further where the buy does; F2 X's markets at the X the token's pool
   // gives; F5 `bought` kept only where the sell builder takes it; F6 minOut off the reference
   [QUOTE, "if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);", "if (markets.has(x) && !a.sell) further.push(x);", R, "PA "],
@@ -304,12 +306,27 @@ export const MUTANTS = [
   // own rule's at the agreed block, never above it; (3) a sell quote reads at a block at or past its buy's
   [QUOTE, 'if (route.venue === "uniswap-v4" && route.hops.some((h) => h.hookData !== "0x")) return refuse(', "if (false) return refuse(", R, "HD1 "],
   [QUOTE, 'route.hops.some((h) => h.hookData !== "0x")) return refuse(', 'route.hops.slice(1).some((h) => h.hookData !== "0x")) return refuse(', R, "HD1 "],
-  [QUOTE, "const feeMax = evmPoolSellFeeMax(chain, block.baseFeePerGas);", "const feeMax = 10n ** 18n;", S, "planted: the sender's fee cap"],
+  [QUOTE, "const feeMax = evmPoolSellFeeMax(chain, block.baseFeePerGas, chainFee);", "const feeMax = 10n ** 18n;", S, "planted: the sender's fee cap"],
   [QUOTE, 'if (block.baseFeePerGas === null) return refuse("rpc_error", `block ${block.number} has no base fee: the sale', 'if (false) return refuse("rpc_error", `block ${block.number} has no base fee: the sale', S, "planted: the sender's fee cap"],
-  [SELLU, "const f = 2n * EVM_POOL_SELL_GAS * (baseFeePerGas + evmPoolSellTip(chain));", "const f = EVM_POOL_SELL_GAS * (baseFeePerGas + evmPoolSellTip(chain));", S, "planted: the sender's fee cap"],
-  [SELLU, "(baseFeePerGas + evmPoolSellTip(chain))", "baseFeePerGas", S, "planted: the sender's fee cap"],
-  [SELLU, "((f + EVM_POOL_FEE_STEP - 1n) / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP", "(f / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP", S, "planted: the sender's fee cap"],
-  [SELLU, "return stepped > EVM_POOL_FEE_STEP ? stepped : EVM_POOL_FEE_STEP;", "return stepped;", S, "planted: the sender's fee cap"],
+  [PF, "const f = 2n * (gas * gasPrice + chainFee);", "const f = gas * gasPrice + chainFee;", S, "planted: the sender's fee cap"],
+  [SELLU, "gasPrice: baseFeePerGas + evmPoolSellTip(chain)", "gasPrice: baseFeePerGas", S, "planted: the sender's fee cap"],
+  [SELLU, "{ floor: EVM_POOL_FEE_STEP, gas: EVM_POOL_SELL_GAS,", "{ floor: 0n, gas: EVM_POOL_SELL_GAS,", S, "planted: the sender's fee cap"],
+  [PF, "export const EVM_POOL_FEE_STEP = 10_000_000_000_000n;", "export const EVM_POOL_FEE_STEP = 1_000_000_000_000n;", S, "planted: the sender's fee cap"],
+  [QUOTE, "const feeMax = evmPoolSellFeeMax(chain, block.baseFeePerGas, chainFee);", "const feeMax = evmPoolSellFeeMax(chain, 2n * block.baseFeePerGas, chainFee);", S, "planted: the sender's fee cap"],
+  // review fold 1 L1: the chain fee, read at the agreed block on both providers, in the one rule (pool-fee.ts)
+  [QUOTE, "evmPoolSellFeeMax(chain, block.baseFeePerGas, chainFee)", "evmPoolSellFeeMax(chain, block.baseFeePerGas, 0n)", S, "L1 "],
+  [QUOTE, "    ...evmPoolChainFeeReads(chain, EVM_POOL_SELL_GAS),\n", "", S, "L1 "],
+  [QUOTE, 'if (chainFees.some((a) => a!.kind !== "out")) return refuse(', "if (false) return refuse(", S, "L1 "],
+  [PF, "if (op(chain) && ok(2)) return answers[0]! + answers[1]!;", "if (op(chain) && ok(2)) return answers[0]!;", E, "L1 "],
+  [PF, "const ARB_GAS_PER_CALLDATA_BYTE = 16n;", "const ARB_GAS_PER_CALLDATA_BYTE = 1n;", E, "L1 "],
+  [PF, 'data: "0x" + SEL_OPERATOR_FEE + word(gas) }', 'data: "0x" + SEL_OPERATOR_FEE + word(txBytes) }', E, "L1 "],
+  [PF, "export const EVM_POOL_TX_BYTES = 2_600n;", "export const EVM_POOL_TX_BYTES = 600n;", E, "L1 "],
+  // review fold 1 L5: no sell whose deposit back would revert
+  [QUOTE, "if (minOut - feeMax < EVM_POOL_MIN_DEPOSIT) return refuse(", "if (false) return refuse(", S, "L5 "],
+  [QUOTE, "if (minOut - feeMax < EVM_POOL_MIN_DEPOSIT) return refuse(", "if (minOut - feeMax <= EVM_POOL_MIN_DEPOSIT) return refuse(", S, "L5 "],
+  [PF, "export const EVM_POOL_MIN_DEPOSIT = 100_000_000_000_000n;", "export const EVM_POOL_MIN_DEPOSIT = 10_000_000_000_000n;", S, "L5 "],
+  [PF, "((f + EVM_POOL_FEE_STEP - 1n) / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP", "(f / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP", S, "planted: the sender's fee cap"],
+  [PF, "return stepped > floor ? stepped : floor;", "return stepped;", S, "planted: the sender's fee cap"],
   [QD, "if (feeCap > feeMax) throw", "if (false) throw", S, "planted: the sender's fee cap"],
   [QD, "if (feeCap > feeMax) throw", "if (feeCap > feeMax + 1n) throw", S, "planted: the sender's fee cap"],
   [QD, "const feeCap = asked === undefined ? feeMax : asked;", "const feeCap = asked === undefined ? feeMax - 1n : asked;", S, "planted: the sender's fee cap"],
@@ -317,11 +334,24 @@ export const MUTANTS = [
   [QUOTE, "boughtBlock < 1n) return refuse(", "boughtBlock < 0n) return refuse(", S, "planted: a sell quote takes the buy's block"],
   [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "break;", R, "L5 "],
   [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "if (a.number >= minBlock || b.number >= minBlock) break;", R, "L5 "],
-  [QUOTE, "if (waited >= EVM_MIN_BLOCK_WAIT_MS) return refuse(", "if (waited > EVM_MIN_BLOCK_WAIT_MS) return refuse(", R, "L5b "],
+  [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "if (a.number > minBlock && b.number > minBlock) break;", R, "L5 "],
+  [QUOTE, "    if (left() <= 0) return late();\n", "", R, "L5b "],
   [QUOTE, "export const EVM_MIN_BLOCK_WAIT_MS = 30_000;", "export const EVM_MIN_BLOCK_WAIT_MS = 3_000;", R, "L5b "],
   [QUOTE, "const EVM_MIN_BLOCK_EVERY_MS = 500;", "const EVM_MIN_BLOCK_EVERY_MS = 1_000;", R, "L5b "],
-  [QUOTE, "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock)", "agreedBlock(rpcs, v.maxLag, a.nowMs)", R, "L5 "],
-  [QUOTE, "sell: true, minBlock: boughtBlock });", "sell: true });", R, "L5 "],
+  // the reviewer's two survivors (review fold 1, L3): the wait's sleep gone, or of 0 ms
+  [QUOTE, "    await new Promise((r) => setTimeout(r, EVM_MIN_BLOCK_EVERY_MS));\n", "", R, "L5b "],
+  [QUOTE, "setTimeout(r, EVM_MIN_BLOCK_EVERY_MS)", "setTimeout(r, 0)", R, "L5b "],
+  // review fold 1 M2 and L2: one deadline over the reads and the sleeps; the age at the clock after the wait
+  [QUOTE, "const heads = minBlock === 0n ? await read : await within(read, left(), late);", "const heads = await read;", R, "M2 "],
+  [QUOTE, "const left = () => EVM_MIN_BLOCK_WAIT_MS - (mono() - t0);", "const left = () => EVM_MIN_BLOCK_WAIT_MS;", R, "M2 "],
+  [QUOTE, "const atMs = minBlock === 0n ? nowMs : nowMs + Math.max(0, mono() - t0);", "const atMs = nowMs;", R, "L2 "],
+  [QUOTE, "const atMs = minBlock === 0n ? nowMs : nowMs + Math.max(0, mono() - t0);", "const atMs = nowMs + Math.max(0, mono() - t0);", R, "R6 "],
+  [QUOTE, "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono)", "agreedBlock(rpcs, v.maxLag, a.nowMs)", R, "L5 "],
+  [QUOTE, "sell: true, minBlock: boughtBlock, mono });", "sell: true, mono });", R, "L5 "],
+  [QUOTE, "sell: true, minBlock: boughtBlock, mono });", "sell: true, minBlock: boughtBlock - 1n, mono });", R, "L5 "],
+  [QUOTE, "sell: true, minBlock: boughtBlock, mono });", "sell: true, minBlock: boughtBlock });", R, "M2 "],
+  // the hook data rule on any hop, the first included (review fold 1, L3)
+  [QUOTE, 'route.hops.some((h) => h.hookData !== "0x")) return refuse(', 'route.hops.slice(-1).some((h) => h.hookData !== "0x")) return refuse(', R, "HD1 "],
   [QUOTE, 'if (fee !== undefined && (typeof fee !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(fee))) return refuse(', "if (false) return refuse(", R, "R11 "],
   // the sim signer's signature recovers to W over SellDelegate's own digest (review of the exec sim, LOW 3)
   [SELLU, "      word(BigInt(chainId)),", "      word(0n),", S, "planted: the sim signer"],
@@ -332,7 +362,8 @@ let lastFail = "";
 function run(dir, file, name) {
   const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, file];
   try {
-    const out = execFileSync("node", args, { cwd: dir, stdio: "pipe", encoding: "utf8" });
+    // a mutant that hangs its test (a wait with no sleep) is killed by the time limit, never a sweep that hangs
+    const out = execFileSync("node", args, { cwd: dir, stdio: "pipe", encoding: "utf8", timeout: 300_000 });
     return /^# pass ([1-9]\d*)$/m.test(out) ? "pass" : "none";
   } catch (e) {
     lastFail = `${e.stdout ?? ""}${e.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
@@ -346,7 +377,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let bad = 0;
   try {
     for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
-    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
     for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
       const r = run(dir, file, t);
       if (r !== "pass") {

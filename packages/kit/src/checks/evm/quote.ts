@@ -61,6 +61,7 @@ import {
   type EvmV4Hop,
   type EvmV4Route,
 } from "../../trade/evm/buy-unpinned.ts";
+import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads } from "../../trade/evm/pool-fee.ts";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
@@ -124,6 +125,7 @@ export type EvmQuoteErrorCode =
   | "too_many_pools" // the token has more pools than a quote reads: past the bound its real one may be unread
   | "fee_on_transfer" // a sell's token does not deliver the whole amount from W to the pool, or its transfer reverts
   | "not_landed" // a provider's head is still below the block a sell's buy landed in, past EVM_MIN_BLOCK_WAIT_MS
+  | "below_minimum" // a sell's minOut less the fee rule's cap is under the pool's MIN_DEPOSIT: its deposit back would revert
   | "no_exit"; // a buy's route goes through a pool its sell could not leave through
 export class EvmQuoteError extends Error {
   readonly code: EvmQuoteErrorCode;
@@ -437,24 +439,32 @@ type Block = { number: bigint; hash: string; timestamp: bigint; baseFeePerGas: b
  *  EVM_QUOTE_MAX_AGE_MS behind the device's clock, with `confirm`, which reads that number's hash and time on the other
  *  provider and must find the same block. One provider alone cannot pick an old block, nor name a block the other does
  *  not hold (review of b17d1fc, R1, R1b). `confirm` runs beside the reads, and nothing read is used before it passes. */
-async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, nowMs: number, minBlock = 0n): Promise<{ block: Block; confirm: () => Promise<void> }> {
+async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, nowMs: number, minBlock = 0n, mono: () => number = monotonic): Promise<{ block: Block; confirm: () => Promise<void> }> {
   const call: EvmRpcCall = { method: "eth_getBlockByNumber", params: ["latest", false] };
   let a: Block;
   let b: Block;
   // `minBlock`: a sell's buy's block (card evm-buy-hookdata-fee). W holds the token only from that block on, so the
   // lower head is asked again, every EVM_MIN_BLOCK_EVERY_MS, until it reaches it, and refused not_landed past
   // EVM_MIN_BLOCK_WAIT_MS: a sell asked right after its buy is quoted at a block that holds the buy, never read as
-  // fee_on_transfer at one before it
-  for (let waited = 0; ; waited += EVM_MIN_BLOCK_EVERY_MS) {
-    const heads = await Promise.all(rpcs.map((rpc) => ask(rpc, [call])));
+  // fee_on_transfer at one before it. One deadline on the monotonic clock covers the sleeps and the reads, each head
+  // read cut off at the time left, so a slow or rate-limited provider holds the quote no longer (review fold 1, M2)
+  const t0 = mono();
+  const left = () => EVM_MIN_BLOCK_WAIT_MS - (mono() - t0);
+  const late = () => refuse("not_landed", `the providers' heads did not reach block ${minBlock}, the buy's, within ${EVM_MIN_BLOCK_WAIT_MS} ms`);
+  for (;;) {
+    const read = Promise.all(rpcs.map((rpc) => ask(rpc, [call])));
+    const heads = minBlock === 0n ? await read : await within(read, left(), late);
     [a, b] = heads.map((h, i) => header(h[0], `provider ${i + 1}`)) as [Block, Block];
     if (a.number >= minBlock && b.number >= minBlock) break;
-    if (waited >= EVM_MIN_BLOCK_WAIT_MS) return refuse("not_landed", `the providers' heads ${a.number} and ${b.number} are still below block ${minBlock}, the buy's`);
+    if (left() <= 0) return late();
     await new Promise((r) => setTimeout(r, EVM_MIN_BLOCK_EVERY_MS));
   }
   if (a.number - b.number > maxLag || b.number - a.number > maxLag) return refuse("rpc_disagree", `the providers' heads ${a.number} and ${b.number} are more than ${maxLag} blocks apart`);
   const [lo, other, who] = a.number <= b.number ? [a, rpcs[1], "provider 2"] : [b, rpcs[0], "provider 1"];
-  if (nowMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse("stale_quote", `block ${lo.number} is more than 30 s old`);
+  // a sell's block's age on the device's clock after the wait for the buy's block, never at the quote's start (review
+  // fold 1, L2); a buy's agreed block waits for nothing, and is judged at the quote's clock
+  const atMs = minBlock === 0n ? nowMs : nowMs + Math.max(0, mono() - t0);
+  if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse("stale_quote", `block ${lo.number} is more than 30 s old`);
   const confirm = async () => {
     const back = header((await askAt(other, [{ method: "eth_getBlockByNumber", params: ["0x" + lo.number.toString(16), false] }]))[0], who);
     if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {
@@ -469,6 +479,17 @@ export const EVM_QUOTE_MAX_AGE_MS = 30_000;
  *  quote's block may be old, so a provider at most that far behind is waited for. */
 export const EVM_MIN_BLOCK_WAIT_MS = 30_000;
 const EVM_MIN_BLOCK_EVERY_MS = 500;
+/** The device's monotonic clock, ms: a wall clock set back or forward moves no wait's deadline. */
+const monotonic = (): number => performance.now();
+/** `p`, or `onLate()` once `ms` have passed first; the timer is cleared either way. */
+async function within<T>(p: Promise<T>, ms: number, onLate: () => never): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([p, new Promise<never>((_, reject) => (timer = setTimeout(() => { try { onLate(); } catch (e) { reject(e); } }, Math.max(0, ms))))]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // The held head (card evm-quote-head-watch): the last block both providers agreed on and confirmed by number (same hash
 // and time), kept between quotes so a tap runs only the read round. A quote reads at it only while it was read at most
@@ -1140,6 +1161,8 @@ async function routeSet(a: {
   watch?: EvmHeadWatch | undefined;
   /** the lowest block the set reads at (a sell's buy's block; agreedBlock waits for it); a held head (the buy's) has none */
   minBlock?: bigint;
+  /** tests only: the monotonic clock agreedBlock's wait runs on (performance.now) */
+  mono?: (() => number) | undefined;
   /** the caller's reads after the standard pools' (the buy's first-hop reads, in the order its recorded reads hold) */
   beforeFound?: () => void;
   /** the caller's refusals on the first round's answers, before any later round */
@@ -1203,7 +1226,7 @@ async function routeSet(a: {
   // the agreed block, picked once (the held head while fresh), after the token's scan has its logs; a new one is held
   // to the 30 s rule in agreedBlock, a held one in the watch's reuse bound on both clocks
   let agreed: ReturnType<typeof agreedBlock> | undefined;
-  const agreedOnce = () => (agreed ??= a.watch === undefined ? agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock) : a.watch.head(a.nowMs));
+  const agreedOnce = () => (agreed ??= a.watch === undefined ? agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono) : a.watch.head(a.nowMs));
   const agreedHead = () => agreedOnce().then((x) => x.block);
   const gate = gateOf(v.scan?.parallel ?? 1);
   let headOfScan: Promise<bigint> | undefined;
@@ -1588,8 +1611,9 @@ export const evmIsDeviceQuote = (q: unknown): q is EvmPoolBuyQuote => typeof q =
 // PoolManager for v4, the v3 pool from the quoter's factory().getPool for v3) and returns what that address received,
 // only where W's balance fell by the same; a probe that reverts, or answers another amount, is refused
 // (fee_on_transfer). minOut = floor(Q x (10000 - slippageBps) / 10000). The agreed block is never below `boughtBlock`,
-// the buy's (agreedBlock waits for both providers to reach it), and the quote's feeMax is the device's own cap on the
-// sender's fee at that block's base fee (card evm-buy-hookdata-fee). Only a quote made here builds a sell, within 30 s
+// the buy's (agreedBlock waits for both providers to reach it, at most EVM_MIN_BLOCK_WAIT_MS), and the quote's feeMax is
+// the device's own cap on the sender's fee at that block's base fee and chain fee (card evm-buy-hookdata-fee; the kit's
+// one fee rule, trade/evm/pool-fee.ts), with minOut less it at least the pool's MIN_DEPOSIT (below_minimum). Only a quote made here builds a sell, within 30 s
 // of its block (trade/evm/sell.ts), and W signs only a sell built from one.
 
 /** The user's own sell: the token W holds, the amount of it to sell, W, and their slippage. No route. `bought`
@@ -1602,8 +1626,11 @@ export type EvmPoolSellQuoteRequest = {
   amountIn: bigint;
   slippageBps: number;
   bought: EvmRoute;
-  /** (required) The block the buy that paid W the token landed in, as the device read its receipt: the quote reads at
-   *  this block or a later one, waiting for both providers to reach it (card evm-buy-hookdata-fee). */
+  /** (required) The block the buy that paid W the token landed in: the buy receipt's blockNumber, as the device read
+   *  the receipt itself. The quote reads at this block or a later one, waiting for both providers to reach it (card
+   *  evm-buy-hookdata-fee). A number, not a hash: the agreed block is confirmed by hash on both providers, and a buy a
+   *  reorg drops leaves W without the token, which the fee-on-transfer probe at that block refuses, so a hash would add
+   *  reads for no named risk (review fold 1, L6). */
   boughtBlock: bigint;
   /** W's signature of a sim sell at the agreed block's timestamp (the kit's evmPoolSignSimSell with W's key), needed
    *  only where a route through a hook the venue does not list would set the reference (card evm-quote-exec-sim). */
@@ -1625,7 +1652,8 @@ export type EvmPoolSellQuote = {
   /** What W signs: floor(Q x (10000 - slippageBps) / 10000). */
   readonly minOut: bigint;
   /** The most the sender may take from the sale: the device's own fee rule (trade/evm/sell-unpinned.ts
-   *  evmPoolSellFeeMax) at the agreed block's base fee; the kit's sell builder takes no fee cap above it. */
+   *  evmPoolSellFeeMax) at the agreed block's base fee and chain fee, read on both providers; the kit's sell builder
+   *  takes no fee cap above it, and minOut less it is at least the pool's MIN_DEPOSIT. */
   readonly feeMax: bigint;
 };
 
@@ -1660,9 +1688,9 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
   return evmPoolSellQuoteWith(asked, evmProviders(p, fetch), Date.now(), s === undefined ? undefined : evmJsonRpc(s.url, fetch, 16 << 20));
 }
 
-/** evmPoolSellQuote on the providers `rpcs` with the device's clock at `nowMs`, and the scan provider `scan`. Not in
- *  the index. */
-export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, venues?: EvmPoolVenueList): Promise<EvmPoolSellQuote> {
+/** evmPoolSellQuote on the providers `rpcs` with the device's clock at `nowMs`, and the scan provider `scan` (`venues`
+ *  and `mono`, the monotonic clock of the wait for the buy's block: tests only). Not in the index. */
+export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, venues?: EvmPoolVenueList, mono?: () => number): Promise<EvmPoolSellQuote> {
   if (typeof req !== "object" || req === null) return refuse("bad_request", "a request is an object");
   if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");
   const { chain, token, w, amountIn, slippageBps } = req;
@@ -1691,7 +1719,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const reads: Read[] = [];
   const factory = v.v3 !== undefined && router !== undefined ? reads.push({ to: v.v3, data: "0x" + SEL_FACTORY }) - 1 : -1;
   const exits = evmSellExits(chain, t, bought) ? bought : undefined;
-  const { block, out, filled } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock });
+  const { block, out, filled } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono });
   // a route through a hook the venue does not list, priced above the best route the sell builder takes, counts only
   // where W's own sell through it executes at that price (card evm-quote-exec-sim; review of edb4dbb, F4)
   const takes = best(filled.filter((r) => evmSellExits(chain, t, r.route)));
@@ -1721,7 +1749,11 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
     if (p === 0n || p >= 1n << 160n) return refuse("no_quote", "the v3 factory names no pool for the route's first hop");
     to = "0x" + p.toString(16).padStart(40, "0");
   }
-  const [probe] = await readBoth(rpcs, block.hash, [{ to: lower(w), data: "0x" + word(BigInt(t)) + word(BigInt(to)) + word(amountIn), override: { [lower(w)]: { code: EVM_SELL_PROBE_CODE } } }]);
+  // with the probe, the chain fee the sale pays beside its gas (pool-fee.ts evmPoolChainFeeReads), on both providers
+  const [probe, ...chainFees] = await readBoth(rpcs, block.hash, [
+    { to: lower(w), data: "0x" + word(BigInt(t)) + word(BigInt(to)) + word(amountIn), override: { [lower(w)]: { code: EVM_SELL_PROBE_CODE } } },
+    ...evmPoolChainFeeReads(chain, EVM_POOL_SELL_GAS),
+  ]);
   if (probe!.kind !== "out" || probe!.amountOut !== amountIn) {
     return refuse("fee_on_transfer", `W's transfer of ${amountIn} of the token to ${to} ${probe!.kind === "out" ? `delivers ${probe!.amountOut}` : "reverts"}`);
   }
@@ -1734,7 +1766,12 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   // the sender's fee cap, from the device's own rule at the agreed block's base fee, never a caller's (card
   // evm-buy-hookdata-fee)
   if (block.baseFeePerGas === null) return refuse("rpc_error", `block ${block.number} has no base fee: the sale's fee cannot be capped`);
-  const feeMax = evmPoolSellFeeMax(chain, block.baseFeePerGas);
+  if (chainFees.some((a) => a!.kind !== "out")) return refuse("rpc_error", "the chain's fee oracle did not answer: the sale's fee cannot be capped");
+  const chainFee = evmPoolChainFee(chain, EVM_POOL_TX_BYTES, chainFees.map((a) => (a as { amountOut: bigint }).amountOut));
+  const feeMax = evmPoolSellFeeMax(chain, block.baseFeePerGas, chainFee);
+  // the sale's proceeds less the sender's most go back into the pool as a deposit, which the pool refuses under its
+  // MIN_DEPOSIT: a sale that could land only as a revert is never quoted (review fold 1, L5)
+  if (minOut - feeMax < EVM_POOL_MIN_DEPOSIT) return refuse("below_minimum", `the sale's ${minOut} at least, less the fee's ${feeMax} at most, is under the pool's least deposit of ${EVM_POOL_MIN_DEPOSIT}`);
   const quote: EvmPoolSellQuote = Object.freeze({ chain, token: t, w: lower(w), amountIn, route, target, block: Object.freeze(block), amountOut: pick.amountOut, minOut, feeMax });
   QUOTED_SELLS.add(quote);
   return quote;

@@ -286,6 +286,31 @@ test("planted: the sender's fee cap is the device's own rule's at the agreed blo
   assert.deepEqual(await verdict(sell({ price: flat, baseFee: null })), { accepted: false, code: "rpc_error" });
 });
 
+test("L1 the sender's fee cap counts the chain fee read at the agreed block on both providers: Base's L1 fee bound and operator fee, Robinhood's L1 base fee", async () => {
+  // Base Sepolia at a 5,000,000 wei base fee: 2 x (1,000,000 x 6,000,000 + 4e13 + 1e13) = 1.12e14, up to 1.2e14
+  const op = { f1c7a58b: 4n * 10n ** 13n, "275aedd2": 10n ** 13n };
+  const b = await sellQuoteWith(req("base-sepolia"), [provider({ price: flat, chainFee: op }), provider({ price: flat, chainFee: op })], Date.now());
+  assert.equal(b.feeMax, 120_000_000_000_000n);
+  // Robinhood testnet at 3e10: 2 x (1,000,000 x 3e10 + 16 x 2,600 x 1e9) = 6.0083200e16, up to 6.0090e16
+  const arb = { f5d6ded7: 10n ** 9n };
+  const r = await sellQuoteWith(req("robinhood-testnet"), [provider({ price: flat, baseFee: 30_000_000_000n, chainFee: arb }), provider({ price: flat, baseFee: 30_000_000_000n, chainFee: arb })], Date.now());
+  assert.equal(r.feeMax, 60_090_000_000_000_000n);
+  // an oracle that reverts caps nothing; one provider's other answer is a disagreement
+  assert.deepEqual(await verdict(sell({ price: flat, chainFee: { f1c7a58b: null } }, "base-sepolia")), { accepted: false, code: "rpc_error" });
+  assert.deepEqual(await verdict(sell({ price: flat }, "base-sepolia", {}, { price: flat, chainFee: { "275aedd2": 1n } })), { accepted: false, code: "rpc_disagree" });
+});
+
+test("L5 a sell whose minOut less the fee rule's cap is under the pool's MIN_DEPOSIT is refused below_minimum: its deposit back would revert", async () => {
+  // every pool pays `x` for AMOUNT (in proportion), so minOut = floor(x x 9,900 / 10,000); Base Sepolia's cap is 2e13
+  const at = (x: bigint) => sell({ price: (p: Pool) => (p.amount * x) / AMOUNT }, "base-sepolia");
+  // minOut 1.2e14: exactly MIN_DEPOSIT 1e14 over the cap, quoted
+  const ok = await at(121_212_121_212_122n);
+  assert.equal(ok.minOut - ok.feeMax, 10n ** 14n);
+  // a wei under it, refused
+  assert.deepEqual(await verdict(at(121_212_121_212_121n)), { accepted: false, code: "below_minimum" });
+  assert.deepEqual(await verdict(at(10n ** 13n)), { accepted: false, code: "below_minimum" });
+});
+
 test("planted: a sell quote takes the buy's block (boughtBlock): none, 0, a negative or a number is refused bad_request", async () => {
   for (const boughtBlock of [undefined, 0n, -1n, 256]) {
     assert.deepEqual(await verdict(sell({ price: flat }, "base", { boughtBlock })), { accepted: false, code: "bad_request" }, String(boughtBlock));
