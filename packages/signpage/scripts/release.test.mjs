@@ -427,3 +427,9 @@ test("SIGN_HOST's build reads only SIGN_BUILD_INPUTS, the paths the verify gate 
     rmSync(built, { recursive: true, force: true });
   }
 });
+
+test("APP_HOST's part of a list is built by the terminal deploy's own build(), so the list and the deploy are one build", () => {
+  const src = readFileSync(join(PKG, "scripts", "release-list.mjs"), "utf8");
+  assert.match(src, /import \{ build as buildTerminal \} from "\.\.\/\.\.\/\.\.\/apps\/terminal\/scripts\/deploy\.mjs";/);
+  assert.doesNotMatch(src, /vite\.js/, "release-list.mjs runs no vite build of its own");
+});

@@ -11,12 +11,25 @@
 # With no args it runs every test target with the sandbox feature on. Output: the wasm sizes and sha256, then the
 # tests with --nocapture (the harness prints each wasm's size and sha256 as it loads it; each test its gas table).
 # A NEAR_SANDBOX_BIN_PATH is refused by the harness unless HARNESS_SANDBOX_BIN names the same path.
+# CI builds the four once for all its shards (.github/workflows/ci.yml, job vault-sandbox-build):
+#   contracts/vault/tests/harness/run.sh --build-only <dir>   builds them and copies each to <dir>/<name>.wasm, fetches
+#                                                             the two pinned ones into <dir>, and runs no test
+#   VAULT_WASM_DIR=<dir> contracts/vault/tests/harness/run.sh [args]   builds nothing: loads the four from <dir> (each
+#                                                             must be there) and runs the tests, cargo-near not needed
 set -euo pipefail
 V=$(cd "$(dirname "$0")/../.." && pwd)
 export PATH="$HOME/.cargo/bin:$PATH"
 TC=+1.96.0
+OUT=
+if [ "${1:-}" = --build-only ]; then
+  [ "$#" -eq 2 ] || { echo "usage: run.sh --build-only <dir>" >&2; exit 2; }
+  [ -z "${VAULT_WASM_DIR:-}" ] || { echo "run.sh: --build-only builds, and VAULT_WASM_DIR says not to" >&2; exit 2; }
+  mkdir -p "$2"; OUT=$(cd "$2" && pwd)
+  export BLINDFILL_WASM_CACHE="$OUT"
+  set --
+fi
 date -u +"start %Y-%m-%dT%H:%M:%SZ"
-rustc $TC --version; cargo $TC near --version; uname -srm
+rustc $TC --version; [ -n "${VAULT_WASM_DIR:-}" ] || cargo $TC near --version; uname -srm
 
 # The target dir cargo itself resolves (CARGO_TARGET_DIR, .cargo/config, or <crate>/target): cargo-near writes there,
 # and the wasm is removed before each build, so a test never loads a stale file.
@@ -40,12 +53,31 @@ build() { # <crate dir> <wasm name> [more cargo-near args]
 echo "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-unset} NEAR_SANDBOX_BIN_PATH=${NEAR_SANDBOX_BIN_PATH:-unset} HARNESS_SANDBOX_BIN=${HARNESS_SANDBOX_BIN:-unset}"
 # VT-S17's test build first (tests/s17.rs; its on_payout runs out of gas), copied aside, so the release build below is
 # the last one at blindfill_vault.wasm and VAULT_WASM names it
-OOG_BUILT=$(build "$V" blindfill_vault --features test-on-payout-out-of-gas)
-VAULT_OOG_WASM="$(dirname "$OOG_BUILT")/blindfill_vault_out_of_gas.wasm"
-cp "$OOG_BUILT" "$VAULT_OOG_WASM"
-VAULT_WASM=$(build "$V" blindfill_vault)
-MOCK_TOKEN_WASM=$(build "$V/tests/mock-token" blindfill_mock_token)
-PROBE_WASM=$(build "$V/tests/harness/probe" blindfill_harness_probe)
+# a wasm built by --build-only, by its name in VAULT_WASM_DIR
+prebuilt() {
+  local w="$VAULT_WASM_DIR/$1.wasm"
+  [ -s "$w" ] || { echo "run.sh: no $w (VAULT_WASM_DIR holds what run.sh --build-only built)" >&2; exit 1; }
+  echo "$w $(wc -c <"$w" | tr -d ' ') B sha256 $(shasum -a 256 "$w" | cut -d' ' -f1)" >&2
+  echo "$w"
+}
+if [ -n "${VAULT_WASM_DIR:-}" ]; then
+  VAULT_WASM_DIR=$(cd "$VAULT_WASM_DIR" && pwd)
+  export BLINDFILL_WASM_CACHE="${BLINDFILL_WASM_CACHE:-$VAULT_WASM_DIR}" # the pinned two, as --build-only fetched them
+  VAULT_OOG_WASM=$(prebuilt blindfill_vault_out_of_gas)
+  VAULT_WASM=$(prebuilt blindfill_vault)
+  MOCK_TOKEN_WASM=$(prebuilt blindfill_mock_token)
+  PROBE_WASM=$(prebuilt blindfill_harness_probe)
+else
+  OOG_BUILT=$(build "$V" blindfill_vault --features test-on-payout-out-of-gas)
+  VAULT_OOG_WASM="$(dirname "$OOG_BUILT")/blindfill_vault_out_of_gas.wasm"
+  cp "$OOG_BUILT" "$VAULT_OOG_WASM"
+  VAULT_WASM=$(build "$V" blindfill_vault)
+  MOCK_TOKEN_WASM=$(build "$V/tests/mock-token" blindfill_mock_token)
+  PROBE_WASM=$(build "$V/tests/harness/probe" blindfill_harness_probe)
+fi
+if [ -n "$OUT" ]; then
+  for w in "$VAULT_OOG_WASM" "$VAULT_WASM" "$MOCK_TOKEN_WASM" "$PROBE_WASM"; do cp "$w" "$OUT/"; done
+fi
 export VAULT_WASM VAULT_OOG_WASM MOCK_TOKEN_WASM PROBE_WASM
 # the real USDC and intents.near at DF: mainnet's code, pinned in tests/fixtures/real-wasm.json, read by view_code on
 # two mainnet RPCs (or the cache, when its sha256 is the pin); the harness refuses any other bytes again
@@ -57,6 +89,8 @@ while IFS='=' read -r k v; do
   esac
 done <<<"$PINNED"
 [ -n "${USDC_WASM:-}" ] && [ -n "${INTENTS_WASM:-}" ] || { echo "run.sh: fetch-wasm.mjs named no USDC_WASM or INTENTS_WASM" >&2; exit 1; }
+
+if [ -n "$OUT" ]; then ls -l "$OUT"; date -u +"end %Y-%m-%dT%H:%M:%SZ"; exit 0; fi
 
 cd "$V"
 if [ "$#" -eq 0 ]; then set -- --tests; fi

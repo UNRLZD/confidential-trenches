@@ -12,7 +12,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import * as kit from "../src/index.ts";
 import { evmPoolVenues, EvmPoolBuyError, evmPoolRouteData, type EvmPoolChain, type EvmPoolVenue, type EvmRoute, type EvmV4Hop } from "../src/index.ts";
 // the checks through the unpinned builder and signer; the pinned ones (M370) at the end, with a pinned list of the test's
-import { evmPoolBuildUnpinned as evmPoolBuild, evmPoolSignBuyUnpinned as evmPoolSignBuy, pinnedBuild, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
+import { evmPoolBuildUnpinned as evmPoolBuild, evmPoolSignBuyUnpinned as evmPoolSignBuy, pinnedBuild, pinnedBuildQuoted, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
 
 const CAST = JSON.parse(readFileSync(new URL("./evm-pool-buy-hostile.cast.json", import.meta.url), "utf8"));
 const PROOFS = JSON.parse(readFileSync(new URL("../../../contracts/pool-evm/test/fixtures/buy-proofs.json", import.meta.url), "utf8"));
@@ -135,8 +135,10 @@ test("F2 no input of W's signer takes a digest: an EIP-7702 delegation of W to t
   assert.equal(code(() => evmPoolSignBuy(W_KEY, "base", POOL, built, any)), "bad_amount");
   // the kit's public entry exports no digest maker and no signer but the one
   assert.equal("evmPoolBuyDigest" in kit, false);
-  // evmPoolGas (trade/evm/pool-fee.ts) takes only a tree depth and gives the gas of one release: no key and no digest
-  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolBuildSell", "evmPoolGas", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
+  // evmPoolGas (trade/evm/pool-fee.ts) takes only a tree depth and gives the gas of one release: no key and no digest;
+  // evmPoolBuyQuote (checks/evm/quote.ts) reads quotes and evmPoolBuildQuoted builds from one: no key and no digest;
+  // no builder takes its caller's minOut (the review of cefe7a0)
+  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuildQuoted", "evmPoolBuildSell", "evmPoolBuyQuote", "evmPoolGas", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
 });
 
 test("F2b W signs only the buy object the builder returned: a copy, an edit or a hand-made buy is refused", () => {
@@ -281,15 +283,17 @@ const PINNED = Object.freeze({
   robinhood: pin(R, { pool: POOL, adapters: Object.freeze({ v3: A_V3 }) }),
 });
 
-test("M370 today no pool or adapter is pinned: the kit's evmPoolBuild and evmPoolSignBuy refuse not_deployed", () => {
+test("M370 today no pool or adapter is pinned: the pinned builder and signer the kit's refuse not_deployed", () => {
   for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
     const v = evmPoolVenues()[chain];
     assert.equal(v.pool, undefined);
     assert.equal(v.adapters, undefined);
-    assert.equal(code(() => kit.evmPoolBuild(chain, ADAPTER, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
-    assert.equal(code(() => kit.evmPoolBuild(chain, ADAPTER, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
+    assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, ADAPTER, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
+    assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, ADAPTER, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
     const built = evmPoolBuild(chain, ADAPTER, v4(ZERO, hop(X)), 1n, X);
-    assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, chain, POOL, built, PROOF)), "not_deployed", chain);
+    assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, chain, POOL, built, PROOF)), "not_deployed", chain);
+    // the kit's signer takes only a buy evmPoolBuildQuoted returned
+    assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, chain, POOL, built, PROOF)), "not_built", chain);
   }
 });
 
@@ -307,6 +311,17 @@ test("M370 a pinned build takes only the chain's adapter for the route's venue",
   const route = { get venue() { return reads++ === 0 ? "uniswap-v4" : "uniswap-v3"; }, currencyIn: ZERO, hops: [hop(X)] } as unknown as EvmRoute;
   assert.equal(code(() => pinnedBuild(PINNED, "base", A_V4, route, 1n, X)), "built");
   assert.equal(reads, 1);
+});
+
+test("Q1 the quoted pinned build takes a v4 route through a middle that is not listed; the plain one and any v3 route do not", () => {
+  // the route evmPoolBuildQuoted builds from a device quote (checks/evm/quote.ts): its middles need not be listed
+  const route = v4(ZERO, hop(Z), hop(X));
+  const built = pinnedBuildQuoted(PINNED, "base", A_V4, route, 1n, X);
+  assert.equal(built.data, evmPoolBuild("base", A_V4, route, 1n, X, true).data);
+  assert.equal(code(() => pinnedBuild(PINNED, "base", A_V4, route, 1n, X)), "middle_not_listed");
+  assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", A_V3, v3([B.weth, Z, X]), 1n, X)), "middle_not_listed");
+  // the pins still hold
+  assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", ADAPTER, route, 1n, X)), "not_pinned");
 });
 
 test("M370 a pinned signature goes only to the chain's pool, of a buy through a pinned adapter", () => {
@@ -346,10 +361,10 @@ test("M370 a polluted Object.prototype names no adapter and no pool: every buy b
   polluted(() => {
     for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
       const v = evmPoolVenues()[chain];
-      assert.equal(code(() => kit.evmPoolBuild(chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
-      assert.equal(code(() => kit.evmPoolBuild(chain, BAD_PIN, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, BAD_PIN, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
       const built = evmPoolBuild(chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X);
-      assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, chain, BAD_PIN, built, PROOF)), "not_deployed", chain);
+      assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, chain, BAD_PIN, built, PROOF)), "not_deployed", chain);
       assert.equal(code(() => pinnedBuild(noPins, chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
       assert.equal(code(() => pinnedBuild(noPins, chain, BAD_PIN, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
       assert.equal(code(() => pinnedSignBuy(noPins, W_KEY, chain, BAD_PIN, built, PROOF)), "not_deployed", chain);
