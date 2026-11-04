@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
-import { CURVE_TOKEN, fakeChain, KNOWN, MAG, open, POOL_CURVE, POOL_MAG, REC, toLog } from "../../../test/evm-swaps/robinhood.ts";
+import { CURVE_TOKEN, fakeChain, KNOWN, MAG, open, POOL_CURVE, POOL_MAG, REC, toLog, URLS } from "../../../test/evm-swaps/robinhood.ts";
 import { decodeRef, decodeSwap, ROBINHOOD_VENUES, TOPIC, VENUES, type Pool } from "./swaps.ts";
 
 function rebuild(pool: Pool, upTo: number) {
@@ -319,4 +319,56 @@ test("card helper-chart-fresh: GeckoTerminal history before a time held past its
   assert.equal(cold.status, 200, cold.body);
   assert.equal(JSON.parse(cold.body).src, "geckoterminal", "a cold token's first read finds its calls");
   s.stop();
+});
+
+test("card helper-chart-fresh: Robinhood as read live 2026-11-04 14:36-14:58Z (one history provider timing out, the third's public window ~850 blocks, the chain's own RPC logging blockTimestamp 0x0): a token's discovery and tape answer 200, its swaps timed by the block times two providers give alike, the chain's own RPC's from its block headers", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  chain.st.faults.set("https://a.test", { down: true }); // robinhood.daybreak-rpc.network: 1-15 s a read, past TIMEOUT_MS
+  chain.st.faults.set("https://c.test", { window: 850 }); // api.blockvectra.com: -32011 state_window
+  chain.st.faults.set("https://d.test", { zeroTime: true }); // rpc.mainnet.chain.robinhood.com
+  const s = open(chain, undefined, { pools: new Map(), rpcs: [...URLS, "https://d.test"], headerTimed: new Set(["https://d.test"]) });
+  const r = await s.trades(CURVE_TOKEN, 50);
+  s.stop();
+  assert.equal(r.status, 200, r.body);
+  const whole = rebuild(POOL_CURVE, REC.lastHead);
+  const inWindow = whole.tape(50).filter((t) => t.block > REC.lastHead - VENUES.robinhood.cold);
+  assert.ok(inWindow.length > 0);
+  assert.deepEqual(JSON.parse(r.body).trades.map((t: { tx: string; t_ms: number }) => [t.tx, t.t_ms]), inWindow.map((t) => [t.tx, t.t_ms]), "every trade, at its block's time");
+
+  // a header-timed provider whose header disagrees with the other's logged time is no agreement
+  const skew = fakeChain();
+  skew.st.head = REC.lastHead;
+  skew.st.faults.set("https://a.test", { down: true });
+  skew.st.faults.set("https://b.test", { skewTime: true });
+  skew.st.faults.set("https://c.test", { window: 850 });
+  skew.st.faults.set("https://d.test", { zeroTime: true });
+  const k = open(skew, undefined, { pools: new Map(), rpcs: [...URLS, "https://d.test"], headerTimed: new Set(["https://d.test"]) });
+  const rk = await k.trades(CURVE_TOKEN, 50);
+  k.stop();
+  assert.equal(rk.status, 503, "times one provider alone gives: nothing served");
+});
+
+test("card helper-chart-fresh: a quiet token's discovery walks the whole cold window with at most INFLIGHT_MAX requests out to any provider at once (2026-11-04 14:49Z: 246 at once met 429, -32005, drpc's code 30 and timeouts)", async () => {
+  const { INFLIGHT_MAX } = await import("./swaps.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead + 5_000;
+  const out = new Map<string, number>();
+  let peak = 0;
+  const fetch = async (url: string, init: RequestInit) => {
+    out.set(url, (out.get(url) ?? 0) + 1);
+    peak = Math.max(peak, out.get(url)!);
+    try {
+      await new Promise((r) => setTimeout(r, 1));
+      return await chain.fetch(url, init);
+    } finally {
+      out.set(url, out.get(url)! - 1);
+    }
+  };
+  const s = open(chain, undefined, { pools: new Map(), fetch: fetch as never });
+  const r = await s.trades(CURVE_TOKEN, 50);
+  s.stop();
+  assert.equal(r.status, 200, r.body);
+  assert.ok(chain.st.spans.length > 2 * VENUES.robinhood.step / VENUES.robinhood.span, "the walk went past one step");
+  assert.ok(peak <= INFLIGHT_MAX, `${peak} requests out to one provider at once`);
 });

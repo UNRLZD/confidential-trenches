@@ -32,8 +32,9 @@ export function timeAt(n: number): number {
 
 export const URLS = ["https://a.test", "https://b.test", "https://c.test"];
 /** `zeroTime`: logs `blockTimestamp` 0x0, as rpc.mainnet.chain.robinhood.com does; `skewTime`: a second later;
- *  `backTime`: an hour earlier for the logs of every other block, so time goes back. */
-type Fault = { zeroTime?: boolean; skewTime?: boolean; backTime?: boolean; down?: boolean };
+ *  `backTime`: an hour earlier for the logs of every other block, so time goes back; `window`: logs only of the newest
+ *  this many blocks, older ones refused -32011, as api.blockvectra.com's public endpoint (about 850, 2026-11-04 14:38Z). */
+type Fault = { zeroTime?: boolean; skewTime?: boolean; backTime?: boolean; down?: boolean; window?: number };
 export function fakeChain() {
   const st = { head: REC.firstHead, calls: new Map<string, number>(), faults: new Map<string, Fault>(), spans: [] as number[] };
   const sources = [
@@ -58,12 +59,16 @@ export function fakeChain() {
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
     const out = reqs.map((r) => {
       const ok = (result: unknown) => ({ jsonrpc: "2.0", id: r.id, result });
-      if (r.method === "eth_getBlockByNumber") return ok({ number: `0x${st.head.toString(16)}`, timestamp: `0x${timeAt(st.head).toString(16)}` });
+      if (r.method === "eth_getBlockByNumber") {
+        const n = r.params[0] === "latest" ? st.head : parseInt(r.params[0] as string, 16);
+        return ok(n > st.head ? null : { number: `0x${n.toString(16)}`, timestamp: `0x${timeAt(n).toString(16)}` });
+      }
       if (r.method === "eth_getLogs") {
         const q = r.params[0] as { address: string; topics: (string | string[])[]; fromBlock: string; toBlock: string };
         const [from, to] = [parseInt(q.fromBlock, 16), parseInt(q.toBlock, 16)];
         st.spans.push(to - from + 1);
         if (to > st.head || to - from + 1 > 100) return { jsonrpc: "2.0", id: r.id, error: { code: -32602, message: "eth_getLogs block range exceeds 100 blocks" } };
+        if (f.window !== undefined && from < st.head - f.window) return { jsonrpc: "2.0", id: r.id, error: { code: -32011, message: "block reference is outside the public history window" } };
         if (q.topics[0] === TOPIC.transfer) return ok([]);
         const src = sources.find((s) => s.addr === q.address && (s.t1 === null || s.t1 === q.topics[1]));
         if (src === undefined) return ok([]);

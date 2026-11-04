@@ -197,12 +197,29 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // batches); each of the three fills a log's `blockTimestamp`. rpc.mainnet.chain.robinhood.com answers 5,000 blocks but
   // logs `blockTimestamp` 0x0 and refused a fourth quick read with 429; robinhood-rpc.publicnode.com refused every
   // `eth_getLogs` ("Archive requests require a personal token"); blockreq.com's public endpoint took 21 s.
-  robinhood: ["https://robinhood.daybreak-rpc.network", "https://robinhood.drpc.org", "https://api.blockvectra.com/v1/robinhood_mainnet/public"],
+  //
+  // Read again 2026-11-04 14:36-14:58Z (card helper-chart-fresh), when the helper's Robinhood candles and tape answered
+  // 503: robinhood.daybreak-rpc.network took 0.8-15 s for one 100-block `eth_getLogs` (5 of 8 past the 10 s a read
+  // was given) and 1-15 s for eth_blockNumber; api.blockvectra.com refuses any block older than about 850 (-32011
+  // "block reference is outside the public history window", reason state_window, retryable false) and 429s bursts, so
+  // it serves no discovery and no first read; robinhood.drpc.org answered 100-block reads in 0.5-0.8 s (one run of
+  // -32601 "method not available" at 14:36:28Z). With two providers needed alike, one slow provider left no pair:
+  // 503. rpc.mainnet.chain.robinhood.com, the chain's own, answered 100-block reads 11,000 blocks back in 0.4-1.3 s
+  // and a batch of 10 in 2.0 s, its logs' `blockTimestamp` still 0x0 and its block headers' `timestamp` set: it is
+  // header-timed (HEADER_TIMED). Ordered by those reads, the fastest first.
+  robinhood: ["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network", "https://api.blockvectra.com/v1/robinhood_mainnet/public"],
 };
+
+/** Providers whose logs carry no block time on a chain timed by them (Robinhood): their logs are timed by their own
+ *  `eth_getBlockByNumber` of each log's block, and count for a swap's time only where another provider logged the same. */
+export const HEADER_TIMED: ReadonlySet<string> = new Set(["https://rpc.mainnet.chain.robinhood.com"]);
 
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
  *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ). */
 const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://base.gateway.tenderly.co": 4, "https://api.blockvectra.com/v1/robinhood_mainnet/public": 1 };
+
+/** Requests out to one provider at once (swaps.ts batchTo). */
+export const INFLIGHT_MAX = 4;
 
 /** Blocks read again every tick, and so the blocks an agreed head must be ahead of a settled block. Base's sequencer can
  *  reorg a few unsafe blocks; its `safe` head trails by about 40 s (proofs/evm-safe-lag, 20 blocks), so 10 re-read blocks
@@ -414,10 +431,11 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
 type Call = { method: string; params: unknown[] };
 type Reply = { ok: true; result: unknown } | { ok: false; wait: number };
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
+  const headerTimed = deps.headerTimed ?? HEADER_TIMED;
   const V = VENUES[chain];
   // Base's fixed clock times its blocks; a chain with none (Robinhood) is timed by each log's own block time, which two
   // providers must give alike
@@ -436,8 +454,26 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const max = BATCH_SIZE[url] ?? 10;
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
-    const got = await Promise.all(parts.map((part) => one(url, part)));
+    const got = await Promise.all(parts.map((part) => slot(url, () => one(url, part))));
     return got.some((g) => g === null) ? null : got.flat() as Reply[];
+  }
+
+  // at most INFLIGHT_MAX requests out to a provider at once, the rest queued in order: a first read's walk sent 246 at
+  // once to the Robinhood providers, which answered 429, -32005, drpc's code 30 and timeouts that one at a time they
+  // did not (card helper-chart-fresh, 2026-11-04 14:49Z)
+  const inflight = new Map<string, { n: number; queue: (() => void)[] }>();
+  async function slot<T>(url: string, run: () => Promise<T>): Promise<T> {
+    const q = inflight.get(url) ?? { n: 0, queue: [] };
+    inflight.set(url, q);
+    if (q.n >= INFLIGHT_MAX) await new Promise<void>((go) => q.queue.push(go));
+    else q.n++;
+    try {
+      return await run();
+    } finally {
+      const next = q.queue.shift();
+      if (next !== undefined) next();
+      else q.n--;
+    }
   }
 
   /** One JSON-RPC batch (at most the provider's batch size) to a provider. */
@@ -549,10 +585,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       filters.length,
       async (u, idx) => {
         const r = await batchTo(u, idx.map((i) => ({ method: "eth_getLogs", params: [filters[i]] })));
-        return idx.map((_, k) => (r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null));
+        const got = idx.map((_, k) => (r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null));
+        return clock === null && headerTimed.has(u) ? timedByHeaders(u, got) : got;
       },
       (a, b) => sameLogs(a, b, clock === null),
     );
+  }
+
+  /** A header-timed provider's logs (it logs no block time) timed by its own headers of their blocks; an answer with a
+   *  block it gives no time for is no answer. Its times count only where another provider logged the same (agreedLogs'
+   *  sameLogs with times), so a header for the wrong block or a 0 is no agreement. */
+  async function timedByHeaders(u: string, got: (Log[] | null)[]): Promise<(Log[] | null)[]> {
+    const blocks = [...new Set(got.flatMap((g) => (g ?? []).map((l) => l.block)))];
+    if (blocks.length === 0) return got;
+    const r = await batchTo(u, blocks.map((n) => ({ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] })));
+    const times = new Map<number, number>();
+    blocks.forEach((n, i) => {
+      const b = r?.[i]?.ok ? obj((r[i] as { result: unknown }).result) : {};
+      const t = hexInt(b.timestamp);
+      if (t !== null) times.set(n, t); // checked as any logged time is: alike with another provider's, never 0 (apply)
+    });
+    return got.map((g) => (g === null || g.some((l) => !times.has(l.block)) ? null : g.map((l) => ({ ...l, t: times.get(l.block)! }))));
   }
 
   /** One filter's logs over blocks `from` to `to`, read in spans the providers take: null when any span is not agreed. */
