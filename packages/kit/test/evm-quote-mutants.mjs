@@ -2,14 +2,19 @@
 // src/trade/evm/buy.ts, and the builder's admission of a device-quoted route's v4 middles in
 // src/trade/evm/buy-unpinned.ts), one at a time, and runs the test named for it in test/evm-quote.test.ts or
 // test/evm-quote-attacks.test.ts: each named test passes on the code as it is and fails on every mutant. The mutants are
-// made in a copy of the kit's sources and tests in a fresh temporary folder inside the kit (so the copy resolves the
+// made in copies of the kit's sources and tests in fresh temporary folders inside the kit (so each copy resolves the
 // same installed modules), removed at the end; the tree's own files are never changed. Exits 1 when a named test passes on its
 // mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly once.
+// The named tests are first run on the code as it is, all of one test file in one run; then the mutants, JOBS at once,
+// each in its own copy (each run is mostly a process's start: about 1 s each, 279 one after another took 266 s and the
+// named tests one by one 140 s on GitHub's runner, readme-fresh-run at 47109a7). Each line prints its time.
 //   node packages/kit/test/evm-quote-mutants.mjs     (a heavy job: run it on a machine with spare cores)
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const KIT = fileURLToPath(new URL("..", import.meta.url));
 const QUOTE = "src/checks/evm/quote.ts";
@@ -376,51 +381,87 @@ export const MUTANTS = [
   [SELLU, "      word(BigInt(chainId)),", "      word(0n),", S, "planted: the sim signer"],
 ];
 
+const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
+const run$ = promisify(execFile);
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`
 let lastFail = "";
-function run(dir, file, name) {
-  const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, file];
+async function run(dir, file, name) {
   try {
-    const out = execFileSync("node", args, { cwd: dir, stdio: "pipe", encoding: "utf8" });
-    return /^# pass ([1-9]\d*)$/m.test(out) ? "pass" : "none";
+    const { stdout } = await run$("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 26 });
+    return /^# pass ([1-9]\d*)$/m.test(stdout) ? "pass" : "none";
   } catch (e) {
     lastFail = `${e.stdout ?? ""}${e.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
     return "fail";
   }
 }
+// each name's "pass", "fail" or "none" on the code as it is: every named test of `file` in one run, each top-level
+// result read from the TAP lines (a name passes when some test starts with it and none of those fails)
+function runAll(dir, file, names) {
+  let out = "";
+  try {
+    out = execFileSync("node", ["--test", "--test-reporter=tap", ...names.flatMap((n) => ["--test-name-pattern", esc(n)]), file], { cwd: dir, stdio: "pipe", encoding: "utf8", maxBuffer: 1 << 26 });
+  } catch (e) {
+    out = `${e.stdout ?? ""}`;
+  }
+  const results = [...out.matchAll(/^(not )?ok \d+ - (.*?)(?: # .*)?$/gm)].map((m) => ({ ok: m[1] === undefined, name: m[2].replace(/\\#/g, "#").replace(/\\\\/g, "\\") }));
+  return new Map(names.map((n) => {
+    const of = results.filter((r) => r.name.startsWith(n));
+    return [n, of.length === 0 ? "none" : of.every((r) => r.ok) ? "pass" : "fail"];
+  }));
+}
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  // the copy: the kit's sources, tests and package file, with its installed modules linked
-  const dir = mkdtempSync(join(KIT, ".evm-quote-mutants-"));
+  const JOBS = Math.max(1, Math.min(4, availableParallelism()));
+  const t0 = performance.now();
+  const s = (t) => `${((performance.now() - t) / 1000).toFixed(1)} s`;
+  // the copies: the kit's sources, tests and package file, with its installed modules linked
+  const dirs = [];
   let bad = 0;
   try {
-    for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
-    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
-    for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
-      const r = run(dir, file, t);
-      if (r !== "pass") {
-        console.log(`FAIL "${t}" in ${file} ${r === "none" ? "names no test" : `fails on the code as it is:\n${lastFail}`}`);
-        bad++;
+    for (let w = 0; w < JOBS; w++) {
+      const dir = mkdtempSync(join(KIT, ".evm-quote-mutants-"));
+      dirs.push(dir);
+      for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
+    }
+    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
+    const byFile = new Map();
+    for (const m of MUTANTS) byFile.set(m[3], [...new Set([...(byFile.get(m[3]) ?? []), m[4]])]);
+    for (const [file, names] of byFile) {
+      const t = performance.now();
+      for (const [n, r] of runAll(dirs[0], file, names)) {
+        if (r !== "pass") {
+          console.log(`FAIL "${n}" in ${file} ${r === "none" ? "names no test" : "fails on the code as it is"}`);
+          bad++;
+        }
       }
+      console.log(`the ${names.length} named tests of ${file} on the code as it is: ${s(t)}`);
     }
     if (bad === 0) {
-      MUTANTS.forEach(([file, find, repl, tf, t], i) => {
-        const s = src.get(file);
-        if (s.split(find).length !== 2) {
-          console.log(`FAIL mutant ${i + 1}: its text is not in ${file} exactly once`);
-          bad++;
-          return;
+      let next = 0;
+      const worker = async (dir) => {
+        for (let i = next++; i < MUTANTS.length; i = next++) {
+          const [file, find, repl, tf, t] = MUTANTS[i];
+          const sf = src.get(file);
+          if (sf.split(find).length !== 2) {
+            console.log(`FAIL mutant ${i + 1}: its text is not in ${file} exactly once`);
+            bad++;
+            continue;
+          }
+          const tm = performance.now();
+          writeFileSync(join(dir, file), sf.replace(find, repl));
+          const r = await run(dir, tf, t);
+          writeFileSync(join(dir, file), sf);
+          console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"} (${s(tm)})`);
+          if (r !== "fail") bad++;
         }
-        writeFileSync(join(dir, file), s.replace(find, repl));
-        const r = run(dir, tf, t);
-        writeFileSync(join(dir, file), s);
-        console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
-        if (r !== "fail") bad++;
-      });
+      };
+      const tm = performance.now();
+      await Promise.all(dirs.map((d) => worker(d)));
+      console.log(`${MUTANTS.length} mutants, ${JOBS} at once: ${s(tm)}`);
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
-  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test` : `${bad} problem(s)`);
+  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test (${s(t0)})` : `${bad} problem(s)`);
   process.exit(bad === 0 ? 0 : 1);
 }
