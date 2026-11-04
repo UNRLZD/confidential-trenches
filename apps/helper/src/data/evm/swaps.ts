@@ -253,6 +253,9 @@ export const INFLIGHT_MAX = 4;
  *  one to wait for while another has room.] A provider that holds is passed over at once: the pace keeps the reads
  *  under each provider's limit, so the short holds HOLD_WAIT_S waited out (cd22743) no longer start. */
 export const PACE_WAIT_MAX_MS = 1_500;
+/** The longest a read waits for its provider's pace when no other provider answered it (agreed's last round), so it
+ *  never fails on the pace alone. [design: 5 s, a third of the 15 s a cold tape is given, within TIMEOUT_MS.] */
+export const PACE_PATIENT_MS = 5_000;
 
 /** Blocks read again every tick, and so the blocks an agreed head must be ahead of a settled block. Base's sequencer can
  *  reorg a few unsafe blocks; its `safe` head trails by about 40 s (proofs/evm-safe-lag, 20 blocks), so 10 re-read blocks
@@ -282,6 +285,9 @@ export const LAG_MAX = VENUES.base.lagMax;
 export const IDLE_MS = 60_000;
 /** The tick period. */
 export const TICK_MS = 1_000;
+/** An agreed head read within this is every reader's (agreedHead). [design: a tick's period, so a tick reads at most one
+ *  head of its own and a dozen first reads at once read one.] */
+export const HEAD_SHARE_MS = TICK_MS;
 /** A book not read for this long answers 503 rather than a stale chart. */
 export const STALE_MS = 60_000;
 export const OPEN_MAX = 40;
@@ -545,7 +551,7 @@ export function traderLeg(s: Pick<Swap, "side" | "amt">, take: bigint | undefine
 type Call = { method: string; params: unknown[] };
 type Reply = { ok: true; result: unknown } | { ok: false; wait: number };
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -565,11 +571,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const holds = deps.holds ?? providerHolds(now);
 
   /** One JSON-RPC batch to a provider: each call's reply, or the wait a refusal names; null when it failed. */
-  async function batchTo(url: string, calls: Call[]): Promise<Reply[] | null> {
+  async function batchTo(url: string, calls: Call[], patient = false): Promise<Reply[] | null> {
     const max = BATCH_SIZE[url] ?? 10;
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
-    const got = await Promise.all(parts.map((part) => slot(url, part.length, () => one(url, part))));
+    const got = await Promise.all(parts.map((part) => slot(url, part.length, () => one(url, part, patient))));
     return got.some((g) => g === null) ? null : got.flat() as Reply[];
   }
 
@@ -598,12 +604,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  batch queued behind INFLIGHT_MAX before the provider refused sends nothing while it holds and fails as a refused
    *  read does, so the caller asks the next provider (card helper-rpc-hold-queued: 2026-11-04 18:55Z on the helper box,
    *  seven batches queued before the chain's own Robinhood RPC's 429 were sent within 190 ms of it). */
-  async function one(url: string, part: Call[]): Promise<Reply[] | null> {
+  /** Reads each provider passed at its pace's wait, by which agreed's last round knows whom to ask again. */
+  const paced = new Map<string, number>();
+  async function one(url: string, part: Call[], patient = false): Promise<Reply[] | null> {
     if (holds.heldFor(url) > 0) return null;
     // the provider's pace, which every path of the helper draws from (limits.ts providerHolds take): a background read
-    // waits for its units, the hold read again after each wait; past PACE_WAIT_MAX_MS of waits it is another provider's
+    // waits for its units, the hold read again after each wait; past PACE_WAIT_MAX_MS of waits it is another provider's,
+    // past PACE_PATIENT_MS when no other provider answered it (agreed's last round)
     for (let w = holds.take(url, part.length, true), slept = 0; w > 0; w = holds.take(url, part.length, true)) {
-      if (slept + w > PACE_WAIT_MAX_MS) return null;
+      if (slept + w > (patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS)) return (paced.set(url, (paced.get(url) ?? 0) + 1), null);
       await new Promise((go) => setTimeout(go, w));
       slept += w;
       if (holds.heldFor(url) > 0) return null;
@@ -679,12 +688,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** The block both providers have, and its time: the newest block of the two heads (the second highest of three when
    *  the first two differ by more than LAG_MAX), with the providers that have it. Null when it cannot be read. */
-  async function agreedHead(): Promise<{ n: number; t: number; with: string[] } | null> {
+  // one agreed head per HEAD_SHARE_MS, shared by every first read and discovery of the chain that asks within it (card
+  // helper-robinhood-capacity fold 3: a dozen cold tapes read a dozen heads, two or three providers each); a tick
+  // (`fresh`) always reads its own, the newest, and leaves it for them
+  let headShared: { at: number; p: Promise<{ n: number; t: number; with: string[] } | null> } | null = null;
+  function agreedHead(fresh = false): Promise<{ n: number; t: number; with: string[] } | null> {
+    if (!fresh && headShared !== null && now() - headShared.at < HEAD_SHARE_MS) return headShared.p;
+    const p = agreedHeadNow();
+    const mine = { at: now(), p };
+    headShared = mine;
+    // a head not read is not kept: the next asks again
+    void p.then((h) => {
+      if (h === null && headShared === mine) headShared = null;
+    });
+    return p;
+  }
+  async function agreedHeadNow(): Promise<{ n: number; t: number; with: string[] } | null> {
     const heads = new Map<string, { n: number; t: number }>();
-    const read = async (urls: string[]) => {
+    const read = async (urls: string[], patient = false) => {
       await Promise.all(
         urls.map(async (u) => {
-          const r = await batchTo(u, [{ method: "eth_getBlockByNumber", params: ["latest", false] }]);
+          const r = await batchTo(u, [{ method: "eth_getBlockByNumber", params: ["latest", false] }], patient);
           const b = r?.[0]?.ok ? obj(r[0].result) : {};
           const [n, t] = [hexInt(b.number), hexInt(b.timestamp)];
           if (n !== null && t !== null) heads.set(u, { n, t });
@@ -695,6 +719,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     await read(ok.slice(0, 2));
     const first = [...heads.values()];
     if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await read(ok.slice(2, 3));
+    // no two heads within the pace's wait: the providers not read yet, and those that passed, read patiently
+    if (heads.size < 2) await read(ok.filter((u) => !heads.has(u)).slice(0, 2), true);
     const sorted = [...heads].sort((a, b) => b[1].n - a[1].n);
     if (sorted.length < 2) return null;
     const agreed = sorted[1]![1].n; // the newest block at least two providers have
@@ -717,12 +743,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  (WIDE_SPAN) of the first two is asked again for the requests it did not answer before any narrower one is asked (a
    *  read past its pace's wait or held answers nothing at once): the local helper at 95730cb (2026-11-04
    *  20:10Z) sent the walks daybreak missed in its one 1 s hold to drpc, 71 reads of 100 blocks in 2 s. */
-  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[]) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true): Promise<(A | null)[]> {
+  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true): Promise<(A | null)[]> {
     const order = askOrder(urls, wideFirst);
+    const passedBefore = new Map(order.map((u) => [u, paced.get(u) ?? 0]));
     const got: A[][] = Array.from({ length: n }, () => []);
     const by: Set<string>[] = Array.from({ length: n }, () => new Set());
-    const run = async (u: string, idx: number[]) => {
-      const r = await ask(u, idx);
+    const run = async (u: string, idx: number[], patient = false) => {
+      const r = await ask(u, idx, patient);
       idx.forEach((i, k) => {
         if (r[k] != null) got[i]!.push(r[k]!), by[i]!.add(u);
       });
@@ -742,13 +769,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (all.every((i) => pick(i) !== null)) break;
       if (left.length > 0) await run(u, left);
     }
+    // a request still without two alike answers: asked again, patiently, of each provider (not held) that passed a read
+    // at its pace's wait meanwhile, so a read fails on a refusal or a disagreement, never on the pace alone (card
+    // helper-robinhood-capacity fold 3: on the loaded box every bucket spent at once left 1 or 2 of 12 cold tokens no
+    // pair, 503)
+    for (const u of order) {
+      if (all.every((i) => pick(i) !== null)) break;
+      const left = all.filter((i) => pick(i) === null && !by[i]!.has(u));
+      if (left.length > 0 && holds.heldFor(u) === 0 && (paced.get(u) ?? 0) > passedBefore.get(u)!) await run(u, left, true);
+    }
     return all.map(pick);
   }
 
   /** Each filter's logs as `u` answers them, null where it did not. A provider that takes wider ranges (WIDE_SPAN) is
    *  asked fewer, wider reads: a run of the same filter over adjacent ranges is joined up to its span, and the answer
    *  split back by block, so each filter is still compared with the other provider's answer for that range alone. */
-  async function logsOf(u: string, fs: Record<string, unknown>[]): Promise<(Log[] | null)[]> {
+  async function logsOf(u: string, fs: Record<string, unknown>[], patient = false): Promise<(Log[] | null)[]> {
     const max = WIDE_SPAN[u] ?? V.span;
     const at = (f: Record<string, unknown>): [number, number] => [hexInt(f.fromBlock) ?? -1, hexInt(f.toBlock) ?? -1];
     const rest = (f: Record<string, unknown>) => JSON.stringify({ ...f, fromBlock: null, toBlock: null });
@@ -759,7 +795,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (g !== undefined && from >= 0 && to >= from && rest(g.f) === rest(f) && from === g.to + 1 && to - g.from + 1 <= max) (g.to = to), g.of.push(i);
       else groups.push({ f, from, to, of: [i] });
     });
-    const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })));
+    const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })), patient);
     const out: (Log[] | null)[] = fs.map(() => null);
     groups.forEach((g, k) => {
       const logs = r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null;
@@ -777,9 +813,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return agreed<Log[]>(
       urls,
       filters.length,
-      async (u, idx) => {
-        const got = await logsOf(u, idx.map((i) => filters[i]!));
-        return clock === null && headerTimed.has(u) ? timedByHeaders(u, got) : got;
+      async (u, idx, patient) => {
+        const got = await logsOf(u, idx.map((i) => filters[i]!), patient);
+        return clock === null && headerTimed.has(u) ? timedByHeaders(u, got, patient) : got;
       },
       (a, b) => sameLogs(a, b, clock === null),
     );
@@ -788,10 +824,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** A header-timed provider's logs (it logs no block time) timed by its own headers of their blocks; an answer with a
    *  block it gives no time for is no answer. Its times count only where another provider logged the same (agreedLogs'
    *  sameLogs with times), so a header for the wrong block or a 0 is no agreement. */
-  async function timedByHeaders(u: string, got: (Log[] | null)[]): Promise<(Log[] | null)[]> {
+  async function timedByHeaders(u: string, got: (Log[] | null)[], patient = false): Promise<(Log[] | null)[]> {
     const blocks = [...new Set(got.flatMap((g) => (g ?? []).map((l) => l.block)))];
     if (blocks.length === 0) return got;
-    const r = await batchTo(u, blocks.map((n) => ({ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] })));
+    const r = await batchTo(u, blocks.map((n) => ({ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] })), patient);
     const times = new Map<number, number>();
     blocks.forEach((n, i) => {
       const b = r?.[i]?.ok ? obj((r[i] as { result: unknown }).result) : {};
@@ -814,8 +850,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const got = await agreed<string>(
       rpcs,
       calls.length,
-      async (u, idx) => {
-        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [calls[i], `0x${n.toString(16)}`] })));
+      async (u, idx, patient) => {
+        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [calls[i], `0x${n.toString(16)}`] })), patient);
         return idx.map((_, k) => (r?.[k]?.ok && typeof (r[k] as { result: unknown }).result === "string" ? (r[k] as { result: string }).result.toLowerCase() : null));
       },
       (a, b) => a === b,
@@ -837,6 +873,67 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const pad32 = (a: string) => a.slice(2).padStart(64, "0");
 
   const wordAddr = (r: string | undefined, i = 0): string | null => (r !== undefined && /^0x([0-9a-f]{64})+$/.test(r) && r.length >= 2 + 64 * (i + 1) ? `0x${r.slice(2 + 64 * i + 24, 2 + 64 * (i + 1))}` : null);
+
+  /** A pool's quote by the other token: USD, or ETH (WETH, or native ETH where `native`). */
+  const quoteOf = (other: string, native: boolean): Pool["quote"] | null =>
+    other === V.usd ? { kind: "usd", decimals: 6 } : other === V.weth || (native && other === ZERO) ? { kind: "eth", decimals: 18 } : null;
+  /** A v2 or v3 pool of the token: its factory one of the chain's venues, the token one of its two, quoted in USD or WETH. */
+  function pairPool(token: string, a: string, factory: string | undefined, token0: string | undefined, token1: string | undefined): Pool | null {
+    const [f, t0, t1] = [wordAddr(factory), wordAddr(token0), wordAddr(token1)];
+    if (f === null || t0 === null || t1 === null || !(V.v2.includes(f) || V.v3.includes(f))) return null;
+    const tokenIs0 = t0 === token;
+    if (!tokenIs0 && t1 !== token) return null;
+    const quote = quoteOf(tokenIs0 ? t1 : t0, false);
+    return quote === null ? null : { venue: V.v2.includes(f) ? "v2" : "v3", id: a, token, tokenIs0, quote };
+  }
+  /** A v4 pool of the token from a pool key that hashes to its id, quoted in USD or ETH, with its hook. */
+  function v4Pool(token: string, id: string, k: string | undefined): Pool | null {
+    if (k === undefined || !/^0x[0-9a-f]{320}$/.test(k) || keccakHex(k) !== id) return null;
+    const [c0, c1] = [wordAddr(k, 0)!, wordAddr(k, 1)!];
+    const tokenIs0 = c0 === token;
+    if (!tokenIs0 && c1 !== token) return null;
+    const quote = quoteOf(tokenIs0 ? c1 : c0, true);
+    const hook = hookOf(k);
+    return quote === null ? null : { venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }) };
+  }
+  /** The Pons curves the factories' records of the token name (a record of another token, or not live, names none). */
+  const curvePools = (token: string, recs: readonly (string | undefined)[]): Pool[] =>
+    recs.flatMap((r) => {
+      if (r === undefined || !/^0x[0-9a-f]{960}$/.test(r) || wordAddr(r, 0) !== token || BigInt(`0x${r.slice(2 + 64 * 14)}`) !== 1n) return [];
+      const [curve, pair] = [wordAddr(r, 1)!, wordAddr(r, 4)!];
+      const quote = quoteOf(pair, true);
+      return curve !== ZERO && quote !== null ? [{ venue: "curve" as const, id: curve, token, tokenIs0: false, quote }] : [];
+    });
+  const decimalsOf = (d: string | undefined): number | null => {
+    const n = d !== undefined && /^0x[0-9a-f]{64}$/.test(d) ? Number(BigInt(d)) : NaN;
+    return Number.isInteger(n) && n <= 77 ? n : null;
+  };
+
+  /**
+   * A listed token's pool from its list's entry (card helper-robinhood-capacity fold 3): the pool the list names, taken
+   * only once the chain says it is the token's, read at the agreed head on two agreeing providers in one round (a v4
+   * id: the PositionManager's key, which must hash to it; an address: its factory and two tokens, a v2 or v3 venue of
+   * ours, or the Pons factories' record naming it as the token's curve), with the token's decimals. Null when the chain
+   * does not say so (a pool of no venue of ours, a v4 key the PositionManager does not hold): the token is discovered
+   * as one in no list is. Its first read is the book's own (readBook), not the discovery's walks over every venue.
+   */
+  async function fromHint(token: string, hint: string): Promise<Found | null> {
+    const head = await agreedHead();
+    if (head === null) throw new Error("no agreed head");
+    const id = /^0x[0-9a-f]{64}$/.test(hint);
+    // first the token's decimals with the v4 key or the Pons records (a curve answers no factory, a revert), then, for an
+    // address no record names, its factory and two tokens
+    const first: { to: string; data: string }[] = id ? [{ to: V.positionManager, data: `${SEL.poolKeys}${hint.slice(2, 2 + 50).padEnd(64, "0")}` }] : V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` }));
+    const got = await callsAgreed(head.n, [{ to: token, data: SEL.decimals }, ...first]);
+    const decimals = decimalsOf(got[0]);
+    if (decimals === null) throw new Error("decimals not agreed");
+    let pool = id ? v4Pool(token, hint, got[1]) : (curvePools(token, got.slice(1)).find((c) => c.id === hint) ?? null);
+    if (pool === null && !id) {
+      const [f, t0, t1] = await callsAgreed(head.n, [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: hint, data })));
+      pool = pairPool(token, hint, f, t0, t1);
+    }
+    return pool === null ? null : { pool, decimals };
+  }
 
   async function findPool(token: string): Promise<Found | null> {
     const head = await agreedHead();
@@ -869,14 +966,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     });
     const pairs = await callsAgreed(head.n, ofVenue.flatMap((a) => [SEL.token0, SEL.token1].map((data) => ({ to: a, data }))));
     ofVenue.forEach((a, i) => {
-      const [f, t0, t1] = [wordAddr(factories[top.indexOf(a)]), wordAddr(pairs[2 * i]), wordAddr(pairs[2 * i + 1])];
-      if (f === null || t0 === null || t1 === null) return;
-      const isV2 = V.v2.includes(f);
-      const tokenIs0 = t0 === token;
-      if (!tokenIs0 && t1 !== token) return;
-      const other = tokenIs0 ? t1 : t0;
-      const quote = other === V.usd ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth ? ({ kind: "eth", decimals: 18 } as const) : null;
-      if (quote !== null) cands.push({ venue: isV2 ? "v2" : "v3", id: a, token, tokenIs0, quote });
+      const c = pairPool(token, a, factories[top.indexOf(a)], pairs[2 * i], pairs[2 * i + 1]);
+      if (c !== null) cands.push(c);
     });
     // v4 pools: the pool ids the PoolManager's recent swaps in the token's transactions name. A key is the
     // PositionManager's own record of it when there is one; a pool made without it (Doppler, Zora) has its key worked out
@@ -900,19 +991,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const list = [...seen.keys()].slice(0, CANDIDATES_MAX);
       const keys = await callsAgreed(head.n, list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` })));
       list.forEach((id, i) => {
-        let k: string | undefined = keys[i];
-        if (k === undefined || !/^0x[0-9a-f]{320}$/.test(k) || keccakHex(k) !== id) {
-          const e = seen.get(id)!;
-          k = v4Key(id, token, e.fee, [...e.around], chain) ?? undefined; // the key must hash to the id
-        }
-        if (k === undefined) return;
-        const [c0, c1] = [wordAddr(k, 0)!, wordAddr(k, 1)!];
-        const tokenIs0 = c0 === token;
-        if (!tokenIs0 && c1 !== token) return;
-        const other = tokenIs0 ? c1 : c0;
-        const quote = other === V.usd ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth || other === ZERO ? ({ kind: "eth", decimals: 18 } as const) : null;
-        const hook = hookOf(k);
-        if (quote !== null) cands.push({ venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }) });
+        const e = seen.get(id)!;
+        // the PositionManager's key when it hashes to the id, else one worked out from the swap (it must hash to the id)
+        const c = v4Pool(token, id, keys[i]) ?? v4Pool(token, id, v4Key(id, token, e.fee, [...e.around], chain) ?? undefined);
+        if (c !== null) cands.push(c);
       });
     }
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
@@ -920,12 +1002,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const recs = await callsAgreed(head.n, V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` })));
       // a record not read is no answer: never kept as "no pool" (a token with none answers the empty record)
       if (recs.some((r) => r === undefined)) throw new Error("pons records not agreed");
-      for (const r of recs) {
-        if (r === undefined || !/^0x[0-9a-f]{960}$/.test(r) || wordAddr(r, 0) !== token || BigInt(`0x${r.slice(2 + 64 * 14)}`) !== 1n) continue;
-        const [curve, pair] = [wordAddr(r, 1)!, wordAddr(r, 4)!];
-        const quote = pair === V.usd ? ({ kind: "usd", decimals: 6 } as const) : pair === ZERO || pair === V.weth ? ({ kind: "eth", decimals: 18 } as const) : null;
-        if (curve !== ZERO && quote !== null) cands.push({ venue: "curve", id: curve, token, tokenIs0: false, quote });
-      }
+      cands.push(...curvePools(token, recs));
     }
     if (cands.length === 0) return null;
     // the pool with most swaps in the window is the main pool (ties: the lower id); its logs are the book's first read
@@ -950,8 +1027,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     if (n <= 0) return null;
     const ref = best.c.quote.kind === "eth" ? await readRef(head.with, head.n, from) : true;
-    const decimals = d !== undefined && /^0x[0-9a-f]{64}$/.test(d) ? Number(BigInt(d)) : NaN;
-    if (!Number.isInteger(decimals) || decimals > 77) throw new Error("decimals not agreed");
+    const decimals = decimalsOf(d);
+    if (decimals === null) throw new Error("decimals not agreed");
     return { pool: best.c, decimals, seed: (refOk && ref) || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs } : undefined };
   }
 
@@ -963,7 +1040,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (kept !== undefined && kept.found === null && now() - kept.at < NONE_MS) return null;
     let p = resolving.get(token);
     if (p === undefined) {
-      p = findPool(token).finally(() => resolving.delete(token));
+      // the list's pool, checked on chain, else the discovery a token in no list has
+      p = (async () => {
+        const hint = (await deps.hint?.(token)) ?? null;
+        return (hint !== null ? await fromHint(token, hint) : null) ?? findPool(token);
+      })().finally(() => resolving.delete(token));
       resolving.set(token, p);
     }
     const found = await p;
@@ -987,13 +1068,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** Reads the ETH price pool's swaps up to `to`, and back to refBack before `need` (the earliest block a book reads:
    *  a book walked back further than any before has the blocks before what is held read first). One read at a time. */
-  function readRef(urls: readonly string[], to: number, need = to - V.step + 1): Promise<boolean> {
-    const run = refLock.then(() => readRefNow(urls, to, need));
+  function readRef(urls: readonly string[], to: number, need = to - V.step + 1, fresh = false): Promise<boolean> {
+    const run = refLock.then(() => readRefNow(urls, to, need, fresh));
     refLock = run.catch(() => undefined);
     return run;
   }
-  async function readRefNow(urls: readonly string[], to: number, need: number): Promise<boolean> {
+  async function readRefNow(urls: readonly string[], to: number, need: number, fresh: boolean): Promise<boolean> {
     const want = need - V.refBack;
+    // a first read or discovery at a block already read, back to `want` (a dozen first reads at one shared head):
+    // nothing to read again; a tick (`fresh`) reads its new blocks and the REWIND_BLOCKS before them, as before
+    if (!fresh && refTo !== null && refFrom !== null && to <= refTo && want >= refFrom) return true;
     if (refFrom !== null && want < refFrom) {
       const older = await agreedRange(urls, (lo, hi) => refFilter(lo, hi, chain), want, refFrom - 1);
       if (older == null) return false;
@@ -1091,12 +1175,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   async function tick(): Promise<void> {
     for (const [t, e] of books) if (now() - e.touched > IDLE_MS) books.delete(t);
     if (books.size === 0) return;
-    const head = await agreedHead();
+    const head = await agreedHead(true);
     if (head === null) return;
     // the ETH price and the books are read at once; an ETH-quoted book is folded in only once the ETH price is read to
     // the same block, so no swap is priced by an older price (a tick of three rounds one after another outlasted 1 s)
     const needRef = [...books.values()].some((e) => e.pool.quote.kind === "eth");
-    const refReady = needRef ? readRef(head.with, head.n).catch(() => false) : Promise.resolve(true);
+    const refReady = needRef ? readRef(head.with, head.n, undefined, true).catch(() => false) : Promise.resolve(true);
     // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks
     const due = [...books.values()];
     for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));

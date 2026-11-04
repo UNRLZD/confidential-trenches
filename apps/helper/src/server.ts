@@ -537,19 +537,26 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
     const lists = evmLists[chain];
     if (lists === undefined) continue;
     const url = chain === "base" ? env.BASE_RPC_URL : undefined;
-    let seen: { asOfMs: number; tokens: Set<string> } | null = null;
+    let seen: { asOfMs: number; tokens: Set<string>; pools: Record<string, string> } | null = null;
+    // the lists' newest answer, read once per answer: its tokens, and each one's pool as the list names it
+    const snapshot = async () => {
+      const a = await lists.get();
+      if (a.status !== 200 || a.asOfMs === undefined) return null;
+      if (seen === null || seen.asOfMs !== a.asOfMs) {
+        const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]>; pools?: Record<string, string> };
+        seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))), pools: snap.pools ?? {} };
+      }
+      return seen;
+    };
     out[chain] = createSwaps(chain, {
       gecko,
       holds,
       rpcs: url === undefined || url === "" ? SWAP_RPCS[chain] : [url, ...SWAP_RPCS[chain]],
-      listed: async (token) => {
-        const a = await lists.get();
-        if (a.status !== 200 || a.asOfMs === undefined) return false;
-        if (seen === null || seen.asOfMs !== a.asOfMs) {
-          const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]> };
-          seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))) };
-        }
-        return seen.tokens.has(token);
+      listed: async (token) => (await snapshot())?.tokens.has(token) ?? false,
+      // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's
+      hint: async (token) => {
+        const s = await snapshot();
+        return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : null;
       },
     });
   }
