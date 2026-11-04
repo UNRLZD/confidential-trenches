@@ -1,0 +1,117 @@
+{
+  "good": {
+    "check": "app-portfolio-mount",
+    "at": "2026-11-04T06:19:11.726Z",
+    "source": "harness, terminal build of card/app-portfolio-mount at fe5017a, the stand-in shell signed in",
+    "browser": "156.0.8078.80",
+    "runs": [
+      {
+        "width": "phone",
+        "scheme": "dark",
+        "framed": true,
+        "route": "portfolio",
+        "text": 320,
+        "screen": "portfolio",
+        "state": "S10.3",
+        "total": "8305",
+        "header": "$83.05",
+        "taps": {
+          "withdraw": "withdraw.open",
+          "export": "export.open",
+          "deposit": "deposit",
+          "sell": "nothing"
+        }
+      },
+      {
+        "width": "phone",
+        "scheme": "light",
+        "framed": true,
+        "route": "portfolio",
+        "text": 320,
+        "screen": "portfolio",
+        "state": "S10.3",
+        "total": "8305",
+        "header": "$83.05"
+      },
+      {
+        "width": "desktop",
+        "scheme": "dark",
+        "framed": true,
+        "route": "portfolio",
+        "text": 765,
+        "screen": "portfolio",
+        "state": "S10.3",
+        "total": "8305",
+        "header": "$83.05",
+        "taps": {
+          "withdraw": "withdraw.open",
+          "export": "export.open",
+          "sell": "nothing"
+        }
+      },
+      {
+        "width": "desktop",
+        "scheme": "light",
+        "framed": true,
+        "route": "portfolio",
+        "text": 765,
+        "screen": "portfolio",
+        "state": "S10.3",
+        "total": "8305",
+        "header": "$83.05"
+      }
+    ]
+  },
+  "bad": {
+    "check": "app-portfolio-mount",
+    "at": "2026-11-04T06:20:29.624Z",
+    "source": "live https://confidential.unrealized.trade, the stand-in shell signed in",
+    "browser": "156.0.8078.80",
+    "runs": [
+      {
+        "width": "phone",
+        "scheme": "dark",
+        "framed": true,
+        "route": "portfolio",
+        "text": 0,
+        "screen": null,
+        "state": null,
+        "total": null,
+        "header": "$65.68"
+      },
+      {
+        "width": "phone",
+        "scheme": "light",
+        "framed": true,
+        "route": "portfolio",
+        "text": 0,
+        "screen": null,
+        "state": null,
+        "total": null,
+        "header": "$65.68"
+      },
+      {
+        "width": "desktop",
+        "scheme": "dark",
+        "framed": true,
+        "route": "portfolio",
+        "text": 0,
+        "screen": null,
+        "state": null,
+        "total": null,
+        "header": "$65.68"
+      },
+      {
+        "width": "desktop",
+        "scheme": "light",
+        "framed": true,
+        "route": "portfolio",
+        "text": 0,
+        "screen": null,
+        "state": null,
+        "total": null,
+        "header": "$65.68"
+      }
+    ]
+  }
+}
