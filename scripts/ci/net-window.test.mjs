@@ -16,6 +16,7 @@ const SHARED = path.join(ROOT, "scripts/net-window.mjs");
 export const CHANGED = [
   "apps/helper/deploy/create-server.mjs",
   "contracts/vault/scripts/deploy.mjs",
+  "contracts/vault/scripts/prepay.mjs",
   "contracts/vault/scripts/testnet-t04.mjs",
   "contracts/vault/scripts/testnet-usdc.mjs",
   "scripts/ci/live-plan.mjs",

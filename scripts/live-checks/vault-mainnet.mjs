@@ -9,34 +9,33 @@
 //   - the code's imports: none of 2.8's banned ones (a key, a deploy, a delete), promise imports inside the seven, and
 //     its exports inside 2.5.7's list (vault-skeleton.mjs wasmProblems); it names the network's token and no other;
 //   - config(): it answers, its asset the network's token and its version the network's, both pinned here.
-// Then one write: storage_prepay(precommitment) with the minimum attached (config().deposit_storage_bytes bytes), and
-// that write read back on both RPCs: final, one storage_prepay call to the vault, the tx and every receipt a success,
-// and the vault's receipt logging storage_prepaid {precommitment, payer, amount} for exactly that call. The write is
-// sent only after every read passed.
-//   - testnet: signed here with --key-file (a testnet key outside the repo, read by deploy.mjs loadKey, never printed),
-//     the signer a .testnet or implicit account;
-//   - mainnet: never signed here. The script prints the owner's one near CLI line and exits 3; after the paste, the
-//     same command with --tx <hash> reads that write back.
+// Then one write: storage_prepay(precommitment) with the minimum attached (config().deposit_storage_bytes bytes), read
+// back on both RPCs by --tx: final, one storage_prepay call from the signer to the vault, the tx and every receipt a
+// success, and the vault's receipt logging storage_prepaid {precommitment, payer, amount} for exactly that call.
+// This check holds no key and signs nothing, on either network. Without --tx, once every read passed, it prints the
+// write as one near CLI line and exits 3:
+//   - mainnet: that line is the owner's paste; then this same command with --tx <hash> reads the write back;
+//   - testnet: contracts/vault/scripts/prepay.mjs signs and sends the same write with a testnet key, then runs this
+//     check with --tx.
 //   node scripts/live-checks/vault-mainnet.mjs --network testnet|mainnet --account <vault> --signer <id>
-//     [--deployment <file>] [--key-file <path> | --tx <hash>] [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2, reads PASS and the write still to paste exit 3
+//     [--deployment <file>] [--tx <hash>] [--record <file>]
+//     PASS exit 0, FAIL exit 1, error exit 2, reads PASS and the write still to send exit 3
 // --deployment is the vault's record (account_id, wasm_sha256, wasm_builds_sha256, code_hash, network); testnet's
 // default is contracts/vault/deployments/testnet-v1.json, mainnet names its own. --record writes every RPC answer the
 // run read to <file>, so the check's test can replay it, each NEAR signature replaced (delete-refund-readback.mjs's
 // recorder: a 64-byte signature has a secret key's shape, and the check reads none).
 import "../net-window.mjs";
-import { createHash, sign } from "node:crypto";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RPCS as TESTNET_RPCS, operatorProblems } from "./vault-skeleton.mjs";
 import { recorder } from "./delete-refund-readback.mjs";
 import { DEPLOYMENT as TESTNET_DEPLOYMENT, MAINNET_USDC, TESTNET_TOKEN, b58, readVault } from "./vault-testnet-t01.mjs";
-import { MAINNET_RPCS } from "../../contracts/vault/scripts/testnet-usdc.mjs";
-import { b58decode, functionCallTx } from "../../contracts/vault/scripts/near-tx.mjs";
-import { loadKey } from "../../contracts/vault/scripts/deploy.mjs";
 
 const KEY = "vault-mainnet";
+// FastNEAR and dRPC on mainnet: two operators (near-rpc-operators.mjs), as contracts/vault/scripts/testnet-usdc.mjs
+// reads mainnet USDC's pin
+export const MAINNET_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 const BYTE = 10n ** 19n; // storage_amount_per_byte, the same on both networks
 export const PREPAY_GAS = 30n * 10n ** 12n; // the vault's storage_prepay receipt burns about 1.8 Tgas (vault-testnet-t04.md)
 
@@ -70,22 +69,6 @@ export function pasteLine({ network, account, signer, precommitment, deposit }) 
   const frac = (deposit % 10n ** 24n).toString().padStart(24, "0").replace(/0+$/, "");
   const near = `${deposit / 10n ** 24n}${frac ? `.${frac}` : ""} NEAR`;
   return `near contract call-function as-transaction ${account} storage_prepay json-args '${JSON.stringify({ precommitment })}' prepaid-gas '30 Tgas' attached-deposit '${near}' sign-as ${signer} network-config ${network} sign-with-keychain send`;
-}
-
-/** Signs one storage_prepay with `key` and sends it to `url`, waiting for FINAL. Returns its hash whatever the answer. */
-export async function sendPrepay({ fetchFn, url, signer, key, account, precommitment, deposit }) {
-  const pk = `ed25519:${b58(key.pub)}`;
-  const ak = await rpc(fetchFn, url, "query", { request_type: "view_access_key", account_id: signer, public_key: pk, finality: "final" });
-  const block = await rpc(fetchFn, url, "block", { finality: "final" });
-  const tx = functionCallTx({ signer, publicKey: key.pub, nonce: BigInt(ak.nonce) + 1n, receiver: account, blockHash: b58decode(block.header.hash), method: "storage_prepay", args: JSON.stringify({ precommitment }), gas: PREPAY_GAS, deposit });
-  const h = createHash("sha256").update(tx).digest();
-  const signed = Buffer.concat([tx, Buffer.from([0]), sign(null, h, key.privateKey)]);
-  try {
-    await rpc(fetchFn, url, "send_tx", { signed_tx_base64: signed.toString("base64"), wait_until: "FINAL" });
-  } catch {
-    // a timeout or a refusal: the read-back below says whether it landed
-  }
-  return b58(h);
 }
 
 /** The storage_prepay tx `hash` by `signer` read back on `url`, each fact told to `say`. */
@@ -137,7 +120,6 @@ export async function check({ network, account, deployment, fetchFn = fetch, rpc
   };
   const net = NETWORKS[network];
   if (!net) throw new Error(`--network ${network}: want testnet or mainnet`);
-  if (write.key && network !== "testnet") throw new Error("a mainnet write is the owner's paste: this script signs on testnet only");
   for (const p of operatorProblems(rpcs, network)) say(false, p);
   rpcs = rpcs.slice(0, 2);
   const recordHash = /^[0-9a-f]{64}$/.test(deployment.wasm_sha256 ?? "") ? b58(Buffer.from(deployment.wasm_sha256, "hex")) : null;
@@ -162,14 +144,10 @@ export async function check({ network, account, deployment, fetchFn = fetch, rpc
     say(false, `the write's signer ${signer ?? "(none)"} is not a ${network} account`);
     return { ok, lines };
   }
-  let hash = write.tx;
-  if (!hash && write.key) {
-    hash = await sendPrepay({ fetchFn, url: rpcs[0], signer, key: write.key, account, precommitment: write.precommitment ?? freshPrecommitment(), deposit: minDeposit });
-    lines.push(`    sent storage_prepay tx ${hash} by ${signer} on ${rpcs[0]}`);
-  }
+  const hash = write.tx;
   if (!hash) {
-    const line = pasteLine({ network, account, signer, precommitment: write.precommitment ?? freshPrecommitment(), deposit: minDeposit });
-    return { ok: false, pending: true, lines, line };
+    const precommitment = write.precommitment ?? freshPrecommitment();
+    return { ok: false, pending: true, lines, line: pasteLine({ network, account, signer, precommitment, deposit: minDeposit }), prepay: { precommitment, deposit: minDeposit } };
   }
   for (const url of rpcs) await readPrepay({ fetchFn, url, hash, signer, account, minDeposit, say, wait });
   return { ok, lines, tx: hash };
@@ -177,7 +155,7 @@ export async function check({ network, account, deployment, fetchFn = fetch, rpc
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const a = process.argv.slice(2);
-  const known = new Set(["--network", "--account", "--signer", "--deployment", "--key-file", "--tx", "--record"]);
+  const known = new Set(["--network", "--account", "--signer", "--deployment", "--tx", "--record"]);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
     for (let i = 0; i < a.length; i += 2) if (!known.has(a[i]) || a[i + 1] === undefined || a[i + 1].startsWith("--")) throw new Error(`argument ${a[i]}: want ${[...known].join(", ")}, each with a value`);
@@ -191,17 +169,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const deployment = JSON.parse(readFileSync(file, "utf8"));
     if (!/^[0-9a-f]{64}$/.test(deployment.wasm_sha256 ?? "")) throw new Error("deployment: want wasm_sha256");
     const signer = opt("--signer");
-    if (opt("--key-file") && network !== "testnet") throw new Error("--key-file is testnet only: a mainnet write is the owner's paste, never signed here");
-    if (opt("--key-file") && opt("--tx")) throw new Error("--key-file sends a new write and --tx reads one back: give one");
-    const key = opt("--key-file") ? loadKey(opt("--key-file"), signer) : null;
     const tx = opt("--tx");
     if (tx && !/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(tx)) throw new Error("--tx: want a base58 tx hash");
     const rec = recorder();
-    const r = await check({ network, account, deployment, fetchFn: opt("--record") ? rec.fetchFn : fetch, write: { signer, key, tx } });
+    const r = await check({ network, account, deployment, fetchFn: opt("--record") ? rec.fetchFn : fetch, write: { signer, tx } });
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify(rec.answers) + "\n");
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     if (r.pending) {
-      console.log(`live-check ${KEY}: the reads PASS; the write is the owner's paste (it signs nothing here):`);
+      console.log(`live-check ${KEY}: the reads PASS; the write, signed by ${signer} (this check signs nothing; on testnet contracts/vault/scripts/prepay.mjs sends it):`);
       console.log(r.line);
       console.log(`live-check ${KEY}: then: node scripts/live-checks/vault-mainnet.mjs ${a.join(" ")} --tx <its hash>`);
       process.exit(3);
