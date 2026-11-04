@@ -30,13 +30,15 @@
 //   shown, below. The best one that fills completely is the reference R. A buy is refused unless its output is at
 //   least R (below_reference, M366 (4)), so a helper cannot steer it into a pool it seeded while the token's real
 //   pool is one the device found; with no R it is refused (no_reference). Every read is within a DoS bound
-//   (EVM_QUOTE_MAX_KEYS, EVM_QUOTE_MAX_OTHER, EVM_QUOTE_MAX_QUOTED), taken in a fixed order no pool's price or
-//   liquidity changes. More found pools of the token than EVM_QUOTE_MAX_KEYS refuses (too_many_pools, review of
-//   4830f1f, H2); past the other bounds nothing refuses: a held pool that no route from the native asset reaches, or
-//   that a bound leaves unread, adds nothing. What is left: a pool of the token created before the scan's depth (about 23 days on
-//   Base, 12 days on Robinhood), of a shape the device has not pinned, that the helper leaves off its list while it
-//   routes the buy into a standard pool it seeded; and, past EVM_QUOTE_MAX_QUOTED held pools or the bounds on another
-//   currency's pools, a real pool that pools an attacker made with smaller pool ids push past that bound;
+//   (EVM_QUOTE_MAX_KEYS, EVM_QUOTE_MAX_OTHER, EVM_QUOTE_MAX_QUOTED), and each bound refuses (too_many_pools), never
+//   cuts: a cut set moved the reference out of the reads whatever the order (review of c71a4d0..a9f1d32, HIGH: 64
+//   dust pools took the quote bound, 16,381 empty ones the markets' state bound). Every found pool's state is read
+//   first, and only pools that hold liquidity are quoted, so empty pools cost a state read and dust ones a quote; a
+//   held pool that no route from the native asset reaches adds nothing. What is left: a pool of the token created
+//   before the scan's depth (about 23 days on Base, 12 days on Robinhood), of a shape the device has not pinned, that
+//   the helper leaves off its list while it routes the buy into a standard pool it seeded; and a token whose pools
+//   pass a bound (an attacker's, each costing gas and, past the quote bound, a position) cannot be bought, never
+//   bought below its real pool;
 // - for a route with a hooked v4 hop, the same route with each hook's code replaced by a hook that does nothing
 //   (eth_call's state override): the hookless output H. The hook's take H - Q is shown as a fee before the buy,
 //   information only, never a pop-up (M360). The route's own Q, which the hook ran in, sets minOut;
@@ -540,14 +542,15 @@ const startsNative = (r: EvmRoute) => r.venue === "uniswap-v4" && lower(r.curren
 
 /** The most pools a caller may list. */
 export const EVM_QUOTE_MAX_HINTS = 16;
-// The bounds a quote reads within, whatever a token's pool count, each a DoS bound and none a refusal: past one the
-// quote prices what it read, in a fixed order an attacker cannot buy into (see "The fixed order" in
-// evmPoolBuyQuoteWith). EVM_QUOTE_MAX_KEYS pools' state (two extsload words each) in all, the token's, X's and Y's;
-// EVM_QUOTE_MAX_OTHER currencies X and Y in all (one getLogs request names at most SCAN_OR of them); and
-// EVM_QUOTE_MAX_QUOTED routes the device made from found pools, each quoted at the amount and twice it.
-const EVM_QUOTE_MAX_KEYS = 16_384;
-const EVM_QUOTE_MAX_OTHER = 256;
-const EVM_QUOTE_MAX_QUOTED = 64;
+// The bounds a quote reads within, whatever a token's pool count, each a DoS bound and each a refusal past it
+// (too_many_pools), never a cut: EVM_QUOTE_MAX_KEYS pools' state (two extsload words each) in all, the token's
+// scanned ones, X's and Y's (the caller's list has its own EVM_QUOTE_MAX_HINTS, so it never pushes a token past one:
+// review of c71a4d0..a9f1d32, LOW 1); EVM_QUOTE_MAX_OTHER currencies X and Y in all (one getLogs request names at most
+// SCAN_OR of them); and EVM_QUOTE_MAX_QUOTED routes the device made from pools that hold liquidity, each quoted at
+// the amount and twice it, in the same rounds (a round's reads go out in parallel calls).
+export const EVM_QUOTE_MAX_KEYS = 65_536;
+export const EVM_QUOTE_MAX_OTHER = 1_024;
+export const EVM_QUOTE_MAX_QUOTED = 1_024;
 /** With no more found pools than this, those of the native asset or WETH whose hook is none or pinned are quoted in
  *  the first round already. */
 const EVM_QUOTE_EARLY = 64;
@@ -686,7 +689,7 @@ async function scanPools(
   pm: string,
   rpc: EvmRpc,
   s: { span: number; depth: number; parallel: number; orSpan?: number },
-  agreed: () => Promise<bigint>,
+  agreed: () => Promise<Block>,
   maxLag: bigint,
   gate: Gate,
   headOfScan: Promise<bigint>,
@@ -706,6 +709,10 @@ async function scanPools(
   const groups = new Map<number, Each[]>();
   for (const e of each) append(groups, e.from, e);
   const w = (c: string) => "0x" + word(BigInt(c));
+  // `pin`: a catch-up request also asks its provider for the agreed block by number, in the same batch, and its logs
+  // count only where that answer is the agreed block's hash (review of c71a4d0..a9f1d32, MEDIUM: a head read on one
+  // backend and logs answered by another that lags behind it, empty past its own head with no error)
+  let pin: Block | null = null;
   const jobs: { part: Each[]; a: number; b: number }[] = [];
   const jobsOf = (g: Each[], from: number, to: number) => {
     for (let i = 0; i < g.length; i += SCAN_OR) {
@@ -724,32 +731,45 @@ async function scanPools(
     // the native asset (address 0, always currency0) or WETH, one value a position
     const e0 = "0x" + INITIALIZE;
     const filters = kind === "all" ? [[e0, null, t], [e0, null, null, t]] : [[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]];
-    const logsOf = (out: readonly unknown[]) => out.map((x) => (x as { result?: unknown } | null)?.result);
     // an answer at the cap may be one the provider cut there (review of 4830f1f, L)
     const fine = (rs: unknown[]) => rs.every((r) => Array.isArray(r) && r.length < SCAN_MAX_LOGS);
+    const p = pin;
+    const calls = p === null ? filters.map(f) : [...filters.map(f), { method: "eth_getBlockByNumber", params: ["0x" + p.number.toString(16), false] }];
+    // the logs' answers, and where pinned, a refusal unless the batch's provider holds the agreed block
+    const logsOf = (out: readonly unknown[]) => {
+      if (p !== null) {
+        const h = (out[filters.length] as { result?: { hash?: unknown } | null } | null)?.result;
+        if (typeof h?.hash !== "string" || lower(h.hash) !== p.hash) return refuse("rpc_disagree", `the scan provider's logs are not read at the agreed block ${p.number}`);
+      }
+      return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
+    };
     if (splits > 0 && b > a) {
-      const rs = await gate(() => ask(rpc, filters.map(f))).then(logsOf, () => null);
+      const rs = await gate(() => ask(rpc, calls)).then(
+        (out) => logsOf(out),
+        () => null,
+      );
       if (rs !== null && fine(rs)) return rs.map((r) => ({ part, a, b, logs: r as unknown[] }));
       const mid = a + Math.floor((b - a) / 2);
       return (await Promise.all([one({ part, a, b: mid }, splits - 1), one({ part, a: mid + 1, b }, splits - 1)])).flat();
     }
-    const rs = logsOf(await gate(() => askScan(rpc, filters.map(f))));
+    const rs = logsOf(await gate(() => askScan(rpc, calls)));
     if (!fine(rs)) return refuse("rpc_error", "the scan provider answered no logs");
     return rs.map((r) => ({ part, a, b, logs: r as unknown[] }));
   };
   const got = (await Promise.all(jobs.map((j) => one(j)))).flat();
-  const b = await agreed();
+  const agreedAt = await agreed();
+  const b = agreedAt.number;
   if (scanHead - b > maxLag) return refuse("rpc_disagree", `the scan provider's head ${scanHead} is more than ${maxLag} blocks past the agreed block ${b}`);
   let to = head;
   if (b - scanHead > maxLag) {
-    // the scan outlasted maxLag blocks: on from the block after the head, up to the head the scan provider names again,
-    // which must be within maxLag of the agreed block (review of 4830f1f, H1: a backend behind it can answer [] past its
-    // own head with no error, so a scan is kept only up to a head its provider named), and never further than one span
-    // a request (review of 4830f1f, L: a head of 0x1 fanned out into about 10^4 requests)
+    // the scan outlasted maxLag blocks: on from the block after the head up to the agreed block, which the provider
+    // answering each request must hold, by hash, in that request's own batch (`pin`; review of 4830f1f, H1: a backend
+    // behind it answers [] past its own head with no error, and a head named on another backend proves nothing about
+    // the one answering the logs); never further than one span a request (review of 4830f1f, L: a head of 0x1 fanned
+    // out into about 10^4 requests)
     if (b - scanHead > BigInt(s.span)) return refuse("rpc_disagree", `the scan provider's head ${scanHead} is more than ${s.span} blocks behind the agreed block ${b}`);
-    const again = await scanHeadOf(rpc, gate);
-    if (b - again > maxLag) return refuse("rpc_disagree", `the scan provider's head ${again} is more than ${maxLag} blocks from the agreed block ${b}`);
-    const end = Number(again < b ? again : b);
+    const end = Number(b);
+    pin = agreedAt;
     jobs.length = 0;
     jobsOf(each, head + 1, end);
     got.push(...(await Promise.all(jobs.map((j) => one(j)))).flat());
@@ -920,22 +940,21 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // same block, once the PoolManager holds it on both providers, so a pool that does not exist never puts an override
   // into a read (review of 5452011, S1). A pool of another currency X counts through X's own markets with the native
   // asset or WETH (see "X's markets" below).
-  // The fixed order of every bound (EVM_QUOTE_MAX_KEYS, EVM_QUOTE_MAX_OTHER, EVM_QUOTE_MAX_QUOTED): the caller's
-  // list, then pools of the native asset or WETH, then of a listed middle, then the rest, each by pool id; X and Y
-  // listed first, then by the smallest id of their pools. No number a pool reports at the block (its price, its
-  // liquidity, which a narrow range inflates for the price of a dust position) decides what is read, quoted or
-  // refused (review of 2afa8b6): a bound only leaves pools unread, and what is read is priced by its quote at the
-  // user's own amount
+  // The bounds (EVM_QUOTE_MAX_KEYS, EVM_QUOTE_MAX_OTHER, EVM_QUOTE_MAX_QUOTED) refuse, never cut, so no order decides
+  // what is read: the order below (the caller's list, the native asset or WETH, a listed middle, the rest, by pool
+  // id) only makes the reads the same on every run. No number a pool reports at the block (its price, its liquidity,
+  // which a narrow range inflates for the price of a dust position) decides what is read or quoted (review of
+  // 2afa8b6), beyond holding liquidity at all: what is read is priced by its quote at the user's own amount
   // the agreed block, picked once (the held head while fresh), after the token's scan has its logs; a new one is held
   // to the 30 s rule in agreedBlock, a held one in the watch's reuse bound on both clocks
   let agreed: ReturnType<typeof agreedBlock> | undefined;
   const agreedOnce = () => (agreed ??= watch === undefined ? agreedBlock(rpcs, v.maxLag, nowMs) : watch.head(nowMs));
-  const agreedNumber = () => agreedOnce().then((x) => x.block.number);
+  const agreedHead = () => agreedOnce().then((x) => x.block);
   const gate = gateOf(v.scan?.parallel ?? 1);
   let headOfScan: Promise<bigint> | undefined;
   const scanOf = (cs: readonly string[], kind: ScanKind) =>
     scan !== undefined && v.poolManager !== undefined && v.scan !== undefined && cs.length > 0
-      ? scanPools(chain, cs, kind, lower(v.weth), v.poolManager, scan, v.scan, agreedNumber, v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)))
+      ? scanPools(chain, cs, kind, lower(v.weth), v.poolManager, scan, v.scan, agreedHead, v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)))
       : null;
   const scanned = await scanOf([lower(token)], "all");
   const { block, confirm } = await agreedOnce();
@@ -967,9 +986,9 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   let keysLeft = EVM_QUOTE_MAX_KEYS;
   let quotesLeft = EVM_QUOTE_MAX_QUOTED;
   // a route the device made from found pools, at the amount and twice it, each hook not pinned replaced, and where one
-  // is, the same route with its hooks as they are; null past the bound
-  const quoteOf = (into: Read[], r: EvmV4Route, hooks: string[]): Quote | null => {
-    if (quotesLeft === 0) return null;
+  // is, the same route with its hooks as they are; past the bound the quote refuses
+  const quoteOf = (into: Read[], r: EvmV4Route, hooks: string[]): Quote => {
+    if (quotesLeft === 0) return refuse("too_many_pools", `the token's pools and markets hold more than the ${EVM_QUOTE_MAX_QUOTED} routes a quote reads`);
     quotesLeft--;
     const c: Quote = { route: r, at: put(into, { ...v4Read(v.v4!, r, amountIn), ...noop(hooks) }), twice: put(into, { ...v4Read(v.v4!, r, 2n * amountIn), ...noop(hooks) }) };
     if (hooks.some(replaced)) c.real = { at: put(into, v4Read(v.v4!, r, amountIn)), twice: put(into, v4Read(v.v4!, r, 2n * amountIn)) };
@@ -986,7 +1005,8 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
       return k === null ? [] : [k];
     });
     const hinted = new Set(hints.map(poolId));
-    const keys = [...(scanned?.pools.get(lower(token)) ?? []), ...hints].flatMap((k) => {
+    const fromScan = scanned?.pools.get(lower(token)) ?? [];
+    const keys = [...fromScan, ...hints].flatMap((k) => {
       const id = poolId(k);
       if (seen.has(id) || droppable(k)) return [];
       seen.add(id);
@@ -995,17 +1015,14 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     const rank = (e: { id: string; other: string }) => (hinted.has(e.id) ? 0 : startsBuy(e.other) ? 1 : listed.has(e.other) ? 2 : 3);
     // a set the bound cuts is never quoted from (review of 4830f1f, H2): 16,384 pools only initialized, each a few
     // cents of gas, with ids ground below the real pool's, pushed it out of the reads and a seeded route at a tenth of
-    // the price was bought
-    if (keys.length > keysLeft) return refuse("too_many_pools", `the token has ${keys.length} pools, more than the ${keysLeft} a quote reads`);
+    // the price was bought. The bound counts the scan's pools: the caller's list (EVM_QUOTE_MAX_HINTS) is read beside it
+    if (fromScan.length > keysLeft) return refuse("too_many_pools", `the token has ${fromScan.length} pools, more than the ${keysLeft} a quote reads`);
+    keysLeft -= fromScan.length;
     const ordered = keys.sort((a, b) => rank(a) - rank(b) || byId(a, b));
-    keysLeft -= ordered.length;
     const early = ordered.length <= EVM_QUOTE_EARLY;
     for (const { k, id } of ordered) {
       const f = foundOf(k, token, reads, id);
-      if (early && startsBuy(f.other) && !replaced(k.hooks)) {
-        const c = quoteOf(reads, routeOfKey(k, token), [k.hooks]);
-        if (c !== null) f.quotes.push(c);
-      }
+      if (early && startsBuy(f.other) && !replaced(k.hooks)) f.quotes.push(quoteOf(reads, routeOfKey(k, token), [k.hooks]));
       found.push(f);
     }
   }
@@ -1064,8 +1081,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const second: Read[] = [];
   for (const f of held) {
     if (!startsBuy(f.other) || f.quotes.length > 0) continue;
-    const c = quoteOf(second, routeOfKey(f.key, token), [f.key.hooks]);
-    if (c !== null) f.quotes.push(c);
+    f.quotes.push(quoteOf(second, routeOfKey(f.key, token), [f.key.hooks]));
   }
   // X's markets: a held pool of the token with another currency X counts through X's markets with the native asset or
   // WETH: X's standard and pinned shapes, which need no scan, and the pools of X with them that one scan for every X
@@ -1080,15 +1096,17 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const xPools = new Map<string, Found[]>();
   for (const f of held) if (!startsBuy(f.other)) append(xPools, f.other, f);
   const smallest = (fs: readonly Found[]) => fs.map((f) => f.id).sort()[0]!;
-  const others = (m: Map<string, Found[]>, cap: number) =>
-    [...m.keys()]
+  const others = (m: Map<string, Found[]>, cap: number) => {
+    if (m.size > cap) return refuse("too_many_pools", `the token's held pools are paired with more than the ${EVM_QUOTE_MAX_OTHER} other currencies a quote reads`);
+    return [...m.keys()]
       .map((c) => ({ c, id: smallest(m.get(c)!) }))
       .sort((a, b) => Number(!listed.has(a.c)) - Number(!listed.has(b.c)) || byId(a, b))
-      .slice(0, cap)
       .map((e) => e.c);
+  };
   const xs = others(xPools, EVM_QUOTE_MAX_OTHER);
-  // c's markets: its standard and pinned shapes, then the scanned ones by pool id; null past the state bound
-  const marketsOf = (c: string, scannedKeys: readonly EvmPoolKey[], into: Read[]): Found[] | null => {
+  // c's markets: its standard and pinned shapes, then the scanned ones by pool id; past the state bound the quote
+  // refuses (review of c71a4d0..a9f1d32, HIGH: 16,381 empty pools of the token left X's markets unread)
+  const marketsOf = (c: string, scannedKeys: readonly EvmPoolKey[], into: Read[]): Found[] => {
     const ks = new Map<string, EvmPoolKey>();
     const add = (k: EvmPoolKey | null) => {
       if (k !== null && !droppable(k) && !ks.has(poolId(k))) ks.set(poolId(k), k);
@@ -1100,7 +1118,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
       add(keyOf({ currency0: c0, currency1: c1, fee: h.fee, tickSpacing: h.tickSpacing, hooks: h.hooks }, c));
     }
     for (const { k } of scannedKeys.map((k) => ({ k, id: poolId(k) })).sort(byId)) add(k);
-    if (ks.size > keysLeft) return null;
+    if (ks.size > keysLeft) return refuse("too_many_pools", `the markets of ${c} pass the ${EVM_QUOTE_MAX_KEYS} pools a quote reads`);
     keysLeft -= ks.size;
     return [...ks.values()].map((k) => foundOf(k, c, into));
   };
@@ -1111,8 +1129,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     sc?.commit();
     for (const c of cs) {
       if (markets.has(c)) continue;
-      const ms = marketsOf(c, sc?.pools.get(c) ?? [], into);
-      if (ms !== null) markets.set(c, ms);
+      markets.set(c, marketsOf(c, sc?.pools.get(c) ?? [], into));
     }
   };
   if (ok) await readMarkets(xs, second);
@@ -1120,10 +1137,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const marketQuote = new Map<Found, Quote>();
   const quoteMarkets = (cs: readonly string[], into: Read[]) => {
     for (const c of cs) {
-      for (const mk of (markets.get(c) ?? []).filter(holds)) {
-        const r = quoteOf(into, routeOfKey(mk.key, c), [mk.key.hooks]);
-        if (r !== null) marketQuote.set(mk, r);
-      }
+      for (const mk of (markets.get(c) ?? []).filter(holds)) marketQuote.set(mk, quoteOf(into, routeOfKey(mk.key, c), [mk.key.hooks]));
     }
   };
   // c's market whose quote counts for the most of c at the user's amount; the first in order on a tie
@@ -1147,10 +1161,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
       if (markets.has(x)) further.push(x);
       continue;
     }
-    for (const p of xPools.get(x)!) {
-      const c = quoteOf(fourth, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key.hooks, p.key.hooks]);
-      if (c !== null) p.quotes.push(c);
-    }
+    for (const p of xPools.get(x)!) p.quotes.push(quoteOf(fourth, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key.hooks, p.key.hooks]));
   }
   // one level further: X's pools with Y, from one scan of every such X's pools
   const vias = new Map<string, Found[]>();
@@ -1162,7 +1173,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
         .map((k) => ({ k, id: poolId(k), other: k.currency0 === x ? k.currency1 : k.currency0 }))
         .filter((e) => !startsBuy(e.other) && e.other !== lower(token) && !droppable(e.k))
         .sort(byId);
-      if (ks.length > keysLeft) continue;
+      if (ks.length > keysLeft) return refuse("too_many_pools", `the pools of ${x} pass the ${EVM_QUOTE_MAX_KEYS} pools a quote reads`);
       keysLeft -= ks.length;
       vias.set(x, ks.map((e) => foundOf(e.k, x, fourth, e.id)));
     }
@@ -1184,8 +1195,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
       if (mk === null) continue;
       for (const p of xPools.get(x)!) {
         const r: EvmV4Route = { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)] };
-        const c = quoteOf(seventh, r, [mk.key.hooks, via.key.hooks, p.key.hooks]);
-        if (c !== null) p.quotes.push(c);
+        p.quotes.push(quoteOf(seventh, r, [mk.key.hooks, via.key.hooks, p.key.hooks]));
       }
     }
   }
@@ -1302,9 +1312,12 @@ const SEL_GET_POOL = "1698ee82"; // UniswapV3Factory.getPool(address,address,uin
  *  evmPoolBuyQuote, it takes no provider from its caller; tests run evmPoolSellQuoteWith. */
 export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<EvmPoolSellQuote> {
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
-  const p = venue(req.chain).providers;
-  if (p === undefined) return refuse("no_quoter", `${req.chain} has no pinned providers`);
-  return evmPoolSellQuoteWith(req, evmProviders(p, fetch), Date.now());
+  // each field read once, into a plain copy (review of c71a4d0..a9f1d32, LOW 2: a getter could name one chain for the
+  // providers and another for the reads)
+  const asked: EvmPoolSellQuoteRequest = { ...req };
+  const p = venue(asked.chain).providers;
+  if (p === undefined) return refuse("no_quoter", `${asked.chain} has no pinned providers`);
+  return evmPoolSellQuoteWith(asked, evmProviders(p, fetch), Date.now());
 }
 
 /** evmPoolSellQuote on the providers `rpcs` with the device's clock at `nowMs`. Not in the index. */
