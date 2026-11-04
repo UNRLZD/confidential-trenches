@@ -39,7 +39,7 @@
 // decoder, and the same fee, recipient, simulation and send rules apply.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { solanaJsonRpc } from "@blindfill/kit";
+import { evmPoolVenues, solanaJsonRpc, type EvmPoolVenue } from "@blindfill/kit";
 import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
 import { heldPerClient, throttleOf } from "../limits/limits.ts";
@@ -428,8 +428,13 @@ export const POOL_EVM_ENV = {
   "base-sepolia": ["POOL_EVM_ADDRESS_BASE_SEPOLIA", "POOL_EVM_SENDER_KEY_BASE_SEPOLIA", "POOL_EVM_FEE_BASE_SEPOLIA", "POOL_EVM_FEE_RECIPIENT_BASE_SEPOLIA", "POOL_EVM_RPCS_BASE_SEPOLIA"],
 } as const;
 
-/** The EVM pool senders the host's environment sets, by pool address; a network with none of its names set is off. */
-export function evmPoolSendersFromEnv(env: Record<string, string | undefined>): Map<string, EvmPoolSender> {
+/**
+ * The EVM pool senders the host's environment sets, by pool address; a network with none of its names set is off. A
+ * network whose venue in the kit (`venues`, the kit's own list) pins a sell sender starts only with that sender's key:
+ * the device sims each sale as sent from the pin (the kit's checks/evm/quote.ts simmedSells), so a sale from any other
+ * key would run where the sim did not.
+ */
+export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = evmPoolVenues()): Map<string, EvmPoolSender> {
   const out = new Map<string, EvmPoolSender>();
   for (const [network, names] of Object.entries(POOL_EVM_ENV)) {
     const [pool, key, fee, feeTo, rpcs] = names.map((n) => env[n] ?? "");
@@ -441,6 +446,9 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>): 
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[4]} must be two different RPC URLs`);
     const providers = urls.map((u) => solanaJsonRpc(u)) as unknown as [EvmRpc, EvmRpc]; // a plain JSON-RPC client
     const s = evmPoolSender({ network, pool: pool!, senderKey: unhex(key!.slice(2)), floor: BigInt(fee!), ...(feeTo === "" ? {} : { feeRecipient: feeTo! }) }, providers);
+    const v = Object.hasOwn(venues, network) ? venues[network] : undefined;
+    const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
+    if (pin !== undefined && pin.toLowerCase() !== s.sender) throw new Error(`${names[1]} is not the key of the kit's pinned sell sender for ${network} (${pin})`);
     out.set(s.pool, s);
   }
   return out;
