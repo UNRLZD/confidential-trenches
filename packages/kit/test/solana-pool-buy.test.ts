@@ -39,6 +39,7 @@ import {
   solanaProgramAddress,
   solanaRentMin,
   solanaRentOf,
+  SOLANA_TOKEN_ACCOUNT_MAX_SIZE,
   solanaTokenAccountSize,
   type SolanaPoolBuyVenue,
   type SolanaRpc,
@@ -239,6 +240,17 @@ test("rent is read from the sysvar (5,080 a byte on 2 Nov), and a token account'
   assert.equal(solanaTokenAccountSize({ owner: T22, data: mint([[14, 64]]) }), 175); // TransferHook adds TransferHookAccount
   assert.throws(() => solanaTokenAccountSize({ owner: T22, data: mint([[99, 4]]) }), /not known/);
   assert.throws(() => solanaTokenAccountSize({ owner: T22, data: mint([[18, 64]]).subarray(0, 200) }), /runs past/);
+});
+
+test("Token-2022: a mint that lists one extension type twice is refused, so no forged mint sizes W's account past the largest", () => {
+  const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+  const mint = (ext: number[][]) => Uint8Array.from([...new Uint8Array(165), 1, ...ext.flatMap(([t, n]) => [t! & 0xff, t! >> 8, n! & 0xff, n! >> 8, ...new Uint8Array(n!)])]);
+  // each of the four extensions that grow W's account, once: the largest size, SOLANA_TOKEN_ACCOUNT_MAX_SIZE
+  const once = [[1, 108], [9, 0], [14, 64], [26, 0]];
+  assert.equal(solanaTokenAccountSize({ owner: T22, data: mint(once) }), SOLANA_TOKEN_ACCOUNT_MAX_SIZE);
+  // any type twice, one that grows W's account or a mint-only one (TokenMetadata, 19)
+  const all = [...once, [19, 64]];
+  for (const [t, n] of all) assert.throws(() => solanaTokenAccountSize({ owner: T22, data: mint([...all, [t!, n!]]) }), new RegExp(`lists extension ${t} twice`), `type ${t}`);
 });
 
 test("a chunk too small to land is refused: W's token account, the volume account, the wrapped SOL at its peak, W's floor", async () => {

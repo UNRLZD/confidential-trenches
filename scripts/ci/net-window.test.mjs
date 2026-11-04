@@ -44,6 +44,7 @@ export const CHANGED = [
   "scripts/live-checks/kit-freeze-helper-api.mjs",
   "scripts/live-checks/kit-freeze-keys.mjs",
   "scripts/live-checks/kit-freeze-vault.mjs",
+  "scripts/live-checks/kit-pool-tap-inputs.mjs",
   "scripts/live-checks/market-data-evm.mjs",
   "scripts/live-checks/market-data-solana-lists.mjs",
   "scripts/live-checks/market-data-solana-token.mjs",
