@@ -37,7 +37,7 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { budgetFromEnv, EVM_LIMIT_CODE, LIMIT_WINDOW_MS, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
+import { budgetFromEnv, evmThrottleS, LIMIT_WINDOW_MS, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
@@ -101,16 +101,15 @@ export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?:
 };
 /** The chains whose providers speak EVM JSON-RPC, where -32005 is a throttle (limits.ts EVM_LIMIT_CODE). */
 const EVM_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
-/** The whole seconds an EVM provider's -32005 in `answer` (one answer or a batch) asks to wait, 1 to RETRY_AFTER_MAX_S;
- * 0 when there is none or the chain is not EVM. */
+/** The whole seconds an EVM provider's throttle in `answer` (one answer or a batch) asks to wait, by the helper's one
+ * rule (limits.ts evmThrottleS: -32005 or a rate or request limit message, never a limit on the read's size), 1 to
+ * RETRY_AFTER_MAX_S; 0 when there is none or the chain is not EVM. */
 function evmLimited(chain: RpcChain, answer: unknown): number {
   if (!EVM_CHAINS.has(chain)) return 0;
   let wait = 0;
   for (const a of Array.isArray(answer) ? answer : [answer]) {
-    const e = (a as { error?: { code?: unknown; data?: { backoff_seconds?: unknown } } } | null)?.error;
-    if (e?.code !== EVM_LIMIT_CODE) continue;
-    const s = Number(e.data?.backoff_seconds);
-    wait = Math.max(wait, Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1);
+    const e = (a as { error?: unknown } | null)?.error;
+    if (e !== undefined) wait = Math.max(wait, evmThrottleS(e));
   }
   return wait;
 }
@@ -142,7 +141,10 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `slot`: the Solana slot's name for its log lines and health (rpc/slot.ts); `publicFallback: false` for a slot whose
  *  calls the public endpoint refuses (holders' getTokenLargestAccounts: HTTP 429 "Too many requests for a specific RPC
  *  call" on every try, read 2026-11-04 10:04Z), which answers 503 while fallen back and its caller serves its own. */
-type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean };
+/** `holds`: the helper's one hold per provider (limits.ts providerHolds, card helper-robinhood-capacity): an EVM chain's
+ *  provider held by any path of the helper (the swap and maker reads use the same public Robinhood RPC) is sent no
+ *  caller's read either, which answers 429 with the seconds left; its throttle here holds it for those paths too. */
+type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
 type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string };
 type Upstream = { url: string; forms: Buffer[] };
@@ -329,7 +331,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const viaSlot = c === "solana" && keyed && key !== PUBLIC_KEY;
     /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). */
     const fellBack = (): Promise<Answer> => (publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : Promise.resolve(UPSTREAM()));
-    const held = budget.heldFor(key);
+    // an EVM chain's provider is held for every path of the helper that reads it (Deps holds)
+    const shared = EVM_CHAINS.has(c) ? deps.holds : undefined;
+    const heldAt = (): number => Math.max(budget.heldFor(key), shared?.heldFor(url) ?? 0);
+    const held = heldAt();
     if (held > 0) return throttled(held, undefined, `${key} held`);
     const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
@@ -339,7 +344,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       await new Promise((ok) => setTimeout(ok, paced));
       // the hold is read again right before the send: the provider may have asked us to wait while this one waited
       // for its second (card helper-rpc-hold-queued)
-      const heldNow = budget.heldFor(key);
+      const heldNow = heldAt();
       if (heldNow > 0) return throttled(heldNow, undefined, `${key} held`);
     }
     let r: Response;
@@ -358,6 +363,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         const waitS = upstreamRetryAfterS(r.headers, now());
         if (viaSlot && (CREDITS.test(body) ? (slot.fail("credits"), true) : slot.throttled(waitS))) return fellBack();
         hold(key, waitS, "caller");
+        shared?.hold(url, waitS);
         return throttled(budget.heldFor(key), undefined, `${key} provider 429`);
       }
       text = await readAnswer(r);
@@ -378,11 +384,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
     // a JSON-RPC error that says the plan is spent is the key's end, as a 401 is
     if (viaSlot && (Array.isArray(answer) ? answer : [answer]).some((a) => CREDITS.test(String((a as { error?: { message?: unknown } } | null)?.error?.message ?? "")))) return slot.fail("credits"), fellBack();
-    // an EVM provider's -32005 (limits.ts EVM_LIMIT_CODE) in any answer is its throttle, as its 429 is: the chain is held
-    // for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
+    // an EVM provider's throttle in any answer (evmLimited: -32005 or a rate or request limit message) is its throttle, as
+    // its 429 is: the chain is held for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
     const limited = evmLimited(c, answer);
     if (limited > 0) {
       hold(key, limited, "caller");
+      shared?.hold(url, limited);
       return throttled(budget.heldFor(key), undefined, `${key} provider limit`);
     }
     const b = Buffer.from(text, "utf8");

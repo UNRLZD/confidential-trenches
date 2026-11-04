@@ -28,7 +28,7 @@
 import { gzipSync } from "node:zlib";
 import { dec, LIST_MAX, ROW_FIELDS, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { throttledUntil, type GeckoBudget } from "../gecko.ts";
-import { EVM_LIMIT_CODE, EVM_LIMIT_MESSAGE } from "../../limits/limits.ts";
+import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 
 export const EVM_CHAINS = ["base", "robinhood"] as const;
 export type EvmChain = (typeof EVM_CHAINS)[number];
@@ -392,6 +392,33 @@ export function padOf(chain: EvmChain, token: string, logs: unknown): string | n
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
+/**
+ * The maker reads' fetch kept by the helper's one hold per provider (limits.ts providerHolds, card
+ * helper-robinhood-capacity): a provider that is held is sent nothing and answers a 429 here (batch() stops on it); its
+ * 429 holds it for the wait it names, and a JSON-RPC throttle in its answer (evmThrottleS) for that one's.
+ */
+export function heldFetch(doFetch: Fetch, holds: ProviderHolds, now: () => number = Date.now): Fetch {
+  return async (url, init) => {
+    const left = holds.heldFor(url);
+    if (left > 0) return new Response("{}", { status: 429, headers: { "retry-after": String(left) } });
+    const r = await doFetch(url, init);
+    if (r.status === 429) {
+      holds.hold(url, upstreamRetryAfterS(r.headers, now()));
+      return r;
+    }
+    if (r.status !== 200) return r;
+    const text = await r.text();
+    try {
+      const parsed: unknown = JSON.parse(text);
+      for (const a of Array.isArray(parsed) ? parsed : [parsed]) {
+        const wait = Object.hasOwn(obj(a), "error") ? evmThrottleS(obj(a).error) : 0;
+        if (wait > 0) holds.hold(url, wait);
+      }
+    } catch {}
+    return new Response(text, { status: r.status, headers: r.headers });
+  };
+}
+
 /** JSON-RPC batches to one provider (BATCH_MAX calls each, one after another): each call's `result`, by position;
  *  undefined for any that failed. A provider that refuses a batch (its HTTP 429, a JSON-RPC -32005 or limit message) is
  *  sent none of the batches after it: they fail as refused reads, so the caller's third provider answers (card
@@ -438,8 +465,7 @@ async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; p
     for (const a of answers) {
       const o = obj(a);
       if (Object.hasOwn(o, "error")) {
-        const e = obj(o.error);
-        if (e.code === EVM_LIMIT_CODE || EVM_LIMIT_MESSAGE.test(String(e.message ?? ""))) refused = true;
+        if (evmThrottleS(o.error) > 0) refused = true;
         continue;
       }
       if (Number.isSafeInteger(o.id) && (o.id as number) >= 0 && (o.id as number) < calls.length && Object.hasOwn(o, "result")) out[o.id as number] = o.result;
@@ -633,9 +659,11 @@ type Read = { rows: Row[]; created: Map<string, number>; at: number; raw: string
 export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][] };
 
 /** Discover's lists for one EVM chain: GeckoTerminal's lists once per LIST_MS, makers read and kept, rebuilt per TICK_MS. */
-export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetch?: Fetch; now?: () => number } = {}) {
+/** `holds`: the helper's one hold per provider (limits.ts providerHolds), which the maker reads keep (heldFetch). */
+export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetch?: Fetch; now?: () => number; holds?: ProviderHolds } = {}) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
+  const rpcFetch = deps.holds === undefined ? doFetch : heldFetch(doFetch, deps.holds, now);
   const makers = new Map<string, string | null>();
   const tries = new Map<string, number>(); // maker reads that settled nothing, per token
   const reads: Partial<Record<ListKey, Read>> = {};
@@ -694,7 +722,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     // the least-tried first, so a token whose read keeps failing never holds the others back
     const ask = [...wanted].sort((a, b) => (tries.get(a[0]) ?? 0) - (tries.get(b[0]) ?? 0)).slice(0, RECORDS[chain] === null ? MAKER_PER_TICK : RECORDS_PER_TICK).map(([token, createdS]) => ({ token, createdS }));
     if (ask.length > 0) {
-      const got = await readMakers(chain, doFetch, ask, now());
+      const got = await readMakers(chain, rpcFetch, ask, now());
       for (const a of ask) {
         const pad = got.get(a.token);
         if (pad === undefined) {

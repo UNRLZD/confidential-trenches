@@ -52,7 +52,7 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
-import { EVM_LIMIT_CODE, EVM_LIMIT_MESSAGE, RETRY_AFTER_MAX_S, upstreamRetryAfterS } from "../../limits/limits.ts";
+import { evmThrottleS, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 
@@ -209,13 +209,38 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // -32601 "method not available" at 14:36:28Z). With two providers needed alike, one slow provider left no pair:
   // 503. rpc.mainnet.chain.robinhood.com, the chain's own, answered 100-block reads 11,000 blocks back in 0.4-1.3 s
   // and a batch of 10 in 2.0 s, its logs' `blockTimestamp` still 0x0 and its block headers' `timestamp` set: it is
-  // header-timed (HEADER_TIMED). Ordered by those reads, the fastest first.
-  robinhood: ["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network", "https://api.blockvectra.com/v1/robinhood_mainnet/public"],
+  // header-timed (HEADER_TIMED).
+  //
+  // Read again 2026-11-04 19:37-19:42Z (card helper-robinhood-capacity), every Robinhood mainnet RPC chainid.network and
+  // chainlist.org list, from the helper box and from the Mac: two more keyless operators answer `eth_getLogs` 3,000
+  // blocks back with each log's blockTimestamp and batches of 10: robinhood.api.pocket.network (served 11 calls a second
+  // for 8 s, none refused) and rpc-robinhood.blockmachine.io (10 a second, then -32029; keyless reads only of about the
+  // newest 10,000 blocks). Sustained from the Mac, 4 at once for 8 s: drpc 33 calls a second none refused, daybreak 29
+  // then -32005 "too many concurrent requests", the chain's own 3.8 then 429. Not added: robinhood-rpc.publicnode.com
+  // (-32602 archive), blockreq.com (only the newest blocks), rpc.ordofi.network (no answer), robinhood.rpc.blxrbdn.com
+  // and rpc.nodeflare.app (403), lb.routeme.sh and 4663.rpc.thirdweb.com (429 at once), the Tatum gateway (5 a minute),
+  // rpc.degenprotocol.io (502s; logs blockTimestamp 0x0) and rpc-robinhood.globalstake.io (10 s timeouts). The wide
+  // providers (WIDE_SPAN) first, the pair asked first turning among them (spread); the chain's own RPC last, since
+  // /v1/rpc/robinhood's callers read it too.
+  robinhood: ["https://robinhood.daybreak-rpc.network", "https://rpc-robinhood.blockmachine.io", "https://robinhood.api.pocket.network", "https://robinhood.drpc.org", "https://api.blockvectra.com/v1/robinhood_mainnet/public", "https://rpc.mainnet.chain.robinhood.com"],
 };
 
 /** Providers whose logs carry no block time on a chain timed by them (Robinhood): their logs are timed by their own
  *  `eth_getBlockByNumber` of each log's block, and count for a swap's time only where another provider logged the same. */
 export const HEADER_TIMED: ReadonlySet<string> = new Set(["https://rpc.mainnet.chain.robinhood.com"]);
+/** The most blocks one `eth_getLogs` asks of a provider that takes more than its chain's VENUES span (card
+ *  helper-robinhood-capacity, read 2026-11-04 19:44Z from the Mac, the v4 PoolManager's logs 500, 1,000 and 3,000 blocks
+ *  back to the head): robinhood.api.pocket.network 1,532 logs over 1,000 blocks in 1.9 s and 3,000 in 7.4 s;
+ *  rpc-robinhood.blockmachine.io 1,000 in 1.0 s and 3,000 in 0.6 s; robinhood.daybreak-rpc.network 1,000 in 0.9 s, 3,000
+ *  refused -32602 "query exceeds max block range 2000"; rpc.mainnet.chain.robinhood.com 3,000 in 0.6 s. A 3,000-block
+ *  cold window is 3 reads on them, not 30. [design: 1,000: the widest every one of them answered within 2 s, and the
+ *  busiest filter's 1,000 blocks (a pool's swaps, under the whole PoolManager's 1,500 logs) fit ANSWER_MAX and LOGS_MAX.] */
+const WIDE_SPAN: Readonly<Record<string, number>> = {
+  "https://robinhood.api.pocket.network": 1_000,
+  "https://rpc-robinhood.blockmachine.io": 1_000,
+  "https://robinhood.daybreak-rpc.network": 1_000,
+  "https://rpc.mainnet.chain.robinhood.com": 1_000,
+};
 
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
  *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ). */
@@ -438,7 +463,7 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
 type Call = { method: string; params: unknown[] };
 type Reply = { ok: true; result: unknown } | { ok: false; wait: number };
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -454,7 +479,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     for (let lo = from; lo <= to; lo += V.span) out.push([lo, Math.min(to, lo + V.span - 1)]);
     return out;
   };
-  const held = new Map<string, number>(); // provider -> held until (ms)
+  // each provider's hold, shared with every other path of the helper that reads it (limits.ts providerHolds)
+  const holds = deps.holds ?? providerHolds(now);
 
   /** One JSON-RPC batch to a provider: each call's reply, or the wait a refusal names; null when it failed. */
   async function batchTo(url: string, calls: Call[]): Promise<Reply[] | null> {
@@ -488,7 +514,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  read does, so the caller asks the next provider (card helper-rpc-hold-queued: 2026-11-04 18:55Z on the helper box,
    *  seven batches queued before the chain's own Robinhood RPC's 429 were sent within 190 ms of it). */
   async function one(url: string, part: Call[]): Promise<Reply[] | null> {
-    if ((held.get(url) ?? 0) > now()) return null;
+    if (holds.heldFor(url) > 0) return null;
     try {
       const r = await doFetch(url, {
         method: "POST",
@@ -499,8 +525,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       });
       if (r.status === 429) {
         await r.body?.cancel();
-        // a later, shorter wait never cuts a longer one, as the limit path below
-        held.set(url, Math.max(held.get(url) ?? 0, now() + upstreamRetryAfterS(r.headers, now()) * 1000));
+        // a later, shorter wait never cuts a longer one (providerHolds), as the limit path below
+        holds.hold(url, upstreamRetryAfterS(r.headers, now()));
         return null;
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
@@ -516,12 +542,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         const o = obj(a);
         if (!Number.isSafeInteger(o.id) || (o.id as number) < 0 || (o.id as number) >= part.length) continue;
         if (Object.hasOwn(o, "error")) {
-          // the helper's RPC rules (rpc.ts): -32005 or a limit message is a throttle, held for the wait it names
-          const e = obj(o.error);
-          const s = Number(obj(e.data).backoff_seconds);
-          const limited = e.code === EVM_LIMIT_CODE || EVM_LIMIT_MESSAGE.test(String(e.message ?? ""));
-          const wait = limited ? (Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1) : 0;
-          if (wait > 0) held.set(url, Math.max(held.get(url) ?? 0, now() + wait * 1000));
+          // the helper's one rule for a provider's error (limits.ts evmThrottleS): a throttle is held for the wait it names
+          const wait = evmThrottleS(o.error);
+          if (wait > 0) holds.hold(url, wait);
           got[o.id as number] = { ok: false, wait };
         } else if (Object.hasOwn(o, "result")) got[o.id as number] = { ok: true, result: o.result };
       }
@@ -530,7 +553,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return null;
     }
   }
-  const usable = (urls: readonly string[]) => urls.filter((u) => (held.get(u) ?? 0) <= now());
+  const usable = (urls: readonly string[]) => urls.filter((u) => holds.heldFor(u) === 0);
 
   /** The block both providers have, and its time: the newest block of the two heads (the second highest of three when
    *  the first two differ by more than LAG_MAX), with the providers that have it. Null when it cannot be read. */
@@ -563,11 +586,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** The providers to ask, in order: those of `urls` not held, then any other of ours not held (a provider that was held
    *  since the head was read, or lags, is made up for by the next), at most PROVIDERS_MAX. */
   const askOrder = (urls: readonly string[]): string[] => [...new Set([...usable(urls), ...usable(rpcs)])].slice(0, PROVIDERS_MAX);
+  /** The leading wide providers (WIDE_SPAN) take turns at being the pair asked first, so a dozen cold tokens' reads are
+   *  spread over all of them rather than queued behind two (card helper-robinhood-capacity: 12 at once took 20 s with the
+   *  first two asked every time, each provider at INFLIGHT_MAX). A chain with none (Base) keeps its order. */
+  let turn = 0;
+  const spread = (order: string[]): string[] => {
+    const lead = order.findIndex((u) => (WIDE_SPAN[u] ?? 0) <= V.span);
+    const k = lead === -1 ? order.length : lead;
+    if (k <= 2) return order;
+    const r = turn++ % k;
+    return [...order.slice(r, k), ...order.slice(0, r), ...order.slice(k)];
+  };
 
   /** Asks `urls` the same `n` requests, two at once and then one more at a time while some answer has no two alike.
    *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. */
   async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[]) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean): Promise<(A | null)[]> {
-    const order = askOrder(urls);
+    const order = spread(askOrder(urls));
     const got: A[][] = Array.from({ length: n }, () => []);
     const run = async (u: string, idx: number[]) => {
       const r = await ask(u, idx);
@@ -590,14 +624,40 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return all.map(pick);
   }
 
+  /** Each filter's logs as `u` answers them, null where it did not. A provider that takes wider ranges (WIDE_SPAN) is
+   *  asked fewer, wider reads: a run of the same filter over adjacent ranges is joined up to its span, and the answer
+   *  split back by block, so each filter is still compared with the other provider's answer for that range alone. */
+  async function logsOf(u: string, fs: Record<string, unknown>[]): Promise<(Log[] | null)[]> {
+    const max = WIDE_SPAN[u] ?? V.span;
+    const at = (f: Record<string, unknown>): [number, number] => [hexInt(f.fromBlock) ?? -1, hexInt(f.toBlock) ?? -1];
+    const rest = (f: Record<string, unknown>) => JSON.stringify({ ...f, fromBlock: null, toBlock: null });
+    const groups: { f: Record<string, unknown>; from: number; to: number; of: number[] }[] = [];
+    fs.forEach((f, i) => {
+      const [from, to] = at(f);
+      const g = groups.at(-1);
+      if (g !== undefined && from >= 0 && to >= from && rest(g.f) === rest(f) && from === g.to + 1 && to - g.from + 1 <= max) (g.to = to), g.of.push(i);
+      else groups.push({ f, from, to, of: [i] });
+    });
+    const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })));
+    const out: (Log[] | null)[] = fs.map(() => null);
+    groups.forEach((g, k) => {
+      const logs = r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null;
+      if (logs === null) return;
+      for (const i of g.of) {
+        const [from, to] = at(fs[i]!);
+        out[i] = logs.filter((l) => l.block >= from && l.block <= to);
+      }
+    });
+    return out;
+  }
+
   /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
   function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[]): Promise<(Log[] | null)[]> {
     return agreed<Log[]>(
       urls,
       filters.length,
       async (u, idx) => {
-        const r = await batchTo(u, idx.map((i) => ({ method: "eth_getLogs", params: [filters[i]] })));
-        const got = idx.map((_, k) => (r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null));
+        const got = await logsOf(u, idx.map((i) => filters[i]!));
         return clock === null && headerTimed.has(u) ? timedByHeaders(u, got) : got;
       },
       (a, b) => sameLogs(a, b, clock === null),

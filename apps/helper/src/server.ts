@@ -41,7 +41,7 @@ import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
 import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
-import { clientOf, clientWindow, refusalLog, throttled, throttleOf } from "./limits/limits.ts";
+import { clientOf, clientWindow, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
@@ -531,7 +531,7 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
  * served only when its chain's Discover lists hold it. Base's providers are the host's BASE_RPC_URL when set (a keyed
  * one, asked first), then the public ones (SWAP_RPCS); Robinhood's are the public ones.
  */
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget): Swaps {
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
@@ -540,6 +540,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
     let seen: { asOfMs: number; tokens: Set<string> } | null = null;
     out[chain] = createSwaps(chain, {
       gecko,
+      holds,
       rpcs: url === undefined || url === "" ? SWAP_RPCS[chain] : [url, ...SWAP_RPCS[chain]],
       listed: async (token) => {
         const a = await lists.get();
@@ -756,7 +757,10 @@ if (import.meta.main) {
   try {
     checkVendorPlans(process.env);
     const proxy = createProxy(process.env);
-    const rpc = createRpc(process.env);
+    // one hold per provider, shared by every path that reads it (card helper-robinhood-capacity: the swap and maker reads
+    // and /v1/rpc/robinhood all read rpc.mainnet.chain.robinhood.com)
+    const holds = providerHolds();
+    const rpc = createRpc(process.env, { holds });
     const lists = createSolanaLists(proxy, rpc);
     // the senders' handover (sendersFromEnv): `peer` when the helper this one replaces still runs
     const senders = sendersFromEnv(process.env);
@@ -764,7 +768,7 @@ if (import.meta.main) {
     // GeckoTerminal's one keyless budget (src/data/gecko.ts): the Solana token page's candles first, the EVM lists after
     const SERVED_EVM: readonly EvmChain[] = ["base", "robinhood"];
     const gecko = geckoBudget(Date.now);
-    const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko)]));
+    const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko, { holds })]));
     // card helper-ready-gate: the previous helper's warm file (data/warm.ts) seeds the EVM lists and its GeckoTerminal
     // calls; while it still runs (peer), this one makes no GeckoTerminal call until the handover, then takes its last
     // calls from the file it wrote at its stop. With no file, a replaced helper may have spent the window: none for one.
@@ -797,7 +801,7 @@ if (import.meta.main) {
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
     const pools = solanaPoolSendersFromEnv(process.env);
     for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();

@@ -96,9 +96,47 @@ export function throttleOf(e: unknown, evm = false): number {
  * {"code": -32005, "message": "project ID request rate exceeded"} (docs.infura.io/reference/ethereum/json-rpc-methods,
  * read 2026-11-03 09:16Z). Any other -320xx stays a provider failure. */
 export const EVM_LIMIT_CODE = -32005;
-/** A JSON-RPC error message that names a rate or request limit, whatever its code (mainnet.base.org's "request limit
- *  reached", Tenderly's "rate limit exceeded"): a throttle, held as EVM_LIMIT_CODE is (data/evm/swaps.ts, lists.ts). */
-export const EVM_LIMIT_MESSAGE = /rate.?limit|too many requests|limit (reached|exceeded)|request limit/i;
+/** A JSON-RPC error message that names a rate or request limit, whatever its code: mainnet.base.org's "request limit
+ *  reached", Tenderly's "rate limit exceeded", and on Robinhood (read 2026-11-04 19:37-19:42Z) blockvectra's "public
+ *  request rate limit exceeded", daybreak's "too many concurrent requests", blockmachine's -32029 "rate limit exceeded".
+ *  A limit on what one read asks is not a throttle (EVM_RANGE_MESSAGE). */
+export const EVM_LIMIT_MESSAGE = /rate.?limit|too many (concurrent )?requests|request limit/i;
+/** A JSON-RPC error that names a limit on one read's size, not on our rate: daybreak's "query exceeds max block range
+ *  2000", drpc's "ranges over 10000 blocks are not supported on freetier", "block range limit exceeded", Infura's -32005
+ *  "query returned more than 10000 results", "Log response size exceeded". Asked again, it answers the same. */
+export const EVM_RANGE_MESSAGE = /block range|max(imum)? (block )?range|ranges? over|returned more than|response size/i;
+/** The one rule for what an EVM provider's JSON-RPC error is (card helper-robinhood-capacity: rpc.ts, data/evm/swaps.ts
+ *  and lists.ts read it alike): the seconds it asks us to wait, 1 to RETRY_AFTER_MAX_S (its data.backoff_seconds, else
+ *  1), when it is EVM_LIMIT_CODE or names a rate or request limit and no limit on the read's size; else 0. */
+export function evmThrottleS(error: unknown): number {
+  const e = (typeof error === "object" && error !== null ? error : {}) as { code?: unknown; message?: unknown; data?: { backoff_seconds?: unknown } };
+  const m = String(e.message ?? "");
+  if (EVM_RANGE_MESSAGE.test(m) || (e.code !== EVM_LIMIT_CODE && !EVM_LIMIT_MESSAGE.test(m))) return 0;
+  const s = Number(e.data?.backoff_seconds);
+  return Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1;
+}
+
+/**
+ * One hold per provider URL, shared by every path of this helper that reads it (card helper-robinhood-capacity): the
+ * Robinhood swap reads (data/evm/swaps.ts), the maker reads (data/evm/lists.ts) and /v1/rpc/robinhood (rpc/rpc.ts) all
+ * read rpc.mainnet.chain.robinhood.com from the one address the provider limits. hold(url, s) holds it s seconds more
+ * from now unless it is held longer (at most RETRY_AFTER_MAX_S); heldFor(url) is the seconds left, 0 when it is free.
+ */
+export type ProviderHolds = { heldFor(url: string): number; hold(url: string, seconds: number): void };
+export function providerHolds(now: () => number = Date.now): ProviderHolds {
+  const until = new Map<string, number>();
+  return {
+    heldFor(url) {
+      const u = until.get(url) ?? 0;
+      if (u <= now()) return 0;
+      return secondsUntil(u, now());
+    },
+    hold(url, seconds) {
+      const t = now();
+      until.set(url, Math.max(until.get(url) ?? 0, t + Math.min(Math.max(seconds, 0), RETRY_AFTER_MAX_S) * 1000));
+    },
+  };
+}
 
 /** A read behind a cached answer was throttled (its upstream's 429, the helper's own budget, a paused queue): the
  * cache answers 429 with `retryAfterS` instead of 503 when it has nothing good to serve. */
