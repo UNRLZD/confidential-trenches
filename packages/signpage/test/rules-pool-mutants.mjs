@@ -1,6 +1,7 @@
-// Removes each of src/rules/pool.ts's checks, one at a time, and runs the test named for it in test/rules-pool.test.ts:
-// each named test passes on the code as it is and fails on every mutant. A mutant is written to a copy beside pool.ts
-// (src/rules/.pool-mutant-<pid>.ts) and run by a copy of the test that imports it, both removed after: pool.ts itself is
+// Removes each of src/rules/pool.ts's checks, one at a time, and runs the test named for it in test/rules-pool.test.ts
+// (or the test file a mutant names, test/rules-pool-onward.test.ts): each named test passes on the code as it is and fails
+// on every mutant. A mutant is written to a copy beside pool.ts (src/rules/.pool-mutant-<pid>.ts) and run by a copy of
+// its test file that imports it, all removed after: pool.ts itself is
 // never changed, so a test run at the same time (the package's own, in parallel) never reads a mutant. Exits 1 when a
 // named test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file
 // exactly once. test/rules-pool-mutants.test.mjs runs it in the package's tests.
@@ -10,9 +11,11 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const POOL = fileURLToPath(new URL("../src/rules/pool.ts", import.meta.url));
-const TEST = fileURLToPath(new URL("./rules-pool.test.ts", import.meta.url));
+const TEST = "rules-pool.test.ts";
+const ONWARD = "rules-pool-onward.test.ts";
+const testOf = (file) => fileURLToPath(new URL(`./${file}`, import.meta.url));
 const MUTANT_SRC = fileURLToPath(new URL(`../src/rules/.pool-mutant-${process.pid}.ts`, import.meta.url));
-const MUTANT_TEST = fileURLToPath(new URL(`./.rules-pool-mutant-${process.pid}.test.ts`, import.meta.url));
+const mutantTestOf = (file) => fileURLToPath(new URL(`./.${file.replace(/\.test\.ts$/, "")}-mutant-${process.pid}.test.ts`, import.meta.url));
 const IMPORT = 'from "../src/rules/pool.ts";';
 
 const REQ = "a request: each pool kind";
@@ -26,8 +29,10 @@ const SELL = "Solana sell:";
 const EBUY = "EVM buy:";
 const EWD = "EVM withdraw:";
 const ESELL = "EVM sell and authorization";
+const ONC = "EVM onward send: W's whole balance";
+const ONS = "EVM onward send: signs as W";
 
-// [text, replacement, the test that must fail]
+// [text, replacement, the test that must fail, its file when not rules-pool.test.ts]
 export const MUTANTS = [
   // the request
   ['if (!(POOL_CHAINS as readonly string[]).includes(p.chain)) return refuse("chain");', "", REQ],
@@ -109,7 +114,7 @@ export const MUTANTS = [
   ['if (lower(built.token) !== lower(ask.token ?? "")) return refuse("token");\n  if (proof.value', "if (proof.value", EBUY],
   ['if (proof.value !== ask.amount) return refuse("amount");', "", EBUY],
   ['if (lower(pool) !== lower(pins.pool)) return refuse("pool");\n  if (proof.value === 0n)', "if (proof.value === 0n)", EWD],
-  ['if (ask.kind !== "pool.withdraw") return refuse("kind");', "", EWD],
+  ['if (ask.kind !== "pool.withdraw") return refuse("kind");\n  const proof', "const proof", EWD],
   // the EVM sell and authorization
   ['if (lower(built.w) !== lower(ctx.wallet)) return refuse("wallet");', "", ESELL],
   ['if (lower(built.pool) !== lower(pins.pool)) return refuse("pool");', "", ESELL],
@@ -144,12 +149,51 @@ export const MUTANTS = [
   ['if (d.op === "pool.withdraw" || d.op === "pool.sell") lines.push(["To", d.to]);', "", WDOK],
   ['if (d.back !== null) lines.push(["To private balance", poolUnits(d.back, asset)]);', "", SELL],
   ['const frac = (amount % base).toString().padStart(decimals, "0").replace(/0+$/, "");', 'const frac = (amount % base).toString().replace(/0+$/, "");', SELL],
+  // the EVM onward send (W's second step of a withdraw): each refusal, and the signer's
+  ['if (ask.kind !== "pool.withdraw") return refuse("kind");\n  const chain', "const chain", ONC, ONWARD],
+  ['if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");', "", ONC, ONWARD],
+  ['typeof tx !== "object" || tx === null || Object.keys', "Object.keys", ONC, ONWARD],
+  ["Object.keys(tx).sort().join() !== ONWARD_KEYS || ", "", ONC, ONWARD],
+  [' || tx.type !== 2) return refuse("type");', ') return refuse("type");', ONC, ONWARD],
+  ["![t.chainId, t.maxPriorityFeePerGas, t.maxFeePerGas, t.gasLimit, t.value].every(uint) || ", "", ONC, ONWARD],
+  [' || t.nonce >= (1n << 64n) - 1n) return refuse("tx_fields");', ') return refuse("tx_fields");', ONC, ONWARD],
+  ['if (typeof t.to !== "string" || typeof t.data !== "string" || !Array.isArray(t.accessList)) return refuse("tx_fields");', "", ONC, ONWARD],
+  ["!Array.isArray(pair) || pair.length !== 2 || ", "", ONC, ONWARD],
+  ['ok(pair[0]) || pair[0] !== pair[1]) return refuse("reads");', 'ok(pair[0])) return refuse("reads");', ONC, ONWARD],
+  ['if (!uint(reads.priorityCap)) return refuse("reads");', "", ONC, ONWARD],
+  ["const estimate = hasCode ? agreed(reads.estimate, uint) : null;", "const estimate = reads.estimate ? agreed(reads.estimate, uint) : null;", ONC, ONWARD],
+  ['if (t.chainId !== pins.chainId) return refuse("chain_id");', "", ONC, ONWARD],
+  ["!EVM_ADDRESS.test(to) || lower(to) === ZERO_ADDRESS", "lower(to) === ZERO_ADDRESS", ONC, ONWARD],
+  [" || lower(to) === ZERO_ADDRESS", "", ONC, ONWARD],
+  [" || lower(to) === lower(pins.pool)", "", ONC, ONWARD],
+  [' || lower(to) === lower(ctx.wallet)) return refuse("to");', ') return refuse("to");', ONC, ONWARD],
+  ['if (lower(t.to) !== lower(to)) return refuse("transfer_to");', "", ONC, ONWARD],
+  ['if (t.nonce !== nonce) return refuse("nonce");', "", ONC, ONWARD],
+  ['if (t.data !== "0x") return refuse("data");', "", ONC, ONWARD],
+  ['if (t.accessList.length !== 0) return refuse("access_list");', "", ONC, ONWARD],
+  ['if (t.gasLimit !== EVM_ONWARD_GAS) return refuse("gas_limit");', "", ONC, ONWARD],
+  ['if (t.gasLimit !== estimate) return refuse("gas_estimate");', "", ONC, ONWARD],
+  ['if (t.gasLimit > EVM_ONWARD_GAS_MAX) return refuse("gas_over_cap");', "", ONC, ONWARD],
+  ["export const EVM_ONWARD_GAS_MAX = 100_000n;", "export const EVM_ONWARD_GAS_MAX = 100_001n;", ONC, ONWARD],
+  ['if (t.maxPriorityFeePerGas > reads.priorityCap) return refuse("priority_fee");', "", ONC, ONWARD],
+  ['if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap) return refuse("max_fee");', "", ONC, ONWARD],
+  ["t.maxFeePerGas > 2n * baseFee", "t.maxFeePerGas > 3n * baseFee", ONC, ONWARD],
+  ["t.value + feeBound !== balance", "t.value + feeBound > balance", ONC, ONWARD],
+  ["t.value + feeBound !== balance", "t.value + feeBound < balance", ONC, ONWARD],
+  ['if (t.value === 0n || t.value', "if (t.value", ONC, ONWARD],
+  ["const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;", "const feeBound = t.gasLimit * t.maxFeePerGas;", ONC, ONWARD],
+  ["  ONWARD_CHECKED.set(tx, Object.freeze({ ...t, wallet: lower(ctx.wallet) }));\n", "", ONS, ONWARD],
+  ['if (!read) return refuse("unchecked");', "", ONS, ONWARD],
+  ['    return refuse("unchecked");\n  }\n  const fields', "    now = read;\n  }\n  const fields", ONS, ONWARD],
+  ['if (fields.some((k) => now[k] !== read[k]) || now.accessList.length !== 0) return refuse("unchecked");', "", ONS, ONWARD],
+  [' || now.accessList.length !== 0) return refuse("unchecked");', ') return refuse("unchecked");', ONS, ONWARD],
+  ['!== read.wallet) return refuse("wallet");', '=== "") return refuse("wallet");', ONS, ONWARD],
 ];
 
 // a child test run must not inherit this process's own node --test context (when the sweep runs as a test, the child
 // would report to the parent's runner and print no summary of its own)
 const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
-const run = (name, file = TEST) => {
+const run = (name, file) => {
   try {
     const out = execFileSync(process.execPath, ["--test", "--test-timeout=120000", "--test-name-pattern", name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), file], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: CHILD_ENV });
     return { ok: true, ran: /ℹ pass [1-9]/.test(out) };
@@ -160,23 +204,27 @@ const run = (name, file = TEST) => {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const original = readFileSync(POOL, "utf8");
-  const test = readFileSync(TEST, "utf8");
-  if (test.split(IMPORT).length !== 2) { console.log("BAD  rules-pool.test.ts imports pool.ts not once"); process.exit(1); }
-  writeFileSync(MUTANT_TEST, test.replace(IMPORT, `from "../src/rules/.pool-mutant-${process.pid}.ts";`));
-  process.on("exit", () => { rmSync(MUTANT_TEST, { force: true }); rmSync(MUTANT_SRC, { force: true }); });
+  const files = [TEST, ONWARD];
+  process.on("exit", () => { for (const f of files) rmSync(mutantTestOf(f), { force: true }); rmSync(MUTANT_SRC, { force: true }); });
+  for (const f of files) {
+    const test = readFileSync(testOf(f), "utf8");
+    if (test.split(IMPORT).length !== 2) { console.log(`BAD  ${f} imports pool.ts not once`); process.exit(1); }
+    writeFileSync(mutantTestOf(f), test.replace(IMPORT, `from "../src/rules/.pool-mutant-${process.pid}.ts";`));
+  }
   // an interrupt removes the copies too (exit runs the handler above)
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => process.exit(130));
   let bad = 0;
-  for (const name of new Set(MUTANTS.map((m) => m[2]))) {
-    const r = run(name);
+  for (const key of new Set(MUTANTS.map((m) => `${m[3] ?? TEST}\0${m[2]}`))) {
+    const [file, name] = key.split("\0");
+    const r = run(name, testOf(file));
     if (!r.ok || !r.ran) { console.log(`BAD  "${name}" does not pass on the code as it is`); bad++; }
   }
-  for (const [text, repl, name] of MUTANTS) {
+  for (const [text, repl, name, file = TEST] of MUTANTS) {
     const n = original.split(text).length - 1;
     if (n !== 1) { console.log(`BAD  mutant text ${n} times in pool.ts, not once: ${text.slice(0, 80)}`); bad++; continue; }
     writeFileSync(MUTANT_SRC, original.replace(text, () => repl));
     try {
-      const r = run(name, MUTANT_TEST);
+      const r = run(name, mutantTestOf(file));
       if (r.ok) { console.log(`LIVE "${name}" passes with: ${text.slice(0, 90)}`); bad++; }
       else console.log(`killed  ${text.slice(0, 90).replace(/\n/g, " ")}`);
     } finally {
