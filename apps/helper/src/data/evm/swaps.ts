@@ -869,11 +869,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const fresh = history.get(k);
     if (fresh !== undefined && now() - fresh.at < GT_FRESH_MS) return fresh.bars;
     const fallback = (fail: DataAnswer): Candle[] | DataAnswer => {
+      if (fresh !== undefined && fresh.bars.length > 0) return fresh.bars;
       const cut = (kept.get(`${e.pool.id}:${tf}`)?.bars ?? []).filter((c) => before === null || c[0] < before);
       return cut.length > 0 ? cut : fail;
     };
     const wait = (why = "geckoterminal budget") => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
-    if (!gecko.take("pages")) return fallback(wait());
+    // a re-read of bars held (this range's, or the newest range's kept bars) is a refresh (../gecko.ts): it leaves a cold
+    // page its calls, and refused, the bars held are served (card app-console-429)
+    const held = fresh !== undefined || (before === null && kept.has(`${e.pool.id}:${tf}`));
+    if (!gecko.take(held ? "refresh" : "pages")) return fallback(wait(held ? "geckoterminal refresh" : undefined));
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
       const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;

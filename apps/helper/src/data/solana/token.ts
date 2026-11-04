@@ -327,8 +327,9 @@ const isBars = (v: unknown): v is Candle[] =>
 /** The bytes of answers a process hands the next one (data/warm.ts holds the whole file under WARM_MAX, 16 MB, with
  *  the EVM lists' answers) [design: 4 MB, a few hundred pages and holders and two dozen charts' last bars]. */
 export const HANDOVER_MAX = 4 * 1024 * 1024;
-/** The last good bars handed over are at most this old [design: an hour; a helper down longer reads them again]. */
-export const KEPT_HANDOVER_MS = 3_600_000;
+/** The last good bars handed over are at most this old: bars are history with their read time, so a swap's first loads
+ *  are answered from them, dated, rather than going to a GeckoTerminal budget the old helper spent [design: a day]. */
+export const KEPT_HANDOVER_MS = 86_400_000;
 
 /** A read cached per key: fresh within `freshMs` of our own read; a failed refresh serves the last good one while its
  *  data is under STALE_MS old; one read per key at a time. `client`, the caller whose request makes the read, draws
@@ -336,8 +337,10 @@ export const KEPT_HANDOVER_MS = 3_600_000;
  *  nothing. `read` answers null for "no such token" and throws for an
  *  upstream failure. `opts.revalidate`: a good answer past `freshMs` whose data is under STALE_MS old is answered at
  *  once while one refresh runs, so a caller never waits on a slow upstream for what it was just served. `opts.view`:
- *  every kept answer as served (the token page fills a launch read since). */
-function cached(freshMs: number | ((key: string) => number), now: () => number, read: (key: string, client?: string) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer } = {}) {
+ *  every kept answer as served (the token page fills a launch read since). `read`'s `held`: a good answer is held for
+ *  the key (its re-read is a refresh, ../gecko.ts "refresh"); `opts.keepHeld`: a refresh refused by a budget serves
+ *  the held answer, dated by its own read, whatever its age (card app-console-429). */
+function cached(freshMs: number | ((key: string) => number), now: () => number, read: (key: string, client?: string, held?: boolean) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer; keepHeld?: boolean } = {}) {
   const view = (key: string, a: DataAnswer) => (opts.view === undefined ? a : opts.view(key, a));
   const last = bounded<{ a: DataAnswer; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<DataAnswer>>();
@@ -368,12 +371,12 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
       let p = running.get(key);
       if (p === undefined) {
         const started = now(); // fresh from when the read began, so a refresh answered in the background is never fresher than its data
-        p = read(key, client)
+        p = read(key, client, hit !== undefined && hit.a.status === 200)
           .then((a) => {
             if (a.status === 200 || a.status === 404) last.set(key, { a, at: started });
             return a;
           })
-          .catch((e) => (hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS ? hit.a : e instanceof Throttled ? limited(e.retryAfterS, e.why) : UPSTREAM))
+          .catch((e) => (hit !== undefined && hit.a.status === 200 && ((opts.keepHeld === true && e instanceof Throttled) || now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS) ? hit.a : e instanceof Throttled ? limited(e.retryAfterS, e.why) : UPSTREAM))
           .finally(() => running.delete(key));
         running.set(key, p);
       }
@@ -611,8 +614,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // budget (../gecko.ts) when it passes one, where the lists yield to it; a 429 pauses it. A refused call is a throttle
   // naming the wait to the budget's next free call or the pause's end (card helper-abuse-limits)
   const gt = deps.gecko ?? geckoBudget(now, GT_PER_MIN);
-  async function gecko(path: string): Promise<unknown> {
-    if (!gt.take("pages")) throw new Throttled(secondsUntil(gt.retryAt("pages"), now()), "geckoterminal budget");
+  async function gecko(path: string, lane: "pages" | "refresh" = "pages"): Promise<unknown> {
+    if (!gt.take(lane)) throw new Throttled(secondsUntil(gt.retryAt("pages"), now()), lane === "refresh" ? "geckoterminal refresh" : "geckoterminal budget");
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
       throw new Throttled(secondsUntil(throttledUntil(gt, r.headers.get("retry-after"), now()), now()), "geckoterminal 429");
@@ -624,18 +627,27 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return JSON.parse(text);
   }
 
-  const pools = cached(POOL_FRESH_MS, now, async (mint) => {
-    const a = await gecko(`/networks/solana/tokens/${mint}`);
-    const pool = a === null ? null : topPool(a);
-    return pool === null ? NOT_FOUND : { status: 200, body: pool, asOfMs: now() };
-  });
+  // a held pool's re-read is a refresh: refused, the pool held is served (a token's top pool rarely moves)
+  const pools = cached(
+    POOL_FRESH_MS,
+    now,
+    async (mint, _client, held) => {
+      const a = await gecko(`/networks/solana/tokens/${mint}`, held === true ? "refresh" : "pages");
+      const pool = a === null ? null : topPool(a);
+      return pool === null ? NOT_FOUND : { status: 200, body: pool, asOfMs: now() };
+    },
+    { keepHeld: true },
+  );
 
   /** The last good GeckoTerminal bars per mint and tf: served when a read is throttled or fails (an empty chart is never
    *  the answer for a token with known history). */
   const kept = bounded<{ bars: Candle[]; at: number }>(CACHE_MAX);
   // the newest range (no `to`) moves with every trade: CANDLES_FRESH_MS; a range before a time is history: an hour
-  const bars = cached((key) => (key.endsWith(":") ? CANDLES_FRESH_MS : HISTORY_FRESH_MS), now, async (key) => {
+  // a re-read of bars held (this range's, or the newest range's kept bars, a swap's handover included) is a refresh:
+  // refused, candles() serves the kept bars, dated by their read
+  const bars = cached((key) => (key.endsWith(":") ? CANDLES_FRESH_MS : HISTORY_FRESH_MS), now, async (key, _client, held) => {
     const [mint, tf, to] = key.split(":") as [string, Tf, string];
+    const lane = held === true || (to === "" && kept.get(`${mint}:${tf}`) !== undefined) ? "refresh" : "pages";
     const p = await pools.get(mint);
     if (p.status !== 200) {
       if (p.status === 404) return NOT_FOUND;
@@ -644,7 +656,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
     const { period, aggregate } = TF[tf];
     const before = to === "" ? "" : `&before_timestamp=${to}`;
-    const a = await gecko(`/networks/solana/pools/${p.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`);
+    const a = await gecko(`/networks/solana/pools/${p.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`, lane);
     const candles = a === null ? [] : toCandles(a, tf, 1_000, now());
     if (candles === null) throw new Upstream();
     const at = now();
