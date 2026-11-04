@@ -49,7 +49,7 @@
 //   bad_shape        a body of any other key or shape, or data not sell((address,uint256,address,bytes,uint256,address,
 //                    uint256,uint256,uint256,uint256),uint256,bytes) in its one canonical ABI encoding (every offset,
 //                    length and padding as the encoder writes them, a 65-byte signature, nothing after), or over
-//                    EVM_SELL_DATA_MAX (400);
+//                    EVM_SELL_DATA_MAX (2,048 bytes);
 //   not_pool         the Sell's pool is not this sender's;
 //   fee_over_cap     the fee is over the Sell's feeCap, or the feeCap is not under minOut (the deposit holds nothing);
 //   bad_authorization the authorization's chainId is not the venue's (the kit's evmPoolVenues(), never 0), its address
