@@ -287,6 +287,10 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     // again), or stuck (INCOMING: U cannot pay its send again)
     const finish = async (note: NoteRecord, own: boolean, reads: number): Promise<"landed" | "taken" | "pending" | "stuck"> => {
       let n = note;
+      // the reads are a time budget too (POOL_DEPOSIT_READS a second apart): one RPC down, each read's retry its own
+      // 3.5 s, never holds the seed's lock past it; the note, INCOMING, settles at the next load
+      const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
+      const from = clock();
       for (let k = 0; ; k++) {
         const sends = n.sends ?? [];
         if (sends.length === 0) throw new Refused("failed"); // a pool note goes INCOMING with its send, never without
@@ -331,7 +335,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
           if ((after.sends ?? []).length === sends.length + 1 && after.sends!.at(-1)!.signature === b.send.signature) await send(b, own);
           n = after;
         }
-        if (k + 1 >= reads) return "pending";
+        if (k + 1 >= reads || clock() - from >= POOL_DEPOSIT_READS * POOL_DEPOSIT_WAIT_MS) return "pending";
         await wait(POOL_DEPOSIT_WAIT_MS);
       }
     };

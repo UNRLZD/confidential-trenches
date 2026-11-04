@@ -25,7 +25,7 @@ import { solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
-import { poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
+import { POOL_DEPOSIT_READS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
 type Acc = { owner: string; lamports: number; data: Uint8Array };
@@ -764,4 +764,17 @@ test("R3 fold 1: an earlier send already landed but its note still INCOMING is i
   assert.deepEqual(r, { error: "not_funded" });
   assert.equal(short.length, 1);
   assert.deepEqual((await ours(ns)).filter((n) => n.state !== "PLANNED").map((n) => n.state), ["INCOMING"]);
+});
+
+// the review of 54b2f65 (finding 1, in every path): the read-back is a time budget, so one RPC down (each read its own
+// retry) never holds the seed's lock for minutes
+test("a deposit that never lands stops at POOL_DEPOSIT_READS seconds on the wall clock, whatever its read count", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false;
+  let waited = 0;
+  const a = (await runPoolDeposit(host(c, ns, { reads: 1_000, wait: async (ms: number) => void (waited += ms), now: () => BigInt(1_000 + waited) }), ask(RUNG))) as { stage: string };
+  assert.notEqual(a.stage, "filled");
+  assert.ok(waited <= POOL_DEPOSIT_READS * POOL_DEPOSIT_WAIT_MS, `waited ${waited} ms`);
 });

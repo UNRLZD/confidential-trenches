@@ -317,43 +317,145 @@ function httpsUrl(raw: string, what: string): URL {
 }
 
 let nextId = 1;
+
+/** A JSON-RPC client's retry of transport faults (card signpage-rpc-throttle-retry): the call ends within `deadlineMs` of
+ * its start, waits and attempts counted; an attempt may take all the time left (a slow answer inside it lands, as the
+ * client without retry takes it), and no wait is begun that would end past it. A wait is `backoffMs` doubled per try,
+ * or the provider's Retry-After when that is longer (a Retry-After of 0 still waits the backoff). */
+export type SolanaRpcRetry = { readonly deadlineMs: number; readonly backoffMs: number };
+/** The signing page's: a pool buy reads the venue and then the blockhash (its slot the device's own) after the reference,
+ * so two calls at their deadline (7 s) stay inside SOLANA_POOL_QUOTE_MAX_AGE_SLOTS (25) at a slot of 360 ms (9 s; the
+ * cluster's target is 400 ms, agave sdk clock.rs DEFAULT_MS_PER_SLOT), and the quote rule never sees a retry age it. */
+export const SOLANA_RPC_RETRY: SolanaRpcRetry = Object.freeze({ deadlineMs: 3_500, backoffMs: 250 });
+/** A fault the retry takes: HTTP 429 or 5xx, a JSON-RPC throttle (RPC_THROTTLE_CODES) in a 200, an answer that is not JSON,
+ * an attempt with no answer in time, or no connection. */
+export type SolanaRpcFault = "http_429" | "http_5xx" | "rpc_throttled" | "not_json" | "timeout" | "network";
+/** A call whose transport faults outlasted its retry: the fault named, with the tries and the provider's host. */
+export class SolanaRpcTransportError extends Error {
+  readonly fault: SolanaRpcFault;
+  readonly tries: number;
+  readonly host: string;
+  constructor(fault: SolanaRpcFault, detail: string, tries: number, host: string) {
+    super(`${detail} (${fault}, ${tries} ${tries === 1 ? "try" : "tries"} at ${host})`);
+    this.name = "SolanaRpcTransportError";
+    this.fault = fault;
+    this.tries = tries;
+    this.host = host;
+  }
+}
+/** The JSON-RPC throttle codes a provider may answer inside an HTTP 200: -32029 and -32429 (the card's brief), -429 and
+ * dRPC's 15 "You reached Public endpoint rate limit" (the answers recorded in scripts/live-checks/vault-testnet-t02.mjs
+ * and scripts/ci/money-gate.mjs). */
+const RPC_THROTTLE_CODES: ReadonlySet<number> = new Set([-32029, -32429, -429, 15]);
+/** A transport fault inside one attempt; `orig` is what the call rejected with before the retry (and still does without it). */
+class Fault extends Error {
+  readonly fault: SolanaRpcFault;
+  readonly afterMs: number | null;
+  readonly orig: unknown;
+  constructor(fault: SolanaRpcFault, detail: string, orig: unknown, afterMs: number | null = null) {
+    super(detail);
+    this.fault = fault;
+    this.afterMs = afterMs;
+    this.orig = orig;
+  }
+}
+const timedOut = (e: unknown): boolean => e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+/** Retry-After in ms: delta-seconds or an HTTP date (RFC 9110 10.2.3); null when absent or unreadable. */
+function retryAfterMs(h: string | null, now: number): number | null {
+  if (h === null || h.trim() === "") return null;
+  const t = h.trim();
+  if (/^\d{1,6}$/.test(t)) return Number(t) * 1000;
+  const at = Date.parse(t);
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
+}
+
 /** JSON-RPC over HTTP POST to one URL. `init` is merged into every request (the helper's HELPER_FETCH_INIT). The id is
- * a string of digits, so an echo of it as the string or as the same number both match, and nothing else does. */
-export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: RequestInit; timeoutMs?: number } = {}): SolanaRpc {
+ * a string of digits, so an echo of it as the string or as the same number both match, and nothing else does. With
+ * `retry`, a transport fault (SolanaRpcFault) is tried again within its bounds and then rejects as a
+ * SolanaRpcTransportError; any other answer (an RPC error, a foreign id, no result, a 4xx) rejects at once. */
+export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: RequestInit; timeoutMs?: number; retry?: SolanaRpcRetry } = {}): SolanaRpc {
   const href = httpsUrl(url, "an RPC URL").href;
+  const host = new URL(href).host;
   const doFetch: SolanaFetch = opts.fetch ?? ((u, i) => fetch(u, i));
   const timeoutMs = opts.timeoutMs ?? SOLANA_CALL_TIMEOUT_MS;
-  const call = (method: string, params: readonly unknown[]): Promise<unknown> => {
+  const retry = opts.retry;
+  const once = (method: string, params: readonly unknown[], ms: number): Promise<unknown> => {
     const id = String(nextId++);
     const init: RequestInit = {
       ...opts.init,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(ms),
     };
     // fetch is called here, synchronously: a caller that starts several calls starts them all in one tick.
-    return doFetch(url, init).then(async (r) => {
-      const text = await readBounded(r);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const j = JSON.parse(text) as unknown;
-      if (typeof j !== "object" || j === null || Array.isArray(j)) throw new Error("not a JSON-RPC answer");
-      const o = j as Record<string, unknown>;
-      if (!(o.id === id || (typeof o.id === "number" && String(o.id) === id))) throw new Error(`answer id ${JSON.stringify(o.id)} is not request id ${id}`);
-      if (o.error !== undefined) {
-        const e = o.error as { code?: unknown; message?: unknown } | null;
-        throw new Error(`RPC error ${String(e?.code)}: ${String(e?.message).slice(0, 120)}`);
-      }
-      if (!("result" in o)) throw new Error("no result");
-      return o.result;
-    });
+    return doFetch(url, init).then(
+      async (r) => {
+        let text: string;
+        try {
+          text = await readBounded(r);
+        } catch (e) {
+          if (e instanceof Error && e.message === "answer too large") throw e;
+          throw new Fault(timedOut(e) ? "timeout" : "network", timedOut(e) ? `no answer in ${ms} ms` : "the answer broke off", e);
+        }
+        if (r.status === 429) throw new Fault("http_429", "HTTP 429", new Error("HTTP 429"), retryAfterMs(r.headers.get("retry-after"), Date.now()));
+        if (r.status >= 500 && r.status <= 599) throw new Fault("http_5xx", `HTTP ${r.status}`, new Error(`HTTP ${r.status}`), retryAfterMs(r.headers.get("retry-after"), Date.now()));
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        let j: unknown;
+        try {
+          j = JSON.parse(text) as unknown;
+        } catch (e) {
+          throw new Fault("not_json", "not a JSON answer", e);
+        }
+        if (typeof j !== "object" || j === null || Array.isArray(j)) throw new Error("not a JSON-RPC answer");
+        const o = j as Record<string, unknown>;
+        if (!(o.id === id || (typeof o.id === "number" && String(o.id) === id))) throw new Error(`answer id ${JSON.stringify(o.id)} is not request id ${id}`);
+        if (o.error !== undefined) {
+          const e = o.error as { code?: unknown; message?: unknown } | null;
+          const msg = `RPC error ${String(e?.code)}: ${String(e?.message).slice(0, 120)}`;
+          if (typeof e?.code === "number" && RPC_THROTTLE_CODES.has(e.code)) throw new Fault("rpc_throttled", msg, new Error(msg));
+          throw new Error(msg);
+        }
+        if (!("result" in o)) throw new Error("no result");
+        return o.result;
+      },
+      (e: unknown) => {
+        throw new Fault(timedOut(e) ? "timeout" : "network", timedOut(e) ? `no answer in ${ms} ms` : "no connection", e);
+      },
+    );
   };
+  // without `retry`, one attempt, its faults as plain errors (the kit's own send paths and the helper keep their rules)
+  const plain = (method: string, params: readonly unknown[]): Promise<unknown> =>
+    once(method, params, timeoutMs).catch((e: unknown) => {
+      throw e instanceof Fault ? e.orig : e;
+    });
+  const call = !retry
+    ? plain
+    : (method: string, params: readonly unknown[]): Promise<unknown> => {
+        const start = Date.now();
+        const end = start + retry.deadlineMs;
+        const go = async (tries: number): Promise<unknown> => {
+          const left = end - Date.now();
+          try {
+            return await once(method, params, Math.max(1, Math.min(timeoutMs, left)));
+          } catch (e) {
+            if (!(e instanceof Fault)) throw e;
+            // the backoff is a floor: a Retry-After of 0 never makes a throttled call a burst
+            const waitMs = Math.max(e.afterMs ?? 0, retry.backoffMs * 2 ** (tries - 1));
+            // a wait that ends past the deadline is not begun: the call answers now, its fault named
+            if (Date.now() + waitMs >= end) throw new SolanaRpcTransportError(e.fault, e.message, tries, host);
+            await new Promise((res) => setTimeout(res, waitMs));
+            return go(tries + 1);
+          }
+        };
+        return go(1);
+      };
   return Object.assign(call, { url: href });
 }
 
 /** The helper's POST /v1/rpc/solana (helper/v1.ts HELPER_RPC_METHODS: sendTransaction, getSignatureStatuses,
  * getLatestBlockhash and isBlockhashValid are on its list), with the kit's HELPER_FETCH_INIT. `origin` is the helper's origin only. */
-export function solanaHelperRpc(origin: string, opts: { fetch?: SolanaFetch; timeoutMs?: number } = {}): SolanaRpc {
+export function solanaHelperRpc(origin: string, opts: { fetch?: SolanaFetch; timeoutMs?: number; retry?: SolanaRpcRetry } = {}): SolanaRpc {
   const u = httpsUrl(origin, "the helper origin");
   if (u.pathname !== "/" || u.search !== "" || !(origin === u.origin || origin === `${u.origin}/`)) throw new Error("the helper origin must be an origin only");
   return solanaJsonRpc(`${u.origin}${HELPER_V1_PREFIX}/rpc/solana`, { ...opts, init: HELPER_FETCH_INIT });
