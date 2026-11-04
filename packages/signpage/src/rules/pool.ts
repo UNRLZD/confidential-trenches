@@ -668,6 +668,168 @@ export function signEvmWithdraw(secretKey: Uint8Array, _ctx: PoolContext, _ask: 
   return out;
 }
 
+// ---------- EVM: W's onward send ----------
+// An EVM pool withdraw pays W (the pool requires its recipient's signature, contracts/pool-evm/src/PrivacyPool.sol), then
+// W sends what it holds on to the address the user typed on SIGN_HOST: one EIP-1559 transfer, checked here field by field
+// against the device's own two-RPC reads, and signed only as this check read it.
+
+/** W's onward send: an EIP-1559 (type 2) transaction. `data` is hex ("0x" for a plain send). */
+export type EvmOnwardSend = {
+  readonly type: 2;
+  readonly chainId: bigint;
+  readonly nonce: bigint;
+  readonly maxPriorityFeePerGas: bigint;
+  readonly maxFeePerGas: bigint;
+  readonly gasLimit: bigint;
+  readonly to: string;
+  readonly value: bigint;
+  readonly data: string;
+  readonly accessList: readonly unknown[];
+};
+/** The device's reads for W's onward send, each as its two RPCs answered (they must agree): W's nonce, W's balance after
+ *  the withdraw landed, whether the typed address has code and, when it has, eth_estimateGas of the send to it, the
+ *  base fee, and the L1 data fee W must also hold on an OP Stack chain (Base: GasPriceOracle.getL1FeeUpperBound of the
+ *  signed size; 0 on a chain without one); with the device's own cap on the priority fee. */
+export type EvmOnwardReads = {
+  readonly nonce: readonly [bigint, bigint];
+  readonly balance: readonly [bigint, bigint];
+  readonly toHasCode: readonly [boolean, boolean];
+  readonly estimate: readonly [bigint, bigint] | null;
+  readonly baseFee: readonly [bigint, bigint];
+  readonly l1Fee: readonly [bigint, bigint];
+  readonly priorityCap: bigint;
+};
+/** A plain transfer's gas, and the most a contract recipient (a smart wallet) may take: its estimate, never more. */
+export const EVM_ONWARD_GAS = 21_000n;
+export const EVM_ONWARD_GAS_MAX = 100_000n;
+const ONWARD_KEYS = "accessList,chainId,data,gasLimit,maxFeePerGas,maxPriorityFeePerGas,nonce,to,type,value";
+const U256 = 1n << 256n;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+type OnwardRead = EvmOnwardSend & { readonly wallet: string };
+// each send a check passed, with the check's own copy of it: a signer signs only that copy, and only while the send
+// still reads as it
+const ONWARD_CHECKED = new WeakMap<object, OnwardRead>();
+/** The send's fields, each read once, into a frozen copy: refused "type" when it is not a type 2 send of exactly
+ *  these fields, "tx_fields" when a field is out of its range. */
+function onwardCopy(tx: EvmOnwardSend): EvmOnwardSend {
+  // no EIP-7702 delegation (type 4) of W slipped in, no legacy send, no field beside the nine
+  if (typeof tx !== "object" || tx === null || Object.keys(tx).sort().join() !== ONWARD_KEYS || tx.type !== 2) return refuse("type");
+  const t = { type: 2 as const, chainId: tx.chainId, nonce: tx.nonce, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, maxFeePerGas: tx.maxFeePerGas, gasLimit: tx.gasLimit, to: tx.to, value: tx.value, data: tx.data, accessList: tx.accessList };
+  const uint = (x: unknown): x is bigint => typeof x === "bigint" && x >= 0n && x < U256;
+  // every number a uint256 (the nonce under 2^64 - 1, EIP-2681), the address and data strings, the list an array
+  if (![t.chainId, t.maxPriorityFeePerGas, t.maxFeePerGas, t.gasLimit, t.value].every(uint) || !uint(t.nonce) || t.nonce >= (1n << 64n) - 1n) return refuse("tx_fields");
+  if (typeof t.to !== "string" || typeof t.data !== "string" || !Array.isArray(t.accessList)) return refuse("tx_fields");
+  return Object.freeze({ ...t, accessList: Object.freeze([...t.accessList]) });
+}
+const agreed = <T>(pair: readonly [T, T] | null | undefined, ok: (x: unknown) => boolean): T => {
+  if (!Array.isArray(pair) || pair.length !== 2 || !ok(pair[0]) || pair[0] !== pair[1]) return refuse("reads");
+  return pair[0];
+};
+
+/** W's onward send of its whole balance, less the send's fee bound, to `to`, the address typed on SIGN_HOST, on the
+ *  pinned chain: each field held to `reads`, the device's own two-RPC reads. */
+export function checkEvmOnwardSend(tx: EvmOnwardSend, ask: PoolAsk, ctx: PoolContext, to: string, reads: EvmOnwardReads, testnet = false): PoolDraw {
+  // only a pool withdraw's second step, on an EVM pool chain
+  if (ask.kind !== "pool.withdraw") return refuse("kind");
+  const chain = evmChainOf(ask, testnet);
+  const pins = evmPins(ctx, chain);
+  // W, the fresh wallet the check holds the send to (its nonce, its balance, its key at the signer)
+  if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");
+  const t = onwardCopy(tx);
+  const uint = (x: unknown) => typeof x === "bigint" && x >= 0n && x < U256;
+  // two providers' answers that differ are no read at all
+  const nonce = agreed(reads.nonce, uint);
+  const balance = agreed(reads.balance, uint);
+  const hasCode = agreed(reads.toHasCode, (x) => typeof x === "boolean");
+  const baseFee = agreed(reads.baseFee, uint);
+  const l1Fee = agreed(reads.l1Fee, uint);
+  const estimate = hasCode ? agreed(reads.estimate, uint) : null;
+  if (!uint(reads.priorityCap)) return refuse("reads");
+  // the pinned chain's id: no replay of W's send on another chain
+  if (t.chainId !== pins.chainId) return refuse("chain_id");
+  // the typed address: an address, never the zero address (a burn), the pool or W itself (the money back where it was)
+  if (typeof to !== "string" || !EVM_ADDRESS.test(to) || lower(to) === ZERO_ADDRESS || lower(to) === lower(pins.pool) || lower(to) === lower(ctx.wallet)) return refuse("to");
+  // the send goes to the typed address: no redirect
+  if (lower(t.to) !== lower(to)) return refuse("transfer_to");
+  // W's nonce on two RPCs: no replacing a send of W's, no queueing behind one
+  if (t.nonce !== nonce) return refuse("nonce");
+  // a plain send: no contract call dressed as one
+  if (t.data !== "0x") return refuse("data");
+  // no access list: nothing beside the send
+  if (t.accessList.length !== 0) return refuse("access_list");
+  if (estimate === null) {
+    // no code at the address: a plain transfer's gas, no fee bound padded past it
+    if (t.gasLimit !== EVM_ONWARD_GAS) return refuse("gas_limit");
+  } else {
+    // a smart-wallet recipient: its own two-RPC estimate, no padding past it
+    if (t.gasLimit !== estimate) return refuse("gas_estimate");
+    // and never more than the cap, so a recipient's code cannot burn the withdrawal as gas
+    if (t.gasLimit > EVM_ONWARD_GAS_MAX) return refuse("gas_over_cap");
+  }
+  // no tip that burns the withdrawal
+  if (t.maxPriorityFeePerGas > reads.priorityCap) return refuse("priority_fee");
+  // no max fee past two base fees and the tip, the standard bound
+  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap) return refuse("max_fee");
+  // the whole balance less the fee bound: no skim left in W, no overspend, never nothing
+  const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;
+  if (t.value === 0n || t.value + feeBound !== balance) return refuse("value");
+  ONWARD_CHECKED.set(tx, Object.freeze({ ...t, wallet: lower(ctx.wallet) }));
+  return { chain: ask.chain, op: "pool.withdraw", token: null, amount: t.value, feeCap: feeBound, pool: pins.pool, to, decimals: ask.decimals, back: null };
+}
+
+// RLP (the Ethereum yellow paper, appendix B): a byte string or a list, each with its length prefix
+const beBytes = (v: bigint): Uint8Array => {
+  const b: number[] = [];
+  for (let x = v; x > 0n; x >>= 8n) b.unshift(Number(x & 0xffn));
+  return Uint8Array.from(b);
+};
+const rlpHead = (n: number, short: number): Uint8Array => {
+  if (n <= 55) return Uint8Array.of(short + n);
+  const l = beBytes(BigInt(n));
+  return Uint8Array.of(short + 55 + l.length, ...l);
+};
+const rlpBytes = (b: Uint8Array): Uint8Array => (b.length === 1 && b[0]! < 0x80 ? b : cat(rlpHead(b.length, 0x80), b));
+const rlpUint = (v: bigint): Uint8Array => rlpBytes(beBytes(v));
+const rlpList = (items: Uint8Array[]): Uint8Array => {
+  const body = cat(...items);
+  return cat(rlpHead(body.length, 0xc0), body);
+};
+const hexBytes = (h: string): Uint8Array => {
+  if (!/^0x([0-9a-fA-F]{2})*$/.test(h)) return refuse("tx_fields");
+  return Uint8Array.from(h.slice(2).match(/../g) ?? [], (x) => parseInt(x, 16));
+};
+/** The nine fields of a type 2 send, RLP-encoded (EIP-1559); its access list is always empty here. */
+const onwardFields = (t: EvmOnwardSend): Uint8Array[] => {
+  if (t.accessList.length !== 0) refuse("access_list");
+  return [rlpUint(t.chainId), rlpUint(t.nonce), rlpUint(t.maxPriorityFeePerGas), rlpUint(t.maxFeePerGas), rlpUint(t.gasLimit), rlpBytes(hexBytes(t.to)), rlpUint(t.value), rlpBytes(hexBytes(t.data)), rlpList([])];
+};
+/** The digest W signs for a type 2 send: keccak256(0x02 ‖ rlp([chainId, nonce, maxPriorityFeePerGas, maxFeePerGas,
+ *  gasLimit, to, value, data, accessList])), EIP-1559. */
+export function evmOnwardSendDigest(tx: EvmOnwardSend): Uint8Array {
+  return keccak_256(cat(Uint8Array.of(2), rlpList(onwardFields(tx))));
+}
+
+/** W's signed onward send, the raw transaction 0x02 ‖ rlp([...the nine fields, yParity, r, s]), s low: only the very
+ *  send checkEvmOnwardSend passed, while it reads as the check read it, and only with W's own key. */
+export function signEvmOnwardSend(secretKey: Uint8Array, tx: EvmOnwardSend): Uint8Array {
+  const read = typeof tx === "object" && tx !== null ? ONWARD_CHECKED.get(tx) : undefined;
+  if (!read) return refuse("unchecked");
+  let now: EvmOnwardSend;
+  try {
+    now = onwardCopy(tx);
+  } catch {
+    return refuse("unchecked");
+  }
+  const fields = ["type", "chainId", "nonce", "maxPriorityFeePerGas", "maxFeePerGas", "gasLimit", "to", "value", "data"] as const;
+  if (fields.some((k) => now[k] !== read[k]) || now.accessList.length !== 0) return refuse("unchecked");
+  if (lower(hex(keccak_256(secp256k1.getPublicKey(secretKey, false).subarray(1)).subarray(12))) !== read.wallet) return refuse("wallet");
+  const rec = secp256k1.sign(evmOnwardSendDigest(read), secretKey, { prehash: false, lowS: true, format: "recovered" });
+  // noble's recovered form is the recovery bit, then r and s
+  const sig = [rlpUint(BigInt(rec[0]!)), rlpUint(be32(rec.subarray(1, 33))), rlpUint(be32(rec.subarray(33, 65)))];
+  return cat(Uint8Array.of(2), rlpList([...onwardFields(read), ...sig]));
+}
+const hex = (b: Uint8Array): string => "0x" + Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
 // ---------- the draw ----------
 
 /** An amount in base units as a decimal at `decimals`, trailing zeros dropped (12.5, not 12.500000000). */
