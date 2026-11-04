@@ -48,7 +48,12 @@ const REPO = path.join(HERE, "../../..");
 const imp = (p) => import(pathToFileURL(path.join(REPO, p)).href);
 const kit = await imp("packages/kit/src/index.ts");
 const { pinnedBuild, pinnedSignBuy } = await imp("packages/kit/src/trade/evm/buy-unpinned.ts");
-const { evmPool, evmTreeSync, evmNow, evmRelayDataBytes, evmPoolScopeOf, evmEpochBlock, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_CHAIN_IDS } = await imp("packages/wallet/src/pool/evm.ts");
+const { evmPool, evmTreeSync, evmNow: evmNowOnce, evmRelayDataBytes, evmPoolScopeOf, evmEpochBlock: evmEpochBlockOnce, evmRetryLag, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_CHAIN_IDS } = await imp("packages/wallet/src/pool/evm.ts");
+// The run's own reads of the pool's time and the epoch's block, as the device's evmPool makes them: again while an RPC
+// has not caught up (EvmLagError, evmRetryLag). Read once, Robinhood testnet's own RPC answering null for a block the
+// other held stopped a run after its deposit (4 Nov 08:45Z, "rpc 0 does not know block 148245096 yet").
+const evmNow = (rpcs) => evmRetryLag(() => evmNowOnce(rpcs));
+const evmEpochBlock = (rpcs, startMs) => evmRetryLag(() => evmEpochBlockOnce(rpcs, startMs));
 const { evmRestoreNotes } = await imp("packages/wallet/src/pool/evm-restore.ts");
 const { noteSecrets } = await imp("packages/wallet/src/notes/secrets.ts");
 const { entropyToWords, freshWallet, newEntropy, wordsToSeed64 } = await imp("packages/wallet/src/derive/index.ts");

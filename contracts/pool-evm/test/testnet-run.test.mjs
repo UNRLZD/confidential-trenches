@@ -100,7 +100,8 @@ async function unexported(src) {
   const named = [...src.matchAll(/const \{([^}]+)\} = await imp\("([^"]+)"\)/g)];
   for (const [, names, p] of named) {
     const m = await import(new URL(p, REPO).href);
-    for (const n of names.split(",").map((s) => s.trim()).filter(Boolean)) if (!(n in m)) missing.push(`${n} from ${p}`);
+    // a name as exported, before any rename (`evmNow: evmNowOnce`)
+    for (const n of names.split(",").map((s) => s.split(":")[0].trim()).filter(Boolean)) if (!(n in m)) missing.push(`${n} from ${p}`);
   }
   const ns = [...src.matchAll(/const (\w+) = await imp\("([^"]+)"\)/g)];
   for (const [, bind, p] of ns) {
