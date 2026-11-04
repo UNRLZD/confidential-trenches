@@ -387,12 +387,15 @@ export async function collect({ launchers, shots, source, expect, routes }) {
 // APP_HOST at its own path and query, full size; posts `ready` to the frame on each of its loads; answers `state` from
 // that frame's window only, with targetOrigin APP_HOST, signed in, at any time (the silent run's shell: only from its
 // ready on); keeps the app's path and query in its address on nav and reloads the top window on reload, as the real
-// shell does; refuses every other kind (not_allowed). The update run's shell names message API 2 in its ready. The late and silent shells post their ready 7 s after the load
+// shell does; refuses every other kind (not_allowed), but for the open kinds a check names in `opens`, which it answers
+// as the real shell answers an open it drew ({ pending: true }); every request the app sent is kept whole in
+// window.__ctShellAsked for a check to read (card app-pool-withdraw). The update run's shell names message API 2 in its ready. The late and silent shells post their ready 7 s after the load
 // and tell the check through window.__ctShellReady. Its headers
 // are SIGN_HOST's _headers with section 4's frame rules: frame-ancestors 'none' and frame-src APP_HOST.
 const SIGNED_IN = { release: "harness-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "1250.00", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
-const shellJs = (kind, state = null) => `const APP = ${JSON.stringify(APP_HOST)};
+const shellJs = (kind, state = null, opens = []) => `const APP = ${JSON.stringify(APP_HOST)};
+const OPENS = ${JSON.stringify(opens)};
 const STATE = ${JSON.stringify(state ?? (kind === "tap" ? SIGNED_OUT : SIGNED_IN))};
 const API = ${kind === "update" ? 2 : 1};
 const HOLD = ${kind === "late" || kind === "silent" ? LATE_READY_MS : 0};
@@ -410,13 +413,14 @@ addEventListener("message", (e) => {
   if (!answering || e.origin !== APP || e.source !== f.contentWindow || !e.data || typeof e.data.id !== "string") return;
   // every request kind the app sent, for a check to read
   (window.__ctShellSeen ??= []).push(e.data.type);
+  (window.__ctShellAsked ??= []).push(e.data);
   const ok = (result) => ({ v: 1, id: e.data.id, ok: true, result });
   const no = { v: 1, id: e.data.id, ok: false, error: { code: "not_allowed" } };
   const p = e.data.path;
   // nav and reload as the real shell's (packages/signpage/src/shell.ts): the app's path and query in the top window's
   // address with history.replaceState, never a navigation; reload answers, then reloads the top window
   const nav = e.data.type === "nav" && typeof p === "string" && p.startsWith("/") && p[1] !== "/" && p[1] !== "\\\\";
-  const answer = e.data.type === "state" ? ok(STATE) : nav || e.data.type === "reload" ? ok({}) : no;
+  const answer = e.data.type === "state" ? ok(STATE) : nav || e.data.type === "reload" ? ok({}) : OPENS.includes(e.data.type) ? ok({ pending: true }) : no;
   if (nav) history.replaceState(null, "", location.origin + new URL(APP + p).pathname + new URL(APP + p).search);
   f.contentWindow.postMessage(answer, APP);
   if (e.data.type === "reload") location.reload();
@@ -451,7 +455,7 @@ const TOKEN_ANSWER = { ...TOKEN_READ.rest, row: unzipRows(TOKEN_READ.fields, [TO
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json" };
 
-export async function harnessRoute(appBuild, kind = "signed", { state = null } = {}) {
+export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [] } = {}) {
   const { parseHeadersFile } = await import("../../apps/terminal/scripts/check-deploy.ts");
   const { headersFor } = await import("../../apps/terminal/test/harness/server.mjs");
   const rulesOf = (text) => {
@@ -461,7 +465,7 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null } =
   };
   const appRules = rulesOf(readFileSync(path.join(appBuild, "_headers"), "utf8"));
   const signRules = rulesOf(shellHeaders(readFileSync(path.join(REPO, "packages/signpage/public/_headers"), "utf8")));
-  const js = shellJs(kind, state);
+  const js = shellJs(kind, state, opens);
   const shellFiles = { "/shell.js": js, "/shell.css": SHELL_CSS };
   const headers = (rules, p, type) => ({ ...Object.fromEntries(headersFor(rules, p)), "content-type": type });
   return async (route) => {

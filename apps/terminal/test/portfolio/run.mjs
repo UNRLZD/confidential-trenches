@@ -64,8 +64,8 @@ const POOLS = {
   loading: ["loading"],
   offline: ["offline"],
   rows: ["unread"],
-  pools: ["rows", [["Solana", "1.25M SOL", "999.99K", "250K"], ["Base", "0.25 ETH", "0.2", "0.05"], ["Robinhood", "0 ETH", "0", "0"]]],
-  "pools-noready": ["rows", [["Solana", "12.5 SOL", "—", "—"], ["Base", "0.001 ETH", "—", "—"]]],
+  pools: ["rows", [["Solana", "1.25M SOL", "999.99K", "250K", ""], ["Base", "0.25 ETH", "0.2", "0.05", ""], ["Robinhood", "0 ETH", "0", "0", ""]]],
+  "pools-noready": ["rows", [["Solana", "12.5 SOL", "—", "—", ""], ["Base", "0.001 ETH", "—", "—", ""]]],
   "pools-empty": ["empty"],
 };
 
@@ -230,6 +230,21 @@ try {
       check((await page.locator('.pfm [data-pane="stats"]').count()) === 1, `@${w.name}: Stats segment`);
       await page.locator('.pfm [data-control="deposit"]').click();
       check((await page.evaluate(() => window.__calls)).at(-1)?.kind === "deposit", `@${w.name}: Deposit`);
+      await ctx.close();
+    }
+    // a pool row's Withdraw (card app-pool-withdraw): on for a chain with a balance, off for one with none, and the tap
+    // hands the mount the chain only: no address, no amount
+    {
+      const { ctx, page } = await open(browser, w, "pools");
+      const form = phone ? ".pfm" : ".pfd";
+      const btn = (c) => page.locator(`${form} [data-control="pool-withdraw-${c}"]`);
+      const off = await Promise.all(["solana", "base", "robinhood"].map((c) => btn(c).isDisabled()));
+      check(JSON.stringify(off) === "[false,false,true]", `@${w.name}: pool Withdraw on/off ${JSON.stringify(off)}, want Solana and Base on, Robinhood (0) off`);
+      check((await btn("base").getAttribute("aria-label")) === "Withdraw", `@${w.name}: pool Withdraw's name`);
+      if (phone) await page.evaluate(() => document.querySelector(".pfm .pools").scrollIntoView({ block: "center" }));
+      await btn("base").click();
+      const calls = await page.evaluate(() => window.__calls);
+      check(JSON.stringify(calls) === JSON.stringify([{ kind: "pool-withdraw", chain: "base" }]), `@${w.name}: pool Withdraw hands ${JSON.stringify(calls)}, want the chain only`);
       await ctx.close();
     }
   }

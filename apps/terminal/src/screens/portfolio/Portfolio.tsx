@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
+import { useReturnHop } from "../../shell/ReturnHop.tsx";
+import { HopLine } from "../signin/HopLine.tsx";
 import { Avatar } from "../market/Avatar.tsx";
 import { ActivityList } from "./Activity.tsx";
 import type { ActUi } from "./Activity.tsx";
@@ -214,7 +216,7 @@ function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadP
         <div className="eqbrk">
           <div className="eqh"><W id="whereItIs" /></div>
           <Where t={t} loading={loading} />
-          <PoolRows p={pools} />
+          <PoolRows p={pools} src={src} />
         </div>
         <div className="eqch">
           <div className="ctl">
@@ -272,24 +274,29 @@ const CHAIN_NAME = { solana: "Solana", base: "Base", robinhood: "Robinhood", nea
 /** Each chain's pool (card balances-per-chain, v2 A1), in its own asset: the private balance from the device's own
  *  notes ("12.5 SOL"), the part ready to buy (a proof made) and the rest still being proved, in the same unit. No dollar
  *  figure: a SOL or ETH pool has none until a price read exists. No proof queue running: Ready and Pending are dashes,
- *  never 0. data-pools names the view, each row its chain, asset and base units, for the checks. */
-function PoolRows({ p, phone }: { p: Pools; phone?: boolean }) {
+ *  never 0. data-pools names the view, each row its chain, asset and base units, for the checks.
+ *  Each row with a balance ends in Withdraw (card app-pool-withdraw): an icon that opens SIGN_HOST's pool withdraw for
+ *  that chain, where the amount and the address are typed; an open that did not happen draws its HopLine on the
+ *  heading's row (portfolio.css), so the block never grows inside the desktop panel. */
+function PoolRows({ p, src, phone }: { p: Pools; src: PortfolioSource; phone?: boolean }) {
+  const { locked } = useReturnHop();
+  const on = src.snapshot.status === "ready" && locked === null;
   const cols = p.view === "rows" || p.view === "unread" || p.view === "loading";
   const amt = (r: PoolRow, c: bigint | null, cls = ""): ReactNode => (c === null ? DASH : <span className={cls}>{amount(c, r.decimals)}</span>);
   return (
     <div className={`pools${phone ? " ph" : ""}`} data-pools={p.view}>
       <span className="plk"><W id="privateBalance" /></span>
       {cols ? (
-        <><span /><span className="plc"><W id="balance" /></span><span className="plc"><W id="ready" /></span><span className="plc"><W id="pending" /></span></>
+        <><span /><span className="plc"><W id="balance" /></span><span className="plc"><W id="ready" /></span><span className="plc"><W id="pending" /></span><span /></>
       ) : (
         <span className="plst" data-pools-state={p.view}>{p.view === "offline" ? <W id="offline" /> : <W id="noBalance" />}</span>
       )}
       {p.view === "loading" &&
         [0, 1].map((i) => (
-          <div className="plr" key={i}><Sk w={64} h={12} /><Sk w={56} h={12} /><Sk w={48} h={12} /><Sk w={48} h={12} /></div>
+          <div className="plr" key={i}><Sk w={64} h={12} /><Sk w={56} h={12} /><Sk w={48} h={12} /><Sk w={48} h={12} /><span /></div>
         ))}
       {p.view === "unread" && (
-        <div className="plr" data-pool="unread"><span className="t3">{"—"}</span><span className="num">{DASH}</span><span className="num">{DASH}</span><span className="num">{DASH}</span></div>
+        <div className="plr" data-pool="unread"><span className="t3">{"—"}</span><span className="num">{DASH}</span><span className="num">{DASH}</span><span className="num">{DASH}</span><span /></div>
       )}
       {p.view === "rows" &&
         p.rows.map((r) => (
@@ -298,9 +305,23 @@ function PoolRows({ p, phone }: { p: Pools; phone?: boolean }) {
             <span className="num">{amount(r.balance, r.decimals)} <span className="t3">{r.asset}</span></span>
             <span className="num">{amt(r, r.ready, r.ready ? "gain" : "")}</span>
             <span className="num t2">{amt(r, r.pending)}</span>
+            <PoolWithdraw r={r} on={on} act={src.act} />
+            <HopLine control={`pool-withdraw-${r.chain}`} />
           </div>
         ))}
     </div>
+  );
+}
+
+/** A pool row's Withdraw: the chain only goes to the mount (PortfolioAction pool-withdraw); off with nothing held. */
+function PoolWithdraw({ r, on, act }: { r: PoolRow; on: boolean; act: PortfolioSource["act"] }) {
+  if (r.chain === "near") return <span />;
+  const chain = r.chain;
+  const control = `pool-withdraw-${chain}`;
+  return (
+    <button type="button" className="plw" data-control={control} aria-label={WORDS.withdraw.text} title={WORDS.withdraw.text} disabled={!on || r.balance === 0n} onClick={() => act({ kind: "pool-withdraw", chain })}>
+      <Ic name="arrowUp" size={12} />
+    </button>
   );
 }
 
@@ -573,7 +594,7 @@ function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: Hea
       <div className="mwhere">
         <div className="lbl2"><W id="whereItIs" /></div>
         <Where t={t} loading={loading} phone />
-        <PoolRows p={pools} phone />
+        <PoolRows p={pools} src={src} phone />
       </div>
     </div>
   );
