@@ -1,8 +1,9 @@
-// Self-check of the venue fixtures (card pool-sol-buy-sell): loads pump.json or pumpswap.json into LiteSVM (mainnet's
-// accounts and program code as dumped), funds W with 13,000,000 lamports, runs the buy steps top-level in one
-// transaction W signs and pays, then the sell steps in a second one. Nothing is sent to any cluster.
+// Self-check of the venue fixtures (card pool-sol-buy-sell): loads pump.json, pumpswap.json or pumpswap-cashback.json
+// into LiteSVM (mainnet's accounts and program code as dumped), funds W with 30,000,000 lamports (a cashback pool's buy
+// also makes W's two cashback accounts), runs the buy steps top-level in one transaction W signs and pays, then the
+// sell steps in a second one. Nothing is sent to any cluster.
 //
-//   LITESVM_DIR=<a folder with `npm i --no-package-lock litesvm@1.5.0`> node fixtures/venues/check.mjs pump.json|pumpswap.json
+//   LITESVM_DIR=<a folder with `npm i --no-package-lock litesvm@1.5.0`> node fixtures/venues/check.mjs pump.json|pumpswap.json|pumpswap-cashback.json
 //
 // W's key is the pool fixture's test key "W": ed25519 seed sha256("pool-sol-core/test-key/W"), a published test key.
 import { readFileSync } from "node:fs";
@@ -13,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const name = process.argv[2];
-if (!["pump.json", "pumpswap.json"].includes(name)) throw new Error("usage: check.mjs pump.json|pumpswap.json");
+if (!["pump.json", "pumpswap.json", "pumpswap-cashback.json"].includes(name)) throw new Error("usage: check.mjs pump.json|pumpswap.json|pumpswap-cashback.json");
 const dir = process.env.LITESVM_DIR ?? (() => { throw new Error("LITESVM_DIR is not set"); })();
 const req = createRequire(pathToFileURL(join(dir, "package.json")));
 const { LiteSVM, FailedTransactionMetadata } = await import(pathToFileURL(req.resolve("litesvm")).href);
@@ -39,7 +40,7 @@ svm.warpToSlot(BigInt(fx.slot));
 const clock = svm.getClock();
 clock.unixTimestamp = BigInt(fx.unix_timestamp);
 svm.setClock(clock);
-svm.airdrop(W.address, k.lamports(13_000_000n));
+svm.airdrop(W.address, k.lamports(30_000_000n));
 
 const toIx = (s) => ({
   programAddress: k.address(s.program),

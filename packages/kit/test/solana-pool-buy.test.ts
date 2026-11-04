@@ -444,6 +444,20 @@ test("a sell's min out comes from the two-provider quote less the user's slippag
   }
 });
 
+test("a cashback coin's PumpSwap sell is the one the pool's LiteSVM test ran on mainnet's code from a W with neither cashback account", async () => {
+  // contracts/pool-solana/fixtures/venues/pumpswap-cashback.json (Pool byte 244 = 1); svm-tests release.rs
+  // venue_pumpswap_cashback_sell_makes_ws_cashback_accounts runs its sell: the program makes both accounts at W's cost
+  const ran = JSON.parse(readFileSync(new URL("../../../contracts/pool-solana/fixtures/venues/pumpswap-cashback.json", import.meta.url), "utf8"));
+  assert.equal(ran.wallet, W);
+  const byKey = new Map<string, { owner: string; lamports: string; data: string }>(ran.accounts.map((a: { address: string }) => [a.address, a]));
+  const value = (k: string) => { const a = byKey.get(k); return a ? { owner: a.owner, lamports: Number(a.lamports), data: [a.data, "base64"], executable: false } : null; };
+  const at = (): SolanaRpc => (async (m: string, p: readonly unknown[]) => ({ context: { slot: Number(ran.slot) }, value: m === "getMultipleAccounts" ? (p[0] as string[]).map(value) : value(p[0] as string) })) as unknown as SolanaRpc;
+  const venue = await readSolanaPoolBuyVenue([at(), at()], "pumpswap", ran.mint, () => 0);
+  assert.equal(venue.kind === "pumpswap" && venue.cashback, true);
+  const steps = solanaPoolSellSteps(venue, W, BigInt(ran.min_out), 1n);
+  assert.deepEqual(steps.map((x) => ({ program: x.program, accounts: x.accounts.map((a) => ({ address: a.key, signer: a.signer, writable: a.writable })), data: Buffer.from(x.data).toString("hex") })), ran.sell);
+});
+
 test("the build refuses a pool that is not the program's, W as the fee payer and a CU price over its cap", async () => {
   const { venue, req, chain } = await setup("pump");
   assert.throws(() => buildSolanaPoolBuy({ ...cfg, pool: base58.encode(new Uint8Array(32).fill(6)) }, release, venue, req, chain), /not the program's pool account/);
