@@ -253,6 +253,7 @@ function answerOf(a: unknown, who: string, raw = false): Answer | string {
 // READS_PER_CALL below).
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
 const SEL_AGGREGATE3 = "82ad56cb"; // aggregate3((address,bool,bytes)[])
+const SEL_ETH_BALANCE = "4d2301cc"; // getEthBalance(address)
 
 /** aggregate3's calldata: every read with allowFailure, so a reverting quote is an answer, not a failed batch. */
 function aggregate(reads: readonly Read[]): string {
@@ -1029,8 +1030,9 @@ const qty = (v: bigint) => "0x" + v.toString(16);
  *  carry into the next). Each call, the nonce read too, is sent as the helper sends the sale: from the pinned sell
  *  sender (tx.origin and W's msg.sender), with the sale's gas less its authorization's intrinsic cost (the gas the
  *  sale's execution is given), maxPriorityFeePerGas the sale's tip and maxFeePerGas the agreed block's base fee plus
- *  it (tx.gasprice and BASEFEE as the sale's at that base fee), and a balance on the sender that covers that gas and
- *  one ETH more (an L1 data fee). */
+ *  it (tx.gasprice and BASEFEE as the sale's at that base fee). The sender's balance is its own at the block, never
+ *  overridden: a sender too low to pay the sim's gas drops every route that needed the sim, and the routes no sim
+ *  needs stay, so a sale is never frozen by it. */
 async function simmedSells(chain: EvmPoolChain, pins: Pick<Venue, "sellDelegate" | "sellSender">, rpcs: readonly [EvmRpc, EvmRpc], block: Block, w: string, token: string, amountIn: bigint, routes: Filled[], floor: bigint, signSim: EvmPoolSellQuoteRequest["signSim"]): Promise<Filled[]> {
   const toSim = routes.filter((r) => r.amountOut > floor && simRule(chain, r.route, pins) === "sim");
   if (toSim.length === 0) return routes;
@@ -1042,14 +1044,18 @@ async function simmedSells(chain: EvmPoolChain, pins: Pick<Venue, "sellDelegate"
   const maxFee = block.baseFeePerGas + tip;
   const tx: SimTx = { from: sender, gas: qty(gas), maxFeePerGas: qty(maxFee), maxPriorityFeePerGas: qty(tip) };
   const asW = { [lower(w)]: { code: designator(delegate!) } };
-  const funded = { [sender]: { balance: qty(gas * maxFee + 10n ** 18n) }, ...asW };
-  const [n] = await readBoth(rpcs, block.hash, [{ to: lower(w), data: "0x" + SEL_NONCE, override: funded, tx }]);
+  // the sender's own balance at the block (Multicall3.getEthBalance, both providers agreeing): an eth_call it cannot pay
+  // for is a node's error, not a revert ("insufficient funds for gas * price + value"), so a sender too low to pay the
+  // sim's gas proves no route: each route that needed the sim is dropped and the rest stand, never a refusal
+  const [bal] = await readBoth(rpcs, block.hash, [{ to: lower(MULTICALL3), data: "0x" + SEL_ETH_BALANCE + sender.slice(2).toLowerCase().padStart(64, "0") }]);
+  if (bal!.kind !== "out" || bal!.amountOut < gas * maxFee) return routes.filter((r) => !toSim.includes(r));
+  const [n] = await readBoth(rpcs, block.hash, [{ to: lower(w), data: "0x" + SEL_NONCE, override: asW, tx }]);
   if (n!.kind !== "out") return refuse("no_quote", "W's sell nonce does not read through the sell delegate");
   const reads: Read[] = toSim.map((r) => {
     const s = evmSellRouteOf(r.route) as EvmV4SellRoute;
     const sim = evmPoolBuildSimSellUnpinned(chain, { w, token, amount: amountIn, hops: s.hops, minOut: r.amountOut, nonce: n!.amountOut, deadline: block.timestamp });
     const sig = signSim(sim, block.timestamp);
-    return { to: lower(w), data: evmSellCallData(sim, 0n, sig), override: { ...funded, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };
+    return { to: lower(w), data: evmSellCallData(sim, 0n, sig), override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };
   });
   const ans = await readBoth(rpcs, block.hash, reads);
   const failed = new Set(toSim.filter((_, i) => { const a = ans[i]!; return a.kind !== "out" || a.amountOut < toSim[i]!.amountOut; }));

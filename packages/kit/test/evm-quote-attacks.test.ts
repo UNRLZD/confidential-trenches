@@ -280,9 +280,10 @@ const keyOf = (token: string, other: string, fee: number, tickSpacing: number, h
   return { currency0, currency1, fee, tickSpacing, hooks };
 };
 // the chain's head in the model: the agreed block, which the scan provider's head must be within maxLag of;
-// `overrides` keeps, for each eth_call with a state override, the addresses it replaces and the hooks of each quote in it
+// `overrides` keeps, for each eth_call with a state override, the addresses it replaces and the hooks of each quote in it;
+// `balances` is each account's ETH at the block (the pinned sell sender holds one ETH), which a state override replaces
 type Overridden = { replaces: string[]; hooks: string[][] };
-function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: Overridden[]): EvmRpc {
+function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: Overridden[], balances: Record<string, bigint> = { [SENDER]: 10n ** 18n }): EvmRpc {
   const live = pools.filter((p) => p.only === undefined || p.only === who);
   const byPid = new Map(live.map((p) => [pidOf(p.key), p]));
   const slots = new Map<string, bigint>();
@@ -313,6 +314,8 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     overridden.has(to.toLowerCase()) && d.length === 192 ? BigInt("0x" + d.slice(128))
     // QuoterV2.factory(): no v3 in the model
     : d.startsWith("c45a0155") ? null
+    // Multicall3.getEthBalance(address): the account's ETH at the block
+    : to.toLowerCase() === "0xca11bde05977b3631167028862be2a173976ca11" && d.startsWith("4d2301cc") ? (balances["0x" + d.slice(32, 72)] ?? 0n)
     : to.toLowerCase() === PM || to.toLowerCase() === RH_PM
       ? d.startsWith("1e2eaeaf") ? (slots.get(d.slice(8)) ?? 0n) : null
       : d.startsWith("3850c7bd") || d.startsWith("1a686502") ? null // no v3 pool in the model
@@ -342,7 +345,7 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       }
       const asW = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code;
       const isSim = to.toLowerCase() === SELL_W && asW?.startsWith("0xef0100");
-      const ctx = isSim ? simCtx(c.params[0] as CallArgs, (c.params[2] ?? {}) as Record<string, { balance?: string }>) : null;
+      const ctx = isSim ? simCtx(c.params[0] as CallArgs, (c.params[2] ?? {}) as Record<string, { balance?: string }>, balances) : null;
       if (typeof ctx === "string") return { jsonrpc: "2.0", id, error: { code: -32000, message: ctx } };
       const o = isSim ? simSell(data.slice(2), c.params[2] as Record<string, { code: string }>, ctx!) : one(to, data.slice(2), overridden);
       return o === null ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted" } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
@@ -379,11 +382,11 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
 // An eth_call's context as geth runs one (internal/ethapi TransactionArgs, core/state_transition.go): no `from` is the
 // zero address as tx.origin and msg.sender; no `gas` is the provider's cap (publicnode's 50,000,000); no fee fields are
 // tx.gasprice 0; with fees, maxFeePerGas under the block's base fee is refused, tx.gasprice is min(maxFee, base fee +
-// tip), and the sender's balance must cover gas x maxFeePerGas (here only a state override gives one). A string is the
-// node's refusal.
+// tip), and the sender's balance (its own at the block, or a state override's) must cover gas x maxFeePerGas. A string
+// is the node's refusal.
 type CallArgs = { from?: string; gas?: string; gasPrice?: string; maxFeePerGas?: string; maxPriorityFeePerGas?: string };
 const GAS_CAP = 50_000_000n;
-function simCtx(a: CallArgs, o: Record<string, { balance?: string }>): SimCtx | string {
+function simCtx(a: CallArgs, o: Record<string, { balance?: string }>, balances: Record<string, bigint>): SimCtx | string {
   const from = (a.from ?? NATIVE).toLowerCase();
   const gas = a.gas !== undefined ? BigInt(a.gas) : GAS_CAP;
   const maxFee = a.maxFeePerGas !== undefined ? BigInt(a.maxFeePerGas) : a.gasPrice !== undefined ? BigInt(a.gasPrice) : 0n;
@@ -391,8 +394,8 @@ function simCtx(a: CallArgs, o: Record<string, { balance?: string }>): SimCtx | 
   if (maxFee === 0n && tip === 0n) return { origin: from, sender: from, gas, gasPrice: 0n };
   if (maxFee < BASE_FEE) return "max fee per gas less than block base fee";
   const gasPrice = maxFee < BASE_FEE + tip ? maxFee : BASE_FEE + tip;
-  const bal = Object.entries(o).find(([k]) => k.toLowerCase() === from)?.[1]?.balance;
-  if (BigInt(bal ?? "0x0") < gas * maxFee) return "insufficient funds for gas * price + value";
+  const set = Object.entries(o).find(([k]) => k.toLowerCase() === from)?.[1]?.balance;
+  if ((set !== undefined ? BigInt(set) : (balances[from] ?? 0n)) < gas * maxFee) return "insufficient funds for gas * price + value";
   return { origin: from, sender: from, gas, gasPrice };
 }
 const SEL_SELL = Buffer.from(keccak_256(new TextEncoder().encode("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)"))).toString("hex").slice(0, 8);
@@ -1572,6 +1575,30 @@ test("PE6 the sim's eth_call and its nonce read go from the pinned sender, with 
     assert.equal(BigInt(String(args.maxPriorityFeePerGas)), tip);
     assert.equal(BigInt(String(args.maxFeePerGas)), BASE_FEE + tip!);
     assert.equal(args.gasPrice, undefined, "EIP-1559 fields only");
-    assert.ok(BigInt(state[SENDER]!.balance!) >= BigInt(String(args.gas)) * (BASE_FEE + tip!), "the sender's balance covers the gas");
+    // the sender's balance is its own at the block: the override names W and the sim pool, never the sender
+    assert.deepEqual(Object.keys(state).filter((a) => a.toLowerCase() === SENDER), [], "no override of the sender");
   }
+});
+
+test("PE8 a sender too low to pay the sale's gas drops the hooked route and freezes no sell: its balance is its own", async () => {
+  const token = "0x00000000000000000000000000000000000c0ebe";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  // a hook W's own sell clears at twice the market: with the sender funded it sets the reference, so W's bought route is
+  // below it
+  const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, exec: (a) => 2n * a };
+  const pools = [market, hooked];
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), signSim } as EvmPoolSellQuoteRequest;
+  const logs = scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]);
+  const funded = await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, logs, DELEGATED));
+  assert.deepEqual(funded, { accepted: false, code: "below_reference" });
+  // the sender holding exactly the sim's gas x maxFeePerGas: the sim runs
+  const cost = (SALE_GAS - 25_000n) * (BASE_FEE + 1_000_000n);
+  const exact = { [SENDER]: cost };
+  assert.deepEqual(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, exact), chain(pools, 1, 5_000_000, undefined, exact)], NOW, logs, DELEGATED)), { accepted: false, code: "below_reference" });
+  // one wei short on both providers (an eth_call it cannot pay for is the node's error, not a revert): the hooked route
+  // is dropped and the sale prices at the market
+  const short = { [SENDER]: cost - 1n };
+  atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, short), chain(pools, 1, 5_000_000, undefined, short)], NOW, logs, DELEGATED)));
+  // and one with no ETH at all
+  atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, {}), chain(pools, 1, 5_000_000, undefined, {})], NOW, logs, DELEGATED)));
 });
