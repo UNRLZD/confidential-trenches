@@ -123,7 +123,9 @@ const verdict = async (p: Promise<kit.EvmPoolSellQuote>) => {
     return { accepted: false, code: e.code };
   }
 };
-const req = (chain: EvmPoolChain = "base", o: Record<string, unknown> = {}) => ({ chain, token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, ...o });
+// the route the buy that paid W took (required, review of edb4dbb F3): the standard 0.3% native pool
+const BOUGHT = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
+const req = (chain: EvmPoolChain = "base", o: Record<string, unknown> = {}) => ({ chain, token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, bought: BOUGHT, ...o });
 const sell = (m: Model, chain: EvmPoolChain = "base", o: Record<string, unknown> = {}, m2: Model = m) =>
   sellQuoteWith(req(chain, o), [provider(m), provider(m2)], Date.now());
 /** v4 to the native asset, fee 3000: 2 ETH a token; every other pool 1 */
@@ -234,7 +236,7 @@ test("planted: an unlisted hook is never quoted; a listed one is, with its own k
   assert.deepEqual(q.route.venue === "uniswap-v4" && q.route.hops, [{ currency: B.weth.toLowerCase(), fee: clanker.fee, tickSpacing: clanker.tickSpacing, hooks: clanker.hooks.toLowerCase(), hookData: "0x" }]);
   // a token that is a listed hook's own address: that hook is not read for it (its pool would swap through itself)
   const self: Seen = { pools: [], probes: [] };
-  await sellQuoteWith(req("base", { token: clanker.hooks }), [provider({ price: flat }, self), provider({ price: flat })], Date.now());
+  await sellQuoteWith(req("base", { token: clanker.hooks, bought: { ...BOUGHT, hops: [{ ...BOUGHT.hops[0]!, currency: clanker.hooks }] } }), [provider({ price: flat }, self), provider({ price: flat })], Date.now());
   assert.ok(self.pools.length > 0 && self.pools.every((p) => p.hooks.every((h) => h !== clanker.hooks.toLowerCase())));
 });
 
