@@ -1,0 +1,26 @@
+{
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "dryRun": false,
+  "at": "2026-11-04T14:06:51.375Z",
+  "deployer": "0x8186ce87d92063fc71c8a1a359f9af279863d9a1",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "24903697342151",
+  "build": "solc 0.8.28 (contracts/pool-evm/foundry.toml), forge Version: 1.7.1-Homebrew",
+  "contracts": {
+    "SellDelegate": {
+      "address": "0xe39f1b9934810792c090d8ab8f555b9955527260"
+    }
+  },
+  "txs": [
+    {
+      "step": "deploy SellDelegate",
+      "hash": "0xa889469f4b7386072b3343b295002c09a4aff89638d29b304ac940c0c6168121",
+      "contract": "SellDelegate"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0x9f4e5a01420ee387d4c4e62fd595bdb45317f8c3fb1d4190299ef47622ec4184"
+    }
+  ]
+}

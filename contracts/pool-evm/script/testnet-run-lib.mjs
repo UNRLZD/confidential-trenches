@@ -117,7 +117,9 @@ export function signTx7702(sk, t) {
   return { raw: hex(raw), hash: keccak(raw) };
 }
 /** An authorization as eth_estimateGas takes it */
-export const authJson = (a) => ({ chainId: `0x${BigInt(a.chainId).toString(16)}`, address: a.address, nonce: `0x${BigInt(a.nonce).toString(16)}`, yParity: `0x${a.yParity.toString(16)}`, r: a.r, s: a.s });
+export const authJson = (a) => ({ chainId: `0x${BigInt(a.chainId).toString(16)}`, address: a.address, nonce: `0x${BigInt(a.nonce).toString(16)}`, yParity: `0x${a.yParity.toString(16)}`, r: `0x${BigInt(a.r).toString(16)}`, s: `0x${BigInt(a.s).toString(16)}` });
+// (r and s as quantities: a node's JSON decoder refuses a hex number with a leading zero digit, so a 32-byte r or s that
+// starts with 0 made Robinhood testnet refuse the sell's eth_estimateGas, 4 Nov)
 
 // ---- A revert's name: the custom errors the pool, the adapters and the delegate may throw ----
 const ERRORS = [
