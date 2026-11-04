@@ -5,11 +5,12 @@
 // made in copies of the kit's sources and tests in fresh temporary folders inside the kit (so each copy resolves the
 // same installed modules), removed at the end; the tree's own files are never changed. Exits 1 when a named test passes on its
 // mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly once.
-// The named tests are first run on the code as it is, all of one test file in one run; then the mutants, JOBS at once,
-// each in its own copy (each run is mostly a process's start: about 1 s each, 279 one after another took 266 s and the
-// named tests one by one 140 s on GitHub's runner, readme-fresh-run at 47109a7). Each line prints its time.
+// The named tests are first run on the code as it is, then the mutants, each run judged the same way (one name alone, by
+// its exit code) and JOBS at once, each in its own copy (each run is mostly a process's start: about 1 s each, 279 one
+// after another took 266 s and the named tests one by one 140 s on GitHub's runner, readme-fresh-run at 47109a7).
+// Each line prints its time.
 //   node packages/kit/test/evm-quote-mutants.mjs     (a heavy job: run it on a machine with spare cores)
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
@@ -383,31 +384,34 @@ export const MUTANTS = [
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
 const run$ = promisify(execFile);
+// each test run's own environment: without the node --test runner's NODE_TEST_CONTEXT, which turns a child's report
+// from TAP into the runner's own stream (the runner's test calls these judges from inside node --test)
+const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT"));
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`
 let lastFail = "";
 async function run(dir, file, name) {
   try {
-    const { stdout } = await run$("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 26 });
-    return /^# pass ([1-9]\d*)$/m.test(stdout) ? "pass" : "none";
+    const { stdout } = await run$("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, env: ENV, encoding: "utf8", maxBuffer: 1 << 26 });
+    // a test of that name passed: a file that runs no test still reports itself as one that passed
+    const ran = [...stdout.matchAll(/^\s*ok \d+ - (.*?)(?: # .*)?$/gm)].some((m) => m[1].replace(/\\#/g, "#").replace(/\\\\/g, "\\").startsWith(name));
+    return ran ? "pass" : "none";
   } catch (e) {
     lastFail = `${e.stdout ?? ""}${e.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
     return "fail";
   }
 }
-// each name's "pass", "fail" or "none" on the code as it is: every named test of `file` in one run, each top-level
-// result read from the TAP lines (a name passes when some test starts with it and none of those fails)
-function runAll(dir, file, names) {
-  let out = "";
-  try {
-    out = execFileSync("node", ["--test", "--test-reporter=tap", ...names.flatMap((n) => ["--test-name-pattern", esc(n)]), file], { cwd: dir, stdio: "pipe", encoding: "utf8", maxBuffer: 1 << 26 });
-  } catch (e) {
-    out = `${e.stdout ?? ""}`;
-  }
-  const results = [...out.matchAll(/^(not )?ok \d+ - (.*?)(?: # .*)?$/gm)].map((m) => ({ ok: m[1] === undefined, name: m[2].replace(/\\#/g, "#").replace(/\\\\/g, "\\") }));
-  return new Map(names.map((n) => {
-    const of = results.filter((r) => r.name.startsWith(n));
-    return [n, of.length === 0 ? "none" : of.every((r) => r.ok) ? "pass" : "fail"];
+/** Each named test's "pass", "fail" or "none" on the code as it is, judged as the kill phase judges a mutant: each name
+ *  alone, by its run's exit code (`run`), as many at once as there are copies `dirs` (re-review of 037627c, LOW-1: one
+ *  run per file read from its TAP lines passed a test that passed and then threw from a timer, which alone exits 1).
+ *  `byFile` maps a test file to its names. */
+export async function baseline(dirs, byFile) {
+  const jobs = [...byFile].flatMap(([file, names]) => names.map((name) => ({ file, name })));
+  const out = [];
+  let next = 0;
+  await Promise.all(dirs.map(async (dir) => {
+    for (let i = next++; i < jobs.length; i = next++) out[i] = { ...jobs[i], r: await run(dir, jobs[i].file, jobs[i].name) };
   }));
+  return out;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -426,16 +430,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
     const byFile = new Map();
     for (const m of MUTANTS) byFile.set(m[3], [...new Set([...(byFile.get(m[3]) ?? []), m[4]])]);
-    for (const [file, names] of byFile) {
-      const t = performance.now();
-      for (const [n, r] of runAll(dirs[0], file, names)) {
-        if (r !== "pass") {
-          console.log(`FAIL "${n}" in ${file} ${r === "none" ? "names no test" : "fails on the code as it is"}`);
-          bad++;
-        }
+    const tb = performance.now();
+    for (const { file, name: n, r } of await baseline(dirs, byFile)) {
+      if (r !== "pass") {
+        console.log(`FAIL "${n}" in ${file} ${r === "none" ? "names no test" : "fails on the code as it is"}`);
+        bad++;
       }
-      console.log(`the ${names.length} named tests of ${file} on the code as it is: ${s(t)}`);
     }
+    console.log(`the ${[...byFile.values()].flat().length} named tests on the code as it is: ${s(tb)}`);
     if (bad === 0) {
       let next = 0;
       const worker = async (dir) => {
