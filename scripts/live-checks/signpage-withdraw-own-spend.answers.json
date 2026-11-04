@@ -1,0 +1,15 @@
+{
+  "_note": "good: this branch build (packages/signpage public/app.js and index.html at the card commit), what the SIGN_HOST deploy of release-26 serves; bad: SIGN_HOST read live on 2026-11-04 22:46Z, before the deploy (the paper seven stores only)",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0fMPi4aC8YWIRhfiP9Gxwj9bf1tsW6cYc5W5ySNTFciWN//YjoY+823ZGxklxxXD\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-0fMPi4aC8YWIRhfiP9Gxwj9bf1tsW6cYc5W5ySNTFciWN//YjoY+823ZGxklxxXD",
+    "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`,`owed`]",
+    "readerSkipsOwed": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9LPkjHnbcayzEfq/Ls2ycnapgFuSizURn+aIlrgExeU80aQ5qP4HdKeCXwsHccvQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-9LPkjHnbcayzEfq/Ls2ycnapgFuSizURn+aIlrgExeU80aQ5qP4HdKeCXwsHccvQ",
+    "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`]",
+    "readerSkipsOwed": false
+  }
+}
