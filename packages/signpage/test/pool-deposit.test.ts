@@ -746,3 +746,22 @@ test("R3: a front-run on the second rung of a move ends the run part filled, wit
     ["second", "TAKEN", undefined],
   ]);
 });
+
+test("R3 fold 1: an earlier send already landed but its note still INCOMING is in U's balance once, never subtracted again: the ask waits; if one RPC has not seen it, the lower reading holds", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 2 * (Number(RUNG) + COST)); // its own rung and the next one, with costs
+  // the send lands (its status confirmed on both RPCs, U charged), but one RPC has not the mark yet: the note stays INCOMING
+  const lagging = () => [c.rpc(), c.rpc({ hide: isMark(c) })] as const;
+  assert.equal(((await runPoolDeposit(host(c, ns, { rpcs: [...lagging()], reads: 1 }), ask(RUNG))) as { stage: string }).stage, "not_landed");
+  assert.equal(c.lamports(u.address), Number(RUNG) + COST, "U already paid the first rung");
+  const short: [string, bigint][] = [];
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [...lagging()], short: (a, l) => short.push([a, l]) }), ask(RUNG)), { stage: "not_landed", txs: [] });
+  assert.equal(short.length, 0, "no top-up asked: U covers the rung once the note lands");
+  // the RPCs disagree (one has not seen the send): the lower reading, U less the send's value, is short
+  const r = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ hide: isMark(c), hideStatus: true })], short: (a, l) => short.push([a, l]) }), ask(RUNG));
+  assert.deepEqual(r, { error: "not_funded" });
+  assert.equal(short.length, 1);
+  assert.deepEqual((await ours(ns)).filter((n) => n.state !== "PLANNED").map((n) => n.state), ["INCOMING"]);
+});

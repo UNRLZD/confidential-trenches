@@ -32,8 +32,9 @@
 //   move, never waited on: settled, taken, sent again, or left INCOMING with its U not a source this run (a resend U
 //   cannot pay leaves it so, and `short` names the top-up). settlePoolDeposits does that pass with no ask, on page load
 //   and on the page's state reads while such a note is open. An ask whose U is short behind such a pending note waits
-//   (not_landed) only when that note's U still holds the rung once its open notes land; else not_funded, `short` naming
-//   the ask's own U.
+//   (not_landed) only when that note's U still holds the rung once its open notes land (a send an RPC already saw
+//   succeed is in U's balance, never subtracted again; the lower of the two RPCs' readings decides); else not_funded,
+//   `short` naming the ask's own U.
 // - Each note that lands starts the proof queue's pass (`landed`), so the next buy's proof is made ahead; `sent` and
 //   `progress` tell the app of the ask's own sends and landed rungs, never an earlier note's.
 // - Every read names a public account or tx (the pool, its pages, U, the mark the deposit itself named, U's own
@@ -351,13 +352,25 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       if (end === "pending") pending.add(u.i);
       stuck ||= end === "stuck";
     }
-    // a U still landing a note holds `value` once its open notes land: its balance less their recorded values
+    // a U still landing a note holds `value` once its open notes land. Per RPC: U's balance, less the value of each open
+    // note none of whose sends that RPC has seen succeed (processed or later: already out of the balance); one batched
+    // status read per U. The lower of the two RPCs' readings decides, so neither alone makes the ask wait.
     const coversOnceLanded = async (value: bigint): Promise<boolean> => {
       const open = (await store.list()).filter((n) => n.state === "INCOMING" && n.scope === scope);
       for (const i of pending) {
-        const held = await balanceOf(h, uKey({ s: scope, i }).address);
-        const out = open.filter((n) => uOf(n.ref)?.i === i).reduce((a, n) => a + (n.sends?.[0]?.value ?? 0n), 0n);
-        if (held - out >= value) return true;
+        const address = uKey({ s: scope, i }).address;
+        const mine = open.filter((n) => uOf(n.ref)?.i === i);
+        const sigs = mine.flatMap((n) => (n.sends ?? []).map((x) => x.signature));
+        const left = await both(h, async (r) => {
+          const a = await account(r, address, "confirmed");
+          const held = "none" in a ? 0n : a.lamports;
+          const v = ((await r("getSignatureStatuses", [sigs, { searchTransactionHistory: false }])) as { value?: unknown })?.value;
+          if (!Array.isArray(v) || v.length !== sigs.length) throw new Refused("failed");
+          const seen = new Set(sigs.filter((_, k) => (v[k] as { err?: unknown } | null)?.err === null));
+          const out = mine.filter((n) => !(n.sends ?? []).some((x) => seen.has(x.signature))).reduce((t, n) => t + (n.sends?.[0]?.value ?? 0n), 0n);
+          return held - out;
+        });
+        if ((left[0] < left[1] ? left[0] : left[1]) >= value) return true;
       }
       return false;
     };
