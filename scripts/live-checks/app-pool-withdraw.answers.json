@@ -1,10 +1,10 @@
 {
- "_note": "Recorded 4 Nov by app-pool-withdraw.mjs --record: good = this card build (--harness --build apps/terminal/dist), bad = the deployed APP_HOST before this card; both framed by the stand-in shell signed in with POOLS.",
+ "_note": "Recorded 4 Nov by app-pool-withdraw.mjs --record: good = card app-hop-sync-lock's build (--harness --build apps/terminal/dist; the opened run's control stays locked until the shell's screen takes the frame), bad = the deployed APP_HOST before card app-pool-withdraw; both framed by the stand-in shell signed in with POOLS.",
  "good": {
   "check": "app-pool-withdraw",
-  "at": "2026-11-04T13:51:54.024Z",
+  "at": "2026-11-04T17:18:05.603Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
-  "browser": "157.0.8103.38",
+  "browser": "156.0.8078.79",
   "runs": [
    {
     "width": "phone",
@@ -21,7 +21,7 @@
       "chain": "base",
       "return_key": "withdraw",
       "v": 1,
-      "id": "9d03da3c-4b5b-4432-8759-90c2cb0fadcc",
+      "id": "e20eadfe-be95-4372-ba14-5d1b25613fe4",
       "type": "pool.withdraw"
      }
     ],
@@ -44,12 +44,12 @@
       "chain": "base",
       "return_key": "withdraw",
       "v": 1,
-      "id": "570cfcfd-5e5e-4b6b-a0fc-6262f5b2839a",
+      "id": "c8132803-9f63-4ebc-b7f4-a8d0af653854",
       "type": "pool.withdraw"
      }
     ],
     "line": null,
-    "unlocked": true,
+    "unlocked": false,
     "inside": true
    },
    {
@@ -67,7 +67,7 @@
       "chain": "base",
       "return_key": "withdraw",
       "v": 1,
-      "id": "622b341a-cb9a-4536-baa7-b2ccd0237d04",
+      "id": "549516b8-54be-4071-9680-15088f61bf40",
       "type": "pool.withdraw"
      }
     ],
@@ -90,12 +90,12 @@
       "chain": "base",
       "return_key": "withdraw",
       "v": 1,
-      "id": "4872a182-96e5-4738-a42e-a8f2edd84ebe",
+      "id": "2f6f1625-831c-4e52-bc08-a275e9085d05",
       "type": "pool.withdraw"
      }
     ],
     "line": null,
-    "unlocked": true,
+    "unlocked": false,
     "inside": true
    }
   ]
