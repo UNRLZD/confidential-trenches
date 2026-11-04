@@ -153,9 +153,22 @@ function checkArgs(a: PoolUsdArgs): { feed: PoolUsdPythFeed | PoolUsdChainlinkFe
   return { feed: POOL_USD_FEEDS[chain as PoolUsdChain], chain: chain as PoolUsdChain, rpcs: rpcs as [SolanaRpc, SolanaRpc], nowS: nowMs / 1000, nowMs };
 }
 
-/** The price's age against the device's clock: older than maxAgeS, or ahead by more than POOL_USD_MAX_AHEAD_S, refused. */
+/** The last second a price is used: its bound counted from the earlier of the feed's own time and the device's read, so a
+ *  device clock behind the feed never stretches the bound past maxAgeS of the device's own time. */
+const goodUntil = (publishedS: number, readS: number, maxAgeS: number): number => Math.min(publishedS, readS) + maxAgeS;
+
+/**
+ * The last unix second a price of `chain` read at `readS` (the device's clock at the read) is used: its feed's bound
+ * (POOL_USD_FEEDS maxAgeS) from the earlier of `publishedS` and `readS`. The one rule for every holder of a read price:
+ * a device clock behind the feed would otherwise stretch the bound by as much as it lags.
+ */
+export function poolUsdGoodUntilS(chain: PoolUsdChain, publishedS: number, readS: number): number {
+  return goodUntil(publishedS, readS, POOL_USD_FEEDS[chain].maxAgeS);
+}
+
+/** The price's age against the device's clock: past goodUntil, or ahead by more than POOL_USD_MAX_AHEAD_S, refused. */
 function checkAge(publishedS: number, maxAgeS: number, nowS: number): void {
-  if (nowS - publishedS > maxAgeS) fail(`the price is older than ${maxAgeS} s: published ${publishedS}, now ${Math.floor(nowS)}`);
+  if (nowS > goodUntil(publishedS, nowS, maxAgeS)) fail(`the price is older than ${maxAgeS} s: published ${publishedS}, now ${Math.floor(nowS)}`);
   if (publishedS - nowS > POOL_USD_MAX_AHEAD_S) fail(`the price's time ${publishedS} is ahead of the device's clock ${Math.floor(nowS)}`);
 }
 

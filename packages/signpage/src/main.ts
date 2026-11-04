@@ -64,6 +64,8 @@ import { startApi } from "./api.ts";
 import { depositQuoteHost } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { PAGE_POOLS, withPools } from "./pools.ts";
+import { poolPrices } from "./pool-price.ts";
+import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readNotes, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
@@ -137,6 +139,15 @@ else {
   channel.addEventListener("message", (m) => notesMoved(m.data as WalletEvent));
   // under the APP_HOST frame: the app's boot frame as shapes, for the moment before a new frame paints (src/backdrop.ts)
   document.body.append(drawBackdrop(document));
+  // the pool kinds' deps: their pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
+  const poolDeps =
+    POOL_TESTNET && testnet
+      ? testnetPoolDeps(testnet.flow)
+      : {
+          pinned: poolPinned,
+          rpcs: (chain: PoolChain) => (chain === "solana" ? ([pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)] as const) : null),
+        };
+  const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
   // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
   const trades = tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() });
   shell = mountShell(document, {
@@ -144,12 +155,20 @@ else {
     settle: () => trades.idle(),
     // the private balance per chain's pool, from this page's own notes (src/pools.ts); the frame's state has none
     // the testnet build: a state read while a deposit note is still landing settles it again (src/pool-testnet.ts)
+    // each pool's USD price, read by this page on the pool kinds' own RPC pair (src/pool-price.ts); each state read
+    // starts the next read of a chain it names that is due one
     state: () =>
-      fs.state().then((s) => {
+      fs.state().then(async (s) => {
         if (POOL_TESTNET && s.signed_in) void testnet?.stateRead();
-        return withPools(s, pageNotes, PAGE_POOLS);
+        const out = await withPools(s, pageNotes, PAGE_POOLS, undefined, prices.get);
+        prices.refresh((out.pools ?? []).map((p) => p.chain));
+        return out;
       }),
-    watch: fs.watch,
+    // a store change, and a new price read (or its next one due)
+    watch: (fn) => {
+      fs.watch(fn);
+      prices.watch(fn);
+    },
     kinds: {
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
       // layer opens (and the frame leaves).
@@ -164,14 +183,7 @@ else {
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (mainnet: none yet, every one refused not_allowed, no read made; the testnet build: the devnet
       // pool, src/pool-testnet.ts, whose flow deposits into it); a sell's decimals read on two providers
-      ...poolKinds(
-        POOL_TESTNET && testnet
-          ? testnetPoolDeps(testnet.flow)
-          : {
-              pinned: poolPinned,
-              rpcs: (chain) => (chain === "solana" ? [pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)] : null),
-            },
-      ),
+      ...poolKinds(poolDeps),
     },
   });
   shell.layer.append(root);
