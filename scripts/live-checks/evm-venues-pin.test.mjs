@@ -1,8 +1,8 @@
 // Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-04 for card
-// evm-sell-v4-kit) through the live check: the recorded good answers pass on both testnets; the same recording with one
+// evm-selldelegate-exact-debit) through the live check: the recorded good answers pass on both testnets; the same recording with one
 // thing changed fails: a pin's code with one byte flipped, a pin that differs between the two RPCs, a router or WETH
-// with other code, another chain id, a kit pin that is not the record's (the sell delegate's record is card
-// evm-sell-v4's; the PoolManager is pool-evm-deploy's CHAINS one), and two RPCs of one operator.
+// with other code, another chain id, a kit pin that is not the record's (the sell delegate's record is the
+// newest redeploy's, card evm-selldelegate-exact-debit's; the PoolManager is pool-evm-deploy's CHAINS one), and two RPCs of one operator.
 //   node --test scripts/live-checks/evm-venues-pin.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -74,7 +74,9 @@ test("WETH or the router with other code, another chain id, a kit pin that is no
   const other = "0x000000000000000000000000000000000000bad0";
   fails(await run(b, { venue: { ...v, sellDelegate: other } }), /the sell delegate pin 0x0+bad0/);
   // the v1 delegate (pool-evm-deploy's record), which sells through no PoolManager, is no longer the pin (card evm-sell-v4-kit)
-  fails(await run(b, { venue: { ...v, sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef88" } }), /the sell delegate pin 0x23ad\w+ is the record's SellDelegate 0xfa14/);
+  fails(await run(b, { venue: { ...v, sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef88" } }), /the sell delegate pin 0x23ad\w+ is the record's SellDelegate 0xe39f/);
+  // nor the evm-sell-v4 delegate, which has no exact-debit check (card evm-selldelegate-exact-debit)
+  fails(await run(b, { venue: { ...v, sellDelegate: "0xfa1442419b6984b8e3aa8933c690f80f063b6adf" } }), /the sell delegate pin 0xfa14\w+ is the record's SellDelegate 0xe39f/);
   fails(await run(b, { venue: { ...v, poolManager: other } }), /the PoolManager 0x0+bad0 is pool-evm-deploy's/);
   fails(await run(b, { venue: { ...v, poolManager: undefined } }), /the PoolManager \(none\) is pool-evm-deploy's/);
   fails(await run(b, { venue: { ...v, pool: other } }), /the pool pin 0x0+bad0/);
