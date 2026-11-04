@@ -102,27 +102,29 @@ export function createPacer() {
   const left = new Map<string, number[]>();
   return {
     /**
-     * When `n` sends to `url` at `t` may go so that no PACE_SECOND_MS holds more than `perSecond` of them, from `from`
+     * When `n` sends to `url` may go so that no PACE_SECOND_MS holds more than `perSecond` of them, `fromMs` from now
      * on (a hold's end) and after every send booked before (first come, first sent), `share` the most of a second's
      * room these may fill (a background read: half, so a caller always finds the rest). Booked when within `maxWaitMs`
-     * of `t` (and `book`), else only named: the ms to wait.
+     * (and `book`), else only named: the ms to wait. Every time here is the process's monotonic clock
+     * (performance.now), never the wall clock: on the box Date.now() stepped back 0.5 s and 8 s inside a test (traced
+     * 4 Nov 22:14Z), and bookings on it let 11 sends into one real second, then refused callers for the step's length.
      */
-    at(url: string, t: number, n: number, perSecond: number, opts: { from?: number; maxWaitMs: number; share?: number; book?: boolean }): number {
+    at(url: string, n: number, perSecond: number, opts: { fromMs?: number; maxWaitMs: number; share?: number; book?: boolean }): number {
+      const t = performance.now();
       const cap = Math.max(1, opts.share ?? perSecond);
       const s = (booked.get(url) ?? []).filter((x) => x > t - PACE_SECOND_MS);
       booked.set(url, s);
       const i = s.length + n - cap - 1;
-      let at = Math.max(t, opts.from ?? t, s[s.length - 1] ?? t);
+      let at = Math.max(t + (opts.fromMs ?? 0), s[s.length - 1] ?? t);
       if (i >= 0) at = Math.max(at, s[Math.min(i, s.length - 1)]! + PACE_SECOND_MS);
       if (at - t <= opts.maxWaitMs && opts.book !== false) for (let k = 0; k < n; k++) s.push(at);
       return at - t;
     },
     /**
-     * The send itself, at `t`: 0 when fewer than `perSecond` - `n` + 1 sends left in the last PACE_SECOND_MS, and then it
-     * is counted; else the ms until one leaves. A booking names when a send may go, but a busy event loop can start
-     * it late, so two seconds' sends would land closer than a second (seen on the box at load 26: 11 in one second);
-     * this counts the sends where they leave, on the process's own monotonic clock (the provider counts real time,
-     * whatever clock a test gives the budget).
+     * The send itself, now: 0 when fewer than `perSecond` - `n` + 1 sends left in the last PACE_SECOND_MS, and then it is
+     * counted; else the ms until one leaves. A booking names the earliest a send may go, and a lagging event loop
+     * starts some later than booked, which would put them under a second from the next second's on-time sends: this
+     * counts each send where it leaves.
      */
     go(url: string, n: number, perSecond: number): number {
       const t = performance.now();
@@ -314,7 +316,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  0 when not paced. A batch larger than a second's room goes alone in its own second. */
   const pace = (key: string, n: number, maxWaitMs: number): number => {
     const p = pacedOf(key);
-    return p === null ? 0 : pacer.at(p.url, now(), n, p.perSecond, { from: budget.heldUntil(key), maxWaitMs });
+    return p === null ? 0 : pacer.at(p.url, n, p.perSecond, { fromMs: Math.max(0, budget.heldUntil(key) - now()), maxWaitMs });
   };
   const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
   /** A hold on `key` that ends within HOLD_WAIT_MS and by `deadline` is waited out: true once nothing holds it (card
@@ -503,9 +505,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const p = pacedOf(key);
     const room = { maxWaitMs: 0, share: p === null ? 0 : p.perSecond - userRoomOf(p.perSecond) };
     // the walk sends at once (data/solana/trades.ts): counted as it leaves, within the same half of the sends that left
-    if (p !== null && (pacer.at(p.url, now(), 1, p.perSecond, { ...room, book: false }) > 0 || pacer.go(p.url, 1, room.share) > 0)) return 1;
+    if (p !== null && (pacer.at(p.url, 1, p.perSecond, { ...room, book: false }) > 0 || pacer.go(p.url, 1, room.share) > 0)) return 1;
     const wait = budget.takeEach(drawsOf(key, [method]), undefined, false, false);
-    if (wait === 0 && p !== null) pacer.at(p.url, now(), 1, p.perSecond, room);
+    if (wait === 0 && p !== null) pacer.at(p.url, 1, p.perSecond, room);
     return wait;
   }
   /** That provider answered 429 to a background read: the background reads wait out its reset; callers go on. */
