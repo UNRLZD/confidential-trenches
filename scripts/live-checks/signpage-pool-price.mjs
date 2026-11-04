@@ -4,7 +4,8 @@
 //   1. The page's read: the kit's poolUsdPrice (through the kit's public entry) for Solana on the signing page's own
 //      pair for it, SIGN_HOST's provider A and the helper's keyed route (packages/signpage/src/trade.ts SOLANA_PROVIDER_A
 //      and TRADE_HELPER, the pair main.ts gives the pool kinds and src/pool-price.ts), as SIGN_HOST's CSP allows both. It
-//      passes only with two hosts of two providers agreeing on Pyth's SOL/USD account and a price at most 60 s old.
+//      passes only with two hosts of two providers agreeing on Pyth's SOL/USD account and a price at most 60 s old, and
+//      with SIGN_HOST's served connect-src naming both origins, so the page itself can make that read.
 //   2. The terminal: APP_HOST's terminal, framed by a stand-in for SIGN_HOST's shell (app-in-shell.mjs) that sends a
 //      signed-in state holding the devnet Solana pool with its proof ready (trade-box-pool.mjs POOL.ready) and, as
 //      src/pool-price.ts puts it in state.pools[solana].price, the price part 1 read: fresh (as read), stale (the same
@@ -27,11 +28,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { POOL_USD_FEEDS, poolUsdPrice, SOLANA_RPC_RETRY, solanaHelperRpc, solanaJsonRpc, solanaSameProvider } from "../../packages/kit/src/index.ts";
 import { launchBrowser } from "../browsers.mjs";
-import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
+import { harnessRoute } from "./app-in-shell.mjs";
 import { POOL } from "./trade-box-pool.mjs";
 
 const KEY = "signpage-pool-price";
 export const APP_HOST = "https://confidential.unrealized.trade";
+export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const HELPER_HOST = "https://api.confidential.unrealized.trade";
 /** The signing page's Solana pair (packages/signpage/src/trade.ts): its provider A and the helper's keyed route. */
@@ -74,6 +76,9 @@ export function judge(rec) {
   const priced = typeof r.price === "string" && /^[1-9]\d*$/.test(r.price) && r.expo === -8 && Number.isInteger(r.published_s);
   say(priced && r.error === undefined, `the two agree on Pyth's SOL/USD: ${priced ? `${r.price} x 10^${r.expo}` : (r.error ?? "no price")}`);
   say(priced && atS - r.published_s <= MAX_AGE_S && r.published_s - atS <= 60, `the price is fresh: published ${priced ? atS - r.published_s : "?"} s before the run (bound ${MAX_AGE_S} s)`);
+  const src = (/(?:^|;)\s*connect-src\s+([^;]*)/.exec(rec.signCsp ?? "")?.[1] ?? "").split(/\s+/);
+  const reach = PAGE_PAIR.map((u) => new URL(u).origin).filter((o) => !src.includes(o));
+  say(src.length > 1 && reach.length === 0, `SIGN_HOST's connect-src names both: ${reach.length ? `not ${reach.join(", ")}` : PAGE_PAIR.map((u) => new URL(u).origin).join(" and ")}`);
   say(typeof rec.entry === "string" && /^\/assets\/[\w.-]+\.js$/.test(rec.entry), `the served / names its entry script ${rec.entry ?? "none"}`);
   const runs = rec.runs ?? [];
   const want = WIDTHS.flatMap((w) => PRICES.map((p) => `${w.name} ${p}`));
@@ -197,6 +202,8 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
   const at = new Date().toISOString();
   const read = await pageRead();
   const entry = await entryOf(build);
+  // SIGN_HOST's own policy as served: the page's pair must be in its connect-src
+  const signCsp = (await fetch(`${SIGN_HOST}/`, { signal: AbortSignal.timeout(15_000) })).headers.get("content-security-policy");
   const browser = await launchBrowser("chromium");
   try {
     const runs = [];
@@ -207,7 +214,7 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
       const route = build ? shell : (r) => (originOf(r.request().url()) === APP_HOST || originOf(r.request().url()) === HELPER_HOST ? r.continue() : shell(r));
       for (const w of WIDTHS) runs.push(await runOne(browser, w, price, shots, route));
     }
-    return { check: KEY, at, source, browser: browser.version(), read, entry, shots, runs };
+    return { check: KEY, at, source, browser: browser.version(), read, signCsp, entry, shots, runs };
   } finally {
     await browser.close();
   }

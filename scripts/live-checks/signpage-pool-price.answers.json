@@ -1,7 +1,7 @@
 {
  "good": {
   "check": "signpage-pool-price",
-  "at": "2026-11-04T14:41:51.867Z",
+  "at": "2026-11-04T14:55:07.783Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with the devnet pool and the page's own price read",
   "browser": "156.0.8078.79",
   "read": {
@@ -9,11 +9,12 @@
     "https://solana-rpc.publicnode.com",
     "https://api.confidential.unrealized.trade/v1/rpc/solana"
    ],
-   "price": "9388311299",
+   "price": "9480884657",
    "expo": -8,
-   "published_s": 1793803309,
-   "read_ms": 1793803313572
+   "published_s": 1793804099,
+   "read_ms": 1793804108600
   },
+  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
   "entry": "/assets/index-ByRV7dR0.js",
   "runs": [
    {
@@ -23,7 +24,7 @@
     "route": "token",
     "box": {
      "path": "pool",
-     "bal": "Bal $0.93",
+     "bal": "Bal $0.94",
      "ctaOn": true,
      "cta": "Buy DJT"
     },
@@ -32,7 +33,7 @@
       "type": "pool.buy",
       "params": {
        "chain": "solana",
-       "amount": "0.000532577",
+       "amount": "0.000527376",
        "slippage_bps": 1000,
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
       }
@@ -47,7 +48,7 @@
     "route": "token",
     "box": {
      "path": "pool",
-     "bal": "Bal $0.93",
+     "bal": "Bal $0.94",
      "ctaOn": true,
      "cta": "Buy DJT"
     },
@@ -56,7 +57,7 @@
       "type": "pool.buy",
       "params": {
        "chain": "solana",
-       "amount": "0.000532577",
+       "amount": "0.000527376",
        "slippage_bps": 1000,
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
       }
@@ -124,7 +125,7 @@
  },
  "bad": {
   "check": "signpage-pool-price",
-  "at": "2026-11-04T14:42:03.594Z",
+  "at": "2026-11-04T14:55:19.213Z",
   "source": "live https://confidential.unrealized.trade, the stand-in shell signed in with the devnet pool and the page's own price read",
   "browser": "156.0.8078.79",
   "read": {
@@ -132,11 +133,12 @@
     "https://solana-rpc.publicnode.com",
     "https://api.confidential.unrealized.trade/v1/rpc/solana"
    ],
-   "price": "9389103399",
+   "price": "9476926665",
    "expo": -8,
-   "published_s": 1793803319,
-   "read_ms": 1793803324461
+   "published_s": 1793804109,
+   "read_ms": 1793804120062
   },
+  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
   "entry": "/assets/index-BqB1l2a4.js",
   "runs": [
    {
@@ -204,7 +206,7 @@
      "path": "pool",
      "bal": "Bal \u2014",
      "ctaOn": false,
-     "cta": "Buy cbBTC"
+     "cta": "Buy SPCX"
     },
     "asked": [],
     "shot": "desktop-none.png"
@@ -218,7 +220,7 @@
      "path": "pool",
      "bal": "Bal \u2014",
      "ctaOn": false,
-     "cta": "Buy cbBTC"
+     "cta": "Buy SPCX"
     },
     "asked": [],
     "shot": "phone-none.png"

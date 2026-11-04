@@ -3,10 +3,10 @@
 // test box: Pyth's SOL/USD on the signing page's own Solana pair, then the terminal in the stand-in shell sent the
 // devnet Solana pool with that price fresh, stale and absent:
 //   good: the harness, this card's terminal build (entry /assets/index-ByRV7dR0.js) at APP_HOST's name, read at
-//         14:41:51Z: the pair agreed on 9388311299 x 10^-8 published 2 s before; at 1440 and 390 a fresh price shows
-//         Bal $0.93, Buy on, and the tap asks for one pool.buy of 0.000532577 SOL ($0.05 rounded down); stale and none
-//         show no USD, Buy off, nothing asked: PASS;
-//   bad:  the deployed APP_HOST before this card (entry /assets/index-BqB1l2a4.js), read at 14:42:03Z: its kit's exact
+//         14:55:07Z: the pair agreed on 9480884657 x 10^-8 published 8 s before and SIGN_HOST's connect-src names both;
+//         at 1440 and 390 a fresh price shows Bal $0.94, Buy on, and the tap asks for one pool.buy of 0.000527376 SOL
+//         ($0.05 rounded down); stale and none show no USD, Buy off, nothing asked: PASS;
+//   bad:  the deployed APP_HOST before this card (entry /assets/index-BqB1l2a4.js), read at 14:55:19Z: its kit's exact
 //         state schema refuses a pool entry carrying a price, so with a fresh or stale price the box reads signed out
 //         on the vault path and asks for nothing: FAIL.
 // Planted from the good run: a wrong amount, a vault buy, Buy on or USD drawn with a stale price, a disagreeing or
@@ -55,7 +55,7 @@ test("recorded bad answer: the deployed app before this card reads a priced stat
 });
 
 test("planted: a pool.buy of another amount or chain, a vault buy, two asks, or none with a fresh price fail", () => {
-  fails(mut((rec) => (run(rec, "desktop", "fresh").asked[0].params.amount = "0.000532578")), /^BAD desktop fresh: its pool\.buy is 0\.000532578 SOL on solana, not 0\.000532577/);
+  fails(mut((rec) => (run(rec, "desktop", "fresh").asked[0].params.amount = "0.000527377")), /^BAD desktop fresh: its pool\.buy is 0\.000527377 SOL on solana, not 0\.000527376/);
   fails(mut((rec) => (run(rec, "phone", "fresh").asked[0].params.chain = "base")), /^BAD phone fresh: its pool\.buy is .* on base/);
   fails(mut((rec) => (run(rec, "desktop", "fresh").asked = [{ type: "buy", params: {} }])), /^BAD desktop fresh: the tap asked for buy, not one pool\.buy/);
   fails(mut((rec) => run(rec, "phone", "fresh").asked.push(run(rec, "phone", "fresh").asked[0])), /^BAD phone fresh: the tap asked for pool\.buy, pool\.buy/);
@@ -80,4 +80,6 @@ test("planted: the page's read disagreeing, stale, on another pair or one host; 
   fails(mut((rec) => (run(rec, "desktop", "fresh").framed = false)), /^BAD desktop fresh: not inside SIGN_HOST's shell/);
   fails(mut((rec) => (run(rec, "phone", "stale").shot = null)), /^BAD phone stale: no screenshot/);
   fails(mut((rec) => (rec.entry = null)), /^BAD the served \/ names its entry script none/);
+  fails(mut((rec) => (rec.signCsp = rec.signCsp.replace(" https://solana-rpc.publicnode.com", ""))), /^BAD SIGN_HOST's connect-src names both: not https:\/\/solana-rpc\.publicnode\.com/);
+  fails(mut((rec) => (rec.signCsp = null)), /^BAD SIGN_HOST's connect-src names both/);
 });
