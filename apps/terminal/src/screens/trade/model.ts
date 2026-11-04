@@ -12,7 +12,8 @@
 // `endView` as Failed (with the reason for the kit's code when the app has words for it) or Not landed, each with
 // Retry, or part filled, with the button back to its ready label (`showsRetry`); a trade still Sending or Landing past 5 s is Slow (S8.11), which never ends it. The sell side
 // (src/screens/positions/) runs the same machine.
-import type { Chain, ErrorCode, SignpageState, Stage } from "@blindfill/kit";
+import { POOL_ASSET_DECIMALS, POOL_CHAINS } from "@blindfill/kit";
+import type { Chain, ErrorCode, PoolAsset, PoolChain, PoolUsdPrice, SignpageParams, SignpageState, Stage } from "@blindfill/kit";
 
 /** USD cents. */
 export type Cents = bigint;
@@ -219,4 +220,89 @@ export function proofStatus(pools: SignpageState["pools"], chain: Chain): ProofS
   if (bal === null || ready === null) return "none";
   if (ready) return "ready";
   return bal ? "making" : "none";
+}
+
+// ------------------------------------------------------------------------------------------------ the pool path
+
+/** The price the box converts with: one asset (10^decimals base units) is price x 10^expo USD (the kit's PoolUsdPrice). */
+export type PoolPrice = Pick<PoolUsdPrice, "price" | "expo" | "decimals">;
+
+/** Cents in the asset's base units, rounded down as the kit's poolUsdToUnits rounds: a tap never spends more than asked. */
+export function centsToUnits(c: Cents, p: PoolPrice): bigint {
+  // units = c / 100 x 10^decimals / (price x 10^expo)
+  const e = p.decimals - 2 - p.expo;
+  return e >= 0 ? (c * 10n ** BigInt(e)) / p.price : c / (p.price * 10n ** BigInt(-e));
+}
+
+/** Base units in cents, rounded down: what they are worth, never more. */
+export function unitsToCents(u: bigint, p: PoolPrice): Cents {
+  const e = p.expo + 2 - p.decimals;
+  return e >= 0 ? u * p.price * 10n ** BigInt(e) : (u * p.price) / 10n ** BigInt(-e);
+}
+
+/** A plain decimal in whole units ("12.5") to base units; anything else, or more digits than the asset has, is null. */
+export function decimalToUnits(s: string, decimals: number): bigint | null {
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(s);
+  if (!m || (m[2] ?? "").length > decimals) return null;
+  return BigInt(m[1]!) * 10n ** BigInt(decimals) + BigInt((m[2] ?? "").padEnd(decimals, "0") || "0");
+}
+
+/** Base units as the kit's decimal string in whole units: "0.268786906", "12", never a trailing zero. */
+export function unitsToDecimal(u: bigint, decimals: number): string {
+  const d = 10n ** BigInt(decimals);
+  const frac = String(u % d).padStart(decimals, "0").replace(/0+$/, "");
+  return frac ? `${u / d}.${frac}` : String(u / d);
+}
+
+const isPoolChain = (c: Chain): c is PoolChain => (POOL_CHAINS as readonly Chain[]).includes(c);
+const poolOf = (pools: SignpageState["pools"], chain: Chain) => (isPoolChain(chain) ? (pools?.find((x) => x.chain === chain) ?? null) : null);
+
+/** The chain's pool as the box draws it: its balance and the most one tap can spend in USD, and its proof's state. */
+export interface PoolView {
+  asset: PoolAsset;
+  balance: Cents;
+  /** Null when the page sends no `tap_max` (none ready, or a page that cannot price the pool). */
+  tapMax: Cents | null;
+  proof: ProofStatus;
+}
+
+/** Null without a price, with no pool for the chain (NEAR, signed out, notes unread) or with a total that is not a decimal. */
+export function poolView(pools: SignpageState["pools"], chain: Chain, price: PoolPrice | null): PoolView | null {
+  const p = poolOf(pools, chain);
+  if (!p || !price) return null;
+  const d = POOL_ASSET_DECIMALS[p.asset];
+  const bal = decimalToUnits(p.balance, d);
+  if (bal === null) return null;
+  const tap = p.tap_max === undefined ? null : decimalToUnits(p.tap_max, d);
+  return { asset: p.asset, balance: unitsToCents(bal, price), tapMax: tap === null ? null : unitsToCents(tap, price), proof: proofStatus(pools, chain) };
+}
+
+export type PoolBuyAsk =
+  | { ok: true; kind: "pool.buy"; params: SignpageParams["pool.buy"] }
+  | { ok: false; why: "no_pool" | "no_price" | "no_proof" | "too_small" | "over_tap" | "chunk" };
+
+/**
+ * The tap's pool.buy for `c` cents: the USD in the pool asset's units at the device's price, rounded down. Only with a
+ * proof ready and the page's `tap_max`, and at most it; on Base and Robinhood a tap spends one whole chunk (the signing
+ * page refuses any other EVM amount, rules/pool.ts checkEvmBuy), so only the chunk's own USD asks for it.
+ */
+export function poolBuyAsk(pools: SignpageState["pools"], chain: Chain, token: string, c: Cents, price: PoolPrice | null, slippageBps: number): PoolBuyAsk {
+  const p = poolOf(pools, chain);
+  if (!p) return { ok: false, why: "no_pool" };
+  if (!price) return { ok: false, why: "no_price" };
+  const d = POOL_ASSET_DECIMALS[p.asset];
+  const tap = p.tap_max === undefined ? null : decimalToUnits(p.tap_max, d);
+  if (proofStatus(pools, chain) !== "ready" || tap === null || tap === 0n) return { ok: false, why: "no_proof" };
+  const units = centsToUnits(c, price);
+  if (units <= 0n) return { ok: false, why: "too_small" };
+  if (units > tap) return { ok: false, why: "over_tap" };
+  if (chain !== "solana" && c !== unitsToCents(tap, price)) return { ok: false, why: "chunk" };
+  const amount = unitsToDecimal(chain === "solana" ? units : tap, d);
+  return { ok: true, kind: "pool.buy", params: { chain: p.chain as PoolChain, token, amount, slippage_bps: slippageBps } };
+}
+
+/** The sell's pool.sell (the proceeds go back into the chain's pool in the same transaction); null with no pool. */
+export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: string, amount: string, slippageBps: number): { kind: "pool.sell"; params: SignpageParams["pool.sell"] } | null {
+  const p = poolOf(pools, chain);
+  return p ? { kind: "pool.sell", params: { chain: p.chain as PoolChain, token, amount, slippage_bps: slippageBps } } : null;
 }

@@ -10,7 +10,10 @@ import {
   fmtUsd,
   outcome,
   parseUsd,
+  poolBuyAsk,
+  poolView,
   PRESETS,
+  proofStatus,
   presetOn,
   progress,
   READY,
@@ -96,10 +99,19 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   const [, tick] = useState(0);
 
   const amount = text === "" ? null : parseUsd(text);
+  // the pool path (card trade-box-pool): a chain whose pool the signing page reports buys from it, one proof a tap; Bal
+  // is the pool's balance and Max the most one tap can spend, in USD at the device's price. Other chains keep the vault.
+  const pools = signedOut ? undefined : snapshot.state?.pools;
+  const onPool = !!pools?.some((p) => p.chain === chain);
+  const price = onPool ? kit.poolPrice(chain) : null;
+  const pool = onPool ? poolView(pools, chain, price) : null;
+  // the proof's state reads state.pools alone: it draws with no price
+  const proof = onPool ? proofStatus(pools, chain) : "none";
   // signed out there is no balance to show: the signing page sends a state with a zero one, which is not "$0" of anyone's
-  const balance = snapshot.state && !signedOut ? parseUsd(snapshot.state.vault_balance) : null;
-  const maxText = kit.maxBuy(chain);
-  const max = maxText === null ? null : parseUsd(maxText);
+  const balance = onPool ? (pool?.balance ?? null) : snapshot.state && !signedOut ? parseUsd(snapshot.state.vault_balance) : null;
+  const maxText = onPool ? null : kit.maxBuy(chain);
+  const max = onPool ? (pool?.tapMax ?? null) : maxText === null ? null : parseUsd(maxText);
+  const askable = (c: Cents | null) => c !== null && (!onPool || poolBuyAsk(pools, chain, token, c, price, slippageBps).ok);
   const running = busy(phase);
 
   // the set preview for the amount in the box; a change asks again and the last numbers stay, dimmed, until it answers
@@ -136,7 +148,13 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
 
   function buy(c: Cents) {
     if (!ready || busy(phaseRef.current) || !amountOk(c, max, balance)) return;
-    const h = kit.request!("buy", { chain, token, side: "buy", amount: centsToDecimal(c), slippage_bps: slippageBps });
+    let h;
+    if (onPool) {
+      // only an ask the box's own checks passed: a proof ready, at most one tap's spend, the device's price
+      const ask = poolBuyAsk(pools, chain, token, c, price, slippageBps);
+      if (!ask.ok) return;
+      h = kit.request!(ask.kind, ask.params);
+    } else h = kit.request!("buy", { chain, token, side: "buy", amount: centsToDecimal(c), slippage_bps: slippageBps });
     const next = tap(phaseRef.current, h.id, src.now());
     phaseRef.current = next;
     setPhase(next);
@@ -152,7 +170,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   const est = (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : "—";
   const now = src.now();
   const state = signedOut ? "S8.1" : (stateId(phase, now, "buy") ?? "S8.3");
-  const canBuy = ready && !running && amountOk(amount, max, balance);
+  const canBuy = ready && !running && amountOk(amount, max, balance) && askable(amount);
 
   let label;
   if (signedOut) label = <W id="signInToTrade" />;
@@ -171,6 +189,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
       data-state={state}
       data-stage={phase.k === "ended" ? phase.stage : undefined}
       data-set={shown ? shown.slices.map((s) => s.usd).join("+") : undefined}
+      data-path={onPool ? "pool" : "vault"}
       data-testid="trade-box"
     >
       <div className="trb-sides">
@@ -211,7 +230,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
             className="trb-preset"
             data-preset={centsToDecimal(p)}
             data-on={amount === p || undefined}
-            disabled={!signedOut && (!ready || !presetOn(p, max, balance, running))}
+            disabled={!signedOut && (!ready || !presetOn(p, max, balance, running) || !askable(p))}
             onClick={() => {
               if (signedOut) return openSignin(true);
               setText(String(p / 100n));
@@ -237,10 +256,19 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
       <div className="trb-warn" data-testid="trade-max">
         {phase.k === "ended" ? (
           <EndLine phase={phase} side="buy" part={kit.part?.(phase.id) ?? null} />
-        ) : max !== null && (
-          <span>
-            <W id="max" /> {fmtUsd(max)}
-          </span>
+        ) : (
+          <>
+            {proof !== "none" && (
+              <span className="trb-proof" data-proof={proof} data-testid="trade-proof">
+                <W id={proof === "ready" ? "proofReady" : "proofMaking"} />
+              </span>
+            )}
+            {max !== null && (
+              <span>
+                <W id="max" /> {fmtUsd(max)}
+              </span>
+            )}
+          </>
         )}
       </div>
       <button
