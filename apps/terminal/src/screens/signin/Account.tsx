@@ -5,6 +5,7 @@ import type { RouteId } from "../../routes/routes.ts";
 import { ROUTES } from "../../routes/routes.ts";
 import { HopLine } from "./HopLine.tsx";
 import { Icon } from "./Icon.tsx";
+import { useBalance } from "../portfolio/source.tsx";
 import { headerModel, usd } from "./model.ts";
 import type { HeaderModel } from "./model.ts";
 import { useSigninSheet, useSigninSource } from "./source.tsx";
@@ -26,7 +27,7 @@ function Balance({ m }: { m: HeaderModel }) {
 export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean }) {
   const src = useSigninSource();
   const { setOpen } = useSigninSheet();
-  const m = headerModel(src.snapshot);
+  const m = headerModel(src.snapshot, useBalance(src.snapshot));
   const [menu, setMenu] = useState(initialMenu);
   const box = useRef<HTMLDivElement>(null);
 
@@ -127,7 +128,7 @@ export function AccountMenu({ src, m, onDone, phone = false }: { src: SigninSour
 export function PhoneAccount() {
   const src = useSigninSource();
   const { setOpen } = useSigninSheet();
-  const m = headerModel(src.snapshot);
+  const m = headerModel(src.snapshot, useBalance(src.snapshot));
   // as on desktop: the skeleton, Sign in and the balance pill are each their own key, so one replaces another (BAR-04)
   if (m.kind === "out")
     return (
@@ -156,7 +157,7 @@ export function PhoneAccount() {
 /** The phone's account rows (S1.16 at 390), for the Account tab. */
 export function PhoneAccountMenu() {
   const src = useSigninSource();
-  const m = headerModel(src.snapshot);
+  const m = headerModel(src.snapshot, useBalance(src.snapshot));
   if (m.kind === "out" || m.kind === "loading") return null;
   return <AccountMenu src={src} m={m} phone />;
 }
