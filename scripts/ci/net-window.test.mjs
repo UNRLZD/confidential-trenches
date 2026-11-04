@@ -20,7 +20,6 @@ export const CHANGED = [
   "contracts/vault/scripts/testnet-usdc.mjs",
   "scripts/ci/live-plan.mjs",
   "scripts/ci/money-gate.mjs",
-  "scripts/live-checks/app-console-429.mjs",
   "scripts/live-checks/app-harness-signin-e2e.mjs",
   "scripts/live-checks/app-host-gate.mjs",
   "scripts/live-checks/app-release-sri.mjs",
