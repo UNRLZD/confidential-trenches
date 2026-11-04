@@ -25,6 +25,8 @@ const CHAIN_ID = BigInt(V.chainId); // 84532
 const DELEGATE = V.sellDelegate!;
 const POOL = V.pool!;
 const ORACLE = "0x420000000000000000000000000000000000000f";
+/** Arbitrum's ArbGasInfo precompile (Robinhood Chain), getL1BaseFeeEstimate() (the kit's pool-fee.ts reads it) */
+const ARB_GAS_INFO = "0x000000000000000000000000000000000000006c";
 const NATIVE = "0x0000000000000000000000000000000000000000";
 const N = secp256k1.Point.CURVE().n;
 
@@ -137,6 +139,8 @@ const AUTH = authOf(W_KEY, CHAIN_ID, DELEGATE, W_NONCE);
 type Calls = { method: string; params: readonly unknown[] }[];
 type Opts = {
   chain?: string; base?: bigint; wNonce?: bigint; l1?: bigint; revert?: boolean;
+  /** OP Stack: GasPriceOracle getOperatorFee(gas) (0 unless given); Arbitrum: ArbGasInfo getL1BaseFeeEstimate() (0) */
+  opFee?: bigint; arbL1?: bigint;
   /** each sent hash's receipt and transaction as this provider answers them (none given: the method is unexpected) */
   receipt?: (hash: string) => unknown; tx?: (hash: string) => unknown;
   /** this provider refuses eth_sendRawTransaction */
@@ -159,7 +163,8 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
       case "eth_getTransactionCount": return (params[0] as string) === W ? `0x${(o.wNonce ?? W_NONCE).toString(16)}` : "0x7";
       case "eth_call": {
         const c = params[0] as { to: string; data: string };
-        if (c.to === ORACLE) return `0x${w32(o.l1 ?? L1)}`;
+        if (c.to === ORACLE) return c.data.startsWith(`0x${selector("getOperatorFee(uint256)")}`) ? `0x${w32(o.opFee ?? 0n)}` : `0x${w32(o.l1 ?? L1)}`;
+        if (c.to === ARB_GAS_INFO) return `0x${w32(o.arbL1 ?? 0n)}`;
         if (o.revert) throw new Error("RPC error 3: execution reverted: 0xd6d39ee2"); // the kit client's wording
         return `0x${w32(1n)}`;
       }
@@ -288,6 +293,70 @@ test("the fee is bounded: at the bound it sends and the sender's worst cost is w
   const low = await evmPoolSender({ network: "robinhood-testnet", pool: rn.pool!, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc([], { chain: `0x${rid.toString(16)}` }), rpc([], { chain: `0x${rid.toString(16)}` })], () => NOW)
     .sell({ pool: rn.pool!, w: W, data: rd({ ...rs, feeCap: EVM_POOL_SELL_GAS * BASE - 1n }), authorization: ra });
   assert.equal(code(low), "fee_low");
+});
+
+test("the operator fee is in the bound: the kit's chain fee reads, getOperatorFee(1,000,000) on both providers, the higher; at the bound with it the sale goes, one wei under is fee_low", async () => {
+  const OP = 7_000_000_000n;
+  const need = NEED + OP;
+  for (const c of [[{ opFee: OP }, { opFee: OP }], [{}, { opFee: OP }], [{ opFee: OP }, {}]] as [Opts, Opts][]) {
+    const x: Calls = [];
+    const y: Calls = [];
+    const label = `operator fee on A ${c[0].opFee ?? 0n}, on B ${c[1].opFee ?? 0n}`;
+    assert.equal(code(await senderOf(x, c[0], y, c[1]).sell(body({ fee: need - 1n, sell: { feeCap: need } }))), "fee_low", label);
+    assert.equal(sends(x).length, 0);
+    for (const q of [x, y]) assert.ok(q.some((m) => m.method === "eth_call" && (m.params[0] as { to: string; data: string }).to === ORACLE && (m.params[0] as { data: string }).data === `0x${selector("getOperatorFee(uint256)")}${w32(EVM_POOL_SELL_GAS)}`), "getOperatorFee(gas) read on both providers");
+  }
+  const x: Calls = [];
+  const a = await senderOf(x, { opFee: OP }, [], { opFee: OP }).sell(body({ fee: need, sell: { feeCap: need } }));
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  const f = dec(unhex(sends(x)[0]!).subarray(1)) as Rlp[];
+  assert.ok(num(f[3]!) * num(f[4]!) + L1 + OP <= need, "the worst cost, the chain fee with it, within the fee");
+});
+
+test("Robinhood's L1 poster fee: ArbGasInfo's estimate on both providers; the bound holds 16 x the transaction's bytes x the higher estimate; the sim's gas is the limit less the authorization's 25,000 and the poster's gas at the lower base fee; a poster's gas that leaves no room is simulation_failed", async () => {
+  const rn = evmPoolVenues()["robinhood-testnet"];
+  const rid = BigInt(rn.chainId);
+  const ch = `0x${rid.toString(16)}`;
+  const ra = authOf(W_KEY, rid, rn.sellDelegate!, W_NONCE);
+  const sale = (feeCap: bigint) => {
+    const x = { ...SELL, pool: rn.pool!, target: rn.poolManager!, feeCap };
+    return { pool: rn.pool!, w: W, data: sellData(x, feeCap, sign65(W_KEY, digestOf(x, rid))), authorization: ra };
+  };
+  const robin = (a: Calls, oa: Opts, b: Calls, ob: Opts) => evmPoolSender({ network: "robinhood-testnet", pool: rn.pool!, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc(a, { chain: ch, ...oa }), rpc(b, { chain: ch, ...ob })], () => NOW);
+  const EST = 1_000_001n;
+  // a fee that covers the gas and any poster fee this test sets: the sale goes, the sim's gas less the poster's gas
+  const x: Calls = [];
+  const y: Calls = [];
+  const ok = await robin(x, { arbL1: EST }, y, { arbL1: EST / 2n, base: 2n * BASE }).sell(sale(3n * 10n ** 13n));
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  for (const q of [x, y]) assert.ok(q.some((m) => m.method === "eth_call" && (m.params[0] as { to: string; data: string }).to === ARB_GAS_INFO && (m.params[0] as { data: string }).data === `0x${selector("getL1BaseFeeEstimate()")}`), "the estimate read on both providers");
+  const rawLen = BigInt(unhex(sends(x)[0]!).length);
+  const sim = x.find((m) => m.method === "eth_call" && (m.params[0] as { to: string }).to === W)!;
+  const simGas = BigInt((sim.params[0] as { gas: string }).gas);
+  // the poster's gas: the poster fee over the lower base fee, rounded up. The poster fee the helper read for this sale's
+  // longest form is in a fee_low answer's detail at a fee whose fee / gas is as long (2.9e7 and 3e7 wei, 4 bytes each)
+  const probe = await robin([], { arbL1: EST }, [], { arbL1: EST, base: 3n * BASE }).sell(sale(29n * 10n ** 12n));
+  assert.equal(code(probe), "fee_low", JSON.stringify(probe.body));
+  const posterFee = BigInt(/ \+ (\d+) = /.exec(detail(probe))![1]!);
+  assert.ok(posterFee >= 16n * rawLen * EST && posterFee <= 16n * (rawLen + 16n) * EST, `poster fee ${posterFee} for ${rawLen} bytes`);
+  assert.equal(posterFee % 16n, 0n);
+  assert.notEqual(posterFee % BASE, 0n, "a poster gas that rounds");
+  assert.equal(simGas, EVM_POOL_SELL_GAS - EVM_7702_AUTH_GAS - (posterFee + BASE - 1n) / BASE, `sim gas ${simGas}`);
+  // the bound: gas x the base fee + the poster fee (its bytes within 16 of this sale's, whose fee field is shorter):
+  // a fee under it by the poster fee of 16 bytes is fee_low, one over it by that much goes
+  const chainFee = (bytes: bigint) => 16n * bytes * EST;
+  const z: Calls = [];
+  const low = await robin(z, { arbL1: EST }, [], { arbL1: EST }).sell(sale(EVM_POOL_SELL_GAS * BASE + chainFee(rawLen - 16n) - 1n));
+  assert.equal(code(low), "fee_low", `${JSON.stringify(low.body)} raw ${rawLen}`);
+  assert.equal(sends(z).length, 0);
+  const enough = await robin([], { arbL1: EST }, [], { arbL1: EST }).sell(sale(EVM_POOL_SELL_GAS * BASE + chainFee(rawLen + 16n)));
+  assert.equal(enough.status, 200, JSON.stringify(enough.body));
+  // a poster's gas past the limit less the authorization's: nothing to run the sale with, refused, nothing sent
+  const BIG = 10n ** 9n; // 16 x ~800 bytes x 1e9 / 1e7 = ~1.3M gas
+  const w: Calls = [];
+  const none = await robin(w, { arbL1: BIG }, [], { arbL1: BIG }).sell(sale(9n * 10n ** 13n));
+  assert.deepEqual([none.status, code(none)], [422, "simulation_failed"], JSON.stringify(none.body));
+  assert.equal(sends(w).length, 0);
 });
 
 test("the base fee and the L1 bound are each the higher of the two providers' answers", async () => {

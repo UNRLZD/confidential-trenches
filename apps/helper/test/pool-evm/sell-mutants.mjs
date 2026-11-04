@@ -74,12 +74,22 @@ export const MUTANTS = [
   [EVM, "if (na !== auth.nonce || nb !== auth.nonce) return", "if (na !== auth.nonce) return", T, "auth_nonce:"],
   [EVM, "if (na !== auth.nonce || nb !== auth.nonce) return", "if (nb !== auth.nonce) return", T, "auth_nonce:"],
   [EVM, "      base = x > y ? x : y;", "      base = x;", T, "the base fee and the L1 bound"],
-  [EVM, "        l1 = words[0]! > words[1]! ? words[0]! : words[1]!;", "        l1 = words[0]!;", T, "the base fee and the L1 bound"],
-  [EVM, "        l1 = words[0]! > words[1]! ? words[0]! : words[1]!;", "        l1 = words[1]!;", T, "the base fee and the L1 bound"],
-  [EVM, "        l1 = words[0]! > words[1]! ? words[0]! : words[1]!;", "        l1 = 0n;", T, "the fee is bounded:"],
-  [EVM, 'const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base", "base-sepolia"]);', 'const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base", "base-sepolia", "robinhood-testnet"]);', T, "the fee is bounded:"],
-  // fold 1, M3 (a): Base itself reads the L1 oracle (a delegate pinned on base through cfg.venues)
-  [EVM, 'const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base", "base-sepolia"]);', 'const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base-sepolia"]);', T, "on Base, a pinned delegate's sale reads the L1 oracle"],
+  [EVM, "      l1 = fees[0]! > fees[1]! ? fees[0]! : fees[1]!;", "      l1 = fees[0]!;", T, "the base fee and the L1 bound"],
+  [EVM, "      l1 = fees[0]! > fees[1]! ? fees[0]! : fees[1]!;", "      l1 = fees[1]!;", T, "the base fee and the L1 bound"],
+  [EVM, "      l1 = fees[0]! > fees[1]! ? fees[0]! : fees[1]!;", "      l1 = 0n;", T, "the fee is bounded:"],
+  // the chain fee is the kit's whole rule (pool-fee.ts): the operator fee on Base, the poster fee on Robinhood. Which
+  // chain reads which oracle is the kit's (its own tests and mutants); Base itself reading the oracle is held by the
+  // test named for it
+  [EVM, "        return evmPoolChainFee(kitChain, txBytes, words);", "        return words[0]!;", T, "the operator fee is in the bound"],
+  [EVM, "        return evmPoolChainFee(kitChain, txBytes, words);", "        return words[0]!;", T, "Robinhood's L1 poster fee"],
+  [EVM, "      const reads = evmPoolChainFeeReads(kitChain, gas, txBytes);", "      const reads = evmPoolChainFeeReads(kitChain, gas, 1n);", T, "Robinhood's L1 poster fee"],
+  [EVM, "      const fees = await Promise.all([a, b].map(", "      const fees = await Promise.all([a, a].map(", T, "the operator fee is in the bound"],
+  // the poster's gas inside the limit (Robinhood): the sim runs with what is left, at the lower base fee; none left refuses
+  [EVM, 'const POSTER_GAS_CHAINS: ReadonlySet<string> = new Set(["robinhood", "robinhood-testnet"]);', "const POSTER_GAS_CHAINS: ReadonlySet<string> = new Set([]);", T, "Robinhood's L1 poster fee"],
+  [EVM, "      baseLow = x < y ? x : y;", "      baseLow = x > y ? x : y;", T, "Robinhood's L1 poster fee"],
+  [EVM, "(l1 + baseLow - 1n) / baseLow", "l1 / baseLow", T, "Robinhood's L1 poster fee"],
+  [EVM, '    if (posterGas >= gas - EVM_7702_AUTH_GAS) return no(422, "simulation_failed"', '    if (false) return no(422, "simulation_failed"', T, "Robinhood's L1 poster fee"],
+  [EVM, "gas: tag(gas - EVM_7702_AUTH_GAS - posterGas)", "gas: tag(gas - EVM_7702_AUTH_GAS)", T, "Robinhood's L1 poster fee"],
   [EVM, "big(1n), big(U256_MAX), big(U256_MAX)]).length;", "big(1n), big(1n), big(1n)]).length;", T, "a good sell:"],
   // the transaction as sent
   [EVM, "    const cap = (s.fee - l1) / gas;\n    const maxFeePerGas = 2n * base + tip < cap ? 2n * base + tip : cap;", "    const cap = (s.fee - l1) / gas;\n    const maxFeePerGas = cap;", T, "a good sell:"],
@@ -87,7 +97,7 @@ export const MUTANTS = [
   [EVM, '    if (s.fee < need) return no(422, "fee_low", `fee ${s.fee}, need ${gas} x (${base} + ${tip}) + ${l1} = ${need}`);\n    const cap = (s.fee - l1) / gas;\n    const maxFeePerGas = 2n * base + tip < cap ? 2n * base + tip : cap;\n    if (maxFeePerGas < base + tip) return no(422, "fee_low", `maxFeePerGas ${maxFeePerGas} under ${base} + ${tip}`);', "    const cap = (s.fee - l1) / gas;\n    const maxFeePerGas = 2n * base + tip < cap ? 2n * base + tip : cap;", T, "the fee is bounded:"],
   [EVM, "    const gas = EVM_POOL_SELL_GAS;", "    const gas = EVM_POOL_SELL_GAS + 1n;", T, "a good sell:"],
   [EVM, "    const tip = evmPoolSellTip(kitChain);", "    const tip = 0n;", T, "a good sell:"],
-  [EVM, "gas: tag(gas - EVM_7702_AUTH_GAS), maxFeePerGas: tag(maxFeePerGas)", "gas: tag(gas), maxFeePerGas: tag(maxFeePerGas)", T, "a good sell:"],
+  [EVM, "gas: tag(gas - EVM_7702_AUTH_GAS - posterGas), maxFeePerGas: tag(maxFeePerGas)", "gas: tag(gas - posterGas), maxFeePerGas: tag(maxFeePerGas)", T, "a good sell:"],
   [EVM, ', "pending", { [w]: { code: `0xef0100${delegate.slice(2)}` } }]);', ', "pending"]);', T, "a good sell:"],
   [EVM, "    } catch (e) {\n      return failedInExecution(e) ? no(422, \"simulation_failed\", String((e as Error).message).slice(0, 200)) : unread(e);\n    }\n    const { raw, hash } = signEvmTx4(", "    } catch (e) {\n      void e;\n    }\n    const { raw, hash } = signEvmTx4(", T, "a sim that reverts"],
   [EVM, "  const raw = Uint8Array.from([4, ...rlp([...fields, big(BigInt(sig[0]!)), big(r), big(s)])]);", "  const raw = Uint8Array.from([2, ...rlp([...fields, big(BigInt(sig[0]!)), big(r), big(s)])]);", T, "a good sell:"],

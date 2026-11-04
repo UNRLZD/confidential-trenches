@@ -73,14 +73,17 @@
 //   auth_nonce       W's account nonce at pending, on either provider, is not the authorization's: the chain would skip
 //                    the authorization and the sender would pay for a call to W with no code;
 //   fee_low          the fee is under EVM_POOL_SELL_GAS x (the higher latest base fee of the two providers + the kit's
-//                    tip) + the L1 data fee bound (Base and Base Sepolia: GasPriceOracle getL1FeeUpperBound of the
-//                    longest the transaction can be, the higher of the two providers; the L1 margin is that length:
-//                    the transaction as sent with its signature's r and s at 32 bytes each, evmTx4MaxLength, and
-//                    maxFeePerGas at fee / gas, the most it can be; Robinhood: 0, its L1 cost is in its gas);
+//                    tip) + the chain fee: the kit's one definition (pool-fee.ts evmPoolChainFeeReads and
+//                    evmPoolChainFee, the device's own rule), read on both providers, the higher, for the longest the
+//                    transaction can be (its signature's r and s at 32 bytes each, evmTx4MaxLength, and maxFeePerGas at
+//                    fee / gas, the most it can be). On Base and Base Sepolia the GasPriceOracle's L1 fee bound and its
+//                    operator fee; on Robinhood the L1 poster fee, 16 x those bytes x ArbGasInfo's L1 base fee estimate;
 //   simulation_failed eth_call at "pending" of the transaction as signed (from the sell sender, to W, its fee fields, its
-//                    gas less EVM_7702_AUTH_GAS, which an eth_call does not charge), W's code overridden with the
-//                    delegation designator, fails in execution (as the device's sim does: the kit's checks/evm/quote.ts
-//                    simmedSells);
+//                    gas less EVM_7702_AUTH_GAS, which an eth_call does not charge, and on Robinhood less the poster's
+//                    gas too: Arbitrum charges the poster fee as gas inside the limit, the poster fee over the lower
+//                    of the two base fees, rounded up), W's code overridden with the delegation designator, fails in
+//                    execution (as the device's sim does: the kit's checks/evm/quote.ts simmedSells); or the poster's
+//                    gas leaves no gas to run the sale;
 //   upstream (503)   a read could not be made, or the providers name another chain than each other or the venue's;
 //   rate_limited (429) the sell lane's queue is full; or the unpaid gas held against W, the client, the token (each
 //                    EVM_SELL_UNPAID_CAP_WEI) or the sender's whole sell budget (EVM_SELL_UNPAID_BUDGET_WEI) in the
@@ -90,8 +93,8 @@
 //   in_flight (429)  as the withdraw: one held limit per client across both routes.
 // The send: from the sell sender's own key (never the withdraw sender's) on its own queue and nonce lane; gas exactly
 // EVM_POOL_SELL_GAS and maxPriorityFeePerGas exactly the kit's evmPoolSellTip (pins the device's sim copies, never
-// eth_estimateGas or eth_maxPriorityFeePerGas), maxFeePerGas min(2 x base + tip, (fee - L1) / gas), so the sender's
-// worst cost, gas x maxFeePerGas + L1, is within the fee. That worst cost is held against
+// eth_estimateGas or eth_maxPriorityFeePerGas), maxFeePerGas min(2 x base + tip, (fee - the chain fee) / gas), so the
+// sender's worst cost, gas x maxFeePerGas + the chain fee, is within the fee. That worst cost is held against
 // the caps from the send; the sale's receipt, read in the background on both providers, turns it into what went
 // unpaid: all of gasUsed x effectiveGasPrice + l1Fee on a revert, that less the fee on a sale that paid less, else 0.
 // Once per (W, Sell nonce): a repeat gets the first hash and sends nothing, unless that sale ended without landing on
@@ -104,6 +107,8 @@ import {
   EVM_7702_AUTH_GAS,
   EVM_POOL_SELL_DEADLINE_MAX_S,
   EVM_POOL_SELL_GAS,
+  evmPoolChainFee,
+  evmPoolChainFeeReads,
   evmPoolSellTip,
   evmPoolVenues,
   evmSellRouteOf,
@@ -413,11 +418,8 @@ const sameKeys = (o: object, keys: readonly string[]) => {
   const k = Object.keys(o).sort();
   return k.length === keys.length && k.every((x, i) => x === keys[i]);
 };
-/** OP Stack's GasPriceOracle, the same address on Base and Base Sepolia, and its getL1FeeUpperBound(uint256). */
-const OP_ORACLE = "0x420000000000000000000000000000000000000f";
-const L1_BOUND_SELECTOR = selectorOf("getL1FeeUpperBound(uint256)");
-/** The chains whose L1 data fee is paid apart from gas (OP Stack); Robinhood Chain (Arbitrum) prices it in its gas. */
-const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base", "base-sepolia"]);
+/** The chains whose L1 poster fee is charged as gas inside the transaction's limit (Arbitrum: Robinhood Chain). */
+const POSTER_GAS_CHAINS: ReadonlySet<string> = new Set(["robinhood", "robinhood-testnet"]);
 /**
  * An RPC's hex string as viem and ethers read one, and as the device does (packages/wallet/src/pool/evm.ts evmRpcHex,
  * card wallet-rpc-hex-case): "0x", then hex digits in either case, lower-cased; null for anything else.
@@ -788,13 +790,14 @@ export function evmPoolSender(
     if (s.deadline * 1000n < BigInt(Math.floor(now())) + BigInt(EVM_POOL_SEND_MARGIN_MS)) return no(422, "deadline_near", `deadline ${s.deadline} s, now ${now()} ms after the queue`);
     const gas = EVM_POOL_SELL_GAS;
     const tip = evmPoolSellTip(kitChain);
-    let id: bigint, base: bigint, pending: bigint;
+    let id: bigint, base: bigint, baseLow: bigint, pending: bigint;
     try {
       id = await chain();
       if (id !== BigInt(venue.chainId)) return no(503, "upstream", `the providers name chain ${id}, not ${venue.chainId}`);
       const [ba, bb, wa, wb, n] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), b("eth_getBlockByNumber", ["latest", false]), a("eth_getTransactionCount", [w, "pending"]), b("eth_getTransactionCount", [w, "pending"]), a("eth_getTransactionCount", [from, "pending"])]);
       const [x, y] = [qty((ba as { baseFeePerGas?: unknown } | null)?.baseFeePerGas), qty((bb as { baseFeePerGas?: unknown } | null)?.baseFeePerGas)];
       base = x > y ? x : y;
+      baseLow = x < y ? x : y;
       const [na, nb] = [qty(wa), qty(wb)];
       if (na !== auth.nonce || nb !== auth.nonce) return no(422, "auth_nonce", `W's pending nonce ${na} and ${nb}, the authorization's ${auth.nonce}`);
       pending = qty(n);
@@ -803,22 +806,28 @@ export function evmPoolSender(
     }
     const nonce = pending > sellLane.nextNonce ? pending : sellLane.nextNonce;
     const txAt = (maxFeePerGas: bigint): EvmTx4 => ({ chainId: id, nonce, maxPriorityFeePerGas: tip, maxFeePerGas, gas, to: w, data: bytes, authorizations: [auth] });
-    // the L1 data fee bound, for the longest this transaction can be (maxFeePerGas at most fee / gas), the higher of the
-    // two providers' answers
-    let l1 = 0n;
-    if (L1_FEE_CHAINS.has(kitChain)) {
-      const at = { to: OP_ORACLE, data: `0x${L1_BOUND_SELECTOR}${BigInt(evmTx4MaxLength(txAt(s.fee / gas))).toString(16).padStart(64, "0")}` };
-      try {
-        const words = (await Promise.all([a("eth_call", [at, "latest"]), b("eth_call", [at, "latest"])])).map((v) => {
-          const h = evmRpcHex(v);
+    // the chain fee (the kit's one definition, pool-fee.ts), for the longest this transaction can be (maxFeePerGas at
+    // most fee / gas), on each provider, the higher of the two
+    let l1: bigint;
+    const txBytes = BigInt(evmTx4MaxLength(txAt(s.fee / gas)));
+    try {
+      const reads = evmPoolChainFeeReads(kitChain, gas, txBytes);
+      const fees = await Promise.all([a, b].map(async (r) => {
+        const words = await Promise.all(reads.map(async (at) => {
+          const h = evmRpcHex(await r("eth_call", [at, "latest"]));
           if (h === null || !/^0x[0-9a-f]{64}$/.test(h)) throw new Error("not a word");
           return BigInt(h);
-        });
-        l1 = words[0]! > words[1]! ? words[0]! : words[1]!;
-      } catch (e) {
-        return unread(e);
-      }
+        }));
+        return evmPoolChainFee(kitChain, txBytes, words);
+      }));
+      l1 = fees[0]! > fees[1]! ? fees[0]! : fees[1]!;
+    } catch (e) {
+      return unread(e);
     }
+    // Arbitrum charges the poster fee as gas inside the limit, at the block's base fee: the lower of the two providers'
+    // gives the most gas it can take; what is left after it and the authorization's intrinsic gas runs the sale
+    const posterGas = POSTER_GAS_CHAINS.has(kitChain) && l1 > 0n ? (baseLow > 0n ? (l1 + baseLow - 1n) / baseLow : gas) : 0n;
+    if (posterGas >= gas - EVM_7702_AUTH_GAS) return no(422, "simulation_failed", `the L1 poster fee ${l1} takes ${posterGas} gas of the ${gas - EVM_7702_AUTH_GAS} the sale has`);
     const need = gas * (base + tip) + l1;
     if (s.fee < need) return no(422, "fee_low", `fee ${s.fee}, need ${gas} x (${base} + ${tip}) + ${l1} = ${need}`);
     const cap = (s.fee - l1) / gas;
@@ -829,9 +838,9 @@ export function evmPoolSender(
     const capped = overCap(keys, worst);
     if (capped !== null) return capped;
     // the simulation: the transaction as it will be signed, W's code its delegation designator (the authorization's
-    // effect), its gas less the authorization's intrinsic gas, which an eth_call does not charge
+    // effect), its gas less the authorization's intrinsic gas, which an eth_call does not charge, and the poster's gas
     try {
-      await a("eth_call", [{ from, to: w, data, gas: tag(gas - EVM_7702_AUTH_GAS), maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(tip) }, "pending", { [w]: { code: `0xef0100${delegate.slice(2)}` } }]);
+      await a("eth_call", [{ from, to: w, data, gas: tag(gas - EVM_7702_AUTH_GAS - posterGas), maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(tip) }, "pending", { [w]: { code: `0xef0100${delegate.slice(2)}` } }]);
     } catch (e) {
       return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : unread(e);
     }
