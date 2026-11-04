@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
 import { CURVE_TOKEN, fakeChain, KNOWN, MAG, open, POOL_CURVE, POOL_MAG, REC, toLog, URLS } from "../../../test/evm-swaps/robinhood.ts";
-import { decodeRef, decodeSwap, ROBINHOOD_VENUES, TOPIC, VENUES, type Pool } from "./swaps.ts";
+import { createSwaps, decodeRef, decodeSwap, INFLIGHT_MAX, ROBINHOOD_VENUES, TOPIC, VENUES, type Pool } from "./swaps.ts";
 
 function rebuild(pool: Pool, upTo: number) {
   const src = pool === POOL_CURVE ? REC.logs.curve : REC.logs.v4;
@@ -377,3 +377,98 @@ test("card helper-chart-fresh: a quiet token's discovery walks the whole cold wi
   assert.ok(chain.st.spans.length > 2 * VENUES.robinhood.step / VENUES.robinhood.span, "the walk went past one step");
   assert.ok(peak <= INFLIGHT_MAX, `${peak} requests out to one provider at once`);
 });
+
+
+for (const refusal of ["HTTP 429", "JSON-RPC code", "JSON-RPC message", "shorter HTTP 429"] as const) {
+  test(`queued batches stop before fetch after ${refusal}, drain without leaking slots and recover at expiry`, { timeout: 5_000 }, async () => {
+    const chain = fakeChain();
+    chain.st.head = REC.lastHead;
+    const clock = { t: 1_000_000 };
+    // drpc takes three calls per batch: both the book and reference reads exceed four slots.
+    const provider = "https://robinhood.drpc.org";
+    const peer = URLS[1]!;
+    const full = Promise.withResolvers<void>();
+    const gates = Array.from({ length: INFLIGHT_MAX }, () => Promise.withResolvers<void>());
+    const sent: { url: string; method: string; from?: string }[] = [];
+    const ranges: string[] = [];
+    let refusing = true;
+    let active = 0;
+    let peak = 0;
+    let starts = 0;
+    const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+      const calls = JSON.parse(String(init.body)) as { id: number; method: string; params: { fromBlock?: string }[] }[];
+      sent.push({ url, method: calls[0]!.method, from: calls[0]!.params[0]?.fromBlock });
+      if (url !== provider || calls[0]!.method !== "eth_getLogs") return chain.fetch(url, init);
+      ranges.push(...calls.map((c) => c.params[0]!.fromBlock!));
+      active++;
+      peak = Math.max(peak, active);
+      try {
+        if (refusing) {
+          const index = starts++;
+          if (starts === INFLIGHT_MAX) full.resolve();
+          if (index < INFLIGHT_MAX) await gates[index]!.promise;
+          if (index === 0 || (refusal === "shorter HTTP 429" && index === 1)) {
+            if (refusal === "HTTP 429" || refusal === "shorter HTTP 429")
+              return new Response("limited", { status: 429, headers: { "retry-after": index === 0 ? "30" : "1" } });
+            return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, error: {
+              code: refusal === "JSON-RPC code" ? -32005 : 30,
+              message: refusal === "JSON-RPC code" ? "busy" : "rate limit exceeded",
+              data: { backoff_seconds: 30 },
+            } }))), { status: 200 });
+          }
+        }
+        return await chain.fetch(url, init);
+      } finally {
+        active--;
+      }
+    };
+    const s = createSwaps("robinhood", {
+      fetch, now: () => clock.t, listed: async () => true, rpcs: [provider, peer], pools: KNOWN, tickMs: 0,
+    });
+    try {
+      const pending = s.trades(CURVE_TOKEN, 50);
+      await full.promise;
+      const admitted = starts;
+      gates[0]!.resolve();
+      // Let the refusal update the hold and wake queued work while the other slots remain occupied.
+      await turn();
+      await turn();
+      const afterRefusal = starts;
+      for (const gate of gates) gate.resolve();
+      const failed = await pending;
+      const afterDrain = starts;
+      const drained = active;
+      const sentAtHold = sent.length;
+      const peerReads = sent.filter((r) => r.url === peer && r.method === "eth_getLogs").length;
+      const peerAtHold = sent.filter((r) => r.url === peer).length;
+      refusing = false;
+      clock.t += 2_000;
+      const stillHeld = await s.trades(CURVE_TOKEN, 50);
+      const heldCalls = sent.slice(sentAtHold).filter((r) => r.url === provider);
+      const peerAfter = sent.filter((r) => r.url === peer).length;
+      const recoveryStart = ranges.length;
+      clock.t += 28_000;
+      const recovered = await s.trades(CURVE_TOKEN, 50);
+      assert.equal(admitted, INFLIGHT_MAX, "the existing four slots are occupied");
+      assert.equal(afterRefusal, INFLIGHT_MAX, "queued work must not reach fetch during cooldown");
+      assert.equal(afterDrain, INFLIGHT_MAX, "all queued work drains without sending or retrying");
+      assert.equal(drained, 0, "no in-flight work remains");
+      assert.ok(peerReads > 0 && peerAfter > peerAtHold, "the other provider keeps serving reads during the hold");
+      assert.equal(failed.status, 503, "one provider's complete answer cannot fill missing pages");
+      assert.equal(stillHeld.status, 503, "a shorter refusal cannot end the thirty-second hold");
+      assert.deepEqual(heldCalls, [], "no held-provider request, including heads, before expiry");
+      assert.equal(recovered.status, 200, recovered.body);
+      assert.ok(ranges.length > recoveryStart + INFLIGHT_MAX, "recovery drains more than four batches without slot leaks");
+      assert.equal(ranges[recoveryStart], ranges[0], "missing pages are read again from the original start");
+      const tape = JSON.parse(recovered.body).trades;
+      assert.deepEqual(tape.map((t: { tx: string; usd: string; amt: string; t_ms: number }) => [t.tx, t.usd, t.amt, t.t_ms]),
+        rebuild(POOL_CURVE, REC.lastHead).tape(50).map((t) => [t.tx, t.usd, t.amt, t.t_ms]),
+        "recovered batches retain order and both providers' complete, agreeing tape");
+      assert.ok(peak <= INFLIGHT_MAX, `${peak} requests out to the provider at once`);
+    } finally {
+      for (const gate of gates) gate.resolve();
+      s.stop();
+    }
+  });
+}

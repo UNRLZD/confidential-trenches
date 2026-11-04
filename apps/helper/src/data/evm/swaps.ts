@@ -481,6 +481,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** One JSON-RPC batch (at most the provider's batch size) to a provider. */
   async function one(url: string, part: Call[]): Promise<Reply[] | null> {
+    if ((held.get(url) ?? 0) > now()) return null;
     try {
       const r = await doFetch(url, {
         method: "POST",
@@ -491,7 +492,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       });
       if (r.status === 429) {
         await r.body?.cancel();
-        held.set(url, now() + upstreamRetryAfterS(r.headers, now()) * 1000);
+        held.set(url, Math.max(held.get(url) ?? 0, now() + upstreamRetryAfterS(r.headers, now()) * 1000));
         return null;
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
