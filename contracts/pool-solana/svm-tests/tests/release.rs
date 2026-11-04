@@ -1387,8 +1387,9 @@ fn tag3_data_refusals() {
 }
 
 // ---------------------------------------------------------------------------------------- tag 3 on mainnet copies
-// ../fixtures/venues/{pump,pumpswap}.json: a pump.fun curve and a PumpSwap pool read on two RPCs, with the steps W
-// runs (the kit's solanaPoolBuySteps) and a sell; their programs' code is in ../fixtures/venues/programs/, fetched by
+// ../fixtures/venues/{pump,pumpswap,pumpswap-cashback}.json: a pump.fun curve, a PumpSwap pool and a cashback coin's
+// PumpSwap pool read on two RPCs, with the steps W runs (the kit's solanaPoolBuySteps) and a sell (the kit's
+// solanaPoolSellSteps gives the same steps); their programs' code is in ../fixtures/venues/programs/, fetched by
 // `node fixtures/venues/dump.mjs --programs-only` (sha256-checked against the JSON; not committed: closed-source code).
 
 
@@ -1563,6 +1564,87 @@ fn venue_pumpswap_release_and_buy() {
         let mut env = with_deposits();
         release_and_buy_on(&mut env, "pumpswap", compressed, 5, &PUMPSWAP_STATIC);
     }
+}
+
+/// The review of signpage-pool-sell (MEDIUM): a cashback coin's PumpSwap sell names W's PumpSwap volume accumulator and
+/// its wrapped-SOL account (remaining accounts 21 and 22, as pump-swap-sdk 2.2.0 sellInstructionsNoPool lists them) with
+/// no instruction of W's to make them. On mainnet's code (../fixtures/venues/pumpswap-cashback.json, Pool byte 244 = 1),
+/// a W that holds the token but has neither account, holding exactly what solanaPoolSellNeed keeps for this case (the
+/// fee, the temporary wrapped-SOL account, both cashback accounts), sells: the sell makes both at W's cost (the
+/// accumulator 137 B owned by PumpSwap, its wSOL account 165 B owned by the Token program) and W ends with its proceeds
+/// less exactly the fee and those two rents. The same sell without the two accounts is refused.
+#[test]
+fn venue_pumpswap_cashback_sell_makes_ws_cashback_accounts() {
+    let mut env = fresh();
+    let v = load_venue(&mut env, "pumpswap-cashback");
+    let w = env.w.insecure_clone();
+    let sell = steps(&v["sell"]);
+    let s = &sell[1];
+    let amm: Pubkey = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA".parse().unwrap();
+    let token: Pubkey = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".parse().unwrap();
+    let ata_program: Pubkey = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL".parse().unwrap();
+    let wsol_mint: Pubkey = "So11111111111111111111111111111111111111112".parse().unwrap();
+    assert_eq!((sell.len(), s.program_id, s.accounts.len()), (3, amm, 26), "create wSOL, PumpSwap's sell with a cashback pool's 26 accounts, close");
+    assert_eq!(env.svm.get_account(&s.accounts[0].pubkey).unwrap().data[244], 1, "the pool's is_cashback_coin");
+    let vol = pda(&[b"user_volume_accumulator", w.pubkey().as_array()], &amm);
+    let vol_wsol = pda(&[vol.as_array(), token.as_array(), wsol_mint.as_array()], &ata_program);
+    assert_eq!((s.accounts[21].pubkey, s.accounts[22].pubkey), (vol_wsol, vol), "remaining: the accumulator's wSOL account, the accumulator");
+    assert!(s.accounts[21].is_writable && s.accounts[22].is_writable);
+
+    // W gets the token with the fixture's own buy, then loses both cashback accounts that buy made: W as after a curve
+    // buy of a coin since graduated (a curve buy makes neither)
+    env.svm.airdrop(&w.pubkey(), 30_000_000).unwrap();
+    send(&mut env, &steps(&v["buy"]), &w.pubkey(), &[&w]).expect("the fixture's buy lands");
+    let gone = |env: &Env, k: &Pubkey| env.svm.get_account(k).map_or(true, |a| a.lamports == 0);
+    for k in [vol, vol_wsol] {
+        assert!(!gone(&env, &k), "the PumpSwap buy made {k}");
+        env.svm.set_account(k, solana_account::Account { lamports: 0, data: vec![], owner: SYSTEM, executable: false, rent_epoch: 0 }).unwrap();
+        assert!(gone(&env, &k));
+    }
+    let ata = s.accounts[5].pubkey;
+    let held = token_amount(&env, &ata);
+    let sold: u64 = v["min_out"].as_str().unwrap().parse().unwrap();
+    assert!(held >= sold && sold > 0, "W holds {held}, sells {sold}");
+    // W holds exactly solanaPoolSellNeed(pumpswap, cashback, { ammCashback: false }): the fee, rent(165) for the
+    // temporary wSOL account, rent(137) and rent(165) for the two cashback accounts
+    let rent = |n: usize| env.svm.minimum_balance_for_rent_exemption(n);
+    let (fee, r137, r165) = (5_000u64, rent(137), rent(165));
+    let need = fee + r165 + r137 + r165;
+    env.svm.set_account(w.pubkey(), solana_account::Account { lamports: need, data: vec![], owner: SYSTEM, executable: false, rent_epoch: 0 }).unwrap();
+
+    let sim = |env: &mut Env, ixs: &[Instruction]| {
+        env.svm.expire_blockhash();
+        let tx = Transaction::new(&[&w], Message::new(ixs, Some(&w.pubkey())), env.svm.latest_blockhash());
+        env.svm.simulate_transaction(tx)
+    };
+    // the sell without the two cashback accounts is refused
+    let mut bare = sell.clone();
+    bare[1].accounts.drain(21..23);
+    assert!(sim(&mut env, &bare).is_err(), "a cashback pool's sell without W's cashback accounts lands");
+    // the proceeds: W's wSOL account after the sell, before the close (simulated, nothing kept)
+    let wsol = sell[2].accounts[0].pubkey;
+    let post = sim(&mut env, &sell[..2]).unwrap_or_else(|e| panic!("the sell simulates: {:?}\n{:#?}", e.err, e.meta.logs)).post_accounts;
+    let wsol_after: solana_account::Account = post.iter().find(|(k, _)| *k == wsol).unwrap().1.clone().into();
+    let proceeds = u64::from_le_bytes(wsol_after.data[64..72].try_into().unwrap());
+    assert!(proceeds > 0);
+
+    let meta = send(&mut env, &sell, &w.pubkey(), &[&w]).expect("the sell from a W with neither cashback account lands");
+    let a = env.svm.get_account(&vol).expect("the sell made W's volume accumulator");
+    assert_eq!((a.owner, a.data.len(), a.lamports), (amm, 137, r137), "the accumulator: PumpSwap's, 137 B, rent-exempt");
+    let b = env.svm.get_account(&vol_wsol).expect("the sell made the accumulator's wSOL account");
+    assert_eq!((b.owner, b.data.len()), (token, 165), "the accumulator's wSOL account: the Token program's, 165 B");
+    assert_eq!((&b.data[0..32], &b.data[32..64]), (&wsol_mint.as_array()[..], &vol.as_array()[..]), "a wSOL account the accumulator owns");
+    assert!(b.lamports >= r165);
+    assert_eq!(token_amount(&env, &ata), held - sold, "W sold min_out");
+    assert!(gone(&env, &wsol), "W's temporary wSOL account is closed");
+    let w_after = lamports(&env, &w.pubkey());
+    assert_eq!(w_after, need - fee - r137 - r165 + proceeds, "W paid the fee and the two cashback accounts' rent, and got the proceeds");
+    println!(
+        "CU sell pumpswap cashback {}; W {need} -> {w_after} (proceeds {proceeds}, fee {fee}, accumulator {r137}, its wSOL account {} of which cashback {})",
+        meta.compute_units_consumed,
+        b.lamports,
+        b.lamports - r165
+    );
 }
 
 // ------------------------------------------------------------------------------------- tag 3: the review's cases

@@ -264,15 +264,18 @@ test("a chunk too small to land is refused: W's token account, the volume accoun
     // the review's GAP-2: the spend takes the whole chunk, nothing for W's accounts
     assert.match(at(chunk).problem ?? "", /does not cover/);
     // the review's GAP-3: W would keep 1 lamport (on PumpSwap the wrapped SOL account's rent is not there at the peak)
-    assert.match(at(chunk - ata - vol - 1n).problem ?? "", v === "pump" ? /under the 655240 its sell needs up front/ : /does not cover/);
+    assert.match(at(chunk - ata - vol - 1n).problem ?? "", v === "pump" ? /under the 1493440 its sell needs up front/ : /does not cover/);
     // W keeps exactly 0 (pump) or the wrapped SOL's rent (PumpSwap), the old max spend: refused, its sell could never
     // pay the fee and, on PumpSwap, the wrapped SOL account it makes first (the review of signpage-pool-sell 4b6223a)
-    assert.match(at(chunk - ata - vol).problem ?? "", v === "pump" ? /W would keep 0 lamports, under the 655240/ : /does not cover/);
+    assert.match(at(chunk - ata - vol).problem ?? "", v === "pump" ? /W would keep 0 lamports, under the 1493440/ : /does not cover/);
     assert.notEqual(at(chunk - ata - vol - wsol).problem, null);
     // W keeps rent(0) only: after the sell's fee it would hold less than rent(0), refused
     assert.match(at(chunk - ata - vol - 650_240n).problem ?? "", v === "pump" ? /its sell needs up front/ : /does not cover/);
-    // W keeps the sell's fee and the rent of what it makes before proceeds arrive: lands
-    const need = 5_000n + (v === "pumpswap" ? wsol : 650_240n);
+    // a curve coin's W keeps only the curve's own need (fee and rent(0), 3bdca74's rule): refused, since once the coin
+    // graduates it sells on PumpSwap, which needs the fee and the wrapped SOL account up front (the re-review, critical)
+    if (v === "pump") assert.match(at(chunk - ata - vol - 655_240n).problem ?? "", /its sell needs up front on any venue/);
+    // W keeps the sell's fee and the rent of what it makes before proceeds arrive, on PumpSwap for both: lands
+    const need = 5_000n + solanaRentMin(rent, 165);
     assert.equal(at(chunk - ata - vol - need).problem, null);
     assert.equal(at(chunk - ata - vol - need).left, need);
     assert.match(solanaPoolBuyFunds(release, venue, { spend: 1n, tip: release.withdrawnValue }, rent).problem ?? "", /more than the release/);
@@ -439,6 +442,20 @@ test("a sell's min out comes from the two-provider quote less the user's slippag
     assert.throws(() => solanaPoolSellMinOut(venue, amount, { amount, ref, slippageBps: 10_000 }, ref!.slot!), /slippage/);
     assert.throws(() => solanaPoolSellSteps(venue, W, amount, 0n), /above 0/);
   }
+});
+
+test("a cashback coin's PumpSwap sell is the one the pool's LiteSVM test ran on mainnet's code from a W with neither cashback account", async () => {
+  // contracts/pool-solana/fixtures/venues/pumpswap-cashback.json (Pool byte 244 = 1); svm-tests release.rs
+  // venue_pumpswap_cashback_sell_makes_ws_cashback_accounts runs its sell: the program makes both accounts at W's cost
+  const ran = JSON.parse(readFileSync(new URL("../../../contracts/pool-solana/fixtures/venues/pumpswap-cashback.json", import.meta.url), "utf8"));
+  assert.equal(ran.wallet, W);
+  const byKey = new Map<string, { owner: string; lamports: string; data: string }>(ran.accounts.map((a: { address: string }) => [a.address, a]));
+  const value = (k: string) => { const a = byKey.get(k); return a ? { owner: a.owner, lamports: Number(a.lamports), data: [a.data, "base64"], executable: false } : null; };
+  const at = (): SolanaRpc => (async (m: string, p: readonly unknown[]) => ({ context: { slot: Number(ran.slot) }, value: m === "getMultipleAccounts" ? (p[0] as string[]).map(value) : value(p[0] as string) })) as unknown as SolanaRpc;
+  const venue = await readSolanaPoolBuyVenue([at(), at()], "pumpswap", ran.mint, () => 0);
+  assert.equal(venue.kind === "pumpswap" && venue.cashback, true);
+  const steps = solanaPoolSellSteps(venue, W, BigInt(ran.min_out), 1n);
+  assert.deepEqual(steps.map((x) => ({ program: x.program, accounts: x.accounts.map((a) => ({ address: a.key, signer: a.signer, writable: a.writable })), data: Buffer.from(x.data).toString("hex") })), ran.sell);
 });
 
 test("the build refuses a pool that is not the program's, W as the fee payer and a CU price over its cap", async () => {

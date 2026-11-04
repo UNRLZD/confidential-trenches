@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // dump.mjs --programs-only against local fake RPCs (no network): it passes when the code hashes as the JSON says, fails
 // as a code change (exit 1, the refresh command) when it does not, retries an RPC error or rate limit 3 times, and
-// fails as an RPC failure (exit 2, "not a code change") when an RPC fails every try.
+// fails as an RPC failure (exit 2, "not a code change") when an RPC fails every try. It checks every fixture in the
+// folder, an --out one too, and refuses an --out that is not a bare name before any read.
 //   node --test contracts/pool-solana/fixtures/venues/dump.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -14,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ELF = { A: Buffer.from("the code of program A"), B: Buffer.from("the code of program B") };
+const ELF = { A: Buffer.from("the code of program A"), B: Buffer.from("the code of program B"), C: Buffer.from("the code of program C") };
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 
 /** A fake RPC: `answer(n)` for its n-th request (from 1) returns "ok", an HTTP status, "rpc-error" or "wrong-code". */
@@ -48,14 +49,16 @@ async function fakeRpc(answer) {
   return { url: `http://127.0.0.1:${server.address().port}`, requests: () => n, close: () => server.close() };
 }
 
-/** dump.mjs and a two-venue fixture (programs A and B) in a fresh folder, run against `rpcs`. */
-function run(rpcs) {
+/** dump.mjs and a two-venue fixture (programs A and B) in a fresh folder, with `extra` fixtures beside them, run
+ * against `rpcs` with `args`. */
+function run(rpcs, { extra = {}, args = ["--programs-only"] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "venues-"));
   copyFileSync(join(HERE, "dump.mjs"), join(dir, "dump.mjs"));
   writeFileSync(join(dir, "pump.json"), JSON.stringify({ programs: [{ address: "A", sha256: sha(ELF.A), file: "programs/A.so" }] }));
   writeFileSync(join(dir, "pumpswap.json"), JSON.stringify({ programs: [{ address: "B", sha256: sha(ELF.B), file: "programs/B.so" }] }));
+  for (const [name, body] of Object.entries(extra)) writeFileSync(join(dir, name), JSON.stringify(body));
   return new Promise((resolve) => {
-    const p = spawn(process.execPath, [join(dir, "dump.mjs"), "--programs-only"], {
+    const p = spawn(process.execPath, [join(dir, "dump.mjs"), ...args], {
       env: { ...process.env, VENUE_RPCS: rpcs.join(","), VENUE_RPC_BACKOFF_MS: "1" },
     });
     let out = "";
@@ -113,4 +116,29 @@ test("an RPC that does not answer at all fails as an RPC failure", async () => {
   b.close();
   assert.equal(r.code, 2, r.out);
   assert.match(r.out, /FAIL \(RPC, not a code change\): .*ECONNREFUSED, after 4 tries/);
+});
+
+test("an --out fixture beside the two is checked too: its code as dumped passes, changed code fails", async () => {
+  const cashback = (hash) => ({ "pumpswap-cashback.json": { programs: [{ address: "C", sha256: hash, file: "programs/C.so" }] } });
+  const [a, b] = [await fakeRpc(() => "ok"), await fakeRpc(() => "ok")];
+  const ok = await run([a.url, b.url], { extra: cashback(sha(ELF.C)) });
+  assert.equal(ok.code, 0, ok.out);
+  assert.match(ok.out, /program C: .* \(equal on both providers\)/);
+  const bad = await run([a.url, b.url], { extra: cashback(sha(Buffer.from("older code of program C"))) });
+  a.close(), b.close();
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, /MISMATCH pumpswap-cashback\.json C/);
+  assert.match(bad.out, /--out pumpswap-cashback\.json/, "the refresh command re-dumps the --out fixture too");
+});
+
+test("an --out that is a path, or with a second venue, is refused before any read", async () => {
+  const a = await fakeRpc(() => "ok");
+  const b = await fakeRpc(() => "ok");
+  for (const args of [["--pumpswap", "M", "--out", "../pumpswap.json"], ["--pumpswap", "M", "--out", "pump.json"], ["--pumpswap", "M", "--out"], ["--pump", "M", "--pumpswap", "N", "--out", "x.json"], ["--out", "x.json"]]) {
+    const r = await run([a.url, b.url], { args });
+    assert.equal(r.code, 64, `${args.join(" ")}: ${r.out}`);
+    assert.match(r.out, /^FAIL: --out /);
+  }
+  a.close(), b.close();
+  assert.equal(a.requests() + b.requests(), 0, "no RPC was read");
 });
