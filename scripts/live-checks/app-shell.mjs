@@ -9,7 +9,7 @@
 //   - every script tag carries an integrity equal to the sha384 of the bytes served, no script is inline, and every
 //     script an APP_HOST document loaded is one of those tags (the shell's own scripts are SIGN_HOST's to check);
 //   - each route draws its own screen (main[data-route]), not the fallback;
-//   - CLS at most 0.1 per load and 0 inside the shell (from the first screen's load through the click-through; a FAIL names each shift's element and its
+//   - CLS 0 per load at both widths and 0 inside the shell (from the first screen's load through the click-through; a FAIL names each shift's element and its
 //     rects before and after), every shift counted, the
 //     hadRecentInput exclusion not applied (BAR-04, app.md:1102);
 //   - no horizontal scroll, no text under 11 px, and on the phone no tap target under 44 px (BAR-10, app.md:1108; the
@@ -32,7 +32,6 @@ import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "app-shell";
 export const APP_HOST = "https://confidential.unrealized.trade";
-export const CLS_MAX = 0.1;
 // the shell's routes (apps/terminal/src/routes/routes.ts)
 export const ROUTES = [
   ["token", "/"],
@@ -87,7 +86,9 @@ export function judge(rec) {
     if (l.route !== l.expect) bad.push(`drew ${l.route ?? "nothing"}`);
     if (l.violations.length) bad.push(`CSP violation: ${l.violations.map((v) => `${v.directive} ${v.blocked}`).join("; ")}`);
     if (l.consoleErrors.length) bad.push(`console error: ${l.consoleErrors.join("; ")}`);
-    if (!(l.cls <= CLS_MAX)) bad.push(`CLS ${l.cls.toFixed(4)} above ${CLS_MAX}${shiftsOf(l.shifts)}`);
+    // every load holds still at both widths (card app-shell-tabbar-cls: a phone tab bar drawn before the frame had its
+    // size moved 0.0806 under the old 0.1 limit and passed)
+    if (l.cls !== 0) bad.push(`CLS ${l.cls.toFixed(4)} above 0${shiftsOf(l.shifts)}`);
     if (l.hscroll) bad.push("horizontal scroll");
     if (l.smallText.length) bad.push(`text under 11 px: ${l.smallText.join(", ")}`);
     if (l.smallTaps.length) bad.push(`tap under 44 px: ${l.smallTaps.join(", ")}`);
