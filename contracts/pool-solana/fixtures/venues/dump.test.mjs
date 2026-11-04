@@ -2,7 +2,8 @@
 // dump.mjs --programs-only against local fake RPCs (no network): it passes when the code hashes as the JSON says, fails
 // as a code change (exit 1, the refresh command) when it does not, retries an RPC error or rate limit 3 times, and
 // fails as an RPC failure (exit 2, "not a code change") when an RPC fails every try. It checks every fixture in the
-// folder, an --out one too, and refuses an --out that is not a bare name before any read.
+// folder, an --out one too, refuses an --out that is not a bare name before any read, and ends each try at its own
+// deadline, so an RPC that stops answering fails as an RPC failure rather than holding the run.
 //   node --test contracts/pool-solana/fixtures/venues/dump.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -51,7 +52,7 @@ async function fakeRpc(answer) {
 
 /** dump.mjs and a two-venue fixture (programs A and B) in a fresh folder, with `extra` fixtures beside them, run
  * against `rpcs` with `args`. */
-function run(rpcs, { extra = {}, args = ["--programs-only"] } = {}) {
+function run(rpcs, { extra = {}, args = ["--programs-only"], env = {}, killMs } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "venues-"));
   copyFileSync(join(HERE, "dump.mjs"), join(dir, "dump.mjs"));
   writeFileSync(join(dir, "pump.json"), JSON.stringify({ programs: [{ address: "A", sha256: sha(ELF.A), file: "programs/A.so" }] }));
@@ -59,7 +60,9 @@ function run(rpcs, { extra = {}, args = ["--programs-only"] } = {}) {
   for (const [name, body] of Object.entries(extra)) writeFileSync(join(dir, name), JSON.stringify(body));
   return new Promise((resolve) => {
     const p = spawn(process.execPath, [join(dir, "dump.mjs"), ...args], {
-      env: { ...process.env, VENUE_RPCS: rpcs.join(","), VENUE_RPC_BACKOFF_MS: "1" },
+      env: { ...process.env, VENUE_RPCS: rpcs.join(","), VENUE_RPC_BACKOFF_MS: "1", ...env },
+      // a run that hangs is killed here, so the test fails rather than waits
+      ...(killMs === undefined ? {} : { timeout: killMs }),
     });
     let out = "";
     p.stdout.on("data", (c) => (out += c));
@@ -117,6 +120,34 @@ test("an RPC that does not answer at all fails as an RPC failure", async () => {
   assert.equal(r.code, 2, r.out);
   assert.match(r.out, /FAIL \(RPC, not a code change\): .*ECONNREFUSED, after 4 tries/);
 });
+
+// pool-solana's job 126859622621 hung 29 minutes on a public RPC that stopped answering mid-way through a program's
+// code, until the job's cancel: each try now has its own deadline (VENUE_RPC_TIMEOUT_MS here, 60 s in the script)
+async function stallingRpc(mid) {
+  let n = 0;
+  const server = createServer((req, res) => {
+    n++;
+    req.resume();
+    // the request taken and never answered, or the answer's headers and the start of its body, then nothing
+    if (mid) req.on("end", () => (res.writeHead(200, { "content-type": "application/json" }), res.write('{"jsonrpc":"2.0","id":1,"result":{"va')));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return { url: `http://127.0.0.1:${server.address().port}`, requests: () => n, close: () => server.closeAllConnections() ?? server.close() };
+}
+
+for (const mid of [false, true]) {
+  test(`an RPC that takes the request and ${mid ? "stops mid-body" : "never answers"} fails each try at its deadline, then as an RPC failure`, { timeout: 20_000 }, async () => {
+    const a = await stallingRpc(mid);
+    const b = await fakeRpc(() => "ok");
+    const t = performance.now();
+    const r = await run([a.url, b.url], { env: { VENUE_RPC_TIMEOUT_MS: "300" }, killMs: 8_000 });
+    a.close(), b.close();
+    assert.equal(r.code, 2, r.out);
+    assert.equal(a.requests(), 4, "one try and 3 retries, each ended by its deadline");
+    assert.match(r.out, /FAIL \(RPC, not a code change\): .*(TimeoutError|timeout|aborted).*, after 4 tries/i);
+    assert.ok(performance.now() - t < 10_000, "four 300 ms deadlines, not a hang");
+  });
+}
 
 test("an --out fixture beside the two is checked too: its code as dumped passes, changed code fails", async () => {
   const cashback = (hash) => ({ "pumpswap-cashback.json": { programs: [{ address: "C", sha256: hash, file: "programs/C.so" }] } });
