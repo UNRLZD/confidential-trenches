@@ -142,7 +142,8 @@ contract ReenterHook {
   }
 }
 
-contract SellV4Test is SellBase {
+/// What the v4 sell tests share: the etched PoolManager, WETH, the pool, W delegated, planted pools and the helpers
+abstract contract SellV4Base is SellBase {
   address internal constant PM_ADDR = 0x498581fF718922c3f8e6A244956aF099B2652b2b;
   bytes32 internal constant PM_HASH = 0x83b2af6e9f3158defc2811cbcb0db71ecf8b2ba2abea39c39e370ac5c6f43eb6;
   address internal constant WETH = 0x4200000000000000000000000000000000000006;
@@ -263,7 +264,8 @@ contract SellV4Test is SellBase {
     assertEq(IAllowance(_token).allowance(W, PM_ADDR), 0, 'no approval was given');
     assertEq(W.balance, 0, 'W keeps no ether');
     assertEq(IWETH9Sell(WETH).balanceOf(W), 0, 'nor WETH');
-    if (_path[_path.length - 1].intermediateCurrency == address(0)) {
+    // (a hook on the last hop may take its own cut of the output from the PoolManager too)
+    if (_path[_path.length - 1].intermediateCurrency == address(0) && _path[_path.length - 1].hooks == address(0)) {
       assertEq(PM_ADDR.balance, _pmEth - _quoted, 'the PoolManager paid out exactly the proceeds');
     }
     assertEq(SellDelegate(payable(W)).nonce(), 1);
@@ -281,6 +283,9 @@ contract SellV4Test is SellBase {
     assertEq(SellDelegate(payable(W)).nonce(), 0, 'the nonce is not used');
   }
 
+}
+
+contract SellV4Test is SellV4Base {
   // ----- the sells -----
 
   function test_v4SellToTheNativeAssetLands() public {

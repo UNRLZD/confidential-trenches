@@ -139,15 +139,16 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      V4Router does: W unlocks it, and W's unlockCallback swaps exactly the amount along data = abi.encode(PathKey[])
      (each hop must take all it is given, else PartialFill; the route ends in the native asset or WETH, else
      InvalidRoute), settles the token with W's own transfer (sync, transfer, settle: no approval is ever given) and
-     takes the whole output to W. The callback runs only when the PoolManager calls it (NotPoolManager) and only once
-     inside W's own sell: the sell sets a one-shot flag at the ERC-7201 transient slot of "blindfill.sell.v4" just
-     before the unlock and the callback clears it (NotInSell otherwise, so a transaction W's key sends to the
-     PoolManager cannot run it). The PoolManager reverts the unlock unless nothing is left owed (a token that
+     takes the whole output to W. The callback runs only when the PoolManager calls it (NotPoolManager), only once
+     inside W's own sell and only with that sell's payload: the sell stores keccak256(abi.encode(token, amount, data))
+     at the ERC-7201 transient slot of "blindfill.sell.v4" just before the unlock and the callback clears it
+     (NotInSell otherwise: a transaction W's key sends to the PoolManager, a second callback in one unlock, or a wrong
+     PoolManager pin handing back another token, amount or route, test/HostileSellV4.t.sol, review of e9f6ff9). The PoolManager reverts the unlock unless nothing is left owed (a token that
      delivers less than it moves fails with CurrencyNotSettled). minOut, the fee and the deposit are as in 14; the v3
      router path is unchanged. Gas (forge 1.7.1, one type-4 transaction with W's authorization, trees empty,
-     test/SellV4Fork.t.sol): Base, Clanker coin BTC1 through its hooked WETH pool, 699,266; Robinhood, CRYBABYTRUMP
-     through its hooked WETH pool, 495,223. Planted pools on Base's PoolManager code (test/SellV4.t.sol): one hop to
-     ETH 491,560, to WETH 502,251, two hops 573,026, depth 32 1,805,991.
+     test/SellV4Fork.t.sol): Base, Clanker coin BTC1 through its hooked WETH pool, 699,660; Robinhood, CRYBABYTRUMP
+     through its hooked WETH pool, 495,617. Planted pools on Base's PoolManager code (test/SellV4.t.sol): one hop to
+     ETH 491,954, to WETH 502,645, two hops 573,525 (to WETH 589,816), depth 32 1,806,385.
 
 Gas, each pool call its own transaction (isolate = true in foundry.toml), so a figure is what a sender pays: the
 21,000 base, calldata and cold reads included. The kit's real proofs (test/fixtures/buy-proofs.json), fee 0.01 ETH.

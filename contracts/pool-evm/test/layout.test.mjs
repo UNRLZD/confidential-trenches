@@ -40,16 +40,19 @@ test("the pool's ABI is exactly the listed functions; only deposit takes value",
 });
 
 // The sell delegate (card pool-evm-sell) runs in W's account: it declares no storage slot at all (W's sell nonce sits at
-// its ERC-7201 slot, test/Sell.t.sol), and its ABI is exactly WETH, nonce, sell and a receive for the sale's ether.
+// its ERC-7201 slot, test/Sell.t.sol), and its ABI is exactly WETH, POOL_MANAGER, nonce, sell, unlockCallback (the v4
+// sell's callback, card evm-sell-v4) and a receive for the sale's ether.
 test("the sell delegate declares no storage", () => {
   assert.deepEqual(inspect("storageLayout", "SellDelegate").storage, []);
 });
 
-// Its one transient slot, the reentrancy guard, is the ERC-7201 slot of "blindfill.sell.guard" (cast computes it): every
-// TLOAD and TSTORE in its deployed code takes that slot straight from a PUSH32, so none reads or writes transient slot 0,
-// where a smart account that runs it as a module may keep its own guard.
-test("the sell delegate's only transient slot is its ERC-7201 guard slot", () => {
-  const slot = execFileSync("cast", ["index-erc7201", "blindfill.sell.guard"], { encoding: "utf8" }).trim().replace(/^0x/, "");
+// Its two transient slots, the reentrancy guard and the v4 sell's one-shot flag, are the ERC-7201 slots of
+// "blindfill.sell.guard" and "blindfill.sell.v4" (cast computes them): every TLOAD and TSTORE in its deployed code takes
+// one of those two slots straight from a PUSH32, so none reads or writes transient slot 0, where a smart account that
+// runs it as a module may keep its own guard, and both slots are read and written.
+test("the sell delegate's only transient slots are its two ERC-7201 slots", () => {
+  const erc7201 = (name) => execFileSync("cast", ["index-erc7201", name], { encoding: "utf8" }).trim().replace(/^0x/, "");
+  const slots = ["blindfill.sell.guard", "blindfill.sell.v4"].map(erc7201);
   const hex = execFileSync("forge", ["inspect", "SellDelegate", "deployedBytecode"], { cwd: ROOT, encoding: "utf8" }).trim();
   const code = Buffer.from(hex.replace(/^0x/, ""), "hex");
   const ops = [];
@@ -65,13 +68,21 @@ test("the sell delegate's only transient slot is its ERC-7201 guard slot", () =>
       i += 1;
     }
   }
-  assert.ok(ops.some((o) => o.op === "TLOAD") && ops.some((o) => o.op === "TSTORE"), "the guard is read and written");
-  for (const o of ops) assert.deepEqual(o.after, { push: 32, data: slot }, `${o.op} takes the guard slot`);
+  for (const slot of slots) {
+    for (const op of ["TLOAD", "TSTORE"]) {
+      assert.ok(ops.some((o) => o.op === op && o.after?.data === slot), `${op} on ${slot}`);
+    }
+  }
+  for (const o of ops) {
+    assert.ok(o.after?.push === 32 && slots.includes(o.after.data), `${o.op} takes one of the two slots: ${JSON.stringify(o.after)}`);
+  }
 });
 
-test("the sell delegate's ABI is exactly the listed functions and a receive; only sell writes", () => {
+test("the sell delegate's ABI is exactly the listed functions and a receive; only sell and unlockCallback write", () => {
   const abi = inspect("abi", "SellDelegate");
   assert.deepEqual(abi.filter((e) => e.type === "receive" || e.type === "fallback").map((e) => e.type), ["receive"]);
   const fns = abi.filter((e) => e.type === "function");
-  assert.deepEqual(fns.map((f) => `${f.name} ${f.stateMutability}`).sort(), ["WETH view", "nonce view", "sell nonpayable"]);
+  assert.deepEqual(fns.map((f) => `${f.name} ${f.stateMutability}`).sort(), [
+    "POOL_MANAGER view", "WETH view", "nonce view", "sell nonpayable", "unlockCallback nonpayable",
+  ]);
 });
