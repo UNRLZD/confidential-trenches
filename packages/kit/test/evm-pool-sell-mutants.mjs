@@ -136,13 +136,17 @@ export const MUTANTS = [
   [SELL, 'if (!Number.isInteger(fee) || (fee as number) < 0 || (fee as number) > U24) refuse("bad_route", "a v4 fee is a u24");', "", V4],
   [SELL, "(tickSpacing as number) < 1 ||", "(tickSpacing as number) < 0 ||", V4],
   [SELL, "const MAX_TICK_SPACING = 32767;", "const MAX_TICK_SPACING = 32768;", V4],
-  [SELL, 'if (typeof hookData !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(hookData)) refuse("bad_route", "hook data is 0x hex");', "", V4],
   [SELL, 'if (to === from) refuse("bad_route", "a hop buys what it spends");', "", V4],
   [SELL, "if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth)", "if (last ? to !== NATIVE && to !== weth : false)", V4],
   [SELL, "if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth)", "if (last ? false : to === NATIVE || to === weth)", V4],
   [SELL, 'if (!last && !listed.has(to)) refuse("middle_not_listed", `${currency} is not on the venue list`);', "", V4],
-  [SELL, 'if (hookData !== "0x") refuse("bad_route", "a hop with no hook carries no hook data");', "", V4],
-  [SELL, "if (((hookData as string).length - 2) / 2 > EVM_POOL_MAX_HOOK_DATA)", "if (((hookData as string).length - 2) / 2 > EVM_POOL_MAX_HOOK_DATA + 1)", V4],
+  // the review of a22060d: hook data is the device's own, empty (item 5); a listed hook only on the hop that spends the
+  // token sold (item 2)
+  [SELL, 'if (hookData !== "0x") refuse("bad_route", "a sell\'s hook data is the device\'s own: empty");', "", V4],
+  [SELL, 'if (hookData !== "0x") refuse(', 'if (hookData !== "0x" && lower(hooks as string) === NATIVE) refuse(', V4],
+  [SELL, "const on = from === lower(token) && ", "const on = ", V4],
+  [SELL, "const on = from === lower(token) && ", "const on = ", V4CAST],
+  [SELL, "if (lower(hooks as string) !== NATIVE) {", "if (false) {", V4],
   [SELL, "lower(p.hooks) === lower(hooks as string) && ", "", V4],
   [SELL, "p.fee === fee && ", "", V4],
   [SELL, "p.tickSpacing === tickSpacing && ", "", V4],
@@ -155,7 +159,7 @@ export const MUTANTS = [
   [BUY, "return concat(word(BigInt(elems.length)), ...offsets, ...elems);", "return concat(...offsets, ...elems);", V4CAST],
   // the testnet PoolManager pins: another one is refused, and a v4 sell is built to the pinned one
   [BUY, 'poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408"', 'poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03409"', V4],
-  [BUY, '      poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",\n    }),', '      poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40952",\n    }),', V4],
+  [BUY, 'poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",\n      // Uniswap\'s V4Quoter at mainnet\'s address', 'poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40952",\n      // Uniswap\'s V4Quoter at mainnet\'s address', V4],
   // the fork fixture is the kit's output
   [SELL, "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)) });", "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)).replace(/.$/, \"0\") });", FIXTURE],
 ];

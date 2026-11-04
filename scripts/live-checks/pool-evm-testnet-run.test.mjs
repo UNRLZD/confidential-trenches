@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { replayer } from "./notes-per-pool-evm.mjs";
-import { CHAINS, TOPICS, VIEWS, check, recordFileOf, recordFiles, runRecord, spoil } from "./pool-evm-testnet-run.mjs";
+import { CHAINS, TOPICS, VIEWS, check, recordFileOf, recordFiles, runRecord, sellTarget, spoil } from "./pool-evm-testnet-run.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-evm-testnet-run.answers.json", import.meta.url), "utf8"));
 const RECS = recordFiles().map((f) => JSON.parse(readFileSync(f, "utf8")));
@@ -80,13 +80,39 @@ for (const run of A.runs) {
     assert.match(r.lines.at(-1), /the record has no sell/);
   });
 
-  test(`${chain}: a v4 sell the record says went through another target than the pinned PoolManager fails`, async () => {
+  // the review of a22060d, item 1: the target is read from the chain's answer, the transaction's input W signed
+  test(`${chain}: a sell whose input on the chain names another target than the pinned one fails, the record unchanged`, async () => {
+    for (const sell of run.record.txs.filter((t) => t.kind === "sell")) {
+      const log = structuredClone(run.good);
+      let set = 0;
+      for (const e of log)
+        if (e.method === "eth_getTransactionByHash" && e.params[0] === sell.hash && e.result) {
+          const at = 10 + 2 * Number(BigInt(`0x${e.result.input.slice(10, 74)}`)) + 2 * 64;
+          e.result.input = e.result.input.slice(0, at) + "000000000000000000000000" + "14cc0aac535ccdb3c01d6787d6413c739ae12bc4" + e.result.input.slice(at + 64);
+          set++;
+        }
+      assert.equal(set, 2, "the sell read on both RPCs");
+      assert.equal(sellTarget(log.find((e) => e.method === "eth_getTransactionByHash" && e.params[0] === sell.hash).result.input), "0x14cc0aac535ccdb3c01d6787d6413c739ae12bc4");
+      const r = await check(run.record, replayer(log), run.urls);
+      assert.equal(r.ok, false, sell.step);
+      assert.match(r.lines.at(-1), /W signed the target 0x14cc\w+, the record says 0x/);
+    }
+  });
+
+  test(`${chain}: a record and a chain that both name another target than the pinned one fail`, async () => {
+    const sell = run.record.txs.find((t) => t.kind === "sell");
     const rec = structuredClone(run.record);
-    const sell = rec.txs.find((t) => t.kind === "sell" && t.venue === "v4");
-    sell.target = "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4";
-    const r = await check(rec, replayer(run.good), run.urls);
+    const log = structuredClone(run.good);
+    const other = "0x14cc0aac535ccdb3c01d6787d6413c739ae12bc4";
+    rec.txs.find((t) => t.hash === sell.hash).target = other;
+    for (const e of log)
+      if (e.method === "eth_getTransactionByHash" && e.params[0] === sell.hash && e.result) {
+        const at = 10 + 2 * Number(BigInt(`0x${e.result.input.slice(10, 74)}`)) + 2 * 64;
+        e.result.input = e.result.input.slice(0, at) + "000000000000000000000000" + other.slice(2) + e.result.input.slice(at + 64);
+      }
+    const r = await check(rec, replayer(log), run.urls);
     assert.equal(r.ok, false);
-    assert.match(r.lines.at(-1), /a v4 sell through 0x94cc\w+, not this chain's pinned PoolManager/);
+    assert.match(r.lines.at(-1), /a v[34] sell through 0x14cc\w+, not this chain's pinned/);
   });
 
   test(`${chain}: a v4 sell whose receipt holds no Swap by W on the PoolManager fails`, async () => {

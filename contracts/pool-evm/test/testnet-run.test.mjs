@@ -113,9 +113,25 @@ async function unexported(src) {
 test("every name the run takes from the kit and the wallet is exported there", async () => {
   const r = await unexported(RUN);
   assert.deepEqual(r.missing, []);
-  assert.equal(r.named, 6); // the buy's pinned builder, and the wallet's pool, restore, notes, derive and queue
+  assert.equal(r.named, 6); // the dry run's quotes on the fork, and the wallet's pool, restore, notes, derive and queue
   assert.equal(r.ns, 1); // the kit's index as kit
   // planted: the name the run called from 1343935 on, and a destructured name the module does not export
-  assert.deepEqual((await unexported(RUN.replace("pinnedBuild(kit.evmPoolVenues()", "kit.evmPoolBuild(kit.evmPoolVenues()"))).missing, ["kit.evmPoolBuild from packages/kit/src/index.ts"]);
-  assert.deepEqual((await unexported(RUN.replace("{ pinnedBuild, pinnedSignBuy }", "{ pinnedBuild, pinnedSignBuy, evmPoolBuild }"))).missing, ["evmPoolBuild from packages/kit/src/trade/evm/buy-unpinned.ts"]);
+  assert.deepEqual((await unexported(RUN.replace("kit.evmPoolBuildQuoted(adapters", "kit.evmPoolBuild(adapters"))).missing, ["kit.evmPoolBuild from packages/kit/src/index.ts"]);
+  assert.deepEqual((await unexported(RUN.replace("{ evmPoolBuyQuoteWith, evmPoolSellQuoteWith }", "{ evmPoolBuyQuoteWith, evmPoolSellQuoteWith, evmPoolBuild }"))).missing, ["evmPoolBuild from packages/kit/src/checks/evm/quote.ts"]);
+});
+
+/** The builders and signers the run calls: the kit index's only, each buy and sell from a device quote. */
+const pathOf = (src) => ({
+  // a builder or signer that takes a route or a minOut from its caller, or any pinned or unpinned one under the index
+  bypass: [...new Set([...src.matchAll(/\b(pinned\w+|evmPool\w*Unpinned|evmPoolRouteData\w*)\b/g)].map((m) => m[1]))],
+  buy: /kit\.evmPoolBuildQuoted\(adapters\[[^\]]+\], q\)/.test(src) && /kit\.evmPoolBuyQuote\(q\)/.test(src) && /kit\.evmPoolSignBuy\(/.test(src),
+  sell: /kit\.evmPoolBuildSell\(q, \{/.test(src) && /kit\.evmPoolSellQuote\(q\)/.test(src) && /kit\.evmPoolSignSell\(/.test(src),
+});
+test("the run buys and sells only through the device's quotes, as a user's device does (card evm-sell-device-quote)", () => {
+  assert.deepEqual(pathOf(RUN), { bypass: [], buy: true, sell: true });
+  // planted: the pinned buy builder and signer the run used before this card, and a sell that names its own route
+  assert.deepEqual(pathOf(RUN.replace("kit.evmPoolBuildQuoted(adapters", "pinnedBuild(kit.evmPoolVenues(), chain, adapters")), { bypass: ["pinnedBuild"], buy: false, sell: true });
+  assert.deepEqual(pathOf(RUN.replace("kit.evmPoolSignBuy(W.secretKey", "pinnedSignBuy(kit.evmPoolVenues(), W.secretKey")).bypass, ["pinnedSignBuy"]);
+  assert.equal(pathOf(RUN.replace("kit.evmPoolBuildSell(q, {", "pinnedBuildSell(kit.evmPoolVenues(), chain, { route, ")).sell, false);
+  assert.equal(pathOf(RUN.replace("kit.evmPoolSellQuote(q)", "evmPoolSellQuoteWith(q, rpcs, Date.now())")).sell, false);
 });

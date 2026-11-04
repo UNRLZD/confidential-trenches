@@ -46,6 +46,7 @@ import { createBook, TFS, type Book, type Candle, type Event, type Swap, type Tf
 import { address } from "./lists.ts";
 import { type DataAnswer } from "./token.ts";
 import { fromInner, fromLogs, poolMints, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
+import { CREDITS, type Slot } from "../../rpc/slot.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -92,10 +93,43 @@ export type Source = {
 export type SourceEvents = { note(mint: string, n: Note): void; down(): void; up(): void };
 type WsLike = { send(s: string): void; close(): void; onopen: (() => void) | null; onmessage: ((m: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null };
 
-/** The websocket stream: one connection, one `logsSubscribe` per mint, reconnected with backoff. */
-export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: string) => WsLike; now?: () => number } = {}): Source {
+/** The first 4 KB of a refusal's body (enough for its error words), the rest never read. */
+async function head(r: Response, max = 4_096): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  let n = 0;
+  try {
+    for await (const c of r.body ?? []) {
+      chunks.push(c);
+      n += c.byteLength;
+      if (n >= max) break;
+    }
+  } catch {
+    // what came is enough
+  }
+  await r.body?.cancel().catch(() => undefined);
+  return Buffer.concat(chunks).toString("utf8").slice(0, max);
+}
+
+/** How long a probe of a fallen-back stream key waits for its first message (card helper-solana-failover). */
+export const PROBE_MS = 10_000;
+/**
+ * The websocket stream: one connection, one `logsSubscribe` per mint, reconnected with backoff. With `fallback` (card
+ * helper-solana-failover, rpc/slot.ts), `url` is a keyed provider's: a connection to it that closes before it opens (a
+ * refused key: a websocket shows no status) or that goes SILENT_MS without a message falls the slot back, and the
+ * stream reconnects to the public `fallback.url`; while fallen back, every SLOT_RETRY_MS a probe connection to the key
+ * waits PROBE_MS for its first message, and on one the stream moves back to the key (its gap walked as after any drop).
+ */
+export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: string) => WsLike; now?: () => number; fallback?: { url: string; slot: Slot } } = {}): Source {
   const make = deps.ws ?? ((u: string) => new WebSocket(u) as unknown as WsLike);
   const now = deps.now ?? Date.now;
+  const slot = deps.fallback?.slot;
+  const keyedSlot = slot !== undefined && slot.state() !== "public";
+  /** The URL the next connection takes: the key unless its slot is fallen back with no retry due. */
+  const target = (): string => (keyedSlot && !slot!.useKeyed() ? deps.fallback!.url : url);
+  let onKey = false; // the live connection is the key's
+  let opened = false;
+  let probe: WsLike | null = null;
+  let probeAt = 0;
   const mints = new Set<string>();
   const subOf = new Map<number, string>(); // subscription id -> mint
   const pending = new Map<number, string>(); // request id -> mint
@@ -116,8 +150,13 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
     pending.set(rid, m);
     ws.send(JSON.stringify({ jsonrpc: "2.0", id: rid, method: "logsSubscribe", params: [{ mentions: [m] }, { commitment: "confirmed" }] }));
   }
-  function drop(): void {
+  function drop(why?: string): void {
     if (ws === null) return;
+    // the key's connection: refused before it opened, or silent, is the key's failure
+    if (keyedSlot && onKey) {
+      if (!opened) slot!.fail("the stream closed before it opened");
+      else if (why === "silent") slot!.fail(`no message for ${SILENT_MS / 1000} s`);
+    }
     const w = ws;
     ws = null;
     live = false;
@@ -136,9 +175,13 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
   }
   function connect(): void {
     if (closed || ws !== null || mints.size === 0) return;
-    const w = make(url);
+    const u = target();
+    onKey = u === url;
+    opened = false;
+    const w = make(u);
     ws = w;
     w.onopen = () => {
+      opened = true;
       live = true;
       upSent = false;
       tries = 0;
@@ -154,6 +197,7 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
     };
     w.onmessage = (msg) => {
       lastMsg = now();
+      if (keyedSlot && onKey) slot!.ok();
       if (typeof msg.data !== "string" || msg.data.length > ANSWER_MAX) return;
       let j: Record<string, unknown>;
       try {
@@ -188,11 +232,36 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
       if (m === undefined || typeof v.signature !== "string" || !Number.isSafeInteger(ctx.slot)) return;
       on.note(m, { sig: v.signature, slot: ctx.slot as number, err: v.err !== null && v.err !== undefined, logs: v.logs });
     };
-    w.onclose = drop;
-    w.onerror = drop;
+    w.onclose = () => drop();
+    w.onerror = () => drop();
+  }
+  /** Fallen back with the retry due: a probe connection to the key; its first message moves the stream back to it. */
+  function tryKey(): void {
+    if (!keyedSlot || slot!.state() !== "fallback" || probe !== null || (onKey && ws !== null) || !slot!.useKeyed() || closed) return;
+    const p = make(url);
+    probe = p;
+    probeAt = now();
+    const end = (back: boolean) => {
+      if (probe !== p) return;
+      probe = null;
+      try {
+        p.close();
+      } catch {
+        // closed already
+      }
+      if (!back) return slot!.fail("the stream retry got no message");
+      slot!.ok();
+      drop(); // reconnect: to the key now
+    };
+    p.onopen = () => p.send(JSON.stringify({ jsonrpc: "2.0", id: 0, method: "slotSubscribe" }));
+    p.onmessage = () => end(true);
+    p.onclose = () => end(false);
+    p.onerror = () => end(false);
   }
   silence = setInterval(() => {
-    if (ws !== null && now() - lastMsg > SILENT_MS) drop();
+    if (ws !== null && now() - lastMsg > SILENT_MS) drop("silent");
+    if (probe !== null && now() - probeAt > PROBE_MS) probe.onclose?.();
+    tryKey();
   }, 5_000);
   silence.unref?.();
   return {
@@ -217,6 +286,8 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
     close() {
       closed = true;
       if (silence !== null) clearInterval(silence);
+      if (probe !== null) probe.close();
+      probe = null;
       drop();
     },
   };
@@ -275,6 +346,12 @@ export function createSolanaTrades(deps: {
   budget?: (url: string, method: string) => number;
   /** That provider's 429, which holds its budget for every caller. */
   throttled?: (url: string, headers: Headers) => void;
+  /** The slot of `rpcs[0]` when it is a keyed provider (SOLANA_TRADES_RPC_URL, rpc/slot.ts): while it is fallen back the
+   *  requests start at the next provider; its 401, 403, a spent plan, a 429 past its reset or 30 s with no answer
+   *  fall it back. */
+  slot?: Slot;
+  /** The stream's slot (SOLANA_STREAM_WS_URL): `wsUrl` falls back to STREAM_WS as wsSource says. */
+  streamSlot?: Slot;
 }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
@@ -287,22 +364,32 @@ export function createSolanaTrades(deps: {
   let refAt = 0;
 
   /** One request, to each provider in turn until one answers a result. */
+  const slot = deps.slot !== undefined && deps.slot.state() !== "public" ? deps.slot : undefined;
   async function rpc(method: string, params: unknown[]): Promise<unknown> {
-    for (const url of rpcs) {
+    for (const url of slot !== undefined && !slot.useKeyed() ? rpcs.slice(1) : rpcs) {
+      const key = slot !== undefined && url === rpcs[0] ? slot : undefined;
       if ((deps.budget?.(url, method) ?? 0) > 0) continue;
+      const sent = now();
       try {
         const r = await doFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
         if (r.status === 429) deps.throttled?.(url, r.headers);
         if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
-          await r.body?.cancel();
+          const body = key !== undefined && r.status >= 400 && r.status < 500 ? await head(r) : (await r.body?.cancel(), "");
+          if (key !== undefined) {
+            if (r.status === 401 || r.status === 403) key.fail(String(r.status));
+            else if (CREDITS.test(body)) key.fail("credits");
+            else if (r.status === 429) key.throttled(Math.max(1, Number(r.headers.get("retry-after")) || 1));
+            else if (r.status >= 500) key.unanswered(sent);
+          }
           continue;
         }
         const text = await r.text();
         if (text.length > ANSWER_MAX) continue;
         const j = JSON.parse(text) as Record<string, unknown>;
-        if (j.error === undefined && "result" in j) return j.result;
+        if (j.error === undefined && "result" in j) return (key?.ok(), j.result);
+        if (key !== undefined && CREDITS.test(String((j.error as { message?: unknown } | undefined)?.message ?? ""))) key.fail("credits");
       } catch {
-        // the next provider
+        key?.unanswered(sent); // the next provider
       }
     }
     throw new Error(`${method}: no provider answered`);
@@ -486,7 +573,7 @@ export function createSolanaTrades(deps: {
     fold(e);
   }
 
-  const source = (deps.source ?? ((on) => wsSource(deps.wsUrl ?? STREAM_WS, on)))({
+  const source = (deps.source ?? ((on) => wsSource(deps.wsUrl ?? STREAM_WS, on, deps.wsUrl !== undefined && deps.streamSlot !== undefined ? { fallback: { url: STREAM_WS, slot: deps.streamSlot } } : {})))({
     note(mint, n) {
       const e = entries.get(mint);
       if (e !== undefined) void onNote(e, n).catch(() => undefined);
