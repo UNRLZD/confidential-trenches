@@ -23,8 +23,18 @@
 //   filled was told, the sell filled when a return note is UNSPENT with a leaf and no stage but sent or filled was told.
 //   The sell's amount is all W holds of the coin, as W's token account reads at finalized (W: the buy tx's second key).
 // - It writes the answers, the stages, the notes and every tx to <out.json>; exit 0 only when both landed.
+// - The run's seed is written, before U is asked for, to ~/.ct-devnet-runs/run-<time>.seed (the folder 0700, the file
+//   0600, the 16 bytes in hex; outside the repo, so no commit can carry it; its path is logged, never its bytes), and
+//   kept: a run that stops after its deposit leaves notes only that seed can spend (runs 1, 3 and 6's first two tries
+//   each stranded 0.01 SOL). FLOW_RESUME=<that file> runs again from it: no U, no deposit; the notes restored from the
+//   seed on both devnet RPCs (the wallet's solanaRestoreNotes) into the store, then the buy and the sell as above.
+//   FLOW_CRASH_AFTER=deposit stops the run right after its deposit (the resume's test).
+// - A buy that did not land (the kind's not_landed, its note RESERVED) is tapped again once the page's RESERVED pass
+//   has freed the note (its deadline past on both RPCs), up to the same 4 tries.
 import { randomBytes, createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import { IDBFactory } from "fake-indexeddb";
 import { base58 } from "@scure/base";
@@ -36,6 +46,8 @@ const { openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
+const { solanaRestoreNotes } = await import("../../wallet/src/pool/solana-restore.ts");
+const { refKey } = await import("../../wallet/src/notes/store.ts");
 const { solanaJsonRpc } = await import("../../kit/src/trade/solana/send.ts");
 const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
@@ -91,7 +103,18 @@ const vault = {
 };
 
 const w = await openWalletStore({ indexedDB: new IDBFactory() });
-const entropy = randomBytes(16);
+const RESUME = process.env.FLOW_RESUME;
+const entropy = RESUME ? Buffer.from(readFileSync(RESUME, "utf8").trim(), "hex") : randomBytes(16);
+if (entropy.length !== 16) throw new Error("the seed file holds no 16-byte seed");
+// kept before anything can move: a run that stops past its deposit can be run again from this file (FLOW_RESUME)
+if (!RESUME) {
+  const dir = join(homedir(), ".ct-devnet-runs");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const at = join(dir, `run-${new Date().toISOString().replace(/[:.]/g, "-")}.seed`);
+  writeFileSync(at, entropy.toString("hex") + "\n", { mode: 0o600, flag: "wx" });
+  log(`the run's seed is kept at ${at} (FLOW_RESUME=${at} runs again from it)`);
+}
 await w.insertSeed({ v: 1, entropy: Uint8Array.from(entropy), source: "code", code_saved: true, created_ms: Date.now() });
 const seed64 = wordsToSeed64(entropyToWords(Uint8Array.from(entropy)));
 entropy.fill(0);
@@ -127,6 +150,16 @@ const run = async (kind, params) => {
   for (let k = 1; ; k++) {
     const r = await once(kind, params);
     const err = r.answer?.error;
+    if (kind === "pool.buy" && r.answer?.result?.stage === "not_landed" && k < 4) {
+      // the note RESERVED until the page's pass frees it past its deadline on both RPCs: then the buy is tapped again
+      log(`pool.buy not landed (try ${k}): waiting for its note to be freed`);
+      for (let i = 0; i < 40 && (await noteList()).some((n) => n.state === "RESERVED"); i++) {
+        await sleep(15_000);
+        await t.stateRead();
+      }
+      await t.proofs();
+      continue;
+    }
     if ((err !== "failed" && err !== "quote_check_failed") || k >= 4) return r;
     log(`${kind} answered ${err} (try ${k}): again in 10 s`);
     await sleep(10_000);
@@ -138,10 +171,13 @@ const noteList = async () => (await ns.list()).map((n) => ({ ref: n.ref.kind, st
 // U: the index the note store plans (the flow's planDeposit names the same one until money reaches it)
 const { scope, pool } = solanaPoolOf(SOL_POOLS.devnet.program);
 const ns = await openNoteStore(w);
-const planned = await ns.planDeposit(scope, (ref) => noteSecrets(seed64, ref).precommitment);
-const id = depositId(seed64, scope, planned.ref.i);
-const U = base58.encode(id.publicKey);
-id.secretKey.fill(0);
+let U = null;
+if (!RESUME) {
+  const planned = await ns.planDeposit(scope, (ref) => noteSecrets(seed64, ref).precommitment);
+  const id = depositId(seed64, scope, planned.ref.i);
+  U = base58.encode(id.publicKey);
+  id.secretKey.fill(0);
+}
 const rent = await readSolanaRent(rpcs);
 const NEED = RUNG + solanaRentMin(rent, 17) + 2n * 72n * rent.lamportsPerByte * rent.factor + FEE;
 const EMPTY = solanaRentMin(rent, 0);
@@ -163,15 +199,31 @@ const balance = async () => {
 const VENUE = SPEND === "max" ? await readSolanaPoolBuyVenue(rpcs, "pump-curve", MINT) : null;
 const KEEPS = VENUE === null ? null : solanaPoolBuySellNeed(VENUE, rent);
 if (VENUE !== null) log(`venue ${VENUE.kind} (token account ${VENUE.tokenAccountSize} B, cashback ${VENUE.cashback}); a buy leaves W ${KEEPS} for its sell on any venue the coin sells on`);
-log(`pool ${pool}; table ${TABLE}; fund U ${U} with exactly ${NEED} lamports (or at least ${NEED + EMPTY}) on devnet`);
-for (let b = await balance(); !(b === NEED || b >= NEED + EMPTY); b = await balance()) {
-  if (b > 0n) log(`U holds ${b}: waiting for exactly ${NEED} or at least ${NEED + EMPTY}`);
-  await sleep(10_000);
+let deposit;
+if (RESUME) {
+  // the notes from the seed alone, as a restore reads them: each into the store, a change note under its parent
+  const r = await solanaRestoreNotes({ seed64, program: SOL_POOLS.devnet.program, rpcs });
+  const ids = new Map();
+  for (const n of r.notes) {
+    const rec = await ns.add({ ref: n.ref, scope: n.scope, precommitment: n.precommitment, state: "UNSPENT", leaf: n.leaf, ...(n.parent === undefined ? {} : { parent: ids.get(n.parent) }) });
+    ids.set(refKey(n.ref), rec.id);
+  }
+  deposit = { resumed: RESUME, notes: await noteList() };
+  log(`resumed from the seed file: ${JSON.stringify(deposit.notes)}`);
+} else {
+  log(`pool ${pool}; table ${TABLE}; fund U ${U} with exactly ${NEED} lamports (or at least ${NEED + EMPTY}) on devnet`);
+  for (let b = await balance(); !(b === NEED || b >= NEED + EMPTY); b = await balance()) {
+    if (b > 0n) log(`U holds ${b}: waiting for exactly ${NEED} or at least ${NEED + EMPTY}`);
+    await sleep(10_000);
+  }
+  log("U funded; pool.deposit of 0.01 SOL");
+  deposit = await run("pool.deposit", { chain: "solana", amount: "0.01" });
+  log(`deposit ${JSON.stringify(deposit)}`);
+  if (process.env.FLOW_CRASH_AFTER === "deposit") {
+    log("stopped after the deposit (FLOW_CRASH_AFTER=deposit): the seed stays in its file");
+    process.exit(3);
+  }
 }
-
-log("U funded; pool.deposit of 0.01 SOL");
-const deposit = await run("pool.deposit", { chain: "solana", amount: "0.01" });
-log(`deposit ${JSON.stringify(deposit)}`);
 const landed = deposit.notes?.some((n) => n.ref === "deposit" && n.state === "UNSPENT");
 let buy = null;
 if (landed) {
