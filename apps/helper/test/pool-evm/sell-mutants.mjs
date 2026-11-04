@@ -82,7 +82,9 @@ export const MUTANTS = [
   // test named for it
   [EVM, "        return evmPoolChainFee(kitChain, txBytes, words);", "        return words[0]!;", T, "the operator fee is in the bound"],
   [EVM, "        return evmPoolChainFee(kitChain, txBytes, words);", "        return words[0]!;", T, "Robinhood's L1 poster fee"],
-  [EVM, "      const reads = evmPoolChainFeeReads(kitChain, gas, txBytes);", "      const reads = evmPoolChainFeeReads(kitChain, gas, 1n);", T, "Robinhood's L1 poster fee"],
+  // the L1 bound read for the transaction's longest form (Base; ArbGasInfo's read takes no length, so on Robinhood the
+  // bytes reach only evmPoolChainFee, which the poster fee mutant above holds)
+  [EVM, "      const reads = evmPoolChainFeeReads(kitChain, gas, txBytes);", "      const reads = evmPoolChainFeeReads(kitChain, gas, 1n);", T, "a good sell:"],
   [EVM, "      const fees = await Promise.all([a, b].map(", "      const fees = await Promise.all([a, a].map(", T, "the operator fee is in the bound"],
   // the poster's gas inside the limit (Robinhood): the sim runs with what is left, at the lower base fee; none left refuses
   [EVM, 'const POSTER_GAS_CHAINS: ReadonlySet<string> = new Set(["robinhood", "robinhood-testnet"]);', "const POSTER_GAS_CHAINS: ReadonlySet<string> = new Set([]);", T, "Robinhood's L1 poster fee"],
