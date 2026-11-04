@@ -190,6 +190,7 @@ export const RELEASED = Object.freeze({
   "release-12": "6d54691cf78370b6afa438fe1c4c8833913ada26b287d813f961bfc986f8541c",
   "release-13": "9cce86b67f5230679fec7acc6a666c1540db896f8ca9fea5250d549eb5df628b",
   "release-14": "41b63dd394bfc58171dc1e65ed87e4f585173dd858c55c54751a9991ffd929dd",
+  "release-15": "d739cfb256bb85b598edc88862f18bd5cc33f92609d0edbbd57ec60492a718e9",
 });
 
 /**
