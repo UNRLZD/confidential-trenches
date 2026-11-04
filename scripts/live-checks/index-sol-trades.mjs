@@ -178,6 +178,15 @@ function watchOnce(open, ws) {
   });
 }
 
+/** Reads each of `open`'s tapes every `everyMs` until the returned stop is called: the helper closes a token nobody read
+ *  for IDLE_MS (60 s, trades.ts), and a wait for a trade can outlast that (a run once waited 66 s). */
+export function keepOpen(base, open, fetchFn = fetch, everyMs = 20_000) {
+  const timer = setInterval(() => {
+    for (const t of open) void fetchFn(`${base}${TRADES_PATH(t)}`, { headers: { origin: APP }, signal: AbortSignal.timeout(10_000) }).then((r) => r.body?.cancel()).catch(() => undefined);
+  }, everyMs);
+  return () => clearInterval(timer);
+}
+
 /** One live run against `base`. */
 export async function read(base = BASE, fetchFn = fetch, ws = WS) {
   const lists = await get(base, LISTS_PATH, fetchFn);
@@ -191,13 +200,18 @@ export async function read(base = BASE, fetchFn = fetch, ws = WS) {
   if (open.length === 0) return { base, coin: tokens[0] ?? null, fresh: null, polls: tokens.length ? [first[tokens[0]]] : [], candles: null };
   // the public websocket refuses a connection now and then (several in a row from one address): five tries, 2 s apart
   let fresh;
-  for (let attempt = 1; fresh === undefined; attempt++) {
-    try {
-      fresh = await watchOnce(open, ws);
-    } catch (e) {
-      if (attempt === 5 || !/websocket error/.test(e.message)) throw e;
-      await new Promise((r) => setTimeout(r, 2_000));
+  const stop = keepOpen(base, open, fetchFn);
+  try {
+    for (let attempt = 1; fresh === undefined; attempt++) {
+      try {
+        fresh = await watchOnce(open, ws);
+      } catch (e) {
+        if (attempt === 5 || !/websocket error/.test(e.message)) throw e;
+        await new Promise((r) => setTimeout(r, 2_000));
+      }
     }
+  } finally {
+    stop();
   }
   const polls = [];
   while (Date.now() - fresh.heldAtMs < FRESH_MS + 3_000) {
