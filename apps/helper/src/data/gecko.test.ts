@@ -82,3 +82,14 @@ test("GeckoTerminal's 429: its Retry-After when it names one (at most 300 s), el
     assert.equal(b.take("pages"), true, String(ra));
   }
 });
+
+test("card app-console-429: a refresh (a re-read of data held) takes a call only while COLD_RESERVE stay free for a cold page read", async () => {
+  const { geckoBudget: budget, COLD_RESERVE: reserve, GT_LIMIT_PER_MIN: perMin } = await import("./gecko.ts");
+  const t = 1_800_000_000_000;
+  const b = budget(() => t);
+  for (let i = 0; i < perMin - reserve - 1; i++) assert.equal(b.take("pages"), true);
+  assert.equal(b.take("refresh"), true, "room past the reserve: the refresh goes");
+  assert.equal(b.take("refresh"), false, "only the reserve left: the refresh yields");
+  for (let i = 0; i < reserve; i++) assert.equal(b.take("pages"), true, "which a cold page read finds");
+  assert.equal(b.take("pages"), false);
+});

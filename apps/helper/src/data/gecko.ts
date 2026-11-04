@@ -7,6 +7,11 @@
 // always keep the other perMin - LIST_FLOOR. A 429 pauses
 // every lane, since GeckoTerminal answers our address, not a lane.
 //
+// The "refresh" lane is a page's re-read of data it already holds (the newest bars past their 60 s, a top pool past its
+// 10 min): it takes a call only while COLD_RESERVE stay free for a read of something nobody holds, so a held token's
+// refresh never refuses another token's first read; refused, the holder serves what it has, dated (card
+// app-console-429: the live suite's candles 429 at 567a181, a cold mint behind another's refreshes).
+//
 // The limit is measured, not the published one: GeckoTerminal's FAQ says 10 calls a minute (apiguide.geckoterminal.com/
 // faq, read 2026-11-03 11:27Z), but read from one address after 70 s with no call, on 2026-11-03 at 14:58:04Z, 14 calls
 // back to back answered 200 five times, then 429 (Retry-After "0") nine times, and still 429 30 s later; the deployed
@@ -23,6 +28,8 @@ export const WINDOW_MS = 75_000;
 export const PAGE_RESERVE = 2;
 /** A page call this recent makes the lists lane wait (unless its read is urgent). */
 export const YIELD_MS = 60_000;
+/** Calls a refresh leaves free: one cold token page's candles, its top pool and its bars (token.ts). */
+export const COLD_RESERVE = 2;
 /** Calls in the minute the lists may always take for an urgent read (6 lists, each read within LIST_URGENT_MS). */
 export const LIST_FLOOR = 2;
 
@@ -65,6 +72,7 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       const t = now();
       prune(t);
       if (held || t < pausedUntil || calls.length >= perMin) return false;
+      if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
       if (lane === "lists") {
         const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
         if (!floor && (calls.length >= perMin - PAGE_RESERVE || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && t - c.at < YIELD_MS))) return false;
