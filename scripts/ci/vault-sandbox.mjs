@@ -59,8 +59,8 @@ export function matches(file, paths = PATHS) {
 // Each shard's cargo test targets, about equal in time (box run 2026-11-02: s10 181 s, s04 95, relayer_send 95,
 // payouts 70, s20 64 plus its two builds, s02 58, deposit_msg 47, ragequit 46, settle 42, real_token 29, smoke 27,
 // s01 19, tree_prop 16, withdraw_spend 15, withdraw_context 14, prepay 12, groth16 5, lib 4, the rest under 1;
-// relayer_withdraw 27 joins shard 3, the lightest). CI run 2026-11-03 with both tokens: withdraw_spend 65 s and s02
-// 85 s (VT-S03's refusals), so shard 3 ran heaviest; relayer_withdraw moves to shard 4: test seconds about 273,
+// relayer_withdraw 27 joins shard 3, the lightest). With both tokens: withdraw_spend 65 s (CI, 2026-11-03) and s02
+// 85 s (Mac, 2026-11-04, with VT-S03's refusals), so shard 3 ran heaviest; relayer_withdraw moves to shard 4: test seconds about 273,
 // 255, 296 and 260.
 export const SHARDS = [
   ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey"],
