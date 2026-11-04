@@ -1,8 +1,10 @@
 // node --test scripts/live-checks/app-shell.test.mjs: the live check's verdict replays recorded runs
-// (app-shell.answers.json), each read on 2026-11-01 by app-shell.mjs --harness --record in headless Chromium 153 on the
-// Mac, the hosts' real names answered by route (APP_HOST: a terminal build under its own _headers; SIGN_HOST:
-// app-in-shell's stand-in shell):
-//   good:         card app-in-shell's build: every load runs inside the shell: PASS;
+// (app-shell.answers.json), the hosts' real names answered by route (APP_HOST: a terminal build under its own _headers;
+// SIGN_HOST: app-in-shell's stand-in shell):
+//   good:         card app-shell-tabbar-cls's build, read on 2026-11-04 by apps/terminal/test/bar10/run.mjs --record (its
+//                 answers-at-once pass: the helper's reads answered, signed in) in Chrome 157 on the Mac, the 4th BAR-10
+//                 PASS in a row: every load inside the shell, every phone load at CLS 0: PASS;
+// the two bad answers read on 2026-11-01 by app-shell.mjs --harness --record in headless Chromium 153 on the Mac:
 //   bad:          main cf7b85a's build, before app-in-shell: APP_HOST stays top-level and frames SIGN_HOST, which the
 //                 shell's frame-ancestors 'none' refuses: FAIL on every load;
 //   badIntegrity: app-in-shell's build with the script tag's integrity taken out: FAIL on the integrity
@@ -30,7 +32,7 @@ test("recorded good answer: every route at both widths, integrity equal, CLS 0, 
   // every phone load holds still; a desktop load moved 0.0009 at most
   for (const w of WIDTHS) for (const [id, p] of ROUTES) assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} ${p} \\(${id}\\): CLS 0\\.000${w.name === "phone" ? "0" : "\\d"}, no violation, no error$`).test(l)), `${w.name} ${p}`);
   assert.ok(r.lines.some((l) => /^ok  phone inside the shell, 4 link\(s\): CLS 0, no reload$/.test(l)));
-  assert.ok(r.lines.some((l) => /^ok  desktop inside the shell, 6 link\(s\): CLS 0, no reload$/.test(l)));
+  assert.ok(r.lines.some((l) => /^ok  desktop inside the shell, 5 link\(s\): CLS 0, no reload$/.test(l)));
 });
 
 test("recorded bad answer: today's APP_HOST stays top-level, not inside SIGN_HOST's shell: FAIL on every load", () => {
@@ -70,7 +72,7 @@ test("planted on the good answer: a shift inside the shell names its element and
   const rec = structuredClone(ANSWERS.good);
   rec.inShell[1].cls = 0.0047;
   rec.inShell[1].shifts = [{ at: 490, value: 0.0047, input: false, sources: ["div.tkp-strip 234,50 861x49 -> 548,50 547x49", "div.tkp-idtext 59,59 165x30 -> 59,56 479x37"] }];
-  assert.deepEqual(bad(judge(rec).lines), ["BAD desktop inside the shell, 6 link(s): CLS 0.0047 inside the shell [+490ms 0.0047: div.tkp-strip 234,50 861x49 -> 548,50 547x49 | div.tkp-idtext 59,59 165x30 -> 59,56 479x37]"]);
+  assert.deepEqual(bad(judge(rec).lines), ["BAD desktop inside the shell, 5 link(s): CLS 0.0047 inside the shell [+490ms 0.0047: div.tkp-strip 234,50 861x49 -> 548,50 547x49 | div.tkp-idtext 59,59 165x30 -> 59,56 479x37]"]);
 });
 
 test("recorded bad answer: one script without its integrity: FAIL", () => {

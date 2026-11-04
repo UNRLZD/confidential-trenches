@@ -16,8 +16,9 @@
 // signing page's state land while the run clicks through the shell. A screen that moves when an answer is slow (card
 // app-shell-cls-zero: CI's "CLS 0.0010 inside the shell" on 1 Nov, the phone tabs and the header) then fails every
 // run, not only on a slow runner.
-//   node apps/terminal/test/bar10/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+//   node apps/terminal/test/bar10/run.mjs [--shots <dir>] [--record <file>]     PASS exit 0, FAIL exit 1
+// --record writes the answers-at-once read to <file> for app-shell.test.mjs to replay through judge().
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +31,8 @@ const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const args = process.argv.slice(2);
 const shotsAt = args.indexOf("--shots");
 const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : undefined;
+const recordAt = args.indexOf("--record");
+const RECORD = recordAt >= 0 ? path.resolve(args[recordAt + 1]) : undefined;
 
 const LISTS_URL = "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana";
 const isTokenRead = (u) => u.origin === "https://api.confidential.unrealized.trade" && u.pathname === "/v1/market/token";
@@ -161,6 +164,8 @@ try {
   for (const late of [false, true]) {
     const rec = await collect({ url: APP_HOST, shots: SHOTS && (late ? path.join(SHOTS, "late") : SHOTS), fetchFn, route, prepare: answering(late), source: `bar10, the build inside the stand-in shell, answers ${late ? "late" : "at once"}` });
     const j = judge(rec);
+    // the answers-at-once read, as app-shell.mjs --record writes it: the shell check's recorded good answer
+    if (RECORD && !late) writeFileSync(RECORD, `${JSON.stringify(rec, null, 1)}\n`);
     console.log(`-- answers ${late ? `late (the lists ${LATE.helperMs} ms, the shell ${LATE.shellMs} ms after the terminal's load)` : "at once"}`);
     for (const l of j.lines) console.log(l);
     ok &&= j.ok;
