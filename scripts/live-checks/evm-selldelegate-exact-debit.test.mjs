@@ -1,12 +1,15 @@
 // Replays evm-selldelegate-exact-debit.answers.json (recorded on Base Sepolia and Robinhood testnet, each on its two
 // RPCs) through the live check: the recorded good answers pass; the same recording with one thing changed fails: the
 // evm-sell-v4 delegate's code (the build before the exact-debit check) at the new address, one byte of the code
-// flipped, a record naming an address the build file froze to the older build, and a kit pin naming another delegate.
+// flipped, a record naming an address the build file froze to the older build, and a kit pin naming another delegate;
+// and the runs through it: each run's recorded answers pass and its spoiled ones (a spent nullifier the pool never
+// marked) fail, a chain whose only runs stopped fails, and so does a run from before the redeploy.
 //   node --test scripts/live-checks/evm-selldelegate-exact-debit.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { check } from "./evm-selldelegate-exact-debit.mjs";
+import { CHAINS as RUN_CHAINS, check, checkRuns } from "./evm-selldelegate-exact-debit.mjs";
+import { replayer } from "./notes-per-pool-evm.mjs";
 import { BUILD, CHAINS } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-selldelegate-exact-debit.answers.json", import.meta.url), "utf8"));
@@ -75,5 +78,25 @@ test("a kit pin naming another delegate fails", async () => {
   for (const chain of CHAIN_NAMES) {
     fails(await run(chain, undefined, undefined, { [chain]: { sellDelegate: "0x" + "ba".repeat(20) } }), /the kit pins SellDelegate/);
     fails(await run(chain, undefined, undefined, {}), /the kit pins SellDelegate .*: none/);
+  }
+});
+
+const runsOf = (pick = (r) => r.good) => A.runs.map((r) => ({ ...r, answers: pick(r) }));
+const runOn = (runs) => checkRuns(runs, (r) => replayer(r.answers), A.deployments);
+
+test("the runs through the new delegate pass, and each chain has one that sold", async () => {
+  assert.ok(A.runs.length >= RUN_CHAINS.length);
+  const r = await runOn(runsOf());
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const c of RUN_CHAINS) assert.ok(r.lines.some((l) => l.startsWith(`ok   ${c}: a run that sold`)), c);
+});
+
+test("a run's spoiled answers fail; a chain with only stopped runs, or a run from before the redeploy, fails", async () => {
+  fails(await runOn(runsOf((r) => r.bad)), /run /);
+  for (const c of RUN_CHAINS) {
+    const stoppedOnly = runsOf().map((r) => (r.record.chain === c ? { ...r, record: { ...r.record, stopped: r.record.stopped ?? "stopped (planted)" } } : r));
+    fails(await runOn(stoppedOnly), new RegExp(`${c}: a run that sold`));
+    const early = runsOf().map((r) => (r.record.chain === c ? { ...r, record: { ...r.record, at: "2026-11-04T07:00:00.000Z" } } : r));
+    fails(await runOn(early), new RegExp(`${c}: a run that sold`));
   }
 });
