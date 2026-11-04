@@ -79,15 +79,15 @@ export const EXPORTS_ALLOWED = new Set([
   "contract_source_metadata",
 ]);
 
-// What keeps `rpcs` from being two independent reads of NEAR testnet: [] when its first two are testnet hosts of two
-// different operators (scripts/ci/near-rpc-operators.mjs). Two hosts of one operator are one read
-// (FastNEAR runs near.org's testnet hosts too), and a host the map does not hold is no read.
-export function operatorProblems(rpcs) {
+// What keeps `rpcs` from being two independent reads of NEAR `network` (testnet unless named): [] when its first two
+// are hosts of that network run by two different operators (scripts/ci/near-rpc-operators.mjs). Two hosts of one
+// operator are one read (FastNEAR runs near.org's hosts too), and a host the map does not hold is no read.
+export function operatorProblems(rpcs, network = "testnet") {
   const two = rpcs.slice(0, 2);
-  const named = two.map((u) => `${u} (${networkOf(u) === "testnet" ? (operatorOf(u) ?? "unknown") : "not a testnet host"})`);
-  const ops = new Set(two.filter((u) => networkOf(u) === "testnet").map(operatorOf).filter(Boolean));
+  const named = two.map((u) => `${u} (${networkOf(u) === network ? (operatorOf(u) ?? "unknown") : `not a ${network} host`})`);
+  const ops = new Set(two.filter((u) => networkOf(u) === network).map(operatorOf).filter(Boolean));
   if (two.length < 2) return [`only ${two.length} RPC(s): ${named.join(", ") || "none"}; want two of two operators`];
-  if (ops.size < 2) return [`only ${ops.size} operator(s) in ${named.join(", ")}; want two testnet operators`];
+  if (ops.size < 2) return [`only ${ops.size} operator(s) in ${named.join(", ")}; want two ${network} operators`];
   return [];
 }
 
