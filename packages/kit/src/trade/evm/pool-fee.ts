@@ -21,3 +21,21 @@ export function evmPoolGas(depth: number): bigint {
   if (!Number.isSafeInteger(depth) || depth < 0 || depth > EVM_POOL_MAX_DEPTH) throw new Error(`a tree depth of 0 to ${EVM_POOL_MAX_DEPTH}`);
   return EVM_POOL_GAS_BASE + EVM_POOL_GAS_PER_LEVEL * BigInt(depth);
 }
+
+/** The pool's backstop: a relay fee is at most this share of the withdrawn value, in bps, whatever cap a proof binds
+ * (contracts/pool-evm/src/PrivacyPool.sol:55 MAX_RELAY_FEE_BPS, checked at :186). */
+export const EVM_POOL_MAX_RELAY_FEE_BPS = 5_000n;
+
+/**
+ * The most a tap's buy can spend from one chunk: what the pool hands the adapter, `_withdrawn - _fee`
+ * (contracts/pool-evm/src/PrivacyPoolSimple.sol:64), with the fee at most the proof's fee cap (PrivacyPool.sol:179) and
+ * at most EVM_POOL_MAX_RELAY_FEE_BPS of the chunk, rounded down as the pool rounds (:186). The relayer pays the gas
+ * out of that fee; nothing else comes out of the chunk before the spend. The tap's ask is the chunk itself (the signing
+ * page's checkEvmBuy refuses an amount other than the proof's value): this is what reaches the venue.
+ */
+export function evmPoolBuyMaxSpend(chunk: bigint, feeCap: bigint): bigint {
+  if (typeof chunk !== "bigint" || chunk < 0n) throw new Error("chunk: a bigint at least 0");
+  if (typeof feeCap !== "bigint" || feeCap < 0n) throw new Error("fee cap: a bigint at least 0");
+  const backstop = (chunk * EVM_POOL_MAX_RELAY_FEE_BPS) / 10_000n;
+  return chunk - (feeCap < backstop ? feeCap : backstop);
+}

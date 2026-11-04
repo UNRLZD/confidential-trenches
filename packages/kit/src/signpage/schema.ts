@@ -155,8 +155,8 @@ const unitsAt = (s: string, d: number): bigint | null => {
 };
 /** The private balance per chain's pool: each entry exact, its asset one of POOL_ASSETS (no decimals key: they come
  * from POOL_ASSET_DECIMALS only) and the one its chain's pool holds, its amounts with no more fraction digits than the
- * asset has decimals, its ready at most its balance, its tap_max only with a ready, at most that ready and "0" exactly
- * when the ready is (the largest of the chunks that sum to it), one entry per chain (a chain twice is refused). */
+ * asset has decimals, its ready at most its balance, its tap_max only with a ready and at most that ready (one
+ * proof's spend, at most its chunk; "0" when the fee and W's new accounts eat every chunk), one entry per chain (a chain twice is refused). */
 const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec });
 const poolFits: SignpageSchema = (v) => {
   if (!poolEntry(v)) return false;
@@ -170,7 +170,7 @@ const poolFits: SignpageSchema = (v) => {
   if (ready === null || ready > balance) return false;
   if (p.tap_max === undefined) return true;
   const tapMax = unitsAt(p.tap_max, d);
-  return tapMax !== null && tapMax <= ready && (tapMax === 0n) === (ready === 0n);
+  return tapMax !== null && tapMax <= ready;
 };
 const poolList = arr(poolFits);
 const pools: SignpageSchema = (v) =>

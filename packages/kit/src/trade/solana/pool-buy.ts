@@ -579,6 +579,24 @@ export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPool
   return { chunk, peak, left, problem };
 }
 
+/**
+ * The most a tap can spend from one release on `venue`: the largest spend solanaPoolBuyFunds passes, 0 when none does.
+ * The chunk less the relay fee, the tip and W's new accounts at the peak: at that spend W keeps 0 (pump's curve) or the
+ * wrapped-SOL account's rent, which is above rent(0) (PumpSwap), so the floor never binds. The tap and the signing
+ * page's state.pools tap_max share this one rule; it is checked against solanaPoolBuyFunds itself before it is given.
+ */
+export function solanaPoolBuyMaxSpend(release: Pick<SolanaPoolRelease, "withdrawnValue" | "relayFee">, venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback">, tip: bigint, rent: SolanaRent): bigint {
+  if (typeof release?.withdrawnValue !== "bigint" || typeof release.relayFee !== "bigint" || typeof tip !== "bigint" || tip < 0n) throw new Error("withdrawnValue, relayFee and tip are bigints, the tip at least 0");
+  const r = release as SolanaPoolRelease;
+  const v = venue as SolanaPoolBuyVenue;
+  const at0 = solanaPoolBuyFunds(r, v, { spend: 0n, tip }, rent);
+  const max = at0.chunk - at0.peak;
+  if (max <= 0n) return 0n;
+  const p = solanaPoolBuyFunds(r, v, { spend: max, tip }, rent).problem;
+  if (p !== null) throw new Error(`the max spend ${max} does not pass the funds rule: ${p}`);
+  return max;
+}
+
 /** M352/M353/M355/M376: the fee payer's cost of one release, from the device's own rent read: the spent mark, which
  * records withdrawnValue u64, the release's number u32 and the program's tag byte in 13 bytes (rent(13)), the change
  * note's 72-byte page entry and two signatures (5,000 each). 1,092,040 lamports at 5,080 a byte. The one definition of the Solana fee rules (M356
@@ -722,6 +740,15 @@ const T22_MINT_ONLY = new Set([3, 4, 6, 10, 12, 16, 18, 19, 20, 21, 22, 23, 24, 
  * -> TransferFeeAmount (8 bytes), NonTransferable -> NonTransferableAccount (0), TransferHook -> TransferHookAccount
  * (1), Pausable -> PausableAccount (0). */
 const T22_ACCOUNT_EXT = new Map([[1, 8], [9, 0], [14, 1], [26, 0]]);
+
+/** The largest new token account W can get for a mint the venue reader admits (solanaTokenAccountSize): a Token-2022
+ * account with its type byte, ImmutableOwner, and each of the four extensions a mint can ask of it once (Token-2022
+ * holds one extension of each type): 195 bytes. */
+export const SOLANA_TOKEN_ACCOUNT_MAX_SIZE = TOKEN_ACCOUNT_SIZE + 1 + 4 + [...T22_ACCOUNT_EXT.values()].reduce((s, x) => s + 4 + x, 0);
+/** The venue that costs W the most of its chunk (solanaPoolBuyFunds): PumpSwap (its wrapped-SOL account at the peak),
+ * a cashback coin (one more token account kept) and the largest token account. tap_max is priced on it, before the tap
+ * knows its venue, so the tap's real venue always funds that spend. */
+export const SOLANA_POOL_WORST_BUY_VENUE = Object.freeze({ kind: "pumpswap", tokenAccountSize: SOLANA_TOKEN_ACCOUNT_MAX_SIZE, cashback: true } as const);
 
 /** The size of W's new associated token account for `mint`: 165 for Token; for Token-2022 165, the account type byte
  * and a 4-byte TLV head per extension: ImmutableOwner (the associated token program always adds it) and the one each
