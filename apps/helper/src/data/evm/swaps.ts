@@ -51,7 +51,7 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
-import { refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { EVM_LIMIT_CODE, RETRY_AFTER_MAX_S, upstreamRetryAfterS } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
@@ -266,6 +266,10 @@ export const TRADES_MAX = 50;
 export const CANDLES_MAX = 500;
 /** History before our first bar never changes: kept this long. */
 const GT_FRESH_MS = 3_600_000;
+/** GeckoTerminal's newest bars as a chart of their own (a listed token with no pool of ours, noneCandles): read again
+ *  after this, as the Solana token page's (../solana/token.ts CANDLES_FRESH_MS), and served from what is held only within
+ *  GT_SERVE_MS (card helper-restart-fresh). */
+const GT_NEWEST_FRESH_MS = 60_000;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Logs
@@ -1014,8 +1018,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
     }
     if (p === undefined || p.id === null) return none;
-    const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to);
-    const bars = Array.isArray(got) ? got.filter((c) => to === null || c[0] < to).slice(-limit) : [];
+    const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to, true);
+    // GeckoTerminal refused or failed with nothing to serve: its 429 (with the wait) or 503, so the page retries, never
+    // an empty 200 for a token it names a pool of (card helper-restart-fresh)
+    if (!Array.isArray(got)) return got;
+    const bars = got.filter((c) => to === null || c[0] < to).slice(-limit);
     if (bars.length === 0) return none;
     const at = history.get(`${p.id}:${tf}:${to ?? ""}`)?.at ?? kept.get(`${p.id}:${tf}`)?.at ?? now();
     const body = { tf, candles: bars, src: "geckoterminal", as_of_ms: at };
@@ -1026,16 +1033,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const kept = new Map<string, { at: number; bars: Candle[] }>();
   /** GeckoTerminal's bars before `before` (unix seconds; null: its newest range, one cache key however often asked),
    *  or, when the read is refused, throttled or fails, the last good bars of the pool and tf cut there; with none of
-   *  those, the 429 (with the wait to the next call) or 503 to answer. */
-  async function geckoBars(e: Entry, tf: Tf, before: number | null): Promise<Candle[] | DataAnswer> {
+   *  those, the 429 (with the wait to the next call) or 503 to answer. `alone`: the bars are the chart, with no book of
+   *  ours after them (noneCandles), so their read is the answer's X-Fetched-At: the newest range is read again after
+   *  GT_NEWEST_FRESH_MS and served from what is held only within GT_SERVE_MS (card helper-restart-fresh); before a book
+   *  of ours they are history the book's own reads follow, kept GT_FRESH_MS. */
+  async function geckoBars(e: Entry, tf: Tf, before: number | null, alone = false): Promise<Candle[] | DataAnswer> {
     if (!Object.hasOwn(GT_TF, tf) || deps.gecko === undefined) return [];
     const gecko = deps.gecko;
     const k = `${e.pool.id}:${tf}:${before ?? ""}`;
     const fresh = history.get(k);
-    if (fresh !== undefined && now() - fresh.at < GT_FRESH_MS) return fresh.bars;
+    const newest = alone && before === null;
+    if (fresh !== undefined && now() - fresh.at < (newest ? GT_NEWEST_FRESH_MS : GT_FRESH_MS)) return fresh.bars;
+    const servable = (at: number | undefined) => at !== undefined && (!newest || now() - at <= GT_SERVE_MS);
     const fallback = (fail: DataAnswer): Candle[] | DataAnswer => {
-      if (fresh !== undefined && fresh.bars.length > 0) return fresh.bars;
-      const cut = (kept.get(`${e.pool.id}:${tf}`)?.bars ?? []).filter((c) => before === null || c[0] < before);
+      if (fresh !== undefined && fresh.bars.length > 0 && servable(fresh.at)) return fresh.bars;
+      const held = kept.get(`${e.pool.id}:${tf}`);
+      const cut = (servable(held?.at) ? held!.bars : []).filter((c) => before === null || c[0] < before);
       return cut.length > 0 ? cut : fail;
     };
     const wait = (why = "geckoterminal budget") => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
