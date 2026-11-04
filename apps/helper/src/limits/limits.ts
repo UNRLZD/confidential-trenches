@@ -96,6 +96,9 @@ export function throttleOf(e: unknown, evm = false): number {
  * {"code": -32005, "message": "project ID request rate exceeded"} (docs.infura.io/reference/ethereum/json-rpc-methods,
  * read 2026-11-03 09:16Z). Any other -320xx stays a provider failure. */
 export const EVM_LIMIT_CODE = -32005;
+/** A JSON-RPC error message that names a rate or request limit, whatever its code (mainnet.base.org's "request limit
+ *  reached", Tenderly's "rate limit exceeded"): a throttle, held as EVM_LIMIT_CODE is (data/evm/swaps.ts, lists.ts). */
+export const EVM_LIMIT_MESSAGE = /rate.?limit|too many requests|limit (reached|exceeded)|request limit/i;
 
 /** A read behind a cached answer was throttled (its upstream's 429, the helper's own budget, a paused queue): the
  * cache answers 429 with `retryAfterS` instead of 503 when it has nothing good to serve. */

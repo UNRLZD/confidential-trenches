@@ -554,3 +554,27 @@ test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller ov
   assert.deepEqual([open.filter((a) => a.status === 200).length, Date.now() - t1 < 500], [20, true], "not paced");
   assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), [], "no hold");
 });
+
+test("card helper-rpc-hold-queued: a send waiting for a keyed provider's second is not sent once the provider has asked us to wait in the meantime: it answers 429 with the hold's seconds", async () => {
+  // a keyed Base plan of 100 per 10 s: 10 sends go in a second, the 11th waits for the next; the first answer is a 429
+  // naming 30 s, which arrives while the 11th waits
+  const sent: number[] = [];
+  const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
+    sent.push(Date.now());
+    const body = JSON.parse(String(init.body)) as { id: unknown };
+    if (sent.length === 1) return new Response("{}", { status: 429, headers: { "retry-after": "30" } });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: "0x1" }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const lines: string[] = [];
+  const r = createRpc({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}`, RPC_BUDGET_BASE: "100,16" }, { fetch: fetch as never, log: (l) => lines.push(l) });
+  const blockNumber = (id: number) => JSON.stringify({ jsonrpc: "2.0", id, method: "eth_blockNumber", params: [] });
+  const t0 = Date.now();
+  const all = await Promise.all(Array.from({ length: 11 }, (_, i) => r.handle("base", JSON_T, blockNumber(i + 1), `198.51.100.${i}`)));
+  assert.ok(Date.now() - t0 >= 1_000, "the 11th waited for the provider's next second");
+  assert.equal(sent.length, 10, `${sent.length} sent: the waiting send went out after the provider's 429`);
+  const last = all[10]!;
+  assert.equal(last.status, 429);
+  assert.equal(last.why, "base held");
+  assert.ok(Number(last.headers?.["Retry-After"]) >= 28, `Retry-After ${last.headers?.["Retry-After"]}: the hold's seconds`);
+  assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), ["rpc hold base caller 30 s"]);
+});

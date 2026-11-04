@@ -335,7 +335,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
     const paced = pace(key, methods.length);
     if (paced > PACE_MAX_MS) return throttled(Math.ceil((paced - PACE_MAX_MS) / 1000), undefined, `${key} pace`);
-    if (paced > 0) await new Promise((ok) => setTimeout(ok, paced));
+    if (paced > 0) {
+      await new Promise((ok) => setTimeout(ok, paced));
+      // the hold is read again right before the send: the provider may have asked us to wait while this one waited
+      // for its second (card helper-rpc-hold-queued)
+      const heldNow = budget.heldFor(key);
+      if (heldNow > 0) return throttled(heldNow, undefined, `${key} held`);
+    }
     let r: Response;
     let text: string | undefined;
     const sent = now();
