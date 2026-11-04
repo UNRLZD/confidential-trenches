@@ -176,6 +176,7 @@ test("the target must be on the chain's router list", () => {
   assert.equal(code(() => evmPoolBuildSell("base", req({ target: R.routers[0]! }))), "bad_target");
   assert.equal(code(() => evmPoolBuildSell("base", req({ target: Y }))), "bad_target");
   assert.equal(code(() => evmPoolBuildSell("base", req({ target: "0x2626" }))), "bad_target");
+  assert.equal(code(() => evmPoolBuildSell("base", req({ target: 5 as unknown as string }))), "bad_target"); // not a string
   assert.equal(code(() => evmPoolBuildSell("base", req({ target: B.routers[0]!.toLowerCase() }))), "built");
   assert.equal(code(() => evmPoolBuildSell("robinhood", req({ target: R.routers[0]!, route: v3([X, USDG, R.weth]) }))), "built");
 });
@@ -200,6 +201,7 @@ test("the route sells the token for the chain's WETH, through listed middles onl
   assert.equal(c({ venue: "uniswap-v4", currencyIn: X, hops: [] }, { target: B.poolManager! }), "bad_route");
   assert.equal(c({ venue: "uniswap-v4", tokens: [X, B.weth], fees: [500] }, { target: B.poolManager! }), "bad_route"); // v3's shape, v4's name
   assert.equal(c(null), "bad_route");
+  assert.equal(c({ venue: "uniswap-v2", tokens: [X, B.weth], fees: [500] }), "bad_route"); // a venue the kit does not sell on
   assert.equal(c({ venue: "uniswap-v3", tokens: { length: 2, 0: X, 1: B.weth }, fees: [500] }), "bad_route");
   assert.equal(c(v3([X, B.weth]), { token: B.weth }), "bad_route"); // selling WETH itself
   assert.equal(c(v3([X, B.weth]), { token: "0xF111" }), "bad_route");
@@ -496,6 +498,7 @@ test("planted: a v4 sell through another target, to a wrong pool key, or through
   assert.equal(c(v4(hop(USDC), hop(USDC), hop(NATIVE))), "bad_route");
   assert.equal(c(v4()), "bad_route");
   assert.equal(c(v4(hop(USDC), hop(USDC), hop(USDC), hop(USDC), hop(NATIVE))), "bad_route");
+  assert.equal(c(v4(hop(Y), hop(USDC), hop(Y), hop(USDC), hop(NATIVE))), "bad_route"); // five hops: refused before its middles are read
   assert.equal(c({ venue: "uniswap-v4", hops: "0x" }), "bad_route");
   // each field's bounds
   assert.equal(c(v4(hop(NATIVE, { fee: 0x1000000 }))), "bad_route");
@@ -505,7 +508,9 @@ test("planted: a v4 sell through another target, to a wrong pool key, or through
   assert.equal(c(v4(hop(NATIVE, { tickSpacing: 1 }))), "built");
   assert.equal(c(v4(hop(NATIVE, { tickSpacing: 32767 }))), "built");
   assert.equal(c(v4(hop("0xnot"))), "bad_route");
+  assert.equal(c(v4(hop("0xnot"), hop(NATIVE))), "bad_route"); // a middle that is no address: refused before the list is read
   assert.equal(c(v4(hop(NATIVE, { hooks: "0x12" }))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE, { hooks: 5 as unknown as string }))), "bad_route");
   assert.equal(c(v4(hop(NATIVE, { hookData: "0x00" }))), "bad_route"); // hook data with no hook
   assert.equal(c(v4(hop(NATIVE, { hookData: "1234" }))), "bad_route");
   const listed = { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks };
