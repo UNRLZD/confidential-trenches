@@ -2,6 +2,7 @@ import type { Chain, SignpageClient, SignpageClientSnapshot } from "@blindfill/k
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
 import { poolPriceEnd, statePoolPrice, type PoolPrice, type Slice } from "./model.ts";
+import type { RouteData } from "./route.ts";
 import type { PartCount } from "./States.tsx";
 
 // What the trade box's buy side reads and does. From the kit's public entry: the balance (`state.vault_balance`), the
@@ -54,6 +55,11 @@ export interface TradeKit {
    *  live source reads state.pools[chain].price only, checked against its feed's bound at each call (card
    *  signpage-pool-price, model.ts statePoolPrice). */
   poolPrice: (chain: Chain) => PoolPrice | null;
+  /** Missing kit call (card app-buy-route-strip): what the signing page is to tell the app of a running buy besides its
+   *  stage, by the request's id: the fresh wallet it assigned, the quote's venue and pool address, the amount filled
+   *  read back on chain. The page's `progress` carries a stage and nothing else today, so the live source has none:
+   *  the strip's steps check on the stages, their values stay empty, and none is made up. Returns the unsubscribe. */
+  route?: ((on: (d: RouteData) => void) => () => void) | null;
 }
 
 export interface TradeSource {
