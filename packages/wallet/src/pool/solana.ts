@@ -28,7 +28,8 @@
 //   answer must be exactly that fee, or bind refuses: a fee the helper could pick per request would mark one user. The
 //   base fee is read with a fixed message whose two signers are the pool and the fee payer (M355 (1)): no read names W.
 // - The chunk: the program pays W chunk - fee - tip, and the runtime refuses a W left under rent(0); the backstop needs
-//   2 x fee at most the chunk. bind refuses a chunk where either fails at the fee and the tip cap.
+//   2 x fee at most the chunk. bind refuses a chunk where either fails at the fee and the tip cap. A withdraw (card
+//   signpage-pool-withdraw-form) binds tipCap 0: its tag 2 pays no tip, so none counts in its floor.
 // - No refund note: the release pays W in the same transaction (lib.rs), so refundPrecommitment is not bound.
 // - Epochs of 60 s (the helper's grid, apps/helper pool/fee.ts) and a life of 2E + 90 s + 2 TAKE_SLACK_MS = 240 s: the
 //   kit's send margin SOLANA_POOL_SEND_MARGIN_MS is 90 s (M356 (1)), longer than a blockhash lives (150 blocks, ~60 s),
@@ -482,11 +483,14 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
     sendMarginMs: SOL_SEND_MARGIN_MS,
     now: (signal) => solanaNow(a.rpcs, signal),
     trees: (beforeMs, signal, opts) => sync.trees(beforeMs, signal, opts),
-    async bind({ chunk, wallet, epochStartMs, deadlineMs }, signal) {
+    async bind({ chunk, wallet, epochStartMs, deadlineMs, tipCap = SOL_TIP_CAP }, signal) {
       if (!(wallet.publicKey instanceof Uint8Array) || wallet.publicKey.length !== 32 || wallet.address !== base58.encode(wallet.publicKey))
         throw new Error("wallet: a Solana W is base58 of its ed25519 public key");
       if (wallet.address === pool || wallet.address === feePayer) throw new Error("wallet: W is the pool or the fee payer");
       if (typeof chunk !== "bigint" || chunk <= 0n || chunk > U64) throw new Error("chunk: a u64 above 0");
+      // the two tip caps every user binds, public in the release: the buy's SOL_TIP_CAP, a withdraw's 0 (tag 2 pays no
+      // tip); a cap per request would mark one user
+      if (tipCap !== SOL_TIP_CAP && tipCap !== 0n) throw new Error("tipCap: SOL_TIP_CAP for a buy or 0 for a withdraw");
       if (typeof epochStartMs !== "bigint" || epochStartMs % SOL_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
       const nowMs = await solanaNow(a.rpcs, signal);
       if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + SOL_LIFE_MS || deadlineMs <= nowMs + SOL_SEND_MARGIN_MS)
@@ -497,10 +501,10 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
       const { rent, fee } = await feeOf(epochStartMs, signal);
       if (typeof f.fee !== "string" || f.fee !== fee.toString()) throw new Error(`relayFee: the helper's ${String(f.fee)} is not the epoch's fee ${fee}`);
       if (fee * 10_000n > chunk * MAX_RELAY_FEE_BPS) throw new Error("chunk: under the program's backstop at this fee");
-      if (chunk - fee - SOL_TIP_CAP < solanaRentMin(rent, 0)) throw new Error("chunk: W would end under rent(0) at this fee and the tip cap");
+      if (chunk - fee - tipCap < solanaRentMin(rent, 0)) throw new Error("chunk: W would end under rent(0) at this fee and the tip cap");
       const salt = (a.salt ?? (() => crypto.getRandomValues(new Uint8Array(16))))();
       if (!(salt instanceof Uint8Array) || salt.length !== 16) throw new Error("salt: not 16 bytes");
-      const request: SolanaReleaseRequest = { program, pool, recipient: wallet.address, feePayer, relayFee: fee, relayFeeCap: fee, tipCap: SOL_TIP_CAP, deadlineMs, salt: hex(salt) };
+      const request: SolanaReleaseRequest = { program, pool, recipient: wallet.address, feePayer, relayFee: fee, relayFeeCap: fee, tipCap, deadlineMs, salt: hex(salt) };
       return { context: solanaContextOf(request, scope), feeCap: fee, request };
     },
   };

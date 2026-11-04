@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
+import { HEADER_TIMED, SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
 import { candlesFault, CANDLES_PATH, judge, read, TRADES_PATH, tradesFault, units } from "./index-evm-swaps.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -198,4 +198,35 @@ test("a lists answer that is not a 200 with lists is a BAD line naming the chain
     assert.deepEqual(bad(r), [`BAD GET /v1/market/lists?chain=robinhood answers ${status}${status === 200 ? " with no lists" : ""} (robinhood)`], r.lines.join("\n"));
     assert.deepEqual(asked, ["https://helper.test/v1/market/lists?chain=robinhood"], "nothing read past the lists");
   }
+});
+
+test("card helper-restart-fresh: Robinhood's pool logs are agreed on providers that log their block time: the chain's own RPC, second in SWAP_RPCS since 5f8e5fd, logs blockTimestamp 0x0 (read 2026-11-04 17:4xZ) and never pairs for them (live run 41871356171: 'blocks none to none')", async () => {
+  const rec = A.robinhood_good;
+  const c = rec.chain;
+  const rpcs = SWAP_RPCS.robinhood;
+  assert.ok(HEADER_TIMED.has(rpcs[1]), "the second provider is header-timed");
+  const fetchFn = async (url, init) => {
+    if (!rpcs.includes(url)) {
+      const k = url.endsWith(CANDLES_PATH(rec.coin, "robinhood")) ? "candles" : "trades";
+      return new Response(rec.reads[k].body, { status: rec.reads[k].status, headers: rec.reads[k].headers });
+    }
+    const req = JSON.parse(init.body);
+    const ok = (result) => new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }), { status: 200 });
+    if (req.method === "eth_blockNumber") return ok(hex(c.heads[Math.min(rpcs.indexOf(url), 1)]));
+    if (req.method === "eth_call") return ok(`0x${c.decimals.toString(16).padStart(64, "0")}`);
+    if (req.method === "eth_getTransactionReceipt") return ok(c.receipts[req.params[0]]);
+    if (req.method === "eth_getBlockByNumber") return ok({ timestamp: hex(c.blockTimes[Number.parseInt(req.params[0], 16)]) });
+    if (req.method === "eth_getLogs") {
+      const lo = Number.parseInt(req.params[0].fromBlock, 16);
+      const hi = Number.parseInt(req.params[0].toBlock, 16);
+      const logs = c.poolLogs.logs.filter((l) => Number.parseInt(l.blockNumber, 16) >= lo && Number.parseInt(l.blockNumber, 16) <= hi);
+      return ok(logs.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, blockTimestamp: HEADER_TIMED.has(url) ? "0x0" : hex(l.t) })));
+    }
+    assert.fail(req.method);
+  };
+  const again = await read("https://helper.test", rec.coin, fetchFn, undefined, "robinhood");
+  assert.deepEqual(again.chain.poolLogs, c.poolLogs, "the pool's logs, agreed by two providers that time them");
+  again.readAt = rec.readAt;
+  const r = judge(again);
+  assert.deepEqual(bad(r), []);
 });

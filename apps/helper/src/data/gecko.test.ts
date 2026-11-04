@@ -109,3 +109,25 @@ test("card helper-chart-fresh: the newest data held is a refresh until REFRESH_U
   // past the bars' own 60 s, so a chart read often still refreshes in its lane; under the live check's 10 min
   assert.ok(urgent > CANDLES_FRESH_MS && urgent < 600_000, `REFRESH_URGENT_MS ${urgent}`);
 });
+
+test("card helper-restart-fresh: a swap reads the old helper's warm file twice (at the start and at the handover); its calls count once, the second file's replacing the first's", () => {
+  let t = 1_800_000_000_000;
+  const b = geckoBudget(() => t);
+  // the file the old helper wrote at its last tick, then the one it wrote at its stop: the same calls and one more
+  b.seed([t - 30_000, t - 20_000]);
+  t += 10_000;
+  b.seed([t - 40_000, t - 30_000, t - 5_000]);
+  assert.deepEqual(b.calls(), [t - 40_000, t - 30_000, t - 5_000], "three calls, not five");
+  assert.equal(b.take("pages"), true);
+  assert.equal(b.take("pages"), true, "a page finds the two calls the old helper left");
+});
+
+test("card helper-restart-fresh: the old helper's lists calls keep their lane across a swap, so the new helper's urgent lists stay within LIST_FLOOR and a cold page still finds its two calls", () => {
+  const t = 1_800_000_000_000;
+  const b = geckoBudget(() => t);
+  b.seed([t - 30_000, t - 20_000], "lists"); // the old helper's lists took their floor in the window
+  assert.deepEqual(b.calls("lists"), [t - 30_000, t - 20_000], "written again as lists calls by this helper's warm file");
+  assert.equal(b.take("lists", true), false, "an urgent list waits: the floor is spent by the old helper's lists");
+  assert.equal(b.take("pages"), true);
+  assert.equal(b.take("pages"), true, "a cold page's top pool and its bars");
+});

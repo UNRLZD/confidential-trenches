@@ -8,7 +8,7 @@ import { after, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
-import { base58 } from "@scure/base";
+import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
@@ -452,7 +452,8 @@ test("a state read refuses a dead pending sell record once per page load, never 
   await t.stateRead();
   assert.deepEqual(await w.get("ops", "z1"), { kind: "sell", pool: "sol", sha: "cc", stage: "refused", code: "failed", txs: [], created_ms: 1 });
   const once = opsKeys;
-  assert.equal(once, 1);
+  // once for the dead sells, once for a withdraw's onward send still owed (card signpage-pool-withdraw-form)
+  assert.equal(once, 2);
   await t.stateRead();
   await t.stateRead();
   assert.equal(opsKeys, once, "read once per page load");
@@ -475,4 +476,94 @@ test("helperPoolSend gives the helper's 429 as busy, with its code and its Retry
   assert.deepEqual(await busy(answer(429, '{"error":{"code":"in_flight"}}', { "retry-after": "2" })), { code: "in_flight", ms: 2_000 });
   assert.deepEqual(await busy(answer(429, "slow down")), { code: "throttled", ms: 1_000 });
   assert.match(String(await busy(answer(503, '{"error":{"code":"upstream"}}'))), /HTTP 503/);
+});
+
+test("pool.withdraw (card signpage-pool-withdraw-form): a checked Solana request opens the page's own screen with its id; no screen, or an EVM chain, is refused", async () => {
+  const { w } = await wallet();
+  const opened: [string, string][] = [];
+  const answer = { result: { pending: true as const } };
+  const with_ = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), openWithdraw: (chain, c) => (opened.push([chain, c.id]), answer) }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
+  const ask: Ask = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 };
+  assert.equal(with_.flow(ask, ctx), answer);
+  assert.deepEqual(opened, [["solana", "r1"]]);
+  assert.deepEqual(with_.flow({ ...ask, chain: "base", decimals: 18 }, ctx), { error: "not_allowed" });
+  const refused = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), openWithdraw: () => null }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
+  assert.deepEqual(refused.flow(ask, ctx), { error: "not_allowed" });
+  const none = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
+  assert.deepEqual(none.flow(ask, ctx), { error: "not_allowed" });
+  // the screen's keys are the pin's own: none of them is a destination
+  const keys = with_.withdrawDeps("solana", "r1").keys;
+  assert.equal(keys.pool, solanaPoolOf(SOL_POOLS.devnet!.program).pool);
+  assert.equal(keys.program, SOL_POOLS.devnet!.program);
+  assert.equal(keys.feePayer, SOL_POOLS.devnet!.feePayer);
+  assert.equal(with_.withdrawDeps("base", "r1").handoff, undefined, "no EVM flow on this page yet");
+});
+
+// Review #232b LOW 2: the finish of an owed onward send takes the seed lock per use (a derive, a signature), never
+// across an RPC read, so a sign out never waits on a slow one; a failed finish is tried again only after a wait.
+test("an owed onward send's finish: a sign out never waits on its slow RPC read, and a failed read waits before the next try", async () => {
+  const { w, ns } = await wallet();
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 7));
+  // the owed attempt's note, spent by it: RESERVED with its context, then SPENT
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "7" });
+  const attempt = n.attempt!;
+  n = await ns.move(n.id, "HELD", "RESERVED", { attempt });
+  n = await ns.move(n.id, "RESERVED", "SPENT", {});
+  await w.put("ops", "w1", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 1, pending: { noteId: n.id, attempt, context: "7", to: "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx", last: true, feeCap: "5000" } });
+  let reads = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const rpc = async () => {
+    reads++;
+    await gate;
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, rpc], prover: { vault: signalsProver(), stop: () => {} } });
+  const pass = t.stateRead();
+  for (let i = 0; reads === 0 && i < 2_000; i++) await new Promise((r) => setTimeout(r, 1));
+  assert.ok(reads > 0, "the finish reads the chain");
+  const signOut = navigator.locks.request("ct-wallet/seed", { mode: "exclusive" }, async () => "out");
+  assert.equal(await Promise.race([signOut, new Promise((r) => setTimeout(() => r("waited"), 200))]), "out", "the sign out goes while the finish waits on its RPC");
+  release();
+  await pass;
+  assert.equal(((await w.get("ops", "w1")) as { stage: string }).stage, "in_transit", "still owed");
+  const before = reads;
+  await t.stateRead();
+  assert.equal(reads, before, "not tried again at once");
+});
+
+// Review #232b fold 3, HIGH 1: the page's own withdraw run, its tab closed while the release's read-back is out (the
+// run never answers): the op owes the send from before the release leaves, in_transit, and the reopened page's state
+// read sends it on, W at 0 and To given the amount.
+test("a withdraw whose tab closed during the release's read-back: the reopened page sends the part on, W at 0, To the amount", async () => {
+  const { world, TO, COST } = await import("./pool-withdraw-world.ts");
+  const wd = await world([30_000_000n], { hangReadBack: true });
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    const answer = await wd.host.send(pool, base64.decode(tx));
+    return new Response(JSON.stringify(answer), { status: 200 });
+  }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn };
+  const page = { store: async () => wd.w, seed64: async () => SEED64.slice() };
+  const amount = 5_000_000n;
+  const t1 = testnetPool(page, over);
+  void t1.withdraw({ chain: "solana", to: TO, amount, maxFee: COST }, "op-w");
+  for (let i = 0; wd.releases.length === 0 && i < 1_000; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(wd.releases.length, 1, "the release went out");
+  await new Promise((r) => setTimeout(r, 20));
+  const W = wd.binds[0]!.recipient;
+  const rec = (await wd.w.get("ops", "op-w")) as { stage: string; pending?: unknown };
+  assert.equal(rec.stage, "in_transit", "never proving while a release is out");
+  assert.ok(rec.pending, "the send owed");
+  assert.equal(wd.balance.get(W), amount + 5_000n, "the part on W");
+  // the tab is gone (its run never answers); the page opened again reads its state
+  const t2 = testnetPool(page, { ...over, fetch: undefined });
+  await t2.stateRead();
+  assert.equal(wd.balance.get(W), 0n);
+  assert.equal(wd.balance.get(TO), amount);
+  const after = (await wd.w.get("ops", "op-w")) as { stage: string; pending?: unknown; txs: { hash: string }[] };
+  assert.equal(after.stage, "sent");
+  assert.equal(after.pending, undefined);
+  assert.equal(after.txs.length, 1, "the onward send's tx");
 });

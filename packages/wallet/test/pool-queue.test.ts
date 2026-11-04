@@ -965,3 +965,20 @@ test("NEAR vault: a fee above fee_max or at the chunk, a W not its key's id, a d
   await assert.rejects(nearPool(v).bind({ ...good, deadlineMs: good.deadlineMs + 1n }), /not on the epoch grid/);
   await assert.rejects(nearPool(v).bind({ ...good, epochStartMs: start - 4n * NEAR_EPOCH_MS, deadlineMs: start }), /too close to send/);
 });
+
+// Card signpage-pool-withdraw-form, review #232b MEDIUM 1: a note a withdraw still owes an onward send for is left
+// alone by the queue (its W is every spend's W), read again each pass.
+test("skip: a note the page's withdraw still owes a send for is never proved nor held; once settled, it is", async () => {
+  const v = await vaultWith([usd(10), usd(20)]);
+  const pool = fakePool(v);
+  const ids = (await v.ns.list()).map((n) => n.id);
+  let owed = new Set([ids[1]!]);
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool, provers: provers3(), hardwareConcurrency: 4, skip: async () => owed });
+  open.push(q as ProofQueue<unknown>);
+  await q.refresh();
+  assert.deepEqual(q.ready().map((r) => r.noteId), [ids[0]]);
+  assert.equal((await state(v, ids[1]!)).state, "UNSPENT");
+  owed = new Set();
+  await q.refresh();
+  assert.deepEqual(q.ready().map((r) => r.noteId).sort(), [...ids].sort());
+});

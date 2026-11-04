@@ -23,7 +23,7 @@
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, dec, toRow, type Row } from "./lists.ts";
 import { createOrigins, hintsOf, rpcAccounts, type Hint, type Origin } from "./origin.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 import { QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
 
@@ -342,7 +342,8 @@ const isBars = (v: unknown): v is Candle[] =>
  *  the EVM lists' answers) [design: 4 MB, a few hundred pages and holders and two dozen charts' last bars]. */
 export const HANDOVER_MAX = 4 * 1024 * 1024;
 /** The last good bars handed over are at most this old: bars are history with their read time, so a swap's first loads
- *  are answered from them, dated, rather than going to a GeckoTerminal budget the old helper spent [design: a day]. */
+ *  are answered from them, dated, rather than going to a GeckoTerminal budget the old helper spent [design: a day]; the
+ *  newest range only while they are under GT_SERVE_MS, history before their read at any age (card helper-restart-fresh). */
 export const KEPT_HANDOVER_MS = 86_400_000;
 
 /** A read cached per key: fresh within `freshMs` of our own read; a failed refresh serves the last good one while its
@@ -357,17 +358,21 @@ export const KEPT_HANDOVER_MS = 86_400_000;
  *  for this read, with nothing served meanwhile (card helper-token-page-cold); a joiner that would wait on a read
  *  begun as a refresh waits on it as it is. */
 function cached(freshMs: number | ((key: string) => number), now: () => number, read: (key: string, client?: string, held?: boolean, waits?: boolean) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer; keepHeld?: boolean } = {}) {
+  // what the next process takes over: answers this one would still serve. keepHeld serves a held answer at any age when
+  // a refresh is refused, so it hands over for KEPT_HANDOVER_MS, the rest under STALE_MS (card helper-restart-fresh: a
+  // top pool past its 60 s was dropped at a swap, and a chart's first read there cost two GeckoTerminal calls, not one)
+  const handoverMs = opts.keepHeld === true ? KEPT_HANDOVER_MS : STALE_MS;
   const view = (key: string, a: DataAnswer) => (opts.view === undefined ? a : opts.view(key, a));
   const last = bounded<{ a: DataAnswer; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<DataAnswer>>();
   return {
     size: last.size,
-    /** Its good answers whose data is under STALE_MS old, newest last: what the next process serves (card
+    /** Its good answers whose data is under handoverMs old, newest last: what the next process serves (card
      *  app-console-429). */
     state: (): [string, Kept][] =>
       last
         .entries()
-        .filter(([, v]) => v.a.status === 200 && now() - (v.a.asOfMs ?? v.at) <= STALE_MS)
+        .filter(([, v]) => v.a.status === 200 && now() - (v.a.asOfMs ?? v.at) <= handoverMs)
         .map(([k, v]) => [k, { at: v.at, body: v.a.body, asOfMs: v.a.asOfMs ?? v.at, ...(v.a.src === undefined ? {} : { src: v.a.src }) }]),
     /** A previous process's answers: each kept when its key passes `key` and it is newer than what this one holds. */
     restore(entries: unknown, key: (k: string) => boolean, body: (b: string) => boolean): void {
@@ -375,7 +380,7 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
       const t = now();
       for (const e of entries.slice(-CACHE_MAX)) {
         if (!Array.isArray(e) || e.length !== 2 || typeof e[0] !== "string" || !key(e[0])) continue;
-        const v = keptOf(e[1], t, STALE_MS, body);
+        const v = keptOf(e[1], t, handoverMs, body);
         if (v === null || (last.get(e[0])?.at ?? -Infinity) >= v.at) continue;
         last.set(e[0], { a: { status: 200, body: v.body, asOfMs: v.asOfMs, ...(v.src === undefined ? {} : { src: v.src }) }, at: v.at });
       }
@@ -701,8 +706,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     { keepHeld: true },
   );
 
-  /** The last good GeckoTerminal bars per mint and tf: served when a read is throttled or fails (an empty chart is never
-   *  the answer for a token with known history). */
+  /** The last good GeckoTerminal bars per mint and tf: served when a read is throttled or fails, while under GT_SERVE_MS
+   *  or for history before their read (an empty chart is never the answer for a token with known history, and an old one
+   *  never a 200: the read's 429 or 503, card helper-restart-fresh). */
   const kept = bounded<{ bars: Candle[]; at: number }>(CACHE_MAX);
   // the newest range (no `to`) moves with every trade: CANDLES_FRESH_MS; a range before a time is history: an hour
   // a re-read of bars held is a refresh: refused, candles() serves the kept bars, dated by their read. The newest range
@@ -790,9 +796,12 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         const had = kept.get(k);
         if (got.length > 0 && (had === undefined || got.at(-1)![0] >= had.bars.at(-1)![0])) kept.set(k, { bars: got, at: a.asOfMs! });
       } else if (a.status === 429 || a.status === 503) {
-        // GeckoTerminal throttled or down: its last good bars, cut at `to`, read time theirs; nothing kept keeps the error
+        // GeckoTerminal throttled or down: its last good bars, cut at `to`, read time theirs, while they are within
+        // GT_SERVE_MS or the range is history before their read; past it the 429 or 503, never a 200 with old bars (card
+        // helper-restart-fresh); nothing kept keeps the error
         const had = kept.get(k);
-        const cut = had === undefined ? [] : had.bars.filter((c) => to === null || c[0] < to);
+        const servable = had !== undefined && ((to !== null && to * 1000 <= had.at) || now() - had.at <= GT_SERVE_MS);
+        const cut = !servable ? [] : had.bars.filter((c) => to === null || c[0] < to);
         if (cut.length > 0) a = { status: 200, body: JSON.stringify(cut), src: "geckoterminal", asOfMs: had!.at };
       }
       if (a.status !== 200) return a;

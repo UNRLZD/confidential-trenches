@@ -73,6 +73,7 @@ import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
+import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
 import { releaseTradeDeps, SOLANA_PROVIDER_A, TRADE_HELPER, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
@@ -85,7 +86,7 @@ import { pageHelperRpc, pageRpc } from "./page-rpc.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
-  | "choose" | "existing" | "signout" | "withdraw";
+  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw";
 
 // DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801),
 // "invalid-code" (CN-41, signed, 09-design-brief.md:2335) and the six the owner picked, each with its pick on its line.
@@ -121,7 +122,9 @@ if (framed) root.dataset.framed = "true";
 let shell: Shell | null = null;
 // the testnet build, top-level: the devnet pool's deposit flow, its settling and the next buy's proofs
 // (src/pool-testnet.ts); the store and the seed are opened when a run needs them
-const testnet = POOL_TESTNET && !framed ? testnetPool({ store: () => open(), seed64: () => openSeed64() }) : null;
+const testnet = POOL_TESTNET && !framed ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }) : null;
+// pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
+let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 if (framed) document.body.append(root);
 else {
   // the shell's own channel: it hears this document's store and other tabs' (a sign-in, Saved, a sign out)
@@ -231,6 +234,21 @@ function decide(kind: AccountKind, way: unknown): OpenAnswer {
       }),
   };
 }
+// pool.withdraw (card signpage-pool-withdraw-form), top-level only and only with a seed stored, as withdraw.open: the
+// answer goes first, then the screen where the user types To and the amount, never passed in by the app; the run's
+// stages go to the op under the request's id.
+function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: true }; then: () => void } | null {
+  if (framed || !testnet || !takes("withdraw.open", root.dataset.signin, busy)) return null;
+  return {
+    result: { pending: true },
+    then: () =>
+      void run(async () => {
+        poolWithdraw = { chain, opId };
+        show("pool-withdraw");
+        openLayer();
+      }),
+  };
+}
 // The layer opens, and the activation guard restarts its 500 ms: a click lined up before cannot act on what it shows.
 function openLayer(): void {
   shell?.open();
@@ -303,7 +321,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   }
   const parts: HTMLElement[] = [];
   if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
-    && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw") {
+    && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw") {
     const p = document.createElement("p");
     p.textContent = WORDS[state];
     parts.push(p);
@@ -330,6 +348,13 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     // the withdraw form (src/withdraw/form.ts), top-level only: the address and the amount are typed here, never
     // passed in by the app (W:927)
     parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step)));
+  } else if (!framed && state === "pool-withdraw" && testnet && poolWithdraw) {
+    // the pool withdraw screen: To and the amount typed here; the press starts the run and the layer closes, its
+    // stages read back in state.ops
+    const { chain, opId } = poolWithdraw;
+    const deps = testnet.withdrawDeps(chain, opId);
+    const handoff = deps.handoff;
+    parts.push(drawPoolWithdrawForm(document, handoff ? { ...deps, handoff: async (r) => (void handoff(r), (poolWithdraw = null), await cancel()) } : deps, button, (step) => void run(step)));
   } else if (!framed && state === "existing") {
     // I already have one: Face ID (the passkey with PRF) or the typed 12 words, then restore (W:50); never a new seed
     if (typeof PublicKeyCredential !== "undefined") parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));

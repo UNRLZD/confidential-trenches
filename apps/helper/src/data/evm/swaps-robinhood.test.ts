@@ -294,6 +294,37 @@ test("card helper-chart-fresh: a listed token with no pool of ours, its GeckoTer
   s.stop();
 });
 
+test("card helper-restart-fresh: a listed token with no pool of ours is served GeckoTerminal's newest bars only within GT_SERVE_MS: 16 min on they are read again, and on a spent budget the read answers 429 with its wait, never a 200 with the old bars", async () => {
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget, GT_LIMIT_PER_MIN } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const start = Date.parse("2026-11-02T13:53:00Z");
+  const clock = { t: start };
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: `0x${"ab".repeat(32)}` } }] }), { status: 200 });
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const token = `0x${"34".repeat(20)}`;
+  const budget = geckoBudget(() => clock.t);
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: budget });
+  assert.equal(JSON.parse((await s.candles(token, "1m", null, 60)).body).as_of_ms, start, "the first read, dated now");
+  clock.t = start + 16 * 60_000; // under GeckoTerminal's hour, past the route's freshness bound
+  const again = await s.candles(token, "1m", null, 60);
+  assert.equal(again.status, 200, again.body);
+  assert.equal(JSON.parse(again.body).as_of_ms, clock.t, "read again, not served from the first read 16 min back");
+  clock.t += 16 * 60_000;
+  for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(budget.take("pages"), true);
+  const spent = await s.candles(token, "1m", null, 60);
+  assert.notEqual(spent.status, 200, `never a 200 dated ${Math.round((clock.t - (spent.asOfMs ?? clock.t)) / 60_000)} min back`);
+  assert.equal(spent.status, 429, spent.body);
+  assert.ok((spent.retryAfterS ?? 0) >= 1, "with the wait to the next call");
+  s.stop();
+});
+
 test("card helper-chart-fresh: GeckoTerminal history before a time held past its hour stays a refresh: with the window at the refresh lane's room it is served as held, no call made, and a cold token's first read finds its calls", async () => {
   const { readFileSync } = await import("node:fs");
   const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));

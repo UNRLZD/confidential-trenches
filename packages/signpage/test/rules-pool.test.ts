@@ -41,6 +41,8 @@ import {
   checkSolanaDeposit,
   checkSolanaSell,
   checkSolanaWithdraw,
+  checkSolanaOnwardSend,
+  type SolanaOnwardReads,
   drawPool,
   SOLANA_POOL_SELL_RESERVE_MAX,
   evmWithdrawDigest,
@@ -243,16 +245,15 @@ const send = (to = TO, v = release.withdrawnValue - release.relayFee, from = SOL
 const wdAsk: PoolAsk = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 };
 const wdWire = (ixs: Ixx[], signers = [SOL_FEE_PAYER, SOL_W]) => wire(signers[0]!, ixs, signers);
 
-test("Solana withdraw: the device's release to W through the pinned pool, then one send to the typed address, passes and draws", () => {
-  const d = checkSolanaWithdraw(wdWire([cuLimit, relIx(), send()]), wdAsk, solCtx(), release, TO, SOL_READS);
-  assert.deepEqual(d, { chain: "solana", op: "pool.withdraw", token: null, amount: release.withdrawnValue - release.relayFee, feeCap: release.relayFeeCap, pool: POOL, to: TO, decimals: 9, back: null });
-  // the page shows where the money lands, under the withdraw form's own label
+test("Solana withdraw: the device's release to W through the pinned pool, alone, passes and draws W as where it lands", () => {
+  const d = checkSolanaWithdraw(wdWire([cuLimit, relIx()]), wdAsk, solCtx(), release, SOL_READS);
+  assert.deepEqual(d, { chain: "solana", op: "pool.withdraw", token: null, amount: release.withdrawnValue - release.relayFee, feeCap: release.relayFeeCap, pool: POOL, to: SOL_W, decimals: 9, back: null });
   assert.deepEqual(drawPool(d).map((l) => l[0]), ["Chain", "Amount", "To", "Max fee", "Pool"]);
-  assert.deepEqual(drawPool(d)[2], ["To", TO]);
-  assert.throws(() => checkSolanaWithdraw(wdWire([relIx()]), wdAsk, solCtx(), release, TO, SOL_READS), refusedAs("instructions"), "the send is the withdraw");
+  // review #232 HIGH 1: a send after the release would let W's holder fail the fee payer's transaction at will
+  assert.throws(() => checkSolanaWithdraw(wdWire([cuLimit, relIx(), send()]), wdAsk, solCtx(), release, SOL_READS), refusedAs("instructions"), "the release is alone");
 });
 
-test("Solana withdraw: another pool program, release, recipient, fee payer, a fee cap over the device's, a past deadline or a send elsewhere is refused", () => {
+test("Solana withdraw: another pool program, release, recipient, fee payer, a fee cap over the device's, a past deadline or anything after the release is refused", () => {
   const other = { ...release, withdrawnValue: release.withdrawnValue - 1n };
   for (const [w, ctx, rule] of [
     [wdWire([relIx(release, SOL_W, SOL_FEE_PAYER, key(43))]), solCtx(), "program"],
@@ -261,16 +262,67 @@ test("Solana withdraw: another pool program, release, recipient, fee payer, a fe
     [wdWire([relIx(release, SOL_W, key(51))], [key(51), SOL_W]), solCtx(), "signers"],
     [wdWire([relIx()]), solCtx({ feeCap: release.relayFeeCap - 1n }), "fee_cap_over_device_cap"],
     [wdWire([relIx()]), solCtx({ nowMs: release.deadlineMs }), "deadline_past"],
-    [wdWire([relIx(), send(key(78))]), solCtx(), "transfer_to"],
-    [wdWire([relIx(), send(TO, release.withdrawnValue)]), solCtx(), "transfer_amount"],
-    [wdWire([relIx(), send(TO, 1n)]), solCtx(), "transfer_amount"],
-    [wdWire([relIx(), send(TO, release.withdrawnValue - release.relayFee - 1n)]), solCtx(), "transfer_amount"],
+    [wdWire([relIx(), send(key(78))]), solCtx(), "instructions"],
     [wdWire([relIx(), send(), send()]), solCtx(), "instructions"],
     [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 0 ? { ...x, key: key(48) } : x)) }]), solCtx(), "release_accounts"],
     [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 6 ? { ...x, key: solanaPoolPage(PROGRAM, 0, 2_000) } : x)) }]), solCtx(), "release_accounts"],
   ] as const) {
-    assert.throws(() => checkSolanaWithdraw(w, wdAsk, ctx, release, TO, SOL_READS), refusedAs(rule), rule);
+    assert.throws(() => checkSolanaWithdraw(w, wdAsk, ctx, release, SOL_READS), refusedAs(rule), rule);
   }
+});
+
+// ---------- Solana withdraw: W's own send onward ----------
+
+const ON_BAL = 9_000_000n;
+const ON_FEE = 5_000n;
+const onReads = (o: Partial<SolanaOnwardReads> = {}): SolanaOnwardReads => ({
+  blockhash: BLOCKHASH, balance: [ON_BAL, ON_BAL], fee: [ON_FEE, ON_FEE], toExecutable: [false, false],
+  releaseAccounts: relIx().accounts.map((a) => a.key), ...o,
+});
+const onWire = (ixs: Ixx[] = [send(TO, ON_BAL - ON_FEE)], signers = [SOL_W], bh = BLOCKHASH) => wire(signers[0]!, ixs, signers, bh);
+
+test("Solana withdraw onward: W's one transfer of all it holds less its own fee to the typed address passes and draws", () => {
+  const d = checkSolanaOnwardSend(onWire(), wdAsk, solCtx(), TO, onReads());
+  assert.deepEqual(d, { chain: "solana", op: "pool.withdraw", token: null, amount: ON_BAL - ON_FEE, feeCap: ON_FEE, pool: POOL, to: TO, decimals: 9, back: null });
+  assert.deepEqual(drawPool(d)[2], ["To", TO]);
+});
+
+test("Solana withdraw onward: a fee payer of ours, a second signer, a compute budget, a send elsewhere, dust left on W, more than W holds or a stale blockhash is refused", () => {
+  for (const [w, rule] of [
+    [onWire([send(TO, ON_BAL - ON_FEE)], [SOL_FEE_PAYER, SOL_W]), "signers"],
+    [onWire([send(TO, ON_BAL - ON_FEE), send(TO, 1n, key(52))], [SOL_W, key(52)]), "signers"],
+    [onWire([cuLimit, send(TO, ON_BAL - ON_FEE)]), "instructions"],
+    [onWire([send(TO, ON_BAL - ON_FEE - 1n), send(TO, 1n)]), "instructions"],
+    [onWire([send(key(78), ON_BAL - ON_FEE)]), "transfer_to"],
+    [onWire([send(TO, ON_BAL - ON_FEE - 1n)]), "transfer_amount"],
+    [onWire([send(TO, ON_BAL - ON_FEE + 1n)]), "transfer_amount"],
+    [onWire([send(TO, ON_BAL)]), "transfer_amount"],
+    [onWire([{ ...send(TO, ON_BAL - ON_FEE), program: key(44) }]), "transfer"],
+    // a System instruction of the same size that is not a transfer (tag 3 here)
+    [onWire([{ ...send(TO, ON_BAL - ON_FEE), data: Uint8Array.of(3, 0, 0, 0, ...u64(ON_BAL - ON_FEE)) }]), "transfer"],
+    [onWire([send(TO, ON_BAL - ON_FEE)], [SOL_W], key(8)), "blockhash"],
+  ] as const) {
+    assert.throws(() => checkSolanaOnwardSend(w, wdAsk, solCtx(), TO, onReads()), refusedAs(rule), rule);
+  }
+  // W holding exactly its fee sends nothing: refused, never a 0 transfer
+  assert.throws(() => checkSolanaOnwardSend(onWire([send(TO, 0n)]), wdAsk, solCtx(), TO, onReads({ balance: [ON_FEE, ON_FEE] })), refusedAs("transfer_amount"));
+});
+
+test("Solana withdraw onward: To that is W, the pool, its program, the fee payer, a key the runtime keeps read-only, an account of the release or executable on either RPC is refused", () => {
+  const rel = relIx().accounts.map((a) => a.key);
+  for (const to of [SOL_W, POOL, PROGRAM, SOL_FEE_PAYER, SOLANA_SYSTEM_PROGRAM, "SysvarC1ock11111111111111111111111111111111", "SysvarRent111111111111111111111111111111111", "Vote111111111111111111111111111111111111111", "Stake11111111111111111111111111111111111111", rel[3]!, rel[4]!, rel[5]!, rel[6]!]) {
+    assert.throws(() => checkSolanaOnwardSend(onWire([send(to, ON_BAL - ON_FEE)]), wdAsk, solCtx(), to, onReads()), refusedAs("to"), to);
+  }
+  assert.throws(() => checkSolanaOnwardSend(onWire(), wdAsk, solCtx(), "not a key", onReads()), refusedAs("to"));
+  for (const toExecutable of [[true, false], [false, true], [true, true]] as const) {
+    assert.throws(() => checkSolanaOnwardSend(onWire(), wdAsk, solCtx(), TO, onReads({ toExecutable })), refusedAs("to"));
+  }
+});
+
+test("Solana withdraw onward: reads the two RPCs disagree on are refused, and a buy kind is refused", () => {
+  assert.throws(() => checkSolanaOnwardSend(onWire(), wdAsk, solCtx(), TO, onReads({ balance: [ON_BAL, ON_BAL + 1n] })), refusedAs("reads"));
+  assert.throws(() => checkSolanaOnwardSend(onWire(), wdAsk, solCtx(), TO, onReads({ fee: [ON_FEE, ON_FEE - 1n] })), refusedAs("reads"));
+  assert.throws(() => checkSolanaOnwardSend(onWire(), { ...wdAsk, kind: "pool.buy" }, solCtx(), TO, onReads()), refusedAs("kind"));
 });
 
 // ---------- Solana buy (tag 3) ----------

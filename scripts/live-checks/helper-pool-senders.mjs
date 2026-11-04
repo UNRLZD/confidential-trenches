@@ -5,7 +5,8 @@
 // that pool and fee payer with a throwaway W key made here, each W-signed and good but for one field:
 //   - "changed": a tag 2 release at the published fee, then one byte of the relay fee changed after W signed;
 //   - "fee_off": the release at the published fee plus one step;
-//   - "extra_instruction": the release, then a transfer out of the fee payer;
+//   - "extra_instruction": the release, then an instruction of a throwaway program (a helper takes after a tag 2 only one
+//     System Transfer from W, card signpage-pool-withdraw-form; a transfer out of the fee payer is fee_payer_named);
 //   - "fee_payer_named": a tag 3 whose inner instruction names the fee payer (the pool instruction's account 2);
 //   - "fee_payer_account": the release naming the fee payer as another pool account (its spent mark) too;
 //   - "fee_below_cost": the release with a priority fee of exactly one lamport over the kit's budget for the fee
@@ -174,7 +175,7 @@ const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
  * A v0 transaction the fee payer pays and W signs: one tag 2 (or tag 3) release into `program` at `relayFee`, after a
  * compute unit limit, before nothing; its accounts the pool, W, the fee payer and throwaway keys (it is refused before
  * the program ever reads them). Slot 0 empty. `kind` plants one fault: "changed" (a relay fee byte changed after W
- * signed), "extra_instruction" (a transfer out of the fee payer after the release), "fee_payer_named" (tag 3, its inner
+ * signed), "extra_instruction" (a throwaway program's instruction after the release), "fee_payer_named" (tag 3, its inner
  * instruction names account 2), "fee_payer_account" (the fee payer as the spent mark too), "fee_below_cost" (a priority
  * fee of `budget` + 1 lamports: 1,000,000 CU at budget + 1 micro-lamports a CU), "no_cu_limit" (a compute unit price
  * and no limit), "inner_program" (tag 3, its inner instruction invokes a throwaway program), "deadline_near" (a
@@ -215,7 +216,7 @@ export function plant({ program, pool, feePayer, relayFee, budget = 0n, kind = "
     ...(kind === "fee_below_cost" ? [ix(10, [], Buffer.concat([Buffer.from([3]), u64(budget + 1n)]))] : []), // priority = price x 1,000,000 / 10^6
     ...(kind === "no_cu_limit" ? [ix(10, [], Buffer.concat([Buffer.from([3]), u64(1_000n)]))] : []),
     ix(9, accounts, data),
-    ...(kind === "extra_instruction" ? [ix(8, [0, 3], transfer)] : []),
+    ...(kind === "extra_instruction" ? [ix(11, [1, 3], transfer)] : []),
   ];
   const message = Buffer.concat([
     Buffer.from([0x80, 2, 0, 6, keys.length]),

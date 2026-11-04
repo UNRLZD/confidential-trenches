@@ -44,7 +44,7 @@ import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoo
 import { clientOf, clientWindow, refusalLog, throttled, throttleOf } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
-import { readWarm, writeWarm, type Warm } from "./data/warm.ts";
+import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
 import { TICK_MS } from "./data/evm/lists.ts";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
@@ -770,16 +770,16 @@ if (import.meta.main) {
     // calls from the file it wrote at its stop. With no file, a replaced helper may have spent the window: none for one.
     const warm = readWarm(storeDir, Date.now());
     if (warm !== null) {
-      gecko.seed(warm.gecko);
+      seedGecko(gecko, warm);
       const whole = SERVED_EVM.map((c) => evmLists[c]!.restore(warm.evm[c])).every(Boolean);
       // held only when the file gave every list: a list it lacks is read now, inside the seeded budget
       if (senders.peer && whole) {
         gecko.hold();
-        void senders.held.then(() => (gecko.seed(readWarm(storeDir, Date.now())?.gecko ?? []), gecko.release()));
+        void senders.held.then(() => (seedGecko(gecko, readWarm(storeDir, Date.now())), gecko.release()));
       }
     } else if (senders.peer) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => Date.now()));
     let solanaState = (): unknown => undefined;
-    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState() }));
+    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), geckoLists: gecko.calls("lists"), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState() }));
     // card helper-solana-failover: every Solana slot's state, for /v1/health
     const slots = new Map<SlotName, Slot>([["rpc", rpc.slot]]);
     const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko, slots);
