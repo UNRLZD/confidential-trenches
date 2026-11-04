@@ -14,6 +14,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { STALE_MS } from "./evm/lists.ts";
+import type { GeckoBudget } from "./gecko.ts";
 import { HANDOVER_MAX } from "./solana/token.ts";
 
 export const WARM_DIR = "market";
@@ -22,8 +23,12 @@ export const WARM_FILE = "warm.json";
  *  (HANDOVER_MAX), and the rest. */
 export const WARM_MAX = 16 * 1024 * 1024 + HANDOVER_MAX;
 
-/** `solana`: the token page's answers (solana/token.ts state), checked entry by entry by its restore. */
-export type Warm = { at: number; gecko: number[]; evm: Record<string, unknown>; solana?: unknown };
+/** `solana`: the token page's answers (solana/token.ts state), checked entry by entry by its restore. `geckoLists`: the
+ *  times among `gecko` of the lists lane's calls, so the next helper's lists count them in their LIST_FLOOR (card
+ *  helper-restart-fresh); a file without it (a helper before that card) seeds every call with no lane. */
+export type Warm = { at: number; gecko: number[]; geckoLists?: number[]; evm: Record<string, unknown>; solana?: unknown };
+
+const times = (v: unknown): number[] => (Array.isArray(v) ? v.filter((t): t is number => typeof t === "number" && Number.isFinite(t)).slice(-64) : []);
 
 /** The warm file under `storeDir`, or null when there is none, it does not parse, or it is older than STALE_MS. */
 export function readWarm(storeDir: string, now: number): Warm | null {
@@ -43,9 +48,22 @@ export function readWarm(storeDir: string, now: number): Warm | null {
   }
   const w = o as Partial<Warm> | null;
   if (typeof w !== "object" || w === null || typeof w.at !== "number" || !Number.isFinite(w.at) || w.at > now || now - w.at >= STALE_MS) return null;
-  const gecko = Array.isArray(w.gecko) ? w.gecko.filter((t): t is number => typeof t === "number" && Number.isFinite(t)).slice(-64) : [];
+  const gecko = times(w.gecko);
   const evm = typeof w.evm === "object" && w.evm !== null && !Array.isArray(w.evm) ? (w.evm as Record<string, unknown>) : {};
-  return { at: w.at, gecko, evm, ...(w.solana === undefined ? {} : { solana: w.solana }) };
+  return { at: w.at, gecko, ...(w.geckoLists === undefined ? {} : { geckoLists: times(w.geckoLists) }), evm, ...(w.solana === undefined ? {} : { solana: w.solana }) };
+}
+
+/** Seeds `b` with a warm file's GeckoTerminal calls: its lists calls in the lists lane, the rest with no lane. A seed
+ *  replaces the one before it (gecko.ts seed), so the file read at the start and again at the handover counts once. */
+export function seedGecko(b: GeckoBudget, w: Warm | null): void {
+  const lists = w?.geckoLists ?? [];
+  const rest = [...(w?.gecko ?? [])];
+  for (const t of lists) {
+    const i = rest.indexOf(t);
+    if (i !== -1) rest.splice(i, 1);
+  }
+  b.seed(rest, "seed");
+  b.seed(lists, "lists");
 }
 
 /** Writes the warm file whole: a temp file, then one rename. A failure is the caller's to ignore. */

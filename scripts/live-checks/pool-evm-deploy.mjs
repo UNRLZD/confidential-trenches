@@ -24,6 +24,7 @@
 // With no --deployment it checks every chain's record present (pool-evm-deploy.<chain>.json). --rpc applies to a
 // single record. --record writes every RPC answer read to <file>, for the test's replay. --write-record, on PASS,
 // writes the run record scripts/live-checks/pool-evm-deploy.md (Money path: yes, one Tx line per transaction).
+// Runs: once, a contract deploy's read-back (the EVM pools on two testnets, no admin); no host deploy changes it
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -40,9 +41,10 @@ export const deploymentFile = (chain) => path.join(HERE, `pool-evm-deploy.${chai
  * that exact address to it (a contract deployed before the build moved on, e.g. the v1 SellDelegate), else the current
  * build. Never either one: each address has exactly one build. */
 export function pinnedBuild(chain, name, address) {
-  const f = BUILD.frozen?.[name];
-  const at = f?.at?.[chain];
-  return at && at.toLowerCase() === String(address ?? "").toLowerCase() ? f : BUILD.contracts[name];
+  const a = String(address ?? "").toLowerCase();
+  // each frozen entry names its contract (`contract`, else its key): the v1 SellDelegate, then the evm-sell-v4 one
+  const f = Object.entries(BUILD.frozen ?? {}).find(([k, b]) => (b.contract ?? k) === name && b.at?.[chain]?.toLowerCase() === a);
+  return f ? f[1] : BUILD.contracts[name];
 }
 
 // @noble/hashes from the helper's own dependencies (apps/ is outside Blindfill, so this check reaches nothing of the
@@ -190,8 +192,9 @@ export function gettersOf(d) {
     ],
     UniswapV4Adapter: [["POOL_MANAGER()", addrWord(chain.poolManager.address)], ["WETH()", addrWord(chain.weth.address)]],
     UniswapV3Adapter: [["ROUTER()", addrWord(chain.router?.address ?? "0x")]],
-    // the v1 delegate (frozen in the build file) has no POOL_MANAGER; the current one holds the chain's PoolManager
-    SellDelegate: [["WETH()", addrWord(chain.weth.address)], ...(pinnedBuild(d.chain, "SellDelegate", at("SellDelegate")) === BUILD.contracts.SellDelegate ? [["POOL_MANAGER()", addrWord(chain.poolManager.address)]] : [])],
+    // the v1 delegate (frozen in the build file) has one immutable and no POOL_MANAGER; every later one holds the
+    // chain's PoolManager too
+    SellDelegate: [["WETH()", addrWord(chain.weth.address)], ...(pinnedBuild(d.chain, "SellDelegate", at("SellDelegate")).immutables.length === 2 ? [["POOL_MANAGER()", addrWord(chain.poolManager.address)]] : [])],
   };
 }
 

@@ -12,7 +12,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { handler } from "../../server.ts";
 import { refusalLog } from "../../limits/limits.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN } from "../gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, GT_SERVE_MS, PAGE_RESERVE, REFRESH_SLOT, REFRESH_URGENT_MS } from "../gecko.ts";
 import { pumpCurveAddress } from "./lists.ts";
 import { createSolanaToken, TOKEN_2022_PROGRAM } from "./token.ts";
 
@@ -195,9 +195,12 @@ test("under a spent budget a held token's refresh yields to a cold token's first
   const first = await tok.candles(PUMP, "1m", null, 24);
   assert.equal(first.status, 200);
   const readAt = first.asOfMs;
-  // 11 minutes on: PUMP's bars (60 s) and top pool (10 min) are both past fresh; the lists take two calls of the window
-  t += 11 * 60_000;
-  assert.deepEqual([budget.take("lists"), budget.take("lists")], [true, true]);
+  // 3 minutes on: PUMP's bars are past their 60 s, still under REFRESH_URGENT_MS (../gecko.ts; past it the re-read is a
+  // page read, card helper-chart-fresh, gecko-share.test.ts); the lists and one other held read keep the window at the refresh lane's room
+  t += 3 * 60_000;
+  assert.ok(t - readAt! < REFRESH_URGENT_MS);
+  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE - REFRESH_SLOT; i++) assert.equal(budget.take("lists"), true);
+  assert.equal(budget.take("refresh"), true, "and one other held read: the window at the refresh lane's room");
   // PUMP's page is open and re-read first, then a token nobody holds is opened
   const held = await tok.candles(PUMP, "1m", null, 24);
   const cold = await tok.candles(COLD, "1m", null, 24);
@@ -207,7 +210,7 @@ test("under a spent budget a held token's refresh yields to a cold token's first
   assert.equal(JSON.parse(held.body).as_of_ms, readAt);
 });
 
-test("the last good bars are handed over across a swap for a day, not an hour", async () => {
+test("the last good bars are handed over across a swap for a day, not an hour: history before their read is served from them on a spent budget", async () => {
   let t = NOW;
   const now = () => t;
   const gt = gecko();
@@ -219,6 +222,90 @@ test("the last good bars are handed over across a swap for a day, not an hour", 
   for (let i = 0; i < GT_LIMIT_PER_MIN; i++) spent.take("pages");
   const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: spent, holdersRpc: chain(() => false) });
   next.restore(st);
-  const a = await next.candles(PUMP, "1m", null, 24);
+  const before = Math.floor(NOW / 1000) - 600; // bars before the old helper's read: history that never changes
+  const a = await next.candles(PUMP, "1m", before, 24);
   assert.deepEqual([a.status, a.asOfMs], [200, NOW], "served from the handover, dated by its read");
+});
+
+test("card helper-restart-fresh: the newest bars kept over a swap past GT_SERVE_MS are never served: on a spent budget the first read answers 429 with its wait (live run 41871356171 at 6832227: PUMP's 1h bars from 16:33:56Z served as a 200 at 16:50:11Z)", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
+  const st = JSON.parse(JSON.stringify(old.state()));
+  t += 16 * 60_000 + 15_000; // the old helper last read PUMP's chart 16 min before the swap (the fixture's bars are minute bars)
+  const spent = geckoBudget(now);
+  for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(spent.take("pages"), true);
+  const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: spent, holdersRpc: chain(() => false) });
+  next.restore(st);
+  const a = await next.candles(PUMP, "1m", null, 24);
+  assert.notEqual(a.status, 200, `never a 200 with bars ${Math.round((t - (a.asOfMs ?? t)) / 60_000)} min old`);
+  assert.equal(a.status, 429, a.body);
+  assert.equal(JSON.parse(a.body).error.code, "rate_limited");
+  assert.ok((a.retryAfterS ?? 0) >= 1, "with the wait to the next call");
+  // inside the bound the kept bars still serve, dated: a swap's first loads 5 min after the old helper's read
+  t = NOW + GT_SERVE_MS - 1_000;
+  const spent2 = geckoBudget(now);
+  for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(spent2.take("pages"), true);
+  const near = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: spent2, holdersRpc: chain(() => false) });
+  near.restore(st);
+  const b = await near.candles(PUMP, "1m", null, 24);
+  assert.deepEqual([b.status, b.asOfMs], [200, NOW], "inside GT_SERVE_MS: the handed-over bars, dated by their read");
+});
+
+test("card helper-restart-fresh: with a call free, the newest bars kept over a swap past GT_SERVE_MS are read again before they are served", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
+  const st = JSON.parse(JSON.stringify(old.state()));
+  t += 16 * 60_000 + 15_000;
+  const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  next.restore(st);
+  const a = await next.candles(PUMP, "1m", null, 24);
+  assert.deepEqual([a.status, a.asOfMs], [200, t], "read now, not the old helper's bars");
+});
+
+test("card helper-restart-fresh: the top pools the old helper would still serve are handed over, so a chart read straight after a swap costs one GeckoTerminal call, not two", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
+  t += 16 * 60_000 + 15_000; // past the pool's 10 minutes: the old helper re-reads it as a refresh and serves it held when refused
+  const st = JSON.parse(JSON.stringify(old.state()));
+  assert.equal(st.pools.length, 1, "PUMP's top pool is handed over");
+  const one = geckoBudget(now);
+  for (let i = 0; i < GT_LIMIT_PER_MIN - 1; i++) assert.equal(one.take("pages"), true); // one call left in the window
+  const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: one, holdersRpc: chain(() => false) });
+  next.restore(st);
+  const n = gt.urls.length;
+  const a = await next.candles(PUMP, "1m", null, 24);
+  assert.deepEqual([a.status, a.asOfMs], [200, t], `read now with the window's last call (${a.body.slice(0, 80)})`);
+  assert.deepEqual(gt.urls.slice(n).map((u) => (u.includes("/ohlcv/") ? "ohlcv" : "pool")), ["ohlcv"], "the bars alone: the pool came over");
+});
+
+test("card helper-chart-fresh: history before a time held past its hour stays a refresh, whatever its age: with the window at the refresh lane's room it is served as held and a cold token's first read finds its calls", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const budget = geckoBudget(now);
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: budget, holdersRpc: chain(() => false) });
+  const COLD = "Q1vecEMQEgDyrw1txmBgFwUrkeQurqkEe1bGMzFpump";
+  const before = Math.floor(NOW / 1000) - 600; // the minute bars before our first, ten minutes back
+  const first = await tok.candles(PUMP, "1m", before, 500);
+  assert.equal(first.status, 200);
+  assert.ok(JSON.parse(first.body).candles.length > 0);
+  t += 2 * 3_600_000; // past HISTORY_FRESH_MS and REFRESH_URGENT_MS
+  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE - REFRESH_SLOT; i++) assert.equal(budget.take("lists"), true);
+  assert.equal(budget.take("refresh"), true, "and one other held read: the window at the refresh lane's room");
+  const ohlcv = () => gt.urls.filter((u) => u.includes("/ohlcv/")).length;
+  const n = ohlcv();
+  const held = await tok.candles(PUMP, "1m", before, 500);
+  assert.equal(held.status, 200, held.body);
+  assert.equal(ohlcv(), n, "the history held is not read again past the refresh lane's room");
+  const cold = await tok.candles(COLD, "1m", null, 24);
+  assert.equal(cold.status, 200, `the cold token's first read is served (${cold.body.slice(0, 80)})`);
 });

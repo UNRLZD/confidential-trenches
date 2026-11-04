@@ -12,7 +12,8 @@
 //
 // --only SellDelegate (card evm-sell-v4) deploys the sell delegate alone, constructed with the chain's WETH and v4
 // PoolManager, with every step below the same (a fresh run key at nonce 0, so the delegate is CREATE(key, 0)); its
-// record goes to scripts/live-checks/evm-sell-v4.<chain>.json (or --out), and its live check is evm-sell-v4.mjs.
+// record goes to scripts/live-checks/evm-selldelegate-exact-debit.<chain>.json (or --out), and its live check is
+// evm-selldelegate-exact-debit.mjs (card evm-selldelegate-exact-debit's redeploy; evm-sell-v4's records keep theirs).
 //
 // Steps:
 //  1. The chain from eth_chainId: the named testnet's id, on its RPC or on a loopback URL (an anvil fork of it, the dry
@@ -40,7 +41,7 @@
 //     counts). A sweep at a nonce with something pending (after a settle that ran out) is priced the same way. Then the sweep: the key's balance, less the transfer's fee bound (the L1 fee bound
 //     read on each pass, doubled), goes to --return, again while what is left is more than two such bounds; a failed
 //     pass is retried with backoff over WAITS.sweep. Every hash is printed.
-//  7. Writes the deployment record (scripts/live-checks/pool-evm-deploy.<chain>.json, evm-sell-v4.<chain>.json with
+//  7. Writes the deployment record (scripts/live-checks/pool-evm-deploy.<chain>.json, evm-selldelegate-exact-debit.<chain>.json with
 //     --only SellDelegate, or --out) with every
 //     transaction that landed, in nonce order, and prints the live check to run next.
 import "../../../scripts/net-window.mjs";
@@ -70,7 +71,8 @@ const argsOf = (name, chain, addrs) => ({
   SellDelegate: [chain.weth.address, chain.poolManager.address],
 })[name];
 // The contracts a run may deploy alone (--only): the sell delegate, whose constructor needs no other contract of the run
-export const ALONE = Object.freeze({ SellDelegate: { key: "evm-sell-v4" } });
+// (card evm-selldelegate-exact-debit; evm-sell-v4's records stay under their own key)
+export const ALONE = Object.freeze({ SellDelegate: { key: "evm-selldelegate-exact-debit" } });
 export const onlyFile = (name, chain) => path.join(REPO, "scripts/live-checks", `${ALONE[name].key}.${chain}.json`);
 const GAS_MARGIN = (g) => (g * 12n) / 10n;
 const OP_ORACLE = "0x420000000000000000000000000000000000000f"; // the OP Stack GasPriceOracle predeploy
@@ -402,7 +404,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (args.includes("--write-build")) {
       const file = {
         notes: [
-          "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04.",
+          "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04, and again for card evm-selldelegate-exact-debit (W's balance of the token falls by exactly the amount) with forge 1.7.1 on 2026-11-04.",
         ],
         contracts: buildOf(),
       };

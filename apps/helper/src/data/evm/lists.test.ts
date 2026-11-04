@@ -12,7 +12,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
 import { geckoBudget, WINDOW_MS } from "../gecko.ts";
 import {
-  blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, joinLogs, LIST_MS, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, RECORDS,
+  batch, blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, joinLogs, LIST_MS, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, RECORDS,
   recordCalls, recordPad, SETTLE_MS, STALE_MS, toRows,
 } from "./lists.ts";
 
@@ -390,8 +390,8 @@ test("the lists: tagged rows, the tokens not read yet named in unsettled, the li
   assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 6, "each list once per LIST_MS (the first and this one)");
   now += WINDOW_MS;
   await l.tick();
-  assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 9);
-  assert.equal(gecko.take("lists"), false, "the lists leave PAGE_RESERVE free");
+  assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 8, "two lists past LIST_MS read: the third waits, the lists leaving REFRESH_SLOT (card helper-chart-fresh)");
+  assert.equal(gecko.take("lists"), false, "the lists leave PAGE_RESERVE and REFRESH_SLOT free");
   assert.equal(gecko.take("pages"), true, "which a page finds");
 
   // GeckoTerminal fails from now on: the last read serves past STALE_MS too, dated by its own read time, never as fresh
@@ -455,4 +455,31 @@ test("providers that write hex in upper case: the recorded Robinhood makers come
     const logs = joinLogs(c.answers[which]!);
     if (logs !== undefined) assert.equal(padOf("robinhood", c.address, up(logs)), c.pad, `${c.symbol} on provider ${which}`);
   }
+});
+
+test("card helper-rpc-hold-queued: a provider that refuses one batch of a read (its HTTP 429, a JSON-RPC -32005 or limit message) is sent none of the read's batches queued after it; they fail as refused reads, so the third provider answers", async () => {
+  const url = MAKER_RPCS.robinhood[0]; // rpc.mainnet.chain.robinhood.com: 10 calls a batch, 429s a burst (2026-11-04 18:55Z)
+  const calls = Array.from({ length: 25 }, (_, i) => ({ method: "eth_getCode", params: [`0x${"1".repeat(40)}`, `0x${i.toString(16)}`] }));
+  const refusals: [string, () => Response][] = [
+    ["HTTP 429", () => new Response("{}", { status: 429, headers: { "retry-after": "1" } })],
+    ["-32005", () => Response.json([{ jsonrpc: "2.0", id: 0, error: { code: -32005, message: "limit exceeded" } }])],
+    ["limit message", () => Response.json([{ jsonrpc: "2.0", id: 0, error: { code: -32000, message: "request limit reached" } }])],
+  ];
+  for (const [name, refuse] of refusals) {
+    let sent = 0;
+    const doFetch = async (_u: string, init: RequestInit): Promise<Response> => {
+      sent++;
+      if (sent === 1) return refuse();
+      const reqs = JSON.parse(String(init.body)) as { id: number }[];
+      return Response.json(reqs.map((r) => ({ jsonrpc: "2.0", id: r.id, result: "0x" })));
+    };
+    const got = await batch(doFetch as never, url, calls);
+    assert.equal(sent, 1, `${name}: ${sent} batches sent, the first refused`);
+    assert.deepEqual(got, calls.map(() => undefined), `${name}: every call failed`);
+  }
+  // a provider that answers sends every batch, in order
+  let n = 0;
+  const ok = await batch((async (_u: string, init: RequestInit) => (n++, Response.json((JSON.parse(String(init.body)) as { id: number }[]).map((r) => ({ jsonrpc: "2.0", id: r.id, result: "0x" }))))) as never, url, calls);
+  assert.equal(n, 3);
+  assert.deepEqual(ok, calls.map(() => "0x"));
 });

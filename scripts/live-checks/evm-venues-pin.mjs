@@ -4,8 +4,9 @@
 // that has a deployment record (pool-evm-deploy.<chain>.json):
 //   - the pins are the record's: the pool is PrivacyPoolSimple, the v3 and v4 adapters UniswapV3Adapter and
 //     UniswapV4Adapter (a record without one, a venue without that pin), the sell delegate SellDelegate, which card
-//     evm-sell-v4 deployed again to sell through the v4 PoolManager: its record (evm-sell-v4.<chain>.json), where there
-//     is one, names the SellDelegate in place of pool-evm-deploy's;
+//     evm-sell-v4 deployed again to sell through the v4 PoolManager and card evm-selldelegate-exact-debit again with the
+//     exact-debit check: the newest of their records (<key>.<chain>.json), where there is one, names the SellDelegate in
+//     place of pool-evm-deploy's;
 //   - the chain's WETH, PoolManager and routers are the ones pool-evm-deploy pinned (CHAINS: WETH; the PoolManager; the
 //     v3 router, or none), and no middle is listed;
 //   - on the chain's two RPCs of two operators (the money gate's), each answering the chain's id: at the newest block
@@ -18,6 +19,7 @@
 //     both read at each RPC's latest block (the one value here an upgrade can change).
 //   node scripts/live-checks/evm-venues-pin.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read to <file>, for the test's replay (evm-venues-pin.answers.json).
+// Runs: once, the kit's EVM pins against the contracts on chain; it changes only with a card that redeploys a contract
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -35,14 +37,17 @@ const PINS = [
   ["sell delegate", (v) => v.sellDelegate, "SellDelegate"],
 ];
 
-const sellV4File = (c) => path.join(path.dirname(fileURLToPath(import.meta.url)), `evm-sell-v4.${c}.json`);
-/** pool-evm-deploy's record of `chain`, its SellDelegate the one card evm-sell-v4 deployed where that card has a record */
+// the sell delegate's redeploys alone, newest first: card evm-selldelegate-exact-debit's, then card evm-sell-v4's
+const SELL_KEYS = ["evm-selldelegate-exact-debit", "evm-sell-v4"];
+const sellFile = (k, c) => path.join(path.dirname(fileURLToPath(import.meta.url)), `${k}.${c}.json`);
+/** pool-evm-deploy's record of `chain`, its SellDelegate the newest redeploy's where one has a record */
 export function recordOf(chain) {
   if (!existsSync(deploymentFile(chain))) return null;
   const d = JSON.parse(readFileSync(deploymentFile(chain), "utf8"));
-  if (!existsSync(sellV4File(chain))) return d;
-  const s = JSON.parse(readFileSync(sellV4File(chain), "utf8"));
-  if (s.chain !== chain || s.dryRun !== false) throw new Error(`${sellV4File(chain)} is not ${chain}'s real run`);
+  const f = SELL_KEYS.map((k) => sellFile(k, chain)).find(existsSync);
+  if (!f) return d;
+  const s = JSON.parse(readFileSync(f, "utf8"));
+  if (s.chain !== chain || s.dryRun !== false) throw new Error(`${f} is not ${chain}'s real run`);
   return { ...d, contracts: { ...d.contracts, SellDelegate: s.contracts.SellDelegate } };
 }
 

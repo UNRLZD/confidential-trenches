@@ -50,26 +50,26 @@ test("no pool pinned (the page's mainnet today): every pool kind is refused not_
   assert.equal(flows.length, 0);
 });
 
-test("Base and Robinhood refuse a pool.deposit and a pool.withdraw even with their pool pinned; Solana's go to the flow", async () => {
+test("Base and Robinhood refuse a pool.deposit even with their pool pinned, and hand a pool.withdraw to the flow (its onward send has its check, rules/pool.ts checkEvmOnwardSend); Solana's go to the flow", async () => {
   const flows: PoolAsk[] = [];
   const deps: PoolKindsDeps = { pinned: () => true, rpcs: () => null, flow: (ask) => (flows.push(ask), { error: "busy" }) };
   const k = poolKinds(deps);
-  for (const chain of ["base", "robinhood"] as const) {
-    assert.deepEqual(k["pool.deposit"]({ chain, amount: "1" }, ctx), { error: "not_allowed" });
-    assert.deepEqual(k["pool.withdraw"]({ chain }, ctx), { error: "not_allowed" });
-  }
+  for (const chain of ["base", "robinhood"] as const) assert.deepEqual(k["pool.deposit"]({ chain, amount: "1" }, ctx), { error: "not_allowed" });
   assert.equal(flows.length, 0);
+  for (const chain of ["base", "robinhood"] as const) assert.deepEqual(k["pool.withdraw"]({ chain }, ctx), { error: "busy" });
   assert.deepEqual(k["pool.deposit"]({ chain: "solana", amount: "1.5" }, ctx), { error: "busy" });
   assert.deepEqual(k["pool.withdraw"]({ chain: "solana" }, ctx), { error: "busy" });
   assert.deepEqual(k["pool.buy"]({ chain: "base", token: EVM_TOKEN, amount: "19", slippage_bps: 100 }, ctx), { error: "busy" });
   assert.deepEqual(flows.map((a) => [a.kind, a.chain, a.amount, a.decimals]), [
+    ["pool.withdraw", "base", 0n, 18],
+    ["pool.withdraw", "robinhood", 0n, 18],
     ["pool.deposit", "solana", 1_500_000_000n, 9],
     ["pool.withdraw", "solana", 0n, 9],
     ["pool.buy", "base", 19n * 10n ** 18n, 18],
   ]);
   // a bad request never reaches a flow
   assert.deepEqual(k["pool.buy"]({ chain: "solana", token: EVM_TOKEN, amount: "1", slippage_bps: 100 }, ctx), { error: "not_allowed" });
-  assert.equal(flows.length, 3);
+  assert.equal(flows.length, 5);
 });
 
 test("a pinned pool with no flow yet refuses a request that passed its checks: never half run", () => {

@@ -53,6 +53,8 @@ export type PoolBindArgs = {
   epochStartMs: bigint;
   /** The deadline to bind: epochStartMs + lifeMs, the same for every proof of the epoch. */
   deadlineMs: bigint;
+  /** A pool that binds a tip cap (Solana): 0 for a withdraw, which pays no tip; the pool's own cap when absent (a buy). */
+  tipCap?: bigint;
 };
 
 /** One chunk's binding: what the proof's last public signal must be, and what the tap sends for the pool to check it. */

@@ -105,6 +105,8 @@ type Plant = {
   heldOn1?: bigint;
   /** a sent transaction lands (true when not given) */
   lands?: boolean;
+  /** getTransaction answers this very transaction with a meta that says nothing (a string), landed or not */
+  metaJunk?: boolean;
   /** RPC p's finalized block height (1,000 when not given: past the blockhash's last height, 151) */
   finalHeight?: number;
   /** another deposit takes the return note's precommitment just before the sell lands */
@@ -160,6 +162,7 @@ function chain(plant: Plant = {}) {
   if (plant.ammVolumeSystem) accounts.set(ammVol, { owner: "11111111111111111111111111111111", lamports: 890_880, data: new Uint8Array(0) });
   const txs = new Map<string, { tx: Uint8Array; err: unknown }>();
   const log: string[] = [];
+  const sentTx = new Map<string, Uint8Array>();
   const calls: { p: 0 | 1; method: string; params: readonly unknown[] }[] = [];
 
   /** The program's deposit of `value` on `pre`: the next nonce's label, both leaves, the mark. */
@@ -280,6 +283,7 @@ function chain(plant: Plant = {}) {
         case "sendTransaction": {
           const tx = base64.decode(params[0] as string);
           const sig = base58.encode(tx.subarray(1, 65));
+          sentTx.set(sig, tx);
           if (plant.frontRun && !accounts.has(markOf(preOf(RETURN)))) deposit(preOf(RETURN), 1n);
           if (plant.frontRunSame && !accounts.has(markOf(preOf(RETURN)))) {
             const m = solanaDecodeMessage(tx.subarray(65));
@@ -297,6 +301,8 @@ function chain(plant: Plant = {}) {
           return sig;
         }
         case "getTransaction": {
+          const sent = sentTx.get(params[0] as string);
+          if (plant.metaJunk && sent) return { slot: VF[v].slot, transaction: [base64.encode(sent), "base64"], meta: "x" };
           const t = txs.get(params[0] as string);
           return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err } } : null;
         }
@@ -1015,4 +1021,15 @@ test("a sell that never reads back stops at POOL_SELL_READS seconds on the wall 
   const a = await runPoolSell({ ...w.host, reads: 1_000, wait: async (ms: number) => void (waited += ms), now: () => BigInt(1_000 + waited) }, ASK);
   assert.equal("stage" in a && a.stage, "sent");
   assert.ok(waited <= POOL_SELL_READS * POOL_SELL_WAIT_MS, `waited ${waited} ms`);
+});
+
+// Card signpage-buy-route-events, fold 1 (L4): readBack (shared with pool-buy.ts) once read a meta that is not an object as
+// a failure, so both RPCs answering that way read as "the sale failed on chain". An unreadable meta proves nothing: the
+// reads go on and the answer keeps the transaction's ref.
+test("this very transaction with an unreadable meta on both RPCs proves nothing: sent with its signature, never refused", async () => {
+  const w = await world({ lands: false, metaJunk: true, finalHeight: 50 });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "sent");
+  assert.equal((a as { txs: unknown[] }).txs.length, 1);
+  assert.equal(w.c.log.filter((x) => x === "0:getTransaction").length, 3, "read back each round");
 });

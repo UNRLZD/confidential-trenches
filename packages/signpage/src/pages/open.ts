@@ -28,7 +28,7 @@ export type AccountKind = "signin.open" | "signout" | "backup.open" | "withdraw.
 const BUSY = new Set(["loading"]);
 
 /** Whether the page has a seed stored, from the state it shows (its own store's last read). */
-const SIGNED_IN = new Set(["signed-in", "backup", "signout", "withdraw"]);
+const SIGNED_IN = new Set(["signed-in", "backup", "signout", "withdraw", "pool-withdraw"]);
 
 /**
  * Whether `kind` may open now: `state` is the page's data-signin, `busy` whether a step is running. A refused kind is

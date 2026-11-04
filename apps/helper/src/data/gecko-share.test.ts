@@ -9,7 +9,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { start } from "../server.ts";
 import { createEvmLists, GT_BASE, GT_READS } from "./evm/lists.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, WINDOW_MS } from "./gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, REFRESH_URGENT_MS, WINDOW_MS } from "./gecko.ts";
 import { createSolanaToken } from "./solana/token.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -27,7 +27,7 @@ const MINTS = ["Q1vecEMQEgDyrw1txmBgFwUrkeQurqkEe1bGMzFpump", "pumpCmXqMfrsAkQ5r
 
 /** One clock, one GeckoTerminal (5 a minute, then 429 "0"), RPC providers down (makers stay unread), and a server with
  *  the token page and both EVM chains' lists on one budget, as the helper's main builds them. */
-async function world() {
+async function world(handover?: unknown) {
   const clock = { now: NOW };
   const gt: { at: number; kind: "lists" | "page" }[] = [];
   const doFetch = async (url: string): Promise<Response> => {
@@ -45,6 +45,7 @@ async function world() {
   const budget = geckoBudget(now);
   const down = { handle: async () => ({ status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' }) };
   const token = createSolanaToken(down as never, down as never, { now, fetch: doFetch as never, gecko: budget });
+  if (handover !== undefined) token.restore(handover);
   const lists = { base: createEvmLists("base", budget, { fetch: doFetch as never, now }), robinhood: createEvmLists("robinhood", budget, { fetch: doFetch as never, now }) };
   const server = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, token, undefined, undefined, lists);
   await new Promise<void>((ok) => server.on("listening", () => ok()));
@@ -122,4 +123,88 @@ test("a helper started while a token page is open still serves its lists: a list
   }
   for (const c of ["base", "robinhood"]) assert.equal((await w.listsAnswer(c)).status, 200, `${c} lists after ${(w.clock.now - NOW) / 1000} s`);
   for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
+});
+
+/** A token page left open: its 1m chart (the fixture's bars are GeckoTerminal's minute bars) read every `everyMs` for `forMs` while both chains' lists tick every 12 s (as
+ *  the helper's main runs them); the age of each answer's bars, read time to the read. */
+async function heldChart(w: Awaited<ReturnType<typeof world>>, everyMs: number, forMs: number): Promise<number[]> {
+  const ages: number[] = [];
+  const end = w.clock.now + forMs;
+  let next = w.clock.now;
+  while (w.clock.now < end) {
+    if (w.clock.now >= next) {
+      const c = await w.candles(MINTS[1]!, "1m");
+      assert.equal(c.status, 200, `candles at +${(w.clock.now - NOW) / 1000} s: ${c.status} ${c.body}`);
+      ages.push(w.clock.now - (JSON.parse(c.body) as { as_of_ms: number }).as_of_ms);
+      next += everyMs;
+    }
+    await w.lists.base.tick();
+    await w.lists.robinhood.tick();
+    w.clock.now += 12_000;
+  }
+  for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
+  return ages;
+}
+
+// the live suite reads a chart every 18 minutes or so, a page left open every 60 s, a judge now and then
+const CADENCES = [60_000, 360_000, 1_080_000];
+
+test("card helper-chart-fresh: a chart read every 60 s, 6 min or 18 min while both chains' lists keep the budget busy is never served bars REFRESH_URGENT_MS old (live 14:03Z and 14:21Z: PUMP's 1h bars from 12:55:51Z, the lists keeping the window at the refresh lane's room)", async (t) => {
+  for (const every of CADENCES) {
+    const w = await world();
+    t.after(w.close);
+    await w.lists.base.tick();
+    await w.lists.robinhood.tick();
+    const ages = await heldChart(w, every, 7_200_000);
+    const worst = Math.max(...ages);
+    assert.ok(worst < REFRESH_URGENT_MS, `read every ${every / 1000} s, the chart's bars reached ${Math.round(worst / 1000)} s old (bound ${REFRESH_URGENT_MS / 1000} s): ${ages.map((a) => Math.round(a / 1000)).join(" ")}`);
+  }
+});
+
+test("card helper-chart-fresh: a chart handed over at a swap, its bars 40 minutes old, is read fresh by the new helper and stays under REFRESH_URGENT_MS", async (t) => {
+  for (const every of CADENCES) {
+    let at = NOW - 2_400_000;
+    const oldNow = () => at;
+    const fx = async (url: string) => new Response(JSON.stringify(url.includes("/ohlcv/") ? FX.gt_ohlcv : FX.gt_token), { status: 200, headers: { "content-type": "application/json" } });
+    const down = { handle: async () => ({ status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' }) };
+    const old = createSolanaToken(down as never, down as never, { now: oldNow, fetch: fx as never, gecko: geckoBudget(oldNow) });
+    assert.ok(JSON.parse((await old.candles(MINTS[1]!, "1m", null, 24)).body).candles.length > 0, "the old helper holds bars");
+    at = NOW;
+    const handed = JSON.parse(JSON.stringify(old.state()));
+    assert.equal(handed.kept.length, 1, "the bars are handed over");
+    const w = await world(handed);
+    t.after(w.close);
+    await w.lists.base.tick();
+    await w.lists.robinhood.tick();
+    const ages = await heldChart(w, every, 7_200_000);
+    const worst = Math.max(...ages);
+    assert.ok(worst < REFRESH_URGENT_MS, `read every ${every / 1000} s after the swap, the chart's bars stayed ${Math.round(worst / 1000)} s old (bound ${REFRESH_URGENT_MS / 1000} s): ${ages.map((a) => Math.round(a / 1000)).join(" ")}`);
+  }
+});
+
+test("card helper-chart-fresh: a held chart past REFRESH_URGENT_MS and a cold token's first open in the same window, both EVM lists ticking: both answered 200, the held one fresh, no 429 (app-console-429's crowd outcome holds with the stale-chart fix)", async (t) => {
+  // each offset puts the two reads at another point of the lists' 12 s ticks and the budget's window
+  for (const offset of [0, 12_000, 24_000, 36_000, 48_000, 60_000]) {
+    const w = await world();
+    t.after(w.close);
+    // normal load: both chains' lists ticking ten minutes, every list read
+    for (let i = 0; i < 50; i++) {
+      await w.lists.base.tick();
+      await w.lists.robinhood.tick();
+      w.clock.now += 12_000;
+    }
+    assert.equal((await w.candles(MINTS[1]!, "1m")).status, 200, "the chart's first read");
+    const end = w.clock.now + REFRESH_URGENT_MS + 60_000 + offset;
+    while (w.clock.now < end) {
+      w.clock.now += 12_000;
+      await w.lists.base.tick();
+      await w.lists.robinhood.tick();
+    }
+    const held = await w.candles(MINTS[1]!, "1m");
+    const cold = await w.candles(MINTS[0]!, "1m");
+    assert.equal(cold.status, 200, `offset ${offset / 1000} s: the cold first open answered ${cold.status} ${cold.body}`);
+    assert.equal(held.status, 200, `offset ${offset / 1000} s: held ${held.status}`);
+    assert.ok(w.clock.now - (JSON.parse(held.body) as { as_of_ms: number }).as_of_ms < REFRESH_URGENT_MS, `offset ${offset / 1000} s: the held chart is read fresh`);
+    for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
+  }
 });

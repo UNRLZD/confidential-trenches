@@ -22,6 +22,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read to <file>, for the test's replay. --write-record, on PASS, writes the run
 // record scripts/live-checks/pool-sol-deploy.md from the deployment record (Money path: yes, one Tx line per tx).
+// Runs: once, a contract deploy's read-back (the Solana pool program, no upgrade authority); no host deploy changes it
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";

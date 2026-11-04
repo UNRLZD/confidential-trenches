@@ -1,0 +1,83 @@
+{
+  "key": "pool-evm-testnet-run",
+  "chain": "robinhood-testnet",
+  "chainId": 46630,
+  "dryRun": false,
+  "at": "2026-11-04T14:17:08.723Z",
+  "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+  "coin": "0x10e626a1d0857174b9a5bdb7a1397068811fbbbc",
+  "venues": [
+    "v4"
+  ],
+  "asked": [
+    "v4"
+  ],
+  "relayer": "0x17e0e894ffe31fc5d82a6d633808d63ce46a08a6",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "2119800000000000",
+  "restore": null,
+  "txs": [
+    {
+      "step": "deposit",
+      "hash": "0x6fa9302206df30788c8e73d98244525ad276582347c4484ac31a8cef4bf00d05",
+      "from": "0x17e0e894ffe31fc5d82a6d633808d63ce46a08a6",
+      "kind": "deposit",
+      "block": "148400621",
+      "gasUsed": "331999",
+      "commitment": "5433307463054140895614769838540851986316757570582292662128941366038560067795",
+      "label": "6102182276026045728111752496602619646407467752343137375028436505213141077575",
+      "value": "2000000000000000",
+      "precommitment": "3659200790614162733064747004820939631552209306456077743599451619481925695888"
+    },
+    {
+      "step": "buy through v4",
+      "hash": "0x94f2c4564570f13448bb05bee7475ad00305ea1336608a6e6e7f61f601b8e80d",
+      "from": "0x17e0e894ffe31fc5d82a6d633808d63ce46a08a6",
+      "kind": "buy",
+      "venue": "v4",
+      "w": "0xc52726e46b055228ba3e59d75500f89218f6ae46",
+      "nullifier": "7674714333298835583145033228909346609484515063033759766983259181242056130280",
+      "minOut": "921689999988716",
+      "quoted": "970199999988123",
+      "quoteBlock": "148400798",
+      "coin": "0x10e626a1d0857174b9a5bdb7a1397068811fbbbc",
+      "block": "148400816",
+      "gasUsed": "556163",
+      "out": "970199999988123",
+      "newCommitment": "16425209518373586094245707452796654064285287683154187736337617573066951559647",
+      "value": "1000000000000000",
+      "fee": "20000000000000"
+    },
+    {
+      "step": "withdraw",
+      "hash": "0xf64f2b807fd98671002ec2cbd3eee260b1dced365ea51040defe983f27f4c4ef",
+      "from": "0x17e0e894ffe31fc5d82a6d633808d63ce46a08a6",
+      "kind": "withdraw",
+      "w": "0x75dc2489759ae8fe73d040eef1d9b4de752b0149",
+      "nullifier": "6412324242397715820633995224641160596411252111168565528395320462888355636795",
+      "value": "1000000000000000",
+      "fee": "20000000000000",
+      "block": "148401043",
+      "gasUsed": "475267",
+      "newCommitment": "16343126278601166665121776509138200917680149323867839135042725316133658294530"
+    },
+    {
+      "step": "sweep (a W's ETH back)",
+      "hash": "0x9da4bfc6a6ded3ffb614cf7dd3b37c845fc588d0977bac951020cee37bb3d281",
+      "from": "0x75dc2489759ae8fe73d040eef1d9b4de752b0149",
+      "kind": "sweep",
+      "w": "0x75dc2489759ae8fe73d040eef1d9b4de752b0149",
+      "block": "148401078",
+      "gasUsed": "21000"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0xf4abfebf258f97dff7e3a0bd7593ff7c267cada3d660d5f89e7c7e836faa33e9",
+      "from": "0x17e0e894ffe31fc5d82a6d633808d63ce46a08a6",
+      "kind": "sweep",
+      "block": "148401109",
+      "gasUsed": "21000"
+    }
+  ],
+  "stopped": "Stopped at its sell's simulation: eth_estimateGas on Robinhood testnet refused the EIP-7702 authorization's r or s as a hex number with a leading zero digit (testnet-run-lib.mjs authJson passed the 32-byte words as they were); its finally withdrew the change note to its W and swept that W and the run key back. authJson now sends r and s as quantities. The W that bought still holds its token."
+}

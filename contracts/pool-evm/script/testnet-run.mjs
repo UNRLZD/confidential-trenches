@@ -383,7 +383,16 @@ export async function main(args, io = {}) {
   const sellOf = async (b) => {
     const W = freshWallet(seed64, "evm", b.l, b.j);
     try {
-      const amount = BigInt(await call("eth_call", [{ to: token, data: balanceOfData(W.address) }, "latest"]));
+      // W is fresh: it holds exactly what its buy paid. Read again while the RPC has not caught up with the buy's block
+      // (Robinhood testnet's own RPC answered 0 for W's balance right after the buy landed, 4 Nov 14:13Z, and the sell
+      // quote refused an amount of 0)
+      let amount = 0n;
+      for (let t = 0; t < 30; t++) {
+        amount = BigInt(await call("eth_call", [{ to: token, data: balanceOfData(W.address) }, "latest"]));
+        if (amount === BigInt(b.out)) break;
+        await sleep(2000);
+      }
+      if (amount !== BigInt(b.out)) throw new Error(`W ${W.address} holds ${amount} of the token, not the ${b.out} its buy paid, after 60 s`);
       // the sender's fee for a sell: the fee step at least (the kit refuses a fee cap of 0)
       const f0 = epochFee({ baseFeePerGas: BigInt((await call("eth_getBlockByNumber", ["latest", false])).baseFeePerGas), depth: 0 });
       const fee = f0 > FEE_STEP ? f0 : FEE_STEP;

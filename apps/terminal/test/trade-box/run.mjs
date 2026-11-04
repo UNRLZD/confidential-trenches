@@ -56,7 +56,7 @@ const STATES = [
   ["S8.9", "ready", true, 100, null, "Sending", null],
   ["S8.10", "ready", true, 400, "0.4s", "Landing 0.4s", null],
   ["S8.11", "slow", true, 6_200, "6.2s", "Slow 6.2s", null],
-  ["S8.12", "ready", true, 1_200, "1.1s", "Filled 1.1s", null],
+  ["S8.12", "ready", true, 1_200, "1.1s", "Filled 1.1s Final", null],
   ["S8.23", "refuse", true, 400, null, "Retry", "Price check failed"],
   ["S8.23", "notsent", true, 400, null, "Retry", "Not sent"],
   ["S8.23", "other", true, 400, null, "Retry", "Failed"],
@@ -236,8 +236,8 @@ try {
       await page.locator('[data-testid="trade-cta"]').click();
       await page.clock.runFor(8_100);
       check((await settle(() => page.locator('[data-testid="trade-box"]').getAttribute("data-state"), "S8.12")) === "S8.12", `@${w.name}: the slow buy did not fill`);
-      const filled = await settle(async () => norm(await page.locator('[data-testid="trade-cta"]').innerText()), "Filled 8.0s");
-      check(filled === "Filled 8.0s", `@${w.name}: the slow buy's fill time "${filled}", want "Filled 8.0s"`);
+      const filled = await settle(async () => norm(await page.locator('[data-testid="trade-cta"]').innerText()), "Filled 8.0s Final");
+      check(filled === "Filled 8.0s Final", `@${w.name}: the slow buy's fill time "${filled}", want "Filled 8.0s Final"`);
       await ctx.close();
     }
 

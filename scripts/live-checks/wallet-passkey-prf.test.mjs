@@ -27,7 +27,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { accountOfEntropy, entropyOfPrf, judge, SIGN_HOST } from "./wallet-passkey-prf.mjs";
+import { accountOfEntropy, entropyOfPrf, judge, SIGN_HOST, watch } from "./wallet-passkey-prf.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "wallet-passkey-prf.answers.json"), "utf8"));
@@ -338,4 +338,29 @@ test("the check's own derivation gives A.8's T_0 for its seed, and wallet.md:47'
   const prk = createHmac("sha256", "confidential-trenches/v1").update(prf).digest();
   const okm = createHmac("sha256", prk).update(Buffer.concat([Buffer.from("wallet/entropy"), Buffer.of(1)])).digest().subarray(0, 16);
   assert.equal(entropyOfPrf(prf).toString("hex"), okm.toString("hex"));
+});
+
+test("planted on the good answer: a recorded 429 names its resource's origin and path in the BAD line, and an error with no location still fails (card live-console-url)", () => {
+  const text = "Failed to load resource: the server responded with a status of 429 ()";
+  const hooks = {};
+  const kept = [];
+  watch({ on: (ev, f) => (hooks[ev] = f) }, kept);
+  const msg = (t, location) => ({ type: () => "error", text: () => t, location: () => location });
+  hooks.console(msg(text, { url: "https://api.confidential.unrealized.trade/v1/relay/status?id=abc" }));
+  hooks.console({ type: () => "warning", text: () => "a warning", location: () => ({ url: "https://x.example/" }) });
+  hooks.console(msg("Uncaught boom", undefined));
+  hooks.pageerror(new Error("boom"));
+  assert.deepEqual(kept, [`console: ${text} (https://api.confidential.unrealized.trade/v1/relay/status)`, "console: Uncaught boom", "pageerror: boom"]);
+  for (const [line, want] of [
+    [kept[0], `console: ${text} (https://api.confidential.unrealized.trade/v1/relay/status)`],
+    [kept[1], "console: Uncaught boom"],
+    [kept[2], "pageerror: boom"],
+  ]) {
+    const rec = structuredClone(answers.good);
+    rec.errors.push(line);
+    const r = judge(rec);
+    assert.equal(r.pass, false);
+    assert.ok(r.lines.some((l) => l === `BAD no page error or CSP violation (1): ${want}`), r.lines.join("\n"));
+    assert.ok(!r.lines.some((l) => l.includes("id=abc")), "no query in a line");
+  }
 });

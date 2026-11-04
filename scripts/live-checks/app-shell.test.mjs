@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { consoleError, judge, ROUTES, WIDTHS } from "./app-shell.mjs";
+import { judge, onConsole, ROUTES, WIDTHS } from "./app-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-shell.answers.json"), "utf8"));
@@ -124,19 +124,33 @@ test("scripts: only APP_HOST's documents' count; the shell's are left to SIGN_HO
   assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)), r.lines.join("\n"));
 });
 
-test("planted on the good answer: a console error names the resource that failed (card app-console-429: run 41816576115 said only 'a status of 429')", () => {
+test("planted on the good answer: a console error names the resource that failed, its origin and path with no query (cards app-console-429, live-console-url: run 41816576115 said only 'a status of 429')", () => {
   const url = "https://api.confidential.unrealized.trade/v1/market/candles?chain=solana&token=6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN&tf=15m&limit=500";
-  const msg = (text, u) => ({ type: () => "error", text: () => text, location: () => ({ url: u }) });
-  const failed = consoleError(msg("Failed to load resource: the server responded with a status of 429 ()", url));
-  assert.equal(failed, `Failed to load resource: the server responded with a status of 429 () (${url})`);
-  assert.equal(consoleError(msg("Uncaught boom", "")), "Uncaught boom", "no address: the text alone");
-  assert.equal(consoleError({ text: () => "x", location: () => undefined }), "x");
+  const at = "https://api.confidential.unrealized.trade/v1/market/candles";
+  const msg = (text, location) => ({ type: () => "error", text: () => text, location: () => location });
+  const kept = [];
+  const hook = onConsole(kept);
+  hook(msg("Failed to load resource: the server responded with a status of 429 ()", { url }));
+  hook(msg("from the shell", { url: "https://sign.confidential.unrealized.trade/assets/shell.js" }));
+  hook({ type: () => "warning", text: () => "a warning", location: () => ({ url }) });
+  hook(msg("Uncaught boom", { url: "" }));
+  hook(msg("Uncaught bang", undefined));
+  assert.deepEqual(kept, [`Failed to load resource: the server responded with a status of 429 () (${at})`, "Uncaught boom", "Uncaught bang"]);
   const rec = structuredClone(ANSWERS.good);
-  rec.loads.find((l) => l.width === "phone" && l.path === "/").consoleErrors.push(failed);
-  rec.inShell.find((s) => s.width === "desktop").consoleErrors.push(failed);
+  rec.loads.find((l) => l.width === "phone" && l.path === "/").consoleErrors.push(kept[0]);
+  rec.inShell.find((s) => s.width === "desktop").consoleErrors.push(kept[0]);
   const r = judge(rec);
   assert.equal(r.ok, false);
-  const esc = url.replace(/[.?&/]/g, "\\$&");
+  const esc = at.replace(/[.?&/]/g, "\\$&");
   assert.ok(bad(r.lines).some((l) => new RegExp(`^BAD phone / \\(token\\): console error: .*status of 429 \\(\\) \\(${esc}\\)$`).test(l)), r.lines.join("\n"));
   assert.ok(bad(r.lines).some((l) => new RegExp(`^BAD desktop inside the shell, 5 link\\(s\\): 0 CSP violation\\(s\\), 1 console error\\(s\\): .*\\(${esc}\\)$`).test(l)), r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => l.includes("chain=solana")), "no query in any line");
+});
+
+test("planted on the good answer: an error with no location still fails the check (card live-console-url)", () => {
+  const rec = structuredClone(ANSWERS.good);
+  rec.loads.find((l) => l.width === "desktop" && l.path === "/").consoleErrors.push("Uncaught boom");
+  const r = judge(rec);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r.lines).some((l) => /^BAD desktop \/ \(token\): console error: Uncaught boom$/.test(l)), r.lines.join("\n"));
 });

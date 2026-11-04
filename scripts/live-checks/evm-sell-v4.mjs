@@ -2,8 +2,9 @@
 // Live check of card evm-sell-v4: the sell delegate redeployed alone (contracts/pool-evm/script/deploy.mjs --only
 // SellDelegate) on Base Sepolia and Robinhood testnet, the one that sells through the pinned v4 PoolManager.
 // For each chain's record (evm-sell-v4.<chain>.json), on two RPCs of two operators, each answering the chain's id:
-//   - the delegate's code is the current build's SellDelegate (pool-evm-deploy.build.json `contracts`, which
-//     test/deploy.test.mjs keeps equal to forge's output; never the frozen v1 build): the same length and, with the
+//   - the delegate's code is the SellDelegate build pinned to its address (pool-evm-deploy.build.json, pinnedBuild: the
+//     frozen evm-sell-v4 build at this card's own redeploys since card evm-selldelegate-exact-debit moved the build on,
+//     else `contracts`, which test/deploy.test.mjs keeps equal to forge's output; never the v1 build): the same length and, with the
 //     immutables' bytes zeroed, the same keccak256; its two immutables each hold one word, the chain's WETH and v4
 //     PoolManager, and WETH() and POOL_MANAGER() return them;
 //   - the PoolManager and WETH have the code hash pool-evm-deploy pins (CHAINS);
@@ -17,19 +18,21 @@
 // With no --deployment it checks every chain's record present. --rpc applies to a single record. --record writes
 // { notes, rpcs, deployments, good } to <file>: every RPC answer read, with the records and the RPCs they were read on,
 // the shape evm-sell-v4.test.mjs replays (evm-sell-v4.answers.json).
+// Runs: once, a contract deploy's read-back (the SellDelegate on two EVM testnets); no host deploy changes it
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BUILD, CHAINS, DUST, EIP1967, keccak, operatorProblems, recorder, rpc, runtimeOf, selector } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, DUST, EIP1967, keccak, operatorProblems, pinnedBuild, recorder, rpc, runtimeOf, selector } from "./pool-evm-deploy.mjs";
 
 const KEY = "evm-sell-v4";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-export const recordFile = (chain) => path.join(HERE, `${KEY}.${chain}.json`);
+export const recordFile = (chain, key = KEY) => path.join(HERE, `${key}.${chain}.json`);
 export const RUN_RECORD = path.join(HERE, `${KEY}.md`);
 
 /** The run record (the money gate reads it) from the redeploy records, after a PASS: each redeploy's transactions */
-export function runRecord(ds) {
+export const runRecord = (ds) => runRecordFor(KEY, ds);
+export function runRecordFor(KEY, ds) {
   for (const d of ds) if (d.dryRun || !CHAINS[d.chain]) throw new Error(`no run record for ${d.dryRun ? "a dry run" : d.chain}`);
   return [
     `CARD ${KEY} / live: PASS`,
@@ -44,7 +47,8 @@ export function runRecord(ds) {
 }
 const addrWord = (a) => "0x" + a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 
-export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep }) {
+/** `current`: the delegate must be the current build (a later card's redeploy), never one the build file froze */
+export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep, current = false }) {
   const lines = [];
   let ok = true;
   const say = (pass, text) => {
@@ -64,7 +68,9 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep }) {
   say(names.length === 1 && /^0x[0-9a-f]{40}$/.test(a), `the record names SellDelegate alone: ${names.join(", ") || "none"}`);
   const txs = d.txs ?? [];
   say(txs.filter((t) => t.contract).length === 1 && txs.some((t) => t.contract === "SellDelegate"), `the record lists the run's transactions, one deploy, SellDelegate's: ${txs.map((t) => t.step).join(", ") || "none"}`);
-  const b = BUILD.contracts.SellDelegate;
+  // the build pinned to this address: the frozen evm-sell-v4 build at its own redeploys, else the current one
+  const b = pinnedBuild(d.chain, "SellDelegate", a);
+  if (current) say(b === BUILD.contracts.SellDelegate, `SellDelegate ${a} is not an address the build file froze to an older build`);
   const getters = [["WETH()", addrWord(chain.weth.address)], ["POOL_MANAGER()", addrWord(chain.poolManager.address)]];
   for (const url of rpcs.slice(0, 2)) {
     const on = `on ${url}`;
@@ -75,7 +81,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep }) {
         const code = await rpc(fetchFn, url, "eth_getCode", [a, "latest"], sleep);
         const r = runtimeOf(code, b.immutables);
         say(r.length === b.length && r.masked === b.masked,
-          `SellDelegate ${a} code is the current build's: ${r.length} bytes (build ${b.length}), immutables zeroed keccak256 ${r.masked} (build ${b.masked}) ${on}`);
+          `SellDelegate ${a} code is the build pinned to it${b === BUILD.contracts.SellDelegate ? " (the current one)" : ""}: ${r.length} bytes (build ${b.length}), immutables zeroed keccak256 ${r.masked} (build ${b.masked}) ${on}`);
         const held = r.words.map((w) => (w.length === 1 ? w[0] : `${w.length} words`)).sort();
         say(JSON.stringify(held) === JSON.stringify(getters.map(([, w]) => w).sort()),
           `SellDelegate's ${b.immutables.length} immutables each hold one word, the chain's WETH and PoolManager ${on}: ${held.join(", ") || "none"}`);
@@ -112,11 +118,13 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep }) {
   return { ok, lines };
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/** The command line, for this card's key or a later redeploy's (its own records, run record and replay file) */
+export async function cli(KEY, opts = {}) {
   const args = process.argv.slice(2);
+  const RUN_RECORD = path.join(HERE, `${KEY}.md`);
   const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
   try {
-    const files = opt("--deployment") ? opt("--deployment").split(",") : Object.keys(CHAINS).map(recordFile).filter(existsSync);
+    const files = opt("--deployment") ? opt("--deployment").split(",") : Object.keys(CHAINS).map((c) => recordFile(c, KEY)).filter(existsSync);
     if (files.length === 0) throw new Error(`no record (${KEY}.<chain>.json) to check`);
     const ds = files.map((f) => JSON.parse(readFileSync(f, "utf8")));
     const rec = recorder();
@@ -125,7 +133,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     for (const d of ds) {
       const rpcs = (opt("--rpc") && ds.length === 1 ? opt("--rpc").split(",") : undefined) ?? CHAINS[d.chain]?.rpcs ?? [];
       const from = rec.answers.length;
-      const r = await check({ deployment: d, rpcs, fetchFn: opt("--record") ? rec.fetchFn : fetch });
+      const r = await (opts.check ?? check)({ deployment: d, rpcs, fetchFn: opt("--record") ? rec.fetchFn : fetch, current: !!opts.current });
       for (const l of r.lines) console.log(`live-check ${KEY} ${d.chain}: ${l}`);
       ok &&= r.ok;
       Object.assign(out.rpcs, { [d.chain]: rpcs.slice(0, 2) });
@@ -133,12 +141,12 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       Object.assign(out.good, { [d.chain]: rec.answers.slice(from) });
     }
     if (opt("--record")) {
-      out.notes.push(`Recorded ${new Date().toISOString()} by: node scripts/live-checks/${KEY}.mjs ${args.join(" ")}; ${ds.some((d) => d.dryRun) ? "a dry run (anvil forks, loopback RPCs)" : "the deployed chains"}. The good answers; evm-sell-v4.test.mjs makes each bad answer from them.`);
+      out.notes.push(`Recorded ${new Date().toISOString()} by: node scripts/live-checks/${KEY}.mjs ${args.join(" ")}; ${ds.some((d) => d.dryRun) ? "a dry run (anvil forks, loopback RPCs)" : "the deployed chains"}. The good answers; ${KEY}.test.mjs makes each bad answer from them.`);
       writeFileSync(opt("--record"), JSON.stringify(out) + "\n");
     }
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"}`);
     if (ok && args.includes("--write-record")) {
-      writeFileSync(RUN_RECORD, runRecord(ds));
+      writeFileSync(RUN_RECORD, runRecordFor(KEY, ds));
       console.log(`live-check ${KEY}: wrote ${path.relative(process.cwd(), RUN_RECORD)}`);
     }
     process.exit(ok ? 0 : 1);
@@ -147,3 +155,5 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
 }
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await cli(KEY);

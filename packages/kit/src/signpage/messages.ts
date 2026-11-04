@@ -200,6 +200,19 @@ export interface StateEvent {
   state: SignpageState;
 }
 
+/**
+ * What a running pool.buy's page read and bound itself, one fact per event, each once and in this order, at the moment
+ * it is known (card signpage-buy-route-events):
+ * - `wallet`: the one-time wallet W the proof pays and the transaction is signed by, once the device's check passed and
+ *   W derived from the seed is the proof's recipient;
+ * - `venue` and `pool`: the venue the quote was read on (on Solana "pump-curve" or "pumpswap") and its pool's address
+ *   (the bonding curve's account or the AMM pool's), read on two RPCs and checked in the same step;
+ * - `out`: the token amount W received, a decimal string in the token's whole units, read from the transaction itself
+ *   on both RPCs, the two the same and at least the buy's min out. Absent when they differ: never made up.
+ * Addresses and an amount only: never a key, the 12 words or a note.
+ */
+export type BuyRoute = { wallet: string } | { venue: string; pool: string } | { out: string };
+
 /** The stage of a request still running, by its id. */
 export interface ProgressEvent {
   v: 1;
@@ -208,7 +221,15 @@ export interface ProgressEvent {
   stage: Stage;
 }
 
-export type SignpageEvent = ReadyEvent | StateEvent | ProgressEvent;
+/**
+ * One fact of a running buy's route (BuyRoute), by its id: a progress event with no stage. Its own event, never fields
+ * on a stage event: a client of an earlier kit checks a progress event with exact keys and drops any other shape, so it
+ * drops a route event and still reads every stage. A page of an earlier release sends none, and a client reads its
+ * stages as before.
+ */
+export type ProgressRouteEvent = { v: 1; type: "progress"; id: string } & BuyRoute;
+
+export type SignpageEvent = ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent;
 
 /** Anything the page posts to the app. */
 export type SignpageMessage = SignpageAnswer | SignpageEvent;
@@ -238,6 +259,9 @@ export type Operation =
   | { id: string; kind: "return"; stage: ReturnStage; txs: TxRef[] }
   | { id: string; kind: "restore"; stage: RestoreStage; txs: TxRef[] };
 
+/** A pool asset's USD price in SignpageState.pools, as the signing page read it (card signpage-pool-price). */
+export type PoolStatePrice = { price: string; expo: number; published_s: number; read_ms: number };
+
 /** What the page tells the app: addresses, balances, tx hashes and states only. */
 export interface SignpageState {
   /** The signing page's release tag. */
@@ -264,8 +288,14 @@ export interface SignpageState {
    * comes only with `ready`, and a page of an earlier release, or one that cannot price a pool, sends `ready` without it.
    * Absent when the page is signed out or the notes could not be read. Totals
    * only, never a note; the app sees them each time the store changes, so two in a row can show one note's value.
+   *
+   * `price` (card signpage-pool-price) is the pool asset's USD price as this page read it itself, the kit's poolUsdPrice
+   * on two RPCs of two providers that agreed: one asset is `price` x 10^`expo` USD (`price` a positive integer string),
+   * `published_s` the feed's own time (unix s) and `read_ms` the device's clock at the read. Absent on NEAR, on a chain
+   * the page could not price, and once the read is older than the feed's bound (POOL_USD_FEEDS maxAgeS); an app checks
+   * that bound again on its own clock, since the state it holds ages.
    */
-  pools?: { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string }[];
+  pools?: { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; price?: PoolStatePrice }[];
   wallets: { chain: Chain; address: string; role: "fresh" | "hop"; size: string; state: WalletState }[];
   positions: { chain: Chain; token: string; amount: string; cost: string; wallets: string[] }[];
   orders: {

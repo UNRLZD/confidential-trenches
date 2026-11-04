@@ -104,6 +104,8 @@ test("made from the good answer: each fault FAILs on its own line", async () => 
     [edit("candles", (c) => c.candles.reverse()), "BAD candles: exactly the frozen fields in their wire forms: bar 1 not after bar 0"],
     [edit("candles", (c) => (c.candles[0][4] = 0.004)), "BAD candles: exactly the frozen fields in their wire forms: bar 0"],
     [edit("token", null, { "x-fetched-at": "2026-11-02T13:00:00.000Z" }), "BAD token X-Fetched-At"],
+    // card helper-restart-fresh: live run 41871356171 straight after a swap, candles dated 16 min 15 s before the read
+    [edit("candles", null, { "x-fetched-at": "2026-11-02T13:51:56.169Z" }), "BAD candles X-Fetched-At"],
     [edit("holders", null, { "access-control-allow-origin": "*" }), 'BAD holders Access-Control-Allow-Origin: "*"'],
   ];
   for (const [rec, line] of cases) {

@@ -64,6 +64,8 @@ import { startApi } from "./api.ts";
 import { depositQuoteHost } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { PAGE_POOLS, withPools } from "./pools.ts";
+import { poolPrices } from "./pool-price.ts";
+import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readNotes, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
@@ -71,6 +73,7 @@ import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
+import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
 import { releaseTradeDeps, SOLANA_PROVIDER_A, TRADE_HELPER, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
@@ -83,7 +86,7 @@ import { pageHelperRpc, pageRpc } from "./page-rpc.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
-  | "choose" | "existing" | "signout" | "withdraw";
+  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw";
 
 // DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801),
 // "invalid-code" (CN-41, signed, 09-design-brief.md:2335) and the six the owner picked, each with its pick on its line.
@@ -119,7 +122,9 @@ if (framed) root.dataset.framed = "true";
 let shell: Shell | null = null;
 // the testnet build, top-level: the devnet pool's deposit flow, its settling and the next buy's proofs
 // (src/pool-testnet.ts); the store and the seed are opened when a run needs them
-const testnet = POOL_TESTNET && !framed ? testnetPool({ store: () => open(), seed64: () => openSeed64() }) : null;
+const testnet = POOL_TESTNET && !framed ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }) : null;
+// pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
+let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 if (framed) document.body.append(root);
 else {
   // the shell's own channel: it hears this document's store and other tabs' (a sign-in, Saved, a sign out)
@@ -134,6 +139,15 @@ else {
   channel.addEventListener("message", (m) => notesMoved(m.data as WalletEvent));
   // under the APP_HOST frame: the app's boot frame as shapes, for the moment before a new frame paints (src/backdrop.ts)
   document.body.append(drawBackdrop(document));
+  // the pool kinds' deps: their pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
+  const poolDeps =
+    POOL_TESTNET && testnet
+      ? testnetPoolDeps(testnet.flow)
+      : {
+          pinned: poolPinned,
+          rpcs: (chain: PoolChain) => (chain === "solana" ? ([pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)] as const) : null),
+        };
+  const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
   // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
   const trades = tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() });
   shell = mountShell(document, {
@@ -141,12 +155,20 @@ else {
     settle: () => trades.idle(),
     // the private balance per chain's pool, from this page's own notes (src/pools.ts); the frame's state has none
     // the testnet build: a state read while a deposit note is still landing settles it again (src/pool-testnet.ts)
+    // each pool's USD price, read by this page on the pool kinds' own RPC pair (src/pool-price.ts); each state read
+    // starts the next read of a chain it names that is due one
     state: () =>
-      fs.state().then((s) => {
+      fs.state().then(async (s) => {
         if (POOL_TESTNET && s.signed_in) void testnet?.stateRead();
-        return withPools(s, pageNotes, PAGE_POOLS);
+        const out = await withPools(s, pageNotes, PAGE_POOLS, undefined, prices.get);
+        prices.refresh((out.pools ?? []).map((p) => p.chain));
+        return out;
       }),
-    watch: fs.watch,
+    // a store change, and a new price read (or its next one due)
+    watch: (fn) => {
+      fs.watch(fn);
+      prices.watch(fn);
+    },
     kinds: {
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
       // layer opens (and the frame leaves).
@@ -161,14 +183,7 @@ else {
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (mainnet: none yet, every one refused not_allowed, no read made; the testnet build: the devnet
       // pool, src/pool-testnet.ts, whose flow deposits into it); a sell's decimals read on two providers
-      ...poolKinds(
-        POOL_TESTNET && testnet
-          ? testnetPoolDeps(testnet.flow)
-          : {
-              pinned: poolPinned,
-              rpcs: (chain) => (chain === "solana" ? [pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)] : null),
-            },
-      ),
+      ...poolKinds(poolDeps),
     },
   });
   shell.layer.append(root);
@@ -215,6 +230,21 @@ function decide(kind: AccountKind, way: unknown): OpenAnswer {
           seed!.entropy.fill(0);
           show("withdraw");
         } else show(page === "passkey" ? "signed-out" : page);
+        openLayer();
+      }),
+  };
+}
+// pool.withdraw (card signpage-pool-withdraw-form), top-level only and only with a seed stored, as withdraw.open: the
+// answer goes first, then the screen where the user types To and the amount, never passed in by the app; the run's
+// stages go to the op under the request's id.
+function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: true }; then: () => void } | null {
+  if (framed || !testnet || !takes("withdraw.open", root.dataset.signin, busy)) return null;
+  return {
+    result: { pending: true },
+    then: () =>
+      void run(async () => {
+        poolWithdraw = { chain, opId };
+        show("pool-withdraw");
         openLayer();
       }),
   };
@@ -291,7 +321,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   }
   const parts: HTMLElement[] = [];
   if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
-    && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw") {
+    && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw") {
     const p = document.createElement("p");
     p.textContent = WORDS[state];
     parts.push(p);
@@ -318,6 +348,13 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     // the withdraw form (src/withdraw/form.ts), top-level only: the address and the amount are typed here, never
     // passed in by the app (W:927)
     parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step)));
+  } else if (!framed && state === "pool-withdraw" && testnet && poolWithdraw) {
+    // the pool withdraw screen: To and the amount typed here; the press starts the run and the layer closes, its
+    // stages read back in state.ops
+    const { chain, opId } = poolWithdraw;
+    const deps = testnet.withdrawDeps(chain, opId);
+    const handoff = deps.handoff;
+    parts.push(drawPoolWithdrawForm(document, handoff ? { ...deps, handoff: async (r) => (void handoff(r), (poolWithdraw = null), await cancel()) } : deps, button, (step) => void run(step)));
   } else if (!framed && state === "existing") {
     // I already have one: Face ID (the passkey with PRF) or the typed 12 words, then restore (W:50); never a new seed
     if (typeof PublicKeyCredential !== "undefined") parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));

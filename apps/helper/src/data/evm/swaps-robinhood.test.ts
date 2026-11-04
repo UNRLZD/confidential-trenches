@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
-import { CURVE_TOKEN, fakeChain, KNOWN, MAG, open, POOL_CURVE, POOL_MAG, REC, toLog } from "../../../test/evm-swaps/robinhood.ts";
+import { CURVE_TOKEN, fakeChain, KNOWN, MAG, open, POOL_CURVE, POOL_MAG, REC, toLog, URLS } from "../../../test/evm-swaps/robinhood.ts";
 import { decodeRef, decodeSwap, ROBINHOOD_VENUES, TOPIC, VENUES, type Pool } from "./swaps.ts";
 
 function rebuild(pool: Pool, upTo: number) {
@@ -196,19 +196,23 @@ test("providers that write hex in upper case: the Pons curve is found and its ta
   assert.deepEqual(all.tape.trades, lower.tape.trades, "every provider in upper case");
 });
 
-// card app-console-429: Robinhood's window was 3,000 blocks, its last 306 s (2026-11-04 12:59Z), so a token quiet for five
-// minutes answered an empty chart and tape though it had a pool and trades; the window is now COLD_S on every chain,
-// walked newest first a step at a time
-test("a token quiet for longer than a step (its last trades 5,000 blocks back) is still found and its tape served: the walk goes back to COLD_S", async () => {
+// card app-console-429 walked a quiet Robinhood token back COLD_S (118 spans of 100 blocks a filter a provider); under it
+// every keyless provider refused or timed out and the routes answered 503 (card helper-robinhood-swaps, 2026-11-04
+// 14:36-15:16Z). The window is one step again: a token quiet for longer answers from our own reads, never 503.
+test("card helper-robinhood-swaps: a token quiet for longer than a step (its last trades 5,000 blocks back) answers 200 from our own reads, its discovery asking no getLogs range past the step", async () => {
   const chain = fakeChain();
   chain.st.head = REC.lastHead + 5_000;
   const s = open(chain, undefined, { pools: new Map() });
-  const tape = await bodyOf(s.trades(CURVE_TOKEN, 50));
+  const r = await s.trades(CURVE_TOKEN, 50);
   s.stop();
-  const whole = rebuild(POOL_CURVE, REC.lastHead);
-  assert.ok(whole.tape(50).length > 0, "the recording holds curve trades");
-  assert.deepEqual(tape.trades.map((t: { tx: string }) => t.tx), whole.tape(50).map((t) => t.tx), "every recorded curve trade, 5,000 blocks back");
-  assert.ok(VENUES.robinhood.cold * 102 >= 1_200_000, "the window is 20 minutes of Robinhood's 102 ms blocks");
+  assert.equal(r.status, 200, r.body);
+  assert.equal(JSON.parse(r.body).src, "chain");
+  assert.equal(VENUES.robinhood.cold, VENUES.robinhood.step, "the window is one step");
+  const step = VENUES.robinhood.step / VENUES.robinhood.span;
+  const ref = (VENUES.robinhood.step + VENUES.robinhood.refBack) / VENUES.robinhood.span;
+  // the token's transfers, its curve's swaps and the ETH price, each over the step, on two providers
+  const asked = chain.st.spans.length / 2;
+  assert.ok(asked <= 2 * step + ref + 2, `${asked} getLogs ranges for a quiet token's open (at most ${2 * step + ref + 2})`);
 });
 
 test("an active token stops after its first step: its first read asks no more spans than before the wider window", async () => {
@@ -223,7 +227,6 @@ test("an active token stops after its first step: its first read asks no more sp
   // every range is asked of two providers that must agree
   const asked = chain.st.spans.length / 2;
   assert.ok(asked <= step + ref + 1, `${asked} getLogs ranges, at most one step (${step}), the ETH price's first read (${ref}) and the head's`);
-  assert.ok(asked < VENUES.robinhood.cold / VENUES.robinhood.span, "never the whole window");
 });
 
 test("a listed token our reads find no pool of: its candles are GeckoTerminal's bars of its top pool, src geckoterminal, dated by their read; with GeckoTerminal silent, the empty chart as before", async () => {
@@ -258,4 +261,150 @@ test("a listed token our reads find no pool of: its candles are GeckoTerminal's 
   assert.deepEqual([e.candles, e.src], [[], "chain"], "GeckoTerminal silent: the empty chart");
   s.stop();
   quiet.stop();
+});
+
+test("card helper-chart-fresh: a listed token with no pool of ours, its GeckoTerminal bars past their hour while the lists hold the budget at the refresh lane's room: the re-read is a page read and the chart is dated now, never its first read", async () => {
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE, REFRESH_SLOT, WINDOW_MS } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: `0x${"ab".repeat(32)}` } }] }), { status: 200 });
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const budget = geckoBudget(() => clock.t);
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: budget });
+  const token = `0x${"34".repeat(20)}`;
+  const first = JSON.parse((await s.candles(token, "1m", null, 60)).body);
+  assert.equal(first.as_of_ms, clock.t, "the first read, dated now");
+  for (const hours of [2, 3, 4]) {
+    clock.t = Date.parse("2026-11-02T13:53:00Z") + hours * 3_600_000; // past GT_FRESH_MS and the pool's 10 minutes
+    // the EVM lists and one other held read keep the window at the refresh lane's room
+    for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE - REFRESH_SLOT; i++) assert.equal(budget.take("lists"), true);
+    assert.equal(budget.take("refresh"), true, "and one other held read: the window at the refresh lane's room");
+    const again = await s.candles(token, "1m", null, 60);
+    assert.equal(again.status, 200, again.body);
+    assert.equal(JSON.parse(again.body).as_of_ms, clock.t, `${hours} h on, the bars are read again, not served from ${new Date(first.as_of_ms).toISOString()}`);
+    clock.t += WINDOW_MS;
+  }
+  s.stop();
+});
+
+test("card helper-restart-fresh: a listed token with no pool of ours is served GeckoTerminal's newest bars only within GT_SERVE_MS: 16 min on they are read again, and on a spent budget the read answers 429 with its wait, never a 200 with the old bars", async () => {
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget, GT_LIMIT_PER_MIN } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const start = Date.parse("2026-11-02T13:53:00Z");
+  const clock = { t: start };
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: `0x${"ab".repeat(32)}` } }] }), { status: 200 });
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const token = `0x${"34".repeat(20)}`;
+  const budget = geckoBudget(() => clock.t);
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: budget });
+  assert.equal(JSON.parse((await s.candles(token, "1m", null, 60)).body).as_of_ms, start, "the first read, dated now");
+  clock.t = start + 16 * 60_000; // under GeckoTerminal's hour, past the route's freshness bound
+  const again = await s.candles(token, "1m", null, 60);
+  assert.equal(again.status, 200, again.body);
+  assert.equal(JSON.parse(again.body).as_of_ms, clock.t, "read again, not served from the first read 16 min back");
+  clock.t += 16 * 60_000;
+  for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(budget.take("pages"), true);
+  const spent = await s.candles(token, "1m", null, 60);
+  assert.notEqual(spent.status, 200, `never a 200 dated ${Math.round((clock.t - (spent.asOfMs ?? clock.t)) / 60_000)} min back`);
+  assert.equal(spent.status, 429, spent.body);
+  assert.ok((spent.retryAfterS ?? 0) >= 1, "with the wait to the next call");
+  s.stop();
+});
+
+test("card helper-chart-fresh: GeckoTerminal history before a time held past its hour stays a refresh: with the window at the refresh lane's room it is served as held, no call made, and a cold token's first read finds its calls", async () => {
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE, REFRESH_SLOT } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const start = Date.parse("2026-11-02T13:53:00Z");
+  const clock = { t: start };
+  const ohlcv: string[] = [];
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: `0x${"ab".repeat(32)}` } }] }), { status: 200 });
+    ohlcv.push(url);
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const budget = geckoBudget(() => clock.t);
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: budget });
+  const before = Math.floor(start / 1000) - 600;
+  const first = JSON.parse((await s.candles(`0x${"34".repeat(20)}`, "1m", before, 60)).body);
+  assert.ok(first.candles.length > 0 && ohlcv.length === 1);
+  clock.t = start + 2 * 3_600_000;
+  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE - REFRESH_SLOT; i++) assert.equal(budget.take("lists"), true);
+  assert.equal(budget.take("refresh"), true, "and one other held read: the window at the refresh lane's room");
+  const held = JSON.parse((await s.candles(`0x${"34".repeat(20)}`, "1m", before, 60)).body);
+  assert.deepEqual([held.candles, ohlcv.length], [first.candles, 1], "the history held is served, not read again");
+  const cold = await s.candles(`0x${"35".repeat(20)}`, "1m", null, 60);
+  assert.equal(cold.status, 200, cold.body);
+  assert.equal(JSON.parse(cold.body).src, "geckoterminal", "a cold token's first read finds its calls");
+  s.stop();
+});
+
+test("card helper-chart-fresh: Robinhood as read live 2026-11-04 14:36-14:58Z (one history provider timing out, the third's public window ~850 blocks, the chain's own RPC logging blockTimestamp 0x0): a token's discovery and tape answer 200, its swaps timed by the block times two providers give alike, the chain's own RPC's from its block headers", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  chain.st.faults.set("https://a.test", { down: true }); // robinhood.daybreak-rpc.network: 1-15 s a read, past TIMEOUT_MS
+  chain.st.faults.set("https://c.test", { window: 850 }); // api.blockvectra.com: -32011 state_window
+  chain.st.faults.set("https://d.test", { zeroTime: true }); // rpc.mainnet.chain.robinhood.com
+  const s = open(chain, undefined, { pools: new Map(), rpcs: [...URLS, "https://d.test"], headerTimed: new Set(["https://d.test"]) });
+  const r = await s.trades(CURVE_TOKEN, 50);
+  s.stop();
+  assert.equal(r.status, 200, r.body);
+  const whole = rebuild(POOL_CURVE, REC.lastHead);
+  const inWindow = whole.tape(50).filter((t) => t.block > REC.lastHead - VENUES.robinhood.cold);
+  assert.ok(inWindow.length > 0);
+  assert.deepEqual(JSON.parse(r.body).trades.map((t: { tx: string; t_ms: number }) => [t.tx, t.t_ms]), inWindow.map((t) => [t.tx, t.t_ms]), "every trade, at its block's time");
+
+  // a header-timed provider whose header disagrees with the other's logged time is no agreement
+  const skew = fakeChain();
+  skew.st.head = REC.lastHead;
+  skew.st.faults.set("https://a.test", { down: true });
+  skew.st.faults.set("https://b.test", { skewTime: true });
+  skew.st.faults.set("https://c.test", { window: 850 });
+  skew.st.faults.set("https://d.test", { zeroTime: true });
+  const k = open(skew, undefined, { pools: new Map(), rpcs: [...URLS, "https://d.test"], headerTimed: new Set(["https://d.test"]) });
+  const rk = await k.trades(CURVE_TOKEN, 50);
+  k.stop();
+  assert.equal(rk.status, 503, "times one provider alone gives: nothing served");
+});
+
+test("card helper-chart-fresh: a quiet token's discovery walks the whole cold window with at most INFLIGHT_MAX requests out to any provider at once (2026-11-04 14:49Z: 246 at once met 429, -32005, drpc's code 30 and timeouts)", async () => {
+  const { INFLIGHT_MAX } = await import("./swaps.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead + 5_000;
+  const out = new Map<string, number>();
+  let peak = 0;
+  const fetch = async (url: string, init: RequestInit) => {
+    out.set(url, (out.get(url) ?? 0) + 1);
+    peak = Math.max(peak, out.get(url)!);
+    try {
+      await new Promise((r) => setTimeout(r, 1));
+      return await chain.fetch(url, init);
+    } finally {
+      out.set(url, out.get(url)! - 1);
+    }
+  };
+  const s = open(chain, undefined, { pools: new Map(), fetch: fetch as never });
+  const r = await s.trades(CURVE_TOKEN, 50);
+  s.stop();
+  assert.equal(r.status, 200, r.body);
+  assert.ok(chain.st.spans.length > 2 * VENUES.robinhood.step / VENUES.robinhood.span, "the walk went past one step");
+  assert.ok(peak <= INFLIGHT_MAX, `${peak} requests out to one provider at once`);
 });

@@ -1,8 +1,8 @@
 // GeckoTerminal's keyless API: the helper has one address, so every part that reads GeckoTerminal (the Solana token
 // page's candles, src/data/solana/token.ts, and the EVM lists, src/data/evm/lists.ts) takes its calls from one budget
 // of GT_LIMIT_PER_MIN in any 60 s. The token page goes first: the "lists" lane yields, taking a call only while
-// PAGE_RESERVE calls stay free for a page, and none while a page has called in the last YIELD_MS, unless its read is
-// urgent (never read, or about to go stale: src/data/evm/lists.ts LIST_URGENT_MS): the lists always keep LIST_FLOOR
+// PAGE_RESERVE calls stay free for a page and REFRESH_SLOT for a held chart's refresh, and none while a page has
+// called in the last YIELD_MS, unless its read is urgent (never read, or about to go stale: src/data/evm/lists.ts LIST_URGENT_MS): the lists always keep LIST_FLOOR
 // calls of the minute for those, so pages opened back to back never leave Discover's lists empty or stale, and pages
 // always keep the other perMin - LIST_FLOOR. A 429 pauses
 // every lane, since GeckoTerminal answers our address, not a lane.
@@ -10,7 +10,12 @@
 // The "refresh" lane is a page's re-read of data it already holds (the newest bars past their 60 s, a top pool past its
 // 10 min): it takes a call only while COLD_RESERVE stay free for a read of something nobody holds, so a held token's
 // refresh never refuses another token's first read; refused, the holder serves what it has, dated (card
-// app-console-429: the live suite's candles 429 at 567a181, a cold mint behind another's refreshes).
+// app-console-429: the live suite's candles 429 at 567a181, a cold mint behind another's refreshes). A refresh of the
+// newest data held once it is REFRESH_URGENT_MS old is a page read (refreshLane), and the lists leave REFRESH_SLOT free
+// for a refresh: the lists ask for more calls than the budget has (6 lists every LIST_MS), so they kept the window at the
+// refresh lane's own room, perMin - COLD_RESERVE, and a refresh refused never made them yield; a chart read only now and
+// then was served its held bars for good (card helper-chart-fresh: PUMP's 1h bars from 12:55:51Z at 14:03Z and 14:21Z,
+// while a key nobody held read fresh). With the slot a refresh finds its call in normal load and a cold page its two.
 //
 // The limit is measured, not the published one: GeckoTerminal's FAQ says 10 calls a minute (apiguide.geckoterminal.com/
 // faq, read 2026-11-03 11:27Z), but read from one address after 70 s with no call, on 2026-11-03 at 14:58:04Z, 14 calls
@@ -26,25 +31,52 @@ export const GT_LIMIT_PER_MIN = 5;
 export const WINDOW_MS = 75_000;
 /** Calls a page may always find free: a token page's first open reads the token's top pool and one candles range. */
 export const PAGE_RESERVE = 2;
+/** Calls the lists' reads that are not urgent leave free on top of PAGE_RESERVE: a held chart's refresh, so the lists,
+ *  which ask for more calls than the budget has, never keep the window at the refresh lane's room (card
+ *  helper-chart-fresh: a chart read now and then was served its held bars for good). Each EVM list is then read about
+ *  every 225 s instead of 150 s, under LIST_URGENT_MS; a list's first read (`first`, never read) may take the slot, so a
+ *  helper started fresh still reads a chain's three lists in its first tick, as before. */
+export const REFRESH_SLOT = 1;
 /** A page call this recent makes the lists lane wait (unless its read is urgent). */
 export const YIELD_MS = 60_000;
 /** Calls a refresh leaves free: one cold token page's candles, its top pool and its bars (token.ts). */
 export const COLD_RESERVE = 2;
 /** Calls in the minute the lists may always take for an urgent read (6 lists, each read within LIST_URGENT_MS). */
 export const LIST_FLOOR = 2;
+/** The newest data held this old is read in the "pages" lane, as the lists' LIST_URGENT_MS (src/data/evm/lists.ts):
+ *  four times the bars' 60 s, so a chart is never served more than this behind its last refresh that could run. */
+export const REFRESH_URGENT_MS = 240_000;
+
+/** The newest bars held from GeckoTerminal serve a read it refuses or fails only while this old (their read time is the
+ *  answer's X-Fetched-At): the market routes' freshness bound, the live checks' 10 minutes (scripts/live-checks/
+ *  market-data-solana-token.mjs, market-data-evm.mjs). Older, the read answers its 429 with the wait, or 503: never a 200
+ *  with old bars (card helper-restart-fresh: live run 41871356171 straight after a swap served PUMP's 1h bars 16 min
+ *  old, handed over by the old helper). History before a time never changes and is served from what is held at any age. */
+export const GT_SERVE_MS = 600_000;
+
+/** The lane of a read of the newest data, held since `heldAtMs` (null: nothing held): "pages" for a first read and for
+ *  data REFRESH_URGENT_MS old, else "refresh". History before a time never changes and stays a refresh, whatever its age. */
+export function refreshLane(heldAtMs: number | null, nowMs: number): "pages" | "refresh" {
+  return heldAtMs === null || nowMs - heldAtMs >= REFRESH_URGENT_MS ? "pages" : "refresh";
+}
 
 export type GeckoBudget = {
   /** One call now in `lane`, or false when the minute, a 429 pause or (for "lists") the yield says no. */
-  take(lane: string, urgent?: boolean): boolean;
+  take(lane: string, urgent?: boolean, first?: boolean): boolean;
   /** A 429: no lane calls until `untilMs`. */
   pause(untilMs: number): void;
   /** When a page call can next be taken (now when it can now): the pause's end or the minute's oldest call leaving
    *  the window; what a refused page names as its wait. */
   retryAt(lane: string): number;
-  /** The calls in the window, oldest first: what a restart's next process seeds from (../data/warm.ts). */
-  calls(): number[];
-  /** Calls another process made from our address (a deploy's old helper, read from its warm file): counted as ours. */
-  seed(times: readonly number[]): void;
+  /** The calls in the window, oldest first (those of `lane` when it is named): what a restart's next process seeds from
+   *  (../data/warm.ts). */
+  calls(lane?: string): number[];
+  /** Calls another process made from our address (a deploy's old helper, read from its warm file): counted as ours, in
+   *  `lane` ("lists" for its lists' calls, so the lists' LIST_FLOOR counts them; "seed" for the rest, which no lane's
+   *  yield counts). Each seed of a lane replaces the one before it: the old helper's file is read at the start and again
+   *  at the handover, two snapshots of the same calls (card helper-restart-fresh: counted twice, they filled the window
+   *  and a page read straight after a swap was refused). */
+  seed(times: readonly number[], lane?: "seed" | "lists"): void;
   /** No lane calls until release(): another helper on our address may still be calling (card helper-ready-gate). */
   hold(): void;
   release(): void;
@@ -61,21 +93,21 @@ export function throttledUntil(b: GeckoBudget, retryAfter: string | null, nowMs:
 
 /** A budget of at most `perMin` calls in any WINDOW_MS, the "lists" lane yielding to every other. */
 export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): GeckoBudget {
-  const calls: { at: number; lane: string }[] = [];
+  const calls: { at: number; lane: string; seeded?: true }[] = [];
   let pausedUntil = 0;
   let held = false;
   const prune = (t: number) => {
     while (calls.length > 0 && t - calls[0]!.at >= WINDOW_MS) calls.shift();
   };
   return {
-    take(lane, urgent = false) {
+    take(lane, urgent = false, first = false) {
       const t = now();
       prune(t);
       if (held || t < pausedUntil || calls.length >= perMin) return false;
       if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
       if (lane === "lists") {
         const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
-        if (!floor && (calls.length >= perMin - PAGE_RESERVE || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && t - c.at < YIELD_MS))) return false;
+        if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && t - c.at < YIELD_MS))) return false;
       }
       calls.push({ at: t, lane });
       return true;
@@ -91,13 +123,14 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + WINDOW_MS);
       return at;
     },
-    calls() {
+    calls(lane) {
       prune(now());
-      return calls.map((c) => c.at);
+      return calls.filter((c) => lane === undefined || c.lane === lane).map((c) => c.at);
     },
-    seed(times) {
+    seed(times, lane = "seed") {
       const t = now();
-      for (const at of times) if (Number.isFinite(at) && at <= t && t - at < WINDOW_MS) calls.push({ at, lane: "seed" });
+      for (let i = calls.length - 1; i >= 0; i--) if (calls[i]!.seeded === true && calls[i]!.lane === lane) calls.splice(i, 1);
+      for (const at of times) if (Number.isFinite(at) && at <= t && t - at < WINDOW_MS) calls.push({ at, lane, seeded: true });
       calls.sort((a, b) => a.at - b.at);
       prune(t);
     },

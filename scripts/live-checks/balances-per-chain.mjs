@@ -12,7 +12,7 @@
 //   - each pool is drawn in its own asset: the balance names it ("12.5 SOL") and no amount in a pool row is a dollar
 //     figure (a SOL or ETH pool has none until a price read exists);
 //   - a pool the answer sends with no ready draws Ready and Pending as a dash, never 0; one with a ready draws a number;
-//   - no CSP violation and no console error in the terminal's frame.
+//   - no CSP violation, no console error and no page error in the terminal's frame (one with no address counts).
 // It passes on the deployed host once Portfolio is mounted on /portfolio (card app-portfolio-mount) and this card is
 // deployed. A screenshot of each width is kept.
 //   node scripts/live-checks/balances-per-chain.mjs [--shots <dir>] [--record <file>]
@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { POOL_ASSET_DECIMALS } from "../../packages/kit/src/index.ts";
 import { APP_HOST, harnessRoute, shellHeaders, SIGN_HOST } from "./app-in-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { watchErrors } from "./console-errors.mjs";
 
 const KEY = "balances-per-chain";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -55,6 +56,13 @@ export function base(s, asset) {
 }
 
 // ------------------------------------------------------------------------------------------------ the verdict
+/** The check's error hooks on its page: every console error and page error of the terminal's frame (an APP_HOST
+ *  address), and every one with no address, kept through the shared collector (console-errors.mjs) as its text and its
+ *  address's origin and path (card live-pageerror-hooks). */
+export function watch(page, errors) {
+  watchErrors(page, errors, (url) => url.startsWith(APP_HOST));
+}
+
 export function judge(rec) {
   const lines = [];
   const say = (ok, s) => lines.push(`${ok ? "ok " : "BAD"} ${s}`);
@@ -156,7 +164,7 @@ async function runOne(browser, w, shots, handler) {
     await ctx.route("**/*", handler);
     await ctx.addInitScript(INIT, { app: APP_HOST });
     const page = await ctx.newPage();
-    page.on("console", (m) => m.type() === "error" && (m.location()?.url ?? "").startsWith(APP_HOST) && run.errors.push(m.text()));
+    watch(page, run.errors);
     await page.goto(SIGN_HOST + PATH, { waitUntil: "commit" });
     const until = Date.now() + READY_MS;
     let f = null;

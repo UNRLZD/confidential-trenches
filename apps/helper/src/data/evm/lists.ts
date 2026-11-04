@@ -28,6 +28,7 @@
 import { gzipSync } from "node:zlib";
 import { dec, LIST_MAX, ROW_FIELDS, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { EVM_LIMIT_CODE, EVM_LIMIT_MESSAGE } from "../../limits/limits.ts";
 
 export const EVM_CHAINS = ["base", "robinhood"] as const;
 export type EvmChain = (typeof EVM_CHAINS)[number];
@@ -392,18 +393,30 @@ export function padOf(chain: EvmChain, token: string, logs: unknown): string | n
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /** JSON-RPC batches to one provider (BATCH_MAX calls each, one after another): each call's `result`, by position;
- *  undefined for any that failed. */
+ *  undefined for any that failed. A provider that refuses a batch (its HTTP 429, a JSON-RPC -32005 or limit message) is
+ *  sent none of the batches after it: they fail as refused reads, so the caller's third provider answers (card
+ *  helper-rpc-hold-queued: the chain's own Robinhood RPC, the first of MAKER_RPCS, answered the helper box's address
+ *  429 on 10 of 10 probes at 2026-11-04 18:53Z, and another address 200 on 6 of 6). */
 export async function batch(doFetch: Fetch, url: string, calls: { method: string; params: unknown[] }[]): Promise<unknown[]> {
   const max = BATCH_MAX[url] ?? 10;
-  if (calls.length <= max) return batchOnce(doFetch, url, calls);
   const out: unknown[] = [];
-  for (let i = 0; i < calls.length; i += max) out.push(...(await batchOnce(doFetch, url, calls.slice(i, i + max))));
+  let refused = false;
+  for (let i = 0; i < calls.length; i += max) {
+    const part = calls.slice(i, i + max);
+    if (refused) {
+      out.push(...part.map(() => undefined));
+      continue;
+    }
+    const got = await batchOnce(doFetch, url, part);
+    refused = got.refused;
+    out.push(...got.out);
+  }
   return out;
 }
 
-async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; params: unknown[] }[]): Promise<unknown[]> {
-  const none = calls.map(() => undefined);
-  if (calls.length === 0) return [];
+async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; params: unknown[] }[]): Promise<{ out: unknown[]; refused: boolean }> {
+  const none = { out: calls.map(() => undefined), refused: false };
+  if (calls.length === 0) return none;
   try {
     const r = await doFetch(url, {
       method: "POST",
@@ -414,18 +427,24 @@ async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; p
     });
     if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
       await r.body?.cancel();
-      return none;
+      return { ...none, refused: r.status === 429 };
     }
     const body = await r.text();
     if (body.length > ANSWER_MAX) return none;
     const parsed: unknown = JSON.parse(body);
     const answers = Array.isArray(parsed) ? parsed : [parsed];
-    const out: unknown[] = [...none];
+    const out: unknown[] = [...none.out];
+    let refused = false;
     for (const a of answers) {
       const o = obj(a);
-      if (Number.isSafeInteger(o.id) && (o.id as number) >= 0 && (o.id as number) < calls.length && Object.hasOwn(o, "result") && !Object.hasOwn(o, "error")) out[o.id as number] = o.result;
+      if (Object.hasOwn(o, "error")) {
+        const e = obj(o.error);
+        if (e.code === EVM_LIMIT_CODE || EVM_LIMIT_MESSAGE.test(String(e.message ?? ""))) refused = true;
+        continue;
+      }
+      if (Number.isSafeInteger(o.id) && (o.id as number) >= 0 && (o.id as number) < calls.length && Object.hasOwn(o, "result")) out[o.id as number] = o.result;
     }
-    return out;
+    return { out, refused };
   } catch {
     return none;
   }
@@ -623,8 +642,8 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   let last: (ListsAnswer & { asOfMs: number }) | null = null;
   let running: Promise<void> | null = null;
 
-  async function gt(path: string, urgent: boolean): Promise<Read | null> {
-    if (!gecko.take("lists", urgent)) return null;
+  async function gt(path: string, urgent: boolean, first: boolean): Promise<Read | null> {
+    if (!gecko.take("lists", urgent, first)) return null;
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
@@ -664,7 +683,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     // the stalest list first (a missing one before any), one call at a time while the lists lane yields one
     const age = (k: ListKey) => (reads[k] === undefined ? Infinity : now() - reads[k]!.at);
     for (const k of LIST_KEYS.filter((x) => age(x) >= LIST_MS).sort((a, b) => age(b) - age(a))) {
-      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS);
+      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS, reads[k] === undefined);
       if (r === null) break;
       reads[k] = r;
     }

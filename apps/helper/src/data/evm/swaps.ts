@@ -51,8 +51,8 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
-import { throttledUntil, type GeckoBudget } from "../gecko.ts";
-import { EVM_LIMIT_CODE, RETRY_AFTER_MAX_S, upstreamRetryAfterS } from "../../limits/limits.ts";
+import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { EVM_LIMIT_CODE, EVM_LIMIT_MESSAGE, RETRY_AFTER_MAX_S, upstreamRetryAfterS } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 
@@ -164,8 +164,8 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
   },
   // Robinhood makes about 10 blocks a second (10,000 blocks over 1,024 s, 2026-11-03 19:1xZ): a step of 3,000 blocks is
   // its last five minutes (600, one minute, found no pool for a v4 token with 213 swaps in the 2,000 blocks before, read
-  // live 2026-11-03 19:5xZ), and a quiet token is walked back up to COLD_S, the bars before our first coming from
-  // GeckoTerminal's OHLCV as on Base; 100 blocks is the widest `eth_getLogs` its keyless providers all take
+  // live 2026-11-03 19:5xZ), and a quiet token's window is that one step (below), the bars before our first coming
+  // from GeckoTerminal's OHLCV as on Base; 100 blocks is the widest `eth_getLogs` its keyless providers all take
   // (api.blockvectra.com "block range exceeds 100 blocks", robinhood.drpc.org refuses 500), so a step is 30 spans,
   // batched; the ETH price pool's longest gap read was 386 blocks, so it is read 1,000 blocks before a book's first
   robinhood: {
@@ -178,8 +178,11 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     refPoolId: ROBINHOOD_REF_POOL_ID,
     pons: [ROBINHOOD_VENUES.ponsV2],
     span: 100,
-    // 102 ms a block: 3,000 blocks over 306 s at head 105918391 (robinhood.daybreak-rpc.network, 2026-11-04 12:59Z)
-    cold: coldOf(102),
+    // one step, not COLD_S (card helper-robinhood-swaps): 20 minutes of 102 ms blocks is 118 spans of 100 blocks a
+    // filter a provider, and under it every keyless provider answered 429, -32005, code 30 or a timeout and the swaps
+    // routes 503 (2026-11-04 14:36-15:16Z reads, a soak at 15:13Z still 503 after 195 s); a token quiet longer than the
+    // step's five minutes has GeckoTerminal's bars of its top pool, as a token with no pool found
+    cold: 3_000,
     step: 3_000,
     refBack: 1_000,
     lagMax: 50,
@@ -197,12 +200,29 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // batches); each of the three fills a log's `blockTimestamp`. rpc.mainnet.chain.robinhood.com answers 5,000 blocks but
   // logs `blockTimestamp` 0x0 and refused a fourth quick read with 429; robinhood-rpc.publicnode.com refused every
   // `eth_getLogs` ("Archive requests require a personal token"); blockreq.com's public endpoint took 21 s.
-  robinhood: ["https://robinhood.daybreak-rpc.network", "https://robinhood.drpc.org", "https://api.blockvectra.com/v1/robinhood_mainnet/public"],
+  //
+  // Read again 2026-11-04 14:36-14:58Z (card helper-chart-fresh), when the helper's Robinhood candles and tape answered
+  // 503: robinhood.daybreak-rpc.network took 0.8-15 s for one 100-block `eth_getLogs` (5 of 8 past the 10 s a read
+  // was given) and 1-15 s for eth_blockNumber; api.blockvectra.com refuses any block older than about 850 (-32011
+  // "block reference is outside the public history window", reason state_window, retryable false) and 429s bursts, so
+  // it serves no discovery and no first read; robinhood.drpc.org answered 100-block reads in 0.5-0.8 s (one run of
+  // -32601 "method not available" at 14:36:28Z). With two providers needed alike, one slow provider left no pair:
+  // 503. rpc.mainnet.chain.robinhood.com, the chain's own, answered 100-block reads 11,000 blocks back in 0.4-1.3 s
+  // and a batch of 10 in 2.0 s, its logs' `blockTimestamp` still 0x0 and its block headers' `timestamp` set: it is
+  // header-timed (HEADER_TIMED). Ordered by those reads, the fastest first.
+  robinhood: ["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network", "https://api.blockvectra.com/v1/robinhood_mainnet/public"],
 };
+
+/** Providers whose logs carry no block time on a chain timed by them (Robinhood): their logs are timed by their own
+ *  `eth_getBlockByNumber` of each log's block, and count for a swap's time only where another provider logged the same. */
+export const HEADER_TIMED: ReadonlySet<string> = new Set(["https://rpc.mainnet.chain.robinhood.com"]);
 
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
  *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ). */
 const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://base.gateway.tenderly.co": 4, "https://api.blockvectra.com/v1/robinhood_mainnet/public": 1 };
+
+/** Requests out to one provider at once (swaps.ts batchTo). */
+export const INFLIGHT_MAX = 4;
 
 /** Blocks read again every tick, and so the blocks an agreed head must be ahead of a settled block. Base's sequencer can
  *  reorg a few unsafe blocks; its `safe` head trails by about 40 s (proofs/evm-safe-lag, 20 blocks), so 10 re-read blocks
@@ -246,6 +266,10 @@ export const TRADES_MAX = 50;
 export const CANDLES_MAX = 500;
 /** History before our first bar never changes: kept this long. */
 const GT_FRESH_MS = 3_600_000;
+/** GeckoTerminal's newest bars as a chart of their own (a listed token with no pool of ours, noneCandles): read again
+ *  after this, as the Solana token page's (../solana/token.ts CANDLES_FRESH_MS), and served from what is held only within
+ *  GT_SERVE_MS (card helper-restart-fresh). */
+const GT_NEWEST_FRESH_MS = 60_000;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Logs
@@ -414,10 +438,11 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
 type Call = { method: string; params: unknown[] };
 type Reply = { ok: true; result: unknown } | { ok: false; wait: number };
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
+  const headerTimed = deps.headerTimed ?? HEADER_TIMED;
   const V = VENUES[chain];
   // Base's fixed clock times its blocks; a chain with none (Robinhood) is timed by each log's own block time, which two
   // providers must give alike
@@ -436,12 +461,34 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const max = BATCH_SIZE[url] ?? 10;
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
-    const got = await Promise.all(parts.map((part) => one(url, part)));
+    const got = await Promise.all(parts.map((part) => slot(url, () => one(url, part))));
     return got.some((g) => g === null) ? null : got.flat() as Reply[];
   }
 
-  /** One JSON-RPC batch (at most the provider's batch size) to a provider. */
+  // at most INFLIGHT_MAX requests out to a provider at once, the rest queued in order: a first read's walk sent 246 at
+  // once to the Robinhood providers, which answered 429, -32005, drpc's code 30 and timeouts that one at a time they
+  // did not (card helper-chart-fresh, 2026-11-04 14:49Z)
+  const inflight = new Map<string, { n: number; queue: (() => void)[] }>();
+  async function slot<T>(url: string, run: () => Promise<T>): Promise<T> {
+    const q = inflight.get(url) ?? { n: 0, queue: [] };
+    inflight.set(url, q);
+    if (q.n >= INFLIGHT_MAX) await new Promise<void>((go) => q.queue.push(go));
+    else q.n++;
+    try {
+      return await run();
+    } finally {
+      const next = q.queue.shift();
+      if (next !== undefined) next();
+      else q.n--;
+    }
+  }
+
+  /** One JSON-RPC batch (at most the provider's batch size) to a provider. Its hold is read right before the fetch: a
+   *  batch queued behind INFLIGHT_MAX before the provider refused sends nothing while it holds and fails as a refused
+   *  read does, so the caller asks the next provider (card helper-rpc-hold-queued: 2026-11-04 18:55Z on the helper box,
+   *  seven batches queued before the chain's own Robinhood RPC's 429 were sent within 190 ms of it). */
   async function one(url: string, part: Call[]): Promise<Reply[] | null> {
+    if ((held.get(url) ?? 0) > now()) return null;
     try {
       const r = await doFetch(url, {
         method: "POST",
@@ -452,7 +499,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       });
       if (r.status === 429) {
         await r.body?.cancel();
-        held.set(url, now() + upstreamRetryAfterS(r.headers, now()) * 1000);
+        // a later, shorter wait never cuts a longer one, as the limit path below
+        held.set(url, Math.max(held.get(url) ?? 0, now() + upstreamRetryAfterS(r.headers, now()) * 1000));
         return null;
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
@@ -471,7 +519,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           // the helper's RPC rules (rpc.ts): -32005 or a limit message is a throttle, held for the wait it names
           const e = obj(o.error);
           const s = Number(obj(e.data).backoff_seconds);
-          const limited = e.code === EVM_LIMIT_CODE || /rate.?limit|too many requests|limit (reached|exceeded)|request limit/i.test(String(e.message ?? ""));
+          const limited = e.code === EVM_LIMIT_CODE || EVM_LIMIT_MESSAGE.test(String(e.message ?? ""));
           const wait = limited ? (Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1) : 0;
           if (wait > 0) held.set(url, Math.max(held.get(url) ?? 0, now() + wait * 1000));
           got[o.id as number] = { ok: false, wait };
@@ -549,10 +597,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       filters.length,
       async (u, idx) => {
         const r = await batchTo(u, idx.map((i) => ({ method: "eth_getLogs", params: [filters[i]] })));
-        return idx.map((_, k) => (r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null));
+        const got = idx.map((_, k) => (r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null));
+        return clock === null && headerTimed.has(u) ? timedByHeaders(u, got) : got;
       },
       (a, b) => sameLogs(a, b, clock === null),
     );
+  }
+
+  /** A header-timed provider's logs (it logs no block time) timed by its own headers of their blocks; an answer with a
+   *  block it gives no time for is no answer. Its times count only where another provider logged the same (agreedLogs'
+   *  sameLogs with times), so a header for the wrong block or a 0 is no agreement. */
+  async function timedByHeaders(u: string, got: (Log[] | null)[]): Promise<(Log[] | null)[]> {
+    const blocks = [...new Set(got.flatMap((g) => (g ?? []).map((l) => l.block)))];
+    if (blocks.length === 0) return got;
+    const r = await batchTo(u, blocks.map((n) => ({ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] })));
+    const times = new Map<number, number>();
+    blocks.forEach((n, i) => {
+      const b = r?.[i]?.ok ? obj((r[i] as { result: unknown }).result) : {};
+      const t = hexInt(b.timestamp);
+      if (t !== null) times.set(n, t); // checked as any logged time is: alike with another provider's, never 0 (apply)
+    });
+    return got.map((g) => (g === null || g.some((l) => !times.has(l.block)) ? null : g.map((l) => ({ ...l, t: times.get(l.block)! }))));
   }
 
   /** One filter's logs over blocks `from` to `to`, read in spans the providers take: null when any span is not agreed. */
@@ -958,8 +1023,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
     }
     if (p === undefined || p.id === null) return none;
-    const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to);
-    const bars = Array.isArray(got) ? got.filter((c) => to === null || c[0] < to).slice(-limit) : [];
+    const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to, true);
+    // GeckoTerminal refused or failed with nothing to serve: its 429 (with the wait) or 503, so the page retries, never
+    // an empty 200 for a token it names a pool of (card helper-restart-fresh)
+    if (!Array.isArray(got)) return got;
+    const bars = got.filter((c) => to === null || c[0] < to).slice(-limit);
     if (bars.length === 0) return none;
     const at = history.get(`${p.id}:${tf}:${to ?? ""}`)?.at ?? kept.get(`${p.id}:${tf}`)?.at ?? now();
     const body = { tf, candles: bars, src: "geckoterminal", as_of_ms: at };
@@ -970,23 +1038,31 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const kept = new Map<string, { at: number; bars: Candle[] }>();
   /** GeckoTerminal's bars before `before` (unix seconds; null: its newest range, one cache key however often asked),
    *  or, when the read is refused, throttled or fails, the last good bars of the pool and tf cut there; with none of
-   *  those, the 429 (with the wait to the next call) or 503 to answer. */
-  async function geckoBars(e: Entry, tf: Tf, before: number | null): Promise<Candle[] | DataAnswer> {
+   *  those, the 429 (with the wait to the next call) or 503 to answer. `alone`: the bars are the chart, with no book of
+   *  ours after them (noneCandles), so their read is the answer's X-Fetched-At: the newest range is read again after
+   *  GT_NEWEST_FRESH_MS and served from what is held only within GT_SERVE_MS (card helper-restart-fresh); before a book
+   *  of ours they are history the book's own reads follow, kept GT_FRESH_MS. */
+  async function geckoBars(e: Entry, tf: Tf, before: number | null, alone = false): Promise<Candle[] | DataAnswer> {
     if (!Object.hasOwn(GT_TF, tf) || deps.gecko === undefined) return [];
     const gecko = deps.gecko;
     const k = `${e.pool.id}:${tf}:${before ?? ""}`;
     const fresh = history.get(k);
-    if (fresh !== undefined && now() - fresh.at < GT_FRESH_MS) return fresh.bars;
+    const newest = alone && before === null;
+    if (fresh !== undefined && now() - fresh.at < (newest ? GT_NEWEST_FRESH_MS : GT_FRESH_MS)) return fresh.bars;
+    const servable = (at: number | undefined) => at !== undefined && (!newest || now() - at <= GT_SERVE_MS);
     const fallback = (fail: DataAnswer): Candle[] | DataAnswer => {
-      if (fresh !== undefined && fresh.bars.length > 0) return fresh.bars;
-      const cut = (kept.get(`${e.pool.id}:${tf}`)?.bars ?? []).filter((c) => before === null || c[0] < before);
+      if (fresh !== undefined && fresh.bars.length > 0 && servable(fresh.at)) return fresh.bars;
+      const held = kept.get(`${e.pool.id}:${tf}`);
+      const cut = (servable(held?.at) ? held!.bars : []).filter((c) => before === null || c[0] < before);
       return cut.length > 0 ? cut : fail;
     };
     const wait = (why = "geckoterminal budget") => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
-    // a re-read of bars held (this range's, or the newest range's kept bars) is a refresh (../gecko.ts): it leaves a cold
-    // page its calls, and refused, the bars held are served (card app-console-429)
-    const held = fresh !== undefined || (before === null && kept.has(`${e.pool.id}:${tf}`));
-    if (!gecko.take(held ? "refresh" : "pages")) return fallback(wait(held ? "geckoterminal refresh" : undefined));
+    // a re-read of bars held is a refresh (../gecko.ts): it leaves a cold page its calls, and refused, the bars held are
+    // served (card app-console-429); the newest range is a page read once its kept bars are REFRESH_URGENT_MS old, so
+    // the lists' calls never leave it served the same bars for good (refreshLane, card helper-chart-fresh); history
+    // before a time stays a refresh
+    const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : "pages";
+    if (!gecko.take(lane)) return fallback(wait(lane === "refresh" ? "geckoterminal refresh" : undefined));
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
       const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;

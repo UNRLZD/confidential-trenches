@@ -4,6 +4,7 @@
 // checked against its kind's params before it is built, so a field its kind does not allow is never sent.
 // The types these schemas mirror are messages.ts's; the test checks one valid and several invalid values per kind.
 
+import { base58 } from "@scure/base";
 import { CHAINS, type Chain } from "../orders/record.ts";
 import { POOL_ASSET_DECIMALS, POOL_ASSETS, POOL_CHAINS, SIGNPAGE_KINDS } from "./messages.ts";
 import type { PoolAsset, SignpageKind } from "./messages.ts";
@@ -157,11 +158,22 @@ const unitsAt = (s: string, d: number): bigint | null => {
  * from POOL_ASSET_DECIMALS only) and the one its chain's pool holds, its amounts with no more fraction digits than the
  * asset has decimals, its ready at most its balance, its tap_max only with a ready and at most that ready (one
  * proof's spend, at most its chunk; "0" when the fee and W's new accounts eat every chunk), one entry per chain (a chain twice is refused). */
-const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec });
+/** The pool asset's USD price as the page read it (card signpage-pool-price): one asset is price x 10^expo USD, price a
+ * positive integer with no leading zero, expo an integer in -18..0 (poolUsdPrice's bounds), published_s the feed's own
+ * time and read_ms the device's clock at the read; only on a chain with a feed (POOL_USD_FEEDS: not NEAR). */
+const poolPrice = obj({
+  price: (v) => typeof v === "string" && /^[1-9]\d{0,77}$/.test(v),
+  expo: (v) => Number.isInteger(v) && (v as number) <= 0 && (v as number) >= -18,
+  published_s: uint,
+  read_ms: uint,
+});
+const PRICED: readonly Chain[] = ["solana", "base", "robinhood"];
+const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec, price: poolPrice });
 const poolFits: SignpageSchema = (v) => {
   if (!poolEntry(v)) return false;
-  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string };
+  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; price?: unknown };
   if (POOL_CHAIN_ASSET[p.chain] !== p.asset) return false;
+  if (p.price !== undefined && !PRICED.includes(p.chain)) return false;
   const d = POOL_ASSET_DECIMALS[p.asset];
   const balance = unitsAt(p.balance, d);
   if (balance === null) return false;
@@ -272,6 +284,26 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
 export const signpageReadySchema = obj({ v: lit(1), type: lit("ready"), release: str, api: uint });
 export const signpageStateEventSchema = obj({ v: lit(1), type: lit("state"), state });
 export const signpageProgressSchema = obj({ v: lit(1), type: lit("progress"), id: str, stage: oneOf(STAGES) });
+/** A route event's `out`: a token amount above 0 in whole units, at most 78 digits each side of the point, no leading
+ *  zero, no trailing zero after it. The signing page tells no amount this refuses (src/pool-buy.ts). */
+export const SIGNPAGE_ROUTE_OUT = /^(0|[1-9]\d{0,77})(\.\d{0,77}[1-9])?$/;
+const routeOutAmount: SignpageSchema = (v) => typeof v === "string" && v !== "0" && SIGNPAGE_ROUTE_OUT.test(v);
+/** A Solana address: base58 of exactly 32 bytes. */
+const solAddress: SignpageSchema = (v) => {
+  if (typeof v !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v)) return false;
+  try {
+    return base58.decode(v).length === 32;
+  } catch {
+    return false;
+  }
+};
+/** A route event (messages.ts BuyRoute): a progress event with no stage and exactly one of its three shapes. W and the
+ *  pool are addresses; the venue is the page's name for it, a free string. */
+const routeHead = { v: lit(1), type: lit("progress"), id: str };
+const routeWallet = obj({ ...routeHead, wallet: solAddress });
+const routeVenue = obj({ ...routeHead, venue: str, pool: solAddress });
+const routeOut = obj({ ...routeHead, out: routeOutAmount });
+export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v) || routeVenue(v) || routeOut(v);
 
 /** An answer's envelope; the result inside is checked against its kind's schema by the client. */
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });

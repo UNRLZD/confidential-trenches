@@ -25,6 +25,10 @@ import {
 } from "./model.ts";
 import type { Cents, Phase } from "./model.ts";
 import { EndLine, hasRunLabel, RunLabel, stateId } from "./States.tsx";
+import { FillToast, RouteStrip } from "./RouteStrip.tsx";
+import { fromOutcome, fromStage, IDLE, routeEvent, routeTap, toastLine, usd2 } from "./route.ts";
+import type { Route } from "./route.ts";
+import { txLink } from "../withdraw/model.ts";
 import { useTradeSource } from "./source.tsx";
 import type { SetPreview } from "./source.tsx";
 import { WORDS } from "./words.ts";
@@ -98,6 +102,8 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   const [phase, setPhase] = useState<Phase>(READY);
   const phaseRef = useRef<Phase>(READY);
   phaseRef.current = phase;
+  const [route, setRoute] = useState<Route>(IDLE);
+  const [dismissed, setDismissed] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ amount: Cents; p: SetPreview } | null>(null);
   const [, tick] = useState(0);
 
@@ -139,8 +145,23 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
     return kit.onProgress((id, stage) => {
       const at = src.now();
       setPhase((p) => progress(p, id, stage, at));
+      setRoute((r) => fromStage(r, id, stage));
     });
   }, [kit.onProgress, src.now]);
+
+  // what the page tells of the running buy besides its stage: the wallet, the venue and pool, the filled amount
+  useEffect(() => {
+    if (!kit.route) return;
+    return kit.route((d) => setRoute((r) => routeEvent(r, d)));
+  }, [kit.route]);
+
+  // the fill toast goes by itself a few seconds after the fill (a notice, never a wait: the next tap does not wait on it)
+  useEffect(() => {
+    if (phase.k !== "filled") return;
+    const id = phase.id;
+    const t = setTimeout(() => setDismissed(id), 6000);
+    return () => clearTimeout(t);
+  }, [phase.k === "filled" ? phase.id : null]);
 
   // Landing's counter and Slow: a tick every 100 ms while a buy runs, none otherwise
   useEffect(() => {
@@ -155,17 +176,20 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
     if (!ready || busy(phaseRef.current) || !amountOk(c, max, balance)) return;
     let h;
     if (onPool) {
-      // only an ask the box's own checks passed: a proof ready, at most one tap's spend, the device's price
-      const ask = poolBuyAsk(pools, chain, token, c, price, slippageBps);
+      // only an ask the box's own checks passed: a proof ready, at most one tap's spend, the device's price as it is at
+      // the tap (a price past its bound since the last render prices nothing)
+      const ask = poolBuyAsk(pools, chain, token, c, kit.poolPrice(chain), slippageBps);
       if (!ask.ok) return;
       h = kit.request!(ask.kind, ask.params);
     } else h = kit.request!("buy", { chain, token, side: "buy", amount: centsToDecimal(c), slippage_bps: slippageBps });
     const next = tap(phaseRef.current, h.id, src.now());
     phaseRef.current = next;
     setPhase(next);
+    setRoute(routeTap(h.id, src.now(), c));
     void h.outcome.then((o) => {
       const at = src.now();
       setPhase((p) => outcome(p, h.id, o, at));
+      setRoute((r) => fromOutcome(r, h.id, o));
     });
   }
 
@@ -180,7 +204,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   let label;
   if (signedOut) label = <W id="signInToTrade" />;
   else if (account === "loading") label = "\u00a0"; // the header's skeleton state: no word until the first `state` says which
-  else if (hasRunLabel(phase)) label = <RunLabel phase={phase} now={now} />;
+  else if (hasRunLabel(phase)) label = <RunLabel phase={phase} now={now} final />;
   else
     label = (
       <span className="trb-ctaLbl" title={`${WORDS.buy.text} ${symbol}`}>
@@ -288,6 +312,16 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
       >
         {label}
       </button>
+      <RouteStrip route={route} symbol={symbol} outText={route.out === null ? null : fmtOut(route.out)} />
+      {phase.k === "filled" && dismissed !== phase.id && (
+        <FillToast
+          symbol={symbol}
+          line={toastLine(phase.ms, route.out === null ? null : fmtOut(route.out), symbol, route.cents === null ? "" : usd2(route.cents))}
+          href={route.tx ? txLink([{ chain, hash: route.tx }]) : null}
+          chainName={chain === "solana" ? "solscan" : chain === "base" ? "basescan" : chain === "robinhood" ? "rhExplorer" : "nearblocks"}
+          onClose={() => setDismissed(phase.id)}
+        />
+      )}
       <div className="trb-line">
         <button type="button" className="trb-row" aria-expanded="false" disabled>
           <Swap />
