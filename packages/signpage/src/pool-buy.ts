@@ -111,6 +111,24 @@ export type PoolBuyHost = {
 
 export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" };
 
+/** The helper's busy answer to a send (its 429: rate_limited when a pool provider throttled a read, in_flight when this
+ *  caller holds too many sends open, or its per-caller throttle), with the wait its Retry-After names. The send is
+ *  made again, the same signed bytes, after that wait, until the blockhash is past on both RPCs (the card
+ *  signpage-pool-flow-run, run 6: the page answered not_landed to a helper that said "wait 1 s"). */
+export class PoolSendBusy extends Error {
+  readonly code: "rate_limited" | "in_flight" | "throttled";
+  readonly retryAfterMs: number;
+  constructor(code: "rate_limited" | "in_flight" | "throttled", retryAfterMs: number) {
+    super(`pool send: busy (${code}), again in ${retryAfterMs} ms`);
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+/** The wait between two sends of one transaction: the helper's Retry-After, at least 1 s, at most 5 s. */
+export const POOL_SEND_BUSY_WAIT_MS = { min: 1_000, max: 5_000 } as const;
+/** The most sends of one transaction: past a blockhash's life at the shortest wait, so the height decides first. */
+export const POOL_SEND_TRIES_MAX = 120;
+
 /** Read-back reads a buy gets, a second apart: past a blockhash's life (~60 to 90 s) and a finalization. */
 export const POOL_BUY_READS = 120;
 export const POOL_BUY_WAIT_MS = 1_000;
@@ -406,11 +424,18 @@ async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolReleas
     return { stage: "sent", txs };
   };
   let answer: unknown;
-  try {
-    answer = await h.send(pool, signed);
-  } catch {
-    // the helper's error says nothing of the chain: a broken-in helper may answer 502 and send it anyway
-    return unlanded([]);
+  for (let tries = 1; ; tries++) {
+    try {
+      answer = await h.send(pool, signed);
+      break;
+    } catch (e) {
+      // the helper's error says nothing of the chain: a broken-in helper may answer 502 and send it anyway
+      if (!(e instanceof PoolSendBusy) || tries >= POOL_SEND_TRIES_MAX) return unlanded([]);
+      // busy: the same bytes again after its wait, while the blockhash lives on either RPC; past it on both, the read-back
+      // rules decide (not_landed once the settle finds no spend)
+      if (await pastOnBoth(h.rpcs, lastHeight).catch(() => false)) return unlanded([]);
+      await wait(Math.min(Math.max(e.retryAfterMs, POOL_SEND_BUSY_WAIT_MS.min), POOL_SEND_BUSY_WAIT_MS.max));
+    }
   }
   const signature = (answer as { signature?: unknown } | null)?.signature;
   if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature) || base58.decode(signature).length !== 64) return unlanded([]);
