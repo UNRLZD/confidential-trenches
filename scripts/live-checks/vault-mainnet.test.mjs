@@ -233,6 +233,18 @@ test("planted: the write's tx is unknown on both RPCs (it never landed): FAIL on
   assert.deepEqual(bads(r).map((l) => l.replace(/ on https:\/\/[^\s:]+/, "")), [`BAD storage_prepay tx ${GOOD_TX} by ${SIGNER}: HANDLER_ERROR: UNKNOWN_TRANSACTION`, `BAD storage_prepay tx ${GOOD_TX} by ${SIGNER}: HANDLER_ERROR: UNKNOWN_TRANSACTION`]);
 });
 
+test("planted: the tx read answers an error other than not-yet-known: FAIL at once, read once per RPC; not-yet-known is read again", async () => {
+  const refused = { jsonrpc: "2.0", id: "x", error: { name: "REQUEST_VALIDATION_ERROR", cause: { name: "PARSE_ERROR" }, message: "Parse error" } };
+  const f = replay(good().map((a) => (a.method === "tx" ? { ...a, json: refused } : a)));
+  const r = await check({ network: "testnet", account: VAULT, deployment, fetchFn: f, write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
+  onlyBad(r, [`BAD storage_prepay tx ${GOOD_TX} by ${SIGNER} on `]);
+  assert.equal(f.asked.filter((m) => m === "tx").length, 2);
+  const unknown = { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, message: "Server error" } };
+  const u = replay(good().map((a) => (a.method === "tx" ? { ...a, json: unknown } : a)));
+  await check({ network: "testnet", account: VAULT, deployment, fetchFn: u, write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
+  assert.equal(u.asked.filter((m) => m === "tx").length, 2 * 10, "ten reads per RPC before a tx counts as never landed");
+});
+
 test("planted: a full-access key in the vault's key list: FAIL on the key list, and no write is offered or read", async () => {
   const key = { public_key: "ed25519:EhjW27bK6ojYS7oWrNQjTjgKgdv8QwfqVQVzSD2YxR51", access_key: { nonce: 1, permission: "FullAccess" } };
   const answers = good().map((a) => (a.params.request_type === "view_access_key_list" ? { ...a, json: { ...a.json, result: { ...a.json.result, keys: [key] } } } : a));
