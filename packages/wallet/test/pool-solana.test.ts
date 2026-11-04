@@ -255,6 +255,22 @@ test("bind: the program's context over W, the pinned fee payer, the epoch fee as
   await assert.rejects(poolWith(pair(nowChain(), nowChain())).bind(args({ deadlineMs: EPOCH + SOL_LIFE_MS + 1n })), /deadlineMs/);
 });
 
+test("bind for a withdraw (tipCap 0, card signpage-pool-withdraw-form): no tip is bound and none counts in W's rent floor; no other tip cap is taken", async () => {
+  const rent0 = (128n * 5_080n);
+  const fee = 1_300_000n;
+  const b = await poolWith(pair(nowChain(), nowChain())).bind({ ...args(), tipCap: 0n });
+  assert.equal(b.request.tipCap, 0n);
+  assert.equal(b.context, solanaContextOf(b.request, SCOPE));
+  // the floor without the tip: W holds chunk - fee after the release, at least rent(0); the backstop 2 x fee
+  const floor = fee + rent0 > 2n * fee ? fee + rent0 : 2n * fee;
+  assert.equal((await poolWith(pair(nowChain(), nowChain())).bind({ ...args(), chunk: floor, tipCap: 0n })).request.tipCap, 0n);
+  await assert.rejects(poolWith(pair(nowChain(), nowChain())).bind({ ...args(), chunk: floor - 1n, tipCap: 0n }), /chunk/);
+  // a buy's chunk at that floor is still refused: its tip cap counts
+  await assert.rejects(poolWith(pair(nowChain(), nowChain())).bind({ ...args(), chunk: floor }), /chunk/);
+  // only the two tip caps every user binds: a tip cap per request would mark one user
+  for (const tipCap of [1n, SOL_TIP_CAP - 1n, SOL_TIP_CAP + 1n, -1n]) await assert.rejects(poolWith(pair(nowChain(), nowChain())).bind({ ...args(), tipCap }), /tipCap/, String(tipCap));
+});
+
 test("the epoch fee is the device's own: the kit's cost rounded up to the step plus two steps, 1,300,000 at mainnet rent; any other helper answer is refused", async () => {
   assert.deepEqual(solanaEpochFee({ lamportsPerByte: 5_080n, factor: 1n }), { cost: 1_092_040n, fee: 1_300_000n }); // M355 (3), M376: the 13-byte spent mark
   assert.equal(SOL_LIFE_MS, 240_000n, "L = 2E + the kit's 90 s send margin + 30 s (M356 (1))");
