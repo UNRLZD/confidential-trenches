@@ -134,9 +134,12 @@ export type BudgetLimits = { total: number; perClient: number; windowMs?: number
  * the total we sent; a caller draws at most its `perClient` share per fixed window, so an honest caller still draws
  * while one is throttled. takeEach([[key, n], ...], client) draws on every key at once or on none (a batch is n calls
  * to the provider, one per method key too); `shareOnly` counts them in the caller's share alone (a cache hit or a call
- * joining one in flight, which reach no provider). When the provider throttles anyway, hold(key, untilMs) stops every
- * draw on the key until its reset: the helper is the provider's one client, so it waits out what the provider named,
- * and every caller is told the seconds left. A refused draw names the seconds until it would go ahead.
+ * joining one in flight, which reach no provider). When the provider throttles a caller's read anyway, hold(key,
+ * untilMs) stops every draw on the key until its reset: the helper is the provider's one client, so it waits out what
+ * the provider named, and every caller is told the seconds left. When it throttles a background read (no caller, not
+ * reserved: the trade walks), hold(key, untilMs, true) stops only the background draws: those reads go behind callers
+ * (userRoom), so their reset never refuses a caller; a caller's read the provider throttles in turn holds every draw.
+ * A refused draw names the seconds until it would go ahead.
  */
 export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () => number = Date.now, windowMs = LIMIT_WINDOW_MS, clients = LIMIT_CLIENTS) {
   let window = -1;
@@ -145,16 +148,19 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   /** Per key: [second, requests sent in it, of them not reserved], oldest first, kept while the provider's window may
    * still count them. */
   const sent = new Map<string, [number, number, number][]>();
-  /** Per key (never a client): when the provider's own reset ends. */
+  /** Per key (never a client): when the provider's own reset ends, for every draw; and for background draws only. */
   const heldUntil = new Map<string, number>();
-  const heldFor = (key: string, t: number): number => {
-    const until = heldUntil.get(key) ?? 0;
+  const backgroundHeldUntil = new Map<string, number>();
+  const heldIn = (m: Map<string, number>, key: string, t: number): number => {
+    const until = m.get(key) ?? 0;
     if (until <= t) {
-      heldUntil.delete(key);
+      m.delete(key);
       return 0;
     }
     return secondsUntil(until, t);
   };
+  /** The seconds a draw on `key` waits for a provider's reset: a background draw also for a background read's. */
+  const heldFor = (key: string, t: number, background = false): number => Math.max(heldIn(heldUntil, key, t), background ? heldIn(backgroundHeldUntil, key, t) : 0);
   /** The seconds until `n` more fit (0: they fit now): every draw under the key's total, and a draw not reserved also
    * with every other such draw under the total less the reserve, so the helper's own reads always find their room. A
    * request sent in second s may still be in the provider's window until the end of second s + W, W its window in
@@ -183,7 +189,8 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     const want = new Map<string, number>();
     for (const [key, n] of draws) want.set(key, (want.get(key) ?? 0) + n);
     let wait = 0;
-    for (const key of want.keys()) wait = Math.max(wait, heldFor(key, t));
+    const background = client === undefined && !reserved;
+    for (const key of want.keys()) wait = Math.max(wait, heldFor(key, t, background));
     if (wait > 0) return wait;
     const w = Math.floor(t / windowMs);
     if (w !== window) {
@@ -193,7 +200,7 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     for (const [key, n] of want) {
       const lim = limitsOf(key);
       if (client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient) wait = Math.max(wait, toWindowEnd(t, windowMs));
-      if (!shareOnly) wait = Math.max(wait, totalWait(key, n, t, lim, reserved, client === undefined && !reserved));
+      if (!shareOnly) wait = Math.max(wait, totalWait(key, n, t, lim, reserved, background));
     }
     if (wait > 0) return wait;
     const sec = Math.floor(t / 1000);
@@ -219,12 +226,14 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     takeEach,
     /** One key: n requests for `client` (undefined: the helper's own read, which draws from the total only). */
     take: (key: string, client: string | undefined, n = 1, shareOnly = false, reserved = false): Take => takeEach([[key, n]], client, shareOnly, reserved),
-    /** The seconds every draw on `key` must still wait for the provider's reset; 0 when none. */
-    heldFor: (key: string): Take => heldFor(key, now()),
-    /** The provider throttled: no draw on `key` until `untilMs`, held to at most RETRY_AFTER_MAX_S from now. */
-    hold(key: string, untilMs: number): void {
+    /** The seconds a draw on `key` must still wait for the provider's reset (`background`: a background draw); 0 when none. */
+    heldFor: (key: string, background = false): Take => heldFor(key, now(), background),
+    /** The provider throttled: no draw on `key` until `untilMs`, held to at most RETRY_AFTER_MAX_S from now; with
+     *  `background`, it throttled a background read, and only background draws wait. */
+    hold(key: string, untilMs: number, background = false): void {
       const t = now();
-      heldUntil.set(key, Math.max(heldUntil.get(key) ?? 0, Math.min(untilMs, t + RETRY_AFTER_MAX_S * 1000)));
+      const m = background ? backgroundHeldUntil : heldUntil;
+      m.set(key, Math.max(m.get(key) ?? 0, Math.min(untilMs, t + RETRY_AFTER_MAX_S * 1000)));
     },
   };
 }
