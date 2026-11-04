@@ -159,7 +159,7 @@ export const MUTANTS = [
   [BUY, "return concat(word(BigInt(elems.length)), ...offsets, ...elems);", "return concat(...offsets, ...elems);", V4CAST],
   // the testnet PoolManager pins: another one is refused, and a v4 sell is built to the pinned one
   [BUY, 'poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408"', 'poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03409"', V4],
-  [BUY, 'poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951"', 'poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40952"', V4],
+  [BUY, 'poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",\n      // Uniswap\'s V4Quoter at mainnet\'s address', 'poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40952",\n      // Uniswap\'s V4Quoter at mainnet\'s address', V4],
   // the fork fixture is the kit's output
   [SELL, "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)) });", "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)).replace(/.$/, \"0\") });", FIXTURE],
 ];
