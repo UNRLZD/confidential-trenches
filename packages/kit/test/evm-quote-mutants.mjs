@@ -99,8 +99,9 @@ export const MUTANTS = [
   [QUOTE, "  if (c0 !== t && c1 !== t) return null;", "  if (![c0, c1].includes(NATIVE) || (c0 !== t && c1 !== t)) return null;", R, "S3 "],
   // X's markets: the deepest X first, at most EVM_QUOTE_MAX_OTHER; a market whose hook is replaced only once it exists,
   // in one override with the pool's hook
-  [QUOTE, "const xs = deepest([...xDeep.keys()], (x) => xDeep.get(x)!).slice(0, EVM_QUOTE_MAX_OTHER);", "const xs = [...xDeep.keys()].reverse().slice(0, EVM_QUOTE_MAX_OTHER);", R, "X1 "],
-  [QUOTE, "deepest(side.markets.filter(holds), (m) => depthIn(m, side.c))", "deepest(side.markets, (m) => depthIn(m, side.c))", R, "S3c "],
+  // (no mutant drops holds() from a side's market ranking: among pools with no state the four standard hookless
+  // shapes always come first, so a market the PoolManager does not hold never reaches the top EVM_QUOTE_X_MARKETS)
+  [QUOTE, "const xs = deepest([...xDeep.keys()], (x) => xDeep.get(x)!).slice(0, EVM_QUOTE_MAX_OTHER);", "const xs = [...xDeep.keys()].slice(0, EVM_QUOTE_MAX_OTHER);", R, "X2 "],
   [QUOTE, "v4At(r, amountIn, [mk.key.hooks, p.key.hooks], third), twice: v4At(r, 2n * amountIn, [mk.key.hooks, p.key.hooks], third)", "v4At(r, amountIn, [p.key.hooks], third), twice: v4At(r, 2n * amountIn, [p.key.hooks], third)", R, "S3c "],
   // every scan of a quote shares one gate and one head; X's scan failing refuses the quote
   [QUOTE, "v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)))", "v.maxLag, gateOf(v.scan.parallel), (headOfScan ??= scanHeadOf(scan, gate)))", R, "G1 "],
