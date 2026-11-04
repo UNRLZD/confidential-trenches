@@ -442,3 +442,16 @@ test("busy every time and both RPCs stuck below the blockhash: the sends stop at
   assert.ok(w.sends.length <= POOL_BLOCKHASH_LIFE_MS / 1_000 + 1, `sent ${w.sends.length} times`);
   assert.ok(waited <= POOL_BUY_SETTLE_MS + 1_000, `waited ${waited} ms`);
 });
+
+test("a pool.buy whose amount an app priced with a planted price (ten times the USD asked, over what one ready proof funds) is refused not_funded: nothing taken, signed or sent (card signpage-pool-price)", async () => {
+  // the box's USD at a price one tenth of the page's own read asks ten times the units; pool.buy's amount is in the
+  // pool asset's units, and the page spends only from a ready proof whose chunk funds it after the fee, tip and W's
+  // accounts (solanaPoolBuyFunds), so no app's price spends over one tap's most
+  const lie = { ...ASK, amount: BigInt(r.withdrawn) };
+  for (const amount of [lie.amount, SPEND * 10n > lie.amount ? SPEND * 10n : lie.amount + 1n]) {
+    const w = await world();
+    assert.deepEqual(await runPoolBuy(w.host, { ...ASK, amount }), { error: "not_funded" }, `amount ${amount}`);
+    assert.equal(w.state(), "HELD", "the proof stays ready");
+    assert.ok(!w.log.includes("send") && !w.log.includes("seed") && !w.log.some((x) => x.startsWith("take")));
+  }
+});
