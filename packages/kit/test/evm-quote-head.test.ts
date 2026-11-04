@@ -61,12 +61,12 @@ test("held head: a second quote under EVM_HEAD_REUSE_MS reads at the held block 
   assert.equal(b.minOut, a.minOut);
 });
 
-test("held head: past EVM_HEAD_REUSE_MS behind the device's clock the quote agrees on a block again, both heads and the by-number check", async () => {
+test("held head: read more than EVM_HEAD_REUSE_MS ago on the device's clock, the quote agrees on a block again, both heads and the by-number check", async () => {
   const c = chain();
   let now = C.now;
   const watch = evmHeadWatch(c.rpcs, MAX_LAG, () => now, false);
   await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
-  now = blockMs() + EVM_HEAD_REUSE_MS + 1;
+  now = C.now + EVM_HEAD_REUSE_MS + 1;
   await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
   assert.equal(c.heads(), 6);
 });

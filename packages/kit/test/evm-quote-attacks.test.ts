@@ -374,7 +374,7 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
 });
 
 test("card evm-quote-head-watch: a scan provider that fails a full span (a timeout, too many logs) is asked by halves, and the real pool it finds still holds a seeded one", async () => {
-  const token = "0x00000000000000000000000000000000000a33a3";
+  const token = "0x00000000000000000000000000000000000e71e7";
   const pools = [seeded(token), real(token)];
   const asked: [number, number][] = [];
   const inner = scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked);
@@ -387,7 +387,7 @@ test("card evm-quote-head-watch: a scan provider that fails a full span (a timeo
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), slow), below);
   assert.ok(asked.length > 0 && asked.every(([a, b]) => b - a + 1 <= 12_500), "every answered request is a half, a quarter or an eighth of a span");
   // a span answered with more logs than SCAN_MAX_LOGS is asked by halves too
-  const token2 = "0x00000000000000000000000000000000000a44a4";
+  const token2 = "0x00000000000000000000000000000000000e72e7";
   const pools2 = [seeded(token2), real(token2)];
   const inner2 = scanner(5_000_000, [{ key: real(token2).key, at: 4_500_000 }]);
   const full: EvmRpc = async (calls) => {
@@ -399,7 +399,7 @@ test("card evm-quote-head-watch: a scan provider that fails a full span (a timeo
 });
 
 test("card evm-quote-head-watch: the agreed block is picked once the token's scan has its logs, so the reads land at a block no older than the scan", async () => {
-  const token = "0x00000000000000000000000000000000000a55a5";
+  const token = "0x00000000000000000000000000000000000e73e7";
   const pools = [seeded(token), real(token)];
   const order: string[] = [];
   const inner = scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }]);
@@ -421,7 +421,7 @@ test("card evm-quote-head-watch: the agreed block is picked once the token's sca
 });
 
 test("card evm-quote-head-watch: a scan that ends more than maxLag blocks behind the agreed block is scanned on up to it, and a pool made in those blocks still holds a seeded one", async () => {
-  const token = "0x00000000000000000000000000000000000a66a6";
+  const token = "0x00000000000000000000000000000000000c44c4";
   const pools = [seeded(token), real(token)];
   const asked: [number, number][] = [];
   // the scan provider's head 4,999,990, ten blocks behind the agreed 5,000,000 (Base's maxLag 5); the real pool at 4,999,995

@@ -430,9 +430,11 @@ async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, nowM
 export const EVM_QUOTE_MAX_AGE_MS = 30_000;
 
 // The held head (card evm-quote-head-watch): the last block both providers agreed on and confirmed by number (same hash
-// and time), kept between quotes so a tap runs only the read round. A quote reads at it only while its block is at
-// most EVM_HEAD_REUSE_MS behind the device's clock, well inside the 30 s rule and inside the state the pinned providers
-// keep (Robinhood's about 13 s: 2 of 11 USDG quotes refused when their reads landed past it, 2026-11-04, card
+// and time), kept between quotes so a tap runs only the read round. A quote reads at it only while it was read at most
+// EVM_HEAD_REUSE_MS ago on the device's clock (a block's own time trails the clock by its interval and the providers'
+// lag: Base's 2 s blocks read 1.1 to 1.4 s behind this Mac's clock, 2026-11-04 10:58Z, so an age by block time held a
+// head one refresh in three), and its block under the 30 s rule, well inside the state the pinned providers keep
+// (Robinhood's about 13 s: 2 of 11 USDG quotes refused when their reads landed past it, 2026-11-04, card
 // evm-pool-buy-quote fold 8); past it the quote agrees on a new block as before. While quotes are asked the head is read
 // again every EVM_HEAD_EVERY_MS in the background, each new one held only once confirmed, until EVM_HEAD_IDLE_MS after
 // the last quote. A held block never comes from one provider alone, and the stale_quote rule is unchanged.
@@ -448,19 +450,21 @@ export type EvmHeadWatch = {
 /** A held head on the providers `rpcs`; `clock` is the device's (Date.now; the tests set their own), and `background`
  *  false reads only when a quote asks (the tests that count reads). */
 export function evmHeadWatch(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, clock: () => number = Date.now, background = true): EvmHeadWatch {
-  let held: Block | null = null;
+  let held: { block: Block; at: number } | null = null;
   let until = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let refreshing: Promise<void> | null = null;
-  const hold = (b: Block) => {
-    if (held === null || b.number > held.number) held = b;
+  // `at`: the device's clock when the heads were asked, so the hold never outlives what was read
+  const hold = (b: Block, at: number) => {
+    if (held === null || b.number > held.block.number) held = { block: b, at };
   };
   const refresh = () =>
     (refreshing ??= (async () => {
       try {
-        const { block, confirm } = await agreedBlock(rpcs, maxLag, clock());
+        const at = clock();
+        const { block, confirm } = await agreedBlock(rpcs, maxLag, at);
         await confirm();
-        hold(block);
+        hold(block, at);
       } catch {
         // nothing held changes: the next quote past EVM_HEAD_REUSE_MS agrees on its own block
       } finally {
@@ -489,13 +493,13 @@ export function evmHeadWatch(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, cl
       // the device's clock now: a quote asks after its scan, which may have run for seconds since `nowMs`
       const t = Math.max(nowMs, clock());
       const h = held;
-      if (h !== null && t - Number(h.timestamp) * 1000 <= EVM_HEAD_REUSE_MS) return { block: h, confirm: async () => {} };
+      if (h !== null && t - h.at <= EVM_HEAD_REUSE_MS && t - Number(h.block.timestamp) * 1000 <= EVM_QUOTE_MAX_AGE_MS) return { block: h.block, confirm: async () => {} };
       const a = await agreedBlock(rpcs, maxLag, t);
       return {
         block: a.block,
         confirm: async () => {
           await a.confirm();
-          hold(a.block);
+          hold(a.block, t);
         },
       };
     },
