@@ -2105,10 +2105,11 @@ const slow = (rpc: EvmRpc, ms: number): EvmRpc => async (calls) => {
 test("L5b a buy's block no provider reaches within EVM_MIN_BLOCK_WAIT_MS is refused not_landed, never quoted at an older block", async () => {
   const { pool, req } = landedSell("0x00000000000000000000000000000000000ba6ba");
   const asked = { heads: 0 };
-  const r = await timed((mono) => evmPoolSellQuoteWith({ ...req, boughtBlock: BigInt(BUY_AT + 1) }, [landed(chain([pool], 0), [BUY_AT], asked), landed(chain([pool], 1), [BUY_AT + 1], asked)], NOW, undefined, undefined, mono), 200);
+  const r = await timed((mono) => evmPoolSellQuoteWith({ ...req, boughtBlock: BigInt(BUY_AT + 1) }, [landed(chain([pool], 0), [BUY_AT], asked), landed(chain([pool], 1), [BUY_AT + 1], asked)], NOW, undefined, undefined, mono), 400, 100);
   assert.deepEqual(r.verdict, { accepted: false, code: "not_landed" });
   // asked every 500 ms for 30 s (EVM_MIN_BLOCK_WAIT_MS, as long as a quote's block may be old), both providers each
-  // time: 61 rounds, and refused only once that time has passed (review fold 1, L3)
+  // time: 61 rounds, and refused only once that time has passed (review fold 1, L3); the clock moves 100 ms a tick, so
+  // a shorter sleep asks more often and fails the count
   assert.equal(quoteMod.EVM_MIN_BLOCK_WAIT_MS, quoteMod.EVM_QUOTE_MAX_AGE_MS);
   assert.equal(asked.heads, 2 * 61);
   assert.ok(r.ms >= quoteMod.EVM_MIN_BLOCK_WAIT_MS, `refused after ${r.ms} ms`);
