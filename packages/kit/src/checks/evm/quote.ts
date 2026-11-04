@@ -50,11 +50,14 @@ import {
   copyRoute,
   evmPoolRouteDataQuoted,
   evmPoolVenues,
+  pathKeysAbi,
   type EvmPoolChain,
   type EvmRoute,
   type EvmV3Route,
+  type EvmV4Hop,
   type EvmV4Route,
 } from "../../trade/evm/buy-unpinned.ts";
+import type { EvmSellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
 /** One JSON-RPC call. */
@@ -112,7 +115,8 @@ export type EvmQuoteErrorCode =
   | "below_reference" // the route is quoted below the device's own standard pool
   | "native_first" // the route starts from WETH where a native route quotes at least as much
   | "no_reference" // no standard or pinned launchpad pool answers: nothing the device chose holds the route
-  | "stale_quote"; // the block is more than 30 s behind the device's clock
+  | "stale_quote" // the block is more than 30 s behind the device's clock
+  | "fee_on_transfer"; // a sell's token does not deliver the whole amount from W to the pool, or its transfer reverts
 export class EvmQuoteError extends Error {
   readonly code: EvmQuoteErrorCode;
   /** On below_reference and native_first: the device's own best route, which the caller may quote instead. */
@@ -1079,6 +1083,180 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
 const QUOTED = new WeakSet<EvmPoolBuyQuote>();
 /** True when `q` is a quote evmPoolBuyQuote returned, unchanged (it is frozen). */
 export const evmIsDeviceQuote = (q: unknown): q is EvmPoolBuyQuote => typeof q === "object" && q !== null && QUOTED.has(q as EvmPoolBuyQuote);
+
+// The device's own quote of an EVM sell (card evm-sell-device-quote). W sells only at a minOut from this quote, through
+// a pool the device picked from its own reads: no server and no caller names the route, the pool, the hook data or
+// minOut. The request has no route field, and one that carries a `route` is refused (bad_request).
+//
+// The candidates are the device's own, one pool or two:
+// - v3 (a pinned v3 quoter and router): the token to WETH at each standard fee tier, and through each listed middle at
+//   each pair of tiers; the target is the chain's first listed router;
+// - v4 (a pinned V4Quoter and PoolManager): the token to the native asset and to WETH at each standard fee and tick
+//   spacing with no hook, through each listed middle to the native asset, and each launchpad pool the venue lists, with
+//   its own hook, fee, tick spacing and paired asset (an unlisted hook is never quoted); the target is the PoolManager.
+// Every hop's hook data is empty: the device makes it, never a route (a listed hook that read a trade referrer from it
+// would let a server name itself).
+// Each is read at the amount and twice it, in aggregate3 calls at the agreed block (agreedBlock, confirmed) on the
+// chain's two pinned providers, whose answers must be equal (rpc_disagree). The best is the largest output among those
+// that fill, by the buy's own rule (the output grows with the input; a v3 route whose twice reverts does not fill), and
+// none filling is no_quote. Then, at the same block on both providers, the fee-on-transfer probe: W's code is replaced
+// (eth_call's state override) by EVM_SELL_PROBE_CODE, which transfers the amount from W to the pool's own address (the
+// PoolManager for v4, the v3 pool from the quoter's factory().getPool for v3) and returns what that address received,
+// only where W's balance fell by the same; a probe that reverts, or answers another amount, is refused
+// (fee_on_transfer). minOut = floor(Q x (10000 - slippageBps) / 10000). Only a quote made here builds a sell, within 30
+// s of its block (trade/evm/sell.ts), and W signs only a sell built from one.
+
+/** The user's own sell: the token W holds, the amount of it to sell, W, and their slippage. No route. */
+export type EvmPoolSellQuoteRequest = { chain: EvmPoolChain; token: string; w: string; amountIn: bigint; slippageBps: number };
+
+export type EvmPoolSellQuote = {
+  readonly chain: EvmPoolChain;
+  readonly token: string;
+  readonly w: string;
+  readonly amountIn: bigint;
+  /** The pool the device picked, as the sell builder takes it, its hook data empty. */
+  readonly route: EvmSellRoute;
+  /** The chain's pinned router (v3) or PoolManager (v4). */
+  readonly target: string;
+  readonly block: { readonly number: bigint; readonly hash: string; readonly timestamp: bigint };
+  /** Q: the route's output in wei of ETH or WETH, the same on both providers. */
+  readonly amountOut: bigint;
+  /** What W signs: floor(Q x (10000 - slippageBps) / 10000). */
+  readonly minOut: bigint;
+};
+
+/** The fee-on-transfer probe, run as W's code (calldata token ‖ to ‖ amount, 32 bytes each): token.balanceOf(to) and
+ *  balanceOf(W), token.transfer(to, amount) (a false or a short answer reverts; no answer is the USDT form), both
+ *  balances again; it returns to's gain where it equals W's loss, and reverts otherwise. Assembled from:
+ *    balanceOf(to)->0x80, balanceOf(this)->0xc0      PUSH4 70a08231 PUSH1 e0 SHL PUSH1 0 MSTORE, the account at 4,
+ *                                                     STATICCALL(gas, token, 0, 0x24, dst, 0x20), fail unless ok and
+ *                                                     RETURNDATASIZE >= 32
+ *    transfer(to, amount)                            PUSH4 a9059cbb ..., CALL(gas, token, 0, 0, 0x44, 0x100, 0x20),
+ *                                                     fail unless ok and (no answer, or 32 bytes and not 0)
+ *    balanceOf(to)->0xa0, balanceOf(this)->0xe0
+ *    mload(0xa0)-mload(0x80) == mload(0xc0)-mload(0xe0), else fail; return that 32-byte word
+ *    fail: JUMPDEST PUSH1 0 DUP1 REVERT
+ *  Read 2026-11-04 09:58Z on sepolia.base.org: as the code of Base Sepolia's PoolManager (holding 283,279.557374 USDC),
+ *  1,000 units of USDC to 0x…dEaD answered 1,000, the whole balance answered it, one unit more reverted. */
+export const EVM_SELL_PROBE_CODE =
+  "0x6370a0823160e01b60005260203560045260206080602460006000355afa15610109573d602011610109576370a0823160e01b60005230600452602060c0602460006000355afa15610109573d6020116101095763a9059cbb60e01b60005260203560045260403560245260206101006044600060006000355af115610109573d15610097573d602011610109576101005115610109575b6370a0823160e01b600052602035600452602060a0602460006000355afa15610109573d602011610109576370a0823160e01b60005230600452602060e0602460006000355afa15610109573d6020116101095760805160a051038060e05160c0510314156101095760005260206000f35b600080fd";
+const SEL_FACTORY = "c45a0155"; // QuoterV2.factory()
+const SEL_GET_POOL = "1698ee82"; // UniswapV3Factory.getPool(address,address,uint24)
+
+/** The device's sell quote on the chain's two pinned providers (see above); throws EvmQuoteError. Like
+ *  evmPoolBuyQuote, it takes no provider from its caller; tests run evmPoolSellQuoteWith. */
+export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<EvmPoolSellQuote> {
+  if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
+  const p = venue(req.chain).providers;
+  if (p === undefined) return refuse("no_quoter", `${req.chain} has no pinned providers`);
+  return evmPoolSellQuoteWith(req, evmProviders(p, fetch), Date.now());
+}
+
+/** evmPoolSellQuote on the providers `rpcs` with the device's clock at `nowMs`. Not in the index. */
+export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number): Promise<EvmPoolSellQuote> {
+  if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
+  if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");
+  if (!Number.isFinite(nowMs)) return refuse("bad_request", "the device's clock");
+  const { chain, token, w, amountIn, slippageBps } = req;
+  if (!Array.isArray(rpcsIn) || rpcsIn.length !== 2 || typeof rpcsIn[0] !== "function" || typeof rpcsIn[1] !== "function" || rpcsIn[0] === rpcsIn[1]) {
+    return refuse("bad_request", "two different providers");
+  }
+  if (typeof amountIn !== "bigint" || amountIn <= 0n || amountIn >= MAX_IN) return refuse("bad_request", "the amount in is above 0 and below 2^127");
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10000) return refuse("bad_request", "the slippage is 0 to 9,999 bps");
+  const v = venue(chain);
+  if (!isAddress(token) || lower(token) === NATIVE || lower(token) === lower(v.weth)) return refuse("bad_request", "the token is not an address, or is WETH");
+  // the probe replaces W's code: never an address the reads call, nor the token
+  if (!isAddress(w) || lower(w) === NATIVE || lower(w) === lower(token) || v.called.has(lower(w))) return refuse("bad_request", "W is not an address, or is one the quote calls");
+  const all = evmPoolVenues()[chain];
+  const router = all.routers.length > 0 ? lower(all.routers[0]!) : undefined;
+  const v3 = v.v3 !== undefined && router !== undefined ? v.v3 : undefined;
+  const v4 = v.v4 !== undefined && v.poolManager !== undefined ? v.v4 : undefined;
+  if (v3 === undefined && v4 === undefined) return refuse("no_quoter", `${chain} has no pinned quoter with a sell target`);
+  const rpcs = rpcsIn.map((rpc) => {
+    const g = gateOf(v.scan?.parallel ?? 2);
+    return (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));
+  }) as unknown as readonly [EvmRpc, EvmRpc];
+
+  const t = lower(token);
+  const weth = lower(v.weth);
+  const middles = v.middles.map(lower).filter((m) => m !== t && m !== weth && m !== NATIVE);
+  const hop = (currency: string, fee: number, tickSpacing: number, hooks = NATIVE): EvmV4Hop => Object.freeze({ currency, fee, tickSpacing, hooks: lower(hooks), hookData: "0x" });
+  const routes: EvmSellRoute[] = [];
+  if (v3 !== undefined) {
+    for (const f of V3_FEES) routes.push({ venue: "uniswap-v3", tokens: [t, weth], fees: [f] });
+    for (const m of middles) for (const f1 of V3_FEES) for (const f2 of V3_FEES) routes.push({ venue: "uniswap-v3", tokens: [t, m, weth], fees: [f1, f2] });
+  }
+  if (v4 !== undefined) {
+    for (const [f, s] of V4_KEYS) routes.push({ venue: "uniswap-v4", hops: [hop(NATIVE, f, s)] }, { venue: "uniswap-v4", hops: [hop(weth, f, s)] });
+    for (const m of middles) for (const k1 of V4_KEYS) for (const k2 of V4_KEYS) routes.push({ venue: "uniswap-v4", hops: [hop(m, k1[0], k1[1]), hop(NATIVE, k2[0], k2[1])] });
+    for (const h of v.hookedPools) {
+      // a listed hook only on its own pool, and never one the probe or the reads would collide with
+      if (lower(h.hooks) === t || v.called.has(lower(h.hooks))) continue;
+      routes.push({ venue: "uniswap-v4", hops: [hop(h.from === "native" ? NATIVE : weth, h.fee, h.tickSpacing, h.hooks)] });
+    }
+  }
+  const reads: Read[] = [];
+  const quoteRead = (r: EvmSellRoute, amount: bigint): number => {
+    if (r.venue === "uniswap-v3") {
+      let path = t.slice(2);
+      r.fees.forEach((f, i) => (path += f.toString(16).padStart(6, "0") + r.tokens[i + 1]!.slice(2)));
+      const n = path.length / 2;
+      return reads.push({ to: v3!, data: "0x" + SEL_V3 + word(0x40n) + word(amount) + word(BigInt(n)) + path.padEnd(Math.ceil(n / 32) * 64, "0") }) - 1;
+    }
+    return reads.push({ to: v4!, data: "0x" + SEL_V4 + word(0x20n) + word(BigInt(t)) + word(0x60n) + word(amount) + hex(pathKeysAbi(r.hops)) }) - 1;
+  };
+  const cands = routes.map((r) => ({ route: r, at: quoteRead(r, amountIn), twice: quoteRead(r, 2n * amountIn) }));
+  const factory = v3 !== undefined ? reads.push({ to: v3, data: "0x" + SEL_FACTORY }) - 1 : -1;
+
+  const { block, confirm } = await agreedBlock(rpcs, v.maxLag, nowMs);
+  const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, block.hash, reads)]);
+  if (confirmed.status === "rejected") throw confirmed.reason;
+  if (read.status === "rejected") throw read.reason;
+  const ans = read.value;
+  const out = (i: number) => (ans[i]!.kind === "out" ? (ans[i] as { amountOut: bigint }).amountOut : null);
+  const fills = (c: { route: EvmSellRoute; at: number; twice: number }) => {
+    const a = out(c.at);
+    const b = out(c.twice);
+    return a !== null && a > 0n && (b === null ? c.route.venue === "uniswap-v4" : b > a);
+  };
+  let best: { route: EvmSellRoute; q: bigint } | null = null;
+  for (const c of cands) if (fills(c) && (best === null || out(c.at)! > best.q)) best = { route: c.route, q: out(c.at)! };
+  if (best === null) return refuse("no_quote", "no pool the device reads fills the sell");
+
+  // the probe's recipient: the pool's own address, where the sell delivers the token
+  let to: string;
+  if (best.route.venue === "uniswap-v4") to = v.poolManager!;
+  else {
+    const f = out(factory);
+    if (f === null || f === 0n || f >= 1n << 160n) return refuse("no_quote", "the v3 quoter names no factory");
+    const [pool] = await readBoth(rpcs, block.hash, [
+      { to: "0x" + f.toString(16).padStart(40, "0"), data: "0x" + SEL_GET_POOL + word(BigInt(t)) + word(BigInt(best.route.tokens[1]!)) + word(BigInt(best.route.fees[0]!)) },
+    ]);
+    const p = pool!.kind === "out" ? pool!.amountOut : 0n;
+    if (p === 0n || p >= 1n << 160n) return refuse("no_quote", "the v3 factory names no pool for the route's first hop");
+    to = "0x" + p.toString(16).padStart(40, "0");
+  }
+  const [probe] = await readBoth(rpcs, block.hash, [{ to: lower(w), data: "0x" + word(BigInt(t)) + word(BigInt(to)) + word(amountIn), override: { [lower(w)]: { code: EVM_SELL_PROBE_CODE } } }]);
+  if (probe!.kind !== "out" || probe!.amountOut !== amountIn) {
+    return refuse("fee_on_transfer", `W's transfer of ${amountIn} of the token to ${to} ${probe!.kind === "out" ? `delivers ${probe!.amountOut}` : "reverts"}`);
+  }
+
+  const minOut = (best.q * BigInt(10000 - slippageBps)) / 10000n;
+  if (minOut === 0n) return refuse("no_quote", "the pool quotes too little to set a minimum above 0");
+  const r = best.route;
+  const route: EvmSellRoute = r.venue === "uniswap-v3"
+    ? Object.freeze({ venue: r.venue, tokens: Object.freeze([...r.tokens]), fees: Object.freeze([...r.fees]) })
+    : Object.freeze({ venue: r.venue, hops: Object.freeze([...r.hops]) });
+  const target = r.venue === "uniswap-v3" ? router! : v.poolManager!;
+  const quote: EvmPoolSellQuote = Object.freeze({ chain, token: t, w: lower(w), amountIn, route, target, block: Object.freeze(block), amountOut: best.q, minOut });
+  QUOTED_SELLS.add(quote);
+  return quote;
+}
+
+// Every quote evmPoolSellQuote returned: the sell builder (trade/evm/sell.ts) builds only from one of these
+const QUOTED_SELLS = new WeakSet<EvmPoolSellQuote>();
+/** True when `q` is a quote evmPoolSellQuote returned, unchanged (it is frozen). */
+export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeof q === "object" && q !== null && QUOTED_SELLS.has(q as EvmPoolSellQuote);
 
 /** A provider's 429: ask asks again, a little later. */
 class RateLimited extends Error {}

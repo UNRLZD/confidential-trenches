@@ -11,6 +11,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import * as kit from "../src/index.ts";
 import { EvmPoolBuyError, EvmPoolSellError, evmPoolVenues, type EvmPoolChain, type EvmRoute } from "../src/index.ts";
 import { pinnedBuild, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
+import { pinnedBuildSell, pinnedSignSell } from "../src/trade/evm/sell-unpinned.ts";
 
 const code = (f: () => unknown): string => {
   try {
@@ -111,18 +112,23 @@ test("a sell pays only into the chain's pinned pool, and W's authorization names
     };
     if (routers.length > 0) {
       // a pool the caller sneaks in is not read: the pin is the pool
-      const built = kit.evmPoolBuildSell(c, { ...req, pool: OTHER } as typeof req);
+      // the pinned builder under the kit's evmPoolBuildSell (sell.ts, which builds only from a device quote)
+      const built = pinnedBuildSell(evmPoolVenues(), c, { ...req, pool: OTHER } as typeof req);
       assert.equal(lower(built.pool), lower(r.PrivacyPoolSimple!.address), chain);
-      assert.equal(kit.evmPoolSignSell(W_KEY, c, built).length, 65, chain);
+      assert.equal(pinnedSignSell(evmPoolVenues(), W_KEY, c, built).length, 65, chain);
     } else {
       // Robinhood testnet has no v3 router (M365), so no v3 sell is built there
-      assert.equal(code(() => kit.evmPoolBuildSell(c, req)), "bad_target", chain);
+      assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), c, req)), "bad_target", chain);
     }
-    // a v4 sell goes through the pinned PoolManager on every testnet (card evm-sell-v4-kit)
+    // a v4 sell goes through the pinned PoolManager on every testnet (card evm-sell-v4-kit), and through no other
+    // target: not the other testnet's PoolManager, not the router (review of a22060d, item 3)
     const v4sell = { ...req, target: v.poolManager!, route: { venue: "uniswap-v4" as const, hops: [{ currency: ZERO, fee: 10000, tickSpacing: 200, hooks: ZERO, hookData: "0x" }] } };
-    const built4 = kit.evmPoolBuildSell(c, v4sell);
-    assert.equal(lower(built4.target), lower(v.poolManager), chain);
+    const built4 = pinnedBuildSell(evmPoolVenues(), c, v4sell);
     assert.equal(lower(built4.pool), lower(r.PrivacyPoolSimple!.address), chain);
+    for (const other of TESTNETS.map((t) => evmPoolVenues()[t.chain as EvmPoolChain].poolManager!).filter((p) => lower(p) !== lower(v.poolManager!))) {
+      assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), c, { ...v4sell, target: other })), "bad_target", chain);
+    }
+    assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), c, { ...v4sell, target: "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4" })), "bad_target", chain);
     const a = kit.evmPoolSignSellAuthorization(W_KEY, c, 0n);
     assert.equal(lower(a.address), lower(sellRecord(chain).SellDelegate!.address), chain);
     assert.equal(a.chainId, chainId, chain);

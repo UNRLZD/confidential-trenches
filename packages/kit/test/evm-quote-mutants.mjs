@@ -17,6 +17,9 @@ const BUY = "src/trade/evm/buy.ts";
 const BUYU = "src/trade/evm/buy-unpinned.ts";
 const Q = "test/evm-quote.test.ts";
 const R = "test/evm-quote-attacks.test.ts";
+// the sell quote (card evm-sell-device-quote) and the index's sell builder and signer that take only one
+const SELLQ = "src/trade/evm/sell.ts";
+const S = "test/evm-sell-quote.test.ts";
 
 // [file, text, replacement, test file, the test that must fail]
 export const MUTANTS = [
@@ -148,6 +151,33 @@ export const MUTANTS = [
   [QUOTE, "if (!Number.isSafeInteger(o) || o < 0 || o + 32 > len)", "if (!Number.isSafeInteger(o) || o < 0)", Q, "Q9 "],
   [QUOTE, "if (e + 96 + dl > len) return refuse(", "if (false) return refuse(", Q, "Q9 "],
   [QUOTE, "if (!Array.isArray(out) || out.length !== calls.length)", "if (!Array.isArray(out))", Q, "Q9 "],
+  // the sell quote: no route from a caller, the device's own pool, minOut, probe and age
+  [QUOTE, 'if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");', "", S, "planted: a server's route"],
+  [QUOTE, "QUOTED_SELLS.add(quote);", "", S, "planted: a server's route"],
+  [SELLQ, "if (!evmIsDeviceSellQuote(quote)) throw new EvmQuoteError(", "if (false) throw new EvmQuoteError(", S, "planted: a server's route"],
+  [SELLQ, 'if (!QUOTED_SELLS.has(built)) throw new EvmPoolSellError("not_built"', 'if (false) throw new EvmPoolSellError("not_built"', S, "planted: a server's route"],
+  [SELLQ, "QUOTED_SELLS.add(built);", "", S, "planted: a server's route"],
+  [SELLQ, "|| nowMs - Number(quote.block.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) {", ") {", S, "planted: a stale quote"],
+  [SELLQ, "> EVM_QUOTE_MAX_AGE_MS) {\n    throw new EvmQuoteError(\"stale_quote\"", "> 10 * EVM_QUOTE_MAX_AGE_MS) {\n    throw new EvmQuoteError(\"stale_quote\"", S, "planted: a stale quote"],
+  [QUOTE, 'if (probe!.kind !== "out" || probe!.amountOut !== amountIn) {', "if (false) {", S, "planted: a fee-on-transfer"],
+  [QUOTE, 'if (probe!.kind !== "out" || probe!.amountOut !== amountIn) {', 'if (probe!.kind !== "out") {', S, "planted: a fee-on-transfer"],
+  [QUOTE, 'if (probe!.kind !== "out" || probe!.amountOut !== amountIn) {', 'if (probe!.kind !== "out" || probe!.amountOut < amountIn) {', S, "planted: a fee-on-transfer"],
+  [QUOTE, "override: { [lower(w)]: { code: EVM_SELL_PROBE_CODE } }", "override: { [lower(w)]: { code: EVM_NOOP_HOOK_CODE } }", S, "the device picks the pool"],
+  [QUOTE, 'if (best.route.venue === "uniswap-v4") to = v.poolManager!;', 'if (best.route.venue === "uniswap-v4") to = lower(w);', S, "the device picks the pool"],
+  [QUOTE, 'to = "0x" + p.toString(16).padStart(40, "0");', "to = router!;", S, "a v3 pool is picked"],
+  [QUOTE, "if (fills(c) && (best === null || out(c.at)! > best.q))", "if (fills(c) && (best === null || out(c.at)! < best.q))", S, "the device picks the pool"],
+  [QUOTE, "if (fills(c) && (best === null || out(c.at)! > best.q))", "if (best === null || out(c.at)! > best.q)", S, "planted: a pool that runs out"],
+  [QUOTE, '(b === null ? c.route.venue === "uniswap-v4" : b > a)', "(b === null ? true : b > a)", S, "planted: a pool that runs out"],
+  [QUOTE, '(b === null ? c.route.venue === "uniswap-v4" : b > a)', '(b === null ? c.route.venue === "uniswap-v4" : true)', S, "planted: a pool that runs out"],
+  [QUOTE, "const minOut = (best.q * BigInt(10000 - slippageBps)) / 10000n;", "const minOut = best.q;", S, "the device picks the pool"],
+  [QUOTE, 'if (minOut === 0n) return refuse("no_quote", "the pool quotes too little to set a minimum above 0");', "", S, "planted: a pool that runs out"],
+  [QUOTE, 'hooks: lower(hooks), hookData: "0x" })', 'hooks: lower(hooks), hookData: "0x00" })', S, "the device picks the pool"],
+  [QUOTE, 'hop(h.from === "native" ? NATIVE : weth, h.fee, h.tickSpacing, h.hooks)', 'hop(h.from === "native" ? weth : NATIVE, h.fee, h.tickSpacing, h.hooks)', S, "planted: an unlisted hook"],
+  [QUOTE, "if (lower(h.hooks) === t || v.called.has(lower(h.hooks))) continue;", "", S, "planted: an unlisted hook"],
+  [QUOTE, 'const target = r.venue === "uniswap-v3" ? router! : v.poolManager!;', 'const target = r.venue === "uniswap-v3" ? v.poolManager! : router!;', S, "the device picks the pool"],
+  [QUOTE, '|| v.called.has(lower(w))) return refuse("bad_request", "W is not an address, or is one the quote calls");', ') return refuse("bad_request", "W is not an address, or is one the quote calls");', S, "a chain with no v3 router"],
+  [QUOTE, '|| lower(token) === lower(v.weth)) return refuse("bad_request", "the token is not an address, or is WETH");', ') return refuse("bad_request", "the token is not an address, or is WETH");', S, "a chain with no v3 router"],
+  [QUOTE, "const v4 = v.v4 !== undefined && v.poolManager !== undefined ? v.v4 : undefined;", "const v4 = undefined as string | undefined;", S, "a chain with no v3 router"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`
@@ -169,7 +199,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let bad = 0;
   try {
     for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
-    const src = new Map([QUOTE, BUY, BUYU].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+    const src = new Map([QUOTE, BUY, BUYU, SELLQ].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
     for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
       const r = run(dir, file, t);
       if (r !== "pass") {

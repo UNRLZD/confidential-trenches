@@ -141,8 +141,13 @@ export const MUTANTS = [
   [SELL, "if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth)", "if (last ? to !== NATIVE && to !== weth : false)", V4],
   [SELL, "if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth)", "if (last ? false : to === NATIVE || to === weth)", V4],
   [SELL, 'if (!last && !listed.has(to)) refuse("middle_not_listed", `${currency} is not on the venue list`);', "", V4],
-  [SELL, 'if (hookData !== "0x") refuse("bad_route", "a hop with no hook carries no hook data");', "", V4],
-  [SELL, "if (((hookData as string).length - 2) / 2 > EVM_POOL_MAX_HOOK_DATA)", "if (((hookData as string).length - 2) / 2 > EVM_POOL_MAX_HOOK_DATA + 1)", V4],
+  // the review of a22060d: hook data is the device's own, empty (item 5); a listed hook only on the hop that spends the
+  // token sold (item 2)
+  [SELL, 'if (hookData !== "0x") refuse("bad_route", "a sell\'s hook data is the device\'s own: empty");', "", V4],
+  [SELL, 'if (hookData !== "0x") refuse(', 'if (hookData !== "0x" && lower(hooks as string) === NATIVE) refuse(', V4],
+  [SELL, "const on = from === lower(token) && ", "const on = ", V4],
+  [SELL, "const on = from === lower(token) && ", "const on = ", V4CAST],
+  [SELL, "if (lower(hooks as string) !== NATIVE) {", "if (false) {", V4],
   [SELL, "lower(p.hooks) === lower(hooks as string) && ", "", V4],
   [SELL, "p.fee === fee && ", "", V4],
   [SELL, "p.tickSpacing === tickSpacing && ", "", V4],
