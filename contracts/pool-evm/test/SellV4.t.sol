@@ -346,9 +346,9 @@ contract SellV4Test is SellBase {
     assertEq(IERC20Balance(T).balanceOf(W), AMOUNT * 10);
   }
 
-  /// The callback is one-shot: after a sell lands, the PoolManager calling back again (W unlocking it in the same
-  /// transaction) is refused
-  function test_v4TheFlagDoesNotOutliveTheSell() public {
+  /// After a sell lands, W's account unlocking the PoolManager in a later transaction gets its callback refused: the
+  /// sell's flag does not stay set
+  function test_v4AnUnlockByWAfterASellIsRefused() public {
     PathKey[] memory _p = _deep(T, address(0), address(0));
     _send(_v4Sell(T, _p, 1, 0));
     vm.expectRevert(NOT_IN_SELL);
@@ -394,7 +394,7 @@ contract SellV4Test is SellBase {
     _refused(_v4Sell(T, _p, 1, 0), INVALID_ROUTE);
   }
 
-  function test_v4AnEmptyRouteIsRefused() public {
+  function test_v4AnEmptySellRouteIsRefused() public {
     _refused(_v4Sell(T, new PathKey[](0), 1, 0), INVALID_ROUTE);
   }
 
