@@ -32,6 +32,7 @@
 //                           params, and a method off the list in any request of a batch.
 import { budgetFromEnv, EVM_LIMIT_CODE, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
+import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
 export const RPC_ANSWER_MAX = 4 * 1024 * 1024; // a getMultipleAccounts of 100 accounts or an eth_getLogs page fits
 export const RPC_TIMEOUT_MS = 10_000; // NEAR send_tx waits for execution; the server's request timeout is 15 s
@@ -117,9 +118,18 @@ export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: s
   near: { env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com" },
 };
 
+/** Solana's public endpoint: a keyed SOLANA_RPC_URL's fallback (card helper-solana-failover, rpc/slot.ts). */
+export const SOLANA_PUBLIC = RPC_UPSTREAMS.solana.fallback;
+/** The budget key of the public endpoint when a keyed provider is set: its own budget, the public limits (RPC_BUDGETS
+ *  solana: 100 per 10 s, 40 per method), never RPC_BUDGET_SOLANA, which is the keyed plan's. */
+const PUBLIC_KEY = "solana-public";
+
 export type RpcAnswer = { status: number; body: string };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void };
+/** `slot`: the Solana slot's name for its log lines and health (rpc/slot.ts); `publicFallback: false` for a slot whose
+ *  calls the public endpoint refuses (holders' getTokenLargestAccounts: HTTP 429 "Too many requests for a specific RPC
+ *  call" on every try, read 2026-11-04 10:04Z), which answers 503 while fallen back and its caller serves its own. */
+type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean };
 type Answer = RpcAnswer & { headers?: Record<string, string> };
 type Upstream = { url: string; forms: Buffer[] };
 
@@ -194,6 +204,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
+  // a keyed Solana provider's slot: its fallback is the public endpoint, on a budget of its own
+  const keyed = upstreams.solana.url !== SOLANA_PUBLIC;
+  const slot: Slot = createSlot(deps.slot ?? "rpc", keyed, { now, log });
+  const publicFallback = deps.publicFallback ?? true;
+  const publicLimits = { ...RPC_BUDGETS.solana, reserve: RPC_RESERVE.solana, userRoom: userRoomOf(RPC_BUDGETS.solana.total) };
   const limits = Object.fromEntries(
     RPC_CHAINS.map((ch) => {
       const b = budgetFromEnv(env, rpcBudgetEnv(ch), RPC_BUDGETS[ch], { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE[ch] });
@@ -201,19 +216,21 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }),
   ) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
   // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
+  const limitsOf = (k: string) => (k === PUBLIC_KEY ? publicLimits : limits[k as RpcChain]);
   const budget = upstreamBudget((key) => {
-    const [ch, method] = key.split(" ") as [RpcChain, string | undefined];
-    return method === undefined ? limits[ch] : { total: limits[ch].perMethod!, perClient: Infinity, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(limits[ch].perMethod!) };
+    const [k, method] = key.split(" ") as [string, string | undefined];
+    const l = limitsOf(k);
+    return method === undefined ? l : { total: l.perMethod!, perClient: Infinity, reserve: k === PUBLIC_KEY ? RPC_RESERVE.solana : RPC_RESERVE[k as RpcChain], userRoom: userRoomOf(l.perMethod!) };
   }, now);
   /** The provider throttled `whose` read on `c` for `seconds`: the chain is held (every draw for a caller's, the
    *  background draws for a background read's), logged as one line with no caller in it. */
-  const hold = (c: RpcChain, seconds: number, whose: "caller" | "background"): void => {
+  const hold = (c: string, seconds: number, whose: "caller" | "background"): void => {
     budget.hold(c, now() + seconds * 1000, whose === "background");
     log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s`);
   };
-  const drawsOf = (c: RpcChain, methods: readonly string[]): [string, number][] => {
+  const drawsOf = (c: string, methods: readonly string[]): [string, number][] => {
     const draws: [string, number][] = [[c, methods.length]];
-    if (limits[c].perMethod !== undefined) for (const m of methods) draws.push([`${c} ${m}`, 1]);
+    if (limitsOf(c).perMethod !== undefined) for (const m of methods) draws.push([`${c} ${m}`, 1]);
     return draws;
   };
 
@@ -265,18 +282,32 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return REFUSED(); // nesting too deep to write back
     }
 
-    // the provider's reset holds every caller, the helper's own reads too; then the call draws on the chain's total (a
-    // caller's share too) and each method's, a batch one per request in it, all or none
-    const held = budget.heldFor(c);
+    const methods = ((Array.isArray(out) ? out : [out]) as { method: string }[]).map((r) => r.method);
+    // a keyed Solana provider fallen back (rpc/slot.ts): the public endpoint, on its own budget; the key while it serves
+    if (c === "solana" && keyed && !slot.useKeyed()) return publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : UPSTREAM();
+    return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved);
+  }
+
+  /**
+   * One call to one provider: `key` is its budget (a chain, or PUBLIC_KEY). The provider's reset holds every caller, the
+   * helper's own reads too; then the call draws on the budget's total (a caller's share too) and each method's, a batch
+   * one per request in it, all or none. A keyed Solana provider that fails the call (rpc/slot.ts) has it carried to the
+   * public endpoint at once, so its fall never reaches the caller as an error.
+   */
+  async function call(key: string, url: string, secretForms: Buffer[], forward: string, methods: string[], client: string | undefined, reserved: boolean): Promise<Answer> {
+    const c = (key === PUBLIC_KEY ? "solana" : key) as RpcChain;
+    const viaSlot = c === "solana" && keyed && key !== PUBLIC_KEY;
+    /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). */
+    const fellBack = (): Promise<Answer> => (publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : Promise.resolve(UPSTREAM()));
+    const held = budget.heldFor(key);
     if (held > 0) return throttled(held);
-    const reqs = (Array.isArray(out) ? out : [out]) as { method: string }[];
-    const wait = budget.takeEach(drawsOf(c, reqs.map((r) => r.method)), client, false, reserved);
+    const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
     if (wait > 0) return throttled(wait);
-    const up = upstreams[c];
     let r: Response;
     let text: string | undefined;
+    const sent = now();
     try {
-      r = await doFetch(up.url, {
+      r = await doFetch(url, {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json" },
         body: forward,
@@ -284,31 +315,40 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
       });
       if (r.status === 429) {
-        await r.body?.cancel();
-        hold(c, upstreamRetryAfterS(r.headers, now()), "caller");
-        return throttled(budget.heldFor(c));
+        const body = viaSlot ? ((await readAnswer(r).catch(() => undefined)) ?? "") : (await r.body?.cancel(), "");
+        const waitS = upstreamRetryAfterS(r.headers, now());
+        if (viaSlot && (CREDITS.test(body) ? (slot.fail("credits"), true) : slot.throttled(waitS))) return fellBack();
+        hold(key, waitS, "caller");
+        return throttled(budget.heldFor(key));
       }
       text = await readAnswer(r);
     } catch {
+      if (viaSlot) return slot.unanswered(sent), fellBack();
       return UPSTREAM();
     }
+    if (viaSlot && (r.status === 401 || r.status === 403)) return slot.fail(String(r.status)), fellBack();
+    if (viaSlot && r.status >= 400 && CREDITS.test(text ?? "")) return slot.fail("credits"), fellBack();
+    if (viaSlot && r.status >= 500) return slot.unanswered(sent), fellBack();
     if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400)) return UPSTREAM();
-    if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return UPSTREAM();
+    if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return viaSlot ? (slot.unanswered(sent), fellBack()) : UPSTREAM();
     let answer: unknown;
     try {
       answer = JSON.parse(text);
     } catch {
-      return UPSTREAM();
+      return viaSlot ? (slot.unanswered(sent), fellBack()) : UPSTREAM();
     }
+    // a JSON-RPC error that says the plan is spent is the key's end, as a 401 is
+    if (viaSlot && (Array.isArray(answer) ? answer : [answer]).some((a) => CREDITS.test(String((a as { error?: { message?: unknown } } | null)?.error?.message ?? "")))) return slot.fail("credits"), fellBack();
     // an EVM provider's -32005 (limits.ts EVM_LIMIT_CODE) in any answer is its throttle, as its 429 is: the chain is held
     // for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
     const limited = evmLimited(c, answer);
     if (limited > 0) {
-      hold(c, limited, "caller");
-      return throttled(budget.heldFor(c));
+      hold(key, limited, "caller");
+      return throttled(budget.heldFor(key));
     }
     const b = Buffer.from(text, "utf8");
-    if (up.forms.some((f) => b.includes(f))) return UPSTREAM();
+    if (secretForms.some((f) => b.includes(f))) return UPSTREAM();
+    if (viaSlot) slot.ok();
     return { status: r.status, body: text };
   }
 
@@ -319,13 +359,17 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * provider draws nothing here. Returns the seconds to wait, 0 to go.
    */
   function background(chain: RpcChain, url: string, method: string): number {
-    if (url !== upstreams[chain].url) return 0;
-    return budget.takeEach(drawsOf(chain, [method]), undefined, false, false);
+    const key = keyOf(chain, url);
+    return key === null ? 0 : budget.takeEach(drawsOf(key, [method]), undefined, false, false);
   }
   /** That provider answered 429 to a background read: the background reads wait out its reset; callers go on. */
   function backgroundThrottled(chain: RpcChain, url: string, headers: Headers): void {
-    if (url === upstreams[chain].url) hold(chain, upstreamRetryAfterS(headers, now()), "background");
+    const key = keyOf(chain, url);
+    if (key !== null) hold(key, upstreamRetryAfterS(headers, now()), "background");
   }
+  /** The budget a background read of `url` draws: the chain's provider's, the public endpoint's own when a keyed
+   *  Solana provider is set (its fallback, whose budget every reader of it shares), else none (another provider). */
+  const keyOf = (chain: RpcChain, url: string): string | null => (url === upstreams[chain].url ? chain : chain === "solana" && keyed && url === SOLANA_PUBLIC ? PUBLIC_KEY : null);
 
-  return { handle, background, backgroundThrottled };
+  return { handle, background, backgroundThrottled, slot };
 }

@@ -55,7 +55,8 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
   assert.equal(r.status, 200);
   const b = JSON.parse(r.body);
   // release: null, as this test's environment sets no HELPER_RELEASE
-  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])) });
+  // solana: this environment sets no SOLANA_RPC_URL, so the RPC slot is the public endpoint (card helper-solana-failover)
+  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])), solana: { rpc: "public" } });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
@@ -78,7 +79,7 @@ test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the rel
     assert.equal(r.status, 200);
     const b = JSON.parse(r.body);
     assert.equal(b.release, 12);
-    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts"]);
+    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts", "solana"]);
     assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   } finally {
     helper.closeAllConnections();
@@ -282,8 +283,8 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /for \(const p of pools\.values\(\)\) p\.ready\.catch\(\(e: Error\) => \(console\.error\(`helper: \$\{e\.message\}`\), process\.exit\(2\)\)\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
-  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc\) \};/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, \(\) => ready, senders\.held\);/);
+  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, \(\) => ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\)\);/);
   // card helper-ready-gate: the fee quoter is the senders' (their store handed over), and a replacing helper listens only once ready
   assert.match(main, /const senders = sendersFromEnv\(process\.env\);/);
   assert.match(main, /const fee = senders\.fee;/);
@@ -296,7 +297,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /^ {1,}setDefaultAutoSelectFamilyAttemptTimeout\(CONNECT_ATTEMPT_MS\);/m);
   assert.ok(CONNECT_ATTEMPT_MS > 1_000, "past the 1 s SYN resend");
   assert.match(main, /const evmLists: EvmLists = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmLists\(c, gecko\)\]\)\);/);
-  assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko\);/);
+  assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko, slots\);/);
   assert.match(main, /for \(const l of Object\.values\(evmLists\)\) l\.warm\(\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
