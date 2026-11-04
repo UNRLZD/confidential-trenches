@@ -39,6 +39,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-proxy.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",
   "scripts/live-checks/helper-solana-failover.mjs",
+  "scripts/live-checks/helper-token-page-cold.mjs",
   "scripts/live-checks/helper-token-watch.mjs",
   "scripts/live-checks/helper-usdc-event-watch.mjs",
   "scripts/live-checks/index-evm-swaps.mjs",

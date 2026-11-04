@@ -1,6 +1,6 @@
 {
   "notes": [
-    "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04."
+    "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04, and again for card evm-selldelegate-exact-debit (W's balance of the token falls by exactly the amount) with forge 1.7.1 on 2026-11-04."
   ],
   "contracts": {
     "WithdrawalVerifier": {
@@ -64,6 +64,51 @@
       ]
     },
     "SellDelegate": {
+      "length": 8368,
+      "masked": "0x63aa1c09eb919724feb88d836411ccb18cda768eedbc59a3364a4e88c1b2e6e2",
+      "immutables": [
+        [
+          256,
+          805,
+          2715,
+          4118,
+          4288
+        ],
+        [
+          119,
+          408,
+          1037,
+          1695,
+          1788,
+          1827,
+          2050,
+          3024,
+          3244
+        ]
+      ]
+    }
+  },
+  "frozen": {
+    "SellDelegate": {
+      "note": "The v1 sell delegate (constructor(IWETH), one immutable: WETH), as this file pinned it before e9f6ff9. A deployed contract here has no upgrade path, so its code stays this build. It is checked only at the addresses in `at`, the pool-evm-deploy runs' delegates, which the kit pins until it moves to the evm-sell-v4 delegate; any other address, and every contract a run deploys now, is checked against `contracts`. deploy.mjs --write-build keeps this map as it is.",
+      "length": 4119,
+      "masked": "0x6b3391e03a047821cc2d2199fa94c46c46e72d98dfe7ae1c9fd39a0ada14f4cf",
+      "immutables": [
+        [
+          82,
+          792,
+          1438,
+          1608
+        ]
+      ],
+      "at": {
+        "base-sepolia": "0x23ad5aabcc139650597f8dc79e9def8bd817ef88",
+        "robinhood-testnet": "0x0ec8c6627939624aeaac3b2f0276136e6e289e23"
+      }
+    },
+    "SellDelegate.v4": {
+      "contract": "SellDelegate",
+      "note": "The evm-sell-v4 sell delegate (constructor(IWETH, IPoolManager)), as this file pinned it before card evm-selldelegate-exact-debit added the exact-debit check. Deployed with no upgrade path, so its code stays this build; it is checked only at the addresses in `at`, the evm-sell-v4 redeploys (scripts/live-checks/evm-sell-v4.<chain>.json), which the kit pinned until that card moved the pins. deploy.mjs --write-build keeps this map as it is.",
       "length": 7982,
       "masked": "0xf310b68a4b89fe748d802ebe304f21bdcb9c5a49bffa1d70a8c193a95837de0a",
       "immutables": [
@@ -85,25 +130,10 @@
           2866,
           3086
         ]
-      ]
-    }
-  },
-  "frozen": {
-    "SellDelegate": {
-      "note": "The v1 sell delegate (constructor(IWETH), one immutable: WETH), as this file pinned it before e9f6ff9. A deployed contract here has no upgrade path, so its code stays this build. It is checked only at the addresses in `at`, the pool-evm-deploy runs' delegates, which the kit pins until it moves to the evm-sell-v4 delegate; any other address, and every contract a run deploys now, is checked against `contracts`. deploy.mjs --write-build keeps this map as it is.",
-      "length": 4119,
-      "masked": "0x6b3391e03a047821cc2d2199fa94c46c46e72d98dfe7ae1c9fd39a0ada14f4cf",
-      "immutables": [
-        [
-          82,
-          792,
-          1438,
-          1608
-        ]
       ],
       "at": {
-        "base-sepolia": "0x23ad5aabcc139650597f8dc79e9def8bd817ef88",
-        "robinhood-testnet": "0x0ec8c6627939624aeaac3b2f0276136e6e289e23"
+        "base-sepolia": "0xfa1442419b6984b8e3aa8933c690f80f063b6adf",
+        "robinhood-testnet": "0xaafb86fed9b651933773a0750d5dba22ca8b8a02"
       }
     }
   }

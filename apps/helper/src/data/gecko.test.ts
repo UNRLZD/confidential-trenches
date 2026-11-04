@@ -3,7 +3,7 @@
 // the last YIELD_MS, except urgent reads within the lists' own LIST_FLOOR); a 429 pausing every lane.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_RESERVE, throttledUntil, WINDOW_MS } from "./gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_RESERVE, REFRESH_SLOT, throttledUntil, WINDOW_MS } from "./gecko.ts";
 
 test("the measured keyless limit: 5 calls a minute from one address (the published 10 met 429s)", () => assert.equal(GT_LIMIT_PER_MIN, 5));
 
@@ -18,11 +18,14 @@ test("pages may take the whole minute; the window slides", () => {
   assert.equal(b.take("pages"), true, "WINDOW_MS after, the first calls have left the window");
 });
 
-test("lists yield: they leave PAGE_RESERVE free and take nothing while a page called in the last YIELD_MS, except urgent reads within their own LIST_FLOOR", () => {
+test("lists yield: they leave PAGE_RESERVE and REFRESH_SLOT free (a list's first read may take the slot) and take nothing while a page called in the last YIELD_MS, except urgent reads within their own LIST_FLOOR", () => {
   let now = 0;
   const b = geckoBudget(() => now);
-  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE; i++) assert.equal(b.take("lists"), true);
-  assert.equal(b.take("lists"), false, "PAGE_RESERVE stays free");
+  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE - REFRESH_SLOT; i++) assert.equal(b.take("lists"), true);
+  assert.equal(b.take("lists"), false, "PAGE_RESERVE and REFRESH_SLOT stay free");
+  assert.equal(b.take("lists", true), false, "an urgent read past the floor too");
+  assert.equal(b.take("lists", true, true), true, "a list's first read takes the slot, so a fresh helper reads a chain's three lists at once");
+  assert.equal(b.take("lists", true, true), false, "never PAGE_RESERVE");
   now = 20_000;
   for (let i = 0; i < PAGE_RESERVE; i++) assert.equal(b.take("pages"), true, "and a page finds it");
   now = WINDOW_MS; // the lists' calls have left; the pages' (20 s later) are still in the window, and within YIELD_MS
@@ -92,4 +95,17 @@ test("card app-console-429: a refresh (a re-read of data held) takes a call only
   assert.equal(b.take("refresh"), false, "only the reserve left: the refresh yields");
   for (let i = 0; i < reserve; i++) assert.equal(b.take("pages"), true, "which a cold page read finds");
   assert.equal(b.take("pages"), false);
+});
+
+test("card helper-chart-fresh: the newest data held is a refresh until REFRESH_URGENT_MS old, then a page read; nothing held is a page read", async () => {
+  const { refreshLane, REFRESH_URGENT_MS: urgent } = await import("./gecko.ts");
+  const { CANDLES_FRESH_MS } = await import("./solana/token.ts");
+  const t = 1_800_000_000_000;
+  assert.equal(refreshLane(null, t), "pages", "nothing held: a first read");
+  assert.equal(refreshLane(t, t), "refresh", "just read");
+  assert.equal(refreshLane(t - urgent + 1, t), "refresh", "a millisecond short of the bound");
+  assert.equal(refreshLane(t - urgent, t), "pages", "at the bound");
+  assert.equal(refreshLane(t - 86_400_000, t), "pages", "handed over a day old");
+  // past the bars' own 60 s, so a chart read often still refreshes in its lane; under the live check's 10 min
+  assert.ok(urgent > CANDLES_FRESH_MS && urgent < 600_000, `REFRESH_URGENT_MS ${urgent}`);
 });

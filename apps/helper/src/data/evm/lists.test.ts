@@ -390,8 +390,8 @@ test("the lists: tagged rows, the tokens not read yet named in unsettled, the li
   assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 6, "each list once per LIST_MS (the first and this one)");
   now += WINDOW_MS;
   await l.tick();
-  assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 9);
-  assert.equal(gecko.take("lists"), false, "the lists leave PAGE_RESERVE free");
+  assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 8, "two lists past LIST_MS read: the third waits, the lists leaving REFRESH_SLOT (card helper-chart-fresh)");
+  assert.equal(gecko.take("lists"), false, "the lists leave PAGE_RESERVE and REFRESH_SLOT free");
   assert.equal(gecko.take("pages"), true, "which a page finds");
 
   // GeckoTerminal fails from now on: the last read serves past STALE_MS too, dated by its own read time, never as fresh

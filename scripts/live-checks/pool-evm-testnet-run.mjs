@@ -21,8 +21,8 @@
 //     the run spent marked in nullifierHashes and every precommitment it used in usedPrecommitments, on both;
 //   - each W that sold: its code on both RPCs is the EIP-7702 designator 0xef0100 ‖ the pinned SellDelegate;
 //   - the run key: no more than DUST wei left, and its nonce the number of transactions it sent.
-// The pins: the pool from card pool-evm-deploy's record, the sell delegate from card evm-sell-v4's (the one that sells
-// through the v4 PoolManager), the PoolManager and the router from pool-evm-deploy.mjs's CHAINS; nothing else is taken
+// The pins: the pool from card pool-evm-deploy's record, the sell delegate from the newest of its redeploys made before
+// the run started (card evm-sell-v4's, which sells through the v4 PoolManager, then card evm-selldelegate-exact-debit's), the PoolManager and the router from pool-evm-deploy.mjs's CHAINS; nothing else is taken
 // from the run's record but what it claims, and each claim is read back. Every chain's run has a sell.
 // A run that stopped part way (its record names why in `stopped`, pool-evm-testnet-run.<chain>.stopped.json) is read
 // back the same way, every transaction and the run key's rest, and needs only its deposit: its Tx lines go into the run
@@ -75,9 +75,18 @@ export const VIEWS = Object.freeze({
 });
 
 // Each chain: its two RPCs (scripts/ci/money-gate.mjs RPCS), and its pins (see the header)
-const pinsOf = (chain) => {
+// The sell delegate a run went through: the newest of the delegate's redeploys alone (card evm-sell-v4's, then card
+// evm-selldelegate-exact-debit's) made before the run started, so each run is read against the delegate the kit pinned then
+const SELL_KEYS = ["evm-sell-v4", "evm-selldelegate-exact-debit"];
+const sellRecordAt = (chain, at) => {
+  const recs = SELL_KEYS.map((k) => path.join(HERE, `${k}.${chain}.json`)).filter(existsSync).map((f) => JSON.parse(readFileSync(f, "utf8")));
+  const before = recs.filter((r) => r.dryRun === false && Date.parse(r.at) <= Date.parse(at)).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  if (!before.length) throw new Error(`no SellDelegate redeploy on ${chain} before the run at ${at}`);
+  return before[0];
+};
+const pinsOf = (chain, at) => {
   const d = JSON.parse(readFileSync(path.join(HERE, `pool-evm-deploy.${chain}.json`), "utf8"));
-  const s = JSON.parse(readFileSync(path.join(HERE, `evm-sell-v4.${chain}.json`), "utf8"));
+  const s = sellRecordAt(chain, at);
   const c = DEPLOYED[chain];
   return {
     pool: d.contracts.PrivacyPoolSimple.address.toLowerCase(),
@@ -134,7 +143,7 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
   };
   try {
     if (!urls || urls.length !== 2) throw new Error(`no two RPCs for ${rec.chain}`);
-    const pins = pinsOf(rec.chain);
+    const pins = pinsOf(rec.chain, rec.at);
     if (lower(rec.pool) !== pins.pool) throw new Error(`the record's pool ${rec.pool} is not ${rec.chain}'s pinned pool ${pins.pool}`);
     const ids = await both("eth_chainId", []);
     if (ids.some((x) => BigInt(x) !== BigInt(rec.chainId))) throw new Error(`chain ids ${ids.join(", ")}, not ${rec.chainId}`);

@@ -154,10 +154,11 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"]),
       pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
       adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645", v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb1" }),
-      // the delegate that also sells through the v4 PoolManager (card evm-sell-v4: scripts/live-checks/
-      // evm-sell-v4.base-sepolia.json, deploy tx 0x795b888806de773381fd8659cfea6faa7614bc3ddbf225f3d273ea66c1c1a505;
-      // its POOL_MANAGER() read 0x05e7…3408 on sepolia.base.org and base-sepolia-rpc.publicnode.com, 4 Nov 08:33Z)
-      sellDelegate: "0xfa1442419b6984b8e3aa8933c690f80f063b6adf",
+      // the delegate that sells through the v4 PoolManager and reverts unless W's balance of the token fell by exactly
+      // the signed amount (card evm-selldelegate-exact-debit: scripts/live-checks/evm-selldelegate-exact-debit.
+      // base-sepolia.json, deploy tx 0xa889469f4b7386072b3343b295002c09a4aff89638d29b304ac940c0c6168121; its code the
+      // build's, read by that card's live check on sepolia.base.org and base-sepolia-rpc.publicnode.com, 4 Nov)
+      sellDelegate: "0xe39f1b9934810792c090d8ab8f555b9955527260",
       // Uniswap v4's PoolManager (pool-evm-deploy.mjs CHAINS, its code hash pinned there), the target of a v4 sell
       poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408",
       // Uniswap's QuoterV2 and V4Quoter (developers.uniswap.org's Base Sepolia deployments); eth_getCode on
@@ -176,11 +177,12 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       routers: Object.freeze([]),
       pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
       adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" }),
-      // the delegate that also sells through the v4 PoolManager (card evm-sell-v4: scripts/live-checks/
-      // evm-sell-v4.robinhood-testnet.json, deploy tx 0x8b9e35f0ae4bbf7b749ac95285e91c294d15fda299a947e7495a7066d3fbb2fd;
-      // its POOL_MANAGER() read 0x8366…0951 on rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com,
-      // 4 Nov 08:33Z), so a sell here goes through v4 alone
-      sellDelegate: "0xaafb86fed9b651933773a0750d5dba22ca8b8a02",
+      // the delegate that sells through the v4 PoolManager alone here and reverts unless W's balance of the token fell
+      // by exactly the signed amount (card evm-selldelegate-exact-debit: scripts/live-checks/
+      // evm-selldelegate-exact-debit.robinhood-testnet.json, deploy tx
+      // 0x62c517784feda75d5597229118cb9c4eb2a370fc34114694c1d009ce84158459; its code the build's, read by that card's
+      // live check on rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 4 Nov)
+      sellDelegate: "0x9909a660c8a55829335dd4d894c8375bfcfcd65b",
       poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
       // Uniswap's V4Quoter at mainnet's address with mainnet's code (testnet-run.mjs NETS); eth_getCode on
       // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, the same on both (2026-11-04 09:55Z):
