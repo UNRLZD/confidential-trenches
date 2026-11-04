@@ -45,6 +45,13 @@ export const LAUNCH_WAIT_MS = 300;
 export const HOLDERS_FRESH_MS = 60_000;
 /** 06b: the OHLCV history is cached 60 s and shared; a token's top pool is kept 10 minutes. */
 export const CANDLES_FRESH_MS = 60_000;
+/**
+ * The longest a caller's cold GeckoTerminal read waits for the budget's next free call (card helper-crowd-429). [design:
+ * 4 s: a cold chart is two calls (its top pool, then its bars), so 8 s of waits and GeckoTerminal's answers stay inside
+ * the app's 10 s request (apps/terminal/src/screens/token/candles.ts TIMEOUT_MS), which then reads a 429 again after its
+ * Retry-After (THROTTLE_RETRIES 2); the live checks wait on the answer with no timeout of their own.]
+ */
+export const GT_PAGE_WAIT_MS = 4_000;
 /** History before a given time (a read with `to`: the bars before our own first bar, or a range scrolled back) never
  *  changes: kept an hour, as the EVM chains keep theirs (../evm/swaps.ts GT_FRESH_MS) (card app-console-429). */
 export const HISTORY_FRESH_MS = 3_600_000;
@@ -713,7 +720,14 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // naming the wait to the budget's next free call or the pause's end (card helper-abuse-limits)
   const gt = deps.gecko ?? geckoBudget(now, GT_PER_MIN);
   async function gecko(path: string, lane: "pages" | "refresh" | "ahead" = "pages"): Promise<unknown> {
-    if (!gt.take(lane)) throw new Throttled(secondsUntil(gt.retryAt("pages"), now()), lane === "pages" ? "geckoterminal budget" : `geckoterminal ${lane}`);
+    // card helper-crowd-429: a caller's cold read (the pages lane) waits for the budget's next free call when it comes
+    // within GT_PAGE_WAIT_MS, instead of a 429 (market-data-solana-token at 22:12Z: PUMP 1h answered 429 "geckoterminal
+    // budget"); a refresh or an ahead read never waits (the bars held are served meanwhile)
+    for (let round = 0; !gt.take(lane); round++) {
+      const at = gt.retryAt("pages");
+      if (lane !== "pages" || round >= 3 || at - now() > GT_PAGE_WAIT_MS) throw new Throttled(secondsUntil(at, now()), lane === "pages" ? "geckoterminal budget" : `geckoterminal ${lane}`);
+      await new Promise((ok) => setTimeout(ok, Math.max(at - now(), 0) + 5));
+    }
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
       throw new Throttled(secondsUntil(throttledUntil(gt, r.headers.get("retry-after"), now()), now()), "geckoterminal 429");
