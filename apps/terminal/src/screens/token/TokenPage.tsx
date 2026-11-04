@@ -302,12 +302,10 @@ function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartSt
             <div className="tkp-idtext">
               <div className="tkp-symrow">
                 {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={120} />}
-                {v && (
-                  <div className="tkp-icons" data-testid="token-links">
-                    <Links v={v} />
-                    <Star v={v} cls="tkp-ib" size={13} />
-                  </div>
-                )}
+                <div className="tkp-icons" data-testid="token-links">
+                  {v && <Links v={v} />}
+                  {v && <Star v={v} cls="tkp-ib" size={13} />}
+                </div>
               </div>
               {v ? (
                 <div className="tkp-meta">
@@ -426,11 +424,9 @@ function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartStat
         ) : (
           <SkMeta w={240} />
         )}
-        {v && (
-          <div className="tkp-links" data-testid="token-links">
-            <Links v={v} />
-          </div>
-        )}
+        <div className="tkp-links" data-testid="token-links">
+          {v && <Links v={v} />}
+        </div>
       </div>
       <Chart c={c} phone />
       <div className="tkp-mtiles">

@@ -44,7 +44,8 @@
    comes only from its own tiles and it starts at the same x before and after the read (CLS 0) */
 .tkp-ident { display: flex; align-items: center; gap: 12px; flex: 1 1 0; min-width: 0; }
 .tkp-idtext { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1 1 0; }
-.tkp-symrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* the row's box is drawn before the token answers: the icons' slot is there empty, so nothing moves when they land */
+.tkp-symrow { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 26px; }
 .tkp-sym { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tkp-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); min-width: 0; white-space: nowrap; }
 .tkp-meta > * { flex: none; }
@@ -55,7 +56,10 @@
    address end in "…" with the full text in the title), so no tile is ever cut at the trade column */
 .tkp-strip { flex: none; margin-left: auto; display: flex; gap: 6px; flex-wrap: nowrap; }
 .tkp-mc { flex: none; margin-left: auto; padding: 8px 14px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.tkp-mcval { min-width: 120px; text-align: center; font-size: 24px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; }
+.tkp-mcval { min-width: max(120px, 8ch); text-align: center; font-size: 24px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; }
+/* a tile is drawn for 8 characters (discover/format.ts priceTile, usdTile; model.ts changeTile), skeleton or value,
+   so the strip's width never follows the data */
+.tkp-tile .tkp-val { min-width: 8ch; text-align: center; }
 .tkp-tile { flex: none; min-width: 96px; padding: 8px 14px; border-radius: 10px; background: var(--bg-panel); display: flex; flex-direction: column; align-items: center; gap: 4px; }
 
 .tkp-chart { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; overflow: hidden; }
@@ -101,7 +105,8 @@
   .tkp-mca .tkp-ca { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tkp-hero .tkp-meta > .tkp-mca { flex: 0 1 auto; }
   /* the link row (R5 mt-links): the identity's link icons, under the address */
-  .tkp-links { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 28px; }
+  /* one row of a fixed height, empty or full, drawn before the token answers (R5 .mlinks: one row) */
+  .tkp-links { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; height: 28px; }
   .tkp-links .tkp-ib::after { inset: -9px; }
   .tkp-pricerow { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .tkp-price { font-size: 34px; font-weight: 600; letter-spacing: -0.06em; line-height: 1; color: var(--text-1); }

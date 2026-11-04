@@ -11,7 +11,7 @@
 // curve token, a Tax tile), on desktop the strip clear of the trade column with no tile cut, on the phone the back, star
 // and share row, the page's data-token is the helper's top Trending token (an `?fx=` in the address bar picks
 // nothing), Retry reads the lists again, and on the phone the bottom bar sits above the tab bar and the last tile
-// scrolls clear of it and every tile is on screen without a sideways scroll. Requests to any other host are
+// scrolls clear of it and the tile row scrolls sideways inside itself with every tile in reach (the page never does). Requests to any other host are
 // refused and listed. Draft words drawn are listed.
 //   node apps/terminal/test/token-page/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -256,10 +256,23 @@ try {
             window.scrollTo(0, document.documentElement.scrollHeight);
             const r = (q) => document.querySelector(q)?.getBoundingClientRect();
             const tiles = [...document.querySelectorAll(".tkp-mtile")].map((e) => e.getBoundingClientRect().bottom);
-            return { bar: r(".tkp-bottom"), tab: r(".tabbar"), lastTile: Math.max(...tiles), tilesRight: Math.max(...[...document.querySelectorAll(".tkp-mtile")].map((e) => e.getBoundingClientRect().right)), vw: window.innerWidth };
+            return { bar: r(".tkp-bottom"), tab: r(".tabbar"), lastTile: Math.max(...tiles), row: (() => {
+              // R5 .mtiles: the tile row is its own sideways scroller inside the page; every tile is reachable in it
+              const row = document.querySelector(".tkp-mtiles");
+              const box = row.getBoundingClientRect();
+              const ox = getComputedStyle(row).overflowX;
+              // the tiles sit in order: the first in the row's box at the start, the last in it at the end of the scroll
+              const first = row.querySelector(".tkp-mtile:first-child").getBoundingClientRect().left;
+              row.scrollLeft = row.scrollWidth;
+              const last = row.querySelector(".tkp-mtile:last-child").getBoundingClientRect().right;
+              const scrolled = row.scrollLeft;
+              row.scrollLeft = 0;
+              return { left: box.left, right: box.right, ox, first, last, scrolled };
+            })(), vw: window.innerWidth };
           });
           check(g.bar && g.tab && g.bar.bottom <= g.tab.top + 0.5, `${tag}: the bottom bar overlaps the tab bar`);
-          check(g.tilesRight <= g.vw, `${tag}: a tile is off screen (right ${g.tilesRight} > ${g.vw})`);
+          check(g.row.left >= 0 && g.row.right <= g.vw + 0.5 && ["auto", "scroll"].includes(g.row.ox), `${tag}: the tile row is not its own scroller (${JSON.stringify(g.row)})`);
+          check(g.row.first >= g.row.left - 0.5 && g.row.last <= g.row.right + 0.5, `${tag}: tiles out of reach in the row: ${JSON.stringify(g.row)}`);
           check(g.bar && g.lastTile <= g.bar.top, `${tag}: the last tile ends under the bottom bar (${g.lastTile} > ${g.bar?.top})`);
           await f.evaluate(() => window.scrollTo(0, 0));
         }
