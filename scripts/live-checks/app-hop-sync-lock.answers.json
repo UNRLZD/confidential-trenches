@@ -1,0 +1,55 @@
+{
+ "_note": "Recorded 4 Nov by app-hop-sync-lock.mjs --record: good = this card's build (--harness --build apps/terminal/dist), bad = the deployed APP_HOST before this card (main b11a766's terminal); both framed by the stand-in shell signed out, answering signin.open { pending: true }.",
+ "good": {
+  "check": "app-hop-sync-lock",
+  "at": "2026-11-04T17:26:13.347Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed out",
+  "browser": "156.0.8078.79",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "sheet": true,
+    "answered": true,
+    "opens": 1,
+    "locked": true,
+    "line": null
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "sheet": true,
+    "answered": true,
+    "opens": 1,
+    "locked": true,
+    "line": null
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-hop-sync-lock",
+  "at": "2026-11-04T17:22:22.585Z",
+  "source": "live https://confidential.unrealized.trade, the stand-in shell signed out",
+  "browser": "156.0.8078.79",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "sheet": true,
+    "answered": true,
+    "opens": 2,
+    "locked": false,
+    "line": null
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "sheet": true,
+    "answered": true,
+    "opens": 2,
+    "locked": false,
+    "line": null
+   }
+  ]
+ }
+}
