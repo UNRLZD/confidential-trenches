@@ -16,7 +16,8 @@
 // - pool.buy (card signpage-pool-buy): src/pool-buy.ts on the queue's ready proofs, sent through the helper's POST
 //   /v1/pool/solana/send and settled through the wallet's solanaSettleSpent once it reads back. A tag 3 loads its
 //   accounts from the pin's lookup table: none is pinned for the devnet pool yet (DEVNET_TABLE), so pool.buy is refused
-//   not_allowed, with no read, until one is.
+//   not_allowed, with no read, until one is. Each state read also settles the pool's RESERVED notes (solanaSettleReserved:
+//   spent, freed past the deadline, or held), so no outcome of a send leaves a note RESERVED for good.
 // main.ts takes these only in the testnet build; SIGN_HOST's build keeps its mainnet deps and carries none of this.
 import { base64 } from "@scure/base";
 import { solanaJsonRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -30,7 +31,7 @@ import { poolDepositKind, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { TRADE_HELPER } from "./trade.ts";
 import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
-import { solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
+import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
@@ -71,23 +72,32 @@ export type TestnetOver = {
 /** The devnet pool's lookup table: none is created and pinned yet (scripts/live-checks/pool-sol-deploy.devnet.json
  *  records the pool and no table), so pool.buy is refused until it is. */
 const DEVNET_TABLE: string | null = null;
-const SEND_TIMEOUT_MS = 90_000;
+/** The pool send's own window: the helper answers a tag 3 only once it has simulated and sent it, and a send may wait
+ *  out a blockhash's life (~60 to 90 s), so this is over 90 s, never the client's 10 s for the pool.buy kind's answer
+ *  (the kit's SIGNPAGE_TIMEOUT_MS["pool.buy"]: the run answers at the send, and goes on whatever the client waits). */
+export const POOL_SEND_TIMEOUT_MS = 120_000;
 
 /** POST /v1/pool/solana/send: the helper's answer as it came (pool-buy.ts reads it back on two RPCs). */
 export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: typeof fetch = fetch): Promise<unknown> {
-  const res = await fetchFn(`${TRADE_HELPER}/v1/pool/solana/send`, {
-    ...HELPER_FETCH_INIT,
-    redirect: "error",
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ pool, tx: base64.encode(tx) }),
-    signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
-  });
-  if (res.status !== 200) throw new Error(`pool send: HTTP ${res.status}`);
-  const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/solana/send")!.limitBytes!;
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length > SEND_ANSWER_MAX) throw new Error(`pool send: an answer over ${SEND_ANSWER_MAX} B`);
-  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  const window = new AbortController();
+  const t = setTimeout(() => window.abort(new DOMException(`pool send: no answer in ${POOL_SEND_TIMEOUT_MS} ms`, "TimeoutError")), POOL_SEND_TIMEOUT_MS);
+  try {
+    const res = await fetchFn(`${TRADE_HELPER}/v1/pool/solana/send`, {
+      ...HELPER_FETCH_INIT,
+      redirect: "error",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pool, tx: base64.encode(tx) }),
+      signal: window.signal,
+    });
+    if (res.status !== 200) throw new Error(`pool send: HTTP ${res.status}`);
+    const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/solana/send")!.limitBytes!;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length > SEND_ANSWER_MAX) throw new Error(`pool send: an answer over ${SEND_ANSWER_MAX} B`);
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 const FEE_TIMEOUT_MS = 10_000;
@@ -114,7 +124,7 @@ export type TestnetPool = {
   host(): PoolDepositHost;
   /** The INCOMING notes finished (src/pool-deposit.ts settlePoolDeposits), one pass at a time: a signed-in load. */
   settle(): Promise<void>;
-  /** A signed-in state read: settle, when a note of the pool is still INCOMING and no pass runs. */
+  /** A signed-in state read, when no pass runs: settle the pool's INCOMING notes, then its RESERVED ones. */
   stateRead(): Promise<void>;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
@@ -212,7 +222,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (list.length === 0) void proofs();
         return list;
       },
-      take: async (id) => (await q()).take(id),
+      take: async (id, attempt) => (await q()).take(id, attempt),
       seed64: page.seed64,
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
       settle: async (noteId) => {
@@ -252,13 +262,30 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // included) gets the same promise and never starts a second pass. No follow-up pass: a note turns INCOMING only in an
   // ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later state read settles what it leaves.
   let reading: Promise<void> | null = null;
+  // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
+  // once both RPCs' block time is past their deadline with no spent mark, or held (../../wallet/src/pool/solana-restore.ts
+  // solanaSettleReserved); a freed note is proved again by the open queue's next pass
+  const settleReserved = async (): Promise<void> => {
+    const notes = await openNoteStore(await page.store());
+    let seed64: Uint8Array | null = null;
+    try {
+      seed64 = await page.seed64();
+      const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: rpcs() });
+      if (pass.freed.length > 0 && open !== null) void proofs();
+    } finally {
+      seed64?.fill(0);
+      notes.close();
+    }
+  };
   const stateRead = (): Promise<void> => {
     if (scope === null) return Promise.resolve();
     if (reading) return reading;
     const p = (async () => {
       try {
         if (settling) return await settling;
-        if ((await readNotes(await page.store())).some((n) => n.state === "INCOMING" && n.scope === scope)) await settle();
+        const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
+        if (mine.some((n) => n.state === "INCOMING")) await settle();
+        if (mine.some((n) => n.state === "RESERVED")) await settleReserved();
       } catch {
         // a state read never fails for this; the next read tries again
       }

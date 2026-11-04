@@ -65,7 +65,7 @@ import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.
 import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
-import { checkSolanaRpcs, type SolanaLagWait, solanaLagRetry, solanaPda, solanaPoolOf, solanaTreeSync } from "./solana.ts";
+import { checkSolanaRpcs, type SolanaLagWait, solanaFinalTimes, solanaLagRetry, solanaPda, solanaPoolOf, solanaTreeSync } from "./solana.ts";
 
 const U32 = 0xffffffff;
 const CHAIN_TAGS = /* @__PURE__ */ Object.keys(CHAINS) as Chain[];
@@ -425,15 +425,16 @@ export type SolanaSettled = { kind: "spent"; change: NoteRecord; withdrawn: bigi
  * No spent mark: nothing is written ("unspent"). A spent mark whose change is not in the state tree: a refusal, nothing
  * written. A change another tab wrote first, with this leaf, is taken. The marks and the pages are read whether or not
  * the mark is there, so the reads look the same either way.
- * The sender treats "unspent" as: the note stays RESERVED and the settle is tried again later (the marks are read at
- * finalized, so a spend that just landed shows up a few seconds on), until the store's deadline rule frees it.
+ * The sender treats "unspent" as: the note stays RESERVED, and solanaSettleReserved settles it on a later pass (the marks
+ * are read at finalized, so a spend that just landed shows up a few seconds on) or frees it once block time on both
+ * RPCs is past its deadline with no spent mark. minSlots: each RPC's marks read at or past it (minContextSlot).
  */
-export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStore; noteId: string; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; /** tests only */ lagWait?: SolanaLagWait }): Promise<SolanaSettled> {
+export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStore; noteId: string; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; minSlots?: readonly [number, number]; /** tests only */ lagWait?: SolanaLagWait }): Promise<SolanaSettled> {
   if (!(a.seed64 instanceof Uint8Array) || a.seed64.length !== 64) throw new Error("seed64: not 64 bytes");
   const scope = solanaPoolOf(a.program).scope;
   const note = await a.notes.get(a.noteId);
   if (note === undefined || note.leaf === undefined || note.scope !== scope) throw new Error(`note ${a.noteId}: not a landed note of this pool`);
-  const marks = await solanaMarks(a.rpcs, a.program, a.signal, undefined, a.lagWait, "spent");
+  const marks = await solanaMarks(a.rpcs, a.program, a.signal, a.minSlots, a.lagWait, "spent");
   const leaves = await solanaTreeSync(a.rpcs, a.program, a.lagWait).leaves(marks.slot, a.signal);
   const withdrawn = marks.spent.get(solanaMarkOf(a.program, "spent", noteSecrets(a.seed64, note.ref).nullifierHash))?.withdrawn;
   if (withdrawn === undefined) return { kind: "unspent" };
@@ -450,4 +451,46 @@ export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStor
     if (there !== undefined && there.precommitment === c.precommitment && there.leaf?.commitment === c.leaf.commitment && there.leaf.leafIndex === c.leaf.leafIndex) return { kind: "spent", change: there, withdrawn };
     throw e;
   }
+}
+
+/** What one pass over the pool's RESERVED notes did with each: settled spent (its change written, the note SPENT),
+ *  freed (RESERVED -> UNSPENT) or held (RESERVED, read again on the next pass). */
+export type SolanaReservedPass = { spent: string[]; freed: string[]; held: string[] };
+
+/**
+ * Every RESERVED note of the Solana pool, settled (card signpage-pool-buy fold 1): the one path that ends a RESERVED
+ * Solana pool note, whatever its send did (filled, refused by the helper or the chain, never answered, sent by a page
+ * that died). Run on each of the signing page's state reads while such a note is open.
+ * - First each RPC's finalized slot and its block time; then, per note, solanaSettleSpent with each RPC's marks read at
+ *   or past that slot. A release lands only before its deadline (contracts/pool-solana src/release.rs row 2, the
+ *   Clock's unix_timestamp), so once both RPCs' finalized block time is past deadline_ms, any release of the note is in
+ *   a block at or before the ones whose time was read, and so in both marks reads that follow.
+ * - A spent mark on either RPC (the marks are the union): settled through solanaSettleSpent, whose change both RPCs'
+ *   pages must hold; a mark whose change is not yet on both is held, never freed.
+ * - No spent mark, and the lower of the two block times past deadline_ms: RESERVED -> UNSPENT (the store's own rule,
+ *   blockTimeMs past deadline_ms), so the queue proves the note again. Before that the note is held: its send may still
+ *   be in flight.
+ * - A read or write that fails holds that note; the others still run. Nothing here names a note to an RPC.
+ */
+export async function solanaSettleReserved(a: { seed64: Uint8Array; notes: NoteStore; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; /** tests only */ lagWait?: SolanaLagWait }): Promise<SolanaReservedPass> {
+  const scope = solanaPoolOf(a.program).scope;
+  const out: SolanaReservedPass = { spent: [], freed: [], held: [] };
+  const reserved = (await a.notes.list()).filter((n) => n.scope === scope && n.state === "RESERVED");
+  if (reserved.length === 0) return out;
+  const times = await solanaFinalTimes(a.rpcs, a.signal);
+  const timeMs = times[0].ms < times[1].ms ? times[0].ms : times[1].ms;
+  const minSlots = [times[0].slot, times[1].slot] as const;
+  for (const n of reserved) {
+    try {
+      const s = await solanaSettleSpent({ seed64: a.seed64, notes: a.notes, noteId: n.id, program: a.program, rpcs: a.rpcs, signal: a.signal, minSlots, lagWait: a.lagWait });
+      if (s.kind === "spent") out.spent.push(n.id);
+      else if (n.deadlineMs !== undefined && timeMs > n.deadlineMs) {
+        await a.notes.move(n.id, "RESERVED", "UNSPENT", { blockTimeMs: timeMs });
+        out.freed.push(n.id);
+      } else out.held.push(n.id);
+    } catch {
+      out.held.push(n.id);
+    }
+  }
+  return out;
 }

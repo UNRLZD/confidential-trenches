@@ -10,13 +10,13 @@ import { test } from "node:test";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
-import { solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_POOL_FEE_STEP, solanaPoolFee, solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vault/shapes.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
-import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
+import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
 import { poolBuyKind, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
@@ -28,7 +28,9 @@ W.secretKey.fill(0);
 const PIN = { program: PROGRAM, feePayer: FEE_PAYER };
 const { scope: SCOPE } = solanaPoolOf(PROGRAM);
 const r = fx.release;
-const FEE = BigInt(fx.relay_fee_cap);
+// the epoch fee the device works out from the Rent sysvar both RPCs answered (the kit's solanaPoolFee): the most a
+// proof's relay fee cap may be
+const FEE = solanaPoolFee(rent);
 const STATE_ROOT = 0x1234_5678n;
 const LABEL_ROOT = 0x9abc_def0n;
 const SIZE = 6;
@@ -41,14 +43,15 @@ const P = unhex(r.proof);
 const at = (i: number) => beHex(P.subarray(i * 32, i * 32 + 32));
 const PROOF: VaultSnarkjsProof = { pi_a: [at(0), at(1), "1"], pi_b: [[at(3), at(2)], [at(5), at(4)], ["1", "0"]], pi_c: [at(6), at(7), "1"] };
 
-function readyProof(over: { stateRoot?: bigint } = {}): ReadyProof<SolanaReleaseRequest> {
-  const request: SolanaReleaseRequest = { program: PROGRAM, pool: POOL, recipient: W.address, feePayer: FEE_PAYER, relayFee: FEE, relayFeeCap: FEE, tipCap: BigInt(fx.tip_cap), deadlineMs: BigInt(fx.deadline_ms), salt: r.salt };
+function readyProof(over: { stateRoot?: bigint; attempt?: string; fee?: bigint; j?: number } = {}): ReadyProof<SolanaReleaseRequest> {
+  const fee = over.fee ?? FEE;
+  const request: SolanaReleaseRequest = { program: PROGRAM, pool: POOL, recipient: W.address, feePayer: FEE_PAYER, relayFee: fee, relayFeeCap: fee, tipCap: BigInt(fx.tip_cap), deadlineMs: BigInt(fx.deadline_ms), salt: r.salt };
   const context = solanaContextOf(request, SCOPE);
   const signals: VaultWithdrawSignals = [beHex(unhex(r.new_commitment)), beHex(unhex(r.nullifier_hash)), String(r.withdrawn), String(over.stateRoot ?? STATE_ROOT), String(r.state_depth), String(LABEL_ROOT), String(r.label_depth), context.toString()];
   return {
-    noteId: "note-1", attempt: "attempt-1", poolId: "sol", wallet: { chain: "sol", l: L, j: J, path: W.path, address: W.address },
+    noteId: "note-1", attempt: over.attempt ?? "attempt-1", poolId: "sol", wallet: { chain: "sol", l: L, j: over.j ?? J, path: W.path, address: W.address },
     chunk: BigInt(r.withdrawn), epochStartMs: 0n, deadlineMs: BigInt(fx.deadline_ms), root: "epoch",
-    binding: { context, feeCap: FEE, request }, proof: PROOF, publicSignals: signals,
+    binding: { context, feeCap: fee, request }, proof: PROOF, publicSignals: signals,
   };
 }
 
@@ -81,8 +84,12 @@ type Plant = {
   venueOff?: "reserves" | "creator";
   /** provider B's state page without the proof's root */
   rootOnOne?: boolean;
-  /** getTransaction's answer for the helper's signature */
-  readBack?: "ours" | "none" | "other" | "failed";
+  /** getTransaction's answer for the helper's signature; "lieOne": the chain holds it, RPC 1 answers another tx */
+  readBack?: "ours" | "none" | "other" | "failed" | "lieOne";
+  /** RPC 1's first read of the pool account is a slot behind: its state tree one leaf short */
+  sizeSkewOnce?: boolean;
+  /** what each call of ready() answers, in turn (the last one again after); the queue's own ready attempt is the last's */
+  readies?: ReadyProof<SolanaReleaseRequest>[][];
 };
 
 async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
@@ -90,6 +97,11 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   const log: string[] = [];
   let st = "HELD";
   let sent: Uint8Array | null = null;
+  const readies = plant.readies ?? [[proof]];
+  let readyCalls = 0;
+  // the queue's ready proof for the note now: the last list's (a remake swaps it in place, the note HELD)
+  const current = readies.at(-1)![0] ?? proof;
+  let skewed = false;
   const accounts = (p: 0 | 1): Record<string, { owner: string; data: Uint8Array }> => ({
     [s.tableAddr]: { owner: ALT, data: s.tableData },
     [POOL]: { owner: PROGRAM, data: poolAccount() },
@@ -112,6 +124,12 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       if (method === "getMultipleAccounts") return venue(method, params);
       if (method === "getAccountInfo") {
         const a = accounts(p)[params[0] as string];
+        if (plant.sizeSkewOnce && p === 1 && params[0] === POOL && !skewed) {
+          skewed = true;
+          const d = poolAccount();
+          new DataView(d.buffer).setBigUint64(49, BigInt(SIZE - 1), true);
+          return { context: { slot: s.ref.slot! + 1 }, value: { owner: PROGRAM, lamports: 1, data: [base64.encode(d), "base64"] } };
+        }
         return { context: { slot: s.ref.slot! + 2 }, value: a ? { owner: a.owner, lamports: 1, data: [base64.encode(a.data), "base64"] } : null };
       }
       if (method === "getLatestBlockhash") return { context: { slot: s.ref.slot! + (plant.slotAhead ?? 2) }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 100 } };
@@ -121,7 +139,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         if (how === "none" || sent === null) return null;
         const tx = sent.slice();
         tx.set(base58.decode(SIG), 1);
-        if (how === "other") tx[tx.length - 1]! ^= 1;
+        if (how === "other" || (how === "lieOne" && p === 1)) tx[tx.length - 1]! ^= 1;
         return { transaction: [base64.encode(tx), "base64"], meta: { err: how === "failed" ? { InstructionError: [2, { Custom: 6 }] } : null } };
       }
       throw new Error(`unexpected ${method}`);
@@ -133,14 +151,17 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
     table: s.tableAddr,
     cluster: "mainnet",
     rpcs,
-    ready: async () => (st === "HELD" ? [proof] : []),
-    take: async (id) => {
+    ready: async () => (st === "HELD" ? readies[Math.min(readyCalls++, readies.length - 1)]! : []),
+    // the queue's take (../../wallet/src/pool/queue.ts): with an attempt, refused inside the note's turn, before any
+    // write, unless it is the note's ready one; without one (012b565's call), the ready one is taken, whatever it is
+    take: async (id: string, attempt?: string) => {
       log.push(`take:${id}`);
       assert.equal(st, "HELD");
+      if (attempt !== undefined && attempt !== current.attempt) throw new Error(`note ${id}'s ready proof is another attempt`);
       st = "RESERVED";
-      return proof;
+      return current;
     },
-    seed64: async () => SEED64.slice(),
+    seed64: async () => (log.push("seed"), SEED64.slice()),
     send: async (pool, tx) => {
       log.push("send");
       assert.equal(pool, POOL);
@@ -148,8 +169,11 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       sent = tx.slice();
       return { signature: SIG };
     },
+    // the wallet's solanaSettleSpent: spent only when the chain holds the transaction (its mark and change)
     settle: async (id) => {
       log.push(`settle:${id}`);
+      const how = plant.readBack ?? "ours";
+      if (sent === null || (how !== "ours" && how !== "lieOne")) return { kind: "unspent" };
       st = "SPENT";
       return { kind: "spent" };
     },
@@ -211,26 +235,82 @@ test("a proof for another root is refused: a root on no page, or on one RPC's pa
   }
 });
 
-test("a helper answer whose tx does not read back, or reads back as another tx, never marks the note spent", async () => {
+test("a helper answer whose tx does not read back, or reads back as another tx, never marks the note spent: the settle is tried first", async () => {
   for (const readBack of ["none", "other"] as const) {
     const w = await world({ readBack });
     const a = await runPoolBuy(w.host, ASK);
     assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
-    assert.equal(w.state(), "RESERVED", "the proof left: RESERVED until the store's deadline rule");
-    assert.ok(!w.log.some((x) => x.startsWith("settle")));
+    assert.equal(w.state(), "RESERVED", "the proof left: RESERVED until the state reads' pass settles or frees it");
+    assert.ok(w.log.includes("settle:note-1"), "the chain's word asked before not_landed");
   }
   const w = await world({ readBack: "failed" });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "refused", txs: [{ chain: "solana", hash: SIG }] });
   assert.equal(w.state(), "RESERVED");
-  assert.ok(!w.log.some((x) => x.startsWith("settle")));
 });
 
-test("a take that hands out another attempt is refused before anything leaves", async () => {
-  const w = await world();
-  const other = { ...readyProof(), attempt: "attempt-2" };
-  w.host.take = async () => other;
+test("fold 1 (3): one RPC answering another tx under the helper's signature does not turn a landed buy into not_landed", async () => {
+  const w = await world({ readBack: "lieOne" });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal(w.state(), "SPENT");
+  assert.equal(w.log.filter((x) => x === "0:getTransaction").length, 3, "the reads went on past the one RPC's other");
+});
+
+test("fold 1 (1): a take whose attempt a remake swapped out is refused inside the queue's turn: nothing leaves, the note HELD", async () => {
+  // ready() still shows attempt-1 while the queue holds attempt-2 for the note
+  const w = await world({ readies: [[readyProof()], [readyProof()], [readyProof()], [readyProof({ attempt: "attempt-2" })]] });
+  w.host.ready = async () => [readyProof()];
   assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "failed" });
+  assert.equal(w.state(), "HELD", "never RESERVED for bytes no one sends");
+  assert.ok(w.log.includes("take:note-1"));
   assert.equal(w.sentTx(), null);
+});
+
+test("fold 1 (6): the pick reads the ready proofs again after the quote: a proof remade during the reads is the one bought", async () => {
+  const w = await world({ readies: [[readyProof()], [readyProof()], [readyProof({ attempt: "attempt-2" })]] });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal(w.state(), "SPENT");
+  // remade onto a newer root (one the pool's pages hold at leaf 4) during the reads: its root is looked up, the reads run
+  // once more, and that proof is bought with its own root index
+  const p2 = readyProof({ attempt: "attempt-2", stateRoot: 1004n });
+  const n = await world({ readies: [[readyProof()], [readyProof()], [p2]] });
+  assert.deepEqual(await runPoolBuy(n.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal(n.state(), "SPENT");
+  assert.equal(n.log.filter((x) => x === "0:getLatestBlockhash").length, 2, "the quote and slot read again for it");
+  // gone during the reads (taken by another tab): none to buy with, nothing taken
+  const g = await world({ readies: [[readyProof()], [readyProof()], []] });
+  assert.deepEqual(await runPoolBuy(g.host, ASK), { error: "not_funded" });
+  assert.ok(!g.log.some((x) => x.startsWith("take")));
+});
+
+test("fold 1 (5): a relay fee cap over the epoch fee the device works out from its own rent read is refused: nothing taken", async () => {
+  const w = await world({}, readyProof({ fee: FEE + SOLANA_POOL_FEE_STEP }));
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "quote_check_failed" });
+  assert.equal(w.state(), "HELD");
+  assert.ok(!w.log.some((x) => x.startsWith("take")) && !w.log.includes("send"));
+  // at the epoch fee: bought
+  const ok = await world({}, readyProof({ fee: FEE }));
+  assert.equal((await runPoolBuy(ok.host, ASK) as { stage?: string }).stage, "filled");
+});
+
+test("fold 1 (4): the device's slot read is last before signing: no RPC read between it and the take, W derived after it", async () => {
+  const w = await world();
+  assert.equal((await runPoolBuy(w.host, ASK) as { stage?: string }).stage, "filled");
+  const bh = w.log.indexOf("0:getLatestBlockhash");
+  const take = w.log.indexOf("take:note-1");
+  const between = w.log.slice(bh + 1, take);
+  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && x !== "1:isBlockhashValid"), [], between.join(" "));
+  assert.ok(w.log.indexOf("seed") > bh, "W is derived after the slot read");
+  // a proof whose l, j derive another W than it names: refused before W signs, nothing taken
+  const x = await world({}, readyProof({ j: 1 }));
+  assert.deepEqual(await runPoolBuy(x.host, ASK), { error: "failed" });
+  assert.equal(x.state(), "HELD");
+  assert.ok(!x.log.some((y) => y.startsWith("take")));
+});
+
+test("fold 1 (7): two providers a slot apart on the state tree's size are read again once", async () => {
+  const w = await world({ sizeSkewOnce: true });
+  assert.equal((await runPoolBuy(w.host, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(w.state(), "SPENT");
 });
 
 test("a proof another run of this page holds is never picked: a second tap at once finds none of its own", async () => {

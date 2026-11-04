@@ -80,8 +80,10 @@ export interface ProofQueue<R> {
   ready(): ReadyProof<R>[];
   /** At the tap: refused (and its note freed) for a proof made before the previous epoch, a newest-root proof past the
    * next boundary + NEWEST_GRACE_MS, or one with less than sendMarginMs + TAKE_SLACK_MS left; else HELD -> RESERVED,
-   * then it is handed out. */
-  take(noteId: string): Promise<ReadyProof<R>>;
+   * then it is handed out. With `attempt` (the ready proof the caller built its transaction on), refused in the note's
+   * turn, before any write, when the note's ready proof is another attempt (a remake swapped it in meanwhile): the note
+   * stays HELD with its new proof ready, never RESERVED for bytes no one sends. */
+  take(noteId: string, attempt?: string): Promise<ReadyProof<R>>;
   /** The proof is dropped and its note goes back to UNSPENT. */
   drop(noteId: string): Promise<void>;
   /** Frees every ready proof's note (HELD -> UNSPENT), then zeroes the seed's copy; the queue does nothing more. */
@@ -276,12 +278,13 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       return run;
     },
     ready: () => [...ready.values()].sort((x, y) => (order.get(x.noteId)! < order.get(y.noteId)! ? -1 : 1)),
-    take(noteId) {
+    take(noteId, attempt) {
       live();
       return onNote(noteId, async () => {
         live();
         const r = ready.get(noteId);
         if (r === undefined) throw new Error(`no ready proof for note ${noteId}`);
+        if (attempt !== undefined && r.attempt !== attempt) throw new Error(`note ${noteId}'s ready proof is another attempt: it was made again, so it is not taken`);
         const nowMs = await pool.now();
         const why =
           epochOf(nowMs) > r.epochStartMs + pool.epochMs

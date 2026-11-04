@@ -17,21 +17,31 @@
 //   on the other. The lookup table is the pin's, read on both.
 // - Built by the kit (buildSolanaPoolBuy), checked by the rule (rules/pool.ts checkSolanaBuy: the request is the ask's,
 //   then every byte), signed by W only through signSolana (it signs nothing a check did not pass). W is derived here
-//   from the seed (freshWallet, l and j of the note) and must be the proof's recipient; its key and the seed are zeroed
-//   when the run ends.
+//   from the seed (freshWallet, l and j of the note) right before it signs, and must be the proof's recipient; its key
+//   and the seed are zeroed when the run ends.
+// - The order, so the quote is fresh when W signs (the check refuses a reference over 25 slots behind the device's own
+//   slot): the rent, the table, the trees' sizes and the root indexes of every ready proof first; then the reference,
+//   the venue and the blockhash (its slot); then the pick, from the ready proofs read again, filtered and claimed in one
+//   turn; then build, check and sign. A proof remade meanwhile onto a root not yet found runs the reads once more.
+// - The fee: the proof's relay fee cap must be at most the epoch fee the device works out from the Rent sysvar it read on
+//   both RPCs (the kit's solanaPoolFee), never only the binding's own word.
 // - The take: only after the check and the signature does the queue's take move the note HELD -> RESERVED, awaited
-//   before the transaction leaves the device (notes/store.ts). A refusal before it leaves the proof ready for the next
-//   tap. A take that hands out another attempt (a remake swapped it in between) is refused: the bytes signed are not
-//   that proof's.
+//   before the transaction leaves the device (notes/store.ts). It names the attempt the bytes carry: one a remake swapped
+//   out is refused inside the queue's turn for the note, before any write, so the note stays HELD and its new proof
+//   ready. A refusal before the take leaves the proof ready for the next tap.
 // - The send: the helper's POST /v1/pool/solana/send ({pool, tx}); its answer is hostile. The signature it names must
 //   read back on both RPCs as this very transaction (the same message, W's signature in slot 1, that signature in slot
-//   0) and succeeded; any other transaction under that name ends the run not_landed. A transaction that failed on chain
-//   spent nothing (the release and the buy are one transaction): refused, the note left RESERVED.
+//   0) and succeeded. Another transaction under that name on both RPCs ends the reads early; on one RPC only it is that
+//   RPC's word against the other's, so the reads go on. A transaction that failed on chain spent nothing (the release
+//   and the buy are one transaction): refused. Before any answer but filled, the note's settle is tried once, so a
+//   buy that landed is never answered not_landed on one RPC's word.
 // - Spent: only then is the note settled through the wallet's one place for it (solanaSettleSpent: the spent mark and
 //   the change leaf read on two RPCs, the change written UNSPENT naming the note, which goes SPENT). That SPENT note is
 //   W's record: the buy wallets list (../../wallet/src/pool/buy-wallets.ts spentNotesOf) finds W and reads its holdings.
-//   Not settled within the reads: answered "sent" with the note RESERVED; the store's deadline rule and the next send's
-//   settle finish it.
+//   Not settled within the reads (or not landed, or refused): the note stays RESERVED, and each state read of the page
+//   settles it (../../wallet/src/pool/solana-restore.ts solanaSettleReserved: SPENT once its spent mark and change read
+//   on both RPCs, UNSPENT once both RPCs' block time is past its deadline with no spent mark, so the queue proves it
+//   again).
 // - Every read names a public account or the transaction itself; no request carries a key, the words or which note is
 //   whose. Nothing here logs.
 import { base58, base64 } from "@scure/base";
@@ -41,6 +51,7 @@ import {
   readSolanaRent,
   solanaPoolAccount,
   solanaPoolBuyFunds,
+  solanaPoolFee,
   solanaPoolPage,
   solanaPoolPriorityBudget,
   SOLANA_POOL_BUY_CU,
@@ -73,8 +84,9 @@ export type PoolBuyHost = {
   rpcs: readonly [SolanaRpc, SolanaRpc];
   /** The queue's ready proofs (never taken by reading them); the queue is opened first when it is not. */
   ready(): Promise<readonly ReadyProof<SolanaReleaseRequest>[]>;
-  /** The queue's take: HELD -> RESERVED, written before it returns. */
-  take(noteId: string): Promise<ReadyProof<SolanaReleaseRequest>>;
+  /** The queue's take of this attempt: HELD -> RESERVED, written before it returns; refused, the note HELD, when the
+   *  note's ready proof is another attempt. */
+  take(noteId: string, attempt: string): Promise<ReadyProof<SolanaReleaseRequest>>;
   /** The 64-byte seed; zeroed here when the run ends. */
   seed64(): Promise<Uint8Array>;
   /** POST /v1/pool/solana/send: the helper's answer as it came (hostile). */
@@ -99,6 +111,8 @@ export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_
 /** Read-back reads a buy gets, a second apart: past a blockhash's life (~60 to 90 s) and a finalization. */
 export const POOL_BUY_READS = 120;
 export const POOL_BUY_WAIT_MS = 1_000;
+/** Two providers a slot apart read the pool's state tree at two sizes: read again once, this long after. */
+export const POOL_BUY_SIZE_RETRY_MS = 500;
 
 const PAGE_HEADER = 16;
 const PAGE_ENTRY = 72;
@@ -140,15 +154,26 @@ async function account(rpc: SolanaRpc, address: string): Promise<{ owner: string
   return { owner: v.owner, data: base64.decode(v.data[0]) };
 }
 
-/** The pool account on both RPCs: its state tree's size (the kit's build needs it) and both trees' sizes, the lower. */
-async function treeSizes(h: PoolBuyHost, pool: string): Promise<{ state: number; label: number; stateSize: number }> {
+/** The pool account on both RPCs: its state tree's size (the kit's build needs it) and both trees' sizes, the lower.
+ *  The two state sizes must be one; a pair a slot apart (a leaf landed between them) is read again once. */
+async function treeSizes(h: PoolBuyHost, pool: string, wait: (ms: number) => Promise<void>): Promise<{ state: number; label: number; stateSize: number }> {
+  try {
+    return await treeSizesOnce(h, pool);
+  } catch (e) {
+    if (!(e instanceof SizeSkew)) throw e;
+    await wait(POOL_BUY_SIZE_RETRY_MS);
+    return treeSizesOnce(h, pool);
+  }
+}
+class SizeSkew extends Refused {}
+async function treeSizesOnce(h: PoolBuyHost, pool: string): Promise<{ state: number; label: number; stateSize: number }> {
   const sizes = (await both(h, (r) => account(r, pool))).map((a) => {
     if (a === null || a.owner !== h.pin.program || a.data.length !== POOL_LEN || !sameBytes(a.data.subarray(0, 8), POOL_DISC)) return no();
     const at = (o: number): number => int(Number(new DataView(a.data.buffer, a.data.byteOffset + o, 8).getBigUint64(0, true)));
     return { state: at(OFF_TREES), label: at(OFF_TREES + TREE_LEN) };
   });
   // the build names the change's page from the state size, which must be the one the release will meet: both the same
-  if (sizes[0]!.state !== sizes[1]!.state) no();
+  if (sizes[0]!.state !== sizes[1]!.state) throw new SizeSkew("failed");
   return { state: sizes[0]!.state, label: Math.min(sizes[0]!.label, sizes[1]!.label), stateSize: sizes[0]!.state };
 }
 
@@ -242,90 +267,87 @@ async function readBack(rpc: SolanaRpc, signature: string, signed: Uint8Array): 
   return r.meta.err === null ? "ok" : "failed";
 }
 
+type Ready = ReadyProof<SolanaReleaseRequest>;
+type Got = "none" | "ok" | "failed" | "other";
+
 /** One pool.buy: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). */
 export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyAnswer> {
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
   let claim: string | null = null;
+  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   try {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || ask.token === null || h.table === null) no("not_allowed");
     const token = ask.token!;
     const pool = solanaPoolAccount(h.pin.program);
+    const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && !h.claimed?.has(p.noteId));
     // the ready proofs first: none (or every one held by another tap of this page) and no read is made
-    const ready = (await h.ready()).filter((p) => p.wallet.chain === "sol" && !h.claimed?.has(p.noteId));
-    if (ready.length === 0) return no("not_funded");
-    // the reads, each on both RPCs
+    if (mine(await h.ready()).length === 0) return no("not_funded");
+    // the reads that do not age, each on both RPCs
     const rent: SolanaRent = await readSolanaRent(h.rpcs);
-    const ref = await readSolanaReference(h.rpcs, { side: "buy", token, amount: ask.amount });
-    const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
-    if (!ref || !best) return no("quote_check_failed");
-    const venue: SolanaPoolBuyVenue = await readSolanaPoolBuyVenue(h.rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : []));
+    const feeCap = solanaPoolFee(rent);
     const { table, reads: tables } = await tableOf(h, h.table!);
-    const sizes = await treeSizes(h, pool);
-    const bh = await blockhashOf(h);
-    const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
     const tip = h.cluster === "mainnet" ? SOLANA_JITO_TIP_MIN : 0n;
-    // the proof: the smallest ready chunk that pays the spend and W's accounts
-    // again after the reads: a tap that ran beside this one may have claimed a proof meanwhile (the claim below is in
-    // the same turn as this filter, so two runs never claim one note)
-    const r = ready
-      .filter((p) => !h.claimed?.has(p.noteId))
-      .sort((x, y) => (x.chunk < y.chunk ? -1 : x.chunk > y.chunk ? 1 : 0))
-      .find((p) => solanaPoolBuyFunds({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee } as SolanaPoolRelease, venue, { spend: ask.amount, tip }, rent).problem === null);
-    if (r === undefined) return no("not_funded");
-    claim = r.noteId;
-    h.claimed?.add(claim);
-    // W, from the seed: the proof's recipient
-    seed = await h.seed64();
-    const w = freshWallet(seed, "sol", r.wallet.l, r.wallet.j);
-    key = w.secretKey;
-    seed.fill(0);
-    const idx = { state: await rootIndex(h, 0, sizes.state, dec(r.publicSignals[3])), label: await rootIndex(h, 1, sizes.label, dec(r.publicSignals[5])) };
-    const release = releaseOf(r, h.pin, w.address, idx);
-    // the most the relay fee's priority budget pays, never over the kit's CU price cap
-    const budget = (solanaPoolPriorityBudget(rent, release.relayFee) * 1_000_000n) / BigInt(SOLANA_POOL_BUY_CU[venue.kind]);
-    const cuPrice = budget < SOLANA_CU_PRICE_MAX ? budget : SOLANA_CU_PRICE_MAX;
-    const req: SolanaPoolBuyRequest = { wallet: w.address, feePayer: h.pin.feePayer, token, spend: ask.amount, minOut, tip, cuPrice, cluster: h.cluster };
-    const cfg = { program: h.pin.program, pool };
-    const built = buildSolanaPoolBuy(cfg, release, venue, req, { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastValidBlockHeight, table: { address: h.table!, table }, stateSize: sizes.stateSize, rent }, h.pick ? { pick: h.pick } : {});
-    const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: w.address, feeCap: r.binding.feeCap, solana: h.pin };
-    checkSolanaBuy(built.wire, ask, ctx, release, venue, req, { blockhash: bh.blockhash, slot: bh.slot, tables, stateSize: sizes.stateSize, rent, reference: { amount: ask.amount, ref, slippageBps: ask.slippageBps } });
-    const sig = signSolana(key, built.wire);
-    key.fill(0);
-    key = null;
-    const signed = built.wire.slice();
-    signed.set(sig, 1 + 64);
-    // the take, awaited before anything leaves: it must hand out the very proof the bytes carry
-    const taken = await h.take(r.noteId);
-    if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();
-    let answer: unknown;
-    try {
-      answer = await h.send(pool, signed);
-    } catch {
-      return { stage: "not_landed", txs: [] };
+    // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
+    const roots = new Map<string, number | null>();
+    const rootKey = (tree: 0 | 1, root: string): string => `${tree}:${root}`;
+    const indexOf = (p: Ready): { state: number; label: number } | null => {
+      const state = roots.get(rootKey(0, p.publicSignals[3]));
+      const label = roots.get(rootKey(1, p.publicSignals[5]));
+      return state == null || label == null ? null : { state, label };
+    };
+    for (let round = 0; ; round++) {
+      const sizes = await treeSizes(h, pool, wait);
+      for (const p of mine(await h.ready()))
+        for (const [tree, size, root] of [[0, sizes.state, p.publicSignals[3]], [1, sizes.label, p.publicSignals[5]]] as const) {
+          if (roots.has(rootKey(tree, root))) continue;
+          roots.set(rootKey(tree, root), await rootIndex(h, tree, size, dec(root)).catch((e) => (e instanceof Refused ? null : Promise.reject(e))));
+        }
+      // last, the reads the quote's age counts from: the reference, its venue, then the device's blockhash and slot
+      const ref = await readSolanaReference(h.rpcs, { side: "buy", token, amount: ask.amount });
+      const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+      if (!ref || !best) return no("quote_check_failed");
+      const venue: SolanaPoolBuyVenue = await readSolanaPoolBuyVenue(h.rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : []));
+      const bh = await blockhashOf(h);
+      const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
+      // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
+      // reads): the smallest chunk that pays the spend and W's accounts; filtered and claimed in one turn, so two runs
+      // of this page never claim one note
+      const fundable = mine(await h.ready())
+        .sort((x, y) => (x.chunk < y.chunk ? -1 : x.chunk > y.chunk ? 1 : 0))
+        .filter((p) => solanaPoolBuyFunds({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee } as SolanaPoolRelease, venue, { spend: ask.amount, tip }, rent).problem === null);
+      if (fundable.length === 0) return no("not_funded");
+      const r = fundable.find((p) => indexOf(p) !== null);
+      // the proof to buy with is on a root not looked up yet (remade during the reads): read once more
+      if (r === undefined || r !== fundable[0]) {
+        if (round === 0 && fundable.some((p) => !roots.has(rootKey(0, p.publicSignals[3])) || !roots.has(rootKey(1, p.publicSignals[5])))) continue;
+        if (r === undefined) return no(); // a proof for another root: refused before anything is signed
+      }
+      claim = r.noteId;
+      h.claimed?.add(claim);
+      const release = releaseOf(r, h.pin, r.wallet.address, indexOf(r)!);
+      // the most the relay fee's priority budget pays, never over the kit's CU price cap
+      const budget = (solanaPoolPriorityBudget(rent, release.relayFee) * 1_000_000n) / BigInt(SOLANA_POOL_BUY_CU[venue.kind]);
+      const cuPrice = budget < SOLANA_CU_PRICE_MAX ? budget : SOLANA_CU_PRICE_MAX;
+      const req: SolanaPoolBuyRequest = { wallet: r.wallet.address, feePayer: h.pin.feePayer, token, spend: ask.amount, minOut, tip, cuPrice, cluster: h.cluster };
+      const cfg = { program: h.pin.program, pool };
+      const built = buildSolanaPoolBuy(cfg, release, venue, req, { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastValidBlockHeight, table: { address: h.table!, table }, stateSize: sizes.stateSize, rent }, h.pick ? { pick: h.pick } : {});
+      // the device's own fee cap: the epoch fee from the Rent sysvar it read, never the binding's word
+      const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: r.wallet.address, feeCap, solana: h.pin };
+      checkSolanaBuy(built.wire, ask, ctx, release, venue, req, { blockhash: bh.blockhash, slot: bh.slot, tables, stateSize: sizes.stateSize, rent, reference: { amount: ask.amount, ref, slippageBps: ask.slippageBps } });
+      // W, from the seed, right before it signs: it must be the proof's recipient the bytes were built and checked for
+      seed = await h.seed64();
+      const w = freshWallet(seed, "sol", r.wallet.l, r.wallet.j);
+      key = w.secretKey;
+      seed.fill(0);
+      if (w.address !== r.wallet.address) return no();
+      const sig = signSolana(key, built.wire);
+      key.fill(0);
+      key = null;
+      const signed = built.wire.slice();
+      signed.set(sig, 1 + 64);
+      return await sendAndSettle(h, r, release, pool, signed, wait);
     }
-    const signature = (answer as { signature?: unknown } | null)?.signature;
-    if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature) || base58.decode(signature).length !== 64) return { stage: "not_landed", txs: [] };
-    h.sent?.(signature);
-    const txs: TxRef[] = [{ chain: "solana", hash: signature }];
-    const reads = h.reads ?? POOL_BUY_READS;
-    const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-    let landed = false;
-    for (let i = 0; i < reads && !landed; i++) {
-      if (i > 0) await wait(POOL_BUY_WAIT_MS);
-      const got: readonly ("none" | "ok" | "failed" | "other")[] = await both(h, (rpc) => readBack(rpc, signature, signed)).catch(() => ["none", "none"]);
-      if (got.includes("other")) return { stage: "not_landed", txs: [] };
-      if (got[0] === "failed" && got[1] === "failed") return { stage: "refused", txs };
-      landed = got[0] === "ok" && got[1] === "ok";
-    }
-    if (!landed) return { stage: "not_landed", txs };
-    // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized)
-    for (let i = 0; i < reads; i++) {
-      if (i > 0) await wait(POOL_BUY_WAIT_MS);
-      const s = await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }));
-      if (s.kind === "spent") return { stage: "filled", txs };
-    }
-    return { stage: "sent", txs };
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
@@ -335,6 +357,47 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
     key?.fill(0);
     if (claim !== null) h.claimed?.delete(claim);
   }
+}
+
+/** The take, the send, the read-back on both RPCs and the settle; every answer but filled tries the settle first. */
+async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, wait: (ms: number) => Promise<void>): Promise<PoolBuyAnswer> {
+  // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD
+  const taken = await h.take(r.noteId, r.attempt);
+  if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();
+  const reads = h.reads ?? POOL_BUY_READS;
+  // the chain's word on the note (its spent mark and change on both RPCs) over the helper's or one RPC's: spent is
+  // filled, shown with the helper's signature only when it read back as this transaction
+  const settled = async (txs: TxRef[], otherwise: PoolBuyAnswer): Promise<PoolBuyAnswer> => {
+    const s = await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }));
+    return s.kind === "spent" ? { stage: "filled", txs } : otherwise;
+  };
+  let answer: unknown;
+  try {
+    answer = await h.send(pool, signed);
+  } catch {
+    return settled([], { stage: "not_landed", txs: [] });
+  }
+  const signature = (answer as { signature?: unknown } | null)?.signature;
+  if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature) || base58.decode(signature).length !== 64) return settled([], { stage: "not_landed", txs: [] });
+  h.sent?.(signature);
+  const txs: TxRef[] = [{ chain: "solana", hash: signature }];
+  let landed = false;
+  for (let i = 0; i < reads && !landed; i++) {
+    if (i > 0) await wait(POOL_BUY_WAIT_MS);
+    const got: readonly Got[] = await both(h, (rpc) => readBack(rpc, signature, signed)).catch((): Got[] => ["none", "none"]);
+    // another transaction under that name on both RPCs: the helper's signature is not this one's
+    if (got[0] === "other" && got[1] === "other") return settled([], { stage: "not_landed", txs: [] });
+    if (got[0] === "failed" && got[1] === "failed") return settled(txs, { stage: "refused", txs });
+    landed = got[0] === "ok" && got[1] === "ok";
+  }
+  if (!landed) return settled(txs, { stage: "not_landed", txs });
+  // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized)
+  for (let i = 0; i < reads; i++) {
+    if (i > 0) await wait(POOL_BUY_WAIT_MS);
+    const s = await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }));
+    if (s.kind === "spent") return { stage: "filled", txs };
+  }
+  return { stage: "sent", txs };
 }
 
 type Locks = Pick<LockManager, "request">;

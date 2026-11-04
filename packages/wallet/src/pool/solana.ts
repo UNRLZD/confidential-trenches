@@ -406,10 +406,15 @@ export function solanaPoolTrees(rpcs: readonly [SolanaRpc, SolanaRpc], program: 
   return solanaTreeSync(rpcs, program).trees(beforeMs, signal);
 }
 
+/** Each of two RPCs' finalized slot and that block's time, ms. */
+export async function solanaFinalTimes(rpcs: readonly [SolanaRpc, SolanaRpc], signal?: AbortSignal): Promise<[{ slot: number; ms: bigint }, { slot: number; ms: bigint }]> {
+  checkSolanaRpcs(rpcs);
+  return both(rpcs, (rpc) => finalTime(rpc), signal);
+}
+
 /** The pool's time: the lower of two RPCs' finalized block times, ms. */
 export async function solanaNow(rpcs: readonly [SolanaRpc, SolanaRpc], signal?: AbortSignal): Promise<bigint> {
-  checkSolanaRpcs(rpcs);
-  const [a, b] = await both(rpcs, (rpc) => finalTime(rpc), signal);
+  const [a, b] = await solanaFinalTimes(rpcs, signal);
   return a.ms < b.ms ? a.ms : b.ms;
 }
 
