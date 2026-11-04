@@ -323,7 +323,9 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   // an amount under 1 keeps its leading zeros: 5,000,000 lamports is 0.005 SOL
   assert.deepEqual(drawPool({ ...d, back: 5_000_000n })[4], ["To private balance", "0.005"]);
   // the reserve is the device's own fee money for W, never more than its fixed cap: the cap passes, one lamport more is refused
-  assert.equal(SOLANA_POOL_SELL_RESERVE_MAX, 2_810_000n);
+  // the worst legitimate cost on W (src/rules/pool.ts): the fee at its cap, the mark and a new page on both trees
+  assert.equal(SOLANA_POOL_SELL_RESERVE_MAX, 1_405_000n + (128n + 17n) * 6_960n + 2n * (128n + 16n + 72n) * 6_960n);
+  assert.equal(SOLANA_POOL_SELL_RESERVE_MAX, 5_420_920n);
   assert.ok(floor > SOLANA_POOL_SELL_RESERVE_MAX + 1n, "the fixture's min out is above the cap");
   const atCap = (r: bigint) => {
     const steps = solanaPoolSellSteps(venue, SOL_W, amount, floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));

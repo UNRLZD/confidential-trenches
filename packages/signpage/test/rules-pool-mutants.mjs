@@ -93,7 +93,8 @@ export const MUTANTS = [
   ['if (back !== minOut - reserve) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],
   ['if (typeof reserve !== "bigint" || reserve < 0n || reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= minOut) return refuse("reserve");', "", SELL],
   ["reserve > SOLANA_POOL_SELL_RESERVE_MAX || ", "", SELL],
-  ["export const SOLANA_POOL_SELL_RESERVE_MAX = 2n * SOLANA_POOL_TX_FEE_MAX;", "export const SOLANA_POOL_SELL_RESERVE_MAX = 3n * SOLANA_POOL_TX_FEE_MAX;", SELL],
+  ["+ 2n * (128n + 16n + 72n) * SOLANA_RENT_PER_BYTE_MAX;", "+ (128n + 16n + 72n) * SOLANA_RENT_PER_BYTE_MAX;", SELL],
+  ["export const SOLANA_RENT_PER_BYTE_MAX = 6_960n;", "export const SOLANA_RENT_PER_BYTE_MAX = 6_961n;", SELL],
   // the EVM relay data
   ['if (lower(relay.recipient) !== lower(ctx.wallet)) refuse("recipient");', "", EBUY],
   ['if (lower(relay.recipient) !== lower(ctx.wallet)) refuse("recipient");', "", EWD],
