@@ -151,7 +151,7 @@ export const MUTANTS = [
   [EVM, "    return at === undefined || now() - at > EVM_SELL_DROP_MARGIN_MS ? pending : lane.nextNonce;", "    return lane.nextNonce;", T, "a nonce hole on the sell lane (N2)"],
   [EVM, "    return at === undefined || now() - at > EVM_SELL_DROP_MARGIN_MS ? pending : lane.nextNonce;", "    return pending;", T, "a nonce hole on the sell lane (N2)"],
   [EVM, "    const nonce = nonceFor(withdrawLane, pending);", "    const nonce = pending > withdrawLane.nextNonce ? pending : withdrawLane.nextNonce;", T, "a nonce hole on the withdraw lane"],
-  [EVM, "      pending = higher(qty(n), qty(m));\n    } catch", "      pending = qty(n);\n    } catch", T, "the sell sender's pending count is read on both providers"],
+  [EVM, "the authorization's ${auth.nonce}`);\n      pending = higher(qty(n), qty(m));", "the authorization's ${auth.nonce}`);\n      pending = qty(n);", T, "the sell sender's pending count is read on both providers"],
   [EVM, "      tip = qty(t);\n      pending = higher(qty(n), qty(m));", "      tip = qty(t);\n      pending = qty(n);", T, "the sell sender's pending count is read on both providers"],
   [EVM, "    for (const [n, x] of lane.sent) if (t > x.stuckAfter) at.add(n);", "", T, "a stuck sale on the sell lane"],
   [EVM, "    for (const [n, x] of lane.sent) if (t > x.stuckAfter) at.add(n);", "", T, "a stuck withdraw on the withdraw lane"],
