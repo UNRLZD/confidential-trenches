@@ -391,3 +391,32 @@ test("card helper-restart-fresh fold: the ahead lane makes at most AHEAD_PER_WIN
   other.restore({ hot: [[`${PUMP}:15m`, t + 1], [`${PUMP}:7m`, t], ["nope:15m", t], [`${PUMP}:15m:1`, t], [`${PUMP}:1h`, t - HOT_MS - 1], [`${PUMP}:1h`, "x"], "junk", [`${PUMP}:4h`, t - 1_000]] });
   assert.deepEqual(other.state().hot, [[`${PUMP}:4h`, t - 1_000]], "only the good entry");
 });
+
+test("card helper-restart-fresh fold: a hot chart GeckoTerminal answers with no bars, or fails, waits its AHEAD_MS and never holds another hot chart back", async () => {
+  let t = NOW;
+  const now = () => t;
+  let ohlcv = 0;
+  let empty = true;
+  const fetch = async (url: string) => {
+    if (!url.includes("/ohlcv/")) return new Response(JSON.stringify(FX.gt_token), { status: 200 });
+    ohlcv++;
+    // the 4h chart: no bars, then a 500
+    if (url.includes("/ohlcv/hour?aggregate=4")) return empty ? new Response(JSON.stringify({ data: { attributes: { ohlcv_list: [] } } }), { status: 200 }) : new Response("no", { status: 500 });
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  const none = await tok.candles(PUMP, "4h", null, 24);
+  assert.deepEqual([none.status, JSON.parse(none.body).candles.length], [200, 0], "GeckoTerminal holds no bars for it");
+  t += 1_000;
+  assert.equal((await tok.candles(PUMP, "1m", null, 24)).status, 200);
+  t += AHEAD_MS + 76_000;
+  assert.equal(await tok.ahead(), `${PUMP}:4h`, "the chart with nothing held goes first");
+  t += 76_000;
+  assert.equal(await tok.ahead(), `${PUMP}:1m`, "then the other: the empty chart waits its AHEAD_MS");
+  empty = false;
+  t += AHEAD_MS;
+  assert.equal(await tok.ahead(), null, "the 4h read failed (500)");
+  t += 76_000;
+  assert.equal(await tok.ahead(), `${PUMP}:1m`, "and the failure does not hold the 1m chart back");
+  assert.ok(ohlcv >= 4);
+});

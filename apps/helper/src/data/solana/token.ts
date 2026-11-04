@@ -781,6 +781,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       return null;
     }
   }
+  /** When the ahead lane last read a chart, whatever it got: a chart GeckoTerminal answers with no bars, or fails, waits
+   *  its AHEAD_MS like the rest and never holds the others back. */
+  const tried = bounded<number>(HOT_MAX * 4);
+  /** The newest a chart is held or was tried ahead. */
+  const lastAhead = (k: string) => Math.max(kept.get(k)?.at ?? -Infinity, tried.get(k) ?? -Infinity);
   let aheadBusy = false;
 
   return {
@@ -800,8 +805,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         const [k] = hot
           .entries()
           // a token GeckoTerminal names no pool for is left to its callers' reads
-          .filter(([key, readAt]) => t - readAt <= HOT_MS && t - (kept.get(key)?.at ?? -Infinity) >= AHEAD_MS && (pools.peek(key.split(":")[0]!)?.status ?? 200) === 200)
-          .sort(([a], [b]) => (kept.get(a)?.at ?? -Infinity) - (kept.get(b)?.at ?? -Infinity))[0] ?? [];
+          .filter(([key, readAt]) => t - readAt <= HOT_MS && t - lastAhead(key) >= AHEAD_MS && (pools.peek(key.split(":")[0]!)?.status ?? 200) === 200)
+          .sort(([a], [b]) => lastAhead(a) - lastAhead(b))[0] ?? [];
         if (k === undefined) return null;
         const [mint, tf] = k.split(":") as [string, Tf];
         const pool = pools.peek(mint);
@@ -814,11 +819,14 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
           }
           const { period, aggregate } = TF[tf];
           const a = await gecko(`/networks/solana/pools/${pool.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}`, "ahead");
+          tried.set(k, now());
           const got = a === null ? [] : toCandles(a, tf, 1_000, now());
           if (got !== null) keep(k, got, now());
           return k;
-        } catch {
-          return null; // refused or failed: the next tick asks again
+        } catch (e) {
+          // refused by the budget: no call made, the next tick asks again; a failed call waits its AHEAD_MS
+          if (!(e instanceof Throttled)) tried.set(k, now());
+          return null;
         }
       } finally {
         aheadBusy = false;
