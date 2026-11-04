@@ -2,9 +2,10 @@
 // Builds the terminal at HEAD and deploys it to APP_HOST's Cloudflare Pages project, only after the deploy gate passes it.
 //   node apps/terminal/scripts/deploy.mjs [--dry-run]     exit 0 ok, 1 refused or failed, 2 usage
 // The deploy makes its own build, the terminal's `vite build` into a fresh temp folder (as SIGN_HOST's deploy does), and
-// takes no build folder: the upload is named by HEAD's commit, so it is HEAD's build and nothing else. A failed build,
-// a gate refusal, an uncommitted change anywhere in the tree (the build bundles the kit and the wallet too) or no HEAD
-// stops here, before a token is read or a byte is uploaded. The gate (check-deploy.ts) runs on the build's own
+// takes no build folder: the upload is named by HEAD's commit, so it is HEAD's build and nothing else, built from
+// HEAD's lockfile (`pnpm install --frozen-lockfile` first). An uncommitted change anywhere in the tree (the build
+// bundles the kit and the wallet too), no HEAD, a failed install, a failed build or a gate refusal stops here, before
+// a token is read or a byte is uploaded. The gate (check-deploy.ts) runs on the build's own
 // _headers. --dry-run stops after the gate and keeps the build folder, so it can be served; it builds a work in
 // progress too, and says a deploy would refuse it. A testnet build is VITE_NEAR_NETWORK=testnet in the environment
 // (build/network.mjs). The upload is wrangler's `pages deploy`, at an exact version, run from an empty directory so no
@@ -39,23 +40,32 @@ export const liveCommands = (sha, network = "mainnet") => [`next: gh workflow ru
 /** The list live.yml reads (scripts/ci/live-plan.mjs runs `node <this file> --live-runs [--network n] [--commit sha]`). */
 export const liveList = (opts = {}) => ({ checks: LIVE_CHECKS, skipped: {}, runs: Object.fromEntries(LIVE_CHECKS.map((k) => [k, liveRuns(k, opts)])) });
 
-/** The terminal's own `vite build` of this checkout into a fresh temp folder: { dir, problems } (empty = built). */
-export function build(env = process.env, run = spawnSync) {
+// the last lines a failed step wrote, on one line
+const tail = (r) => `${r.stderr ?? ""}`.trim().split("\n").slice(-5).join(" | ");
+
+/** The terminal's own `vite build` of the checkout at `repo` into a fresh temp folder: { dir, problems } (empty = built).
+ *  It installs nothing: the deploy installs first, and the release list (release-list.mjs) builds what is installed. */
+export function build(env = process.env, run = spawnSync, repo = REPO) {
   const dir = mkdtempSync(join(tmpdir(), "ct-app-"));
-  const term = join(REPO, "apps", "terminal");
+  const term = join(repo, "apps", "terminal");
   const r = run(process.execPath, [join(term, "node_modules", "vite", "bin", "vite.js"), "build", "--outDir", dir, "--emptyOutDir", "--logLevel", "warn"], { cwd: term, env, encoding: "utf8" });
   if (r.status === 0) return { dir, problems: [] };
-  const why = `${r.stderr ?? ""}`.trim().split("\n").slice(-5).join(" | ");
-  return { dir, problems: [`the build failed (vite exit ${r.status ?? r.signal})${why ? `: ${why}` : ""}`] };
+  return { dir, problems: [`the build failed (vite exit ${r.status ?? r.signal})${tail(r) ? `: ${tail(r)}` : ""}`] };
 }
 
 export function deploy(argv, env = process.env, run = spawnSync, make = () => build(env)) {
   const dryRun = argv.includes("--dry-run");
   const rest = argv.filter((a) => a !== "--dry-run");
   if (rest.length) return { code: 2, err: ["usage: node apps/terminal/scripts/deploy.mjs [--dry-run] (it takes no build folder: it builds HEAD itself)"] };
-  // the tree the build reads, before it reads it
+  // the tree the build reads, before it reads it: a deploy is HEAD's commit and nothing else (--dry-run builds a work in
+  // progress too, and says a deploy would refuse it)
   const sha = run("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout?.trim();
   const dirty = run("git", ["-C", REPO, "status", "--porcelain"], { encoding: "utf8" }).stdout?.trimEnd();
+  if (!dryRun && !sha) return { code: 1, err: ["REFUSED no HEAD commit to name the upload by", "nothing was uploaded"] };
+  if (!dryRun && dirty) return { code: 1, err: [`REFUSED the tree has uncommitted changes, and the upload would carry HEAD's name (${sha}):`, ...dirty.split("\n").slice(0, 20), "commit them first; nothing was uploaded"] };
+  // HEAD's lockfile, exactly: node_modules installed for another commit can build cleanly with the wrong versions
+  const inst = run("pnpm", ["install", "--frozen-lockfile"], { cwd: REPO, env, encoding: "utf8" });
+  if (inst.status !== 0) return { code: 1, err: [`REFUSED the install failed (pnpm exit ${inst.status ?? inst.signal})${tail(inst) ? `: ${tail(inst)}` : ""}`, "nothing was uploaded"] };
   const made = make();
   const dir = made.dir;
   let keep = false; // a passing --dry-run keeps its build to serve; every other run removes it
@@ -64,8 +74,6 @@ export function deploy(argv, env = process.env, run = spawnSync, make = () => bu
     if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
     keep = dryRun;
     if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded${dirty ? "; the tree has uncommitted changes: a deploy would refuse it" : ""}`] };
-    if (!sha) return { code: 1, err: ["REFUSED no HEAD commit to name the upload by", "nothing was uploaded"] };
-    if (dirty) return { code: 1, err: [`REFUSED the tree has uncommitted changes, and the upload would carry HEAD's name (${sha}):`, ...dirty.split("\n").slice(0, 20), "commit them first; nothing was uploaded"] };
     const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
     if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
     const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH, "--commit-hash", sha, "--commit-dirty=false"];

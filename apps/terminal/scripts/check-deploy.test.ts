@@ -160,20 +160,23 @@ const copyOf = (src: string) => {
   cpSync(src, d, { recursive: true });
   return d;
 };
-const steps = ({ head = "abc123", status = "", from = BUILD, problems = [] as string[] } = {}) => {
+const steps = ({ head = "abc123", status = "", from = BUILD, problems = [] as string[], install = 0 } = {}) => {
   const calls: { cmd: string; args: string[]; cwd?: string }[] = [];
   const run = (cmd: string, args: string[], o: { cwd?: string } = {}) => {
     calls.push({ cmd, args, cwd: o.cwd });
+    if (cmd === "pnpm" && args[0] === "install") return { status: install, stdout: "", stderr: install ? "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\" because pnpm-lock.yaml is not up to date\n" : "" };
     if (cmd !== "git") return { status: 0, stdout: "" };
     return { status: 0, stdout: args.includes("rev-parse") ? (head ? `${head}\n` : "") : status };
   };
   const made: string[] = [];
   const make = () => {
+    calls.push({ cmd: "build", args: [] });
     const dir = copyOf(from);
     made.push(dir);
     return { dir, problems };
   };
-  return { calls, run, make, made, uploads: () => calls.filter((c) => c.cmd === "pnpm") };
+  const named = () => calls.map((c) => [c.cmd, ...c.args.slice(0, c.cmd === "git" ? 3 : 2)].join(" "));
+  return { calls, run, make, made, named, uploads: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "dlx"), installs: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "install") };
 };
 const ENV = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
 
@@ -201,7 +204,7 @@ test("an uncommitted tree or no HEAD is refused before the token: the upload is 
   const r = deploy([], {}, dirty.run, dirty.make);
   assert.equal(r.code, 1, r.out?.join("\n"));
   assert.match(r.err.join("\n"), /REFUSED the tree has uncommitted changes[\s\S]*packages\/kit\/src\/index\.ts[\s\S]*nothing was uploaded/);
-  assert.equal(dirty.uploads().length, 0);
+  assert.deepEqual([dirty.installs().length, dirty.made.length, dirty.uploads().length], [0, 0, 0], "refused before the install and the build");
   const headless = steps({ head: "" });
   const r2 = deploy([], ENV, headless.run, headless.make);
   assert.equal(r2.code, 1);
@@ -212,6 +215,33 @@ test("an uncommitted tree or no HEAD is refused before the token: the upload is 
   const d = deploy(["--dry-run"], {}, dry.run, dry.make);
   assert.equal(d.code, 0, d.err?.join("\n"));
   assert.match(d.out.join("\n"), /gate ok on [\s\S]*uncommitted changes: a deploy would refuse/);
+});
+
+test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the repository root) after the tree reads and before the build", async () => {
+  const { deploy } = await import("./deploy.mjs");
+  const s = steps();
+  assert.equal(deploy([], ENV, s.run, s.make).code, 0);
+  assert.deepEqual(s.named().slice(0, 5), ["git -C " + s.calls[0]!.args[1] + " rev-parse", "git -C " + s.calls[0]!.args[1] + " status", "pnpm install --frozen-lockfile", "build", "pnpm dlx wrangler@4.151.1"]);
+  const repo = s.calls[0]!.args[1]!;
+  assert.equal(s.installs()[0]!.cwd, repo);
+  assert.ok(existsSync(join(repo, "pnpm-lock.yaml")), repo);
+  // --dry-run builds what a deploy would, so it installs too
+  const d = steps();
+  assert.equal(deploy(["--dry-run"], {}, d.run, d.make).code, 0);
+  assert.deepEqual(d.named().slice(2, 4), ["pnpm install --frozen-lockfile", "build"]);
+  rmSync(d.made[0]!, { recursive: true, force: true });
+});
+
+test("a failed install refuses before a token is read: no build, no upload", async () => {
+  const { deploy } = await import("./deploy.mjs");
+  const s = steps({ install: 1 });
+  const r = deploy([], {}, s.run, s.make);
+  assert.equal(r.code, 1, r.out?.join("\n"));
+  assert.match(r.err.join("\n"), /REFUSED the install failed \(pnpm exit 1\): ERR_PNPM_OUTDATED_LOCKFILE[\s\S]*nothing was uploaded/);
+  assert.deepEqual([s.made.length, s.uploads().length], [0, 0]);
+  const d = steps({ install: 1 });
+  assert.equal(deploy(["--dry-run"], {}, d.run, d.make).code, 1);
+  assert.equal(d.made.length, 0);
 });
 
 test("deploy.mjs runs the gate first: a refused build reaches no upload; a passing one uploads HEAD's build by wrangler from an empty dir", async () => {
@@ -241,7 +271,10 @@ test("deploy.mjs runs the gate first: a refused build reaches no upload; a passi
 
 test("a fresh build at HEAD, by the terminal's own vite build, passes --dry-run", async () => {
   const { deploy } = await import("./deploy.mjs");
-  const r = deploy(["--dry-run"]);
+  // the real git and vite build; the install alone is left out, since a test must not relink node_modules under the
+  // other test files running beside it (the install's own place in the deploy is held above)
+  const run = (cmd: string, args: string[], o: object) => (cmd === "pnpm" && args[0] === "install" ? { status: 0, stdout: "", stderr: "" } : spawnSync(cmd, args, o));
+  const r = deploy(["--dry-run"], process.env, run);
   assert.equal(r.code, 0, r.err?.join("\n"));
   const dir = /gate ok on (\S+?);/.exec(r.out.join("\n"))![1]!;
   assert.ok(existsSync(join(dir, "index.html")) && existsSync(join(dir, "_headers")), dir);

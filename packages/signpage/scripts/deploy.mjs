@@ -8,7 +8,8 @@
 // rule (W:880) and the thread file's (card signpage-prover-threads), and reads every setup file back against its pin
 // and the worker and the thread file against a fresh build of the kit's;
 // any refusal stops here, before a token is read or a byte is uploaded. So does an uncommitted change anywhere in the
-// tree (the build carries the kit's prover too) or no HEAD: the upload is named by HEAD's commit, so it is HEAD's build.
+// tree (the build carries the kit's prover too), no HEAD, or a failed `pnpm install --frozen-lockfile` (run first, so
+// the build reads HEAD's lockfile): the upload is named by HEAD's commit, so it is HEAD's build.
 // --dry-run stops after the gate and keeps the build folder, so `wrangler pages dev` can serve it; it builds a work in
 // progress too, and says a deploy would refuse it. The upload is
 // wrangler's `pages deploy`, at an exact version, run from an empty folder so no functions/ folder can ride along
@@ -153,16 +154,23 @@ export function checkProver(dir) {
 export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
   const dryRun = argv.includes("--dry-run");
   if (argv.some((a) => a !== "--dry-run")) return { code: 2, err: ["usage: node packages/signpage/scripts/deploy.mjs [--dry-run]"] };
-  // the tree the build reads, before it reads it
+  // the tree the build reads, before it reads it: a deploy is HEAD's commit and nothing else (--dry-run builds a work in
+  // progress too, and says a deploy would refuse it)
   const sha = run("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout?.trim();
   const dirty = run("git", ["-C", REPO, "status", "--porcelain"], { encoding: "utf8" }).stdout?.trimEnd();
+  if (!dryRun && !sha) return { code: 1, err: ["REFUSED no HEAD commit to name the upload by", "nothing was uploaded"] };
+  if (!dryRun && dirty) return { code: 1, err: [`REFUSED the tree has uncommitted changes, and the upload would carry HEAD's name (${sha}):`, ...dirty.split("\n").slice(0, 20), "commit them first; nothing was uploaded"] };
+  // HEAD's lockfile, exactly: the prover worker and thread file are built from the kit's installed packages
+  const inst = run("pnpm", ["install", "--frozen-lockfile"], { cwd: REPO, env, encoding: "utf8" });
+  if (inst.status !== 0) {
+    const why = `${inst.stderr ?? ""}`.trim().split("\n").slice(-5).join(" | ");
+    return { code: 1, err: [`REFUSED the install failed (pnpm exit ${inst.status ?? inst.signal})${why ? `: ${why}` : ""}`, "nothing was uploaded"] };
+  }
   const dir = build(pkg);
   try {
     const problems = checkDir(dir);
     if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
     if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded${dirty ? "; the tree has uncommitted changes: a deploy would refuse it" : ""}`] };
-    if (!sha) return { code: 1, err: ["REFUSED no HEAD commit to name the upload by", "nothing was uploaded"] };
-    if (dirty) return { code: 1, err: [`REFUSED the tree has uncommitted changes, and the upload would carry HEAD's name (${sha}):`, ...dirty.split("\n").slice(0, 20), "commit them first; nothing was uploaded"] };
     const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
     if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
     const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH, "--commit-hash", sha, "--commit-dirty=false"];

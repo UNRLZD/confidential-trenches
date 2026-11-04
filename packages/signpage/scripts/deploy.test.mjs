@@ -31,11 +31,17 @@ function pkgWith(headers, extra = {}) {
 
 // a spawnSync stand-in that records every call: git answers HEAD `head` and the tree's status `status`; `uploads` are
 // the calls that would send bytes (git reads the tree, which any run may do)
-function recorder({ head = "abc", status = "" } = {}) {
+function recorder({ head = "abc", status = "", install = 0 } = {}) {
   const calls = [];
-  const run = (cmd, args, opts) => (calls.push({ cmd, args, opts }), { status: 0, stdout: cmd !== "git" ? "" : args.includes("rev-parse") ? (head ? `${head}\n` : "") : status });
-  return { calls, run, uploads: () => calls.filter((c) => c.cmd !== "git") };
+  const run = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    if (cmd === "pnpm" && args[0] === "install") return { status: install, stdout: "", stderr: install ? "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" : "" };
+    return { status: 0, stdout: cmd !== "git" ? "" : args.includes("rev-parse") ? (head ? `${head}\n` : "") : status };
+  };
+  return { calls, run, uploads: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "dlx"), installs: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "install") };
 }
+// a package folder that is not there: build() throws on it, so a deploy that returns on it never built
+const NO_PKG = join(tmpdir(), "ct-signpage-test-no-such-package");
 
 const WORKER_RULE = "/prover-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\n";
 const THREAD_RULE = "/prover-thread.js\n  Content-Security-Policy: default-src 'none'; script-src 'wasm-unsafe-eval'\n";
@@ -172,10 +178,10 @@ test("the upload is wrangler pages deploy at its pinned version, to the sign pro
 
 test("an uncommitted tree or no HEAD is refused before the token: the upload is named by HEAD's commit, so it must be HEAD's build", () => {
   const dirty = recorder({ status: " M packages/kit/src/prover/worker.js" });
-  const r = deploy([], {}, dirty.run);
+  const r = deploy([], {}, dirty.run, NO_PKG);
   assert.equal(r.code, 1, (r.out ?? []).join("\n"));
   assert.match(r.err.join("\n"), /REFUSED the tree has uncommitted changes[\s\S]*packages\/kit\/src\/prover\/worker\.js[\s\S]*nothing was uploaded/);
-  assert.equal(dirty.uploads().length, 0);
+  assert.deepEqual([dirty.installs().length, dirty.uploads().length], [0, 0], "refused before the install and the build");
   const headless = recorder({ head: "" });
   const r2 = deploy([], ENV, headless.run);
   assert.equal(r2.code, 1);
@@ -187,6 +193,28 @@ test("an uncommitted tree or no HEAD is refused before the token: the upload is 
   assert.equal(d.code, 0, (d.err ?? []).join("\n"));
   rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
   assert.match(d.out[0], /uncommitted changes: a deploy would refuse/);
+});
+
+test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the repository root) after the tree reads and before the build", () => {
+  const { calls, run, installs } = recorder();
+  // the build of a missing package throws: the install was already asked for, after the two tree reads
+  assert.throws(() => deploy([], ENV, run, NO_PKG), /ENOENT/);
+  assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? 2 : 0)].join(" ")), ["git rev-parse", "git status", "pnpm install"]);
+  assert.deepEqual(installs()[0].args, ["install", "--frozen-lockfile"]);
+  assert.equal(installs()[0].opts.cwd, dirname(dirname(PKG)));
+  const dry = recorder();
+  assert.throws(() => deploy(["--dry-run"], {}, dry.run, NO_PKG), /ENOENT/);
+  assert.equal(dry.installs().length, 1, "--dry-run builds what a deploy would, so it installs too");
+});
+
+test("a failed install refuses before a token is read: no build, no upload", () => {
+  for (const argv of [[], ["--dry-run"]]) {
+    const { run, uploads } = recorder({ install: 1 });
+    const r = deploy(argv, {}, run, NO_PKG);
+    assert.equal(r.code, 1, (r.out ?? []).join("\n"));
+    assert.match(r.err.join("\n"), /REFUSED the install failed \(pnpm exit 1\): ERR_PNPM_OUTDATED_LOCKFILE[\s\S]*nothing was uploaded/);
+    assert.equal(uploads().length, 0);
+  }
 });
 
 test("an unknown argument is a usage error", () => {
