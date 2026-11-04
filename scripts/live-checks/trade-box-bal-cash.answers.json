@@ -1,0 +1,116 @@
+{
+ "good": {
+  "check": "trade-box-bal-cash",
+  "at": "2026-11-04T12:45:00.779Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with app-portfolio-mount's account",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-DTV8T32O.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "kind": "cash",
+    "framed": true,
+    "route": "token",
+    "header": "$67.87",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $67.87"
+    },
+    "shot": "desktop-cash.png"
+   },
+   {
+    "width": "phone",
+    "kind": "cash",
+    "framed": true,
+    "route": "token",
+    "header": "$67.87",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $67.87"
+    },
+    "shot": "phone-cash.png"
+   },
+   {
+    "width": "desktop",
+    "kind": "pool",
+    "framed": true,
+    "route": "token",
+    "header": "$67.87",
+    "box": {
+     "path": "pool",
+     "bal": "Bal —"
+    },
+    "shot": "desktop-pool.png"
+   },
+   {
+    "width": "phone",
+    "kind": "pool",
+    "framed": true,
+    "route": "token",
+    "header": "$67.87",
+    "box": {
+     "path": "pool",
+     "bal": "Bal —"
+    },
+    "shot": "phone-pool.png"
+   }
+  ]
+ },
+ "bad": {
+  "check": "trade-box-bal-cash",
+  "at": "2026-11-04T12:45:30.449Z",
+  "source": "live https://confidential.unrealized.trade, the stand-in shell signed in with app-portfolio-mount's account",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-D2sAQfy_.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "kind": "cash",
+    "framed": true,
+    "route": "token",
+    "header": "$67.87",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $40.50"
+    },
+    "shot": "desktop-cash.png"
+   },
+   {
+    "width": "phone",
+    "kind": "cash",
+    "framed": true,
+    "route": "token",
+    "header": "$67.87",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $40.50"
+    },
+    "shot": "phone-cash.png"
+   },
+   {
+    "width": "desktop",
+    "kind": "pool",
+    "framed": true,
+    "route": "token",
+    "header": "$67.87",
+    "box": {
+     "path": "pool",
+     "bal": "Bal —"
+    },
+    "shot": "desktop-pool.png"
+   },
+   {
+    "width": "phone",
+    "kind": "pool",
+    "framed": true,
+    "route": "token",
+    "header": "$67.87",
+    "box": {
+     "path": "pool",
+     "bal": "Bal —"
+    },
+    "shot": "phone-pool.png"
+   }
+  ]
+ }
+}

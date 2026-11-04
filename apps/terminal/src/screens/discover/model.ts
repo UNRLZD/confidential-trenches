@@ -112,3 +112,17 @@ export function rowView(r: MarketRow, win: Win, nowMs: number): RowView {
     chain: r.chain,
   };
 }
+
+/**
+ * How old a list is, from its own read time (the helper's as_of_ms), once it is older than 60 s (card app-list-age):
+ * whole minutes under an hour, whole hours under a day, then whole days; null while it is 60 s old or less, or dated
+ * ahead of this device's clock. The helper serves its last good read on a 200, so the age is the read's, never the answer's.
+ */
+export function listAge(asOfMs: number, nowMs: number, staleMs = 60_000): string | null {
+  const age = nowMs - asOfMs;
+  if (!(age > staleMs)) return null;
+  const m = Math.floor(age / 60_000);
+  if (m < 60) return `${Math.max(m, 1)}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
+}

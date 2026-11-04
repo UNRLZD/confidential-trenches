@@ -123,7 +123,9 @@ const verdict = async (p: Promise<kit.EvmPoolSellQuote>) => {
     return { accepted: false, code: e.code };
   }
 };
-const req = (chain: EvmPoolChain = "base", o: Record<string, unknown> = {}) => ({ chain, token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, ...o });
+// the route the buy that paid W took (required, review of edb4dbb F3): the standard 0.3% native pool
+const BOUGHT = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
+const req = (chain: EvmPoolChain = "base", o: Record<string, unknown> = {}) => ({ chain, token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, bought: BOUGHT, ...o });
 const sell = (m: Model, chain: EvmPoolChain = "base", o: Record<string, unknown> = {}, m2: Model = m) =>
   sellQuoteWith(req(chain, o), [provider(m), provider(m2)], Date.now());
 /** v4 to the native asset, fee 3000: 2 ETH a token; every other pool 1 */
@@ -234,7 +236,7 @@ test("planted: an unlisted hook is never quoted; a listed one is, with its own k
   assert.deepEqual(q.route.venue === "uniswap-v4" && q.route.hops, [{ currency: B.weth.toLowerCase(), fee: clanker.fee, tickSpacing: clanker.tickSpacing, hooks: clanker.hooks.toLowerCase(), hookData: "0x" }]);
   // a token that is a listed hook's own address: that hook is not read for it (its pool would swap through itself)
   const self: Seen = { pools: [], probes: [] };
-  await sellQuoteWith(req("base", { token: clanker.hooks }), [provider({ price: flat }, self), provider({ price: flat })], Date.now());
+  await sellQuoteWith(req("base", { token: clanker.hooks, bought: { ...BOUGHT, hops: [{ ...BOUGHT.hops[0]!, currency: clanker.hooks }] } }), [provider({ price: flat }, self), provider({ price: flat })], Date.now());
   assert.ok(self.pools.length > 0 && self.pools.every((p) => p.hooks.every((h) => h !== clanker.hooks.toLowerCase())));
 });
 
@@ -255,6 +257,8 @@ test("a chain with no v3 router sells through v4 only; the request's fields are 
   const seen: Seen = { pools: [], probes: [] };
   const q = await sellQuoteWith(req("robinhood-testnet"), [provider({ price: (p) => p.amount }, seen), provider({ price: (p) => p.amount })], Date.now());
   assert.ok(seen.pools.every((p) => p.venue === "v4"));
+  // its own v4 set, not only the bought route (0.3%): every standard native pool is quoted
+  for (const fee of [100, 500, 3000, 10000]) assert.ok(seen.pools.some((p) => p.hops === 1 && p.to[0] === NATIVE && p.fees[0] === fee), `fee ${fee}`);
   assert.equal(q.target, evmPoolVenues()["robinhood-testnet"].poolManager);
   const v = (o: Record<string, unknown>) => verdict(sell({ price: flat }, "base", o));
   assert.equal((await v({ token: evmPoolVenues().base.weth })).code, "bad_request");

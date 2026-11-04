@@ -24,6 +24,8 @@ const FIXTURES: Record<string, DiscoverData> = {
   loading: { status: "loading" },
   empty: { status: "ready", snapshot: empty },
   error: { status: "error" },
+  // the same lists from a read 2 h old (card app-list-age: the helper serves its last good read, dated, on a 200)
+  old: { status: "ready", snapshot: { ...solana, as_of_ms: NOW_MS - 2 * 3_600_000 } },
 };
 
 declare global {

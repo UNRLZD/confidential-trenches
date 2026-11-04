@@ -2,7 +2,8 @@
 // Portfolio's Cash tile all draw one number, the cash in Portfolio's totals() (the design-lock-r5 header shows Cash), so
 // they can never differ. Held two ways: no file but the portfolio model sums the signing page's balances, and the
 // header's model given that number draws exactly Portfolio's Cash on states where a second sum would differ (a USDC
-// pool, money on the way, a priced position).
+// pool, money on the way, a priced position). The trade box's Bal is that same number on a chain with no pool, and the
+// chain's pool balance on a chain with one (card trade-box-bal-cash); tradeBal names which.
 //   node --test apps/terminal/test/one-balance.test.ts
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -13,14 +14,13 @@ import type { SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
 import { balanceOf, NO_DATA, portfolio } from "../src/screens/portfolio/model.ts";
 import type { PortfolioData } from "../src/screens/portfolio/model.ts";
 import { headerModel, restoreModel } from "../src/screens/signin/model.ts";
+import { poolView, tradeBal } from "../src/screens/trade/model.ts";
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
 const walk = (d: string): string[] => readdirSync(d).flatMap((f) => (statSync(path.join(d, f)).isDirectory() ? walk(path.join(d, f)) : [path.join(d, f)]));
 
 // Code that reads the vault's cash, and why it is not a second total. Comments do not count.
-const NOT_A_TOTAL: Record<string, string> = {
-  "screens/trade/TradeBox.tsx": "the buy side's Bal: the vault's cash a buy spends from, one field, never a total",
-};
+const NOT_A_TOTAL: Record<string, string> = {};
 const code = (f: string) => readFileSync(f, "utf8").split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
 
 test("no second sum: only the portfolio model reads the balances the total is made of", () => {
@@ -85,4 +85,19 @@ test("signed out or before the first state there is no balance, and the header s
 test("the restore screen counts the same number", () => {
   const s = state({ ops: [{ id: "r", kind: "restore", stage: "scanning", txs: [] }] as SignpageState["ops"] });
   assert.equal(restoreModel(s, balanceOf(snap(s), NO_DATA, NOW))!.cents, 6787n);
+});
+
+test("the trade box's Bal: the header's Cash on a chain with no pool, the pool's balance on a chain with one", () => {
+  const s = state();
+  const cash = balanceOf(snap(s), NO_DATA, NOW);
+  assert.equal(cash, 6787n);
+  // Solana's pool is in the state but cannot be priced here (no price read): no pool view, so no Bal, never the Cash
+  assert.deepEqual(tradeBal(false, null, cash), { from: "cash", cents: 6787n });
+  assert.equal(tradeBal(false, null, cash).cents, headerModel(snap(s), cash).cents);
+  assert.deepEqual(tradeBal(true, null, cash), { from: "pool", cents: null });
+  const SOL = { price: 9_301_048_308n, expo: -8, decimals: 9 };
+  const pv = poolView([{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }], "solana", SOL);
+  assert.deepEqual(tradeBal(true, pv, cash), { from: "pool", cents: 93n });
+  // signed out or before the first state: no Cash, no Bal
+  assert.deepEqual(tradeBal(false, null, null), { from: "cash", cents: null });
 });

@@ -1,0 +1,125 @@
+{
+ "_note": "Recorded 4 Nov by app-list-age.mjs --record: good = this card build (--harness --build apps/terminal/dist), bad = the deployed APP_HOST before this card.",
+ "good": {
+  "check": "app-list-age",
+  "at": "2026-11-04T12:58:23.303Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell, every helper read recorded",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-CWYeIuUZ.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "kind": "served",
+    "framed": true,
+    "state": "ready",
+    "age": "Updated 2d ago",
+    "lists": {
+     "status": 200,
+     "asOfMs": 1793549713397
+    },
+    "readAtMs": 1793797100483,
+    "shot": "desktop-served.png"
+   },
+   {
+    "width": "phone",
+    "kind": "served",
+    "framed": true,
+    "state": "ready",
+    "age": "Updated 2d ago",
+    "lists": {
+     "status": 200,
+     "asOfMs": 1793549713397
+    },
+    "readAtMs": 1793797101394,
+    "shot": "phone-served.png"
+   },
+   {
+    "width": "desktop",
+    "kind": "dated",
+    "framed": true,
+    "state": "ready",
+    "age": "Updated 2d ago",
+    "lists": {
+     "status": 200,
+     "asOfMs": 1793549713397
+    },
+    "readAtMs": 1793797102325,
+    "shot": "desktop-dated.png"
+   },
+   {
+    "width": "phone",
+    "kind": "dated",
+    "framed": true,
+    "state": "ready",
+    "age": "Updated 2d ago",
+    "lists": {
+     "status": 200,
+     "asOfMs": 1793549713397
+    },
+    "readAtMs": 1793797103218,
+    "shot": "phone-dated.png"
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-list-age",
+  "at": "2026-11-04T12:58:35.697Z",
+  "source": "live https://confidential.unrealized.trade, the stand-in shell, the helper live (dated: the recorded 1 Nov lists)",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-D2sAQfy_.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "kind": "served",
+    "framed": true,
+    "state": "ready",
+    "age": null,
+    "lists": {
+     "status": 200,
+     "asOfMs": 1793797098835
+    },
+    "readAtMs": 1793797108317,
+    "shot": "desktop-served.png"
+   },
+   {
+    "width": "phone",
+    "kind": "served",
+    "framed": true,
+    "state": "ready",
+    "age": null,
+    "lists": {
+     "status": 200,
+     "asOfMs": 1793797098835
+    },
+    "readAtMs": 1793797111748,
+    "shot": "phone-served.png"
+   },
+   {
+    "width": "desktop",
+    "kind": "dated",
+    "framed": true,
+    "state": "ready",
+    "age": null,
+    "lists": {
+     "status": 200,
+     "asOfMs": 1793549713397
+    },
+    "readAtMs": 1793797113769,
+    "shot": "desktop-dated.png"
+   },
+   {
+    "width": "phone",
+    "kind": "dated",
+    "framed": true,
+    "state": "ready",
+    "age": null,
+    "lists": {
+     "status": 200,
+     "asOfMs": 1793549713397
+    },
+    "readAtMs": 1793797115625,
+    "shot": "phone-dated.png"
+   }
+  ]
+ }
+}
