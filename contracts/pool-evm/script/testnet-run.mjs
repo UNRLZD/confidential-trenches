@@ -6,7 +6,13 @@
 // run's notes from its 12 words. The run key sends every transaction, as the relayer does.
 //
 //   node contracts/pool-evm/script/testnet-run.mjs --chain base-sepolia --return <address> [--venues v4,v3]
-//     [--rpc <url>,<url>] [--out <file>]
+//     [--rpc <url>,<url>] [--out <file>] [--sell-helper <url>]
+//
+// --sell-helper <url>: each sell goes to that helper's POST /v1/pool/evm/sell (apps/helper/src/pool/evm.ts) as the
+// device sends it, { pool, w, data, authorization }, instead of from the run key; the helper's sell sender sends the
+// type-4 transaction and takes the fee, which is then at least the helper's bound (EVM_POOL_SELL_GAS x (2 x the base
+// fee + the kit's tip) + twice the L1 bound, on the fee step). The record's sell rows carry via "helper" and the
+// sender the receipt names; scripts/live-checks/helper-evm-sender.mjs reads them back.
 //
 // What runs, and whose code:
 //  - The pins: the kit's evmPoolVenues() (the pool, the adapters, the sell delegate, the router, the v4 PoolManager,
@@ -175,6 +181,8 @@ export async function main(args, io = {}) {
   if (urls.length !== 2) throw new Error("--rpc: two URLs");
   const dryRun = urls.every((u) => ["127.0.0.1", "localhost"].includes(new URL(u).hostname));
   const out = opt("--out") ?? (dryRun ? null : recordFile(chain));
+  const sellHelper = opt("--sell-helper");
+  if (args.includes("--sell-helper") && !/^https?:\/\/[^/\s]+$/.test(sellHelper ?? "")) throw new Error("--sell-helper: a helper's base URL, no path");
   if (!out) throw new Error("a dry run (loopback RPCs) needs --out, so it never writes the real record");
   const call = (method, params, u = urls[0]) => rpc(fetchFn, u, method, params, sleep);
   const evmRpc = (u) => Object.assign((method, params) => rpc(fetchFn, u, method, params, sleep), { url: u });
@@ -264,7 +272,7 @@ export async function main(args, io = {}) {
     for (let t = 0; t < 90; t++) {
       const r = await call("eth_getTransactionReceipt", [hash]);
       if (r) return r;
-      if (t % 10 === 9) await call("eth_sendRawTransaction", [raw]).catch(() => {});
+      if (raw && t % 10 === 9) await call("eth_sendRawTransaction", [raw]).catch(() => {});
       await sleep(2000);
     }
     throw new Error(`${hash}: no receipt in 180 s`);
@@ -295,6 +303,23 @@ export async function main(args, io = {}) {
     if (r.status !== "0x1") throw new Error(`${step} ${s.hash}: status ${r.status}`);
     row.landed = true;
     console.log(`run: ${step}: ${s.hash} (block ${row.block}, ${row.gasUsed} gas)`);
+    return r;
+  };
+  /** One sell sent by a helper's POST /v1/pool/evm/sell: its answer's hash, then the receipt, the sender it names */
+  const helperSell = async (step, body, extra) => {
+    const res = await fetchFn(`${sellHelper}/v1/pool/evm/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const text = await res.text();
+    const hash = res.status === 200 ? JSON.parse(text)?.hash : undefined;
+    if (typeof hash !== "string" || !/^0x[0-9a-f]{64}$/.test(hash)) throw new Error(`${step}: the helper answered ${res.status} ${text.slice(0, 200)}`);
+    const row = { step, hash, from: null, via: "helper", ...extra };
+    steps.push(row);
+    const r = await receipt(hash, null);
+    row.from = lower(r.from);
+    row.block = BigInt(r.blockNumber).toString();
+    row.gasUsed = BigInt(r.gasUsed).toString();
+    if (r.status !== "0x1") throw new Error(`${step} ${hash}: status ${r.status}`);
+    row.landed = true;
+    console.log(`run: ${step}: ${hash} (block ${row.block}, ${row.gasUsed} gas, sent by ${row.from})`);
     return r;
   };
   const poolLog = (r, topic) => r.logs.find((l) => lower(l.address) === pool && l.topics[0] === topic);
@@ -394,8 +419,15 @@ export async function main(args, io = {}) {
       }
       if (amount !== BigInt(b.out)) throw new Error(`W ${W.address} holds ${amount} of the token, not the ${b.out} its buy paid, after 60 s`);
       // the sender's fee for a sell: the fee step at least (the kit refuses a fee cap of 0)
-      const f0 = epochFee({ baseFeePerGas: BigInt((await call("eth_getBlockByNumber", ["latest", false])).baseFeePerGas), depth: 0 });
-      const fee = f0 > FEE_STEP ? f0 : FEE_STEP;
+      const baseFee = BigInt((await call("eth_getBlockByNumber", ["latest", false])).baseFeePerGas);
+      const f0 = epochFee({ baseFeePerGas: baseFee, depth: 0 });
+      let fee = f0 > FEE_STEP ? f0 : FEE_STEP;
+      // through a helper: at least its bound, with room for the base fee to double before the send
+      if (sellHelper) {
+        const bound = kit.EVM_POOL_SELL_GAS * (2n * baseFee + kit.evmPoolSellTip(chain)) + 2n * (await l1Bound(TX_BYTES));
+        const stepped = ((bound + FEE_STEP - 1n) / FEE_STEP) * FEE_STEP;
+        if (stepped > fee) fee = stepped;
+      }
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
       const { q, built } = await fresh(
         // `bought`: the route of the buy that paid W the token, which the sell quote requires
@@ -406,7 +438,10 @@ export async function main(args, io = {}) {
       const sig = kit.evmPoolSignSell(W.secretKey, chain, built);
       const auth = kit.evmPoolSignSellAuthorization(W.secretKey, chain, BigInt(await call("eth_getTransactionCount", [W.address, "latest"])));
       console.log(`run: the device's sell quote for W ${lower(W.address)}: ${q.amountOut} wei through ${sv} (${JSON.stringify(q.route, (_, x) => (typeof x === "bigint" ? String(x) : x))}) at block ${q.block.number}, minOut ${q.minOut}`);
-      const r = await send("sell through SellDelegate", { to: lower(W.address), data: sellData(built, fee, sig), authorizations: [auth] }, { kind: "sell", venue: sv, target: lower(built.target), w: lower(W.address), amount: String(amount), minOut: String(built.minOut), quoted: String(q.amountOut), quoteBlock: String(q.block.number), fee: String(fee), coin: token });
+      const sellRow = { kind: "sell", venue: sv, target: lower(built.target), w: lower(W.address), amount: String(amount), minOut: String(built.minOut), quoted: String(q.amountOut), quoteBlock: String(q.block.number), fee: String(fee), coin: token };
+      const r = sellHelper
+        ? await helperSell("sell through SellDelegate (helper)", { pool, w: lower(W.address), data: sellData(built, fee, sig), authorization: authJson(auth) }, sellRow)
+        : await send("sell through SellDelegate", { to: lower(W.address), data: sellData(built, fee, sig), authorizations: [auth] }, sellRow);
       const ev = poolLog(r, T.Deposited);
       if (!ev || lower(`0x${ev.topics[1].slice(26)}`) !== lower(W.address)) throw new Error("sell: no Deposited event from W");
       const d = words(ev.data);
