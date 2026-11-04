@@ -326,7 +326,7 @@ const SLOTS_PER_CALL = 2000;
 /** Both providers' answers to `reads` at `hash`, which must be the same: the reads without a state override in
  *  aggregate3 calls of READS_PER_CALL, the grouped reads of each hook in their own aggregate3 calls with that hook's
  *  override alone, any other read with one in its own call, sent in batches of CALLS_PER_BATCH at once. */
-async function readBoth(rpcs: readonly [EvmRpc, EvmRpc], hash: string, reads: readonly Read[]): Promise<Answer[]> {
+async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[]): Promise<Answer[]> {
   const at = { blockHash: hash, requireCanonical: true };
   const plain = reads.flatMap((r, i) => (r.override === undefined && r.state !== true ? [i] : []));
   const one = (r: Read) => r.override === undefined && r.state === true && r.data.length === 74 && r.data.startsWith("0x" + SEL_EXTSLOAD);
@@ -362,23 +362,93 @@ async function readBoth(rpcs: readonly [EvmRpc, EvmRpc], hash: string, reads: re
   ];
   const batches: EvmRpcCall[][] = [];
   for (let k = 0; k < calls.length; k += CALLS_PER_BATCH) batches.push(calls.slice(k, k + CALLS_PER_BATCH));
-  const both = await Promise.all(rpcs.map(async (rpc) => (await Promise.all(batches.map((b) => askAt(rpc, b)))).flat()));
-  const answers = both.map((b, p) => {
+  const answersOf = async (rpc: EvmRpc, p: number): Promise<Answer[]> => {
+    const b = (await Promise.all(batches.map((x) => askAt(rpc, x)))).flat();
     const who = `provider ${p + 1}`;
     const all: Answer[] = new Array(reads.length);
     parts.forEach((part, c) => unaggregate(b[c], part.length, who).forEach((x, k) => (all[part[k]!] = x)));
     slotParts.forEach((part, c) => unslots(b[parts.length + c], part.length, who).forEach((x, k) => (all[part[k]!] = { kind: "out", amountOut: x })));
     lone.forEach((i, k) => (all[i] = answerOf(b[parts.length + slotParts.length + k], who) as Answer));
     return all;
-  });
-  return reads.map((_, i) => {
-    const a = answers[0]![i]!;
-    const b = answers[1]![i]!;
-    const same = a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial;
-    if (!same) {
-      return refuse("rpc_disagree", `the providers answer read ${i} differently at block ${hash}`);
-    }
-    return a;
+  };
+  const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial);
+  const { a } = await agreeing(
+    rpcs,
+    answersOf,
+    (x, y) => x.every((a, i) => same(a, y[i]!)),
+    (x, y) => refuse("rpc_disagree", `the providers answer read ${x.findIndex((a, i) => !same(a, y[i]!))} differently at block ${hash}`),
+  );
+  return a;
+}
+
+/** The answers of two of the providers `rpcs` that are `same`: the first two are asked at once, and one more of the
+ *  rest, in order, whenever one asked fails, two that answered differ, or EVM_HEDGE_MS pass with no two alike (card
+ *  evm-quote-warm-round: a provider that is slow or has dropped out is never waited on while two others agree, the
+ *  industry's hedged request). Every answer used is one two different providers gave. With none left to ask it throws
+ *  the first failure, or, where two answered and none agree, `differ` on the first two. */
+export const EVM_HEDGE_MS = 400;
+function agreeing<T>(rpcs: readonly EvmRpc[], one: (rpc: EvmRpc, k: number) => Promise<T>, same: (a: T, b: T) => boolean, differ: (a: T, b: T) => never): Promise<{ a: T; b: T; i: number; j: number }> {
+  const list = [...rpcs];
+  return new Promise((resolve, reject) => {
+    const got: { k: number; v: T }[] = [];
+    let started = 0;
+    let settled = 0;
+    let done = false;
+    let failed: { e: unknown } | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const end = () => {
+      if (done || settled < started || started < list.length) return;
+      done = true;
+      if (got.length >= 2) {
+        try {
+          differ(got[0]!.v, got[1]!.v);
+        } catch (e) {
+          reject(e);
+        }
+      } else reject(failed?.e);
+    };
+    const arm = () => {
+      clearTimeout(timer);
+      if (started < list.length) {
+        timer = setTimeout(() => (done ? undefined : start()), EVM_HEDGE_MS);
+        (timer as { unref?: () => void }).unref?.();
+      }
+    };
+    const start = () => {
+      if (done || started >= list.length) return;
+      const k = started++;
+      one(list[k]!, k).then(
+        (v) => {
+          settled++;
+          if (done) return;
+          const g = got.find((x) => same(x.v, v));
+          if (g !== undefined) {
+            done = true;
+            clearTimeout(timer);
+            // the quote's next rounds ask these two first: one that was slow, failed or differed is a spare from now on
+            // (`rpcs` is the quote's own list, gated(); reordered only while no other round has)
+            if (!Object.isFrozen(rpcs) && list.every((r, n) => rpcs[n] === r)) {
+              const order = [list[g.k]!, list[k]!, ...list.filter((_, n) => n !== g.k && n !== k)];
+              order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));
+            }
+            return resolve({ a: g.v, b: v, i: g.k, j: k });
+          }
+          got.push({ k, v });
+          if (got.length >= 2) start();
+          end();
+        },
+        (e) => {
+          settled++;
+          failed ??= { e };
+          if (done) return;
+          start();
+          end();
+        },
+      );
+      if (started >= 2) arm();
+    };
+    start();
+    start();
   });
 }
 
@@ -394,7 +464,11 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly 
       if (i < 3 && Array.isArray(out) && out.some(limited)) throw new RateLimited("a call's error names the provider's rate limit");
       break;
     } catch (e) {
-      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) return refuse("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
+      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {
+        const err = new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
+        if (e instanceof RateLimited) THROTTLED.add(err);
+        throw err;
+      }
       await new Promise((r) => setTimeout(r, 500 * (i + 1)));
     }
   }
@@ -437,15 +511,34 @@ type Block = { number: bigint; hash: string; timestamp: bigint; baseFeePerGas: b
  *  EVM_QUOTE_MAX_AGE_MS behind the device's clock, with `confirm`, which reads that number's hash and time on the other
  *  provider and must find the same block. One provider alone cannot pick an old block, nor name a block the other does
  *  not hold (review of b17d1fc, R1, R1b). `confirm` runs beside the reads, and nothing read is used before it passes. */
-async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, nowMs: number): Promise<{ block: Block; confirm: () => Promise<void> }> {
+async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: number): Promise<{ block: Block; confirm: () => Promise<void> }> {
   const call: EvmRpcCall = { method: "eth_getBlockByNumber", params: ["latest", false] };
-  const heads = await Promise.all(rpcs.map((rpc) => ask(rpc, [call])));
-  const [a, b] = heads.map((h, i) => header(h[0], `provider ${i + 1}`)) as [Block, Block];
-  if (a.number - b.number > maxLag || b.number - a.number > maxLag) return refuse("rpc_disagree", `the providers' heads ${a.number} and ${b.number} are more than ${maxLag} blocks apart`);
-  const [lo, other, who] = a.number <= b.number ? [a, rpcs[1], "provider 2"] : [b, rpcs[0], "provider 1"];
+  const near = (x: Block, y: Block) => x.number - y.number <= maxLag && y.number - x.number <= maxLag;
+  // the order agreeing indexes (it may reorder `rpcs` once it has its two)
+  const list = [...rpcs];
+  // two heads within maxLag of each other, from the first two providers that give them (agreeing: a spare is asked for
+  // one that fails, is slow or lags)
+  const { a, b, i, j } = await agreeing(
+    rpcs,
+    async (rpc, k) => header((await ask(rpc, [call]))[0], `provider ${k + 1}`),
+    near,
+    (x, y) => refuse("rpc_disagree", `the providers' heads ${x.number} and ${y.number} are more than ${maxLag} blocks apart`),
+  );
+  const [lo, at] = a.number <= b.number ? [a, j] : [b, i];
   if (nowMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse("stale_quote", `block ${lo.number} is more than 30 s old`);
+  // confirmed on the provider of the other head, or where that one fails, on the next of the rest (never the lower
+  // head's own provider): a block one provider alone named is never read at
+  const others = [at, ...list.map((_, k) => k).filter((k) => k !== i && k !== j)];
   const confirm = async () => {
-    const back = header((await askAt(other, [{ method: "eth_getBlockByNumber", params: ["0x" + lo.number.toString(16), false] }]))[0], who);
+    const by = { method: "eth_getBlockByNumber", params: ["0x" + lo.number.toString(16), false] };
+    let back: Block | undefined;
+    for (let n = 0; back === undefined; n++) {
+      try {
+        back = header((await askAt(list[others[n]!]!, [by]))[0], `provider ${others[n]! + 1}`);
+      } catch (e) {
+        if (n === others.length - 1) throw e;
+      }
+    }
     if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {
       return refuse("rpc_disagree", `the providers hold different blocks at ${lo.number}`);
     }
@@ -476,7 +569,9 @@ export type EvmHeadWatch = {
 /** A held head on the providers `rpcs`; `clock` is the device's (Date.now) and `mono` a clock that never steps back
  *  (performance.now), which times the hold, so a device clock stepped back cannot stretch its 5 s or 30 s (review of
  *  4830f1f, L); the tests set both. `background` false reads only when a quote asks (the tests that count reads). */
-export function evmHeadWatch(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, clock: () => number = Date.now, background = true, mono: () => number = () => performance.now()): EvmHeadWatch {
+export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]), maxLag: bigint, clock: () => number = Date.now, background = true, mono: () => number = () => performance.now()): EvmHeadWatch {
+  // the providers in their order at each read: the pinned ones by their measured speed (evmPoolBuyQuote)
+  const rpcsNow = () => (Array.isArray(order) ? order : (order as () => readonly EvmRpc[])());
   // `at`: `mono` when the heads were asked; `age`: the block's age on the device's clock then
   let held: { block: Block; at: number; age: number } | null = null;
   let until = 0;
@@ -489,7 +584,7 @@ export function evmHeadWatch(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, cl
     (refreshing ??= (async () => {
       try {
         const [at, nowMs] = [mono(), clock()];
-        const { block, confirm } = await agreedBlock(rpcs, maxLag, nowMs);
+        const { block, confirm } = await agreedBlock(rpcsNow(), maxLag, nowMs);
         await confirm();
         hold(block, at, nowMs);
       } catch {
@@ -527,7 +622,7 @@ export function evmHeadWatch(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, cl
       if (h !== null && since >= 0 && since <= EVM_HEAD_REUSE_MS && h.age + since <= EVM_QUOTE_MAX_AGE_MS && t - Number(h.block.timestamp) * 1000 <= EVM_QUOTE_MAX_AGE_MS) {
         return { block: h.block, confirm: async () => {} };
       }
-      const a = await agreedBlock(rpcs, maxLag, t);
+      const a = await agreedBlock(rpcsNow(), maxLag, t);
       return {
         block: a.block,
         confirm: async () => {
@@ -625,11 +720,39 @@ function keyOfRoute(r: EvmV4Route): EvmPoolKey {
 }
 
 // The device's own scan of the PoolManager's Initialize logs for a currency, kept per chain, currency and kind in this
-// module's memory: the first quote for a currency scans `depth` blocks back, each later one from the block the last
-// scan reached. A scan only adds pools, so one provider serves it; what it finds is read on both providers like any
-// candidate. "all": every pool of the currency; "markets": its pools with the native asset or WETH.
+// module's memory: the blocks it has read (`spans`, disjoint and in order) and the pools it found in them. A quote reads
+// only the blocks of the last `depth` up to the scan provider's head that no scan read yet, so the first quote for a
+// currency scans `depth` blocks back and each later one from the block the last reached. Each span read is kept once
+// the scan ends, the ones that came back also when another failed (card evm-quote-warm-round: a scan of 2,313 currencies
+// that lost one request of 40 kept nothing and was asked again whole by every quote), so no scan reads a block twice. A
+// scan only adds pools, so one provider serves it; what it finds is read on both providers like any candidate. "all":
+// every pool of the currency; "markets": its pools with the native asset or WETH.
 const INITIALIZE = "dd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"; // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
-const SCANS = new Map<string, { to: number; pools: EvmPoolKey[] }>();
+type Spans = [number, number][];
+const SCANS = new Map<string, { spans: Spans; pools: EvmPoolKey[] }>();
+/** `spans` with [a, b] added, merged where they touch. */
+const withSpan = (spans: Spans, a: number, b: number): Spans => {
+  const out: Spans = [];
+  for (const [x, y] of [...spans, [a, b] as [number, number]].sort((p, q) => p[0] - q[0])) {
+    const last = out[out.length - 1];
+    if (last !== undefined && x <= last[1] + 1) last[1] = Math.max(last[1], y);
+    else out.push([x, y]);
+  }
+  return out;
+};
+/** The blocks from `lo` to `hi` that `spans` does not hold. */
+const gapsOf = (spans: Spans, lo: number, hi: number): Spans => {
+  const out: Spans = [];
+  let at = lo;
+  for (const [a, b] of spans) {
+    if (b < at) continue;
+    if (a > hi) break;
+    if (a > at) out.push([at, a - 1]);
+    at = Math.max(at, b + 1);
+  }
+  if (at <= hi) out.push([at, hi]);
+  return out;
+};
 // The warm round (card evm-quote-warm-round): what a token's last quote read after its first round, kept per chain,
 // side and token for EVM_WARM_RANGE_S of block time. The next quote of the token asks those reads in its own first
 // round and starts those scans beside the token's, so where nothing changed every later round finds its reads already
@@ -716,6 +839,7 @@ async function scanPools(
   maxLag: bigint,
   gate: Gate,
   headOfScan: Promise<bigint>,
+  picked: () => Promise<Block> = agreed,
 ): Promise<{ pools: Map<string, EvmPoolKey[]>; commit: () => void }> {
   const scanHead = await headOfScan;
   // the logs up to the scan provider's head are read beside the round before (at most depth / span requests for each
@@ -726,11 +850,14 @@ async function scanPools(
     const key = `${chain}:${kind}:${c}`;
     const cached = SCANS.get(key);
     const pools = cached === undefined ? [] : [...cached.pools];
-    return { c, key, cached, from: cached === undefined || cached.to < floor ? floor : cached.to + 1, pools, ids: new Set(pools.map(poolId)) };
+    // the blocks read before, those still within the depth
+    const spans: Spans = (cached?.spans ?? []).filter(([, b]) => b >= floor).map(([a, b]) => [Math.max(a, floor), b]);
+    return { c, key, spans, gaps: gapsOf(spans, floor, head), pools, ids: new Set(pools.map(poolId)) };
   });
   type Each = (typeof each)[number];
-  const groups = new Map<number, Each[]>();
-  for (const e of each) append(groups, e.from, e);
+  // the currencies with the same blocks left share each request
+  const groups = new Map<string, Each[]>();
+  for (const e of each) append(groups, JSON.stringify(e.gaps), e);
   const w = (c: string) => "0x" + word(BigInt(c));
   // `pin`: a catch-up request also asks its provider for the agreed block by number, in the same batch, and its logs
   // count only where that answer is the agreed block's hash (review of c71a4d0..a9f1d32, MEDIUM: a head read on one
@@ -745,8 +872,10 @@ async function scanPools(
       for (let a = from; a <= to; a += span) jobs.push({ part, a, b: Math.min(to, a + span - 1) });
     }
   };
-  for (const [from, g] of groups) jobsOf(g, from, head);
-  const one = async ({ part, a, b }: (typeof jobs)[number], splits = SCAN_SPLITS): Promise<{ part: Each[]; a: number; b: number; logs: unknown[] }[]> => {
+  for (const g of groups.values()) for (const [a, b] of g[0]!.gaps) jobsOf(g, a, b);
+  // each request's logs as it comes back
+  const got: { part: Each[]; a: number; b: number; logs: unknown[] }[] = [];
+  const one = async ({ part, a, b }: (typeof jobs)[number], splits = SCAN_SPLITS): Promise<void> => {
     const f = (topics: (string | string[] | null)[]) => ({ method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics }] });
     const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));
     // Initialize's topics are the event, the pool id, currency0 and currency1 (a log read on base-rpc.publicnode.com,
@@ -766,24 +895,65 @@ async function scanPools(
       }
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
+    const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[] })));
     if (splits > 0 && b > a) {
+      let throttled = false;
       const rs = await gate(() => ask(rpc, calls)).then(
-        (out) => logsOf(out),
-        () => null,
+        // ask's fourth answer may still name the rate limit
+        (out) => (out.some(limited) ? ((throttled = true), null) : logsOf(out)),
+        (e) => {
+          throttled = THROTTLED.has(e as Error);
+          return null;
+        },
       );
-      if (rs !== null && fine(rs)) return rs.map((r) => ({ part, a, b, logs: r as unknown[] }));
-      const mid = a + Math.floor((b - a) / 2);
-      return (await Promise.all([one({ part, a, b: mid }, splits - 1), one({ part, a: mid + 1, b }, splits - 1)])).flat();
+      if (rs !== null && fine(rs)) return void keep(rs);
+      // a request that ran out of time or answered too many logs is asked as its two halves; one the provider still
+      // throttles is asked again whole, below
+      if (!throttled) {
+        const mid = a + Math.floor((b - a) / 2);
+        return settle([one({ part, a, b: mid }, splits - 1), one({ part, a: mid + 1, b }, splits - 1)]);
+      }
     }
     const rs = logsOf(await gate(() => askScan(rpc, calls)));
     if (!fine(rs)) return refuse("rpc_error", "the scan provider answered no logs");
-    return rs.map((r) => ({ part, a, b, logs: r as unknown[] }));
+    keep(rs);
   };
-  const got = (await Promise.all(jobs.map((j) => one(j)))).flat();
+  // every request runs to its end, so each span that comes back is kept, and the first failure is thrown after
+  const settle = async (ps: Promise<void>[]) => {
+    const failed = (await Promise.allSettled(ps)).find((r) => r.status === "rejected");
+    if (failed !== undefined) throw (failed as PromiseRejectedResult).reason;
+  };
+  const kept = new Set<object>();
+  const take = () => {
+    for (const g of got) {
+      if (kept.has(g)) continue;
+      kept.add(g);
+      found(g);
+    }
+  };
+  // the spans that came back, kept where the scan provider's head is within maxLag of the agreed block (a head named
+  // past it never keeps a span, review of 5452011, S2)
+  const commit = () => {
+    take();
+    for (const e of each) {
+      for (const g of got) if (g.part.includes(e)) e.spans = withSpan(e.spans, g.a, g.b);
+      if (!SCANS.has(e.key) && SCANS.size >= SCAN_TOKENS) SCANS.delete(SCANS.keys().next().value!);
+      SCANS.set(e.key, { spans: e.spans, pools: e.pools });
+    }
+  };
+  const failing = async (e: unknown, at?: Block): Promise<never> => {
+    try {
+      const b = at ?? (await picked());
+      if (scanHead - b.number <= maxLag) commit();
+    } catch {
+      // no agreed block: nothing is kept
+    }
+    throw e;
+  };
+  await settle(jobs.map((j) => one(j))).catch((e) => failing(e));
   const agreedAt = await agreed();
   const b = agreedAt.number;
   if (scanHead - b > maxLag) return refuse("rpc_disagree", `the scan provider's head ${scanHead} is more than ${maxLag} blocks past the agreed block ${b}`);
-  let to = head;
   if (b - scanHead > maxLag) {
     // the scan outlasted maxLag blocks: on from the block after the head up to the agreed block, which the provider
     // answering each request must hold, by hash, in that request's own batch (`pin`; review of 4830f1f, H1: a backend
@@ -795,10 +965,9 @@ async function scanPools(
     pin = agreedAt;
     jobs.length = 0;
     jobsOf(each, head + 1, end);
-    got.push(...(await Promise.all(jobs.map((j) => one(j)))).flat());
-    to = end;
+    await settle(jobs.map((j) => one(j))).catch((e) => failing(e, agreedAt));
   }
-  for (const { part, a, b, logs } of got) {
+  function found({ part, a, b, logs }: (typeof got)[number]) {
     for (const l of logs) {
       const o = l as { address?: unknown; topics?: unknown; data?: unknown; blockNumber?: unknown };
       const topics = o?.topics;
@@ -819,12 +988,7 @@ async function scanPools(
       }
     }
   }
-  const commit = () => {
-    for (const e of each) {
-      if (!SCANS.has(e.key) && SCANS.size >= SCAN_TOKENS) SCANS.delete(SCANS.keys().next().value!);
-      SCANS.set(e.key, { to: Math.max(to, e.cached?.to ?? 0), pools: e.pools });
-    }
-  };
+  take();
   return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };
 }
 
@@ -842,14 +1006,53 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   const p = v.providers;
   if (p === undefined) return refuse("no_quoter", `${chain} has no pinned providers`);
   let watch = WATCHES.get(chain);
-  if (watch === undefined) WATCHES.set(chain, (watch = evmHeadWatch(evmProviders(p, fetch), v.maxLag)));
+  if (watch === undefined) WATCHES.set(chain, (watch = evmHeadWatch(() => evmProviders(evmRanked(p), fetch), v.maxLag)));
   // a scan's answer is a list of logs, bounded by the scan provider's own cap per request (16 MiB read at most)
-  return evmPoolBuyQuoteWith(asked, evmProviders(p, fetch), Date.now(), v.scan === undefined ? undefined : evmJsonRpc(v.scan.url, fetch, 16 << 20), watch);
+  return evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch), Date.now(), v.scan === undefined ? undefined : evmJsonRpc(v.scan.url, fetch, 16 << 20), watch);
 }
 
-/** Two providers from two https URLs on different hosts. */
-export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): [EvmRpc, EvmRpc] {
-  if (!Array.isArray(urls) || urls.length !== 2) return refuse("bad_request", "two provider URLs");
+// Each pinned provider's measured speed (card evm-quote-warm-round): its time to answer a batch, an average that weighs
+// the newest a quarter, and, after a failure (no answer, a 429, a call's error naming a rate limit), the time until
+// which it is asked only after every other. A quote asks the providers in this order, so its two are the fastest that
+// answer, and the rest are its spares (agreeing).
+// A provider with a request out for longer than EVM_HEDGE_MS is ranked with the held until it answers: the next quote
+// does not wait on it either.
+const SPEED = new Map<string, { ms: number | null; held: number; out: number[] }>();
+export const EVM_HOLD_MS = 30_000;
+const timed = (url: string, rpc: EvmRpc): EvmRpc => async (calls) => {
+  const t = performance.now();
+  const s = SPEED.get(url) ?? { ms: null, held: 0, out: [] };
+  SPEED.set(url, s);
+  s.out.push(t);
+  try {
+    const out = await rpc(calls);
+    if (out.some(limited)) s.held = performance.now() + EVM_HOLD_MS;
+    else s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
+    return out;
+  } catch (e) {
+    s.held = performance.now() + EVM_HOLD_MS;
+    throw e;
+  } finally {
+    s.out.splice(s.out.indexOf(t), 1);
+  }
+};
+/** `urls` in the order a quote asks them: those neither held nor with a request out past EVM_HEDGE_MS by their
+ *  measured time (the unmeasured after them, in the venue list's order), then the rest in the same order. */
+export function evmRanked(urls: readonly string[], now: number = performance.now()): string[] {
+  const rank = (u: string, k: number) => {
+    const s = SPEED.get(u);
+    const slow = s !== undefined && (s.held > now || s.out.some((t) => now - t > EVM_HEDGE_MS));
+    return [slow ? 1 : 0, s?.ms ?? Number.MAX_VALUE, k] as const;
+  };
+  return urls
+    .map((u, k) => ({ u, r: rank(u, k) }))
+    .sort((x, y) => x.r[0] - y.r[0] || x.r[1] - y.r[1] || x.r[2] - y.r[2])
+    .map((e) => e.u);
+}
+
+/** Providers from https URLs on different hosts, at least two, each timed for evmRanked. */
+export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): EvmRpc[] {
+  if (!Array.isArray(urls) || urls.length < 2) return refuse("bad_request", "two provider URLs at least");
   const hosts = urls.map((u) => {
     let h: string;
     try {
@@ -860,15 +1063,15 @@ export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): [E
     }
     return h;
   });
-  if (hosts[0] === hosts[1]) return refuse("bad_request", "the two providers are on one host");
-  return [evmJsonRpc(urls[0]!, fetchFn), evmJsonRpc(urls[1]!, fetchFn)];
+  if (new Set(hosts).size !== hosts.length) return refuse("bad_request", "two providers are on one host");
+  return urls.map((u) => timed(u, evmJsonRpc(u, fetchFn)));
 }
 
 /** What every quote checks before any read, buy or sell: the device's clock, two different providers, the amount in
  *  and the slippage. */
 function checkAsk(nowMs: number, rpcsIn: unknown, amountIn: unknown, slippageBps: unknown): void {
   if (!Number.isFinite(nowMs)) return refuse("bad_request", "the device's clock");
-  if (!Array.isArray(rpcsIn) || rpcsIn.length !== 2 || typeof rpcsIn[0] !== "function" || typeof rpcsIn[1] !== "function" || rpcsIn[0] === rpcsIn[1]) {
+  if (!Array.isArray(rpcsIn) || rpcsIn.length < 2 || rpcsIn.some((r) => typeof r !== "function") || new Set(rpcsIn).size !== rpcsIn.length) {
     return refuse("bad_request", "two different providers");
   }
   if (typeof amountIn !== "bigint" || amountIn <= 0n || amountIn >= MAX_IN) return refuse("bad_request", "the amount in is above 0 and below 2^127");
@@ -878,16 +1081,16 @@ function checkAsk(nowMs: number, rpcsIn: unknown, amountIn: unknown, slippageBps
 /** The two providers, every request of a quote to each (its head, its block's confirmation and its reads) at most the
  *  scan provider's limit at once: on each chain one of the two providers is the scan provider's host (Base's publicnode
  *  takes 20 at once, Robinhood's own RPC answers 429 to 4). */
-function gated(rpcsIn: readonly [EvmRpc, EvmRpc], parallel: number): readonly [EvmRpc, EvmRpc] {
+function gated(rpcsIn: readonly EvmRpc[], parallel: number): readonly EvmRpc[] {
   return rpcsIn.map((rpc) => {
     const g = gateOf(parallel);
     return (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));
-  }) as unknown as readonly [EvmRpc, EvmRpc];
+  }) as unknown as readonly EvmRpc[];
 }
 
 /** The reads at the agreed block's hash and that block's confirmation in one round; the confirmation is judged first,
  *  so nothing read is used before it passes. */
-async function readAgreed(confirm: () => Promise<void>, rpcs: readonly [EvmRpc, EvmRpc], hash: string, reads: readonly Read[]): Promise<Answer[]> {
+async function readAgreed(confirm: () => Promise<void>, rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[]): Promise<Answer[]> {
   const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, hash, reads)]);
   if (confirmed.status === "rejected") throw confirmed.reason;
   if (read.status === "rejected") throw read.reason;
@@ -896,7 +1099,7 @@ async function readAgreed(confirm: () => Promise<void>, rpcs: readonly [EvmRpc, 
 
 /** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
  *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
-export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, watch?: EvmHeadWatch): Promise<EvmPoolBuyQuote> {
+export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc, watch?: EvmHeadWatch): Promise<EvmPoolBuyQuote> {
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
   const { chain, token, amountIn, slippageBps } = req;
   checkAsk(nowMs, rpcsIn, amountIn, slippageBps);
@@ -1068,7 +1271,7 @@ const qty = (v: bigint) => "0x" + v.toString(16);
  *  it (tx.gasprice and BASEFEE as the sale's at that base fee). The sender's balance is its own at the block, never
  *  overridden: a sender too low to pay the sim's gas drops every route that needed the sim, and the routes no sim
  *  needs stay, so a sale is never frozen by it. */
-async function simmedSells(chain: EvmPoolChain, pins: Pick<Venue, "sellDelegate" | "sellSender">, rpcs: readonly [EvmRpc, EvmRpc], block: Block, w: string, token: string, amountIn: bigint, routes: Filled[], floor: bigint, signSim: EvmPoolSellQuoteRequest["signSim"]): Promise<Filled[]> {
+async function simmedSells(chain: EvmPoolChain, pins: Pick<Venue, "sellDelegate" | "sellSender">, rpcs: readonly EvmRpc[], block: Block, w: string, token: string, amountIn: bigint, routes: Filled[], floor: bigint, signSim: EvmPoolSellQuoteRequest["signSim"]): Promise<Filled[]> {
   const toSim = routes.filter((r) => r.amountOut > floor && simRule(chain, r.route, pins) === "sim");
   if (toSim.length === 0) return routes;
   if (typeof signSim !== "function") return refuse("bad_request", "a route through a hook the venue does not list needs a sim sell W signs (signSim)");
@@ -1118,7 +1321,7 @@ async function routeSet(a: {
   token: string;
   amountIn: bigint;
   nowMs: number;
-  rpcs: readonly [EvmRpc, EvmRpc];
+  rpcs: readonly EvmRpc[];
   scan: EvmRpc | undefined;
   /** the caller's own reads of the first round, before the set's */
   reads: Read[];
@@ -1195,13 +1398,25 @@ async function routeSet(a: {
   // the agreed block, picked once (the held head while fresh), after the token's scan has its logs; a new one is held
   // to the 30 s rule in agreedBlock, a held one in the watch's reuse bound on both clocks
   let agreed: ReturnType<typeof agreedBlock> | undefined;
-  const agreedOnce = () => (agreed ??= a.watch === undefined ? agreedBlock(rpcs, v.maxLag, a.nowMs) : a.watch.head(a.nowMs));
+  // `picked`: the agreed block once the quote picks it, never sooner (a kept scan that fails keeps its spans then)
+  let pick: (b: Promise<Block>) => void = () => {};
+  const picked = new Promise<Block>((r) => (pick = r));
+  picked.catch(() => {});
+  const agreedOnce = () => {
+    if (agreed === undefined) {
+      agreed = a.watch === undefined ? agreedBlock(rpcs, v.maxLag, a.nowMs) : a.watch.head(a.nowMs);
+      pick(agreed.then((x) => x.block));
+    }
+    return agreed;
+  };
   const agreedHead = () => agreedOnce().then((x) => x.block);
   const gate = gateOf(v.scan?.parallel ?? 1);
   let headOfScan: Promise<bigint> | undefined;
-  const scanAt = (cs: readonly string[], kind: ScanKind) =>
+  // a scan the quote waits for that fails refuses the quote, so it may pick the agreed block to keep its spans; a kept
+  // scan started early waits for the quote to pick it
+  const scanAt = (cs: readonly string[], kind: ScanKind, early = false) =>
     scan !== undefined && v.poolManager !== undefined && v.scan !== undefined && cs.length > 0
-      ? scanPools(chain, cs, kind, lower(v.weth), v.poolManager, scan, v.scan, agreedHead, v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)))
+      ? scanPools(chain, cs, kind, lower(v.weth), v.poolManager, scan, v.scan, agreedHead, v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)), early ? () => picked : agreedHead)
       : null;
   // the warm round: the token's kept reads and scans; a scan asked again in this quote is the one started here
   const planKey = `${chain}:${a.sell ? "sell" : "buy"}:${lower(token)}`;
@@ -1214,7 +1429,7 @@ async function routeSet(a: {
     if (cs.length > 0 && !(kind === "all" && cs.length === 1 && cs[0] === lower(token))) asked.push({ cs: [...cs], kind });
     return scans.get(k)!;
   };
-  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind));
+  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));
   if (plan !== undefined) plan.scans.forEach((p, i) => scans.set(`${p.kind}:${p.cs.join(",")}`, early[i]!));
   // a kept scan that fails refuses only where the quote asks it again
   for (const e of early) e?.catch(() => {});
@@ -1685,12 +1900,12 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
   const p = venue(asked.chain).providers;
   if (p === undefined) return refuse("no_quoter", `${asked.chain} has no pinned providers`);
   const s = venue(asked.chain).scan;
-  return evmPoolSellQuoteWith(asked, evmProviders(p, fetch), Date.now(), s === undefined ? undefined : evmJsonRpc(s.url, fetch, 16 << 20));
+  return evmPoolSellQuoteWith(asked, evmProviders(evmRanked(p), fetch), Date.now(), s === undefined ? undefined : evmJsonRpc(s.url, fetch, 16 << 20));
 }
 
 /** evmPoolSellQuote on the providers `rpcs` with the device's clock at `nowMs`, and the scan provider `scan`. Not in
  *  the index. */
-export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, venues?: EvmPoolVenueList): Promise<EvmPoolSellQuote> {
+export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc, venues?: EvmPoolVenueList): Promise<EvmPoolSellQuote> {
   if (typeof req !== "object" || req === null) return refuse("bad_request", "a request is an object");
   if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");
   const { chain, token, w, amountIn, slippageBps } = req;
@@ -1769,6 +1984,9 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 
 /** A provider's 429: ask asks again, a little later. */
 class RateLimited extends Error {}
+/** The refusals ask gave for a provider that still limited its rate: a scan asks such a span again as it is, never as
+ *  two halves, which only send it more (card evm-quote-warm-round). */
+const THROTTLED = new WeakSet<Error>();
 /** A request that made no connection, so no answer can have started: ask asks again, a little later. mainnet.base.org
  *  failed one connection in about every quote from this Mac ("fetch failed", ETIMEDOUT about 505 ms in: Node tries each
  *  of the host's addresses for 250 ms, and this network has no IPv6 route), 2026-11-04 15:45-16:00Z; a request that ran

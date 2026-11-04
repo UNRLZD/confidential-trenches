@@ -51,8 +51,10 @@ export type EvmPoolVenue = {
   /** A route starts from the native asset whenever a native v4 pool exists and its route quotes at least as much as the
    *  WETH route (the chain's WETH is behind an upgradeable proxy). */
   readonly nativeFirst?: boolean;
-  /** The two RPC providers the device's quote reads (different hosts), and how many blocks their heads may differ. */
-  readonly providers?: readonly [string, string];
+  /** The RPC providers the device's quote reads, two at least, on different hosts of different operators, fastest first
+   *  as measured: a quote asks two and the rest when one fails, is slow or differs (quote.ts agreeing, evmRanked); and
+   *  how many blocks two heads may differ. */
+  readonly providers?: readonly string[];
   readonly maxLag?: number;
   /** The launchpads' hooked v4 pool shapes the device reads as reference pools (a route through any other hook has only
    *  the standard pools to be held to): the asset the pool pairs the token with, fee, tick spacing and hook. */
@@ -88,7 +90,14 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
-      providers: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
+      // Keyless, of five operators (Allnodes, Bware Labs' Blast, Nodies, Coinbase, BlockPI), timed on one warm quote's six
+      // eth_call batches (109 kB) at each one's newest block hash, 10 rounds each, every answer equal to publicnode's
+      // (card evm-quote-warm-round, 2026-11-04 16:4xZ from this Mac): p50/p95 146/207 ms, 315/476, 383/532, 863/1,380
+      // and 816/1,549 ms. Passed over: base.drpc.org and Tenderly's gateway (429 on 6 batches at once), meowrpc, zan,
+      // onfinality, 1rpc, thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), base.api.pocket.network
+      // (10 of 60 answers differed), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr
+      // (no head); third-party proxies of unknown operators are not listed
+      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://base-public.nodies.app", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
       maxLag: 5, // 2 s blocks: 10 s
       // Each launchpad factory's recent creations (apps/helper/src/data/evm/lists.ts) and the PoolManager Initialize log in
       // the same transaction, read 2026-11-03 18:49Z on base-rpc.publicnode.com; each hook's code the same on both
@@ -120,7 +129,13 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
       nativeFirst: true,
-      providers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
+      // Keyless, of five operators (Allnodes, dRPC, Robinhood, bloXroute, Globalstake), timed on the first five eth_call
+      // batches of a USDG quote (1.31 MB) at each one's newest block hash, 10 rounds each, every answer equal to
+      // Robinhood's (card evm-quote-warm-round, 2026-11-04 16:5xZ from this Mac): p50/p95 511/1,014 ms, 606/845,
+      // 823/1,180, 766/2,801 and 2,349/4,972 ms. Passed over: daybreak (413 on a batch this size), blockvectra (outside
+      // its history window), pocket and blockmachine (8 s and more, timeouts), thirdweb (refused requests), tatum,
+      // nodeflare (no head)
+      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
       maxLag: 100,
