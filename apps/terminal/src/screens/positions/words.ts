@@ -41,6 +41,8 @@ export const WORDS = {
   share: PF.share,
   noRoute: PF.noRoute,
   // new here
+  // the pool path (card trade-box-pool): the sell's proceeds go back into the chain's pool, the user's Cash
+  toPool: draft("Back to Cash", "card trade-box-pool (plan v2 A2): pool.sell deposits the proceeds into the pool in the same transaction"),
   held: draft("held", "R5 token.js U.ticket at S8.29, the balance slot (trenches-1440.html: `${fmtK(tokens)} ${sym} held`)"),
   sellCta: draft("Sell", "09-design-brief S8 main button [draft copy: Sell 50%] (the percent is data)"),
   percent: draft("Percent of your bag", "R5 token.js U.ticket amount input aria-label (sell side); 09-design-brief S8 Sell tab [copy needed: CN-16, the custom % field]; the field's accessible name only"),

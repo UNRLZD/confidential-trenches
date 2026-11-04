@@ -1,7 +1,7 @@
 import type { Chain, SignpageClient, SignpageClientSnapshot } from "@blindfill/kit";
 import { createContext, useContext, useMemo } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
-import type { Slice } from "./model.ts";
+import type { PoolPrice, Slice } from "./model.ts";
 import type { PartCount } from "./States.tsx";
 
 // What the trade box's buy side reads and does. From the kit's public entry: the balance (`state.vault_balance`), the
@@ -48,6 +48,11 @@ export interface TradeKit {
   /** Missing kit call: how many of a part-filled trade's slices landed, by the request's id. Absent: not read, so a
    *  part fill draws without a count. */
   part?: (id: string) => PartCount | null;
+  /** The pool asset's USD price on the chain, the device's own read (the kit's poolUsdPrice: two RPCs of two providers
+   *  that agree, fresh). Null: not read, so the pool path draws no USD and keeps Buy off. The live source has none yet:
+   *  APP_HOST's connect-src reaches no Solana, Base or Robinhood RPC, so the signing page reads it and puts it in its
+   *  state (card signpage-pool-price). */
+  poolPrice: (chain: Chain) => PoolPrice | null;
 }
 
 export interface TradeSource {
@@ -62,6 +67,7 @@ const Fixture = createContext<TradeSource | null>(null);
 export const TradeSourceProvider = Fixture.Provider;
 
 const noMax = () => null;
+const noPrice = () => null;
 
 export function useTradeSource(): TradeSource {
   const fixture = useContext(Fixture);
@@ -70,6 +76,7 @@ export function useTradeSource(): TradeSource {
     () => ({
       setPreview: null,
       maxBuy: noMax,
+      poolPrice: noPrice,
       request: client ? client.request.bind(client) : null,
       onProgress: client ? client.onProgress.bind(client) : null,
     }),
