@@ -9,16 +9,17 @@
 //   - the code's imports: none of 2.8's banned ones (a key, a deploy, a delete), promise imports inside the seven, and
 //     its exports inside 2.5.7's list (vault-skeleton.mjs wasmProblems); it names the network's token and no other;
 //   - config(): it answers, its asset the network's token and its version the network's, both pinned here.
-// Then one write: storage_prepay(precommitment) with the minimum attached (config().deposit_storage_bytes bytes), read
-// back on both RPCs by --tx: final, one storage_prepay call from the signer to the vault, the tx and every receipt a
-// success, and the vault's receipt logging storage_prepaid {precommitment, payer, amount} for exactly that call.
+// Then one write: storage_prepay(P) with exactly the minimum attached (DEPOSIT_STORAGE_BYTES, which config() must
+// name, x 1e19 yocto), read back on both RPCs by --tx with --precommitment P: final, the tx itself (its hash, signer
+// and receiver), one storage_prepay call of exactly P and exactly that deposit, the tx and every receipt run and
+// succeeded, and the vault's own receipt logging one storage_prepaid {P, signer, deposit}.
 // This check holds no key and signs nothing, on either network. Without --tx, once every read passed, it prints the
-// write as one near CLI line and exits 3:
-//   - mainnet: that line is the owner's paste; then this same command with --tx <hash> reads the write back;
-//   - testnet: contracts/vault/scripts/prepay.mjs signs and sends the same write with a testnet key, then runs this
-//     check with --tx.
+// write as a near-cli 4.0.13 line (and its Ledger variant) and the command that reads it back, and exits 3:
+//   - mainnet: that line is the owner's paste; then the printed command, with the paste's Transaction Id as --tx;
+//   - testnet: the same line, run with the signer's testnet key in ~/.near-credentials/testnet/, or
+//     contracts/vault/scripts/prepay.mjs, which signs and sends that write itself and then reads it back.
 //   node scripts/live-checks/vault-mainnet.mjs --network testnet|mainnet --account <vault> --signer <id>
-//     [--deployment <file>] [--tx <hash>] [--record <file>]
+//     [--deployment <file>] [--precommitment <P> [--tx <hash>]] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, reads PASS and the write still to send exit 3
 // --deployment is the vault's record (account_id, wasm_sha256, wasm_builds_sha256, code_hash, network); testnet's
 // default is contracts/vault/deployments/testnet-v1.json, mainnet names its own. --record writes every RPC answer the
@@ -39,13 +40,30 @@ export const MAINNET_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.d
 const BYTE = 10n ** 19n; // storage_amount_per_byte, the same on both networks
 export const PREPAY_GAS = 30n * 10n ** 12n; // the vault's storage_prepay receipt burns about 1.8 Tgas (vault-testnet-t04.md)
 
-// config().version ends with the build's network (contracts/vault/src/constants.rs NETWORK)
+// What a deposit writes, the vault's minimum storage_prepay (contracts/vault/src/constants.rs DEPOSIT_STORAGE_BYTES),
+// pinned here: config() must name it, so the write's deposit is a number this check holds, not one the vault answers.
+export const DEPOSIT_STORAGE_BYTES = 756;
+// the field's modulus p (contracts/vault/src/field.rs P): a precommitment is one canonical decimal below it
+const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+
+// A NEAR account id (nearcore's AccountId rules: 2 to 64 characters, lowercase parts joined by "." with "-" or "_"
+// inside a part). A 64-hex implicit account is an account on both networks. Otherwise a testnet account is `testnet`
+// or a sub-account of it, and a mainnet account is any other id, so a top-level name (sweat), another suffix (.tg) and
+// an 0x id pass.
+const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
+const isTestnetName = (s) => s === "testnet" || s.endsWith(".testnet");
+const accountOf = (network) => ({ test: (s) => typeof s === "string" && ACCOUNT_ID.test(s) && (/^[0-9a-f]{64}$/.test(s) || (network === "testnet") === isTestnetName(s)) });
+
+// config().version ends with the build's network (contracts/vault/src/constants.rs NETWORK). Mainnet's record is
+// named with --deployment until the mainnet vault's record is committed; then it becomes the default here.
 export const NETWORKS = {
-  testnet: { rpcs: TESTNET_RPCS, token: TESTNET_TOKEN, version: /^blindfill-vault \S+ testnet$/, account: /^([a-z0-9_-]+\.)*testnet$|^[0-9a-f]{64}$/, deployment: TESTNET_DEPLOYMENT },
-  mainnet: { rpcs: MAINNET_RPCS, token: MAINNET_USDC, version: /^blindfill-vault \S+ mainnet$/, account: /^([a-z0-9_-]+\.)*near$|^[0-9a-f]{64}$/, deployment: null },
+  testnet: { rpcs: TESTNET_RPCS, token: TESTNET_TOKEN, version: /^blindfill-vault \S+ testnet$/, account: accountOf("testnet"), deployment: TESTNET_DEPLOYMENT },
+  mainnet: { rpcs: MAINNET_RPCS, token: MAINNET_USDC, version: /^blindfill-vault \S+ mainnet$/, account: accountOf("mainnet"), deployment: null },
 };
 
 const isDecimal = (s) => typeof s === "string" && /^(0|[1-9]\d*)$/.test(s);
+/** A precommitment the vault takes: one canonical decimal below p. */
+export const isPrecommitment = (s) => isDecimal(s) && BigInt(s) < P;
 
 async function rpc(fetchFn, url, method, params) {
   const r = await fetchFn(url, {
@@ -64,15 +82,22 @@ export function freshPrecommitment(bytes = Buffer.from(crypto.getRandomValues(ne
   return (BigInt(`0x${Buffer.from(bytes).toString("hex")}`) || 1n).toString();
 }
 
-/** The near CLI line (near-cli-rs) the owner pastes for the write. It signs nothing here. */
+// The CLI the write line is for: near-cli 4.0.13 (npm near-cli), the `near` installed on the team's Mac. It signs with
+// the signer's key in ~/.near-credentials/<network>/<signer>.json, or with a Ledger (the second line).
+export const NEAR_CLI = "near-cli 4.0.13";
+
+/** The write as near-cli lines: { line, ledgerLine }. This check signs nothing; the CLI does. */
 export function pasteLine({ network, account, signer, precommitment, deposit }) {
-  const frac = (deposit % 10n ** 24n).toString().padStart(24, "0").replace(/0+$/, "");
-  const near = `${deposit / 10n ** 24n}${frac ? `.${frac}` : ""} NEAR`;
-  return `near contract call-function as-transaction ${account} storage_prepay json-args '${JSON.stringify({ precommitment })}' prepaid-gas '30 Tgas' attached-deposit '${near}' sign-as ${signer} network-config ${network} sign-with-keychain send`;
+  const line = `near call ${account} storage_prepay '${JSON.stringify({ precommitment })}' --useAccount ${signer} --depositYocto ${deposit} --gas ${PREPAY_GAS} --networkId ${network}`;
+  return { line, ledgerLine: `${line} --signWithLedger` };
 }
 
-/** The storage_prepay tx `hash` by `signer` read back on `url`, each fact told to `say`. */
-export async function readPrepay({ fetchFn, url, hash, signer, account, minDeposit, say, tries = 10, wait = 3000 }) {
+// An outcome that ran and succeeded: SuccessValue or SuccessReceiptId. Failure, Unknown (not run yet) or no status is not.
+const succeeded = (status) => status !== null && typeof status === "object" && ("SuccessValue" in status || "SuccessReceiptId" in status);
+
+/** The storage_prepay tx `hash` by `signer` read back on `url`, each fact told to `say`: it must be exactly the write
+ * printed, one storage_prepay of `precommitment` with `deposit` attached, from `signer` to `account`. */
+export async function readPrepay({ fetchFn, url, hash, signer, account, precommitment, deposit, say, tries = 10, wait = 3000 }) {
   const at = `on ${url}`;
   let r;
   for (let i = 1; ; i++) {
@@ -86,29 +111,28 @@ export async function readPrepay({ fetchFn, url, hash, signer, account, minDepos
   }
   say(r.final_execution_status === "FINAL", `storage_prepay tx ${hash} by ${signer} is final ${at}: ${r.final_execution_status ?? "no status"}`);
   const t = r.transaction ?? {};
+  say(t.hash === hash && t.signer_id === signer && t.receiver_id === account, `the tx is ${hash} from ${signer} to ${account} ${at}: ${t.hash} from ${t.signer_id} to ${t.receiver_id}`);
   const fc = t.actions?.length === 1 ? t.actions[0]?.FunctionCall : null;
   let pc = null;
   try {
     pc = JSON.parse(Buffer.from(fc?.args ?? "", "base64").toString("utf8")).precommitment;
   } catch {}
-  const deposit = isDecimal(fc?.deposit) ? BigInt(fc.deposit) : -1n;
-  const shape = t.signer_id === signer && t.receiver_id === account && fc?.method_name === "storage_prepay" && isDecimal(pc) && deposit >= minDeposit;
-  say(shape, `the tx is one storage_prepay call from ${signer} to ${account} with at least ${minDeposit} yocto ${at}: ${t.signer_id} -> ${t.receiver_id}, ${t.actions?.length ?? 0} action(s), ${fc?.method_name ?? "no call"}, deposit ${fc?.deposit ?? "none"}, precommitment ${pc ?? "none"}`);
-  const outcomes = [r.transaction_outcome, ...(r.receipts_outcome ?? [])].filter(Boolean);
-  const failed = outcomes.filter((o) => o.outcome?.status?.Failure);
-  const success = r.status && "SuccessValue" in r.status;
-  say(success && failed.length === 0, `the tx and every receipt succeeded ${at}: ${success ? "SuccessValue" : JSON.stringify(r.status ?? null).slice(0, 300)}, ${failed.length} failed of ${outcomes.length}`);
-  const want = { precommitment: pc, payer: signer, amount: String(deposit) };
+  const call = fc?.method_name === "storage_prepay" && pc === precommitment && fc?.deposit === String(deposit);
+  say(call, `the tx is one storage_prepay of precommitment ${precommitment} with exactly ${deposit} yocto ${at}: ${t.actions?.length ?? 0} action(s), ${fc?.method_name ?? "no call"}, precommitment ${pc ?? "none"}, deposit ${fc?.deposit ?? "none"}`);
+  const outcomes = [r.transaction_outcome, ...(r.receipts_outcome ?? [])];
+  const ran = outcomes.filter((o) => succeeded(o?.outcome?.status));
+  const success = r.status !== null && typeof r.status === "object" && "SuccessValue" in r.status;
+  say(success && ran.length === outcomes.length, `the tx and every receipt succeeded ${at}: ${success ? "SuccessValue" : JSON.stringify(r.status ?? null).slice(0, 300)}, ${ran.length} of ${outcomes.length} succeeded`);
+  const want = { precommitment, payer: signer, amount: String(deposit) };
   const events = (r.receipts_outcome ?? []).filter((o) => o.outcome?.executor_id === account).flatMap((o) => o.outcome.logs ?? []).filter((l) => l.startsWith("EVENT_JSON:")).map((l) => {
     try {
       return JSON.parse(l.slice("EVENT_JSON:".length));
     } catch {
       return null;
     }
-  });
-  const ev = events.find((e) => e?.standard === "blindfill-vault" && e.event === "storage_prepaid");
-  const logged = ev && ev.data?.length === 1 && JSON.stringify(ev.data[0]) === JSON.stringify(want);
-  say(Boolean(logged), `${account} logged storage_prepaid ${JSON.stringify(want)} ${at}: ${ev ? JSON.stringify(ev.data) : "no storage_prepaid event"}`);
+  }).filter((e) => e?.standard === "blindfill-vault" && e.event === "storage_prepaid");
+  const logged = events.length === 1 && events[0].data?.length === 1 && JSON.stringify(events[0].data[0]) === JSON.stringify(want);
+  say(logged, `${account} logged one storage_prepaid ${JSON.stringify(want)} ${at}: ${events.length ? events.map((e) => JSON.stringify(e.data)).join(", ") : "no storage_prepaid event"}`);
 }
 
 export async function check({ network, account, deployment, fetchFn = fetch, rpcs = NETWORKS[network]?.rpcs, write = {}, wait = 3000 }) {
@@ -127,35 +151,43 @@ export async function check({ network, account, deployment, fetchFn = fetch, rpc
   const builds = deployment.wasm_builds_sha256;
   say(Array.isArray(builds) && builds.length >= 2 && builds.every((b) => b === deployment.wasm_sha256), `the record's builds agree on its wasm_sha256 ${deployment.wasm_sha256}: [${Array.isArray(builds) ? builds.join(", ") : "none"}]`);
   say(recordHash !== null && deployment.code_hash === recordHash, `the record's code_hash ${deployment.code_hash} is the base58 of its wasm_sha256 ${deployment.wasm_sha256}`);
+  say(deployment.account_id === account, `the record is ${account}'s: ${deployment.account_id}`);
+  say(deployment.asset === net.token, `the record's asset is the ${network} token ${net.token}: ${deployment.asset}`);
   const configs = [];
   for (const url of rpcs) configs.push((await readVault({ fetchFn, url, account, deployment, token: net.token, version: net.version, say })).config);
 
   // the write, only on a vault whose every read passed
   const bytes = configs[0]?.deposit_storage_bytes;
   const sameConfig = configs.length === 2 && JSON.stringify(configs[0]) === JSON.stringify(configs[1]);
-  say(sameConfig && Number.isInteger(bytes) && bytes > 0, `config() is the same on both RPCs and names deposit_storage_bytes: ${bytes ?? "none"}`);
+  say(sameConfig, `config() is the same on both RPCs: ${sameConfig ? "yes" : "no"}`);
+  say(bytes === DEPOSIT_STORAGE_BYTES, `config() names deposit_storage_bytes ${DEPOSIT_STORAGE_BYTES}: ${bytes ?? "none"}`);
   if (!ok) {
     say(false, "no storage_prepay: a read above failed, so nothing is written to this vault");
     return { ok, lines };
   }
-  const minDeposit = BigInt(bytes) * BYTE;
+  const deposit = BigInt(DEPOSIT_STORAGE_BYTES) * BYTE;
   const { signer } = write;
-  if (!signer || !net.account.test(signer)) {
+  if (!net.account.test(signer)) {
     say(false, `the write's signer ${signer ?? "(none)"} is not a ${network} account`);
     return { ok, lines };
   }
   const hash = write.tx;
   if (!hash) {
     const precommitment = write.precommitment ?? freshPrecommitment();
-    return { ok: false, pending: true, lines, line: pasteLine({ network, account, signer, precommitment, deposit: minDeposit }), prepay: { precommitment, deposit: minDeposit } };
+    return { ok: false, pending: true, lines, ...pasteLine({ network, account, signer, precommitment, deposit }), prepay: { precommitment, deposit } };
   }
-  for (const url of rpcs) await readPrepay({ fetchFn, url, hash, signer, account, minDeposit, say, wait });
+  // a read-back is of the one write printed: its precommitment is given with the tx
+  if (!isPrecommitment(write.precommitment)) {
+    say(false, `the write's precommitment ${write.precommitment ?? "(none)"} is not one canonical decimal below p: --tx needs the --precommitment printed with the write`);
+    return { ok, lines };
+  }
+  for (const url of rpcs) await readPrepay({ fetchFn, url, hash, signer, account, precommitment: write.precommitment, deposit, say, wait });
   return { ok, lines, tx: hash };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const a = process.argv.slice(2);
-  const known = new Set(["--network", "--account", "--signer", "--deployment", "--tx", "--record"]);
+  const known = new Set(["--network", "--account", "--signer", "--deployment", "--tx", "--precommitment", "--record"]);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
     for (let i = 0; i < a.length; i += 2) if (!known.has(a[i]) || a[i + 1] === undefined || a[i + 1].startsWith("--")) throw new Error(`argument ${a[i]}: want ${[...known].join(", ")}, each with a value`);
@@ -171,14 +203,19 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const signer = opt("--signer");
     const tx = opt("--tx");
     if (tx && !/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(tx)) throw new Error("--tx: want a base58 tx hash");
+    const precommitment = opt("--precommitment");
+    if (tx && !precommitment) throw new Error("--tx needs --precommitment <P>: the one the write line printed");
+    if (precommitment && !isPrecommitment(precommitment)) throw new Error("--precommitment: want one canonical decimal below p");
     const rec = recorder();
-    const r = await check({ network, account, deployment, fetchFn: opt("--record") ? rec.fetchFn : fetch, write: { signer, tx } });
+    const r = await check({ network, account, deployment, fetchFn: opt("--record") ? rec.fetchFn : fetch, write: { signer, tx, precommitment } });
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify(rec.answers) + "\n");
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     if (r.pending) {
-      console.log(`live-check ${KEY}: the reads PASS; the write, signed by ${signer} (this check signs nothing; on testnet contracts/vault/scripts/prepay.mjs sends it):`);
+      console.log(`live-check ${KEY}: the reads PASS; the write, signed by ${signer} through ${NEAR_CLI} (this check signs nothing; on testnet contracts/vault/scripts/prepay.mjs can send it):`);
       console.log(r.line);
-      console.log(`live-check ${KEY}: then: node scripts/live-checks/vault-mainnet.mjs ${a.join(" ")} --tx <its hash>`);
+      console.log(`live-check ${KEY}: or with a Ledger:`);
+      console.log(r.ledgerLine);
+      console.log(`live-check ${KEY}: then: node scripts/live-checks/vault-mainnet.mjs --network ${network} --account ${account} --signer ${signer}${opt("--deployment") ? ` --deployment ${opt("--deployment")}` : ""} --precommitment ${r.prepay.precommitment} --tx <its Transaction Id>`);
       process.exit(3);
     }
     console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"}`);
