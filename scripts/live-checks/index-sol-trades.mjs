@@ -114,11 +114,16 @@ export function judge(run) {
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
+/** One read, its error naming the request (a run's ERROR line says which read failed, and a timeout says so). */
 async function get(base, path, fetchFn) {
   const t0 = Date.now();
-  const r = await fetchFn(`${base}${path}`, { headers: { origin: APP }, signal: AbortSignal.timeout(10_000) });
-  const body = await r.text();
-  return { atMs: t0, answeredMs: Date.now(), status: r.status, headers: Object.fromEntries(r.headers), body };
+  try {
+    const r = await fetchFn(`${base}${path}`, { headers: { origin: APP }, signal: AbortSignal.timeout(10_000) });
+    const body = await r.text();
+    return { atMs: t0, answeredMs: Date.now(), status: r.status, headers: Object.fromEntries(r.headers), body };
+  } catch (e) {
+    throw new Error(`GET ${path} ${e?.name === "TimeoutError" ? "timed out after 10 s" : `failed: ${e?.message}`}`);
+  }
 }
 
 /** The quotes the helper prices a trade in (trades.ts): a curve or pool quoted in another token (a tokenized stock, say)

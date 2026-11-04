@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, tradesFault } from "./index-sol-trades.mjs";
+import { judge, read, TRADES_PATH, tradesFault } from "./index-sol-trades.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "index-sol-trades.answers.json"), "utf8"));
@@ -79,4 +79,16 @@ test("the tape's wire form: oldest first or an extra field fails", () => {
   assert.match(tradesFault({ trades: rows, src: "chain", as_of_ms: 1 }), /newer/);
   assert.match(tradesFault({ trades: [{ ...rows[0], extra: 1 }], src: "chain", as_of_ms: 1 }), /keys/);
   assert.equal(tradesFault({ trades: rows.slice().reverse(), src: "chain", as_of_ms: 1 }), null);
+});
+
+test("a request that times out is named in the error, with its path and the 10 s bound", async () => {
+  const coin = "GAtQEYEvkPHMbspPivN4GUVXSg2PVwYXSHSprPEtpump";
+  const fetchFn = async (url) => {
+    if (url.endsWith("/v1/market/lists?chain=solana")) return new Response(JSON.stringify({ lists: { trending: [{ token: coin }] } }), { status: 200 });
+    throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  };
+  await assert.rejects(read("https://helper.test", fetchFn, "wss://ws.test"), (e) => {
+    assert.equal(e.message, `GET ${TRADES_PATH(coin)} timed out after 10 s`);
+    return true;
+  });
 });
