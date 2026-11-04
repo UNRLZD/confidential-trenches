@@ -604,8 +604,11 @@ export function createSolanaTrades(deps: {
       let src = "chain";
       if (own.length < limit && tf !== "1s" && deps.history !== undefined) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
-        const h = await deps.history(mint, tf, before, limit).catch(() => null);
-        const old = h !== null && h.status === 200 ? ((JSON.parse(h.body) as { candles?: Candle[] }).candles ?? []).filter((c) => c[0] < before) : [];
+        // with no bars of ours the history's newest range is asked as such (`to` null: one cache key, not one per second)
+        const h = await deps.history(mint, tf, ownFrom === null ? to : before, limit).catch(() => UPSTREAM);
+        // nothing of ours and no history to serve: the history's 429 or 503, so the page retries, never an empty chart
+        if (own.length === 0 && h.status !== 200 && h.status !== 404) return h;
+        const old = h.status === 200 ? ((JSON.parse(h.body) as { candles?: Candle[] }).candles ?? []).filter((c) => c[0] < before) : [];
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);
           src = `chain,${h!.src ?? "geckoterminal"}`;
