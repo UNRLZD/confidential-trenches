@@ -50,7 +50,8 @@ export interface TradeKit {
   part?: (id: string) => PartCount | null;
   /** The pool asset's USD price on the chain, the device's own read (the kit's poolUsdPrice: two RPCs of two providers
    *  that agree, fresh). Null: not read, so the pool path draws no USD and keeps Buy off. The live source has none yet:
-   *  APP_HOST's connect-src reaches no Solana, Base or Robinhood RPC (card trade-box-pool, a question to the CO). */
+   *  APP_HOST's connect-src reaches no Solana, Base or Robinhood RPC, so the signing page reads it and puts it in its
+   *  state (card signpage-pool-price). */
   poolPrice: (chain: Chain) => PoolPrice | null;
 }
 
