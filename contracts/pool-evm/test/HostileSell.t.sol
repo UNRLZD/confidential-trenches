@@ -357,19 +357,19 @@ contract HostileSellTest is SellBase {
     _send(_s, OUT, _sig);
   }
 
-  /// A target that takes the whole approval and gives part of the token back: the approval ends at 0, the sell lands at
-  /// minOut, W keeps the part given back. Within what W signed (amount out, at least minOut in).
-  function test_R_aTargetGivingTokenBackLandsWithinTheSignedTerms() public {
+  /// A target that takes the whole approval and gives part of the token back: the approval ends at 0, but W's balance
+  /// fell by less than the amount it signed, so the sell is refused (card evm-selldelegate-exact-debit: exactly the
+  /// amount, never more and never less) and W keeps every token
+  function test_R_aTargetGivingTokenBackIsRefused() public {
     GiveBackRouter _r = new GiveBackRouter(weth);
     vm.deal(address(_r), 1 ether);
     SellDelegate.Sell memory _s =
       _base(address(token), AMOUNT, address(_r), abi.encodeCall(GiveBackRouter.swap, (token, AMOUNT, AMOUNT / 2, OUT, W)), OUT, 0);
-    vm.recordLogs();
-    _send(_s, FEE, _signed(_s));
-    (,, uint256 _value,) = _deposited(vm.getRecordedLogs());
-    assertEq(_value, OUT - FEE);
-    assertEq(token.balanceOf(W), AMOUNT * 10 - AMOUNT / 2, 'W keeps the half given back');
-    assertEq(token.allowance(W, address(_r)), 0);
+    bytes memory _sig = _signed(_s);
+    vm.expectRevert(bytes4(keccak256('DebitNotExact()')));
+    _send(_s, FEE, _sig);
+    assertEq(token.balanceOf(W), AMOUNT * 10, 'W keeps every token');
+    assertEq(_w().nonce(), 0);
   }
 
   /// An ERC-777-style hook on transferFrom that calls back into W with another signed sell: Reentrancy
