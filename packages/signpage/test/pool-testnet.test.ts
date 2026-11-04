@@ -476,3 +476,24 @@ test("helperPoolSend gives the helper's 429 as busy, with its code and its Retry
   assert.deepEqual(await busy(answer(429, "slow down")), { code: "throttled", ms: 1_000 });
   assert.match(String(await busy(answer(503, '{"error":{"code":"upstream"}}'))), /HTTP 503/);
 });
+
+test("pool.withdraw (card signpage-pool-withdraw-form): a checked Solana request opens the page's own screen with its id; no screen, or an EVM chain, is refused", async () => {
+  const { w } = await wallet();
+  const opened: [string, string][] = [];
+  const answer = { result: { pending: true as const } };
+  const with_ = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), openWithdraw: (chain, c) => (opened.push([chain, c.id]), answer) }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
+  const ask: Ask = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 };
+  assert.equal(with_.flow(ask, ctx), answer);
+  assert.deepEqual(opened, [["solana", "r1"]]);
+  assert.deepEqual(with_.flow({ ...ask, chain: "base", decimals: 18 }, ctx), { error: "not_allowed" });
+  const refused = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), openWithdraw: () => null }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
+  assert.deepEqual(refused.flow(ask, ctx), { error: "not_allowed" });
+  const none = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
+  assert.deepEqual(none.flow(ask, ctx), { error: "not_allowed" });
+  // the screen's keys are the pin's own: none of them is a destination
+  const keys = with_.withdrawDeps("solana", "r1").keys;
+  assert.equal(keys.pool, solanaPoolOf(SOL_POOLS.devnet!.program).pool);
+  assert.equal(keys.program, SOL_POOLS.devnet!.program);
+  assert.equal(keys.feePayer, SOL_POOLS.devnet!.feePayer);
+  assert.equal(with_.withdrawDeps("base", "r1").handoff, undefined, "no EVM flow on this page yet");
+});

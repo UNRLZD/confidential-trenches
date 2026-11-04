@@ -39,9 +39,9 @@ export type PoolKindsDeps = {
   /** The chain's two providers, or null when the page has none for it. */
   rpcs(chain: PoolChain): readonly [PoolRpc, PoolRpc] | null;
   /** The ops' flow once their pool is pinned (src/pool-testnet.ts testnetPoolFlow); with none a checked request is refused. */
-  flow?: (ask: PoolAsk, ctx: KindContext) => HostRefusal | Running<PoolKind>;
+  flow?: (ask: PoolAsk, ctx: KindContext) => HostRefusal | Running<PoolKind> | HostAnswer<"pool.withdraw">;
 };
-type Answer<K extends PoolKind> = HostRefusal | Deferred<K>;
+type Answer<K extends PoolKind> = HostRefusal | Deferred<K> | HostAnswer<K>;
 type Handler<K extends PoolKind> = (params: Record<string, unknown>, ctx: KindContext) => Answer<K>;
 
 const NO: { error: "not_allowed" } = Object.freeze({ error: "not_allowed" as const });
@@ -79,7 +79,7 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         async (reads) => {
           const ask = checked(p, reads);
           const got = ask && deps.flow ? deps.flow(ask, ctx) : NO;
-          if (!("after" in got)) return void (answer = got);
+          if (!("after" in got)) return void (answer = "error" in got ? got : NO); // a sell's flow answers only by running
           // the flow runs: its answer once its own wait settles (the send, or the run's end)
           await got.after.catch(() => {});
           answer = (got.answer() ?? NO) as HostAnswer<K> | HostRefusal;

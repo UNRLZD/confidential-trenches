@@ -45,6 +45,10 @@ import { buyWallets, solanaHoldingsReader, spentNotesOf } from "../../wallet/src
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import type { PoolChain } from "./rules/pool.ts";
+import type { HostAnswer, KindContext } from "./api.ts";
+import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
+import { runPoolWithdraw, solanaWithdrawMinPart, withdrawSources } from "./pool-withdraw.ts";
+import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
 /** Each chain's two testnet RPCs, as the app names the chain. */
@@ -65,7 +69,12 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
 }
 
 /** What the page gives the testnet flow: its wallet store and the seed, each opened when a run needs it. */
-export type TestnetPage = { store(): Promise<WalletStore>; seed64(): Promise<Uint8Array> };
+export type TestnetPage = {
+  store(): Promise<WalletStore>;
+  seed64(): Promise<Uint8Array>;
+  /** pool.withdraw: the page's own screen opened for the chain and the request's op id (src/main.ts); null refuses. */
+  openWithdraw?(chain: PoolChain, ctx: KindContext): HostAnswer<"pool.withdraw"> | null;
+};
 
 /** Tests only: the pool, the prover, the RPCs, the fee's fetch and the thread count the page would use. */
 export type TestnetOver = {
@@ -159,6 +168,10 @@ export type TestnetPool = {
   proofs(): Promise<QueuePass | null>;
   /** Sign out: the queue closed (its notes freed, its seed copy zeroed), its note store closed, the worker ended. */
   signedOut(): Promise<void>;
+  /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
+  withdrawDeps(chain: PoolChain, opId: string): PoolWithdrawFormDeps;
+  /** The withdraw run of a screen's checked answer, its op record written as it goes; settles at the run's end. */
+  withdraw(r: PoolReady, opId: string): Promise<void>;
 };
 
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
@@ -382,6 +395,73 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     reading = p;
     return p;
   };
+  // pool.withdraw (card signpage-pool-withdraw-form): the screen's funds are the pool's landed notes this page may
+  // spend (UNSPENT, or HELD by its own queue for the next buy, dropped first by the run), the epoch fee and the
+  // smallest part, from the Rent sysvar read on both RPCs; the run proves each part on demand (src/pool-withdraw.ts)
+  const queued = async (): Promise<ProofQueue<SolanaReleaseRequest> | null> => (open ? ((await open.catch(() => null))?.queue as ProofQueue<SolanaReleaseRequest> | undefined) ?? null : null);
+  const funds = async (): Promise<PoolFunds> => {
+    const r = rpcs();
+    const rent = await readSolanaRent(r);
+    const notes = await openNoteStore(await page.store());
+    try {
+      const mine = new Set((await queued())?.ready().map((p) => p.noteId) ?? []);
+      return { notes: withdrawSources(await notes.list(), scope!, mine), fee: solanaPoolFee(rent), minPart: solanaWithdrawMinPart(rent) };
+    } finally {
+      notes.close();
+    }
+  };
+  const withdraw = async (ready: PoolReady, opId: string): Promise<void> => {
+    if (ready.chain !== "solana" || pin === undefined || !locks) return;
+    const ops = await page.store();
+    const created_ms = Date.now();
+    let writes: Promise<unknown> = ops.put("ops", opId, { kind: "withdraw", stage: "proving", txs: [], created_ms }).catch(() => {});
+    const write = (stage: string, txs: unknown[]) => void (writes = writes.then(() => ops.put("ops", opId, { kind: "withdraw", stage, txs, created_ms })).catch(() => {}));
+    await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const notes = await openNoteStore(await page.store());
+      try {
+        const q = await queued();
+        const mine = new Set(q?.ready().map((p) => p.noteId) ?? []);
+        const ask = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 } as const;
+        const end = await runPoolWithdraw(
+          {
+            pin,
+            rpcs: rpcs(),
+            pool: (over.pool as Pool<SolanaReleaseRequest> | undefined) ?? solanaPool({ pin, rpcs: rpcs(), relayFee: (e, s) => devnetRelayFee(solanaPoolOf(pin.program).pool, e, s, over.fetch) }),
+            prover: prover.vault,
+            notes: async () => notes,
+            ...(q ? { drop: (id: string) => q.drop(id) } : {}),
+            seed64: page.seed64,
+            send: (p, tx) => helperPoolSend(p, tx, over.fetch),
+            settle: async (noteId) => {
+              const seed64 = await page.seed64();
+              try {
+                return await solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: rpcs() });
+              } finally {
+                seed64.fill(0);
+              }
+            },
+            stage: write,
+          },
+          { ...ask },
+          ready.to,
+          ready.amount,
+          mine,
+        );
+        write(end.stage, end.txs);
+      } finally {
+        notes.close();
+      }
+    });
+    await writes;
+    // the change notes it wrote are proved for the next buy by the queue's next pass
+    if (open !== null) void proofs();
+  };
+  const withdrawDeps = (chain: PoolChain, opId: string): PoolWithdrawFormDeps => ({
+    chain,
+    keys: chain === "solana" && pin !== undefined ? { pool: solanaPoolOf(pin.program).pool, program: pin.program, feePayer: pin.feePayer } : { pool: "" },
+    funds: () => (chain === "solana" && pin !== undefined ? funds() : Promise.reject(new Error("no flow for this chain"))),
+    ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId) } : {}),
+  });
   return {
     flow: (ask, ctx) =>
       ask.chain !== "solana" || pin === undefined
@@ -392,11 +472,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ? buy(ask, ctx)
             : ask.kind === "pool.sell"
               ? sell(ask, ctx)
-              : { error: "not_allowed" },
+              : ask.kind === "pool.withdraw" && page.openWithdraw
+                ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
+                : { error: "not_allowed" },
     host: () => host(),
     settle,
     stateRead,
     proofs,
     signedOut,
+    withdrawDeps,
+    withdraw,
   };
 }
