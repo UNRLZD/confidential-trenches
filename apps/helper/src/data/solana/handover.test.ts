@@ -420,3 +420,26 @@ test("card helper-restart-fresh fold: a hot chart GeckoTerminal answers with no 
   assert.equal(await tok.ahead(), `${PUMP}:1m`, "and the failure does not hold the 1m chart back");
   assert.ok(ohlcv >= 4);
 });
+
+test("card helper-restart-fresh fold: the Trending column's third row as Discover orders it (app-token-chart's pick, app live run 41908369953: its 15m candles 429 after four reads) is kept fresh with no caller read, and while the ahead lane holds its call a cold chart's first read still finds its two calls", async () => {
+  const OTHER = "Q1vecEMQEgDyrw1txmBgFwUrkeQurqkEe1bGMzFpump";
+  const row = (token: string, vol: string) => ({ token, vol_1h_usd: vol });
+  // the list's own order is not Discover's: Discover sorts the 1h volume, so PUMP is its third row, not the list's
+  const lists = { lists: { trending_1h: [row(OTHER, "900"), row("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", "0"), row("METAewgxyPbgwsseH8T16a39CQ5VyVxZi9zXiDPY18m", "5000"), row(PUMP, "100"), row("2uxaYT1fVrp6Fg2BrxQcyKSW91hefM6dG9krpbeDiirT", "50")] } };
+  const listed = async () => ({ status: 200, body: JSON.stringify(lists) });
+  const r = await idleThenSwap(12 * 60_000, { listed }, false);
+  assert.deepEqual(r.answers.map((a) => a.status), Array(CROWD_429).fill(200), r.lines.join("; "));
+  assert.ok(r.t - JSON.parse(r.answers[0]!.body).as_of_ms <= GT_SERVE_MS);
+  assert.ok(!r.oldGt.some((u) => u.includes("2uxaYT1")), "the fourth row by volume is not kept");
+  // the ahead lane's call in the window: a chart nobody holds still reads its top pool and its bars at once
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const budget = geckoBudget(now);
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: budget, holdersRpc: chain(() => false), listed });
+  for (let i = 0; i < 2; i++) assert.equal(budget.take("lists"), true);
+  assert.notEqual(await tok.ahead(), null, "the ahead lane takes its call");
+  assert.equal(await tok.ahead(), null);
+  const cold = await tok.candles(PUMP, "1m", null, 24);
+  assert.equal(cold.status, 200, `a cold chart beside the ahead call: ${cold.body.slice(0, 80)}`);
+});

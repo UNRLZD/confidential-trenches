@@ -348,21 +348,27 @@ export const KEPT_HANDOVER_MS = 86_400_000;
 
 /** Card helper-restart-fresh: the newest charts callers read lately are re-read by the helper itself, in GeckoTerminal's
  *  "ahead" lane (../gecko.ts), once their bars are AHEAD_MS old, so the bars it holds, and hands over at a swap, stay
- *  inside GT_SERVE_MS. Read 2026-11-04 (live runs 41899807434, 41905007564): right after a swap the whole live suite opens
+ *  inside GT_SERVE_MS. Read 2026-11-04 (helper live runs 41899807434, 41905007564; app live run 41908369953,
+ *  app-token-chart's Trending mint 429 after four reads with Retry-After): right after a swap the whole live suite opens
  *  its charts at once (two Solana tokens off our own venues at 1-2 calls each, token.ts pools and bars; Base's and
  *  Robinhood's charts, ../evm/swaps.ts; the EVM lists, ../evm/lists.ts) into a window of 5 calls the old helper's last
  *  calls already count in (server.ts seedGecko), and a chart whose handed-over bars were past GT_SERVE_MS answered 429:
  *  reUSD's 15m 0 of 25 at 19:44:47Z with Retry-After 51-53, PUMP's 1h at 20:16:58Z. [design: half of GT_SERVE_MS, so a
- *  key re-read one window late is still inside it; HOT_MAX keys at one call a WINDOW_MS (75 s) come round in 450 s.] */
+ *  key re-read one window late is still inside it; HOT_MAX callers' charts and the TOP_MAX Trending ones, at most 7 at one
+ *  call a WINDOW_MS (75 s), come round in 525 s, inside GT_SERVE_MS; a chart in use is also re-read by its callers.] */
 export const AHEAD_MS = GT_SERVE_MS / 2;
 /** A chart read by a caller this recently is kept fresh [design: an hour; a deploy's live suite reads its charts at every
  *  deploy, and the chart a page opened in the last hour is the one its next visitor opens]. */
 export const HOT_MS = 3_600_000;
-/** The charts kept fresh, the most recently read first; the oldest read goes when one more is read. */
-export const HOT_MAX = 6;
-/** The timeframe the app's chart opens on (apps/terminal/src/screens/token/candles.ts DEFAULT_TF): the top Trending
- *  token's chart in it is always kept fresh, since "/" draws it for every visitor (app-console-429 reads it 25 at once). */
+/** The callers' charts kept fresh, the most recently read; the oldest read goes when one more is read. */
+export const HOT_MAX = 3;
+/** The timeframe the app's chart opens on (apps/terminal/src/screens/token/candles.ts DEFAULT_TF). */
 export const AHEAD_TF: Tf = "15m";
+/** The Trending rows whose AHEAD_TF chart is always kept fresh, with no caller read: the first TOP_MAX of Discover's
+ *  Trending column as Discover orders it (apps/terminal/src/screens/discover/model.ts columnRows: trending_1h, one row a
+ *  token, 1h volume above 0, the largest first), the rows a visitor opens first, and the list's own first row, which "/"
+ *  draws (app-console-429 reads it 25 at once; app-token-chart opens the column's third row). */
+export const TOP_MAX = 3;
 /** How often the server asks for one re-read ahead (server.ts); each ask makes at most one GeckoTerminal call. */
 export const AHEAD_TICK_MS = 5_000;
 
@@ -768,17 +774,21 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     const had = kept.get(k);
     if (got.length > 0 && (had === undefined || got.at(-1)![0] >= had.bars.at(-1)![0])) kept.set(k, { bars: got, at });
   };
-  /** The top Trending token on Discover's Solana lists, the token "/" draws (as app-console-429 picks it), or null. */
-  async function topTrending(): Promise<string | null> {
-    if (deps.listed === undefined) return null;
+  /** The Trending tokens kept fresh (TOP_MAX): the list's first row, then Discover's column order's first TOP_MAX. */
+  async function topTrending(): Promise<string[]> {
+    if (deps.listed === undefined) return [];
     try {
       const a = await deps.listed();
-      if (a.status !== 200) return null;
+      if (a.status !== 200) return [];
       const l = obj(obj(JSON.parse(a.body)).lists);
-      const rows = Array.isArray(l.trending_1h) ? l.trending_1h : Array.isArray(l.trending) ? l.trending : [];
-      return address(obj(rows[0]).token);
+      const rows = (Array.isArray(l.trending_1h) ? l.trending_1h : Array.isArray(l.trending) ? l.trending : []).slice(0, 200).map(obj);
+      const vol = (r: Record<string, unknown>) => (typeof r.vol_1h_usd === "string" && /^\d+(\.\d+)?$/.test(r.vol_1h_usd) ? Number(r.vol_1h_usd) : 0);
+      const seen = new Set<string>();
+      const column = rows.filter((r) => typeof r.token === "string" && !seen.has(r.token) && (seen.add(r.token), true)).filter((r) => vol(r) > 0).sort((x, y) => vol(y) - vol(x));
+      const out = [rows[0], ...column.slice(0, TOP_MAX)].map((r) => address(r?.token)).filter((m): m is string => m !== null);
+      return [...new Set(out)];
     } catch {
-      return null;
+      return [];
     }
   }
   /** When the ahead lane last read a chart, whatever it got: a chart GeckoTerminal answers with no bars, or fails, waits
@@ -790,8 +800,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
 
   return {
     /**
-     * One re-read ahead (card helper-restart-fresh, AHEAD_MS): of the charts callers read in the last HOT_MS and the top
-     * Trending token's AHEAD_TF chart, the one whose newest bars held are oldest, once they are AHEAD_MS old (or none is
+     * One re-read ahead (card helper-restart-fresh, AHEAD_MS): of the charts callers read in the last HOT_MS and the
+     * Trending tokens' AHEAD_TF charts (TOP_MAX), the one whose newest bars held are oldest, once they are AHEAD_MS old (or none is
      * held), is read in GeckoTerminal's "ahead" lane: its top pool when none is held, else its bars. At most one call;
      * refused by the budget, nothing is read. Returns the key read, or null.
      */
@@ -799,11 +809,10 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       if (aheadBusy) return null;
       aheadBusy = true;
       try {
-        const top = await topTrending();
-        if (top !== null) hot.set(`${top}:${AHEAD_TF}`, now());
         const t = now();
-        const [k] = hot
-          .entries()
+        // the callers' charts, and the Trending ones as the lists stand now, each once
+        const asked = new Map<string, number>([...hot.entries(), ...(await topTrending()).map((m): [string, number] => [`${m}:${AHEAD_TF}`, t])]);
+        const [k] = [...asked]
           // a token GeckoTerminal names no pool for is left to its callers' reads
           .filter(([key, readAt]) => t - readAt <= HOT_MS && t - lastAhead(key) >= AHEAD_MS && (pools.peek(key.split(":")[0]!)?.status ?? 200) === 200)
           .sort(([a], [b]) => lastAhead(a) - lastAhead(b))[0] ?? [];
