@@ -270,9 +270,9 @@ test("a provider's 429 holds that chain until the reset it named (at most RETRY_
   // a reset past RETRY_AFTER_MAX_S is held to it (75 s), a missing one is 1 s
   next = { status: 429, type: JSON_T, body: () => "{}", headers: { "retry-after": "3600" } };
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "c")).headers?.["Retry-After"], String(RETRY_AFTER_MAX_S));
-  t += RETRY_AFTER_MAX_S * 1000;
+  // (on NEAR: a keyed Solana provider's 429 past its reset is its fall to the public endpoint, card helper-solana-failover)
   next = { status: 429, type: JSON_T, body: () => "{}" };
-  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "c")).headers?.["Retry-After"], "1");
+  assert.equal((await r.handle("near", JSON_T, JSON.stringify({ ...ok, method: "block" }), "c")).headers?.["Retry-After"], "1");
 });
 
 // a provider in memory that keeps its own published limit: past `limit` calls a window it answers 429 (Retry-After 10)

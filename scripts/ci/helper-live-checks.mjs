@@ -24,6 +24,7 @@ export const LIVE_CHECKS = [
   "index-sol-trades",
   "relayer-withdraw-send",
   "relayer-withdraw-fee",
+  "helper-solana-failover",
 ];
 
 // `{commit}` is the deployed commit

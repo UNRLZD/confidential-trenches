@@ -43,6 +43,7 @@ import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender }
 import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
 import { clientOf, clientWindow, throttled, throttleOf } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
+import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { readWarm, writeWarm, type Warm } from "./data/warm.ts";
 import { TICK_MS } from "./data/evm/lists.ts";
 import * as nodeFs from "node:fs";
@@ -195,6 +196,8 @@ export function handler(
   evmSwaps: Swaps = {},
   ready: () => boolean = () => true,
   senders: Promise<unknown> = Promise.resolve(),
+  // card helper-solana-failover: each Solana slot keyed, fallback or public (rpc/slot.ts), for /v1/health
+  solana: () => Partial<Record<SlotName, SlotState>> = () => ({ rpc: rpc.slot.state() }),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // GET /v1/token-status serves each network's token from that network's own watch
@@ -242,7 +245,7 @@ export function handler(
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit, SERVED, release, ready()), cors(req));
+        return send(200, health(commit, SERVED, release, ready(), solana()), cors(req));
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
@@ -503,13 +506,13 @@ export function handler(
  * from the share of the caller whose request made it, and holders on SOLANA_HOLDERS_RPC_URL when set
  * (src/data/solana/token.ts).
  */
-export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc, gecko?: GeckoBudget): Token {
+export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc, gecko?: GeckoBudget, slots?: Map<SlotName, Slot>): Token {
   const holders = env.SOLANA_HOLDERS_RPC_URL;
-  return createSolanaToken(proxy, rpc, {
-    gecko,
-    listed: lists.get,
-    holdersRpc: holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }),
-  });
+  // card helper-solana-failover: the holders key's slot has no public fallback (the public endpoint refuses
+  // getTokenLargestAccounts, rpc/rpc.ts Deps): fallen back, its reads answer 503 at once and the page serves Jupiter's
+  const holdersRpc = holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false });
+  if (holdersRpc !== undefined) slots?.set("holders", holdersRpc.slot);
+  return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc });
 }
 
 /**
@@ -546,11 +549,17 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
  * the bars before our first from the token page's GeckoTerminal candles. The stream is SOLANA_STREAM_WS_URL when set (a
  * keyed provider's websocket), else the public one; requests go to SOLANA_TRADES_RPC_URL first when set.
  */
-export function solanaTradesFromEnv(env: Record<string, string | undefined>, lists: Lists, token: Token, rpc?: Rpc): SolanaTrades {
+export function solanaTradesFromEnv(env: Record<string, string | undefined>, lists: Lists, token: Token, rpc?: Rpc, slots?: Map<SlotName, Slot>): SolanaTrades {
   const ws = env.SOLANA_STREAM_WS_URL;
   const url = env.SOLANA_TRADES_RPC_URL;
   let seen: { asOfMs: number; tokens: Set<string> } | null = null;
+  // card helper-solana-failover: the keyed trades provider and stream each fall back to the public one (rpc/slot.ts)
+  const slot = createSlot("trades", url !== undefined && url !== "");
+  const streamSlot = createSlot("stream", ws !== undefined && ws !== "");
+  slots?.set("trades", slot).set("stream", streamSlot);
   return createSolanaTrades({
+    slot,
+    streamSlot,
     wsUrl: ws === undefined || ws === "" ? undefined : ws,
     rpcs: url === undefined || url === "" ? TRADES_RPCS : [url, ...TRADES_RPCS],
     history: (mint, tf, to, limit) => token.candles(mint, tf, to, limit),
@@ -669,12 +678,12 @@ export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promis
   }
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve()): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools, undefined, undefined, evmLists, evmSwaps, ready, senders),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools, undefined, undefined, evmLists, evmSwaps, ready, senders, solana),
   );
   server.listen(port);
   // the relayers start once this process holds the senders (sendersFromEnv): a restart resends their open sends and
@@ -758,7 +767,9 @@ if (import.meta.main) {
       }
     } else if (senders.peer) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => Date.now()));
     saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])) }));
-    const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko);
+    // card helper-solana-failover: every Solana slot's state, for /v1/health
+    const slots = new Map<SlotName, Slot>([["rpc", rpc.slot]]);
+    const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko, slots);
     const watches = tokenWatchesFromEnv(process.env);
     const fee = senders.fee;
     // each network's carry is held by its own watch only
@@ -768,7 +779,7 @@ if (import.meta.main) {
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
     const pools = solanaPoolSendersFromEnv(process.env);
     for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token, rpc) };
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();
@@ -778,7 +789,7 @@ if (import.meta.main) {
     let ready = false;
     const warmed = warmUntilReady({ lists, evmLists, token }).then(() => void (ready = true));
     const listen = () => {
-      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held); // warms both relayers once the senders are ours
+      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()]))); // warms both relayers once the senders are ours
       drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready ? "" : ", warming"}`));
     };
