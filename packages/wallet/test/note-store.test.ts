@@ -75,7 +75,13 @@ test("every state, and every edge: the legal ones move, every other is refused w
       const n = await noteIn(t.ns, from);
       const raw = await rawNote(t.idb, n.id);
       const puts = t.puts();
-      if ((NOTE_EDGES[from] as readonly NoteState[]).includes(to)) {
+      if (from === "INCOMING" && to === "PLANNED") {
+        // an edge for a sell's deposit only (a return note or an R second arrival): a deposit note is refused, unwritten
+        assert.ok((NOTE_EDGES[from] as readonly NoteState[]).includes(to));
+        await assert.rejects(t.ns.move(n.id, from, to, fieldsFor(from, to, n)), /only a sell's deposit/);
+        assert.equal(t.puts(), puts, `${from}>${to} wrote`);
+        assert.deepEqual(await rawNote(t.idb, n.id), raw);
+      } else if ((NOTE_EDGES[from] as readonly NoteState[]).includes(to)) {
         const m = await t.ns.move(n.id, from, to, fieldsFor(from, to, n));
         assert.equal((await t.ns.get(n.id))?.state, to);
         assert.equal(t.puts(), puts + 1, "one write per move");
@@ -457,6 +463,34 @@ test("pool sends (card signpage-pool-notes): the first with PLANNED -> INCOMING,
   assert.equal((await t.ns.move(sInc.id, "INCOMING", "TAKEN")).state, "TAKEN");
   const r1: NoteRef = { kind: "second", id, n: 1 };
   assert.equal((await t.ns.add({ ref: r1, scope: 951n, precommitment: pc(r1), state: "PLANNED" })).state, "PLANNED");
+});
+
+test("a sell's deposit (card signpage-pool-sell): a return note and its R arrivals go INCOMING with W's send, and one that never landed goes back to PLANNED, its send dropped, to be sent again at another value; a deposit note never does", async () => {
+  const t = await tab();
+  const S = (k: number, value: bigint) => ({ signature: "1".repeat(63) + String(k), value, last_valid_block_height: 100n + BigInt(k) });
+  const r: NoteRef = { kind: "return", c: "sol", l: 9n, j: 1 };
+  const ret = await t.ns.add({ ref: r, scope: 961n, precommitment: pc(r), state: "PLANNED" });
+  const inc = await t.ns.move(ret.id, "PLANNED", "INCOMING", { send: S(1, 7_000_000n) });
+  assert.deepEqual(inc.sends, [S(1, 7_000_000n)]);
+  // never landed: planned again, the send gone from the record as stored
+  const again = await t.ns.move(ret.id, "INCOMING", "PLANNED");
+  assert.equal(again.state, "PLANNED");
+  assert.equal(again.sends, undefined);
+  assert.equal((await t.ns.get(ret.id))!.sends, undefined);
+  // the next sell's send, at its own value, then it lands
+  const inc2 = await t.ns.move(ret.id, "PLANNED", "INCOMING", { send: S(2, 6_500_000n) });
+  assert.deepEqual(inc2.sends, [S(2, 6_500_000n)]);
+  const landed = await t.ns.move(ret.id, "INCOMING", "UNSPENT", { leaf: leafOf(pc(r)) });
+  assert.equal(landed.state, "UNSPENT");
+  // its R arrival takes the same edge; a deposit note and a U arrival never do
+  const r0: NoteRef = { kind: "second", id: { id: "R", c: "sol", l: 9n, j: 1 }, n: 0 };
+  const sec = await t.ns.add({ ref: r0, scope: 961n, precommitment: pc(r0), state: "PLANNED" });
+  await t.ns.move(sec.id, "PLANNED", "INCOMING", { send: S(3, 1n) });
+  assert.equal((await t.ns.move(sec.id, "INCOMING", "PLANNED")).state, "PLANNED");
+  const d = await t.ns.planDeposit(962n, pc);
+  await t.ns.move(d.id, "PLANNED", "INCOMING", { send: S(4, 1n) });
+  await assert.rejects(t.ns.move(d.id, "INCOMING", "PLANNED"), /only a sell's deposit/);
+  assert.equal((await t.ns.get(d.id))!.state, "INCOMING");
 });
 
 test("F5: a precommitmentOf that throws burns no index", async () => {
