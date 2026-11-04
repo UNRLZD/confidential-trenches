@@ -195,8 +195,10 @@ test("the route sells the token for the chain's WETH, through listed middles onl
   assert.equal(c(v3([X, B.weth], [1.5])), "bad_route");
   assert.equal(c(v3([X, B.weth], [500, 500])), "bad_route");
   assert.equal(c(v3([X, "0xnot", B.weth])), "bad_route");
-  assert.equal(c({ venue: "uniswap-v4", currencyIn: X, hops: [] }), "bad_route");
-  assert.equal(c({ venue: "uniswap-v4", tokens: [X, B.weth], fees: [500] }), "bad_route"); // v3's shape, v4's name
+  // a v4 route goes only to the PoolManager: through the v3 router it is refused at the target (card evm-sell-v4-kit)
+  assert.equal(c({ venue: "uniswap-v4", currencyIn: X, hops: [] }), "bad_target");
+  assert.equal(c({ venue: "uniswap-v4", currencyIn: X, hops: [] }, { target: B.poolManager! }), "bad_route");
+  assert.equal(c({ venue: "uniswap-v4", tokens: [X, B.weth], fees: [500] }, { target: B.poolManager! }), "bad_route"); // v3's shape, v4's name
   assert.equal(c(null), "bad_route");
   assert.equal(c({ venue: "uniswap-v3", tokens: { length: 2, 0: X, 1: B.weth }, fees: [500] }), "bad_route");
   assert.equal(c(v3([X, B.weth]), { token: B.weth }), "bad_route"); // selling WETH itself
@@ -441,4 +443,75 @@ test("M370 a polluted Object.prototype names no pool and no delegate: every sell
     }
   });
   assert.equal(({} as Record<string, unknown>).pool, undefined, "the prototype is emptied again");
+});
+
+// A v4 sell (card evm-sell-v4-kit): SellDelegate's data, abi.encode(PathKey[]), against cast (evm-pool-sell-v4.cast.json),
+// sent only to the chain's pinned PoolManager; a hook only on a launchpad pool the venue lists, with that pool's own key.
+const V4CAST = JSON.parse(readFileSync(new URL("./evm-pool-sell-v4.cast.json", import.meta.url), "utf8"));
+const NATIVE = "0x0000000000000000000000000000000000000000";
+const CLANKER = B.hookedPools!.find((p) => p.pad === "clanker")!;
+const hop = (currency: string, o: Partial<{ fee: number; tickSpacing: number; hooks: string; hookData: string }> = {}) => ({ currency, fee: 10000, tickSpacing: 200, hooks: NATIVE, hookData: "0x", ...o });
+const v4 = (...hops: ReturnType<typeof hop>[]) => ({ venue: "uniswap-v4" as const, hops });
+const sellV4 = (route: unknown, o: Partial<EvmPoolSellRequest> = {}, chain: EvmPoolChain = "base") =>
+  evmPoolBuildSell(chain, req({ target: evmPoolVenues()[chain].poolManager!, route: route as EvmV3Route, ...o }));
+
+test("a v4 sell's data is SellDelegate's PathKey[] as cast encodes it, from the token to the native asset or WETH", () => {
+  assert.equal(sellV4(v4(hop(NATIVE))).data, V4CAST.oneHopNative);
+  const clanker = hop(B.weth, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks, hookData: "0x1234" });
+  assert.equal(sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), clanker)).data, V4CAST.usdcThenClanker);
+  const built = sellV4(v4(hop(NATIVE)), {}, "robinhood-testnet");
+  assert.equal(built.target, evmPoolVenues()["robinhood-testnet"].poolManager);
+  assert.ok(Object.isFrozen(built));
+});
+
+test("planted: a v4 sell through another target, to a wrong pool key, or through a hook not on a listed pool is refused", () => {
+  const c = (route: unknown, o: Partial<EvmPoolSellRequest> = {}, chain: EvmPoolChain = "base") => code(() => sellV4(route, o, chain));
+  // the testnets' pinned PoolManagers are pool-evm-deploy's (scripts/live-checks/pool-evm-deploy.mjs CHAINS, each code
+  // hash pinned there), the ones SellDelegate's POOL_MANAGER() returns (scripts/live-checks/evm-sell-v4.mjs)
+  assert.equal(evmPoolVenues()["base-sepolia"].poolManager, "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408");
+  assert.equal(evmPoolVenues()["robinhood-testnet"].poolManager, "0x8366a39cc670b4001a1121b8f6a443a643e40951");
+  assert.equal(c(v4(hop(NATIVE)), {}, "base-sepolia"), "built");
+  assert.equal(c(v4(hop(NATIVE)), { target: evmPoolVenues()["base-sepolia"].poolManager! }, "robinhood-testnet"), "bad_target");
+  // a route through a target that is not the pinned PoolManager: the router, another chain's PoolManager, any address
+  assert.equal(c(v4(hop(NATIVE)), { target: B.routers[0]! }), "bad_target");
+  assert.equal(c(v4(hop(NATIVE)), { target: R.poolManager! }), "bad_target");
+  assert.equal(c(v4(hop(NATIVE)), { target: Y }), "bad_target");
+  // and a v3 route sent to the PoolManager
+  assert.equal(c(v3([X, B.weth])), "bad_target");
+  // a hook not on a listed pool: an unlisted hook, the listed hook paired with the other asset
+  assert.equal(c(v4(hop(B.weth, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: Y }))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks }))), "bad_route");
+  // a wrong pool key: the listed hook with another fee or tick spacing
+  assert.equal(c(v4(hop(B.weth, { fee: 10000, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks }))), "bad_route");
+  assert.equal(c(v4(hop(B.weth, { fee: CLANKER.fee, tickSpacing: 60, hooks: CLANKER.hooks }))), "bad_route");
+  assert.equal(c(v4(hop(B.weth, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks }))), "built");
+  // a chain whose venue lists no hooked pool takes a hookless route only
+  assert.equal(c(v4(hop(NATIVE, { hooks: CLANKER.hooks })), {}, "robinhood-testnet"), "bad_route");
+  // the path: it ends at the native asset or WETH and only there, its middles listed, no hop buying what it spends
+  assert.equal(c(v4(hop(USDC, { fee: 500, tickSpacing: 10 }))), "bad_route");
+  assert.equal(c(v4(hop(B.weth), hop(NATIVE))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE), hop(B.weth))), "bad_route");
+  assert.equal(c(v4(hop(Y), hop(NATIVE))), "middle_not_listed");
+  assert.equal(c(v4(hop(X))), "bad_route");
+  assert.equal(c(v4(hop(USDC), hop(USDC), hop(NATIVE))), "bad_route");
+  assert.equal(c(v4()), "bad_route");
+  assert.equal(c(v4(hop(USDC), hop(USDC), hop(USDC), hop(USDC), hop(NATIVE))), "bad_route");
+  assert.equal(c({ venue: "uniswap-v4", hops: "0x" }), "bad_route");
+  // each field's bounds
+  assert.equal(c(v4(hop(NATIVE, { fee: 0x1000000 }))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE, { fee: -1 }))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE, { tickSpacing: 0 }))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE, { tickSpacing: 32768 }))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE, { tickSpacing: 1 }))), "built");
+  assert.equal(c(v4(hop(NATIVE, { tickSpacing: 32767 }))), "built");
+  assert.equal(c(v4(hop("0xnot"))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE, { hooks: "0x12" }))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE, { hookData: "0x00" }))), "bad_route"); // hook data with no hook
+  assert.equal(c(v4(hop(NATIVE, { hookData: "1234" }))), "bad_route");
+  const listed = { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks };
+  assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0x" + "ab".repeat(1024) }))), "built");
+  assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0x" + "ab".repeat(1025) }))), "bad_route");
+  assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0xabc" }))), "bad_route");
+  // the token sold is the route's start: a route from another token is no route of this sell
+  assert.equal(c(v4(hop(NATIVE)), { token: B.weth }), "bad_route");
 });

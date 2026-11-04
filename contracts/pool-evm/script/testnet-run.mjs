@@ -9,8 +9,10 @@
 //     [--rpc <url>,<url>] [--out <file>]
 //
 // What runs, and whose code:
-//  - The pins: the kit's evmPoolVenues() (the pool, the adapters, the sell delegate, the router, WETH). The kit's
-//    pinned builders and signers only: evmPoolBuild and evmPoolSignBuy, evmPoolBuildSell, evmPoolSignSell and
+//  - The pins: the kit's evmPoolVenues() (the pool, the adapters, the sell delegate, the router, the v4 PoolManager,
+//    WETH). The kit's pinned builders and signers only: the buy's pinnedBuild and pinnedSignBuy (buy-unpinned.ts, the
+//    pinned checks under the index's evmPoolBuildQuoted and evmPoolSignBuy: the index builds a buy only from a device
+//    quote, and the device quote pins no testnet provider yet, card evm-sell-device-quote), evmPoolBuildSell, evmPoolSignSell and
 //    evmPoolSignSellAuthorization, poolProveWithdraw (snarkjs in this process, the setup files checked by sha256
 //    against ZK_SETUP_FILES). The wallet's own evmTreeSync (trees on two RPCs, the pool's views and root times) and
 //    evmPool's bind (the context, the epoch's fee read on two RPCs), noteSecrets and freshWallet from the run's words,
@@ -45,6 +47,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(HERE, "../../..");
 const imp = (p) => import(pathToFileURL(path.join(REPO, p)).href);
 const kit = await imp("packages/kit/src/index.ts");
+const { pinnedBuild, pinnedSignBuy } = await imp("packages/kit/src/trade/evm/buy-unpinned.ts");
 const { evmPool, evmTreeSync, evmNow, evmRelayDataBytes, evmPoolScopeOf, evmEpochBlock, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_CHAIN_IDS } = await imp("packages/wallet/src/pool/evm.ts");
 const { evmRestoreNotes } = await imp("packages/wallet/src/pool/evm-restore.ts");
 const { noteSecrets } = await imp("packages/wallet/src/notes/secrets.ts");
@@ -78,7 +81,8 @@ export const NETS = Object.freeze({
   // addresses developers.uniswap.org lists for Robinhood mainnet (4663), with mainnet's code hashes, and
   // V4Quoter.poolManager() is the pinned PoolManager 0x8366a39c...; the token is tSPILL (18 decimals), whose native ETH
   // pool (fee 10000, tick spacing 200, no hook, id 0x601b493e...) is the deepest hookless one the PoolManager's
-  // Initialize logs name. No v3 and no router there (M365), so the run buys and sells nothing back. The Transfer reads
+  // Initialize logs name. No v3 and no router there (M365), so the run buys and sells through v4 only, the sell through
+  // the pinned PoolManager (card evm-sell-v4-kit). The Transfer reads
   // go to thirdweb's and dRPC's public gateways (chainid.network, chain 46630), neither a pool provider.
   "robinhood-testnet": Object.freeze({
     rpcs: ["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"],
@@ -178,6 +182,7 @@ export async function main(args, io = {}) {
     if ((await call("eth_getCode", [ret, "latest"], u)) !== "0x") throw new Error(`--return ${ret} has code on ${u}`);
   }
   const pool = lower(venue.pool), weth = lower(venue.weth), router = venue.routers[0] ? lower(venue.routers[0]) : null, token = net.coin;
+  const poolManager = venue.poolManager ? lower(venue.poolManager) : null;
   const adapters = { v4: lower(venue.adapters.v4), v3: lower(venue.adapters.v3 ?? ZERO) };
   for (const v of venues) if (adapters[v] === ZERO) throw new Error(`${chain} has no pinned ${v} adapter`);
   for (const v of venues) if (!net[v]) throw new Error(`${chain} has no ${v} pool or quoter in NETS`);
@@ -269,7 +274,7 @@ export async function main(args, io = {}) {
 
   // the run's notes: { ref, value, label, commitment, block, spent }
   const notes = [];
-  const bought = []; // { l, j, w, out }
+  const bought = []; // { l, j, w, out, v }
   const wallets = new Set(); // Ws a withdraw paid, swept at the end
 
   /** The trees once the pool's agreed time is past `block`'s, so the cut holds that block's leaves. */
@@ -310,14 +315,14 @@ export async function main(args, io = {}) {
           ? { venue: "uniswap-v4", currencyIn: ZERO, hops: [{ currency: token, fee: net.v4.fee, tickSpacing: net.v4.tickSpacing, hooks: net.v4.hooks, hookData: "0x" }] }
           : { venue: "uniswap-v3", tokens: [weth, token], fees: [net.v3.fee] };
         const q = await quote(v, withdrawn - fee, true);
-        const built = kit.evmPoolBuild(chain, adapters[v], route, lessSlippage(q), token);
-        const sig = kit.evmPoolSignBuy(W.secretKey, chain, pool, built, { nullifier, context: b.context, value: withdrawn });
+        const built = pinnedBuild(kit.evmPoolVenues(), chain, adapters[v], route, lessSlippage(q), token);
+        const sig = pinnedSignBuy(kit.evmPoolVenues(), W.secretKey, chain, pool, built, { nullifier, context: b.context, value: withdrawn });
         step = `buy through ${v}`;
         r = await send(step, { to: pool, data: buyData(pool, relay, proof, fee, built, sig) }, { kind: "buy", venue: v, w: lower(W.address), nullifier: String(nullifier), minOut: String(built.minOut), coin: token });
         const ev = poolLog(r, T.Bought);
         if (!ev) throw new Error(`${step}: no Bought event`);
         const d = words(ev.data);
-        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref });
+        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref, v });
         Object.assign(steps.at(-1), { out: String(d[6]), newCommitment: String(d[4]), value: String(withdrawn), fee: String(fee) });
       } else {
         const sig = sign65(withdrawDigest(chainId, pool, nullifier, b.context, withdrawn), W.secretKey);
@@ -335,7 +340,7 @@ export async function main(args, io = {}) {
     }
   };
 
-  /** The chain's quoter: what `amountIn` buys (buy: ETH -> token) or sells for (token -> WETH) on venue `v`. */
+  /** The chain's quoter: what `amountIn` buys (buy: ETH -> token) or sells for (token -> ETH on v4, WETH on v3) on venue `v`. */
   const quote = async (v, amountIn, buying) => {
     const data = v === "v4"
       ? v4QuoteData({ currency0: ZERO, currency1: token, fee: net.v4.fee, tickSpacing: net.v4.tickSpacing, hooks: net.v4.hooks }, ZERO < token && buying, amountIn)
@@ -345,21 +350,27 @@ export async function main(args, io = {}) {
     return out;
   };
 
-  /** W's sell of all its token through the router into the pool, as the return note (evm, l, j). */
+  /** W's sell of all its token back into the pool, as the return note (evm, l, j), on the venue W bought through: a
+   *  v4 W through the pinned PoolManager (the token's native ETH pool, one hop, ending at native ETH), a v3 W through
+   *  the pinned router (the token's WETH pool). */
   const sellOf = async (b) => {
     const W = freshWallet(seed64, "evm", b.l, b.j);
     try {
       const amount = BigInt(await call("eth_call", [{ to: token, data: balanceOfData(W.address) }, "latest"]));
-      const q = await quote("v3", amount, false);
+      const q = await quote(b.v, amount, false);
+      const how = b.v === "v4"
+        ? { target: poolManager, route: { venue: "uniswap-v4", hops: [{ currency: ZERO, fee: net.v4.fee, tickSpacing: net.v4.tickSpacing, hooks: net.v4.hooks, hookData: "0x" }] } }
+        : { target: router, route: { venue: "uniswap-v3", tokens: [token, weth], fees: [net.v3.fee] } };
+      if (!how.target) throw new Error(`sell: ${chain} pins no ${b.v === "v4" ? "PoolManager" : "router"} for a ${b.v} sell`);
       // the sender's fee for a sell: the fee step at least (the kit refuses a fee cap of 0)
       const f0 = epochFee({ baseFeePerGas: BigInt((await call("eth_getBlockByNumber", ["latest", false])).baseFeePerGas), depth: 0 });
       const fee = f0 > FEE_STEP ? f0 : FEE_STEP;
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
-      const built = kit.evmPoolBuildSell(chain, { w: W.address, token, amount, target: router, route: { venue: "uniswap-v3", tokens: [token, weth], fees: [net.v3.fee] }, minOut: lessSlippage(q), precommitment: noteSecrets(seed64, ref).precommitment, feeCap: fee, deadline, nonce: 0n });
+      const built = kit.evmPoolBuildSell(chain, { w: W.address, token, amount, ...how, minOut: lessSlippage(q), precommitment: noteSecrets(seed64, ref).precommitment, feeCap: fee, deadline, nonce: 0n });
       const sig = kit.evmPoolSignSell(W.secretKey, chain, built);
       const auth = kit.evmPoolSignSellAuthorization(W.secretKey, chain, BigInt(await call("eth_getTransactionCount", [W.address, "latest"])));
-      const r = await send("sell through SellDelegate", { to: lower(W.address), data: sellData(built, fee, sig), authorizations: [auth] }, { kind: "sell", w: lower(W.address), amount: String(amount), minOut: String(built.minOut), fee: String(fee), coin: token });
+      const r = await send("sell through SellDelegate", { to: lower(W.address), data: sellData(built, fee, sig), authorizations: [auth] }, { kind: "sell", venue: b.v, target: how.target, w: lower(W.address), amount: String(amount), minOut: String(built.minOut), fee: String(fee), coin: token });
       const ev = poolLog(r, T.Deposited);
       if (!ev || lower(`0x${ev.topics[1].slice(26)}`) !== lower(W.address)) throw new Error("sell: no Deposited event from W");
       const d = words(ev.data);
@@ -426,10 +437,8 @@ export async function main(args, io = {}) {
       go();
       await release(notes.findLast((n) => !n.spent && n.ref.kind !== "return"), CHUNK, v);
     }
-    // 5. each W sells what it bought back into the pool; a chain with no pinned router builds no sell (the kit's
-    // evmPoolBuildSell names a router), so its Ws keep what they bought
-    if (!router) console.log(`run: no sell on ${chain}: the kit pins no router there, so each W keeps what it bought`);
-    else for (const b of bought) {
+    // 5. each W sells what it bought back into the pool, on the venue it bought through
+    for (const b of bought) {
       go();
       await sellOf(b);
     }
