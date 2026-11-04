@@ -12,7 +12,7 @@ import { createProxy } from "../../proxy/proxy.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
-  CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
+  CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, LAUNCH_WAIT_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
 } from "./token.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
@@ -190,6 +190,7 @@ test("page: an upstream down answers 503; the last good page serves up to 60 s, 
   down = true;
   now += 10_000;
   assert.equal((await t.page(PUMP)).status, 200, "stale but under 60 s");
+  await new Promise((ok) => setTimeout(ok, 10)); // the one refresh that answer started runs out (card helper-token-page-fast)
   now += 60_000;
   assert.equal((await t.page(PUMP)).status, 503);
   const cold = createSolanaToken(fakeProxy({ down: true }), fakeRpc(), { now: () => NOW });
@@ -262,6 +263,119 @@ test("page: one search failing fails every mint in it with 503, and the next sea
   down = false;
   now += 5_000;
   assert.equal((await tok.page(PUMP)).status, 200);
+});
+
+/** A promise and the hand that settles it. */
+function deferred<T>() {
+  let ok!: (v: T) => void;
+  const p = new Promise<T>((r) => (ok = r));
+  return { p, ok };
+}
+/** `p` within `ms` of wall time, or "late". */
+const within = <T>(ms: number, p: Promise<T>) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([p, new Promise<"late">((ok) => (timer = setTimeout(() => ok("late"), ms)))]).finally(() => clearTimeout(timer));
+};
+
+test("card helper-token-page-fast: an RPC that never answers the launch read: the page is 200 within the box, launch null; the launch fills from origin.ts on the next read with no read of its own", async () => {
+  const inner = fakeRpc();
+  const held: { body: string; d: ReturnType<typeof deferred<{ status: number; body: string }>> }[] = [];
+  const rpc = {
+    calls: inner.calls,
+    handle(c: string, ct: string | undefined, body: string) {
+      const r = JSON.parse(body) as RpcCall;
+      if ((r.params[1] as { encoding?: string }).encoding !== "base64") return inner.handle(c, ct, body);
+      inner.calls.push(r);
+      const d = deferred<{ status: number; body: string }>();
+      held.push({ body, d });
+      return d.p; // the launch read hangs until the test lets it answer
+    },
+  };
+  const t = createSolanaToken(fakeProxy(), rpc, { now: () => NOW });
+  const started = Date.now();
+  const a = await within(LAUNCH_WAIT_MS + 700, t.page(CURVE));
+  assert.notEqual(a, "late", "the page waited on the launch read");
+  if (a === "late") return;
+  assert.equal(a.status, 200);
+  assert.ok(Date.now() - started < 1_000, `${Date.now() - started} ms`);
+  const p = JSON.parse(a.body);
+  assert.equal(p.row.launchpad, null, "not read yet: null, never Jupiter's tag alone");
+  assert.equal(p.decimals, 6);
+  assert.equal(held.length, 1, "one launch read");
+  // a second read while the launch is still out: served at once, no second launch read
+  assert.equal((await t.page(CURVE)).status, 200);
+  assert.equal(held.length, 1);
+  // the launch read answers late: origin.ts keeps it and the next page read shows it with no read of its own
+  for (const h of held) h.d.ok(await inner.handle("solana", undefined, h.body));
+  await new Promise((ok) => setImmediate(ok));
+  const before = inner.calls.length;
+  const q = JSON.parse((await t.page(CURVE)).body);
+  assert.equal(q.row.launchpad, "pump.fun");
+  assert.ok(Number.isInteger(q.row.curve_bps) && q.row.curve_bps > 0 && q.row.curve_bps < 10_000, String(q.row.curve_bps));
+  assert.equal(inner.calls.length, before, "the launch came from origin.ts's own record");
+});
+
+test("card helper-token-page-fast: a refresh past 5 s on a slow upstream answers the last good page at once while one refresh runs; the next read has the refresh", async () => {
+  let now = NOW;
+  const inner = fakeRpc();
+  let hold: ReturnType<typeof deferred<void>> | null = null;
+  const rpc = {
+    calls: inner.calls,
+    async handle(c: string, ct: string | undefined, body: string) {
+      if (hold !== null) await hold.p;
+      return inner.handle(c, ct, body);
+    },
+  };
+  const t = createSolanaToken(fakeProxy(), rpc, { now: () => now });
+  const first = await t.page(PUMP);
+  assert.equal(first.status, 200);
+  now += 6_000; // past PAGE_FRESH_MS, the data still under STALE_MS old
+  hold = deferred<void>();
+  const a = await within(200, t.page(PUMP));
+  assert.notEqual(a, "late", "the caller waited on a slow refresh");
+  if (a === "late") return;
+  assert.equal(a.status, 200);
+  assert.equal(a.body, first.body);
+  const calls = inner.calls.length;
+  assert.equal((await within(200, t.page(PUMP))) === "late", false, "a second caller joins, no second refresh");
+  hold.ok();
+  hold = null;
+  await new Promise((ok) => setImmediate(ok));
+  await new Promise((ok) => setImmediate(ok));
+  const mintReads = () => inner.calls.filter((c) => c.method === "getMultipleAccounts" && (c.params[1] as { encoding?: string }).encoding === "jsonParsed").length;
+  assert.equal(mintReads(), 2, "the first read's and the one refresh's");
+  const b = await t.page(PUMP);
+  assert.equal(b.status, 200);
+  assert.equal(mintReads(), 2, "the refresh is fresh: no read of its own");
+  assert.ok(inner.calls.length >= calls);
+  // past STALE_MS nothing stale is served: the caller waits for the read
+  now += 120_000;
+  hold = deferred<void>();
+  assert.equal(await within(200, t.page(PUMP)), "late");
+  hold.ok();
+  hold = null;
+});
+
+test("card helper-token-page-fast: USDC's mint answers 200; the address the probe asked (EPjFWdd5...1xyybap, one letter off USDC's 1xzybap) has no account on chain and answers 404 at the mint read", async () => {
+  // recorded 4 Nov 10:10Z: Jupiter's search row for USDC (trimmed) and its mint account at slot 465263356
+  const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  const TYPO = "EPjFWdd5AufqSSqeM2qN1xyybapC8G4wEGGkZwyTDt1v";
+  const row = { id: USDC, name: "USD Coin", symbol: "USDC", decimals: 6, createdAt: "2024-06-05T08:55:25.527Z", firstPool: { id: "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2", createdAt: "2021-03-29T10:05:48Z" }, holderCount: 5248202, usdPrice: 0.9993959451717103, mcap: 8571486540.729525, liquidity: 391117152.3425245, mintAuthority: "BJE5MMbqXjVwjAF7oxwPYXnTXDyspzZyt4vwenNw5ruG", freezeAuthority: "7dGbd2QZcCKcTndnHcTL8q7SMVXAkp688NTQYwrRCrar", tokenProgram: TOKEN_PROGRAM };
+  const acct = { data: { parsed: { info: { decimals: 6, freezeAuthority: "7dGbd2QZcCKcTndnHcTL8q7SMVXAkp688NTQYwrRCrar", isInitialized: true, mintAuthority: "BJE5MMbqXjVwjAF7oxwPYXnTXDyspzZyt4vwenNw5ruG", supply: "8576667304253146" }, type: "mint" }, program: "spl-token", space: 82 }, executable: false, lamports: 558731628506, owner: TOKEN_PROGRAM };
+  const proxy = fakeProxy({ search: (m) => (m === USDC ? [row] : []) });
+  const rpc = fakeRpc({ accounts: (m) => ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 465263356 }, value: [m === USDC ? acct : null, null] } }) });
+  const t = createSolanaToken(proxy, rpc, { now: () => NOW });
+  const a = await t.page(USDC);
+  assert.equal(a.status, 200, a.body);
+  const p = JSON.parse(a.body);
+  assert.equal(p.row.symbol, "USDC");
+  assert.equal(p.decimals, 6);
+  assert.equal(p.row.mint_auth, true);
+  assert.equal(p.row.freeze_auth, true);
+  const searches = proxy.calls.length;
+  assert.equal((await t.page(TYPO)).status, 404);
+  assert.equal(proxy.calls.length, searches + 1, "the typo is read once and refused at the mint: no account");
+  assert.equal(JSON.parse((await t.page(TYPO)).body).error.code, "not_found");
 });
 
 test("toMint: decimals, supply, authorities and the Token-2022 fee in force at the slot's epoch; malformed is null", () => {

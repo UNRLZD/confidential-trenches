@@ -33,6 +33,11 @@ const SLOTS_PER_EPOCH = 432_000;
 export const STALE_MS = 60_000;
 /** TokenPage "cacheable 5 s" (06b); D-S6's per-token 12 s is the longer bound, and the page asks every 5 s. */
 export const PAGE_FRESH_MS = 5_000;
+/** The page waits at most this for the token's launch read (origin.ts) once its mint and row are in; a launch read past
+ *  it lands in origin.ts's record and the next page read takes it from there; until then the launch is null, never a
+ *  guess. [design: the public Solana RPC took 0.9-1.9 s a call from the helper's box (3 Nov 20:58Z), so a launch read,
+ *  one or two calls after the row, cannot fit a 1 s page; 300 ms takes one that answers fast.] */
+export const LAUNCH_WAIT_MS = 300;
 /** D-S11: per mint 60 s. */
 export const HOLDERS_FRESH_MS = 60_000;
 /** 06b: the OHLCV history is cached 60 s and shared; a token's top pool is kept 10 minutes. */
@@ -294,27 +299,32 @@ function bounded<V>(max: number) {
  *  data is under STALE_MS old; one read per key at a time. `client`, the caller whose request makes the read, draws
  *  its share of the provider's budget for it (card helper-abuse-limits); a hit or a call joining one in flight draws
  *  nothing. `read` answers null for "no such token" and throws for an
- *  upstream failure. */
-function cached(freshMs: number, now: () => number, read: (key: string, client?: string) => Promise<DataAnswer>) {
+ *  upstream failure. `opts.revalidate`: a good answer past `freshMs` whose data is under STALE_MS old is answered at
+ *  once while one refresh runs, so a caller never waits on a slow upstream for what it was just served. `opts.view`:
+ *  every kept answer as served (the token page fills a launch read since). */
+function cached(freshMs: number, now: () => number, read: (key: string, client?: string) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer } = {}) {
+  const view = (key: string, a: DataAnswer) => (opts.view === undefined ? a : opts.view(key, a));
   const last = bounded<{ a: DataAnswer; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<DataAnswer>>();
   return {
     size: last.size,
     get(key: string, client?: string): Promise<DataAnswer> {
       const hit = last.get(key);
-      if (hit !== undefined && now() - hit.at < freshMs) return Promise.resolve(hit.a);
+      if (hit !== undefined && now() - hit.at < freshMs) return Promise.resolve(view(key, hit.a));
+      const usable = opts.revalidate === true && hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS;
       let p = running.get(key);
       if (p === undefined) {
+        const started = now(); // fresh from when the read began, so a refresh answered in the background is never fresher than its data
         p = read(key, client)
           .then((a) => {
-            if (a.status === 200 || a.status === 404) last.set(key, { a, at: now() });
+            if (a.status === 200 || a.status === 404) last.set(key, { a, at: started });
             return a;
           })
           .catch((e) => (hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS ? hit.a : e instanceof Throttled ? limited(e.retryAfterS) : UPSTREAM))
           .finally(() => running.delete(key));
         running.set(key, p);
       }
-      return p;
+      return usable ? Promise.resolve(view(key, hit.a)) : p.then((a) => view(key, a));
     },
   };
 }
@@ -453,17 +463,37 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // each token's launch (origin.ts), kept as the lists keep theirs; every read is on the asking caller's share
   const origins = createOrigins(rpcAccounts(rpc, false));
 
+  // The launch: read once per token and its curve on each refresh, on the caller's share (origin.ts), one read per
+  // token at a time and never failing the page; the page waits for it at most LAUNCH_WAIT_MS. A page built before its
+  // launch was read is served with it once origin.ts holds it (`view`), with no read of its own.
+  const launching = new Map<string, Promise<void>>();
+  const launch = (mint: string, hint: Hint | undefined, createdS: unknown, client?: string): Promise<void> => {
+    let r = launching.get(mint);
+    if (r === undefined) {
+      r = origins
+        .refresh([{ mint, hint, createdS: Number.isSafeInteger(createdS) ? (createdS as number) : null }], now(), rpcAccounts(rpc, false, client))
+        .catch(() => undefined)
+        .finally(() => launching.delete(mint));
+      launching.set(mint, r);
+    }
+    return r;
+  };
+  const settled = async (mint: string, r: Promise<void>): Promise<Origin | null | undefined> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([r, new Promise<void>((ok) => (timer = setTimeout(ok, LAUNCH_WAIT_MS)))]);
+    clearTimeout(timer);
+    return origins.get(mint);
+  };
+  // each token's last page as built, `answer` as the cache keeps it and `filled` once its launch came in after
+  type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer };
+  const built = bounded<Built>(CACHE_MAX);
+  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt)), src: "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
+
   const page = cached(PAGE_FRESH_MS, now, async (mint, client) => {
     const listed = await listedRow(mint);
-    // the launch: read once per token, its curve each page read, on the caller's share (origin.ts)
-    const launch = (hint: Hint | undefined, createdS: unknown) =>
-      origins.refresh([{ mint, hint, createdS: Number.isSafeInteger(createdS) ? (createdS as number) : null }], now(), rpcAccounts(rpc, false, client)).then(() => origins.get(mint));
-    const [m, j, early] = await Promise.all([
-      mintAt(mint, client),
-      listed === null ? jupiter(mint) : null,
-      // a Discover row's launch is the lists'; this read finds its pool (the config Jupiter names is not in a row)
-      listed === null ? undefined : launch({ tag: listed.row.launchpad as string | null, config: null, graduated: null }, listed.row.created_s),
-    ]);
+    // a Discover row's launch is the lists'; this read finds its pool (the config Jupiter names is not in a row)
+    const early = listed === null ? null : launch(mint, { tag: listed.row.launchpad as string | null, config: null, graduated: null }, listed.row.created_s, client);
+    const [m, j] = await Promise.all([mintAt(mint, client), listed === null ? jupiter(mint) : null]);
     if (m.mint === null) return NOT_FOUND;
     let base: Row | null = listed?.row ?? null;
     let at = listed?.at ?? 0;
@@ -475,9 +505,25 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       pool = jupiterPool(j.row);
     }
     if (base === null || base.token !== mint) return NOT_FOUND;
-    const origin = j === null ? early : await launch(hintsOf([j.row]).get(mint), base.created_s);
-    const p = toPage(m.mint, base, pool, origin, listed !== null, m.at, at);
-    return { status: 200, body: JSON.stringify(p), src: "jupiter", asOfMs: Math.min(m.at, at) };
+    const origin = await settled(mint, early ?? launch(mint, hintsOf([j!.row]).get(mint), base.created_s, client));
+    const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin };
+    b.answer = pageOf(b);
+    built.set(mint, b);
+    return b.answer;
+  }, {
+    revalidate: true,
+    // a page built before its launch was read takes it from origin.ts once there
+    view: (mint, a) => {
+      const b = built.get(mint);
+      if (b === undefined || a !== b.answer) return a;
+      if (b.origin === undefined) {
+        const o = origins.get(mint);
+        if (o === undefined) return a;
+        b.origin = o;
+        b.filled = pageOf(b);
+      }
+      return b.filled ?? a;
+    },
   });
 
   const holders = cached(HOLDERS_FRESH_MS, now, async (mint, client) => {
