@@ -151,7 +151,15 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
         <span data-pending={pending || undefined} data-testid="sell-receive">{outC === null ? "—" : `≈ ${usd(outC)}`}</span>
       </div>
       <div className="trb-warn" data-testid="sell-line">
-        {s.phase.k === "ended" && <EndLine phase={s.phase} side="sell" part={s.part} />}
+        {s.phase.k === "ended" ? (
+          <EndLine phase={s.phase} side="sell" part={s.part} />
+        ) : (
+          s.pool && (
+            <span className="trb-toPool" data-testid="sell-to-pool">
+              <W id="toPool" />
+            </span>
+          )
+        )}
       </div>
       <button
         type="button"

@@ -5,7 +5,12 @@
 // with quote_check_failed at 300 ms, ?f=notsent with signpage_down and ?f=other with not_allowed; ?f=slow fills at 8 s,
 // ?f=notlanded ends not_landed at 3 s, ?f=partial ends part_filled with the kit's count 1 of 2 (?f=partial-nocount: none).
 // Every buy request is recorded in window.__calls. ?plant=set returns a set one cent off the amount (a planted fault
-// for the run). Test only.
+// for the run). ?pool= puts the chain's pool in the state (card trade-box-pool), from recorded runs: sol-ready and
+// sol-making the devnet pool's 0.01 SOL note (scripts/live-checks/signpage-pool-notes.run.json), with the most one tap can
+// spend by the kit's own rule (solanaPoolBuyMaxSpend at the worst venue, the 0.001 SOL tip cap, rent 5,080/1:
+// 1,736,080 lamports) and SOL at Pyth's 4 Nov 07:40Z read; base-ready the Base Sepolia pool's 0.001 ETH chunks
+// (scripts/live-checks/pool-evm-testnet-run.base-sepolia.json), ETH at a planted $3,500.12345678. ?amt= sets the
+// amount in the box. Test only.
 import type { SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -33,6 +38,18 @@ window.__calls = [];
 const q = new URLSearchParams(location.search);
 const f = q.get("f") ?? "ready";
 const plant = q.get("plant");
+const poolMode = q.get("pool");
+type Pool = NonNullable<SignpageState["pools"]>[number];
+const POOLS: Record<string, { chain: "solana" | "base"; pools: Pool[] }> = {
+  "sol-ready": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }] },
+  "sol-making": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0" }] },
+  "base-ready": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0.003", tap_max: "0.001" }] },
+};
+const POOL = poolMode ? POOLS[poolMode] : undefined;
+if (POOL) STATE.pools = POOL.pools;
+const PRICES = { solana: { price: 9_301_048_308n, expo: -8, decimals: 9 }, base: { price: 350_012_345_678n, expo: -8, decimals: 18 } };
+/** An EVM token's address for the Base runs (a shape only). */
+const EVM_TOKEN = "0x00000000000000000000000000000000000f1fe7";
 
 const listeners = new Set<(id: string, stage: Stage) => void>();
 let n = 0;
@@ -58,6 +75,7 @@ const kit: TradeKit = {
     return answer;
   },
   maxBuy: () => "100",
+  poolPrice: (chain) => (POOL && chain === POOL.chain ? PRICES[POOL.chain] : null),
   request: ((kind: string, params: unknown) => {
     const id = `buy-${++n}`;
     window.__calls.push({ kind, params, id });
@@ -99,7 +117,7 @@ function Page() {
   return (
     <TradeSourceProvider value={src}>
       <div className="trb-fx">
-        <TradeBox chain="solana" token={MINT} symbol="TORCH" initialAmount="25" />
+        <TradeBox chain={POOL?.chain ?? "solana"} token={POOL?.chain === "base" ? EVM_TOKEN : MINT} symbol="TORCH" initialAmount={q.get("amt") ?? "25"} />
       </div>
     </TradeSourceProvider>
   );

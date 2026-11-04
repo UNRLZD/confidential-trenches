@@ -10,11 +10,14 @@
 //
 // What runs, and whose code:
 //  - The pins: the kit's evmPoolVenues() (the pool, the adapters, the sell delegate, the router, the v4 PoolManager,
-//    WETH). The kit's pinned builders and signers only: the buy's pinnedBuild and pinnedSignBuy (buy-unpinned.ts, the
-//    pinned checks under the index's evmPoolBuildQuoted and evmPoolSignBuy: the index builds a buy only from a device
-//    quote, and the device quote pins no testnet provider yet, card evm-sell-device-quote), evmPoolBuildSell, evmPoolSignSell and
-//    evmPoolSignSellAuthorization, poolProveWithdraw (snarkjs in this process, the setup files checked by sha256
-//    against ZK_SETUP_FILES). The wallet's own evmTreeSync (trees on two RPCs, the pool's views and root times) and
+//    WETH, the quoters and the two providers). The path a user's device takes, through the kit's index only (card
+//    evm-sell-device-quote): each buy from the device's own quote (evmPoolBuyQuote, then evmPoolBuildQuoted and
+//    evmPoolSignBuy; a route the device refuses below its own best is quoted again on that best route, as
+//    EvmQuoteError.reference offers), each sell from the device's own sell quote (evmPoolSellQuote: the device picks
+//    the pool and sets minOut, probes the token for a fee on transfer; then evmPoolBuildSell, evmPoolSignSell and
+//    evmPoolSignSellAuthorization), poolProveWithdraw (snarkjs in this process, the setup files checked by sha256
+//    against ZK_SETUP_FILES). A real run quotes on the chain's pinned providers, as the index does; the dry run on its
+//    fork's two loopback URLs (evmPoolBuyQuoteWith and evmPoolSellQuoteWith, the same code with the providers named). The wallet's own evmTreeSync (trees on two RPCs, the pool's views and root times) and
 //    evmPool's bind (the context, the epoch's fee read on two RPCs), noteSecrets and freshWallet from the run's words,
 //    and evmRestoreNotes for the restore. The kit has no EVM withdraw signer yet: the Withdraw digest
 //    (PrivacyPool.sol WITHDRAW_TYPEHASH) is made in testnet-run-lib.mjs, as test/Signing.sol makes it.
@@ -23,7 +26,7 @@
 //    restore from the words finds every one.
 //  - The token: Base Sepolia's USDC (Circle's testnet USDC, 0x036CbD53…CF7e), with a v4 pool against native ETH (fee 100,
 //    tick spacing 1, no hook) and a v3 pool against WETH (fee 3000), both read on chain (StateView and the v3 factory,
-//    4 Nov 20:50Z). minOut for each buy and sell is the chain's quoter's answer less 5% (V4Quoter, QuoterV2).
+//    4 Nov 20:50Z). minOut for each buy and sell is the device quote's, at 5% slippage.
 //  - The run key and the words are made in memory; neither is printed, written or passed on. The need is printed
 //    with its parts, then the run waits for it at the run key ("run: waiting for <wei> wei ... at <address>"). Always,
 //    in a finally: every note still in the pool is withdrawn to its W when it can be, each W holding ETH is swept, then
@@ -41,13 +44,13 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { addressOf, returnAddress, signTx } from "./deploy.mjs";
 import { MAINNET_IDS, deploymentFile, hex, keccak, rpc, selector, word } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { authJson, balanceOfData, buyData, depositData, proofArg, revertName, sellData, sign65, signTx7702, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest, withdrawLeft } from "./testnet-run-lib.mjs";
+import { authJson, balanceOfData, buyData, depositData, proofArg, revertName, sellData, sign65, signTx7702, withdrawData, withdrawDigest, withdrawLeft } from "./testnet-run-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(HERE, "../../..");
 const imp = (p) => import(pathToFileURL(path.join(REPO, p)).href);
 const kit = await imp("packages/kit/src/index.ts");
-const { pinnedBuild, pinnedSignBuy } = await imp("packages/kit/src/trade/evm/buy-unpinned.ts");
+const { evmPoolBuyQuoteWith, evmPoolSellQuoteWith } = await imp("packages/kit/src/checks/evm/quote.ts");
 const { evmPool, evmTreeSync, evmNow: evmNowOnce, evmRelayDataBytes, evmPoolScopeOf, evmEpochBlock: evmEpochBlockOnce, evmRetryLag, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_CHAIN_IDS } = await imp("packages/wallet/src/pool/evm.ts");
 // The run's own reads of the pool's time and the epoch's block, as the device's evmPool makes them: again while an RPC
 // has not caught up (EvmLagError, evmRetryLag). Read once, Robinhood testnet's own RPC answering null for a block the
@@ -117,8 +120,8 @@ export const EVENTS = Object.freeze({
   Withdrawn: "Withdrawn(address,address,uint256,uint256,uint256,uint256)",
   Bought: "Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)",
 });
-/** minOut from a quote: 95% of it */
-const lessSlippage = (q) => (q * 95n) / 100n;
+/** The slippage of every device quote the run makes, in basis points */
+const SLIPPAGE_BPS = 500;
 
 /** The need: the deposit, and for each transaction its gas bound at maxFee plus its L1 fee bound. */
 export function needOf({ venues, maxFee, l1 }) {
@@ -176,6 +179,29 @@ export async function main(args, io = {}) {
   const call = (method, params, u = urls[0]) => rpc(fetchFn, u, method, params, sleep);
   const evmRpc = (u) => Object.assign((method, params) => rpc(fetchFn, u, method, params, sleep), { url: u });
   const rpcs = [evmRpc(urls[0]), evmRpc(urls[1])];
+  // the device's quotes: a real run's on the chain's pinned providers (the kit's index); the dry run's on the fork
+  const batchRpc = (u) => async (calls) => {
+    const res = await fetchFn(u, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params }))) });
+    const arr = await res.json();
+    return calls.map((_, id) => arr.find((a) => a?.id === id) ?? null);
+  };
+  const forkRpcs = () => [batchRpc(urls[0]), batchRpc(urls[1])];
+  const buyQuote = (q) => (dryRun ? evmPoolBuyQuoteWith(q, forkRpcs(), Date.now()) : kit.evmPoolBuyQuote(q));
+  const sellQuote = (q) => (dryRun ? evmPoolSellQuoteWith(q, forkRpcs(), Date.now()) : kit.evmPoolSellQuote(q));
+  /** A device quote and what is built from it within the quote's 30 s: a quote whose block is too old by then
+   *  (stale_quote) is asked again, at most 3 times, as an app asks again. A fork reads each pool's state from its
+   *  source the first time, so its first quote can take longer than 30 s (dry run, 4 Nov 10:07Z). */
+  const fresh = async (quoteOf, build) => {
+    for (let i = 0; ; i++) {
+      try {
+        const q = await quoteOf();
+        return { q, built: build(q) };
+      } catch (e) {
+        if (!(e instanceof kit.EvmQuoteError && e.code === "stale_quote") || i === 2) throw e;
+        console.log(`run: ${e.message}; quoting again`);
+      }
+    }
+  };
 
   // 1. the chain and the pins
   const venue = kit.evmPoolVenues()[chain];
@@ -186,8 +212,7 @@ export async function main(args, io = {}) {
     if (BigInt(id) !== chainId) throw new Error(`${u} answers chain ${BigInt(id)}, not ${chain}'s ${chainId}`);
     if ((await call("eth_getCode", [ret, "latest"], u)) !== "0x") throw new Error(`--return ${ret} has code on ${u}`);
   }
-  const pool = lower(venue.pool), weth = lower(venue.weth), router = venue.routers[0] ? lower(venue.routers[0]) : null, token = net.coin;
-  const poolManager = venue.poolManager ? lower(venue.poolManager) : null;
+  const pool = lower(venue.pool), weth = lower(venue.weth), token = net.coin;
   const adapters = { v4: lower(venue.adapters.v4), v3: lower(venue.adapters.v3 ?? ZERO) };
   for (const v of venues) if (adapters[v] === ZERO) throw new Error(`${chain} has no pinned ${v} adapter`);
   for (const v of venues) if (!net[v]) throw new Error(`${chain} has no ${v} pool or quoter in NETS`);
@@ -319,11 +344,18 @@ export async function main(args, io = {}) {
         const route = v === "v4"
           ? { venue: "uniswap-v4", currencyIn: ZERO, hops: [{ currency: token, fee: net.v4.fee, tickSpacing: net.v4.tickSpacing, hooks: net.v4.hooks, hookData: "0x" }] }
           : { venue: "uniswap-v3", tokens: [weth, token], fees: [net.v3.fee] };
-        const q = await quote(v, withdrawn - fee, true);
-        const built = pinnedBuild(kit.evmPoolVenues(), chain, adapters[v], route, lessSlippage(q), token);
-        const sig = pinnedSignBuy(kit.evmPoolVenues(), W.secretKey, chain, pool, built, { nullifier, context: b.context, value: withdrawn });
+        // the device's own quote of the route; one it refuses below its own best (below_reference, native_first) is
+        // quoted again on that best route, which may be the other venue's
+        const ask = (rt) => buyQuote({ chain, token, amountIn: withdrawn - fee, slippageBps: SLIPPAGE_BPS, route: rt });
+        const { q, built } = await fresh(
+          () => ask(route).catch((e) => (e instanceof kit.EvmQuoteError && e.reference ? (console.log(`run: the device refused the ${v} route (${e.code}); quoting its own best`), ask(e.reference.route)) : Promise.reject(e))),
+          (q) => kit.evmPoolBuildQuoted(adapters[q.route.venue === "uniswap-v4" ? "v4" : "v3"], q),
+        );
+        const got = q.route.venue === "uniswap-v4" ? "v4" : "v3";
+        const sig = kit.evmPoolSignBuy(W.secretKey, chain, pool, built, { nullifier, context: b.context, value: withdrawn });
+        v = got;
         step = `buy through ${v}`;
-        r = await send(step, { to: pool, data: buyData(pool, relay, proof, fee, built, sig) }, { kind: "buy", venue: v, w: lower(W.address), nullifier: String(nullifier), minOut: String(built.minOut), coin: token });
+        r = await send(step, { to: pool, data: buyData(pool, relay, proof, fee, built, sig) }, { kind: "buy", venue: v, w: lower(W.address), nullifier: String(nullifier), minOut: String(built.minOut), quoted: String(q.amountOut), quoteBlock: String(q.block.number), coin: token });
         const ev = poolLog(r, T.Bought);
         if (!ev) throw new Error(`${step}: no Bought event`);
         const d = words(ev.data);
@@ -345,37 +377,26 @@ export async function main(args, io = {}) {
     }
   };
 
-  /** The chain's quoter: what `amountIn` buys (buy: ETH -> token) or sells for (token -> ETH on v4, WETH on v3) on venue `v`. */
-  const quote = async (v, amountIn, buying) => {
-    const data = v === "v4"
-      ? v4QuoteData({ currency0: ZERO, currency1: token, fee: net.v4.fee, tickSpacing: net.v4.tickSpacing, hooks: net.v4.hooks }, ZERO < token && buying, amountIn)
-      : buying ? v3QuoteData(weth, token, amountIn, net.v3.fee) : v3QuoteData(token, weth, amountIn, net.v3.fee);
-    const out = BigInt((await call("eth_call", [{ to: v === "v4" ? net.v4.quoter : net.v3.quoter, data }, "latest"])).slice(0, 66));
-    if (out === 0n) throw new Error(`the ${v} quoter gives 0 for ${amountIn}`);
-    return out;
-  };
-
-  /** W's sell of all its token back into the pool, as the return note (evm, l, j), on the venue W bought through: a
-   *  v4 W through the pinned PoolManager (the token's native ETH pool, one hop, ending at native ETH), a v3 W through
-   *  the pinned router (the token's WETH pool). */
+  /** W's sell of all its token back into the pool, as the return note (evm, l, j), from the device's own sell quote:
+   *  the device picks the pool among its own candidates (a v4 pool through the pinned PoolManager, a v3 pool through
+   *  the pinned router), sets minOut and probes the token, on two providers; the run names no route. */
   const sellOf = async (b) => {
     const W = freshWallet(seed64, "evm", b.l, b.j);
     try {
       const amount = BigInt(await call("eth_call", [{ to: token, data: balanceOfData(W.address) }, "latest"]));
-      const q = await quote(b.v, amount, false);
-      const how = b.v === "v4"
-        ? { target: poolManager, route: { venue: "uniswap-v4", hops: [{ currency: ZERO, fee: net.v4.fee, tickSpacing: net.v4.tickSpacing, hooks: net.v4.hooks, hookData: "0x" }] } }
-        : { target: router, route: { venue: "uniswap-v3", tokens: [token, weth], fees: [net.v3.fee] } };
-      if (!how.target) throw new Error(`sell: ${chain} pins no ${b.v === "v4" ? "PoolManager" : "router"} for a ${b.v} sell`);
       // the sender's fee for a sell: the fee step at least (the kit refuses a fee cap of 0)
       const f0 = epochFee({ baseFeePerGas: BigInt((await call("eth_getBlockByNumber", ["latest", false])).baseFeePerGas), depth: 0 });
       const fee = f0 > FEE_STEP ? f0 : FEE_STEP;
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
-      const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
-      const built = kit.evmPoolBuildSell(chain, { w: W.address, token, amount, ...how, minOut: lessSlippage(q), precommitment: noteSecrets(seed64, ref).precommitment, feeCap: fee, deadline, nonce: 0n });
+      const { q, built } = await fresh(
+        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS }),
+        (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, feeCap: fee, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
+      );
+      const sv = q.route.venue === "uniswap-v4" ? "v4" : "v3";
       const sig = kit.evmPoolSignSell(W.secretKey, chain, built);
       const auth = kit.evmPoolSignSellAuthorization(W.secretKey, chain, BigInt(await call("eth_getTransactionCount", [W.address, "latest"])));
-      const r = await send("sell through SellDelegate", { to: lower(W.address), data: sellData(built, fee, sig), authorizations: [auth] }, { kind: "sell", venue: b.v, target: how.target, w: lower(W.address), amount: String(amount), minOut: String(built.minOut), fee: String(fee), coin: token });
+      console.log(`run: the device's sell quote for W ${lower(W.address)}: ${q.amountOut} wei through ${sv} (${JSON.stringify(q.route, (_, x) => (typeof x === "bigint" ? String(x) : x))}) at block ${q.block.number}, minOut ${q.minOut}`);
+      const r = await send("sell through SellDelegate", { to: lower(W.address), data: sellData(built, fee, sig), authorizations: [auth] }, { kind: "sell", venue: sv, target: lower(built.target), w: lower(W.address), amount: String(amount), minOut: String(built.minOut), quoted: String(q.amountOut), quoteBlock: String(q.block.number), fee: String(fee), coin: token });
       const ev = poolLog(r, T.Deposited);
       if (!ev || lower(`0x${ev.topics[1].slice(26)}`) !== lower(W.address)) throw new Error("sell: no Deposited event from W");
       const d = words(ev.data);
@@ -496,7 +517,7 @@ export async function main(args, io = {}) {
       for (const s of SIGNALS) process.off(s, onSignal);
       const landed = steps.filter((s) => s.landed).map(({ landed, ...s }) => s);
       writeFileSync(out, JSON.stringify({
-        key: KEY, chain, chainId: Number(chainId), dryRun, at: new Date().toISOString(), pool, coin: token, venues, relayer, return: ret, need: need.toString(),
+        key: KEY, chain, chainId: Number(chainId), dryRun, at: new Date().toISOString(), pool, coin: token, venues: [...new Set(steps.filter((t) => t.kind === "buy").map((t) => t.venue))], asked: venues, relayer, return: ret, need: need.toString(),
         restore: restored && { notes: restored.notes.length, spends: restored.spends.length, wallets: restored.wallets.map((w) => ({ w: w.w, tokens: w.tokens })), block: String(restored.block) },
         txs: landed,
       }, null, 2) + "\n");

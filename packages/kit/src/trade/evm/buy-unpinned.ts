@@ -155,6 +155,13 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       sellDelegate: "0xfa1442419b6984b8e3aa8933c690f80f063b6adf",
       // Uniswap v4's PoolManager (pool-evm-deploy.mjs CHAINS, its code hash pinned there), the target of a v4 sell
       poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408",
+      // Uniswap's QuoterV2 and V4Quoter (developers.uniswap.org's Base Sepolia deployments); eth_getCode on
+      // sepolia.base.org and base-sepolia-rpc.publicnode.com, the same on both (2026-11-04 09:55Z): 8,273 bytes, keccak
+      // 0x156c129c…, factory() 0x4752ba5d…ad24; and 5,820 bytes, keccak 0x2dddcef8…, poolManager() the PoolManager above
+      quoters: bare({ v3: "0xc5290058841028f1614f3a6f0f5816cad0df5e27", v4: "0x4a6513c898fe1b2d0e78d3b0e0a4a151589b1cba" }),
+      providers: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
+      // 2 s blocks; the two heads were 5 blocks apart in one read (2026-11-04 09:53Z), so 10 blocks, 20 s
+      maxLag: 10,
     }),
     "robinhood-testnet": bare({
       chainId: 46630,
@@ -170,6 +177,14 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 4 Nov 08:33Z), so a sell here goes through v4 alone
       sellDelegate: "0xaafb86fed9b651933773a0750d5dba22ca8b8a02",
       poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+      // Uniswap's V4Quoter at mainnet's address with mainnet's code (testnet-run.mjs NETS); eth_getCode on
+      // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, the same on both (2026-11-04 09:55Z):
+      // 6,118 bytes, keccak 0xd707b1da…, poolManager() the PoolManager above. No v3 here (M365)
+      quoters: bare({ v4: "0x8dc178efb8111bb0973dd9d722ebeff267c98f94" }),
+      nativeFirst: true,
+      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"] as const),
+      // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 10 s
+      maxLag: 100,
     }),
   }));
 
