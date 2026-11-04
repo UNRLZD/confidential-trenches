@@ -3,7 +3,7 @@
 // the last YIELD_MS, except urgent reads within the lists' own LIST_FLOOR); a 429 pausing every lane.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_RESERVE, REFRESH_SLOT, throttledUntil, WINDOW_MS } from "./gecko.ts";
+import { AHEAD_PER_WINDOW, COLD_RESERVE, geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_RESERVE, REFRESH_SLOT, throttledUntil, WINDOW_MS } from "./gecko.ts";
 
 test("the measured keyless limit: 5 calls a minute from one address (the published 10 met 429s)", () => assert.equal(GT_LIMIT_PER_MIN, 5));
 
@@ -130,4 +130,20 @@ test("card helper-restart-fresh: the old helper's lists calls keep their lane ac
   assert.equal(b.take("lists", true), false, "an urgent list waits: the floor is spent by the old helper's lists");
   assert.equal(b.take("pages"), true);
   assert.equal(b.take("pages"), true, "a cold page's top pool and its bars");
+});
+
+test("card helper-restart-fresh fold: the ahead lane takes a call only while COLD_RESERVE stay free, at most AHEAD_PER_WINDOW a window, never makes the lists yield, and leaves a page its PAGE_RESERVE", () => {
+  let t = 1_000_000;
+  const b = geckoBudget(() => t);
+  assert.equal(b.take("ahead"), true);
+  assert.equal(b.take("ahead"), false, "one a window");
+  assert.equal(b.take("lists"), true, "an ahead call is no page call: the lists do not yield to it");
+  assert.equal(b.take("pages"), true);
+  assert.equal(b.take("pages"), true);
+  assert.equal(b.take("pages"), true, "pages keep the rest of the window");
+  t += WINDOW_MS;
+  for (let i = 0; i < GT_LIMIT_PER_MIN - COLD_RESERVE; i++) assert.equal(b.take("pages"), true);
+  assert.equal(b.take("ahead"), false, "COLD_RESERVE free: no ahead call");
+  for (let i = 0; i < PAGE_RESERVE; i++) assert.equal(b.take("pages"), true, "a page still finds its calls");
+  assert.equal(AHEAD_PER_WINDOW, 1);
 });
