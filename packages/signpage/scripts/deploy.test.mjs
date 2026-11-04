@@ -29,11 +29,12 @@ function pkgWith(headers, extra = {}) {
   return d;
 }
 
-// a spawnSync stand-in that records every call
-function recorder() {
+// a spawnSync stand-in that records every call: git answers HEAD `head` and the tree's status `status`; `uploads` are
+// the calls that would send bytes (git reads the tree, which any run may do)
+function recorder({ head = "abc", status = "" } = {}) {
   const calls = [];
-  const run = (cmd, args, opts) => (calls.push({ cmd, args, opts }), { status: 0, stdout: cmd === "git" ? "abc\n" : "" });
-  return { calls, run };
+  const run = (cmd, args, opts) => (calls.push({ cmd, args, opts }), { status: 0, stdout: cmd !== "git" ? "" : args.includes("rev-parse") ? (head ? `${head}\n` : "") : status });
+  return { calls, run, uploads: () => calls.filter((c) => c.cmd !== "git") };
 }
 
 const WORKER_RULE = "/prover-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\n";
@@ -50,14 +51,14 @@ test("the real _headers passes the gate", () => {
 });
 
 test("a CSP with no frame-ancestors is refused, and nothing is uploaded", () => {
-  const { calls, run } = recorder();
+  const { uploads, run } = recorder();
   const r = deploy([], ENV, run, pkgWith(swap(" frame-ancestors 'none';", "")));
   assert.equal(r.code, 1);
   assert.ok(r.err.includes(`REFUSED _headers: CSP frame-ancestors: none, want "'none'"`), r.err.join("\n"));
   assert.ok(r.err.includes("REFUSED _headers: framed from https://confidential.unrealized.trade: allowed (no frame-ancestors)"), r.err.join("\n"));
   assert.ok(r.err.includes("REFUSED _headers: framed from https://example.com: allowed (no frame-ancestors)"), r.err.join("\n"));
   assert.equal(r.err.at(-1), "nothing was uploaded");
-  assert.equal(calls.length, 0);
+  assert.equal(uploads().length, 0);
 });
 
 test("other policy breaks are refused", () => {
@@ -124,48 +125,68 @@ test("other policy breaks are refused", () => {
 });
 
 test("a build carrying _worker.js or .well-known/webauthn is refused", () => {
-  const { calls, run } = recorder();
+  const { uploads, run } = recorder();
   for (const f of ["_worker.js", ".well-known/webauthn"]) {
     const r = deploy([], ENV, run, pkgWith(REAL, { [f]: "x" }));
     assert.equal(r.code, 1, f);
     assert.ok(r.err.some((e) => e.includes(f)), r.err.join("\n"));
   }
-  assert.equal(calls.length, 0);
+  assert.equal(uploads().length, 0);
 });
 
 test("--dry-run stops after the gate and keeps the build, whose _headers is the package's", () => {
-  const { calls, run } = recorder();
+  const { uploads, run } = recorder();
   const r = deploy(["--dry-run"], {}, run);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   const dir = /gate ok on (\S+);/.exec(r.out[0])[1];
   try {
     assert.deepEqual(checkDir(dir), []);
     assert.equal(readFileSync(join(dir, "_headers"), "utf8"), REAL);
-    assert.equal(calls.length, 0);
+    assert.equal(uploads().length, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("with the gate passed and no token, nothing is uploaded", () => {
-  const { calls, run } = recorder();
+  const { uploads, run } = recorder();
   const r = deploy([], {}, run);
   assert.equal(r.code, 2);
   assert.match(r.err[0], /CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set/);
-  assert.equal(calls.length, 0);
+  assert.equal(uploads().length, 0);
 });
 
-test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder", () => {
-  const { calls, run } = recorder();
+test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder, named by HEAD", () => {
+  const { uploads, run } = recorder();
   const r = deploy([], ENV, run);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
-  const up = calls.find((c) => c.cmd === "pnpm");
+  const up = uploads().find((c) => c.cmd === "pnpm");
+  assert.deepEqual(up.args.slice(9), ["--commit-hash", "abc", "--commit-dirty=false"]);
   assert.deepEqual(up.args.slice(0, 4), ["dlx", WRANGLER, "pages", "deploy"]);
   assert.equal(WRANGLER, "wrangler@4.151.1");
   assert.deepEqual(up.args.slice(5, 9), ["--project-name", PROJECT, "--branch", BRANCH]);
   assert.equal(PROJECT, "confidential-trenches-sign");
   assert.notEqual(up.opts.cwd, up.args[4]);
   assert.equal(up.opts.env.WRANGLER_SEND_METRICS, "false");
+});
+
+test("an uncommitted tree or no HEAD is refused before the token: the upload is named by HEAD's commit, so it must be HEAD's build", () => {
+  const dirty = recorder({ status: " M packages/kit/src/prover/worker.js" });
+  const r = deploy([], {}, dirty.run);
+  assert.equal(r.code, 1, (r.out ?? []).join("\n"));
+  assert.match(r.err.join("\n"), /REFUSED the tree has uncommitted changes[\s\S]*packages\/kit\/src\/prover\/worker\.js[\s\S]*nothing was uploaded/);
+  assert.equal(dirty.uploads().length, 0);
+  const headless = recorder({ head: "" });
+  const r2 = deploy([], ENV, headless.run);
+  assert.equal(r2.code, 1);
+  assert.match(r2.err.join("\n"), /REFUSED no HEAD commit/);
+  assert.equal(headless.uploads().length, 0);
+  // --dry-run still builds and gates a work in progress, and says a deploy would refuse it
+  const dry = recorder({ status: " M packages/signpage/index.html" });
+  const d = deploy(["--dry-run"], {}, dry.run);
+  assert.equal(d.code, 0, (d.err ?? []).join("\n"));
+  rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
+  assert.match(d.out[0], /uncommitted changes: a deploy would refuse/);
 });
 
 test("an unknown argument is a usage error", () => {

@@ -1,13 +1,17 @@
 #!/usr/bin/env node
-// Deploys a terminal build to APP_HOST's Cloudflare Pages project, only after the deploy gate passes it.
-//   node apps/terminal/scripts/deploy.mjs <buildDir> [--dry-run]     exit 0 ok, 1 refused or failed, 2 usage
-// The gate (check-deploy.ts) runs on the build's own _headers first; any refusal stops here, before a token is read
-// or a byte is uploaded. --dry-run stops after the gate. The upload is wrangler's `pages deploy`, at an exact version,
-// run from an empty directory so no functions/ folder can ride along (Pages applies no _headers rule to a Function's
-// response). It needs CLOUDFLARE_API_TOKEN (a Pages-only token) and CLOUDFLARE_ACCOUNT_ID in the environment; neither
-// is printed.
+// Builds the terminal at HEAD and deploys it to APP_HOST's Cloudflare Pages project, only after the deploy gate passes it.
+//   node apps/terminal/scripts/deploy.mjs [--dry-run]     exit 0 ok, 1 refused or failed, 2 usage
+// The deploy makes its own build, the terminal's `vite build` into a fresh temp folder (as SIGN_HOST's deploy does), and
+// takes no build folder: the upload is named by HEAD's commit, so it is HEAD's build and nothing else. A failed build,
+// a gate refusal, an uncommitted change anywhere in the tree (the build bundles the kit and the wallet too) or no HEAD
+// stops here, before a token is read or a byte is uploaded. The gate (check-deploy.ts) runs on the build's own
+// _headers. --dry-run stops after the gate and keeps the build folder, so it can be served; it builds a work in
+// progress too, and says a deploy would refuse it. A testnet build is VITE_NEAR_NETWORK=testnet in the environment
+// (build/network.mjs). The upload is wrangler's `pages deploy`, at an exact version, run from an empty directory so no
+// functions/ folder can ride along (Pages applies no _headers rule to a Function's response). It needs
+// CLOUDFLARE_API_TOKEN (a Pages-only token) and CLOUDFLARE_ACCOUNT_ID in the environment; neither is printed.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +21,7 @@ import { checkDir } from "./check-deploy.ts";
 export const PROJECT = "confidential-trenches-app";
 export const BRANCH = "main"; // the project's production branch: a deploy on it serves APP_HOST
 export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
+const REPO = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
 
 // every live check that reads APP_HOST, run after each deploy (a test holds this list to scripts/live-checks/app-*.mjs
 // and signpage-release, which reads APP_HOST alone against this commit's own build, so a SIGN_HOST that lags does not
@@ -34,28 +39,46 @@ export const liveCommands = (sha, network = "mainnet") => [`next: gh workflow ru
 /** The list live.yml reads (scripts/ci/live-plan.mjs runs `node <this file> --live-runs [--network n] [--commit sha]`). */
 export const liveList = (opts = {}) => ({ checks: LIVE_CHECKS, skipped: {}, runs: Object.fromEntries(LIVE_CHECKS.map((k) => [k, liveRuns(k, opts)])) });
 
-export function deploy(argv, env = process.env, run = spawnSync) {
+/** The terminal's own `vite build` of this checkout into a fresh temp folder: { dir, problems } (empty = built). */
+export function build(env = process.env, run = spawnSync) {
+  const dir = mkdtempSync(join(tmpdir(), "ct-app-"));
+  const term = join(REPO, "apps", "terminal");
+  const r = run(process.execPath, [join(term, "node_modules", "vite", "bin", "vite.js"), "build", "--outDir", dir, "--emptyOutDir", "--logLevel", "warn"], { cwd: term, env, encoding: "utf8" });
+  if (r.status === 0) return { dir, problems: [] };
+  const why = `${r.stderr ?? ""}`.trim().split("\n").slice(-5).join(" | ");
+  return { dir, problems: [`the build failed (vite exit ${r.status ?? r.signal})${why ? `: ${why}` : ""}`] };
+}
+
+export function deploy(argv, env = process.env, run = spawnSync, make = () => build(env)) {
   const dryRun = argv.includes("--dry-run");
   const rest = argv.filter((a) => a !== "--dry-run");
-  if (rest.length !== 1) return { code: 2, err: ["usage: node apps/terminal/scripts/deploy.mjs <buildDir> [--dry-run]"] };
-  const dir = resolve(rest[0]);
-  const problems = checkDir(dir);
-  if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
-  if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded`] };
-  const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
-  if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
-  const repo = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
-  const sha = run("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout?.trim();
-  const dirty = run("git", ["-C", repo, "status", "--porcelain", "--", "apps/terminal"], { encoding: "utf8" }).stdout?.trim();
-  const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH];
-  if (sha) args.push("--commit-hash", sha, `--commit-dirty=${dirty ? "true" : "false"}`);
-  const r = run("pnpm", args, {
-    cwd: mkdtempSync(join(tmpdir(), "ct-deploy-")),
-    env: { ...env, WRANGLER_SEND_METRICS: "false" },
-    stdio: "inherit",
-  });
-  if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}${dirty ? " from a tree with uncommitted changes in apps/terminal: the live checks read the commit's own build, not yours" : ""}`, ...liveCommands(sha || "$(git rev-parse HEAD)", networkOfBuild(dir))] };
+  if (rest.length) return { code: 2, err: ["usage: node apps/terminal/scripts/deploy.mjs [--dry-run] (it takes no build folder: it builds HEAD itself)"] };
+  // the tree the build reads, before it reads it
+  const sha = run("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout?.trim();
+  const dirty = run("git", ["-C", REPO, "status", "--porcelain"], { encoding: "utf8" }).stdout?.trimEnd();
+  const made = make();
+  const dir = made.dir;
+  let keep = false; // a passing --dry-run keeps its build to serve; every other run removes it
+  try {
+    const problems = made.problems.length ? made.problems : checkDir(dir);
+    if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
+    keep = dryRun;
+    if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded${dirty ? "; the tree has uncommitted changes: a deploy would refuse it" : ""}`] };
+    if (!sha) return { code: 1, err: ["REFUSED no HEAD commit to name the upload by", "nothing was uploaded"] };
+    if (dirty) return { code: 1, err: [`REFUSED the tree has uncommitted changes, and the upload would carry HEAD's name (${sha}):`, ...dirty.split("\n").slice(0, 20), "commit them first; nothing was uploaded"] };
+    const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
+    if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
+    const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH, "--commit-hash", sha, "--commit-dirty=false"];
+    const r = run("pnpm", args, {
+      cwd: mkdtempSync(join(tmpdir(), "ct-deploy-")),
+      env: { ...env, WRANGLER_SEND_METRICS: "false" },
+      stdio: "inherit",
+    });
+    if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
+    return { code: 0, out: [`deployed HEAD ${sha} to ${PROJECT} on ${BRANCH}`, ...liveCommands(sha, networkOfBuild(dir))] };
+  } finally {
+    if (!keep) rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
