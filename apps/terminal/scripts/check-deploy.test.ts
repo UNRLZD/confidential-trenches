@@ -307,7 +307,7 @@ test("deploy.mjs's live runs name every live check that reads APP_HOST, and its 
   writeFileSync(join(t, "_headers"), headersFor("testnet", readFileSync(join(BUILD, "_headers"), "utf8")));
   assert.deepEqual([networkOfBuild(BUILD), networkOfBuild(t)], ["mainnet", "testnet"]);
   const { LIVE_CHECKS } = await import("./deploy.mjs");
-  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool and trade-box-bal-cash");
+  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash", "signpage-pool-price"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool, trade-box-bal-cash and signpage-pool-price");
 });
 
 // A build like BUILD with `edit` applied to a fresh copy; its problems from checkDir.

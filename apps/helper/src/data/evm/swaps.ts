@@ -51,7 +51,7 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
-import { throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { EVM_LIMIT_CODE, RETRY_AFTER_MAX_S, upstreamRetryAfterS } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
@@ -983,10 +983,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return cut.length > 0 ? cut : fail;
     };
     const wait = (why = "geckoterminal budget") => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
-    // a re-read of bars held (this range's, or the newest range's kept bars) is a refresh (../gecko.ts): it leaves a cold
-    // page its calls, and refused, the bars held are served (card app-console-429)
-    const held = fresh !== undefined || (before === null && kept.has(`${e.pool.id}:${tf}`));
-    if (!gecko.take(held ? "refresh" : "pages")) return fallback(wait(held ? "geckoterminal refresh" : undefined));
+    // a re-read of bars held is a refresh (../gecko.ts): it leaves a cold page its calls, and refused, the bars held are
+    // served (card app-console-429); the newest range is a page read once its kept bars are REFRESH_URGENT_MS old, so
+    // the lists' calls never leave it served the same bars for good (refreshLane, card helper-chart-fresh); history
+    // before a time stays a refresh
+    const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : "pages";
+    if (!gecko.take(lane)) return fallback(wait(lane === "refresh" ? "geckoterminal refresh" : undefined));
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
       const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;

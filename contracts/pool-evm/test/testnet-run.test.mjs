@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import { test } from "node:test";
 import { bytes, hex, keccak, selector } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
 import { intBytes, rlp } from "../script/deploy.mjs";
-import { WITHDRAW_TRIES, buyData, depositData, revertName, sellData, signTx7702, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest, withdrawLeft } from "../script/testnet-run-lib.mjs";
+import { WITHDRAW_TRIES, authJson, buyData, depositData, revertName, sellData, signTx7702, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest, withdrawLeft } from "../script/testnet-run-lib.mjs";
 
 const V = JSON.parse(readFileSync(new URL("./fixtures/testnet-run-calldata.json", import.meta.url), "utf8"));
 const { secp256k1 } = await import(createRequire(new URL("../../../packages/kit/package.json", import.meta.url)).resolve("@noble/curves/secp256k1.js"));
@@ -134,4 +134,12 @@ test("the run buys and sells only through the device's quotes, as a user's devic
   assert.deepEqual(pathOf(RUN.replace("kit.evmPoolSignBuy(W.secretKey", "pinnedSignBuy(kit.evmPoolVenues(), W.secretKey")).bypass, ["pinnedSignBuy"]);
   assert.equal(pathOf(RUN.replace("kit.evmPoolBuildSell(q, {", "pinnedBuildSell(kit.evmPoolVenues(), chain, { route, ")).sell, false);
   assert.equal(pathOf(RUN.replace("kit.evmPoolSellQuote(q)", "evmPoolSellQuoteWith(q, rpcs, Date.now())")).sell, false);
+});
+
+test("an authorization's r and s go to eth_estimateGas as quantities: no leading zero digit (Robinhood testnet refused one, 4 Nov 14:2xZ)", () => {
+  const a = { chainId: 46630n, address: "0x" + "11".repeat(20), nonce: 0n, yParity: 0, r: "0x00" + "ab".repeat(31), s: "0x0" + "c".repeat(63) };
+  const j = authJson(a);
+  assert.equal(j.r, "0x" + "ab".repeat(31));
+  assert.equal(j.s, "0x" + "c".repeat(63));
+  for (const k of ["chainId", "nonce", "yParity", "r", "s"]) assert.match(j[k], /^0x(0|[1-9a-f][0-9a-f]*)$/, k);
 });

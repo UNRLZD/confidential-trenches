@@ -24,9 +24,10 @@ const code = (f: () => unknown): string => {
 };
 const record = (chain: string) =>
   JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/pool-evm-deploy.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
-// the SellDelegate that sells through the v4 PoolManager, deployed again by card evm-sell-v4
+// the SellDelegate that sells through the v4 PoolManager with the exact-debit check, deployed again by card
+// evm-selldelegate-exact-debit (card evm-sell-v4's delegate before it, which the build file now freezes)
 const sellRecord = (chain: string) =>
-  JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/evm-sell-v4.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
+  JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/evm-selldelegate-exact-debit.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
 
 // pool-evm-deploy's pinned chain table: the WETH each testnet's contracts were deployed with
 const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string }; poolManager: { address: string } }> };
