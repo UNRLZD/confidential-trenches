@@ -581,9 +581,12 @@ const SELL_UP_FRONT_SIZE = { "pump-curve": 0, pumpswap: TOKEN_ACCOUNT_SIZE } as 
  * signpage-pool-sell 3bdca74: an upper bound, never less than what the program can take from W).
  */
 export const SOLANA_POOL_AMM_CASHBACK_SIZES = [SOLANA_POOL_VOLUME_ACCOUNT_SIZE.pumpswap, TOKEN_ACCOUNT_SIZE] as const;
-/** What W needs up front for a sell on `venue`; `ammCashback`: W has both PumpSwap cashback accounts already. */
-export function solanaPoolSellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "cashback">, rent: SolanaRent, has: { ammCashback: boolean } = { ammCashback: false }): bigint {
-  const made = venue.kind === "pumpswap" && venue.cashback === true && !has.ammCashback ? SOLANA_POOL_AMM_CASHBACK_SIZES.reduce((t, n) => t + solanaRentMin(rent, n), 0n) : 0n;
+/** What W needs up front for a sell on `venue`. `has`: which of W's PumpSwap cashback accounts already exist (its
+ *  volume account, that account's wrapped-SOL account); each one missing is counted on its own as made by the sell. */
+export type SolanaPoolAmmCashbackHeld = { ammVolume: boolean; ammVolumeAta: boolean };
+export function solanaPoolSellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "cashback">, rent: SolanaRent, has: SolanaPoolAmmCashbackHeld = { ammVolume: false, ammVolumeAta: false }): bigint {
+  const [volume, ata] = SOLANA_POOL_AMM_CASHBACK_SIZES;
+  const made = venue.kind === "pumpswap" && venue.cashback === true ? (has.ammVolume ? 0n : solanaRentMin(rent, volume)) + (has.ammVolumeAta ? 0n : solanaRentMin(rent, ata)) : 0n;
   return SOLANA_POOL_SELL_FEE + solanaRentMin(rent, perVenue(SELL_UP_FRONT_SIZE, venue.kind)) + made;
 }
 /**
@@ -596,7 +599,7 @@ export function solanaPoolBuySellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "
   perVenue(SELL_UP_FRONT_SIZE, venue.kind);
   return venue.kind === "pump-curve"
     ? solanaPoolSellNeed({ kind: "pumpswap", cashback: venue.cashback }, rent)
-    : solanaPoolSellNeed(venue, rent, { ammCashback: true });
+    : solanaPoolSellNeed(venue, rent, { ammVolume: true, ammVolumeAta: true });
 }
 
 /**

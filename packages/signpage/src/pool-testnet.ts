@@ -77,7 +77,7 @@ export type TestnetOver = {
   /** The lookup table pool.buy loads (DEVNET_TABLE otherwise). */
   table?: string | null;
   /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
-  locks?: Pick<LockManager, "request"> | null;
+  locks?: Pick<LockManager, "request" | "query"> | null;
 };
 
 /** The devnet pool's lookup table: none is created and pinned yet (scripts/live-checks/pool-sol-deploy.devnet.json
@@ -317,6 +317,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // included) gets the same promise and never starts a second pass. No follow-up pass: a note turns INCOMING only in an
   // ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later state read settles what it leaves.
   let reading: Promise<void> | null = null;
+  // the dead pending sell records are settled once per page load, not on every state read (a re-ask settles its own)
+  let deadSettled = false;
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
   // once both RPCs' block time is past their deadline with no spent mark, or held (../../wallet/src/pool/solana-restore.ts
   // solanaSettleReserved); a freed note is proved again by the open queue's next pass
@@ -349,7 +351,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (mine.some((n) => n.state === "RESERVED")) await settleReserved();
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R")))) await settleSells();
         // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
-        if (locks) await settleDeadSellOps(await page.store(), locks);
+        if (locks && !deadSettled) {
+          await settleDeadSellOps(await page.store(), locks);
+          deadSettled = true;
+        }
       } catch {
         // a state read never fails for this; the next read tries again
       }

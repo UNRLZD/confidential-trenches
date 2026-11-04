@@ -19,8 +19,8 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
-import { solanaPoolAccount, solanaPoolPage, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
+import { readSolanaPoolBuyVenue, solanaPoolAccount, solanaPoolPage, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
@@ -29,9 +29,9 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_SELL_LOCK, poolSellKind, runPoolSell, type PoolSellHost, type PoolSellKindHost } from "../src/pool-sell.ts";
+import { POOL_SELL_LOCK, poolSellKind, runPoolSell, settleDeadSellOps, type PoolSellHost, type PoolSellKindHost } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
-import type { TradeStore } from "../src/trade.ts";
+import { tradeLock, type TradeStore } from "../src/trade.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
@@ -118,6 +118,16 @@ type Plant = {
   ammCashback?: boolean;
   /** another deposit takes the return note's precommitment just before the sell lands, at exactly the sell's value */
   frontRunSame?: boolean;
+  /** W's token account holds this (AMOUNT when not given) on both RPCs */
+  held?: bigint;
+  /** the bonding curve says a cashback coin (its is_cashback_coin byte, 82, set in the recorded reads) */
+  curveCashback?: boolean;
+  /** of W's PumpSwap cashback accounts, only these (W's PumpSwap volume account, its wrapped-SOL account) */
+  ammOnly?: "volume" | "ata";
+  /** RPC 1 never shows W's PumpSwap cashback accounts (a lagging RPC) */
+  ammHiddenOn1?: boolean;
+  /** W's PumpSwap volume account exists but is the system program's (lamports sent to its address) */
+  ammVolumeSystem?: boolean;
 };
 
 /** One chain: the planted accounts, the program's deposit applied to a signed sell. */
@@ -136,14 +146,14 @@ function chain(plant: Plant = {}) {
   accounts.set(solanaPoolPage(PROGRAM, 1, 0), { owner: PROGRAM, lamports: 1, data: pageBytes(1, Array.from({ length: N }, (_, i) => vaultLabelOf(keccak_256, SCOPE, BigInt(i + 1)))) });
   accounts.set(fx.rent.account, { owner: fx.rent.answers[0].owner, lamports: 1, data: base64.decode(fx.rent.answers[0].data) });
   accounts.set(mint, { owner: mintRead.owner, lamports: 1, data: base64.decode(mintRead.data[0]) });
-  accounts.set(ata, { owner: mintRead.owner, lamports: 1, data: tokenAccount(AMOUNT, 1, mint) });
+  accounts.set(ata, { owner: mintRead.owner, lamports: 1, data: tokenAccount(plant.held ?? AMOUNT, 1, mint) });
   // W at 0 lamports has no account
   if (plant.lamports !== 0) accounts.set(W.address, { owner: "11111111111111111111111111111111", lamports: plant.lamports ?? ENOUGH, data: new Uint8Array(0) });
-  if (plant.ammCashback) {
-    const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
-    accounts.set(vol, { owner: SOLANA_PUMP_AMM_PROGRAM, lamports: 1, data: new Uint8Array(137) });
-    accounts.set(solanaAta(vol, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: new Uint8Array(165) });
-  }
+  const ammVol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
+  const ammAta = solanaAta(ammVol, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  if (plant.ammCashback || plant.ammOnly === "volume") accounts.set(ammVol, { owner: SOLANA_PUMP_AMM_PROGRAM, lamports: 1, data: new Uint8Array(137) });
+  if (plant.ammCashback || plant.ammOnly === "ata") accounts.set(ammAta, { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: new Uint8Array(165) });
+  if (plant.ammVolumeSystem) accounts.set(ammVol, { owner: "11111111111111111111111111111111", lamports: 890_880, data: new Uint8Array(0) });
   const txs = new Map<string, { tx: Uint8Array; err: unknown }>();
   const log: string[] = [];
   const calls: { p: 0 | 1; method: string; params: readonly unknown[] }[] = [];
@@ -195,6 +205,7 @@ function chain(plant: Plant = {}) {
   const rpc = (p: 0 | 1): SolanaRpc => {
     const answer = (address: string): unknown => {
       if (p === 1 && plant.hideOn1 === address) return null;
+      if (p === 1 && plant.ammHiddenOn1 && (address === ammVol || address === ammAta)) return null;
       const a = accounts.get(address);
       if (!a) return null;
       const data = p === 1 && address === ata && plant.heldOn1 !== undefined ? tokenAccount(plant.heldOn1, 1, mint) : a.data;
@@ -207,6 +218,18 @@ function chain(plant: Plant = {}) {
       switch (method) {
         case "getMultipleAccounts": {
           const recorded = fx[v].reads[p][JSON.stringify(params[0])];
+          if (recorded && plant.curveCashback) {
+            // the bonding curve (owned by pump, under 300 bytes): its cashback byte set
+            const r = structuredClone(recorded) as { value: ({ owner: string; data: [string, string] } | null)[] };
+            for (const a of r.value) {
+              if (a?.owner !== SOLANA_PUMP_PROGRAM) continue;
+              const d = base64.decode(a.data[0]);
+              if (d.length < 83 || d.length >= 300) continue;
+              d[82] = 1;
+              a.data[0] = base64.encode(d);
+            }
+            return r;
+          }
           if (recorded && plant.cashback) {
             // the PumpSwap Pool account (owned by the AMM, 245 bytes or more, under 600): its cashback byte set
             const r = structuredClone(recorded) as { value: ({ owner: string; data: [string, string] } | null)[] };
@@ -231,9 +254,10 @@ function chain(plant: Plant = {}) {
         case "getBlockHeight":
           // confirmed: RPC 1's height beside the blockhash, so the last height is max(100, 0 + 151) = 151
           return (params[0] as { commitment: string }).commitment === "confirmed" ? 0 : (plant.finalHeight ?? 1_000);
-        case "getSlot":
-          // finalized: the slot each RPC answers its past read at, which pins its mark read (minContextSlot)
-          return VF[v].slot + 10 + p;
+        case "getEpochInfo":
+          // finalized: each RPC's height and, of the same block, its slot, which pins its mark read (minContextSlot)
+          assert.equal((params[0] as { commitment: string }).commitment, "finalized");
+          return { blockHeight: plant.finalHeight ?? 1_000, absoluteSlot: VF[v].slot + 10 + p, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
         case "getFeeForMessage":
           return { ...ctx, value: FEE };
         case "simulateTransaction": {
@@ -490,9 +514,10 @@ test("a token or chain that is not the ask's own is refused not_allowed with no 
 });
 
 /** Web Locks as one tab sees them: each name held by one callback at a time; ifAvailable gets null while it is held. */
-function fakeLocks(modes: string[] = []): Pick<LockManager, "request"> {
+function fakeLocks(modes: string[] = []): Pick<LockManager, "request" | "query"> {
   const held = new Map<string, Promise<void>>();
   return {
+    query: (async () => ({ held: [...held.keys()].map((name) => ({ name, mode: "exclusive" })), pending: [] })) as never,
     request: (async (name: string, opts: { mode: string; ifAvailable?: boolean }, f: (l: unknown) => Promise<unknown>) => {
       modes.push(`${name}:${opts.mode}${opts.ifAvailable ? "?" : ""}`);
       if (opts.mode === "shared") return f({ name });
@@ -774,7 +799,7 @@ test("the request's record names W's signature before the transaction leaves the
 });
 
 // The re-review (medium): the record is written under the request's own lock, before the wait for the sell lock.
-test("a request waiting behind another sell already has its record: a reload's re-ask of its id is never run again, and once its page is gone the settle refuses it", async () => {
+test("a request waiting behind another sell already has its record: a re-ask of its id from another tab is never run again, and the settle leaves it while its lock is held", async () => {
   const w = await world();
   const locks = fakeLocks();
   // another sell holds the sell lock (through its verdict)
@@ -783,19 +808,114 @@ test("a request waiting behind another sell already has its record: a reload's r
   const r = poolSellKind(kindHost(w), locks)(ASK, ctxOf("p1", "cc")) as KindAnswer;
   await until(async () => (await w.store.get("ops", "p1")) !== undefined);
   assert.equal(((await w.store.get("ops", "p1")) as { stage?: string }).stage, "pending");
-  // a reload (another page, its own locks: the first page's lock went with it) asks the same id: answered, not run
-  const reload = poolSellKind(kindHost(w), fakeLocks())(ASK, ctxOf("p1", "cc")) as KindAnswer;
-  await reload.after;
-  assert.deepEqual(reload.answer(), { error: "id_reused" });
+  // another tab asks the same id while the first waits: answered, not run
+  const again = poolSellKind(kindHost(w), locks)(ASK, ctxOf("p1", "cc")) as KindAnswer;
+  await again.after;
+  assert.deepEqual(again.answer(), { error: "id_reused" });
   assert.equal(sends(w).length, 0);
-  // while its request's lock is held the settle leaves it; a page that died while waiting leaves it "pending" with no
-  // signature, which the settle (its lock free) refuses as failed
-  const { settleDeadSellOps } = await import("../src/pool-sell.ts");
+  // the settle on load leaves a record whose request's lock is held
   await settleDeadSellOps(w.store, locks);
   assert.equal(((await w.store.get("ops", "p1")) as { stage?: string }).stage, "pending");
-  await settleDeadSellOps(w.store, fakeLocks());
-  assert.deepEqual(opOf("p1", await w.store.get("ops", "p1")), { id: "p1", kind: "sell", stage: "refused", txs: [], code: "failed" });
   release();
   await held;
   await r.after;
+  await until(async () => opOf("p1", await w.store.get("ops", "p1"))?.stage === "filled");
+  assert.equal(opOf("p1", await w.store.get("ops", "p1"))?.stage, "filled");
+});
+
+// The second re-review (low): a page that closed while its request waited leaves "pending" with no signature. The
+// re-ask of that id (its lock now free) answers failed at once, never id_reused; the settle on load takes no lock, so
+// a re-ask never meets one it holds, and it leaves a record whose request's lock is held.
+test("a dead pending sell record: its re-ask answers failed and sends nothing; the settle on load refuses the others without taking a lock", async () => {
+  const w = await world();
+  const modes: string[] = [];
+  const locks = fakeLocks(modes);
+  const pending = { kind: "sell", pool: "sol", sha: "cc", stage: "pending", txs: [], created_ms: 1 };
+  for (const k of ["d1", "d2", "d3"]) await w.store.put("ops", k, { ...pending });
+  const r = poolSellKind(kindHost(w), locks)(ASK, ctxOf("d1", "cc")) as KindAnswer;
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "failed" });
+  assert.equal(sends(w).length, 0);
+  assert.deepEqual(opOf("d1", await w.store.get("ops", "d1")), { id: "d1", kind: "sell", stage: "refused", txs: [], code: "failed" });
+  // d3's request is live in another tab: its lock is held through the settle
+  let release!: () => void;
+  const live = locks.request(tradeLock("d3"), { mode: "exclusive" }, () => new Promise<void>((res) => (release = res)));
+  modes.length = 0;
+  await settleDeadSellOps(w.store, locks);
+  assert.deepEqual(modes, [], "the settle takes no lock");
+  assert.deepEqual(opOf("d2", await w.store.get("ops", "d2")), { id: "d2", kind: "sell", stage: "refused", txs: [], code: "failed" });
+  assert.equal(((await w.store.get("ops", "d3")) as { stage?: string }).stage, "pending");
+  release();
+  await live;
+});
+
+// The second re-review (high): a sell of part of W's holding left W rent(0), so the next sell of the rest could never
+// pay its own fee and up-front accounts. While W keeps tokens, the reserve leaves W the next sell's need on every venue
+// the coin can reach (the buy's rule); a sell of the whole holding still keeps only rent(0).
+const GROWS = 2n * 72n * rent.lamportsPerByte * rent.factor;
+/** W's lamports after a sell whose deposit is `value`, from the fixture's recorded min out: what it paid (the fee, the
+ *  accounts it made, the mark and the pages' growth) and what the venue paid it over the deposit. */
+const wAfter = (lamports: bigint, minOut: bigint, value: bigint, made = 0n) => lamports - BigInt(FEE) - made - rentMin(17) - GROWS + (minOut - value);
+const deposited = async (w: World) => (await ours(w.ns))[0]?.value ?? -1n;
+
+test("a PumpSwap sell of part of W's holding leaves W the next sell's need (the fee and the wrapped-SOL account); a sell of all of it, rent(0)", async () => {
+  const ask = { ...ASK, token: VF.pumpswap.mint };
+  const lamports = BigInt(FEE) + rentMin(165); // exactly this sell's own need
+  const next = BigInt(FEE) + rentMin(165);
+  const part = await world({ venue: "pumpswap", held: 2n * AMOUNT, lamports: Number(lamports) }, [wallet(2n * AMOUNT, false, VF.pumpswap.mint)]);
+  const a = await runPoolSell(part.host, ask);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(wAfter(lamports, VF.pumpswap.minOut, await deposited(part)), next);
+  const all = await world({ venue: "pumpswap", lamports: Number(lamports) });
+  assert.equal("stage" in (await runPoolSell(all.host, ask)) && "filled", "filled");
+  assert.equal(wAfter(lamports, VF.pumpswap.minOut, await deposited(all)), rentMin(0));
+});
+
+test("a curve sell of part of W's holding leaves W the PumpSwap need the coin has once it graduates, with both cashback accounts on a cashback coin", async () => {
+  for (const curveCashback of [false, true]) {
+    const probe = await world({ curveCashback });
+    const venue = await readSolanaPoolBuyVenue(probe.host.rpcs, "pump-curve", MINT);
+    assert.equal(venue.cashback, curveCashback, "the planted curve");
+    // the next sell, on PumpSwap after graduation, from a W with neither of PumpSwap's cashback accounts
+    const next = BigInt(FEE) + rentMin(165) + (curveCashback ? rentMin(137) + rentMin(165) : 0n);
+    // W as the buy rule leaves it: exactly that need
+    const w = await world({ curveCashback, held: 2n * AMOUNT, lamports: Number(next) }, [wallet(2n * AMOUNT)]);
+    const a = await runPoolSell(w.host, ASK);
+    assert.equal("stage" in a && a.stage, "filled", `${curveCashback} ${JSON.stringify(a)}`);
+    assert.equal(wAfter(next, MIN_OUT, await deposited(w)), next, String(curveCashback));
+  }
+});
+
+test("a partial sell whose reserve for the next sell passes the cap is refused not_funded before it is simulated or signed, never shrunk; the whole holding still sells", async () => {
+  // a cashback curve coin's W at the curve's own need (fee + rent(0)): keeping the next PumpSwap need would hold back
+  // more than SOLANA_POOL_SELL_RESERVE_MAX from the note
+  const lamports = BigInt(FEE) + rentMin(0);
+  const w = await world({ curveCashback: true, held: 2n * AMOUNT, lamports: Number(lamports) }, [wallet(2n * AMOUNT)]);
+  assert.deepEqual(await runPoolSell(w.host, ASK), { error: "not_funded" });
+  assert.ok(!w.c.log.some((x) => /simulateTransaction|sendTransaction/.test(x)), w.c.log.join(" "));
+  assert.deepEqual(await ours(w.ns), [], "no note");
+  const all = await world({ curveCashback: true, lamports: Number(lamports) });
+  const a = await runPoolSell(all.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+});
+
+// The second re-review (low): each PumpSwap cashback account is counted on its own, by its owner, and one RPC that does
+// not show it yet is no reason to refuse.
+test("W's PumpSwap cashback accounts are counted one by one, by owner, and an account one RPC does not show yet counts as there", async () => {
+  const ask = { ...ASK, token: VF.pumpswap.mint };
+  const base = BigInt(FEE) + rentMin(165);
+  const cases: [Plant, bigint][] = [
+    [{ ammOnly: "volume" }, rentMin(165)],
+    [{ ammOnly: "ata" }, rentMin(137)],
+    [{ ammCashback: true, ammHiddenOn1: true }, 0n],
+    [{ ammVolumeSystem: true }, rentMin(137) + rentMin(165)],
+  ];
+  for (const [plant, made] of cases) {
+    const at = (lamports: bigint) => world({ venue: "pumpswap", cashback: true, ...plant, lamports: Number(lamports) });
+    const ok = await at(base + made);
+    const a = await runPoolSell(ok.host, ask);
+    assert.equal("stage" in a && a.stage, "filled", `${JSON.stringify(plant)} ${JSON.stringify(a)}`);
+    assert.equal(wAfter(base + made, VF.pumpswap.minOut, await deposited(ok), made), rentMin(0), JSON.stringify(plant));
+    if (made > 0n) assert.deepEqual(await runPoolSell((await at(base + made - 1n)).host, ask), { error: "not_funded" }, JSON.stringify(plant));
+  }
 });

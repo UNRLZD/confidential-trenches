@@ -420,3 +420,29 @@ test("a state read settles a sell a closed page left INCOMING (the review of sig
   assert.equal(calls.filter((c) => c === `getAccountInfo ${mark}`).length, 2, calls.join(" | "));
   assert.deepEqual(await states(ns), ["INCOMING"]);
 });
+
+// The second re-review of signpage-pool-sell (low): a dead "pending" sell record is settled once per page load, not by
+// reading every ops record on every state read.
+test("a state read refuses a dead pending sell record once per page load, never reading the ops records again on the next state reads", async () => {
+  const { w } = await wallet();
+  let opsKeys = 0;
+  const counted = new Proxy(w, {
+    get(t, k, r) {
+      const v = Reflect.get(t, k, r);
+      if (k === "keys") return (st: string) => (st === "ops" && opsKeys++, v.call(t, st));
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+  });
+  const rpc = async () => {
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => counted, seed64: async () => SEED64.slice() }, { rpcs: [rpc, rpc], prover: { vault: signalsProver(), stop: () => {} } });
+  await w.put("ops", "z1", { kind: "sell", pool: "sol", sha: "cc", stage: "pending", txs: [], created_ms: 1 });
+  await t.stateRead();
+  assert.deepEqual(await w.get("ops", "z1"), { kind: "sell", pool: "sol", sha: "cc", stage: "refused", code: "failed", txs: [], created_ms: 1 });
+  const once = opsKeys;
+  assert.equal(once, 1);
+  await t.stateRead();
+  await t.stateRead();
+  assert.equal(opsKeys, once, "read once per page load");
+});
