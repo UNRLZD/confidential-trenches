@@ -13,10 +13,11 @@
 // The rest are planted here from the good answer, each changing one thing so that only its guard can fail.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { check, pasteLine, freshPrecommitment, isPrecommitment, NETWORKS, NEAR_CLI } from "./vault-mainnet.mjs";
 import { DEPLOYMENT, MAINNET_USDC } from "./vault-testnet-t01.mjs";
 
@@ -219,6 +220,18 @@ test("planted: the vault's event holds two entries, or the vault logs it twice: 
   })), [EVENT]);
 });
 
+test("planted: the vault's storage_prepaid event is under another standard: FAIL on the event only", async () => {
+  onlyBad(await run(withTx(good(), (j) => {
+    for (const o of j.result.receipts_outcome) o.outcome.logs = o.outcome.logs.map((l) => l.replace('"standard":"blindfill-vault"', '"standard":"nep141"'));
+    return j;
+  })), [EVENT]);
+});
+
+test("planted: the tx's args hold the precommitment and one more field: FAIL on the call only (the args bytes are the printed ones)", async () => {
+  onlyBad(await run(withTx(good(), (j) => ((j.result.transaction.actions[0].FunctionCall.args = b64({ precommitment: GOOD_P, extra: 1 })), j))), [CALL]);
+  onlyBad(await run(withTx(good(), (j) => ((j.result.transaction.actions[0].FunctionCall.args = Buffer.from(`{ "precommitment": "${GOOD_P}" }`).toString("base64")), j))), [CALL]);
+});
+
 test("planted: the vault's event names another payer: FAIL on the event only", async () => {
   onlyBad(await run(withTx(good(), (j) => {
     for (const o of j.result.receipts_outcome) o.outcome.logs = o.outcome.logs.map((l) => l.replace(`"payer":"${SIGNER}"`, '"payer":"someone.testnet"'));
@@ -349,4 +362,44 @@ test("the CLI: the then-line carries the precommitment; --tx wants it; mainnet w
   const w = cli("vault-readback.mjs", ["--network", "mainnet", "--account", "vault.x.near", "--signer", "o.near"]);
   assert.equal(w.status, 2);
   assert.equal(w.stderr, d.stderr);
+});
+
+// The owner pastes these lines on mainnet: the CLI's own output, on the replayed good answer (a fetch stub loaded with
+// --import, as contracts/vault/scripts/deploy.test.mjs runs deploy.mjs), must be exactly these, the record's path quoted.
+test("the CLI prints the write, its Ledger variant and the read-back exactly, the --deployment path shell-quoted", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "vault mainnet "));
+  try {
+    const record = path.join(dir, "it's a record.json");
+    copyFileSync(DEPLOYMENT, record);
+    const answers = path.join(dir, "answers.json");
+    writeFileSync(answers, JSON.stringify(good()));
+    const stub = path.join(dir, "stub.mjs");
+    writeFileSync(stub, `import { readFileSync } from "node:fs";
+const answers = JSON.parse(readFileSync(${JSON.stringify(answers)}, "utf8"));
+const byKey = new Map(answers.map((a) => [\`\${a.url} \${a.method} \${JSON.stringify(a.params)}\`, a]));
+globalThis.fetch = async (url, init) => {
+  const { method, params } = JSON.parse(init.body);
+  const a = byKey.get(\`\${url} \${method} \${JSON.stringify(params)}\`);
+  if (!a) throw new Error("no recorded answer for " + method);
+  return { ok: true, status: a.status, json: async () => a.json };
+};
+`);
+    const r = spawnSync(process.execPath, ["--import", pathToFileURL(stub).href, path.join(HERE, "vault-mainnet.mjs"), "--network", "testnet", "--account", VAULT, "--signer", SIGNER, "--deployment", record, "--precommitment", "12345"], { encoding: "utf8" });
+    assert.equal(r.status, 3, r.stderr);
+    const q = `'${record.replaceAll("'", "'\\''")}'`;
+    const call = `near call ${VAULT} storage_prepay '{"precommitment":"12345"}' --useAccount ${SIGNER} --depositYocto ${MIN} --gas 30000000000000 --networkId testnet`;
+    assert.deepEqual(r.stdout.trim().split("\n").slice(-5), [
+      `live-check vault-mainnet: the reads PASS; the write, signed by ${SIGNER} through ${NEAR_CLI} (this check signs nothing; on testnet contracts/vault/scripts/prepay.mjs can send it):`,
+      call,
+      "live-check vault-mainnet: or with a Ledger:",
+      `${call} --signWithLedger`,
+      `live-check vault-mainnet: then: node scripts/live-checks/vault-mainnet.mjs --network testnet --account ${VAULT} --signer ${SIGNER} --deployment ${q} --precommitment 12345 --tx <its Transaction Id>`,
+    ]);
+    // the read-back line, as a shell reads it, gives the record's path back whole
+    const then = r.stdout.trim().split("\n").at(-1).replace("live-check vault-mainnet: then: ", "").replace("<its Transaction Id>", GOOD_TX);
+    const argv = spawnSync("sh", ["-c", `node() { printf '%s\\0' "$@"; }; ${then}`], { encoding: "utf8" }).stdout.split("\0").slice(0, -1);
+    assert.deepEqual(argv, ["scripts/live-checks/vault-mainnet.mjs", "--network", "testnet", "--account", VAULT, "--signer", SIGNER, "--deployment", record, "--precommitment", "12345", "--tx", GOOD_TX]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

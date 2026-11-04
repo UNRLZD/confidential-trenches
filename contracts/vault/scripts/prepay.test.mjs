@@ -10,7 +10,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { b58encode } from "./near-tx.mjs";
-import { prepay } from "./prepay.mjs";
+import { prepay, sendPrepay } from "./prepay.mjs";
 import { PREPAY_GAS } from "../../../scripts/live-checks/vault-mainnet.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -113,4 +113,16 @@ test("the CLI: testnet accounts only, a named .testnet signer (never 64-hex) and
   const inRepo = cli(["--account", VAULT, "--signer", SIGNER, "--key-file", path.join(HERE, "prepay.mjs")]);
   assert.equal(inRepo.status, 2);
   assert.match(inRepo.stderr, /--key-file is inside the repository/);
+});
+
+test("the exported functions refuse a signer that is no named .testnet account, before any read or signature", async () => {
+  for (const signer of ["ab".repeat(32), "owner.near", "testnet"]) {
+    const asked = [];
+    const fetchFn = async (url, init) => (asked.push(JSON.parse(init.body).method), { ok: true, status: 200, json: async () => ({ result: { chain_id: "testnet", nonce: 1, header: { hash: "11111111111111111111111111111111" } } }) });
+    await assert.rejects(sendPrepay({ fetchFn, url: "https://test.rpc.fastnear.com", signer, key: freshKey(), account: VAULT, precommitment: "1", deposit: MIN }), /is no named \.testnet account: nothing read or signed/, signer);
+    assert.deepEqual(asked, [], signer);
+    const { fetchFn: f2, seen } = chain(load("vault-mainnet.answers.json"));
+    await assert.rejects(prepay({ account: VAULT, deployment, signer, key: freshKey(), fetchFn: f2, wait: 0 }), /is no named \.testnet account: nothing read or signed/, signer);
+    assert.deepEqual(seen.methods, [], signer);
+  }
 });
