@@ -248,6 +248,11 @@ const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://ba
 
 /** Requests out to one provider at once (swaps.ts batchTo). */
 export const INFLIGHT_MAX = 4;
+/** A provider held this long or less is still asked: its reads wait out the hold, then go (one()). The local helper at
+ *  7c0e504 (2026-11-04 20:00Z) saw daybreak and blockmachine held 1 s as a dozen cold walks began; passed over, each walk
+ *  went to drpc 100 blocks at a time, 486 reads, and tapes took up to 30 s. [design: 2 s, twice the 1 s hold of a
+ *  throttle that names no wait (limits.ts evmThrottleS, upstreamRetryAfterS); a longer named wait is passed over.] */
+export const HOLD_WAIT_S = 2;
 
 /** Blocks read again every tick, and so the blocks an agreed head must be ahead of a settled block. Base's sequencer can
  *  reorg a few unsafe blocks; its `safe` head trails by about 40 s (proofs/evm-safe-lag, 20 blocks), so 10 re-read blocks
@@ -514,7 +519,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  read does, so the caller asks the next provider (card helper-rpc-hold-queued: 2026-11-04 18:55Z on the helper box,
    *  seven batches queued before the chain's own Robinhood RPC's 429 were sent within 190 ms of it). */
   async function one(url: string, part: Call[]): Promise<Reply[] | null> {
-    if (holds.heldFor(url) > 0) return null;
+    const held = holds.heldFor(url);
+    if (held > HOLD_WAIT_S) return null;
+    if (held > 0) {
+      // a short hold is waited out, and read again before the fetch: a longer wait named meanwhile is not cut
+      await new Promise((go) => setTimeout(go, holds.heldMs(url)));
+      if (holds.heldFor(url) > 0) return null;
+    }
     try {
       const r = await doFetch(url, {
         method: "POST",
@@ -554,6 +565,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
   }
   const usable = (urls: readonly string[]) => urls.filter((u) => holds.heldFor(u) === 0);
+  /** The providers a pair is picked from: those held no longer than HOLD_WAIT_S, whose reads wait out the hold (a wide
+   *  provider held a second answers a cold walk sooner than a narrow one asked ten times as often). */
+  const askable = (urls: readonly string[]) => urls.filter((u) => holds.heldFor(u) <= HOLD_WAIT_S);
 
   /** The block both providers have, and its time: the newest block of the two heads (the second highest of three when
    *  the first two differ by more than LAG_MAX), with the providers that have it. Null when it cannot be read. */
@@ -569,7 +583,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         }),
       );
     };
-    const ok = usable(rpcs);
+    const ok = askable(rpcs);
     await read(ok.slice(0, 2));
     const first = [...heads.values()];
     if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await read(ok.slice(2, 3));
@@ -583,9 +597,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return { n: agreed, t: clock.genesisS + clock.blockS * agreed, with: withIt };
   }
 
-  /** The providers to ask, in order: those of `urls` not held, then any other of ours not held (a provider that was held
+  /** The providers to ask, in order: those of `urls` not held past HOLD_WAIT_S, then any other of ours alike (a provider held
    *  since the head was read, or lags, is made up for by the next), at most PROVIDERS_MAX. */
-  const askOrder = (urls: readonly string[]): string[] => [...new Set([...usable(urls), ...usable(rpcs)])].slice(0, PROVIDERS_MAX);
+  const askOrder = (urls: readonly string[]): string[] => [...new Set([...askable(urls), ...askable(rpcs)])].slice(0, PROVIDERS_MAX);
   /** The leading wide providers (WIDE_SPAN) take turns at being the pair asked first, so a dozen cold tokens' reads are
    *  spread over all of them rather than queued behind two (card helper-robinhood-capacity: 12 at once took 20 s with the
    *  first two asked every time, each provider at INFLIGHT_MAX). A chain with none (Base) keeps its order. */

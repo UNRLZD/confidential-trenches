@@ -120,9 +120,10 @@ export function evmThrottleS(error: unknown): number {
  * One hold per provider URL, shared by every path of this helper that reads it (card helper-robinhood-capacity): the
  * Robinhood swap reads (data/evm/swaps.ts), the maker reads (data/evm/lists.ts) and /v1/rpc/robinhood (rpc/rpc.ts) all
  * read rpc.mainnet.chain.robinhood.com from the one address the provider limits. hold(url, s) holds it s seconds more
- * from now unless it is held longer (at most RETRY_AFTER_MAX_S); heldFor(url) is the seconds left, 0 when it is free.
+ * from now unless it is held longer (at most RETRY_AFTER_MAX_S); heldFor(url) is the seconds left, 0 when it is free, and
+ * heldMs(url) the same in milliseconds (swaps.ts one() waits out a short hold).
  */
-export type ProviderHolds = { heldFor(url: string): number; hold(url: string, seconds: number): void };
+export type ProviderHolds = { heldFor(url: string): number; heldMs(url: string): number; hold(url: string, seconds: number): void };
 export function providerHolds(now: () => number = Date.now): ProviderHolds {
   const until = new Map<string, number>();
   return {
@@ -130,6 +131,9 @@ export function providerHolds(now: () => number = Date.now): ProviderHolds {
       const u = until.get(url) ?? 0;
       if (u <= now()) return 0;
       return secondsUntil(u, now());
+    },
+    heldMs(url) {
+      return Math.max((until.get(url) ?? 0) - now(), 0);
     },
     hold(url, seconds) {
       const t = now();

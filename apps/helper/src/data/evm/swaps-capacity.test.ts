@@ -64,3 +64,21 @@ test("card helper-robinhood-capacity: a block range limit is no refusal: the pro
   assert.equal(ranged > 0, true);
   assert.ok((r.sends.get(WIDE[0]!) ?? 0) > 1, `asked ${r.sends.get(WIDE[0]!)} times: held after a range error`);
 });
+
+test("card helper-robinhood-capacity: a wide provider held a second is waited for, not passed over: daybreak and blockmachine each refusing their first read with a 1 s wait, 12 cold tokens' walks still go to the wide providers, not 100 blocks at a time to drpc (the local helper at 7c0e504, 2026-11-04 20:00Z: both held 1 s as the walks began, drpc then took 486 reads in 166 batches and tapes up to 30 s)", async () => {
+  const r = rig([]);
+  const once = () => {
+    let n = 0;
+    return () => (n++ === 0 ? Response.json([{ jsonrpc: "2.0", id: 0, error: { code: -32005, message: "rate limited" } }]) : null);
+  };
+  for (const u of WIDE.slice(0, 2)) r.chain.st.faults.set(u, { span: 1_000, refuse: once() });
+  // the helper's clock runs with real time here, so a 1 s hold ends
+  const t0 = performance.now();
+  const clock = { get t() { return 9_000_000 + Math.round(performance.now() - t0); } };
+  const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
+  const got = await Promise.all(TOKENS.map((t) => s.trades(t, 50)));
+  s.stop();
+  assert.deepEqual(got.map((a) => a.status), TOKENS.map(() => 200));
+  const drpc = r.logs.get("https://robinhood.drpc.org") ?? 0;
+  assert.ok(drpc <= 30, `drpc asked ${drpc} eth_getLogs (${[...r.logs].map(([u, k]) => `${new URL(u).host} ${k}`).join(", ")})`);
+});
