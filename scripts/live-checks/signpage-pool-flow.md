@@ -27,7 +27,7 @@ Tx: solana-devnet 4DRGb1Jdpm16ALHQix7XMugsWraRGpd1DM5sCWoCvohKXXkNpXAfb4n4Dy3mZ5
 Tx: solana-devnet 4sF2xvoGKLjYiDy1nBSPq4SsbV2aTtnDPgeq39sjUNRYRrAjkHCoszwiaXjt8KwNPcBG5S3YuwQgEUVDeNjU11i8
 Tx: solana-devnet 4S4xzypmo2VxQJG6LJTt3QmMut9C3umxMFWx3eXVFq2qWuxVLpTJAgsUPumgw54etKZPoZrc8vB82P3XhdSdJScK
 
-The run, on Solana devnet, 2026-11-04 09:29-09:57Z, in the order of the Tx lines above. Every funding came from wallet D (the CO's), each the exact amount the step printed.
+The run, on Solana devnet, 2026-11-04 09:29-09:57Z, in the order of the Tx lines above. Every funding came from our devnet wallet D, each the exact amount the step printed.
 1. The lookup table (packages/signpage/scripts/pool-table-devnet.mjs): the first Tx line funds its authority with the rent and the fee, 5003720 lamports; the second creates and fills it with 25 addresses: the pool, both trees' pages to entry 2,047, the token programs, wSOL, the pump fee program and the pump curve venue's program-wide accounts. It is DEVNET_TABLE in the testnet build, read back the same on both devnet RPCs at finalized.
 Table: 4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy, filled for devnet coin AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P.
 Its authority T: 8YuJPtppEh6qw4DCceF9dV6W28NiMYqMbeFb7e3onCSq, a devnet key kept only in the Mac's Keychain, 0 after.
