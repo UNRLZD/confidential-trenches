@@ -10,19 +10,22 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { readFileSync } from "node:fs";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
-import { evmAddressOf, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
+import { EVM_SELL_FREE_WINDOW_MS, EVM_SELL_FREES_MAX, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, evmAddressOf, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
 
 const key = (label: string) => new Uint8Array(createHash("sha256").update(`helper-evm-sender/test-key/${label}`).digest());
 const KEY = key("EVM_SENDER");
+/** The sell sender's own key, apart from the withdraw sender's (card helper-evm-sender: sells never use KEY). */
+const SELL_KEY = key("EVM_SELL_SENDER");
 const W_KEY = key("W");
 const OTHER_KEY = key("OTHER");
 const W = evmAddressOf(W_KEY);
-const SENDER = evmAddressOf(KEY);
+const SENDER = evmAddressOf(SELL_KEY);
 const V = evmPoolVenues()["base-sepolia"];
 const CHAIN_ID = BigInt(V.chainId); // 84532
 const DELEGATE = V.sellDelegate!;
 const POOL = V.pool!;
 const ORACLE = "0x420000000000000000000000000000000000000f";
+const NATIVE = "0x0000000000000000000000000000000000000000";
 const N = secp256k1.Point.CURVE().n;
 
 const NOW = 1_800_000_000_000;
@@ -40,6 +43,10 @@ const a32 = (a: string) => a.slice(2).toLowerCase().padStart(64, "0");
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const cat = (...p: Uint8Array[]) => Uint8Array.from(p.flatMap((x) => [...x]));
 const SELL_SELECTOR = hex(keccak_256(utf8("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)")).subarray(0, 4));
+const selector = (sig: string) => hex(keccak_256(utf8(sig)).subarray(0, 4));
+/** SellDelegate's v4 data as the kit's sell builder writes it: abi.encode(PathKey[]), one hop to `to`, no hook, no hook
+ *  data (`hooks` and `fee` to plant another). */
+const v4Path = (to = NATIVE, hooks = NATIVE, fee = 3000n) => `0x${w32(0x20n)}${w32(1n)}${w32(0x20n)}${a32(to)}${w32(fee)}${w32(60n)}${a32(hooks)}${w32(0xa0n)}${w32(0n)}`;
 
 type Sell = { w: string; token: string; amount: bigint; target: string; data: string; minOut: bigint; pool: string; precommitment: bigint; feeCap: bigint; deadline: bigint; nonce: bigint };
 const SELL: Sell = {
@@ -47,7 +54,7 @@ const SELL: Sell = {
   token: "0x0000000000000000000000000000000000007070",
   amount: 10n ** 18n,
   target: V.poolManager!,
-  data: `0x${"ab".repeat(100)}`, // 100 bytes: padded to 128
+  data: v4Path(), // the kit's one-hop v4 sell of the token for the native asset
   minOut: 10n ** 15n,
   pool: POOL,
   precommitment: 12_345n,
@@ -128,7 +135,13 @@ function authOf(k: Uint8Array, chainId: bigint, address: string, nonce: bigint):
 const AUTH = authOf(W_KEY, CHAIN_ID, DELEGATE, W_NONCE);
 
 type Calls = { method: string; params: readonly unknown[] }[];
-type Opts = { chain?: string; base?: bigint; wNonce?: bigint; l1?: bigint; revert?: boolean };
+type Opts = {
+  chain?: string; base?: bigint; wNonce?: bigint; l1?: bigint; revert?: boolean;
+  /** each sent hash's receipt and transaction as this provider answers them (none given: the method is unexpected) */
+  receipt?: (hash: string) => unknown; tx?: (hash: string) => unknown;
+  /** this provider refuses eth_sendRawTransaction */
+  sendFails?: boolean;
+};
 function rpc(calls: Calls, o: Opts = {}): EvmRpc {
   return async (method, params) => {
     calls.push({ method, params });
@@ -142,13 +155,17 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
         if (o.revert) throw new Error("RPC error 3: execution reverted: 0xd6d39ee2"); // the kit client's wording
         return `0x${w32(1n)}`;
       }
-      case "eth_sendRawTransaction": return "0x";
-      default: throw new Error(`unexpected ${method}`);
+      case "eth_sendRawTransaction":
+        if (o.sendFails) throw new Error("RPC error -32000: already known");
+        return `0x${hex(keccak_256(unhex(params[0] as string)))}`;
+      case "eth_getTransactionReceipt": if (o.receipt) return o.receipt(params[0] as string); break;
+      case "eth_getTransactionByHash": if (o.tx) return o.tx(params[0] as string); break;
     }
+    throw new Error(`unexpected ${method}`);
   };
 }
 const senderOf = (calls: Calls = [], o: Opts = {}, b: Calls = [], ob: Opts = o, network = "base-sepolia", pool = POOL) =>
-  evmPoolSender({ network, pool, senderKey: KEY, floor: 10n ** 12n }, [rpc(calls, o), rpc(b, ob)], () => NOW);
+  evmPoolSender({ network, pool, senderKey: KEY, sellKey: SELL_KEY, floor: 10n ** 12n }, [rpc(calls, o), rpc(b, ob)], () => NOW);
 const code = (a: { body: unknown }) => ((a.body as { error?: { code: string } }).error?.code ?? "ok");
 const detail = (a: { body: unknown }) => (a.body as { error?: { detail?: string } }).error?.detail ?? "";
 const sends = (calls: Calls) => calls.filter((c) => c.method === "eth_sendRawTransaction").map((c) => c.params[0] as string);
@@ -210,7 +227,7 @@ test("a good sell: one type-4 transaction to W, gas 1,000,000, the pinned tip, v
   // the transaction's signature recovers to the sender
   const digest = keccak_256(cat(Uint8Array.of(4), enc(f.slice(0, 10))));
   const sig = cat(Uint8Array.of(Number(num(f[10]!))), unhex(w32(num(f[11]!))), unhex(w32(num(f[12]!))));
-  assert.equal(hex(secp256k1.recoverPublicKey(sig, digest, { prehash: false })), hex(secp256k1.getPublicKey(KEY, true)));
+  assert.equal(hex(secp256k1.recoverPublicKey(sig, digest, { prehash: false })), hex(secp256k1.getPublicKey(SELL_KEY, true)), "signed by the sell key, never the withdraw sender's");
   // never an estimate and never the node's tip
   const methods = [...calls, ...b].map((c) => c.method);
   assert.ok(!methods.includes("eth_estimateGas") && !methods.includes("eth_maxPriorityFeePerGas"), methods.join(","));
@@ -249,10 +266,10 @@ test("the fee is bounded: at the bound it sends and the sender's worst cost is w
   // Robinhood: no tip and no L1 oracle (its L1 cost is in its gas)
   const r: Calls = [];
   const rn = evmPoolVenues()["robinhood-testnet"];
-  const rs = { ...SELL, pool: rn.pool!, feeCap: EVM_POOL_SELL_GAS * BASE };
+  const rs = { ...SELL, pool: rn.pool!, target: rn.poolManager!, feeCap: EVM_POOL_SELL_GAS * BASE };
   const rid = BigInt(rn.chainId);
   const rd = (x: Sell, k = W_KEY) => sellData(x, x.feeCap, sign65(k, digestOf(x, rid)));
-  const robin = evmPoolSender({ network: "robinhood-testnet", pool: rn.pool!, senderKey: KEY, floor: 1n }, [rpc(r, { chain: `0x${rid.toString(16)}` }), rpc([], { chain: `0x${rid.toString(16)}` })], () => NOW);
+  const robin = evmPoolSender({ network: "robinhood-testnet", pool: rn.pool!, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc(r, { chain: `0x${rid.toString(16)}` }), rpc([], { chain: `0x${rid.toString(16)}` })], () => NOW);
   const ra = authOf(W_KEY, rid, rn.sellDelegate!, W_NONCE);
   const ok = await robin.sell({ pool: rn.pool!, w: W, data: rd(rs), authorization: ra });
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
@@ -260,7 +277,7 @@ test("the fee is bounded: at the bound it sends and the sender's worst cost is w
   assert.equal(num(rf[2]!), 0n, "Robinhood's tip is 0");
   assert.equal(num(rf[3]!), BASE, "(fee - 0) / gas = base");
   assert.ok(!r.some((c) => c.method === "eth_call" && (c.params[0] as { to: string }).to === ORACLE), "no L1 oracle read on Robinhood");
-  const low = await evmPoolSender({ network: "robinhood-testnet", pool: rn.pool!, senderKey: KEY, floor: 1n }, [rpc([], { chain: `0x${rid.toString(16)}` }), rpc([], { chain: `0x${rid.toString(16)}` })], () => NOW)
+  const low = await evmPoolSender({ network: "robinhood-testnet", pool: rn.pool!, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc([], { chain: `0x${rid.toString(16)}` }), rpc([], { chain: `0x${rid.toString(16)}` })], () => NOW)
     .sell({ pool: rn.pool!, w: W, data: rd({ ...rs, feeCap: EVM_POOL_SELL_GAS * BASE - 1n }), authorization: ra });
   assert.equal(code(low), "fee_low");
 });
@@ -275,7 +292,7 @@ test("the base fee and the L1 bound are each the higher of the two providers' an
 
 test("a sell is held with the withdraws: one client holds at most EVM_IN_FLIGHT_MAX open, the next is in_flight", async () => {
   const hang: EvmRpc = async (m, p) => (m === "eth_chainId" ? new Promise(() => {}) : rpc([])(m, p));
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, floor: 1n }, [hang, hang], () => NOW);
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [hang, hang], () => NOW);
   void s.sell(body({ sell: { nonce: 0n } }), "203.0.113.7");
   void s.sell(body({ sell: { nonce: 1n } }), "203.0.113.7");
   // the refusal is at once; a sell let through would wait on the hung reads, so the wait is bounded here
@@ -314,7 +331,7 @@ test("the authorization: chainId 0, another chain's id, another delegate, anothe
   assert.equal(hex(flipped.recoverPublicKey(digest).toBytes(true)), hex(secp256k1.getPublicKey(W_KEY, true)));
   // base (mainnet) pins no sell delegate yet: every sell there is refused, fail closed
   const calls: Calls = [];
-  const m = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, floor: 1n }, [rpc(calls), rpc(calls)], () => NOW);
+  const m = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc(calls), rpc(calls)], () => NOW);
   assert.equal(Object.hasOwn(evmPoolVenues().base, "sellDelegate"), false);
   const a = await m.sell(body({ auth: authOf(W_KEY, 8453n, DELEGATE, W_NONCE) }));
   assert.equal(code(a), "bad_authorization", detail(a));
@@ -402,7 +419,8 @@ test("bad_shape: one trailing byte, a byte short, another selector, a changed of
     ["the signature's offset", { ...body(), data: flip(at(2) + 62, "f") }],
     ["the data's offset", { ...body(), data: flip(at(3 + 3) + 63, "1") }],
     ["an address's high bytes", { ...body(), data: flip(at(3) + 2, "1") }],
-    ["the data's padding", { ...body(), data: flip(at(3 + 11) + 64 * 4 - 1, "1") }],
+    // swap data of 100 bytes, padded to 128: its last padding byte set (the decoder refuses it before the route check)
+    ["the data's padding", (() => { const b = body({ sell: { data: `0x${"ab".repeat(100)}` } }); return { ...b, data: `${b.data.slice(0, at(3 + 11) + 64 * 4 - 1)}1${b.data.slice(at(3 + 11) + 64 * 4)}` }; })()],
     ["the signature's padding", { ...body(), data: flip(good.length - 1, "1") }],
     ["a 64-byte signature", { ...body(), data: sig64 }],
     ["too long", body({ sell: { data: `0x${"ab".repeat(2_000)}` } })],
@@ -432,7 +450,7 @@ test("a sim that reverts is simulation_failed and sends nothing; a provider's ot
   assert.equal(code(a), "simulation_failed", JSON.stringify(a.body));
   assert.equal(sends(calls).length, 0);
   const down: EvmRpc = async (m, p) => (m === "eth_call" && (p[0] as { to: string }).to === W ? Promise.reject(new Error("HTTP 502")) : rpc([])(m, p));
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, floor: 1n }, [down, rpc([])], () => NOW);
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [down, rpc([])], () => NOW);
   assert.equal(code(await s.sell(body())), "upstream");
 });
 
@@ -468,9 +486,10 @@ test("once per (W, Sell nonce): a repeat in flight or after, even as other bytes
   assert.equal(r.filter((c) => c.method === "eth_call" && (c.params[0] as { to: string }).to === W).length, 2);
 });
 
-test("the fee answer names the sender's address, so the kit can pin and check it", async () => {
+test("the fee answer names the sell sender's address as sell_sender (null with no sell key), so the kit can pin and check it", async () => {
   const s = senderOf();
-  assert.equal(s.sender, SENDER);
+  assert.equal(s.sellSender, SENDER);
+  assert.equal(s.sender, evmAddressOf(KEY), "the withdraw sender is its own key");
   const calls: Calls = [];
   const chain = rpc(calls);
   // the fee reads the epoch's first block: a chain whose blocks are 2 s apart up to now
@@ -480,6 +499,200 @@ test("the fee answer names the sender's address, so the kit can pin and check it
     const n = p[0] === "latest" ? latest : BigInt(p[0] as string);
     return { number: `0x${n.toString(16)}`, timestamp: `0x${(NOW_S - 2n * (latest - n)).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" };
   };
-  const f = await evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, floor: 1n }, [blocks, blocks], () => NOW).fee(NOW);
-  assert.equal(f?.sender, SENDER);
+  const f = await evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [blocks, blocks], () => NOW).fee(NOW);
+  assert.equal(f?.sell_sender, SENDER);
+  assert.equal(Object.hasOwn(f!, "sender"), false, "the field is sell_sender, never the withdraw sender's address");
+  const none = await evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, floor: 1n }, [blocks, blocks], () => NOW).fee(NOW);
+  assert.equal(none?.sell_sender, null);
+});
+
+// ---- The sell sender's own costs (card helper-evm-sender, fold 1): a sale that did not land frees its (W, nonce), a
+// bounded number of times; only the kit builder's routes are sent; every sale's unpaid gas is held to caps; sells have
+// their own key; Base reads its L1 bound; one provider's failed send still advances the nonce lane; the deadline is
+// checked again after the queue.
+
+const tick = () => new Promise((ok) => setTimeout(ok, 5));
+/** A receipt as a node answers one: status, the gas used, its price and (OP chains) the L1 fee. */
+const receiptOf = (status: "0x0" | "0x1", o: { gasUsed?: bigint; price?: bigint; l1Fee?: bigint } = {}) => ({
+  status, gasUsed: `0x${(o.gasUsed ?? 1_000_000n).toString(16)}`, effectiveGasPrice: `0x${(o.price ?? 2n * BASE + TIP).toString(16)}`, ...(o.l1Fee === undefined ? {} : { l1Fee: `0x${o.l1Fee.toString(16)}` }),
+});
+const reads = (calls: Calls, m: string) => calls.filter((c) => c.method === m).length;
+/** A sale from a fresh W of `label`, its authorization at W's pending nonce (the mock answers 7 for any but W). */
+const freshBody = (label: string, o: { sell?: Partial<Sell>; fee?: bigint } = {}) => {
+  const k = key(label);
+  const s = { ...SELL, w: evmAddressOf(k), ...o.sell };
+  return { pool: POOL, w: s.w, data: sellData(s, o.fee ?? FEE, sign65(k, digestOf(s))), authorization: authOf(k, CHAIN_ID, DELEGATE, 7n) };
+};
+
+test("a sale that reverted or was dropped frees its (W, Sell nonce): a receipt with status 0 on either provider, or no transaction on either past the deadline; a success or a sale still waiting keeps the first hash; frees capped per W", async () => {
+  // reverted: the repeat reads the first hash's receipt on both providers and sends a new Sell at the same nonce
+  {
+    const x: Calls = [];
+    const y: Calls = [];
+    const s = senderOf(x, { receipt: () => null, tx: () => ({}) }, y, { receipt: () => receiptOf("0x0") });
+    const first = await s.sell(body());
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const again = await s.sell(body({ sell: { deadline: NOW_S + 500n, minOut: SELL.minOut / 2n } }));
+    assert.equal(again.status, 200, JSON.stringify(again.body));
+    assert.notDeepEqual(again, first, "a new send, not the dead hash");
+    assert.equal(sends(x).length, 2);
+    assert.ok(reads(x, "eth_getTransactionReceipt") >= 1 && reads(y, "eth_getTransactionReceipt") >= 1, "the receipt read on both providers");
+  }
+  // landed (status 1 on either), or still waiting (no receipt, a transaction known): the first hash, nothing sent
+  for (const [name, oa, ob] of [
+    ["landed", { receipt: () => receiptOf("0x1") }, { receipt: () => null, tx: () => ({}) }],
+    ["landed on one, reverted on the other", { receipt: () => receiptOf("0x1") }, { receipt: () => receiptOf("0x0") }],
+    ["waiting", { receipt: () => null, tx: () => ({}) }, { receipt: () => null, tx: () => ({}) }],
+    ["no receipt, before the deadline", { receipt: () => null, tx: () => null }, { receipt: () => null, tx: () => null }],
+  ] as [string, Opts, Opts][]) {
+    const x: Calls = [];
+    const s = senderOf(x, oa, [], ob);
+    const first = await s.sell(body());
+    assert.deepEqual(await s.sell(body({ sell: { deadline: NOW_S + 500n } })), first, name);
+    assert.equal(sends(x).length, 1, name);
+  }
+  // dropped: no receipt and no transaction on either provider once now is past the first Sell's deadline frees it;
+  // a transaction still on one provider does not
+  for (const [onB, want] of [[null, 2], [{}, 1]] as [unknown, number][]) {
+    let clock = NOW;
+    const x: Calls = [];
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc(x, { receipt: () => null, tx: () => null }), rpc([], { receipt: () => null, tx: () => onB })], () => clock);
+    assert.equal((await s.sell(body())).status, 200);
+    clock = NOW + 301_000; // past the first deadline (NOW_S + 300)
+    const later = await s.sell(body({ sell: { deadline: NOW_S + 600n } }));
+    assert.equal(sends(x).length, want, `the transaction on provider B: ${JSON.stringify(onB)}: ${JSON.stringify(later.body)}`);
+    if (want === 1) assert.equal(reads(x, "eth_getTransactionByHash"), 1);
+  }
+  // the cap: EVM_SELL_FREES_MAX frees of one W in the window, then 429 with the wait
+  {
+    const x: Calls = [];
+    const s = senderOf(x, { receipt: () => receiptOf("0x0") });
+    assert.equal((await s.sell(body())).status, 200);
+    for (let i = 0; i < EVM_SELL_FREES_MAX; i++) assert.equal((await s.sell(body())).status, 200, `free ${i + 1}`);
+    const capped = await s.sell(body());
+    assert.deepEqual([capped.status, code(capped)], [429, "rate_limited"], JSON.stringify(capped.body));
+    assert.ok(capped.retryAfterS! > 0 && capped.retryAfterS! <= EVM_SELL_FREE_WINDOW_MS / 1000, String(capped.retryAfterS));
+    assert.equal(sends(x).length, 1 + EVM_SELL_FREES_MAX);
+  }
+});
+
+test("bad_route: a sale to any target but the PoolManager or a listed router, or swap data the kit's builder would not make, is refused before any read", async () => {
+  const cases: [string, Partial<Sell>][] = [
+    ["any target, any token (0x…dead, 0x…deadbeef)", { target: "0x000000000000000000000000000000000000dead", token: "0x00000000000000000000000000000000deadbeef", data: `0x${"ff".repeat(32)}` }],
+    ["the PoolManager with data that is no path", { data: `0x${"ff".repeat(32)}` }],
+    ["an unlisted hook", { data: v4Path(NATIVE, "0x00000000000000000000000000000000000000cc") }],
+    ["a path that ends at another token", { data: v4Path("0x0000000000000000000000000000000000007071") }],
+    ["a listed router with v4 data", { target: V.routers[0]!.toLowerCase() }],
+  ];
+  for (const [name, sell] of cases) {
+    const calls: Calls = [];
+    const a = await senderOf(calls, {}, calls).sell(body({ sell }));
+    assert.deepEqual([a.status, code(a)], [422, "bad_route"], `${name}: ${JSON.stringify(a.body)}`);
+    assert.equal(calls.length, 0, `${name}: nothing read`);
+  }
+});
+
+test("unpaid sell gas: reverting sales are held against the client, the token, W and the sender's budget; past a cap 429 rate_limited with the wait, and withdraws still go", async () => {
+  // 50 sales from one client, 50 fresh Ws, each its own token, every landed transaction reverting: the client's cap
+  const worst = EVM_POOL_SELL_GAS * (2n * BASE + TIP) + L1;
+  const tokenOf = (i: number) => `0x${(0x7000 + i).toString(16).padStart(40, "0")}`;
+  const x: Calls = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, [rpc(x, { receipt: () => receiptOf("0x0", { l1Fee: L1 }) }), rpc([], { receipt: () => null })], () => NOW);
+  let sent = 0;
+  let last: Awaited<ReturnType<typeof s.sell>> | undefined;
+  for (let i = 0; i < 50; i++) {
+    last = await s.sell(freshBody(`W-fresh-${i}`, { sell: { token: tokenOf(i) } }), "203.0.113.9");
+    if (last.status === 200) sent++;
+    await tick();
+  }
+  assert.equal(BigInt(sent), EVM_SELL_UNPAID_CAP_WEI / worst, `${sent} sent`);
+  assert.deepEqual([last!.status, code(last!)], [429, "rate_limited"]);
+  assert.ok(last!.retryAfterS! >= 1 && last!.retryAfterS! <= EVM_SELL_UNPAID_WINDOW_MS / 1000);
+  assert.ok(BigInt(sent) * worst <= EVM_SELL_UNPAID_CAP_WEI);
+  assert.equal(sends(x).length, sent);
+  assert.ok(detail(last!).includes("this client"), detail(last!));
+  // one W, many Sell nonces, each its own token, no client: W's cap
+  const v: Calls = [];
+  const u = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, [rpc(v, { receipt: () => receiptOf("0x0", { l1Fee: L1 }) }), rpc([], { receipt: () => null })], () => NOW);
+  let byW = 0;
+  for (let i = 0; i < 50; i++) {
+    last = await u.sell(body({ sell: { nonce: BigInt(i), token: tokenOf(i) } }));
+    if (last.status === 200) byW++;
+    await tick();
+  }
+  assert.equal(BigInt(byW), EVM_SELL_UNPAID_CAP_WEI / worst, `${byW} sent`);
+  assert.ok(detail(last!).includes("for W"), detail(last!));
+  // a withdraw from the same client is not held by the sell caps (its own checks answer)
+  assert.equal(code(await s.carry({ pool: POOL, data: "0x00", epoch: 60_000 }, "203.0.113.9")), "bad_shape");
+  // a burst with no client and no receipt yet: each sale's worst cost is held from its send, so the token's cap stops it
+  const y: Calls = [];
+  const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc(y, { receipt: () => null }), rpc([], { receipt: () => null })], () => NOW);
+  const all = await Promise.all(Array.from({ length: 50 }, (_, i) => t.sell(freshBody(`W-burst-${i}`))));
+  assert.equal(BigInt(all.filter((a) => a.status === 200).length), EVM_SELL_UNPAID_CAP_WEI / worst);
+  assert.ok(all.filter((a) => a.status !== 200).every((a) => code(a) === "rate_limited"));
+  // a sale that landed and paid its fee holds nothing: 60 in a row from one client all go
+  const z: Calls = [];
+  const paid = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, [rpc(z, { receipt: () => receiptOf("0x1", { l1Fee: L1 }) }), rpc([], { receipt: () => null })], () => NOW);
+  for (let i = 0; i < 60; i++) {
+    assert.equal((await paid.sell(freshBody(`W-paid-${i}`), "203.0.113.10")).status, 200, `sale ${i}`);
+    await tick();
+  }
+});
+
+test("the sell sender: its own key and nonce lane, never the withdraw sender's; no sell key is 503 not_configured with nothing read", async () => {
+  const calls: Calls = [];
+  const none = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, floor: 1n }, [rpc(calls), rpc(calls)], () => NOW);
+  assert.equal(none.sellSender, null);
+  const a = await none.sell(body());
+  assert.deepEqual([a.status, code(a)], [503, "not_configured"]);
+  assert.equal(calls.length, 0);
+  assert.throws(() => evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: KEY, floor: 1n }, [rpc([]), rpc([])], () => NOW), /sell key/);
+  // the sale's pending nonce is read for the sell sender's address and its sim runs from it
+  const x: Calls = [];
+  assert.equal((await senderOf(x).sell(body())).status, 200);
+  const counted = x.filter((c) => c.method === "eth_getTransactionCount").map((c) => c.params[0]);
+  assert.ok(counted.includes(SENDER) && !counted.includes(evmAddressOf(KEY)), counted.join(","));
+  assert.equal((x.find((c) => c.method === "eth_call" && (c.params[0] as { to: string }).to === W)!.params[0] as { from: string }).from, SENDER);
+});
+
+test("on Base, a pinned delegate's sale reads the L1 oracle on both providers", async () => {
+  const kit = evmPoolVenues();
+  const venues = { ...kit, base: { ...kit.base, pool: POOL, sellDelegate: DELEGATE } };
+  const x: Calls = [];
+    const y: Calls = [];
+  const s = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, venues }, [rpc(x, { chain: "0x2105" }), rpc(y, { chain: "0x2105" })], () => NOW);
+  const bs = { ...SELL, target: kit.base.poolManager!.toLowerCase() };
+  const a = await s.sell({ pool: POOL, w: W, data: sellData(bs, FEE, sign65(W_KEY, digestOf(bs, 8453n))), authorization: authOf(W_KEY, 8453n, DELEGATE, W_NONCE) });
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  for (const c of [x, y]) assert.ok(c.some((q) => q.method === "eth_call" && (q.params[0] as { to: string; data: string }).to === ORACLE && (q.params[0] as { data: string }).data.startsWith(`0x${selector("getL1FeeUpperBound(uint256)")}`)));
+});
+
+test("one provider refusing the send: the sale is sent on the other, and the next sale takes the sell sender's nonce + 1", async () => {
+  const x: Calls = [];
+  const s = senderOf(x, { sendFails: true }, [], {});
+  const first = await s.sell(body());
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  const next = await s.sell(body({ sell: { nonce: 1n } }));
+  assert.equal(next.status, 200, JSON.stringify(next.body));
+  const raws = sends(x).map((r) => dec(unhex(r).subarray(1)) as Rlp[]);
+  assert.deepEqual(raws.map((f) => num(f[1]!)), [7n, 8n]);
+});
+
+test("the deadline again after the queue's wait: a sale whose deadline came within the margin while it waited is deadline_near, nothing sent", async () => {
+  let clock = NOW;
+  let open: () => void = () => {};
+  const gate = new Promise<void>((ok) => (open = ok));
+  const x: Calls = [];
+  const inner = rpc(x);
+  const slow: EvmRpc = async (m, p) => (m === "eth_chainId" ? gate.then(() => inner(m, p)) : inner(m, p));
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [slow, rpc([])], () => clock);
+  const first = s.sell(body({ sell: { deadline: NOW_S + 600n } }));
+  const second = s.sell(body({ sell: { nonce: 1n, deadline: NOW_S + 100n } }));
+  await tick();
+  clock = NOW + 41_000; // the second's deadline now 59 s away
+  open();
+  assert.equal((await first).status, 200);
+  const late = await second;
+  assert.equal(code(late), "deadline_near", JSON.stringify(late.body));
+  assert.equal(sends(x).length, 1);
 });

@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 const HELPER = fileURLToPath(new URL("../..", import.meta.url));
 const EVM = "src/pool/evm.ts";
 const T = "src/pool/evm-sell.test.ts";
+const T2 = "src/pool/evm.test.ts";
 
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
@@ -66,8 +67,8 @@ export const MUTANTS = [
   [EVM, "    if (s.deadline * 1000n > t + BigInt(EVM_POOL_SELL_DEADLINE_MAX_S) * 1000n) return", "    if (false) return", T, "the deadline is unix seconds:"],
   [EVM, "    if (s.deadline * 1000n > t + BigInt(EVM_POOL_SELL_DEADLINE_MAX_S) * 1000n) return", "    if (s.deadline * 1000n >= t + BigInt(EVM_POOL_SELL_DEADLINE_MAX_S) * 1000n) return", T, "the deadline is unix seconds:"],
   // once per (W, Sell nonce), the held limit
-  [EVM, "return sells.run(`${w}:${s.nonce}`, ", "return sells.run(data, ", T, "once per (W, Sell nonce):"],
-  [EVM, "=> holding(client, () => sellHeld(body));", "=> sellHeld(body);", T, "a sell is held with the withdraws:"],
+  [EVM, "    const key = `${w}:${s.nonce}`;", "    const key = data;", T, "once per (W, Sell nonce):"],
+  [EVM, "=> holding(client, () => sellHeld(body, client));", "=> sellHeld(body, client);", T, "a sell is held with the withdraws:"],
   // the RPC checks
   [EVM, '      if (id !== BigInt(venue.chainId)) return no(503, "upstream"', '      if (false) return no(503, "upstream"', T, "the chain:"],
   [EVM, "if (na !== auth.nonce || nb !== auth.nonce) return", "if (na !== auth.nonce) return", T, "auth_nonce:"],
@@ -77,6 +78,8 @@ export const MUTANTS = [
   [EVM, "        l1 = words[0]! > words[1]! ? words[0]! : words[1]!;", "        l1 = words[1]!;", T, "the base fee and the L1 bound"],
   [EVM, "        l1 = words[0]! > words[1]! ? words[0]! : words[1]!;", "        l1 = 0n;", T, "the fee is bounded:"],
   [EVM, 'const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base", "base-sepolia"]);', 'const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base", "base-sepolia", "robinhood-testnet"]);', T, "the fee is bounded:"],
+  // fold 1, M3 (a): Base itself reads the L1 oracle (a delegate pinned on base through cfg.venues)
+  [EVM, 'const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base", "base-sepolia"]);', 'const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base-sepolia"]);', T, "on Base, a pinned delegate's sale reads the L1 oracle"],
   [EVM, "big(1n), big(U256_MAX), big(U256_MAX)]).length;", "big(1n), big(1n), big(1n)]).length;", T, "a good sell:"],
   // the transaction as sent
   [EVM, "    const cap = (s.fee - l1) / gas;\n    const maxFeePerGas = 2n * base + tip < cap ? 2n * base + tip : cap;", "    const cap = (s.fee - l1) / gas;\n    const maxFeePerGas = cap;", T, "a good sell:"],
@@ -91,9 +94,38 @@ export const MUTANTS = [
   [EVM, "  const digest = keccak_256(Uint8Array.from([4, ...rlp(fields)]));", "  const digest = keccak_256(Uint8Array.from([2, ...rlp(fields)]));", T, "a good sell:"],
   [EVM, "big(a.nonce), big(a.yParity), big(a.r), big(a.s)]),", "big(a.nonce), big(a.yParity), big(a.r), big(a.r)]),", T, "a good sell:"],
   [EVM, "authorizations: [auth] });", "authorizations: [] });", T, "a good sell:"],
-  [EVM, "    nextNonce = nonce + 1n;\n    return { status: 200, body: { hash } };\n  }\n  return {", "    return { status: 200, body: { hash } };\n  }\n  return {", T, "once per (W, Sell nonce):"],
+  [EVM, "    sellLane.nextNonce = nonce + 1n;\n", "", T, "once per (W, Sell nonce):"],
+  // fold 1, M3 (b): one provider refusing the send still sends, and the next sale takes nonce + 1
+  [EVM, "    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);\n    sellLane.nextNonce", "    if (why.length > 0) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);\n    sellLane.nextNonce", T, "one provider refusing the send:"],
   // the fee answer
-  [EVM, "fee_recipient: feeRecipient, sender, epoch_ms", "fee_recipient: feeRecipient, epoch_ms", T, "the fee answer names"],
+  [EVM, "fee_recipient: feeRecipient, sell_sender: sellSender, epoch_ms", "fee_recipient: feeRecipient, sell_sender: sender, epoch_ms", T, "the fee answer names"],
+  // fold 1, H1: a sale that did not land frees its (W, nonce), on both providers' reads, capped per W
+  [EVM, '    if (status.includes("0x0")) return true;', "    if (false) return true;", T, "a sale that reverted or was dropped"],
+  [EVM, '    if (status.includes("0x1")) return false;', "", T, "a sale that reverted or was dropped"],
+  [EVM, "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n) return false;", "", T, "a sale that reverted or was dropped"],
+  [EVM, '    return tx.every((x) => x.status === "fulfilled" && x.value === null);', '    return tx.some((x) => x.status === "fulfilled" && x.value === null);', T, "a sale that reverted or was dropped"],
+  [EVM, '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);\n    const status', '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash])]);\n    const status', T, "a sale that reverted or was dropped"],
+  [EVM, "        if (recent.length >= EVM_SELL_FREES_MAX) return", "        if (false) return", T, "a sale that reverted or was dropped"],
+  // fold 1, H2.1: only a route the kit's sell builder makes (the kit's own checks: packages/kit/test/evm-sell-route-of.test.ts)
+  [EVM, "      evmSellRouteOf(sellChain, { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data });", "      void { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data };", T, "bad_route:"],
+  // fold 1, H2.2: the unpaid-gas caps
+  [EVM, "    const capped = overCap(keys, worst);\n    if (capped !== null) return capped;", "", T, "unpaid sell gas:"],
+  [EVM, '        held.wei = evmRpcHex(r.status) === "0x1" ? (cost > fee ? cost - fee : 0n) : cost;', "        held.wei = cost;", T, "unpaid sell gas:"],
+  [EVM, '        held.wei = evmRpcHex(r.status) === "0x1" ? (cost > fee ? cost - fee : 0n) : cost;', "        held.wei = 0n;", T, "unpaid sell gas:"],
+  [EVM, '["all", `w:${w}`, `t:${token}`, ...(client === undefined ? [] : [`c:${client}`])]', '["all", `w:${w}`, `t:${token}`]', T, "unpaid sell gas:"],
+  [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '["all", `w:${w}`, ...(client', T, "unpaid sell gas:"],
+  [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '["all", `t:${token}`, ...(client', T, "unpaid sell gas:"],
+  // fold 1, H2.3: the sell sender's own key
+  [EVM, '    if (cfg.sellKey === undefined || sellSender === null) return no(503, "not_configured"', '    if (false) return no(503, "not_configured"', T, "the sell sender:"],
+  [EVM, "  if (sellSender === sender) throw", "  if (false) throw", T, "the sell sender:"],
+  [EVM, 'a("eth_getTransactionCount", [from, "pending"])', 'a("eth_getTransactionCount", [sender, "pending"])', T, "the sell sender:"],
+  [EVM, "    const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), key);", "    const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), cfg.senderKey);", T, "a good sell:"],
+  [EVM, '      await a("eth_call", [{ from, to: w, data, gas:', '      await a("eth_call", [{ from: sender, to: w, data, gas:', T, "a good sell:"],
+  [EVM, "pin.toLowerCase() !== s.sellSender)", "pin.toLowerCase() !== s.sender)", T2, "the EVM pool sell sender's address"],
+  [EVM, '    if (sellKey !== "" && sellKey === key) throw', "    if (false) throw", T2, "the EVM pool sell sender's address"],
+  // fold 1, L1: the deadline again after the queue's wait, the sale's and the withdraw's
+  [EVM, "    if (s.deadline * 1000n < BigInt(Math.floor(now())) + BigInt(EVM_POOL_SEND_MARGIN_MS)) return", "    if (false) return", T, "the deadline again after the queue's wait:"],
+  [EVM, "    if (Number(w.deadlineMs) < now() + EVM_POOL_SEND_MARGIN_MS) return", "    if (false) return", T2, "the withdraw's deadline again after the queue's wait:"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a

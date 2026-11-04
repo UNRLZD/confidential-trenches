@@ -275,6 +275,68 @@ export function evmSellRouteCheck(chain: EvmPoolChain, token: string, route: Evm
   else refuse("bad_route", "a sell runs on Uniswap v3's SwapRouter02 or v4's PoolManager");
 }
 
+/** A signed Sell's call as a sender reads it back: W, the token and amount sold, minOut, the target and its data. */
+export type EvmSignedSellCall = { w: string; token: string; amount: bigint; minOut: bigint; target: string; data: string };
+
+/** The route a signed Sell's (target, data) encodes, when it is one the sell builder would build for that Sell; refused
+ *  (throws EvmPoolSellError) otherwise. The data is decoded loosely into a route (v4: abi.encode(PathKey[]) when the
+ *  target is the chain's pinned PoolManager; v3: SwapRouter02's exactInput when it is a listed router; any other target
+ *  bad_target), then encoded again with the builder's own encoder (swapData: the same checks and the same bytes) and
+ *  held byte-equal to the data signed, then checked once more by evmSellRouteCheck. So a sender carries a sale only
+ *  through the PoolManager or a listed router, along a route the device's builder takes, paying W, for the amount and
+ *  minOut signed (card helper-evm-sender: the helper's sell sender pays the gas of every call W signs). */
+export function evmSellRouteOf(chain: EvmPoolChain, sell: EvmSignedSellCall): EvmSellRoute {
+  if (typeof sell !== "object" || sell === null) return refuse("bad_route", "a signed sell is an object");
+  const { w, token, amount, minOut, target, data } = sell;
+  const venue = venueOf(chain);
+  if (!isWallet(w) || !isWallet(token) || !isAddress(target)) return refuse("bad_route", "W, the token or the target is not an address");
+  if (!isUint(amount, U256) || !isUint(minOut, U256)) return refuse("bad_amount", "amount or minOut is not a uint256");
+  if (typeof data !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(data) || data.length > 2 + 2 * 4096) return refuse("bad_route", "the data is not 0x hex, or too long");
+  const d = fromHex(data.toLowerCase());
+  const at = (i: number): bigint => {
+    if (i < 0 || i + 32 > d.length) return refuse("bad_route", "the data is too short");
+    let v = 0n;
+    for (let k = i; k < i + 32; k++) v = (v << 8n) | BigInt(d[k]!);
+    return v;
+  };
+  const small = (v: bigint, below: number, what: string): number => (v < BigInt(below) ? Number(v) : refuse("bad_route", `${what} is out of range`));
+  const asAddress = (v: bigint): string => (v >> 160n === 0n ? `0x${v.toString(16).padStart(40, "0")}` : refuse("bad_route", "an address word's high bytes"));
+  const pm = Object.hasOwn(venue, "poolManager") && isAddress(venue.poolManager) ? lower(venue.poolManager) : undefined;
+  let route: EvmSellRoute;
+  if (pm !== undefined && lower(target) === pm) {
+    // abi.encode(PathKey[]): the array's offset, its length, one offset per element, then each element
+    const base = 32 + small(at(0), 0x10000, "the path's offset");
+    const n = small(at(base - 32), EVM_POOL_MAX_HOPS + 1, "the path's length");
+    const hops: EvmV4Hop[] = [];
+    for (let i = 0; i < n; i++) {
+      const e = base + small(at(base + 32 * i), 0x10000, "a hop's offset");
+      const hd = e + small(at(e + 128), 0x10000, "a hop's hook data offset");
+      const len = small(at(hd), 4097, "a hop's hook data length");
+      if (hd + 32 + len > d.length) return refuse("bad_route", "a hop's hook data runs past the data");
+      hops.push({ currency: asAddress(at(e)), fee: small(at(e + 32), U24 + 1, "a fee"), tickSpacing: small(at(e + 64), MAX_TICK_SPACING + 1, "a tick spacing"), hooks: asAddress(at(e + 96)), hookData: toHex(d.slice(hd + 32, hd + 32 + len)) });
+    }
+    route = { venue: "uniswap-v4", hops };
+  } else if (venue.routers.some((r) => lower(r) === lower(target))) {
+    // exactInput((bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum)): the path's packed
+    // tokens and fees (token, then fee and token per hop)
+    if (d.length < 4) return refuse("bad_route", "the data is too short");
+    const p = 4 + 32 + small(at(4 + 32 * 1), 0x10000, "the path's offset");
+    const len = small(at(p), 20 + 23 * EVM_POOL_MAX_HOPS + 1, "the path's length");
+    if (len < 43 || (len - 20) % 23 !== 0 || p + 32 + len > d.length) return refuse("bad_route", "the path is not tokens and fees");
+    const path = d.slice(p + 32, p + 32 + len);
+    const tokens = [toHex(path.slice(0, 20))];
+    const fees: number[] = [];
+    for (let o = 20; o < len; o += 23) fees.push((path[o]! << 16) | (path[o + 1]! << 8) | path[o + 2]!), tokens.push(toHex(path.slice(o + 3, o + 23)));
+    route = { venue: "uniswap-v3", tokens, fees };
+  } else {
+    return refuse("bad_target", `a sell goes only to ${chain}'s pinned PoolManager or a listed router, not ${target}`);
+  }
+  // the builder's own bytes for that route, W, the amount and minOut: anything else signed is refused
+  if (swapData(chain, token, route, target, w, amount, minOut) !== lower(data)) return refuse("bad_route", "the data is not the bytes the sell builder makes for its route");
+  evmSellRouteCheck(chain, token, route);
+  return route;
+}
+
 /** The sell W asked for on `chain`, after every check (see the header); refused with its own code otherwise. */
 export function evmPoolBuildSellUnpinned(chain: EvmPoolChain, req: EvmPoolSellUnpinnedRequest): EvmPoolSell {
   if (typeof req !== "object" || req === null) return refuse("bad_route", "a sell request is an object");
