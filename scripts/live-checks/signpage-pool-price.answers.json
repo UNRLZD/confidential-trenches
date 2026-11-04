@@ -1,21 +1,27 @@
 {
  "good": {
   "check": "signpage-pool-price",
-  "at": "2026-11-04T14:55:07.783Z",
+  "at": "2026-11-04T15:36:52.748Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with the devnet pool and the page's own price read",
-  "browser": "156.0.8078.79",
+  "host": "sign",
+  "browser": "157.0.8103.38",
   "read": {
    "rpcs": [
     "https://solana-rpc.publicnode.com",
     "https://api.confidential.unrealized.trade/v1/rpc/solana"
    ],
-   "price": "9480884657",
+   "price": "9663681652",
    "expo": -8,
-   "published_s": 1793804099,
-   "read_ms": 1793804108600
+   "published_s": 1793806609,
+   "read_ms": 1793806613763
   },
   "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
-  "entry": "/assets/index-ByRV7dR0.js",
+  "treeBundle": "sha384-yAMS3uu/XU+r8SXxJX5c8g/DXenQqFTUd3cJXlTujHb0pL+BVt0go3HY+9AUVkfQ",
+  "signBundle": {
+   "status": 200,
+   "sha384": "sha384-yAMS3uu/XU+r8SXxJX5c8g/DXenQqFTUd3cJXlTujHb0pL+BVt0go3HY+9AUVkfQ"
+  },
+  "entry": "/assets/index-C4hTE6bh.js",
   "runs": [
    {
     "width": "desktop",
@@ -24,7 +30,7 @@
     "route": "token",
     "box": {
      "path": "pool",
-     "bal": "Bal $0.94",
+     "bal": "Bal $0.96",
      "ctaOn": true,
      "cta": "Buy DJT"
     },
@@ -33,7 +39,7 @@
       "type": "pool.buy",
       "params": {
        "chain": "solana",
-       "amount": "0.000527376",
+       "amount": "0.000517401",
        "slippage_bps": 1000,
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
       }
@@ -48,7 +54,7 @@
     "route": "token",
     "box": {
      "path": "pool",
-     "bal": "Bal $0.94",
+     "bal": "Bal $0.96",
      "ctaOn": true,
      "cta": "Buy DJT"
     },
@@ -57,7 +63,7 @@
       "type": "pool.buy",
       "params": {
        "chain": "solana",
-       "amount": "0.000527376",
+       "amount": "0.000517401",
        "slippage_bps": 1000,
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
       }
@@ -125,20 +131,26 @@
  },
  "bad": {
   "check": "signpage-pool-price",
-  "at": "2026-11-04T14:55:19.213Z",
+  "at": "2026-11-04T15:37:09.598Z",
   "source": "live https://confidential.unrealized.trade, the stand-in shell signed in with the devnet pool and the page's own price read",
-  "browser": "156.0.8078.79",
+  "host": "sign",
+  "browser": "157.0.8103.38",
   "read": {
    "rpcs": [
     "https://solana-rpc.publicnode.com",
     "https://api.confidential.unrealized.trade/v1/rpc/solana"
    ],
-   "price": "9476926665",
+   "price": "9674682241",
    "expo": -8,
-   "published_s": 1793804109,
-   "read_ms": 1793804120062
+   "published_s": 1793806619,
+   "read_ms": 1793806630288
   },
   "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+  "treeBundle": "sha384-yAMS3uu/XU+r8SXxJX5c8g/DXenQqFTUd3cJXlTujHb0pL+BVt0go3HY+9AUVkfQ",
+  "signBundle": {
+   "status": 200,
+   "sha384": "sha384-ph8jD6WHbU5bCQRbPM6o55SdYFhMkik4qecQF/YTRMZiRE+5UAAHRAbgznc9MSPf"
+  },
   "entry": "/assets/index-BqB1l2a4.js",
   "runs": [
    {
@@ -206,7 +218,7 @@
      "path": "pool",
      "bal": "Bal \u2014",
      "ctaOn": false,
-     "cta": "Buy SPCX"
+     "cta": "Buy cbBTC"
     },
     "asked": [],
     "shot": "desktop-none.png"
@@ -220,7 +232,7 @@
      "path": "pool",
      "bal": "Bal \u2014",
      "ctaOn": false,
-     "cta": "Buy SPCX"
+     "cta": "Buy cbBTC"
     },
     "asked": [],
     "shot": "phone-none.png"

@@ -2,11 +2,13 @@
 // (signpage-pool-price.answers.json), each read on 4 Nov by signpage-pool-price.mjs collect() in headless Chrome on the
 // test box: Pyth's SOL/USD on the signing page's own Solana pair, then the terminal in the stand-in shell sent the
 // devnet Solana pool with that price fresh, stale and absent:
-//   good: the harness, this card's terminal build (entry /assets/index-ByRV7dR0.js) at APP_HOST's name, read at
-//         14:55:07Z: the pair agreed on 9480884657 x 10^-8 published 8 s before and SIGN_HOST's connect-src names both;
-//         at 1440 and 390 a fresh price shows Bal $0.94, Buy on, and the tap asks for one pool.buy of 0.000527376 SOL
+//   good: the harness, this card's terminal build (entry /assets/index-C4hTE6bh.js) at APP_HOST's name and this checkout's
+//         signing page bundle as SIGN_HOST's, read at 15:36:52Z: the pair agreed on 9663681652 x 10^-8 published 3 s
+//         before, SIGN_HOST's connect-src names both; at 1440 and 390 a fresh price shows Bal $0.96, Buy on, and the tap
+//         asks for one pool.buy of 0.000517401 SOL
 //         ($0.05 rounded down); stale and none show no USD, Buy off, nothing asked: PASS;
-//   bad:  the deployed APP_HOST before this card (entry /assets/index-BqB1l2a4.js), read at 14:55:19Z: its kit's exact
+//   bad:  the deployed APP_HOST before this card (entry /assets/index-BqB1l2a4.js), read at 15:37:09Z, SIGN_HOST serving the bundle from before this card (its sha384 is not the
+//         checkout's); its kit's exact
 //         state schema refuses a pool entry carrying a price, so with a fresh or stale price the box reads signed out
 //         on the vault path and asks for nothing: FAIL.
 // Planted from the good run: a wrong amount, a vault buy, Buy on or USD drawn with a stale price, a disagreeing or
@@ -52,10 +54,11 @@ test("recorded bad answer: the deployed app before this card reads a priced stat
   assert.equal(r.ok, false);
   assert.ok(bad(r).some((l) => /^BAD desktop fresh: the box is on the vault path.*the tap asked for nothing, not one pool\.buy/.test(l)), r.lines.join("\n"));
   assert.ok(bad(r).some((l) => /^BAD phone stale: .*Buy is on with a stale price/.test(l)), r.lines.join("\n"));
+  assert.ok(bad(r).some((l) => /^BAD SIGN_HOST's \/app\.js is this checkout's signing page bundle: served sha384-/.test(l)), r.lines.join("\n"));
 });
 
 test("planted: a pool.buy of another amount or chain, a vault buy, two asks, or none with a fresh price fail", () => {
-  fails(mut((rec) => (run(rec, "desktop", "fresh").asked[0].params.amount = "0.000527377")), /^BAD desktop fresh: its pool\.buy is 0\.000527377 SOL on solana, not 0\.000527376/);
+  fails(mut((rec) => (run(rec, "desktop", "fresh").asked[0].params.amount = "0.000517402")), /^BAD desktop fresh: its pool\.buy is 0\.000517402 SOL on solana, not 0\.000517401/);
   fails(mut((rec) => (run(rec, "phone", "fresh").asked[0].params.chain = "base")), /^BAD phone fresh: its pool\.buy is .* on base/);
   fails(mut((rec) => (run(rec, "desktop", "fresh").asked = [{ type: "buy", params: {} }])), /^BAD desktop fresh: the tap asked for buy, not one pool\.buy/);
   fails(mut((rec) => run(rec, "phone", "fresh").asked.push(run(rec, "phone", "fresh").asked[0])), /^BAD phone fresh: the tap asked for pool\.buy, pool\.buy/);
