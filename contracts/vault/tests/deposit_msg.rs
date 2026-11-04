@@ -128,6 +128,7 @@ async fn a_direct_call_is_refused(kind: TokenKind) -> R<()> {
     assert_eq!(snapshot(&h, &token, u.id()).await?, before, "a direct call changed a balance or a state byte");
     println!("NotTheToken (direct): refused, {} Tgas", on_transfer(&h, &o)?.gas_burnt as f64 / 1e12);
     println!("{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 
@@ -166,6 +167,7 @@ async fn another_token_is_refused(kind: TokenKind) -> R<()> {
     let o = transfer_call(&h, &u, &other_id, KIT_MSG).await?;
     refused(&h, &o, &other_id, u.id(), &before, "NotTheToken").await?;
     println!("{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 
@@ -206,6 +208,7 @@ async fn every_bad_message_is_refused(kind: TokenKind) -> R<()> {
         refused(&h, &o, &token, u.id(), &before, want).await.map_err(|e| format!("{name}: {e}"))?;
     }
     println!("{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 
@@ -231,5 +234,6 @@ async fn the_kits_message_passes_the_message_checks(kind: TokenKind) -> R<()> {
         refused(&h, &o, &token, u.id(), &before, "NoPrepay").await.map_err(|e| format!("{name}: {e}"))?;
     }
     println!("{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }

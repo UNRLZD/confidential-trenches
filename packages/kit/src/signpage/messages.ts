@@ -9,7 +9,10 @@
 
 import type { Chain, OrderTrigger } from "../orders/record.ts";
 
-/** The seventeen request kinds, app to page. The last two, nav and reload, are to SIGN_HOST's shell (card signpage-shell). */
+/**
+ * The twenty-one request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the last four
+ * are the pool kinds (card signpage-pool-kinds), added after kit-v1 without changing any other kind.
+ */
 export const SIGNPAGE_KINDS = [
   "deposit.quote",
   "deposit.confirm",
@@ -28,12 +31,20 @@ export const SIGNPAGE_KINDS = [
   "state",
   "nav",
   "reload",
+  "pool.deposit",
+  "pool.buy",
+  "pool.sell",
+  "pool.withdraw",
 ] as const;
 
 export type SignpageKind = (typeof SIGNPAGE_KINDS)[number];
 
 /** The kinds that open a SIGN_HOST top-level screen: the app posts one, then moves the same tab to SIGN_HOST. */
-export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout"] as const satisfies readonly SignpageKind[];
+export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout", "pool.withdraw"] as const satisfies readonly SignpageKind[];
+
+/** The chains a pool runs on: NEAR's money is the vault's, never a pool's. */
+export type PoolChain = "solana" | "base" | "robinhood";
+export const POOL_CHAINS: readonly PoolChain[] = Object.freeze(["solana", "base", "robinhood"] as const);
 
 /** The events, page to app. */
 export const SIGNPAGE_EVENTS = ["ready", "state", "progress"] as const;
@@ -105,6 +116,14 @@ export interface SignpageParams {
   nav: { path: string };
   /** Reload the top window: the shell and the app in it (a reload of the frame alone would keep the old shell). */
   reload: Record<never, never>;
+  /** Move `amount` of the chain pool's asset (POOL_ASSET_DECIMALS) that the device holds on that chain into the pool. */
+  "pool.deposit": { chain: PoolChain; amount: string };
+  /** A release from the chain's pool to a fresh wallet that buys `token` with `amount` of the pool's asset. */
+  "pool.buy": { chain: PoolChain; token: string; amount: string; slippage_bps: number };
+  /** The fresh wallet sells `amount` of `token`; the proceeds go back into the chain's pool in the same transaction. */
+  "pool.sell": { chain: PoolChain; token: string; amount: string; slippage_bps: number };
+  /** Open SIGN_HOST's withdraw screen for the chain's pool. The address is typed there, never sent by the app. */
+  "pool.withdraw": Open & { chain: PoolChain };
 }
 
 export interface TxRef {
@@ -145,6 +164,10 @@ export interface SignpageResults {
   state: SignpageState;
   nav: Record<never, never>;
   reload: Record<never, never>;
+  "pool.deposit": { stage: TradeStage; txs: TxRef[] };
+  "pool.buy": { stage: TradeStage; txs: TxRef[] };
+  "pool.sell": { stage: TradeStage; txs: TxRef[] };
+  "pool.withdraw": OpenResult;
 }
 
 /**

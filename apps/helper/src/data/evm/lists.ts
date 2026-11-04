@@ -107,6 +107,7 @@ const FLAUNCH_POOL = "0xba4a1a749cfb812cb3d32c76acc5ea9089875a6ca8bdf9d0c29382be
 const PONS_LAUNCHED = "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607"; // TokenLaunched(address indexed token,address indexed curve,address indexed deployer,address pairToken,uint256 launchConfigId,uint256 graduationThreshold)
 const PONS_V1_LAUNCHED = "0xdb51ea9ad51ab453a65a4cb7e60c3cb378c9501bb002609f8f97778fb6c4235a"; // TokenLaunched(address indexed token,address indexed deployer,address indexed dexFactory,address pairToken,address pool,uint256 dexId,uint256 launchConfigId,uint256 positionId,uint256 restrictionsEndBlock,uint256 initialBuyAmount)
 const BAGS_CREATED = "0x643b3b606052cbadac2f906ad0b462da99eda2a1d4f824d315d7f6edd3e4cced"; // TokenCreated(address indexed token,address indexed curve,address indexed creator,address feeShare,address partner,bytes32 poolId,string name,string symbol,string metadataURI)
+const TORCH_LAUNCHED = "0xea6baf14ec1f4c08d18114c1eea0e6a2a018eef994f9db19ea8a41526e49d28c"; // TokenLaunched(address indexed token,address indexed creator,bytes32 poolId,uint256 buyTaxBps,uint24 lpFee,uint256 antiSnipeSeconds,(uint16,uint16,uint16,uint16) split,string contractURI,address quote)
 
 /** The launchpads' factories per chain; each address's cite is on its line. A pad with no row on a chain is one whose
  *  factory there is not published or could not be cited (the hand-back of card market-data-evm-lists names them). */
@@ -154,6 +155,9 @@ export const FACTORIES: Readonly<Record<EvmChain, readonly Factory[]>> = {
     // implementation 0x7dfa0131f6c8626f199a2e33e49dfb5660e6ef1c, Sourcify [BagsFactory], whose TokenCreated adds `partner`: every one of the
     // factory's 4449 creation logs on chain carries this topic0, none the older implementation 0x46aD6f53's)
     { pad: "bags", address: "0xe8Cc4431adF8b5A847C113EF0c6af9043219Cb37", topic0: BAGS_CREATED, at: { topic: 1 } },
+    // docs.torchpad.fun/protocol/contract-addresses: "Torch launchpad (factory) | Robinhood Chain | 0x7891eA889899928aFE637e4Cca8106188427776a"
+    // (Sourcify chain 4663, exact match [TorchFactory], not a proxy; read 2026-11-03 19:25Z: 2082 creation logs on chain, every token ending in 1111)
+    { pad: "torch", address: "0x7891eA889899928aFE637e4Cca8106188427776a", topic0: TORCH_LAUNCHED, at: { topic: 1 } },
   ],
 };
 

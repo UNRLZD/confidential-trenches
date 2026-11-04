@@ -36,14 +36,17 @@ For the longer read, see [docs/architecture.md](docs/architecture.md) and [docs/
 | The performance table | `perf/runs/*.json` | `scripts/perf-table.mjs` writes the table from these |
 | CI | `.github/workflows/ci.yml` | Five required jobs |
 
-`packages/exit/` will hold the exit tool: money out with only the 12 words and public RPCs. It is empty today.
+`packages/exit/` holds the exit tool: money out with only the 12 words and public RPCs. Today it reads the vault's
+lists on two public NEAR RPCs that must agree byte for byte (`src/rpc.ts`) and loads the setup files, hash-checked
+(`src/setup.ts`); `node scripts/ci/exit-no-server.mjs` refuses any address or helper import of ours in it.
 
 ## How the parts connect
 
 Three boundaries, each with a check that fails when it breaks:
 
 1. **Apps reach Blindfill only through the kit's public entry.** Everything under `packages/` and `contracts/` is
-   Blindfill, and a file outside them may import only `packages/kit/src/index.ts`. Held by `pnpm run check:imports`.
+   Blindfill, and a file outside them may import only `packages/kit/src/index.ts`. The exit tool is held the same way:
+   `packages/exit/` may import only its own files and the kit's entries. Held by `pnpm run check:imports`.
 2. **Keys stay on the device.** Servers hold API keys, never a key that moves money. gitleaks keeps every secret
    out of the tree and the history, with `.gitleaks.toml` adding NEAR secret keys to its default rules.
 3. **The vault has no key.** Its live check reads `keys: []` on two RPCs and reads the compiled code's imports, so
@@ -92,8 +95,8 @@ over public RPCs that rate-limit.
 - **A money path is done when it has landed.** Deposit, withdraw, trade and orders count as done only after a real
   run reaches arrival and every transaction reads back on chain. Money code is what `MONEY` in
   `scripts/ci/money-gate.mjs` names: `contracts/vault/`, the pool programs in `contracts/pool-solana/` and
-  `contracts/pool-evm/`, `packages/kit/`, `packages/wallet/`, and the terminal's trading code once it lands in
-  `apps/terminal/src/trading/`.
+  `contracts/pool-evm/`, `packages/kit/`, `packages/wallet/`, the signing page in `packages/signpage/`, and the
+  terminal's trading code once it lands in `apps/terminal/src/trading/`.
 - **A security fix comes with a test that fails before the fix and passes after it.** Without it, nothing shows the
   fix works or keeps it working.
 - **Every commit subject starts with `Card <key>: `**, where `<key>` names the change in lowercase letters, digits and

@@ -143,6 +143,9 @@ export interface PortfolioData {
   exported: readonly ExportedKey[];
 }
 
+/** No market reads, no closed trades, no series: what the live source has until the kit carries them (dashes). */
+export const NO_DATA: PortfolioData = { market: () => null, extra: () => null, closed: [], series: [], fees: null, op: () => null, exported: [] };
+
 // --------------------------------------------------------------------------------------------------- positions S10
 
 export type Mark = "noRoute" | "held" | "reverted" | null;
@@ -281,6 +284,11 @@ export function portfolio(snap: SignpageClientSnapshot, d: PortfolioData, now: n
   const rows = sortRows(s.positions.map((p) => rowOf(p, d, s.ops, now)));
   return { view: rows.length ? "S10.3" : "S10.2", offline, rows, totals: totals(s, rows, d.closed, now), pools: pools(s, offline) };
 }
+
+/** The one balance the app draws: Portfolio's Cash (totals(); design-lock-r5 S10.3 shows Cash in the header), for the
+ *  header, the deposit and withdraw screens and the restore screen alike, so no two of them ever differ; null before the
+ *  first state. */
+export const balanceOf = (snap: SignpageClientSnapshot, d: PortfolioData, now: number): bigint | null => portfolio(snap, d, now).totals?.cash ?? null;
 
 // ------------------------------------------------------------------------------------------------- the pools (A1)
 

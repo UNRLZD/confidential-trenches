@@ -1,12 +1,12 @@
 // node --test scripts/ci/live-workflow.test.mjs: the shape of the live runs (scripts/ci/live-workflow.mjs) holds on the
 // repository as it is, refuses each planted failure, and the plan (scripts/ci/live-plan.mjs) reads the deploys' own lists.
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
-import { HOSTS, ROOT, commitProblem, enginesFor, listOf, planFor, reachesLauncher } from "./live-plan.mjs";
+import { HOSTS, ROOT, commitProblem, enginesFor, listOf, missingFor, planFor, reachesLauncher, usagesOf } from "./live-plan.mjs";
 
 const LIVE = readFileSync(path.join(ROOT, ".github/workflows/live.yml"), "utf8");
 const CHROME = readFileSync(path.join(ROOT, ".github/actions/chrome/action.yml"), "utf8");
@@ -85,7 +85,7 @@ function fixture(edit) {
 test("planted: a deploy that lists a check with no file, a check without its test, a check that reads the environment", async () => {
   const gone = fixture((r) => writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), listFile(["no-such-check"])));
   const noTest = fixture((r) => rmSync(path.join(r, "scripts/live-checks/helper-rpc-proxy.test.mjs")));
-  const env = fixture((r) => writeFileSync(path.join(r, "scripts/live-checks/helper-rpc-proxy.mjs"), "const k = process.env.ONECLICK_JWT;\n"));
+  const env = fixture((r) => writeFileSync(path.join(r, "scripts/live-checks/helper-rpc-proxy.mjs"), "//   node scripts/live-checks/helper-rpc-proxy.mjs [--base <url>]\nconst k = process.env.ONECLICK_JWT;\n"));
   try {
     assert.ok(has(await planProblems("helper", gone), /no-such-check, which is no file/));
     assert.ok(has(await planProblems("helper", noTest), /helper-rpc-proxy has no scripts\/live-checks\/helper-rpc-proxy\.test\.mjs/));
@@ -101,16 +101,18 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
     const list = listOf(host, ROOT, { commit: COMMIT, network: "mainnet" });
     const plan = await planFor(host, { commit: COMMIT });
     const skipped = Object.keys(list.skipped);
-    assert.deepEqual([...new Set(plan.include.map((e) => e.key))].sort(), list.checks.filter((k) => !skipped.includes(k)).sort(), host);
-    assert.deepEqual(plan.skipped.map((s) => s.key).sort(), skipped.sort(), host);
+    const ran = list.checks.filter((k) => !skipped.includes(k) && list.runs[k].length);
+    assert.deepEqual([...new Set(plan.include.map((e) => e.key))].sort(), ran.sort(), host);
+    assert.deepEqual(list.checks.filter((k) => !ran.includes(k) && !skipped.includes(k)).filter((k) => !list.notApplicable[k]), [], `${host}: a check with no run says why`);
+    assert.deepEqual(plan.skipped.map((s) => s.key).sort(), [...skipped, ...Object.keys(list.notApplicable)].sort(), host);
     assert.deepEqual(plan.include.map((e) => `scripts/live-checks/${e.key}.mjs${e.args ? ` ${e.args}` : ""}`).sort(), list.checks.filter((k) => !skipped.includes(k)).flatMap((k) => list.runs[k]).sort(), host);
     assert.equal(new Set(plan.include.map((e) => e.id)).size, plan.include.length, `${host}: ids are unique`);
   }
 });
 
-test("the signing page's ten checks (signpage-shell runs four ways) and every app check, with the network a testnet build names", async () => {
+test("the signing page's fourteen checks (signpage-shell runs four ways) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 10);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 14);
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
@@ -128,7 +130,8 @@ test("the helper's skipped checks are the ones the runner cannot run, with the r
   assert.deepEqual(fee.RELEASE_RELAYER, { mainnet: null, testnet: null }, "the release names a relayer now: run the check, drop the skip");
   assert.deepEqual(Object.keys(SKIPPED).sort(), ["helper-proxy", "relayer-withdraw-fee"], "a new skip needs a reason this test checks");
   const plan = await planFor("helper", { commit: COMMIT });
-  assert.deepEqual(plan.skipped.map((s) => `skipped-${s.reason}: ${s.key}`).sort(), ["skipped-needs-relayer: relayer-withdraw-fee", "skipped-needs-secret: helper-proxy"]);
+  const na = existsSync(path.join(ROOT, "scripts/live-checks/pool-sol-deploy.mainnet.json")) ? [] : ["skipped-not-applicable: helper-pool-senders"];
+  assert.deepEqual(plan.skipped.map((s) => `skipped-${s.reason}: ${s.key}`).sort(), ["skipped-needs-relayer: relayer-withdraw-fee", "skipped-needs-secret: helper-proxy", ...na].sort());
   assert.ok(!plan.include.some((e) => SKIPPED[e.key]), "a skipped check is never in the matrix");
 });
 
@@ -161,4 +164,128 @@ test("the helper's commit is held to what it reports; a Pages host reports none"
   assert.match(commitProblem("helper", COMMIT, null), /reports commit none/);
   assert.equal(commitProblem("sign", COMMIT, null), null);
   assert.equal(commitProblem("app", COMMIT, null), null);
+});
+
+// card live-plan-args: every run gives what its check's usage needs, and helper-pool-senders gets its pool from the
+// pools' deploy records (live.yml runs 41676189548 and 41685034036 exited 2 on a bare helper-pool-senders)
+
+test("a check's usage line says the flags it needs: outside [...], with a value where one follows", () => {
+  const text = (k, ...forms) => forms.map((f) => `//   node scripts/live-checks/${k}.mjs ${f}`).join("\n");
+  assert.deepEqual(usagesOf(text("x", "--pool <address> [--base <url>] [--record <file>]"), "x"), [[{ flag: "--pool", value: true }]]);
+  assert.deepEqual(usagesOf(text("x", "[--url <url>] [--record <file>]     PASS exit 0, FAIL exit 1"), "x"), [[]]);
+  assert.deepEqual(usagesOf(text("x", "[--chain near --tx <hash> [--x <y>]] [--a <b>]"), "x"), [[]], "nested brackets are optional too");
+  assert.deepEqual(usagesOf(text("x", "--engine webkit|chromium [--width phone]", "--engine chromium --live [--record <f>]"), "x"), [[{ flag: "--engine", value: true }], [{ flag: "--engine", value: true }, { flag: "--live", value: false }]]);
+  assert.deepEqual(usagesOf(text("x", "--harness [--build <dir>] ...   the hosts' real names --not-a-flag"), "x"), [[{ flag: "--harness", value: false }]], "a line's note is not its usage");
+  assert.deepEqual(usagesOf(text("x.sweep", "--network testnet"), "x"), [], "another check's usage is not this one's");
+  const pool = [[{ flag: "--pool", value: true }]];
+  assert.deepEqual(missingFor(pool, ""), [{ flag: "--pool", value: true }]);
+  assert.deepEqual(missingFor(pool, "--pool"), [{ flag: "--pool", value: true }], "a flag without its value");
+  assert.deepEqual(missingFor(pool, "--pool --base x"), [{ flag: "--pool", value: true }]);
+  assert.deepEqual(missingFor(pool, "--pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"), []);
+  assert.deepEqual(missingFor([[{ flag: "--host", value: true }], [{ flag: "--release", value: true }]], "--release release-3"), [], "any one form met is enough");
+  assert.deepEqual(missingFor([[]], ""), []);
+});
+
+test("the real lists pass: every run of every check, on both networks, gives what its usage needs", async () => {
+  for (const host of Object.keys(HOSTS)) for (const network of ["mainnet", "testnet"]) {
+    const plan = await planFor(host, { commit: COMMIT, network });
+    for (const e of plan.include) {
+      const forms = usagesOf(readFileSync(path.join(ROOT, "scripts/live-checks", `${e.key}.mjs`), "utf8"), e.key);
+      assert.ok(forms.length, `${e.key} has a usage line`);
+      assert.deepEqual(missingFor(forms, e.args), [], `${host} ${network} ${e.id}`);
+    }
+  }
+});
+
+// a list that gives `runs` for one check, in a copy of the files the plan reads
+const runsFile = (runs) => `console.log(JSON.stringify({ checks: ["helper-pool-senders"], runs: { "helper-pool-senders": ${JSON.stringify(runs)} } }));\n`;
+const withPoolCheck = (r) => cpSync(path.join(ROOT, "scripts/live-checks/helper-pool-senders.mjs"), path.join(r, "scripts/live-checks/helper-pool-senders.mjs"));
+
+test("planted: a check that needs --pool listed bare, or with --pool and no value, and a check with no usage line, fail the plan and the gate", async () => {
+  const bare = fixture((r) => {
+    withPoolCheck(r);
+    writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), runsFile(["scripts/live-checks/helper-pool-senders.mjs"]));
+  });
+  const noValue = fixture((r) => {
+    withPoolCheck(r);
+    writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), runsFile(["scripts/live-checks/helper-pool-senders.mjs --pool --base https://x"]));
+  });
+  const noUsage = fixture((r) => writeFileSync(path.join(r, "scripts/live-checks/helper-rpc-proxy.mjs"), "console.log('PASS');\n"));
+  const good = fixture((r) => {
+    withPoolCheck(r);
+    writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), runsFile(["scripts/live-checks/helper-pool-senders.mjs --pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"]));
+  });
+  try {
+    await assert.rejects(planFor("helper", { commit: COMMIT, root: bare }), /runs helper-pool-senders without --pool <value>, which its usage needs/);
+    assert.ok(has(await planProblems("helper", bare), /helper: .*runs helper-pool-senders without --pool/));
+    await assert.rejects(planFor("helper", { commit: COMMIT, root: noValue }), /without --pool <value>/);
+    await assert.rejects(planFor("helper", { commit: COMMIT, root: noUsage }), /helper-rpc-proxy\.mjs has no usage line/);
+    assert.deepEqual((await planFor("helper", { commit: COMMIT, root: good })).include.map((e) => e.args), ["--pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"]);
+  } finally {
+    for (const r of [bare, noValue, noUsage, good]) rmSync(r, { recursive: true, force: true });
+  }
+});
+
+test("the helper's list gives helper-pool-senders the pool each cluster's deploy record names, read from the record's file", async () => {
+  const { POOL_SOLANA_CLUSTERS, liveList, poolRecord, poolSenderPlan } = await import("./helper-live-checks.mjs");
+  const env = /export const POOL_SOLANA_ENV = \{([^}]*)\}/.exec(readFileSync(path.join(ROOT, "apps/helper/src/pool/solana.ts"), "utf8"))?.[1];
+  assert.ok(env, "apps/helper/src/pool/solana.ts has POOL_SOLANA_ENV");
+  assert.deepEqual([...env.matchAll(/^\s*"?([a-z-]+)"?:/gm)].map((m) => m[1]), POOL_SOLANA_CLUSTERS, "one run for each cluster the helper may serve");
+  // the repository: each record's pool, read here from the file, is the run's; a cluster with none is not applicable
+  const list = liveList({ commit: COMMIT });
+  for (const c of POOL_SOLANA_CLUSTERS) {
+    const f = path.join(ROOT, poolRecord(c));
+    if (existsSync(f)) assert.ok(list.runs["helper-pool-senders"].includes(`scripts/live-checks/helper-pool-senders.mjs --pool ${JSON.parse(readFileSync(f, "utf8")).pool}`), c);
+    else assert.match(list.notApplicable["helper-pool-senders"], new RegExp(`no Solana ${c} pool is deployed: ${poolRecord(c).replace(/[.]/g, "\\.")} does not exist`));
+  }
+  // planted records under a copy of the repository
+  const root = mkdtempSync(path.join(tmpdir(), "pool-records-"));
+  const rec = (c, body) => {
+    mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
+    writeFileSync(path.join(root, poolRecord(c)), typeof body === "string" ? body : JSON.stringify(body));
+  };
+  try {
+    assert.deepEqual(poolSenderPlan(root), { runs: [], notApplicable: "no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist; no Solana devnet pool is deployed: scripts/live-checks/pool-sol-deploy.devnet.json does not exist" });
+    rec("devnet", { cluster: "devnet", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" });
+    assert.deepEqual(poolSenderPlan(root), { runs: ["scripts/live-checks/helper-pool-senders.mjs --pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"], notApplicable: "no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist" });
+    rec("mainnet", { cluster: "mainnet", pool: "D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef" });
+    assert.deepEqual(poolSenderPlan(root).runs.length, 2);
+    assert.equal(poolSenderPlan(root).notApplicable, null);
+    rec("mainnet", { cluster: "devnet", pool: "D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef" });
+    assert.throws(() => poolSenderPlan(root), /pool-sol-deploy\.mainnet\.json names cluster devnet, not mainnet/);
+    rec("mainnet", { cluster: "mainnet", pool: "not a pool" });
+    assert.throws(() => poolSenderPlan(root), /names no pool address/);
+    rec("mainnet", "{");
+    assert.throws(() => poolSenderPlan(root), /is not JSON/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the plan runs helper-pool-senders on each cluster with a record and lists the rest not applicable; with no record it runs nothing and says why", async () => {
+  const { LIVE_CHECKS } = await import("./helper-live-checks.mjs");
+  const real = (edit) =>
+    fixture((r) => {
+      cpSync(path.join(ROOT, "scripts/ci/helper-live-checks.mjs"), path.join(r, "scripts/ci/helper-live-checks.mjs"));
+      for (const k of LIVE_CHECKS) cpSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), path.join(r, "scripts/live-checks", `${k}.mjs`));
+      edit(r);
+    });
+  const none = real(() => {});
+  const devnet = real((r) => writeFileSync(path.join(r, "scripts/live-checks/pool-sol-deploy.devnet.json"), JSON.stringify({ cluster: "devnet", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" })));
+  try {
+    const a = await planFor("helper", { commit: COMMIT, root: none });
+    assert.ok(!a.include.some((e) => e.key === "helper-pool-senders"), "no pool: no run, so nothing crashes on a missing --pool");
+    assert.match(a.skipped.find((s) => s.key === "helper-pool-senders" && s.reason === "not-applicable")?.detail ?? "", /no Solana mainnet pool .* no Solana devnet pool/);
+    const b = await planFor("helper", { commit: COMMIT, root: devnet });
+    assert.deepEqual(b.include.filter((e) => e.key === "helper-pool-senders").map((e) => e.args), ["--pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"]);
+    assert.deepEqual(b.skipped.filter((s) => s.key === "helper-pool-senders").map((s) => s.detail), ["no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist"]);
+    assert.deepEqual(b.skipped.map((s) => s.key).sort(), ["helper-pool-senders", "helper-proxy", "relayer-withdraw-fee"], "the whole skips stay skipped");
+  } finally {
+    for (const r of [none, devnet]) rmSync(r, { recursive: true, force: true });
+  }
+});
+
+test("planted: a plan job that also runs on a pull request is refused", () => {
+  assert.deepEqual(liveProblems(LIVE).filter((l) => /plan job runs/.test(l)), []);
+  assert.ok(has(liveProblems(LIVE.replace("    if: github.event_name == 'workflow_dispatch'\n", "    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'card/x'\n")), /plan job runs on something other than a dispatch/));
 });

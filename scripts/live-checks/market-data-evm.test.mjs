@@ -3,7 +3,8 @@
 // real GeckoTerminal and Base providers, with every RPC answer the maker re-read got: PASS. bad_not_deployed: the deployed helper before this card,
 // 404: FAIL. Made from the good answer: a tagged row's pad swapped for another table pad (wrong tag), an untagged row from
 // no listed factory given a tag, a row missing a frozen field, a pad no table row has: each FAIL. good_robinhood: the
-// helper's Robinhood lists on card/helper-launchpad-origin (17:04Z, Pons v1 in the table): PASS; a wrong tag and a Base pad on a Robinhood row: FAIL. A tagged row served
+// helper's Robinhood lists on card/pad-torch-robinhood (19:33Z, TorchFactory in the table; TORCH re-read as torch): PASS; a
+// wrong tag (TORCH tagged pons among them) and a Base pad on a Robinhood row: FAIL. A tagged row served
 // untagged and not named unsettled (the deployed a0f19f5's Paper): FAIL; `unsettled` missing, naming a tagged token or
 // over half the tokens: FAIL.
 import assert from "node:assert/strict";
@@ -147,6 +148,11 @@ test("good_robinhood: the local helper's Robinhood lists and their makers re-rea
   // depends on the head each read saw, so that case is replayed on Base above (the judge is the same for both chains)
   const zora = await run(edit((s) => (s.lists.new[0].launchpad = "zora"), g), "robinhood");
   assert.equal(zora.ok, false, "a Base pad on a Robinhood row");
+  const TORCH = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111";
+  assert.ok(r.lines.some((l) => l.includes(TORCH) && /tagged "torch", the creation events read on chain \(two providers that agree\) name "torch"/.test(l)), "TORCH re-read as torch");
+  const asPons = await run(edit((s) => each(s, TORCH, (x) => (x.launchpad = "pons")), g), "robinhood");
+  assert.equal(asPons.ok, false);
+  assert.ok(bad(asPons).some((l) => l.includes(TORCH) && l.includes('tagged "pons"') && l.includes('name "torch"')), bad(asPons).join("\n"));
 });
 
 test("unsettled: a tagged row served untagged and not named unsettled (Paper's shape at a0f19f5, null where the chain names clanker): FAIL; the same row named unsettled is said, not failed; no unsettled list, a tagged token in it, or over half the tokens in it: FAIL", async () => {

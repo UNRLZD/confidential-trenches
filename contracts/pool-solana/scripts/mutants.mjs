@@ -44,6 +44,9 @@ export const MUTANTS = [
   // M353: the precommitment mark's record
   ["mark records the new nonce", "src/deposit.rs", "d[8..16].copy_from_slice(&pool.nonce.to_le_bytes());", "d[8..16].copy_from_slice(&(pool.nonce - 1).to_le_bytes());", "each_deposit_records_its_value_and_nonce_in_its_mark"],
   ["mark records the value", "src/deposit.rs", "d[0..8].copy_from_slice(&value.to_le_bytes());", "d[0..8].copy_from_slice(&0u64.to_le_bytes());", "each_deposit_records_its_value_and_nonce_in_its_mark"],
+  // card pool-sol-mark-tag: each mark's tag byte, which keeps a stranger's zero-filled accounts out of every bucket
+  ["mark records the tag", "src/deposit.rs", "d[16] = MARK_TAG;", "let _ = MARK_TAG;", "a_strangers_zero_accounts_match_no_bucket_of_the_marks_read"],
+  ["spent mark records the tag", "src/release.rs", "m[12] = MARK_TAG;", "let _ = MARK_TAG;", "a_funded_mark_address_blocks_nothing"],
   // M355 (3): the spent mark's record, for tag 2 and tag 3 (both settle through src/release.rs)
   ["spent mark records withdrawn", "src/release.rs", "m[0..8].copy_from_slice(&r.withdrawn.to_le_bytes());", "let _ = &r.withdrawn;", "each_release_records_its_withdrawn_value_in_its_spent_mark"],
   ["spent mark records not 0", "src/release.rs", "m[0..8].copy_from_slice(&r.withdrawn.to_le_bytes());", "m[0..8].copy_from_slice(&0u64.to_le_bytes());", "each_release_records_its_withdrawn_value_in_its_spent_mark"],

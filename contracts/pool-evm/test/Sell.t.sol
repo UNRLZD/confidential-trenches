@@ -6,6 +6,7 @@ import {console} from 'forge-std/console.sol';
 
 import {PrivacyPoolSimple} from '../src/PrivacyPoolSimple.sol';
 import {SellDelegate, IWETH} from '../src/SellDelegate.sol';
+import {IPoolManager} from '../src/adapters/UniswapV4Adapter.sol';
 import {PoseidonT4} from '../src/poseidon/PoseidonT4.sol';
 import {WithdrawalVerifier} from '../src/verifiers/WithdrawalVerifier.sol';
 import {IPrivacyPool} from 'interfaces/IPrivacyPool.sol';
@@ -222,7 +223,7 @@ contract SellTest is SellBase {
     weth = new MockWETH();
     router = new MockRouter(weth);
     vm.deal(address(router), 100 ether);
-    delegate = new SellDelegate(IWETH(address(weth)));
+    delegate = new SellDelegate(IWETH(address(weth)), IPoolManager(address(0)));
     _setUpW();
     vm.signAndAttachDelegation(address(delegate), W_KEY);
     assertEq(SellDelegate(payable(W)).nonce(), 0, 'W is delegated');
@@ -633,7 +634,7 @@ contract SellDelegateKeylessTest is SellBase {
   bytes internal code;
 
   function setUp() public {
-    code = address(new SellDelegate(IWETH(address(0x4200000000000000000000000000000000000006)))).code;
+    code = address(new SellDelegate(IWETH(address(0x4200000000000000000000000000000000000006)), IPoolManager(address(0x498581fF718922c3f8e6A244956aF099B2652b2b)))).code;
     assertGt(code.length, 0);
   }
 
@@ -677,10 +678,12 @@ contract SellDelegateKeylessTest is SellBase {
   }
 
   function test_theDelegatesDispatcherHasExactlyTheListedSelectors() public view {
-    bytes4[3] memory _want = [
+    bytes4[5] memory _want = [
       bytes4(keccak256("WETH()")),
+      bytes4(keccak256("POOL_MANAGER()")),
       SellDelegate.nonce.selector,
-      SellDelegate.sell.selector
+      SellDelegate.sell.selector,
+      SellDelegate.unlockCallback.selector
     ];
     (, bytes4[] memory _got) = _walk();
     assertEq(_got.length, _want.length, 'the number of selectors');

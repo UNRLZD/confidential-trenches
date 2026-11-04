@@ -1,6 +1,7 @@
 import type { Chain, SignpageClientSnapshot } from "@blindfill/kit";
 import { createContext, useContext } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
+import { balanceOf, NO_DATA } from "./model.ts";
 import type { PortfolioData } from "./model.ts";
 
 // What Portfolio and Activity read and do. The kit gives the signing page's state (cash, wallets, open positions and
@@ -32,10 +33,16 @@ export interface PortfolioSource {
 const Fixture = createContext<PortfolioSource | null>(null);
 export const PortfolioSourceProvider = Fixture.Provider;
 
-export const NO_DATA: PortfolioData = { market: () => null, extra: () => null, closed: [], series: [], fees: null, op: () => null, exported: [] };
+export { NO_DATA };
 
 export function usePortfolioSource(act: (a: PortfolioAction) => void): PortfolioSource {
   const fixture = useContext(Fixture);
   const { snapshot } = useSignpage();
   return fixture ?? { snapshot, data: NO_DATA, now: Date.now, tzMin: -new Date().getTimezoneOffset(), act };
+}
+
+/** The one balance for `snapshot` (balanceOf: Portfolio's Cash), from the same data Portfolio reads. */
+export function useBalance(snapshot: SignpageClientSnapshot): bigint | null {
+  const fixture = useContext(Fixture);
+  return balanceOf(snapshot, fixture?.data ?? NO_DATA, fixture?.now() ?? Date.now());
 }

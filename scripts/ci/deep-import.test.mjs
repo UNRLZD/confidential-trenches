@@ -89,6 +89,11 @@ const PLANTED = {
   // reach from this file itself to the text rule)
   "examples/private-buy/p11-example.ts": `import { seed } from "${UP2}/packages/kit/src/core/seed";\nexport const a = seed;\n`,
   "apps/terminal/src/p12-contract.ts": 'import { abi } from "../../../contracts/vault/abi";\nexport const a = abi;\n',
+  // packages/exit is held as an app is (card exit-pages-rpcs): the kit's internals, the wallet, a contract and an app
+  "packages/exit/src/p13-exit-kit.ts": 'import { seed } from "../../kit/src/core/seed";\nexport const a = seed;\n',
+  "packages/exit/src/p14-exit-wallet.ts": 'import { derive } from "../../wallet/src/keys/derive";\nexport const a = derive;\n',
+  "packages/exit/test/p15-exit-contract.ts": 'import { abi } from "../../../contracts/vault/abi";\nexport const a = abi;\n',
+  "packages/exit/src/p16-exit-app.ts": 'import { x } from "../../../apps/terminal/src/main";\nexport const a = x;\n',
 };
 
 // plain strings next to the entry: a path to the entry itself, the app's own files, a URL path, the workspace globs
@@ -96,6 +101,10 @@ const CONTROL = {
   "apps/terminal/src/entry-relative.ts": 'export { seed } from "../../../packages/kit/src/index";\n',
   "apps/terminal/src/own.ts": 'export const w = new URL("./worker.ts", import.meta.url);\nexport const api = "/api/quote";\n',
   "apps/terminal/src/worker.ts": "export {};\n",
+  // the exit package's own files and the kit's entry, by its bare name
+  "packages/exit/src/own.ts": 'import { seed } from "@blindfill/kit";\nimport { b } from "./b";\nexport const a = seed + b;\n',
+  "packages/exit/src/b.ts": "export const b = 1;\n",
+  "packages/exit/test/own.test.ts": 'import { a } from "../src/own";\nexport const t = new URL("../src/b.ts", import.meta.url) && a;\n',
   "pnpm-workspace.yaml": 'packages:\n  - "apps/*"\n  - "packages/*"\n',
   "README.md": "The kit lives in `packages/kit`; see 'packages/kit/src/index.ts'.\n",
   // normal configs and routes that name packages/ or contracts/ without reaching them (outside read of fd72db5)
@@ -219,6 +228,17 @@ const FORMS = {
   "a template string up to its first ${": {
     files: { "apps/terminal/src/f6-template.ts": "export const load = (n: string) => import(`../../../packages/kit/src/core/${n}.ts`);\n" },
     want: [/apps\/terminal\/src\/f6-template\.ts:1: "[^"]*" reaches packages\/kit\/src\/core/],
+  },
+  "a reach from the exit package": {
+    files: {
+      "packages/exit/src/f-exit-worker.ts": 'export const w = new URL("../../kit/src/core/prover.worker.ts", import.meta.url);\n',
+      "packages/exit/src/f-exit-dynamic.ts": 'export const m = import("@blindfill/wallet/derive");\n',
+      "packages/wallet/package.json": JSON.stringify({ name: "@blindfill/wallet", type: "module" }),
+    },
+    want: [
+      /packages\/exit\/src\/f-exit-worker\.ts:1: "[^"]*" reaches packages\/kit\/src\/core\/prover\.worker\.ts/,
+      /packages\/exit\/src\/f-exit-dynamic\.ts:1: "@blindfill\/wallet\/derive" names @blindfill\/wallet/,
+    ],
   },
   "a root-relative path": {
     // (joined, so this file's own text holds no root-relative path to packages/)

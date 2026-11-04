@@ -10,8 +10,10 @@ import { useCallback, useEffect, useState } from "react";
 import { readLists } from "../discover/data.ts";
 import type { MarketChain, MarketRow } from "../discover/fields.ts";
 import { columnRows } from "../discover/model.ts";
+import type { RiskRead } from "../trade/safety.ts";
 
-export type TokenData = { status: "loading" } | { status: "error" } | { status: "empty" } | { status: "ready"; row: MarketRow };
+/** `risk` is the token read's own `risk` part, which the safety grid draws (what the row lacks: insiders, tax, LP, honeypot). */
+export type TokenData = { status: "loading" } | { status: "error" } | { status: "empty" } | { status: "ready"; row: MarketRow; risk?: RiskRead };
 
 /** HELPER_HOST's token read for one token (the CSP's connect-src names the host, public/_headers). */
 export const TOKEN_URL = (id: string, chain: MarketChain = "solana") => `https://api.confidential.unrealized.trade/v1/market/token?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(id)}`;
@@ -22,23 +24,24 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 /** The helper does not know the token (it answers 404 for an id that is no token of that chain, or one it does not list). */
 class Unknown extends Error {}
 
-/** The row of one token read. Throws Unknown on a 404, any other Error on a failed read, another status, or a row that is
- *  not this chain's and id's. */
-async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch): Promise<MarketRow> {
+/** The row and `risk` of one token read. Throws Unknown on a 404, any other Error on a failed read, another status, or a
+ *  row that is not this chain's and id's. */
+async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch): Promise<{ row: MarketRow; risk?: RiskRead }> {
   const r = await fetchFn(TOKEN_URL(id, chain), { ...HELPER_FETCH_INIT, signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (r.status === 404) throw new Unknown("token: unknown");
   if (r.status !== 200) throw new Error(`token answered ${r.status}`);
   const body: unknown = await r.json();
   const row = isObject(body) ? body.row : null;
+  const risk = isObject(body) ? body.risk : null;
   if (!isObject(row) || row.chain !== chain || row.token !== id || typeof row.symbol !== "string" || row.symbol === "") throw new Error("token: not this token's row");
-  return row as unknown as MarketRow;
+  return { row: row as unknown as MarketRow, ...(isObject(risk) ? { risk: risk as RiskRead } : {}) };
 }
 
 /** The page's data for /token/<chain>/<id>: the token's row, the empty state (not found) for an id the helper does not
  *  know, else the error state. */
 export async function loadToken(chain: MarketChain, id: string, fetchFn: typeof fetch = fetch): Promise<TokenData> {
   try {
-    return { status: "ready", row: await readRow(chain, id, fetchFn) };
+    return { status: "ready", ...(await readRow(chain, id, fetchFn)) };
   } catch (e) {
     return e instanceof Unknown ? { status: "empty" } : { status: "error" };
   }
@@ -49,7 +52,7 @@ export async function loadTopToken(fetchFn: typeof fetch = fetch): Promise<Token
   try {
     const top = columnRows(await readLists(fetchFn), "trending")[0];
     if (!top) return { status: "empty" };
-    return { status: "ready", row: await readRow("solana", top.token, fetchFn) };
+    return { status: "ready", ...(await readRow("solana", top.token, fetchFn)) };
   } catch {
     return { status: "error" };
   }

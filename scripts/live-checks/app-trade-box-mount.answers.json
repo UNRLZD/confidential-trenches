@@ -1,0 +1,458 @@
+{
+ "good": {
+  "source": "harness: this card's build (apps/terminal at 7d46160) at APP_HOST's name in the stand-in shell, signed out, HELPER_HOST live",
+  "at": "2026-11-03T17:34:34.660Z",
+  "browser": "156.0.8078.80",
+  "loads": [
+   {
+    "width": "desktop",
+    "opened": "https://confidential.unrealized.trade/",
+    "frame": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "state": "ready",
+    "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+    "symbol": "cbBTC",
+    "page": {
+     "route": "token",
+     "state": "ready",
+     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "symbol": "cbBTC",
+     "bar": false,
+     "box": {
+      "state": "S8.1",
+      "text": "Buy\nSell\nMarket\nLimit\nTP/SL\nBal —\nUSD\n—\n$10\n$25\n$50\n$100\nExit plan\nSells automatically once this buy fills\nYou receive\n—\nSign in to trade\nRoute & fees\n≤10%\n—\n—\nTop 10 %\n16%\nDev %\n—\nSnipers %\n—\nHolders\n76.5K\nLiq\n$26.67M\nAge\n726d\nInsiders\n—\nTax\n0%\nMint auth\nFreeze auth\nLP\n—\nHoneypot\n—",
+      "balance": "Bal —",
+      "exit": {
+       "text": "Exit plan Sells automatically once this buy fills",
+       "pressed": "false",
+       "on": "false"
+      },
+      "cta": {
+       "text": "Sign in to trade",
+       "disabled": false
+      },
+      "left": 1104,
+      "right": 1434,
+      "inColumn": true,
+      "lineBottom": 410.0625,
+      "gridTop": 419.0625,
+      "cells": [
+       {
+        "id": "top10",
+        "label": "Top 10 %",
+        "value": "16%",
+        "cross": false,
+        "tone": "good"
+       },
+       {
+        "id": "dev",
+        "label": "Dev %",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       },
+       {
+        "id": "snipers",
+        "label": "Snipers %",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       },
+       {
+        "id": "holders",
+        "label": "Holders",
+        "value": "76.5K",
+        "cross": false,
+        "tone": "plain"
+       },
+       {
+        "id": "liq",
+        "label": "Liq",
+        "value": "$26.67M",
+        "cross": false,
+        "tone": "plain"
+       },
+       {
+        "id": "age",
+        "label": "Age",
+        "value": "726d",
+        "cross": false,
+        "tone": "plain"
+       },
+       {
+        "id": "insiders",
+        "label": "Insiders",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       },
+       {
+        "id": "tax",
+        "label": "Tax",
+        "value": "0%",
+        "cross": false,
+        "tone": "plain"
+       },
+       {
+        "id": "mintAuth",
+        "label": "Mint auth",
+        "value": "",
+        "cross": true,
+        "tone": "bad"
+       },
+       {
+        "id": "freezeAuth",
+        "label": "Freeze auth",
+        "value": "",
+        "cross": true,
+        "tone": "bad"
+       },
+       {
+        "id": "lp",
+        "label": "LP",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       },
+       {
+        "id": "honeypot",
+        "label": "Honeypot",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       }
+      ]
+     },
+     "chartRight": 1098
+    },
+    "token": {
+     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "status": 200,
+     "rowMint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "read": {
+      "row": {
+       "top10_bps": 1631,
+       "dev_bps": null,
+       "snipers_bps": null,
+       "holders": 76520,
+       "liq_usd": "26667591.5076",
+       "created_s": 1730990040,
+       "mint_auth": true,
+       "freeze_auth": true,
+       "launchpad": null,
+       "curve_bps": null
+      },
+      "risk": {
+       "insiders_bps": null,
+       "tax": {
+        "buy_bps": 0,
+        "sell_bps": 0
+       },
+       "lp": null,
+       "honeypot": null
+      }
+     }
+    },
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-good/0-desktop.png",
+    "signin": {
+     "opened": true,
+     "state": "S2.1"
+    }
+   },
+   {
+    "width": "phone",
+    "opened": "https://confidential.unrealized.trade/",
+    "frame": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "state": "ready",
+    "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+    "symbol": "cbBTC",
+    "page": {
+     "route": "token",
+     "state": "ready",
+     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "symbol": "cbBTC",
+     "bar": true,
+     "box": null,
+     "chartRight": 0
+    },
+    "token": {
+     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "status": 200,
+     "rowMint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "read": {
+      "row": {
+       "top10_bps": 1631,
+       "dev_bps": null,
+       "snipers_bps": null,
+       "holders": 76520,
+       "liq_usd": "26667591.5076",
+       "created_s": 1730990040,
+       "mint_auth": true,
+       "freeze_auth": true,
+       "launchpad": null,
+       "curve_bps": null
+      },
+      "risk": {
+       "insiders_bps": null,
+       "tax": {
+        "buy_bps": 0,
+        "sell_bps": 0
+       },
+       "lp": null,
+       "honeypot": null
+      }
+     }
+    },
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-good/1-phone.png",
+    "sheet": {
+     "route": "token",
+     "state": "ready",
+     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "symbol": "cbBTC",
+     "bar": true,
+     "box": {
+      "state": "S8.1",
+      "text": "Buy\nSell\nMarket\nLimit\nTP/SL\nBal —\nUSD\n—\n$10\n$25\n$50\n$100\nExit plan\nSells automatically once this buy fills\nYou receive\n—\nSign in to trade\nRoute & fees\n≤10%\n—\n—\nTop 10 %\n16%\nDev %\n—\nSnipers %\n—\nHolders\n76.5K\nLiq\n$26.67M\nAge\n726d\nInsiders\n—\nTax\n0%\nMint auth\nFreeze auth\nLP\n—\nHoneypot\n—",
+      "balance": "Bal —",
+      "exit": {
+       "text": "Exit plan Sells automatically once this buy fills",
+       "pressed": "false",
+       "on": "false"
+      },
+      "cta": {
+       "text": "Sign in to trade",
+       "disabled": false
+      },
+      "left": 0,
+      "right": 390,
+      "inColumn": false,
+      "lineBottom": 666.109375,
+      "gridTop": 678.109375,
+      "cells": [
+       {
+        "id": "top10",
+        "label": "Top 10 %",
+        "value": "16%",
+        "cross": false,
+        "tone": "good"
+       },
+       {
+        "id": "dev",
+        "label": "Dev %",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       },
+       {
+        "id": "snipers",
+        "label": "Snipers %",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       },
+       {
+        "id": "holders",
+        "label": "Holders",
+        "value": "76.5K",
+        "cross": false,
+        "tone": "plain"
+       },
+       {
+        "id": "liq",
+        "label": "Liq",
+        "value": "$26.67M",
+        "cross": false,
+        "tone": "plain"
+       },
+       {
+        "id": "age",
+        "label": "Age",
+        "value": "726d",
+        "cross": false,
+        "tone": "plain"
+       },
+       {
+        "id": "insiders",
+        "label": "Insiders",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       },
+       {
+        "id": "tax",
+        "label": "Tax",
+        "value": "0%",
+        "cross": false,
+        "tone": "plain"
+       },
+       {
+        "id": "mintAuth",
+        "label": "Mint auth",
+        "value": "",
+        "cross": true,
+        "tone": "bad"
+       },
+       {
+        "id": "freezeAuth",
+        "label": "Freeze auth",
+        "value": "",
+        "cross": true,
+        "tone": "bad"
+       },
+       {
+        "id": "lp",
+        "label": "LP",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       },
+       {
+        "id": "honeypot",
+        "label": "Honeypot",
+        "value": "—",
+        "cross": false,
+        "tone": "unknown"
+       }
+      ]
+     },
+     "chartRight": 0,
+     "open": true,
+     "name": "Buy cbBTC",
+     "left": 0,
+     "right": 390,
+     "bottom": 844
+    },
+    "signin": {
+     "opened": true,
+     "state": "S2.1",
+     "above": true
+    }
+   }
+  ]
+ },
+ "bad": {
+  "source": "harness: the build before this card (card app-token-route's a3b7068) at APP_HOST's name in the stand-in shell, signed out, HELPER_HOST live",
+  "at": "2026-11-03T17:34:39.916Z",
+  "browser": "156.0.8078.80",
+  "loads": [
+   {
+    "width": "desktop",
+    "opened": "https://confidential.unrealized.trade/",
+    "frame": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "state": "ready",
+    "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+    "symbol": "cbBTC",
+    "page": {
+     "route": "token",
+     "state": "ready",
+     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "symbol": "cbBTC",
+     "bar": false,
+     "box": null,
+     "chartRight": 1098
+    },
+    "token": {
+     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "status": 200,
+     "rowMint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "read": {
+      "row": {
+       "top10_bps": 1631,
+       "dev_bps": null,
+       "snipers_bps": null,
+       "holders": 76520,
+       "liq_usd": "26667591.5076",
+       "created_s": 1730990040,
+       "mint_auth": true,
+       "freeze_auth": true,
+       "launchpad": null,
+       "curve_bps": null
+      },
+      "risk": {
+       "insiders_bps": null,
+       "tax": {
+        "buy_bps": 0,
+        "sell_bps": 0
+       },
+       "lp": null,
+       "honeypot": null
+      }
+     }
+    },
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-bad/0-desktop.png",
+    "signin": {
+     "opened": false,
+     "state": null
+    }
+   },
+   {
+    "width": "phone",
+    "opened": "https://confidential.unrealized.trade/",
+    "frame": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "state": "ready",
+    "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+    "symbol": "cbBTC",
+    "page": {
+     "route": "token",
+     "state": "ready",
+     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "symbol": "cbBTC",
+     "bar": true,
+     "box": null,
+     "chartRight": 0
+    },
+    "token": {
+     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "status": 200,
+     "rowMint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "read": {
+      "row": {
+       "top10_bps": 1631,
+       "dev_bps": null,
+       "snipers_bps": null,
+       "holders": 76519,
+       "liq_usd": "26667324.6536",
+       "created_s": 1730990040,
+       "mint_auth": true,
+       "freeze_auth": true,
+       "launchpad": null,
+       "curve_bps": null
+      },
+      "risk": {
+       "insiders_bps": null,
+       "tax": {
+        "buy_bps": 0,
+        "sell_bps": 0
+       },
+       "lp": null,
+       "honeypot": null
+      }
+     }
+    },
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-bad/1-phone.png",
+    "sheet": {
+     "route": "token",
+     "state": "ready",
+     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+     "symbol": "cbBTC",
+     "bar": true,
+     "box": null,
+     "chartRight": 0,
+     "open": false,
+     "name": null,
+     "left": null,
+     "right": null,
+     "bottom": null
+    },
+    "signin": {
+     "opened": false,
+     "state": null,
+     "above": false
+    }
+   }
+  ]
+ }
+}

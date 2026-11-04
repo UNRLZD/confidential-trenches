@@ -210,6 +210,7 @@ async fn one_part_fails(kind: TokenKind, failing: Failing) -> R<()> {
     let t = h.view(&h.vault, "totals", json!({})).await?;
     assert_eq!((t["spent"].clone(), t["returned"].clone()), (json!("2000000"), json!(returned.to_string())), "{t}");
     println!("{kind:?}, {failing:?} failed: delivered {delivered}, refund_pending {returned}\n{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 
@@ -285,6 +286,7 @@ async fn vt_s04(kind: TokenKind) -> R<()> {
     h.wait_final(&h.vault).await?;
     assert_eq!(vault_state(&h).await?, state, "a stranger's on_payout changed state");
     println!("{kind:?}: VT-S04 holds\n{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }
 
@@ -326,6 +328,7 @@ async fn a_registration_below_the_minimum_returns_part_0(kind: TokenKind) -> R<(
     let back = refunded_to(&h, &o.tx_hash, relayer.id().as_str(), h.vault.as_str()).await?;
     println!("{kind:?}: refund receipts to the vault: {back} yocto (register_deposit 1 + 1 yocto)\n{}", h.gas_table());
     assert_eq!(back, 2, "the vault did not get back register_deposit + the transfer's yocto");
+    h.i1().await?;
     Ok(())
 }
 

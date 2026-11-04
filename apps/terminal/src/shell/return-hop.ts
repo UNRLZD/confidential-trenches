@@ -18,6 +18,7 @@ export const RETURN_KEYS = {
   "export.open": "export",
   signout: "signout",
   "withdraw.open": "withdraw",
+  "pool.withdraw": "withdraw",
 } as const satisfies Record<OpenKind, string>;
 
 /**

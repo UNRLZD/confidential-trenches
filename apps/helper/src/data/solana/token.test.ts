@@ -541,3 +541,30 @@ test("page: a LaunchLab token on its curve trades in its LaunchLab pool, read on
   const q = JSON.parse((await t.page(md.mint)).body);
   assert.equal(q.row.launchpad, null, "Jupiter's metadao tag with no launch read on chain");
 });
+
+test("candles: a GeckoTerminal 429 after one good read serves the last good bars of that mint and tf (cut at `to`), read time the good read's; with no good read, 429, never an empty 200", async () => {
+  // app live run 41787804457 (4 Nov 06:49Z): wNEAR's chart drew no bars while GeckoTerminal was throttled
+  let now = NOW;
+  let refuse = false;
+  const g = fakeGecko();
+  const fetchFn = async (url: string) => (refuse ? new Response("{}", { status: 429, headers: { "retry-after": "30" } }) : g.fetch(url));
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: fetchFn as never });
+  const good = await t.candles(CURVE, "1m", null, 500);
+  assert.equal(good.status, 200);
+  const bars = JSON.parse(good.body).candles as [number, ...string[]][];
+  assert.ok(bars.length > 2);
+  now += 10 * 60_000; // past the cache and its stale window
+  refuse = true;
+  const kept = await t.candles(CURVE, "1m", null, 500);
+  assert.equal(kept.status, 200, kept.body);
+  assert.deepEqual(JSON.parse(kept.body).candles, bars);
+  assert.equal(kept.src, "geckoterminal");
+  assert.equal(kept.asOfMs, NOW, "the good read's time, not now");
+  const to = bars.at(-2)![0];
+  const cut = await t.candles(CURVE, "1m", to, 500);
+  assert.equal(cut.status, 200);
+  assert.deepEqual(JSON.parse(cut.body).candles, bars.filter((b) => b[0] < to));
+  const none = await t.candles(CURVE, "15m", null, 500); // never read: nothing kept
+  assert.equal(none.status, 429);
+  assert.ok((none.retryAfterS ?? 0) > 0);
+});

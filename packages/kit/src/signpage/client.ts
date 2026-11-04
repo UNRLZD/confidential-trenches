@@ -74,10 +74,15 @@ export const SIGNPAGE_TIMEOUT_MS = {
   // the shell's (card signpage-shell): answered at once
   nav: 5_000,
   reload: 5_000,
+  // the pool kinds (card signpage-pool-kinds): answered once signed and sent, as buy is; the withdraw screen as an open
+  "pool.deposit": 10_000,
+  "pool.buy": 10_000,
+  "pool.sell": 10_000,
+  "pool.withdraw": 5_000,
 } as const satisfies Record<SignpageKind, number | null>;
 
 /** After one of these times out, the client asks `state` again (a new `state` request); the kind itself is never re-sent. */
-const REASK_STATE: ReadonlySet<SignpageKind> = new Set(["deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return"]);
+const REASK_STATE: ReadonlySet<SignpageKind> = new Set(["deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return", "pool.deposit", "pool.buy", "pool.sell"]);
 
 /** The hidden iframe's attributes (app.md §2.1 item 2; AX-06, app.md:1386). */
 export const SIGNPAGE_IFRAME_ATTRIBUTES = {

@@ -32,6 +32,17 @@ const state = (id = uuid()) => ({ v: 1, id, type: "state" });
 const notAllowed = (id: string) => ({ v: 1, id, ok: false, error: { code: "not_allowed" } });
 const idReused = (id: string) => ({ v: 1, id, ok: false, error: { code: "id_reused" } });
 const stateAnswer = (id: string) => ({ v: 1, id, ok: true, result: signedOutState() });
+// The api answers after an off-thread SHA-256 of each message, so on a loaded runner an answer comes when it comes: a
+// wait for one waits until its condition holds, bounded at 2 s with a named failure, never for a set time. A set wait is
+// left only before a check that nothing came, where it can let a late post through but never fail.
+async function until(cond: () => boolean, what: string, ms = 2_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > end) assert.fail(`not within ${ms} ms: ${what}`);
+    await new Promise((ok) => setTimeout(ok, 1));
+  }
+}
+const idOf = (m: unknown) => (m as { id?: string } | null)?.id;
 
 test("ready: posted once at start, to the parent, with targetOrigin APP_HOST, in the frozen shape", () => {
   const p = page();
@@ -355,7 +366,7 @@ test("a kind whose handler answers later is answered with its result once it set
   await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(posted.filter((m) => (m as { id?: string }).id === a || (m as { id?: string }).id === b), [], "answered before the handler settled");
   release();
-  await new Promise((r) => setTimeout(r, 20));
+  await until(() => posted.filter((m) => idOf(m) === a || idOf(m) === b).length === 2, "both answers once the handler settled");
   const answers = posted.filter((m) => (m as { id?: string }).id !== undefined);
   assert.deepEqual(answers, [{ v: 1, id: a, ok: true, result: { pending: true } }, stateAnswer(b)]);
   assert.deepEqual(ran, ["then"]);
@@ -382,4 +393,88 @@ test("a host kind's refusal carries its own code; busy and down are not kept, so
     assert.deepEqual(posted.slice(-2), [{ v: 1, id, ok: false, error: { code } }, { v: 1, id, ok: false, error: { code } }], code);
     assert.equal(runs - before, code === "busy" || code === "down" ? 2 : 1, code);
   }
+});
+
+test("a running kind (a trade) gets its id, holds no other message, runs once for a repeat, and its progress follows its answer", async () => {
+  const posted: unknown[] = [];
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const ids: string[] = [];
+  startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: signedOutState,
+    kinds: {
+      // a trade answered at "sent", its fill as a progress event (src/trade.ts); a progress before the answer waits for it
+      buy: (p, ctx) => {
+        ids.push(ctx.id);
+        if (p.side === "sell") return { error: "quote_check_failed" };
+        ctx.progress("signed");
+        return { running: true, after: held.then(() => ctx.progress("filled")), answer: () => ({ result: { stage: "sent" as const, txs: [{ chain: "solana" as const, hash: "sig" }] } }) };
+      },
+    },
+  });
+  const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
+  const a = uuid();
+  const b = uuid();
+  const c = uuid();
+  const buy = { v: 1, type: "buy", chain: "solana", token: "Mint", amount: "10", slippage_bps: 500 };
+  send({ ...buy, id: a, side: "buy" });
+  send({ ...buy, id: a, side: "buy" });
+  send({ ...buy, id: a, side: "buy", amount: "20" });
+  send({ ...buy, id: b, side: "sell" });
+  send(state(c));
+  await until(() => posted.length >= 4, "the repeat's, the sell's and the state's answers");
+  assert.deepEqual(posted.slice(1), [idReused(a), { v: 1, id: b, ok: false, error: { code: "quote_check_failed" } }, stateAnswer(c)], "nothing waits for the trade; its repeat is not run");
+  release();
+  await until(() => posted.length >= 7, "a's answer and its two progress events");
+  assert.deepEqual(ids, [a, b], "one run for a");
+  assert.deepEqual(posted.slice(4), [
+    { v: 1, id: a, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: "sig" }] } },
+    { v: 1, type: "progress", id: a, stage: "signed" },
+    { v: 1, type: "progress", id: a, stage: "filled" },
+  ]);
+  send({ ...buy, id: a, side: "buy" });
+  await until(() => posted.length >= 8, "a's answer again for its repeat");
+  assert.deepEqual(posted.slice(7), [{ v: 1, id: a, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: "sig" }] } }], "a repeat after the answer gets it again");
+});
+
+test("a running id's answer refreshes its place among the remembered ids, so ids answered while it ran never push it out", async () => {
+  const posted: unknown[] = [];
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const runs: string[] = [];
+  const shas = new Map<string, string>();
+  const api = startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: signedOutState,
+    kinds: {
+      buy: (p, ctx) => {
+        runs.push(ctx.id);
+        shas.set(ctx.id, ctx.sha);
+        if (p.side === "sell") return { error: "quote_check_failed" };
+        return { running: true, after: held, answer: () => ({ result: { stage: "sent" as const, txs: [] } }) };
+      },
+    },
+  });
+  const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
+  const buy = { v: 1, type: "buy", chain: "solana", token: "Mint", amount: "10", slippage_bps: 500 };
+  const a = uuid();
+  send({ ...buy, id: a, side: "buy" });
+  for (let i = 0; i < REMEMBERED_IDS - 1; i++) send({ ...buy, id: uuid(), side: "sell" });
+  await api.idle();
+  release();
+  await until(() => posted.some((m) => idOf(m) === a && (m as { ok?: boolean }).ok === true), "a's answer once its run settled");
+  send({ ...buy, id: uuid(), side: "sell" }); // one more: the oldest remembered id goes, which is no longer a
+  send({ ...buy, id: a, side: "buy" });
+  await api.idle();
+  assert.equal(runs.filter((x) => x === a).length, 1, "a was remembered: its repeat got its answer, not a second run");
+  assert.deepEqual(posted.at(-1), { v: 1, id: a, ok: true, result: { stage: "sent", txs: [] } });
+  const bytes = new TextEncoder().encode(JSON.stringify({ ...buy, id: a, side: "buy" }));
+  assert.equal(shas.get(a), Buffer.from(await crypto.subtle.digest("SHA-256", bytes)).toString("hex"), "ctx.sha is the request's SHA-256");
 });

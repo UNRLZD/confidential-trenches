@@ -14,7 +14,9 @@
 //     each a Field {v, src, as_of_ms}, the authorities and the tax read from the chain;
 //   - holders: Holders {holders, total, top_bps, src, as_of_ms}, at most 20 rows {addr, amt, bps[, kind]};
 //   - candles: Candles {tf, candles, src, as_of_ms}, at least one bar, each [t_s, o, h, l, c, vol_usd] on the hour
-//     grid, oldest first, USD values decimal strings.
+//     grid, oldest first, USD values decimal strings. src is "geckoterminal" for a mint the lists do not hold, else
+//     "chain" or "chain,geckoterminal" (the helper's own bars, the vendor's only before them,
+//     apps/helper/src/data/solana/trades.ts); when the bars include ours, own_from_s (before as_of_ms) is our first bar.
 //   node scripts/live-checks/market-data-solana-token.mjs [--base <url>] [--token <mint>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; --speed times n more page reads.
 import "../net-window.mjs";
@@ -36,7 +38,8 @@ export const PAGE = ["row", "decimals", "pool", "risk", "route"];
 export const RISK = ["mint_auth", "freeze_auth", "lp", "top10_bps", "dev_bps", "snipers_bps", "holders", "liq_usd", "age_s", "tax", "honeypot", "insiders_bps", "bundlers_bps", "fresh_bps"];
 export const HOLDERS = ["holders", "total", "top_bps", "src", "as_of_ms"];
 export const CANDLES = ["tf", "candles", "src", "as_of_ms"];
-const SOURCE = { token: ["jupiter"], holders: ["chain", "jupiter"], candles: ["geckoterminal"] };
+export const CANDLE_SOURCES = ["geckoterminal", "chain", "chain,geckoterminal"];
+const SOURCE = { token: ["jupiter"], holders: ["chain", "jupiter"], candles: CANDLE_SOURCES };
 const SHA = /^[0-9a-f]{40}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/;
 const DEC = /^\d+(\.\d+)?$/;
@@ -87,8 +90,10 @@ export function holdersFault(h) {
 
 /** The first thing wrong with a Candles answer for tf 1h, or null. */
 export function candlesFault(c) {
-  if (!isObj(c) || !same(Object.keys(c), CANDLES)) return `keys ${show(isObj(c) ? Object.keys(c) : c)}`;
-  if (c.tf !== "1h" || c.src !== "geckoterminal" || !Number.isSafeInteger(c.as_of_ms)) return `tf ${show(c.tf)}, src ${show(c.src)}`;
+  const own = isObj(c) && Object.hasOwn(c, "own_from_s");
+  if (!isObj(c) || !same(Object.keys(c), own ? ["tf", "candles", "src", "own_from_s", "as_of_ms"] : CANDLES)) return `keys ${show(isObj(c) ? Object.keys(c) : c)}`;
+  if (c.tf !== "1h" || !CANDLE_SOURCES.includes(c.src) || !Number.isSafeInteger(c.as_of_ms)) return `tf ${show(c.tf)}, src ${show(c.src)}`;
+  if (own && (!c.src.startsWith("chain") || !Array.isArray(c.candles) || !c.candles.some((b) => Array.isArray(b) && b[0] === c.own_from_s))) return `own_from_s ${show(c.own_from_s)} with src ${show(c.src)}`;
   if (!Array.isArray(c.candles) || c.candles.length === 0 || c.candles.length > 24) return `candles ${Array.isArray(c.candles) ? c.candles.length : "not a list"}`;
   for (const [i, b] of c.candles.entries()) {
     if (!Array.isArray(b) || b.length !== 6 || !Number.isSafeInteger(b[0]) || b[0] % 3600 !== 0 || !b.slice(1).every((v) => typeof v === "string" && DEC.test(v))) return `bar ${i} ${show(b)}`;

@@ -12,7 +12,7 @@ import { createRequire } from "node:module";
 import { test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { poseidon1, poseidon2, poseidon3 } from "poseidon-lite";
-import { VaultTree, vaultRootOfPath, vaultWithdrawInput, type VaultWithdrawInput, type VaultWithdrawInputArgs } from "../src/vault/inputs.ts";
+import { VaultTree, vaultCommitment, vaultRootOfPath, vaultWithdrawInput, type VaultWithdrawInput, type VaultWithdrawInputArgs } from "../src/vault/inputs.ts";
 import { VAULT_FIELD_P, vaultLabelOf, vaultScopeOf, vaultWithdrawalProblems, type VaultWithdrawal } from "../src/vault/shapes.ts";
 
 type Wtns = { type: "mem"; data?: Uint8Array };
@@ -351,4 +351,16 @@ test("refusals: what the circuit or the vault would refuse never reaches a proof
   assert.throws(() => t.path(P), /leaf: not a field element/);
   assert.throws(() => vaultRootOfPath(1n, 0, [0n]), /not 32/);
   assert.throws(() => vaultRootOfPath(1n, 2 ** 32, Array<bigint>(32).fill(0n)), /index/);
+});
+
+test("vaultCommitment is Poseidon(value, label, precommitment): the devnet pool's leaf of the signing page's deposit, and inputs out of the field refused", () => {
+  // scripts/live-checks/signpage-pool-notes.run.json: the leaf both devnet RPCs hold at state index 1
+  const value = 10_000_000n;
+  const label = 0x0efaebfbf3dcb8e13144b46ea286a820df0958a6ded265ee691a50591316fdddn;
+  const pre = 0x28fb4aaedb8bc5a86143b4404719b308e41c297bcccd058edd831d990c064b48n;
+  assert.equal(vaultCommitment(value, label, pre), 0x0446b3c85886af8a2b4ae432180fa6383587a2444f4df91581e2341426a1df3bn);
+  assert.equal(vaultCommitment(value, label, pre), poseidon3([value, label, pre]));
+  assert.throws(() => vaultCommitment(value, VAULT_FIELD_P, pre), /label: not a field element/);
+  assert.throws(() => vaultCommitment(value, label, -1n), /precommitment: not a field element/);
+  assert.throws(() => vaultCommitment(1n << 128n, label, pre), /value: 2\^128 or more/);
 });

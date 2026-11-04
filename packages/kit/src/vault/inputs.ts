@@ -47,6 +47,14 @@ function field(x: bigint, what: string): bigint {
 
 const hash = (a: bigint, b: bigint): bigint => poseidon2([a, b]);
 
+/** A note's commitment, the leaf the vault and the pools write for it (commitment.circom:24-36): Poseidon(value, label,
+ *  precommitment), each a field element, the value below 2^128. Needs no secret, so a reader of the chain can check a
+ *  leaf against a deposit it names. */
+export function vaultCommitment(value: bigint, label: bigint, precommitment: bigint): bigint {
+  if (field(value, "value") >= U128) throw new Error("value: 2^128 or more");
+  return poseidon3([value, field(label, "label"), field(precommitment, "precommitment")]);
+}
+
 /** One of the vault's two trees on the device: built once, then grown by each page of leaves read from the vault. */
 export class VaultTree {
   #tree = new LeanIMT<bigint>(hash);
@@ -192,7 +200,7 @@ export function poolWithdrawInput(a: PoolWithdrawInputArgs): VaultWithdrawInput 
   if (a.stateTree.root !== field(a.newestStateRoot, "newestStateRoot")) throw new Error("stateTree: its root is not the vault's newest");
   if (a.labelTree.root !== field(a.newestLabelRoot, "newestLabelRoot")) throw new Error("labelTree: its root is not the vault's newest");
   // commitment.circom:24-36: commitment = Poseidon(value, label, Poseidon(nullifier, secret))
-  const commitment = poseidon3([value, label, poseidon2([nullifier, secret])]);
+  const commitment = vaultCommitment(value, label, poseidon2([nullifier, secret]));
   const s = pathOf(a.stateTree, commitment, "the note's commitment");
   const l = pathOf(a.labelTree, label, "the note's label");
 
