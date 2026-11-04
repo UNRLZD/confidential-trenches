@@ -12,7 +12,7 @@
 // `endView` as Failed (with the reason for the kit's code when the app has words for it) or Not landed, each with
 // Retry, or part filled, with the button back to its ready label (`showsRetry`); a trade still Sending or Landing past 5 s is Slow (S8.11), which never ends it. The sell side
 // (src/screens/positions/) runs the same machine.
-import { POOL_ASSET_DECIMALS, POOL_CHAINS, POOL_USD_FEEDS, POOL_USD_MAX_AHEAD_S } from "@blindfill/kit";
+import { POOL_ASSET_DECIMALS, POOL_CHAINS, POOL_USD_FEEDS, POOL_USD_MAX_AHEAD_S, poolUsdGoodUntilS } from "@blindfill/kit";
 import type { Chain, ErrorCode, PoolAsset, PoolChain, PoolUsdChain, PoolUsdPrice, SignpageParams, SignpageState, Stage } from "@blindfill/kit";
 
 /** USD cents. */
@@ -257,11 +257,11 @@ export function unitsToDecimal(u: bigint, decimals: number): string {
 const isPoolChain = (c: Chain): c is PoolChain => (POOL_CHAINS as readonly Chain[]).includes(c);
 const poolOf = (pools: SignpageState["pools"], chain: Chain) => (isPoolChain(chain) ? (pools?.find((x) => x.chain === chain) ?? null) : null);
 
-/** When the page's price for the pool's chain stops being used, unix ms: the feed's own time plus its bound (the kit's
- *  POOL_USD_FEEDS maxAgeS, as poolUsdPrice holds it); null with no price or no feed (NEAR). */
+/** When the page's price for the pool's chain stops being used, unix ms: the kit's poolUsdGoodUntilS (the feed's bound
+ *  from the earlier of its own time and the page's read); null with no price or no feed (NEAR). */
 export function poolPriceEnd(p: NonNullable<SignpageState["pools"]>[number]): number | null {
   if (!p.price || !Object.hasOwn(POOL_USD_FEEDS, p.chain)) return null;
-  return (p.price.published_s + POOL_USD_FEEDS[p.chain as PoolUsdChain].maxAgeS) * 1000;
+  return poolUsdGoodUntilS(p.chain as PoolUsdChain, p.price.published_s, p.price.read_ms / 1000) * 1000;
 }
 
 /**

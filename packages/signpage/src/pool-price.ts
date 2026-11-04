@@ -9,14 +9,14 @@
 //   with no pair, or one the kit refuses (Base Sepolia and Robinhood testnet: their chain ids are not the feeds'), has
 //   no price. Robinhood's read holds its ETH/USD to Base's, on Base's pair.
 // - Fresh: a chain in the state is read again once its last try is POOL_PRICE_REFRESH_MS old, one read per chain at a
-//   time. A read that fails keeps the last good one, which is dropped once older than the feed's own bound
-//   (POOL_USD_FEEDS maxAgeS, the kit's), so a price past it never reaches the state.
+//   time. A read that fails keeps the last good one, which is dropped once past the kit's poolUsdGoodUntilS (the feed's
+//   maxAgeS from the earlier of its own time and the read's), so a price past it never reaches the state.
 // - The app hears each new price: a read that ends calls the watchers (the API posts a state event when the state read
 //   then differs), and POOL_PRICE_REFRESH_MS after it calls them again, so a state read starts the next read while a
 //   pool shows. Signed out, or with no pool, no state names a chain and no read is made.
 // - The price only labels USD: pool.buy's amount is in the pool asset's units and the page spends it only from a ready
 //   proof that funds it (src/pool-buy.ts), so a price an app planted cannot spend over a tap's most.
-import { POOL_USD_FEEDS, POOL_USD_MAX_AHEAD_S, poolUsdPrice, type PoolUsdArgs, type PoolUsdChain, type PoolUsdPrice } from "../../kit/src/price/pool-usd.ts";
+import { POOL_USD_FEEDS, POOL_USD_MAX_AHEAD_S, poolUsdGoodUntilS, poolUsdPrice, type PoolUsdArgs, type PoolUsdChain, type PoolUsdPrice } from "../../kit/src/price/pool-usd.ts";
 import type { Chain } from "../../kit/src/orders/record.ts";
 import type { PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -61,7 +61,7 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
     const p = held.get(chain);
     if (!p) return null;
     const nowS = now() / 1000;
-    return nowS - p.published_s > POOL_USD_FEEDS[chain].maxAgeS || p.published_s - nowS > POOL_USD_MAX_AHEAD_S ? null : p;
+    return nowS > poolUsdGoodUntilS(chain, p.published_s, p.read_ms / 1000) || p.published_s - nowS > POOL_USD_MAX_AHEAD_S ? null : p;
   };
   const start = (chain: PoolUsdChain): void => {
     const rpcs = deps.rpcs(chain);

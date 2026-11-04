@@ -59,3 +59,11 @@ test("each chain's own bound: Base's and Robinhood's from their feeds; the end i
   }
   assert.equal(poolPriceEnd(sol()), null);
 });
+
+test("a clock behind the feed never stretches the bound: a price stamped 60 s ahead of its read is refused 61 s after the read (review L2)", () => {
+  const readS = PUBLISHED_S;
+  const ahead = [sol({ ...PRICE, published_s: readS + 60, read_ms: readS * 1000 })];
+  assert.notEqual(statePoolPrice(ahead, "solana", (readS + 60) * 1000), null, "60 s after the read: used");
+  assert.equal(statePoolPrice(ahead, "solana", (readS + 61) * 1000), null, "61 s after the read: refused");
+  assert.equal(poolPriceEnd(ahead[0]!), (readS + POOL_USD_FEEDS.solana.maxAgeS) * 1000, "the end counts from the earlier of the two times");
+});

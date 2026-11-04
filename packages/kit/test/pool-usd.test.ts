@@ -408,3 +408,11 @@ test("refused: an unknown chain, NEAR included (its vault holds USDC: no price r
 test("refused: a now that is not a time", async () => {
   for (const nowMs of [NaN, -1, Infinity, 1.5, "1" as never]) await assert.rejects(poolUsdToUnits({ chain: "solana", usd: "1", rpcs: pair(FX.solana), nowMs }), /nowMs/, String(nowMs));
 });
+
+test("staleness: poolUsdGoodUntilS counts the bound from the earlier of the feed's time and the read's, so a clock behind never stretches it (review L2)", async () => {
+  const { poolUsdGoodUntilS } = await import("../src/index.ts");
+  const max = POOL_USD_FEEDS.solana.maxAgeS;
+  assert.equal(poolUsdGoodUntilS("solana", 1_000, 1_060), 1_000 + max, "published before the read");
+  assert.equal(poolUsdGoodUntilS("solana", 1_060, 1_000), 1_000 + max, "published 60 s after the read (the clock behind)");
+  assert.equal(poolUsdGoodUntilS("base", 1_000, 1_000), 1_000 + POOL_USD_FEEDS.base.maxAgeS);
+});

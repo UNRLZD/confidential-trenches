@@ -188,3 +188,15 @@ test("no pair, NEAR or no chain named: no read and no price; Robinhood reads on 
   await settled();
   assert.equal(asked.length, 1);
 });
+
+test("a clock behind the feed never stretches the bound: a price stamped 60 s ahead of its read is dropped 61 s after the read (review L2)", async () => {
+  const readMs = FX.nowMs;
+  const read = async (): Promise<PoolUsdPrice> => ({ chain: "solana", asset: "SOL", decimals: 9, price: 1n, expo: 0, publishedS: Math.floor(readMs / 1000) + 60, source: "pyth", at: 1n });
+  const h = holder({ read });
+  h.p.refresh(["solana"]);
+  await settled();
+  h.clock.ms = Math.floor(readMs / 1000) * 1000 + 60_000;
+  assert.notEqual(h.p.get("solana"), null, "60 s after the read: held");
+  h.clock.ms = readMs + 61_000;
+  assert.equal(h.p.get("solana"), null, "61 s after the read: dropped");
+});
