@@ -14,9 +14,21 @@
 .tkp-val { font-size: 15px; font-weight: 500; white-space: nowrap; }
 .tkp-val[data-dir="up"], .tkp-chg[data-dir="up"] { color: var(--acc); }
 .tkp-val[data-dir="down"], .tkp-chg[data-dir="down"] { color: var(--sell); }
-.tkp-val[data-curve="false"] { color: var(--text-3); }
-.tkp-bar { display: block; width: 100%; height: 6px; margin-top: 2px; border-radius: 3px; background: var(--border-panel); overflow: hidden; }
-.tkp-bar i { display: block; height: 100%; border-radius: 3px; background: var(--sage); }
+.tkp-val[data-tone="warn"] { color: var(--warn, #f2b543); }
+.tkp-val[data-tone="bad"] { color: var(--sell); }
+.tkp-val[data-tone="unknown"] { color: var(--text-3); }
+/* the identity's icon buttons (R5 .hd-icons, .hd-iconBtn, .hd-copy): 26 px, the tap area grown by an invisible box */
+.tkp-ic { display: block; flex: none; }
+.tkp-icons { display: flex; gap: 4px; flex: none; color: var(--text-3); }
+.tkp-ib { position: relative; width: 26px; height: 26px; flex: none; border-radius: 7px; background: var(--bg-raised); display: flex; align-items: center; justify-content: center; color: var(--text-3); border: 0; padding: 0; cursor: pointer; }
+.tkp-ib::after { content: ""; position: absolute; inset: -9px -1px; }
+.tkp-ib:hover { color: var(--text-1); }
+.tkp-ib[data-on="true"] { color: var(--paper, #f4f4f2); }
+.tkp-copy { position: relative; display: flex; flex: none; padding: 0; border: 0; background: transparent; color: var(--text-3); cursor: pointer; }
+.tkp-copy::after { content: ""; position: absolute; inset: -12px -8px -12px -12px; }
+.tkp-copy:hover, .tkp-mca:hover { color: var(--text-2); }
+.tkp-copy[data-copied="true"], .tkp-mca[data-copied="true"] { color: var(--paper, #f4f4f2); }
+.tkp-nav, .tkp-links { display: none; }
 
 /* the error and empty labels */
 .tkp-msg { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-2); font-size: 13px; }
@@ -30,20 +42,25 @@
 .tkp-head { flex: none; display: flex; align-items: center; gap: 14px; padding: 6px 4px 2px; flex-wrap: nowrap; }
 /* one row (the locked design): the identity takes what the strip leaves and its text truncates, so the strip's width
    comes only from its own tiles and it starts at the same x before and after the read (CLS 0) */
-.tkp-ident { display: flex; align-items: center; gap: 12px; flex: 1 1 0; min-width: 160px; }
+.tkp-ident { display: flex; align-items: center; gap: 12px; flex: 1 1 0; min-width: 0; }
 .tkp-idtext { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1 1 0; }
-.tkp-symrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* the row's box is drawn before the token answers: the icons' slot is there empty, so nothing moves when they land */
+.tkp-symrow { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 26px; }
 .tkp-sym { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tkp-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); min-width: 0; white-space: nowrap; }
 .tkp-meta > * { flex: none; }
 .tkp-sep { color: var(--border-active); }
 .tkp-meta > .tkp-name { flex: 0 1 auto; max-width: 60%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tkp-meta > .tkp-ca { flex: 0 100000 auto; min-width: 48px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
-.tkp-strip { flex: 0 1 auto; margin-left: auto; min-width: min(100%, 260px); display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+/* every tile whole (card app-token-header): the strip keeps its own width and the identity gives way (its name and
+   address end in "…" with the full text in the title), so no tile is ever cut at the trade column */
+.tkp-strip { flex: none; margin-left: auto; display: flex; gap: 6px; flex-wrap: nowrap; }
 .tkp-mc { flex: none; margin-left: auto; padding: 8px 14px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.tkp-mcval { min-width: 120px; text-align: center; font-size: 24px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; }
-.tkp-tile { flex: none; min-width: 100px; padding: 8px 14px; border-radius: 10px; background: var(--bg-panel); display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.tkp-tile[data-k="curve"] { min-width: 120px; }
+.tkp-mcval { min-width: max(120px, 8ch); text-align: center; font-size: 24px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; }
+/* a tile is drawn for 8 characters (discover/format.ts priceTile, usdTile; model.ts changeTile), skeleton or value,
+   so the strip's width never follows the data */
+.tkp-tile .tkp-val { min-width: 8ch; text-align: center; }
+.tkp-tile { flex: none; min-width: 96px; padding: 8px 14px; border-radius: 10px; background: var(--bg-panel); display: flex; flex-direction: column; align-items: center; gap: 4px; }
 
 .tkp-chart { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; overflow: hidden; }
 .tkp-tfs { flex: none; height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border-panel); }
@@ -75,8 +92,22 @@
   .tkp.tkp-msg { min-height: calc(100dvh - 124px); padding-bottom: 0; }
   .tkp-desk { display: none; }
   .tkp-phone { display: block; }
-  .tkp-hero { padding: 10px 16px 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .tkp-hero .tkp-sym { font-size: 20px; }
+  /* the nav row (R5 pp-row, mt-nav*): back, the icon, the symbol, the star, share */
+  .tkp-nav { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 6px; min-width: 0; }
+  .tkp-nav .tkp-sym { flex: 1; min-width: 0; padding-left: 4px; font-size: 15.5px; line-height: 1.15; letter-spacing: 0; }
+  .tkp-navbtn { width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 12px; background: transparent; color: var(--text-1); cursor: pointer; padding: 0; }
+  .tkp-navbtn:active { background: var(--m-ink-pin, #161616); }
+  .tkp-navbtn.tkp-star[data-on="true"] { color: var(--m-warn, #f2b543); }
+  .tkp-hero { padding: 4px 16px 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  /* the address is the copy button (R5 mt-ca), its tap area at least 44 px tall */
+  .tkp-mca { position: relative; display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1 1 auto; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+  .tkp-mca::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+  .tkp-mca .tkp-ca { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tkp-hero .tkp-meta > .tkp-mca { flex: 0 1 auto; }
+  /* the link row (R5 mt-links): the identity's link icons, under the address */
+  /* one row of a fixed height, empty or full, drawn before the token answers (R5 .mlinks: one row) */
+  .tkp-links { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; height: 28px; }
+  .tkp-links .tkp-ib::after { inset: -9px; }
   .tkp-pricerow { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .tkp-price { font-size: 34px; font-weight: 600; letter-spacing: -0.06em; line-height: 1; color: var(--text-1); }
   .tkp-chg { height: 24px; padding: 0 8px; border-radius: 7px; display: flex; align-items: center; align-self: center; font-size: 13px; font-weight: 500; background: var(--m-ink-pill); }
@@ -96,6 +127,8 @@
   .tkp-mtile { flex: none; width: 124px; padding: 12px; border-radius: 16px; background: var(--m-ink-panel); box-shadow: inset 0 0 0 1px var(--m-line-soft); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .tkp-mtile .tkp-lbl { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
   .tkp-mtile .tkp-val { overflow: hidden; text-overflow: ellipsis; }
+  /* the tile's dot strip (R5 mt-tileViz, P.unlit): unlit dots until a series is drawn there */
+  .tkp-viz { display: block; height: 24px; background-image: radial-gradient(circle, #262626 1.1px, transparent 1.4px); background-size: 4.2px 4.2px; background-position: 0 100%; background-repeat: repeat; }
   .tkp-bottom { position: fixed; z-index: 64; left: 0; right: 0; bottom: calc(68px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 8px; background: var(--m-ink); }
   .tkp-bottom::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 24px; background: linear-gradient(to top, var(--m-ink), rgba(10, 10, 10, 0)); pointer-events: none; }
   .tkp-quick { display: flex; gap: 6px; }

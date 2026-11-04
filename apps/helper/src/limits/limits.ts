@@ -121,8 +121,11 @@ export function clientWindow(max: number, now: () => number = Date.now, windowMs
  * window, the provider's own: 10 s for a chain's RPC, a minute for a vendor; unset, the budget's window), and one
  * caller draws at most `perClient` of them per fixed LIMIT_WINDOW_MS window (perClient under total; Infinity: no share).
  * `reserve` of the total is kept for the helper's own reads that serve every user (Discover's lists, the token page's
- * batched search): only a draw marked reserved may use it, so no set of callers can make those reads stale. */
-export type BudgetLimits = { total: number; perClient: number; windowMs?: number; reserve?: number };
+ * batched search): only a draw marked reserved may use it, so no set of callers can make those reads stale.
+ * `userRoom` of the total is kept for callers (card helper-ready-gate): the helper's own background reads (no caller,
+ * not reserved: the trade walks) go only while every draw in the window, callers' included, leaves it free, so callers
+ * go ahead of them and a walk never makes a caller wait for room it took. */
+export type BudgetLimits = { total: number; perClient: number; windowMs?: number; reserve?: number; userRoom?: number };
 
 /**
  * A shared upstream budget per key (a chain's RPC provider, one RPC method on it, a vendor). Every call that reaches
@@ -155,8 +158,8 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   /** The seconds until `n` more fit (0: they fit now): every draw under the key's total, and a draw not reserved also
    * with every other such draw under the total less the reserve, so the helper's own reads always find their room. A
    * request sent in second s may still be in the provider's window until the end of second s + W, W its window in
-   * seconds. */
-  const totalWait = (key: string, n: number, t: number, lim: BudgetLimits, reserved: boolean): number => {
+   * seconds. A background draw (`background`) also leaves the key's userRoom free. */
+  const totalWait = (key: string, n: number, t: number, lim: BudgetLimits, reserved: boolean, background: boolean): number => {
     const w = Math.ceil((lim.windowMs ?? windowMs) / 1000);
     const sec = Math.floor(t / 1000);
     const q = sent.get(key) ?? [];
@@ -172,7 +175,7 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
       }
       return RETRY_AFTER_MAX_S;
     };
-    return Math.max(until(1, lim.total), reserved ? 0 : until(2, lim.total - (lim.reserve ?? 0)));
+    return Math.max(until(1, lim.total), reserved ? 0 : until(2, lim.total - (lim.reserve ?? 0) - (background ? (lim.userRoom ?? 0) : 0)));
   };
   /** `reserved`: the helper's own read that may use the key's reserve; every other draw stops at total less reserve. */
   function takeEach(draws: readonly (readonly [string, number])[], client?: string, shareOnly = false, reserved = false): Take {
@@ -190,7 +193,7 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     for (const [key, n] of want) {
       const lim = limitsOf(key);
       if (client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient) wait = Math.max(wait, toWindowEnd(t, windowMs));
-      if (!shareOnly) wait = Math.max(wait, totalWait(key, n, t, lim, reserved));
+      if (!shareOnly) wait = Math.max(wait, totalWait(key, n, t, lim, reserved, client === undefined && !reserved));
     }
     if (wait > 0) return wait;
     const sec = Math.floor(t / 1000);

@@ -15,7 +15,9 @@
 //     one for every new commit), a whole number, 1 or more, the same in each; and with --since <record> (an earlier
 //     run's --record, taken before the deploy), it went up from the record's when the commit is another, and is the
 //     record's when the commit is the same. A record from a helper that reported no release holds none, so any whole
-//     number is up from it. Without --since the comparison is not made, and the run says so.
+//     number is up from it. Without --since the comparison is not made, and the run says so;
+//   - every answer says ready: true (card helper-ready-gate): the deployed helper has warmed (its lists, a token page
+//     and its holders answer 200) before it took this read, so the first live run after a redeploy needs no warm-up wait.
 //   node scripts/live-checks/helper-host-health.mjs [--base <url>] [--commit <sha>] [--since <record>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
@@ -78,6 +80,7 @@ export function judge({ reads, bind }, commit, since) {
     say(h["x-helper-commit"] === commit, `${tag} X-Helper-Commit: ${show(h["x-helper-commit"])}${h["x-helper-commit"] === commit ? "" : `, want ${show(commit)}`}`);
     say(b?.commit === commit, `${tag} body commit equals it`);
     say(isRelease(b?.release), `${tag} release ${show(b?.release)} is a whole number, 1 or more`);
+    say(b?.ready === true, `${tag} ready: ${show(b?.ready)}${b?.ready === true ? "" : ", want true (the helper took traffic before its warm-up was done)"}`);
     const acao = h["access-control-allow-origin"];
     const wantAcao = want === OTHER ? undefined : want;
     say(acao === wantAcao, `${tag} Access-Control-Allow-Origin: ${show(acao)}${acao === wantAcao ? "" : `, want ${show(wantAcao)}`}`);

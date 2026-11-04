@@ -256,10 +256,16 @@ export interface SignpageState {
    * per chain, each amount a decimal string in whole units of the pool's asset, as vault_balance is for USDC (12.5 SOL
    * is "12.5"). `asset` is the pool's, set by the device from the pool's kind; its decimals are POOL_ASSET_DECIMALS's
    * alone. `ready` is how much of it is ready to buy (chunks with a proof ready); absent while no proof
-   * queue runs, never "0" in its place. Absent when the page is signed out or the notes could not be read. Totals
+   * queue runs, never "0" in its place. `tap_max` is the most one tap can spend on the chain, in the same whole units:
+   * a tap spends one ready proof, so it is the largest spend among the ready proofs, never their sum: the chunk less
+   * what comes out of it before the venue (Solana: the relay fee, the tip and W's new accounts on the costliest venue,
+   * the kit's solanaPoolBuyMaxSpend; EVM: nothing, since an EVM tap asks for a whole chunk and the signing page refuses
+   * any other amount, rules/pool.ts checkEvmBuy). At most `ready`, never below "0". It
+   * comes only with `ready`, and a page of an earlier release, or one that cannot price a pool, sends `ready` without it.
+   * Absent when the page is signed out or the notes could not be read. Totals
    * only, never a note; the app sees them each time the store changes, so two in a row can show one note's value.
    */
-  pools?: { chain: Chain; asset: PoolAsset; balance: string; ready?: string }[];
+  pools?: { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string }[];
   wallets: { chain: Chain; address: string; role: "fresh" | "hop"; size: string; state: WalletState }[];
   positions: { chain: Chain; token: string; amount: string; cost: string; wallets: string[] }[];
   orders: {

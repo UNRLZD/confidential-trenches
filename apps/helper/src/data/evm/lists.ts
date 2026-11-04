@@ -8,12 +8,17 @@
 // reads the stalest list older than LIST_MS, one call at a time while the "lists" lane yields a call, so the lists
 // slow down while pages are opened and answer 503 only past STALE_MS.
 //
-// Launchpad (the maker): the block the token's pool was made in, then on two RPC providers one `eth_getLogs` over that
-// block and the one before it, filtered to the chain's FACTORIES and their creation events; the row's launchpad is the
-// pad whose factory's creation event names the token where that event puts the new token. Both providers must answer
-// and agree; a token no listed factory made gets null, never a guess. A pad's tokens are made with their pool in one
-// transaction (each pad's creation event holds the pool or hook), so the pool's block is the token's. A token's maker
-// never changes, so it is read once and kept (MAKER_MAX tokens); a refresh reads only tokens it has not settled.
+// Launchpad (the maker), read on two RPC providers that must answer and agree; a token no listed launchpad made gets
+// null, never a guess. A token's maker never changes, so it is read once and kept (MAKER_MAX tokens); a refresh reads
+// only tokens it has not settled.
+// - Robinhood: each launchpad's own record of the tokens it made (RECORDS), read at the latest block, so a later pool
+//   of an older token (the row's time is the pool's, not the token's) never settles it as none, with no archive read
+//   (none of Robinhood's keyless providers serves old state).
+// - Base: the block the token's pool was made in, then one `eth_getLogs` over that block and the one before it,
+//   filtered to the chain's FACTORIES and their creation events; the row's launchpad is the pad whose factory's
+//   creation event names the token where that event puts the new token. A pad's tokens are made with their pool in one
+//   transaction, so the pool's block is the token's; a token with code before its pool is read again where its code
+//   first appears (Base's first provider serves old state).
 //
 // Display only: nothing here feeds a signature. Every vendor and RPC value is hostile input, checked as in the Solana
 // lists: a row with no valid address, symbol or name is dropped, numbers are checked finite and bounded or become null,
@@ -53,6 +58,9 @@ export const SETTLE_MS = 60_000;
 export const MAKER_MAX = 20_000;
 /** Makers read per tick, per provider: one batch of `eth_getLogs` (two filters a token on Base). */
 export const MAKER_PER_TICK = 10;
+/** Makers read per tick on a chain with RECORDS: every token of the three lists GT_READS reads (page 1, 20 pools each),
+ *  one `eth_call` a record in batches of BATCH_MAX, so a helper started fresh settles its lists in its first tick. */
+export const RECORDS_PER_TICK = 60;
 const ANSWER_MAX = 2 * 1024 * 1024;
 const TIMEOUT_MS = 8_000;
 const LOGS_MAX = 2_000;
@@ -158,6 +166,35 @@ export const FACTORIES: Readonly<Record<EvmChain, readonly Factory[]>> = {
     // docs.torchpad.fun/protocol/contract-addresses: "Torch launchpad (factory) | Robinhood Chain | 0x7891eA889899928aFE637e4Cca8106188427776a"
     // (Sourcify chain 4663, exact match [TorchFactory], not a proxy; read 2026-11-03 19:25Z: 2082 creation logs on chain, every token ending in 1111)
     { pad: "torch", address: "0x7891eA889899928aFE637e4Cca8106188427776a", topic0: TORCH_LAUNCHED, at: { topic: 1 } },
+  ],
+};
+
+/** A launchpad's own record of the tokens it made: a view on its factory that takes the token and answers `words` 32-byte
+ *  words (every output static), where word `word` is the token itself, any nonzero address, or `true` exactly when the
+ *  pad made it. `shared` as in Factory. */
+export type MakerRecord = { pad: string; address: string; signature: string; selector: string; words: number; made: { word: number; is: "token" | "address" | "true" }; shared?: true };
+
+/** The chains whose makers are read from the launchpads' records (null: from creation events, FACTORIES). Each view's
+ *  outputs are read from the ABI Sourcify holds for chain 4663 (sourcify.dev/server/v2/contract/4663/<address>?fields=abi,
+ *  read 2026-11-04 08:20Z; a proxy's from its implementation), each selector keccak-256 of the signature, and each answer
+ *  read at latest on rpc.mainnet.chain.robinhood.com, robinhood-rpc.publicnode.com and robinhood.drpc.org for a token of
+ *  the pad and for tokens of the other pads, which answer zeros (fixtures/maker-records-robinhood.json.gz). */
+export const RECORDS: Readonly<Record<EvmChain, readonly MakerRecord[] | null>> = {
+  base: null,
+  robinhood: [
+    // [Clanker] deploymentInfoForToken(address) -> (address token, address hook, address locker)
+    { pad: "clanker", address: "0xd3f2cc1731b7fd17f28798835c2e02f0a1839a94", signature: "deploymentInfoForToken(address)", selector: "0x06562980", words: 3, made: { word: 0, is: "token" } },
+    // [PonsV2LaunchFactory] getLaunchedToken(address) -> (address token, address curve, ... 15 static fields)
+    { pad: "pons", address: "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e", signature: "getLaunchedToken(address)", selector: "0x3cf28b5a", words: 15, made: { word: 0, is: "token" } },
+    // [PonsLaunchFactory] getLaunchedToken(address) -> (address token, address deployer, ... 13 static fields)
+    { pad: "pons", address: "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb", signature: "getLaunchedToken(address)", selector: "0x3cf28b5a", words: 13, made: { word: 0, is: "token" } },
+    // [BagsFactory] (behind the BagsFactory proxy) curveForToken(address) -> address
+    { pad: "bags", address: "0xe8cc4431adf8b5a847c113ef0c6af9043219cb37", signature: "curveForToken(address)", selector: "0x8580756c", words: 1, made: { word: 0, is: "address" } },
+    // [TorchFactory] isTorchToken(address) -> bool
+    { pad: "torch", address: "0x7891ea889899928afe637e4cca8106188427776a", signature: "isTorchToken(address)", selector: "0x498d5beb", words: 1, made: { word: 0, is: "true" } },
+    // [Airlock] getAssetData(address) -> (numeraire, timelock, governance, liquidityMigrator, poolInitializer, pool,
+    // migrationPool, numTokensToSell, totalSupply, integrator): an asset Airlock made has its pool initializer set
+    { pad: "doppler", address: "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862", signature: "getAssetData(address)", selector: "0x1652e7b7", words: 10, made: { word: 4, is: "address" }, shared: true },
   ],
 };
 
@@ -308,83 +345,12 @@ export function makerFilters(chain: EvmChain, from: number, to: number): Record<
 /** The logs of several filters' answers as one, or undefined when any is not a list. */
 export const joinLogs = (answers: readonly unknown[]): unknown[] | undefined => (answers.every(Array.isArray) ? (answers as unknown[][]).flat() : undefined);
 
-/** The most blocks one second may hold before a block-time answer is refused (Robinhood put 10 or more in one second:
- *  Bags' creation of 0x4dd4aad9887eb3b7615baace5fcd565c0f61008c is the 10th block of its second, block 98761499). */
-export const SECOND_BLOCKS_MAX = 1_000;
-const hexInt = (v: unknown): number | null => (typeof v === "string" && /^0x[0-9a-f]{1,13}$/i.test(v) ? parseInt(v, 16) : null);
-
-/** Block reads for the search: from the chain's second provider, or its first when the second refuses (a 429). The
- *  search is not trusted for any tag (the logs are read on both), so either may answer it. */
-async function blocks(doFetch: Fetch, chain: EvmChain, ns: (number | "latest")[]): Promise<unknown[]> {
-  const calls = ns.map((n) => ({ method: "eth_getBlockByNumber", params: [n === "latest" ? n : `0x${n.toString(16)}`, false] }));
-  for (const url of [MAKER_RPCS[chain][1], MAKER_RPCS[chain][0], MAKER_RPCS[chain][2]]) {
-    const got = await batch(doFetch, url, calls);
-    if (got.every((x) => x !== undefined)) return got;
-  }
-  return calls.map(() => undefined);
-}
-
-/** One block's number and time, or null. */
-async function blockTime(doFetch: Fetch, chain: EvmChain, n: number | "latest"): Promise<{ n: number; t: number } | null> {
-  const [r] = await blocks(doFetch, chain, [n]);
-  const o = obj(r);
-  const bn = hexInt(o.number);
-  const bt = hexInt(o.timestamp);
-  return bn === null || bt === null || (n !== "latest" && bn !== n) ? null : { n: bn, t: bt };
-}
-
-/**
- * The blocks a pool made at unix second `s` can be in: on a chain with a fixed clock its block and the one before; else
- * every block whose time is `s`: from the first block whose time is at least `s` to the one before the first at least
- * `s + 1` (each searched between block 0 and the head, in rounds of one batch of 10 block reads around the interpolated
- * guess and across the interval, at most 12 rounds; the second search starts from the first's reads). A wrong range
- * finds no creation event, so it can only leave a row untagged, never tag it.
- */
-export async function blockRange(chain: EvmChain, s: number, doFetch: Fetch, known: Map<number, number> = new Map()): Promise<[number, number] | null> {
+/** The blocks a pool made at unix second `s` can be in on a chain with a fixed clock: its block and the one before; null
+ *  on a chain without one (its makers come from RECORDS). A wrong range finds no creation event, so it can only leave a
+ *  row untagged, never tag it. */
+export function blockRange(chain: EvmChain, s: number): [number, number] | null {
   const b = blockAt(chain, s);
-  if (b !== null) return [b - 1, b];
-  if (BLOCK_CLOCK[chain] !== null || !Number.isSafeInteger(s)) return null;
-  const [head, zero] = await Promise.all([blockTime(doFetch, chain, "latest"), known.has(0) ? { n: 0, t: known.get(0)! } : blockTime(doFetch, chain, 0)]);
-  if (head === null || zero === null || s > head.t || s <= zero.t) return null;
-  const keep = (m: { n: number; t: number }) => {
-    if (known.size >= 4_096) known.delete(known.keys().next().value!);
-    known.set(m.n, m.t);
-  };
-  keep(zero);
-  /** The first block whose time is at least `at` (zero.t < at <= head.t), or null when the reads fail. */
-  const firstAt = async (at: number): Promise<{ n: number; t: number } | null> => {
-    let lo = zero; // lo.t < at <= hi.t
-    let hi = head;
-    // start from the closest blocks earlier searches read (a block's time never changes)
-    for (const [n, t] of known) {
-      if (t < at && n > lo.n && n < hi.n) lo = { n, t };
-      else if (t >= at && n < hi.n && n > lo.n) hi = { n, t };
-    }
-    for (let round = 0; hi.n - lo.n > 1; round++) {
-      if (round >= 12) return null;
-      const g = lo.n + Math.round(((at - lo.t) * (hi.n - lo.n)) / Math.max(1, hi.t - lo.t));
-      const span = hi.n - lo.n;
-      const picks = [g, g - 2, g + 2, g - 32, g + 32, g - 1_024, g + 1_024, lo.n + Math.floor(span / 4), lo.n + Math.floor(span / 2), lo.n + Math.floor((3 * span) / 4)];
-      const ns = [...new Set(picks.map((n) => Math.min(hi.n - 1, Math.max(lo.n + 1, n))))].sort((a, b) => a - b);
-      const got = await blocks(doFetch, chain, ns);
-      for (const [k, r] of got.entries()) {
-        const o = obj(r);
-        const m = { n: hexInt(o.number), t: hexInt(o.timestamp) };
-        if (m.n !== ns[k] || m.t === null) return null;
-        keep(m as { n: number; t: number });
-        if (m.t < at && m.n > lo.n) lo = m as { n: number; t: number };
-        else if (m.t >= at && m.n < hi.n) hi = m as { n: number; t: number };
-      }
-      if (lo.t >= hi.t && hi.n - lo.n > 1) return null; // times out of order: not a chain
-    }
-    return hi;
-  };
-  const start = await firstAt(s);
-  if (start === null || start.t > s) return null; // no block at that second
-  const after = s + 1 > head.t ? null : await firstAt(s + 1);
-  if (s + 1 <= head.t && after === null) return null;
-  const end = after === null ? head.n : after.n - 1;
-  return end < start.n || end - start.n >= SECOND_BLOCKS_MAX ? null : [start.n, end];
+  return b === null ? null : [b - 1, b];
 }
 
 const tokenWord = (token: string) => `000000000000000000000000${token.slice(2).toLowerCase()}`;
@@ -486,6 +452,58 @@ async function padsAt(chain: EvmChain, doFetch: Fetch, asks: readonly { token: s
   return out;
 }
 
+/** The `eth_call`s that read a token's records on a chain, in RECORDS order. */
+export const recordCalls = (chain: EvmChain, token: string) =>
+  (RECORDS[chain] ?? []).map((r) => ({ method: "eth_call", params: [{ to: r.address, data: `${r.selector}${tokenWord(token)}` }, "latest"] }));
+
+const ADDRESS_WORD = /^0{24}[0-9a-f]{40}$/;
+
+/**
+ * The pad whose record says it made `token`, from the answers to recordCalls (in order): null when none does; undefined
+ * when any answer is not its view's exact static answer (a revert, an error, another length, a word out of its type) or
+ * when two own pads claim the token. A shared pad's record counts only when no own pad's does.
+ */
+export function recordPad(chain: EvmChain, token: string, answers: readonly unknown[]): string | null | undefined {
+  const recs = RECORDS[chain] ?? [];
+  if (answers.length !== recs.length) return undefined;
+  const word = tokenWord(token);
+  const pads = new Set<string>();
+  for (const [i, r] of recs.entries()) {
+    const a = answers[i];
+    if (typeof a !== "string" || a.length !== 2 + 64 * r.words || !DATA.test(a)) return undefined;
+    const w = a.slice(2 + 64 * r.made.word, 2 + 64 * (r.made.word + 1)).toLowerCase();
+    if (r.made.is === "true" ? !/^0{63}[01]$/.test(w) : !ADDRESS_WORD.test(w)) return undefined;
+    const made = r.made.is === "token" ? w === word : r.made.is === "address" ? !/^0{64}$/.test(w) : w.endsWith("1");
+    if (made) pads.add(r.pad);
+  }
+  const own = [...pads].filter((p) => !recs.some((r) => r.pad === p && r.shared === true));
+  if (own.length > 1) return undefined;
+  return own[0] ?? (pads.size === 1 ? [...pads][0]! : pads.size === 0 ? null : undefined);
+}
+
+/** The pad each token's records name on two providers that answer and agree (the third asked for a token one of the
+ *  first two could not answer); a token is absent when that does not hold. */
+async function recordsAt(chain: EvmChain, doFetch: Fetch, tokens: readonly string[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  if (tokens.length === 0) return out;
+  const per = (RECORDS[chain] ?? []).length;
+  const calls = tokens.flatMap((t) => recordCalls(chain, t));
+  const [u0, u1, u2] = MAKER_RPCS[chain];
+  const pads = (got: unknown[]) => tokens.map((t, i) => recordPad(chain, t, got.slice(i * per, (i + 1) * per)));
+  const [p, q] = (await Promise.all([batch(doFetch, u0, calls), batch(doFetch, u1, calls)])).map(pads) as [(string | null | undefined)[], (string | null | undefined)[]];
+  const short = tokens.flatMap((_, i) => (p[i] === undefined || q[i] === undefined ? [i] : []));
+  const r = new Map<number, string | null | undefined>();
+  if (short.length > 0) {
+    const got = await batch(doFetch, u2, short.flatMap((i) => calls.slice(i * per, (i + 1) * per)));
+    short.forEach((i, k) => r.set(i, recordPad(chain, tokens[i]!, got.slice(k * per, (k + 1) * per))));
+  }
+  tokens.forEach((t, i) => {
+    const answered = [p[i], q[i], r.get(i)].filter((x) => x !== undefined);
+    if (answered.length >= 2 && answered.every((x) => x === answered[0])) out.set(t, answered[0] as string | null);
+  });
+  return out;
+}
+
 /** Creation-block searches run at once (EARLIER_READS_MAX block reads each, at most); every older token a tick asks
  *  about is searched in that tick, so none waits behind newer tokens with a null that means "not read yet". */
 export const EARLIER_PARALLEL = 3;
@@ -531,17 +549,27 @@ async function search(code: (ns: number[]) => Promise<(boolean | undefined)[]>, 
   return hi;
 }
 
-/** The makers of these tokens: a pad, null for none (settled), or absent when not settled yet. A token whose pool
- *  block shows no creation event and whose code is older is read again at the block its code appeared in. */
-export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readonly { token: string; createdS: number }[], nowMs: number, known?: Map<number, number>): Promise<Map<string, string | null>> {
+/** The makers of these tokens: a pad, null for none (settled), or absent when not settled yet. On a chain with RECORDS,
+ *  from the launchpads' records at latest; else from the creation events at the pool's block, and a token whose pool
+ *  block shows none and whose code is older is read again at the block its code appeared in. None is never settled
+ *  within SETTLE_MS of the pool, since a provider may not hold the creation yet. */
+export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readonly { token: string; createdS: number }[], nowMs: number): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>();
   if (FACTORIES[chain].length === 0) {
     // no factory on this chain: nothing can name a maker, so every token is settled as none
     for (const w of wanted) out.set(w.token, null);
     return out;
   }
-  const ranges: ([number, number] | null)[] = [];
-  for (const w of wanted) ranges.push(await blockRange(chain, w.createdS, doFetch, known)); // one at a time, each from the last's blocks
+  if (RECORDS[chain] !== null) {
+    const got = await recordsAt(chain, doFetch, wanted.map((w) => w.token));
+    for (const w of wanted) {
+      const x = got.get(w.token);
+      if (x === undefined || (x === null && nowMs / 1000 - w.createdS < SETTLE_MS / 1000)) continue; // read again later
+      out.set(w.token, x);
+    }
+    return out;
+  }
+  const ranges = wanted.map((w) => blockRange(chain, w.createdS));
   const asks = wanted.flatMap((w, i) => (ranges[i] === null ? [] : [{ ...w, range: ranges[i]! }]));
   const first = await padsAt(chain, doFetch, asks);
   const none: (typeof asks)[number][] = [];
@@ -549,7 +577,7 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
     const x = first.get(a.token);
     if (x === undefined) continue; // read again later
     if (x === null && nowMs / 1000 - a.createdS < SETTLE_MS / 1000) continue; // too new to call it none
-    if (x === null && BLOCK_CLOCK[chain] !== null) none.push(a);
+    if (x === null) none.push(a);
     else out.set(a.token, x);
   }
   // none at the pool: a token with no code before its pool was made there, so none; an older token's creation block is
@@ -578,14 +606,16 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
 // ---------------------------------------------------------------------------------------------------------------
 
 const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
-type Read = { rows: Row[]; created: Map<string, number>; at: number };
+type Read = { rows: Row[]; created: Map<string, number>; at: number; raw: string };
+/** What a restart's next process takes over (../warm.ts, card helper-ready-gate): each list's GeckoTerminal answer as
+ *  read and its read time, and the makers read. The answers are parsed again by toRows, as from GeckoTerminal. */
+export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][] };
 
 /** Discover's lists for one EVM chain: GeckoTerminal's lists once per LIST_MS, makers read and kept, rebuilt per TICK_MS. */
 export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetch?: Fetch; now?: () => number } = {}) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const makers = new Map<string, string | null>();
-  const known = new Map<number, number>(); // block times the Robinhood search has read
   const tries = new Map<string, number>(); // maker reads that settled nothing, per token
   const reads: Partial<Record<ListKey, Read>> = {};
   let last: (ListsAnswer & { asOfMs: number }) | null = null;
@@ -608,7 +638,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
       if (body.length > ANSWER_MAX) return null;
       const at = now();
       const rows = toRows(chain, JSON.parse(body), at);
-      return rows === null ? null : { ...rows, at };
+      return rows === null ? null : { ...rows, at, raw: body };
     } catch {
       return null;
     }
@@ -641,9 +671,9 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     const wanted = new Map<string, number>();
     for (const r of [read.new, read.trending_5m, read.trending_1h]) for (const [t, s] of r.created) if (!makers.has(t) && s >= 0) wanted.set(t, s);
     // the least-tried first, so a token whose read keeps failing never holds the others back
-    const ask = [...wanted].sort((a, b) => (tries.get(a[0]) ?? 0) - (tries.get(b[0]) ?? 0)).slice(0, MAKER_PER_TICK).map(([token, createdS]) => ({ token, createdS }));
+    const ask = [...wanted].sort((a, b) => (tries.get(a[0]) ?? 0) - (tries.get(b[0]) ?? 0)).slice(0, RECORDS[chain] === null ? MAKER_PER_TICK : RECORDS_PER_TICK).map(([token, createdS]) => ({ token, createdS }));
     if (ask.length > 0) {
-      const got = await readMakers(chain, doFetch, ask, now(), known);
+      const got = await readMakers(chain, doFetch, ask, now());
       for (const a of ask) {
         const pad = got.get(a.token);
         if (pad === undefined) {
@@ -684,5 +714,39 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return () => clearInterval(t);
   }
 
-  return { get, warm, tick };
+  /** This chain's lists as a next process takes them over. */
+  function state(): EvmListsState {
+    const out: EvmListsState = { reads: {}, makers: [...makers] };
+    for (const k of LIST_KEYS) if (reads[k] !== undefined) out.reads[k] = { raw: reads[k]!.raw, at: reads[k]!.at };
+    return out;
+  }
+
+  /** A previous process's state (hostile input, as a vendor's): each list read under STALE_MS old is parsed again by
+   *  toRows; a maker is kept only as an address and one of this chain's pads or null. Reads held already are kept.
+   *  True when every list is held after it, so the lists answer without a GeckoTerminal call. */
+  function restore(st: unknown): boolean {
+    const t = now();
+    const o = (st ?? {}) as { reads?: unknown; makers?: unknown };
+    const rs = (o.reads ?? {}) as Record<string, unknown>;
+    for (const k of LIST_KEYS) {
+      const r = (Object.hasOwn(rs, k) ? rs[k] : undefined) as { raw?: unknown; at?: unknown } | undefined;
+      if (reads[k] !== undefined || typeof r?.raw !== "string" || r.raw.length > ANSWER_MAX || typeof r.at !== "number" || !Number.isFinite(r.at) || r.at > t || t - r.at >= STALE_MS) continue;
+      try {
+        const rows = toRows(chain, JSON.parse(r.raw), r.at);
+        if (rows !== null) reads[k] = { ...rows, at: r.at, raw: r.raw };
+      } catch {
+        // not an answer: the list is read from GeckoTerminal
+      }
+    }
+    const pads = new Set(FACTORIES[chain].map((f) => f.pad));
+    if (Array.isArray(o.makers))
+      for (const m of o.makers.slice(0, MAKER_MAX)) {
+        if (!Array.isArray(m) || m.length !== 2 || typeof m[0] !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(m[0]) || !(m[1] === null || (typeof m[1] === "string" && pads.has(m[1])))) continue;
+        if (!makers.has(m[0])) makers.set(m[0], m[1]);
+      }
+    build();
+    return all() !== null;
+  }
+
+  return { get, warm, tick, state, restore };
 }

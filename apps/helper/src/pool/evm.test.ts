@@ -262,3 +262,39 @@ test("signEvmTx: the signature recovers to the sender; rlp's short and long form
   assert.deepEqual([...rlp([])], [0xc0]);
   assert.deepEqual([...rlp(new Uint8Array(56))].slice(0, 2), [0xb8, 56]);
 });
+
+// card helper-rpc-hex-case: robinhood-testnet.drpc.org answers eth_chainId "0xB626" where Robinhood's own RPC and
+// publicnode answer "0xb626" (read 3 Nov 23:07Z, card wallet-rpc-hex-case); viem and ethers read hex in either case
+/** `r` with every hex string it answers in upper case (a quantity, a hash, the code), as such a provider writes it. */
+const upper = (r: EvmRpc): EvmRpc => {
+  const up = (v: unknown): unknown =>
+    typeof v === "string" && /^0x[0-9a-f]+$/.test(v) ? `0x${v.slice(2).toUpperCase()}` : v !== null && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, up(x)])) : v;
+  return async (method, params) => up(await r(method, params));
+};
+const LETTERS = chainOf({ hash: (n) => `0x${"ab".repeat(30)}${n.toString(16).padStart(4, "0")}` }); // hashes with hex letters
+
+test("a provider that writes hex in upper case: drpc's 0xB626 reads as 46630, and its fee and send are the lower-case provider's", async () => {
+  const pair = (calls: Calls, b: Calls, chainA: string, chainB: string, c = LETTERS) =>
+    evmPoolSender({ network: "robinhood-testnet", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [upper(rpc(calls, { chain: chainA }, c)), rpc(b, { chain: chainB }, c)], () => NOW);
+  const calls: Calls = [];
+  const s = pair(calls, [], "0xb626", "0xb626");
+  const fee = await s.fee(EPOCH);
+  assert.deepEqual(fee, await pair([], [], "0xb626", "0xb626", LETTERS).fee(EPOCH).then((f) => f), "read twice alike");
+  assert.equal(fee?.block, "0x1ae");
+  assert.equal(fee?.fee, FEE.toString());
+  const a = await s.carry(req());
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.equal(num(decodeTx(sends(calls)[0]!)[0]!), 46_630n, "signed for chain 0xB626 = 46630");
+  // a case-only difference never fails agreement; any other difference still does
+  assert.equal(code(await pair([], [], "0xB626", "0xb626").carry(req())), "ok");
+  const b: Calls = [];
+  assert.equal(code(await pair([], b, "0xB626", "0x2105").carry(req())), "upstream", "another chain");
+  const moved = chainOf({ hash: (n) => `0x${"ab".repeat(30)}${(n + 1n).toString(16).padStart(4, "0")}` });
+  const t = evmPoolSender({ network: "robinhood-testnet", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [upper(rpc([], {}, LETTERS)), rpc(b, {}, moved)], () => NOW);
+  assert.equal(code(await t.carry(req())), "upstream", "another block");
+  assert.equal(sends(b).length, 0);
+  // not hex at all is still no quantity
+  const junk: EvmRpc = async (m, p) => (m === "eth_chainId" ? "0xG626" : rpc([])(m, p));
+  const j = evmPoolSender({ network: "robinhood-testnet", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [junk, rpc([])], () => NOW);
+  assert.equal(code(await j.carry(req())), "upstream");
+});

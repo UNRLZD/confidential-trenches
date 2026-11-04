@@ -9,6 +9,7 @@ import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
 import { geckoBudget, PAGE_RESERVE, WINDOW_MS } from "../gecko.ts";
 import { createProxy } from "../../proxy/proxy.ts";
+import { createRpc } from "../../rpc/rpc.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
   CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
@@ -567,4 +568,42 @@ test("candles: a GeckoTerminal 429 after one good read serves the last good bars
   const none = await t.candles(CURVE, "15m", null, 500); // never read: nothing kept
   assert.equal(none.status, 429);
   assert.ok((none.retryAfterS ?? 0) > 0);
+});
+
+test("card helper-ready-gate: under a walk at full draw all along, a burst of 15 callers opening token pages and holders answers 200 every time, never 429", async () => {
+  // one public provider for every read the helper makes: 100 requests per 10 s from our address, then 429 Retry-After 5
+  // (4 Nov 06:24-06:30Z and the 07:50Z live run 41794726819); the clock stands still, so nothing leaves its window
+  const PUBLIC = "https://api.mainnet-beta.solana.com";
+  const fr = fakeRpc();
+  let sent = 0;
+  const provider = (async (_url: string, init: RequestInit) => {
+    sent++;
+    if (sent > 100) return new Response("", { status: 429, headers: { "retry-after": "5" } });
+    const a = await fr.handle("solana", "application/json", String(init.body));
+    return new Response(a.body, { status: a.status, headers: { "content-type": "application/json" } });
+  }) as never;
+  const rpc = createRpc({}, { now: () => NOW, fetch: provider });
+  const r = rpc as unknown as { background?: (chain: string, url: string, method: string) => number };
+  // the trade walks (trades.ts: signature pages, transactions, pools and the SOL price): every request they can take,
+  // each one to the provider; a helper with no budget for them (before this card) takes as many as its tokens need,
+  // here 200 a round
+  const METHODS = ["getTransaction", "getSignaturesForAddress", "getAccountInfo"];
+  const walk = () => {
+    let n = 0;
+    while (n < 200 && (r.background?.("solana", PUBLIC, METHODS[n % 3]!) ?? 0) === 0) n++;
+    sent += n;
+    return n;
+  };
+  assert.ok(walk() > 0, "the walk draws");
+  // fifteen callers, each a token page and its holders of a token no one opened yet (a token page each: no shared cache)
+  const statuses: number[] = [];
+  for (let i = 0; i < 15; i++) {
+    const t = createSolanaToken(fakeProxy(), rpc, { now: () => NOW });
+    const mint = i % 2 === 0 ? PUMP : CURVE;
+    const [page, holders] = await Promise.all([t.page(mint, `198.51.100.${i}`), t.holders(mint, `198.51.100.${i}`)]);
+    statuses.push(page.status, holders.status);
+    walk(); // the walk takes whatever is left after each caller
+  }
+  assert.deepEqual(statuses, Array(30).fill(200), "every caller's read answered");
+  assert.ok(sent <= 100, `the provider was sent ${sent}, never past its limit`);
 });

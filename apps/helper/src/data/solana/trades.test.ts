@@ -8,7 +8,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { fromLogs } from "./decode.ts";
-import { createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, wsSource, type Note, type SourceEvents } from "./trades.ts";
+import { createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
+import { createRpc } from "../../rpc/rpc.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as {
@@ -360,4 +361,45 @@ test("candles of a listed token with no bars of ours: the history is asked for i
   hist = { status: 200, body: JSON.stringify({ tf: "1h", candles: [], src: "geckoterminal", as_of_ms: TS * 1000 }), src: "geckoterminal", asOfMs: TS * 1000 };
   assert.equal((await t.candles(MINT, "1h", null, 60)).status, 200);
   t.stop();
+});
+
+test("card helper-ready-gate: walks that would draw the whole public Solana budget leave a caller's token read its room (200), never the provider's 429", async () => {
+  // one provider (the public endpoint) shared by the helper's RPC route and the walks, as on the box: 100 requests per
+  // 10 s from our address, then 429 Retry-After 5 (4 Nov 06:24-06:30Z); the clock stands still, so nothing leaves its window
+  const t = 1_800_000_000_000;
+  const PUBLIC = TRADES_RPCS[0];
+  const SECOND = "https://second.test";
+  const sent: Record<string, number> = { [PUBLIC]: 0, [SECOND]: 0 };
+  const provider = async (url: string, init: RequestInit): Promise<Response> => {
+    sent[url] = (sent[url] ?? 0) + 1;
+    if (url === PUBLIC && sent[url]! > 100) return new Response("", { status: 429, headers: { "retry-after": "5" } });
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200, headers: { "content-type": "application/json" } });
+    if (req.method === "getAccountInfo" && req.params[0] === PYTH_SOL_USD) return ok({ context: { slot: 1 }, value: { owner: PYTH_RECEIVER, data: [pyth(9_342_267_796n, t / 1000).toString("base64"), "base64"] } });
+    if (req.method === "getAccountInfo") return ok({ context: { slot: 1 }, value: { owner: TOKEN_PROGRAM, data: [mintData(6).toString("base64"), "base64"] } });
+    if (req.method === "getSignaturesForAddress") return ok(Array.from({ length: 30 }, (_, i) => ({ signature: `${req.params[0].slice(0, 8)}sig${i}`, slot: 100 + i, err: null })));
+    if (req.method === "getTransaction") return ok(null);
+    return ok(1);
+  };
+  const rpc = createRpc({}, { now: () => t, fetch: provider as never });
+  const trades = createSolanaTrades({
+    fetch: provider,
+    now: () => t,
+    listed: async () => true,
+    rpcs: [PUBLIC, SECOND],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+    budget: (u, m) => rpc.background("solana", u, m),
+    throttled: (u, h) => rpc.backgroundThrottled("solana", u, h),
+  });
+  // five tokens opened: each a mint read, a signature page and 30 transactions, about 160 requests in all
+  const mints = [MINT, "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr", "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC"];
+  await Promise.all(mints.map((m) => trades.trades(m, 50)));
+  await settle();
+  assert.ok(sent[PUBLIC]! + sent[SECOND]! >= 150, `the walks asked ${sent[PUBLIC]! + sent[SECOND]!} requests`);
+  assert.ok(sent[PUBLIC]! <= 100 - 3 - 50, `the walks drew ${sent[PUBLIC]} of the public 100: at most its total less the reserve and the callers' half`);
+  // a caller opening a token page: the page's reads, at the caller's full share, each answered by the provider
+  const read = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [mints[0], { encoding: "base64" }] });
+  for (let i = 0; i < 16; i++) assert.equal((await rpc.handle("solana", "application/json", read, "198.51.100.7")).status, 200, `the caller's read ${i + 1}`);
+  assert.ok(sent[PUBLIC]! <= 100, "the provider never throttled us");
 });

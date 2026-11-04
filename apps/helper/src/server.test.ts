@@ -55,7 +55,7 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
   assert.equal(r.status, 200);
   const b = JSON.parse(r.body);
   // release: null, as this test's environment sets no HELPER_RELEASE
-  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])) });
+  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])) });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
@@ -78,7 +78,7 @@ test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the rel
     assert.equal(r.status, 200);
     const b = JSON.parse(r.body);
     assert.equal(b.release, 12);
-    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "parts"]);
+    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts"]);
     assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   } finally {
     helper.closeAllConnections();
@@ -273,6 +273,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   let warmed = 0;
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, withdraw);
   t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
+  await null; // once the senders are this process's (none to wait for here: a microtask)
   assert.equal(warmed, 1, "start warms the withdrawal relayer: a restart resends its open sends before any request");
   // and the helper's main starts the server with the relayer it built
   const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
@@ -281,8 +282,12 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /for \(const p of pools\.values\(\)\) p\.ready\.catch\(\(e: Error\) => \(console\.error\(`helper: \$\{e\.message\}`\), process\.exit\(2\)\)\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
-  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko\), solana: solanaTradesFromEnv\(process\.env, lists, token\) \};/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps\);/);
+  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc\) \};/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, \(\) => ready, senders\.held\);/);
+  // card helper-ready-gate: the fee quoter is the senders' (their store handed over), and a replacing helper listens only once ready
+  assert.match(main, /const senders = sendersFromEnv\(process\.env\);/);
+  assert.match(main, /const fee = senders\.fee;/);
+  assert.match(main, /if \(senders\.peer\) void warmed\.then\(listen\);/);
   // the EVM lists (src/data/evm/lists.ts): each served chain's lists on GeckoTerminal's one budget, shared with the
   // Solana token page's candles, and warmed at start
   assert.match(main, /const SERVED_EVM: readonly EvmChain\[\] = \["base", "robinhood"\];/);
@@ -344,6 +349,7 @@ test("POST /v1/bind: mounted; with no network set the helper starts and a body t
   };
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
   t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
+  await null; // once the senders are this process's (none to wait for here: a microtask)
   assert.equal(warmed, 1, "start warms the deposit relayer: a restart reads its open records before any request");
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   try {
@@ -367,6 +373,8 @@ test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the de
   const bind: BindSender = {
     carry: async () => {
       const gate = new Promise<void>((ok) => (finish = ok));
+      // a loaded runner: real time passes between the bind's arrival and its carry, none on the clock the test drives
+      for (const until = performance.now() + 5; performance.now() < until; );
       entered();
       await gate; // the prepay and the delegate, read at final
       finished++;
@@ -379,7 +387,8 @@ test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the de
   t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
-  mock.timers.enable({ apis: ["setTimeout"] });
+  // one clock: the bound's timer and the helper's now() (which reads Date.now when called) both move only by tick
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
   try {
     // a carry still running at the bound
     let inside = new Promise<void>((ok) => (entered = ok));
