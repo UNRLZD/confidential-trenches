@@ -102,7 +102,11 @@ export const MUTANTS = [
   // fold 1, H1: a sale that did not land frees its (W, nonce), on both providers' reads, capped per W
   [EVM, '    if (status.includes("0x0")) return true;', "    if (false) return true;", T, "a sale that reverted or was dropped"],
   [EVM, '    if (status.includes("0x1")) return false;', "", T, "a sale that reverted or was dropped"],
-  [EVM, "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n) return false;", "", T, "a sale that reverted or was dropped"],
+  [EVM, "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;", "", T, "a sale that reverted or was dropped"],
+  // the drop margin: a clock up to 60 s ahead of the chain's never frees (W, nonce) while the first sale can land
+  [EVM, "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;", "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n) return false;", T, "a dropped sale with our clock 59 s ahead"],
+  [EVM, "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;", "    if (BigInt(Math.floor(now())) < deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;", T, "a dropped sale is freed at 61 s past"],
+  [EVM, "export const EVM_SELL_DROP_MARGIN_MS = 60_000;", "export const EVM_SELL_DROP_MARGIN_MS = 58_000;", T, "a dropped sale with our clock 59 s ahead"],
   [EVM, '    return tx.every((x) => x.status === "fulfilled" && x.value === null);', '    return tx.some((x) => x.status === "fulfilled" && x.value === null);', T, "a sale that reverted or was dropped"],
   [EVM, '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);\n    const status', '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash])]);\n    const status', T, "a sale that reverted or was dropped"],
   [EVM, "        if (recent.length >= EVM_SELL_FREES_MAX) return", "        if (false) return", T, "a sale that reverted or was dropped"],

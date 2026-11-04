@@ -573,7 +573,7 @@ test("a sale that reverted or was dropped frees its (W, Sell nonce): a receipt w
     const x: Calls = [];
     const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc(x, { receipt: () => null, tx: () => null }), rpc([], { receipt: () => null, tx: () => onB })], () => clock);
     assert.equal((await s.sell(body())).status, 200);
-    clock = NOW + 301_000; // past the first deadline (NOW_S + 300)
+    clock = NOW + 361_000; // past the first deadline (NOW_S + 300) and its 60 s margin
     const later = await s.sell(body({ sell: { deadline: NOW_S + 600n } }));
     assert.equal(sends(x).length, want, `the transaction on provider B: ${JSON.stringify(onB)}: ${JSON.stringify(later.body)}`);
     if (want === 1) assert.equal(reads(x, "eth_getTransactionByHash"), 1);
@@ -589,6 +589,37 @@ test("a sale that reverted or was dropped frees its (W, Sell nonce): a receipt w
     assert.ok(capped.retryAfterS! > 0 && capped.retryAfterS! <= EVM_SELL_FREE_WINDOW_MS / 1000, String(capped.retryAfterS));
     assert.equal(sends(x).length, 1 + EVM_SELL_FREES_MAX);
   }
+});
+
+// A dropped sale is freed only once our clock is past its deadline plus 60 s (EVM_SELL_DROP_MARGIN_MS): a helper whose clock
+// runs up to 60 s ahead of the chain's would otherwise free (W, nonce) while the first sale can still land, and send a
+// second tx at that nonce. The first Sell's deadline is NOW_S + 300; neither provider holds a receipt or the tx.
+const droppedAt = async (pastMs: readonly number[]) => {
+  let clock = NOW;
+  const x: Calls = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc(x, { receipt: () => null, tx: () => null }), rpc([], { receipt: () => null, tx: () => null })], () => clock);
+  const first = await s.sell(body());
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  const seen: { past: number; sends: number; txReads: number; same: boolean }[] = [];
+  for (const past of pastMs) {
+    clock = NOW + 300_000 + past;
+    const again = await s.sell(body({ sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
+    seen.push({ past, sends: sends(x).length, txReads: reads(x, "eth_getTransactionByHash"), same: JSON.stringify(again) === JSON.stringify(first) });
+  }
+  return seen;
+};
+
+test("a dropped sale with our clock 59 s ahead of the chain's deadline keeps its (W, Sell nonce) held: the first hash, no second tx, no tx read", async () => {
+  assert.deepEqual(await droppedAt([59_000]), [{ past: 59_000, sends: 1, txReads: 0, same: true }]);
+});
+
+test("a dropped sale is freed at 61 s past its deadline, never at or before 60 s: held at 1 s, 59 s and 60 s, a new send at 61 s", async () => {
+  assert.deepEqual(await droppedAt([1_000, 59_000, 60_000, 61_000]), [
+    { past: 1_000, sends: 1, txReads: 0, same: true },
+    { past: 59_000, sends: 1, txReads: 0, same: true },
+    { past: 60_000, sends: 1, txReads: 0, same: true },
+    { past: 61_000, sends: 2, txReads: 1, same: false },
+  ]);
 });
 
 test("bad_route: a sale to any target but the PoolManager or a listed router, or swap data the kit's builder would not make, is refused before any read", async () => {

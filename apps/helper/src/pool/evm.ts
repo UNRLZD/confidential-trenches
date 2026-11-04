@@ -95,8 +95,9 @@
 // the caps from the send; the sale's receipt, read in the background on both providers, turns it into what went
 // unpaid: all of gasUsed x effectiveGasPrice + l1Fee on a revert, that less the fee on a sale that paid less, else 0.
 // Once per (W, Sell nonce): a repeat gets the first hash and sends nothing, unless that sale ended without landing on
-// the providers' own reads (a receipt with status 0 on either, or once now is past its deadline no transaction on
-// either): then (W, nonce) is free for a new send, capped per W. A refused sell frees it at once.
+// the providers' own reads (a receipt with status 0 on either, or once now is past its deadline plus
+// EVM_SELL_DROP_MARGIN_MS no transaction on either): then (W, nonce) is free for a new send, capped per W. A refused
+// sell frees it at once.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
@@ -298,12 +299,20 @@ export const EVM_IN_FLIGHT_MAX = 2;
 /** The wait a full queue or a client's held limit names [design: a send's reads and send take about a second]. */
 export const EVM_BUSY_RETRY_S = 2;
 /**
- * A sell that reverted on chain, or was dropped (no transaction on either provider once past its deadline), frees its
+ * A sell that reverted on chain, or was dropped (no transaction on either provider once past its deadline plus
+ * EVM_SELL_DROP_MARGIN_MS), frees its
  * (W, Sell nonce) for a new send: at most EVM_SELL_FREES_MAX times per W in EVM_SELL_FREE_WINDOW_MS, then that W's
  * sells answer 429 until the oldest free leaves the window [design: a device retries a failed sale a few times, and
  * each free can cost the sell sender one more unpaid revert, which the unpaid-gas caps below bound too].
  */
 export const EVM_SELL_FREES_MAX = 3;
+/**
+ * How long past a Sell's deadline, on our clock, a sale with no receipt and no transaction on either provider still
+ * holds its (W, Sell nonce): SellDelegate checks the deadline against the block's time, so a helper whose clock runs up
+ * to this far ahead of the chain's would otherwise free the nonce, and send a second tx at it, while the first can still
+ * land [design: the same 60 s as EVM_POOL_SEND_MARGIN_MS].
+ */
+export const EVM_SELL_DROP_MARGIN_MS = 60_000;
 export const EVM_SELL_FREE_WINDOW_MS = 3_600_000;
 /**
  * The sell sender pays gas for each call W signs and is paid only when the sale lands (SellDelegate pays the fee out of
@@ -737,14 +746,15 @@ export function evmPoolSender(
     return entry;
   };
   /** True when the sale `hash` ended without landing: a receipt with status 0 on either provider, or no transaction on
-   *  either once now is past the Sell's deadline. A read that fails, a success or a sale still waiting: false. */
+   *  either once now is past the Sell's deadline plus EVM_SELL_DROP_MARGIN_MS. A read that fails, a success or a sale
+   *  still waiting: false. */
   async function sellEnded(hash: string, deadlineS: bigint): Promise<boolean> {
     const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);
     const status = rc.map((x) => (x.status === "fulfilled" && x.value !== null && typeof x.value === "object" ? evmRpcHex((x.value as { status?: unknown }).status) : undefined));
     if (status.includes("0x1")) return false;
     if (status.includes("0x0")) return true;
     if (rc.some((x) => x.status === "rejected" || x.value !== null)) return false;
-    if (BigInt(Math.floor(now())) <= deadlineS * 1000n) return false;
+    if (BigInt(Math.floor(now())) <= deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;
     const tx = await Promise.allSettled([a("eth_getTransactionByHash", [hash]), b("eth_getTransactionByHash", [hash])]);
     return tx.every((x) => x.status === "fulfilled" && x.value === null);
   }
