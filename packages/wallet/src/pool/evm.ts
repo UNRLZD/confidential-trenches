@@ -73,7 +73,7 @@
 // Nothing here holds a secret, and no read names a note of the user's: only the pool's own logs and views. The one read
 // that names a wallet is evmTokensSentTo, one W a call, for the restore.
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRpc } from "@blindfill/kit";
+import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
@@ -828,12 +828,13 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
 export type EvmFeeAnswer = { chain: string; network: string; pool: string; fee_recipient: string; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
 
 /**
- * Until card evm-pool-fee-kit makes it the kit's constant (M371 (2)). The epoch fee's formula, M356 (4) and M357 (3): max(floor, ceilStep(2 x (G(depth) x basefee + the L1 fee))), G the
- * kit's evmPoolGas. It is the kit's one definition, which the helper imports too (M356 (6)); the kit on main does not
- * export it yet (card helper-pool-senders holds G), so the caller passes the kit's function. The device reads every
- * input itself: the epoch's first block (both RPCs) and the tree depth at it (the leaves both RPCs agree on).
+ * The epoch fee, M356 (4) and M357 (3): the kit's one relay fee rule, evmPoolFee({ floor, gas: evmPoolGas(depth),
+ * gasPrice: baseFeePerGas, chainFee }) (kit trade/evm/pool-fee.ts, card evm-buy-hookdata-fee), which the helper imports
+ * too (M356 (6)); the caller passes it with the pool's floor. The device reads every input itself: the epoch's first
+ * block (both RPCs), the tree depth at it (the leaves both RPCs agree on) and the chain fee at it (the kit's
+ * evmPoolChainFeeReads at that block's hash, the same answer on both RPCs).
  */
-export type EvmEpochFeeRule = (at: { block: bigint; baseFeePerGas: bigint; depth: number }) => bigint;
+export type EvmEpochFeeRule = (at: { block: bigint; baseFeePerGas: bigint; depth: number; chainFee: bigint }) => bigint;
 
 export type EvmPoolArgs = {
   /** The network's pin (EVM_POOLS[network]): the pool, the fee recipient and the deploy block, never the helper's word. */
@@ -885,11 +886,16 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");
       // the device's own fee: the epoch's first block and the tree depth there, each read on both RPCs
       // the depth on the epoch block's own chain: depthAt refuses (a retry) when that block is no longer at its height
-      const { block, depth } = await evmRetryLag(async () => {
+      // and the chain fee there (the L1 data fee, and Base's operator fee), the same on both RPCs
+      const { block, depth, chainFee } = await evmRetryLag(async () => {
         const block = await evmEpochBlock(a.rpcs, epochStartMs, signal);
-        return { block, depth: await sync.depthAt(block.number, signal, block.hash) };
+        const depth = await sync.depthAt(block.number, signal, block.hash);
+        const reads = evmPoolChainFeeReads(a.pin.network, evmPoolGas(depth));
+        const [x, y] = await both(a.rpcs, (rpc, k) => Promise.all(reads.map((r) => view(rpc, r.to, r.data.slice(2), block.hash, `rpc ${k} chain fee`))), signal);
+        if (x.some((v, i) => v !== y[i])) throw new Error(`the two RPCs differ on the chain fee at block ${block.number} (${block.hash})`);
+        return { block, depth, chainFee: evmPoolChainFee(a.pin.network, EVM_POOL_TX_BYTES, x) };
       }, sleep, signal);
-      const fee = a.epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas!, depth });
+      const fee = a.epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas!, depth, chainFee });
       if (typeof fee !== "bigint" || fee < 0n) throw new Error("epochFee: not a fee");
       const f = await a.relayFee(epochStartMs, signal);
       if (f?.chain !== "evm" || f.network !== a.pin.network || typeof f.pool !== "string" || lower(f.pool) !== pool || typeof f.fee_recipient !== "string" || lower(f.fee_recipient) !== feeRecipient)

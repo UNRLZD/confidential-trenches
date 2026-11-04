@@ -107,13 +107,10 @@ export const GAS = Object.freeze({ deposit: 300_000n, buy: 1_600_000n, sell: 1_0
 const TX_BYTES = 2_600n;
 /** The chunk each release takes: the wallet's ladder's smallest (EVM_LADDER.min, 0.001 ETH). */
 export const CHUNK = 1_000_000_000_000_000n;
-/** The epoch fee the run's relayer asks and the device recomputes (M356 (4), before the L1 fee): 2 x G(depth) x the
- *  epoch block's base fee, rounded up to the helper's step of 1e13 wei. */
-export const FEE_STEP = 10_000_000_000_000n;
-export const epochFee = ({ baseFeePerGas, depth }) => {
-  const f = 2n * kit.evmPoolGas(depth) * baseFeePerGas;
-  return ((f + FEE_STEP - 1n) / FEE_STEP) * FEE_STEP;
-};
+/** The epoch fee the run's relayer asks and the device recomputes: the kit's one relay fee rule (pool-fee.ts evmPoolFee,
+ *  M356 (4)) with G(depth) at the epoch block's base fee and its chain fee, no floor, on the helper's step of 1e13 wei. */
+export const FEE_STEP = kit.EVM_POOL_FEE_STEP;
+export const epochFee = ({ baseFeePerGas, depth, chainFee }) => kit.evmPoolFee({ floor: 0n, gas: kit.evmPoolGas(depth), gasPrice: baseFeePerGas, chainFee });
 /** The pool's events (contracts/pool-evm/src/interfaces/IPrivacyPool.sol:65, 78, 253) */
 export const EVENTS = Object.freeze({
   Deposited: "Deposited(address,uint256,uint256,uint256,uint256)",
@@ -246,7 +243,10 @@ export async function main(args, io = {}) {
   const relayFee = async (epochStartMs) => {
     const block = await evmEpochBlock(rpcs, epochStartMs);
     const depth = await relaySync.depthAt(block.number);
-    const fee = epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas, depth });
+    // the chain fee at that block, as the device reads it (wallet pool/evm.ts bind), here on the relayer's first RPC
+    const reads = kit.evmPoolChainFeeReads(chain, kit.evmPoolGas(depth));
+    const answers = await Promise.all(reads.map(async (r) => BigInt(await rpcs[0]("eth_call", [{ to: r.to, data: r.data }, { blockHash: block.hash }]))));
+    const fee = epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas, depth, chainFee: kit.evmPoolChainFee(chain, kit.EVM_POOL_TX_BYTES, answers) });
     return { chain: "evm", network: chain, pool, fee_recipient: relayer, epoch_ms: Number(EVM_EPOCH_MS), epoch_start_ms: Number(epochStartMs), block: `0x${block.number.toString(16)}`, fee: fee.toString(), step: FEE_STEP.toString() };
   };
   const device = evmPool({ pin, rpcs, relayFee, epochFee });
