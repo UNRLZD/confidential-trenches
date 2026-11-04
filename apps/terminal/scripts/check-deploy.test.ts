@@ -382,7 +382,12 @@ const unlisted = (dir: string, listed: Set<string>) =>
 
 test("every live check that holds APP_HOST's address runs after a deploy, or ONE_OFF names it with its reason", async () => {
   const app = await import("./deploy.mjs");
-  const sign = await import("../../../packages/signpage/scripts/deploy.mjs");
+  // the signing page's list read as text: a file outside Blindfill imports only the kit's entry (check:imports)
+  const signText = readFileSync(join(HERE, "..", "..", "..", "packages", "signpage", "scripts", "deploy.mjs"), "utf8");
+  const signList = /^export const LIVE_CHECKS = (\[[^\]]*\]);$/m.exec(signText)?.[1];
+  assert.ok(signList, "the signing page's deploy.mjs holds no one-line LIVE_CHECKS literal");
+  const sign = { LIVE_CHECKS: JSON.parse(signList) as string[] };
+  assert.ok(sign.LIVE_CHECKS.includes("signpage-release") && sign.LIVE_CHECKS.length >= 10, signList);
   const helper = await import("../../../scripts/ci/helper-live-checks.mjs");
   const oneOff: Record<string, string> = app.ONE_OFF ?? {};
   for (const [k, why] of Object.entries(oneOff)) assert.ok(typeof why === "string" && why.length > 20, `ONE_OFF ${k} gives no reason`);
