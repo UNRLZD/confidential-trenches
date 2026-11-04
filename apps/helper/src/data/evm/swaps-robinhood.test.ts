@@ -263,7 +263,7 @@ test("a listed token our reads find no pool of: its candles are GeckoTerminal's 
 test("card helper-chart-fresh: a listed token with no pool of ours, its GeckoTerminal bars past their hour while the lists hold the budget at the refresh lane's room: the re-read is a page read and the chart is dated now, never its first read", async () => {
   const { readFileSync } = await import("node:fs");
   const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
-  const { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE, WINDOW_MS } = await import("../gecko.ts");
+  const { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE, REFRESH_SLOT, WINDOW_MS } = await import("../gecko.ts");
   const { GT_BASE } = await import("./lists.ts");
   const chain = fakeChain();
   chain.st.head = REC.lastHead;
@@ -280,8 +280,9 @@ test("card helper-chart-fresh: a listed token with no pool of ours, its GeckoTer
   assert.equal(first.as_of_ms, clock.t, "the first read, dated now");
   for (const hours of [2, 3, 4]) {
     clock.t = Date.parse("2026-11-02T13:53:00Z") + hours * 3_600_000; // past GT_FRESH_MS and the pool's 10 minutes
-    // the EVM lists keep the window at what they may take: every call but PAGE_RESERVE
-    for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE; i++) assert.equal(budget.take("lists"), true);
+    // the EVM lists and one other held read keep the window at the refresh lane's room
+    for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE - REFRESH_SLOT; i++) assert.equal(budget.take("lists"), true);
+    assert.equal(budget.take("refresh"), true, "and one other held read: the window at the refresh lane's room");
     const again = await s.candles(token, "1m", null, 60);
     assert.equal(again.status, 200, again.body);
     assert.equal(JSON.parse(again.body).as_of_ms, clock.t, `${hours} h on, the bars are read again, not served from ${new Date(first.as_of_ms).toISOString()}`);
@@ -293,7 +294,7 @@ test("card helper-chart-fresh: a listed token with no pool of ours, its GeckoTer
 test("card helper-chart-fresh: GeckoTerminal history before a time held past its hour stays a refresh: with the window at the refresh lane's room it is served as held, no call made, and a cold token's first read finds its calls", async () => {
   const { readFileSync } = await import("node:fs");
   const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
-  const { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE } = await import("../gecko.ts");
+  const { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE, REFRESH_SLOT } = await import("../gecko.ts");
   const { GT_BASE } = await import("./lists.ts");
   const chain = fakeChain();
   chain.st.head = REC.lastHead;
@@ -312,7 +313,8 @@ test("card helper-chart-fresh: GeckoTerminal history before a time held past its
   const first = JSON.parse((await s.candles(`0x${"34".repeat(20)}`, "1m", before, 60)).body);
   assert.ok(first.candles.length > 0 && ohlcv.length === 1);
   clock.t = start + 2 * 3_600_000;
-  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE; i++) assert.equal(budget.take("lists"), true);
+  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE - REFRESH_SLOT; i++) assert.equal(budget.take("lists"), true);
+  assert.equal(budget.take("refresh"), true, "and one other held read: the window at the refresh lane's room");
   const held = JSON.parse((await s.candles(`0x${"34".repeat(20)}`, "1m", before, 60)).body);
   assert.deepEqual([held.candles, ohlcv.length], [first.candles, 1], "the history held is served, not read again");
   const cold = await s.candles(`0x${"35".repeat(20)}`, "1m", null, 60);

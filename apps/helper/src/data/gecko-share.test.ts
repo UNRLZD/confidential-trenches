@@ -181,3 +181,30 @@ test("card helper-chart-fresh: a chart handed over at a swap, its bars 40 minute
     assert.ok(worst < REFRESH_URGENT_MS, `read every ${every / 1000} s after the swap, the chart's bars stayed ${Math.round(worst / 1000)} s old (bound ${REFRESH_URGENT_MS / 1000} s): ${ages.map((a) => Math.round(a / 1000)).join(" ")}`);
   }
 });
+
+test("card helper-chart-fresh: a held chart past REFRESH_URGENT_MS and a cold token's first open in the same window, both EVM lists ticking: both answered 200, the held one fresh, no 429 (app-console-429's crowd outcome holds with the stale-chart fix)", async (t) => {
+  // each offset puts the two reads at another point of the lists' 12 s ticks and the budget's window
+  for (const offset of [0, 12_000, 24_000, 36_000, 48_000, 60_000]) {
+    const w = await world();
+    t.after(w.close);
+    // normal load: both chains' lists ticking ten minutes, every list read
+    for (let i = 0; i < 50; i++) {
+      await w.lists.base.tick();
+      await w.lists.robinhood.tick();
+      w.clock.now += 12_000;
+    }
+    assert.equal((await w.candles(MINTS[1]!, "1m")).status, 200, "the chart's first read");
+    const end = w.clock.now + REFRESH_URGENT_MS + 60_000 + offset;
+    while (w.clock.now < end) {
+      w.clock.now += 12_000;
+      await w.lists.base.tick();
+      await w.lists.robinhood.tick();
+    }
+    const held = await w.candles(MINTS[1]!, "1m");
+    const cold = await w.candles(MINTS[0]!, "1m");
+    assert.equal(cold.status, 200, `offset ${offset / 1000} s: the cold first open answered ${cold.status} ${cold.body}`);
+    assert.equal(held.status, 200, `offset ${offset / 1000} s: held ${held.status}`);
+    assert.ok(w.clock.now - (JSON.parse(held.body) as { as_of_ms: number }).as_of_ms < REFRESH_URGENT_MS, `offset ${offset / 1000} s: the held chart is read fresh`);
+    for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
+  }
+});

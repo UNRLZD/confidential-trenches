@@ -21,6 +21,8 @@ const H = "test/evm-quote-head.test.ts";
 // the sell quote (card evm-sell-device-quote) and the index's sell builder and signer that take only one
 const SELLQ = "src/trade/evm/sell.ts";
 const S = "test/evm-sell-quote.test.ts";
+// the sim sell's builder and signer (card evm-quote-exec-sim)
+const SELLU = "src/trade/evm/sell-unpinned.ts";
 
 // [file, text, replacement, test file, the test that must fail]
 export const MUTANTS = [
@@ -30,9 +32,9 @@ export const MUTANTS = [
   [QUOTE, 'b.kind === "revert" && a.partial === b.partial', 'b.kind === "revert"', Q, "Q2 "],
   [QUOTE, "const at = { blockHash: hash, requireCanonical: true };", "const at = { blockHash: hash };", Q, "Q1 "],
   [QUOTE, "if (a.number - b.number > maxLag || b.number - a.number > maxLag) return refuse(", "if (false) return refuse(", R, "R5 "],
-  [QUOTE, "if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp) {", "if (false) {", R, "R1b "],
+  [QUOTE, "if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {", "if (false) {", R, "R1b "],
   [QUOTE, "back.number !== lo.number || back.hash !== lo.hash || back.timestamp", "back.number !== lo.number || back.timestamp", R, "R5 "],
-  [QUOTE, " || back.timestamp !== lo.timestamp) {", ") {", R, "R5 "],
+  [QUOTE, " || back.timestamp !== lo.timestamp || back.baseFeePerGas", " || back.baseFeePerGas", R, "R5 "],
   [QUOTE, '? [a, rpcs[1], "provider 2"] : [b, rpcs[0], "provider 1"]', '? [a, rpcs[0], "provider 2"] : [b, rpcs[1], "provider 1"]', R, "R5 "],
   [QUOTE, 'if (confirmed.status === "rejected") throw confirmed.reason;', "", R, "R1b "],
   [QUOTE, "if (nowMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse(", "if (false) return refuse(", Q, "Q14 "],
@@ -69,13 +71,45 @@ export const MUTANTS = [
   // card evm-quote-head-watch: a scan request that fails or overflows is asked by halves; one ending past maxLag behind
   // the agreed block is scanned on to it
   [QUOTE, "rs.every((r) => Array.isArray(r) && r.length < SCAN_MAX_LOGS)", "rs.every((r) => Array.isArray(r))", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
-  // review of 4830f1f: H1 the catch-up only up to a head the scan provider names again; L its depth, an answer at the
-  // cap asked by halves, the hold timed on a clock that never steps back; H2 a cut set refuses
-  [QUOTE, "    if (b - again > maxLag) return refuse(", "    if (false) return refuse(", R, "review of 4830f1f, H1"],
+  // review of 4830f1f: H1 the catch-up only on a backend that holds the agreed block (card evm-quote-one-round: by its
+  // hash in each request's batch, review of a9f1d32, MEDIUM); L its depth, an answer at the cap asked by halves, the hold
+  // timed on a clock that never steps back; H2 a cut set refuses
+  [QUOTE, 'if (typeof h?.hash !== "string" || lower(h.hash) !== p.hash) return refuse(', "if (false) return refuse(", R, "review of a9f1d32, MEDIUM"],
+  [QUOTE, "    pin = agreedAt;\n", "", R, "review of a9f1d32, MEDIUM"],
   [QUOTE, "    if (b - scanHead > BigInt(s.span)) return refuse(", "    if (false) return refuse(", R, "review of 4830f1f, L"],
   [QUOTE, "r.length < SCAN_MAX_LOGS)", "r.length <= SCAN_MAX_LOGS)", R, "review of 4830f1f, L"],
   [QUOTE, "      const m = mono();\n      const since = h === null ? -1 : m - h.at;\n      if (h !== null && since >= 0 && ", "      const m = clock();\n      const since = h === null ? -1 : m - h.at;\n      if (h !== null && ", H, "held head (review of 4830f1f, L)"],
-  [QUOTE, "    if (keys.length > keysLeft) return refuse(", "    if (false) return refuse(", R, "review of 4830f1f, H2"],
+  // card evm-quote-one-round (review of c71a4d0..a9f1d32): every bound refuses, never cuts; the caller's list beside it
+  [QUOTE, "    if (fromScan.length > keysLeft) return refuse(", "    if (false) return refuse(", R, "KB2 "],
+  [QUOTE, "if (fromScan.length > keysLeft)", "if (keys.length > keysLeft)", R, "KB1 "],
+  [QUOTE, 'if (ks.size > keysLeft) return refuse("too_many_pools", `the markets of', 'if (false) return refuse("too_many_pools", `the markets of', R, "KB3 "],
+  [QUOTE, "      if (ks.length > keysLeft) return refuse(", "      if (false) return refuse(", R, "KB4 "],
+  // the prune (review of 13a063e): a buy's pool, market or via dropped only where its bound (the amount at its spot
+  // price after its fee) cannot give Q, a pinned hook never; every pool kept quoted, past the budgets a refusal
+  [QUOTE, "    floor: (out) => out(main)!,\n", "", R, "RK3 "],
+  [QUOTE, "    if (x === null || (f.key.hooks !== NATIVE && !replaced(f.key))) return null;", "    if (x === null) return null;", R, "PROBE C "],
+  [QUOTE, "    const y = cdiv(x * (1_000_000n - (fee < 1_000_000n ? fee : 1_000_000n)), 1_000_000n);", "    const y = x;", R, "RK3 "],
+  [QUOTE, "    const y = cdiv(x * (1_000_000n - (fee < 1_000_000n ? fee : 1_000_000n)), 1_000_000n);", "    const y = cdiv(x * (1_000_000n - 2n * (fee < 1_000_000n ? fee : 1_000_000n)), 1_000_000n);", R, "RK8 "],
+  [QUOTE, "    return zf(f) ? cdiv(y * p * p, 1n << 192n) : cdiv(y << 192n, p * p);", "    return zf(f) ? cdiv(y * p * p, 1n << 193n) : cdiv(y << 192n, p * p);", R, "RK8 "],
+  [QUOTE, "    return zf(f) ? cdiv(y * p * p, 1n << 192n) : cdiv(y << 192n, p * p);", "    return zf(f) ? cdiv(y * p * p, 1n << 192n) : cdiv(y << 191n, p * p);", R, "RK8 "],
+  [QUOTE, "  const zf = (f: Found) => f.other === f.key.currency0;", "  const zf = (f: Found) => f.other !== f.key.currency0;", R, "RK3 "],
+  [QUOTE, "    return u === null || u >= floor;", "    return u !== null && u >= floor;", R, "PROBE C "],
+  [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn / 1000n)) f.quotes.push(", R, "PROBE D "],
+  [QUOTE, "      if (!can(p, xa)) continue;\n      p.quotes.push(quoteOf(fourth,", "      if (!can(p, xa / 1000n)) continue;\n      p.quotes.push(quoteOf(fourth,", R, "PROBE A "],
+  [QUOTE, "        if (marketQuote.has(mk) || !needs(c, ubOf(mk, amountIn))) continue;", "        if (marketQuote.has(mk) || !needs(c, ubOf(mk, amountIn / 1000n))) continue;", R, "PROBE A2 "],
+  [QUOTE, "    (xPools.get(c) ?? []).some((p) => can(p, x)) ||", "    false ||", R, "PROBE A2 "],
+  [QUOTE, "    [...vias].some(([x2, fs]) => fs.some((via) => via.other === c && (xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))));", "    false;", R, "RK7 "],
+  [QUOTE, "(xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))", "(xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x === null ? null : x / 1000n)))", R, "PROBE E "],
+  [QUOTE, "      const xa = ubOf(via, out(marketQuote.get(mk)!.at)!);", "      const xa = out(marketQuote.get(mk)!.at)! / 1000n;", R, "PROBE E "],
+  [QUOTE, "  for (const [x, fs] of vias) vias.set(x, fs.filter(holds));", "  for (const [x, fs] of vias) vias.set(x, fs.filter(holds).slice(0, 4));", R, "RK7 "],
+  [QUOTE, "    if (quotesLeft-- === 0) return refuse(", "    if (false) return refuse(", R, "card evm-quote-one-round: pools that cannot beat"],
+  [QUOTE, "export const EVM_QUOTE_MAX_QUOTED = 1_024;", "export const EVM_QUOTE_MAX_QUOTED = 2_048;", R, "card evm-quote-one-round: pools that cannot beat"],
+  [QUOTE, "    if (n > EVM_QUOTE_MAX_OTHER) return refuse(", "    if (false) return refuse(", R, "card evm-quote-one-round: pools that cannot beat"],
+  [QUOTE, "  priced(xs.length + ys.filter((y) => !xs.includes(y)).length);", "  priced(xs.length);", R, "card evm-quote-one-round: pools that cannot beat"],
+  [QUOTE, "export const EVM_QUOTE_MAX_OTHER = 1_024;", "export const EVM_QUOTE_MAX_OTHER = 2_048;", R, "card evm-quote-one-round: pools that cannot beat"],
+  [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "review of a9f1d32, HIGH: 16,000 and 16,381"],
+  [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "T1b "],
+  [QUOTE, "  const asked: EvmPoolSellQuoteRequest = { ...req };", "  const asked: EvmPoolSellQuoteRequest = req;", S, "the sell quote reads each field"],
   [QUOTE, "if (rs !== null && fine(rs)) return rs.map(", "if (rs !== null) return rs.map(", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
   [QUOTE, "  if (b - scanHead > maxLag) {", "  if (false) {", R, "card evm-quote-head-watch: a scan that ends more than maxLag"],
   [QUOTE, '  const scanned = await scanOf([lower(token)], "all");', '  void agreedOnce();\n  const scanned = await scanOf([lower(token)], "all");', R, "card evm-quote-head-watch: the agreed block is picked once"],
@@ -118,23 +152,23 @@ export const MUTANTS = [
   // build; scans as ORs within a provider's span; 429s asked again; each provider at most its limit at once
   [QUOTE, "    if (!behind || i === 3) return out;", "    return out;", R, "R10 "],
   [QUOTE, "for (const { k, id } of ordered) {", "for (const { k, id } of [] as typeof ordered) {", R, "N1a "],
-  [QUOTE, "  for (const f of held) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", "  for (const f of [] as Found[]) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", R, "A1 "],
-  [QUOTE, "  for (const f of held) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", "  for (const f of found) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", R, "S1c "],
-  [QUOTE, "    if (keys.length > keysLeft) return refuse(", "    if (false) return refuse(", R, "T1b "],
+  [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (false) f.quotes.push(", R, "A1 "],
+  // (no mutant reads `found` for `held` here: a buy's pool the PoolManager does not hold reads a price of 0, which the
+  // prune's bound reads as giving nothing, so it is never quoted and its hook never replaced; S1c holds that rule)
   [QUOTE, "      if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);\n      continue;", "      return refuse(\"no_reference\", `${x} has no market`);", R, "B1 "],
   [QUOTE, "      if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);\n", "", R, "T3 "],
-  [QUOTE, "    if (ks.size > keysLeft) return null;\n", "", R, "X3 "],
+  [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "X3 "],
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
   [QUOTE, "    return x < y ? x : y;", "    return x;", R, "H2 "],
   [QUOTE, "      const span = part.length === 1 ? s.span : Math.min(s.span, s.orSpan ?? s.span);", "      const span = s.span;", R, "B1 "],
-  [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X2 "],
+  [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X4 "],
   [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
   [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1a "],
-  [QUOTE, "const keys = [...(scanned?.pools.get(lower(token)) ?? []), ...hints].flatMap(", "const keys = [...hints].flatMap(", R, "N1a "],
+  [QUOTE, "const fromScan = scanned?.pools.get(lower(token)) ?? [];", "const fromScan: EvmPoolKey[] = [];", R, "N1a "],
   [QUOTE, "from: cached === undefined || cached.to < floor ? floor : cached.to + 1,", "from: floor,", R, "G4 "],
   [QUOTE, "  return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };", "  commit();\n  return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };", R, "S2b "],
   [QUOTE, "    const sc = await scanOf(cs, \"markets\");", "    const sc = await (scanOf(cs, \"markets\") ?? Promise.resolve(null)).catch(() => null);", R, "G2 "],
-  [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]);", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]);", R, "S3c "],
+  [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]))", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]))", R, "S3c "],
   [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
   [QUOTE, "    if (res.status === 429) throw new RateLimited(", "    if (false) throw new RateLimited(", R, "T7 "],
   [QUOTE, "      if (!(e instanceof RateLimited) || i === 3) return refuse(", "      if (true) return refuse(", R, "T7 "],
@@ -216,11 +250,56 @@ export const MUTANTS = [
   // the review of edb4dbb: F1 the sell goes further where the buy does; F2 X's markets at the X the token's pool
   // gives; F5 `bought` kept only where the sell builder takes it; F6 minOut off the reference
   [QUOTE, "if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);", "if (markets.has(x) && !a.sell) further.push(x);", R, "PA "],
-  [QUOTE, "quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount);", "quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, amountIn);", R, "PB2 "],
-  [QUOTE, "if (q !== null) append(legs, x, { q, p });", "", R, "PB "],
+  [QUOTE, "quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));", "quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, amountIn));", R, "PB2 "],
+  [QUOTE, "        append(legs, x, { q: quoteOf(second, { venue: \"uniswap-v4\", currencyIn: x, hops: [hopTo(lower(token), p.key)] }, [p.key]), p });\n", "", R, "PB "],
   [QUOTE, "const exits = evmSellExits(chain, t, bought) ? bought : undefined;", "const exits = bought;", R, "PC "],
   [QUOTE, "const minOut = (reference!.amountOut * BigInt(10000 - slippageBps)) / 10000n;", "const minOut = (pick.amountOut * BigInt(10000 - slippageBps)) / 10000n;", R, "PD "],
   [QUOTE, "return Object.freeze({ venue: r.venue, hops: Object.freeze(hops.reverse()) });", "return Object.freeze({ venue: r.venue, hops: Object.freeze(hops) });", R, "P4 "],
+  // card evm-quote-exec-sim: a route through an unlisted hook above the builder's best counts only where W's own sell
+  // through it executes (the sim), where the chain pins a sell delegate; elsewhere the lower of its two quotes stays
+  [QUOTE, 'const toSim = routes.filter((r) => r.amountOut > floor && simRule(chain, r.route, pins) === "sim");', "const toSim: Filled[] = [];", R, "PE a pool"],
+  [QUOTE, 'return pins.sellDelegate !== undefined && pins.sellSender !== undefined ? "sim" : "keep-min";', 'return "sim";', R, "PE (keep-min)"],
+  [QUOTE, 'return pins.sellDelegate !== undefined && pins.sellSender !== undefined ? "sim" : "keep-min";', 'return "keep-min";', R, "PE a pool"],
+  [QUOTE, 'if (typeof signSim !== "function") return refuse("bad_request",', 'if (false) return refuse("bad_request",', R, "PE a pool"],
+  [QUOTE, "nonce: n!.amountOut, deadline: block.timestamp });", "nonce: n!.amountOut, deadline: block.timestamp + 60n });", R, "PE a pool"],
+  [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", "override: { ...asW }, tx };", R, "PE a pool"],
+  [QUOTE, "const asW = { [lower(w)]: { code: designator(delegate!) } };", "const asW = { [lower(w)]: { code: EVM_NOOP_HOOK_CODE } };", R, "PE a pool"],
+  [QUOTE, "const takes = best(filled.filter((r) => evmSellExits(chain, t, r.route)));", "const takes = best(filled);", R, "PE a pool"],
+  // (no mutant drops the signer's pool check: only a sim the builder made is signed, frozen with EVM_SELL_SIM as its
+  // pool, so the check cannot fail there; the signing page's rule, which takes any object, holds it: sim_pool)
+  [SELLU, "sim.deadline > blockTimestamp) return refuse(", "sim.deadline > blockTimestamp + 1n) return refuse(", S, "planted: the sim signer"],
+  [SELLU, "if (!Number.isFinite(nowMs) || blockTimestamp * 1000n > BigInt(Math.floor(nowMs))) return refuse(", "if (!Number.isFinite(nowMs)) return refuse(", S, "planted: the sim signer"],
+  [SELLU, 'if (!SIMS.has(sim) || sim.chain !== chain) return refuse("not_built", "W signs only a sim', 'if (sim.chain !== chain) return refuse("not_built", "W signs only a sim', S, "planted: the sim signer"],
+  [SELLU, 'if (addressOf(secretKey) !== lower(sim.w)) return refuse("bad_key", "the key is not W\'s");\n  return signDigest(secretKey, sellDigest(sim));', "return signDigest(secretKey, sellDigest(sim));", S, "planted: the sim signer"],
+  [SELLU, 'if (pinsOf(venues, chain).sellDelegate === undefined) return refuse("not_deployed", `${chain} has no pinned sell delegate yet`);\n  return evmPoolSignSimSellUnpinned', "return evmPoolSignSimSellUnpinned", S, "planted: the sim signer"],
+  [SELLU, "pool: EVM_SELL_SIM, precommitment: 0n, feeCap: 0n,", "pool: venue.weth, precommitment: 0n, feeCap: 0n,", S, "planted: the sim signer"],
+  [SELLU, "    if (!anyHook && lower(hooks as string) !== NATIVE) {", "    if (lower(hooks as string) !== NATIVE) {", R, "PE a pool"],
+  // the sim sent as the sale (review of the exec sim, HIGH 1): from the pinned sender, the sale's gas and fees, the
+  // agreed block's base fee agreed on both providers; no sender pinned, no sim
+  [QUOTE, 'pins.sellDelegate !== undefined && pins.sellSender !== undefined ? "sim"', 'pins.sellDelegate !== undefined ? "sim"', R, "PE5 "],
+  [QUOTE, "const tx: SimTx = { from: sender,", "const tx: SimTx = { from: NATIVE,", R, "PE4 "],
+  [QUOTE, "gas: qty(gas), maxFeePerGas: qty(maxFee),", "gas: qty(50_000_000n), maxFeePerGas: qty(maxFee),", R, "PE3 "],
+  [QUOTE, "maxFeePerGas: qty(maxFee), maxPriorityFeePerGas: qty(tip) };", 'maxFeePerGas: "0x0", maxPriorityFeePerGas: "0x0" };', R, "PE1 "],
+  [QUOTE, "const maxFee = block.baseFeePerGas + tip;", "const maxFee = tip;", R, "PE6 "],
+  [QUOTE, "const gas = EVM_POOL_SELL_GAS - EVM_7702_AUTH_GAS;", "const gas = EVM_POOL_SELL_GAS;", R, "PE6 "],
+  [QUOTE, "const tip = evmPoolSellTip(chain);", "const tip = 0n;", R, "PE6 "],
+  [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } } };", R, "PE1 "],
+  [QUOTE, "override: asW, tx }]);", "override: asW }]);", R, "PE6 "],
+  // the sender's balance is its own (review point 4, 4 Nov): a balance override on it, on the nonce read or the sim, is caught,
+  // and a sender too low to pay the sim's gas, read at the block, drops the sim's routes, never the sale
+  [QUOTE, "override: asW, tx }]);", "override: { ...asW, [sender]: { balance: qty(gas * maxFee + 10n ** 18n) } }, tx }]);", R, "PE6 "],
+  [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", "override: { ...asW, [sender]: { balance: qty(gas * maxFee + 10n ** 18n) }, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", R, "PE6 "],
+  [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut < gas * maxFee) return routes.filter", "if (false) return routes.filter", R, "PE8 "],
+  [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut < gas * maxFee - 1n)", R, "PE8 "],
+  [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut <= gas * maxFee)", R, "PE8 "],
+  [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut < gas)", R, "PE8 "],
+  [QUOTE, "SEL_ETH_BALANCE + sender.slice(2)", "SEL_ETH_BALANCE + lower(w).slice(2)", R, "PE8 "],
+  [QUOTE, "data: reads[i]!.data, ...reads[i]!.tx }", "data: reads[i]!.data }", R, "PE1 "],
+  [QUOTE, 'if (block.baseFeePerGas === null) return refuse("rpc_error",', 'if (false) return refuse("rpc_error",', R, "PE7 "],
+  [QUOTE, " || back.baseFeePerGas !== lo.baseFeePerGas) {", ") {", R, "R11 "],
+  [QUOTE, 'if (fee !== undefined && (typeof fee !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(fee))) return refuse(', "if (false) return refuse(", R, "R11 "],
+  // the sim signer's signature recovers to W over SellDelegate's own digest (review of the exec sim, LOW 3)
+  [SELLU, "      word(BigInt(chainId)),", "      word(0n),", S, "planted: the sim signer"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`
@@ -242,7 +321,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let bad = 0;
   try {
     for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
-    const src = new Map([QUOTE, BUY, BUYU, SELLQ].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
     for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
       const r = run(dir, file, t);
       if (r !== "pass") {
