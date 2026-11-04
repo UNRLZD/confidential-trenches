@@ -466,9 +466,13 @@ test("a v4 sell's data is SellDelegate's PathKey[] as cast encodes it, from the 
   const clanker = hop(B.weth, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks });
   assert.equal(sellV4(v4(clanker)).data, V4CAST.clankerFromToken);
   assert.equal(sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), hop(NATIVE))).data, V4CAST.usdcThenNative);
-  // the review of a22060d, item 2: a listed hook on a pool that does not spend the token sold (USDC, then a Clanker
-  // hop of USDC to WETH) is no launchpad pool of the token
-  assert.equal(code(() => sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), clanker))), "bad_route");
+  // card evm-route-parity: a listed launchpad hook with its own fee and tick spacing builds on any hop, as the buy takes
+  // it (a Zora coin pairs its creator coin, which pairs ZORA, each through Zora's hook); on hop 2, an unlisted hook, or
+  // the listed hook with another fee or tick spacing, is refused (the review of a22060d, item 2, narrowed to the shape)
+  assert.equal(code(() => sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), clanker))), "built");
+  assert.equal(code(() => sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), { ...clanker, hooks: Y }))), "bad_route");
+  assert.equal(code(() => sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), { ...clanker, fee: 10000 }))), "bad_route");
+  assert.equal(code(() => sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), { ...clanker, tickSpacing: 60 }))), "bad_route");
   const built = sellV4(v4(hop(NATIVE)), {}, "robinhood-testnet");
   assert.ok(Object.isFrozen(built));
   // item 3: the target is the pinned PoolManager because nothing else builds, not because the test passed it in
@@ -490,20 +494,22 @@ test("planted: a v4 sell through another target, to a wrong pool key, or through
   assert.equal(c(v4(hop(NATIVE)), { target: Y }), "bad_target");
   // and a v3 route sent to the PoolManager
   assert.equal(c(v3([X, B.weth])), "bad_target");
-  // a hook not on a listed pool: an unlisted hook, the listed hook paired with the other asset
+  // a hook not on a listed pool: an unlisted hook; the listed hook with its own shape pairs any asset (card
+  // evm-route-parity: the shape is the rule, as on the buy)
   assert.equal(c(v4(hop(B.weth, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: Y }))), "bad_route");
-  assert.equal(c(v4(hop(NATIVE, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks }))), "bad_route");
+  assert.equal(c(v4(hop(NATIVE, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks }))), "built");
   // a wrong pool key: the listed hook with another fee or tick spacing
   assert.equal(c(v4(hop(B.weth, { fee: 10000, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks }))), "bad_route");
   assert.equal(c(v4(hop(B.weth, { fee: CLANKER.fee, tickSpacing: 60, hooks: CLANKER.hooks }))), "bad_route");
   assert.equal(c(v4(hop(B.weth, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks }))), "built");
   // a chain whose venue lists no hooked pool takes a hookless route only
   assert.equal(c(v4(hop(NATIVE, { hooks: CLANKER.hooks })), {}, "robinhood-testnet"), "bad_route");
-  // the path: it ends at the native asset or WETH and only there, its middles listed, no hop buying what it spends
+  // the path: it ends at the native asset or WETH and only there, no hop buying what it spends; a v4 middle need not
+  // be listed (card evm-route-parity, as on the quoted buy: no middle token moves inside the unlock)
   assert.equal(c(v4(hop(USDC, { fee: 500, tickSpacing: 10 }))), "bad_route");
   assert.equal(c(v4(hop(B.weth), hop(NATIVE))), "bad_route");
   assert.equal(c(v4(hop(NATIVE), hop(B.weth))), "bad_route");
-  assert.equal(c(v4(hop(Y), hop(NATIVE))), "middle_not_listed");
+  assert.equal(c(v4(hop(Y), hop(NATIVE))), "built");
   assert.equal(c(v4(hop(X))), "bad_route");
   assert.equal(c(v4(hop(USDC), hop(USDC), hop(NATIVE))), "bad_route");
   assert.equal(c(v4()), "bad_route");
@@ -530,9 +536,10 @@ test("planted: a v4 sell through another target, to a wrong pool key, or through
   assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0x00" }))), "bad_route");
   assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0x" + "ab".repeat(1024) }))), "bad_route");
   assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0xabc" }))), "bad_route");
-  // item 4: the token sold is the route's start, refused in the route check: a v3 path from another token, and a listed
-  // hook's pool reached from another token
+  // item 4: the token sold is the route's start, refused in the route check: a v3 path from another token. A listed
+  // hook's pool with its own shape is taken on any hop (card evm-route-parity); one with an unlisted hook is not
   assert.equal(c(v3([Y, B.weth]), { target: B.routers[0]! }), "token_mismatch");
   assert.equal(c(v4(hop(B.weth, listed)), { token: Y }), "built");
-  assert.equal(c(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), hop(B.weth, listed)), { token: Y }), "bad_route");
+  assert.equal(c(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), hop(B.weth, listed)), { token: Y }), "built");
+  assert.equal(c(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), hop(B.weth, { ...listed, hooks: Y })), { token: Y }), "bad_route");
 });
