@@ -12,7 +12,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { handler } from "../../server.ts";
 import { refusalLog } from "../../limits/limits.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN } from "../gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, REFRESH_URGENT_MS } from "../gecko.ts";
 import { pumpCurveAddress } from "./lists.ts";
 import { createSolanaToken, TOKEN_2022_PROGRAM } from "./token.ts";
 
@@ -195,9 +195,11 @@ test("under a spent budget a held token's refresh yields to a cold token's first
   const first = await tok.candles(PUMP, "1m", null, 24);
   assert.equal(first.status, 200);
   const readAt = first.asOfMs;
-  // 11 minutes on: PUMP's bars (60 s) and top pool (10 min) are both past fresh; the lists take two calls of the window
-  t += 11 * 60_000;
-  assert.deepEqual([budget.take("lists"), budget.take("lists")], [true, true]);
+  // 3 minutes on: PUMP's bars are past their 60 s, still under REFRESH_URGENT_MS (../gecko.ts; past it the re-read is a
+  // page read, card helper-chart-fresh, gecko-share.test.ts); the lists take what they may of the window
+  t += 3 * 60_000;
+  assert.ok(t - readAt! < REFRESH_URGENT_MS);
+  assert.deepEqual([budget.take("lists"), budget.take("lists"), budget.take("lists")], [true, true, true]);
   // PUMP's page is open and re-read first, then a token nobody holds is opened
   const held = await tok.candles(PUMP, "1m", null, 24);
   const cold = await tok.candles(COLD, "1m", null, 24);

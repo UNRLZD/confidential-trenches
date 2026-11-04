@@ -93,3 +93,16 @@ test("card app-console-429: a refresh (a re-read of data held) takes a call only
   for (let i = 0; i < reserve; i++) assert.equal(b.take("pages"), true, "which a cold page read finds");
   assert.equal(b.take("pages"), false);
 });
+
+test("card helper-chart-fresh: the newest data held is a refresh until REFRESH_URGENT_MS old, then a page read; nothing held is a page read", async () => {
+  const { refreshLane, REFRESH_URGENT_MS: urgent } = await import("./gecko.ts");
+  const { CANDLES_FRESH_MS } = await import("./solana/token.ts");
+  const t = 1_800_000_000_000;
+  assert.equal(refreshLane(null, t), "pages", "nothing held: a first read");
+  assert.equal(refreshLane(t, t), "refresh", "just read");
+  assert.equal(refreshLane(t - urgent + 1, t), "refresh", "a millisecond short of the bound");
+  assert.equal(refreshLane(t - urgent, t), "pages", "at the bound");
+  assert.equal(refreshLane(t - 86_400_000, t), "pages", "handed over a day old");
+  // past the bars' own 60 s, so a chart read often still refreshes in its lane; under the live check's 10 min
+  assert.ok(urgent > CANDLES_FRESH_MS && urgent < 600_000, `REFRESH_URGENT_MS ${urgent}`);
+});

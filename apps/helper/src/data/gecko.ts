@@ -10,7 +10,11 @@
 // The "refresh" lane is a page's re-read of data it already holds (the newest bars past their 60 s, a top pool past its
 // 10 min): it takes a call only while COLD_RESERVE stay free for a read of something nobody holds, so a held token's
 // refresh never refuses another token's first read; refused, the holder serves what it has, dated (card
-// app-console-429: the live suite's candles 429 at 567a181, a cold mint behind another's refreshes).
+// app-console-429: the live suite's candles 429 at 567a181, a cold mint behind another's refreshes). A refresh of the
+// newest data held once it is REFRESH_URGENT_MS old is a page read (refreshLane): the lists ask for more calls than the
+// budget has (6 lists every LIST_MS), so they keep the window at the refresh lane's own room, perMin - COLD_RESERVE,
+// and a refresh refused never makes them yield; a chart read only now and then was served its held bars for good (card
+// helper-chart-fresh: PUMP's 1h bars from 12:55:51Z at 14:03Z and 14:21Z, while a key nobody held read fresh).
 //
 // The limit is measured, not the published one: GeckoTerminal's FAQ says 10 calls a minute (apiguide.geckoterminal.com/
 // faq, read 2026-11-03 11:27Z), but read from one address after 70 s with no call, on 2026-11-03 at 14:58:04Z, 14 calls
@@ -32,6 +36,15 @@ export const YIELD_MS = 60_000;
 export const COLD_RESERVE = 2;
 /** Calls in the minute the lists may always take for an urgent read (6 lists, each read within LIST_URGENT_MS). */
 export const LIST_FLOOR = 2;
+/** The newest data held this old is read in the "pages" lane, as the lists' LIST_URGENT_MS (src/data/evm/lists.ts):
+ *  four times the bars' 60 s, so a chart is never served more than this behind its last refresh that could run. */
+export const REFRESH_URGENT_MS = 240_000;
+
+/** The lane of a read of the newest data, held since `heldAtMs` (null: nothing held): "pages" for a first read and for
+ *  data REFRESH_URGENT_MS old, else "refresh". History before a time never changes and stays a refresh, whatever its age. */
+export function refreshLane(heldAtMs: number | null, nowMs: number): "pages" | "refresh" {
+  return heldAtMs === null || nowMs - heldAtMs >= REFRESH_URGENT_MS ? "pages" : "refresh";
+}
 
 export type GeckoBudget = {
   /** One call now in `lane`, or false when the minute, a 429 pause or (for "lists") the yield says no. */
