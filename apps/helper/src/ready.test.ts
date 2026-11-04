@@ -341,3 +341,48 @@ test("a peer writes no warm file until the senders are its own: the old helper's
   save();
   assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).gecko, [1]);
 });
+
+test("card helper-ready-without-gt: a helper beside a running one whose environment it refuses stops at its start with exit 2 naming the variable, never later in its warm-up (redeploys 18:55-18:58Z: the env file held POOL_EVM_SENDER_KEY_BASE_SEPOLIA with no POOL_EVM_ADDRESS_BASE_SEPOLIA; the peer threw it in its deferred listen, an unhandled rejection, exit 1 and a restart loop until the 300 s bound)", async (t) => {
+  const { spawn } = await import("node:child_process");
+  const { createHash } = await import("node:crypto");
+  const dir = mkdtempSync(join(tmpdir(), "peer-env-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const old = openDurableDir(join(dir, "senders"), nodeFs, (d) => d); // the old helper holds the senders: this start is its peer
+  t.after(() => old.close());
+  const key = `0x${createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest("hex")}`; // pool/evm.test.ts's test key
+  const env = { PATH: process.env.PATH, HELPER_COMMIT: "0123456789abcdef0123456789abcdef01234567", PORT: "0", HELPER_STORE_DIR: dir, JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001", POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key };
+  const c = spawn(process.execPath, [join(import.meta.dirname, "server.ts")], { env, stdio: ["ignore", "ignore", "pipe"] });
+  let err = "";
+  c.stderr.on("data", (d) => (err += d));
+  const code = await new Promise<number | string>((done) => {
+    const timer = setTimeout(() => (c.kill("SIGKILL"), done("still running after 5 s")), 5_000);
+    c.on("exit", (n) => (clearTimeout(timer), done(n ?? "signal")));
+  });
+  assert.equal(code, 2, `exit ${code}; stderr: ${err.replace(/\(node:\d+\) ExperimentalWarning[^\n]*\n(\(Use[^\n]*\n)?/g, "")}`);
+  assert.match(err, /helper: POOL_EVM_ADDRESS_BASE_SEPOLIA must be an address/);
+  assert.ok(!err.includes(key.slice(2)), "the key is never printed");
+});
+
+test("card helper-ready-without-gt: a new helper whose GeckoTerminal window is full of the old helper's calls, and held for the handover, still turns ready: readiness reads the lists the warm file handed over, the Solana list, a token page and its holders, never GeckoTerminal", async () => {
+  let now = Date.parse("2026-11-03T11:36:00Z");
+  const fx = (f: string) => readFileSync(new URL(`./data/evm/fixtures/${f}`, import.meta.url), "utf8");
+  const answerOf = (url: string) => fx(url.includes("new_pools") ? "gt-base-new.json" : url.includes("duration=5m") ? "gt-base-trending-5m.json" : "gt-base-trending-1h.json");
+  let gtCalls = 0;
+  const fetch = (async (url: string) => (gtCalls++, new Response(answerOf(String(url)), { status: 200, headers: { "content-type": "application/json" } }))) as never;
+  const old = createEvmLists("base", gk.geckoBudget(() => now, 100), { fetch, now: () => now });
+  await old.tick();
+  const st = JSON.parse(JSON.stringify(old.state()));
+  const calls = gtCalls;
+  now += 10_000;
+  const budget = gk.geckoBudget(() => now);
+  budget.seed(Array.from({ length: gk.GT_LIMIT_PER_MIN }, (_, i) => now - 1_000 * (i + 1))); // the old helper's window, full
+  budget.hold(); // and none until the handover
+  const lists = { base: createEvmLists("base", budget, { fetch, now: () => now }), robinhood: createEvmLists("robinhood", budget, { fetch, now: () => now }) };
+  assert.equal(lists.base.restore(st), true);
+  assert.equal(lists.robinhood.restore({ reads: Object.fromEntries(Object.entries(st.reads)) }), true);
+  const ok200 = (body: unknown) => async () => ({ status: 200, body: JSON.stringify(body) });
+  const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
+  const p = { lists: { get: ok200({ lists: { new: [{ token: PUMP }] } }) }, evmLists: lists, token: { page: ok200({}), holders: ok200({}) } };
+  assert.equal(await (S.isReady as (p: unknown) => Promise<boolean>)(p), true, "ready with the window full and held");
+  assert.equal(gtCalls, calls, "no GeckoTerminal call");
+});

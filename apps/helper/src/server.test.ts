@@ -284,7 +284,10 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
   assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, \(\) => ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\)\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, \(\) => ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
+  // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
+  assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env\);/);
+  assert.match(main, /const release = releaseOf\(process\.env\);/);
   // card helper-ready-gate: the fee quoter is the senders' (their store handed over), and a replacing helper listens only once ready
   assert.match(main, /const senders = sendersFromEnv\(process\.env\);/);
   assert.match(main, /const fee = senders\.fee;/);
