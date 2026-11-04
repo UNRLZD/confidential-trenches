@@ -48,6 +48,9 @@ export type Swap = {
   amt: bigint;
   /** The quote leg, in the quote's smallest unit, > 0. */
   quote: bigint;
+  /** The token leg the trader got (a buy) or paid (a sell) when a v4 hook's cut makes it differ from the pool's `amt`
+   *  (evm/swaps.ts hookTakes): the tape's amount. Bars are priced by the pool's own legs, as every bar is. */
+  got?: bigint;
 };
 /** ETH's price at a point: USD per ETH times 10^VALUE_SCALE, from the chain's reference pool. */
 export type Ref = { kind: "ref"; block: number; index: number; ethUsd: bigint };
@@ -204,7 +207,7 @@ export function createBook(cfg: BookConfig) {
           t_ms: p.swap.t * 1000,
           side: p.swap.side,
           usd: fixed(p.usd, VALUE_SCALE),
-          amt: fixed(p.swap.amt, cfg.decimals),
+          amt: fixed(p.swap.got ?? p.swap.amt, cfg.decimals),
           trader: null,
           tx: p.swap.tx,
           block: p.swap.block,
