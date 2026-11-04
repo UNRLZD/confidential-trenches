@@ -12,7 +12,8 @@
 //   header, ./ladder.ts chunkOf), less what comes out of it before the spend: so it is the largest spendOf(chunk, the
 //   proof's fee cap) among the proofs `ready` counts, across the chain's pools, never their sum and never below 0.
 //   spendOf is the pool's, from its caller: solanaTapSpendOf (the kit's solanaPoolBuyMaxSpend on the worst venue, at
-//   the rent the caller read on two RPCs) or evmTapSpendOf (the kit's evmPoolBuyMaxSpend). Present only with ready,
+//   the rent the caller read on two RPCs) or evmTapSpendOf (the chunk itself: an EVM tap asks for a whole chunk, the
+//   signing page's checkEvmBuy refusing any other amount, and the relay fee comes out on chain). Present only with ready,
 //   and only when every pool on the chain gives a spendOf; "0" when no proof is counted.
 // - One entry per chain, in the order the chain first appears in the pool table, carrying the chain's pool asset; pools
 //   on one chain sum into it. Two assets on one chain are refused: the kit's state keeps one entry per chain.
@@ -23,7 +24,6 @@
 // names Base and Robinhood alike.
 import {
   CHAINS,
-  evmPoolBuyMaxSpend,
   POOL_ASSETS,
   POOL_ASSET_DECIMALS,
   SOLANA_JITO_TIP_MIN,
@@ -65,8 +65,10 @@ export function solanaTapSpendOf(rent: SolanaRent, cluster: "mainnet" | "devnet"
   const tip = cluster === "mainnet" ? SOLANA_JITO_TIP_MIN : 0n;
   return (chunk, feeCap) => solanaPoolBuyMaxSpend({ withdrawnValue: chunk, relayFee: feeCap }, SOLANA_POOL_WORST_BUY_VENUE, tip, rent);
 }
-/** An EVM proof's spend at the tap: the kit's evmPoolBuyMaxSpend, the chunk less the most the relayer may take. */
-export const evmTapSpendOf: TapSpendOf = (chunk, feeCap) => evmPoolBuyMaxSpend(chunk, feeCap);
+/** An EVM proof's ask at the tap: the whole chunk. The signing page's checkEvmBuy (signpage src/rules/pool.ts) refuses
+ * an EVM pool.buy whose amount is not the proof's value; the relay fee comes out of it on chain (contracts/pool-evm
+ * PrivacyPoolSimple.sol:64), so the trade box asks for chunks on EVM. */
+export const evmTapSpendOf: TapSpendOf = (chunk) => chunk;
 
 /** The asset's decimals from the kit's table; an asset not in it is refused. */
 function decimalsOf(p: BalancePool): number {

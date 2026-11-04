@@ -132,7 +132,7 @@ test("tap_max from the kit's rules: solanaTapSpendOf (the worst venue, the mainn
   const out = poolBalances([s, e], [S, B], [proof(S, s, LAMPORTS / 10n, undefined, fee), proof(B, e, WEI / 1000n, undefined, 10n ** 13n)]);
   const sol = solanaPoolBuyMaxSpend({ withdrawnValue: LAMPORTS / 10n, relayFee: fee }, SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent);
   assert.equal(out[0]!.tap_max, `0.${sol.toString().padStart(9, "0")}`.replace(/0+$/, ""));
-  assert.equal(out[1]!.tap_max, "0.00099");
+  assert.equal(out[1]!.tap_max, "0.001", "an EVM tap asks for the whole chunk");
   const dev = poolBalances([d], [D], [proof(D, d, LAMPORTS / 10n, undefined, fee)]);
   assert.equal(BigInt(dev[0]!.tap_max!.replace("0.", "").padEnd(9, "0")), sol + SOLANA_JITO_TIP_MIN, "devnet tips 0");
   assert.throws(() => solanaTapSpendOf(rent, "testnet" as never), /cluster/);

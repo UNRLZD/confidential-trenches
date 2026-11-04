@@ -1,12 +1,10 @@
 // node --test packages/kit/test/pool-max-spend.test.ts: the most one ready proof can spend at the tap, one rule for the
 // tap and the signing page's state.pools tap_max (card kit-pool-tap-inputs). Solana: solanaPoolBuyMaxSpend, the
-// largest spend solanaPoolBuyFunds passes on the worst venue the device buys on; EVM: evmPoolBuyMaxSpend, the chunk less
-// the most the relayer may take. Planted chunks, fees and rents only; no network.
+// largest spend solanaPoolBuyFunds passes on the worst venue the device buys on (an EVM tap asks for a whole chunk, so
+// its tap_max is the chunk: packages/wallet/src/pool/balances.ts evmTapSpendOf). Planted chunks, fees and rents only; no network.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  EVM_POOL_MAX_RELAY_FEE_BPS,
-  evmPoolBuyMaxSpend,
   SOLANA_JITO_TIP_MIN,
   SOLANA_POOL_WORST_BUY_VENUE,
   SOLANA_TOKEN_2022_PROGRAM,
@@ -91,15 +89,4 @@ test("Solana: the max spend is the chunk less the fee, the tip and W's new accou
 test("Solana: never below 0: a chunk the fee, the tip and the accounts eat is 0", () => {
   const rent = RENTS[0]!;
   for (const chunk of [0n, 1n, 1_300_000n, 5_000_000n]) assert.equal(solanaPoolBuyMaxSpend(release(chunk, solanaPoolFee(rent)), SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent), 0n, String(chunk));
-});
-
-test("EVM: the max spend is the chunk less the most the relayer may take: the fee cap, or the pool's 50% backstop", () => {
-  assert.equal(EVM_POOL_MAX_RELAY_FEE_BPS, 5_000n);
-  const one = 10n ** 18n;
-  assert.equal(evmPoolBuyMaxSpend(one, 10n ** 13n), one - 10n ** 13n);
-  assert.equal(evmPoolBuyMaxSpend(one, 0n), one);
-  assert.equal(evmPoolBuyMaxSpend(1_000n, 900n), 500n); // the backstop caps the fee at 500
-  assert.equal(evmPoolBuyMaxSpend(1_001n, 900n), 501n); // 1,001 x 5,000 / 10,000 = 500, rounded down as the pool does
-  assert.equal(evmPoolBuyMaxSpend(0n, 0n), 0n);
-  for (const [c, f] of [[-1n, 0n], [1n, -1n], [1 as never, 0n], [1n, 0 as never]] as [bigint, bigint][]) assert.throws(() => evmPoolBuyMaxSpend(c, f), /chunk|fee cap/);
 });
