@@ -56,6 +56,7 @@ import {
   type EvmV4Route,
 } from "../../trade/evm/buy-unpinned.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
 /** One JSON-RPC call. */
 export type EvmRpcCall = { readonly method: string; readonly params: readonly unknown[] };
@@ -149,7 +150,14 @@ const MAX_ANSWER_HEX = 2 + 2 * 65536;
 const isAddress = (a: unknown): a is string => typeof a === "string" && /^0x[0-9a-fA-F]{40}$/.test(a);
 const lower = (a: string) => a.toLowerCase();
 const word = (v: bigint) => v.toString(16).padStart(64, "0");
-const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+const hex = (b: Uint8Array) => bytesToHex(b);
+/** Adds `v` to the list `m` keeps at `k`, in place: a copy per add made the 19,884 slot reads of USDG's pools, and
+ *  T1b's 40,000, quadratic (5.2 of T1b's 11.6 s on this Mac, card evm-quote-head-watch). */
+const append = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
+  const l = m.get(k);
+  if (l === undefined) m.set(k, [v]);
+  else l.push(v);
+};
 
 /** The pinned quoters and rules of `chain`: own keys of the frozen venue list only. */
 function venue(chain: EvmPoolChain) {
@@ -314,12 +322,12 @@ async function readBoth(rpcs: readonly [EvmRpc, EvmRpc], hash: string, reads: re
   const slotParts: number[][] = [];
   if (batched) {
     const byTo = new Map<string, number[]>();
-    for (const i of slots) byTo.set(lower(reads[i]!.to), [...(byTo.get(lower(reads[i]!.to)) ?? []), i]);
+    for (const i of slots) append(byTo, lower(reads[i]!.to), i);
     for (const g of byTo.values()) for (let k = 0; k < g.length; k += SLOTS_PER_CALL) slotParts.push(g.slice(k, k + SLOTS_PER_CALL));
   }
   const groups = new Map<string, number[]>();
   reads.forEach((r, i) => {
-    if (r.override !== undefined && r.group !== undefined) groups.set(r.group, [...(groups.get(r.group) ?? []), i]);
+    if (r.override !== undefined && r.group !== undefined) append(groups, r.group, i);
   });
   const lone = reads.flatMap((r, i) => (r.override !== undefined && r.group === undefined ? [i] : []));
   const parts: number[][] = [];
@@ -533,7 +541,7 @@ const EVM_QUOTE_EARLY = 64;
 const SEL_EXTSLOAD = "1e2eaeaf"; // PoolManager.extsload(bytes32)
 const POOLS_SLOT = 6n; // v4-core StateLibrary.POOLS_SLOT
 const U24 = 0xffffff;
-const keccak = (h: string) => hex(keccak_256(Uint8Array.from(h.match(/../g)!, (b) => parseInt(b, 16))));
+const keccak = (h: string) => hex(keccak_256(hexToBytes(h)));
 /** v4's PoolId: keccak256(abi.encode(PoolKey)). */
 const poolId = (k: EvmPoolKey) =>
   keccak(word(BigInt(k.currency0)) + word(BigInt(k.currency1)) + word(BigInt(k.fee)) + word(BigInt.asUintN(256, BigInt(k.tickSpacing))) + word(BigInt(k.hooks)));
@@ -683,7 +691,7 @@ async function scanPools(
   });
   type Each = (typeof each)[number];
   const groups = new Map<number, Each[]>();
-  for (const e of each) groups.set(e.from, [...(groups.get(e.from) ?? []), e]);
+  for (const e of each) append(groups, e.from, e);
   const w = (c: string) => "0x" + word(BigInt(c));
   const jobs: { part: Each[]; a: number; b: number }[] = [];
   const jobsOf = (g: Each[], from: number, to: number) => {
@@ -1028,7 +1036,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // best market, read the same way. A quote that reverts or runs out adds nothing; a held pool that no route from the
   // native asset or WETH reaches adds nothing, since a buyer cannot reach it either
   const xPools = new Map<string, Found[]>();
-  for (const f of held) if (!startsBuy(f.other)) xPools.set(f.other, [...(xPools.get(f.other) ?? []), f]);
+  for (const f of held) if (!startsBuy(f.other)) append(xPools, f.other, f);
   const smallest = (fs: readonly Found[]) => fs.map((f) => f.id).sort()[0]!;
   const others = (m: Map<string, Found[]>, cap: number) =>
     [...m.keys()]
@@ -1119,7 +1127,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   }
   await round(fourth);
   const yPools = new Map<string, Found[]>();
-  for (const fs of vias.values()) for (const f of fs.filter(holds)) yPools.set(f.other, [...(yPools.get(f.other) ?? []), f]);
+  for (const fs of vias.values()) for (const f of fs.filter(holds)) append(yPools, f.other, f);
   const ys = others(yPools, Math.max(0, EVM_QUOTE_MAX_OTHER - xs.length));
   const fifth: Read[] = [];
   if (ok) await readMarkets(ys, fifth);
