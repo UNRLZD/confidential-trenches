@@ -1,7 +1,8 @@
 // One real devnet run of the pool path through the signing page's own testnet flow (card signpage-pool-flow-run): the
 // page's pool kinds (src/pool-kinds.ts poolKinds over src/pool-testnet.ts testnetPool, as main.ts wires them in the
-// testnet build) on the devnet pool it pins: one pool.deposit of 0.01 SOL, the proof queue's pass, then one pool.buy of a
-// devnet pump.fun coin sent through the helper's POST /v1/pool/solana/send.
+// testnet build) on the devnet pool it pins: one pool.deposit of 0.01 SOL, the proof queue's pass, one pool.buy of a
+// devnet pump.fun coin sent through the helper's POST /v1/pool/solana/send, then one pool.sell of all W holds of it,
+// back into the pool as a return note.
 //   node packages/signpage/scripts/pool-flow-devnet.mjs <table> <mint> <spend SOL> <out.json>
 // - A seed made in this run only (16 random bytes), never printed or kept; the wallet store and its notes are
 //   fake-indexeddb, in memory. U, the deposit's source, is the address the note store plans; this prints U and the
@@ -9,10 +10,14 @@
 //   waits for U to hold exactly that, or that plus at least an empty account's rent. Someone else funds U.
 // - What differs from the page in a browser, and only that: the prover is snarkjs's fullProve in this process, the one
 //   the prover worker makes (the setup files checked by sha256 against ZK_SETUP_FILES); <table> is the lookup table
-//   (DEVNET_TABLE once pinned); and each devnet RPC call that answers HTTP 429 is asked again, up to 8 times, since
-//   the public devnet RPCs throttle. Every check, the send and every read-back are the page's own code.
+//   (DEVNET_TABLE once pinned); each devnet RPC call that fails in transport (an HTTP 429 or a JSON-RPC -32029, a 5xx,
+//   a non-JSON page, a timeout) is logged and asked again, up to 10 times, a short wait apart; the helper's answers are logged by status;
+//   and a kind that answers failed or quote_check_failed (nothing sent) is tapped again, up to 4 times. Every check,
+//   the send and every read-back are the page's own code.
 // - Each kind answers at its send and its run goes on; this waits for the run's end (the seed's lock), then reads the
-//   notes: the deposit landed when its note is UNSPENT, the buy filled when that note is SPENT and no stage but sent or filled was told.
+//   notes: the deposit landed when its note is UNSPENT, the buy filled when that note is SPENT and no stage but sent or
+//   filled was told, the sell filled when a return note is UNSPENT with a leaf and no stage but sent or filled was told.
+//   The sell's amount is all W holds of the coin, as W's token account reads at finalized (W: the buy tx's second key).
 // - It writes the answers, the stages, the notes and every tx to <out.json>; exit 0 only when both landed.
 import { randomBytes, createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -47,8 +52,11 @@ const patient = (rpc) => {
       try {
         return await rpc(method, params);
       } catch (e) {
-        if (i >= 7 || !/429|fetch failed/.test(String(e?.message))) throw e;
-        await sleep(1_000 * 2 ** Math.min(i, 4));
+        // every failed call is logged (its method and error: public reads only, never a key or the words)
+        log(`rpc ${new URL(rpc.url).host} ${method}: ${String(e?.message).slice(0, 120)}`);
+        // short waits, so a retried read never ages the quote past the rule's 25 slots
+        if (i >= 9 || !/429|-32029|fetch failed|not a JSON-RPC answer|HTTP 5\d\d|timed out|aborted/i.test(String(e?.message))) throw e;
+        await sleep(Math.min(500 * (i + 1), 3_000));
       }
     }
   };
@@ -84,14 +92,20 @@ await w.insertSeed({ v: 1, entropy: Uint8Array.from(entropy), source: "code", co
 const seed64 = wordsToSeed64(entropyToWords(Uint8Array.from(entropy)));
 entropy.fill(0);
 const page = { store: async () => w, seed64: async () => seed64.slice() };
-const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, table: TABLE });
+// the helper's fetch, logged: its status for every call
+const helperFetch = async (url, init) => {
+  const r = await fetch(url, init);
+  log(`helper ${init?.method ?? "GET"} ${new URL(url).pathname}: HTTP ${r.status}`);
+  return r;
+};
+const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, table: TABLE, fetch: helperFetch });
 const kinds = poolKinds({ ...testnetPoolDeps(t.flow), rpcs: (c) => (c === "solana" ? rpcs : testnetPoolDeps().rpcs(c)) });
 const ctx = (id) => ({ id, sha: "00", progress: (s) => log(`${id} progress ${JSON.stringify(s)}`) });
 // a kind answers at its send and its run goes on (the app learns the end from its state reads): each run holds the seed's
 // shared lock, so this waits for the exclusive one, then reads the notes, which hold the run's verdict
 const { WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
 const stages = [];
-const run = async (kind, params) => {
+const once = async (kind, params) => {
   const r = kinds[kind](params, { ...ctx(kind), progress: (s) => (stages.push({ kind, stage: s }), log(`${kind} progress ${JSON.stringify(s)}`)) });
   if ("error" in r) return { answer: r };
   await r.after;
@@ -99,6 +113,18 @@ const run = async (kind, params) => {
   log(`${kind} answered ${JSON.stringify(answer)}; waiting for its run to end`);
   await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
   return { answer, notes: await noteList() };
+};
+// a kind that answers failed or quote_check_failed sent nothing (each sends only after every check, and answers a stage
+// from the send on): tapped again, as a user would, after the proof queue's pass, up to 4 times
+const run = async (kind, params) => {
+  for (let k = 1; ; k++) {
+    const r = await once(kind, params);
+    const err = r.answer?.error;
+    if ((err !== "failed" && err !== "quote_check_failed") || k >= 4) return r;
+    log(`${kind} answered ${err} (try ${k}): again in 10 s`);
+    await sleep(10_000);
+    if (kind === "pool.buy") await t.proofs();
+  }
 };
 const noteList = async () => (await ns.list()).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null, leafIndex: n.leaf ? String(n.leaf.leafIndex) : null, sends: (n.sends ?? []).map((s) => s.signature) }));
 
@@ -112,9 +138,17 @@ id.secretKey.fill(0);
 const rent = await readSolanaRent(rpcs);
 const NEED = RUNG + solanaRentMin(rent, 17) + 2n * 72n * rent.lamportsPerByte * rent.factor + FEE;
 const EMPTY = solanaRentMin(rent, 0);
+// a read that fails while U waits is read again: this process holds the only copy of U's seed
 const balance = async () => {
-  const got = await Promise.all(rpcs.map(async (r) => BigInt((await r("getBalance", [U, { commitment: "confirmed" }])).value)));
-  return got[0] < got[1] ? got[0] : got[1];
+  for (;;) {
+    try {
+      const got = await Promise.all(rpcs.map(async (r) => BigInt((await r("getBalance", [U, { commitment: "confirmed" }])).value)));
+      return got[0] < got[1] ? got[0] : got[1];
+    } catch (e) {
+      log(`balance read failed (${String(e?.message).slice(0, 80)}): reading again`);
+      await sleep(5_000);
+    }
+  }
 };
 log(`pool ${pool}; table ${TABLE}; fund U ${U} with exactly ${NEED} lamports (or at least ${NEED + EMPTY}) on devnet`);
 for (let b = await balance(); !(b === NEED || b >= NEED + EMPTY); b = await balance()) {
@@ -135,11 +169,28 @@ if (landed) {
   buy = await run("pool.buy", { chain: "solana", token: MINT, amount: SPEND, slippage_bps: 300 });
   log(`buy ${JSON.stringify(buy)}`);
 }
+let sell = null;
+const bought = buy?.notes?.some((n) => n.state === "SPENT");
+if (bought) {
+  const sig = buy.answer.result.txs[0].hash;
+  let t = null;
+  for (let i = 0; i < 60 && !t; i++) {
+    t = await rpcs[0]("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+    if (!t) await sleep(2_000);
+  }
+  const W = t.transaction.message.accountKeys[1];
+  const accs = (await rpcs[0]("getTokenAccountsByOwner", [W, { mint: MINT }, { encoding: "jsonParsed", commitment: "finalized" }])).value;
+  const amount = accs[0].account.data.parsed.info.tokenAmount.uiAmountString;
+  log(`pool.sell of ${amount} of ${MINT} from W ${W}`);
+  sell = await run("pool.sell", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
+  log(`sell ${JSON.stringify(sell)}`);
+}
 const notes = await noteList();
 log(`notes ${JSON.stringify(notes)}`);
-const filled = landed && buy?.answer?.result?.stage === "sent" && notes.some((n) => n.state === "SPENT") && !stages.some((x) => x.kind === "pool.buy" && x.stage !== "sent" && x.stage !== "filled");
+const told = (kind) => !stages.some((x) => x.kind === kind && x.stage !== "sent" && x.stage !== "filled");
+const filled = landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
 seed64.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, U, need: String(NEED), deposit, buy, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, U, need: String(NEED), deposit, buy, sell, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

@@ -3,7 +3,8 @@
 // /app.js with no testnet pin: PASS. bad: the same reads for the helper's earlier devnet program in the pin's place:
 // another code and none of the record's deposit: FAIL. bad_table: the pool account read in the table's place: FAIL.
 // Planted on the good one: SIGN_HOST serving a testnet pin, a pool account another program owns, an upgrade authority
-// set, the buy failed or paid by another key, and the helper naming another fee payer: FAIL.
+// set, the buy failed or another tx's bytes in its place, the sell not W's alone, and the helper naming another fee
+// payer: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -44,7 +45,7 @@ test("recorded bad answer: the pool account in the table's place: FAIL", async (
   assert.ok(r.lines.some((l) => l.startsWith(`BAD  table ${A.bad_table.table}: the ALT program's`)), r.lines.join("\n"));
 });
 
-test("planted on the good answer: the buy failed on one RPC or another tx's bytes in its place, or the helper naming another fee payer: FAIL", async () => {
+test("planted on the good answer: the buy failed on one RPC or another tx's bytes in its place, the buy's bytes in the sell's place, or the helper naming another fee payer: FAIL", async () => {
   const failed = await run(A.good, (a) => (a.method === "getTransaction" && a.params[0] === RUN.buy && a.url === A.good.rpcs[1] ? ((a.json.result.meta.err = { InstructionError: [0, "Custom"] }), a.json) : a.json));
   assert.equal(failed.ok, false);
   assert.ok(failed.lines.some((l) => l.startsWith(`BAD  buy ${RUN.buy}`)), failed.lines.join("\n"));
@@ -53,6 +54,11 @@ test("planted on the good answer: the buy failed on one RPC or another tx's byte
   const payer = await run(A.good, (a) => (a.method === "getTransaction" && a.params[0] === RUN.buy ? ((a.json.result.transaction = depositTx), a.json) : a.json));
   assert.equal(payer.ok, false);
   assert.ok(payer.lines.some((l) => l.startsWith(`BAD  buy ${RUN.buy}`)));
+  // the buy's bytes in the sell's place: paid by the helper's fee payer, not W
+  const buyTx = A.good.answers.find((a) => a.method === "getTransaction" && a.params[0] === RUN.buy).json.result.transaction;
+  const sell = await run(A.good, (a) => (a.method === "getTransaction" && a.params[0] === RUN.sell ? ((a.json.result.transaction = buyTx), a.json) : a.json));
+  assert.equal(sell.ok, false);
+  assert.ok(sell.lines.some((l) => l.startsWith(`BAD  sell ${RUN.sell}`)), sell.lines.join("\n"));
   const helper = await run(A.good, undefined, A.good.sign, { ...A.good.helper, json: { ...A.good.helper.json, fee_payer: "11111111111111111111111111111111" } });
   assert.equal(helper.ok, false);
   assert.ok(helper.lines.some((l) => l.startsWith("BAD  the helper's fee answer")));

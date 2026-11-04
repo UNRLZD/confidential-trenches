@@ -14,7 +14,8 @@
 //     pool and both trees' first pages;
 //   - the deposit: succeeded, a call of the pinned program on the pool;
 //   - the pool buy: succeeded, a call of the pinned program and of pump.fun, paid by the helper's devnet fee payer (the
-//     pin) and loading the table.
+//     pin) and loading the table;
+//   - the sell back: succeeded, a call of pump.fun and of the pinned program on the pool, paid by the buy's W alone.
 //   - the helper's own GET /v1/pool/fee for the pool names the pin's program and fee payer.
 //   node scripts/live-checks/signpage-pool-flow.mjs [--program <id>] [--table <id>] [--record <file>]
 // --program or --table reads another account in the pin's place (the recorded bad answers). PASS exit 0, FAIL exit 1,
@@ -33,10 +34,12 @@ export const PIN = Object.freeze({
   /** DEVNET_TABLE (packages/signpage/src/pool-testnet.ts). */
   table: "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy",
 });
-/** The run's transactions (signpage-pool-flow.md): the deposit and the pool buy, through the page's testnet flow. */
+/** Run 4's transactions (signpage-pool-flow.md): the deposit, the pool buy and the sell back, through the page's testnet
+ *  flow. */
 export const RUN = Object.freeze({
-  deposit: "4YkacU63Ko4MiUiRUxwaPcAEMeBUorfyUmkXExgxkkF49BGu3dzYzVnUcDD2xn7WJPGJ683748nZP3bn8b3a7E5F",
-  buy: "5GmNBPPpYhp5ggqJLek6qECLXWghVDiL1ms8ALE21TxDxoAekbA9Pvj2bRHUeZhWv4obzYSyvL6iarJifDX6wgzW",
+  deposit: "63fqkqcKM2jQq7aPitYXUzeUWnm7FTyCMHMUhHVSrXbDQeZwHxkXBFUvkEzE5JVkAaspXqDUYc8hRBGh3R4Zkera",
+  buy: "2MbB4Fq7KU1TiSkYA1GpPYAUTTyt68Jz2quLfvsp5xP72yawSYG1E9D3bs9mBHirYar8UTLQm786CyfgUD5VPNua",
+  sell: "3ZMVTe6R7zXPpE76MC6oJCSXBUZT2XYH6kyrXhDGt4stS5U8WyPPKnzHWsXrrdD2RWSMW919DEhTqLptiX7myG3w",
 });
 export const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
 export const PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
@@ -67,10 +70,10 @@ async function txOf(fetchFn, url, sig, sleep) {
   const m = message(Buffer.from(t.transaction[0], "base64"));
   const keys = [...m.keys, ...(t.meta?.loadedAddresses?.writable ?? []), ...(t.meta?.loadedAddresses?.readonly ?? [])];
   const calls = [...m.programs, ...(t.meta?.innerInstructions ?? []).flatMap((x) => x.instructions.map((ix) => ix.programIdIndex))].map((i) => keys[i]);
-  return { err: t.meta ? t.meta.err : "no meta", payer: m.keys[0], keys, tables: m.tables, calls: [...new Set(calls)] };
+  return { err: t.meta ? t.meta.err : "no meta", payer: m.keys[0], signers: m.signers, keys, tables: m.tables, calls: [...new Set(calls)] };
 }
 
-/** A wire transaction's message: its static keys, each instruction's program index and its lookup tables. */
+/** A wire transaction's message: its signer count, its static keys, each instruction's program index and its lookup tables. */
 function message(b) {
   let o = 0;
   const compact = () => {
@@ -85,6 +88,7 @@ function message(b) {
   skip(64 * compact());
   const v0 = (b[o] & 0x80) !== 0;
   if (v0) o++;
+  const signers = b[o];
   o += 3;
   const keys = Array.from({ length: compact() }, () => b58(b.subarray(o, (o += 32))));
   o += 32;
@@ -103,7 +107,7 @@ function message(b) {
       })
     : [];
   if (o !== b.length) throw new Error(`a transaction of ${b.length} bytes parsed to ${o}`);
-  return { keys, programs, tables };
+  return { signers, keys, programs, tables };
 }
 
 /** The run's reads: the table and the two transactions on both RPCs, and the helper's fee answer. */
@@ -116,11 +120,17 @@ async function checkRun({ table, fetchFn, rpcs, sleep, helper }, say) {
   const need = [PIN.pool, pageAddress(PIN.program, 0, 0).address, pageAddress(PIN.program, 1, 0).address];
   say(table === PIN.table, `the table read is the pin's: ${table}`);
   say(reads.every((r) => r?.owner === ALT_PROGRAM) && same && active && need.every((a) => addrs.includes(a)), `table ${table}: the ALT program's, the same bytes on both RPCs, active, holding the pool and both first pages: ${reads.map((r) => r?.owner ?? "none").join(", ")}, ${addrs.length} addresses`);
+  let w = null; // the buy's W: its second static key (the fee payer first)
   for (const [name, sig] of Object.entries(RUN)) {
     const txs = await Promise.all(rpcs.map((u) => txOf(fetchFn, u, sig, sleep)));
     const ok = txs.every((t) => t && t.err === null && t.calls.includes(PIN.program) && t.keys.includes(PIN.pool));
-    const shape = name === "buy" ? txs.every((t) => t && t.payer === PIN.feePayer && t.tables.includes(PIN.table) && t.calls.includes(PUMP_PROGRAM)) : true;
-    say(ok && shape, `${name} ${sig}: succeeded on both RPCs at finalized, the pinned program on the pool${name === "buy" ? ", paid by the pin's fee payer, loading the pin's table, calling pump.fun" : ""}: ${txs.map((t) => (t ? `err ${JSON.stringify(t.err)}, payer ${t.payer}` : "not found")).join("; ")}`);
+    if (name === "buy") w = txs[0]?.keys[1] ?? null;
+    const shape =
+      name === "buy" ? txs.every((t) => t && t.payer === PIN.feePayer && t.tables.includes(PIN.table) && t.calls.includes(PUMP_PROGRAM) && t.keys[1] === w)
+      : name === "sell" ? txs.every((t) => t && w !== null && t.payer === w && t.signers === 1 && t.calls.includes(PUMP_PROGRAM))
+      : true;
+    const what = name === "buy" ? ", paid by the pin's fee payer, loading the pin's table, calling pump.fun" : name === "sell" ? ", signed and paid by the buy's W alone, calling pump.fun" : "";
+    say(ok && shape, `${name} ${sig}: succeeded on both RPCs at finalized, the pinned program on the pool${what}: ${txs.map((t) => (t ? `err ${JSON.stringify(t.err)}, payer ${t.payer}` : "not found")).join("; ")}`);
   }
   const h = helper?.json;
   say(helper?.status === 200 && h?.cluster === "devnet" && h?.program === PIN.program && h?.pool === PIN.pool && h?.fee_payer === PIN.feePayer, `the helper's fee answer names the pin's program and fee payer: ${helper ? `${helper.status}, ${h?.program}, ${h?.fee_payer}` : "not read"}`);
