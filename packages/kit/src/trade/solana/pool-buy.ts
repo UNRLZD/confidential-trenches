@@ -576,9 +576,12 @@ const SELL_UP_FRONT_SIZE = { "pump-curve": 0, pumpswap: TOKEN_ACCOUNT_SIZE } as 
  * W's accounts a PumpSwap sell of a cashback coin names, writable: W's PumpSwap volume account (137 bytes, as the
  * PumpSwap buy makes it: SOLANA_POOL_VOLUME_ACCOUNT_SIZE) and its wrapped-SOL account (165), the remaining accounts
  * solanaPoolSellSteps lists, as pump-swap-sdk 2.2.0's sellInstructionsNoPool does, with no instruction of the user's
- * to make them. A PumpSwap buy makes both (solanaPoolBuyFunds keeps their rent); a curve buy makes neither, so after a
- * curve buy each is counted as made by the sell, at W's cost and before any proceeds arrive (the re-review of
- * signpage-pool-sell 3bdca74: an upper bound, never less than what the program can take from W).
+ * to make them. A PumpSwap buy makes both (solanaPoolBuyFunds keeps their rent); a curve buy makes neither, and the
+ * sell then makes each one missing itself, at W's cost (the re-review of signpage-pool-sell 3bdca74). Proven on
+ * mainnet's PumpSwap code in LiteSVM: contracts/pool-solana/svm-tests/tests/release.rs
+ * venue_pumpswap_cashback_sell_makes_ws_cashback_accounts (fixtures/venues/pumpswap-cashback.json) sells from a W with
+ * neither account holding exactly this need, the accumulator made at 137 B owned by PumpSwap and its wrapped-SOL
+ * account at 165 B owned by the Token program, W paying the fee and both rents; the same sell without them is refused.
  */
 export const SOLANA_POOL_AMM_CASHBACK_SIZES = [SOLANA_POOL_VOLUME_ACCOUNT_SIZE.pumpswap, TOKEN_ACCOUNT_SIZE] as const;
 /** What W needs up front for a sell on `venue`. `has`: which of W's PumpSwap cashback accounts already exist (its
