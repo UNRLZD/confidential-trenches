@@ -1,8 +1,10 @@
 // Where Discover's data comes from: GET /v1/market/lists?chain=solana on HELPER_HOST (card app-discover-live; the route is
 // apps/helper/src/data/solana/lists.ts). The answer is 06b's `snapshot` of `Row`s (fields.ts), 38 fields a row. Display
 // only: nothing here feeds a signature, so a row that is not a row is dropped and the rest is drawn as the helper sent it.
-// The helper refreshes the lists every 12 s and serves its last good read up to 60 s, so the screen reads on that cadence
-// and shows the error state once a minute has passed with no good read.
+// The helper refreshes the lists every 12 s; since app-console-429 it answers its last good read, dated by as_of_ms, on a
+// 200 however old it is, and never a 503 once it has one. So the screen reads on that cadence, draws the list's age once
+// its read is older than 60 s (model.ts listAge, card app-list-age), and on a failed re-read keeps the lists only while
+// their own read is at most 60 s old (keepOnFail), else shows the error state.
 import { HELPER_FETCH_INIT } from "@blindfill/kit";
 import { useCallback, useEffect, useState } from "react";
 import type { DiscoverData } from "./Discover.tsx";
@@ -32,25 +34,32 @@ export async function readLists(fetchFn: typeof fetch = fetch): Promise<MarketSn
   return { chain: "solana", as_of_ms: body.as_of_ms, lists: lists as unknown as MarketSnapshot["lists"] };
 }
 
+/** A failed re-read keeps the lists while their own read time (as_of_ms) is at most STALE_MS old; with none, it does not. */
+export const keepOnFail = (asOfMs: number | null, nowMs: number): boolean => asOfMs !== null && nowMs - asOfMs <= STALE_MS;
+
 /** The data and the clock for Discover: loading until the first read, then the lists, re-read every 12 s. A failed
- *  re-read keeps the last good lists until they are 60 s old; `retry` reads again from the loading state. */
+ *  re-read keeps the last good lists while their own read is at most 60 s old; `retry` reads again from the loading state. */
 export function useDiscoverData(): { data: DiscoverData; nowMs: number; retry: () => void } {
   const [data, setData] = useState<DiscoverData>({ status: "loading" });
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
-    let lastGood = 0;
+    let asOf: number | null = null;
     const read = () =>
       readLists().then(
         (snapshot) => {
           if (!live) return;
-          lastGood = Date.now();
-          setNowMs(lastGood);
+          asOf = snapshot.as_of_ms;
+          setNowMs(Date.now());
           setData({ status: "ready", snapshot });
         },
         () => {
-          if (live && Date.now() - lastGood > STALE_MS) setData({ status: "error" });
+          if (!live) return;
+          const now = Date.now();
+          // the clock moves on a failed read too, so a kept list's age keeps counting
+          setNowMs(now);
+          if (!keepOnFail(asOf, now)) setData({ status: "error" });
         },
       );
     void read();

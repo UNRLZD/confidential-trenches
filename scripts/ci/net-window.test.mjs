@@ -23,6 +23,7 @@ export const CHANGED = [
   "scripts/live-checks/app-console-429.mjs",
   "scripts/live-checks/app-harness-signin-e2e.mjs",
   "scripts/live-checks/app-host-gate.mjs",
+  "scripts/live-checks/app-list-age.mjs",
   "scripts/live-checks/app-release-sri.mjs",
   "scripts/live-checks/app-shell.mjs",
   "scripts/live-checks/app-token-chart.mjs",

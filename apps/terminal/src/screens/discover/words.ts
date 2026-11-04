@@ -16,6 +16,7 @@ export interface Word {
 }
 
 const ok = (text: string, source: string): Word => ({ text, source, draft: false });
+const draft = (text: string, source: string): Word => ({ text, source, draft: true });
 
 export const WORDS = {
   discover: ok("Discover", "R5 app.js nav (S1 top bar) and discover-1440.html title"),
@@ -37,9 +38,14 @@ export const WORDS = {
   noTokens: ok("No tokens", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S5.3 Empty [draft copy: No tokens]"),
   offline: ok("Offline", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S5.5 Offline [draft copy: Offline]"),
   loading: ok("Loading", "owner 1 Nov 16:45Z, keep; drafted from S5.1 skeleton rows: the list's accessible name only (never drawn)"),
+  // {age} is data (listAge: 1m, 12m, 2h, 3d); the owner's pick changes only the words around it
+  updated: draft("Updated {age} ago", "board/words-pending.json, card app-list-age: Discover's list header, right side, muted, only when the helper's list is older than 60 s"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
 
 /** The words still waiting for the owner's pick. */
 export const DRAFTS = (Object.keys(WORDS) as WordId[]).filter((k) => WORDS[k].draft);
+
+/** The list's age line: the `updated` words with the age in them. */
+export const ageLine = (age: string): string => WORDS.updated.text.replace("{age}", age);

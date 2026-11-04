@@ -38,6 +38,8 @@ const SHOTS_LIST = [
   { id: "S5.1-loading", f: "loading", expect: (w) => `${box(w)} [data-state="S5.1"]` },
   { id: "S5.3-empty", f: "empty", expect: (w) => `${box(w)} [data-state="S5.3"]` },
   { id: "S5.5-offline", f: "error", expect: (w) => `${box(w)} [data-state="S5.5"] .dsc-retry` },
+  // card app-list-age: lists from a read 2 h old draw their age in the bar, and the rows as ever
+  { id: "S5.2-old", f: "old", expect: () => '[data-testid="list-age"]' },
 ];
 
 async function build() {
@@ -105,6 +107,10 @@ try {
         const wide = await page.$$eval(`${box(w.name)} [role="listitem"]`, (els) => els.filter((e) => e.getClientRects().length && e.scrollWidth > e.clientWidth + 1).map((e) => e.getAttribute("data-token")));
         check(wide.length === 0, `${tag}: rows wider than their column: ${wide.join(" ")}`);
         check((await page.locator(".dsc img:not(.tok-pb img):not(.tok-cb img)").count()) === 0, `${tag}: token text drew an element`);
+        // the list's age: "Updated 2h ago" on the 2 h old read, nothing on a fresh one (card app-list-age)
+        const ages = await page.$$eval('[data-testid="list-age"]', (els) => els.filter((e) => e.getClientRects().length).map((e) => e.textContent.trim()));
+        const wantAge = s.f === "old" ? ["Updated 2h ago"] : [];
+        check(JSON.stringify(ages) === JSON.stringify(wantAge), `${tag}: list age ${JSON.stringify(ages)}, want ${JSON.stringify(wantAge)}`);
         // every row: its launchpad's logo badge (none for null or an unknown id), its chain's mark, no raw id, not cut
         if (s.f === "rows" || s.f === "edges") {
           await page.evaluate(() => Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; })))));
