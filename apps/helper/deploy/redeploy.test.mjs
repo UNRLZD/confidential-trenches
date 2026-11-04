@@ -53,7 +53,8 @@ function server() {
   // --no-recreate: `compose ps -q helper` prints the running ids, `-a` every id, `--status <s>` (any number) those in one
   // of the statuses; `compose up --scale helper=<n>` first starts the stopped containers it counts (as compose does),
   // then adds new-<k> from ct-helper:$HELPER_COMMIT until there are n, and with no --scale adds one; it exits 1 after
-  // that when STUB_READY=0 (compose does the same when --wait times out). STUB_ADD=0 makes it add none and STUB_IMAGE
+  // that when STUB_READY=0 (compose does the same when --wait times out). `compose run` (the settings check) exits 2 when
+// STUB_ENV=1. STUB_ADD=0 makes it add none and STUB_IMAGE
   // names the image it adds. `inspect -f <fmt> <id>` prints the id's image; `stop -t <s> <id>` leaves it exited;
   // `rm [-f] <id>` takes it out. Every call is logged as "<cwd>|<args>|<HELPER_COMMIT>|<HELPER_RELEASE>".
   const state = path.join(dir, "containers");
@@ -77,6 +78,7 @@ case "$1 $2" in
     elif [ $all = 1 ]; then awk '{ print $1 }' "$S"
     else awk '$2 == "running" { print $1 }' "$S"; fi ;;
   "compose build") ;;
+  "compose run") [ "\${STUB_ENV:-0}" = 0 ] || { echo "helper env: POOL_EVM_ADDRESS_BASE_SEPOLIA must be an address" >&2; exit 2; } ;;
   "compose up")
     want=$(echo "$*" | sed -n 's/.*--scale helper=\\([0-9]*\\).*/\\1/p')
     if [ -n "$want" ]; then
@@ -410,6 +412,23 @@ test("a new helper that never gets ready: the deploy fails naming the bound, the
     assert.deepEqual(s.running(), ["old-1"], "the old one still runs, the new one is gone");
   } finally {
     s.done();
+  }
+});
+
+test("the new image's pool senders' settings check refuses (a half set): the redeploy fails after the build, starts no helper and never stops or removes the old one", () => {
+  const t = server();
+  try {
+    t.seed("old-1");
+    const r = t.runWith({ STUB_ENV: "1" }, t.B);
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /refuses its pool senders' settings/);
+    const calls = t.docker().map((l) => l.split("|")[1]);
+    const check = calls.findIndex((c) => c === "compose run --rm --no-deps -T helper node src/env-check.ts");
+    assert.ok(check > calls.indexOf("compose build helper"), calls.join("\n"));
+    assert.ok(!calls.some((c) => c.startsWith("compose up") || c.startsWith("stop") || c.startsWith("rm")), calls.join("\n"));
+    assert.deepEqual(t.running(), ["old-1"]);
+  } finally {
+    t.done();
   }
 });
 

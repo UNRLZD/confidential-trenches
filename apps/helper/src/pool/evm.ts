@@ -88,8 +88,9 @@
 //   rate_limited (429) the sell lane's queue is full; or the unpaid gas held against W, the client, the token (each
 //                    EVM_SELL_UNPAID_CAP_WEI) or the sender's whole sell budget (EVM_SELL_UNPAID_BUDGET_WEI) in the
 //                    window would pass its cap with this sale's worst cost, each with Retry-After until the oldest
-//                    leaves it; a caller (W or client) whose own sale landed and paid in the window is held only by
-//                    its own W and client caps, never by the token's or the budget. Withdraws are never held by these;
+//                    leaves it; a caller (W or client) whose own sale landed and paid in the window is held by its own
+//                    W and client caps and the budget, never by the token's, so unpaid gas never passes the budget.
+//                    Withdraws are never held by these;
 //   in_flight (429)  as the withdraw: one held limit per client across both routes.
 // The send: from the sell sender's own key (never the withdraw sender's) on its own queue and nonce lane; gas exactly
 // EVM_POOL_SELL_GAS and maxPriorityFeePerGas exactly the kit's evmPoolSellTip (pins the device's sim copies, never
@@ -101,12 +102,17 @@
 // the providers' own reads (a receipt with status 0 on either, or once now is past its deadline plus
 // EVM_SELL_DROP_MARGIN_MS no transaction on either): then (W, nonce) is free for a new send, as often as W's unpaid cap
 // allows. A refused sell frees it at once.
-// The nonce lanes (withdraw and sell alike): neither leaves a nonce no transaction holds. Each send reads its sender's
-// pending count on both providers, the higher; while that count stays below the lane's next nonce for longer than
-// EVM_SELL_DROP_MARGIN_MS since the lane's send at it, no provider holds a tx there, so the send takes that nonce. Each
-// send's receipt is read in the background, from EVM_SELL_RECEIPT_POLL_MS doubling to 15 times it: a send still
-// unmined past its deadline plus the margin is replaced at its own nonce by a 0-value transfer to the sender itself,
-// its fee fields raised a tenth over the send's, and a hole with no send waiting to fill it is filled the same way.
+// The nonce lanes (withdraw and sell alike): neither leaves a nonce no transaction holds, and no one provider moves a
+// lane. Each send reads its sender's pending count on both providers: it goes at the lower count when that is at or past
+// the lane's next nonce; it fills a hole, the higher count when that is below the lane's next nonce, only once the
+// lane's send there (if any) is older than EVM_SELL_DROP_MARGIN_MS and neither provider returns it by hash; else at the
+// next nonce. A nonce is mined once both latest counts pass it. Each send's receipt is read in the background, from
+// EVM_SELL_RECEIPT_POLL_MS doubling to 15 times it, on both providers: a send still unmined past its deadline plus the
+// margin is replaced once at its own nonce, whatever its price, by a 0-value transfer to the sender itself (gas
+// EVM_SELF_TRANSFER_GAS, with the L1 poster's gas on Robinhood), its fee fields raised a tenth over the send's and to
+// at least 2 x base + tip, never over EVM_SELL_MAX_FEE_PER_GAS; a replacement is raised again only once 2 x base + tip
+// passes its maxFeePerGas, and a hole is filled the same way. Each watch ends at its bound (EVM_LANE_WATCH_MS) with
+// one log line, and while the lane's lowest unmined send is past it new sends answer 503 with Retry-After.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
@@ -339,6 +345,16 @@ export const EVM_SELL_UNPAID_BUDGET_WEI = 10n ** 16n;
  * EVM_POOL_SELL_GAS, so one value serves both].
  */
 export const EVM_SELL_MAX_FEE_PER_GAS = EVM_SELL_UNPAID_CAP_WEI / EVM_POOL_SELL_GAS;
+/**
+ * How long a lane's send is watched past its deadline plus the send margin; a watch that reaches it ends with one log
+ * line, and while the lane's lowest unmined send is past it the lane answers every new send 503 upstream with
+ * Retry-After EVM_LANE_RETRY_S, since a send behind it could not be mined [design: a proof's life, 10 minutes, past the
+ * one replacement and its raises].
+ */
+export const EVM_LANE_WATCH_MS = 600_000;
+export const EVM_LANE_RETRY_S = 60;
+/** A 0-value transfer's gas: 21,000 (OP Stack, Base); on Arbitrum (Robinhood) the L1 poster's gas is added to it. */
+export const EVM_SELF_TRANSFER_GAS = 21_000n;
 /** The first wait before a sent transaction's receipt is read, doubling each read up to EVM_RECEIPT_POLL_BACKOFF times
  *  it (2 s to 30 s), until its deadline plus the send margin [design: about a block on Base, then a few reads a minute]. */
 export const EVM_SELL_RECEIPT_POLL_MS = 2_000;
@@ -395,7 +411,8 @@ export type EvmRpc = (method: string, params: readonly unknown[]) => Promise<unk
 export type PoolEvmCode =
   | "bad_shape" | "not_pool" | "fee_recipient" | "fee_off" | "fee_over_cap" | "epoch_off" | "deadline_near" | "reverted" | "recipient_code" | "simulation_failed" | "fee_stale" | "rate_limited" | "in_flight" | "upstream"
   | "bad_authorization" | "bad_signature" | "deadline_far" | "auth_nonce" | "fee_low" | "bad_route" | "not_configured";
-/** `retryAfterS` on a 429 only: the whole seconds the route names in Retry-After. */
+/** `retryAfterS` on a 429, and on the 503 of a lane held behind an unmined send: the whole seconds the route names in
+ *  Retry-After. */
 export type PoolEvmAnswer = { status: number; body: { hash: string } | { error: { code: PoolEvmCode; detail?: string } }; retryAfterS?: number };
 /** `sell_sender`: the sell sender's address, which a sale's fee is paid to and the device's sim runs from (the kit pins
  *  it), or null where no sell key is set (every sell refused not_configured). */
@@ -476,16 +493,22 @@ export function evmPoolSender(
   let chainId: Promise<bigint> | null = null;
   // one lane per key: its queue (each send waits for the one before it), its next nonce, and each of its own sends not
   // yet seen mined, by nonce: when it was sent, the time past which it is stuck, its fee fields
-  type Sent = { at: number; stuckAfter: number; maxFee: bigint; tip: bigint };
-  // (`ceilingSaid`: the lane has logged a replacement held over EVM_SELL_MAX_FEE_PER_GAS since its last one went)
-  type Lane = { queue: Promise<unknown>; waiting: number; nextNonce: bigint; from: string; key: Uint8Array | undefined; sent: Map<bigint, Sent>; tending: boolean; ceilingSaid: boolean };
-  const laneOf = (from: string, key: Uint8Array | undefined): Lane => ({ queue: Promise.resolve(), waiting: 0, nextNonce: -1n, from, key, sent: new Map(), tending: false, ceilingSaid: false });
+  // (`bound`: its watch's end; `replacement`: one of the lane's own 0-value transfers)
+  type Sent = { at: number; stuckAfter: number; bound: number; maxFee: bigint; tip: bigint; hash: string; replacement: boolean };
+  // (`ceilingSaid`, `failSaid`: the lane has logged a replacement held over EVM_SELL_MAX_FEE_PER_GAS, or a tend that
+  // failed, since its last replacement went or its last tend ran through)
+  type Lane = { queue: Promise<unknown>; waiting: number; nextNonce: bigint; from: string; key: Uint8Array | undefined; sent: Map<bigint, Sent>; tending: boolean; ceilingSaid: boolean; failSaid: boolean };
+  const laneOf = (from: string, key: Uint8Array | undefined): Lane => ({ queue: Promise.resolve(), waiting: 0, nextNonce: -1n, from, key, sent: new Map(), tending: false, ceilingSaid: false, failSaid: false });
+  /** The hashes of the lanes' sends a replacement took the nonce of, the oldest dropped first: each is ended. */
+  const superseded = new Set<string>();
   const log = cfg.log ?? ((line: string) => console.log(`helper: ${line}`));
   const withdrawLane = laneOf(sender, cfg.senderKey);
   const sellLane = laneOf(sellSender ?? sender, cfg.sellKey);
   const once = oncePerNullifier<PoolEvmAnswer>(cfg.memory);
   /** Each remembered send's epoch, so a revert is held against the epoch whose proof reverted. */
   const sentIn = new WeakMap<Promise<PoolEvmAnswer>, number>();
+  /** Each remembered send's deadline (ms), so a repeat can tell a dropped withdraw from a waiting one. */
+  const sentDeadline = new WeakMap<Promise<PoolEvmAnswer>, number>();
   /** `${epoch}:${nullifier}` of every send that reverted on chain, the oldest dropped first (M356 (1)). */
   const reverted = new Set<string>();
   const revertMemory = cfg.memory ?? POOL_SEND_MEMORY;
@@ -515,11 +538,11 @@ export function evmPoolSender(
   /** The 429 a sale would get with `extra` wei more held against `keys`, or null when every key stays within its cap. */
   const overCap = (keys: readonly string[], extra: bigint): PoolEvmAnswer | null => {
     const t = now();
-    // a caller whose own sale landed and paid in the window is held by its own W and client caps only: strangers'
-    // reverts spending the token's cap or the sender's budget never refuse it
+    // a caller whose own sale landed and paid in the window is not held by the token's cap (strangers' reverts on its
+    // token never refuse it); its own W and client caps and the sender's whole budget hold it as they hold every sale
     const known = keys.some((k) => (k.startsWith("w:") || k.startsWith("c:")) && (paid.get(k) ?? -Infinity) > t - EVM_SELL_UNPAID_WINDOW_MS);
     for (const k of keys) {
-      if (known && (k === "all" || k.startsWith("t:"))) continue;
+      if (known && k.startsWith("t:")) continue;
       const l = live(k, t);
       const cap = k === "all" ? EVM_SELL_UNPAID_BUDGET_WEI : EVM_SELL_UNPAID_CAP_WEI;
       const sum = l.reduce((x, c) => x + c.wei, 0n);
@@ -626,28 +649,37 @@ export function evmPoolSender(
     if (w.fee > w.feeCap) return no(422, "fee_over_cap", `fee ${w.fee}, cap ${w.feeCap}`);
     // one send per nullifier (./once.ts): a repeat gets the first hash; a repeat after that send reverted on chain is
     // refused, and its epoch is remembered so that release is never sent again (M356 (1))
+    // refused, and its epoch is remembered so that release is never sent again (M356 (1)); a repeat after that send was
+    // dropped (no receipt and no transaction on either provider past its deadline plus the margin) or replaced (the
+    // lane's 0-value transfer took its nonce) frees the nullifier, as a dropped sale frees its (W, Sell nonce)
     const prior = once.get(w.nullifier);
     if (prior) {
       const first = await prior;
       const hash = (first.body as { hash?: string }).hash;
-      const rc = hash ? await a("eth_getTransactionReceipt", [hash]).catch(() => null) : null;
-      if ((rc as { status?: unknown } | null)?.status !== "0x0") return first;
-      const was = sentIn.get(prior) ?? epoch;
-      reverted.add(`${was}:${w.nullifier}`);
-      while (reverted.size > revertMemory) reverted.delete(reverted.values().next().value as string);
-      once.forget(w.nullifier, prior);
-      if (was === epoch) return no(422, "reverted");
+      if (hash === undefined) return first;
+      const end = await sendEnded(hash, sentDeadline.get(prior) ?? 0);
+      if (end === "waiting") return first;
+      if (end === "reverted") {
+        const was = sentIn.get(prior) ?? epoch;
+        reverted.add(`${was}:${w.nullifier}`);
+        while (reverted.size > revertMemory) reverted.delete(reverted.values().next().value as string);
+        once.forget(w.nullifier, prior);
+        if (was === epoch) return no(422, "reverted");
+      } else once.forget(w.nullifier, prior);
     }
     const entry = once.run(w.nullifier, () => enqueue(withdrawLane, () => simulateSignSend(data, bytes, w)));
     sentIn.set(entry, epoch);
+    if (!sentDeadline.has(entry)) sentDeadline.set(entry, Number(w.deadlineMs));
     return entry;
   };
   async function simulateSignSend(data: string, bytes: Uint8Array, w: EvmWithdraw): Promise<PoolEvmAnswer> {
     // the deadline again after the queue's wait: a send that waited past the margin would pay for the pool's revert
     if (Number(w.deadlineMs) < now() + EVM_POOL_SEND_MARGIN_MS) return no(422, "deadline_near", `deadline ${w.deadlineMs}, now ${now()} after the queue`);
     const call = { from: sender, to: pool, data, value: "0x0" };
-    let id: bigint, base: bigint, tip: bigint, pending: bigint;
+    let id: bigint, base: bigint, tip: bigint, pa: bigint, pb: bigint;
     try {
+      const stuck = await laneHeld(withdrawLane);
+      if (stuck !== null) return stuck;
       id = await chain();
       // a recipient with code could revert the pool's push after the simulation: refused on either provider, at
       // pending and at latest; any answer but "0x" (an EIP-7702 delegation is 0xef0100 + an address) is code
@@ -656,7 +688,7 @@ export function evmPoolSender(
       const [block, t, n, m] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), a("eth_getTransactionCount", [sender, "pending"]), b("eth_getTransactionCount", [sender, "pending"])]);
       base = qty((block as { baseFeePerGas?: unknown })?.baseFeePerGas);
       tip = qty(t);
-      pending = higher(qty(n), qty(m));
+      [pa, pb] = [qty(n), qty(m)];
     } catch (e) {
       return unread(e);
     }
@@ -681,13 +713,13 @@ export function evmPoolSender(
     } catch (e) {
       return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : unread(e);
     }
-    const nonce = nonceFor(withdrawLane, pending);
+    const nonce = await nonceFor(withdrawLane, pa, pb);
     const { raw, hash } = signEvmTx({ chainId: id, nonce, maxPriorityFeePerGas, maxFeePerGas, gas, to: pool, data: bytes }, cfg.senderKey);
     const sent = await Promise.allSettled([a("eth_sendRawTransaction", [`0x${hex(raw)}`]), b("eth_sendRawTransaction", [`0x${hex(raw)}`])]);
     const why = sent.flatMap((s) => (s.status === "rejected" ? [s.reason as unknown] : []));
     if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
     const until = Number(w.deadlineMs) + EVM_POOL_SEND_MARGIN_MS;
-    sentAt(withdrawLane, nonce, until, maxFeePerGas, maxPriorityFeePerGas);
+    sentAt(withdrawLane, nonce, until, maxFeePerGas, maxPriorityFeePerGas, hash, false);
     watch(withdrawLane, nonce, hash, until);
     return { status: 200, body: { hash } };
   }
@@ -752,130 +784,200 @@ export function evmPoolSender(
     if (prior) {
       const first = await prior;
       const hash = (first.body as { hash?: string }).hash;
-      if (hash === undefined || !(await sellEnded(hash, sellDeadline.get(prior) ?? 0n))) return first;
+      if (hash === undefined || (await sendEnded(hash, Number(sellDeadline.get(prior) ?? 0n) * 1000)) === "waiting") return first;
       if (sells.get(key) === prior) sells.forget(key, prior);
     }
     const entry = sells.run(key, () => enqueue(sellLane, () => sellSend(w, data, bytes, s, auth, sellChain, sellVenue, sellDelegate, sellKey, sellSender, keys)));
     if (!sellDeadline.has(entry)) sellDeadline.set(entry, s.deadline);
     return entry;
   };
-  /** True when the sale `hash` ended without landing: a receipt with status 0 on either provider, or no transaction on
-   *  either once now is past the Sell's deadline plus EVM_SELL_DROP_MARGIN_MS. A read that fails, a success or a sale
-   *  still waiting: false. */
-  async function sellEnded(hash: string, deadlineS: bigint): Promise<boolean> {
+  /** How the send `hash` (a sale or a withdraw, its deadline `deadlineMs`) ended: "reverted", a receipt with status 0
+   *  on either provider; "dropped", the lane's replacement took its nonce, or no receipt and no transaction on either
+   *  once now is past the deadline plus EVM_SELL_DROP_MARGIN_MS; else "waiting" (a read that fails, a success, a send
+   *  still pending). */
+  async function sendEnded(hash: string, deadlineMs: number): Promise<"reverted" | "dropped" | "waiting"> {
     const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);
     const status = rc.map((x) => (x.status === "fulfilled" && x.value !== null && typeof x.value === "object" ? evmRpcHex((x.value as { status?: unknown }).status) : undefined));
-    if (status.includes("0x1")) return false;
-    if (status.includes("0x0")) return true;
-    if (rc.some((x) => x.status === "rejected" || x.value !== null)) return false;
-    if (BigInt(Math.floor(now())) <= deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;
+    if (status.includes("0x1")) return "waiting";
+    if (status.includes("0x0")) return "reverted";
+    if (superseded.has(hash)) return "dropped";
+    if (rc.some((x) => x.status === "rejected" || x.value !== null)) return "waiting";
+    if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return "waiting";
     const tx = await Promise.allSettled([a("eth_getTransactionByHash", [hash]), b("eth_getTransactionByHash", [hash])]);
-    return tx.every((x) => x.status === "fulfilled" && x.value === null);
+    return tx.every((x) => x.status === "fulfilled" && x.value === null) ? "dropped" : "waiting";
   }
   const higher = (x: bigint, y: bigint) => (x > y ? x : y);
-  /**
-   * The nonce a lane's next send takes, from its sender's pending count on both providers, the higher (card
-   * helper-evm-sender fold 2: no nonce is left that no tx holds): the count when it is at or past the lane's next nonce;
-   * below it, the count's own nonce once the lane's send there is older than EVM_SELL_DROP_MARGIN_MS (no provider holds a
-   * tx at it: it was dropped), else the next nonce (a send that young may not have reached the providers yet).
-   */
-  const nonceFor = (lane: Lane, pending: bigint): bigint => {
-    if (pending >= lane.nextNonce) return pending;
-    const at = lane.sent.get(pending)?.at;
-    return at === undefined || now() - at > EVM_SELL_DROP_MARGIN_MS ? pending : lane.nextNonce;
+  const lower = (x: bigint, y: bigint) => (x < y ? x : y);
+  /** The lane's sender's pending and latest counts on both providers. */
+  const countsOf = async (lane: Lane) => {
+    const [pa, la, pb, lb] = await Promise.all([a, b].flatMap((r) => ["pending", "latest"].map(async (at) => qty(await r("eth_getTransactionCount", [lane.from, at])))));
+    return { pa: pa!, pb: pb!, la: la!, lb: lb! };
   };
+  /** Drops the lane's records below `mined`, the lower latest count: a nonce is mined only once both providers pass it. */
+  const prune = (lane: Lane, mined: bigint): void => {
+    for (const n of [...lane.sent.keys()]) if (n < mined) lane.sent.delete(n);
+  };
+  /** The lane's lowest record, its lowest unmined send once pruned. */
+  const lowestOf = (lane: Lane): [bigint, Sent] | undefined => {
+    let low: [bigint, Sent] | undefined;
+    for (const e of lane.sent) if (low === undefined || e[0] < low[0]) low = e;
+    return low;
+  };
+  /**
+   * The lane's lowest nonce no tx holds, or null (card helper-evm-sender fold 4): the higher of the two pending counts,
+   * when it is below the lane's next nonce (both providers count no tx there), and the lane's send there, if any, is older
+   * than EVM_SELL_DROP_MARGIN_MS and neither provider returns it by hash (as a dropped sale is read).
+   */
+  async function holeOf(lane: Lane, pa: bigint, pb: bigint): Promise<bigint | null> {
+    const n = higher(pa, pb);
+    if (n >= lane.nextNonce) return null;
+    const x = lane.sent.get(n);
+    if (x === undefined) return n;
+    if (now() - x.at <= EVM_SELL_DROP_MARGIN_MS) return null;
+    const seen = await Promise.allSettled([a("eth_getTransactionByHash", [x.hash]), b("eth_getTransactionByHash", [x.hash])]);
+    return seen.every((y) => y.status === "fulfilled" && y.value === null) ? n : null;
+  }
+  /**
+   * The nonce a lane's next send takes, from its sender's pending counts on both providers (no nonce is left that no tx
+   * holds, and no one provider moves the lane): the lower count when it is at or past the lane's next nonce; else the
+   * lane's hole (holeOf); else the next nonce.
+   */
+  async function nonceFor(lane: Lane, pa: bigint, pb: bigint): Promise<bigint> {
+    const lo = lower(pa, pb);
+    if (lo >= lane.nextNonce) return lo;
+    return (await holeOf(lane, pa, pb)) ?? lane.nextNonce;
+  }
   /** A send at `nonce` that a provider took: the lane's next nonce past it, and its record. */
-  const sentAt = (lane: Lane, nonce: bigint, stuckAfter: number, maxFee: bigint, tip: bigint): void => {
+  const sentAt = (lane: Lane, nonce: bigint, stuckAfter: number, maxFee: bigint, tip: bigint, hash: string, replacement: boolean): void => {
     if (nonce + 1n > lane.nextNonce) lane.nextNonce = nonce + 1n;
-    lane.sent.set(nonce, { at: now(), stuckAfter, maxFee, tip });
+    lane.sent.set(nonce, { at: now(), stuckAfter, bound: stuckAfter + EVM_LANE_WATCH_MS, maxFee, tip, hash, replacement });
     while (lane.sent.size > revertMemory) lane.sent.delete(lane.sent.keys().next().value as bigint);
   };
-  /** One tend of the lane, queued behind its sends; a tend already queued answers every ask until it runs. */
+  /** 503 upstream with Retry-After EVM_LANE_RETRY_S while the lane's lowest unmined send (on both providers' latest
+   *  counts, read only once a record is past its bound) is past its watch's bound; else null. */
+  async function laneHeld(lane: Lane): Promise<PoolEvmAnswer | null> {
+    if (![...lane.sent.values()].some((x) => now() > x.bound)) return null;
+    const c = await countsOf(lane);
+    prune(lane, lower(c.la, c.lb));
+    const low = lowestOf(lane);
+    if (low === undefined || now() <= low[1].bound) return null;
+    return { ...no(503, "upstream", `the sender's nonce ${low[0]} is unmined past its watch`), retryAfterS: EVM_LANE_RETRY_S };
+  }
+  /** One tend of the lane, queued behind its sends; a tend already queued answers every ask until it runs. A tend that
+   *  fails logs once until one runs through. */
   const tend = (lane: Lane): void => {
     if (lane.tending || lane.key === undefined) return;
     lane.tending = true;
     lane.queue = lane.queue
       .then(() => tendNow(lane))
-      .catch(() => {})
+      .then(
+        () => {
+          lane.failSaid = false;
+        },
+        (e: unknown) => {
+          if (!lane.failSaid) log(`evm ${cfg.network}: ${lane.from}'s tend failed: ${String((e as Error | undefined)?.message ?? e).slice(0, 200)}`);
+          lane.failSaid = true;
+        },
+      )
       .finally(() => {
         lane.tending = false;
       });
   };
   /**
-   * The lane's stuck sends and its hole, on both providers' counts, the higher of each: every one of its sends not mined
-   * (the latest count at or below its nonce) past its deadline plus the margin, and the lowest nonce no tx holds (the
-   * pending count below the lane's next nonce, the lane's send there older than the margin, no send waiting to take it),
-   * is sent again as a 0-value transfer to the sender itself. A stuck send is replaced only while it is stuck on price:
-   * its maxFeePerGas under 2 x the base fee (the providers' higher) + the tip (their higher eth_maxPriorityFeePerGas); one
-   * that covers it is left to be mined, and is never raised again. The replacement's tip is max(the old x 11/10 + 1, that
-   * tip), its maxFeePerGas max(the old x 11/10 + 1, 2 x base + its tip) (a node replaces a pending tx only for more than
-   * a tenth over), never over EVM_SELL_MAX_FEE_PER_GAS (over it nothing is sent and the lane logs once); its gas the
-   * providers' higher estimate + a fifth (on Robinhood the estimate holds the L1 poster's gas).
+   * One nonce of the lane sent again, as a 0-value transfer to the sender itself: its lowest unmined send (on both
+   * providers' latest counts) once past its deadline plus the margin, else its hole (holeOf). A send of the lane's own is
+   * replaced once whatever its price; a replacement is raised again only while stuck on price, its maxFeePerGas under 2 x
+   * the base fee (the providers' higher) + the tip (their higher eth_maxPriorityFeePerGas). The new tip is max(the old x
+   * 11/10 + 1, that tip), the new maxFeePerGas max(the old x 11/10 + 1, 2 x base + the new tip) (a node replaces a pending
+   * tx only for more than a tenth over), never over EVM_SELL_MAX_FEE_PER_GAS (over it nothing is sent and the lane logs
+   * once). Its gas is EVM_SELF_TRANSFER_GAS, and on Arbitrum (Robinhood) the L1 poster's gas too: the kit's chain fee
+   * read (ArbGasInfo) on both providers, the higher, over the lower base fee, plus a fifth (the estimate moves between the
+   * read and the block). A replacement both providers refuse fails the tend.
    */
   async function tendNow(lane: Lane): Promise<void> {
     const key = lane.key!;
-    const [pa, la, pb, lb] = await Promise.all([a, b].flatMap((r) => ["pending", "latest"].map(async (at) => qty(await r("eth_getTransactionCount", [lane.from, at])))));
-    const pending = higher(pa!, pb!);
-    const mined = higher(la!, lb!);
-    for (const n of [...lane.sent.keys()]) if (n < mined) lane.sent.delete(n);
-    const t = now();
-    const at = new Set<bigint>();
-    const hole = lane.sent.get(pending);
-    const holed = pending < lane.nextNonce && lane.waiting === 0 && (hole === undefined || t - hole.at > EVM_SELL_DROP_MARGIN_MS);
-    if (holed) at.add(pending);
-    for (const [n, x] of lane.sent) if (t > x.stuckAfter) at.add(n);
-    if (at.size === 0) return;
-    const id = await chain();
-    const self = { from: lane.from, to: lane.from, value: "0x0" };
-    const [ba, bb, ta, tb, ga, gb] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), b("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), b("eth_maxPriorityFeePerGas", []), a("eth_estimateGas", [self, "pending"]), b("eth_estimateGas", [self, "pending"])]);
-    const base = higher(qty((ba as { baseFeePerGas?: unknown } | null)?.baseFeePerGas), qty((bb as { baseFeePerGas?: unknown } | null)?.baseFeePerGas));
-    const tipNow = higher(qty(ta), qty(tb));
-    const gas = (higher(qty(ga), qty(gb)) * 12n) / 10n;
-    const raise = (v: bigint) => (v * 11n) / 10n + 1n;
-    for (const n of [...at].sort((x, y) => (x < y ? -1 : 1))) {
-      const old = lane.sent.get(n);
-      // a stuck send that covers 2 x base + tip is not stuck on price: left to be mined (a hole is filled at any price)
-      if (!(holed && n === pending) && old !== undefined && old.maxFee >= 2n * base + tipNow) continue;
-      const tip = old === undefined ? tipNow : higher(tipNow, raise(old.tip));
-      const maxFee = higher(2n * base + tip, old === undefined ? 0n : raise(old.maxFee));
-      if (maxFee > EVM_SELL_MAX_FEE_PER_GAS) {
-        if (!lane.ceilingSaid) log(`evm ${cfg.network}: ${lane.from}'s nonce ${n} is not replaced: its fee ${maxFee} wei per gas is over EVM_SELL_MAX_FEE_PER_GAS ${EVM_SELL_MAX_FEE_PER_GAS} (base fee ${base})`);
-        lane.ceilingSaid = true;
-        continue;
-      }
-      const { raw, hash } = signEvmTx({ chainId: id, nonce: n, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gas, to: lane.from, data: new Uint8Array() }, key);
-      const sent = await Promise.allSettled([a("eth_sendRawTransaction", [`0x${hex(raw)}`]), b("eth_sendRawTransaction", [`0x${hex(raw)}`])]);
-      if (sent.every((x) => x.status === "rejected")) continue;
-      lane.ceilingSaid = false;
-      const until = now() + EVM_SELL_DROP_MARGIN_MS;
-      sentAt(lane, n, until, maxFee, tip);
-      watch(lane, n, hash, until);
+    const { pa, pb, la, lb } = await countsOf(lane);
+    prune(lane, lower(la, lb));
+    const low = lowestOf(lane);
+    let n: bigint | null = null;
+    let old: Sent | undefined;
+    const stuck = low !== undefined && now() > low[1].stuckAfter;
+    if (stuck) [n, old] = low!;
+    else {
+      n = await holeOf(lane, pa, pb);
+      old = n === null ? undefined : lane.sent.get(n);
     }
+    if (n === null) return;
+    const [ba, bb, ta, tb] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), b("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), b("eth_maxPriorityFeePerGas", [])]);
+    const [xa, xb] = [qty((ba as { baseFeePerGas?: unknown } | null)?.baseFeePerGas), qty((bb as { baseFeePerGas?: unknown } | null)?.baseFeePerGas)];
+    const base = higher(xa, xb);
+    const tipNow = higher(qty(ta), qty(tb));
+    // a replacement that covers 2 x base + tip is not stuck on price: left to be mined, never raised again
+    if (stuck && old!.replacement && old!.maxFee >= 2n * base + tipNow) return;
+    const raise = (v: bigint) => (v * 11n) / 10n + 1n;
+    const tip = old === undefined ? tipNow : higher(tipNow, raise(old.tip));
+    const maxFee = higher(2n * base + tip, old === undefined ? 0n : raise(old.maxFee));
+    if (maxFee > EVM_SELL_MAX_FEE_PER_GAS) {
+      if (!lane.ceilingSaid) log(`evm ${cfg.network}: ${lane.from}'s nonce ${n} is not replaced: its fee ${maxFee} wei per gas is over EVM_SELL_MAX_FEE_PER_GAS ${EVM_SELL_MAX_FEE_PER_GAS} (base fee ${base})`);
+      lane.ceilingSaid = true;
+      return;
+    }
+    const id = await chain();
+    let gas = EVM_SELF_TRANSFER_GAS;
+    if (POSTER_GAS_CHAINS.has(cfg.network)) {
+      const net = cfg.network as EvmPoolChain;
+      const txBytes = BigInt(evmTx4MaxLength({ chainId: id, nonce: n, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gas: 1n << 32n, to: lane.from, data: new Uint8Array(), authorizations: [] }));
+      const reads = evmPoolChainFeeReads(net, EVM_SELF_TRANSFER_GAS, txBytes);
+      const fees = await Promise.all([a, b].map(async (r) => evmPoolChainFee(net, txBytes, await Promise.all(reads.map(async (at) => {
+        const h = evmRpcHex(await r("eth_call", [at, "latest"]));
+        if (h === null || !/^0x[0-9a-f]{64}$/.test(h)) throw new Error("not a word");
+        return BigInt(h);
+      })))));
+      const l1 = higher(fees[0]!, fees[1]!);
+      const baseLow = lower(xa, xb);
+      if (l1 > 0n && baseLow === 0n) throw new Error("a base fee of 0 prices no poster gas");
+      const poster = l1 === 0n ? 0n : (l1 + baseLow - 1n) / baseLow;
+      gas += poster + (poster + 4n) / 5n;
+    }
+    const { raw, hash } = signEvmTx({ chainId: id, nonce: n, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gas, to: lane.from, data: new Uint8Array() }, key);
+    const sent = await Promise.allSettled([a("eth_sendRawTransaction", [`0x${hex(raw)}`]), b("eth_sendRawTransaction", [`0x${hex(raw)}`])]);
+    if (sent.every((x) => x.status === "rejected")) throw new Error(`both providers refused the replacement at nonce ${n}: ${String((sent[0] as PromiseRejectedResult).reason).slice(0, 120)}`);
+    lane.ceilingSaid = false;
+    if (old !== undefined) {
+      superseded.add(old.hash);
+      while (superseded.size > revertMemory) superseded.delete(superseded.values().next().value as string);
+    }
+    const until = now() + EVM_SELL_DROP_MARGIN_MS;
+    sentAt(lane, n, until, maxFee, tip, hash, true);
+    watch(lane, n, hash, until);
   }
   /**
    * Reads a lane's send's receipt on both providers in the background, first after cfg.receiptPollMs
-   * (EVM_SELL_RECEIPT_POLL_MS), the wait doubling to EVM_RECEIPT_POLL_BACKOFF times it, until `until`. A receipt ends it
-   * (`landed` reads it) and drops the send's record; a send unmined past the margin has its lane tended at each read
-   * (a hole behind it is filled), and past `until` it is read on, and its lane tended at each read (it is replaced when
-   * stuck on price and under the ceiling), while its record is still the lane's at its nonce: mined, or replaced, ends it.
+   * (EVM_SELL_RECEIPT_POLL_MS), the wait doubling to EVM_RECEIPT_POLL_BACKOFF times it. A receipt ends it (`landed` reads
+   * it) and drops the send's record; another send taking its nonce (a replacement) ends it; its bound (`until` +
+   * EVM_LANE_WATCH_MS) ends it with one log line. A send unmined past the margin has its lane tended at each read (a hole
+   * behind it is filled, it is replaced past `until`).
    */
   function watch(lane: Lane, nonce: bigint, hash: string, until: number, landed?: (r: Record<string, unknown>) => void): void {
     const first = cfg.receiptPollMs ?? EVM_SELL_RECEIPT_POLL_MS;
     const sent = now();
     const mine = lane.sent.get(nonce);
+    const bound = until + EVM_LANE_WATCH_MS;
     let every = first;
     const tick = async (): Promise<void> => {
       const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);
       const got = rc.flatMap((x) => (x.status === "fulfilled" && x.value !== null && typeof x.value === "object" ? [x.value as Record<string, unknown>] : []));
       if (got.length > 0) {
-        lane.sent.delete(nonce);
+        if (lane.sent.get(nonce) === mine) lane.sent.delete(nonce);
         landed?.(got.find((x) => evmRpcHex(x.status) === "0x0") ?? got[0]!);
         return;
       }
-      if (now() > until) {
-        tend(lane);
-        if (mine === undefined || lane.sent.get(nonce) !== mine) return;
-      } else if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);
+      if (mine === undefined || lane.sent.get(nonce) !== mine) return;
+      if (now() > bound) {
+        log(`evm ${cfg.network}: ${lane.from}'s nonce ${nonce} (${hash}) is unmined past its watch; new sends wait for it`);
+        return;
+      }
+      if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);
       every = Math.min(every * 2, first * EVM_RECEIPT_POLL_BACKOFF);
       setTimeout(() => void tick(), every).unref?.();
     };
@@ -906,8 +1008,10 @@ export function evmPoolSender(
     if (s.deadline * 1000n < BigInt(Math.floor(now())) + BigInt(EVM_POOL_SEND_MARGIN_MS)) return no(422, "deadline_near", `deadline ${s.deadline} s, now ${now()} ms after the queue`);
     const gas = EVM_POOL_SELL_GAS;
     const tip = evmPoolSellTip(kitChain);
-    let id: bigint, base: bigint, baseLow: bigint, pending: bigint;
+    let id: bigint, base: bigint, baseLow: bigint, pa: bigint, pb: bigint;
     try {
+      const stuck = await laneHeld(sellLane);
+      if (stuck !== null) return stuck;
       id = await chain();
       if (id !== BigInt(venue.chainId)) return no(503, "upstream", `the providers name chain ${id}, not ${venue.chainId}`);
       const [ba, bb, wa, wb, n, m] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), b("eth_getBlockByNumber", ["latest", false]), a("eth_getTransactionCount", [w, "pending"]), b("eth_getTransactionCount", [w, "pending"]), a("eth_getTransactionCount", [from, "pending"]), b("eth_getTransactionCount", [from, "pending"])]);
@@ -916,11 +1020,11 @@ export function evmPoolSender(
       baseLow = x < y ? x : y;
       const [na, nb] = [qty(wa), qty(wb)];
       if (na !== auth.nonce || nb !== auth.nonce) return no(422, "auth_nonce", `W's pending nonce ${na} and ${nb}, the authorization's ${auth.nonce}`);
-      pending = higher(qty(n), qty(m));
+      [pa, pb] = [qty(n), qty(m)];
     } catch (e) {
       return unread(e);
     }
-    const nonce = nonceFor(sellLane, pending);
+    const nonce = await nonceFor(sellLane, pa, pb);
     const txAt = (maxFeePerGas: bigint): EvmTx4 => ({ chainId: id, nonce, maxPriorityFeePerGas: tip, maxFeePerGas, gas, to: w, data: bytes, authorizations: [auth] });
     // the chain fee (the kit's one definition, pool-fee.ts), for the longest this transaction can be (maxFeePerGas at
     // most fee / gas), on each provider, the higher of the two
@@ -965,7 +1069,7 @@ export function evmPoolSender(
     const why = sent.flatMap((x) => (x.status === "rejected" ? [x.reason as unknown] : []));
     if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
     const until = Number(s.deadline) * 1000 + EVM_POOL_SEND_MARGIN_MS;
-    sentAt(sellLane, nonce, until, maxFeePerGas, tip);
+    sentAt(sellLane, nonce, until, maxFeePerGas, tip, hash, false);
     watch(sellLane, nonce, hash, until, landedSale(charge(keys, worst), s.fee, keys));
     return { status: 200, body: { hash } };
   }

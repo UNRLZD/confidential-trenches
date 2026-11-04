@@ -12,9 +12,7 @@
 // authorization's address never equals undefined), the yParity and v range tests where only the detail differs (a
 // recovery id of 2 or more recovers no key), the body's and the decoder's two data size bounds (each holds without the
 // other), the % 32 length test (the word count test refuses the same), and either fee_low test without the other
-// (fee >= gas x (base + tip) + L1 exactly when (fee - L1) / gas >= base + tip; both are removed together below), and
-// a tend's "no send waiting" test on a hole (the tend runs on the lane's queue, so a send waiting behind it reads the
-// count the tend's transfer raised and takes the next nonce: the test saves one transfer, never a nonce).
+// (fee >= gas x (base + tip) + L1 exactly when (fee - L1) / gas >= base + tip; both are removed together below).
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -87,11 +85,11 @@ export const MUTANTS = [
   // the L1 bound read for the transaction's longest form (Base; ArbGasInfo's read takes no length, so on Robinhood the
   // bytes reach only evmPoolChainFee, which the poster fee mutant above holds)
   [EVM, "      const reads = evmPoolChainFeeReads(kitChain, gas, txBytes);", "      const reads = evmPoolChainFeeReads(kitChain, gas, 1n);", T, "a good sell:"],
-  [EVM, "      const fees = await Promise.all([a, b].map(", "      const fees = await Promise.all([a, a].map(", T, "the operator fee is in the bound"],
+  [EVM, "      const fees = await Promise.all([a, b].map(async (r) => {", "      const fees = await Promise.all([a, a].map(async (r) => {", T, "the operator fee is in the bound"],
   // the poster's gas inside the limit (Robinhood): the sim runs with what is left, at the lower base fee; none left refuses
   [EVM, 'const POSTER_GAS_CHAINS: ReadonlySet<string> = new Set(["robinhood", "robinhood-testnet"]);', "const POSTER_GAS_CHAINS: ReadonlySet<string> = new Set([]);", T, "Robinhood's L1 poster fee"],
   [EVM, "      baseLow = x < y ? x : y;", "      baseLow = x > y ? x : y;", T, "Robinhood's L1 poster fee"],
-  [EVM, "(l1 + baseLow - 1n) / baseLow", "l1 / baseLow", T, "Robinhood's L1 poster fee"],
+  [EVM, "(baseLow > 0n ? (l1 + baseLow - 1n) / baseLow", "(baseLow > 0n ? l1 / baseLow", T, "Robinhood's L1 poster fee"],
   [EVM, '    if (posterGas >= gas - EVM_7702_AUTH_GAS) return no(422, "simulation_failed"', '    if (false) return no(422, "simulation_failed"', T, "Robinhood's L1 poster fee"],
   [EVM, "gas: tag(gas - EVM_7702_AUTH_GAS - posterGas)", "gas: tag(gas - EVM_7702_AUTH_GAS)", T, "Robinhood's L1 poster fee"],
   [EVM, "big(1n), big(U256_MAX), big(U256_MAX)]).length;", "big(1n), big(1n), big(1n)]).length;", T, "a good sell:"],
@@ -114,14 +112,14 @@ export const MUTANTS = [
   // the fee answer
   [EVM, "fee_recipient: feeRecipient, sell_sender: sellSender, epoch_ms", "fee_recipient: feeRecipient, sell_sender: sender, epoch_ms", T, "the fee answer names"],
   // fold 1, H1: a sale that did not land frees its (W, nonce), on both providers' reads, capped per W
-  [EVM, '    if (status.includes("0x0")) return true;', "    if (false) return true;", T, "a sale that reverted or was dropped"],
-  [EVM, '    if (status.includes("0x1")) return false;', "", T, "a sale that reverted or was dropped"],
-  [EVM, "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;", "", T, "a sale that reverted or was dropped"],
+  [EVM, '    if (status.includes("0x0")) return "reverted";', '    if (false) return "reverted";', T, "a sale that reverted or was dropped"],
+  [EVM, '    if (status.includes("0x1")) return "waiting";', "", T, "a sale that reverted or was dropped"],
+  [EVM, "    if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", "", T, "a sale that reverted or was dropped"],
   // the drop margin: a clock up to 60 s ahead of the chain's never frees (W, nonce) while the first sale can land
-  [EVM, "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;", "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n) return false;", T, "a dropped sale with our clock 59 s ahead"],
-  [EVM, "    if (BigInt(Math.floor(now())) <= deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;", "    if (BigInt(Math.floor(now())) < deadlineS * 1000n + BigInt(EVM_SELL_DROP_MARGIN_MS)) return false;", T, "a dropped sale is freed at 61 s past"],
+  [EVM, "    if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", "    if (Math.floor(now()) <= deadlineMs) return \"waiting\";", T, "a dropped sale with our clock 59 s ahead"],
+  [EVM, "    if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", "    if (Math.floor(now()) < deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", T, "a dropped sale is freed at 61 s past"],
   [EVM, "export const EVM_SELL_DROP_MARGIN_MS = 60_000;", "export const EVM_SELL_DROP_MARGIN_MS = 58_000;", T, "a dropped sale with our clock 59 s ahead"],
-  [EVM, '    return tx.every((x) => x.status === "fulfilled" && x.value === null);', '    return tx.some((x) => x.status === "fulfilled" && x.value === null);', T, "a sale that reverted or was dropped"],
+  [EVM, '    return tx.every((x) => x.status === "fulfilled" && x.value === null) ? "dropped" : "waiting";', '    return tx.some((x) => x.status === "fulfilled" && x.value === null) ? "dropped" : "waiting";', T, "a sale that reverted or was dropped"],
   [EVM, '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);\n    const status', '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash])]);\n    const status', T, "a sale that reverted or was dropped"],
   // fold 1, H2.1: only a route the kit's sell builder makes (the kit's own checks: packages/kit/test/evm-sell-route-of.test.ts)
   [EVM, "      evmSellRouteOf(sellChain, { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data });", "      void { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data };", T, "bad_route:"],
@@ -145,32 +143,64 @@ export const MUTANTS = [
   // fold 1, L1: the deadline again after the queue's wait, the sale's and the withdraw's
   [EVM, "    if (s.deadline * 1000n < BigInt(Math.floor(now())) + BigInt(EVM_POOL_SEND_MARGIN_MS)) return", "    if (false) return", T, "the deadline again after the queue's wait:"],
   [EVM, "    if (Number(w.deadlineMs) < now() + EVM_POOL_SEND_MARGIN_MS) return", "    if (false) return", T2, "the withdraw's deadline again after the queue's wait:"],
-  // fold 2, H-N2: neither lane leaves a nonce no tx holds (the pending count on both providers; a dropped send's nonce
-  // taken past the margin; a stuck send replaced at its nonce; an idle hole filled)
+  // fold 2 and 4, H-N2 and H2: neither lane leaves a nonce no tx holds, and no one provider moves a lane (a lane goes at
+  // the lower pending count, fills a hole only below both, mined only past both latest counts)
   [EVM, "    if (nonce + 1n > lane.nextNonce) lane.nextNonce = nonce + 1n;", "    lane.nextNonce = nonce + 1n;", T, "a nonce hole on the sell lane (N2)"],
-  [EVM, "    return at === undefined || now() - at > EVM_SELL_DROP_MARGIN_MS ? pending : lane.nextNonce;", "    return lane.nextNonce;", T, "a nonce hole on the sell lane (N2)"],
-  [EVM, "    return at === undefined || now() - at > EVM_SELL_DROP_MARGIN_MS ? pending : lane.nextNonce;", "    return pending;", T, "a nonce hole on the sell lane (N2)"],
-  [EVM, "    const nonce = nonceFor(withdrawLane, pending);", "    const nonce = pending > withdrawLane.nextNonce ? pending : withdrawLane.nextNonce;", T, "a nonce hole on the withdraw lane"],
-  [EVM, "the authorization's ${auth.nonce}`);\n      pending = higher(qty(n), qty(m));", "the authorization's ${auth.nonce}`);\n      pending = qty(n);", T, "the sell sender's pending count is read on both providers"],
-  [EVM, "      tip = qty(t);\n      pending = higher(qty(n), qty(m));", "      tip = qty(t);\n      pending = qty(n);", T, "the sell sender's pending count is read on both providers"],
-  [EVM, "    for (const [n, x] of lane.sent) if (t > x.stuckAfter) at.add(n);", "", T, "a stuck sale on the sell lane"],
-  [EVM, "    for (const [n, x] of lane.sent) if (t > x.stuckAfter) at.add(n);", "", T, "a stuck withdraw on the withdraw lane"],
+  [EVM, "    const lo = lower(pa, pb);", "    const lo = higher(pa, pb);", T, "one provider's count never moves a lane (Q2-A)"],
+  [EVM, "    if (lo >= lane.nextNonce) return lo;", "", T, "a good sell:"],
+  [EVM, "    const n = higher(pa, pb);", "    const n = lower(pa, pb);", T, "the sell sender's pending count is read on both providers"],
+  [EVM, "    if (n >= lane.nextNonce) return null;", "", T, "one provider's count never moves a lane (Q2-A)"],
+  [EVM, "    if (now() - x.at <= EVM_SELL_DROP_MARGIN_MS) return null;", "    if (now() - x.at < EVM_SELL_DROP_MARGIN_MS) return null;", T, "a nonce hole on the sell lane (N2)"],
+  [EVM, "    if (now() - x.at <= EVM_SELL_DROP_MARGIN_MS) return null;", "", T, "a nonce hole on the sell lane (N2)"],
+  [EVM, "    const nonce = await nonceFor(withdrawLane, pa, pb);", "    const nonce = pa > withdrawLane.nextNonce ? pa : withdrawLane.nextNonce;", T, "a nonce hole on the withdraw lane"],
+  [EVM, "the authorization's ${auth.nonce}`);\n      [pa, pb] = [qty(n), qty(m)];", "the authorization's ${auth.nonce}`);\n      [pa, pb] = [qty(n), qty(n)];", T, "the sell sender's pending count is read on both providers"],
+  [EVM, "      tip = qty(t);\n      [pa, pb] = [qty(n), qty(m)];", "      tip = qty(t);\n      [pa, pb] = [qty(n), qty(n)];", T, "the sell sender's pending count is read on both providers"],
+  [EVM, "    prune(lane, lower(la, lb));", "    prune(lane, higher(la, lb));", T, "one provider's count never moves a lane (Q2-A)"],
   [EVM, "    for (const n of [...lane.sent.keys()]) if (n < mined) lane.sent.delete(n);", "", T, "a stuck sale on the sell lane"],
+  // fold 4, M1: a hole only where neither provider returns the lane's send by hash
+  [EVM, "    return seen.every((y) => y.status === \"fulfilled\" && y.value === null) ? n : null;", "    return n;", T, "a hole is only where neither provider returns the lane's send by hash (Q1)"],
+  // fold 4, H2 (2): a send unmined past its deadline plus the margin is replaced once at its nonce, whatever its price;
+  // fold 3's pricing (2 x the base fee now + tip, a tenth over, never over the ceiling)
+  [EVM, "    const stuck = low !== undefined && now() > low[1].stuckAfter;", "    const stuck = false;", T, "a stuck sale on the sell lane"],
+  [EVM, "    const stuck = low !== undefined && now() > low[1].stuckAfter;", "    const stuck = false;", T, "a stuck withdraw on the withdraw lane"],
+  [EVM, "    if (stuck && old!.replacement && old!.maxFee >= 2n * base + tipNow) return;", "    if (stuck && old!.maxFee >= 2n * base + tipNow) return;", T, "a sale one provider's stale pool still counts (Q5)"],
+  [EVM, "    if (stuck && old!.replacement && old!.maxFee >= 2n * base + tipNow) return;", "    if (stuck && old!.maxFee >= 2n * base + tipNow) return;", T, "a stuck sale that covers 2 x base + tip"],
+  [EVM, "    if (stuck && old!.replacement && old!.maxFee >= 2n * base + tipNow) return;", "    if (stuck && old!.replacement && old!.maxFee > 2n * base + tipNow) return;", T, "at a steady base fee, a stuck sale"],
+  [EVM, "    if (stuck && old!.replacement && old!.maxFee >= 2n * base + tipNow) return;", "", T, "at a steady base fee, a stuck sale"],
   [EVM, "    const raise = (v: bigint) => (v * 11n) / 10n + 1n;", "    const raise = (v: bigint) => v;", T, "a stuck sale on the sell lane"],
+  [EVM, "    const maxFee = higher(2n * base + tip, old === undefined ? 0n : raise(old.maxFee));", "    const maxFee = old === undefined ? 2n * base + tip : raise(old.maxFee);", T, "a stuck sale on the sell lane"],
+  [EVM, "    if (maxFee > EVM_SELL_MAX_FEE_PER_GAS) {", "    if (false) {", T, "a base fee whose 2 x base + tip is over"],
+  [EVM, "    if (maxFee > EVM_SELL_MAX_FEE_PER_GAS) {", "    if (maxFee >= EVM_SELL_MAX_FEE_PER_GAS) {", T, "at exactly EVM_SELL_MAX_FEE_PER_GAS"],
+  [EVM, "      if (!lane.ceilingSaid) log(", "      log(", T, "a base fee whose 2 x base + tip is over"],
   [EVM, "maxFeePerGas: maxFee, gas, to: lane.from, data: new Uint8Array() }, key);", "maxFeePerGas: maxFee, gas, to: pool, data: new Uint8Array() }, key);", T, "a stuck sale on the sell lane"],
   [EVM, "    watch(withdrawLane, nonce, hash, until);", "", T, "a stuck withdraw on the withdraw lane"],
-  [EVM, "    if (holed) at.add(pending);", "", T, "an idle hole on the sell lane"],
-  [EVM, "      } else if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);", "      }", T, "an idle hole on the sell lane"],
-  // fold 3: a replacement only for a send stuck on price, at 2 x the base fee now + tip, never over the ceiling
-  [EVM, "      if (!(holed && n === pending) && old !== undefined && old.maxFee >= 2n * base + tipNow) continue;", "", T, "at a steady base fee, a stuck sale"],
-  [EVM, "      const maxFee = higher(2n * base + tip, old === undefined ? 0n : raise(old.maxFee));", "      const maxFee = old === undefined ? 2n * base + tip : raise(old.maxFee);", T, "a stuck sale on the sell lane"],
-  [EVM, "      if (maxFee > EVM_SELL_MAX_FEE_PER_GAS) {", "      if (false) {", T, "a base fee whose 2 x base + tip is over"],
-  [EVM, "        if (mine === undefined || lane.sent.get(nonce) !== mine) return;", "        return;", T, "a stuck sale that covers 2 x base + tip"],
-  // fold 2, M-cap: a caller with a paid landing is held by its own caps only
-  [EVM, '      if (known && (k === "all" || k.startsWith("t:"))) continue;', "", T, "the shared caps hold only callers with no paid landing"],
-  [EVM, '      if (known && (k === "all" || k.startsWith("t:"))) continue;', "      if (known) continue;", T, "the shared caps hold only callers with no paid landing"],
-  [EVM, '(k.startsWith("w:") || k.startsWith("c:")) && (paid.get(k)', 'k.startsWith("w:") && (paid.get(k)', T, "the shared caps hold only callers with no paid landing"],
-  [EVM, "    if (!ok || cost > fee) return;", "    return;", T, "the shared caps hold only callers with no paid landing"],
+  // fold 4, L1: a replacement's gas, 21,000, and on Robinhood the L1 poster's gas from the kit's ArbGasInfo read
+  [EVM, "    let gas = EVM_SELF_TRANSFER_GAS;", "    let gas = EVM_POOL_SELL_GAS;", T, "a stuck sale on the sell lane"],
+  [EVM, "    if (POSTER_GAS_CHAINS.has(cfg.network)) {", "    if (false) {", T, "the replacement's gas on Robinhood"],
+  [EVM, "[a, b].map(async (r) => evmPoolChainFee(net, txBytes", "[a, a].map(async (r) => evmPoolChainFee(net, txBytes", T, "the replacement's gas on Robinhood"],
+  [EVM, "      gas += poster + (poster + 4n) / 5n;", "      gas += poster;", T, "the replacement's gas on Robinhood"],
+  // fold 4, L1: a failing tend logs once and is never recorded as sent
+  [EVM, "    if (sent.every((x) => x.status === \"rejected\")) throw new Error(", "    if (false) throw new Error(", T, "a tend that fails logs once"],
+  [EVM, "          if (!lane.failSaid) log(", "          log(", T, "a tend that fails logs once"],
+  // fold 4, H2 (3): every watch ends (a receipt, the lane's replacement, or its bound with one log line); a lane whose
+  // lowest unmined send is past its bound answers 503 with Retry-After
+  [EVM, "      if (mine === undefined || lane.sent.get(nonce) !== mine) return;", "      if (mine === undefined) return;", T, "at a steady base fee, a stuck sale"],
+  [EVM, "      if (now() > bound) {", "      if (false) {", T, "a lane's watch ends at its bound"],
+  [EVM, "      if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);", "", T, "an idle hole on the sell lane"],
+  [EVM, "      if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);", "", T, "a stuck sale on the sell lane"],
+  [EVM, "      const stuck = await laneHeld(sellLane);", "      const stuck = null;", T, "a lane's watch ends at its bound"],
+  [EVM, "    if (low === undefined || now() <= low[1].bound) return null;", "    return null;", T, "a lane's watch ends at its bound"],
+  // fold 4, M2: a withdraw repeat frees its nullifier when its first send was dropped or the lane's replacement took it
+  [EVM, "      if (end === \"waiting\") return first;", "      return first;", T, "a withdraw repeat after its first send was dropped"],
+  [EVM, "    if (superseded.has(hash)) return \"dropped\";", "", T, "a withdraw repeat whose first send the lane's replacement took"],
+  [EVM, "      superseded.add(old.hash);", "", T, "a withdraw repeat whose first send the lane's replacement took"],
+  // fold 4, H1: the budget holds every sale; a paid landing (in the window, paid its cost) frees only the token's cap
+  [EVM, "      if (known && k.startsWith(\"t:\")) continue;", "      if (known) continue;", T, "the sender's whole budget holds every sale (H1)"],
+  [EVM, "      if (known && k.startsWith(\"t:\")) continue;", "", T, "a paid landing frees its caller of the token's cap only"],
+  [EVM, "(k.startsWith(\"w:\") || k.startsWith(\"c:\")) && (paid.get(k) ?? -Infinity) > t - EVM_SELL_UNPAID_WINDOW_MS", "(k.startsWith(\"w:\") || k.startsWith(\"c:\")) && paid.has(k)", T, "a paid landing is one in the window that paid its cost"],
+  [EVM, "(k.startsWith(\"w:\") || k.startsWith(\"c:\")) && (paid.get(k)", "k.startsWith(\"w:\") && (paid.get(k)", T, "a paid landing frees its caller of the token's cap only"],
+  [EVM, "    if (!ok || cost > fee) return;", "    if (!ok) return;", T, "a paid landing is one in the window that paid its cost"],
+  [EVM, "    if (!ok || cost > fee) return;", "    return;", T, "a paid landing frees its caller of the token's cap only"],
   // fold 2, L-poll: the receipt watch backs off
   [EVM, "      every = Math.min(every * 2, first * EVM_RECEIPT_POLL_BACKOFF);", "", T, "the receipt watch backs off"],
   // fold 2, L-pin: a chain with no pin starts with sales off
