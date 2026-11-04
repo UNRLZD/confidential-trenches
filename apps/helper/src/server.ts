@@ -27,7 +27,7 @@ import { createSolanaLists } from "./data/solana/lists.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
-import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
+import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
@@ -813,6 +813,9 @@ if (import.meta.main) {
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();
+    // card helper-restart-fresh: the charts callers read lately are re-read ahead of their next read, one GeckoTerminal
+    // call at most a tick in its "ahead" lane (data/solana/token.ts ahead), so a swap hands over bars inside the bound
+    setInterval(() => void token.ahead().catch(() => undefined), AHEAD_TICK_MS).unref();
     // ready (health.ts): once the lists, a token page and its holders answer 200. A helper that replaces a running one
     // (peer) listens only then, so the proxy, which tries each helper of the service in turn, never reaches it cold
     // (deploy/redeploy.sh waits for it, bounded, before it stops the old one); one that starts alone listens at once.
