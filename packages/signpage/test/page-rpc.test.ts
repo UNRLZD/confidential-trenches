@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageRpc } from "../src/page-rpc.ts";
 import { TESTNET_RPCS, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 
 /** globalThis.fetch for one test: each URL answers 429 (Retry-After 0) on its first call, then the call's result. */
 async function withThrottledOnce(run: (seen: Map<string, number>) => Promise<void>): Promise<void> {
@@ -43,6 +44,15 @@ test("the page's direct and helper RPCs (the mainnet pool reads) read through a 
     assert.equal(await pageHelperRpc("https://helper.example")("getSlot", []), 42);
     assert.equal(seen.get("https://solana-rpc.publicnode.com"), 2);
     assert.equal(seen.get("https://helper.example/v1/rpc/solana"), 2);
+  });
+});
+
+test("the page's trade path (src/trade.ts releaseTradeDeps): both providers read through a 429 once", async () => {
+  await withThrottledOnce(async (seen) => {
+    const d = releaseTradeDeps();
+    for (const p of d.providers) assert.equal(await p("getSlot", []), 42);
+    assert.equal(seen.get(SOLANA_PROVIDER_A), 2);
+    assert.equal(seen.get(`${TRADE_HELPER}/v1/rpc/solana`), 2);
   });
 });
 

@@ -126,3 +126,25 @@ test("without retry, one attempt: a 429 rejects as HTTP 429, as before", async (
   await assert.rejects(solanaJsonRpc("https://rpc.example", { fetch: p.fetch })("getSlot", []), (e: Error) => e.message === "HTTP 429" && !(e instanceof SolanaRpcTransportError));
   assert.equal(p.tries(), 1);
 });
+
+test("without retry, every fault rejects as the client did before the option: one attempt, the same error", async () => {
+  const boom = new TypeError("fetch failed");
+  const cases: [Answer | "reject", (e: unknown) => boolean][] = [
+    [{ status: 502, body: "" }, (e) => e instanceof Error && e.message === "HTTP 502"],
+    [rpcError(-32429), (e) => e instanceof Error && e.message === "RPC error -32429: too many requests"],
+    [{ body: "<html>" }, (e) => e instanceof SyntaxError],
+    ["reject", (e) => e === boom],
+  ];
+  for (const [a, is] of cases) {
+    let n = 0;
+    const fetch = (_u: string, init: RequestInit): Promise<Response> => {
+      n++;
+      if (a === "reject") return Promise.reject(boom);
+      const id = (JSON.parse(String(init.body)) as { id: string }).id;
+      return Promise.resolve(new Response((a.body ?? "").replaceAll("$ID", id), { status: a.status ?? 200 }));
+    };
+    const e = await solanaJsonRpc("https://rpc.example", { fetch })("getSlot", []).catch((x: unknown) => x);
+    assert.ok(is(e), String(e));
+    assert.equal(n, 1);
+  }
+});

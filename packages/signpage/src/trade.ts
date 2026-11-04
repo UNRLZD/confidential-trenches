@@ -37,7 +37,8 @@ import { base58 } from "@scure/base";
 import { solanaAta, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/index.ts";
 import { runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeRequest, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
-import { readSolanaTxEnd, solanaHelperRpc, solanaJsonRpc, solanaSendPaths, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { readSolanaTxEnd, solanaHelperRpc, solanaSendPaths, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { pageHelperRpc, pageRpc } from "./page-rpc.ts";
 import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit } from "@blindfill/wallet/arming/ladder";
 import { ArmRefused, armRecordOf, armRecords, claimArm, settleArm, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
@@ -93,7 +94,8 @@ export const SOLANA_PROVIDER_A = "https://solana-rpc.publicnode.com";
 /** The release's trade deps: provider A device-direct and provider B the helper's /v1/rpc/solana (LD1), E(A) from the
  * device's own pool reads on both, and the kit's send paths with the helper's. */
 export function releaseTradeDeps(): TradeHost["deps"] {
-  const providers = [solanaJsonRpc(SOLANA_PROVIDER_A), solanaHelperRpc(TRADE_HELPER)] as const;
+  // the page's one RPC client (src/page-rpc.ts): a throttled read is tried again within its bounds, never a failed trade
+  const providers = [pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)] as const;
   return {
     helper: TRADE_HELPER,
     providers,
