@@ -150,9 +150,9 @@ export const MUTANTS = [
   [QUOTE, "  if (c0 !== t && c1 !== t) return null;", "  if (![c0, c1].includes(NATIVE) || (c0 !== t && c1 !== t)) return null;", R, "S3 "],
   // every scan of a quote shares one gate and one head; X's scan failing refuses the quote
   // (no mutant gives each scan its own gate: the token's scan and the one scan of every X run one after the other, so
-  // a gate per scan never has more in flight; G1 holds the gate's own limit)
+  // a gate per scan never has more in flight; G1 and TH3 hold the scan gate's own limit, T8b the reads' gate's)
   [QUOTE, "(headOfScan ??= scanHeadOf(scan, gate))", "scanHeadOf(scan, gate)", R, "G3 "],
-  [QUOTE, "if (next === undefined) free++;\n      else next();", "free++;\n      next?.();", R, "G1 "],
+  [QUOTE, "if (next === undefined) free++;\n      else next();", "free++;\n      next?.();", R, "T8b "],
   // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
   // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
   // build; scans as ORs within a provider's span; 429s asked again; each provider at most its limit at once

@@ -850,7 +850,8 @@ type ScanKind = "all" | "markets";
  *  `parallel` at once drew 429s on rpc.mainnet.chain.robinhood.com (2026-11-03 21:20Z: 89 of 125 requests). One gate
  *  per quote, so a request that never returns holds up that quote alone. */
 type Gate = <T>(f: () => Promise<T>) => Promise<T>;
-function gateOf(parallel: number): Gate {
+/** Exported for the tests (T8b); not in the index. */
+export function gateOf(parallel: number): Gate {
   let free = parallel;
   const waiting: (() => void)[] = [];
   return async (f) => {

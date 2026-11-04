@@ -1297,6 +1297,22 @@ test("T8 a quote's reads go to each provider at most the chain's limit at once (
   assert.ok(most >= 1 && most <= 2, `${most} requests at once`);
 });
 
+test("T8b the reads' gate never has more than its limit in flight, however many wait and in whatever order they end", async () => {
+  // the gate a quote puts before each of its providers (gated): a quote's rounds come one after another, so a slot a
+  // release handed on twice shows only in the round after one that queued
+  const gate = (quoteMod as unknown as { gateOf: (n: number) => <T>(f: () => Promise<T>) => Promise<T> }).gateOf(2);
+  let [now, most] = [0, 0];
+  const job = (ms: number) => gate(async () => {
+    most = Math.max(most, ++now);
+    await pause(ms);
+    now--;
+  });
+  // a round of five, then a round of five more
+  await Promise.all([5, 1, 3, 2, 4].map(job));
+  await Promise.all([1, 2, 3, 4, 5].map(job));
+  assert.equal(most, 2);
+});
+
 // card evm-route-parity: the buy and the sell route through one device-made set of pools (quote.ts routeSet), the sell
 // held to a reference (review of evm-sell-device-quote, H1: a seeded hookless 1% pool was the sell's only candidate
 // when the token's market sat where the sell could not route, and the device signed minOut = 0.99 x dust)
