@@ -12,8 +12,11 @@ import {SellDelegate, IWETH} from '../src/SellDelegate.sol';
 import {IPoolManager, PathKey} from '../src/adapters/UniswapV4Adapter.sol';
 import {WithdrawalVerifier} from '../src/verifiers/WithdrawalVerifier.sol';
 
+import {stdError} from 'forge-std/StdError.sol';
+
 import {SellBase, MockToken, MockWETH, MockRouter} from './Sell.t.sol';
 import {SellV4Base} from './SellV4.t.sol';
+import {GiveBackRouter} from './HostileSell.t.sol';
 
 interface IExttload {
   function exttload(bytes32 _slot) external view returns (bytes32);
@@ -187,5 +190,53 @@ contract ExactDebitV4Test is SellV4Base {
   function test_v4AnExtraDebitOnlyTowardThePoolIsRefused() public {
     _token(2, EXTRA);
     _refused(_v4Sell(XT, _deep(XT, address(0), address(0)), 1, 0), DEBIT_NOT_EXACT);
+  }
+}
+
+/// A balance that rose: a target that pulls the amount and gives back twice it leaves W holding more than before, so
+/// the check's subtraction underflows (Panic 0x11) and the whole sell reverts with W keeping every token
+contract ExactDebitRoseTest is SellBase {
+  uint256 internal constant AMOUNT = 1000e6;
+  uint256 internal constant OUT = 0.4 ether;
+  uint256 internal constant FEE = 0.002 ether;
+
+  MockToken internal token;
+  MockWETH internal weth;
+
+  function setUp() public {
+    _prague();
+    _deployPoseidon();
+    vm.warp(1_900_000_000);
+    pool = new PrivacyPoolSimple(address(new WithdrawalVerifier()));
+    token = new MockToken();
+    weth = new MockWETH();
+    delegate = new SellDelegate(IWETH(address(weth)), IPoolManager(address(0)));
+    _setUpW();
+    vm.signAndAttachDelegation(address(delegate), W_KEY);
+    token.mint(W, AMOUNT * 10);
+  }
+
+  function test_aBalanceThatRoseIsAnUnderflow() public {
+    GiveBackRouter _r = new GiveBackRouter(weth);
+    vm.deal(address(_r), 1 ether);
+    token.mint(address(_r), AMOUNT * 2);
+    SellDelegate.Sell memory _s = SellDelegate.Sell({
+      token: address(token),
+      amount: AMOUNT,
+      target: address(_r),
+      data: abi.encodeCall(GiveBackRouter.swap, (token, AMOUNT, AMOUNT * 2, OUT, W)),
+      minOut: OUT,
+      pool: address(pool),
+      precommitment: 0x1234,
+      feeCap: FEE,
+      deadline: block.timestamp + 60,
+      nonce: 0
+    });
+    bytes memory _sig = _signed(_s);
+    vm.expectRevert(stdError.arithmeticError);
+    vm.prank(SENDER);
+    SellDelegate(payable(W)).sell(_s, FEE, _sig);
+    assertEq(token.balanceOf(W), AMOUNT * 10, 'W keeps every token');
+    assertEq(SellDelegate(payable(W)).nonce(), 0, 'the nonce is not used');
   }
 }
