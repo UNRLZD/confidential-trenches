@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { centsToUnits, decimalToUnits, poolBuyAsk, poolSellAsk, poolView, unitsToCents, unitsToDecimal } from "../src/screens/trade/model.ts";
+import { amountWrong, centsToUnits, decimalToUnits, poolBuyAsk, poolSellAsk, poolView, unitsToCents, unitsToDecimal } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -76,4 +76,16 @@ test("pool.sell: the position's token units for the chain's pool, the proceeds b
   // no pool for the chain (signed out, notes unread, or NEAR): the vault's own sell stays
   assert.equal(poolSellAsk(undefined, "solana", "Mint1", "1", 1_000), null);
   assert.equal(poolSellAsk([sol("0.2")], "near", "x.near", "1", 1_000), null);
+});
+
+test("the amount field is marked wrong only when the amount is what is wrong: over one tap, not a whole chunk, under a base unit; never while a proof is making or the pool cannot be priced", () => {
+  const ready = [sol("1.25", "0.4", "0.3")];
+  // a proof still making, with or without the page's tap_max: the amount is not what is wrong
+  assert.equal(amountWrong(poolBuyAsk([sol("0.2", "0", "0.1")], "solana", "Mint1", 1_000n, SOL, 1_000)), false);
+  assert.equal(amountWrong(poolBuyAsk([sol("0.2", "0")], "solana", "Mint1", 1_000n, SOL, 1_000)), false);
+  assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 1_000n, null, 1_000)), false);
+  assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 2_500n, SOL, 1_000)), false);
+  assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 3_000n, SOL, 1_000)), true);
+  assert.equal(amountWrong(poolBuyAsk([base("0.03", "0.02", "0.01")], "base", "0xabc", 2_500n, ETH, 500)), true);
+  assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 0n, SOL, 1_000)), true);
 });

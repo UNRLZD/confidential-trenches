@@ -281,6 +281,13 @@ export type PoolBuyAsk =
   | { ok: true; kind: "pool.buy"; params: SignpageParams["pool.buy"] }
   | { ok: false; why: "no_pool" | "no_price" | "no_proof" | "too_small" | "over_tap" | "chunk" };
 
+/** The amount field is marked wrong only when the amount is what is wrong: over one tap's most, not a whole chunk on
+ *  Base or Robinhood, or under one base unit. A proof still making, a page that cannot price the pool or no pool leave it
+ *  unmarked: the button is off for them. */
+export function amountWrong(ask: PoolBuyAsk): boolean {
+  return !ask.ok && (ask.why === "over_tap" || ask.why === "chunk" || ask.why === "too_small");
+}
+
 /**
  * The tap's pool.buy for `c` cents: the USD in the pool asset's units at the device's price, rounded down. Only with a
  * proof ready and the page's `tap_max`, and at most it; on Base and Robinhood a tap spends one whole chunk (the signing

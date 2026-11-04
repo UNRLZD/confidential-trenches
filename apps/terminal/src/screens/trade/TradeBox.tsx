@@ -5,6 +5,7 @@ import { headerModel } from "../signin/model.ts";
 import { useSigninSheet } from "../signin/source.tsx";
 import {
   amountOk,
+  amountWrong,
   busy,
   centsToDecimal,
   fmtUsd,
@@ -206,7 +207,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
           {WORDS.bal.text} {balance === null ? "—" : fmtUsd(balance)}
         </span>
       </div>
-      <label className="trb-amount" data-bad={!signedOut && amount !== null && amount > 0n && (onPool ? pool?.tapMax != null && !askable(amount) : !amountOk(amount, max, balance))}>
+      <label className="trb-amount" data-bad={!signedOut && amount !== null && amount > 0n && (onPool ? amountWrong(poolBuyAsk(pools, chain, token, amount, price, slippageBps)) : !amountOk(amount, max, balance))}>
         <input
           className="trb-input"
           value={text}
