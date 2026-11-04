@@ -13,7 +13,8 @@ test("recorded bad answer: a devnet pool buy in the withdraw's place: FAIL, its 
   const v = judge(ANSWERS.bad);
   assert.equal(v.ok, false);
   assert.ok(v.lines.some((l) => l.endsWith("loads a lookup table")), v.lines.join("\n"));
-  assert.ok(v.lines.some((l) => l.endsWith("not one release and one transfer after the compute budget")), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.endsWith("not a tag 2 release of the pinned program")), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.endsWith("(onward): not on both RPCs at finalized")), v.lines.join("\n"));
   assert.ok(!v.lines.some((l) => l.includes("SIGN_HOST")), "SIGN_HOST serves its pinned /app.js");
 });
 

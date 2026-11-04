@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 // Live check of card signpage-pool-withdraw-form: the pool withdraw of the signing page's testnet flow landed on the
-// devnet pool, one transaction a part, through the deployed helper's POST /v1/pool/solana/send, and SIGN_HOST serves
-// the build index.html pins. It reads:
+// devnet pool, two transactions a part (review #232): the release through the deployed helper's POST
+// /v1/pool/solana/send, then W's own send onward, and SIGN_HOST serves the build index.html pins. It reads:
 //   - SIGN_HOST (https://sign.confidential.unrealized.trade): the served /app.js is the one index.html pins (its sha384);
-//   - each part's transaction of the run (scripts/live-checks/signpage-pool-withdraw-form.md), at finalized on both
-//     devnet RPCs of two operators, read as base64 and decoded here:
-//     - succeeded, the same bytes on both;
-//     - two signers: the helper's devnet fee payer (the pin), then W;
-//     - after the compute budget, exactly two instructions: a tag 2 release of the pinned program (W its 2nd account,
-//       the release's recipient), then one System transfer from W to To;
-//     - To's balance up by exactly the part, and W left with nothing.
+//   - each part's two transactions of the run (scripts/live-checks/signpage-pool-withdraw-form.md), at finalized on
+//     both devnet RPCs of two operators, read as base64 and decoded here, each succeeded with the same bytes on both:
+//     - the release: two signers, the helper's devnet fee payer (the pin) then W; after the compute budget exactly one
+//       instruction, a tag 2 release of the pinned program with W its 2nd account (the recipient); no lookup table;
+//     - the onward send: one signer, that same W, its fee payer; exactly one instruction, a System transfer from W to
+//       To of the part; no lookup table; To's balance up by exactly the part, and W left with nothing.
 // The pins, To and the run's parts are written out here, not read from the repo.
-//   node scripts/live-checks/signpage-pool-withdraw-form.mjs [--tx <sig>:<part>] [--record <file>] [--answer <file>]
-// --tx reads another transaction in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1, error exit 2.
+//   node scripts/live-checks/signpage-pool-withdraw-form.mjs [--tx <release>:<onward>:<part>] [--record <file>] [--answer <file>]
+// --tx reads other transactions in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -27,8 +26,8 @@ export const PIN = Object.freeze({ program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqK
 export const TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
 export const SYSTEM = "11111111111111111111111111111111";
 export const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
-/** The run's parts (signpage-pool-withdraw-form.md): each signature and the lamports it sends To. Empty until the run
- *  lands on the deployed helper: the check fails until then. */
+/** The run's parts (signpage-pool-withdraw-form.md): each part's release and onward signatures and the lamports it
+ *  sends To. Empty until the run lands on the deployed helper: the check fails until then. */
 export const RUN = Object.freeze([]);
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -79,7 +78,7 @@ export function decode(b) {
 
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
-/** The verdict on an answer { sign: { index, sha384 }, run: [{ signature, part, reads: [rpc0, rpc1] }] }. */
+/** The verdict on an answer { sign: { index, sha384 }, run: [{ part, release: { signature, reads }, onward }] }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -87,45 +86,52 @@ export function judge(a) {
   if (!pin) bad("SIGN_HOST's index.html pins no /app.js");
   else if (pin !== a.sign?.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
   if (!Array.isArray(a.run) || a.run.length === 0) bad("no run of the withdraw recorded");
-  for (const p of a.run ?? []) {
-    const tag = `${String(p.signature).slice(0, 12)}…`;
-    const [x, y] = p.reads ?? [];
-    if (!x || !y) {
-      bad(`${tag}: not on both RPCs at finalized`);
-      continue;
-    }
+  // one transaction on both RPCs: the same bytes, succeeded, decoded; null when it is not
+  const landed = (t, what) => {
+    const tag = `${String(t?.signature).slice(0, 12)}… (${what})`;
+    const [x, y] = t?.reads ?? [];
+    if (!x || !y) return void bad(`${tag}: not on both RPCs at finalized`);
     if (x.transaction?.[0] !== y.transaction?.[0]) bad(`${tag}: the two RPCs give other bytes`);
-    for (const t of [x, y]) if (t.meta?.err !== null) bad(`${tag}: did not succeed (${JSON.stringify(t.meta?.err)})`);
-    let m;
+    for (const r of [x, y]) if (r.meta?.err !== null) bad(`${tag}: did not succeed (${JSON.stringify(r.meta?.err)})`);
     try {
-      m = decode(Buffer.from(x.transaction[0], "base64"));
+      const m = decode(Buffer.from(x.transaction[0], "base64"));
+      if (m.tables !== 0) bad(`${tag}: loads a lookup table`);
+      return { tag, m, reads: [x, y] };
     } catch {
-      bad(`${tag}: not a transaction`);
-      continue;
+      return void bad(`${tag}: not a transaction`);
     }
-    if (m.signers !== 2 || m.keys[0] !== PIN.feePayer) bad(`${tag}: not paid by the pinned fee payer with W the second signer`);
-    if (m.tables !== 0) bad(`${tag}: loads a lookup table`);
-    const rest = m.ixs.filter((ix) => m.keys[ix.program] !== COMPUTE_BUDGET);
-    const [rel, send] = rest;
-    if (rest.length !== 2 || !rel || !send) {
-      bad(`${tag}: not one release and one transfer after the compute budget`);
-      continue;
+  };
+  for (const p of a.run ?? []) {
+    const rel = landed(p.release, "release");
+    let W = null;
+    if (rel) {
+      const { tag, m } = rel;
+      if (m.signers !== 2 || m.keys[0] !== PIN.feePayer) bad(`${tag}: not paid by the pinned fee payer with W the second signer`);
+      const rest = m.ixs.filter((ix) => m.keys[ix.program] !== COMPUTE_BUDGET);
+      if (rest.length !== 1) bad(`${tag}: not the release alone after the compute budget`);
+      const r = rest[0];
+      if (!r || m.keys[r.program] !== PIN.program || r.data[0] !== 2) bad(`${tag}: not a tag 2 release of the pinned program`);
+      else if (m.keys[r.accounts[1]] !== m.keys[1]) bad(`${tag}: the release's recipient is not W`);
+      else W = m.keys[1];
     }
-    if (m.keys[rel.program] !== PIN.program || rel.data[0] !== 2) bad(`${tag}: the first is not a tag 2 release of the pinned program`);
-    if (m.keys[rel.accounts[1]] !== m.keys[1]) bad(`${tag}: the release's recipient is not W`);
-    const v = send.data.length === 12 ? new DataView(send.data.buffer, send.data.byteOffset, 12) : null;
-    if (m.keys[send.program] !== SYSTEM || !v || v.getUint32(0, true) !== 2 || send.accounts.length !== 2) bad(`${tag}: the last is not one System transfer`);
+    const on = landed(p.onward, "onward");
+    if (!on) continue;
+    const { tag, m, reads } = on;
+    if (m.signers !== 1 || W === null || m.keys[0] !== W) bad(`${tag}: not W's own send, W its one signer and fee payer`);
+    const send = m.ixs.length === 1 ? m.ixs[0] : null;
+    const v = send && send.data.length === 12 ? new DataView(send.data.buffer, send.data.byteOffset, 12) : null;
+    if (!send || m.keys[send.program] !== SYSTEM || !v || v.getUint32(0, true) !== 2 || send.accounts.length !== 2) bad(`${tag}: not one System transfer alone`);
     else {
-      if (send.accounts[0] !== 1 || m.keys[send.accounts[1]] !== TO) bad(`${tag}: the transfer is not from W to To`);
+      if (send.accounts[0] !== 0 || m.keys[send.accounts[1]] !== TO) bad(`${tag}: the transfer is not from W to To`);
       if (String(v.getBigUint64(4, true)) !== String(p.part)) bad(`${tag}: the transfer is not the part ${p.part}`);
     }
     const at = m.keys.indexOf(TO);
-    for (const t of [x, y]) {
+    for (const t of reads) {
       if (at < 0 || String(BigInt(t.meta.postBalances[at]) - BigInt(t.meta.preBalances[at])) !== String(p.part)) bad(`${tag}: To is not up by exactly the part`);
-      if (t.meta.postBalances[1] !== 0) bad(`${tag}: W kept lamports`);
+      if (t.meta.postBalances[0] !== 0) bad(`${tag}: W kept lamports`);
     }
   }
-  if (!lines.length) lines.push(`OK SIGN_HOST serves its pinned /app.js; the withdraw's ${a.run.length} part(s) landed on both RPCs, each a tag 2 release to W and one transfer of the part from W to To`);
+  if (!lines.length) lines.push(`OK SIGN_HOST serves its pinned /app.js; the withdraw's ${a.run.length} part(s) landed on both RPCs, each a tag 2 release alone to W, then W's own transfer of the part to To, W left at 0`);
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
@@ -133,11 +139,12 @@ export function judge(a) {
 export async function read(run = RUN, fetchFn = fetch) {
   const index = await (await fetchFn(`${SIGN}/`)).text();
   const js = await (await fetchFn(`${SIGN}/app.js`)).text();
+  const tx = async (signature) => ({
+    signature,
+    reads: await Promise.all(RPCS.map((u) => rpc(fetchFn, u, "getTransaction", [signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }]))),
+  });
   const parts = [];
-  for (const p of run) {
-    const reads = await Promise.all(RPCS.map((u) => rpc(fetchFn, u, "getTransaction", [p.signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }])));
-    parts.push({ signature: p.signature, part: String(p.part), reads });
-  }
+  for (const p of run) parts.push({ part: String(p.part), release: await tx(p.release), onward: await tx(p.onward) });
   return { sign: { index, sha384: sha384(js) }, run: parts };
 }
 
@@ -148,7 +155,7 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
   };
   try {
     const tx = arg("--tx");
-    const run = tx ? [{ signature: tx.split(":")[0], part: tx.split(":")[1] }] : RUN;
+    const run = tx ? [{ release: tx.split(":")[0], onward: tx.split(":")[1], part: tx.split(":")[2] }] : RUN;
     const answer = arg("--answer") ? JSON.parse(readFileSync(arg("--answer"), "utf8")) : await read(run);
     if (arg("--record")) writeFileSync(arg("--record"), `${JSON.stringify(answer)}\n`);
     const v = judge(answer);

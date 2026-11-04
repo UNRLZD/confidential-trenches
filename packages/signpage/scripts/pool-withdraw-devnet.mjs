@@ -1,8 +1,8 @@
 // One real devnet run of the pool withdraw through the signing page's own testnet flow (card
 // signpage-pool-withdraw-form): pool.withdraw on the page's pool kinds (src/pool-kinds.ts over src/pool-testnet.ts, as
 // main.ts wires them), its screen's model on the funds the page reads (src/withdraw/pool-form.ts evaluatePool), then the
-// press: the run (src/pool-withdraw.ts) proves each part on demand, sends the release and the transfer from W to To
-// through the helper's POST /v1/pool/solana/send, and reads it back on both devnet RPCs.
+// press: the run (src/pool-withdraw.ts) proves each part on demand, sends its release alone to W through the helper's
+// POST /v1/pool/solana/send, then W's own transfer to To through the page's RPC pair, each read back on both devnet RPCs.
 //   FLOW_RESUME=<seed file> node packages/signpage/scripts/pool-withdraw-devnet.mjs <to> <amount SOL> <out.json>
 // - The seed is a kept run's (~/.ct-devnet-runs/run-<time>.seed, pool-flow-devnet.mjs): its notes restored from the seed
 //   on both devnet RPCs (the wallet's solanaRestoreNotes), never printed. No new money goes in.
@@ -10,7 +10,8 @@
 // - What differs from the page in a browser, and only that: the prover is snarkjs's fullProve in this process on the
 //   pinned setup files, and the screen's fields are given here, not typed. Every check, the send and every read-back are
 //   the page's own code.
-// - Then each part's transaction is read at finalized on both RPCs: succeeded, and To's balance up by exactly its part.
+// - Then each part's two transactions are read at finalized on both RPCs: both succeeded; the onward send moves To's
+//   balance up by exactly its part and leaves W at 0.
 //   It writes the answers, the op record, the notes and every tx to <out.json>; exit 0 only when the op is "sent" and
 //   every part reads back so on both RPCs.
 import { createHash } from "node:crypto";
@@ -102,8 +103,8 @@ if (!opened) throw new Error("pool.withdraw did not open the screen");
 const deps = t.withdrawDeps("solana", opId);
 const funds = await deps.funds();
 const view = evaluatePool("solana", TO, AMOUNT, deps.keys, funds);
-const plan = view.ready ? planPoolWithdraw(funds.notes, view.ready.amount, funds.fee, funds.minPart) : null;
-log(`screen ${view.state}: ${JSON.stringify({ view, plan, fee: funds.fee, minPart: funds.minPart }, big)}`);
+const plan = view.ready ? planPoolWithdraw(funds.notes, view.ready.amount, funds) : null;
+log(`screen ${view.state}: ${JSON.stringify({ view, plan, fee: funds.fee, wFee: funds.wFee, minPart: funds.minPart }, big)}`);
 const record = { at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, to: TO, amount: AMOUNT, dry: DRY, answer, opened, view, plan, before };
 if (DRY || !view.ready) {
   writeFileSync(OUT, JSON.stringify(record, big, 2) + "\n");
@@ -115,22 +116,35 @@ log("the press");
 await t.withdraw(view.ready, opId);
 const op = await w.get("ops", opId);
 log(`op ${JSON.stringify(op)}`);
-// each part read at finalized on both RPCs: succeeded, To up by exactly its part
+// each part's two transactions (txs: release, onward, release, onward, ...) read at finalized on both RPCs: both
+// succeeded; the onward send moves To up by exactly its part and leaves W (its fee payer, key 0) at 0
+const finalized = async (rpc, hash) => {
+  let got = null;
+  for (let i = 0; i < 60 && !got; i++) {
+    got = await rpc("getTransaction", [hash, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]).catch(() => null);
+    if (!got) await sleep(2_000);
+  }
+  return got;
+};
 const checks = [];
-for (const [k, tx] of (op?.txs ?? []).entries()) {
+const txs = op?.txs ?? [];
+for (let k = 0; k * 2 < txs.length; k++) {
+  const [release, onward] = [txs[2 * k]?.hash, txs[2 * k + 1]?.hash];
   const reads = [];
   for (const rpc of rpcs) {
-    let got = null;
-    for (let i = 0; i < 60 && !got; i++) {
-      got = await rpc("getTransaction", [tx.hash, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]).catch(() => null);
-      if (!got) await sleep(2_000);
-    }
-    const keys = got?.transaction?.message?.accountKeys ?? [];
+    const rel = release ? await finalized(rpc, release) : null;
+    const on = onward ? await finalized(rpc, onward) : null;
+    const keys = on?.transaction?.message?.accountKeys ?? [];
     const at = keys.indexOf(TO);
-    reads.push({ ok: got?.meta?.err === null, toDelta: at < 0 ? null : String(BigInt(got.meta.postBalances[at]) - BigInt(got.meta.preBalances[at])) });
+    reads.push({
+      release: rel?.meta?.err === null,
+      onward: on?.meta?.err === null,
+      toDelta: at < 0 ? null : String(BigInt(on.meta.postBalances[at]) - BigInt(on.meta.preBalances[at])),
+      wAfter: on ? String(on.meta.postBalances[0]) : null,
+    });
   }
   const want = plan?.[k]?.part;
-  checks.push({ signature: tx.hash, part: String(want), reads, landed: reads.every((x) => x.ok && x.toDelta === String(want)) });
+  checks.push({ release, onward, part: String(want), reads, landed: reads.every((x) => x.release && x.onward && x.toDelta === String(want) && x.wAfter === "0") });
 }
 const notes = await noteList();
 const sent = op?.stage === "sent" && checks.length === (plan?.length ?? -1) && checks.every((c) => c.landed);

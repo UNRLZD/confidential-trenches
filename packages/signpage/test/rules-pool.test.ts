@@ -296,6 +296,8 @@ test("Solana withdraw onward: a fee payer of ours, a second signer, a compute bu
     [onWire([send(TO, ON_BAL - ON_FEE + 1n)]), "transfer_amount"],
     [onWire([send(TO, ON_BAL)]), "transfer_amount"],
     [onWire([{ ...send(TO, ON_BAL - ON_FEE), program: key(44) }]), "transfer"],
+    // a System instruction of the same size that is not a transfer (tag 3 here)
+    [onWire([{ ...send(TO, ON_BAL - ON_FEE), data: Uint8Array.of(3, 0, 0, 0, ...u64(ON_BAL - ON_FEE)) }]), "transfer"],
     [onWire([send(TO, ON_BAL - ON_FEE)], [SOL_W], key(8)), "blockhash"],
   ] as const) {
     assert.throws(() => checkSolanaOnwardSend(w, wdAsk, solCtx(), TO, onReads()), refusedAs(rule), rule);
