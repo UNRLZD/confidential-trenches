@@ -26,7 +26,8 @@
 //   (pool-sell.ts settlePoolSells), writing its record's stage.
 // main.ts takes these only in the testnet build; SIGN_HOST's build keeps its mainnet deps and carries none of this.
 import { base64 } from "@scure/base";
-import { solanaJsonRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { pageRpc } from "./page-rpc.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -58,7 +59,7 @@ const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinh
 export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
   return {
     pinned: (chain) => (chain === "solana" ? SOL_POOLS.devnet !== undefined : EVM_POOLS[EVM_TESTNET[chain]] !== undefined),
-    rpcs: (chain) => TESTNET_RPCS[chain].map((u) => solanaJsonRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc],
+    rpcs: (chain) => TESTNET_RPCS[chain].map((u) => pageRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc],
     ...(flow ? { flow } : {}),
   };
 }
@@ -163,7 +164,7 @@ export type TestnetPool = {
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
 export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetPool {
   const pin = SOL_POOLS.devnet;
-  const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? [solanaJsonRpc(TESTNET_RPCS.solana[0]), solanaJsonRpc(TESTNET_RPCS.solana[1])];
+  const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? [pageRpc(TESTNET_RPCS.solana[0]), pageRpc(TESTNET_RPCS.solana[1])];
   const prover = over.prover ?? proverHost();
 
   // the proof queue: opened at the first landing, closed at sign out

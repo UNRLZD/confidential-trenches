@@ -75,6 +75,10 @@ type World = {
   log: string[];
   state: () => string;
   sentTx: () => Uint8Array | null;
+  /** every send the helper got, busy ones included */
+  sends: Uint8Array[];
+  /** each wait the run asked for */
+  waits: number[];
 };
 type Plant = {
   /** the slot of the device's blockhash read, past the quote's */
