@@ -1,0 +1,737 @@
+{
+ "good": {
+  "base": "http://127.0.0.1:18788",
+  "at": "2026-11-04T14:46:20.089Z",
+  "pairs": 16,
+  "lists": {
+   "status": 200,
+   "size": 0
+  },
+  "pool": {
+   "status": 200,
+   "size": 4131
+  },
+  "reads": [
+   {
+    "pair": 0,
+    "order": 0,
+    "mint": "CY8ttw5rYCT6fFBJwqXofefqa7Ji9E8zfLmhRLmondo",
+    "sentAt": 1793803580674,
+    "status": 200,
+    "ms": 363,
+    "jupAt": 1793803580845,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 0,
+    "order": 1,
+    "mint": "EVrGfAj99Xr1NjqqZv6E2msVKZVmhGaThHhcZXzrpump",
+    "sentAt": 1793803581037,
+    "status": 200,
+    "ms": 121,
+    "jupAt": 1793803581099,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 1,
+    "order": 0,
+    "mint": "Xs7wD8JEF2KoED55Re7W6GDoHwA5QPGJvLwQYHYw5wr",
+    "sentAt": 1793803591159,
+    "status": 200,
+    "ms": 369,
+    "jupAt": 1793803591330,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 1,
+    "order": 1,
+    "mint": "Fxm6tJ2khHbLVcSgnYUqg9FiBduVRLEvdQR67dvQ3eGp",
+    "sentAt": 1793803591528,
+    "status": 200,
+    "ms": 130,
+    "jupAt": 1793803591594,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 2,
+    "order": 0,
+    "mint": "BWXrrYFhT7bMHmNBFoQFWdsSgA3yXoAnMhDK6Fn1eSEn",
+    "sentAt": 1793803601660,
+    "status": 200,
+    "ms": 351,
+    "jupAt": 1793803601880,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 2,
+    "order": 1,
+    "mint": "4Hcm1TfA1MvVhCQHvJCcKL7ymUhJZAV7P439H5ZHnKRh",
+    "sentAt": 1793803602011,
+    "status": 200,
+    "ms": 136,
+    "jupAt": 1793803602077,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 3,
+    "order": 0,
+    "mint": "7MCgYMzq3fov6oERdtTMAYbN2U9LZrrSYS1MBhjixZFr",
+    "sentAt": 1793803612148,
+    "status": 200,
+    "ms": 875,
+    "jupAt": 1793803612598,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 3,
+    "order": 1,
+    "mint": "CMFmrTNfNEYNnauug1mi2LMkghaVT3Sx6CxJ8xLcmeta",
+    "sentAt": 1793803613023,
+    "status": 200,
+    "ms": 123,
+    "jupAt": 1793803613084,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 4,
+    "order": 0,
+    "mint": "J8PSdNP3QewKq2Z1JJJFDMaqF7KcaiJhR7gbr5KZpump",
+    "sentAt": 1793803623146,
+    "status": 200,
+    "ms": 422,
+    "jupAt": 1793803623387,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 4,
+    "order": 1,
+    "mint": "XsaXKP7GaPDA3bLwtuFoZ2oGsaukfeS1v2U1xUeqwrp",
+    "sentAt": 1793803623568,
+    "status": 200,
+    "ms": 126,
+    "jupAt": 1793803623630,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 5,
+    "order": 0,
+    "mint": "XsZLZdFAgS2tyeyifki2fLiPYDA4yW1Y6kTTcBUAf2u",
+    "sentAt": 1793803633695,
+    "status": 200,
+    "ms": 469,
+    "jupAt": 1793803634096,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 5,
+    "order": 1,
+    "mint": "Xstq9oUsBPd8LSyivHhnt8P8t9xK5RYoM9P6izLczvm",
+    "sentAt": 1793803634163,
+    "status": 200,
+    "ms": 165,
+    "jupAt": 1793803634230,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 6,
+    "order": 0,
+    "mint": "Gymbmn9wwMKe4NnmVceyyfpncp9arbwPfSdBsyY9pump",
+    "sentAt": 1793803644330,
+    "status": 200,
+    "ms": 681,
+    "jupAt": 1793803644874,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 6,
+    "order": 1,
+    "mint": "Xs6GaCP5pV3cBkCX1w1mZ8zLZ7khW8ZRkZN3x1esBD6",
+    "sentAt": 1793803645011,
+    "status": 200,
+    "ms": 329,
+    "jupAt": 1793803645229,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 7,
+    "order": 0,
+    "mint": "XsYa1w57EZDEiryphKCD8AJf33f4ewr2BHUW4RcjSuE",
+    "sentAt": 1793803655340,
+    "status": 200,
+    "ms": 267,
+    "jupAt": 1793803655494,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 7,
+    "order": 1,
+    "mint": "Xso2H7vbDS6HVokLUecSG5GvWAZXjH7PEHAH9rAYXUP",
+    "sentAt": 1793803655607,
+    "status": 200,
+    "ms": 219,
+    "jupAt": 1793803655670,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 8,
+    "order": 0,
+    "mint": "BQX1cjcRHXmrqNtoFWwmE5bZj7RPneTmqXB979b2pump",
+    "sentAt": 1793803665830,
+    "status": 200,
+    "ms": 486,
+    "jupAt": 1793803666207,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 8,
+    "order": 1,
+    "mint": "tSATdGGSLYBVCrm3pXiib8NmzKcB1iUdjRRseNGssxu",
+    "sentAt": 1793803666316,
+    "status": 200,
+    "ms": 313,
+    "jupAt": 1793803666563,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 9,
+    "order": 0,
+    "mint": "XsDZMGEU8zadWFCkTtPBoPWYcUX3JHVmghnwf2Mve2q",
+    "sentAt": 1793803676630,
+    "status": 200,
+    "ms": 360,
+    "jupAt": 1793803676798,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 9,
+    "order": 1,
+    "mint": "Hon2rHAiqkcDtUzL5gA2vjXPr7T1MPCK2UT2AHKCpump",
+    "sentAt": 1793803676990,
+    "status": 200,
+    "ms": 585,
+    "jupAt": 1793803677514,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 10,
+    "order": 0,
+    "mint": "nbwNoPaFYNY2c3u4iK6U59ySC2ehFrpjdpfbyLDondo",
+    "sentAt": 1793803687576,
+    "status": 200,
+    "ms": 292,
+    "jupAt": 1793803687683,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 10,
+    "order": 1,
+    "mint": "ja4bMvHL3Hw9Ey33VGWyDeXvrHvQWyBnK4GSmCUondo",
+    "sentAt": 1793803687868,
+    "status": 200,
+    "ms": 193,
+    "jupAt": 1793803687997,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 11,
+    "order": 0,
+    "mint": "G5bStqnKXv11fmPvMaagUbZi86BGnpf9zZtyPQtAdaos",
+    "sentAt": 1793803698061,
+    "status": 200,
+    "ms": 287,
+    "jupAt": 1793803698170,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 11,
+    "order": 1,
+    "mint": "D25bi7oHQjqkVrzbfuM6k2gzVNHTSpBLhtakDCzCCDUB",
+    "sentAt": 1793803698348,
+    "status": 200,
+    "ms": 242,
+    "jupAt": 1793803698485,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 12,
+    "order": 0,
+    "mint": "gNhrgh21pQozQoc7YtvhdKF7eJnSKwWa9dzHnaxondo",
+    "sentAt": 1793803708591,
+    "status": 200,
+    "ms": 380,
+    "jupAt": 1793803708780,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 12,
+    "order": 1,
+    "mint": "9hX59xHHnaZXLU6quvm5uGY2iDiT3jczaReHy6A6TYKw",
+    "sentAt": 1793803708971,
+    "status": 200,
+    "ms": 154,
+    "jupAt": 1793803709033,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 13,
+    "order": 0,
+    "mint": "HKJHsYJHMVK5VRyHHk5GhvzY9tBAAtPvDkZfDH6RLDTd",
+    "sentAt": 1793803719125,
+    "status": 200,
+    "ms": 407,
+    "jupAt": 1793803719265,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 13,
+    "order": 1,
+    "mint": "XsqzzgtDcBGrRQGasUDMTNXxFxBwxnDUvipe73maWoV",
+    "sentAt": 1793803719532,
+    "status": 200,
+    "ms": 146,
+    "jupAt": 1793803719595,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 14,
+    "order": 0,
+    "mint": "BEgBsVSKJSxreiCE1XmWWq8arnwit7xDqQXSWYgay9xP",
+    "sentAt": 1793803729678,
+    "status": 200,
+    "ms": 321,
+    "jupAt": 1793803729853,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 14,
+    "order": 1,
+    "mint": "a2vHV6BstDDyZTkiQtEKTWrdcQNE6AAvcjj7dwMondo",
+    "sentAt": 1793803730000,
+    "status": 200,
+    "ms": 136,
+    "jupAt": 1793803730077,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 15,
+    "order": 0,
+    "mint": "2yu92oYzBWLAdVpu8BoaLzmM1oxPsHoboay2BXmeDDZr",
+    "sentAt": 1793803740136,
+    "status": 200,
+    "ms": 361,
+    "jupAt": 1793803740321,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 15,
+    "order": 1,
+    "mint": "R3ywbVQ5t8LNmjQsn2Ngv43dSqyZscQwNag9G3Eondo",
+    "sentAt": 1793803740498,
+    "status": 200,
+    "ms": 272,
+    "jupAt": 1793803740619,
+    "src": "jupiter",
+    "retryAfter": null
+   }
+  ]
+ },
+ "bad_pre_card": {
+  "base": "https://api.confidential.unrealized.trade",
+  "at": "2026-11-04T14:37:13.079Z",
+  "pairs": 16,
+  "lists": {
+   "status": 200,
+   "size": 181
+  },
+  "pool": {
+   "status": 200,
+   "size": 4021
+  },
+  "reads": [
+   {
+    "pair": 0,
+    "order": 0,
+    "mint": "XsKfV36es7HHpJFKrDqaaXSFC1dwsrwLit4N67JH5LV",
+    "sentAt": 1793803034779,
+    "status": 200,
+    "ms": 318,
+    "jupAt": 1793803034951,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 0,
+    "order": 1,
+    "mint": "XsvEMALzsRVnPED4KEAd7pivT5ho9vgqzqZxQxNBkWW",
+    "sentAt": 1793803035097,
+    "status": 200,
+    "ms": 3980,
+    "jupAt": 1793803038953,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 1,
+    "order": 0,
+    "mint": "XszkVkR1etQRYCTuyiojGiP8i31nphC89w5KVTp98TX",
+    "sentAt": 1793803049076,
+    "status": 200,
+    "ms": 710,
+    "jupAt": 1793803049644,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 1,
+    "order": 1,
+    "mint": "5gsDMgG3p1xZR7qvbS88EjNSDesBdJjYH7PGemUgpump",
+    "sentAt": 1793803049786,
+    "status": 200,
+    "ms": 3959,
+    "jupAt": 1793803053629,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 2,
+    "order": 0,
+    "mint": "XsLpBnXxSy99fL54j3h76gvbJD6c2tjPTUHUvnwhvMA",
+    "sentAt": 1793803063747,
+    "status": 200,
+    "ms": 710,
+    "jupAt": 1793803064297,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 2,
+    "order": 1,
+    "mint": "aHFrgfBHMGEScG8j64cN324jeoQ4EVXLmiHxtuPondo",
+    "sentAt": 1793803064458,
+    "status": 200,
+    "ms": 3993,
+    "jupAt": 1793803068297,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 3,
+    "order": 0,
+    "mint": "Xs3c2aZenyRQwXjki5MDxJEJ2km27ef2rWQMFWx7QKJ",
+    "sentAt": 1793803078451,
+    "status": 200,
+    "ms": 744,
+    "jupAt": 1793803079045,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 3,
+    "order": 1,
+    "mint": "HAWKThXRcNL9ZGZKqgUXLm4W8tnRZ7U6MVdEepSutj34",
+    "sentAt": 1793803079194,
+    "status": 200,
+    "ms": 3951,
+    "jupAt": 1793803083023,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 4,
+    "order": 0,
+    "mint": "3ThdFZQKM6kRyVGLG48kaPg5TRMhYMKY1iCRa9xop1WC",
+    "sentAt": 1793803093146,
+    "status": 200,
+    "ms": 751,
+    "jupAt": 1793803093745,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 4,
+    "order": 1,
+    "mint": "DHJVYXsikcimtcVo49FAZqYd1XPYPaXezYhbKArJbonk",
+    "sentAt": 1793803093897,
+    "status": 200,
+    "ms": 3953,
+    "jupAt": 1793803097725,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 5,
+    "order": 0,
+    "mint": "XsHXhZf6yLqBvcbuswpbio7m6yNTMrMiQWWN7csQMAr",
+    "sentAt": 1793803107850,
+    "status": 200,
+    "ms": 841,
+    "jupAt": 1793803108509,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 5,
+    "order": 1,
+    "mint": "Zippybh3S5xYYam2nvL6hVJKz1got6ShgV4DyD1XQYF",
+    "sentAt": 1793803108691,
+    "status": 200,
+    "ms": 3901,
+    "jupAt": 1793803112474,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 6,
+    "order": 0,
+    "mint": "StepAscQoEioFxxWGnh2sLBDFp9d8rvKz2Yp39iDpyT",
+    "sentAt": 1793803122593,
+    "status": 200,
+    "ms": 772,
+    "jupAt": 1793803123147,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 6,
+    "order": 1,
+    "mint": "XsxtnDUJzTMjqmzajufokv9xrG868kvkp5KNuNNsU4d",
+    "sentAt": 1793803123365,
+    "status": 200,
+    "ms": 3911,
+    "jupAt": 1793803127156,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 7,
+    "order": 0,
+    "mint": "HAYQtfJEQ9DbDbaHEhxfGsWbSZ3ywthdsVB3PuB72DYe",
+    "sentAt": 1793803137278,
+    "status": 200,
+    "ms": 726,
+    "jupAt": 1793803137832,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 7,
+    "order": 1,
+    "mint": "XsnHFPDQiWVbmZobbRvneRpvY5BL7AGKcJ9kMJGvUgk",
+    "sentAt": 1793803138004,
+    "status": 200,
+    "ms": 3957,
+    "jupAt": 1793803141835,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 8,
+    "order": 0,
+    "mint": "ChanGGuDHboPswpTmKDfsTVGQL96VHhmvpwrE4UjWssd",
+    "sentAt": 1793803151962,
+    "status": 200,
+    "ms": 883,
+    "jupAt": 1793803152695,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 8,
+    "order": 1,
+    "mint": "9tqjeRS1swj36Ee5C1iGiwAxjQJNGAVCzaTLwFY8bonk",
+    "sentAt": 1793803152845,
+    "status": 200,
+    "ms": 3963,
+    "jupAt": 1793803156675,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 9,
+    "order": 0,
+    "mint": "DELL2aRKQz7DMq5DrKLtkn47ZCnbxXPZXrSGbkmd13wy",
+    "sentAt": 1793803166809,
+    "status": 200,
+    "ms": 770,
+    "jupAt": 1793803167447,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 9,
+    "order": 1,
+    "mint": "Xsyv3e3WaVQ57Kcjum3ofoEk1iTGw4xWMLyfnmceiCA",
+    "sentAt": 1793803167579,
+    "status": 200,
+    "ms": 3964,
+    "jupAt": 1793803171419,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 10,
+    "order": 0,
+    "mint": "XsV4wp56vcokXjRWaeBxhf5PrYLtGtNxWDa9KddWGcx",
+    "sentAt": 1793803181544,
+    "status": 0,
+    "ms": 10500,
+    "jupAt": null,
+    "src": null,
+    "error": "fetch failed"
+   },
+   {
+    "pair": 10,
+    "order": 1,
+    "mint": "XsXoAR52Q2NYFkYiNqhCq4FauvyA1tdRsrmEYNf9fuh",
+    "sentAt": 1793803192044,
+    "status": 0,
+    "ms": 10497,
+    "jupAt": null,
+    "src": null,
+    "error": "fetch failed"
+   },
+   {
+    "pair": 11,
+    "order": 0,
+    "mint": "XsraCsjDB8cYn672MZSxCzZBhrodEPXD7pWd5EiRUhm",
+    "sentAt": 1793803212543,
+    "status": 200,
+    "ms": 751,
+    "jupAt": 1793803213130,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 11,
+    "order": 1,
+    "mint": "Loothu7Ac6GqtvVcUWSEZBVDAxQnyesc3fFWTGp1DZj",
+    "sentAt": 1793803213294,
+    "status": 200,
+    "ms": 3944,
+    "jupAt": 1793803217099,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 12,
+    "order": 0,
+    "mint": "CARDSccUMFKoPRZxt5vt3ksUbxEFEcnZ3H2pd3dKxYjp",
+    "sentAt": 1793803227240,
+    "status": 200,
+    "ms": 733,
+    "jupAt": 1793803227776,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 12,
+    "order": 1,
+    "mint": "BWXrrYFhT7bMHmNBFoQFWdsSgA3yXoAnMhDK6Fn1eSEn",
+    "sentAt": 1793803227972,
+    "status": 200,
+    "ms": 4195,
+    "jupAt": 1793803231754,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 13,
+    "order": 0,
+    "mint": "XsA5xNUbsqxyz22XSFnNeALLv5XsmBgq3SCaK6xFR5R",
+    "sentAt": 1793803242168,
+    "status": 200,
+    "ms": 712,
+    "jupAt": 1793803242703,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 13,
+    "order": 1,
+    "mint": "FXdwYhavxUufiDfEA3kPyVzJSYoQ16euB1EdPfBakXX5",
+    "sentAt": 1793803242880,
+    "status": 200,
+    "ms": 3965,
+    "jupAt": 1793803246696,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 14,
+    "order": 0,
+    "mint": "6f8ZQhxqfigdv7UszZ1rirbV7Sgv83s3rxv1N2Zopump",
+    "sentAt": 1793803256847,
+    "status": 200,
+    "ms": 1534,
+    "jupAt": 1793803258174,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 14,
+    "order": 1,
+    "mint": "EBGaJP7srpUUN8eRdta1MsojrNtweuHYsdP3P1TRpump",
+    "sentAt": 1793803258381,
+    "status": 200,
+    "ms": 3938,
+    "jupAt": 1793803262191,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 15,
+    "order": 0,
+    "mint": "XsVDmkYEQ3wwLkXKdkRmic3HroSbReejAcnY9eNmrRW",
+    "sentAt": 1793803272319,
+    "status": 200,
+    "ms": 1865,
+    "jupAt": 1793803273195,
+    "src": "jupiter",
+    "retryAfter": null
+   },
+   {
+    "pair": 15,
+    "order": 1,
+    "mint": "AY1Ww6MxwC3cCiyrandHqLrp4FXvzgcwQTZpJ2FEpump",
+    "sentAt": 1793803274183,
+    "status": 200,
+    "ms": 3905,
+    "jupAt": 1793803277175,
+    "src": "jupiter",
+    "retryAfter": null
+   }
+  ],
+  "commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+ }
+}
