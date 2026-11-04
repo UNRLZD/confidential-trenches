@@ -3,15 +3,16 @@
 // on the chain's two RPCs (good) and the same reads with every nullifierHashes answer false on both (bad: a spend the
 // pool never marked). Good passes every line; bad fails on the first nullifier; each record it reads is the one
 // committed beside it, and the run record names every tx of every run. Every chain's run sells (card evm-sell-v4-kit):
-// Robinhood testnet through the v4 PoolManager, Base Sepolia through it and through the v3 router.
+// Robinhood testnet through the v4 PoolManager, Base Sepolia through it and through the v3 router. A run that stopped
+// part way (Robinhood testnet's first, 4 Nov 08:45Z) is read back too and its Tx lines are in the run record.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { replayer } from "./notes-per-pool-evm.mjs";
-import { CHAINS, TOPICS, VIEWS, check, recordFileOf, runRecord, spoil } from "./pool-evm-testnet-run.mjs";
+import { CHAINS, TOPICS, VIEWS, check, recordFileOf, recordFiles, runRecord, spoil } from "./pool-evm-testnet-run.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-evm-testnet-run.answers.json", import.meta.url), "utf8"));
-const RECS = CHAINS.map((c) => JSON.parse(readFileSync(recordFileOf(c), "utf8")));
+const RECS = recordFiles().map((f) => JSON.parse(readFileSync(f, "utf8")));
 
 test("the answers were read from the committed run records, and the run record names every one of their txs", () => {
   assert.deepEqual(A.runs.map((r) => r.record), RECS);
@@ -19,7 +20,10 @@ test("the answers were read from the committed run records, and the run record n
   assert.equal(md, runRecord(RECS));
   assert.match(md, /^Money path: yes$/m);
   assert.deepEqual([...md.matchAll(/^Tx: (\S+) (0x[0-9a-f]{64})$/gm)].map((m) => `${m[1]} ${m[2]}`), RECS.flatMap((rec) => rec.txs.map((t) => `${rec.chain} ${t.hash}`)));
-  for (const rec of RECS) {
+  assert.deepEqual(RECS.filter((r) => !r.stopped).map((r) => r.chain), CHAINS);
+  for (const c of CHAINS) assert.deepEqual(JSON.parse(readFileSync(recordFileOf(c), "utf8")), RECS.find((r) => r.chain === c && !r.stopped));
+  for (const rec of RECS.filter((r) => r.stopped)) assert.ok(md.includes(rec.stopped), `${rec.chain}: why the run stopped`);
+  for (const rec of RECS.filter((r) => !r.stopped)) {
     assert.equal(rec.dryRun, false);
     for (const k of ["deposit", "buy", "withdraw", "sweep", "sell"]) assert.ok(rec.txs.some((t) => t.kind === k), `${rec.chain} ${k}`);
     assert.ok(rec.txs.some((t) => t.kind === "sell" && t.venue === "v4"), `${rec.chain}: a sell through the v4 PoolManager`);
@@ -27,7 +31,7 @@ test("the answers were read from the committed run records, and the run record n
 });
 
 for (const run of A.runs) {
-  const chain = run.record.chain;
+  const chain = run.record.chain + (run.record.stopped ? " (stopped run)" : "");
   test(`${chain}: the recorded good run passes: every tx, the pool's views, the nullifiers, the Ws' delegation, the run key`, async () => {
     const r = await check(run.record, replayer(run.good), run.urls);
     assert.equal(r.ok, true, r.lines.join("\n"));
@@ -45,6 +49,19 @@ for (const run of A.runs) {
     assert.equal(r.ok, false);
     assert.match(r.lines.at(-1), /nullifierHashes\(\d+\) is not set on both/);
   });
+  if (run.record.stopped) {
+    test(`${chain}: a stopped run that does not say why, or has no deposit, fails`, async () => {
+      for (const stopped of ["", 1]) {
+        const r = await check({ ...run.record, stopped }, replayer(run.good), run.urls);
+        assert.equal(r.ok, false);
+        assert.match(r.lines.at(-1), /names why it stopped/);
+      }
+      const r = await check({ ...run.record, txs: run.record.txs.filter((t) => t.kind !== "deposit") }, replayer(run.good), run.urls);
+      assert.equal(r.ok, false);
+      assert.match(r.lines.at(-1), /the record has no deposit/);
+    });
+    continue;
+  }
 
   test(`${chain}: a record that claims another out than the chain's Bought event fails`, async () => {
     const rec = structuredClone(run.record);

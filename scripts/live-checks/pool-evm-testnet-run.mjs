@@ -22,6 +22,9 @@
 // The pins: the pool from card pool-evm-deploy's record, the sell delegate from card evm-sell-v4's (the one that sells
 // through the v4 PoolManager), the PoolManager and the router from pool-evm-deploy.mjs's CHAINS; nothing else is taken
 // from the run's record but what it claims, and each claim is read back. Every chain's run has a sell.
+// A run that stopped part way (its record names why in `stopped`, pool-evm-testnet-run.<chain>.stopped.json) is read
+// back the same way, every transaction and the run key's rest, and needs only its deposit: its Tx lines go into the run
+// record with the others, so the money gate reads them too.
 //   node scripts/live-checks/pool-evm-testnet-run.mjs [--record-file <file>] [--rpc <url>,<url>] [--record <answers>]
 //     [--write-record]
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -41,6 +44,9 @@ const KEY = "pool-evm-testnet-run";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RECORD = path.join(HERE, `${KEY}.md`);
 export const recordFileOf = (chain) => path.join(HERE, `${KEY}.${chain}.json`);
+export const stoppedFileOf = (chain) => path.join(HERE, `${KEY}.${chain}.stopped.json`);
+/** Every record file there is, in the run record's order: each chain's run, then its stopped run if it has one. */
+export const recordFiles = () => CHAINS.flatMap((c) => [recordFileOf(c), stoppedFileOf(c)]).filter((f) => existsSync(f));
 // What a run key may keep: pool-evm-deploy.mjs's DUST (1e13 wei, a transfer's cost many times over)
 export const DUST = 10n ** 13n;
 /** The testnets a run may have a record for, in the run record's order. */
@@ -121,7 +127,8 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
     if (!Array.isArray(rec.txs) || rec.txs.length === 0) throw new Error("the record lists no transaction");
     const relayer = lower(rec.relayer);
     const kinds = new Set(rec.txs.map((t) => t.kind));
-    for (const k of ["deposit", "buy", "sell", "withdraw"]) if (!kinds.has(k)) throw new Error(`the record has no ${k}`);
+    if ("stopped" in rec && (typeof rec.stopped !== "string" || rec.stopped.length === 0)) throw new Error("a stopped run's record names why it stopped");
+    for (const k of rec.stopped ? ["deposit"] : ["deposit", "buy", "sell", "withdraw"]) if (!kinds.has(k)) throw new Error(`the record has no ${k}`);
     const nullifiers = [], precommitments = [], sellers = [];
     let sent = 0;
     for (const t of rec.txs) {
@@ -242,13 +249,14 @@ export function runRecord(recs) {
 const runLines = (rec) => [
     `${rec.chain} (chain id ${rec.chainId}), contracts/pool-evm/script/testnet-run.mjs at ${rec.at}, the pool ${rec.pool}, the token ${rec.coin}, venues ${rec.venues.join(" and ")}. Its steps, in the order of its Tx lines above: ${rec.txs.map((t) => t.step).join(", ")}.`,
     `The run key ${rec.relayer} lived only in the run, sent every transaction but the Ws' own sweeps as the relayer, was funded with ${rec.need} wei (the printed need) and swept back to ${rec.return}. The run's 12 words lived only in the run; every note came from them.`,
+    ...(rec.stopped ? [rec.stopped] : []),
     rec.restore ? `The restore from the words (packages/wallet evmRestoreNotes) at block ${rec.restore.block}: ${rec.restore.notes} notes, ${rec.restore.spends} spends, the Ws ${rec.restore.wallets.map((w) => `${w.w} (${(w.tokens ?? ["unread"]).join(", ") || "no token"})`).join(", ")}.` : "No restore was run.",
     "",
 ];
 
 async function main(argv) {
   const at = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : undefined);
-  const files = at("--record-file") ? [at("--record-file")] : CHAINS.map(recordFileOf).filter((f) => existsSync(f));
+  const files = at("--record-file") ? [at("--record-file")] : recordFiles();
   if (files.length === 0) throw new Error("no run record");
   const runs = [];
   let ok = true;
