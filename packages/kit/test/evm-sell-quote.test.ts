@@ -297,6 +297,22 @@ function hardhatAccount0(): Uint8Array {
   return Buffer.from(k.toString(16).padStart(64, "0"), "hex");
 }
 
+test("the sell quote reads each field of its request once (review of c71a4d0..a9f1d32, LOW 2): a getter cannot name one chain for the providers and another for the reads", async () => {
+  let reads = 0;
+  const req = { token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, bought: BOUGHT } as Record<string, unknown>;
+  Object.defineProperty(req, "chain", { enumerable: true, get: () => (reads++ === 0 ? "base" : "robinhood") });
+  // no network: every provider request fails at once
+  const f = mock.method(globalThis, "fetch", async () => {
+    throw new Error("offline");
+  });
+  try {
+    await assert.rejects(kit.evmPoolSellQuote(req as unknown as kit.EvmPoolSellQuoteRequest), (e: unknown) => (e as { code?: string }).code === "rpc_error");
+  } finally {
+    f.mock.restore();
+  }
+  assert.equal(reads, 1);
+});
+
 // card evm-quote-exec-sim: W signs a sim sell only into EVM_SELL_SIM, with a deadline at most the agreed block's time,
 // itself at most the device's clock. Such a signature can never land for one reason: the deposit into the codeless
 // sim pool reverts when its empty answer is decoded. The deadline does not stop it: later blocks can share the agreed
