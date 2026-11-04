@@ -303,7 +303,7 @@ test("a provider that writes hex in upper case: drpc's 0xB626 reads as 46630, an
 // card evm-quote-exec-sim (review of the exec sim, HIGH 1): the device sims each sale as sent from the kit's pinned sell
 // sender, so the helper starts a network's sell sender only with the key of that pin, where the kit pins one; card
 // helper-evm-sender: the sell sender has its own key (POOL_EVM_SELL_KEY_<NETWORK>), never the withdraw sender's
-test("the EVM pool sell sender's address is the kit's pinned sell sender for its chain, or the helper does not start; its key is its own", () => {
+test("the EVM pool sell sender's address is the kit's pinned sell sender for its chain, or the helper does not start; a chain with no pin starts with sales off; its key is its own", async () => {
   const SELL_KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SELL_SENDER").digest());
   const env = {
     POOL_EVM_ADDRESS_BASE_SEPOLIA: POOL,
@@ -332,13 +332,18 @@ test("the EVM pool sell sender's address is the kit's pinned sell sender for its
   delete noSell.POOL_EVM_SELL_KEY_BASE_SEPOLIA;
   assert.equal(evmPoolSendersFromEnv(noSell, pinned(own)).get(POOL)!.sellSender, null);
   // the kit's own list pins each testnet's sell sender (the helper box's key) and no mainnet's yet: a test key on Base
-  // Sepolia is refused at start against the kit's own pin; on a chain with no pin it starts
+  // Sepolia is refused at start against the kit's own pin; a chain with no pin starts with sales off, never with an
+  // unpinned key (the device sims each sale from the pin, so there is nothing to sim a sale from)
   assert.equal(kit["base-sepolia"].sellSender, "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553");
   assert.equal(kit["robinhood-testnet"].sellSender, "0xd12d83097671d731df2db731e973ad9a07673607");
   for (const c of ["base", "robinhood"] as const) assert.equal(Object.hasOwn(kit[c], "sellSender"), false, c);
   assert.throws(() => evmPoolSendersFromEnv(env), (e: Error) => e.message.includes("POOL_EVM_SELL_KEY_BASE_SEPOLIA") && e.message.includes(kit["base-sepolia"].sellSender!));
   const unpinned = { ...kit, "base-sepolia": Object.fromEntries(Object.entries(kit["base-sepolia"]).filter(([k]) => k !== "sellSender")) as typeof kit["base-sepolia"] };
-  assert.equal(evmPoolSendersFromEnv(env, unpinned).get(POOL)!.sellSender, own);
+  const off = evmPoolSendersFromEnv(env, unpinned).get(POOL)!;
+  assert.equal(off.sellSender, null, "no pin: no sell sender");
+  assert.equal(off.sender, evmAddressOf(KEY), "the withdraws still go");
+  const refused = await off.sell({});
+  assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [503, "not_configured"]);
 });
 
 test("the withdraw's deadline again after the queue's wait: a carry whose deadline came within the margin while it waited is deadline_near, nothing sent", async () => {
