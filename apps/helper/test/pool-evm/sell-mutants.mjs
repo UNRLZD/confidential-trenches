@@ -161,6 +161,11 @@ export const MUTANTS = [
   [EVM, "    watch(withdrawLane, nonce, hash, until);", "", T, "a stuck withdraw on the withdraw lane"],
   [EVM, "    if (pending < lane.nextNonce && lane.waiting === 0 && (hole === undefined || t - hole.at > EVM_SELL_DROP_MARGIN_MS)) at.add(pending);", "", T, "an idle hole on the sell lane"],
   [EVM, "      if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);", "", T, "an idle hole on the sell lane"],
+  // fold 3: a replacement only for a send stuck on price, at 2 x the base fee now + tip, never over the ceiling
+  [EVM, "      if (!(holed && n === pending) && old !== undefined && old.maxFee >= 2n * base + tipNow) continue;", "", T, "at a steady base fee, a stuck sale"],
+  [EVM, "      const maxFee = higher(2n * base + tip, old === undefined ? 0n : raise(old.maxFee));", "      const maxFee = old === undefined ? 2n * base + tip : raise(old.maxFee);", T, "a stuck sale on the sell lane"],
+  [EVM, "      if (maxFee > EVM_SELL_MAX_FEE_PER_GAS) {", "      if (false) {", T, "a base fee whose 2 x base + tip is over"],
+  [EVM, "        if (mine === undefined || lane.sent.get(nonce) !== mine) return;", "        return;", T, "a stuck sale that covers 2 x base + tip"],
   // fold 2, M-cap: a caller with a paid landing is held by its own caps only
   [EVM, '      if (known && (k === "all" || k.startsWith("t:"))) continue;', "", T, "the shared caps hold only callers with no paid landing"],
   [EVM, '      if (known && (k === "all" || k.startsWith("t:"))) continue;', "      if (known) continue;", T, "the shared caps hold only callers with no paid landing"],

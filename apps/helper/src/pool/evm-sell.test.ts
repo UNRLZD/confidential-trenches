@@ -11,7 +11,10 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { readFileSync } from "node:fs";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
 import { EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmEpochFee, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
+import * as evmModule from "./evm.ts";
 
+// read by name, so a build without the ceiling fails only the tests that use it
+const EVM_SELL_MAX_FEE_PER_GAS = (evmModule as Record<string, unknown>).EVM_SELL_MAX_FEE_PER_GAS as bigint;
 const key = (label: string) => new Uint8Array(createHash("sha256").update(`helper-evm-sender/test-key/${label}`).digest());
 const KEY = key("EVM_SENDER");
 /** The sell sender's own key, apart from the withdraw sender's (card helper-evm-sender: sells never use KEY). */
@@ -933,36 +936,86 @@ test("an idle hole on the sell lane: a sale dropped from both providers with no 
 });
 
 /** A lane's send stuck at 7: pending on both providers (the count at pending 8 once it is sent), never mined (latest 7,
- *  or `mined` once given). Past its deadline plus the 60 s margin, the watch's next read finds it still unmined. */
-const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ status: number; body: unknown }>, deadlineMs: number, mined = 7n) => {
+ *  or `mined` once given). Past its deadline plus the 60 s margin, the watch's next read finds it still unmined; the
+ *  base fee is `base` from then (BASE unless given), and each of `then` moves the clock (and the base fee) on again. */
+const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ status: number; body: unknown }>, deadlineMs: number, o2: { mined?: bigint; base?: bigint; then?: { atMs: number; base?: bigint }[] } = {}) => {
   let clock = NOW;
   let pending = 7n;
-  const count = (t: string) => (t === "pending" ? pending : mined);
+  const count = (t: string) => (t === "pending" ? pending : (o2.mined ?? 7n));
   const x: Calls = [];
   const o: Opts = { receipt: () => null, tx: () => ({}), count };
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(x, o), rpc([], o)], () => clock);
+  const lines: string[] = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, feeRecipient: FEE_TO, receiptPollMs: 1, log: (l: string) => lines.push(l) }, [rpc(x, o), rpc([], o)], () => clock);
   const first = await send(s);
   assert.equal(first.status, 200, JSON.stringify(first.body));
   pending = 8n;
   clock = deadlineMs + 59_000; // within the margin: nothing replaced
   for (let i = 0; i < 30; i++) await tick();
   const early = sends(x).length;
+  if (o2.base !== undefined) o.base = o2.base;
   clock = deadlineMs + 60_001;
   await settle(() => sends(x).length > 1);
-  return { early, raws: sends(x).map(fieldsOf) };
+  const replaced = sends(x).length;
+  for (const step of o2.then ?? []) {
+    if (step.base !== undefined) o.base = step.base;
+    clock = step.atMs;
+    await settle(() => false, 80);
+  }
+  return { early, replaced, raws: sends(x).map(fieldsOf), lines };
+};
+/** The tip and maxFeePerGas a replacement takes over `old`: each over the old by more than a tenth, the tip at least the
+ *  providers' eth_maxPriorityFeePerGas (the mock's 1), maxFeePerGas at least 2 x the base fee + that tip. */
+const raised = (old: { tip: bigint; maxFee: bigint }, base: bigint) => {
+  const tip = (old.tip * 11n) / 10n + 1n > 1n ? (old.tip * 11n) / 10n + 1n : 1n;
+  const floor = 2n * base + tip;
+  const up = (old.maxFee * 11n) / 10n + 1n;
+  return { tip, maxFee: up > floor ? up : floor };
 };
 
-test("a stuck sale on the sell lane: still pending past its deadline plus the margin, it is replaced at its own nonce by a 0-value self-transfer with a raised fee; one mined meanwhile is not", async () => {
+test("a stuck sale on the sell lane: still pending past its deadline plus the margin with the base fee doubled, it is replaced at its own nonce by a 0-value self-transfer at 2 x the new base + tip; the base steady after, it is raised no more; one mined meanwhile is not", async () => {
   const deadlineMs = Number(SELL.deadline) * 1000;
-  const { early, raws } = await stuck((s) => s.sell(body()), deadlineMs);
+  const { early, replaced, raws } = await stuck((s) => s.sell(body()), deadlineMs, { base: 2n * BASE, then: [{ atMs: deadlineMs + 200_000 }, { atMs: deadlineMs + 400_000 }] });
   assert.equal(early, 1, "nothing replaced within the margin");
-  assert.equal(raws.length, 2, "one replacement");
+  assert.equal(replaced, 2, "one replacement");
+  assert.equal(raws.length, 2, "the base steady after: never raised again");
   const [sale, repl] = raws as [ReturnType<typeof fieldsOf>, ReturnType<typeof fieldsOf>];
   assert.deepEqual([sale.type, sale.nonce], [4, 7n]);
   assert.deepEqual([repl.type, repl.nonce, repl.to, repl.value, repl.data], [2, 7n, SENDER, 0n, ""], "a 0-value self-transfer at the sale's nonce");
-  assert.ok(repl.tip * 10n >= sale.tip * 11n && repl.maxFee * 10n >= sale.maxFee * 11n, `the fee raised by at least a tenth: tip ${sale.tip} -> ${repl.tip}, max ${sale.maxFee} -> ${repl.maxFee}`);
-  const mined = await stuck((s) => s.sell(body()), deadlineMs, 8n);
+  assert.deepEqual({ tip: repl.tip, maxFee: repl.maxFee }, raised(sale, 2n * BASE));
+  assert.equal(repl.maxFee, 2n * (2n * BASE) + repl.tip, "2 x the new base + tip");
+  const mined = await stuck((s) => s.sell(body()), deadlineMs, { mined: 8n, base: 2n * BASE });
   assert.equal(mined.raws.length, 1, "a sale whose nonce was mined is not replaced");
+});
+
+test("at a steady base fee, a stuck sale priced under 2 x base + tip is replaced once, at 2 x base + tip, and never raised again", async () => {
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  // fee - L1 = 1.6 x 10^13: maxFeePerGas 16,000,000, over base + tip (11,000,000) but under 2 x base + tip
+  const { replaced, raws } = await stuck((s) => s.sell(body({ fee: L1 + 16n * 10n ** 12n })), deadlineMs, { then: [{ atMs: deadlineMs + 200_000 }, { atMs: deadlineMs + 400_000 }, { atMs: deadlineMs + 900_000 }] });
+  assert.equal(replaced, 2, "one replacement");
+  assert.equal(raws.length, 2, "never raised again at the same base fee");
+  const [sale, repl] = raws as [ReturnType<typeof fieldsOf>, ReturnType<typeof fieldsOf>];
+  assert.equal(sale.maxFee, 16_000_000n);
+  assert.deepEqual({ tip: repl.tip, maxFee: repl.maxFee }, raised(sale, BASE));
+  assert.equal(repl.maxFee, 2n * BASE + repl.tip);
+});
+
+test("a stuck sale that covers 2 x base + tip at its deadline is left, read on, and replaced once the base fee rises past it", async () => {
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  const { replaced, raws } = await stuck((s) => s.sell(body()), deadlineMs, { then: [{ atMs: deadlineMs + 200_000 }, { atMs: deadlineMs + 400_000, base: 2n * BASE }] });
+  assert.equal(replaced, 1, "not stuck on price at its deadline: left");
+  assert.equal(raws.length, 2, "replaced once the base rose");
+  assert.equal(raws[1]!.maxFee, 2n * (2n * BASE) + raws[1]!.tip);
+});
+
+test("a base fee whose 2 x base + tip is over EVM_SELL_MAX_FEE_PER_GAS replaces nothing, and the lane logs it once", async () => {
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  const ceiling = EVM_SELL_UNPAID_CAP_WEI / EVM_POOL_SELL_GAS; // 1 gwei: one sale's worst gas at it is a whole W's unpaid cap
+  const { replaced, raws, lines } = await stuck((s) => s.sell(body()), deadlineMs, { base: ceiling / 2n + 1n, then: [{ atMs: deadlineMs + 200_000 }] });
+  assert.equal(replaced, 1, "nothing replaced over the ceiling");
+  assert.equal(raws.length, 1);
+  assert.equal(EVM_SELL_MAX_FEE_PER_GAS, ceiling);
+  const said = lines.filter((l) => l.includes("EVM_SELL_MAX_FEE_PER_GAS"));
+  assert.equal(said.length, 1, `logged once: ${lines.join(" | ")}`);
 });
 
 test("a nonce hole on the withdraw lane: a withdraw dropped from both providers, the withdraw sender's pending count 7 throughout, is followed past the margin by the next withdraw at 7", async () => {
@@ -979,17 +1032,19 @@ test("a nonce hole on the withdraw lane: a withdraw dropped from both providers,
   assert.deepEqual(sends(x).map((r) => fieldsOf(r).nonce), [7n, 8n, 7n]);
 });
 
-test("a stuck withdraw on the withdraw lane: still pending past its deadline plus the margin, it is replaced at its own nonce by a 0-value self-transfer from the withdraw sender with a raised fee; one mined meanwhile is not", async () => {
+test("a stuck withdraw on the withdraw lane: still pending past its deadline plus the margin with the base fee doubled, it is replaced at its own nonce by a 0-value self-transfer from the withdraw sender at 2 x the new base + tip, raised no more after; one mined meanwhile is not", async () => {
   const fee = evmEpochFee(1n, BASE);
   const deadlineMs = NOW + 300_000; // withdrawData's
-  const { early, raws } = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x81n), epoch: NOW }), deadlineMs);
+  const { early, replaced, raws } = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x81n), epoch: NOW }), deadlineMs, { base: 2n * BASE, then: [{ atMs: deadlineMs + 200_000 }] });
   assert.equal(early, 1, "nothing replaced within the margin");
-  assert.equal(raws.length, 2, "one replacement");
+  assert.equal(replaced, 2, "one replacement");
+  assert.equal(raws.length, 2, "the base steady after: never raised again");
   const [wd, repl] = raws as [ReturnType<typeof fieldsOf>, ReturnType<typeof fieldsOf>];
   assert.deepEqual([wd.type, wd.nonce, wd.to], [2, 7n, POOL]);
   assert.deepEqual([repl.type, repl.nonce, repl.to, repl.value, repl.data], [2, 7n, evmAddressOf(KEY), 0n, ""]);
-  assert.ok(repl.tip * 10n >= wd.tip * 11n && repl.maxFee * 10n >= wd.maxFee * 11n, `raised: tip ${wd.tip} -> ${repl.tip}, max ${wd.maxFee} -> ${repl.maxFee}`);
-  const mined = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x82n), epoch: NOW }), deadlineMs, 8n);
+  assert.deepEqual({ tip: repl.tip, maxFee: repl.maxFee }, raised(wd, 2n * BASE));
+  assert.equal(repl.maxFee, 2n * (2n * BASE) + repl.tip, "2 x the new base + tip");
+  const mined = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x82n), epoch: NOW }), deadlineMs, { mined: 8n, base: 2n * BASE });
   assert.equal(mined.raws.length, 1);
 });
 
