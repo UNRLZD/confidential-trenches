@@ -17,7 +17,7 @@ import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vaul
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
-import { PoolSendBusy, poolBuyKind, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
+import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
@@ -414,4 +414,31 @@ test("a send error that is not the helper's busy answer is not sent again (a 502
   const a = await runPoolBuy(w.host, ASK);
   assert.deepEqual(a, { stage: "not_landed", txs: [] });
   assert.equal(w.sends.length, 1);
+});
+
+// the review of 54b2f65 (finding 1): one RPC down or stuck never keeps a busy send going, nor the read-back, for minutes
+test("busy every time, RPC 1 down and RPC 0 past the blockhash: no send again once either RPC reads it past", async () => {
+  const w = await world({ busy: 1_000_000, landsAtSettle: "never", finalHeight: (p) => { if (p === 1) throw new Error("RPC 1 down"); return 1_000; } });
+  const a = await runPoolBuy(w.host, ASK);
+  assert.equal(w.sends.length, 1, `sent ${w.sends.length} times`);
+  assert.deepEqual(a, { stage: "sent", txs: [] }, "never not_landed on one RPC's word");
+  assert.equal(w.state(), "RESERVED");
+});
+
+test("busy every time, RPC 1 stuck below the blockhash and RPC 0 past it: no send again", async () => {
+  const w = await world({ busy: 1_000_000, landsAtSettle: "never", finalHeight: (p) => (p === 1 ? 50 : 1_000) });
+  const a = await runPoolBuy(w.host, ASK);
+  assert.equal(w.sends.length, 1, `sent ${w.sends.length} times`);
+  assert.deepEqual(a, { stage: "sent", txs: [] });
+});
+
+test("busy every time and both RPCs stuck below the blockhash: the sends stop at its life on the wall clock, the read-back at POOL_BUY_SETTLE_MS", async () => {
+  const w = await world({ busy: 1_000_000, landsAtSettle: "never", finalHeight: () => 50 });
+  // the page's clock moves with each wait the run asks for
+  w.host.now = () => BigInt(1_000 + w.waits.reduce((s, x) => s + x, 0));
+  const a = await runPoolBuy({ ...w.host, reads: 1_000 }, ASK);
+  const waited = w.waits.reduce((s, x) => s + x, 0);
+  assert.deepEqual(a, { stage: "sent", txs: [] });
+  assert.ok(w.sends.length <= POOL_BLOCKHASH_LIFE_MS / 1_000 + 1, `sent ${w.sends.length} times`);
+  assert.ok(waited <= POOL_BUY_SETTLE_MS + 1_000, `waited ${waited} ms`);
 });
