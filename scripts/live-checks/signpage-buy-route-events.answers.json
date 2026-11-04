@@ -1,0 +1,64 @@
+{
+ "good": {
+  "at": "2026-11-04T17:21:04.312Z",
+  "hosts": {
+   "sign": {
+    "source": "this checkout, packages/signpage",
+    "pageStatus": 200,
+    "js": [
+     {
+      "url": "/app.js",
+      "status": 200,
+      "found": [
+       "the route poster",
+       "the kinds' route context"
+      ]
+     }
+    ]
+   },
+   "app": {
+    "source": "this checkout, apps/terminal/dist",
+    "pageStatus": 200,
+    "js": [
+     {
+      "url": "/assets/index-tn68l98g.js",
+      "status": 200,
+      "found": [
+       "the kit client's onRoute",
+       "the trade source's live seam"
+      ]
+     }
+    ]
+   }
+  },
+  "note": "this card at 887c521: packages/signpage as committed (index.html, public/app.js) and apps/terminal built fresh (vite build), read from disk"
+ },
+ "bad": {
+  "at": "2026-11-04T17:21:04.345Z",
+  "hosts": {
+   "sign": {
+    "source": "https://sign.confidential.unrealized.trade/",
+    "pageStatus": 200,
+    "js": [
+     {
+      "url": "/app.js",
+      "status": 200,
+      "found": []
+     }
+    ]
+   },
+   "app": {
+    "source": "https://confidential.unrealized.trade/",
+    "pageStatus": 200,
+    "js": [
+     {
+      "url": "/assets/index-BG0SJzHL.js",
+      "status": 200,
+      "found": []
+     }
+    ]
+   }
+  },
+  "note": "the deployed hosts before this card, read over https: SIGN_HOST and APP_HOST hold neither half"
+ }
+}
