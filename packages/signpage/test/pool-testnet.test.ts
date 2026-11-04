@@ -457,3 +457,22 @@ test("a state read refuses a dead pending sell record once per page load, never 
   await t.stateRead();
   assert.equal(opsKeys, once, "read once per page load");
 });
+
+// The card signpage-pool-flow-run, run 6: the helper's busy answer to a send is told apart from a failure, with its wait.
+test("helperPoolSend gives the helper's 429 as busy, with its code and its Retry-After; a 429 that is not the helper's body is still busy", async () => {
+  const { helperPoolSend } = await import("../src/pool-testnet.ts");
+  const { PoolSendBusy } = await import("../src/pool-buy.ts");
+  const answer = (status: number, body: string, headers: Record<string, string> = {}) => (async () => new Response(body, { status, headers })) as unknown as typeof fetch;
+  const busy = async (f: typeof fetch) => {
+    try {
+      await helperPoolSend("p", new Uint8Array(3), f);
+    } catch (e) {
+      return e instanceof PoolSendBusy ? { code: e.code, ms: e.retryAfterMs } : String(e);
+    }
+    return "answered";
+  };
+  assert.deepEqual(await busy(answer(429, '{"error":{"code":"rate_limited"}}', { "retry-after": "1" })), { code: "rate_limited", ms: 1_000 });
+  assert.deepEqual(await busy(answer(429, '{"error":{"code":"in_flight"}}', { "retry-after": "2" })), { code: "in_flight", ms: 2_000 });
+  assert.deepEqual(await busy(answer(429, "slow down")), { code: "throttled", ms: 1_000 });
+  assert.match(String(await busy(answer(503, '{"error":{"code":"upstream"}}'))), /HTTP 503/);
+});

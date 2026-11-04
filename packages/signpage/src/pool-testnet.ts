@@ -38,7 +38,7 @@ import { proverHost } from "./prover-host.ts";
 import { TRADE_HELPER } from "./trade.ts";
 import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
-import { poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
+import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { poolSellKind, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
@@ -102,6 +102,22 @@ export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: type
       body: JSON.stringify({ pool, tx: base64.encode(tx) }),
       signal: window.signal,
     });
+    if (res.status === 429) {
+      // busy (the helper's rate_limited or in_flight, or its per-caller throttle): its Retry-After (whole seconds) and
+      // its code, read from a body no larger than the route's limit; pool-buy.ts sends the same bytes again after it
+      const header = res.headers.get("retry-after");
+      const after = header === null || header.trim() === "" ? Number.NaN : Number(header);
+      const ms = Number.isInteger(after) && after >= 0 && after <= 3_600 ? after * 1_000 : POOL_SEND_BUSY_WAIT_MS.min;
+      const body = new Uint8Array(await res.arrayBuffer());
+      let code: PoolSendBusy["code"] = "throttled";
+      try {
+        const c = body.length <= 4_096 ? (JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) as { error?: { code?: unknown } })?.error?.code : undefined;
+        if (c === "rate_limited" || c === "in_flight") code = c;
+      } catch {
+        // a body that is not the helper's: still its 429
+      }
+      throw new PoolSendBusy(code, ms);
+    }
     if (res.status !== 200) throw new Error(`pool send: HTTP ${res.status}`);
     const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/solana/send")!.limitBytes!;
     const bytes = new Uint8Array(await res.arrayBuffer());

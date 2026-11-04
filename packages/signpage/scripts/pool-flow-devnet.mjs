@@ -29,8 +29,8 @@
 //   each stranded 0.01 SOL). FLOW_RESUME=<that file> runs again from it: no U, no deposit; the notes restored from the
 //   seed on both devnet RPCs (the wallet's solanaRestoreNotes) into the store, then the buy and the sell as above.
 //   FLOW_CRASH_AFTER=deposit stops the run right after its deposit (the resume's test).
-// - A buy that did not land (the kind's not_landed, its note RESERVED) is tapped again once the page's RESERVED pass
-//   has freed the note (its deadline past on both RPCs), up to the same 4 tries.
+// - A buy that does not land on its tap is a failed run, recorded as one: it is never tapped again (a re-tap would hide
+//   a page that gives up on a busy provider).
 import { randomBytes, createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -150,16 +150,6 @@ const run = async (kind, params) => {
   for (let k = 1; ; k++) {
     const r = await once(kind, params);
     const err = r.answer?.error;
-    if (kind === "pool.buy" && r.answer?.result?.stage === "not_landed" && k < 4) {
-      // the note RESERVED until the page's pass frees it past its deadline on both RPCs: then the buy is tapped again
-      log(`pool.buy not landed (try ${k}): waiting for its note to be freed`);
-      for (let i = 0; i < 40 && (await noteList()).some((n) => n.state === "RESERVED"); i++) {
-        await sleep(15_000);
-        await t.stateRead();
-      }
-      await t.proofs();
-      continue;
-    }
     if ((err !== "failed" && err !== "quote_check_failed") || k >= 4) return r;
     log(`${kind} answered ${err} (try ${k}): again in 10 s`);
     await sleep(10_000);
