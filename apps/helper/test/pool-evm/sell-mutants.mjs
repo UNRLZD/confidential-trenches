@@ -159,8 +159,8 @@ export const MUTANTS = [
   [EVM, "    const raise = (v: bigint) => (v * 11n) / 10n + 1n;", "    const raise = (v: bigint) => v;", T, "a stuck sale on the sell lane"],
   [EVM, "maxFeePerGas: maxFee, gas, to: lane.from, data: new Uint8Array() }, key);", "maxFeePerGas: maxFee, gas, to: pool, data: new Uint8Array() }, key);", T, "a stuck sale on the sell lane"],
   [EVM, "    watch(withdrawLane, nonce, hash, until);", "", T, "a stuck withdraw on the withdraw lane"],
-  [EVM, "    if (pending < lane.nextNonce && lane.waiting === 0 && (hole === undefined || t - hole.at > EVM_SELL_DROP_MARGIN_MS)) at.add(pending);", "", T, "an idle hole on the sell lane"],
-  [EVM, "      if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);", "", T, "an idle hole on the sell lane"],
+  [EVM, "    if (holed) at.add(pending);", "", T, "an idle hole on the sell lane"],
+  [EVM, "      } else if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);", "      }", T, "an idle hole on the sell lane"],
   // fold 3: a replacement only for a send stuck on price, at 2 x the base fee now + tip, never over the ceiling
   [EVM, "      if (!(holed && n === pending) && old !== undefined && old.maxFee >= 2n * base + tipNow) continue;", "", T, "at a steady base fee, a stuck sale"],
   [EVM, "      const maxFee = higher(2n * base + tip, old === undefined ? 0n : raise(old.maxFee));", "      const maxFee = old === undefined ? 2n * base + tip : raise(old.maxFee);", T, "a stuck sale on the sell lane"],
