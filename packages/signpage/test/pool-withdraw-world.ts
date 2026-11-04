@@ -262,14 +262,18 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     return id;
   };
   /** A transaction in W's history older than the rest: `wire` with its own id, failed or landed. `nullifier` set: its
-   *  release's nullifier hash's last byte changed (a release of another note to W, which anyone can make). */
+   *  release's nullifier hash and salt changed (another note's release to W, which anyone can make). */
   const landOlder = (wire: Uint8Array, o: { failed?: boolean; nullifier?: boolean } = {}): string => {
     const m = keysOf(wire);
     const ix = m.instructions.at(-1)!;
     const id = base58.encode(new Uint8Array(64).fill(230 + landed.size));
     const tx = wire.slice();
     tx.set(base58.decode(id), 1);
-    if (o.nullifier) tx[tx.length - 1 - 387 + 1 + 256 + 63]! ^= 1;
+    // another note's release: its own nullifier hash and its own context (its salt)
+    if (o.nullifier) {
+      tx[tx.length - 1 - 387 + 1 + 256 + 63]! ^= 1;
+      tx[tx.length - 2]! ^= 1;
+    }
     landed.set(id, tx);
     if (o.failed) failed.add(id);
     touchOldest(m.staticKeys[ix.accounts[1]!]!, id);
