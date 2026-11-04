@@ -518,6 +518,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return pool === null ? NOT_FOUND : { status: 200, body: pool, asOfMs: now() };
   });
 
+  /** The last good GeckoTerminal bars per mint and tf: served when a read is throttled or fails (an empty chart is never
+   *  the answer for a token with known history). */
+  const kept = bounded<{ bars: Candle[]; at: number }>(CACHE_MAX);
   const bars = cached(CANDLES_FRESH_MS, now, async (key) => {
     const [mint, tf, to] = key.split(":") as [string, Tf, string];
     const p = await pools.get(mint);
@@ -543,7 +546,19 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     /** 06b Candles: up to `limit` bars of `tf` ending before `to` (unix seconds) when it is set. */
     async candles(mint: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       if (address(mint) === null || !Object.hasOwn(TF, tf)) return NOT_FOUND;
-      const a = await bars.get(`${mint}:${tf}:${to ?? ""}`);
+      let a = await bars.get(`${mint}:${tf}:${to ?? ""}`);
+      const k = `${mint}:${tf}`;
+      if (a.status === 200) {
+        // the last good bars of this mint and tf (the newest range read), whatever range was asked
+        const got = JSON.parse(a.body) as Candle[];
+        const had = kept.get(k);
+        if (got.length > 0 && (had === undefined || got.at(-1)![0] >= had.bars.at(-1)![0])) kept.set(k, { bars: got, at: a.asOfMs! });
+      } else if (a.status === 429 || a.status === 503) {
+        // GeckoTerminal throttled or down: its last good bars, cut at `to`, read time theirs; nothing kept keeps the error
+        const had = kept.get(k);
+        const cut = had === undefined ? [] : had.bars.filter((c) => to === null || c[0] < to);
+        if (cut.length > 0) a = { status: 200, body: JSON.stringify(cut), src: "geckoterminal", asOfMs: had!.at };
+      }
       if (a.status !== 200) return a;
       const body: Candles = { tf: tf as Tf, candles: (JSON.parse(a.body) as Candle[]).slice(-limit), src: "geckoterminal", as_of_ms: a.asOfMs! };
       return { status: 200, body: JSON.stringify(body), src: "geckoterminal", asOfMs: a.asOfMs };

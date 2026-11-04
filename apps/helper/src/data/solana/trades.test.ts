@@ -332,3 +332,32 @@ test("a listed token with no priced trade for over a minute answers its empty ta
   assert.equal(a.asOfMs, ms);
   t.stop();
 });
+
+test("candles of a listed token with no bars of ours: the history is asked for its newest range (one cache key), and a throttled or failed history answers its 429 or 503, never an empty 200", async () => {
+  // app live run 41787804457 (4 Nov 06:49Z): wNEAR (listed, no curve trades) answered 200 "chain" with no bars
+  const asked: (number | null)[] = [];
+  let hist: { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number } = { status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 30 };
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }),
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async (_m, _tf, to) => (asked.push(to), hist),
+    tickMs: 0,
+  });
+  const throttled = await t.candles(MINT, "1h", null, 60);
+  assert.deepEqual([throttled.status, throttled.retryAfterS], [429, 30], throttled.body);
+  hist = { status: 503, body: '{"error":{"code":"upstream"}}' };
+  assert.equal((await t.candles(MINT, "1h", null, 60)).status, 503);
+  hist = { status: 200, body: JSON.stringify({ tf: "1h", candles: [[TS - (TS % 3600) - 3600, "1", "1", "1", "1", "5"]], src: "geckoterminal", as_of_ms: TS * 1000 }), src: "geckoterminal", asOfMs: TS * 1000 };
+  const good = await t.candles(MINT, "1h", null, 60);
+  assert.equal(good.status, 200);
+  assert.equal(good.src, "chain,geckoterminal");
+  assert.equal(JSON.parse(good.body).candles.length, 1);
+  assert.deepEqual(asked, [null, null, null], "the newest range, not one keyed by the second of the read");
+  // a history that knows no bars (GeckoTerminal's own empty answer) is an empty chart, truly
+  hist = { status: 200, body: JSON.stringify({ tf: "1h", candles: [], src: "geckoterminal", as_of_ms: TS * 1000 }), src: "geckoterminal", asOfMs: TS * 1000 };
+  assert.equal((await t.candles(MINT, "1h", null, 60)).status, 200);
+  t.stop();
+});

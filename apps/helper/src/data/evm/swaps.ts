@@ -857,33 +857,52 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // -------------------------------------------------------------------------------------------------------------
 
   const history = new Map<string, { at: number; bars: Candle[] }>();
-  async function geckoBars(e: Entry, tf: Tf, before: number): Promise<Candle[]> {
+  /** The last good bars per pool and tf (the newest range read): served when a read is throttled or fails. */
+  const kept = new Map<string, { at: number; bars: Candle[] }>();
+  /** GeckoTerminal's bars before `before` (unix seconds; null: its newest range, one cache key however often asked),
+   *  or, when the read is refused, throttled or fails, the last good bars of the pool and tf cut there; with none of
+   *  those, the 429 (with the wait to the next call) or 503 to answer. */
+  async function geckoBars(e: Entry, tf: Tf, before: number | null): Promise<Candle[] | DataAnswer> {
     if (!Object.hasOwn(GT_TF, tf) || deps.gecko === undefined) return [];
-    const k = `${e.pool.id}:${tf}:${before}`;
-    const kept = history.get(k);
-    if (kept !== undefined && now() - kept.at < GT_FRESH_MS) return kept.bars;
-    if (!deps.gecko.take("pages")) return [];
+    const gecko = deps.gecko;
+    const k = `${e.pool.id}:${tf}:${before ?? ""}`;
+    const fresh = history.get(k);
+    if (fresh !== undefined && now() - fresh.at < GT_FRESH_MS) return fresh.bars;
+    const fallback = (fail: DataAnswer): Candle[] | DataAnswer => {
+      const cut = (kept.get(`${e.pool.id}:${tf}`)?.bars ?? []).filter((c) => before === null || c[0] < before);
+      return cut.length > 0 ? cut : fail;
+    };
+    const wait = () => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S));
+    if (!gecko.take("pages")) return fallback(wait());
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
-      const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}&before_timestamp=${before}`;
+      const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;
       const r = await doFetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
         await r.body?.cancel();
-        throttledUntil(deps.gecko, r.headers.get("retry-after"), now());
-        return [];
+        throttledUntil(gecko, r.headers.get("retry-after"), now());
+        return fallback(wait());
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
         await r.body?.cancel();
-        return [];
+        return fallback(UPSTREAM);
       }
       const text = await r.text();
-      if (text.length > ANSWER_MAX) return [];
-      const bars = toCandles(JSON.parse(text), tf as keyof typeof GT_TF, 1_000, now()) ?? [];
+      if (text.length > ANSWER_MAX) return fallback(UPSTREAM);
+      const bars = toCandles(JSON.parse(text), tf as keyof typeof GT_TF, 1_000, now());
+      if (bars === null) return fallback(UPSTREAM);
       if (history.size >= 500) history.delete(history.keys().next().value!);
       history.set(k, { at: now(), bars });
+      const kk = `${e.pool.id}:${tf}`;
+      const had = kept.get(kk);
+      if (bars.length > 0 && (had === undefined || bars.at(-1)![0] >= had.bars.at(-1)![0])) {
+        kept.delete(kk);
+        if (kept.size >= 500) kept.delete(kept.keys().next().value!);
+        kept.set(kk, { at: now(), bars });
+      }
       return bars;
     } catch {
-      return [];
+      return fallback(UPSTREAM);
     }
   }
 
@@ -932,7 +951,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a range we do not hold: bars before our first
       if (own.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
-        const old = (await geckoBars(e, tf as Tf, before)).filter((c) => c[0] < before);
+        const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before);
+        // nothing of ours and no history to serve: GeckoTerminal's 429 or 503, so the page retries, never an empty chart
+        if (!Array.isArray(got) && own.length === 0) return got;
+        const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);
           src = "chain,geckoterminal";
