@@ -306,6 +306,12 @@ const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such bl
 // exceeded".
 /** A provider's cap on one eth_getLogs page: only this shrinks the page. */
 const RANGE_CAP = /limited to an? [\d,]+ (block )?range|exceed(s|ed)? (the )?max(imum)? block range|max(imum)? block range (is|of)? ?[\d,]+|range (is )?too (large|wide)|ranges over [\d,]+ blocks are not supported|exceeds max(imum)? results [\d,]+|exceeds (the )?limit of [\d,]+|returned more than [\d,]+ results|more than [\d,]+ (results|logs)|response size (exceeded|is larger)|too many (results|logs|blocks)/i;
+/** The kit's client's whole words for an HTTP 400 (solanaJsonRpc throws "HTTP <status>" before it reads the body), which
+ * is how dRPC answers its cap: base-sepolia.drpc.org, read 4 Nov 12:41-12:43Z, answers HTTP 400 with code 35 "ranges over
+ * 10000 blocks are not supported on free plan" at 6,832, 501, 200 and 106 blocks, and answers 101 and 53. A page
+ * refused so is halved like a cap; one block refused so is that read's failure, so a 400 that is no cap costs at most
+ * one halving per bit of the page. */
+const HTTP_400 = /^HTTP 400$/;
 /** A page past the provider's own head (its log index behind its block headers): a lag, never a smaller page. */
 const HEAD_LAG = /beyond (the )?current head|invalid block range params|after last accepted block|is ahead of (the )?(head|latest)/i;
 // Read live on 3 Nov 05:35Z, eth_call at a block 20,000 blocks back by hash: rpc.testnet.chain.robinhood.com and
@@ -413,9 +419,9 @@ export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to:
 
 /**
  * One RPC's logs of a filter over from..to, in pages that end at or below `to`. Only a provider's cap (RANGE_CAP: on a
- * call's block range or on its number of results) halves its page; after a full page reads, the page doubles again, up
- * to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read, so a cap lifted or a page shrunk long ago
- * comes back. A page past the provider's head (HEAD_LAG) is a lag.
+ * call's block range or on its number of results; HTTP_400: dRPC's, through the kit's client) halves its page; after a
+ * full page reads, the page doubles again, up to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read,
+ * so a cap lifted or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG) is a lag.
  */
 async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal): Promise<E[]> {
   const out: E[] = [];
@@ -429,7 +435,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       got = await rpc("eth_getLogs", [{ ...filter, fromBlock: tag(at), toBlock: tag(end) }]);
     } catch (e) {
       const m = String((e as Error)?.message ?? e);
-      if (RANGE_CAP.test(m) && end > at) {
+      if ((RANGE_CAP.test(m) || HTTP_400.test(m)) && end > at) {
         refused = end - at + 1n;
         page[k] = refused / 2n;
         continue;

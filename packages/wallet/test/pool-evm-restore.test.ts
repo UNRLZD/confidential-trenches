@@ -580,3 +580,94 @@ test("hex in either case: a Transfer pair that differs by more than case is stil
   assert.match(w0.error!, /the two RPCs differ at log 1/);
   assert.equal(r.notes.length, 10);
 });
+
+// ---- dRPC's range refusal, as base-sepolia.drpc.org answers it (fold of 4 Nov) ----
+
+/** base-sepolia.drpc.org's answer to an eth_getLogs past its cap, read 4 Nov 12:41-12:43Z: HTTP 400 with this body, at
+ * 6,832 (54304922..54311753), 10,001, 9,999, 501, 200 and 106 blocks; 101 and 53 blocks answered. The words name 10,000
+ * blocks whatever the size refused. The kit's client (solanaJsonRpc) throws "HTTP 400" before it reads the body. */
+const drpcRefusal = (b: Body) => new Response(JSON.stringify({ id: Number(b.id), jsonrpc: "2.0", error: { message: "ranges over 10000 blocks are not supported on free plan", code: 35 } }), { status: 400 });
+const span = (b: Body) => {
+  const p = b.params[0] as { fromBlock: string; toBlock: string };
+  return { from: Number(BigInt(p.fromBlock)), to: Number(BigInt(p.toBlock)) };
+};
+/** An RPC that records each eth_getLogs page it answered (the Transfer filter's W, from, to), never one it refused. */
+const answered = (r: EvmRpc, out: { w: string; from: number; to: number }[], url: string): EvmRpc =>
+  Object.assign(async (m: string, p: readonly unknown[]) => {
+    const v = await r(m, p);
+    const f = p[0] as { address?: string; topics?: string[]; fromBlock?: string; toBlock?: string };
+    if (m === "eth_getLogs" && f.address === undefined) out.push({ w: f.topics![2]!, from: Number(BigInt(f.fromBlock!)), to: Number(BigInt(f.toBlock!)) });
+    return v;
+  }, { url });
+/** The pages answered for one W, in order, tile from..to: no block left out, none read twice. */
+const tiles = (pages: { w: string; from: number; to: number }[], w: string, from: number, to: number) => {
+  const mine = pages.filter((x) => x.w === addrTopic(w));
+  let at = from;
+  for (const x of mine) {
+    assert.equal(x.from, at, `a page of ${w} starts at ${x.from}, not at ${at}: ${JSON.stringify(mine)}`);
+    at = x.to + 1;
+  }
+  assert.equal(at, to + 1, `the pages of ${w} end at ${at - 1}, not at ${to}`);
+};
+
+test("D1 dRPC's real range refusal through the kit's client (HTTP 400, code 35) is paged under: every W's tokens read, every block of each W read", async () => {
+  const { world, W0, W1 } = seeded();
+  const want = await restore(pair(world, world), wpair(world));
+  const refused: number[] = [], pages: { w: string; from: number; to: number }[] = [];
+  const capped = (b: Body) => {
+    if (b.method !== "eth_getLogs") return undefined;
+    const { from, to } = span(b);
+    if (to - from + 1 <= 7) return undefined;
+    refused.push(to - from + 1);
+    return drpcRefusal(b);
+  };
+  const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", answered(rpc(world), pages, "https://m.example"), capped)]);
+  assert.deepEqual(r.wallets, want.wallets);
+  assert.ok(refused.length > 0, "the first page is past the cap");
+  // W0 released at block 20, W1 at 40; the anchor is 100
+  tiles(pages, W0, 20, 100);
+  tiles(pages, W1, 40, 100);
+});
+
+test("D2 a range no page can read is never counted as read: that W is unread, never a token list without it, and every note stands", async () => {
+  const { world, W0, W1 } = seeded();
+  const fails: [string, (r: EvmRpc) => EvmRpc, RegExp][] = [
+    // dRPC's words even for one block, at block 25 (W0's token TX)
+    ["a cap at one block", (r) => Object.assign(async (m: string, p: readonly unknown[]) => {
+      const f = p[0] as { address?: string; topics?: string[]; fromBlock?: string; toBlock?: string };
+      if (m === "eth_getLogs" && f.address === undefined && f.topics![2] === addrTopic(W0) && Number(BigInt(f.fromBlock!)) <= 25 && Number(BigInt(f.toBlock!)) >= 25) throw new Error("ranges over 10000 blocks are not supported on free plan");
+      return r(m, p);
+    }, { url: "https://d.example" }), /ranges over 10000 blocks/],
+    // another error on one page past the first: the pages before it read, the rest never
+    ["another error on a later page", (r) => Object.assign(async (m: string, p: readonly unknown[]) => {
+      const f = p[0] as { address?: string; topics?: string[]; fromBlock?: string; toBlock?: string };
+      if (m === "eth_getLogs" && f.address === undefined && f.topics![2] === addrTopic(W0) && Number(BigInt(f.fromBlock!)) > 20) throw new Error("RPC error -32603: internal error");
+      if (m === "eth_getLogs" && f.address === undefined && Number(BigInt(f.toBlock!)) - Number(BigInt(f.fromBlock!)) + 1 > 7) throw new Error("ranges over 10000 blocks are not supported on free plan");
+      return r(m, p);
+    }, { url: "https://d.example" }), /^rpc error -32603$/],
+  ];
+  for (const [name, bad, error] of fails) {
+    const r = await restore(pair(world, world), [rpc(world, { url: "https://c.example" }), bad(rpc(world))]);
+    const w0 = r.wallets.find((w) => w.w === W0)!;
+    assert.equal(w0.tokens, null, `${name}: W0 listed tokens over a range it never read`);
+    assert.match(w0.error!, error, name);
+    assert.deepEqual(r.wallets.find((w) => w.w === W1)!.tokens, [TY], name);
+    assert.equal(r.notes.length, 10, name);
+  }
+  // through the kit's client: an HTTP 400 at every size, one block too, is that W's failure after its pages shrink to
+  // one block, never a page of no block and never a W read
+  const sizes: number[] = [];
+  const always = (b: Body) => {
+    if (!namesW(b, W0)) return undefined;
+    const { from, to } = span(b);
+    sizes.push(to - from + 1);
+    return drpcRefusal(b);
+  };
+  const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), always)]);
+  const w0 = r.wallets.find((w) => w.w === W0)!;
+  assert.equal(w0.tokens, null);
+  assert.equal(w0.error, "http 400");
+  assert.ok(sizes.every((n) => n >= 1) && sizes.includes(1), `pages: ${sizes}`);
+  assert.deepEqual(r.wallets.find((w) => w.w === W1)!.tokens, [TY]);
+  assert.equal(r.notes.length, 10);
+});

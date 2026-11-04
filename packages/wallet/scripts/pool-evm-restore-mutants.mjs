@@ -65,10 +65,12 @@ const M = [
   [S, "if (v >> 160n !== 0n) throw new Error(`${what}: ${name} is not an address`);", "", T, "a lying pool RPC"],
   [S, "if (topics[2] !== `0x${w.slice(2).padStart(64, \"0\")}`) throw", "if (false) throw", T, "a lying Transfer RPC"],
   [S, "if (topics[0] !== EVM_TRANSFER_TOPIC) throw", "if (false) throw", T, "a lying Transfer RPC"],
-  [S, "(topics.length !== 3 && topics.length !== 4)", "(topics.length !== 3)", T, "restore of a seeded chain"],
+  [S, "(l.topics.length !== 3 && l.topics.length !== 4)", "(l.topics.length !== 3)", T, "restore of a seeded chain"],
   [S, "{ topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, \"0\")}`] }", "{ topics: [EVM_TRANSFER_TOPIC, null, null] }", T, "restore of a seeded chain"],
   // the one pager and the one two-RPC compare, now shared by the pool's events and W's Transfers
-  [S, "if (RANGE_CAP.test(m) && end > at) {", "if (false) {", T, "paging past"],
+  [S, "if ((RANGE_CAP.test(m) || HTTP_400.test(m)) && end > at) {", "if (false) {", T, "paging past"],
+  // dRPC's refusal through the kit's client (HTTP 400) is paged under
+  [S, "if ((RANGE_CAP.test(m) || HTTP_400.test(m)) && end > at) {", "if (RANGE_CAP.test(m) && end > at) {", T, "^D1 "],
   [S, "exceeds max(imum)? results [\\d,]+|", "", T, "paging past"],
   [S, "if (at === short.length && long.slice(at).every((e) => e.block > fin.number)) lag(", "if (false) lag(", T, "a lagging Transfer RPC"],
   [S, "  if (at >= 0) {\n    const [short, long]", "  if (false) {\n    const [short, long]", T, "a lying Transfer RPC"],
