@@ -7,6 +7,7 @@ import {console} from 'forge-std/console.sol';
 import {PrivacyPoolSimple} from '../src/PrivacyPoolSimple.sol';
 import {Constants} from '../src/lib/Constants.sol';
 import {SellDelegate, IWETH} from '../src/SellDelegate.sol';
+import {IPoolManager} from '../src/adapters/UniswapV4Adapter.sol';
 import {IV3SwapRouter} from '../src/adapters/UniswapV3Adapter.sol';
 import {PoseidonT3} from '../src/poseidon/PoseidonT3.sol';
 import {PoseidonT4} from '../src/poseidon/PoseidonT4.sol';
@@ -30,6 +31,8 @@ abstract contract SellForkBase is SellBase {
 
   function _chain() internal pure virtual returns (string memory _rpc, uint256 _block);
   function _route() internal pure virtual returns (address _router, address _quoter, address _weth, address _token, uint24 _fee);
+  /// The chain's v4 PoolManager, the delegate's pin (test/BuyV4Fork.t.sol reads its code on chain)
+  function _poolManager() internal pure virtual returns (address);
 
   function setUp() public {
     (string memory _rpc, uint256 _block) = _chain();
@@ -60,7 +63,7 @@ abstract contract SellForkBase is SellBase {
   /// The pool and the delegate this fork's sells go through: new ones here (a pinned chain's are at its pins)
   function _deploy(address _weth) internal virtual {
     pool = new PrivacyPoolSimple(address(new WithdrawalVerifier()));
-    delegate = new SellDelegate(IWETH(_weth));
+    delegate = new SellDelegate(IWETH(_weth), IPoolManager(_poolManager()));
   }
 
   /// This fork's entry in test/fixtures/kit-sells.json
@@ -210,6 +213,10 @@ abstract contract SellForkBase is SellBase {
 
 /// Base: SwapRouter02, QuoterV2, WETH and the WETH/USDC 0.05% pool, as test/BuyFork.t.sol
 contract SellForkBaseTest is SellForkBase {
+  function _poolManager() internal pure virtual override returns (address) {
+    return 0x498581fF718922c3f8e6A244956aF099B2652b2b;
+  }
+
   function _chain() internal pure override returns (string memory, uint256) {
     return ('base', 53_440_000);
   }
@@ -227,6 +234,10 @@ contract SellForkBaseTest is SellForkBase {
 
 /// Robinhood Chain: Uniswap v3's SwapRouter02, QuoterV2, WETH and the WETH/USDG 0.01% pool, as test/BuyFork.t.sol
 contract SellForkRobinhoodTest is SellForkBase {
+  function _poolManager() internal pure override returns (address) {
+    return 0x8366a39CC670B4001A1121B8F6A443A643e40951;
+  }
+
   function _chain() internal pure override returns (string memory, uint256) {
     return ('robinhood', 104_675_000);
   }
@@ -261,11 +272,16 @@ contract SellForkBaseSepoliaPinsTest is SellForkBaseTest {
     return 'base-sepolia';
   }
 
+  /// Base Sepolia's v4 PoolManager (scripts/live-checks/pool-evm-deploy.mjs CHAINS)
+  function _poolManager() internal pure override returns (address) {
+    return 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
+  }
+
   function _deploy(address _weth) internal override {
     vm.chainId(84_532);
     vm.etch(PIN_ROUTER, address(0x2626664c2603336E57B271c5C0b26F421741e481).code);
     _deployAt(PIN_POOL, abi.encodePacked(type(PrivacyPoolSimple).creationCode, abi.encode(address(new WithdrawalVerifier()))));
-    _deployAt(PIN_DELEGATE, abi.encodePacked(type(SellDelegate).creationCode, abi.encode(_weth)));
+    _deployAt(PIN_DELEGATE, abi.encodePacked(type(SellDelegate).creationCode, abi.encode(_weth, _poolManager())));
     pool = PrivacyPoolSimple(PIN_POOL);
     delegate = SellDelegate(payable(PIN_DELEGATE));
     assertEq(pool.SCOPE(), uint256(keccak256(abi.encodePacked(PIN_POOL, uint256(84_532), pool.ASSET()))) % Constants.SNARK_SCALAR_FIELD);
