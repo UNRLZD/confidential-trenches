@@ -68,13 +68,20 @@ export const MUTANTS = [
   [QUOTE, "if (!fine(rs)) return refuse(", "if (false) return refuse(", R, "N1a "],
   // card evm-quote-head-watch: a scan request that fails or overflows is asked by halves; one ending past maxLag behind
   // the agreed block is scanned on to it
-  [QUOTE, "rs.every((r) => Array.isArray(r) && r.length <= SCAN_MAX_LOGS)", "rs.every((r) => Array.isArray(r))", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
+  [QUOTE, "rs.every((r) => Array.isArray(r) && r.length < SCAN_MAX_LOGS)", "rs.every((r) => Array.isArray(r))", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
+  // review of 4830f1f: H1 the catch-up only up to a head the scan provider names again; L its depth, an answer at the
+  // cap asked by halves, the hold timed on a clock that never steps back; H2 a cut set refuses
+  [QUOTE, "    if (b - again > maxLag) return refuse(", "    if (false) return refuse(", R, "review of 4830f1f, H1"],
+  [QUOTE, "    if (b - scanHead > BigInt(s.span)) return refuse(", "    if (false) return refuse(", R, "review of 4830f1f, L"],
+  [QUOTE, "r.length < SCAN_MAX_LOGS)", "r.length <= SCAN_MAX_LOGS)", R, "review of 4830f1f, L"],
+  [QUOTE, "      const m = mono();\n      const since = h === null ? -1 : m - h.at;\n      if (h !== null && since >= 0 && ", "      const m = clock();\n      const since = h === null ? -1 : m - h.at;\n      if (h !== null && ", H, "held head (review of 4830f1f, L)"],
+  [QUOTE, "    if (keys.length > keysLeft) return refuse(", "    if (false) return refuse(", R, "review of 4830f1f, H2"],
   [QUOTE, "if (rs !== null && fine(rs)) return rs.map(", "if (rs !== null) return rs.map(", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
   [QUOTE, "  if (b - scanHead > maxLag) {", "  if (false) {", R, "card evm-quote-head-watch: a scan that ends more than maxLag"],
   [QUOTE, '  const scanned = await scanOf([lower(token)], "all");', '  void agreedOnce();\n  const scanned = await scanOf([lower(token)], "all");', R, "card evm-quote-head-watch: the agreed block is picked once"],
   // the held head: reused only while read under EVM_HEAD_REUSE_MS ago, and held only once confirmed by number
-  [QUOTE, "if (h !== null && t - h.at <= EVM_HEAD_REUSE_MS && ", "if (h !== null && ", H, "held head: read more than"],
-  [QUOTE, "          await a.confirm();\n          hold(a.block, t);", "          hold(a.block, t);\n          await a.confirm();", H, "held head: a block the other provider"],
+  [QUOTE, "since >= 0 && since <= EVM_HEAD_REUSE_MS && ", "", H, "held head: read more than"],
+  [QUOTE, "          await a.confirm();\n          hold(a.block, m, t);", "          hold(a.block, m, t);\n          await a.confirm();", H, "held head: a block the other provider"],
   [QUOTE, "return p !== null && (p & ((1n << 160n) - 1n)) !== 0n && l !== null && (l & ((1n << 128n) - 1n)) !== 0n;", "return true;", R, "N1d "],
   [QUOTE, "(p & ((1n << 160n) - 1n)) !== 0n &&", "", R, "N1d "],
   [QUOTE, " && (l & ((1n << 128n) - 1n)) !== 0n;", ";", R, "N1d "],
@@ -105,7 +112,7 @@ export const MUTANTS = [
   [QUOTE, "for (const { k, id } of ordered) {", "for (const { k, id } of [] as typeof ordered) {", R, "N1a "],
   [QUOTE, "  for (const f of held) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", "  for (const f of [] as Found[]) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", R, "A1 "],
   [QUOTE, "  for (const f of held) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", "  for (const f of found) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", R, "S1c "],
-  [QUOTE, "    keysLeft -= ordered.length;", "    if (keys.length > EVM_QUOTE_MAX_KEYS) return refuse(\"no_reference\", \"more pools than a quote reads\");\n    keysLeft -= ordered.length;", R, "T1b "],
+  [QUOTE, "    if (keys.length > keysLeft) return refuse(", "    if (false) return refuse(", R, "T1b "],
   [QUOTE, "      if (markets.has(x)) further.push(x);\n      continue;", "      return refuse(\"no_reference\", `${x} has no market`);", R, "B1 "],
   [QUOTE, "      if (markets.has(x)) further.push(x);\n", "", R, "T3 "],
   [QUOTE, "    if (ks.size > keysLeft) return null;\n", "", R, "X3 "],
