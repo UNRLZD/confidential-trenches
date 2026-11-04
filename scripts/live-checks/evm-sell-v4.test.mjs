@@ -59,7 +59,7 @@ test("the recorded good answers pass on both chains, every read on both RPCs", a
   }
 });
 
-test("the v1 delegate's code fails: this check takes only the current build, never the frozen one", async () => {
+test("the v1 delegate's code fails: this check takes only the build pinned to the address, never the v1 one", async () => {
   // the v1 delegate as deployed on Base Sepolia, read on both RPCs (sell-delegate-v1.code.json)
   const V = JSON.parse(readFileSync(new URL("./sell-delegate-v1.code.json", import.meta.url), "utf8"));
   const f = BUILD.frozen.SellDelegate;
@@ -67,7 +67,7 @@ test("the v1 delegate's code fails: this check takes only the current build, nev
   const v1 = V.code;
   const r1 = runtimeOf(v1, f.immutables);
   assert.equal(r1.masked, f.masked, "the recorded code is the frozen v1 build");
-  for (const chain of CHAIN_NAMES) fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = v1))), /SellDelegate \S+ code is the current build's: 4119 bytes/);
+  for (const chain of CHAIN_NAMES) fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = v1))), /SellDelegate \S+ code is the build pinned to it: 4119 bytes/);
 });
 
 test("POOL_MANAGER() or WETH() answering another address fails", async () => {
@@ -92,7 +92,7 @@ test("the build's code with its PoolManager immutable set to another address fai
 
 test("other code bytes, an EIP-1967 slot set, an owner() that answers, a PoolManager with other code fail", async () => {
   const chain = "robinhood-testnet";
-  fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = flip(j.result, 10)))), /code is the current build's/);
+  fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = flip(j.result, 10)))), /code is the build pinned to it/);
   fails(await run(chain, mutate(chain, (a) => a.method === "eth_getStorageAt" && lower(a.params[0]) === lower(del(chain)) && a.params[1] === EIP1967.implementation, (j) => (j.result = "0x" + "11".repeat(32)))), /EIP-1967 implementation slot is 0/);
   fails(await run(chain, mutate(chain, isCall(del(chain), "owner()"), (j) => (delete j.error, (j.result = OTHER)))), /SellDelegate has no owner\(\)/);
   fails(await run(chain, mutate(chain, isCode(CHAINS[chain].poolManager.address), (j) => (j.result = flip(j.result, 5)))), /PoolManager \S+ code hash/);
