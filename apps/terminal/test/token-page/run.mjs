@@ -7,10 +7,11 @@
 // src/shell/in-shell.ts), so the run answers the hosts' real names from local files as app-in-shell.mjs --harness and
 // the BAR-10 run do: APP_HOST the build under its _headers, SIGN_HOST the stand-in shell, signed in; every read is of
 // the terminal's frame inside the shell, and each shot is the whole window. Per shot: the token route drew the page in
-// its state, no horizontal scroll, no text under 11 px in the page, the curve bar only on the curve token and the dash
-// in the field elsewhere, the page's data-token is the helper's top Trending token (an `?fx=` in the address bar picks
+// its state, no horizontal scroll, no text under 11 px in the page, the design's tiles (Liquidity reads In curve on the
+// curve token, a Tax tile), on desktop the strip clear of the trade column with no tile cut, on the phone the back, star
+// and share row, the page's data-token is the helper's top Trending token (an `?fx=` in the address bar picks
 // nothing), Retry reads the lists again, and on the phone the bottom bar sits above the tab bar and the last tile
-// scrolls clear of it and the curve tile is on screen without a sideways scroll. Requests to any other host are
+// scrolls clear of it and the tile row scrolls sideways inside itself with every tile in reach (the page never does). Requests to any other host are
 // refused and listed. Draft words drawn are listed.
 //   node apps/terminal/test/token-page/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -182,10 +183,26 @@ try {
         const shown = await f.$eval("[data-token-page]", (e) => e.getAttribute("data-token"));
         check(shown === TOKENS[s.top].token, `${tag}: data-token ${shown}, the helper's top is ${TOKENS[s.top].token}`);
         const box = phone ? ".tkp-phone" : ".tkp-desk";
-        const bars = await f.locator(`${box} [data-testid="curve-bar"]`).count();
-        check(bars === (s.curve ? 1 : 0), `${tag}: ${bars} curve bars`);
-        const field = (await f.locator(`${box} [data-k="curve"] .tkp-val`).textContent())?.trim();
-        check(s.curve ? /^\d+%$/.test(field ?? "") : field === "—", `${tag}: the curve field reads ${field}`);
+        // the design's tiles (design-lock-r5 token.js U.header, token-390.html): Liquidity reads In curve on the curve
+        // token, and a Tax tile at both widths
+        const liq = (await f.locator(`${box} [data-k="liq"] .tkp-lbl`).textContent())?.trim();
+        check(liq === (s.curve ? "In curve" : "Liquidity"), `${tag}: the liquidity tile reads ${liq}`);
+        check((await f.locator(`${box} [data-k="tax"]`).count()) === 1, `${tag}: no Tax tile`);
+        if (!phone) {
+          // the strip ends before the trade column and no tile is cut (seen 3 Nov: "Bon…" under the trade column)
+          const st = await f.evaluate(() => {
+            const strip = document.querySelector(".tkp-desk .tkp-strip")?.getBoundingClientRect();
+            const trade = document.querySelector(".tkp-desk .tkp-trade")?.getBoundingClientRect();
+            const cut = [...document.querySelectorAll(".tkp-desk .tkp-strip > *, .tkp-desk .tkp-strip .tkp-val, .tkp-desk .tkp-strip .tkp-lbl")].filter((e) => e.scrollWidth > e.clientWidth + 0.5).map((e) => e.textContent.trim());
+            return { right: strip?.right ?? Infinity, tradeLeft: trade?.left ?? -Infinity, cut };
+          });
+          check(st.right <= st.tradeLeft, `${tag}: the strip runs under the trade column (right ${st.right} > ${st.tradeLeft})`);
+          check(st.cut.length === 0, `${tag}: strip tiles cut: ${JSON.stringify(st.cut)}`);
+        } else {
+          // the design's phone row: back, star, share
+          const nav = await f.$$eval(".tkp-nav button", (bs) => bs.map((b) => b.getAttribute("aria-label")));
+          check(nav.length === 3 && nav[0] === "Back" && /watchlist$/.test(nav[1] ?? "") && nav[2] === "Share", `${tag}: the phone row reads ${JSON.stringify(nav)}`);
+        }
         // the origin badges: the fixture's pad (or none) bottom-right, its chain top-right, loaded, named, not cut
         const drawnRow = await f.evaluate(async (box) => {
           await Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))));
@@ -239,10 +256,23 @@ try {
             window.scrollTo(0, document.documentElement.scrollHeight);
             const r = (q) => document.querySelector(q)?.getBoundingClientRect();
             const tiles = [...document.querySelectorAll(".tkp-mtile")].map((e) => e.getBoundingClientRect().bottom);
-            return { bar: r(".tkp-bottom"), tab: r(".tabbar"), lastTile: Math.max(...tiles), curveRight: r('.tkp-phone [data-k="curve"]')?.right ?? Infinity, vw: window.innerWidth };
+            return { bar: r(".tkp-bottom"), tab: r(".tabbar"), lastTile: Math.max(...tiles), row: (() => {
+              // R5 .mtiles: the tile row is its own sideways scroller inside the page; every tile is reachable in it
+              const row = document.querySelector(".tkp-mtiles");
+              const box = row.getBoundingClientRect();
+              const ox = getComputedStyle(row).overflowX;
+              // the tiles sit in order: the first in the row's box at the start, the last in it at the end of the scroll
+              const first = row.querySelector(".tkp-mtile:first-child").getBoundingClientRect().left;
+              row.scrollLeft = row.scrollWidth;
+              const last = row.querySelector(".tkp-mtile:last-child").getBoundingClientRect().right;
+              const scrolled = row.scrollLeft;
+              row.scrollLeft = 0;
+              return { left: box.left, right: box.right, ox, first, last, scrolled };
+            })(), vw: window.innerWidth };
           });
           check(g.bar && g.tab && g.bar.bottom <= g.tab.top + 0.5, `${tag}: the bottom bar overlaps the tab bar`);
-          check(g.curveRight <= g.vw, `${tag}: the curve tile is off screen (right ${g.curveRight} > ${g.vw})`);
+          check(g.row.left >= 0 && g.row.right <= g.vw + 0.5 && ["auto", "scroll"].includes(g.row.ox), `${tag}: the tile row is not its own scroller (${JSON.stringify(g.row)})`);
+          check(g.row.first >= g.row.left - 0.5 && g.row.last <= g.row.right + 0.5, `${tag}: tiles out of reach in the row: ${JSON.stringify(g.row)}`);
           check(g.bar && g.lastTile <= g.bar.top, `${tag}: the last tile ends under the bottom bar (${g.lastTile} > ${g.bar?.top})`);
           await f.evaluate(() => window.scrollTo(0, 0));
         }

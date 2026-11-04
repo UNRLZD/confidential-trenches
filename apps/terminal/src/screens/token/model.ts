@@ -75,3 +75,67 @@ export function tokenView(r: MarketRow, nowMs: number): TokenView {
     curve: curve(r),
   };
 }
+
+// ---------------------------------------------------------------------------------------------------------------- links
+// The identity's link icons (card app-token-header, R5 token.js socials and explorers): only what has data. The row
+// carries no website, X account or Telegram, so none of those is drawn; every token has an address, so its chain's
+// explorer is, and "Search on X" by that address (R5's link when no X account is listed). Explorer token pages are
+// each explorer's own path (the tx paths are withdraw/model.ts's).
+const EXPLORERS: Record<string, { href: string; name: "solscan" | "basescan" | "rhExplorer" | "nearblocks" }> = {
+  solana: { href: "https://solscan.io/token/", name: "solscan" },
+  base: { href: "https://basescan.org/token/", name: "basescan" },
+  robinhood: { href: "https://robinhoodchain.blockscout.com/token/", name: "rhExplorer" },
+  near: { href: "https://nearblocks.io/token/", name: "nearblocks" },
+};
+
+export type TokenLink = { id: "explorer"; name: (typeof EXPLORERS)[string]["name"]; href: string } | { id: "xSearch"; href: string };
+
+/** The links a token's identity draws, in R5's order (socials, then the explorer): never one without data behind it. */
+export function tokenLinks(chain: string, token: string): TokenLink[] {
+  const links: TokenLink[] = [{ id: "xSearch", href: `https://x.com/search?q=${encodeURIComponent(token)}` }];
+  const e = Object.hasOwn(EXPLORERS, chain) ? EXPLORERS[chain]! : null;
+  if (e) links.push({ id: "explorer", name: e.name, href: e.href + encodeURIComponent(token) });
+  return links;
+}
+
+/** The token's public link, the address the shell shows (SIGN_HOST's /token/<chain>/<id>), for Share. */
+export const shareHref = (host: string, chain: string, token: string): string => new URL(`/token/${chain}/${encodeURIComponent(token)}`, host).href;
+
+/** Writes `text` with the async clipboard, else the page's own copy command (a framed page the parent's permissions
+ *  keep from the async one): true when either took it. */
+export async function copyText(text: string, clip: { writeText(t: string): Promise<void> } | undefined, fallback: (t: string) => boolean): Promise<boolean> {
+  try {
+    if (!clip) throw new Error("no clipboard");
+    await clip.writeText(text);
+    return true;
+  } catch {
+    try {
+      return fallback(text);
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** The watchlist star (R5 token-watch): the tokens kept on this device, `chain/token`, in the browser's storage. A
+ *  storage that throws or holds something else reads as an empty list and the star still toggles for the page. */
+export const WATCH_KEY = "ct.watch.v1";
+export function readWatch(store: Pick<Storage, "getItem"> | null): string[] {
+  try {
+    const v = JSON.parse(store?.getItem(WATCH_KEY) ?? "[]") as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+/** Toggles `key` in the stored list and returns whether it is now watched. */
+export function toggleWatch(store: Pick<Storage, "getItem" | "setItem"> | null, key: string): boolean {
+  const list = readWatch(store);
+  const on = !list.includes(key);
+  try {
+    store?.setItem(WATCH_KEY, JSON.stringify(on ? [...list, key] : list.filter((k) => k !== key)));
+  } catch {
+    // the page's own state still shows the press
+  }
+  return on;
+}

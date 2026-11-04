@@ -149,3 +149,99 @@ test("planted: a test target in no shard, in two, or gone fails", () => {
   assert.deepEqual(shardProblems([...SHARDS, ["s04"]], all), [`s04 is in shard 2 and shard ${SHARDS.length + 1}`]);
   assert.deepEqual(shardProblems(SHARDS, all.filter((t) => t !== "smoke")), ["smoke is in a shard but is no test target"]);
 });
+
+// What is wrong with ci.yml's sandbox build and caches: the shards must run on the wasm vault-sandbox-build built, the
+// wasm cache must be keyed on every file under contracts/vault/ and the cargo-near that builds it (else a shard tests
+// stale wasm), no cache key may name the commit (a key per commit fills the repo's 10 GB and evicts every cache), the
+// shards must read the build's rust-cache entry (same env and inputs, else they always build cold), and the matrix
+// must run every shard SHARDS lists.
+const jobText = (ci, name) => ci.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z-]+:\n/)[0];
+const block = (text, head) => {
+  const at = text.indexOf(head);
+  if (at < 0) return null;
+  const lines = text.slice(at).split("\n").slice(1);
+  const indent = (l) => l.match(/^ */)[0].length;
+  const own = indent(text.slice(0, at).split("\n").pop() + head.trimEnd()) + 2;
+  const out = [];
+  for (const l of lines) {
+    if (l.trim() && indent(l) < own) break;
+    if (l.trim() && !l.trim().startsWith("#")) out.push(l);
+  }
+  return out;
+};
+function cacheProblems(ci, shards = SHARDS) {
+  const p = [];
+  for (const l of ci.split("\n").filter((l) => /^\s*(key|restore-keys):/.test(l) || /^\s+[a-z-]+-\$\{\{/.test(l))) {
+    if (l.includes("github.sha")) p.push(`a cache key names the commit: ${l.trim()}`);
+  }
+  const build = jobText(ci, "vault-sandbox-build");
+  const shard = jobText(ci, "vault-sandbox-shard");
+  if (!build || !shard) return [...p, "ci.yml has no vault-sandbox-build or vault-sandbox-shard job"];
+  const key = build.match(/key: (vault-wasm-.*)/)?.[1] ?? "";
+  if (!key.includes("hashFiles('contracts/vault/**')")) p.push("the wasm cache key does not hash every file under contracts/vault/");
+  const near = build.match(/cargo-near-v([0-9.]+)\//)?.[1];
+  if (!near || !key.includes(`cargo-near-${near}-`)) p.push(`the wasm cache key does not name the cargo-near the build installs (${near})`);
+  if (!build.includes('run.sh --build-only "$RUNNER_TEMP/vault-wasm"')) p.push("vault-sandbox-build does not build the wasm with run.sh --build-only");
+  if (!shard.includes('VAULT_WASM_DIR="$RUNNER_TEMP/vault-wasm" contracts/vault/tests/harness/run.sh')) p.push("a shard does not run on the built wasm");
+  if (/--build-only/.test(shard)) p.push("a shard builds wasm");
+  // a target that starts deploy.mjs gets its cargo-near builds: the shards install the build job's sha256-checked one
+  const install = (t) => t.match(/- name: install cargo-near\n[\s\S]*?cargo \+1\.96\.0 near --version\n/)?.[0]?.replace(/\n\s*if: .*/, "");
+  const deploys = shards.flat().filter((x) => x !== "lib" && targets().includes(x) && readFileSync(path.join(ROOT, `contracts/vault/tests/${x}.rs`), "utf8").includes('join("scripts/deploy.mjs")'));
+  if (deploys.length && (!install(shard) || install(shard) !== install(build) || !shard.includes("--target wasm32-unknown-unknown"))) {
+    p.push(`${deploys.join(", ")} start contracts/vault/scripts/deploy.mjs, which builds with cargo-near, and the shards do not install it`);
+  }
+  if (JSON.stringify(block(build, "    env:")) !== JSON.stringify(block(shard, "    env:"))) p.push("the build and the shards hold different env, so the shards miss the build's rust-cache entry");
+  // the rust-cache step's inputs, up to the next step, but for save-if
+  const rc = (t) => {
+    const at = t.indexOf("Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3\n");
+    if (at < 0) return null;
+    const rest = t.slice(at).split("\n").slice(1);
+    const end = rest.findIndex((l) => /^ {0,6}\S/.test(l));
+    return rest.slice(0, end < 0 ? rest.length : end).map((l) => l.trim()).filter((l) => l && !l.startsWith("#") && !l.startsWith("save-if:"));
+  };
+  if (!rc(build) || JSON.stringify(rc(build)) !== JSON.stringify(rc(shard))) p.push("the shards do not read the build's rust-cache entry");
+  if (!/save-if: "false"/.test(shard)) p.push("a shard saves the rust-cache entry");
+  const matrix = shard.match(/shard: \[([0-9, ]*)\]/)?.[1];
+  const want = shards.map((_, i) => i + 1).join(", ");
+  if (matrix !== want) p.push(`the matrix runs shards [${matrix}], and SHARDS has [${want}]`);
+  return p;
+}
+
+test("the shards run on the wasm built once, from caches keyed on their inputs", () => {
+  const ci = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
+  assert.deepEqual(cacheProblems(ci), []);
+});
+
+test("planted: a commit in a key, a stale wasm key, a shard that builds or misses the cache, a dropped shard fail", () => {
+  const ci = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
+  const at = (job) => ci.indexOf(`\n  ${job}:\n`);
+  const plant = (job, a, b) => {
+    const out = ci.slice(0, at(job)) + ci.slice(at(job)).replace(a, b);
+    assert.notEqual(out, ci, `the plant ${a} -> ${b} changed nothing`);
+    return out;
+  };
+  assert.deepEqual(cacheProblems(plant("pool-solana", "svm-tests/Cargo.lock') }}\n", "svm-tests/Cargo.lock') }}-${{ github.sha }}\n")),
+    ["a cache key names the commit: key: pool-solana-rustc-1.96.0-1.97.1-agave-4.4.0-${{ hashFiles('contracts/pool-solana/Cargo.lock', 'contracts/pool-solana/svm-tests/Cargo.lock') }}-${{ github.sha }}"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-build", "hashFiles('contracts/vault/**')", "hashFiles('contracts/vault/Cargo.lock')")),
+    ["the wasm cache key does not hash every file under contracts/vault/"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-build", "cargo-near-v0.22.0/", "cargo-near-v0.23.0/")),
+    ["the wasm cache key does not name the cargo-near the build installs (0.23.0)",
+      "s17, s20 start contracts/vault/scripts/deploy.mjs, which builds with cargo-near, and the shards do not install it"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", 'VAULT_WASM_DIR="$RUNNER_TEMP/vault-wasm" contracts', "contracts")),
+    ["a shard does not run on the built wasm"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "      - uses: actions/download-artifact", "      - run: contracts/vault/tests/harness/run.sh --build-only x\n      - uses: actions/download-artifact")),
+    ["a shard builds wasm"]);
+  const noNear = ci.slice(0, at("vault-sandbox-shard")) + ci.slice(at("vault-sandbox-shard")).replace(/      - name: install cargo-near\n[\s\S]*?near --version\n/, "");
+  assert.notEqual(noNear, ci);
+  assert.deepEqual(cacheProblems(noNear), ["s17, s20 start contracts/vault/scripts/deploy.mjs, which builds with cargo-near, and the shards do not install it"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown", "rustup toolchain install 1.96.0 --profile minimal")),
+    ["s17, s20 start contracts/vault/scripts/deploy.mjs, which builds with cargo-near, and the shards do not install it"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", 'CARGO_PROFILE_DEV_DEBUG: "0"', 'CARGO_PROFILE_DEV_DEBUG: "1"')),
+    ["the build and the shards hold different env, so the shards miss the build's rust-cache entry"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "shared-key: vault-sandbox", "shared-key: vault-sandbox-shard")),
+    ["the shards do not read the build's rust-cache entry"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", 'save-if: "false"', 'save-if: "true"')), ["a shard saves the rust-cache entry"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "shard: [1, 2, 3, 4]", "shard: [1, 2, 3]")),
+    ["the matrix runs shards [1, 2, 3], and SHARDS has [1, 2, 3, 4]"]);
+  assert.deepEqual(cacheProblems(ci, [...SHARDS, ["s99"]]), ["the matrix runs shards [1, 2, 3, 4], and SHARDS has [1, 2, 3, 4, 5]"]);
+});
