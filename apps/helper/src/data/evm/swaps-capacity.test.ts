@@ -82,3 +82,17 @@ test("card helper-robinhood-capacity: a wide provider held a second is waited fo
   const drpc = r.logs.get("https://robinhood.drpc.org") ?? 0;
   assert.ok(drpc <= 30, `drpc asked ${drpc} eth_getLogs (${[...r.logs].map(([u, k]) => `${new URL(u).host} ${k}`).join(", ")})`);
 });
+
+test("card helper-robinhood-capacity: a wide provider refused mid-walk with a 1 s wait is asked again for what it missed, before a 100-block provider (the local helper at 95730cb, 2026-11-04 20:10Z: daybreak's one -32005 'rate limited' sent the walks it was in to drpc, 71 reads in 2 s)", async () => {
+  const r = rig([]);
+  let n = 0;
+  r.chain.st.faults.set(WIDE[0]!, { span: 1_000, refuse: () => (n++ === 1 ? Response.json([{ jsonrpc: "2.0", id: 0, error: { code: -32005, message: "rate limited" } }]) : null) });
+  r.chain.st.faults.set(POCKET, { span: 1_000 });
+  const t0 = performance.now();
+  const clock = { get t() { return 9_000_000 + Math.round(performance.now() - t0); } };
+  const s = open(r.chain, clock, { pools: new Map(), rpcs: [WIDE[0]!, POCKET, "https://robinhood.drpc.org"], fetch: r.fetch as never });
+  assert.equal((await s.trades(CURVE_TOKEN, 50)).status, 200);
+  s.stop();
+  assert.ok(n > 1, "daybreak refused once");
+  assert.equal(r.logs.get("https://robinhood.drpc.org") ?? 0, 0, `${[...r.logs].map(([u, k]) => `${new URL(u).host} ${k}`).join(", ")}`);
+});

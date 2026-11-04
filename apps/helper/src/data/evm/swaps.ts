@@ -613,14 +613,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   };
 
   /** Asks `urls` the same `n` requests, two at once and then one more at a time while some answer has no two alike.
-   *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. */
+   *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. A wide provider
+   *  (WIDE_SPAN) of the first two is asked again for the requests it did not answer before any narrower one is asked (a
+   *  short hold is waited out in one(); a longer one answers nothing at once): the local helper at 95730cb (2026-11-04
+   *  20:10Z) sent the walks daybreak missed in its one 1 s hold to drpc, 71 reads of 100 blocks in 2 s. */
   async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[]) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean): Promise<(A | null)[]> {
     const order = spread(askOrder(urls));
     const got: A[][] = Array.from({ length: n }, () => []);
+    const by: Set<string>[] = Array.from({ length: n }, () => new Set());
     const run = async (u: string, idx: number[]) => {
       const r = await ask(u, idx);
       idx.forEach((i, k) => {
-        if (r[k] != null) got[i]!.push(r[k]!);
+        if (r[k] != null) got[i]!.push(r[k]!), by[i]!.add(u);
       });
     };
     const pick = (i: number): A | null => {
@@ -630,10 +634,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     };
     const all = Array.from({ length: n }, (_, i) => i);
     await Promise.all(order.slice(0, 2).map((u) => run(u, all)));
-    for (const u of order.slice(2)) {
-      const left = all.filter((i) => pick(i) === null);
-      if (left.length === 0) break;
-      await run(u, left);
+    const wide = (u: string) => (WIDE_SPAN[u] ?? 0) > V.span;
+    const rest = order.slice(2);
+    const then = [...rest.filter(wide), ...order.slice(0, 2).filter(wide), ...rest.filter((u) => !wide(u))];
+    for (const u of then) {
+      const left = all.filter((i) => pick(i) === null && !by[i]!.has(u));
+      if (all.every((i) => pick(i) !== null)) break;
+      if (left.length > 0) await run(u, left);
     }
     return all.map(pick);
   }
