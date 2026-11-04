@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_HOST, headersOf, judge as judgeAt, releasePin } from "./signpage-postmessage.mjs";
+import { APP_HOST, headersOf, judge as judgeAt, onConsole, releasePin } from "./signpage-postmessage.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-postmessage.answers.json"), "utf8"));
@@ -142,4 +142,25 @@ test("headersOf reads the /* rule of SIGN_HOST's _headers", () => {
   assert.match(h["content-security-policy"], /frame-ancestors 'none';/);
   assert.equal(h["integrity-policy"], "blocked-destinations=(script)");
   assert.deepEqual(headersOf("/x\n  A: 1\n/*\n  B: 2\n"), { b: "2" });
+});
+
+test("planted on the good answer: a frame whose script was refused names the refusal and its resource's origin and path in the BAD line, and one with no location still fails (card live-console-url)", () => {
+  const text = "Failed to find a valid digest in the 'integrity' attribute for resource";
+  const kept = [];
+  const hook = onConsole(kept);
+  const msg = (t, location) => ({ type: () => "error", text: () => t, location: () => location });
+  hook(msg(text, { url: "https://sign.confidential.unrealized.trade/app.js?v=9" }));
+  hook(msg("Refused to load the script because it violates the following Content Security Policy directive", undefined));
+  hook({ type: () => "log", text: () => "a log line", location: () => ({ url: "https://x.example/" }) });
+  assert.deepEqual(kept, [`${text} (https://sign.confidential.unrealized.trade/app.js)`, "Refused to load the script because it violates the following Content Security Policy directive"]);
+  for (const line of kept) {
+    const rec = clone(GOOD);
+    const s = run(rec, "https://evil.ct.test", "lifted");
+    s.scriptRan = false;
+    s.errors.push(line);
+    const r = judge(rec);
+    assert.equal(r.ok, false);
+    assert.ok(r.lines.includes(`BAD from https://evil.ct.test with frame-ancestors lifted: the frame loads and its script does not run: ${line}`), r.lines.join("\n"));
+    assert.ok(!r.lines.some((l) => l.includes("?v=9")), "no query in a line");
+  }
 });
