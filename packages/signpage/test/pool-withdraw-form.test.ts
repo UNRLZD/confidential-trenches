@@ -4,11 +4,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CHECK_IDLE_MS } from "../src/withdraw/form.ts";
+import { SOLANA_RESERVED_KEYS } from "../src/rules/pool.ts";
 import { checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, parseUnits, poolRefusalWords, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady } from "../src/withdraw/pool-form.ts";
 
 const POOL = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
-const PROGRAM = "BPFLoaderUpgradeab1e11111111111111111111111";
-const FEE_PAYER = "Vote111111111111111111111111111111111111111";
+// stand-ins that are no key the runtime reserves, so each refusal below is its own check's
+const PROGRAM = "9rTKx2KjYLXGKXwJvCGrCRBEPnrpD5Ctfsx4y5DRiw3T";
+const FEE_PAYER = "7MLmfjrk5gj6kTzNuMQovz3gnVbRe2Y5k8GW4uLkjqt9";
 const KEYS = { pool: POOL, program: PROGRAM, feePayer: FEE_PAYER };
 const TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
 // EIP-55's own test vector (eips.ethereum.org/EIPS/eip-55)
@@ -19,9 +21,9 @@ const MIN = 1_890_880n;
 const W_FEE = 5_000n;
 const FUNDS: PoolFunds = { notes: [{ id: "a", value: 30_000_000n }, { id: "b", value: 10_000_000n }], fee: FEE, wFee: W_FEE, minPart: MIN };
 
-test("To on Solana: a base58 key passes; the pool, its program, the fee payer, the System program and any non-key are refused", () => {
+test("To on Solana: a base58 key passes; the pool, its program, the fee payer, any key the runtime keeps read-only and any non-key are refused", () => {
   assert.deepEqual(checkPoolTo("solana", ` ${TO} `, KEYS), { ok: true, to: TO });
-  for (const bad of [POOL, PROGRAM, FEE_PAYER, "11111111111111111111111111111111", TO.slice(6), TO + "1", "0OIl" + TO.slice(4), CHECKSUMMED, ""]) {
+  for (const bad of [POOL, PROGRAM, FEE_PAYER, "11111111111111111111111111111111", ...SOLANA_RESERVED_KEYS, TO.slice(6), TO + "1", "0OIl" + TO.slice(4), CHECKSUMMED, ""]) {
     assert.deepEqual(checkPoolTo("solana", bad, KEYS), { ok: false, code: "address" }, bad);
   }
 });

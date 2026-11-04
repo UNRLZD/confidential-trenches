@@ -47,7 +47,8 @@ import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import type { PoolChain } from "./rules/pool.ts";
 import type { HostAnswer, KindContext } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
-import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type PendingOnward } from "./pool-withdraw.ts";
+import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
+import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type PendingOnward } from "./pool-withdraw.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
@@ -58,6 +59,24 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"] as const),
 });
 const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinhood: "robinhood-testnet" } as const);
+
+/** A withdraw op record's next state, merged into what the store holds (another tab may have written it since): the
+ *  stage, every tx either wrote (by hash, never one dropped), every arrival, and the onward send owed: set by
+ *  `pending`, cleared by `clear` only while it is still that note's (a later part's, another tab's, stays). */
+export function mergeWithdrawOp(
+  v: unknown,
+  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; pending?: PendingOnward; clear?: string },
+): Record<string, unknown> {
+  const r = { ...(v as Record<string, unknown>) };
+  if (w.stage !== undefined) r.stage = w.stage;
+  const txs = [...((r.txs as TxRef[] | undefined) ?? [])];
+  for (const t of w.txs ?? []) if (!txs.some((x) => x.hash === t.hash)) txs.push(t);
+  r.txs = txs;
+  if (w.arrived && Object.keys(w.arrived).length > 0) r.arrived = { ...((r.arrived as Arrivals | undefined) ?? {}), ...w.arrived };
+  if (w.pending) r.pending = w.pending;
+  else if (w.clear !== undefined && (r.pending as PendingOnward | undefined)?.noteId === w.clear) delete r.pending;
+  return r;
+}
 
 /** The testnet build's deps for poolKinds, with `flow` the ops' flow (none: every checked request is refused). */
 export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
@@ -378,6 +397,20 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // left one owed, until none is.
   const withdrawing = new Set<string>();
   let owedScan = true;
+  // a finish that failed (a read, the send) is tried again after a wait that doubles, 2 s up to 60 s: the money is on
+  // W, so it never gives up, and never hammers the RPCs either
+  const owedRetry = new Map<string, { at: number; waitMs: number }>();
+  // one use of the seed under its shared lock, the lock let go after it: a sign out waits for a derive or a signature,
+  // never for a blockhash (review #232b LOW 2)
+  const withSeed = <T,>(f: (seed64: Uint8Array) => T | Promise<T>): Promise<T> =>
+    locks!.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const seed64 = await page.seed64();
+      try {
+        return await f(seed64);
+      } finally {
+        seed64.fill(0);
+      }
+    });
   const finishOnward = async (): Promise<void> => {
     if (!locks || pin === undefined || !owedScan) return;
     owedScan = false;
@@ -388,13 +421,37 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (rec?.kind === "withdraw" && rec.stage === "in_transit" && rec.pending && !withdrawing.has(k)) owed.push([k, rec.pending]);
     }
     if (owed.length === 0) return;
-    await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+    const notes = await openNoteStore(await page.store());
+    try {
       for (const [k, pending] of owed) {
-        const got = await finishPoolOnward({ pin, rpcs: rpcs(), seed64: page.seed64 }, pending);
-        if (got) await ops.update("ops", k, (v) => ({ ...(v as { txs: unknown[] }), stage: got.stage, txs: [...((v as { txs?: unknown[] }).txs ?? []), ...got.txs], pending: undefined }));
-        else owedScan = true;
+        const retry = owedRetry.get(k);
+        if (retry && Date.now() < retry.at) {
+          owedScan = true;
+          continue;
+        }
+        const got = await finishPoolOnward(
+          {
+            pin,
+            rpcs: rpcs(),
+            seed64: page.seed64,
+            withSeed,
+            notes: async () => notes,
+            settle: (noteId) => withSeed((seed64) => solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: rpcs() })),
+          },
+          pending,
+        );
+        if (got) {
+          owedRetry.delete(k);
+          await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: got.stage, txs: got.txs, arrived: got.arrived, clear: pending.noteId }));
+        } else {
+          const waitMs = Math.min(Math.max(2_000, (retry?.waitMs ?? 1_000) * 2), 60_000);
+          owedRetry.set(k, { at: Date.now() + waitMs, waitMs });
+          owedScan = true;
+        }
       }
-    });
+    } finally {
+      notes.close();
+    }
   };
   const stateRead = (): Promise<void> => {
     if (scope === null) return Promise.resolve();
@@ -452,9 +509,20 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const ops = await page.store();
     const created_ms = Date.now();
     let writes: Promise<unknown> = ops.put("ops", opId, { kind: "withdraw", stage: "proving", txs: [], created_ms }).catch(() => {});
-    // the op keeps the onward send still owed (a part on W), for the state reads to finish after a crash
-    const write = (stage: string, txs: unknown[], pending: PendingOnward | null = null) =>
-      void (writes = writes.then(() => ops.put("ops", opId, { kind: "withdraw", stage, txs, created_ms, ...(pending ? { pending } : {}) })).catch(() => {}));
+    // the op keeps the onward send still owed (a part on W), for the state reads to finish after a crash; every write
+    // merges into the record (mergeWithdrawOp), so another tab's finish of a part is never written over
+    let owedNote: string | null = null;
+    const write = (stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals) =>
+      void (writes = writes
+        .then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage, txs, arrived, ...(pending ? { pending } : owedNote ? { clear: owedNote } : {}) })))
+        .catch(() => {}));
+    // written before the part's release leaves, and awaited: a failed write sends nothing
+    const owe = async (pending: PendingOnward): Promise<void> => {
+      owedNote = pending.noteId;
+      const w = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { pending })));
+      writes = w.catch(() => {});
+      await w;
+    };
     await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
       const notes = await openNoteStore(await page.store());
       try {
@@ -480,6 +548,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               }
             },
             stage: write,
+            owe,
           },
           { ...ask },
           ready.to,
@@ -487,7 +556,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           ready.maxFee,
           mine,
         );
-        write(end.stage, end.txs, end.pending);
+        write(end.stage, end.txs, end.pending, end.arrived);
         if (end.pending) owedScan = true;
       } finally {
         notes.close();

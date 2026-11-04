@@ -81,8 +81,9 @@ export const MUTANTS = [
   ['if (!sameList(rel.accounts, accounts)) return refuse("release_accounts");', "", WD],
   ['if (d.ixs.length > n + 1) return refuse("instructions");', "", WDOK],
   // W's onward send (the withdraw's second transaction)
-  ["[ctx.wallet, pin.pool, pin.program, pin.feePayer, SOLANA_SYSTEM_PROGRAM, ...reads.releaseAccounts].includes(to)", "false", ONTO],
+  ["[ctx.wallet, pin.pool, pin.program, pin.feePayer, ...reads.releaseAccounts].includes(to)", "false", ONTO],
   [", ...reads.releaseAccounts].includes(to)", "].includes(to)", ONTO],
+  [" || SOLANA_RESERVED_KEYS.includes(to)) return refuse(\"to\");", ") return refuse(\"to\");", ONTO],
   ['if (!Array.isArray(reads.toExecutable) || reads.toExecutable.length !== 2 || reads.toExecutable.some((x) => x !== false)) return refuse("to");', "", ONTO],
   ["p[0] >= 0n && p[0] === p[1] ? p[0]", "p[0] >= 0n ? p[0]", ONR],
   ['// W alone signs and pays: no fee payer of ours, nobody else\'s key\n  if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");', "", ONW],

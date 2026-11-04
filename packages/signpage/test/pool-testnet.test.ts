@@ -498,3 +498,32 @@ test("pool.withdraw (card signpage-pool-withdraw-form): a checked Solana request
   assert.equal(keys.feePayer, SOL_POOLS.devnet!.feePayer);
   assert.equal(with_.withdrawDeps("base", "r1").handoff, undefined, "no EVM flow on this page yet");
 });
+
+// Review #232b LOW 2: the finish of an owed onward send takes the seed lock per use (a derive, a signature), never
+// across an RPC read, so a sign out never waits on a slow one; a failed finish is tried again only after a wait.
+test("an owed onward send's finish: a sign out never waits on its slow RPC read, and a failed read waits before the next try", async () => {
+  const { w, ns } = await wallet();
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 7));
+  n = await ns.move(n.id, "UNSPENT", "SPENT", {});
+  await w.put("ops", "w1", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 1, pending: { noteId: n.id, to: "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx", last: true } });
+  let reads = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const rpc = async () => {
+    reads++;
+    await gate;
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, rpc], prover: { vault: signalsProver(), stop: () => {} } });
+  const pass = t.stateRead();
+  while (reads === 0) await new Promise((r) => setTimeout(r, 1));
+  const signOut = navigator.locks.request("ct-wallet/seed", { mode: "exclusive" }, async () => "out");
+  assert.equal(await Promise.race([signOut, new Promise((r) => setTimeout(() => r("waited"), 200))]), "out", "the sign out goes while the finish waits on its RPC");
+  release();
+  await pass;
+  assert.equal(((await w.get("ops", "w1")) as { stage: string }).stage, "in_transit", "still owed");
+  const before = reads;
+  await t.stateRead();
+  assert.equal(reads, before, "not tried again at once");
+});

@@ -416,6 +416,46 @@ export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolCon
   return { chain: "solana", op: ask.kind, token: null, amount: got.withdrawnValue - got.relayFee, feeCap: got.relayFeeCap, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
 }
 
+/** The keys the Solana runtime keeps read-only in every transaction: its reserved account keys (agave
+ *  reserved-account-keys/src/lib.rs RESERVED_ACCOUNTS at f2046e514dd0, the ids from solana-sdk sdk-ids/src/lib.rs at
+ *  28c48986ed): the builtin programs and the sysvars. A transfer to one can never land. */
+export const SOLANA_RESERVED_KEYS: readonly string[] = Object.freeze([
+  // builtin programs
+  "AddressLookupTab1e1111111111111111111111111",
+  "BPFLoader2111111111111111111111111111111111",
+  "BPFLoader1111111111111111111111111111111111",
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+  "ComputeBudget111111111111111111111111111111",
+  "Config1111111111111111111111111111111111111",
+  "Ed25519SigVerify111111111111111111111111111",
+  "Feature111111111111111111111111111111111111",
+  "LoaderV411111111111111111111111111111111111",
+  "KeccakSecp256k11111111111111111111111111111",
+  "Secp256r1SigVerify1111111111111111111111111",
+  "StakeConfig11111111111111111111111111111111",
+  "Stake11111111111111111111111111111111111111",
+  "11111111111111111111111111111111",
+  "Vote111111111111111111111111111111111111111",
+  "ZkE1Gama1Proof11111111111111111111111111111",
+  "ZkTokenProof1111111111111111111111111111111",
+  // sysvars
+  "SysvarC1ock11111111111111111111111111111111",
+  "SysvarEpochRewards1111111111111111111111111",
+  "SysvarEpochSchedu1e111111111111111111111111",
+  "SysvarFees111111111111111111111111111111111",
+  "Sysvar1nstructions1111111111111111111111111",
+  "SysvarLastRestartS1ot1111111111111111111111",
+  "SysvarRecentB1ockHashes11111111111111111111",
+  "SysvarRent111111111111111111111111111111111",
+  "SysvarRewards111111111111111111111111111111",
+  "SysvarS1otHashes111111111111111111111111111",
+  "SysvarS1otHistory11111111111111111111111111",
+  "SysvarStakeHistory1111111111111111111111111",
+  // other
+  "NativeLoader1111111111111111111111111111111",
+  "Sysvar1111111111111111111111111111111111111",
+]);
+
 /** The device's reads for W's onward send, each as its two RPCs answered (they must agree): W's balance once its
  *  release landed, the network's fee for this very message (getFeeForMessage), whether the typed address is an
  *  executable account; with the release's own accounts, none of which is ever the destination. */
@@ -432,9 +472,9 @@ export type SolanaOnwardReads = {
 export function checkSolanaOnwardSend(wire: Uint8Array, ask: PoolAsk, ctx: PoolContext, to: string, reads: SolanaOnwardReads): PoolDraw {
   if (ask.kind !== "pool.withdraw" || ask.chain !== "solana") return refuse("kind");
   const pin = pinOf(ctx);
-  // the typed address: a key, never W, the pool, its program, the fee payer, the System program, an account of the
-  // release (its pages or mark) or an executable account (a program cannot hold the user's money for them)
-  if (!SOL_KEY(to) || [ctx.wallet, pin.pool, pin.program, pin.feePayer, SOLANA_SYSTEM_PROGRAM, ...reads.releaseAccounts].includes(to)) return refuse("to");
+  // the typed address: a key, never W, the pool, its program, the fee payer, an account of the release (its pages or
+  // mark), a key the runtime keeps read-only (SOLANA_RESERVED_KEYS, System among them) or an executable account
+  if (!SOL_KEY(to) || [ctx.wallet, pin.pool, pin.program, pin.feePayer, ...reads.releaseAccounts].includes(to) || SOLANA_RESERVED_KEYS.includes(to)) return refuse("to");
   if (!Array.isArray(reads.toExecutable) || reads.toExecutable.length !== 2 || reads.toExecutable.some((x) => x !== false)) return refuse("to");
   const agreed = (p: readonly [bigint, bigint]): bigint => (Array.isArray(p) && p.length === 2 && typeof p[0] === "bigint" && p[0] >= 0n && p[0] === p[1] ? p[0] : refuse("reads"));
   const balance = agreed(reads.balance);

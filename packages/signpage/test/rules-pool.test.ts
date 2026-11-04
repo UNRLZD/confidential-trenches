@@ -308,9 +308,9 @@ test("Solana withdraw onward: a fee payer of ours, a second signer, a compute bu
   assert.throws(() => checkSolanaOnwardSend(onWire([send(TO, 0n)]), wdAsk, solCtx(), TO, onReads({ balance: [ON_FEE, ON_FEE] })), refusedAs("transfer_amount"));
 });
 
-test("Solana withdraw onward: To that is W, the pool, its program, the fee payer, System, an account of the release or executable on either RPC is refused", () => {
+test("Solana withdraw onward: To that is W, the pool, its program, the fee payer, a key the runtime keeps read-only, an account of the release or executable on either RPC is refused", () => {
   const rel = relIx().accounts.map((a) => a.key);
-  for (const to of [SOL_W, POOL, PROGRAM, SOL_FEE_PAYER, SOLANA_SYSTEM_PROGRAM, rel[3]!, rel[4]!, rel[5]!, rel[6]!]) {
+  for (const to of [SOL_W, POOL, PROGRAM, SOL_FEE_PAYER, SOLANA_SYSTEM_PROGRAM, "SysvarC1ock11111111111111111111111111111111", "SysvarRent111111111111111111111111111111111", "Vote111111111111111111111111111111111111111", "Stake11111111111111111111111111111111111111", rel[3]!, rel[4]!, rel[5]!, rel[6]!]) {
     assert.throws(() => checkSolanaOnwardSend(onWire([send(to, ON_BAL - ON_FEE)]), wdAsk, solCtx(), to, onReads()), refusedAs("to"), to);
   }
   assert.throws(() => checkSolanaOnwardSend(onWire(), wdAsk, solCtx(), "not a key", onReads()), refusedAs("to"));

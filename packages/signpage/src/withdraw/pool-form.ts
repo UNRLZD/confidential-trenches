@@ -4,8 +4,8 @@
 // it keeps:
 //
 // - To, checked per chain: on Solana 32 bytes of base58 (the rules' SOL_KEY), never the pool, its program, the
-//   relayer's fee payer or the System program (the helper refuses each as a transfer's destination, and a send to any
-//   of them is never the user's); on Base and Robinhood 0x and 40 hex digits (EVM_ADDRESS), its EIP-55 checksum
+//   relayer's fee payer or a key the runtime keeps read-only (SOLANA_RESERVED_KEYS: the sysvars and builtin programs,
+//   System among them; a send to any of them is never the user's and can never land); on Base and Robinhood 0x and 40 hex digits (EVM_ADDRESS), its EIP-55 checksum
 //   right when it mixes cases, never the zero address or the pool.
 // - Amount: a decimal in the pool asset's decimals, refused above what the pool's notes can send ("Insufficient": the
 //   ready pool balance, poolWithdrawable: each note less the epoch's fee and W's fee), under the smallest part ("Min"),
@@ -21,7 +21,7 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58 } from "@scure/base";
 import { nearestPlannable, planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
-import { EVM_ADDRESS, SOL_KEY, type PoolChain } from "../rules/pool.ts";
+import { EVM_ADDRESS, SOL_KEY, SOLANA_RESERVED_KEYS, type PoolChain } from "../rules/pool.ts";
 import { CHECK_IDLE_MS, WITHDRAW_WORDS } from "./form.ts";
 
 // DRAFT COPY: every word here is drawn with data-draft-copy until the owner picks it.
@@ -61,7 +61,6 @@ export type PoolFormState = "empty" | "typing" | "refused" | "ready";
 export type PoolReady = Readonly<{ chain: PoolChain; to: string; amount: bigint; maxFee: bigint }>;
 export type PoolFormView = { state: PoolFormState; address: PoolAddressCheck | null; amount: PoolAmountCheck | null; ready: PoolReady | null };
 
-const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 const EVM_ZERO = "0x0000000000000000000000000000000000000000";
 
 /** EIP-55: the checksummed spelling of a 0x address (hex digit i upper case when nibble i of keccak256(lower) >= 8). */
@@ -77,7 +76,8 @@ export function checkPoolTo(chain: PoolChain, raw: string, keys: PoolKeys): Pool
   const no: PoolAddressCheck = { ok: false, code: "address" };
   if (chain === "solana") {
     if (!SOL_KEY(to) || base58.encode(base58.decode(to)) !== to) return no;
-    if ([keys.pool, keys.program, keys.feePayer, SYSTEM_PROGRAM].includes(to)) return no;
+    // nor a key the runtime keeps read-only (a sysvar or a builtin program, System among them): nothing lands there
+    if ([keys.pool, keys.program, keys.feePayer].includes(to) || SOLANA_RESERVED_KEYS.includes(to)) return no;
     return { ok: true, to };
   }
   if (!EVM_ADDRESS.test(to)) return no;
