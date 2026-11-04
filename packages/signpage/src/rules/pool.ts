@@ -172,14 +172,14 @@ export type PoolAsk = { kind: PoolKind; chain: PoolChain; token: string | null; 
 export function poolTokenAddress(chain: PoolChain, token: unknown): token is string {
   return typeof token === "string" && (chain === "solana" ? SOL_KEY(token) : EVM_ADDRESS.test(token));
 }
-const SOL_KEY = (s: string): boolean => {
+export const SOL_KEY = (s: string): boolean => {
   try {
     return base58.decode(s).length === 32;
   } catch {
     return false;
   }
 };
-const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+export const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const DECIMAL = /^(0|[1-9]\d{0,29})(?:\.(\d{1,18}))?$/;
 const lower = (s: string) => s.toLowerCase();
 
@@ -385,12 +385,13 @@ export function checkSolanaDeposit(wire: Uint8Array, ask: PoolAsk, ctx: PoolCont
   return { chain: "solana", op: ask.kind, token: null, amount: ask.amount, feeCap: 0n, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back: null };
 }
 
-/** A Solana pool withdraw: the device's own release to W through the pinned pool, then at most one transfer from W to
- *  `to`, the address the user typed on SIGN_HOST, of no more than the release leaves W. */
-export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolContext, release: SolanaPoolRelease, to: string, reads: SolanaPoolReads): PoolDraw {
+/** A Solana pool withdraw's release (card signpage-pool-withdraw-form, the review of #232): the device's own release
+ *  to W through the pinned pool, alone after the compute budget (the helper sends nothing else with a tag 2), so it
+ *  lands or fails on the pool's own rules, never on a transfer W's holder could make fail. The draw is where it lands:
+ *  W. W's own send onward to the typed address is a second transaction (checkSolanaOnwardSend). */
+export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolContext, release: SolanaPoolRelease, reads: SolanaPoolReads): PoolDraw {
   if (ask.kind !== "pool.withdraw" || ask.chain !== "solana") return refuse("kind");
   const pin = pinOf(ctx);
-  if (!SOL_KEY(to)) return refuse("to");
   const d = decode(wire, reads);
   if (d.signers.length !== 2 || d.signers[0] !== pin.feePayer || d.signers[1] !== ctx.wallet) return refuse("signers");
   const n = head(d.ixs);
@@ -403,22 +404,94 @@ export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolCon
   } catch {
     return refuse("release_data");
   }
-  // byte for byte the device's own release (its ready proof): a field the bytes changed is not the device's
+  // byte for byte the device's own release (its proof): a field the bytes changed is not the device's
   const want = solanaEncodePoolRelease(release);
   if (want.length !== rel.data.length || want.some((b, i) => b !== rel.data[i])) return refuse("release_not_devices");
   checkFeeAndDeadline(got.relayFee, got.relayFeeCap, got.deadlineMs, ctx);
   const accounts = solanaPoolReleaseAccounts(pin, ctx.wallet, pin.feePayer, got, reads.stateSize);
   if (!sameList(rel.accounts, accounts)) return refuse("release_accounts");
-  const rest = d.ixs.slice(n + 1);
-  if (rest.length !== 1) return refuse("instructions");
-  {
-    const t = rest[0]!;
-    if (t.program !== SOLANA_SYSTEM_PROGRAM || t.data.length !== 12 || u64le(Uint8Array.of(...t.data.subarray(0, 4), 0, 0, 0, 0), 0) !== 2n) return refuse("transfer");
-    if (t.accounts.length !== 2 || !same(t.accounts[0], ctx.wallet, true, true) || !same(t.accounts[1], to, false, true)) return refuse("transfer_to");
-    if (u64le(t.data, 4) !== got.withdrawnValue - got.relayFee) return refuse("transfer_amount");
-  }
+  // the release alone: nothing after it
+  if (d.ixs.length > n + 1) return refuse("instructions");
   passedWire(wire);
-  return { chain: "solana", op: ask.kind, token: null, amount: got.withdrawnValue - got.relayFee, feeCap: got.relayFeeCap, pool: pin.pool, to, decimals: ask.decimals, back: null };
+  return { chain: "solana", op: ask.kind, token: null, amount: got.withdrawnValue - got.relayFee, feeCap: got.relayFeeCap, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
+}
+
+/** The keys the Solana runtime keeps read-only in every transaction: its reserved account keys (agave
+ *  reserved-account-keys/src/lib.rs RESERVED_ACCOUNTS at f2046e514dd0, the ids from solana-sdk sdk-ids/src/lib.rs at
+ *  28c48986ed): the builtin programs and the sysvars. A transfer to one can never land. */
+export const SOLANA_RESERVED_KEYS: readonly string[] = Object.freeze([
+  // builtin programs
+  "AddressLookupTab1e1111111111111111111111111",
+  "BPFLoader2111111111111111111111111111111111",
+  "BPFLoader1111111111111111111111111111111111",
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+  "ComputeBudget111111111111111111111111111111",
+  "Config1111111111111111111111111111111111111",
+  "Ed25519SigVerify111111111111111111111111111",
+  "Feature111111111111111111111111111111111111",
+  "LoaderV411111111111111111111111111111111111",
+  "KeccakSecp256k11111111111111111111111111111",
+  "Secp256r1SigVerify1111111111111111111111111",
+  "StakeConfig11111111111111111111111111111111",
+  "Stake11111111111111111111111111111111111111",
+  "11111111111111111111111111111111",
+  "Vote111111111111111111111111111111111111111",
+  "ZkE1Gama1Proof11111111111111111111111111111",
+  "ZkTokenProof1111111111111111111111111111111",
+  // sysvars
+  "SysvarC1ock11111111111111111111111111111111",
+  "SysvarEpochRewards1111111111111111111111111",
+  "SysvarEpochSchedu1e111111111111111111111111",
+  "SysvarFees111111111111111111111111111111111",
+  "Sysvar1nstructions1111111111111111111111111",
+  "SysvarLastRestartS1ot1111111111111111111111",
+  "SysvarRecentB1ockHashes11111111111111111111",
+  "SysvarRent111111111111111111111111111111111",
+  "SysvarRewards111111111111111111111111111111",
+  "SysvarS1otHashes111111111111111111111111111",
+  "SysvarS1otHistory11111111111111111111111111",
+  "SysvarStakeHistory1111111111111111111111111",
+  // other
+  "NativeLoader1111111111111111111111111111111",
+  "Sysvar1111111111111111111111111111111111111",
+]);
+
+/** The device's reads for W's onward send, each as its two RPCs answered (they must agree): W's balance once its
+ *  release landed, the network's fee for this very message (getFeeForMessage), whether the typed address is an
+ *  executable account; with the release's own accounts, none of which is ever the destination. */
+export type SolanaOnwardReads = {
+  readonly blockhash: string;
+  readonly balance: readonly [bigint, bigint];
+  readonly fee: readonly [bigint, bigint];
+  readonly toExecutable: readonly [boolean, boolean];
+  readonly releaseAccounts: readonly string[];
+};
+
+/** W's onward send of a Solana pool withdraw: one System transfer of all W holds less its own fee to `to`, the address
+ *  typed on SIGN_HOST, W its only signer and fee payer, so W ends at 0 and nothing else is in the transaction. */
+export function checkSolanaOnwardSend(wire: Uint8Array, ask: PoolAsk, ctx: PoolContext, to: string, reads: SolanaOnwardReads): PoolDraw {
+  if (ask.kind !== "pool.withdraw" || ask.chain !== "solana") return refuse("kind");
+  const pin = pinOf(ctx);
+  // the typed address: a key, never W, the pool, its program, the fee payer, an account of the release (its pages or
+  // mark), a key the runtime keeps read-only (SOLANA_RESERVED_KEYS, System among them) or an executable account
+  if (!SOL_KEY(to) || [ctx.wallet, pin.pool, pin.program, pin.feePayer, ...reads.releaseAccounts].includes(to) || SOLANA_RESERVED_KEYS.includes(to)) return refuse("to");
+  if (!Array.isArray(reads.toExecutable) || reads.toExecutable.length !== 2 || reads.toExecutable.some((x) => x !== false)) return refuse("to");
+  const agreed = (p: readonly [bigint, bigint]): bigint => (Array.isArray(p) && p.length === 2 && typeof p[0] === "bigint" && p[0] >= 0n && p[0] === p[1] ? p[0] : refuse("reads"));
+  const balance = agreed(reads.balance);
+  const fee = agreed(reads.fee);
+  const d = decode(wire, { blockhash: reads.blockhash, tables: {}, stateSize: 0, labelSize: 0 });
+  // W alone signs and pays: no fee payer of ours, nobody else's key
+  if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
+  // one transfer, no compute budget (W pays the base fee only) and nothing beside it
+  if (d.ixs.length !== 1) return refuse("instructions");
+  const t = d.ixs[0]!;
+  if (t.program !== SOLANA_SYSTEM_PROGRAM || t.data.length !== 12 || u64le(Uint8Array.of(...t.data.subarray(0, 4), 0, 0, 0, 0), 0) !== 2n) return refuse("transfer");
+  if (t.accounts.length !== 2 || !same(t.accounts[0], ctx.wallet, true, true) || !same(t.accounts[1], to, false, true)) return refuse("transfer_to");
+  // all W holds less the fee: W ends at 0, nothing left on it, never more than it holds
+  const amount = u64le(t.data, 4);
+  if (amount === 0n || amount + fee !== balance) return refuse("transfer_amount");
+  passedWire(wire);
+  return { chain: "solana", op: ask.kind, token: null, amount, feeCap: fee, pool: pin.pool, to, decimals: ask.decimals, back: null };
 }
 
 /** A Solana pool buy (tag 3): the kit's checks on every byte against the pinned pool, the request bound to them here. */
@@ -697,6 +770,173 @@ export function signEvmWithdraw(secretKey: Uint8Array, _ctx: PoolContext, _ask: 
   out[64] = 27 + rec[0]!;
   return out;
 }
+
+// ---------- EVM: W's onward send ----------
+// An EVM pool withdraw pays W (the pool requires its recipient's signature, contracts/pool-evm/src/PrivacyPool.sol), then
+// W sends what it holds on to the address the user typed on SIGN_HOST: one EIP-1559 transfer, checked here field by field
+// against the device's own two-RPC reads, and signed only as this check read it.
+
+/** W's onward send: an EIP-1559 (type 2) transaction. `data` is hex ("0x" for a plain send). */
+export type EvmOnwardSend = {
+  readonly type: 2;
+  readonly chainId: bigint;
+  readonly nonce: bigint;
+  readonly maxPriorityFeePerGas: bigint;
+  readonly maxFeePerGas: bigint;
+  readonly gasLimit: bigint;
+  readonly to: string;
+  readonly value: bigint;
+  readonly data: string;
+  readonly accessList: readonly unknown[];
+};
+/** The device's reads for W's onward send, each as its two RPCs answered (they must agree): W's nonce, W's balance after
+ *  the withdraw landed, whether the typed address has code and, when it has, eth_estimateGas of the send to it, the
+ *  base fee, and the L1 data fee W must also hold on an OP Stack chain (Base: GasPriceOracle.getL1FeeUpperBound of the
+ *  signed size; 0 on a chain without one); with the device's own cap on the priority fee. */
+export type EvmOnwardReads = {
+  readonly nonce: readonly [bigint, bigint];
+  readonly balance: readonly [bigint, bigint];
+  readonly toHasCode: readonly [boolean, boolean];
+  readonly estimate: readonly [bigint, bigint] | null;
+  readonly baseFee: readonly [bigint, bigint];
+  readonly l1Fee: readonly [bigint, bigint];
+  readonly priorityCap: bigint;
+};
+/** A plain transfer's gas, and the most a contract recipient (a smart wallet) may take: its estimate, never more. */
+export const EVM_ONWARD_GAS = 21_000n;
+export const EVM_ONWARD_GAS_MAX = 100_000n;
+const ONWARD_KEYS = "accessList,chainId,data,gasLimit,maxFeePerGas,maxPriorityFeePerGas,nonce,to,type,value";
+const U256 = 1n << 256n;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+type OnwardRead = EvmOnwardSend & { readonly wallet: string };
+// each send a check passed, with the check's own copy of it: a signer signs only that copy, and only while the send
+// still reads as it
+const ONWARD_CHECKED = new WeakMap<object, OnwardRead>();
+/** The send's fields, each read once, into a frozen copy: refused "type" when it is not a type 2 send of exactly
+ *  these fields, "tx_fields" when a field is out of its range. */
+function onwardCopy(tx: EvmOnwardSend): EvmOnwardSend {
+  // no EIP-7702 delegation (type 4) of W slipped in, no legacy send, no field beside the nine
+  if (typeof tx !== "object" || tx === null || Object.keys(tx).sort().join() !== ONWARD_KEYS || tx.type !== 2) return refuse("type");
+  const t = { type: 2 as const, chainId: tx.chainId, nonce: tx.nonce, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, maxFeePerGas: tx.maxFeePerGas, gasLimit: tx.gasLimit, to: tx.to, value: tx.value, data: tx.data, accessList: tx.accessList };
+  const uint = (x: unknown): x is bigint => typeof x === "bigint" && x >= 0n && x < U256;
+  // every number a uint256 (the nonce under 2^64 - 1, EIP-2681), the address and data strings, the list an array
+  if (![t.chainId, t.maxPriorityFeePerGas, t.maxFeePerGas, t.gasLimit, t.value].every(uint) || !uint(t.nonce) || t.nonce >= (1n << 64n) - 1n) return refuse("tx_fields");
+  if (typeof t.to !== "string" || typeof t.data !== "string" || !Array.isArray(t.accessList)) return refuse("tx_fields");
+  return Object.freeze({ ...t, accessList: Object.freeze([...t.accessList]) });
+}
+const agreed = <T>(pair: readonly [T, T] | null | undefined, ok: (x: unknown) => boolean): T => {
+  if (!Array.isArray(pair) || pair.length !== 2 || !ok(pair[0]) || pair[0] !== pair[1]) return refuse("reads");
+  return pair[0];
+};
+
+/** W's onward send of its whole balance, less the send's fee bound, to `to`, the address typed on SIGN_HOST, on the
+ *  pinned chain: each field held to `reads`, the device's own two-RPC reads. */
+export function checkEvmOnwardSend(tx: EvmOnwardSend, ask: PoolAsk, ctx: PoolContext, to: string, reads: EvmOnwardReads, testnet = false): PoolDraw {
+  // only a pool withdraw's second step, on an EVM pool chain
+  if (ask.kind !== "pool.withdraw") return refuse("kind");
+  const chain = evmChainOf(ask, testnet);
+  const pins = evmPins(ctx, chain);
+  // W, the fresh wallet the check holds the send to (its nonce, its balance, its key at the signer)
+  if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");
+  const t = onwardCopy(tx);
+  const uint = (x: unknown) => typeof x === "bigint" && x >= 0n && x < U256;
+  // two providers' answers that differ are no read at all
+  const nonce = agreed(reads.nonce, uint);
+  const balance = agreed(reads.balance, uint);
+  const hasCode = agreed(reads.toHasCode, (x) => typeof x === "boolean");
+  const baseFee = agreed(reads.baseFee, uint);
+  const l1Fee = agreed(reads.l1Fee, uint);
+  // Robinhood (Arbitrum Nitro) charges its L1 data as gas: a plain send's gas is its own estimate there, on any To
+  const nitro = ask.chain === "robinhood";
+  const estimate = hasCode || nitro ? agreed(reads.estimate, uint) : null;
+  // and no L1 fee beside it: Nitro has no separate one to hold
+  if (nitro && l1Fee !== 0n) return refuse("l1_fee");
+  if (!uint(reads.priorityCap)) return refuse("reads");
+  // the pinned chain's id: no replay of W's send on another chain
+  if (t.chainId !== pins.chainId) return refuse("chain_id");
+  // the typed address: an address, never the zero address (a burn), the pool or W itself (the money back where it was)
+  if (typeof to !== "string" || !EVM_ADDRESS.test(to) || lower(to) === ZERO_ADDRESS || lower(to) === lower(pins.pool) || lower(to) === lower(ctx.wallet)) return refuse("to");
+  // the send goes to the typed address: no redirect
+  if (lower(t.to) !== lower(to)) return refuse("transfer_to");
+  // W's nonce on two RPCs: no replacing a send of W's, no queueing behind one
+  if (t.nonce !== nonce) return refuse("nonce");
+  // a plain send: no contract call dressed as one
+  if (t.data !== "0x") return refuse("data");
+  // no access list: nothing beside the send
+  if (t.accessList.length !== 0) return refuse("access_list");
+  if (estimate === null) {
+    // no code at the address: a plain transfer's gas, no fee bound padded past it
+    if (t.gasLimit !== EVM_ONWARD_GAS) return refuse("gas_limit");
+  } else {
+    // a smart-wallet recipient, or any send on Nitro: its own two-RPC estimate, no padding past it
+    if (t.gasLimit !== estimate) return refuse("gas_estimate");
+    // and never more than the cap, so a recipient's code cannot burn the withdrawal as gas
+    if (t.gasLimit > EVM_ONWARD_GAS_MAX) return refuse("gas_over_cap");
+  }
+  // no tip that burns the withdrawal, nor one above the max fee (a send no node includes)
+  if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");
+  // no max fee past two base fees and the tip, the standard bound, nor under the base fee (a send that never lands,
+  // its nonce held, the money stuck on W)
+  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");
+  // the whole balance less the fee bound: no skim left in W, no overspend, never nothing
+  const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;
+  if (t.value === 0n || t.value + feeBound !== balance) return refuse("value");
+  ONWARD_CHECKED.set(tx, Object.freeze({ ...t, wallet: lower(ctx.wallet) }));
+  return { chain: ask.chain, op: "pool.withdraw", token: null, amount: t.value, feeCap: feeBound, pool: pins.pool, to, decimals: ask.decimals, back: null };
+}
+
+// RLP (the Ethereum yellow paper, appendix B): a byte string or a list, each with its length prefix
+const beBytes = (v: bigint): Uint8Array => {
+  const b: number[] = [];
+  for (let x = v; x > 0n; x >>= 8n) b.unshift(Number(x & 0xffn));
+  return Uint8Array.from(b);
+};
+const rlpHead = (n: number, short: number): Uint8Array => {
+  if (n <= 55) return Uint8Array.of(short + n);
+  const l = beBytes(BigInt(n));
+  return Uint8Array.of(short + 55 + l.length, ...l);
+};
+const rlpBytes = (b: Uint8Array): Uint8Array => (b.length === 1 && b[0]! < 0x80 ? b : cat(rlpHead(b.length, 0x80), b));
+const rlpUint = (v: bigint): Uint8Array => rlpBytes(beBytes(v));
+const rlpList = (items: Uint8Array[]): Uint8Array => {
+  const body = cat(...items);
+  return cat(rlpHead(body.length, 0xc0), body);
+};
+const hexBytes = (h: string): Uint8Array => {
+  if (!/^0x([0-9a-fA-F]{2})*$/.test(h)) return refuse("tx_fields");
+  return Uint8Array.from(h.slice(2).match(/../g) ?? [], (x) => parseInt(x, 16));
+};
+/** The nine fields of a type 2 send, RLP-encoded (EIP-1559); its access list is always empty here. */
+const onwardFields = (t: EvmOnwardSend): Uint8Array[] => {
+  if (t.accessList.length !== 0) refuse("access_list");
+  return [rlpUint(t.chainId), rlpUint(t.nonce), rlpUint(t.maxPriorityFeePerGas), rlpUint(t.maxFeePerGas), rlpUint(t.gasLimit), rlpBytes(hexBytes(t.to)), rlpUint(t.value), rlpBytes(hexBytes(t.data)), rlpList([])];
+};
+/** The digest W signs for a type 2 send: keccak256(0x02 ‖ rlp([chainId, nonce, maxPriorityFeePerGas, maxFeePerGas,
+ *  gasLimit, to, value, data, accessList])), EIP-1559. */
+export function evmOnwardSendDigest(tx: EvmOnwardSend): Uint8Array {
+  return keccak_256(cat(Uint8Array.of(2), rlpList(onwardFields(tx))));
+}
+
+/** W's signed onward send, the raw transaction 0x02 ‖ rlp([...the nine fields, yParity, r, s]), s low: only the very
+ *  send checkEvmOnwardSend passed, while it reads as the check read it, and only with W's own key. */
+export function signEvmOnwardSend(secretKey: Uint8Array, tx: EvmOnwardSend): Uint8Array {
+  const read = typeof tx === "object" && tx !== null ? ONWARD_CHECKED.get(tx) : undefined;
+  if (!read) return refuse("unchecked");
+  let now: EvmOnwardSend;
+  try {
+    now = onwardCopy(tx);
+  } catch {
+    return refuse("unchecked");
+  }
+  const fields = ["type", "chainId", "nonce", "maxPriorityFeePerGas", "maxFeePerGas", "gasLimit", "to", "value", "data"] as const;
+  if (fields.some((k) => now[k] !== read[k]) || now.accessList.length !== 0) return refuse("unchecked");
+  if (lower(hex(keccak_256(secp256k1.getPublicKey(secretKey, false).subarray(1)).subarray(12))) !== read.wallet) return refuse("wallet");
+  const rec = secp256k1.sign(evmOnwardSendDigest(read), secretKey, { prehash: false, lowS: true, format: "recovered" });
+  // noble's recovered form is the recovery bit, then r and s
+  const sig = [rlpUint(BigInt(rec[0]!)), rlpUint(be32(rec.subarray(1, 33))), rlpUint(be32(rec.subarray(33, 65)))];
+  return cat(Uint8Array.of(2), rlpList([...onwardFields(read), ...sig]));
+}
+const hex = (b: Uint8Array): string => "0x" + Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 // ---------- the draw ----------
 
