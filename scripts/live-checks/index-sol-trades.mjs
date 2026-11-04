@@ -106,12 +106,18 @@ export function judge(run) {
   if (hit === null) return { ok: false, lines };
   const ms = hit.p.answeredMs - f.heldAtMs;
   say(ms <= FRESH_MS, `on the tape ${ms} ms after the check held it on chain (at most ${FRESH_MS})`);
+  // where the time went (the helper's clock for as_of_ms, so within the two hosts' clock skew): the helper folded the
+  // trade after the last read that lacked it was sent and by the as_of_ms of the read that holds it; the rest is the
+  // read's own round trip
+  const prev = hit.i > 0 ? polls[hit.i - 1] : null;
+  const asOf = JSON.parse(hit.p.body).as_of_ms;
+  lines.push(`    timing: the helper folded it after +${prev === null ? "?" : prev.atMs - f.heldAtMs} ms (read ${hit.i} sent, without it) and by +${asOf - f.heldAtMs} ms (as_of_ms of read ${hit.i + 1}); read ${hit.i + 1} sent at +${hit.p.atMs - f.heldAtMs} ms, answered in ${hit.p.answeredMs - hit.p.atMs} ms`);
   say(hit.row.side === f.side && hit.row.t_ms === f.ts * 1000 && hit.row.trader === f.user, `its side ${show(hit.row.side)}, time ${hit.row.t_ms} and trader ${show(hit.row.trader)} are the event's (${f.side}, ${f.ts * 1000}, ${f.user})`);
   const c = answer(say, `GET ${CANDLES_PATH(run.coin)}`, run.candles, run.candles?.answeredMs);
   if (c === undefined) return { ok: false, lines };
   const bar = Array.isArray(c.candles) ? c.candles.find((b) => Array.isArray(b) && b[0] === f.ts) : undefined;
   say(c.tf === "1s" && bar !== undefined && bar.length === 6 && bar.slice(1).every((v) => typeof v === "string" && DEC.test(v)) && Number(bar[5]) > 0, `the 1s candles hold the trade's second ${f.ts}: ${show(bar)}`);
-  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
 /** One read, its error naming the request (a run's ERROR line says which read failed, and a timeout says so). */

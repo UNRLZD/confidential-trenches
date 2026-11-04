@@ -92,3 +92,10 @@ test("a request that times out is named in the error, with its path and the 10 s
     return true;
   });
 });
+
+test("a run says where the time went: the helper's fold between the read without the trade and the read with it", () => {
+  const r = judge(A.good);
+  const line = r.lines.find((l) => /timing:/.test(l));
+  assert.match(line ?? "", /folded it after \+\d+ ms \(read \d+ sent, without it\) and by \+-?\d+ ms \(as_of_ms of read \d+\); read \d+ sent at \+\d+ ms, answered in \d+ ms/);
+  assert.equal(r.ok, true);
+});
