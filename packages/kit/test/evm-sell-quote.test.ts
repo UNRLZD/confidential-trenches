@@ -257,6 +257,8 @@ test("a chain with no v3 router sells through v4 only; the request's fields are 
   const seen: Seen = { pools: [], probes: [] };
   const q = await sellQuoteWith(req("robinhood-testnet"), [provider({ price: (p) => p.amount }, seen), provider({ price: (p) => p.amount })], Date.now());
   assert.ok(seen.pools.every((p) => p.venue === "v4"));
+  // its own v4 set, not only the bought route (0.3%): every standard native pool is quoted
+  for (const fee of [100, 500, 3000, 10000]) assert.ok(seen.pools.some((p) => p.hops === 1 && p.to[0] === NATIVE && p.fees[0] === fee), `fee ${fee}`);
   assert.equal(q.target, evmPoolVenues()["robinhood-testnet"].poolManager);
   const v = (o: Record<string, unknown>) => verdict(sell({ price: flat }, "base", o));
   assert.equal((await v({ token: evmPoolVenues().base.weth })).code, "bad_request");
