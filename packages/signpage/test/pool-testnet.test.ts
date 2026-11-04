@@ -505,8 +505,12 @@ test("an owed onward send's finish: a sign out never waits on its slow RPC read,
   const { w, ns } = await wallet();
   const { land } = fakePool();
   let n = await land(ns, await incoming(ns, null, 7));
-  n = await ns.move(n.id, "UNSPENT", "SPENT", {});
-  await w.put("ops", "w1", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 1, pending: { noteId: n.id, to: "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx", last: true } });
+  // the owed attempt's note, spent by it: RESERVED with its context, then SPENT
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "7" });
+  const attempt = n.attempt!;
+  n = await ns.move(n.id, "HELD", "RESERVED", { attempt });
+  n = await ns.move(n.id, "RESERVED", "SPENT", {});
+  await w.put("ops", "w1", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 1, pending: { noteId: n.id, attempt, context: "7", to: "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx", last: true, feeCap: "5000" } });
   let reads = 0;
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
@@ -517,7 +521,8 @@ test("an owed onward send's finish: a sign out never waits on its slow RPC read,
   };
   const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, rpc], prover: { vault: signalsProver(), stop: () => {} } });
   const pass = t.stateRead();
-  while (reads === 0) await new Promise((r) => setTimeout(r, 1));
+  for (let i = 0; reads === 0 && i < 2_000; i++) await new Promise((r) => setTimeout(r, 1));
+  assert.ok(reads > 0, "the finish reads the chain");
   const signOut = navigator.locks.request("ct-wallet/seed", { mode: "exclusive" }, async () => "out");
   assert.equal(await Promise.race([signOut, new Promise((r) => setTimeout(() => r("waited"), 200))]), "out", "the sign out goes while the finish waits on its RPC");
   release();
@@ -544,7 +549,8 @@ test("a withdraw whose tab closed during the release's read-back: the reopened p
   const amount = 5_000_000n;
   const t1 = testnetPool(page, over);
   void t1.withdraw({ chain: "solana", to: TO, amount, maxFee: COST }, "op-w");
-  while (wd.releases.length === 0) await new Promise((r) => setTimeout(r, 5));
+  for (let i = 0; wd.releases.length === 0 && i < 1_000; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(wd.releases.length, 1, "the release went out");
   await new Promise((r) => setTimeout(r, 20));
   const W = wd.binds[0]!.recipient;
   const rec = (await wd.w.get("ops", "op-w")) as { stage: string; pending?: unknown };
