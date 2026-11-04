@@ -126,5 +126,5 @@ test("the run record lists every transaction of each real redeploy as money-path
   assert.equal(lines[1], "Money path: yes");
   assert.deepEqual(lines.filter((l) => l.startsWith("Tx: ")), real.flatMap((d) => d.txs.map((t) => `Tx: ${d.chain} ${t.hash}`)));
   assert.ok(real.every((d) => text.includes(d.contracts.SellDelegate.address)));
-  assert.throws(() => runRecord(Object.values(A.deployments)), /dry run/);
+  assert.throws(() => runRecord(real.map((d) => ({ ...d, dryRun: true }))), /dry run/);
 });
