@@ -49,6 +49,7 @@ import {
   SOLANA_CU_PRICE_MAX,
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_JITO_TIP_MIN,
+  SOLANA_LAMPORTS_PER_SIGNATURE,
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_PUMP_PROGRAM,
   SOLANA_SOL_MINT,
@@ -557,11 +558,29 @@ function perVenue<T>(table: Readonly<Record<SolanaPoolVenue, T>>, kind: unknown)
 }
 
 /**
+ * What W must hold before its sell runs, in lamports (the review of signpage-pool-sell 4b6223a): W pays the sell's fee
+ * (one signature, no compute budget: SOLANA_POOL_SELL_FEE) before any instruction runs, and the runtime refuses a fee
+ * payer that has no account, holds less than the fee, or after the fee holds more than 0 and less than rent(0). On
+ * PumpSwap the sell makes W's wrapped-SOL account (165 bytes) before any proceeds arrive, so W pays its rent up front
+ * too (it comes back when the sell closes it). So: the fee and rent(0) on pump's curve (W after a buy holds 0 or at
+ * least rent(0), and after the fee the same), the fee and rent(165) on PumpSwap. The buy keeps it in W
+ * (solanaPoolBuyFunds) and the sell refuses a W short of it before it builds (packages/signpage/src/pool-sell.ts).
+ */
+export const SOLANA_POOL_SELL_FEE = SOLANA_LAMPORTS_PER_SIGNATURE;
+/** The bytes of the account W keeps rent for up front: none beyond its own on pump's curve (rent(0)), the wrapped-SOL
+ *  account on PumpSwap (whose rent is above rent(0), so it covers W's own floor too). */
+const SELL_UP_FRONT_SIZE = { "pump-curve": 0, pumpswap: TOKEN_ACCOUNT_SIZE } as const;
+export function solanaPoolSellNeed(kind: SolanaPoolVenue, rent: SolanaRent): bigint {
+  return SOLANA_POOL_SELL_FEE + solanaRentMin(rent, perVenue(SELL_UP_FRONT_SIZE, kind));
+}
+
+/**
  * What W's chunk must cover, in lamports, on today's rent (every account counted as made new, which only raises W's
  * balance when one already exists):
  * - the spend, W's token account (its size from the mint: Token-2022 adds its extensions), the venue's volume account;
  * - PumpSwap: W's wrapped-SOL account while the spend sits in it (its rent comes back when it is closed);
- * - W after the buy holds 0 or at least rent(0), the runtime's floor for a system account.
+ * - W after the buy holds what its sell needs up front (solanaPoolSellNeed), which is above rent(0), the runtime's
+ *   floor for a system account, so a bought W can always sell.
  * `peak` is what W pays out at its lowest point, `left` what W holds after.
  */
 export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "spend" | "tip">, rent: SolanaRent): { chunk: bigint; peak: bigint; left: bigint; problem: string | null } {
@@ -570,27 +589,28 @@ export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPool
     (venue.kind === "pumpswap" && venue.cashback ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const peak = kept + (venue.kind === "pumpswap" ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const left = chunk - kept;
-  const floor = solanaRentMin(rent, 0);
+  const need = solanaPoolSellNeed(venue.kind, rent);
   const problem =
     chunk < 0n ? "the relay fee and the tip are more than the release"
     : chunk < peak ? `the chunk ${chunk} does not cover the spend and W's new accounts (${peak})`
-    : left > 0n && left < floor ? `W would keep ${left} lamports, under the ${floor} a wallet must hold or 0`
+    : left < need ? `W would keep ${left} lamports, under the ${need} its sell needs up front`
     : null;
   return { chunk, peak, left, problem };
 }
 
 /**
  * The most a tap can spend from one release on `venue`: the largest spend solanaPoolBuyFunds passes, 0 when none does.
- * The chunk less the relay fee, the tip and W's new accounts at the peak: at that spend W keeps 0 (pump's curve) or the
- * wrapped-SOL account's rent, which is above rent(0) (PumpSwap), so the floor never binds. The tap and the signing
- * page's state.pools tap_max share this one rule; it is checked against solanaPoolBuyFunds itself before it is given.
+ * The chunk less the relay fee, the tip, W's new accounts and what W's sell needs up front (solanaPoolSellNeed): at
+ * that spend W keeps exactly that need, which also covers the peak (PumpSwap's wrapped-SOL rent is part of it). The tap
+ * and the signing page's state.pools tap_max share this one rule; it is checked against solanaPoolBuyFunds itself
+ * before it is given.
  */
 export function solanaPoolBuyMaxSpend(release: Pick<SolanaPoolRelease, "withdrawnValue" | "relayFee">, venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback">, tip: bigint, rent: SolanaRent): bigint {
   if (typeof release?.withdrawnValue !== "bigint" || typeof release.relayFee !== "bigint" || typeof tip !== "bigint" || tip < 0n) throw new Error("withdrawnValue, relayFee and tip are bigints, the tip at least 0");
   const r = release as SolanaPoolRelease;
   const v = venue as SolanaPoolBuyVenue;
   const at0 = solanaPoolBuyFunds(r, v, { spend: 0n, tip }, rent);
-  const max = at0.chunk - at0.peak;
+  const max = at0.left - solanaPoolSellNeed(v.kind, rent);
   if (max <= 0n) return 0n;
   const p = solanaPoolBuyFunds(r, v, { spend: max, tip }, rent).problem;
   if (p !== null) throw new Error(`the max spend ${max} does not pass the funds rule: ${p}`);

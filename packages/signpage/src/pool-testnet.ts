@@ -22,6 +22,8 @@
 //   holdings. A testnet-only choice: those holdings are read on ONE devnet RPC (solanaHoldingsReader on the first),
 //   since devnet has no helper route, and a read naming W reaches that public RPC (mainnet reads them on the helper's
 //   keyed route, buy-wallets.ts). They only pick W: the run reads W's token account and lamports again on both RPCs.
+//   Its ops record goes in the page's wallet store, and each state read settles a sell a closed page left INCOMING
+//   (pool-sell.ts settlePoolSells), writing its record's stage.
 // main.ts takes these only in the testnet build; SIGN_HOST's build keeps its mainnet deps and carries none of this.
 import { base64 } from "@scure/base";
 import { solanaJsonRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -37,7 +39,7 @@ import { TRADE_HELPER } from "./trade.ts";
 import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { poolSellKind, type PoolSellHost } from "./pool-sell.ts";
+import { poolSellKind, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
@@ -269,7 +271,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
   // pool.sell: W from the page's buy wallets; one run per tap, one at a time (the sell kind's lock)
-  const sellHost = (): PoolSellHost & { end(): void } => {
+  const sellHost = (): PoolSellKindHost & { end(): void } => {
     const r = rpcs();
     let notes: Promise<NoteStore> | null = null;
     const store = (): Promise<NoteStore> => (notes ??= page.store().then((w) => openNoteStore(w)));
@@ -277,6 +279,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       pin: pin!,
       rpcs: r,
       notes: store,
+      ops: page.store,
       seed64: page.seed64,
       // the pool's Ws with their holdings, read on one devnet RPC (the header's testnet-only choice); none: no read
       wallets: async () => {
@@ -295,6 +298,22 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
   };
   const sell = poolSellKind(() => sellHost());
+  // the sells a closed or reloaded page left INCOMING: each settled by the run's own verdict rules, its ops record's
+  // stage written; under the seed's shared lock, as every pass that writes the store (a sign out waits for it)
+  const settleSells = async (): Promise<void> => {
+    if (!locks) return;
+    await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const notes = await openNoteStore(await page.store());
+      try {
+        const ops = await page.store();
+        const ends: Promise<void>[] = [];
+        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, settled: (signature, stage) => void ends.push(settleSellOps(ops, signature, stage).catch(() => {})) }, locks);
+        await Promise.all(ends);
+      } finally {
+        notes.close();
+      }
+    });
+  };
   // one state read's pass at a time: set before its first await, so a read that comes while it runs (its note read
   // included) gets the same promise and never starts a second pass. No follow-up pass: a note turns INCOMING only in an
   // ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later state read settles what it leaves.
@@ -329,6 +348,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
         if (mine.some((n) => n.state === "INCOMING")) await settle();
         if (mine.some((n) => n.state === "RESERVED")) await settleReserved();
+        if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R")))) await settleSells();
       } catch {
         // a state read never fails for this; the next read tries again
       }
