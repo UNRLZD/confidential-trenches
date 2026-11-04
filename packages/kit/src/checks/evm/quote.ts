@@ -511,9 +511,7 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly 
       break;
     } catch (e) {
       if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {
-        const err = new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
-        if (e instanceof RateLimited) THROTTLED.add(err);
-        throw err;
+        throw new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
       }
       await new Promise((r) => setTimeout(r, 500 * (i + 1)));
     }
@@ -867,23 +865,102 @@ function gateOf(parallel: number): Gate {
     }
   };
 }
-/** ask, up to 3 more times 0.5, 1 and 1.5 s apart: the scan provider limits its rate ("429 Too Many Requests",
- *  rpc.mainnet.chain.robinhood.com, 2026-11-03 20:27Z). A scan that still fails refuses the quote. */
-async function askScan(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly unknown[]> {
-  for (let i = 0; ; i++) {
-    try {
-      return await ask(rpc, calls);
-    } catch (e) {
-      if (i === 3) throw e;
-      await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+/** The longest a quote's scan waits on its provider's rate limit, from the quote's start: past it the scan refuses
+ *  (rpc_error) rather than wait on. base-rpc.publicnode.com limits each address's getLogs work to about two cold scans
+ *  back to back, then answers most requests 429 for under a minute (2026-11-04 21:26-21:27Z); a cold quote on GitHub's
+ *  runner, whose 4 tries a request ran out, ended rpc_error after 99 s (card evm-quote-warm-round, fold 5). */
+export const EVM_SCAN_BOUND_MS = 60_000;
+let scanBoundMs = EVM_SCAN_BOUND_MS;
+/** For the tests: the scan's bound in ms (no argument: EVM_SCAN_BOUND_MS). Not in the index. */
+export const evmScanBound = (ms = EVM_SCAN_BOUND_MS) => void (scanBoundMs = ms);
+/** The wait after a throttle that named no Retry-After: 0.5 s, doubled for each throttle since an answer, to 8 s. */
+const SCAN_BACKOFF_MS = 500;
+/** A scan request's tries at its smallest span: a timeout or a failure other than a throttle spends one. */
+const SCAN_TRIES = 4;
+const SCAN_BACKOFF_MAX_MS = 8_000;
+/** The scan provider's requests of one quote: the token's and each X's scans queue in the order they ask (the token's
+ *  first), at most `limit` in flight, `limit` starting at the venue's `parallel` (nine scans that each sent their own
+ *  `parallel` at once drew 429s on rpc.mainnet.chain.robinhood.com, 2026-11-03 21:20Z: 89 of 125 requests). A throttle
+ *  (HTTP 429, or a call's error naming the rate limit) or a request that ran out of time halves `limit`, to 1 at
+ *  least, and a throttle holds every request not yet sent until its Retry-After, or the backoff where it names none;
+ *  each answer then adds 1 back up to half the limit at the last congestion, and 1 / limit past it, up to `parallel`
+ *  (TCP Reno's additive increase, multiplicative decrease: at 1 added an answer, a provider that slows past 5 in
+ *  flight was sent 11 at once again and again, and a span ran out its four tries). A throttled request is asked again whole and spends none of its
+ *  tries; one that would wait past the quote's bound refuses. One gate per quote, so a request that never returns
+ *  holds up that quote alone. */
+type ScanGate = { ask: (rpc: EvmRpc, calls: readonly EvmRpcCall[], tries: number) => Promise<readonly unknown[]> };
+function scanGateOf(parallel: number, untilMs: number): ScanGate {
+  let limit = parallel;
+  // the limit up to which each answer adds 1, half the limit at the last congestion; past it an answer adds 1 / limit
+  let sst = parallel;
+  let flying = 0;
+  let resumeAt = 0;
+  let strikes = 0;
+  const waiting: (() => void)[] = [];
+  // every request waiting looks again: one sent, an answer back, a wait ended
+  const wake = () => waiting.splice(0).forEach((r) => r());
+  // a slot, once the provider's wait is over
+  const take = async () => {
+    for (;;) {
+      const now = performance.now();
+      if (resumeAt > untilMs) return refuse("rpc_error", `the scan provider limited its rate past the quote's bound of ${scanBoundMs} ms`);
+      if (now < resumeAt) await new Promise((r) => setTimeout(r, resumeAt - now));
+      else if (flying < Math.floor(limit)) {
+        flying++;
+        return;
+      } else await new Promise<void>((r) => waiting.push(r));
     }
-  }
+  };
+  const done = () => {
+    flying--;
+    wake();
+  };
+  // a congestion signal halves the requests at once
+  const congest = () => void (limit = sst = Math.max(1, Math.floor(limit / 2)));
+  const throttle = (afterMs: number | null) => {
+    congest();
+    const wait = afterMs ?? Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** strikes);
+    strikes++;
+    resumeAt = Math.max(resumeAt, performance.now() + wait);
+  };
+  return {
+    async ask(rpc, calls, tries) {
+      for (let i = 0; ; ) {
+        await take();
+        let out: unknown;
+        try {
+          out = await rpc(calls);
+        } catch (e) {
+          done();
+          if (e instanceof RateLimited) {
+            throttle(e.afterMs);
+            continue;
+          }
+          // a timeout is a congestion signal too (GitHub's runner, 7d6ec94: 14 of 128 and 7 of 114 of a cold quote's
+          // getLogs ran out of time at 20 at once, no 429); it and any other failure spend a try
+          if ((e as Error | null)?.name === "TimeoutError") congest();
+          if (++i >= tries) throw e instanceof EvmQuoteError ? e : new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
+          await new Promise((r) => setTimeout(r, 500 * i));
+          continue;
+        }
+        done();
+        if (Array.isArray(out) && out.some(limited)) {
+          throttle(null);
+          continue;
+        }
+        strikes = 0;
+        limit = Math.min(parallel, limit < sst ? limit + 1 : limit + 1 / limit);
+        if (!Array.isArray(out) || out.length !== calls.length) return refuse("rpc_error", "a provider answered another number of calls");
+        return out;
+      }
+    },
+  };
 }
 /** The scan provider's head, read once per quote: every scan of the quote reads up to it, so a scan that waits at the
  *  gate behind others is held to the same head as the first (a head read per scan, seconds later, was past maxLag on
  *  Robinhood, 2026-11-03 21:30Z). */
-async function scanHeadOf(rpc: EvmRpc, gate: Gate): Promise<bigint> {
-  const h = (await gate(() => ask(rpc, [{ method: "eth_blockNumber", params: [] }])))[0] as { result?: unknown } | null;
+async function scanHeadOf(rpc: EvmRpc, gate: ScanGate): Promise<bigint> {
+  const h = (await gate.ask(rpc, [{ method: "eth_blockNumber", params: [] }], SCAN_TRIES))[0] as { result?: unknown } | null;
   if (typeof h?.result !== "string" || !/^0x[0-9a-fA-F]{1,16}$/.test(h.result)) return refuse("rpc_error", "the scan provider answered no block number");
   const scanHead = BigInt(h.result);
   if (scanHead > BigInt(Number.MAX_SAFE_INTEGER)) return refuse("rpc_disagree", "the scan provider's head is past any block");
@@ -907,7 +984,7 @@ async function scanPools(
   s: { span: number; depth: number; parallel: number; orSpan?: number },
   agreed: () => Promise<Block>,
   maxLag: bigint,
-  gate: Gate,
+  gate: ScanGate,
   headOfScan: Promise<bigint>,
   picked: () => Promise<Block> = agreed,
 ): Promise<{ pools: Map<string, EvmPoolKey[]>; commit: () => void }> {
@@ -967,24 +1044,14 @@ async function scanPools(
     };
     const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[] })));
     if (splits > 0 && b > a) {
-      let throttled = false;
-      const rs = await gate(() => ask(rpc, calls)).then(
-        // ask's fourth answer may still name the rate limit
-        (out) => (out.some(limited) ? ((throttled = true), null) : logsOf(out)),
-        (e) => {
-          throttled = THROTTLED.has(e as Error);
-          return null;
-        },
-      );
+      // one try: a request that ran out of time, failed or answered too many logs is asked as its two halves (a
+      // throttled one is asked again whole by the gate; past the scan's bound each half refuses before it is sent)
+      const rs = await gate.ask(rpc, calls, 1).then(logsOf, () => null);
       if (rs !== null && fine(rs)) return void keep(rs);
-      // a request that ran out of time or answered too many logs is asked as its two halves; one the provider still
-      // throttles is asked again whole, below
-      if (!throttled) {
-        const mid = a + Math.floor((b - a) / 2);
-        return settle([one({ part, a, b: mid }, splits - 1), one({ part, a: mid + 1, b }, splits - 1)]);
-      }
+      const mid = a + Math.floor((b - a) / 2);
+      return settle([one({ part, a, b: mid }, splits - 1), one({ part, a: mid + 1, b }, splits - 1)]);
     }
-    const rs = logsOf(await gate(() => askScan(rpc, calls)));
+    const rs = logsOf(await gate.ask(rpc, calls, SCAN_TRIES));
     if (!fine(rs)) return refuse("rpc_error", "the scan provider answered no logs");
     keep(rs);
   };
@@ -1494,7 +1561,7 @@ async function routeSet(a: {
     return agreed;
   };
   const agreedHead = () => agreedOnce().then((x) => x.block);
-  const gate = gateOf(v.scan?.parallel ?? 1);
+  const gate = scanGateOf(v.scan?.parallel ?? 1, performance.now() + scanBoundMs);
   let headOfScan: Promise<bigint> | undefined;
   // a scan the quote waits for that fails refuses the quote, so it may pick the agreed block to keep its spans; a kept
   // scan started early waits for the quote to pick it, whether it ends or fails (review of bc189de, L-3: one that ended
@@ -2068,11 +2135,22 @@ const QUOTED_SELLS = new WeakSet<EvmPoolSellQuote>();
 /** True when `q` is a quote evmPoolSellQuote returned, unchanged (it is frozen). */
 export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeof q === "object" && q !== null && QUOTED_SELLS.has(q as EvmPoolSellQuote);
 
-/** A provider's 429: ask asks again, a little later. */
-class RateLimited extends Error {}
-/** The refusals ask gave for a provider that still limited its rate: a scan asks such a span again as it is, never as
- *  two halves, which only send it more (card evm-quote-warm-round). */
-const THROTTLED = new WeakSet<Error>();
+/** A provider's 429: ask asks again, a little later. `afterMs`: the wait its Retry-After named, if any. */
+class RateLimited extends Error {
+  readonly afterMs: number | null;
+  constructor(message: string, afterMs: number | null = null) {
+    super(message);
+    this.afterMs = afterMs;
+  }
+}
+/** A Retry-After header's wait in ms: delay-seconds or an HTTP date (RFC 9110 10.2.3), null when absent or neither. */
+function retryAfterMs(h: string | null, now = Date.now()): number | null {
+  if (h === null) return null;
+  const t = h.trim();
+  if (/^\d{1,9}$/.test(t)) return Number(t) * 1000;
+  const at = Date.parse(t);
+  return Number.isFinite(at) && /[a-z]/i.test(t) ? Math.max(0, at - now) : null;
+}
 /** A request that made no connection, so no answer can have started: ask asks again, a little later. mainnet.base.org
  *  failed one connection in about every quote from this Mac ("fetch failed", ETIMEDOUT about 505 ms in: Node tries each
  *  of the host's addresses for 250 ms, and this network has no IPv6 route), 2026-11-04 15:45-16:00Z; a request that ran
@@ -2102,7 +2180,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       if (e instanceof TypeError && typeof code === "string" && CONNECT_ERRORS.has(code)) throw new Unreachable(`no connection (${code})`);
       throw e;
     }
-    if (res.status === 429) throw new RateLimited("the provider answered 429 Too Many Requests");
+    if (res.status === 429) throw new RateLimited("the provider answered 429 Too Many Requests", retryAfterMs(res.headers.get("retry-after")));
     const text = await res.text();
     if (text.length > maxBytes) throw new Error("the answer is too long");
     const arr: unknown = JSON.parse(text);

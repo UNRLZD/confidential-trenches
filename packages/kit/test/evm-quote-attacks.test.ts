@@ -2734,3 +2734,144 @@ test("V15 a confirm that can no longer reach a majority stops asking", async () 
   assert.equal(big(await buyN(v3direct, [honestNode(), honestNode("throws"), honestNode("throws"), honestNode("throws"), counted(honestNode())])), big({ accepted: false, code: "rpc_error" }));
   assert.equal(asked, 0, "the fifth is never asked to confirm when no answer can bring the block to three");
 });
+
+// ------------------------------------------------------------------ the scan provider's rate limit (card evm-quote-warm-round, fold 5)
+// base-rpc.publicnode.com answers most getLogs 429 for under a minute once an address has sent about two cold scans
+// (2026-11-04 21:26Z); a cold quote on GitHub's runner whose every try was throttled ended rpc_error after 99 s. A 429
+// halves the quote's scan parallelism and holds its next requests for the Retry-After (or a backoff); a throttled
+// request spends no try; past the scan's bound the quote refuses, never hangs.
+const { evmScanBound } = quoteMod as unknown as { evmScanBound?: (ms?: number) => void };
+/** The scan provider over HTTP (evmJsonRpc on a fake fetch), answering 429 while `throttled()` says so, with
+ *  `retryAfter` as its Retry-After header (none when null); `seen` gets each request's in-flight count on arrival and
+ *  each 429 and 200 as it is answered. */
+function throttlingScan(logs: { key: EvmPoolKey; at: number }[], throttled: () => boolean, retryAfter: string | null, seen: (string | number)[] = [], at: number[] = []): EvmRpc {
+  const inner = scanner(5_000_000, logs);
+  let flying = 0;
+  return evmJsonRpc("https://scan.throttle.test", (async (_u: string, init: RequestInit) => {
+    flying++;
+    seen.push(flying);
+    try {
+      if (throttled()) {
+        seen.push("429");
+        at.push(performance.now());
+        return new Response("", { status: 429, headers: retryAfter === null ? {} : { "retry-after": retryAfter } });
+      }
+      const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+      const out = await inner(calls);
+      await pause(2);
+      seen.push("200");
+      return new Response(JSON.stringify(out), { status: 200 });
+    } finally {
+      flying--;
+    }
+  }) as unknown as typeof fetch);
+}
+
+for (const [name, header] of [["TH1 ", "1"], ["TH2 ", null]] as const) {
+  test(`${name}a cold quote whose scan provider answers 429${header === null ? " with no Retry-After" : ", Retry-After: 1,"} for its first 4 s ends as it would unthrottled, never rpc_error`, { timeout: 30_000 }, async () => {
+    const token = freshToken();
+    const { pools, logs } = warmCase(token, xAt(0x3e00 + (header === null ? 16 : 0)));
+    const t0 = performance.now();
+    const at: number[] = [];
+    const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, throttlingScan(logs, () => performance.now() - t0 < 4_000, header, [], at)));
+    // the waits between throttled requests: the Retry-After's 1 s each, or the backoff's 0.5, 1 and 2 s
+    const gaps = at.slice(1).map((t, i) => t - at[i]!);
+    const want = header === null ? [500, 1_000, 2_000] : [1_000, 1_000, 1_000];
+    assert.ok(gaps.length >= 3 && want.every((w, i) => gaps[i]! >= w - 50), `waits ${gaps.map(Math.round).join(", ")} ms, at least ${want.join(", ")}`);
+    const t2 = freshToken();
+    const c2 = warmCase(t2, xAt(0x3e20 + (header === null ? 16 : 0)));
+    const fresh = await verdict(evmPoolBuyQuoteWith(warmReq(t2), [chain(c2.pools, 0), chain(c2.pools, 1)], NOW, scanner(5_000_000, c2.logs)));
+    assert.equal(v.accepted, true, String((v as { code?: string }).code));
+    assert.equal(fresh.accepted, true);
+    assert.equal(big((v as { amountOut?: bigint }).amountOut), big((fresh as { amountOut?: bigint }).amountOut));
+  });
+}
+
+test("TH3 after a 429 the scan never has more requests in flight than its halved limit, which answers raise again", async () => {
+  const token = freshToken();
+  const { pools, logs } = warmCase(token, xAt(0x3e40));
+  // the first 20 getLogs are throttled, the rest answered
+  let n = 0;
+  const seen: (string | number)[] = [];
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, throttlingScan(logs, () => ++n > 1 && n <= 21, "0", seen)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  // the provider's own count of the limit: 20, halved at each 429 to 1 at least, one more at each answer, up to 20
+  let lim = 20;
+  let worst = 0;
+  for (const s of seen) {
+    if (s === "429") lim = Math.max(1, Math.floor(lim / 2));
+    else if (s === "200") lim = Math.min(20, lim + 1);
+    else worst = Math.max(worst, (s as number) - lim);
+  }
+  assert.ok(seen.includes("429"), "the provider throttled");
+  // and the limit grows back: the later requests go out more than one at once
+  assert.ok(Math.max(...(seen.slice(seen.lastIndexOf("429")).filter((x) => typeof x === "number") as number[])) >= 4, `in flight after the 429s: ${seen.join(" ")}`);
+  assert.ok(worst <= 0, `a request arrived with ${worst} more in flight than the halved limit: ${seen.join(" ")}`);
+});
+
+test("TH4 a scan provider that throttles past the scan's bound refuses at the bound, rpc_error naming it, never a hang", { timeout: 30_000 }, async () => {
+  // a Retry-After past the bound refuses at once
+  const token = freshToken();
+  const { pools, logs } = warmCase(token, xAt(0x3e60));
+  let t = performance.now();
+  const r1 = evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, throttlingScan(logs, () => true, "120"));
+  await assert.rejects(r1, (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error" && /past the quote's bound/.test(e.message));
+  assert.ok(performance.now() - t < 2_000, "refused at once, not after waiting");
+  // a provider that answers 429 with Retry-After: 1 for ever refuses once the next wait passes the bound
+  evmScanBound?.(1_500);
+  try {
+    const t2 = freshToken();
+    const c2 = warmCase(t2, xAt(0x3e70));
+    t = performance.now();
+    const r2 = evmPoolBuyQuoteWith(warmReq(t2), [chain(c2.pools, 0), chain(c2.pools, 1)], NOW, throttlingScan(c2.logs, () => true, "1"));
+    await assert.rejects(r2, (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error" && /past the quote's bound of 1500 ms/.test(e.message));
+    assert.ok(performance.now() - t < 4_000, `refused within the bound and one wait: ${Math.round(performance.now() - t)} ms`);
+  } finally {
+    evmScanBound?.();
+  }
+});
+
+test("TH5 a scan provider that slows past the deadline with more than 5 requests in flight: a timeout halves the scan's parallelism, so its median in flight settles at 5 or below and the quote ends ok", { timeout: 60_000 }, async () => {
+  const token = freshToken();
+  const { pools, logs } = warmCase(token, xAt(0x3e80));
+  const inner = scanner(5_000_000, logs);
+  const K = 5;
+  let flying = 0;
+  let timedOut = 0;
+  let firstTimeout = -1;
+  const arrivals: number[] = [];
+  // each request's deadline 300 ms (evmJsonRpc's timeoutMs); over K in flight an answer takes 1 s
+  const scan = evmJsonRpc("https://scan.slow.test", (async (_u: string, init: RequestInit) => {
+    flying++;
+    arrivals.push(flying);
+    try {
+      const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+      // the deadline's signal still fires after an answer: only one that lands first is a timeout
+      await new Promise<void>((ok, no) => {
+        let over = false;
+        const t = setTimeout(() => ((over = true), ok()), flying > K ? 1_000 : 10);
+        init.signal?.addEventListener("abort", () => {
+          if (over) return;
+          clearTimeout(t);
+          if (timedOut++ === 0) firstTimeout = arrivals.length;
+          no(init.signal!.reason);
+        });
+      });
+      return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+    } finally {
+      flying--;
+    }
+  }) as unknown as typeof fetch, 1 << 20, 300);
+  const t0 = performance.now();
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scan));
+  const ms = performance.now() - t0;
+  console.log(`TH5: ${String((v as { code?: string }).code ?? "ok")}, ${timedOut} of ${arrivals.length} requests timed out, ${Math.round(ms)} ms`);
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  // after the first timeout the scan probes past K by two at most (the sawtooth of additive increase, which grows for
+  // the deadline's 300 ms before a timeout is seen), never the 20 at once whose every wave sent 15 past K
+  const late = arrivals.slice(firstTimeout);
+  const sorted = [...late].sort((a, b) => a - b);
+  assert.ok(Math.max(...late) <= K + 2 && sorted[sorted.length >> 1]! <= K, `in flight on arrival after the first timeout: most ${Math.max(...late)}, median ${sorted[sorted.length >> 1]}, of ${late.length}`);
+  // at 7d6ec94's fixed 20: rpc_error after 18.4 s, 790 of 1,541 requests timed out; with the gate: ok in 5.1 s, 93 of 387
+  assert.ok(timedOut <= 120 && ms < 10_000, `${timedOut} requests ran out of time in ${Math.round(ms)} ms`);
+});

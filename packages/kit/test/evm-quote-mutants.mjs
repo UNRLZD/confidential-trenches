@@ -234,9 +234,19 @@ export const MUTANTS = [
   [QUOTE, "v.scan, at, v.maxLag, gate,", "v.scan, agreedHead, v.maxLag, gate,", R, "J4 "],
   [QUOTE, "(headOfScan ??= scanHeadOf(scan, gate)), at);", "(headOfScan ??= scanHeadOf(scan, gate)), agreedHead);", R, "J5 "],
   [QUOTE, "for (const g of got) if (g.part.includes(e)) e.spans", "for (const g of got) e.spans", R, "J6 "],
-  [QUOTE, "(out) => (out.some(limited) ? ((throttled = true), null) : logsOf(out)),", "(out) => logsOf(out),", R, "J2 "],
-  [QUOTE, "          throttled = THROTTLED.has(e as Error);", "          throttled = false;", R, "J2 "],
-  [QUOTE, "        if (e instanceof RateLimited) THROTTLED.add(err);", "", R, "J2 "],
+  // fold 5: the scan's gate, per quote: a 429, a named limit or a timeout halves its parallelism (to 1), answers raise
+  // it again; a throttle holds the next requests for its Retry-After or a doubling backoff, spends no try, and past
+  // the quote's bound refuses (re-review of 037627c, MEDIUM-1; GitHub's runner at 7d6ec94: the cold quote's getLogs
+  // timed out at 20 at once)
+  [QUOTE, "          if (e instanceof RateLimited) {\n            throttle(e.afterMs);\n            continue;", "          if (e instanceof RateLimited) {\n            throttle(e.afterMs);\n            if (++i >= tries) throw e;\n            continue;", R, "TH1 "],
+  [QUOTE, "        if (Array.isArray(out) && out.some(limited)) {\n          throttle(null);\n          continue;", "        if (false) {\n          throttle(null);\n          continue;", R, "J2 "],
+  [QUOTE, 'retryAfterMs(res.headers.get("retry-after"))', "null", R, "TH1 "],
+  [QUOTE, "Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** strikes)", "SCAN_BACKOFF_MS", R, "TH2 "],
+  [QUOTE, "const congest = () => void (limit = sst = Math.max(1, Math.floor(limit / 2)));", "const congest = () => void (sst = limit);", R, "TH3 "],
+  [QUOTE, "      else if (flying < Math.floor(limit)) {", "      else if (true) {", R, "TH3 "],
+  [QUOTE, "limit = Math.min(parallel, limit < sst ? limit + 1 : limit + 1 / limit);", "limit = Math.min(parallel, limit);", R, "TH3 "],
+  [QUOTE, "      if (resumeAt > untilMs) return refuse(", "      if (false) return refuse(", R, "TH4 "],
+  [QUOTE, '          if ((e as Error | null)?.name === "TimeoutError") congest();', "", R, "TH5 "],
   [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "X3 "],
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
   [QUOTE, "    return x < y ? x : y;", "    return x;", R, "H2 "],
@@ -289,7 +299,7 @@ export const MUTANTS = [
   // a provider's answer
   [QUOTE, "if (!Number.isSafeInteger(o) || o < 0 || o + 32 > len)", "if (!Number.isSafeInteger(o) || o < 0)", Q, "Q9 "],
   [QUOTE, "if (e + 96 + dl > len) return refuse(", "if (false) return refuse(", Q, "Q9 "],
-  [QUOTE, "if (!Array.isArray(out) || out.length !== calls.length)", "if (!Array.isArray(out))", Q, "Q9 "],
+  [QUOTE, "\n  if (!Array.isArray(out) || out.length !== calls.length)", "\n  if (!Array.isArray(out))", Q, "Q9 "],
   // the sell quote: no route from a caller, the device's own pool, minOut, probe and age
   [QUOTE, 'if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");', "", S, "planted: a server's route"],
   [QUOTE, "QUOTED_SELLS.add(quote);", "", S, "planted: a server's route"],
@@ -387,11 +397,14 @@ const run$ = promisify(execFile);
 // each test run's own environment: without the node --test runner's NODE_TEST_CONTEXT, which turns a child's report
 // from TAP into the runner's own stream (the runner's test calls these judges from inside node --test)
 const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT"));
+// The longest one test run takes before it is killed and counts as failed: a mutant that leaves a wait with no end
+// (the scan gate's bound removed, a Retry-After of 120 s asked again for ever) never holds up the sweep
+const RUN_MS = 60_000;
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`
 let lastFail = "";
 async function run(dir, file, name) {
   try {
-    const { stdout } = await run$("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, env: ENV, encoding: "utf8", maxBuffer: 1 << 26 });
+    const { stdout } = await run$("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, env: ENV, encoding: "utf8", maxBuffer: 1 << 26, timeout: RUN_MS });
     // a test of that name passed: a file that runs no test still reports itself as one that passed
     const ran = [...stdout.matchAll(/^\s*ok \d+ - (.*?)(?: # .*)?$/gm)].some((m) => m[1].replace(/\\#/g, "#").replace(/\\\\/g, "\\").startsWith(name));
     return ran ? "pass" : "none";
