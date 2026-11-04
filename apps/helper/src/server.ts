@@ -760,7 +760,9 @@ if (import.meta.main) {
     // one hold per provider, shared by every path that reads it (card helper-robinhood-capacity: the swap and maker reads
     // and /v1/rpc/robinhood all read rpc.mainnet.chain.robinhood.com)
     const holds = providerHolds();
-    const rpc = createRpc(process.env, { holds });
+    // an EVM chain's callers may be answered by the swap reads' pinned providers when its own is held or has no room
+    // (rpc.ts callEvm): a user's call never pays for the helper's background load
+    const rpc = createRpc(process.env, { holds, pinned: SWAP_RPCS });
     const lists = createSolanaLists(proxy, rpc);
     // the senders' handover (sendersFromEnv): `peer` when the helper this one replaces still runs
     const senders = sendersFromEnv(process.env);

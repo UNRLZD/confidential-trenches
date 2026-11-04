@@ -52,7 +52,7 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
-import { evmThrottleS, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
+import { CALLER_ROOM, evmThrottleS, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 
@@ -220,7 +220,7 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // (-32602 archive), blockreq.com (only the newest blocks), rpc.ordofi.network (no answer), robinhood.rpc.blxrbdn.com
   // and rpc.nodeflare.app (403), lb.routeme.sh and 4663.rpc.thirdweb.com (429 at once), the Tatum gateway (5 a minute),
   // rpc.degenprotocol.io (502s; logs blockTimestamp 0x0) and rpc-robinhood.globalstake.io (10 s timeouts). The wide
-  // providers (WIDE_SPAN) first, the pair asked first turning among them (spread); the chain's own RPC last, since
+  // providers (WIDE_SPAN) first, the pair asked first by free budget (ranked); the chain's own RPC last, since
   // /v1/rpc/robinhood's callers read it too.
   robinhood: ["https://robinhood.daybreak-rpc.network", "https://rpc-robinhood.blockmachine.io", "https://robinhood.api.pocket.network", "https://robinhood.drpc.org", "https://api.blockvectra.com/v1/robinhood_mainnet/public", "https://rpc.mainnet.chain.robinhood.com"],
 };
@@ -248,11 +248,11 @@ const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://ba
 
 /** Requests out to one provider at once (swaps.ts batchTo). */
 export const INFLIGHT_MAX = 4;
-/** A provider held this long or less is still asked: its reads wait out the hold, then go (one()). The local helper at
- *  7c0e504 (2026-11-04 20:00Z) saw daybreak and blockmachine held 1 s as a dozen cold walks began; passed over, each walk
- *  went to drpc 100 blocks at a time, 486 reads, and tapes took up to 30 s. [design: 2 s, twice the 1 s hold of a
- *  throttle that names no wait (limits.ts evmThrottleS, upstreamRetryAfterS); a longer named wait is passed over.] */
-export const HOLD_WAIT_S = 2;
+/** The longest a read waits for its provider's pace (limits.ts PROVIDER_PACE) before it is the next provider's to
+ *  answer. [design: 1.5 s, ten of daybreak's posts at its pace; a provider whose bucket is that far spent is not the
+ *  one to wait for while another has room.] A provider that holds is passed over at once: the pace keeps the reads
+ *  under each provider's limit, so the short holds HOLD_WAIT_S waited out (cd22743) no longer start. */
+export const PACE_WAIT_MAX_MS = 1_500;
 
 /** Blocks read again every tick, and so the blocks an agreed head must be ahead of a settled block. Base's sequencer can
  *  reorg a few unsafe blocks; its `safe` head trails by about 40 s (proofs/evm-safe-lag, 20 blocks), so 10 re-read blocks
@@ -569,22 +569,25 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const max = BATCH_SIZE[url] ?? 10;
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
-    const got = await Promise.all(parts.map((part) => slot(url, () => one(url, part))));
+    const got = await Promise.all(parts.map((part) => slot(url, part.length, () => one(url, part))));
     return got.some((g) => g === null) ? null : got.flat() as Reply[];
   }
 
   // at most INFLIGHT_MAX requests out to a provider at once, the rest queued in order: a first read's walk sent 246 at
   // once to the Robinhood providers, which answered 429, -32005, drpc's code 30 and timeouts that one at a time they
   // did not (card helper-chart-fresh, 2026-11-04 14:49Z)
-  const inflight = new Map<string, { n: number; queue: (() => void)[] }>();
-  async function slot<T>(url: string, run: () => Promise<T>): Promise<T> {
-    const q = inflight.get(url) ?? { n: 0, queue: [] };
+  // (`calls`: the calls out or queued to it, by which free counts its budget)
+  const inflight = new Map<string, { n: number; calls: number; queue: (() => void)[] }>();
+  async function slot<T>(url: string, calls: number, run: () => Promise<T>): Promise<T> {
+    const q = inflight.get(url) ?? { n: 0, calls: 0, queue: [] };
     inflight.set(url, q);
-    if (q.n >= INFLIGHT_MAX) await new Promise<void>((go) => q.queue.push(go));
+    q.calls += calls;
+    if (q.n >= (holds.paceOf(url)?.inflight ?? INFLIGHT_MAX)) await new Promise<void>((go) => q.queue.push(go));
     else q.n++;
     try {
       return await run();
     } finally {
+      q.calls -= calls;
       const next = q.queue.shift();
       if (next !== undefined) next();
       else q.n--;
@@ -596,11 +599,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  read does, so the caller asks the next provider (card helper-rpc-hold-queued: 2026-11-04 18:55Z on the helper box,
    *  seven batches queued before the chain's own Robinhood RPC's 429 were sent within 190 ms of it). */
   async function one(url: string, part: Call[]): Promise<Reply[] | null> {
-    const held = holds.heldFor(url);
-    if (held > HOLD_WAIT_S) return null;
-    if (held > 0) {
-      // a short hold is waited out, and read again before the fetch: a longer wait named meanwhile is not cut
-      await new Promise((go) => setTimeout(go, holds.heldMs(url)));
+    if (holds.heldFor(url) > 0) return null;
+    // the provider's pace, which every path of the helper draws from (limits.ts providerHolds take): a background read
+    // waits for its units, the hold read again after each wait; past PACE_WAIT_MAX_MS of waits it is another provider's
+    for (let w = holds.take(url, part.length, true), slept = 0; w > 0; w = holds.take(url, part.length, true)) {
+      if (slept + w > PACE_WAIT_MAX_MS) return null;
+      await new Promise((go) => setTimeout(go, w));
+      slept += w;
       if (holds.heldFor(url) > 0) return null;
     }
     try {
@@ -642,9 +647,35 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
   }
   const usable = (urls: readonly string[]) => urls.filter((u) => holds.heldFor(u) === 0);
-  /** The providers a pair is picked from: those held no longer than HOLD_WAIT_S, whose reads wait out the hold (a wide
-   *  provider held a second answers a cold walk sooner than a narrow one asked ten times as often). */
-  const askable = (urls: readonly string[]) => urls.filter((u) => holds.heldFor(u) <= HOLD_WAIT_S);
+  /** Providers by free budget, the most first. */
+  const byFree = (urls: readonly string[]) => urls.map((u) => ({ u, f: free(u) })).sort((a, b) => b.f - a.f).map((x) => x.u);
+  /** A provider's free budget, in calls: what its pace lets background reads send within the next second (the free
+   *  units above CALLER_ROOM and a second's refill, times the calls a post carries where it counts posts), less the calls
+   *  already out or queued to it (slot), so a dozen walks starting at once see each other's reads. A provider with no
+   *  pace counts what INFLIGHT_MAX posts carry. */
+  const free = (u: string): number => {
+    const batch = BATCH_SIZE[u] ?? 10;
+    const p = holds.paceOf(u);
+    const per = p === undefined || p.unit === "post" ? batch : 1;
+    const room = p === undefined ? INFLIGHT_MAX : Math.max(0, holds.room(u) * p.burst - p.burst * CALLER_ROOM) + p.perS;
+    return room * per - (inflight.get(u)?.calls ?? 0);
+  };
+  /** Providers in the order to ask them (card helper-robinhood-capacity fold 2): the wide ones (WIDE_SPAN) first, a
+   *  header-timed one (HEADER_TIMED: Robinhood's own, which /v1/rpc's callers read first and whose logs cost a second
+   *  post for their headers) after the other wide ones, then by free budget, the most first, so the walks share the wide
+   *  providers and a 100-block one (drpc) is the last resort; ties take turns, so a dozen walks starting on full
+   *  buckets do not all start on the same two. A read that names no block range (an eth_call, a receipt, a sender) is
+   *  ranked by free budget alone (wideFirst false). */
+  let turn = 0;
+  const ranked = (urls: readonly string[], wideFirst = true): string[] => {
+    const t = turn++;
+    const n = Math.max(urls.length, 1);
+    const key = (u: string, i: number): number[] => [wideFirst && (WIDE_SPAN[u] ?? 0) > V.span ? 1 : 0, wideFirst && clock === null && headerTimed.has(u) ? 0 : 1, Math.round(free(u)), -((i - (t % n) + n) % n)];
+    return urls
+      .map((u, i) => ({ u, k: key(u, i) }))
+      .sort((a, b) => b.k[0]! - a.k[0]! || b.k[1]! - a.k[1]! || b.k[2]! - a.k[2]! || b.k[3]! - a.k[3]!)
+      .map((x) => x.u);
+  };
 
   /** The block both providers have, and its time: the newest block of the two heads (the second highest of three when
    *  the first two differ by more than LAG_MAX), with the providers that have it. Null when it cannot be read. */
@@ -660,7 +691,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         }),
       );
     };
-    const ok = askable(rpcs);
+    const ok = ranked(usable(rpcs));
     await read(ok.slice(0, 2));
     const first = [...heads.values()];
     if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await read(ok.slice(2, 3));
@@ -674,28 +705,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return { n: agreed, t: clock.genesisS + clock.blockS * agreed, with: withIt };
   }
 
-  /** The providers to ask, in order: those of `urls` not held past HOLD_WAIT_S, then any other of ours alike (a provider held
+  /** The providers to ask, in order (ranked): those of `urls` not held, then any other of ours alike (a provider held
    *  since the head was read, or lags, is made up for by the next), at most PROVIDERS_MAX. */
-  const askOrder = (urls: readonly string[]): string[] => [...new Set([...askable(urls), ...askable(rpcs)])].slice(0, PROVIDERS_MAX);
-  /** The leading wide providers (WIDE_SPAN) take turns at being the pair asked first, so a dozen cold tokens' reads are
-   *  spread over all of them rather than queued behind two (card helper-robinhood-capacity: 12 at once took 20 s with the
-   *  first two asked every time, each provider at INFLIGHT_MAX). A chain with none (Base) keeps its order. */
-  let turn = 0;
-  const spread = (order: string[]): string[] => {
-    const lead = order.findIndex((u) => (WIDE_SPAN[u] ?? 0) <= V.span);
-    const k = lead === -1 ? order.length : lead;
-    if (k <= 2) return order;
-    const r = turn++ % k;
-    return [...order.slice(r, k), ...order.slice(0, r), ...order.slice(k)];
+  const askOrder = (urls: readonly string[], wideFirst: boolean): string[] => {
+    const have = ranked(usable(urls), wideFirst);
+    return [...new Set([...have, ...ranked(usable(rpcs).filter((u) => !have.includes(u)), wideFirst)])].slice(0, PROVIDERS_MAX);
   };
 
   /** Asks `urls` the same `n` requests, two at once and then one more at a time while some answer has no two alike.
    *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. A wide provider
    *  (WIDE_SPAN) of the first two is asked again for the requests it did not answer before any narrower one is asked (a
-   *  short hold is waited out in one(); a longer one answers nothing at once): the local helper at 95730cb (2026-11-04
+   *  read past its pace's wait or held answers nothing at once): the local helper at 95730cb (2026-11-04
    *  20:10Z) sent the walks daybreak missed in its one 1 s hold to drpc, 71 reads of 100 blocks in 2 s. */
-  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[]) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean): Promise<(A | null)[]> {
-    const order = spread(askOrder(urls));
+  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[]) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true): Promise<(A | null)[]> {
+    const order = askOrder(urls, wideFirst);
     const got: A[][] = Array.from({ length: n }, () => []);
     const by: Set<string>[] = Array.from({ length: n }, () => new Set());
     const run = async (u: string, idx: number[]) => {
@@ -796,6 +819,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         return idx.map((_, k) => (r?.[k]?.ok && typeof (r[k] as { result: unknown }).result === "string" ? (r[k] as { result: string }).result.toLowerCase() : null));
       },
       (a, b) => a === b,
+      false,
     );
     return got.map((x) => x ?? undefined);
   }
@@ -859,7 +883,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // from the swap's own fee and the addresses in its transaction (v4Key). Either way the key must hash to the id.
     if (pmTxs.length > 0) {
       const seen = new Map<string, { fee: number; around: Set<string> }>();
-      for (const u of usable(rpcs)) {
+      for (const u of byFree(usable(rpcs))) {
         const r = await batchTo(u, pmTxs.slice(-V4_TXS).map((t) => ({ method: "eth_getTransactionReceipt", params: [t] })));
         if (r === null) continue;
         for (const x of r) {
@@ -1263,15 +1287,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // The served answers
   // -------------------------------------------------------------------------------------------------------------
 
-  /** Traders of the txs, the sender of each (06c §4.12), read in batches of 10 from the first provider that answers; a
-   *  tx whose read fails stays null this time and is asked again the next. */
+  /** Traders of the txs, the sender of each (06c §4.12). A dozen cold tokens ask about 600 at once (card
+   *  helper-robinhood-capacity fold 2), so they are split across the providers not held by free budget (free), each share
+   *  read at once, and a share whose read fails asked of the others in turn; a tx whose read fails everywhere stays null
+   *  this time and is asked again the next. */
   async function tradersOf(txs: string[]): Promise<void> {
     const need = [...new Set(txs)].filter((t) => !traders.has(t));
     if (need.length === 0) return;
-    for (const u of usable(rpcs)) {
-      const r = await batchTo(u, need.map((t) => ({ method: "eth_getTransactionByHash", params: [t] })));
-      if (r === null) continue;
-      need.forEach((t, i) => {
+    const order = usable(rpcs).map((u) => ({ u, f: Math.max(free(u), 0) })).sort((x, y) => y.f - x.f);
+    const sum = order.reduce((n, x) => n + x.f, 0);
+    let at = 0;
+    const shares = order.map(({ u, f }, i) => {
+      const k = i === order.length - 1 ? need.length - at : Math.min(need.length - at, Math.round((need.length * (sum > 0 ? f : 1)) / (sum > 0 ? sum : order.length)));
+      return { u, part: need.slice(at, (at += k)) };
+    });
+    const read = async (u: string, part: string[]): Promise<boolean> => {
+      const r = await batchTo(u, part.map((t) => ({ method: "eth_getTransactionByHash", params: [t] })));
+      if (r === null) return false;
+      part.forEach((t, i) => {
         const x = r[i];
         const tx = x?.ok ? obj(x.result) : null;
         const from = tx === null ? null : evmAddress(tx.from);
@@ -1280,8 +1313,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           traders.set(t, from);
         }
       });
-      return;
-    }
+      return true;
+    };
+    await Promise.all(
+      shares.filter((x) => x.part.length > 0).map(async ({ u, part }) => {
+        if (await read(u, part)) return;
+        for (const v of byFree(usable(rpcs))) if (v !== u && (await read(v, part))) return;
+      }),
+    );
   }
 
   return {

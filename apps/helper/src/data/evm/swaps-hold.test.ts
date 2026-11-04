@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CURVE_TOKEN, fakeChain, open, REC } from "../../../test/evm-swaps/robinhood.ts";
+import { providerHolds } from "../../limits/limits.ts";
 import { INFLIGHT_MAX, VENUES } from "./swaps.ts";
 
 /** A provider that takes one request per batch (swaps.ts BATCH_SIZE: api.blockvectra.com), so a walk queues its spans. */
@@ -54,7 +55,11 @@ function rig(refusals: Refusal[]) {
   };
   chain.st.head = REC.lastHead; // the discovery walks the cold window for transfers (the fake has none): a step of spans
   const clock = { t: 5_000_000 };
-  const s = open(chain, clock, { pools: new Map(), rpcs: RPCS, fetch: fetch as never });
+  // ONE is given the most free budget (a pace of its own here), so the walk asks it first and queues its spans behind
+  // INFLIGHT_MAX: the reads by free budget (swaps.ts ranked, card helper-robinhood-capacity fold 2) ask a provider with
+  // no pace and one request a batch last
+  const holds = providerHolds(() => clock.t, { [ONE]: { perS: 1_000, burst: 1_000, unit: "post" } });
+  const s = open(chain, clock, { pools: new Map(), rpcs: RPCS, fetch: fetch as never, holds });
   return { s, st, chain, clock };
 }
 

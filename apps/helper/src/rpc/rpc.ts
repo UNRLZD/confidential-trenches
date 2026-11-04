@@ -37,7 +37,7 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { budgetFromEnv, evmThrottleS, LIMIT_WINDOW_MS, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
+import { budgetFromEnv, evmThrottleS, LIMIT_WINDOW_MS, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
@@ -144,7 +144,9 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `holds`: the helper's one hold per provider (limits.ts providerHolds, card helper-robinhood-capacity): an EVM chain's
  *  provider held by any path of the helper (the swap and maker reads use the same public Robinhood RPC) is sent no
  *  caller's read either, which answers 429 with the seconds left; its throttle here holds it for those paths too. */
-type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds };
+/** `pinned`: an EVM chain's other providers, in order (server.ts: swaps.ts SWAP_RPCS), each of which may answer a
+ *  caller's read when the configured one is held or has no room in its pace (callEvm). */
+type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>> };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
 type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string };
 type Upstream = { url: string; forms: Buffer[] };
@@ -317,7 +319,79 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const methods = ((Array.isArray(out) ? out : [out]) as { method: string }[]).map((r) => r.method);
     // a keyed Solana provider fallen back (rpc/slot.ts): the public endpoint, on its own budget; the key while it serves
     if (c === "solana" && keyed && !slot.useKeyed()) return publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : UPSTREAM();
+    if (EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) return callEvm(c, forward, methods, client, reserved, deps.holds);
     return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved);
+  }
+
+  /**
+   * A caller's read on an EVM chain with pinned providers (card helper-robinhood-capacity fold 2): a user's call never
+   * pays for the helper's background load. It draws on the chain's budget once (a caller's share, as call() does), then
+   * goes to the first of the configured provider and the pinned ones that is not held and has room in its pace for a
+   * caller (limits.ts take: background reads leave CALLER_ROOM of it); one that refuses it (its 429, or a throttle in its
+   * answer) is held for every path of the helper, and the next is asked. Only when none can take it does the caller get
+   * a 429, with the soonest wait any of them names. The chain itself is never held here: a provider's refusal holds that
+   * provider alone.
+   */
+  async function callEvm(c: RpcChain, forward: string, methods: string[], client: string | undefined, reserved: boolean, holds: ProviderHolds): Promise<Answer> {
+    const held = budget.heldFor(c);
+    if (held > 0) return throttled(held, undefined, `${c} held`);
+    const wait = budget.takeEach(drawsOf(c, methods), client, false, reserved);
+    if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
+    const list = [...new Set([upstreams[c].url, ...(deps.pinned?.[c] ?? [])])];
+    let soonest = RETRY_AFTER_MAX_S;
+    let down = false;
+    for (const url of list) {
+      const secretForms = url === upstreams[c].url ? upstreams[c].forms : [];
+      const h = holds.heldFor(url);
+      if (h > 0) {
+        soonest = Math.min(soonest, h);
+        continue;
+      }
+      const room = holds.take(url, methods.length, false);
+      if (room > 0) {
+        soonest = Math.min(soonest, Math.max(1, Math.ceil(room / 1000)));
+        continue;
+      }
+      let r: Response;
+      let text: string | undefined;
+      try {
+        r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+        if (r.status === 429) {
+          await r.body?.cancel();
+          const s = upstreamRetryAfterS(r.headers, now());
+          holds.hold(url, s);
+          log(`rpc hold ${c} ${new URL(url).host} caller ${s} s`);
+          soonest = Math.min(soonest, s);
+          continue;
+        }
+        text = await readAnswer(r);
+      } catch {
+        down = true;
+        continue;
+      }
+      if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400) || text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) {
+        down = true;
+        continue;
+      }
+      let answer: unknown;
+      try {
+        answer = JSON.parse(text);
+      } catch {
+        down = true;
+        continue;
+      }
+      const limited = evmLimited(c, answer);
+      if (limited > 0) {
+        holds.hold(url, limited);
+        log(`rpc hold ${c} ${new URL(url).host} caller ${limited} s`);
+        soonest = Math.min(soonest, limited);
+        continue;
+      }
+      if (secretForms.some((f) => Buffer.from(text, "utf8").includes(f))) return UPSTREAM();
+      return { status: r.status, body: text };
+    }
+    // every provider failed (none held or out of room): upstream, so the device reads its own; else the soonest wait
+    return down && soonest === RETRY_AFTER_MAX_S ? UPSTREAM() : throttled(soonest, undefined, `${c} every provider held`);
   }
 
   /**

@@ -83,7 +83,10 @@ export const MAKER_RPCS: Readonly<Record<EvmChain, readonly [string, string, str
   robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"],
 };
 /** Requests per JSON-RPC batch a provider takes (drpc's free plan: 3); others 10. */
-export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3 };
+/** daybreak counts each call of a batch as one of the about 4 concurrent requests it takes (a batch of 5 at 4 posts a
+ *  second refused at its 4th post with -32005 "too many concurrent requests", 2026-11-04 20:51Z, from the Mac): one call a
+ *  post, three posts out at once (limits.ts PROVIDER_PACE). */
+export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3, "https://robinhood.daybreak-rpc.network": 1 };
 
 /** Base makes a block every 2 s from genesis at 1686789347 (eth_getBlockByNumber latest on mainnet.base.org and
  *  base.drpc.org, 2026-11-03 11:28Z: block 53457954 at 1793705255, 1793705255 - 2 x 53457954 = 1686789347). */
@@ -393,7 +396,7 @@ export function padOf(chain: EvmChain, token: string, logs: unknown): string | n
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /**
- * The maker reads' fetch kept by the helper's one hold per provider (limits.ts providerHolds, card
+ * The maker reads' fetch kept by the helper's one hold and pace per provider (limits.ts providerHolds, card
  * helper-robinhood-capacity): a provider that is held is sent nothing and answers a 429 here (batch() stops on it); its
  * 429 holds it for the wait it names, and a JSON-RPC throttle in its answer (evmThrottleS) for that one's.
  */
@@ -401,6 +404,20 @@ export function heldFetch(doFetch: Fetch, holds: ProviderHolds, now: () => numbe
   return async (url, init) => {
     const left = holds.heldFor(url);
     if (left > 0) return new Response("{}", { status: 429, headers: { "retry-after": String(left) } });
+    // the provider's pace, drawn as a background read (limits.ts take): its calls wait for their units; a wait past a
+    // second answers as a hold does, so the maker read asks its next provider
+    let calls = 1;
+    try {
+      const b: unknown = JSON.parse(String(init.body));
+      if (Array.isArray(b)) calls = b.length;
+    } catch {}
+    const w = holds.take(url, calls, true);
+    const busy = new Response("{}", { status: 429, headers: { "retry-after": String(Math.max(1, Math.ceil(w / 1000))) } });
+    if (w > 1_000) return busy;
+    if (w > 0) {
+      await new Promise((go) => setTimeout(go, w));
+      if (holds.take(url, calls, true) > 0) return busy;
+    }
     const r = await doFetch(url, init);
     if (r.status === 429) {
       holds.hold(url, upstreamRetryAfterS(r.headers, now()));

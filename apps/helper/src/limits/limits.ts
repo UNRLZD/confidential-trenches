@@ -121,12 +121,90 @@ export function evmThrottleS(error: unknown): number {
  * Robinhood swap reads (data/evm/swaps.ts), the maker reads (data/evm/lists.ts) and /v1/rpc/robinhood (rpc/rpc.ts) all
  * read rpc.mainnet.chain.robinhood.com from the one address the provider limits. hold(url, s) holds it s seconds more
  * from now unless it is held longer (at most RETRY_AFTER_MAX_S); heldFor(url) is the seconds left, 0 when it is free, and
- * heldMs(url) the same in milliseconds (swaps.ts one() waits out a short hold).
+ * heldMs(url) the same in milliseconds.
+ *
+ * And one pace per provider (card helper-robinhood-capacity fold 2), a token bucket (PROVIDER_PACE) every path draws
+ * from before it sends: take(url, calls, background) takes the post's units (1, or its calls for a provider that counts
+ * calls) and answers 0, or the ms until they fit and takes nothing. Background reads (the swap and maker reads) draw
+ * only down to the CALLER_ROOM a provider keeps for callers' reads (/v1/rpc), so our own load never spends the room a
+ * user's call needs. room(url) is the bucket's free share, 0 to 1 (1 for a provider with no pace), by which the swap
+ * reads pick the providers they ask; paceOf(url) the pace they were made with.
  */
-export type ProviderHolds = { heldFor(url: string): number; heldMs(url: string): number; hold(url: string, seconds: number): void };
-export function providerHolds(now: () => number = Date.now): ProviderHolds {
+export type ProviderHolds = {
+  heldFor(url: string): number;
+  heldMs(url: string): number;
+  hold(url: string, seconds: number): void;
+  take(url: string, calls: number, background: boolean): number;
+  room(url: string): number;
+  paceOf(url: string): Pace | undefined;
+};
+
+/** A provider's pace: `perS` units a second, at most `burst` at once; a unit is a post (one HTTP request, a batch or
+ *  not) or a call (each request in a batch); `inflight`, the posts it takes at once. */
+export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number };
+/**
+ * Each paced provider, set under the point where it refuses (reads cited):
+ *   - robinhood.daybreak-rpc.network: refuses two ways. -32005 "rate limited" with Retry-After 10 at 61 to 72 posts in
+ *     the 5 s before it, 12 to 14 a second (the markets lead's upstream logs, 4 runs 2026-11-04 20:0xZ, 151 to 341 calls
+ *     in the 10 s before); and -32005 "too many concurrent requests" past about 4 calls at once: single 1,000-block
+ *     eth_getLogs at 10 posts a second (4.4 in flight, p50 442 ms) refused at 4.1 s, at 8 a second (3.2 in flight) none
+ *     in 12 s, and batches of 5 at 4 posts a second refused at the 4th post (sweep from the Mac 2026-11-04 20:48-20:52Z).
+ *     Paced at 7 posts a second, one call a post (lists.ts BATCH_MAX) and 3 out at once.
+ *   - rpc-robinhood.blockmachine.io: its 429 names x-ratelimit-limit 60, x-ratelimit-unit cu_per_minute (the same logs,
+ *     Retry-After 41-42 s); the sweep's single eth_getLogs, 1 then 2 a second for 12 s each, passed, and 4 a second was
+ *     refused at its 31st post, the minute's 67th call, Retry-After 23 (20:53Z). Paced under its header's 60 a minute: half
+ *     a call a second, 25 at once, at most 55 in any minute.
+ *   - robinhood.api.pocket.network: x-ratelimit-limit 1200, its reset 60 s ahead, remaining one less per call (read
+ *     2026-11-04 20:49Z). Paced at 15 calls a second, 200 at once: 1,100 in any minute.
+ *   - robinhood.drpc.org: 33 calls a second for 8 s, none refused (SWAP_RPCS' note, 2026-11-04 19:4xZ). Paced at 15, 15 at once: at most 30 in
+ *     any second.
+ *   - rpc.mainnet.chain.robinhood.com, the chain's own and /v1/rpc/robinhood's first: 3.8 posts a second, then 429 (the
+ *     same note), and a fourth quick read refused 429 (19:2xZ). Paced at 1, 2 at once: at most 3 in any second.
+ * api.blockvectra.com (100 blocks, last) is not paced: its holds keep it, as before.
+ */
+export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
+  "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
+  "https://rpc-robinhood.blockmachine.io": { perS: 0.5, burst: 25, unit: "call" },
+  "https://robinhood.api.pocket.network": { perS: 15, burst: 200, unit: "call" },
+  "https://robinhood.drpc.org": { perS: 15, burst: 15, unit: "call" },
+  "https://rpc.mainnet.chain.robinhood.com": { perS: 1, burst: 2, unit: "post" },
+};
+/** The share of a paced provider's burst background reads leave for callers' reads. [design: a quarter, so a caller's
+ *  read finds room at once on the provider it asks first while the walks run at three quarters of its pace.] */
+export const CALLER_ROOM = 0.25;
+
+export function providerHolds(now: () => number = Date.now, pace: Readonly<Record<string, Pace>> = PROVIDER_PACE): ProviderHolds {
   const until = new Map<string, number>();
+  const buckets = new Map<string, { tokens: number; at: number }>();
+  const fill = (url: string, p: Pace) => {
+    const t = now();
+    const b = buckets.get(url) ?? { tokens: p.burst, at: t };
+    b.tokens = Math.min(p.burst, b.tokens + ((t - b.at) * p.perS) / 1000);
+    b.at = t;
+    buckets.set(url, b);
+    return b;
+  };
   return {
+    take(url, calls, background) {
+      const p = pace[url];
+      if (p === undefined) return 0;
+      const b = fill(url, p);
+      const floor = background ? p.burst * CALLER_ROOM : 0;
+      // a post larger than the bucket waits for a full one
+      const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
+      if (b.tokens - units >= floor) {
+        b.tokens -= units;
+        return 0;
+      }
+      return Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
+    },
+    room(url) {
+      const p = pace[url];
+      return p === undefined ? 1 : fill(url, p).tokens / p.burst;
+    },
+    paceOf(url) {
+      return pace[url];
+    },
     heldFor(url) {
       const u = until.get(url) ?? 0;
       if (u <= now()) return 0;
