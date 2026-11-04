@@ -10,7 +10,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { readFileSync } from "node:fs";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
-import { EVM_SELL_FREE_WINDOW_MS, EVM_SELL_FREES_MAX, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, evmAddressOf, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
+import { EVM_SELL_FREE_WINDOW_MS, EVM_SELL_FREES_MAX, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmEpochFee, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
 
 const key = (label: string) => new Uint8Array(createHash("sha256").update(`helper-evm-sender/test-key/${label}`).digest());
 const KEY = key("EVM_SENDER");
@@ -147,7 +147,15 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
     calls.push({ method, params });
     switch (method) {
       case "eth_chainId": return o.chain ?? `0x${CHAIN_ID.toString(16)}`;
-      case "eth_getBlockByNumber": return { number: "0x64", timestamp: `0x${NOW_S.toString(16)}`, hash: `0x${"11".repeat(32)}`, baseFeePerGas: `0x${(o.base ?? BASE).toString(16)}` };
+      case "eth_getBlockByNumber": {
+        // latest is block 100 at now; block n is 2 s per block before it (a withdraw's epoch search reads them)
+        const n = params[0] === "latest" ? 100n : BigInt(params[0] as string);
+        return { number: `0x${n.toString(16)}`, timestamp: `0x${(NOW_S - 2n * (100n - n)).toString(16)}`, hash: n === 100n ? `0x${"11".repeat(32)}` : `0x${w32(n)}`, baseFeePerGas: `0x${(o.base ?? BASE).toString(16)}` };
+      }
+      // a withdraw's reads (a sale reads none of these)
+      case "eth_getCode": return "0x";
+      case "eth_maxPriorityFeePerGas": return "0x1";
+      case "eth_estimateGas": return `0x${(611_391).toString(16)}`;
       case "eth_getTransactionCount": return (params[0] as string) === W ? `0x${(o.wNonce ?? W_NONCE).toString(16)}` : "0x7";
       case "eth_call": {
         const c = params[0] as { to: string; data: string };
@@ -599,7 +607,7 @@ test("bad_route: a sale to any target but the PoolManager or a listed router, or
   }
 });
 
-test("unpaid sell gas: reverting sales are held against the client, the token, W and the sender's budget; past a cap 429 rate_limited with the wait, and withdraws still go", async () => {
+test("unpaid sell gas: reverting sales are held against the client, the token, W and the sender's budget; past a cap 429 rate_limited with the wait", async () => {
   // 50 sales from one client, 50 fresh Ws, each its own token, every landed transaction reverting: the client's cap
   const worst = EVM_POOL_SELL_GAS * (2n * BASE + TIP) + L1;
   const tokenOf = (i: number) => `0x${(0x7000 + i).toString(16).padStart(40, "0")}`;
@@ -629,8 +637,6 @@ test("unpaid sell gas: reverting sales are held against the client, the token, W
   }
   assert.equal(BigInt(byW), EVM_SELL_UNPAID_CAP_WEI / worst, `${byW} sent`);
   assert.ok(detail(last!).includes("for W"), detail(last!));
-  // a withdraw from the same client is not held by the sell caps (its own checks answer)
-  assert.equal(code(await s.carry({ pool: POOL, data: "0x00", epoch: 60_000 }, "203.0.113.9")), "bad_shape");
   // a burst with no client and no receipt yet: each sale's worst cost is held from its send, so the token's cap stops it
   const y: Calls = [];
   const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n }, [rpc(y, { receipt: () => null }), rpc([], { receipt: () => null })], () => NOW);
@@ -644,6 +650,51 @@ test("unpaid sell gas: reverting sales are held against the client, the token, W
     assert.equal((await paid.sell(freshBody(`W-paid-${i}`), "203.0.113.10")).status, 200, `sale ${i}`);
     await tick();
   }
+});
+
+/** withdraw's calldata as solc's abi.encode writes it, for this test's pool and fee recipient (the proof's words are
+ *  not read by the helper; the pool checks them, and the fake providers' simulation passes). */
+const FEE_TO = "0x000000000000000000000000000000000000fee1";
+function withdrawData(fee: bigint, nullifier: bigint): string {
+  const relay = [a32("0x0000000000000000000000000000000000000a11"), a32(FEE_TO), w32(10n ** 16n), w32(BigInt(NOW + 300_000)), w32(1n), "c9".padEnd(64, "0")];
+  const proof = Array.from({ length: 16 }, (_, i) => (i === 9 ? nullifier : BigInt(i + 1)));
+  return `0x${WITHDRAW_SELECTOR}${w32(18n * 32n)}${proof.map(w32).join("")}${w32(fee)}${a32(POOL)}${w32(64n)}${w32(192n)}${relay.join("")}`;
+}
+
+test("withdraws still go while sales answer 429: the sell sender's whole budget spent refuses every sale, a client's included, and that client's withdraw is still sent from the withdraw sender", async () => {
+  const worst = EVM_POOL_SELL_GAS * (2n * BASE + TIP) + L1;
+  const tokenOf = (i: number) => `0x${(0x9000 + i).toString(16).padStart(40, "0")}`;
+  const x: Calls = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(x, { receipt: () => receiptOf("0x0", { l1Fee: L1 }) }), rpc([], { receipt: () => null })], () => NOW);
+  // the sender's whole budget: fresh Ws, each its own token, no client, every landed sale reverting
+  let sent = 0;
+  let last: Awaited<ReturnType<typeof s.sell>> | undefined;
+  const most = Number(EVM_SELL_UNPAID_BUDGET_WEI / worst) + 3;
+  for (let i = 0; i < most; i++) {
+    last = await s.sell(freshBody(`W-budget-${i}`, { sell: { token: tokenOf(i) } }));
+    if (last.status === 200) sent++;
+    await tick();
+  }
+  assert.equal(BigInt(sent), EVM_SELL_UNPAID_BUDGET_WEI / worst, `${sent} sent`);
+  assert.deepEqual([last!.status, code(last!)], [429, "rate_limited"]);
+  assert.ok(detail(last!).includes("this sender"), detail(last!));
+  assert.ok(last!.retryAfterS! >= 1 && last!.retryAfterS! <= EVM_SELL_UNPAID_WINDOW_MS / 1000);
+  // a client's sale is refused too, and nothing more is sent
+  const c = await s.sell(freshBody("W-budget-client", { sell: { token: tokenOf(most) } }), "203.0.113.9");
+  assert.deepEqual([c.status, code(c)], [429, "rate_limited"]);
+  assert.equal(sends(x).length, sent);
+  // the same client's withdraw: sent to the pool, its nonce read for the withdraw sender
+  const fee = evmEpochFee(1n, BASE);
+  const wd = await s.carry({ pool: POOL, data: withdrawData(fee, 0x77n), epoch: NOW }, "203.0.113.9");
+  assert.equal(wd.status, 200, JSON.stringify(wd.body));
+  const raws = sends(x);
+  assert.equal(raws.length, sent + 1);
+  const last1 = unhex(raws.at(-1)!);
+  assert.equal(last1[0], 2, "an EIP-1559 transaction");
+  const f = dec(last1.subarray(1)) as Rlp[];
+  assert.equal(`0x${hex(f[5] as Uint8Array)}`, POOL);
+  const counted = x.filter((q) => q.method === "eth_getTransactionCount").map((q) => q.params[0]);
+  assert.ok(counted.includes(evmAddressOf(KEY)), counted.join(","));
 });
 
 test("the sell sender: its own key and nonce lane, never the withdraw sender's; no sell key is 503 not_configured with nothing read", async () => {

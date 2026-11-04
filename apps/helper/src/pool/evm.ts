@@ -406,7 +406,8 @@ const sameKeys = (o: object, keys: readonly string[]) => {
 };
 /** OP Stack's GasPriceOracle, the same address on Base and Base Sepolia, and its getL1FeeUpperBound(uint256). */
 const OP_ORACLE = "0x420000000000000000000000000000000000000f";
-const L1_BOUND_SELECTOR = selectorOf("getL1FeeUpperBound(uint256)");/** The chains whose L1 data fee is paid apart from gas (OP Stack); Robinhood Chain (Arbitrum) prices it in its gas. */
+const L1_BOUND_SELECTOR = selectorOf("getL1FeeUpperBound(uint256)");
+/** The chains whose L1 data fee is paid apart from gas (OP Stack); Robinhood Chain (Arbitrum) prices it in its gas. */
 const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base", "base-sepolia"]);
 /**
  * An RPC's hex string as viem and ethers read one, and as the device does (packages/wallet/src/pool/evm.ts evmRpcHex,

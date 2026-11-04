@@ -115,6 +115,8 @@ export const MUTANTS = [
   [EVM, '["all", `w:${w}`, `t:${token}`, ...(client === undefined ? [] : [`c:${client}`])]', '["all", `w:${w}`, `t:${token}`]', T, "unpaid sell gas:"],
   [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '["all", `w:${w}`, ...(client', T, "unpaid sell gas:"],
   [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '["all", `t:${token}`, ...(client', T, "unpaid sell gas:"],
+  [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '[`w:${w}`, `t:${token}`, ...(client', T, "withdraws still go while sales answer 429:"],
+  [EVM, 'const cap = k === "all" ? EVM_SELL_UNPAID_BUDGET_WEI : EVM_SELL_UNPAID_CAP_WEI;', "const cap = EVM_SELL_UNPAID_CAP_WEI;", T, "withdraws still go while sales answer 429:"],
   // fold 1, H2.3: the sell sender's own key
   [EVM, '    if (cfg.sellKey === undefined || sellSender === null) return no(503, "not_configured"', '    if (false) return no(503, "not_configured"', T, "the sell sender:"],
   [EVM, "  if (sellSender === sender) throw", "  if (false) throw", T, "the sell sender:"],
