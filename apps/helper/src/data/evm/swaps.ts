@@ -1057,7 +1057,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // The books
   // -------------------------------------------------------------------------------------------------------------
 
-  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number };
+  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; first?: Promise<void> };
   const books = new Map<string, Entry>();
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
@@ -1169,6 +1169,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return apply(e, from, to, head.n, logs);
   }
 
+  /** A new book's first read, at once (card helper-robinhood-capacity fold 3): a dozen cold tapes opened together
+   *  waited for the tick in progress, which read READ_PARALLEL other books, and then for the next; each now reads its
+   *  own, at the shared agreed head and ETH price (agreedHead, readRef), once however many callers ask. */
+  function firstRead(e: Entry): Promise<void> {
+    e.first ??= (async () => {
+      const head = await agreedHead();
+      if (head !== null) await readBook(e, head.with, head, Promise.resolve(true)).catch(() => false);
+    })().finally(() => {
+      e.first = undefined;
+    });
+    return e.first;
+  }
+
   let running: Promise<void> | null = null;
   /** The timer fired while a tick ran: the next starts as soon as it ends, never a skipped period. */
   let again = false;
@@ -1181,8 +1194,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // the same block, so no swap is priced by an older price (a tick of three rounds one after another outlasted 1 s)
     const needRef = [...books.values()].some((e) => e.pool.quote.kind === "eth");
     const refReady = needRef ? readRef(head.with, head.n, undefined, true).catch(() => false) : Promise.resolve(true);
-    // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks
-    const due = [...books.values()];
+    // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks; a
+    // book whose first read is in flight (firstRead) is that read's
+    const due = [...books.values()].filter((e) => e.first === undefined);
     for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));
     await refReady;
   }
@@ -1242,6 +1256,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     e.touched = now();
     ensureTimer();
+    if (e.readAt === null) await firstRead(e);
     for (let attempt = 0; e.readAt === null && attempt < 2; attempt++) await start();
     if (e.readAt === null) return UPSTREAM;
     if (now() - e.readAt > STALE_MS) {
