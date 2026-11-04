@@ -8,7 +8,7 @@
 //     middle is listed;
 //   - on the chain's two RPCs of two operators (the money gate's), each answering the chain's id: at the newest block
 //     both have (the lower of their two eth_blockNumber answers, so no archive read is needed), each pin's code is the
-//     same on both and is the build's (pool-evm-deploy.build.json: the same length and, with the immutables' bytes
+//     same on both and is the build's (pool-evm-deploy.build.json, pinnedBuild: the same length and, with the immutables' bytes
 //     zeroed, the same keccak256), and its immutables hold exactly the words pool-evm-deploy's getters must return
 //     (gettersOf: the pool's verifier, asset and scope, the adapters' PoolManager, router and WETH, the delegate's WETH);
 //     the record's verifier is the build's; the PoolManager's, WETH's and each router's code hash is the one CHAINS
@@ -20,7 +20,7 @@ import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { BUILD, CHAINS, EIP1967, deploymentFile, gettersOf, keccak, operatorProblems, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
+import { CHAINS, EIP1967, deploymentFile, gettersOf, keccak, operatorProblems, pinnedBuild, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
 
 const KEY = "evm-venues-pin";
 const lower = (a) => (typeof a === "string" ? a.toLowerCase() : a);
@@ -82,7 +82,7 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
   try {
     for (const [role, pin, name] of [...want, ["verifier", d.contracts?.WithdrawalVerifier?.address ?? "0x", "WithdrawalVerifier"]]) {
       const [a, b] = await codeAt(pin);
-      const build = BUILD.contracts[name];
+      const build = pinnedBuild(chain, name, pin);
       const r = runtimeOf(a, build.immutables);
       say(a === b && a !== "0x", `the ${role} ${pin}: the same code on both RPCs at block ${BigInt(block)} (${(a.length - 2) / 2} bytes)`);
       say(r.length === build.length && r.masked === build.masked, `the ${role} ${pin} is the build's ${name}: length ${r.length}, keccak256 with the immutables zeroed ${r.masked}`);

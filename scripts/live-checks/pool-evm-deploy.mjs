@@ -3,7 +3,7 @@
 // For each chain's deployment record, on two RPCs of two operators, each answering the chain's id, it reads:
 //   - every contract the record names (the verifier, the pool, the v4 adapter, the v3 adapter on Base Sepolia only,
 //     the sell delegate): its code is the build's (pool-evm-deploy.build.json, which test/deploy.test.mjs keeps equal to
-//     forge's output): the same length and, with the immutables' bytes zeroed, the same keccak256; every place one
+//     forge's output; at an address the file's `frozen` map pins, that older build: pinnedBuild): the same length and, with the immutables' bytes zeroed, the same keccak256; every place one
 //     immutable sits holds the same word;
 //   - those immutables through their getters: the pool's ASSET is the native asset, WITHDRAWAL_VERIFIER is the
 //     record's verifier and SCOPE is keccak256(pool, chain id, asset) mod p (contracts/pool-evm/src/State.sol); the
@@ -36,6 +36,14 @@ export const RECORD = path.join(HERE, "pool-evm-deploy.md");
 export const BUILD_FILE = path.join(HERE, "pool-evm-deploy.build.json");
 export const BUILD = JSON.parse(readFileSync(BUILD_FILE, "utf8"));
 export const deploymentFile = (chain) => path.join(HERE, `pool-evm-deploy.${chain}.json`);
+/** The one build the code of `name` at `address` on `chain` must be: the frozen older build when the build file pins
+ * that exact address to it (a contract deployed before the build moved on, e.g. the v1 SellDelegate), else the current
+ * build. Never either one: each address has exactly one build. */
+export function pinnedBuild(chain, name, address) {
+  const f = BUILD.frozen?.[name];
+  const at = f?.at?.[chain];
+  return at && at.toLowerCase() === String(address ?? "").toLowerCase() ? f : BUILD.contracts[name];
+}
 
 // @noble/hashes from the helper's own dependencies (apps/ is outside Blindfill, so this check reaches nothing of the
 // kit's). A static name, so check:imports reads it (Node 24 loads this ES module through require).
@@ -182,7 +190,8 @@ export function gettersOf(d) {
     ],
     UniswapV4Adapter: [["POOL_MANAGER()", addrWord(chain.poolManager.address)], ["WETH()", addrWord(chain.weth.address)]],
     UniswapV3Adapter: [["ROUTER()", addrWord(chain.router?.address ?? "0x")]],
-    SellDelegate: [["WETH()", addrWord(chain.weth.address)]],
+    // the v1 delegate (frozen in the build file) has no POOL_MANAGER; the current one holds the chain's PoolManager
+    SellDelegate: [["WETH()", addrWord(chain.weth.address)], ...(pinnedBuild(d.chain, "SellDelegate", at("SellDelegate")) === BUILD.contracts.SellDelegate ? [["POOL_MANAGER()", addrWord(chain.poolManager.address)]] : [])],
   };
 }
 
@@ -216,7 +225,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep = slee
       for (const name of chain.contracts) {
         const a = at(name);
         if (!a) continue; // the record line above failed already
-        const b = BUILD.contracts[name];
+        const b = pinnedBuild(d.chain, name, a);
         const code = await rpc(fetchFn, url, "eth_getCode", [a, "latest"], sleep);
         const r = runtimeOf(code, b.immutables);
         say(r.length === b.length && r.masked === b.masked,

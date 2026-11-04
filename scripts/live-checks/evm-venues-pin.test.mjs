@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { check, deployed } from "./evm-venues-pin.mjs";
-import { BUILD, CHAINS, EIP1967 } from "./pool-evm-deploy.mjs";
+import { CHAINS, EIP1967, pinnedBuild } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-venues-pin.answers.json", import.meta.url), "utf8"));
 const RECORD = Object.fromEntries(deployed());
@@ -82,14 +82,15 @@ test("WETH or the router with other code, another chain id, a kit pin that is no
 // the review of c473b3d: the build's code with other immutables, consistent on both RPCs, must fail
 const HOSTILE = "000000000000000000000000" + "ba".repeat(20);
 const word = (a) => "000000000000000000000000" + lower(a).slice(2);
-/** the recording with the immutable of `name` at `pin` that holds `from` rewritten to HOSTILE, on both RPCs */
-function swapImmutable(pin, name, from) {
+/** the recording with the immutable of `name` at `pin` on `chain` (its build: pinnedBuild) that holds `from` rewritten
+ * to HOSTILE, on both RPCs */
+function swapImmutable(chain, pin, name, from) {
   const out = structuredClone(A.good);
   let n = 0;
   for (const a of out) {
     if (a.method !== "eth_getCode" || lower(a.params[0]) !== lower(pin)) continue;
     let h = a.json.result.slice(2);
-    const starts = BUILD.contracts[name].immutables.find((g) => h.slice(2 * g[0], 2 * g[0] + 64) === from);
+    const starts = pinnedBuild(chain, name, pin).immutables.find((g) => h.slice(2 * g[0], 2 * g[0] + 64) === from);
     assert.ok(starts, `${name} holds ${from}`);
     for (const s of starts) h = h.slice(0, 2 * s) + HOSTILE + h.slice(2 * s + 64);
     a.json.result = "0x" + h;
@@ -107,7 +108,7 @@ test("a pin with the build's code but other immutables fails: the pool's verifie
     [v.pool, "PrivacyPoolSimple", word(d.contracts.WithdrawalVerifier.address), /PrivacyPoolSimple's immutables/],
     [v.adapters.v3, "UniswapV3Adapter", word(CHAINS[chain].router.address), /UniswapV3Adapter's immutables/],
     [v.sellDelegate, "SellDelegate", word(CHAINS[chain].weth.address), /SellDelegate's immutables/],
-  ]) fails(await run(chain, { answers: swapImmutable(pin, name, from) }), re);
+  ]) fails(await run(chain, { answers: swapImmutable(chain, pin, name, from) }), re);
 });
 
 test("the pool's verifier, the PoolManager or Robinhood testnet WETH's implementation with other code, or another WETH implementation, fails", async () => {
