@@ -83,3 +83,11 @@ test("planted: the page's read disagreeing, stale, on another pair or one host; 
   fails(mut((rec) => (rec.signCsp = rec.signCsp.replace(" https://solana-rpc.publicnode.com", ""))), /^BAD SIGN_HOST's connect-src names both: not https:\/\/solana-rpc\.publicnode\.com/);
   fails(mut((rec) => (rec.signCsp = null)), /^BAD SIGN_HOST's connect-src names both/);
 });
+
+test("planted (review M1): a SIGN_HOST bundle that is not this checkout's fails, so a page without pool-price.ts cannot pass; an app deploy does not judge it", () => {
+  fails(mut((rec) => (rec.signBundle.sha384 = "sha384-" + "A".repeat(64))), /^BAD SIGN_HOST's \/app\.js is this checkout's signing page bundle: served sha384-A+/);
+  fails(mut((rec) => (rec.signBundle = { status: 404, sha384: rec.treeBundle })), /^BAD SIGN_HOST's \/app\.js .*HTTP 404/);
+  fails(mut((rec) => delete rec.signBundle), /^BAD SIGN_HOST's \/app\.js/);
+  const app = mut((rec) => { rec.host = "app"; rec.signBundle.sha384 = "sha384-" + "A".repeat(64); });
+  assert.equal(app.ok, true, app.lines.join("\n"));
+});

@@ -33,7 +33,7 @@ export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "ap
 export const ONE_OFF = {
   "kit-freeze-helper-api": "the kit's /v1 freeze at a named tag (--tag): it judges packages/kit/src/helper/v1.ts on GitHub against pins and the tag, not what a host serves; APP_HOST is only the Origin it reads the helper's health from",
 };
-export const LIVE_ARGS = { "app-in-shell": "--engines chromium,firefox,webkit", "app-harness-signin-e2e": "--host app", "signpage-release": "--host app" };
+export const LIVE_ARGS = { "app-in-shell": "--engines chromium,firefox,webkit", "app-harness-signin-e2e": "--host app", "signpage-release": "--host app", "signpage-pool-price": "--host app" };
 // app-verify-mount reads the network the build names: a testnet build's _headers carries the testnet pair (build/network.mjs)
 export const networkOfBuild = (dir) => (readFileSync(join(dir, "_headers"), "utf8").includes(TESTNET_RPCS) ? "testnet" : "mainnet");
 export const liveRun = (k, network = "mainnet") => `scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k]}` : ""}${k === "app-verify-mount" ? ` --network ${network}` : ""}`;

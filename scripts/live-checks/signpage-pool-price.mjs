@@ -5,7 +5,12 @@
 //      pair for it, SIGN_HOST's provider A and the helper's keyed route (packages/signpage/src/trade.ts SOLANA_PROVIDER_A
 //      and TRADE_HELPER, the pair main.ts gives the pool kinds and src/pool-price.ts), as SIGN_HOST's CSP allows both. It
 //      passes only with two hosts of two providers agreeing on Pyth's SOL/USD account and a price at most 60 s old, and
-//      with SIGN_HOST's served connect-src naming both origins, so the page itself can make that read.
+//      with SIGN_HOST's served connect-src naming both origins, so the page itself can make that read; and SIGN_HOST's
+//      served /app.js has the sha384 of this checkout's signing page bundle (packages/signpage/public/app.js, hashed as
+//      app-release-sri hashes a served script), so the deployed page carries src/pool-price.ts. On an app deploy
+//      (--host app, as signpage-release) that line is not judged: SIGN_HOST may lag, and its own deploy runs this check.
+//      The page's own price in state on the real page is proven once pinned pools land on SIGN_HOST (a later card);
+//      until then, by the signing page's unit tests (packages/signpage/test/pool-price.test.ts).
 //   2. The terminal: APP_HOST's terminal, framed by a stand-in for SIGN_HOST's shell (app-in-shell.mjs) that sends a
 //      signed-in state holding the devnet Solana pool with its proof ready (trade-box-pool.mjs POOL.ready) and, as
 //      src/pool-price.ts puts it in state.pools[solana].price, the price part 1 read: fresh (as read), stale (the same
@@ -15,13 +20,14 @@
 //          that price, rounded down (5 x 10^15 / price lamports at exponent -8), never the vault's buy;
 //        - stale and none: Bal shows no USD, Buy is off, and the tap asks for nothing.
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
-//   node scripts/live-checks/signpage-pool-price.mjs [--shots <dir>] [--record <file>]
+//   node scripts/live-checks/signpage-pool-price.mjs [--host sign|app] [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/signpage-pool-price.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
 //     a local build (apps/terminal/dist, or --build <dir>) at APP_HOST's name, the helper's reads recorded
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -47,6 +53,9 @@ export const WIDTHS = [
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 ];
 const READY_MS = 20_000;
+const sha384 = (bytes) => `sha384-${createHash("sha384").update(bytes).digest("base64")}`;
+/** This checkout's signing page bundle, as build-app.mjs writes it. */
+const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");
 const MAX_AGE_S = POOL_USD_FEEDS.solana.maxAgeS;
 
 /** The pool entry the stand-in sends for `which`, from the page's read `p`, at the run's clock `nowMs`. */
@@ -79,6 +88,9 @@ export function judge(rec) {
   const src = (/(?:^|;)\s*connect-src\s+([^;]*)/.exec(rec.signCsp ?? "")?.[1] ?? "").split(/\s+/);
   const reach = PAGE_PAIR.map((u) => new URL(u).origin).filter((o) => !src.includes(o));
   say(src.length > 1 && reach.length === 0, `SIGN_HOST's connect-src names both: ${reach.length ? `not ${reach.join(", ")}` : PAGE_PAIR.map((u) => new URL(u).origin).join(" and ")}`);
+  const b = rec.signBundle ?? {};
+  if (rec.host === "app") say(true, "SIGN_HOST's /app.js: not judged on an app deploy (SIGN_HOST's own deploy runs this check with it)");
+  else say(b.status === 200 && typeof rec.treeBundle === "string" && b.sha384 === rec.treeBundle, `SIGN_HOST's /app.js is this checkout's signing page bundle: ${b.status !== 200 ? `HTTP ${b.status ?? "none"}` : b.sha384 === rec.treeBundle ? b.sha384 : `served ${b.sha384}, the checkout's ${rec.treeBundle}`}`);
   say(typeof rec.entry === "string" && /^\/assets\/[\w.-]+\.js$/.test(rec.entry), `the served / names its entry script ${rec.entry ?? "none"}`);
   const runs = rec.runs ?? [];
   const want = WIDTHS.flatMap((w) => PRICES.map((p) => `${w.name} ${p}`));
@@ -197,13 +209,21 @@ async function entryOf(build) {
   return html.match(/<script[^>]*type="module"[^>]*src="([^"]+)"/)?.[1] ?? null;
 }
 
-export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), build = null, source }) {
+export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), build = null, source, host = "sign" }) {
   mkdirSync(shots, { recursive: true });
   const at = new Date().toISOString();
   const read = await pageRead();
   const entry = await entryOf(build);
   // SIGN_HOST's own policy as served: the page's pair must be in its connect-src
   const signCsp = (await fetch(`${SIGN_HOST}/`, { signal: AbortSignal.timeout(15_000) })).headers.get("content-security-policy");
+  // SIGN_HOST's bundle as served (the harness: this checkout's, served as SIGN_HOST's), against this checkout's
+  const treeBundle = sha384(readFileSync(TREE_BUNDLE));
+  let signBundle;
+  if (build) signBundle = { status: 200, sha384: treeBundle };
+  else {
+    const res = await fetch(`${SIGN_HOST}/app.js`, { signal: AbortSignal.timeout(15_000) });
+    signBundle = { status: res.status, sha384: sha384(new Uint8Array(await res.arrayBuffer())) };
+  }
   const browser = await launchBrowser("chromium");
   try {
     const runs = [];
@@ -214,7 +234,7 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
       const route = build ? shell : (r) => (originOf(r.request().url()) === APP_HOST || originOf(r.request().url()) === HELPER_HOST ? r.continue() : shell(r));
       for (const w of WIDTHS) runs.push(await runOne(browser, w, price, shots, route));
     }
-    return { check: KEY, at, source, browser: browser.version(), read, signCsp, entry, shots, runs };
+    return { check: KEY, at, source, host, browser: browser.version(), read, signCsp, treeBundle, signBundle, entry, shots, runs };
   } finally {
     await browser.close();
   }
@@ -232,7 +252,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       const rel = path.relative(REPO, build);
       source = `harness, terminal build ${rel && !rel.startsWith("..") ? rel : "<build>"}, the stand-in shell signed in with the devnet pool and the page's own price read`;
     }
-    const rec = await collect({ shots: opt("--shots", undefined), build, source });
+    const host = opt("--host", "sign");
+    if (host !== "sign" && host !== "app") throw new Error("--host: sign or app");
+    const rec = await collect({ shots: opt("--shots", undefined), build, source, host });
     const file = opt("--record", null);
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
     const { ok, lines } = judge(rec);
