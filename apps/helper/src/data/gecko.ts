@@ -46,6 +46,13 @@ export const LIST_FLOOR = 2;
 /** The newest data held this old is read in the "pages" lane, as the lists' LIST_URGENT_MS (src/data/evm/lists.ts):
  *  four times the bars' 60 s, so a chart is never served more than this behind its last refresh that could run. */
 export const REFRESH_URGENT_MS = 240_000;
+/** The "ahead" lane (card helper-restart-fresh): the helper's own re-read of a chart callers read lately, before its
+ *  bars pass AHEAD_MS (solana/token.ts ahead), so a deploy's swap hands the next helper bars inside GT_SERVE_MS and a
+ *  crowd's first loads after it are served from them while the window the old helper spent refills (live runs
+ *  41899807434 and 41905007564: 0 of 25 candles 200 at 19:44:47Z, PUMP's 1h 429 at 20:16:58Z, both right after a swap).
+ *  It takes a call only while COLD_RESERVE stay free, as a held chart's refresh, at most AHEAD_PER_WINDOW in the window,
+ *  and its calls never make the lists yield: it is the helper's background read, as theirs. */
+export const AHEAD_PER_WINDOW = 1;
 
 /** The newest bars held from GeckoTerminal serve a read it refuses or fails only while this old (their read time is the
  *  answer's X-Fetched-At): the market routes' freshness bound, the live checks' 10 minutes (scripts/live-checks/
@@ -105,9 +112,10 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       prune(t);
       if (held || t < pausedUntil || calls.length >= perMin) return false;
       if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
+      if (lane === "ahead" && (calls.length >= perMin - COLD_RESERVE || calls.filter((c) => c.lane === "ahead").length >= AHEAD_PER_WINDOW)) return false;
       if (lane === "lists") {
         const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
-        if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && t - c.at < YIELD_MS))) return false;
+        if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && c.lane !== "ahead" && t - c.at < YIELD_MS))) return false;
       }
       calls.push({ at: t, lane });
       return true;

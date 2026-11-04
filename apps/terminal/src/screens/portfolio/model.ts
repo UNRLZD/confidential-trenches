@@ -9,7 +9,7 @@
 // type the card's report names as missing kit calls: a token's symbol, name and price and whether a route sells it; a
 // position's bought, sold and realized, its open time, its TP/SL and its held or reverted mark; the closed positions;
 // the value series; the fees paid; and each operation's time, USD size, token and units.
-import { POOL_ASSET_DECIMALS } from "@blindfill/kit";
+import { moneyWallets, POOL_ASSET_DECIMALS } from "@blindfill/kit";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
 
 // ---------------------------------------------------------------------------------------------------- exact decimals
@@ -168,6 +168,8 @@ export interface Row {
   mark: Mark;
   exit: PositionExtra["exit"] | null;
   wallets: number;
+  /** The wallets that hold it, each with its own export (card app-export-every-wallet). */
+  addresses: string[];
   openedAt: number | null;
   /** S10.12: a sell of this token on its way, from the kit's op and its detail. */
   selling: { stage: "sending" | "landing"; ms: number } | null;
@@ -226,6 +228,7 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     mark: x.mark ?? (m && !m.route ? "noRoute" : null),
     exit: x.exit ?? null,
     wallets: p.wallets.length,
+    addresses: [...new Set(p.wallets)],
     openedAt: x.opened_at ?? null,
     selling,
   };
@@ -289,6 +292,43 @@ export function portfolio(snap: SignpageClientSnapshot, d: PortfolioData, now: n
  *  header, the deposit and withdraw screens and the restore screen alike, so no two of them ever differ; null before the
  *  first state. */
 export const balanceOf = (snap: SignpageClientSnapshot, d: PortfolioData, now: number): bigint | null => portfolio(snap, d, now).totals?.cash ?? null;
+
+// ------------------------------------------------------------------------------------- wallets with no position
+
+/** A wallet that holds money but no open position (card app-export-every-wallet): a deposit wallet with money left, in
+ *  its chain's pool asset, or a fresh or hop wallet armed, ready or returning, at its size in USD. Each has its export. */
+export interface WalletRow {
+  chain: Chain;
+  address: string;
+  role: "trade" | "deposit";
+  /** A deposit wallet's balance in base units of `asset`; null for a trade wallet. */
+  amount: bigint | null;
+  asset: PoolAsset | null;
+  /** A trade wallet's size in cents; null for a deposit wallet. */
+  size: bigint | null;
+}
+
+/** Every wallet the kit's moneyWallets names that no open position holds, in its order: positions draw their own. */
+export function walletRows(s: SignpageState | null): WalletRow[] {
+  if (!s) return [];
+  return moneyWallets(s)
+    .filter((w) => w.tokens.length === 0)
+    .map((w) => {
+      const d = w.role === "deposit" ? (s.deposit_wallets ?? []).find((x) => x.chain === w.chain && x.address === w.address) : undefined;
+      const t = w.role === "trade" ? s.wallets.find((x) => x.chain === w.chain && x.address === w.address) : undefined;
+      return {
+        chain: w.chain,
+        address: w.address,
+        role: w.role,
+        amount: d ? baseUnits(d.amount, POOL_ASSET_DECIMALS[d.asset]) : null,
+        asset: d?.asset ?? null,
+        size: t ? cents(t.size) : null,
+      };
+    });
+}
+
+/** A wallet's address, short: its first and last four characters, whole when it is ten or fewer. Data, not copy. */
+export const shortAddress = (a: string): string => (a.length <= 10 ? a : `${a.slice(0, 4)}…${a.slice(-4)}`);
 
 // ------------------------------------------------------------------------------------------------- the pools (A1)
 

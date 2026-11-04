@@ -188,6 +188,18 @@ const poolList = arr(poolFits);
 const pools: SignpageSchema = (v) =>
   poolList(v) && new Set((v as { chain: unknown }[]).map((p) => p.chain)).size === (v as unknown[]).length;
 
+/** A deposit wallet with money left (card app-export-every-wallet): exact, its asset its chain's pool asset, its amount
+ * with no more fraction digits than that asset has decimals; one entry per wallet (a chain and address twice is refused). */
+const depositWalletEntry = obj({ chain, address: str, asset: oneOf(POOL_ASSETS), amount: dec });
+const depositWalletFits: SignpageSchema = (v) => {
+  if (!depositWalletEntry(v)) return false;
+  const w = v as { chain: Chain; asset: PoolAsset; amount: string };
+  return POOL_CHAIN_ASSET[w.chain] === w.asset && unitsAt(w.amount, POOL_ASSET_DECIMALS[w.asset]) !== null;
+};
+const depositWalletList = arr(depositWalletFits);
+const depositWallets: SignpageSchema = (v) =>
+  depositWalletList(v) && new Set((v as { chain: string; address: string }[]).map((w) => `${w.chain}\n${w.address}`)).size === (v as unknown[]).length;
+
 const state = obj(
   {
     release: str,
@@ -216,7 +228,7 @@ const state = obj(
       }),
     ),
   },
-  { way, signin_failed: obj({ way, reason: str }), pools },
+  { way, signin_failed: obj({ way, reason: str }), pools, deposit_wallets: depositWallets },
 );
 
 const open = obj({ pending: lit(true) });

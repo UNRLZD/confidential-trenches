@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Operation, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
-import { activity, amount, bps, calendar, cents, closedRows, filterActivity, filterRows, groupByDay, line, mulCents, NO_FILTER, pct, portfolio, restored, sortRows, stats, units, usd } from "../src/screens/portfolio/model.ts";
+import { activity, amount, bps, calendar, cents, closedRows, filterActivity, filterRows, groupByDay, line, mulCents, NO_FILTER, pct, portfolio, restored, shortAddress, sortRows, stats, units, usd, walletRows } from "../src/screens/portfolio/model.ts";
 import type { PortfolioData, TokenMarket } from "../src/screens/portfolio/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/portfolio/words.ts";
 
@@ -335,12 +335,27 @@ test("cash: the vault and the ready wallets in dollars; a SOL or ETH pool never 
   assert.equal(same.total, 10000n);
 });
 
-test("words: every word has a source; the one draft left is the overflow button's accessible name", () => {
+test("words: every word has a source; the drafts left are the overflow button's accessible name and card app-export-every-wallet's two (words-pending)", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text && w.source, k);
   for (const k of ["total", "token", "holding", "value", "pnl", "realized", "tpsl", "search", "hideSmall", "minSize", "feesPaid", "receipt", "keyExported", "viewKey"] as const) assert.equal(WORDS[k].draft, false, k);
   // owner 2 Nov 06:08Z, all approved
   for (const k of ["cash", "noPositions", "noActivity", "open", "closed", "offline", "noRoute", "reverted", "held", "today", "yesterday", "notRestorable"] as const) assert.equal(WORDS[k].draft, false, k);
   // owner 3 Nov 09:17Z, keep (card balances-per-chain)
   for (const k of ["privateBalance", "balance", "ready", "pending", "noBalance"] as const) assert.equal(WORDS[k].draft, false, k);
-  assert.deepEqual([...DRAFTS], ["more"]);
+  assert.deepEqual([...DRAFTS], ["more", "exportKey", "wallets"]);
+});
+
+test("export (card app-export-every-wallet): each row names the wallets that hold it; Wallets lists every money wallet with no position, a deposit wallet with money left among them", () => {
+  const s: SignpageState = { ...STATE, deposit_wallets: [{ chain: "solana", address: "SoU3xxxxxxxxxxxxxxxx", asset: "SOL", amount: "0.02" }, { chain: "solana", address: "SoU4", asset: "SOL", amount: "0" }] };
+  const pf = portfolio({ status: "ready", state: s } as SignpageClientSnapshot, data(), NOW);
+  assert.deepEqual(Object.fromEntries(pf.rows.map((r) => [r.key, r.addresses])), { "solana:WTH": ["a4"], "base:BOAR": ["b1", "b2"], "near:NEAIR": ["n1"], "solana:SWC": ["s1"] });
+  assert.deepEqual(walletRows(s), [
+    { chain: "solana", address: "a1", role: "trade", amount: null, asset: null, size: 1000n },
+    { chain: "solana", address: "SoU3xxxxxxxxxxxxxxxx", role: "deposit", amount: 20_000_000n, asset: "SOL", size: null },
+    { chain: "base", address: "a2", role: "trade", amount: null, asset: null, size: 500n },
+    { chain: "near", address: "a3", role: "trade", amount: null, asset: null, size: 250n },
+  ]);
+  assert.deepEqual(walletRows(null), []);
+  assert.equal(shortAddress("SoU3xxxxxxxxxxxxxxxx"), "SoU3…xxxx");
+  assert.equal(shortAddress("u.near"), "u.near");
 });
