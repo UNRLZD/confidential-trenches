@@ -6,9 +6,11 @@
 // Sources:
 //   - page: one `getMultipleAccounts` (jsonParsed) of the mint and its pump.fun curve account through the helper's RPC
 //     path (src/rpc/), and the token's row: Discover's own row when the token is on the lists (lists.ts), else Jupiter's
-//     `/tokens/v2/search` through the helper's proxy (src/proxy/), batched up to 100 mints a call and at most one call
-//     every JUP_GAP_MS (D-S6), at once. The mint account gives decimals, the mint and freeze authorities and the
-//     Token-2022 transfer fee (Risk `tax`); the curve account gives `curve_bps` and `lp: curve` while on its curve.
+//     `/tokens/v2/search` through the helper's proxy (src/proxy/), up to 100 mints a call, one call out at a time and at
+//     most SEARCH_PER_SPAN in the proxy's counted minute (D-S6, card helper-token-page-cold): a mint a caller waits for
+//     goes at once, a held mint's refresh JUP_GAP_MS after the last call; the mint and the row are read together. The
+//     mint account gives decimals, the mint and freeze authorities and the Token-2022 transfer fee (Risk `tax`); the
+//     curve account gives `curve_bps` and `lp: curve` while on its curve.
 //   - holders: `getTokenLargestAccounts`, then one `getMultipleAccounts` (jsonParsed) of those accounts for their
 //     owners, merged per owner (D-S11), on the holders provider only (SOLANA_HOLDERS_RPC_URL; the public endpoints
 //     refuse the call). With none set, or when it does not answer: `holders: []`, `total` and `top_bps` from
@@ -23,6 +25,7 @@ import { address, dec, toRow, type Row } from "./lists.ts";
 import { createOrigins, hintsOf, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
+import { QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -50,12 +53,23 @@ export const POOL_FRESH_MS = 600_000;
  *  EVM lists, which yield to the token page. */
 export const GT_PER_MIN = GT_LIMIT_PER_MIN;
 export const GT_BASE = "https://api.geckoterminal.com/api/v2";
-/** D-S6: Jupiter's search reads up to 100 mints a call; a mint's row is read again after 12 s. One search at most every
- *  JUP_GAP_MS: with the lists' 3 calls per 12 s that is at most 30 a minute, half the keyed free bucket (L-01: 1 RPS,
- *  one bucket shared with the swap build), so a busy token page never starves a trade's build. */
+/** D-S6: Jupiter's search reads up to 100 mints a call; a mint's row is read again after 12 s. */
 export const SEARCH_MAX = 100;
 export const JUP_FRESH_MS = 12_000;
+/** The search's part of the helper's own Jupiter reserve (../../proxy/proxy.ts PROXY_RESERVE: 34, with the lists' 18):
+ *  at most this many searches in any span the proxy's budget counts as one minute (a call counts until the end of its
+ *  second plus VENDOR_WINDOW_MS, ../../limits/limits.ts upstreamBudget), so the searches never take the callers' part
+ *  of Jupiter's one bucket (L-01: 60 a minute on a 60 s sliding window, Swap and Token requests together,
+ *  developers.jup.ag/docs/api-rate-limit, read 2026-11-04 14:25Z) and a swap build never waits behind token pages. */
+export const SEARCH_PER_SPAN = 16;
+/** A held mint's refresh (its page served at once from what is held) is batched: it goes JUP_GAP_MS after the last
+ *  search, and only while COLD_ROOM of the SEARCH_PER_SPAN stay free, so a mint a caller waits for always finds room at
+ *  once; such a mint goes as soon as there is room, carrying every refresh due (card helper-token-page-cold). */
 export const JUP_GAP_MS = 4_000;
+export const COLD_ROOM = 4;
+/** A search whose room is further off than this answers its waiting callers 429 with the wait instead of holding them
+ *  (never longer than the old batch gap); the mint stays in the next search, so the retry finds its row. */
+export const SEARCH_WAIT_MAX_MS = 4_000;
 /** Tokens held per cache; the oldest goes first. */
 export const CACHE_MAX = 2_000;
 export const HOLDERS_MAX = 20;
@@ -339,8 +353,10 @@ export const KEPT_HANDOVER_MS = 86_400_000;
  *  once while one refresh runs, so a caller never waits on a slow upstream for what it was just served. `opts.view`:
  *  every kept answer as served (the token page fills a launch read since). `read`'s `held`: a good answer is held for
  *  the key (its re-read is a refresh, ../gecko.ts "refresh"); `opts.keepHeld`: a refresh refused by a budget serves
- *  the held answer, dated by its own read, whatever its age (card app-console-429). */
-function cached(freshMs: number | ((key: string) => number), now: () => number, read: (key: string, client?: string, held?: boolean) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer; keepHeld?: boolean } = {}) {
+ *  the held answer, dated by its own read, whatever its age (card app-console-429). `read`'s `waits`: the caller waits
+ *  for this read, with nothing served meanwhile (card helper-token-page-cold); a joiner that would wait on a read
+ *  begun as a refresh waits on it as it is. */
+function cached(freshMs: number | ((key: string) => number), now: () => number, read: (key: string, client?: string, held?: boolean, waits?: boolean) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer; keepHeld?: boolean } = {}) {
   const view = (key: string, a: DataAnswer) => (opts.view === undefined ? a : opts.view(key, a));
   const last = bounded<{ a: DataAnswer; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<DataAnswer>>();
@@ -371,7 +387,7 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
       let p = running.get(key);
       if (p === undefined) {
         const started = now(); // fresh from when the read began, so a refresh answered in the background is never fresher than its data
-        p = read(key, client, hit !== undefined && hit.a.status === 200)
+        p = read(key, client, hit !== undefined && hit.a.status === 200, !usable)
           .then((a) => {
             if (a.status === 200 || a.status === 404) last.set(key, { a, at: started });
             return a;
@@ -406,26 +422,69 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return { result: obj(j.result) };
   }
 
-  // Jupiter's search, batched (D-S6): every mint asked while a search is out or within JUP_GAP_MS of the last joins
-  // one call of up to SEARCH_MAX mints, so this part's Jupiter calls stay at most 60 / JUP_GAP_MS s a minute whatever
-  // the number of pages open; a mint's row is kept JUP_FRESH_MS from our own read.
+  // Jupiter's search (D-S6, card helper-token-page-cold): every mint asked while a search is out joins the next one, of
+  // up to SEARCH_MAX mints, the mints callers wait for first. The next search goes when the last returns if a caller
+  // waits for one of its mints (`cold`) and the counted minute has room; with only refreshes waiting, JUP_GAP_MS after
+  // the last search and while COLD_ROOM stay free; after a search that failed, JUP_GAP_MS after it either way. A mint's
+  // row is kept JUP_FRESH_MS from our own read.
   type JupRow = { row: Record<string, unknown> | null; at: number };
   const jrows = bounded<JupRow & { readAt: number }>(CACHE_MAX);
-  const waiting = new Map<string, { ok: (r: JupRow) => void; fail: (e: Error) => void }[]>();
+  const waiting = new Map<string, { cold: boolean; ws: { ok: (r: JupRow) => void; fail: (e: Error) => void }[] }>();
+  /** When each search in the proxy's counted minute went, oldest first. */
+  const sent: number[] = [];
+  const SPAN_S = VENDOR_WINDOW_MS / 1000;
   let lastSearch = -Infinity;
+  /** When the last search that failed (a 429, an upstream failure) went: the next waits JUP_GAP_MS from it, so callers
+   *  asking again after a failure never spend the counted minute on a vendor that is refusing. */
+  let lastFailed = -Infinity;
   let searching = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let timerAt = Infinity;
+
+  /** When the counted minute holds fewer than `cap` searches: now, or when enough of the oldest leave it. */
+  function roomAt(cap: number, t: number): number {
+    while (sent.length > 0 && Math.floor(sent[0]! / 1000) < Math.floor(t / 1000) - SPAN_S) sent.shift();
+    return sent.length < cap ? t : (Math.floor(sent[sent.length - cap]! / 1000) + SPAN_S + 1) * 1000;
+  }
 
   function schedule() {
-    if (searching || timer !== null || waiting.size === 0) return;
-    timer = setTimeout(() => void search(), Math.max(0, lastSearch + JUP_GAP_MS - now()));
+    if (searching || waiting.size === 0) return;
+    const t = now();
+    const cold = [...waiting.values()].some((w) => w.cold);
+    const at = Math.max(lastFailed + JUP_GAP_MS, cold ? roomAt(SEARCH_PER_SPAN, t) : Math.max(lastSearch + JUP_GAP_MS, roomAt(SEARCH_PER_SPAN - COLD_ROOM, t)));
+    if (at - t > SEARCH_WAIT_MAX_MS) {
+      // too far off to hold a caller: each answers 429 with the wait; the mints stay for that search
+      for (const w of waiting.values()) for (const f of w.ws.splice(0)) f.fail(new Throttled(secondsUntil(at, t), "jupiter search"));
+    }
+    if (timer !== null && timerAt <= at) return;
+    if (timer !== null) clearTimeout(timer);
+    timerAt = at;
+    timer = setTimeout(() => {
+      timer = null;
+      timerAt = Infinity;
+      // the clock is read again: a timer may fire a little early, and a search sent before its room would be counted
+      // by the proxy in the second before
+      if (now() < at) schedule();
+      else void search();
+    }, Math.max(0, at - t));
+    // a search waiting for its gap or room never holds the process open alone (the server's listener does)
+    if (at > t) timer.unref?.();
   }
 
   async function search() {
-    timer = null;
-    const batch = [...waiting.keys()].slice(0, SEARCH_MAX);
+    const keys = [...waiting.keys()];
+    // the mints callers wait for first, up to SEARCH_MAX and within the proxy's QUERY_MAX (100 mints of 44 characters
+    // are 4.5 KB, past it: the proxy would refuse the whole search 413); the rest go in the next
+    const batch: string[] = [];
+    let size = "query=".length - 1;
+    for (const m of [...keys.filter((k) => waiting.get(k)!.cold), ...keys.filter((k) => !waiting.get(k)!.cold)]) {
+      if (batch.length === SEARCH_MAX || size + 1 + m.length > QUERY_MAX) break;
+      batch.push(m);
+      size += 1 + m.length;
+    }
     searching = true;
     lastSearch = now();
+    sent.push(lastSearch);
     let rows: unknown = null;
     let at = now();
     let wait = 0;
@@ -441,8 +500,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     } catch {
       rows = null;
     }
+    if (!Array.isArray(rows)) lastFailed = lastSearch;
     for (const mint of batch) {
-      const ws = waiting.get(mint) ?? [];
+      const ws = waiting.get(mint)?.ws ?? [];
       waiting.delete(mint);
       if (!Array.isArray(rows)) {
         for (const w of ws) w.fail(wait > 0 ? new Throttled(wait, why) : new Upstream());
@@ -456,13 +516,14 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     schedule();
   }
 
-  function jupiter(mint: string): Promise<JupRow> {
+  /** `cold`: a caller waits for this row (nothing held is served meanwhile); else a held page's refresh. */
+  function jupiter(mint: string, cold: boolean): Promise<JupRow> {
     const hit = jrows.get(mint);
     if (hit !== undefined && now() - hit.readAt < JUP_FRESH_MS) return Promise.resolve(hit);
     return new Promise((ok, fail) => {
-      const ws = waiting.get(mint);
-      if (ws !== undefined) ws.push({ ok, fail });
-      else waiting.set(mint, [{ ok, fail }]);
+      const w = waiting.get(mint);
+      if (w !== undefined) (w.ws.push({ ok, fail }), (w.cold ||= cold));
+      else waiting.set(mint, { cold, ws: [{ ok, fail }] });
       schedule();
     });
   }
@@ -512,7 +573,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   async function rowOf(mint: string): Promise<{ row: Row; at: number } | null> {
     const listed = await listedRow(mint);
     if (listed !== null) return listed;
-    const j = await jupiter(mint);
+    // holders are not served before their read: its caller waits
+    const j = await jupiter(mint, true);
     const row = j.row === null ? null : toRow(j.row, j.at);
     return row === null ? null : { row, at: j.at };
   }
@@ -546,11 +608,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   const built = bounded<Built>(CACHE_MAX);
   const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt)), src: "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
 
-  const page = cached(PAGE_FRESH_MS, now, async (mint, client) => {
+  const page = cached(PAGE_FRESH_MS, now, async (mint, client, _held, waits) => {
     const listed = await listedRow(mint);
     // a Discover row's launch is the lists'; this read finds its pool (the config Jupiter names is not in a row)
     const early = listed === null ? null : launch(mint, { tag: listed.row.launchpad as string | null, config: null, graduated: null }, listed.row.created_s, client);
-    const [m, j] = await Promise.all([mintAt(mint, client), listed === null ? jupiter(mint) : null]);
+    const [m, j] = await Promise.all([mintAt(mint, client), listed === null ? jupiter(mint, waits === true) : null]);
     if (m.mint === null) return NOT_FOUND;
     let base: Row | null = listed?.row ?? null;
     let at = listed?.at ?? 0;

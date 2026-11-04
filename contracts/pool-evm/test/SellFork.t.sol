@@ -260,7 +260,7 @@ contract SellForkRobinhoodTest is SellForkBase {
 /// holds this fork's SwapRouter02 code. scripts/live-checks/evm-venues-pin.mjs reads the pins' code on Base Sepolia.
 contract SellForkBaseSepoliaPinsTest is SellForkBaseTest {
   address internal constant PIN_POOL = 0xB239A38Af69B68E6C5C305df64985F283b5d5Fe5;
-  address internal constant PIN_DELEGATE = 0xfa1442419b6984b8e3aA8933C690f80f063B6ADf;
+  address internal constant PIN_DELEGATE = 0xE39f1b9934810792C090d8AB8f555b9955527260;
   address internal constant PIN_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
 
   function _route() internal pure override returns (address, address, address, address, uint24) {

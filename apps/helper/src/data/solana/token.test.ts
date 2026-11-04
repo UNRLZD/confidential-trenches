@@ -205,9 +205,11 @@ test("page: Jupiter's search is batched: mints asked together share one call; on
   const proxy = fakeProxy();
   const tok = createSolanaToken(proxy, fakeRpc(), { now: () => now });
   const flush = () => new Promise((ok) => setImmediate(ok));
-  // the reads reach the search a few promise steps after they are asked: let them, then move the clock
+  // the reads reach the search a few promise steps after they are asked: let them, then move the clock (the timers and
+  // the time the reads see together: the search reads the clock again when its timer fires)
   const advance = async (ms: number) => {
     await flush();
+    now += ms;
     t.mock.timers.tick(ms);
     await flush();
   };
