@@ -26,6 +26,7 @@ export {
   type EvmQuoteErrorCode,
 } from "./checks/evm/quote.ts";
 export * from "./signpage/client.ts";
+export * from "./signpage/wallets.ts";
 export * from "./vault/messages.ts";
 export * from "./prover/prove.ts";
 export { isProverDead, PROVER_DEAD_PREFIX } from "./prover/client.ts";

@@ -311,5 +311,12 @@ export interface SignpageState {
   }[];
   /** Money held under a one-time id or an arming account whose arm has stopped; withdraw.open with the id moves it. */
   held: { id: string; asset: string; amount: string }[];
+  /**
+   * The device's deposit wallets that still hold money (card app-export-every-wallet): a deposit wallet of this seed
+   * with a balance not yet moved into its chain's pool or the vault, a remainder or dust included. `asset` is the
+   * chain's pool asset (POOL_ASSET_DECIMALS), `amount` its balance in whole units of it, as pools' `balance` is.
+   * Addresses and amounts only. Absent from a page of an earlier release; moneyWallets names the ones above 0.
+   */
+  deposit_wallets?: { chain: Chain; address: string; asset: PoolAsset; amount: string }[];
   ops: Operation[];
 }

@@ -300,3 +300,9 @@
    to the pool rows; the phone keeps them (placement on the owner's picks page) */
 .pfd .eqbrk .pvtstrip { display: none; }
 .pfd .eqbrk { gap: 6px; }
+
+/* Wallets (card app-export-every-wallet): each wallet with money and no position, in the pools' grid, its Export key icon */
+.pools.wls { margin-top: 10px; }
+.pools.wls .plr > .adr { font-family: var(--font-num); font-size: 11px; text-align: right; }
+/* the desktop header panel is a fixed 364px: Where it is scrolls when the pools and Wallets need more, so no row is cut off */
+.pfd .eqbrk { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
