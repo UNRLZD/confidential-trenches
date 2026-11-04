@@ -171,7 +171,7 @@ const be32 = (x: bigint): Uint8Array => {
 const beInt = (b: Uint8Array): bigint => b.reduce((v, x) => (v << 8n) | BigInt(x), 0n);
 const dec = (s: unknown): bigint => (typeof s === "string" && /^(0|[1-9][0-9]{0,77})$/.test(s) ? BigInt(s) : no());
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
-const both = <T>(h: PoolBuyHost, f: (rpc: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(h.rpcs[0]), f(h.rpcs[1])]);
+const both = <T>(h: Pick<PoolBuyHost, "rpcs">, f: (rpc: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(h.rpcs[0]), f(h.rpcs[1])]);
 
 /** One account as an RPC gives it (base64, confirmed); null when there is none. */
 async function account(rpc: SolanaRpc, address: string): Promise<{ owner: string; data: Uint8Array } | null> {
@@ -184,7 +184,7 @@ async function account(rpc: SolanaRpc, address: string): Promise<{ owner: string
 
 /** The pool account on both RPCs: its state tree's size (the kit's build needs it) and both trees' sizes, the lower.
  *  The two state sizes must be one; a pair a slot apart (a leaf landed between them) is read again once. */
-async function treeSizes(h: PoolBuyHost, pool: string, wait: (ms: number) => Promise<void>): Promise<{ state: number; label: number; stateSize: number }> {
+export async function treeSizes(h: Pick<PoolBuyHost, "rpcs" | "pin">, pool: string, wait: (ms: number) => Promise<void>): Promise<{ state: number; label: number; stateSize: number }> {
   try {
     return await treeSizesOnce(h, pool);
   } catch (e) {
@@ -194,7 +194,7 @@ async function treeSizes(h: PoolBuyHost, pool: string, wait: (ms: number) => Pro
   }
 }
 class SizeSkew extends Refused {}
-async function treeSizesOnce(h: PoolBuyHost, pool: string): Promise<{ state: number; label: number; stateSize: number }> {
+async function treeSizesOnce(h: Pick<PoolBuyHost, "rpcs" | "pin">, pool: string): Promise<{ state: number; label: number; stateSize: number }> {
   const sizes = (await both(h, (r) => account(r, pool))).map((a) => {
     if (a === null || a.owner !== h.pin.program || a.data.length !== POOL_LEN || !sameBytes(a.data.subarray(0, 8), POOL_DISC)) return no();
     const at = (o: number): number => int(Number(new DataView(a.data.buffer, a.data.byteOffset + o, 8).getBigUint64(0, true)));
@@ -206,7 +206,7 @@ async function treeSizesOnce(h: PoolBuyHost, pool: string): Promise<{ state: num
 }
 
 /** The leaf index whose root is `root` in `tree`, read on both RPCs from the newest page back: both must give it. */
-async function rootIndex(h: PoolBuyHost, tree: 0 | 1, size: number, root: bigint): Promise<number> {
+export async function rootIndex(h: Pick<PoolBuyHost, "rpcs" | "pin">, tree: 0 | 1, size: number, root: bigint): Promise<number> {
   const want = be32(root);
   for (let page = Math.floor((size - 1) / PAGE_ENTRIES); page >= 0; page--) {
     const found = (await both(h, (r) => account(r, solanaPoolPage(h.pin.program, tree, page * PAGE_ENTRIES)))).map((a) => {
@@ -236,7 +236,7 @@ export function solanaProofBytes(p: VaultSnarkjsProof): Uint8Array {
 
 /** The release a ready proof carries, for this pin and W, with its two root indexes; refused unless every field of
  *  the binding is this pin's and W's and its context is the proof's. */
-function releaseOf(r: ReadyProof<SolanaReleaseRequest>, pin: SolanaPoolPin, w: string, idx: { state: number; label: number }): SolanaPoolRelease {
+export function releaseOf(r: ReadyProof<SolanaReleaseRequest>, pin: SolanaPoolPin, w: string, idx: { state: number; label: number }): SolanaPoolRelease {
   const q = r.binding.request;
   const { pool, scope } = solanaPoolOf(pin.program);
   const s = r.publicSignals;
@@ -420,7 +420,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
 }
 
 /** The take, the send, the read-back on both RPCs and the settle; every answer but filled tries the settle first. */
-async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>): Promise<PoolBuyAnswer> {
+export async function sendAndSettle(h: Pick<PoolBuyHost, "rpcs" | "take" | "send" | "settle" | "now" | "reads" | "sent">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>): Promise<PoolBuyAnswer> {
   // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD
   const taken = await h.take(r.noteId, r.attempt);
   if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();

@@ -171,14 +171,14 @@ export type PoolAsk = { kind: PoolKind; chain: PoolChain; token: string | null; 
 export function poolTokenAddress(chain: PoolChain, token: unknown): token is string {
   return typeof token === "string" && (chain === "solana" ? SOL_KEY(token) : EVM_ADDRESS.test(token));
 }
-const SOL_KEY = (s: string): boolean => {
+export const SOL_KEY = (s: string): boolean => {
   try {
     return base58.decode(s).length === 32;
   } catch {
     return false;
   }
 };
-const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+export const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const DECIMAL = /^(0|[1-9]\d{0,29})(?:\.(\d{1,18}))?$/;
 const lower = (s: string) => s.toLowerCase();
 
