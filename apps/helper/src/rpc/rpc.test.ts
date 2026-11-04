@@ -477,7 +477,10 @@ test("each chain is one budget callers draw from fairly: a heavy caller is throt
   assert.equal(seen.length, RPC_CLIENT_MAX, "the throttled draw never reached the provider");
   assert.equal((await r.handle("solana", JSON_T, ok, "honest")).status, 200, "an honest caller in the same window");
   assert.equal((await r.handle("near", JSON_T, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "block", params: { finality: "final" } }), "heavy")).status, 200, "another chain is its own budget");
-  assert.equal((await r.handle("solana", JSON_T, ok)).status, 200, "the helper's own read (no caller) draws from no share");
+  assert.equal((await r.handle("solana", JSON_T, ok, undefined, true)).status, 200, "the helper's own reserved read (no caller) draws from no share");
+  // card helper-ready-gate: a background read (no caller, not reserved) leaves the callers' half of the method's 40 free:
+  // the callers drew 17 of the 37 they may, so 40 - 3 - 20 = 17 leaves it nothing
+  assert.equal((await r.handle("solana", JSON_T, ok)).status, 429, "a background read goes behind callers");
   t += wait * 1000;
   assert.equal((await r.handle("solana", JSON_T, ok, "heavy")).status, 200, "after the named wait the heavy caller goes again");
   assert.ok(RPC_CLIENT_MAX * 6 <= RPC_CHAIN_MAX, "six callers at their full share before anyone else is throttled");

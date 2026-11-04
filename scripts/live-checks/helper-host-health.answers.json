@@ -1,44 +1,44 @@
 {
  "good": {
-  "note": "apps/helper at 8d0257a (card helper-release-bump) run by node src/server.ts on a Mac with only HELPER_COMMIT, HELPER_RELEASE=2 and PORT set (no relayer network), read 2026-11-02T16:42Z; the release a first redeploy.sh run writes over a .env that held HELPER_RELEASE=1 and no HELPER_COMMIT; not deployed at this commit yet",
-  "commit": "8d0257ad5596cc6a104930f50bf56882d3d44931",
-  "base": "http://127.0.0.1:18192",
+  "note": "card helper-ready-gate: apps/helper at b0c24a5 run by node src/server.ts on a Mac (HELPER_COMMIT, HELPER_RELEASE=2, PORT, every PROXY_BUDGET_<VENDOR> set to a keyless plan, no key, no relayer network), read 2026-11-04T08:01:3xZ once it said ready (started 07:58:3xZ, ready 08:01:23Z); the release a first redeploy.sh run writes over a .env that held HELPER_RELEASE=1",
+  "commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91",
+  "base": "http://127.0.0.1:18731",
   "reads": [
    {
     "origin": "https://confidential.unrealized.trade",
     "status": 200,
     "headers": {
      "access-control-allow-origin": "https://confidential.unrealized.trade",
-     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "173",
+     "content-length": "186",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 16:42:51 GMT",
+     "date": "Wed, 04 Nov 2026 08:01:31 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
+     "x-helper-commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91"
     },
-    "body": "{\"ok\":true,\"commit\":\"8d0257ad5596cc6a104930f50bf56882d3d44931\",\"release\":2,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"b0c24a527943bd06af8b9c981b31caf1e033ae91\",\"release\":2,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
    },
    {
     "origin": "https://sign.confidential.unrealized.trade",
     "status": 200,
     "headers": {
      "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
-     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "173",
+     "content-length": "186",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 16:42:51 GMT",
+     "date": "Wed, 04 Nov 2026 08:01:31 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
+     "x-helper-commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91"
     },
-    "body": "{\"ok\":true,\"commit\":\"8d0257ad5596cc6a104930f50bf56882d3d44931\",\"release\":2,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"b0c24a527943bd06af8b9c981b31caf1e033ae91\",\"release\":2,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
    },
    {
     "origin": "https://example.com",
@@ -46,31 +46,107 @@
     "headers": {
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "173",
+     "content-length": "186",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 16:42:51 GMT",
+     "date": "Wed, 04 Nov 2026 08:01:31 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
+     "x-helper-commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91"
     },
-    "body": "{\"ok\":true,\"commit\":\"8d0257ad5596cc6a104930f50bf56882d3d44931\",\"release\":2,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"b0c24a527943bd06af8b9c981b31caf1e033ae91\",\"release\":2,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
    }
   ],
   "bind": {
    "status": 400,
    "headers": {
     "access-control-allow-origin": "https://confidential.unrealized.trade",
-    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
     "cache-control": "no-store",
     "connection": "keep-alive",
     "content-length": "30",
     "content-type": "application/json; charset=utf-8",
-    "date": "Mon, 02 Nov 2026 16:42:51 GMT",
+    "date": "Wed, 04 Nov 2026 08:01:31 GMT",
     "keep-alive": "timeout=65",
     "vary": "Origin",
     "x-content-type-options": "nosniff",
-    "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
+    "x-helper-commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91"
+   },
+   "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+  }
+ },
+ "bad_warming": {
+  "note": "card helper-ready-gate: apps/helper at b0c24a5 run by node src/server.ts on a Mac (HELPER_COMMIT, HELPER_RELEASE=2, PORT, every PROXY_BUDGET_<VENDOR> set to a keyless plan, no key, no relayer network), read 2026-11-04T07:58:43Z while it warmed: a start with no other helper listens at once and says ready: false",
+  "commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91",
+  "base": "http://127.0.0.1:18731",
+  "reads": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "187",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Wed, 04 Nov 2026 07:58:43 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91"
+    },
+    "body": "{\"ok\":true,\"commit\":\"b0c24a527943bd06af8b9c981b31caf1e033ae91\",\"release\":2,\"ready\":false,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://sign.confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "187",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Wed, 04 Nov 2026 07:58:43 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91"
+    },
+    "body": "{\"ok\":true,\"commit\":\"b0c24a527943bd06af8b9c981b31caf1e033ae91\",\"release\":2,\"ready\":false,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://example.com",
+    "status": 200,
+    "headers": {
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "187",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Wed, 04 Nov 2026 07:58:43 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91"
+    },
+    "body": "{\"ok\":true,\"commit\":\"b0c24a527943bd06af8b9c981b31caf1e033ae91\",\"release\":2,\"ready\":false,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   }
+  ],
+  "bind": {
+   "status": 400,
+   "headers": {
+    "access-control-allow-origin": "https://confidential.unrealized.trade",
+    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+    "cache-control": "no-store",
+    "connection": "keep-alive",
+    "content-length": "30",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Wed, 04 Nov 2026 07:58:43 GMT",
+    "keep-alive": "timeout=65",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-helper-commit": "b0c24a527943bd06af8b9c981b31caf1e033ae91"
    },
    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
   }

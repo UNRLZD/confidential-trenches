@@ -606,7 +606,10 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
 // ---------------------------------------------------------------------------------------------------------------
 
 const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
-type Read = { rows: Row[]; created: Map<string, number>; at: number };
+type Read = { rows: Row[]; created: Map<string, number>; at: number; raw: string };
+/** What a restart's next process takes over (../warm.ts, card helper-ready-gate): each list's GeckoTerminal answer as
+ *  read and its read time, and the makers read. The answers are parsed again by toRows, as from GeckoTerminal. */
+export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][] };
 
 /** Discover's lists for one EVM chain: GeckoTerminal's lists once per LIST_MS, makers read and kept, rebuilt per TICK_MS. */
 export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetch?: Fetch; now?: () => number } = {}) {
@@ -635,7 +638,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
       if (body.length > ANSWER_MAX) return null;
       const at = now();
       const rows = toRows(chain, JSON.parse(body), at);
-      return rows === null ? null : { ...rows, at };
+      return rows === null ? null : { ...rows, at, raw: body };
     } catch {
       return null;
     }
@@ -711,5 +714,39 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return () => clearInterval(t);
   }
 
-  return { get, warm, tick };
+  /** This chain's lists as a next process takes them over. */
+  function state(): EvmListsState {
+    const out: EvmListsState = { reads: {}, makers: [...makers] };
+    for (const k of LIST_KEYS) if (reads[k] !== undefined) out.reads[k] = { raw: reads[k]!.raw, at: reads[k]!.at };
+    return out;
+  }
+
+  /** A previous process's state (hostile input, as a vendor's): each list read under STALE_MS old is parsed again by
+   *  toRows; a maker is kept only as an address and one of this chain's pads or null. Reads held already are kept.
+   *  True when every list is held after it, so the lists answer without a GeckoTerminal call. */
+  function restore(st: unknown): boolean {
+    const t = now();
+    const o = (st ?? {}) as { reads?: unknown; makers?: unknown };
+    const rs = (o.reads ?? {}) as Record<string, unknown>;
+    for (const k of LIST_KEYS) {
+      const r = (Object.hasOwn(rs, k) ? rs[k] : undefined) as { raw?: unknown; at?: unknown } | undefined;
+      if (reads[k] !== undefined || typeof r?.raw !== "string" || r.raw.length > ANSWER_MAX || typeof r.at !== "number" || !Number.isFinite(r.at) || r.at > t || t - r.at >= STALE_MS) continue;
+      try {
+        const rows = toRows(chain, JSON.parse(r.raw), r.at);
+        if (rows !== null) reads[k] = { ...rows, at: r.at, raw: r.raw };
+      } catch {
+        // not an answer: the list is read from GeckoTerminal
+      }
+    }
+    const pads = new Set(FACTORIES[chain].map((f) => f.pad));
+    if (Array.isArray(o.makers))
+      for (const m of o.makers.slice(0, MAKER_MAX)) {
+        if (!Array.isArray(m) || m.length !== 2 || typeof m[0] !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(m[0]) || !(m[1] === null || (typeof m[1] === "string" && pads.has(m[1])))) continue;
+        if (!makers.has(m[0])) makers.set(m[0], m[1]);
+      }
+    build();
+    return all() !== null;
+  }
+
+  return { get, warm, tick, state, restore };
 }

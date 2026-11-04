@@ -401,7 +401,19 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   }
 
   /** The mint account at a slot, or null when it is not a mint. */
-  async function mintAt(mint: string, client?: string) {
+  /** The mint's read, one at a time per mint: a page and its holders opened together (the token screen asks both at
+   *  once) share it, so a page open draws one getMultipleAccounts of the public endpoint's 40 a method, not two (card
+   *  helper-ready-gate). A call joining one in flight draws nothing, as a cache hit. */
+  const mintReads = new Map<string, ReturnType<typeof readMint>>();
+  function mintAt(mint: string, client?: string): ReturnType<typeof readMint> {
+    let p = mintReads.get(mint);
+    if (p === undefined) {
+      p = readMint(mint, client).finally(() => mintReads.delete(mint));
+      mintReads.set(mint, p);
+    }
+    return p;
+  }
+  async function readMint(mint: string, client?: string) {
     const keys = [mint];
     const { result } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }], rpc, client);
     const value = result.value;
