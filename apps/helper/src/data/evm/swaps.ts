@@ -164,8 +164,8 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
   },
   // Robinhood makes about 10 blocks a second (10,000 blocks over 1,024 s, 2026-11-03 19:1xZ): a step of 3,000 blocks is
   // its last five minutes (600, one minute, found no pool for a v4 token with 213 swaps in the 2,000 blocks before, read
-  // live 2026-11-03 19:5xZ), and a quiet token is walked back up to COLD_S, the bars before our first coming from
-  // GeckoTerminal's OHLCV as on Base; 100 blocks is the widest `eth_getLogs` its keyless providers all take
+  // live 2026-11-03 19:5xZ), and a quiet token's window is that one step (below), the bars before our first coming
+  // from GeckoTerminal's OHLCV as on Base; 100 blocks is the widest `eth_getLogs` its keyless providers all take
   // (api.blockvectra.com "block range exceeds 100 blocks", robinhood.drpc.org refuses 500), so a step is 30 spans,
   // batched; the ETH price pool's longest gap read was 386 blocks, so it is read 1,000 blocks before a book's first
   robinhood: {
@@ -178,8 +178,11 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     refPoolId: ROBINHOOD_REF_POOL_ID,
     pons: [ROBINHOOD_VENUES.ponsV2],
     span: 100,
-    // 102 ms a block: 3,000 blocks over 306 s at head 105918391 (robinhood.daybreak-rpc.network, 2026-11-04 12:59Z)
-    cold: coldOf(102),
+    // one step, not COLD_S (card helper-robinhood-swaps): 20 minutes of 102 ms blocks is 118 spans of 100 blocks a
+    // filter a provider, and under it every keyless provider answered 429, -32005, code 30 or a timeout and the swaps
+    // routes 503 (2026-11-04 14:36-15:16Z reads, a soak at 15:13Z still 503 after 195 s); a token quiet longer than the
+    // step's five minutes has GeckoTerminal's bars of its top pool, as a token with no pool found
+    cold: 3_000,
     step: 3_000,
     refBack: 1_000,
     lagMax: 50,

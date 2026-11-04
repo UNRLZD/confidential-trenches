@@ -196,19 +196,23 @@ test("providers that write hex in upper case: the Pons curve is found and its ta
   assert.deepEqual(all.tape.trades, lower.tape.trades, "every provider in upper case");
 });
 
-// card app-console-429: Robinhood's window was 3,000 blocks, its last 306 s (2026-11-04 12:59Z), so a token quiet for five
-// minutes answered an empty chart and tape though it had a pool and trades; the window is now COLD_S on every chain,
-// walked newest first a step at a time
-test("a token quiet for longer than a step (its last trades 5,000 blocks back) is still found and its tape served: the walk goes back to COLD_S", async () => {
+// card app-console-429 walked a quiet Robinhood token back COLD_S (118 spans of 100 blocks a filter a provider); under it
+// every keyless provider refused or timed out and the routes answered 503 (card helper-robinhood-swaps, 2026-11-04
+// 14:36-15:16Z). The window is one step again: a token quiet for longer answers from our own reads, never 503.
+test("card helper-robinhood-swaps: a token quiet for longer than a step (its last trades 5,000 blocks back) answers 200 from our own reads, its discovery asking no getLogs range past the step", async () => {
   const chain = fakeChain();
   chain.st.head = REC.lastHead + 5_000;
   const s = open(chain, undefined, { pools: new Map() });
-  const tape = await bodyOf(s.trades(CURVE_TOKEN, 50));
+  const r = await s.trades(CURVE_TOKEN, 50);
   s.stop();
-  const whole = rebuild(POOL_CURVE, REC.lastHead);
-  assert.ok(whole.tape(50).length > 0, "the recording holds curve trades");
-  assert.deepEqual(tape.trades.map((t: { tx: string }) => t.tx), whole.tape(50).map((t) => t.tx), "every recorded curve trade, 5,000 blocks back");
-  assert.ok(VENUES.robinhood.cold * 102 >= 1_200_000, "the window is 20 minutes of Robinhood's 102 ms blocks");
+  assert.equal(r.status, 200, r.body);
+  assert.equal(JSON.parse(r.body).src, "chain");
+  assert.equal(VENUES.robinhood.cold, VENUES.robinhood.step, "the window is one step");
+  const step = VENUES.robinhood.step / VENUES.robinhood.span;
+  const ref = (VENUES.robinhood.step + VENUES.robinhood.refBack) / VENUES.robinhood.span;
+  // the token's transfers, its curve's swaps and the ETH price, each over the step, on two providers
+  const asked = chain.st.spans.length / 2;
+  assert.ok(asked <= 2 * step + ref + 2, `${asked} getLogs ranges for a quiet token's open (at most ${2 * step + ref + 2})`);
 });
 
 test("an active token stops after its first step: its first read asks no more spans than before the wider window", async () => {
@@ -223,7 +227,6 @@ test("an active token stops after its first step: its first read asks no more sp
   // every range is asked of two providers that must agree
   const asked = chain.st.spans.length / 2;
   assert.ok(asked <= step + ref + 1, `${asked} getLogs ranges, at most one step (${step}), the ETH price's first read (${ref}) and the head's`);
-  assert.ok(asked < VENUES.robinhood.cold / VENUES.robinhood.span, "never the whole window");
 });
 
 test("a listed token our reads find no pool of: its candles are GeckoTerminal's bars of its top pool, src geckoterminal, dated by their read; with GeckoTerminal silent, the empty chart as before", async () => {
