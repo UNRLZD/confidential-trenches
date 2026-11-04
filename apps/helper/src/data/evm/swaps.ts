@@ -215,7 +215,7 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // chainlist.org list, from the helper box and from the Mac: two more keyless operators answer `eth_getLogs` 3,000
   // blocks back with each log's blockTimestamp and batches of 10: robinhood.api.pocket.network (served 11 calls a second
   // for 8 s, none refused) and rpc-robinhood.blockmachine.io (10 a second, then -32029; keyless reads only of about the
-  // newest 10,000 blocks). Sustained from the Mac, 4 at once for 8 s: drpc 33 calls a second none refused, daybreak 29
+  // newest 10,000 blocks; its 429 at 20:12Z named x-ratelimit-limit 60, unit cu_per_minute, Retry-After 3). Sustained from the Mac, 4 at once for 8 s: drpc 33 calls a second none refused, daybreak 29
   // then -32005 "too many concurrent requests", the chain's own 3.8 then 429. Not added: robinhood-rpc.publicnode.com
   // (-32602 archive), blockreq.com (only the newest blocks), rpc.ordofi.network (no answer), robinhood.rpc.blxrbdn.com
   // and rpc.nodeflare.app (403), lb.routeme.sh and 4663.rpc.thirdweb.com (429 at once), the Tatum gateway (5 a minute),
