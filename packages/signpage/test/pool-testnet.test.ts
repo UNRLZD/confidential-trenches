@@ -23,7 +23,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
 
@@ -81,8 +81,19 @@ test("the testnet flow (card signpage-pool-notes): a Solana pool.deposit runs th
   await d.after;
   assert.deepEqual(d.answer(), { error: "failed" });
   assert.equal(opened, 1);
-  assert.deepEqual(k["pool.buy"](buy("solana"), ctx), { error: "not_allowed" }, "no lookup table is pinned for the devnet pool: no read, refused");
   assert.deepEqual(k["pool.deposit"]({ chain: "base", amount: "0.01" }, ctx), { error: "not_allowed" });
+});
+
+test("the testnet build pins the devnet pool's lookup table, so its pool.buy runs (card signpage-pool-flow-run)", async () => {
+  // created by devnet tx 4K48NMp5…, read back the same on both devnet RPCs at finalized 4 Nov 09:30Z
+  assert.equal(DEVNET_TABLE, "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy");
+  let opened = 0;
+  const flow = testnetPool({ store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) }).flow;
+  const r = poolKinds(testnetPoolDeps(flow))["pool.buy"](buy("solana"), ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
+  assert.equal(r.running, true, "the pinned table: the buy runs");
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "failed" }, "a queue that cannot open: failed, nothing sent");
+  assert.equal(opened, 1);
 });
 
 // ---- card signpage-pool-notes-2: the next buy's proof after each deposit, and settling on the page's state reads ----
