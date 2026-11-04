@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CHECK_IDLE_MS } from "../src/withdraw/form.ts";
-import { checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, parseUnits, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady } from "../src/withdraw/pool-form.ts";
+import { checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, parseUnits, poolRefusalWords, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady } from "../src/withdraw/pool-form.ts";
 
 const POOL = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
 const PROGRAM = "BPFLoaderUpgradeab1e11111111111111111111111";
@@ -16,7 +16,8 @@ const CHECKSUMMED = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
 const EVM_POOL = "0x1111111111111111111111111111111111111111";
 const FEE = 1_300_000n;
 const MIN = 1_890_880n;
-const FUNDS: PoolFunds = { notes: [{ id: "a", value: 30_000_000n }, { id: "b", value: 10_000_000n }], fee: FEE, minPart: MIN };
+const W_FEE = 5_000n;
+const FUNDS: PoolFunds = { notes: [{ id: "a", value: 30_000_000n }, { id: "b", value: 10_000_000n }], fee: FEE, wFee: W_FEE, minPart: MIN };
 
 test("To on Solana: a base58 key passes; the pool, its program, the fee payer, the System program and any non-key are refused", () => {
   assert.deepEqual(checkPoolTo("solana", ` ${TO} `, KEYS), { ok: true, to: TO });
@@ -43,17 +44,18 @@ test("Amount: refused above what the notes can send, under the smallest part, or
   assert.equal(parseUnits("0.002", 9), 2_000_000n);
   assert.equal(parseUnits("1.0000000001", 9), null);
   assert.equal(formatUnits(2_600_000n, 9), "0.0026");
-  const most = 40_000_000n - 2n * FEE;
+  const most = 40_000_000n - 2n * (FEE + W_FEE);
   assert.deepEqual(checkPoolAmount("solana", formatUnits(most + 1n, 9), FUNDS), { ok: false, code: "insufficient" });
   assert.deepEqual(checkPoolAmount("solana", "1", FUNDS), { ok: false, code: "insufficient" });
   assert.deepEqual(checkPoolAmount("solana", formatUnits(MIN - 1n, 9), FUNDS), { ok: false, code: "min", min: MIN });
   for (const bad of ["", "0", "-1", "1e3", "0.0000000001", "abc"]) assert.deepEqual(checkPoolAmount("solana", bad, FUNDS), { ok: false, code: "amount" }, bad);
   assert.deepEqual(checkPoolAmount("solana", "0.002", null), { ok: false, code: "unread" });
-  assert.deepEqual(checkPoolAmount("solana", "0.002", FUNDS), { ok: true, amount: 2_000_000n, parts: 1, maxFee: FEE });
-  assert.deepEqual(checkPoolAmount("solana", formatUnits(most, 9), FUNDS), { ok: true, amount: most, parts: 2, maxFee: 2n * FEE });
+  // Max fee: each part's relay fee and W's own fee for its send onward
+  assert.deepEqual(checkPoolAmount("solana", "0.002", FUNDS), { ok: true, amount: 2_000_000n, parts: 1, maxFee: FEE + W_FEE });
+  assert.deepEqual(checkPoolAmount("solana", formatUnits(most, 9), FUNDS), { ok: true, amount: most, parts: 2, maxFee: 2n * (FEE + W_FEE) });
   const v = evaluatePool("solana", TO, "0.002", KEYS, FUNDS);
   assert.equal(v.state, "ready");
-  assert.deepEqual(v.ready, { chain: "solana", to: TO, amount: 2_000_000n, maxFee: FEE });
+  assert.deepEqual(v.ready, { chain: "solana", to: TO, amount: 2_000_000n, maxFee: FEE + W_FEE });
   assert.equal(evaluatePool("solana", POOL, "0.002", KEYS, FUNDS).state, "refused");
   assert.equal(evaluatePool("solana", "", "", KEYS, FUNDS).state, "empty");
 });
@@ -103,6 +105,7 @@ function drawn(funds: () => Promise<PoolFunds> = async () => FUNDS) {
     form, handed,
     go: form.find((e) => e.dataset.action === "withdraw")!,
     lines: form.find((e) => e.dataset.lines === "pool-withdraw")!,
+    input,
     type: (k: "to" | "amount", v: string) => { input(k).value = v; input(k).fire("input"); },
     tap: async () => { form.find((e) => e.dataset.action === "withdraw")!.fire("click"); await Promise.all(steps.splice(0)); },
   };
@@ -127,11 +130,48 @@ test("the drawn screen: To and Max fee shown before the press, the press hands o
   assert.equal(f.form.dataset.state, "ready");
   assert.equal(f.lines.hidden, false);
   const shown = Object.fromEntries(f.lines.children.filter((e) => e.tag === "dd").map((e) => [e.dataset.line, e.textContent]));
-  assert.deepEqual(shown, { to: TO, "max-fee": "0.0013 SOL" });
+  assert.deepEqual(shown, { to: TO, "max-fee": "0.001305 SOL" });
   assert.deepEqual(f.lines.children.filter((e) => e.tag === "dt").map((e) => e.dataset.draftCopy), ["to", "max-fee"]);
   assert.equal(f.go.disabled, false);
   await f.tap();
-  assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: 2_000_000n, maxFee: FEE }]);
+  assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: 2_000_000n, maxFee: FEE + W_FEE }]);
+});
+
+// review #232 HIGH 2: an amount no plan sends without a change no withdraw could ever send is refused, naming the
+// nearest amounts that can be sent
+test("Amount: one no plan sends without dust is refused with the nearest amounts that can be sent, each of them sendable", () => {
+  const one: PoolFunds = { ...FUNDS, notes: [{ id: "a", value: 10_000_000n }] };
+  const cap = 10_000_000n - FEE - W_FEE;
+  const floor = FEE + W_FEE + MIN;
+  const got = checkPoolAmount("solana", formatUnits(cap - 1n, 9), one);
+  assert.deepEqual(got, { ok: false, code: "unplannable", below: cap - floor, above: cap });
+  for (const x of [cap - floor, cap]) assert.equal(checkPoolAmount("solana", formatUnits(x, 9), one).ok, true, String(x));
+  assert.equal(checkPoolAmount("solana", formatUnits(cap - floor + 1n, 9), one).ok, false);
+  assert.equal(poolRefusalWords("solana", "unplannable", undefined, { below: cap - floor, above: cap }), `Try ${formatUnits(cap - floor, 9)} or ${formatUnits(cap, 9)} SOL`);
+  assert.equal(poolRefusalWords("solana", "unplannable", undefined, { above: cap }), `Try ${formatUnits(cap, 9)} SOL`);
+});
+
+test("the drawn screen: an unplannable amount draws the nearest amounts, under the try words' draft key", async () => {
+  const f = drawn(async () => ({ ...FUNDS, notes: [{ id: "a", value: 10_000_000n }] }));
+  f.type("to", TO);
+  f.type("amount", formatUnits(10_000_000n - FEE - W_FEE - 1n, 9));
+  await settle();
+  const refusal = f.form.find((e) => e.dataset.for === "amount")!;
+  assert.equal(refusal.dataset.refusal, "unplannable");
+  assert.equal(refusal.dataset.draftCopy, "try");
+  assert.match(refusal.textContent, /^Try \S+ or \S+ SOL$/);
+});
+
+// review #232 LOW: the press compares the amount it reads now with the one drawn, not only the input events
+test("the press: an amount changed with no input event (a script, an autofill) hands nothing over", async () => {
+  const f = drawn();
+  f.type("to", TO);
+  f.type("amount", "0.002");
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  f.input("amount").value = "0.003";
+  await f.tap();
+  assert.deepEqual(f.handed, [], "the drawn 0.002 is not what the field holds at the press");
 });
 
 test("the press reads the funds again: a note spent meanwhile hands nothing over", async () => {

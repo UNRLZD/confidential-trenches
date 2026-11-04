@@ -8,17 +8,19 @@
 //   of them is never the user's); on Base and Robinhood 0x and 40 hex digits (EVM_ADDRESS), its EIP-55 checksum
 //   right when it mixes cases, never the zero address or the pool.
 // - Amount: a decimal in the pool asset's decimals, refused above what the pool's notes can send ("Insufficient": the
-//   ready pool balance, poolWithdrawable: each note less the epoch's fee), under the smallest part ("Min"), or when no
-//   plan of parts pays it exactly.
+//   ready pool balance, poolWithdrawable: each note less the epoch's fee and W's fee), under the smallest part ("Min"),
+//   or when no plan of parts pays it exactly without leaving a change no withdraw could ever send: then the line names
+//   the nearest amounts that can be sent (review #232 HIGH 2).
 // - Before the press, with both fields passed: the To line (the address that gets the money) and the Max fee line (one
-//   epoch fee per part: the most the relayer takes), so nothing is signed that was not shown.
+//   epoch fee and W's own send fee per part), so nothing is signed that was not shown; the run stops before its first
+//   part when its plan costs more.
 // - The notes and the fee are read when the screen opens and again at the press; the press checks both fields again
 //   and hands over only an answer equal to the one drawn.
 // - Every word is a draft until the owner picks it (data-draft-copy names its key in POOL_WITHDRAW_WORDS).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58 } from "@scure/base";
-import { planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
+import { nearestPlannable, planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
 import { EVM_ADDRESS, SOL_KEY, type PoolChain } from "../rules/pool.ts";
 import { CHECK_IDLE_MS, WITHDRAW_WORDS } from "./form.ts";
 
@@ -33,6 +35,9 @@ export const POOL_WITHDRAW_WORDS = {
   min: "Min ", // the vault form's "Min $X" with the pool asset's amount: Min 0.00189 SOL
   busy: WITHDRAW_WORDS.busy,
   "max-fee": "Max fee", // the signing page's line for a checked pool payload (rules/pool.ts drawPool)
+  // an amount no plan sends exactly: the nearest that can be, "Try 0.5 or 0.6 SOL" (one side alone: "Try 0.5 SOL")
+  try: "Try ",
+  or: " or ",
 } as const;
 
 /** Each chain's pool asset, as the screen names it. */
@@ -44,13 +49,14 @@ export const POOL_ASSET: Readonly<Record<PoolChain, { symbol: string; decimals: 
 
 /** The pool's own addresses no withdraw may send to (the pin's). */
 export type PoolKeys = { pool: string; program?: string; feePayer?: string };
-/** What the screen reads at open and at the press: the notes it may spend, the epoch fee and the smallest part. */
-export type PoolFunds = { notes: readonly WithdrawSource[]; fee: bigint; minPart: bigint };
+/** What the screen reads at open and at the press: the notes it may spend, the epoch fee, W's own send fee and the
+ *  smallest part. */
+export type PoolFunds = { notes: readonly WithdrawSource[]; fee: bigint; wFee: bigint; minPart: bigint };
 
 export type PoolAddressCode = "address";
-export type PoolAmountCode = "amount" | "insufficient" | "min" | "unread";
+export type PoolAmountCode = "amount" | "insufficient" | "min" | "unread" | "unplannable";
 export type PoolAddressCheck = { ok: true; to: string } | { ok: false; code: PoolAddressCode };
-export type PoolAmountCheck = { ok: true; amount: bigint; parts: number; maxFee: bigint } | { ok: false; code: PoolAmountCode; min?: bigint };
+export type PoolAmountCheck = { ok: true; amount: bigint; parts: number; maxFee: bigint } | { ok: false; code: PoolAmountCode; min?: bigint; below?: bigint; above?: bigint };
 export type PoolFormState = "empty" | "typing" | "refused" | "ready";
 export type PoolReady = Readonly<{ chain: PoolChain; to: string; amount: bigint; maxFee: bigint }>;
 export type PoolFormView = { state: PoolFormState; address: PoolAddressCheck | null; amount: PoolAmountCheck | null; ready: PoolReady | null };
@@ -101,11 +107,11 @@ export function checkPoolAmount(chain: PoolChain, raw: string, funds: PoolFunds 
   const amount = parseUnits(raw, POOL_ASSET[chain].decimals);
   if (amount === null || amount === 0n) return { ok: false, code: "amount" };
   if (funds === null) return { ok: false, code: "unread" };
-  if (amount > poolWithdrawable(funds.notes, funds.fee, funds.minPart)) return { ok: false, code: "insufficient" };
+  if (amount > poolWithdrawable(funds.notes, funds)) return { ok: false, code: "insufficient" };
   if (amount < funds.minPart) return { ok: false, code: "min", min: funds.minPart };
-  const plan = planPoolWithdraw(funds.notes, amount, funds.fee, funds.minPart);
-  if (plan === null) return { ok: false, code: "amount" };
-  return { ok: true, amount, parts: plan.length, maxFee: BigInt(plan.length) * funds.fee };
+  const plan = planPoolWithdraw(funds.notes, amount, funds);
+  if (plan === null) return { ok: false, code: "unplannable", ...nearestPlannable(funds.notes, amount, funds) };
+  return { ok: true, amount, parts: plan.length, maxFee: BigInt(plan.length) * (funds.fee + funds.wFee) };
 }
 
 /** The screen's view of both fields, checked now. */
@@ -120,8 +126,12 @@ export function evaluatePool(chain: PoolChain, to: string, amount: string, keys:
 }
 
 /** The words a refusal draws. */
-export function poolRefusalWords(chain: PoolChain, code: PoolAddressCode | PoolAmountCode, min?: bigint): string {
+export function poolRefusalWords(chain: PoolChain, code: PoolAddressCode | PoolAmountCode, min?: bigint, near: { below?: bigint; above?: bigint } = {}): string {
   const { symbol, decimals } = POOL_ASSET[chain];
+  if (code === "unplannable") {
+    const sides = [near.below, near.above].filter((x): x is bigint => x !== undefined).map((x) => formatUnits(x, decimals));
+    return sides.length === 0 ? POOL_WITHDRAW_WORDS["invalid-amount"] : `${POOL_WITHDRAW_WORDS.try}${sides.join(POOL_WITHDRAW_WORDS.or)} ${symbol}`;
+  }
   if (code === "unread") return POOL_WITHDRAW_WORDS.busy;
   if (code === "amount") return POOL_WITHDRAW_WORDS["invalid-amount"];
   if (code === "insufficient") return POOL_WITHDRAW_WORDS.insufficient;
@@ -193,9 +203,10 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
       return void p.replaceChildren();
     }
     p.dataset.refusal = code;
-    p.dataset.draftCopy = code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "address" ? "invalid-address" : code;
+    p.dataset.draftCopy = code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "address" ? "invalid-address" : code === "unplannable" ? "try" : code;
     const min = c && !c.ok && "min" in c ? c.min : undefined;
-    if (code !== "unread") return void (p.textContent = poolRefusalWords(chain, code, min));
+    const near = c && !c.ok && c.code === "unplannable" ? (c as { below?: bigint; above?: bigint }) : {};
+    if (code !== "unread") return void (p.textContent = poolRefusalWords(chain, code, min, near));
     const again = doc.createElement("button");
     again.type = "button";
     again.dataset.action = "retry";

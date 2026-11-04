@@ -452,7 +452,8 @@ test("a state read refuses a dead pending sell record once per page load, never 
   await t.stateRead();
   assert.deepEqual(await w.get("ops", "z1"), { kind: "sell", pool: "sol", sha: "cc", stage: "refused", code: "failed", txs: [], created_ms: 1 });
   const once = opsKeys;
-  assert.equal(once, 1);
+  // once for the dead sells, once for a withdraw's onward send still owed (card signpage-pool-withdraw-form)
+  assert.equal(once, 2);
   await t.stateRead();
   await t.stateRead();
   assert.equal(opsKeys, once, "read once per page load");

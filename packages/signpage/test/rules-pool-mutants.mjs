@@ -29,7 +29,12 @@ const SELL = "Solana sell:";
 const EBUY = "EVM buy:";
 const EWD = "EVM withdraw:";
 const ESELL = "EVM sell and authorization";
+const ONW = "Solana withdraw onward: a fee payer of ours";
+const ONTO = "Solana withdraw onward: To that is W";
+const ONR = "Solana withdraw onward: reads the two RPCs";
 const ONC = "EVM onward send: W's whole balance";
+const ONRH = "EVM onward send: on Robinhood";
+const ONF = "EVM onward send: a max fee under";
 const ONS = "EVM onward send: signs as W";
 
 // [text, replacement, the test that must fail, its file when not rules-pool.test.ts]
@@ -73,9 +78,18 @@ export const MUTANTS = [
   ['if (!rel || rel.program !== pin.program) return refuse("program");', 'if (!rel) return refuse("program");', WD],
   ['if (want.length !== rel.data.length || want.some((b, i) => b !== rel.data[i])) return refuse("release_not_devices");', "", WD],
   ['if (!sameList(rel.accounts, accounts)) return refuse("release_accounts");', "", WD],
-  ['if (rest.length !== 1) return refuse("instructions");', 'if (rest.length > 1) return refuse("instructions");', WDOK],
-  ['!same(t.accounts[1], to, false, true)) return refuse("transfer_to");', 'false) return refuse("transfer_to");', WD],
-  ['if (u64le(t.data, 4) !== got.withdrawnValue - got.relayFee) return refuse("transfer_amount");', 'if (u64le(t.data, 4) > got.withdrawnValue - got.relayFee) return refuse("transfer_amount");', WD],
+  ['if (d.ixs.length > n + 1) return refuse("instructions");', "", WDOK],
+  // W's onward send (the withdraw's second transaction)
+  ["[ctx.wallet, pin.pool, pin.program, pin.feePayer, SOLANA_SYSTEM_PROGRAM, ...reads.releaseAccounts].includes(to)", "false", ONTO],
+  [", ...reads.releaseAccounts].includes(to)", "].includes(to)", ONTO],
+  ['if (!Array.isArray(reads.toExecutable) || reads.toExecutable.length !== 2 || reads.toExecutable.some((x) => x !== false)) return refuse("to");', "", ONTO],
+  ["p[0] >= 0n && p[0] === p[1] ? p[0]", "p[0] >= 0n ? p[0]", ONR],
+  ['// W alone signs and pays: no fee payer of ours, nobody else\'s key\n  if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");', "", ONW],
+  ['if (d.ixs.length !== 1) return refuse("instructions");', "", ONW],
+  ['u64le(Uint8Array.of(...t.data.subarray(0, 4), 0, 0, 0, 0), 0) !== 2n) return refuse("transfer");', 'false) return refuse("transfer");', ONW],
+  ['!same(t.accounts[1], to, false, true)) return refuse("transfer_to");', 'false) return refuse("transfer_to");', ONW],
+  ["if (amount === 0n || amount + fee !== balance)", "if (amount === 0n || amount + fee > balance)", ONW],
+  ["if (amount === 0n || amount + fee", "if (amount + fee", ONW],
   // the fee and deadline (withdraw and buy)
   ['if (cap > ctx.feeCap) refuse("fee_cap_over_device_cap");', "", WD],
   ['if (cap > ctx.feeCap) refuse("fee_cap_over_device_cap");', "", BUY],
@@ -161,7 +175,10 @@ export const MUTANTS = [
   ["!Array.isArray(pair) || pair.length !== 2 || ", "", ONC, ONWARD],
   ['ok(pair[0]) || pair[0] !== pair[1]) return refuse("reads");', 'ok(pair[0])) return refuse("reads");', ONC, ONWARD],
   ['if (!uint(reads.priorityCap)) return refuse("reads");', "", ONC, ONWARD],
-  ["const estimate = hasCode ? agreed(reads.estimate, uint) : null;", "const estimate = reads.estimate ? agreed(reads.estimate, uint) : null;", ONC, ONWARD],
+  ["const estimate = hasCode || nitro ? agreed(reads.estimate, uint) : null;", "const estimate = reads.estimate ? agreed(reads.estimate, uint) : null;", ONC, ONWARD],
+  ["const estimate = hasCode || nitro ?", "const estimate = hasCode ?", ONRH, ONWARD],
+  ['const nitro = ask.chain === "robinhood";', "const nitro = false;", ONRH, ONWARD],
+  ['if (nitro && l1Fee !== 0n) return refuse("l1_fee");', "", ONRH, ONWARD],
   ['if (t.chainId !== pins.chainId) return refuse("chain_id");', "", ONC, ONWARD],
   ["!EVM_ADDRESS.test(to) || lower(to) === ZERO_ADDRESS", "lower(to) === ZERO_ADDRESS", ONC, ONWARD],
   [" || lower(to) === ZERO_ADDRESS", "", ONC, ONWARD],
@@ -175,8 +192,10 @@ export const MUTANTS = [
   ['if (t.gasLimit !== estimate) return refuse("gas_estimate");', "", ONC, ONWARD],
   ['if (t.gasLimit > EVM_ONWARD_GAS_MAX) return refuse("gas_over_cap");', "", ONC, ONWARD],
   ["export const EVM_ONWARD_GAS_MAX = 100_000n;", "export const EVM_ONWARD_GAS_MAX = 100_001n;", ONC, ONWARD],
-  ['if (t.maxPriorityFeePerGas > reads.priorityCap) return refuse("priority_fee");', "", ONC, ONWARD],
-  ['if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap) return refuse("max_fee");', "", ONC, ONWARD],
+  ['if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");', "", ONC, ONWARD],
+  [" || t.maxPriorityFeePerGas > t.maxFeePerGas) return", ") return", ONF, ONWARD],
+  ['if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");', "", ONC, ONWARD],
+  [" || t.maxFeePerGas < baseFee) return", ") return", ONF, ONWARD],
   ["t.maxFeePerGas > 2n * baseFee", "t.maxFeePerGas > 3n * baseFee", ONC, ONWARD],
   ["t.value + feeBound !== balance", "t.value + feeBound > balance", ONC, ONWARD],
   ["t.value + feeBound !== balance", "t.value + feeBound < balance", ONC, ONWARD],

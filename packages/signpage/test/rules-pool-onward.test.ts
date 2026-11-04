@@ -184,6 +184,45 @@ test("EVM onward send: W's whole balance less its fee bound to the typed address
   for (const [rule, f] of cases) assert.throws(f, refusedAs(rule), rule);
 });
 
+// review #232 LOW: fees bounded from below too, so a checked send is one a node includes
+test("EVM onward send: a max fee under the base fee, or a priority fee above the max fee, is refused", () => {
+  // control: a max fee of twice the base fee and a tip at the cap passes
+  checkEvmOnwardSend(txOf({ maxFeePerGas: 2n * BASE_FEE }), ASK, ctxOf(), TO, readsOf());
+  // and a max fee of exactly the base fee with no tip
+  checkEvmOnwardSend(txOf({ maxFeePerGas: BASE_FEE, maxPriorityFeePerGas: 0n }), ASK, ctxOf(), TO, readsOf());
+  assert.throws(() => checkEvmOnwardSend(txOf({ maxFeePerGas: BASE_FEE / 2n, maxPriorityFeePerGas: 0n }), ASK, ctxOf(), TO, readsOf()), refusedAs("max_fee"));
+  assert.throws(() => checkEvmOnwardSend(txOf({ maxFeePerGas: BASE_FEE - 1n, maxPriorityFeePerGas: 0n }), ASK, ctxOf(), TO, readsOf()), refusedAs("max_fee"));
+  // a tip over the max fee, the tip still under the device's cap
+  const big = readsOf({ priorityCap: 3n * BASE_FEE });
+  assert.throws(() => checkEvmOnwardSend(txOf({ maxFeePerGas: 3n * BASE_FEE / 2n, maxPriorityFeePerGas: 2n * BASE_FEE }), ASK, ctxOf(), TO, big), refusedAs("priority_fee"));
+});
+
+// review #232 MEDIUM 2: Robinhood is Arbitrum Nitro, which charges the L1 data as gas: 21,000 does not land there
+const RH = evmPoolVenues().robinhood;
+const RH_CTX = ctxOf({ evm: { venues: Object.freeze({ ...VENUES, robinhood: pin(RH, { pool: EVM_POOL }) }), feeRecipient: FEE_TO } });
+const RH_ASK: PoolAsk = { ...ASK, chain: "robinhood" };
+const rh = (gasLimit: bigint) => txOf({ gasLimit, chainId: BigInt(RH.chainId) });
+const est = (g: bigint, o: Partial<EvmOnwardReads> = {}) => readsOf({ estimate: [g, g], ...o });
+test("EVM onward send: on Robinhood the gas is the estimate both RPCs agree on, at most 100,000, with no L1 fee, to any address", () => {
+  const d = checkEvmOnwardSend(rh(32_000n), RH_ASK, RH_CTX, TO, est(32_000n));
+  assert.equal(d.feeCap, 32_000n * rh(32_000n).maxFeePerGas);
+  checkEvmOnwardSend(rh(100_000n), RH_ASK, RH_CTX, TO, est(100_000n));
+  checkEvmOnwardSend(rh(60_000n), RH_ASK, RH_CTX, TO, est(60_000n, { toHasCode: [true, true] }));
+  for (const [rule, f] of [
+    // a plain 21,000 on Nitro: under what the chain charges, the send never lands
+    ["gas_estimate", () => checkEvmOnwardSend(rh(21_000n), RH_ASK, RH_CTX, TO, est(32_000n))],
+    ["gas_estimate", () => checkEvmOnwardSend(rh(40_000n), RH_ASK, RH_CTX, TO, est(32_000n))],
+    // no estimate, or two that differ, is no read
+    ["reads", () => checkEvmOnwardSend(rh(21_000n), RH_ASK, RH_CTX, TO, readsOf())],
+    ["reads", () => checkEvmOnwardSend(rh(32_000n), RH_ASK, RH_CTX, TO, readsOf({ estimate: [32_000n, 32_001n] }))],
+    ["gas_over_cap", () => checkEvmOnwardSend(rh(100_001n), RH_ASK, RH_CTX, TO, est(100_001n))],
+    // Nitro's L1 cost is in the gas: an L1 fee beside it is a second charge W would be short of
+    ["l1_fee", () => checkEvmOnwardSend(txOf({ gasLimit: 32_000n, chainId: BigInt(RH.chainId) }, 7n), RH_ASK, RH_CTX, TO, est(32_000n, { l1Fee: [7n, 7n] }))],
+  ] as const) assert.throws(f, refusedAs(rule), rule);
+  // Base keeps 21,000 plus its L1 fee to an address with no code, and ignores an estimate there
+  checkEvmOnwardSend(txOf({}, 7n), ASK, ctxOf(), TO, readsOf({ l1Fee: [7n, 7n] }));
+});
+
 test("EVM onward send: signs as W the send the check passed, as it read it; nothing else", () => {
   const tx = txOf();
   checkEvmOnwardSend(tx, ASK, ctxOf(), TO, readsOf());

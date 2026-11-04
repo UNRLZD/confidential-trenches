@@ -384,12 +384,13 @@ export function checkSolanaDeposit(wire: Uint8Array, ask: PoolAsk, ctx: PoolCont
   return { chain: "solana", op: ask.kind, token: null, amount: ask.amount, feeCap: 0n, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back: null };
 }
 
-/** A Solana pool withdraw: the device's own release to W through the pinned pool, then at most one transfer from W to
- *  `to`, the address the user typed on SIGN_HOST, of no more than the release leaves W. */
-export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolContext, release: SolanaPoolRelease, to: string, reads: SolanaPoolReads): PoolDraw {
+/** A Solana pool withdraw's release (card signpage-pool-withdraw-form, the review of #232): the device's own release
+ *  to W through the pinned pool, alone after the compute budget (the helper sends nothing else with a tag 2), so it
+ *  lands or fails on the pool's own rules, never on a transfer W's holder could make fail. The draw is where it lands:
+ *  W. W's own send onward to the typed address is a second transaction (checkSolanaOnwardSend). */
+export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolContext, release: SolanaPoolRelease, reads: SolanaPoolReads): PoolDraw {
   if (ask.kind !== "pool.withdraw" || ask.chain !== "solana") return refuse("kind");
   const pin = pinOf(ctx);
-  if (!SOL_KEY(to)) return refuse("to");
   const d = decode(wire, reads);
   if (d.signers.length !== 2 || d.signers[0] !== pin.feePayer || d.signers[1] !== ctx.wallet) return refuse("signers");
   const n = head(d.ixs);
@@ -402,22 +403,54 @@ export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolCon
   } catch {
     return refuse("release_data");
   }
-  // byte for byte the device's own release (its ready proof): a field the bytes changed is not the device's
+  // byte for byte the device's own release (its proof): a field the bytes changed is not the device's
   const want = solanaEncodePoolRelease(release);
   if (want.length !== rel.data.length || want.some((b, i) => b !== rel.data[i])) return refuse("release_not_devices");
   checkFeeAndDeadline(got.relayFee, got.relayFeeCap, got.deadlineMs, ctx);
   const accounts = solanaPoolReleaseAccounts(pin, ctx.wallet, pin.feePayer, got, reads.stateSize);
   if (!sameList(rel.accounts, accounts)) return refuse("release_accounts");
-  const rest = d.ixs.slice(n + 1);
-  if (rest.length !== 1) return refuse("instructions");
-  {
-    const t = rest[0]!;
-    if (t.program !== SOLANA_SYSTEM_PROGRAM || t.data.length !== 12 || u64le(Uint8Array.of(...t.data.subarray(0, 4), 0, 0, 0, 0), 0) !== 2n) return refuse("transfer");
-    if (t.accounts.length !== 2 || !same(t.accounts[0], ctx.wallet, true, true) || !same(t.accounts[1], to, false, true)) return refuse("transfer_to");
-    if (u64le(t.data, 4) !== got.withdrawnValue - got.relayFee) return refuse("transfer_amount");
-  }
+  // the release alone: nothing after it
+  if (d.ixs.length > n + 1) return refuse("instructions");
   passedWire(wire);
-  return { chain: "solana", op: ask.kind, token: null, amount: got.withdrawnValue - got.relayFee, feeCap: got.relayFeeCap, pool: pin.pool, to, decimals: ask.decimals, back: null };
+  return { chain: "solana", op: ask.kind, token: null, amount: got.withdrawnValue - got.relayFee, feeCap: got.relayFeeCap, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
+}
+
+/** The device's reads for W's onward send, each as its two RPCs answered (they must agree): W's balance once its
+ *  release landed, the network's fee for this very message (getFeeForMessage), whether the typed address is an
+ *  executable account; with the release's own accounts, none of which is ever the destination. */
+export type SolanaOnwardReads = {
+  readonly blockhash: string;
+  readonly balance: readonly [bigint, bigint];
+  readonly fee: readonly [bigint, bigint];
+  readonly toExecutable: readonly [boolean, boolean];
+  readonly releaseAccounts: readonly string[];
+};
+
+/** W's onward send of a Solana pool withdraw: one System transfer of all W holds less its own fee to `to`, the address
+ *  typed on SIGN_HOST, W its only signer and fee payer, so W ends at 0 and nothing else is in the transaction. */
+export function checkSolanaOnwardSend(wire: Uint8Array, ask: PoolAsk, ctx: PoolContext, to: string, reads: SolanaOnwardReads): PoolDraw {
+  if (ask.kind !== "pool.withdraw" || ask.chain !== "solana") return refuse("kind");
+  const pin = pinOf(ctx);
+  // the typed address: a key, never W, the pool, its program, the fee payer, the System program, an account of the
+  // release (its pages or mark) or an executable account (a program cannot hold the user's money for them)
+  if (!SOL_KEY(to) || [ctx.wallet, pin.pool, pin.program, pin.feePayer, SOLANA_SYSTEM_PROGRAM, ...reads.releaseAccounts].includes(to)) return refuse("to");
+  if (!Array.isArray(reads.toExecutable) || reads.toExecutable.length !== 2 || reads.toExecutable.some((x) => x !== false)) return refuse("to");
+  const agreed = (p: readonly [bigint, bigint]): bigint => (Array.isArray(p) && p.length === 2 && typeof p[0] === "bigint" && p[0] >= 0n && p[0] === p[1] ? p[0] : refuse("reads"));
+  const balance = agreed(reads.balance);
+  const fee = agreed(reads.fee);
+  const d = decode(wire, { blockhash: reads.blockhash, tables: {}, stateSize: 0, labelSize: 0 });
+  // W alone signs and pays: no fee payer of ours, nobody else's key
+  if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
+  // one transfer, no compute budget (W pays the base fee only) and nothing beside it
+  if (d.ixs.length !== 1) return refuse("instructions");
+  const t = d.ixs[0]!;
+  if (t.program !== SOLANA_SYSTEM_PROGRAM || t.data.length !== 12 || u64le(Uint8Array.of(...t.data.subarray(0, 4), 0, 0, 0, 0), 0) !== 2n) return refuse("transfer");
+  if (t.accounts.length !== 2 || !same(t.accounts[0], ctx.wallet, true, true) || !same(t.accounts[1], to, false, true)) return refuse("transfer_to");
+  // all W holds less the fee: W ends at 0, nothing left on it, never more than it holds
+  const amount = u64le(t.data, 4);
+  if (amount === 0n || amount + fee !== balance) return refuse("transfer_amount");
+  passedWire(wire);
+  return { chain: "solana", op: ask.kind, token: null, amount, feeCap: fee, pool: pin.pool, to, decimals: ask.decimals, back: null };
 }
 
 /** A Solana pool buy (tag 3): the kit's checks on every byte against the pinned pool, the request bound to them here. */
@@ -743,7 +776,11 @@ export function checkEvmOnwardSend(tx: EvmOnwardSend, ask: PoolAsk, ctx: PoolCon
   const hasCode = agreed(reads.toHasCode, (x) => typeof x === "boolean");
   const baseFee = agreed(reads.baseFee, uint);
   const l1Fee = agreed(reads.l1Fee, uint);
-  const estimate = hasCode ? agreed(reads.estimate, uint) : null;
+  // Robinhood (Arbitrum Nitro) charges its L1 data as gas: a plain send's gas is its own estimate there, on any To
+  const nitro = ask.chain === "robinhood";
+  const estimate = hasCode || nitro ? agreed(reads.estimate, uint) : null;
+  // and no L1 fee beside it: Nitro has no separate one to hold
+  if (nitro && l1Fee !== 0n) return refuse("l1_fee");
   if (!uint(reads.priorityCap)) return refuse("reads");
   // the pinned chain's id: no replay of W's send on another chain
   if (t.chainId !== pins.chainId) return refuse("chain_id");
@@ -761,15 +798,16 @@ export function checkEvmOnwardSend(tx: EvmOnwardSend, ask: PoolAsk, ctx: PoolCon
     // no code at the address: a plain transfer's gas, no fee bound padded past it
     if (t.gasLimit !== EVM_ONWARD_GAS) return refuse("gas_limit");
   } else {
-    // a smart-wallet recipient: its own two-RPC estimate, no padding past it
+    // a smart-wallet recipient, or any send on Nitro: its own two-RPC estimate, no padding past it
     if (t.gasLimit !== estimate) return refuse("gas_estimate");
     // and never more than the cap, so a recipient's code cannot burn the withdrawal as gas
     if (t.gasLimit > EVM_ONWARD_GAS_MAX) return refuse("gas_over_cap");
   }
-  // no tip that burns the withdrawal
-  if (t.maxPriorityFeePerGas > reads.priorityCap) return refuse("priority_fee");
-  // no max fee past two base fees and the tip, the standard bound
-  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap) return refuse("max_fee");
+  // no tip that burns the withdrawal, nor one above the max fee (a send no node includes)
+  if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");
+  // no max fee past two base fees and the tip, the standard bound, nor under the base fee (a send that never lands,
+  // its nonce held, the money stuck on W)
+  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");
   // the whole balance less the fee bound: no skim left in W, no overspend, never nothing
   const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;
   if (t.value === 0n || t.value + feeBound !== balance) return refuse("value");
