@@ -11,9 +11,14 @@
 // - Fresh: a chain in the state is read again once its last try is POOL_PRICE_REFRESH_MS old, one read per chain at a
 //   time. A read that fails keeps the last good one, which is dropped once past the kit's poolUsdGoodUntilS (the feed's
 //   maxAgeS from the earlier of its own time and the read's), so a price past it never reaches the state.
+// - A failed read (card signpage-price-read-retry) is due again POOL_PRICE_RETRY_MS after it ends, doubled per failure
+//   in a row up to POOL_PRICE_REFRESH_MS, not POOL_PRICE_REFRESH_MS after its try: one slow provider leaves Bal without
+//   USD and Buy off for about a second, not 15 s (sign live runs 41920575578 and 41924297260, 4 Nov 22:00Z and 22:25Z).
+//   A good read ends the run of failures.
 // - The app hears each new price: a read that ends calls the watchers (the API posts a state event when the state read
-//   then differs), and POOL_PRICE_REFRESH_MS after it calls them again, so a state read starts the next read while a
-//   pool shows. Signed out, or with no pool, no state names a chain and no read is made.
+//   then differs), and once its next read is due (POOL_PRICE_REFRESH_MS after it, or the failure's wait) calls them
+//   again, so a state read starts the next read while a pool shows. Signed out, or with no pool, no state names a chain
+//   and no read is made.
 // - The price only labels USD: pool.buy carries only its amount, in the pool asset's units, and the page spends it only
 //   from a ready proof that funds it (src/pool-buy.ts), so an amount an app priced with a planted price is refused when
 //   it is over one proof's funds; the page does not hold it to the USD the app showed.
@@ -25,6 +30,9 @@ import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 /** A chain's price is read again once its last try is this old: Pyth's SOL/USD (maxAgeS 60) is read at least three
  *  times inside its bound. Its sponsored feed published every 3 to 16 s in four reads on 4 Nov 14:44Z. */
 export const POOL_PRICE_REFRESH_MS = 15_000;
+/** A failed read is due again this long after it ends, doubled per failure in a row up to POOL_PRICE_REFRESH_MS: soon
+ *  enough that Buy is back within a second or two of one slow answer, and a provider still failing is asked less often. */
+export const POOL_PRICE_RETRY_MS = 1_000;
 
 export type PoolPriceDeps = {
   /** The chain's two RPCs of two providers, as the pool kinds read on; null: none, so no price. */
@@ -52,7 +60,10 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
   const read = deps.read ?? poolUsdPrice;
   const after = deps.after ?? ((ms: number, fn: () => void) => void setTimeout(fn, ms));
   const held = new Map<PoolUsdChain, PoolStatePrice>();
-  const tried = new Map<PoolUsdChain, number>();
+  /** When the chain's next read is due, unix ms on `now`. */
+  const due = new Map<PoolUsdChain, number>();
+  /** The chain's failed reads in a row. */
+  const failed = new Map<PoolUsdChain, number>();
   const reading = new Set<PoolUsdChain>();
   const watchers = new Set<() => void>();
   const tell = (): void => {
@@ -73,15 +84,24 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
     void Promise.resolve()
       .then(() => read({ chain, rpcs, nowMs: now(), ...(base ? { baseRpcs: base } : {}) }))
       .then((p) => {
-        if (p.chain !== chain || p.price <= 0n) return;
+        if (p.chain !== chain || p.price <= 0n) return false;
         held.set(chain, { price: p.price.toString(), expo: p.expo, published_s: p.publishedS, read_ms: now() });
+        return true;
       })
       // refused (stale, disagreeing, unsure, unreachable): the last good read stands until its bound drops it
-      .catch(() => {})
-      .finally(() => {
+      .catch(() => false)
+      .then((ok) => {
         reading.delete(chain);
+        let waitMs = POOL_PRICE_REFRESH_MS;
+        if (ok) failed.delete(chain);
+        else {
+          const n = (failed.get(chain) ?? 0) + 1;
+          failed.set(chain, n);
+          waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);
+          due.set(chain, now() + waitMs);
+        }
         tell();
-        after(POOL_PRICE_REFRESH_MS, tell);
+        after(waitMs, tell);
       });
   };
   return {
@@ -89,9 +109,9 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
     refresh(chains) {
       for (const chain of new Set(chains)) {
         if (!priced(chain) || reading.has(chain)) continue;
-        const last = tried.get(chain);
-        if (last !== undefined && now() - last < POOL_PRICE_REFRESH_MS) continue;
-        tried.set(chain, now());
+        const at = due.get(chain);
+        if (at !== undefined && now() < at) continue;
+        due.set(chain, now() + POOL_PRICE_REFRESH_MS);
         start(chain);
       }
     },

@@ -12,7 +12,7 @@ import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import type { BalancePool } from "../../wallet/src/pool/balances.ts";
-import { POOL_PRICE_REFRESH_MS, poolPrices, type PoolPriceDeps } from "../src/pool-price.ts";
+import { POOL_PRICE_REFRESH_MS, POOL_PRICE_RETRY_MS, poolPrices, type PoolPriceDeps } from "../src/pool-price.ts";
 import { withPools } from "../src/pools.ts";
 import { stateOf } from "../src/state.ts";
 
@@ -160,6 +160,54 @@ test("refresh: one read per chain at a time, again only once its last try is POO
   h.p.refresh(["solana"]);
   await settled();
   assert.deepEqual(asked, ["solana", "solana"], "due: read again");
+});
+
+test("retry: a failed first read is read again within 2 s and its good price reaches the state; failures in a row wait longer, up to POOL_PRICE_REFRESH_MS", async () => {
+  // the kit's read fails as sign live run 41920575578 did (4 Nov 22:00Z), then answers
+  // (false: it throws; "base": an answer of another chain, which is a failure too)
+  const outcomes: (boolean | "base")[] = [false, true];
+  const asked: number[] = [];
+  const read = async (): Promise<PoolUsdPrice> => {
+    asked.push(h.clock.ms);
+    const o = outcomes.shift() ?? true;
+    if (o === false) throw new Error("rpc 0 getMultipleAccounts: no answer in 3500 ms (timeout, 1 try at solana-rpc.publicnode.com)");
+    return { chain: o === "base" ? "base" : "solana", asset: "SOL", decimals: 9, price: SOL_PRICE, expo: -8, publishedS: Math.floor(h.clock.ms / 1000), source: "pyth", at: 1n };
+  };
+  const waits: { ms: number; fn: () => void }[] = [];
+  const h = holder({ read, after: (ms, fn) => void waits.push({ ms, fn }) });
+  /** A tick: the clock moves to it and the watchers hear it, and the state read that follows refreshes the chain. */
+  const tick = async (): Promise<number> => {
+    const w = waits.shift()!;
+    h.clock.ms += w.ms;
+    w.fn();
+    h.p.refresh(["solana"]);
+    await settled();
+    return w.ms;
+  };
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(h.p.get("solana"), null, "the first read failed: no price");
+  assert.equal(await tick(), POOL_PRICE_RETRY_MS);
+  assert.ok(POOL_PRICE_RETRY_MS <= 2_000);
+  assert.deepEqual(asked, [FX.nowMs, FX.nowMs + POOL_PRICE_RETRY_MS], "read again at the failure's tick");
+  assert.notEqual(h.p.get("solana"), null, "the good read is in the state");
+  // a good read: the next one POOL_PRICE_REFRESH_MS on, as before
+  assert.equal(waits.at(-1)!.ms, POOL_PRICE_REFRESH_MS);
+  // failures in a row: 1 s, 2 s, 4 s, 8 s, then POOL_PRICE_REFRESH_MS, each read at its tick; a good read ends the run
+  outcomes.push(false, false, false, false, false, false, true, false);
+  const seen: number[] = [];
+  for (let i = 0; i < 8; i++) seen.push(await tick());
+  assert.deepEqual(seen, [POOL_PRICE_REFRESH_MS, 1_000, 2_000, 4_000, 8_000, POOL_PRICE_REFRESH_MS, POOL_PRICE_REFRESH_MS, POOL_PRICE_REFRESH_MS]);
+  assert.equal(asked.length, 10, "every tick read once");
+  assert.equal(waits.at(-1)!.ms, POOL_PRICE_RETRY_MS, "the failure after a good read waits POOL_PRICE_RETRY_MS again");
+  outcomes.push("base");
+  assert.equal(await tick(), POOL_PRICE_RETRY_MS);
+  assert.equal(waits.at(-1)!.ms, 2 * POOL_PRICE_RETRY_MS, "an answer of another chain is a failure in the run");
+  // not due before its wait: a state read 1 ms early starts nothing
+  h.clock.ms += POOL_PRICE_RETRY_MS - 1;
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(asked.length, 11);
 });
 
 test("no pair, NEAR or no chain named: no read and no price; Robinhood reads on its pair with Base's pair beside it", async () => {
