@@ -3,7 +3,11 @@
 // testnet build) on the devnet pool it pins: one pool.deposit of 0.01 SOL, the proof queue's pass, one pool.buy of a
 // devnet pump.fun coin sent through the helper's POST /v1/pool/solana/send, then one pool.sell of all W holds of it,
 // back into the pool as a return note.
-//   node packages/signpage/scripts/pool-flow-devnet.mjs <table> <mint> <spend SOL> <out.json>
+//   node packages/signpage/scripts/pool-flow-devnet.mjs <table> <mint> <spend SOL | max> <out.json>
+// - <spend> "max": the most the ready proof can spend on the coin's own venue (the kit's solanaPoolBuyMaxSpend on the
+//   venue readSolanaPoolBuyVenue reads, the rung's chunk, the relay fee the helper gave the proof's pass, the devnet tip
+//   of 0), so the buy leaves W exactly what its sell needs up front (the review of signpage-pool-sell 4b6223a), and
+//   the sell then shows on chain that W at that need sells.
 // - A seed made in this run only (16 random bytes), never printed or kept; the wallet store and its notes are
 //   fake-indexeddb, in memory. U, the deposit's source, is the address the note store plans; this prints U and the
 //   lamports it needs (the rung, the mark's rent, two page entries and the fee, from the Rent sysvar both RPCs give), then
@@ -33,7 +37,7 @@ const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { solanaJsonRpc } = await import("../../kit/src/trade/solana/send.ts");
-const { readSolanaRent, solanaRentMin } = await import("../../kit/src/trade/solana/pool-buy.ts");
+const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolSellNeed } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
 const { TESTNET_RPCS, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
@@ -93,9 +97,12 @@ const seed64 = wordsToSeed64(entropyToWords(Uint8Array.from(entropy)));
 entropy.fill(0);
 const page = { store: async () => w, seed64: async () => seed64.slice() };
 // the helper's fetch, logged: its status for every call
+// the relay fee the helper gave the proof's pass (GET /v1/pool/fee), for a "max" spend
+let relayFee = null;
 const helperFetch = async (url, init) => {
   const r = await fetch(url, init);
   log(`helper ${init?.method ?? "GET"} ${new URL(url).pathname}: HTTP ${r.status}`);
+  if (new URL(url).pathname === "/v1/pool/fee" && r.status === 200) relayFee = BigInt(JSON.parse(await r.clone().text()).fee);
   return r;
 };
 const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, table: TABLE, fetch: helperFetch });
@@ -165,8 +172,15 @@ if (landed) {
   log("the proof queue's pass");
   const pass = await t.proofs();
   log(`pass ${JSON.stringify(pass, (k, v) => (typeof v === "bigint" ? String(v) : v))}`);
-  log(`pool.buy of ${SPEND} SOL of ${MINT}`);
-  buy = await run("pool.buy", { chain: "solana", token: MINT, amount: SPEND, slippage_bps: 300 });
+  let spend = SPEND;
+  if (SPEND === "max") {
+    const venue = await readSolanaPoolBuyVenue(rpcs, "pump-curve", MINT);
+    const max = solanaPoolBuyMaxSpend({ withdrawnValue: RUNG, relayFee }, venue, 0n, rent);
+    spend = `0.${String(max).padStart(9, "0")}`;
+    log(`max spend on ${venue.kind} (token account ${venue.tokenAccountSize} B, cashback ${venue.cashback}): ${max} lamports at relay fee ${relayFee}; W keeps ${solanaPoolSellNeed(venue.kind, rent)}, its sell's need`);
+  }
+  log(`pool.buy of ${spend} SOL of ${MINT}`);
+  buy = await run("pool.buy", { chain: "solana", token: MINT, amount: spend, slippage_bps: 300 });
   log(`buy ${JSON.stringify(buy)}`);
 }
 let sell = null;
@@ -181,6 +195,7 @@ if (bought) {
   const W = t.transaction.message.accountKeys[1];
   const accs = (await rpcs[0]("getTokenAccountsByOwner", [W, { mint: MINT }, { encoding: "jsonParsed", commitment: "finalized" }])).value;
   const amount = accs[0].account.data.parsed.info.tokenAmount.uiAmountString;
+  log(`W ${W} holds ${(await rpcs[0]("getBalance", [W, { commitment: "finalized" }])).value} lamports after the buy`);
   log(`pool.sell of ${amount} of ${MINT} from W ${W}`);
   sell = await run("pool.sell", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
   log(`sell ${JSON.stringify(sell)}`);

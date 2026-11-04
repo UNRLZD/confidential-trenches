@@ -14,6 +14,10 @@ Tx: solana-devnet 4aDumNmw65YCWCpepMGp9NoNRWRZPUPCu21LSyJA3G4zShduyt9CzJ6s5iwtqH
 Tx: solana-devnet 63fqkqcKM2jQq7aPitYXUzeUWnm7FTyCMHMUhHVSrXbDQeZwHxkXBFUvkEzE5JVkAaspXqDUYc8hRBGh3R4Zkera
 Tx: solana-devnet 2MbB4Fq7KU1TiSkYA1GpPYAUTTyt68Jz2quLfvsp5xP72yawSYG1E9D3bs9mBHirYar8UTLQm786CyfgUD5VPNua
 Tx: solana-devnet 3ZMVTe6R7zXPpE76MC6oJCSXBUZT2XYH6kyrXhDGt4stS5U8WyPPKnzHWsXrrdD2RWSMW919DEhTqLptiX7myG3w
+Tx: solana-devnet 5YyxmCGwww7uqXVeGL9WrhmDGg1shqhdHURsZrVQuim6DERjBHPfG88MzVE4QxczS4Lzx1FVyLpU89tyWfmxewpQ
+Tx: solana-devnet 3p8pyECkxcGkZYM8tehKUHBbYZvLNT2NAHSuazkKKP6yTtKVzMWx5gKw4wWpeo7peA5BHMTVh3JX4xPznCANY1cJ
+Tx: solana-devnet 3MhuhtsQ9twN36JgGeN2x6ojSfbHSgL3HHxGDodGy55LEkhon4vd7ExjBffSXMjamXR2nPrZCBtByg8W8PAS4KkR
+Tx: solana-devnet yxY67LWAHQtdasuVwJSv47ed3QWKTPSg1Tfm8ptmZFS5ir8uvoYKYEZDAGAbgA5e65ENi38sAbq6NFxjUR5AEfq
 
 The run, on Solana devnet, 2026-11-04 09:29-09:57Z, in the order of the Tx lines above. Every funding came from wallet D (the CO's), each the exact amount the step printed.
 1. The lookup table (packages/signpage/scripts/pool-table-devnet.mjs): the first Tx line funds its authority with the rent and the fee, 5003720 lamports; the second creates and fills it with 25 addresses: the pool, both trees' pages to entry 2,047, the token programs, wSOL, the pump fee program and the pump curve venue's program-wide accounts. It is DEVNET_TABLE in the testnet build, read back the same on both devnet RPCs at finalized.
@@ -29,5 +33,7 @@ Its authority T: 8YuJPtppEh6qw4DCceF9dV6W28NiMYqMbeFb7e3onCSq, a devnet key kept
    - pool.buy of 0.004 SOL of the coin, sent through the helper's POST /v1/pool/solana/send, paid by the helper's devnet fee payer, loading the table: filled, the note SPENT, change 0 at leaf 7;
    - pool.sell of all W held (12978802.596837 of the coin), signed and paid by W alone: the sale and the deposit of its proceeds back into the pool in one transaction, filled, the return note UNSPENT with 3500796 lamports at leaf 8.
 Run 4's W: 3qQvaWZeSQPXXBpr3fjrTPnmRu5Ft5hFTLr55AooLjNN, holding 767277 lamports after the sell (an empty account's rent and what the sale gave over min out). The fee payer: 9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb.
+7. Run 5, 10:40-10:42Z, the max-spend buy then sell (the review of signpage-pool-sell 4b6223a: a W left at 0 or short of its sell's fee could never sell): the last four Tx lines fund U from D, make the deposit (note UNSPENT, leaf 9), the pool buy at the most the proof could spend on the coin's own venue (5184720 lamports, the harness's spend "max": the kit's solanaPoolBuyMaxSpend at the helper's relay fee of 1300000, tip 0), filled with change 0 at leaf 10, and the sell of all W held, filled, the return note UNSPENT with 3436878 lamports at leaf 11.
+Run 5's W: 6qV5goNN5mbRrVcLYuKjbsE9duNhxh9M4NWLsnGS7RWs, holding exactly 655240 lamports after the buy (the sell's fee and rent(0), the kit's solanaPoolSellNeed on pump's curve) and 801941 after the sell, the same on both devnet RPCs at finalized.
 Each run's seed lived only in its run (16 random bytes, never printed or kept).
 This live check reads, on https://api.devnet.solana.com and https://solana-devnet.api.onfinality.io/public at finalized: the table (the ALT program's, the same bytes, active, holding the pool and both first pages); run 4's deposit, pool buy and sell succeeded (the buy paid by the pin's fee payer, loading the pin's table, calling pump.fun; the sell signed and paid by the buy's W alone, calling pump.fun and the pool); and the helper's GET /v1/pool/fee naming the pin's program and fee payer.
