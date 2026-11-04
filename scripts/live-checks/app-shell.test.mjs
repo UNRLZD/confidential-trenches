@@ -27,8 +27,8 @@ test("recorded good answer: every route at both widths, integrity equal, CLS 0, 
   assert.match(r.lines[0], /^ok  served with a CSP and an Integrity-Policy: CSP, Integrity-Policy blocked-destinations=\(script\)$/);
   assert.ok(r.lines.some((l) => /^ok  \S+\/assets\/index-[\w-]+\.js integrity equals the sha384 of the bytes served$/.test(l)));
   assert.ok(r.lines.includes(`ok  ${ROUTES.length * WIDTHS.length} loads of ${ROUTES.length * WIDTHS.length} (every route at both widths)`));
-  // the phone's header swaps Sign in for the balance when the shell's signed-in state lands: a shift of 0.0004 at most
-  for (const w of WIDTHS) for (const [id, p] of ROUTES) assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} ${p} \\(${id}\\): CLS 0\\.000\\d, no violation, no error$`).test(l)), `${w.name} ${p}`);
+  // every phone load holds still; a desktop load moved 0.0009 at most
+  for (const w of WIDTHS) for (const [id, p] of ROUTES) assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} ${p} \\(${id}\\): CLS 0\\.000${w.name === "phone" ? "0" : "\\d"}, no violation, no error$`).test(l)), `${w.name} ${p}`);
   assert.ok(r.lines.some((l) => /^ok  phone inside the shell, 4 link\(s\): CLS 0, no reload$/.test(l)));
   assert.ok(r.lines.some((l) => /^ok  desktop inside the shell, 6 link\(s\): CLS 0, no reload$/.test(l)));
 });
@@ -42,12 +42,28 @@ test("recorded bad answer: today's APP_HOST stays top-level, not inside SIGN_HOS
   }
 });
 
-test("planted on the good answer: a late shift above 0.1 on one load, and inside the shell: FAIL", () => {
+test("planted on the good answer: a late shift above 0.1 on a desktop load, and inside the shell: FAIL", () => {
   const rec = structuredClone(ANSWERS.good);
-  rec.loads[0].cls = 0.1422;
+  const desk = rec.loads.findIndex((l) => l.width === "desktop");
+  rec.loads[desk].cls = 0.1422;
   rec.inShell[0].cls = 0.05;
   const b = bad(judge(rec).lines);
-  assert.deepEqual(b, [`BAD phone / (token): CLS 0.1422 above 0.1`, "BAD phone inside the shell, 4 link(s): CLS 0.0500 inside the shell"]);
+  assert.deepEqual(b, [`BAD desktop ${rec.loads[desk].path} (${rec.loads[desk].expect}): CLS 0.1422 above 0.1`, "BAD phone inside the shell, 4 link(s): CLS 0.0500 inside the shell"]);
+});
+
+test("planted on the good answer: any shift on a phone load, BAR-10's 0.0806 tab bar and 0.0008 Verify reads: FAIL", () => {
+  const rec = structuredClone(ANSWERS.good);
+  const at = (p) => rec.loads.findIndex((l) => l.width === "phone" && l.path === p);
+  Object.assign(rec.loads[at("/profile")], { cls: 0.0806, shifts: [{ at: 28, value: 0.0806, input: false, sources: ["div.tabbar 0,0 0x0 -> 0,776 390x68"] }] });
+  Object.assign(rec.loads[at("/verify")], { cls: 0.0008, shifts: [{ at: 65, value: 0.0008, input: false, sources: ["dd.num 282,212 90x14 -> 365,212 7x14"] }] });
+  assert.deepEqual(bad(judge(rec).lines), [
+    "BAD phone /profile (profile): CLS 0.0806 above 0 [+28ms 0.0806: div.tabbar 0,0 0x0 -> 0,776 390x68]",
+    "BAD phone /verify (verify): CLS 0.0008 above 0 [+65ms 0.0008: dd.num 282,212 90x14 -> 365,212 7x14]",
+  ]);
+  // the same shift on a desktop load stays under its 0.1
+  const d = structuredClone(ANSWERS.good);
+  d.loads.find((l) => l.width === "desktop").cls = 0.0806;
+  assert.equal(judge(d).ok, true);
 });
 
 test("planted on the good answer: a shift inside the shell names its element and its rects", () => {
