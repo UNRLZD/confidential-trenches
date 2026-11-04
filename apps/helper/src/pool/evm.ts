@@ -37,9 +37,59 @@
 // gas than the fee, and a send the helper accepts either lands and spends or fails in the simulation.
 // Answer: 200 { hash }. pool-evm-buy adds buy() with W's EIP-712 signature: its selector goes in SELECTORS with its own
 // decoder, and the same fee, recipient, simulation and send rules apply.
+//
+// POST /v1/pool/evm/sell (card helper-evm-sender): W's sell of its token back into the pool. W holds no ETH and sends
+// nothing: the device sends W's EIP-712 Sell inside SellDelegate.sell's calldata and W's EIP-7702 authorization of the
+// kit's pinned SellDelegate, and the sender sends ONE type-4 transaction to W carrying both, as the device's reference
+// sell that landed on both testnets does (contracts/pool-evm/script/testnet-run.mjs sellOf, testnet-run-lib.mjs
+// signTx7702). SellDelegate pays `fee` (at most Sell.feeCap) to msg.sender, the sender, and deposits the rest.
+// The body: { "pool", "w", "data", "authorization": { chainId, address, nonce, yParity, r, s } }, hex strings as
+// testnet-run-lib.mjs authJson writes them. Checks, each a refusal before any send (422 unless named), every static one
+// before any RPC call:
+//   bad_shape        a body of any other key or shape, or data not sell((address,uint256,address,bytes,uint256,address,
+//                    uint256,uint256,uint256,uint256),uint256,bytes) in its one canonical ABI encoding (every offset,
+//                    length and padding as the encoder writes them, a 65-byte signature, nothing after), or over
+//                    EVM_SELL_DATA_MAX (400);
+//   not_pool         the Sell's pool is not this sender's;
+//   fee_over_cap     the fee is over the Sell's feeCap, or the feeCap is not under minOut (the deposit holds nothing);
+//   bad_authorization the authorization's chainId is not the venue's (the kit's evmPoolVenues(), never 0), its address
+//                    not the kit's pinned sell delegate for this network (none pinned: every sell refused), yParity not
+//                    0 or 1, r or s 0 or out of range, s high (EIP-2), nonce 2^64 - 1 or more (EIP-7702), or its signer
+//                    not W; one code, the detail names which;
+//   bad_signature    W's Sell signature does not recover to W over SellDelegate's own digest (evmSellDigest: domain
+//                    Blindfill, 1, the venue's chain id, verifyingContract W, as SellDelegate._sellDigest and the kit's
+//                    sell-unpinned.ts sellDigest make it; the kit exports no digest), or its v is not 27 or 28, or its
+//                    s is high;
+//   deadline_near    the deadline (unix seconds) is under now + EVM_POOL_SEND_MARGIN_MS;
+//   deadline_far     it is over now + the kit's EVM_POOL_SELL_DEADLINE_MAX_S (a deadline written in ms lands here);
+//   auth_nonce       W's account nonce at pending, on either provider, is not the authorization's: the chain would skip
+//                    the authorization and the sender would pay for a call to W with no code;
+//   fee_low          the fee is under EVM_POOL_SELL_GAS x (the higher latest base fee of the two providers + the kit's
+//                    tip) + the L1 data fee bound (Base and Base Sepolia: GasPriceOracle getL1FeeUpperBound of the
+//                    longest the transaction can be, the higher of the two providers; Robinhood: 0, its L1 cost is in
+//                    its gas);
+//   simulation_failed eth_call at "pending" of the transaction as signed (from the sender, to W, its fee fields, its gas
+//                    less EVM_7702_AUTH_GAS, which an eth_call does not charge), W's code overridden with the delegation
+//                    designator, fails in execution (as the device's sim does: the kit's checks/evm/quote.ts
+//                    simmedSells);
+//   upstream (503)   a read could not be made, or the providers name another chain than each other or the venue's;
+//   rate_limited and in_flight (429) as the withdraw: one queue, one nonce lane, one held limit per client.
+// The send: gas exactly EVM_POOL_SELL_GAS and maxPriorityFeePerGas exactly the kit's evmPoolSellTip (pins the device's
+// sim copies, never eth_estimateGas or eth_maxPriorityFeePerGas), maxFeePerGas min(2 x base + tip, (fee - L1) / gas),
+// so the sender's worst cost, gas x maxFeePerGas + L1, is within the fee. Once per (W, Sell nonce): a repeat gets the
+// first hash and sends nothing; a refused sell frees it.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { evmPoolVenues, solanaJsonRpc, type EvmPoolVenue } from "@blindfill/kit";
+import {
+  EVM_7702_AUTH_GAS,
+  EVM_POOL_SELL_DEADLINE_MAX_S,
+  EVM_POOL_SELL_GAS,
+  evmPoolSellTip,
+  evmPoolVenues,
+  solanaJsonRpc,
+  type EvmPoolChain,
+  type EvmPoolVenue,
+} from "@blindfill/kit";
 import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
 import { heldPerClient, throttleOf } from "../limits/limits.ts";
@@ -96,6 +146,9 @@ export function rlp(x: Rlp): Uint8Array {
 }
 
 export type EvmTx = { chainId: bigint; nonce: bigint; maxPriorityFeePerGas: bigint; maxFeePerGas: bigint; gas: bigint; to: string; data: Uint8Array };
+/** One EIP-7702 authorization as a type-4 transaction's list carries it. */
+export type EvmAuthorization = { chainId: bigint; address: string; nonce: bigint; yParity: bigint; r: bigint; s: bigint };
+export type EvmTx4 = EvmTx & { authorizations: readonly EvmAuthorization[] };
 
 /** The signed type-2 transaction (EIP-1559): value 0, no access list. */
 export function signEvmTx(tx: EvmTx, key: Uint8Array): { raw: Uint8Array; hash: string } {
@@ -109,9 +162,95 @@ export function signEvmTx(tx: EvmTx, key: Uint8Array): { raw: Uint8Array; hash: 
   return { raw, hash: `0x${hex(keccak_256(raw))}` };
 }
 
+/** A type-4 transaction's fields before its signature (EIP-7702): value 0, no access list. */
+const tx4Fields = (tx: EvmTx4): Rlp[] => [
+  big(tx.chainId), big(tx.nonce), big(tx.maxPriorityFeePerGas), big(tx.maxFeePerGas), big(tx.gas), unhex(tx.to.slice(2)), new Uint8Array(), tx.data, [],
+  tx.authorizations.map((a) => [big(a.chainId), unhex(a.address.slice(2)), big(a.nonce), big(a.yParity), big(a.r), big(a.s)]),
+];
+
+/** The signed type-4 transaction (EIP-7702): 0x04 ‖ rlp([chainId, nonce, tip, maxFee, gas, to, 0, data, [], auths, y, r, s]). */
+export function signEvmTx4(tx: EvmTx4, key: Uint8Array): { raw: Uint8Array; hash: string } {
+  const fields = tx4Fields(tx);
+  const digest = keccak_256(Uint8Array.from([4, ...rlp(fields)]));
+  const sig = secp256k1.sign(digest, key, { prehash: false, format: "recovered" });
+  const r = BigInt(`0x${hex(sig.subarray(1, 33))}`);
+  const s = BigInt(`0x${hex(sig.subarray(33, 65))}`);
+  const raw = Uint8Array.from([4, ...rlp([...fields, big(BigInt(sig[0]!)), big(r), big(s)])]);
+  return { raw, hash: `0x${hex(keccak_256(raw))}` };
+}
+
+/** The most bytes `tx` signed can take: its signature's r and s at 32 bytes each, the longest they can be. */
+const U256_MAX = (1n << 256n) - 1n;
+export const evmTx4MaxLength = (tx: EvmTx4): number => 1 + rlp([...tx4Fields(tx), big(1n), big(U256_MAX), big(U256_MAX)]).length;
+
 /** The address of a secp256k1 private key. */
 export function evmAddressOf(key: Uint8Array): string {
   return `0x${hex(keccak_256(secp256k1.getPublicKey(key, false).subarray(1)).subarray(12))}`;
+}
+
+// ---- The sell's calldata (card helper-evm-sender) ----
+
+export const SELL_SIGNATURE = "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)";
+export const SELL_SELECTOR = selectorOf(SELL_SIGNATURE);
+/**
+ * The sell's calldata limit, bytes, and POST /v1/pool/evm/sell's body limit: the calldata is 580 bytes plus the swap
+ * data padded; the longest route the kit builds (EVM_POOL_MAX_HOPS 4 v4 hops with empty hook data, abi.encode(PathKey[]))
+ * is 960 bytes of swap data, so 1,540 bytes [design: about 1.3x that].
+ */
+export const EVM_SELL_DATA_MAX = 2_048;
+export const POOL_EVM_SELL_BODY_MAX = 8_192;
+const SELL_HEAD = 3; // the tuple's offset, the fee, the signature's offset
+const SELL_TUPLE = 10; // token, amount, target, the data's offset, minOut, pool, precommitment, feeCap, deadline, nonce
+
+export type EvmSell = { token: string; amount: bigint; target: string; data: string; minOut: bigint; pool: string; precommitment: bigint; feeCap: bigint; deadline: bigint; nonce: bigint; fee: bigint; signature: Uint8Array };
+
+/** A sell's calldata read back; throws unless it is exactly the one canonical encoding. */
+export function evmReadSell(d: Uint8Array): EvmSell {
+  const least = 4 + 32 * (SELL_HEAD + SELL_TUPLE + 1 + 1 + 3);
+  if (d.length > EVM_SELL_DATA_MAX || d.length < least || (d.length - 4) % 32 !== 0 || hex(d.subarray(0, 4)) !== SELL_SELECTOR) throw new Error("not sell's calldata");
+  if (word(d, 0) !== BigInt(32 * SELL_HEAD)) throw new Error("the sell's offset");
+  const t = (i: number) => word(d, SELL_HEAD + i);
+  if (t(3) !== BigInt(32 * SELL_TUPLE)) throw new Error("the swap data's offset");
+  if (![t(0), t(2), t(5)].every(isAddressWord)) throw new Error("an address's padding");
+  const len = t(SELL_TUPLE);
+  if (len > BigInt(d.length)) throw new Error("the swap data's length");
+  const padded = Math.ceil(Number(len) / 32);
+  const sigAt = SELL_HEAD + SELL_TUPLE + 1 + padded; // the signature's length word
+  if ((d.length - 4) / 32 !== sigAt + 4) throw new Error("the sell's length");
+  if (word(d, 2) !== BigInt(32 * sigAt)) throw new Error("the signature's offset");
+  if (word(d, sigAt) !== 65n) throw new Error("the signature's length");
+  const dataAt = 4 + 32 * (SELL_HEAD + SELL_TUPLE + 1);
+  const sigBytes = 4 + 32 * (sigAt + 1);
+  if (d.subarray(dataAt + Number(len), dataAt + 32 * padded).some((b) => b !== 0) || d.subarray(sigBytes + 65, sigBytes + 96).some((b) => b !== 0)) throw new Error("the padding");
+  return {
+    token: addr(t(0)), amount: t(1), target: addr(t(2)), data: `0x${hex(d.subarray(dataAt, dataAt + Number(len)))}`, minOut: t(4), pool: addr(t(5)),
+    precommitment: t(6), feeCap: t(7), deadline: t(8), nonce: t(9), fee: word(d, 1), signature: d.slice(sigBytes, sigBytes + 65),
+  };
+}
+
+const utf8 = (t: string) => new TextEncoder().encode(t);
+const w32 = (n: bigint) => unhex(n.toString(16).padStart(64, "0"));
+const DOMAIN_TYPE = keccak_256(utf8("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
+const SELL_TYPE = keccak_256(utf8("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)"));
+/** SellDelegate._sellDigest (contracts/pool-evm/src/SellDelegate.sol) of `s` under W's own address on chain `chainId`. */
+export function evmSellDigest(chainId: bigint, w: string, s: EvmSell): Uint8Array {
+  const domain = keccak_256(Uint8Array.from([...DOMAIN_TYPE, ...keccak_256(utf8("Blindfill")), ...keccak_256(utf8("1")), ...w32(chainId), ...w32(BigInt(w))]));
+  const fields = [BigInt(s.token), s.amount, BigInt(s.target)].map(w32);
+  const rest = [s.minOut, BigInt(s.pool), s.precommitment, s.feeCap, s.deadline, s.nonce].map(w32);
+  const struct = keccak_256(Uint8Array.from([...SELL_TYPE, ...fields.flatMap((x) => [...x]), ...keccak_256(unhex(s.data.slice(2))), ...rest.flatMap((x) => [...x])]));
+  return keccak_256(Uint8Array.from([0x19, 0x01, ...domain, ...struct]));
+}
+
+const N = secp256k1.Point.CURVE().n;
+/** The address that signed `digest` with (recovery, r, s), or null where none does. */
+function recoverAddress(digest: Uint8Array, recovery: number, r: bigint, s: bigint): string | null {
+  try {
+    const sig = Uint8Array.from([recovery, ...unhex(r.toString(16).padStart(64, "0")), ...unhex(s.toString(16).padStart(64, "0"))]);
+    const pub = secp256k1.Point.fromBytes(secp256k1.recoverPublicKey(sig, digest, { prehash: false })).toBytes(false);
+    return `0x${hex(keccak_256(pub.subarray(1)).subarray(12))}`;
+  } catch {
+    return null;
+  }
 }
 
 // ---- The epoch fee (M352 (2)) ----
@@ -188,10 +327,12 @@ export function evmEpochFee(floor: bigint, baseFeePerGas: bigint): bigint {
 
 export type EvmRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export type PoolEvmCode =
-  | "bad_shape" | "not_pool" | "fee_recipient" | "fee_off" | "fee_over_cap" | "epoch_off" | "deadline_near" | "reverted" | "recipient_code" | "simulation_failed" | "fee_stale" | "rate_limited" | "in_flight" | "upstream";
+  | "bad_shape" | "not_pool" | "fee_recipient" | "fee_off" | "fee_over_cap" | "epoch_off" | "deadline_near" | "reverted" | "recipient_code" | "simulation_failed" | "fee_stale" | "rate_limited" | "in_flight" | "upstream"
+  | "bad_authorization" | "bad_signature" | "deadline_far" | "auth_nonce" | "fee_low";
 /** `retryAfterS` on a 429 only: the whole seconds the route names in Retry-After. */
 export type PoolEvmAnswer = { status: number; body: { hash: string } | { error: { code: PoolEvmCode; detail?: string } }; retryAfterS?: number };
-export type EvmFeeAnswer = { chain: "evm"; network: string; pool: string; fee_recipient: string; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
+/** `sender`: the sender's address, which a sale's fee is paid to and the device's sim runs from (the kit pins it). */
+export type EvmFeeAnswer = { chain: "evm"; network: string; pool: string; fee_recipient: string; sender: string; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
 
 export type EvmPoolSender = {
   readonly network: string;
@@ -201,10 +342,27 @@ export type EvmPoolSender = {
   fee(atMs: number): Promise<EvmFeeAnswer | null>;
   /** POST /v1/pool/evm/send for a parsed body, from `client` (server.ts's clientOf: the caller's address). */
   carry(body: unknown, client?: string): Promise<PoolEvmAnswer>;
+  /** POST /v1/pool/evm/sell for a parsed body, from `client`, held and queued with the withdraws. */
+  sell(body: unknown, client?: string): Promise<PoolEvmAnswer>;
 };
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HEX = /^0x([0-9a-f]{2})+$/;
+/** The sell body's hex strings, as authJson writes them: an address in either case, a 32-byte word, a quantity. */
+const ANY_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const WORD32 = /^0x[0-9a-fA-F]{64}$/;
+const QUANTITY = /^0x(0|[1-9a-f][0-9a-f]{0,63})$/;
+const SELL_KEYS = ["authorization", "data", "pool", "w"];
+const AUTH_KEYS = ["address", "chainId", "nonce", "r", "s", "yParity"];
+const sameKeys = (o: object, keys: readonly string[]) => {
+  const k = Object.keys(o).sort();
+  return k.length === keys.length && k.every((x, i) => x === keys[i]);
+};
+/** OP Stack's GasPriceOracle, the same address on Base and Base Sepolia, and its getL1FeeUpperBound(uint256). */
+const OP_ORACLE = "0x420000000000000000000000000000000000000f";
+const L1_BOUND_SELECTOR = selectorOf("getL1FeeUpperBound(uint256)");
+/** The chains whose L1 data fee is paid apart from gas (OP Stack); Robinhood Chain (Arbitrum) prices it in its gas. */
+const L1_FEE_CHAINS: ReadonlySet<string> = new Set(["base", "base-sepolia"]);
 /**
  * An RPC's hex string as viem and ethers read one, and as the device does (packages/wallet/src/pool/evm.ts evmRpcHex,
  * card wallet-rpc-hex-case): "0x", then hex digits in either case, lower-cased; null for anything else.
@@ -236,7 +394,7 @@ const failedInExecution = (e: unknown): boolean => {
  * `feeRecipient` is where the release takes it. Sends one at a time, so each takes the next nonce; one per nullifier.
  */
 export function evmPoolSender(
-  cfg: { network: string; pool: string; senderKey: Uint8Array; floor: bigint; feeRecipient?: string; memory?: number },
+  cfg: { network: string; pool: string; senderKey: Uint8Array; floor: bigint; feeRecipient?: string; memory?: number; venues?: Readonly<Partial<Record<string, EvmPoolVenue>>> },
   providers: readonly [EvmRpc, EvmRpc],
   now: () => number = Date.now,
 ): EvmPoolSender {
@@ -257,6 +415,14 @@ export function evmPoolSender(
   const revertMemory = cfg.memory ?? POOL_SEND_MEMORY;
   let waiting = 0;
   const fees = new Map<number, Promise<{ block: EvmBlock; fee: bigint } | null>>();
+  // the sell's chain: the network's kit chain (the helper's network names are the kit's), its venue and its pinned
+  // sell delegate; a network the kit does not list, or one with no pinned delegate, refuses every sell
+  const venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = cfg.venues ?? evmPoolVenues();
+  const sellVenue = Object.hasOwn(venues, cfg.network) ? venues[cfg.network] : undefined;
+  const sellChain = sellVenue === undefined ? undefined : (cfg.network as EvmPoolChain);
+  const pinned = sellVenue !== undefined && Object.hasOwn(sellVenue, "sellDelegate") && typeof sellVenue.sellDelegate === "string" ? sellVenue.sellDelegate.toLowerCase() : undefined;
+  const sellDelegate = pinned !== undefined && ADDRESS.test(pinned) ? pinned : undefined;
+  const sells = oncePerNullifier<PoolEvmAnswer>(cfg.memory);
   const no = (status: number, code: PoolEvmCode, detail?: string): PoolEvmAnswer => ({ status, body: { error: { code, ...(detail ? { detail } : {}) } } });
   // a provider call that failed: a throttle (its 429, a rate-limit error) is 429 rate_limited with its wait, else 503
   // upstream (card helper-abuse-limits: a 503 never means "wait")
@@ -292,14 +458,27 @@ export function evmPoolSender(
   };
   // M374 (5): the requests each client holds open, the queue's wait included
   const held = heldPerClient(EVM_IN_FLIGHT_MAX);
-  // (a caller with no address, a test or the helper itself, is not counted)
-  const carry = (body: unknown, client?: string): Promise<PoolEvmAnswer> => {
-    if (client === undefined) return carryHeld(body);
+  // (a caller with no address, a test or the helper itself, is not counted); a withdraw and a sell count alike
+  const holding = (client: string | undefined, run: () => Promise<PoolEvmAnswer>): Promise<PoolEvmAnswer> => {
+    if (client === undefined) return run();
     if (!held.enter(client)) return Promise.resolve({ ...no(429, "in_flight"), retryAfterS: EVM_BUSY_RETRY_S });
-    const p = carryHeld(body);
+    const p = run();
     const leave = () => held.leave(client);
     p.then(leave, leave);
     return p;
+  };
+  const carry = (body: unknown, client?: string): Promise<PoolEvmAnswer> => holding(client, () => carryHeld(body));
+  const sell = (body: unknown, client?: string): Promise<PoolEvmAnswer> => holding(client, () => sellHeld(body));
+  // one queue and one nonce lane for every send of this sender: each waits for the one before it
+  const enqueue = (job: () => Promise<PoolEvmAnswer>): Promise<PoolEvmAnswer> => {
+    if (waiting >= EVM_QUEUE_MAX) return Promise.resolve({ ...no(429, "rate_limited"), retryAfterS: EVM_BUSY_RETRY_S });
+    waiting++;
+    const run = queue.then(() => {
+      waiting--;
+      return job();
+    });
+    queue = run.catch(() => {});
+    return run;
   };
   const carryHeld = async (body: unknown): Promise<PoolEvmAnswer> => {
     if (typeof body !== "object" || body === null || Array.isArray(body) || Object.keys(body).length !== 3) return no(400, "bad_shape");
@@ -346,16 +525,7 @@ export function evmPoolSender(
       once.forget(w.nullifier, prior);
       if (was === epoch) return no(422, "reverted");
     }
-    const entry = once.run(w.nullifier, () => {
-      if (waiting >= EVM_QUEUE_MAX) return Promise.resolve({ ...no(429, "rate_limited"), retryAfterS: EVM_BUSY_RETRY_S });
-      waiting++;
-      const run = queue.then(() => {
-        waiting--;
-        return simulateSignSend(data, bytes, w);
-      });
-      queue = run.catch(() => {});
-      return run;
-    });
+    const entry = once.run(w.nullifier, () => enqueue(() => simulateSignSend(data, bytes, w)));
     sentIn.set(entry, epoch);
     return entry;
   };
@@ -404,6 +574,102 @@ export function evmPoolSender(
     nextNonce = nonce + 1n;
     return { status: 200, body: { hash } };
   }
+  /** POST /v1/pool/evm/sell: the static checks, none of which reads a provider, then one send per (W, Sell nonce). */
+  const sellHeld = async (body: unknown): Promise<PoolEvmAnswer> => {
+    if (typeof body !== "object" || body === null || Array.isArray(body) || !sameKeys(body, SELL_KEYS)) return no(400, "bad_shape");
+    const { pool: p, w: wIn, data, authorization: au } = body as Record<string, unknown>;
+    if (p !== pool || typeof wIn !== "string" || !ANY_ADDRESS.test(wIn) || typeof data !== "string" || data.length > 2 + 2 * EVM_SELL_DATA_MAX || !HEX.test(data)) return no(400, "bad_shape");
+    if (typeof au !== "object" || au === null || Array.isArray(au) || !sameKeys(au, AUTH_KEYS)) return no(400, "bad_shape");
+    const { chainId: ac, address: aa, nonce: an, yParity: ay, r: ar, s: as } = au as Record<string, unknown>;
+    if (![ac, an, ay].every((x) => typeof x === "string" && QUANTITY.test(x)) || typeof aa !== "string" || !ANY_ADDRESS.test(aa) || ![ar, as].every((x) => typeof x === "string" && WORD32.test(x))) return no(400, "bad_shape");
+    const auth: EvmAuthorization = { chainId: BigInt(ac as string), address: aa.toLowerCase(), nonce: BigInt(an as string), yParity: BigInt(ay as string), r: BigInt(ar as string), s: BigInt(as as string) };
+    const w = wIn.toLowerCase();
+    const bytes = unhex(data.slice(2));
+    let s: EvmSell;
+    try {
+      s = evmReadSell(bytes);
+    } catch (e) {
+      return no(400, "bad_shape", (e as Error).message);
+    }
+    if (s.pool !== pool) return no(422, "not_pool");
+    if (s.fee > s.feeCap) return no(422, "fee_over_cap", `fee ${s.fee}, cap ${s.feeCap}`);
+    if (s.feeCap >= s.minOut) return no(422, "fee_over_cap", `feeCap ${s.feeCap} is not under minOut ${s.minOut}`);
+    // W's authorization: of the kit's pinned delegate, on this chain's own id, in its one low-s form, signed by W
+    const bad = (d: string) => no(422, "bad_authorization", d);
+    if (sellChain === undefined || sellVenue === undefined || sellDelegate === undefined) return bad(`no sell delegate is pinned for ${cfg.network}`);
+    if (auth.chainId === 0n || auth.chainId !== BigInt(sellVenue.chainId)) return bad(`chainId ${auth.chainId}, not ${sellVenue.chainId}`);
+    if (auth.address !== sellDelegate) return bad(`address ${auth.address}, not the pinned delegate ${sellDelegate}`);
+    if (auth.yParity > 1n) return bad(`yParity ${auth.yParity}`);
+    if (auth.r === 0n || auth.r >= N || auth.s === 0n || auth.s > N / 2n) return bad("r or s out of range, or s high");
+    if (auth.nonce >= (1n << 64n) - 1n) return bad(`nonce ${auth.nonce} is not under 2^64 - 1`);
+    const authDigest = keccak_256(Uint8Array.from([5, ...rlp([big(auth.chainId), unhex(auth.address.slice(2)), big(auth.nonce)])]));
+    const authority = recoverAddress(authDigest, Number(auth.yParity), auth.r, auth.s);
+    if (authority !== w) return bad(`signed by ${authority ?? "no key"}, not W`);
+    // W's Sell signature over SellDelegate's own digest, as its _signer reads it: r ‖ s ‖ v, s low, v 27 or 28
+    const sig = s.signature;
+    const [r, sv, v] = [BigInt(`0x${hex(sig.subarray(0, 32))}`), BigInt(`0x${hex(sig.subarray(32, 64))}`), sig[64]!];
+    if ((v !== 27 && v !== 28) || r === 0n || r >= N || sv === 0n || sv > N / 2n) return no(422, "bad_signature", "v not 27 or 28, or r or s out of range, or s high");
+    const signer = recoverAddress(evmSellDigest(BigInt(sellVenue.chainId), w, s), v - 27, r, sv);
+    if (signer !== w) return no(422, "bad_signature", `signed by ${signer ?? "no key"}, not W`);
+    // the deadline is unix seconds: at least the send margin away, at most the kit's longest sell
+    const t = BigInt(Math.floor(now()));
+    if (s.deadline * 1000n < t + BigInt(EVM_POOL_SEND_MARGIN_MS)) return no(422, "deadline_near", `deadline ${s.deadline} s, now ${t} ms`);
+    if (s.deadline * 1000n > t + BigInt(EVM_POOL_SELL_DEADLINE_MAX_S) * 1000n) return no(422, "deadline_far", `deadline ${s.deadline} s, now ${t} ms`);
+    return sells.run(`${w}:${s.nonce}`, () => enqueue(() => sellSend(w, data, bytes, s, auth, sellChain, sellVenue, sellDelegate)));
+  };
+  async function sellSend(w: string, data: string, bytes: Uint8Array, s: EvmSell, auth: EvmAuthorization, kitChain: EvmPoolChain, venue: EvmPoolVenue, delegate: string): Promise<PoolEvmAnswer> {
+    const gas = EVM_POOL_SELL_GAS;
+    const tip = evmPoolSellTip(kitChain);
+    let id: bigint, base: bigint, pending: bigint;
+    try {
+      id = await chain();
+      if (id !== BigInt(venue.chainId)) return no(503, "upstream", `the providers name chain ${id}, not ${venue.chainId}`);
+      const [ba, bb, wa, wb, n] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), b("eth_getBlockByNumber", ["latest", false]), a("eth_getTransactionCount", [w, "pending"]), b("eth_getTransactionCount", [w, "pending"]), a("eth_getTransactionCount", [sender, "pending"])]);
+      const [x, y] = [qty((ba as { baseFeePerGas?: unknown } | null)?.baseFeePerGas), qty((bb as { baseFeePerGas?: unknown } | null)?.baseFeePerGas)];
+      base = x > y ? x : y;
+      const [na, nb] = [qty(wa), qty(wb)];
+      if (na !== auth.nonce || nb !== auth.nonce) return no(422, "auth_nonce", `W's pending nonce ${na} and ${nb}, the authorization's ${auth.nonce}`);
+      pending = qty(n);
+    } catch (e) {
+      return unread(e);
+    }
+    const nonce = pending > nextNonce ? pending : nextNonce;
+    const txAt = (maxFeePerGas: bigint): EvmTx4 => ({ chainId: id, nonce, maxPriorityFeePerGas: tip, maxFeePerGas, gas, to: w, data: bytes, authorizations: [auth] });
+    // the L1 data fee bound, for the longest this transaction can be (maxFeePerGas at most fee / gas), the higher of the
+    // two providers' answers
+    let l1 = 0n;
+    if (L1_FEE_CHAINS.has(kitChain)) {
+      const at = { to: OP_ORACLE, data: `0x${L1_BOUND_SELECTOR}${BigInt(evmTx4MaxLength(txAt(s.fee / gas))).toString(16).padStart(64, "0")}` };
+      try {
+        const words = (await Promise.all([a("eth_call", [at, "latest"]), b("eth_call", [at, "latest"])])).map((v) => {
+          const h = evmRpcHex(v);
+          if (h === null || !/^0x[0-9a-f]{64}$/.test(h)) throw new Error("not a word");
+          return BigInt(h);
+        });
+        l1 = words[0]! > words[1]! ? words[0]! : words[1]!;
+      } catch (e) {
+        return unread(e);
+      }
+    }
+    const need = gas * (base + tip) + l1;
+    if (s.fee < need) return no(422, "fee_low", `fee ${s.fee}, need ${gas} x (${base} + ${tip}) + ${l1} = ${need}`);
+    const cap = (s.fee - l1) / gas;
+    const maxFeePerGas = 2n * base + tip < cap ? 2n * base + tip : cap;
+    if (maxFeePerGas < base + tip) return no(422, "fee_low", `maxFeePerGas ${maxFeePerGas} under ${base} + ${tip}`);
+    // the simulation: the transaction as it will be signed, W's code its delegation designator (the authorization's
+    // effect), its gas less the authorization's intrinsic gas, which an eth_call does not charge
+    try {
+      await a("eth_call", [{ from: sender, to: w, data, gas: tag(gas - EVM_7702_AUTH_GAS), maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(tip) }, "pending", { [w]: { code: `0xef0100${delegate.slice(2)}` } }]);
+    } catch (e) {
+      return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : unread(e);
+    }
+    const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), cfg.senderKey);
+    const sent = await Promise.allSettled([a("eth_sendRawTransaction", [`0x${hex(raw)}`]), b("eth_sendRawTransaction", [`0x${hex(raw)}`])]);
+    const why = sent.flatMap((x) => (x.status === "rejected" ? [x.reason as unknown] : []));
+    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
+    nextNonce = nonce + 1n;
+    return { status: 200, body: { hash } };
+  }
   return {
     network: cfg.network,
     pool,
@@ -415,9 +681,10 @@ export function evmPoolSender(
       if (epoch > t || epoch < t - POOL_LIFE_MAX_MS) return null;
       const f = await feeOf(epoch);
       if (f === null) return null;
-      return { chain: "evm", network: cfg.network, pool, fee_recipient: feeRecipient, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: epoch, block: tag(f.block.number), fee: f.fee.toString(), step: EVM_FEE_STEP.toString() };
+      return { chain: "evm", network: cfg.network, pool, fee_recipient: feeRecipient, sender, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: epoch, block: tag(f.block.number), fee: f.fee.toString(), step: EVM_FEE_STEP.toString() };
     },
     carry,
+    sell,
   };
 }
 
@@ -426,6 +693,7 @@ export const POOL_EVM_ENV = {
   base: ["POOL_EVM_ADDRESS_BASE", "POOL_EVM_SENDER_KEY_BASE", "POOL_EVM_FEE_BASE", "POOL_EVM_FEE_RECIPIENT_BASE", "POOL_EVM_RPCS_BASE"],
   robinhood: ["POOL_EVM_ADDRESS_ROBINHOOD", "POOL_EVM_SENDER_KEY_ROBINHOOD", "POOL_EVM_FEE_ROBINHOOD", "POOL_EVM_FEE_RECIPIENT_ROBINHOOD", "POOL_EVM_RPCS_ROBINHOOD"],
   "base-sepolia": ["POOL_EVM_ADDRESS_BASE_SEPOLIA", "POOL_EVM_SENDER_KEY_BASE_SEPOLIA", "POOL_EVM_FEE_BASE_SEPOLIA", "POOL_EVM_FEE_RECIPIENT_BASE_SEPOLIA", "POOL_EVM_RPCS_BASE_SEPOLIA"],
+  "robinhood-testnet": ["POOL_EVM_ADDRESS_ROBINHOOD_TESTNET", "POOL_EVM_SENDER_KEY_ROBINHOOD_TESTNET", "POOL_EVM_FEE_ROBINHOOD_TESTNET", "POOL_EVM_FEE_RECIPIENT_ROBINHOOD_TESTNET", "POOL_EVM_RPCS_ROBINHOOD_TESTNET"],
 } as const;
 
 /**
@@ -445,7 +713,7 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     const urls = rpcs!.split(",");
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[4]} must be two different RPC URLs`);
     const providers = urls.map((u) => solanaJsonRpc(u)) as unknown as [EvmRpc, EvmRpc]; // a plain JSON-RPC client
-    const s = evmPoolSender({ network, pool: pool!, senderKey: unhex(key!.slice(2)), floor: BigInt(fee!), ...(feeTo === "" ? {} : { feeRecipient: feeTo! }) }, providers);
+    const s = evmPoolSender({ network, pool: pool!, senderKey: unhex(key!.slice(2)), floor: BigInt(fee!), ...(feeTo === "" ? {} : { feeRecipient: feeTo! }), venues }, providers);
     const v = Object.hasOwn(venues, network) ? venues[network] : undefined;
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
     if (pin !== undefined && pin.toLowerCase() !== s.sender) throw new Error(`${names[1]} is not the key of the kit's pinned sell sender for ${network} (${pin})`);

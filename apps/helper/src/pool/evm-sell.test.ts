@@ -1,0 +1,485 @@
+// node --test apps/helper/src/pool/evm-sell.test.ts: the EVM pool sender carries W's sell (POST /v1/pool/evm/sell) as
+// one EIP-7702 type-4 transaction to W, with W's one authorization of the kit's pinned SellDelegate and exactly the
+// calldata received, or refuses it. The reference is the device's sell that landed on both testnets
+// (contracts/pool-evm/script/testnet-run.mjs sellOf, testnet-run-lib.mjs signTx7702 and authJson). The chain is
+// base-sepolia with the kit's own pins (evmPoolVenues()); the keys are test keys, each sha256 of a label.
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { test } from "node:test";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { readFileSync } from "node:fs";
+import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
+import { evmAddressOf, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
+
+const key = (label: string) => new Uint8Array(createHash("sha256").update(`helper-evm-sender/test-key/${label}`).digest());
+const KEY = key("EVM_SENDER");
+const W_KEY = key("W");
+const OTHER_KEY = key("OTHER");
+const W = evmAddressOf(W_KEY);
+const SENDER = evmAddressOf(KEY);
+const V = evmPoolVenues()["base-sepolia"];
+const CHAIN_ID = BigInt(V.chainId); // 84532
+const DELEGATE = V.sellDelegate!;
+const POOL = V.pool!;
+const ORACLE = "0x420000000000000000000000000000000000000f";
+const N = secp256k1.Point.CURVE().n;
+
+const NOW = 1_800_000_000_000;
+const NOW_S = BigInt(NOW / 1000);
+const BASE = 10_000_000n; // 0.01 gwei
+const TIP = evmPoolSellTip("base-sepolia");
+const L1 = 5_000_000_000_000n;
+const W_NONCE = 3n;
+const NEED = EVM_POOL_SELL_GAS * (BASE + TIP) + L1;
+
+const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+const unhex = (s: string) => new Uint8Array(Buffer.from(s.replace(/^0x/, ""), "hex"));
+const w32 = (n: bigint) => n.toString(16).padStart(64, "0");
+const a32 = (a: string) => a.slice(2).toLowerCase().padStart(64, "0");
+const utf8 = (s: string) => new TextEncoder().encode(s);
+const cat = (...p: Uint8Array[]) => Uint8Array.from(p.flatMap((x) => [...x]));
+const SELL_SELECTOR = hex(keccak_256(utf8("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)")).subarray(0, 4));
+
+type Sell = { w: string; token: string; amount: bigint; target: string; data: string; minOut: bigint; pool: string; precommitment: bigint; feeCap: bigint; deadline: bigint; nonce: bigint };
+const SELL: Sell = {
+  w: W,
+  token: "0x0000000000000000000000000000000000007070",
+  amount: 10n ** 18n,
+  target: V.poolManager!,
+  data: `0x${"ab".repeat(100)}`, // 100 bytes: padded to 128
+  minOut: 10n ** 15n,
+  pool: POOL,
+  precommitment: 12_345n,
+  feeCap: 3n * 10n ** 13n,
+  deadline: NOW_S + 300n,
+  nonce: 0n,
+};
+const FEE = 3n * 10n ** 13n; // (fee - L1) / gas = 25,000,000 wei, over 2 x base + tip
+
+/** SellDelegate._sellDigest written out here (SellDelegate.sol), held equal to the helper's and to cast's below. */
+function digestOf(s: Sell, chainId = CHAIN_ID): Uint8Array {
+  const k = (t: string) => keccak_256(utf8(t));
+  const domain = keccak_256(cat(k("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"), k("Blindfill"), k("1"), unhex(w32(chainId)), unhex(a32(s.w))));
+  const type = k("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)");
+  const struct = keccak_256(cat(type, unhex(a32(s.token)), unhex(w32(s.amount)), unhex(a32(s.target)), keccak_256(unhex(s.data)), unhex(w32(s.minOut)), unhex(a32(s.pool)), unhex(w32(s.precommitment)), unhex(w32(s.feeCap)), unhex(w32(s.deadline)), unhex(w32(s.nonce))));
+  return keccak_256(cat(Uint8Array.of(0x19, 0x01), domain, struct));
+}
+/** r ‖ s ‖ v, s low, v 27 or 28 (the kit's signDigest). */
+function sign65(k: Uint8Array, digest: Uint8Array): Uint8Array {
+  const rec = secp256k1.sign(digest, k, { prehash: false, lowS: true, format: "recovered" });
+  return cat(rec.subarray(1, 65), Uint8Array.of(27 + rec[0]!));
+}
+/** sell(Sell, fee, signature) as solc's abi.encode writes it. */
+function sellData(s: Sell, fee: bigint, sig: Uint8Array): string {
+  const d = unhex(s.data);
+  const pad = (b: Uint8Array) => hex(b).padEnd(Math.ceil(b.length / 32) * 64, "0");
+  const tuple = `${a32(s.token)}${w32(s.amount)}${a32(s.target)}${w32(0x140n)}${w32(s.minOut)}${a32(s.pool)}${w32(s.precommitment)}${w32(s.feeCap)}${w32(s.deadline)}${w32(s.nonce)}${w32(BigInt(d.length))}${pad(d)}`;
+  return `0x${SELL_SELECTOR}${w32(0x60n)}${w32(fee)}${w32(BigInt(0x60 + tuple.length / 2))}${tuple}${w32(65n)}${pad(sig)}`;
+}
+
+// ---- RLP: an encoder for the authorization's digest, a decoder for the sent transaction ----
+type Rlp = Uint8Array | Rlp[];
+const int = (n: bigint) => (n === 0n ? new Uint8Array() : unhex(n.toString(16).padStart(Math.ceil(n.toString(16).length / 2) * 2, "0")));
+function enc(x: Rlp): Uint8Array {
+  const len = (n: number, short: number) => (n < 56 ? Uint8Array.of(short + n) : cat(Uint8Array.of(short + 55 + int(BigInt(n)).length), int(BigInt(n))));
+  if (x instanceof Uint8Array) return x.length === 1 && x[0]! < 0x80 ? x : cat(len(x.length, 0x80), x);
+  const body = cat(...x.map(enc));
+  return cat(len(body.length, 0xc0), body);
+}
+function dec(b: Uint8Array): Rlp {
+  const one = (at: number): [Rlp, number] => {
+    const x = b[at]!;
+    const long = (short: number) => {
+      const n = x - short - 55;
+      let v = 0;
+      for (let i = 0; i < n; i++) v = v * 256 + b[at + 1 + i]!;
+      return [1 + n, v] as const;
+    };
+    if (x < 0x80) return [b.subarray(at, at + 1), at + 1];
+    if (x < 0xb8) return [b.subarray(at + 1, at + 1 + x - 0x80), at + 1 + x - 0x80];
+    if (x < 0xc0) {
+      const [h, n] = long(0x80);
+      return [b.subarray(at + h, at + h + n), at + h + n];
+    }
+    const [h, n] = x < 0xf8 ? [1, x - 0xc0] : long(0xc0);
+    const out: Rlp[] = [];
+    let p = at + h;
+    while (p < at + h + n) {
+      const [v, q] = one(p);
+      out.push(v);
+      p = q;
+    }
+    return [out, p];
+  };
+  const [v, end] = one(0);
+  assert.equal(end, b.length, "nothing after the transaction");
+  return v;
+}
+const num = (u: Rlp) => (u instanceof Uint8Array ? (u.length === 0 ? 0n : BigInt(`0x${hex(u)}`)) : assert.fail("a list"));
+
+type Auth = { chainId: string; address: string; nonce: string; yParity: string; r: string; s: string };
+/** An EIP-7702 authorization signed here: keccak256(0x05 ‖ rlp([chainId, address, nonce])), as authJson writes it. */
+function authOf(k: Uint8Array, chainId: bigint, address: string, nonce: bigint): Auth {
+  const digest = keccak_256(cat(Uint8Array.of(5), enc([int(chainId), unhex(address), int(nonce)])));
+  const rec = secp256k1.sign(digest, k, { prehash: false, lowS: true, format: "recovered" });
+  return { chainId: `0x${chainId.toString(16)}`, address, nonce: `0x${nonce.toString(16)}`, yParity: `0x${rec[0]!.toString(16)}`, r: `0x${hex(rec.subarray(1, 33))}`, s: `0x${hex(rec.subarray(33, 65))}` };
+}
+const AUTH = authOf(W_KEY, CHAIN_ID, DELEGATE, W_NONCE);
+
+type Calls = { method: string; params: readonly unknown[] }[];
+type Opts = { chain?: string; base?: bigint; wNonce?: bigint; l1?: bigint; revert?: boolean };
+function rpc(calls: Calls, o: Opts = {}): EvmRpc {
+  return async (method, params) => {
+    calls.push({ method, params });
+    switch (method) {
+      case "eth_chainId": return o.chain ?? `0x${CHAIN_ID.toString(16)}`;
+      case "eth_getBlockByNumber": return { number: "0x64", timestamp: `0x${NOW_S.toString(16)}`, hash: `0x${"11".repeat(32)}`, baseFeePerGas: `0x${(o.base ?? BASE).toString(16)}` };
+      case "eth_getTransactionCount": return (params[0] as string) === W ? `0x${(o.wNonce ?? W_NONCE).toString(16)}` : "0x7";
+      case "eth_call": {
+        const c = params[0] as { to: string; data: string };
+        if (c.to === ORACLE) return `0x${w32(o.l1 ?? L1)}`;
+        if (o.revert) throw new Error("RPC error 3: execution reverted: 0xd6d39ee2"); // the kit client's wording
+        return `0x${w32(1n)}`;
+      }
+      case "eth_sendRawTransaction": return "0x";
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+}
+const senderOf = (calls: Calls = [], o: Opts = {}, b: Calls = [], ob: Opts = o, network = "base-sepolia", pool = POOL) =>
+  evmPoolSender({ network, pool, senderKey: KEY, floor: 10n ** 12n }, [rpc(calls, o), rpc(b, ob)], () => NOW);
+const code = (a: { body: unknown }) => ((a.body as { error?: { code: string } }).error?.code ?? "ok");
+const detail = (a: { body: unknown }) => (a.body as { error?: { detail?: string } }).error?.detail ?? "";
+const sends = (calls: Calls) => calls.filter((c) => c.method === "eth_sendRawTransaction").map((c) => c.params[0] as string);
+/** The body the device sends: W's Sell signed with `signer`, at `fee`, with `auth`. */
+const body = (o: { sell?: Partial<Sell>; fee?: bigint; signer?: Uint8Array; sig?: Uint8Array; auth?: Partial<Auth> | Record<string, unknown>; data?: string } = {}) => {
+  const s = { ...SELL, ...o.sell };
+  const data = o.data ?? sellData(s, o.fee ?? FEE, o.sig ?? sign65(o.signer ?? W_KEY, digestOf(s)));
+  return { pool: POOL, w: W, data, authorization: { ...AUTH, ...o.auth } };
+};
+
+test("the helper's sell digest is SellDelegate's: cast's signed sells recover to their W over it; the kit's authorization is the one written out here", () => {
+  // the kit's cast vectors (fixtures/sell-cast.json, copied from packages/kit/test/evm-pool-sell.cast.json): each Sell
+  // signed by anvil's account 0 with cast, as SellDelegate checks it; the helper's digest of the Sell read back from its
+  // calldata recovers that signer
+  const CAST = JSON.parse(readFileSync(new URL("./fixtures/sell-cast.json", import.meta.url), "utf8")) as { sells: Record<string, Record<string, string>> };
+  const ANVIL_0 = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
+  assert.deepEqual(Object.keys(CAST.sells), ["baseOneHop", "robinhoodTwoHop"]);
+  for (const [name, c] of Object.entries(CAST.sells)) {
+    const sell: Sell = { w: ANVIL_0, token: c.sells!.toLowerCase(), amount: BigInt(c.amount!), target: c.target!.toLowerCase(), data: c.data!.toLowerCase(), minOut: BigInt(c.minOut!), pool: c.pool!, precommitment: BigInt(c.precommitment!), feeCap: BigInt(c.feeCap!), deadline: BigInt(c.deadline!), nonce: BigInt(c.nonce!) };
+    const sig = unhex(c.sellSignature!);
+    const read = evmReadSell(unhex(sellData(sell, 0n, sig)));
+    const digest = evmSellDigest(BigInt(c.chainId as unknown as number), ANVIL_0, read);
+    assert.equal(hex(digest), hex(digestOf(sell, BigInt(c.chainId as unknown as number))), name);
+    const rec = secp256k1.Signature.fromBytes(sig.subarray(0, 64), "compact").addRecoveryBit(sig[64]! - 27).recoverPublicKey(digest).toBytes(false);
+    assert.equal(`0x${hex(keccak_256(rec.subarray(1)).subarray(12))}`, ANVIL_0, `${name}: cast's signature recovers to W`);
+  }
+  const kit = evmPoolSignSellAuthorization(W_KEY, "base-sepolia", W_NONCE);
+  assert.deepEqual({ chainId: `0x${kit.chainId.toString(16)}`, address: kit.address, nonce: `0x${kit.nonce.toString(16)}`, yParity: `0x${kit.yParity.toString(16)}`, r: kit.r, s: kit.s }, AUTH);
+  assert.equal(EVM_POOL_SELL_GAS, 1_000_000n);
+  assert.equal(TIP, 1_000_000n);
+});
+
+test("a good sell: one type-4 transaction to W, gas 1,000,000, the pinned tip, value 0, the calldata received, the one authorization byte-equal to the body's, signed by the sender", async () => {
+  const calls: Calls = [];
+  const b: Calls = [];
+  const s = senderOf(calls, {}, b);
+  const a = await s.sell(body());
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  const raws = [...sends(calls), ...sends(b)];
+  assert.equal(raws.length, 2, "the one transaction, to both providers");
+  assert.equal(raws[0], raws[1]);
+  const raw = unhex(raws[0]!);
+  assert.equal((a.body as { hash: string }).hash, `0x${hex(keccak_256(raw))}`);
+  assert.equal(raw[0], 4, "type 4");
+  const f = dec(raw.subarray(1)) as Rlp[];
+  assert.equal(f.length, 13);
+  const [chainId, nonce, tip, maxFee, gas, to, value, data, access, auths] = f;
+  assert.equal(num(chainId!), CHAIN_ID);
+  assert.equal(num(nonce!), 7n, "the sender's pending nonce");
+  assert.equal(num(tip!), TIP, "maxPriorityFeePerGas: the kit's pinned tip");
+  assert.equal(num(gas!), EVM_POOL_SELL_GAS, "gas: exactly the kit's EVM_POOL_SELL_GAS");
+  assert.equal(num(maxFee!), 2n * BASE + TIP, "2 x base + tip, under (fee - L1) / gas");
+  assert.equal(`0x${hex(to as Uint8Array)}`, W);
+  assert.equal(num(value!), 0n);
+  assert.equal(`0x${hex(data as Uint8Array)}`, body().data, "the data is the calldata received");
+  assert.deepEqual(access, []);
+  const want: Rlp[] = [[int(CHAIN_ID), unhex(DELEGATE), int(W_NONCE), int(BigInt(AUTH.yParity)), int(BigInt(AUTH.r)), int(BigInt(AUTH.s))]];
+  assert.equal(hex(enc(auths!)), hex(enc(want)), "the authorization list is the body's one authorization, byte for byte");
+  // the transaction's signature recovers to the sender
+  const digest = keccak_256(cat(Uint8Array.of(4), enc(f.slice(0, 10))));
+  const sig = cat(Uint8Array.of(Number(num(f[10]!))), unhex(w32(num(f[11]!))), unhex(w32(num(f[12]!))));
+  assert.equal(hex(secp256k1.recoverPublicKey(sig, digest, { prehash: false })), hex(secp256k1.getPublicKey(KEY, true)));
+  // never an estimate and never the node's tip
+  const methods = [...calls, ...b].map((c) => c.method);
+  assert.ok(!methods.includes("eth_estimateGas") && !methods.includes("eth_maxPriorityFeePerGas"), methods.join(","));
+  // the simulation: at pending, from the sender, to W, gas less the authorization's intrinsic gas, the signed fee
+  // fields, and W's code as the delegation designator
+  const sim = calls.find((c) => c.method === "eth_call" && (c.params[0] as { to: string }).to === W)!;
+  assert.deepEqual(sim.params, [
+    { from: SENDER, to: W, data: body().data, gas: `0x${(EVM_POOL_SELL_GAS - EVM_7702_AUTH_GAS).toString(16)}`, maxFeePerGas: `0x${(2n * BASE + TIP).toString(16)}`, maxPriorityFeePerGas: `0x${TIP.toString(16)}` },
+    "pending",
+    { [W]: { code: `0xef0100${DELEGATE.slice(2)}` } },
+  ]);
+  // the L1 bound is read for at least the sent transaction's length, on both providers
+  for (const c of [calls, b]) {
+    const o = c.find((x) => x.method === "eth_call" && (x.params[0] as { to: string }).to === ORACLE)!;
+    const d = (o.params[0] as { data: string }).data;
+    assert.equal(d.slice(0, 10), `0x${hex(keccak_256(utf8("getL1FeeUpperBound(uint256)")).subarray(0, 4))}`);
+    assert.ok(BigInt(`0x${d.slice(10)}`) >= BigInt(raw.length), `bound length ${BigInt(`0x${d.slice(10)}`)} under ${raw.length}`);
+  }
+  // W's pending nonce read on both providers
+  for (const c of [calls, b]) assert.ok(c.some((x) => x.method === "eth_getTransactionCount" && x.params[0] === W && x.params[1] === "pending"));
+});
+
+test("the fee is bounded: at the bound it sends and the sender's worst cost is within the fee; one wei under is fee_low; a cap at (fee - L1) / gas", async () => {
+  {
+    const calls: Calls = [];
+    const a = await senderOf(calls).sell(body({ fee: NEED, sell: { feeCap: NEED } }));
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    const f = dec(unhex(sends(calls)[0]!).subarray(1)) as Rlp[];
+    assert.equal(num(f[3]!), (NEED - L1) / EVM_POOL_SELL_GAS, "maxFeePerGas: (fee - L1) / gas, under 2 x base + tip");
+    assert.ok(num(f[3]!) * num(f[4]!) + L1 <= NEED);
+  }
+  const calls: Calls = [];
+  const a = await senderOf(calls).sell(body({ fee: NEED - 1n, sell: { feeCap: NEED } }));
+  assert.equal(code(a), "fee_low", detail(a));
+  assert.equal(sends(calls).length, 0);
+  // Robinhood: no tip and no L1 oracle (its L1 cost is in its gas)
+  const r: Calls = [];
+  const rn = evmPoolVenues()["robinhood-testnet"];
+  const rs = { ...SELL, pool: rn.pool!, feeCap: EVM_POOL_SELL_GAS * BASE };
+  const rid = BigInt(rn.chainId);
+  const rd = (x: Sell, k = W_KEY) => sellData(x, x.feeCap, sign65(k, digestOf(x, rid)));
+  const robin = evmPoolSender({ network: "robinhood-testnet", pool: rn.pool!, senderKey: KEY, floor: 1n }, [rpc(r, { chain: `0x${rid.toString(16)}` }), rpc([], { chain: `0x${rid.toString(16)}` })], () => NOW);
+  const ra = authOf(W_KEY, rid, rn.sellDelegate!, W_NONCE);
+  const ok = await robin.sell({ pool: rn.pool!, w: W, data: rd(rs), authorization: ra });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  const rf = dec(unhex(sends(r)[0]!).subarray(1)) as Rlp[];
+  assert.equal(num(rf[2]!), 0n, "Robinhood's tip is 0");
+  assert.equal(num(rf[3]!), BASE, "(fee - 0) / gas = base");
+  assert.ok(!r.some((c) => c.method === "eth_call" && (c.params[0] as { to: string }).to === ORACLE), "no L1 oracle read on Robinhood");
+  const low = await evmPoolSender({ network: "robinhood-testnet", pool: rn.pool!, senderKey: KEY, floor: 1n }, [rpc([], { chain: `0x${rid.toString(16)}` }), rpc([], { chain: `0x${rid.toString(16)}` })], () => NOW)
+    .sell({ pool: rn.pool!, w: W, data: rd({ ...rs, feeCap: EVM_POOL_SELL_GAS * BASE - 1n }), authorization: ra });
+  assert.equal(code(low), "fee_low");
+});
+
+test("the base fee and the L1 bound are each the higher of the two providers' answers", async () => {
+  const calls: Calls = [];
+  assert.equal(code(await senderOf(calls, {}, [], { base: 2n * BASE }).sell(body({ fee: NEED, sell: { feeCap: NEED } }))), "fee_low", "provider B's base fee doubles the bound");
+  assert.equal(code(await senderOf(calls, {}, [], { l1: L1 + 1n }).sell(body({ fee: NEED, sell: { feeCap: NEED } }))), "fee_low", "provider B's L1 bound one wei more");
+  assert.equal(code(await senderOf(calls, { l1: L1 + 1n }, [], {}).sell(body({ fee: NEED, sell: { feeCap: NEED } }))), "fee_low", "provider A's L1 bound one wei more");
+  assert.equal(sends(calls).length, 0);
+});
+
+test("a sell is held with the withdraws: one client holds at most EVM_IN_FLIGHT_MAX open, the next is in_flight", async () => {
+  const hang: EvmRpc = async (m, p) => (m === "eth_chainId" ? new Promise(() => {}) : rpc([])(m, p));
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, floor: 1n }, [hang, hang], () => NOW);
+  void s.sell(body({ sell: { nonce: 0n } }), "203.0.113.7");
+  void s.sell(body({ sell: { nonce: 1n } }), "203.0.113.7");
+  // the refusal is at once; a sell let through would wait on the hung reads, so the wait is bounded here
+  const late = new Promise<{ status: number; body: unknown; retryAfterS?: number }>((ok) => setTimeout(() => ok({ status: 0, body: { error: { code: "still waiting" } } }), 1_000));
+  const third = await Promise.race([s.sell(body({ sell: { nonce: 2n } }), "203.0.113.7"), late]);
+  assert.deepEqual([third.status, code(third), third.retryAfterS], [429, "in_flight", 2]);
+  assert.deepEqual(code(await Promise.race([s.carry({ pool: POOL, data: "0x00", epoch: 60_000 }, "203.0.113.7"), late])), "in_flight", "a withdraw from the same client too");
+});
+
+test("the authorization: chainId 0, another chain's id, another delegate, another signer, a high s, yParity 2, a nonce at 2^64 - 1, no pinned delegate: bad_authorization, nothing read", async () => {
+  const high = { ...AUTH, s: `0x${w32(N - BigInt(AUTH.s))}`, yParity: AUTH.yParity === "0x0" ? "0x1" : "0x0" };
+  // each with the words its detail names
+  const cases: [string, Record<string, unknown>, string][] = [
+    ["chainId 0", authOf(W_KEY, 0n, DELEGATE, W_NONCE), "chainId 0"],
+    ["another chain's id", authOf(W_KEY, 8453n, DELEGATE, W_NONCE), "chainId 8453"],
+    ["another delegate", authOf(W_KEY, CHAIN_ID, "0x000000000000000000000000000000000000dead", W_NONCE), "not the pinned delegate"],
+    ["another signer", authOf(OTHER_KEY, CHAIN_ID, DELEGATE, W_NONCE), `signed by ${evmAddressOf(OTHER_KEY)}`],
+    ["a high s (the same signer's other form)", high, "s high"],
+    ["yParity 2", { ...AUTH, yParity: "0x2" }, "yParity 2"],
+    ["a nonce at 2^64 - 1", authOf(W_KEY, CHAIN_ID, DELEGATE, 2n ** 64n - 1n), "under 2^64 - 1"],
+    ["r 0", { ...AUTH, r: `0x${w32(0n)}` }, "r or s"],
+    ["s 0", { ...AUTH, s: `0x${w32(0n)}` }, "r or s"],
+    ["r at n", { ...AUTH, r: `0x${w32(N)}` }, "r or s"],
+  ];
+  for (const [name, auth, says] of cases) {
+    const calls: Calls = [];
+    const a = await senderOf(calls, {}, calls).sell(body({ auth }));
+    assert.equal(a.status, 422, name);
+    assert.equal(code(a), "bad_authorization", `${name}: ${JSON.stringify(a.body)}`);
+    assert.ok(detail(a).includes(says), `${name}: ${detail(a)}`);
+    assert.equal(calls.length, 0, `${name}: no RPC call`);
+  }
+  // the recovered signer of high s is W itself: only the s rule refuses it
+  const digest = keccak_256(cat(Uint8Array.of(5), enc([int(CHAIN_ID), unhex(DELEGATE), int(W_NONCE)])));
+  const flipped = secp256k1.Signature.fromBytes(unhex(`${high.r}${high.s.slice(2)}`), "compact").addRecoveryBit(Number(BigInt(high.yParity)));
+  assert.equal(hex(flipped.recoverPublicKey(digest).toBytes(true)), hex(secp256k1.getPublicKey(W_KEY, true)));
+  // base (mainnet) pins no sell delegate yet: every sell there is refused, fail closed
+  const calls: Calls = [];
+  const m = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, floor: 1n }, [rpc(calls), rpc(calls)], () => NOW);
+  assert.equal(Object.hasOwn(evmPoolVenues().base, "sellDelegate"), false);
+  const a = await m.sell(body({ auth: authOf(W_KEY, 8453n, DELEGATE, W_NONCE) }));
+  assert.equal(code(a), "bad_authorization", detail(a));
+  assert.equal(calls.length, 0);
+  // a network the kit does not list: refused too
+  assert.equal(code(await senderOf([], {}, [], {}, "anvil").sell(body())), "bad_authorization");
+});
+
+test("auth_nonce: W's pending nonce on either provider is not the authorization's, so the chain would skip it", async () => {
+  for (const [oa, ob] of [[{ wNonce: W_NONCE + 1n }, {}], [{}, { wNonce: W_NONCE - 1n }]] as [Opts, Opts][]) {
+    const calls: Calls = [];
+    const b: Calls = [];
+    const a = await senderOf(calls, oa, b, ob).sell(body());
+    assert.equal(code(a), "auth_nonce", `${oa.wNonce} ${ob.wNonce}: ${detail(a)}`);
+    assert.equal(sends(calls).length + sends(b).length, 0);
+  }
+});
+
+test("the Sell: another pool is not_pool; fee over feeCap and a feeCap not under minOut are fee_over_cap; nothing read", async () => {
+  const cases: [string, Parameters<typeof body>[0], string][] = [
+    ["another pool", { sell: { pool: "0x000000000000000000000000000000000000beef" } }, "not_pool"],
+    ["fee over feeCap", { fee: SELL.feeCap + 1n }, "fee_over_cap"],
+    ["feeCap at minOut", { sell: { feeCap: SELL.minOut }, fee: FEE }, "fee_over_cap"],
+  ];
+  for (const [name, o, want] of cases) {
+    const calls: Calls = [];
+    const a = await senderOf(calls, {}, calls).sell(body(o));
+    assert.equal(code(a), want, `${name}: ${JSON.stringify(a.body)}`);
+    assert.equal(calls.length, 0, name);
+  }
+});
+
+test("W's Sell signature: by another key, a high s, v 29, or over another Sell is bad_signature; nothing read", async () => {
+  const good = sign65(W_KEY, digestOf(SELL));
+  const s = BigInt(`0x${hex(good.subarray(32, 64))}`);
+  const high = cat(good.subarray(0, 32), unhex(w32(N - s)), Uint8Array.of(good[64] === 27 ? 28 : 27));
+  const cases: [string, Parameters<typeof body>[0], string][] = [
+    ["another key", { signer: OTHER_KEY }, `signed by ${evmAddressOf(OTHER_KEY)}`],
+    ["a high s", { sig: high }, "s high"],
+    ["v 29", { sig: cat(good.subarray(0, 64), Uint8Array.of(29)) }, "v not 27 or 28"],
+    ["v 0", { sig: cat(good.subarray(0, 64), Uint8Array.of(good[64]! - 27)) }, "v not 27 or 28"],
+    ["over another Sell", { data: sellData({ ...SELL, amount: SELL.amount + 1n }, FEE, good) }, "not W"],
+  ];
+  for (const [name, o, says] of cases) {
+    const calls: Calls = [];
+    const a = await senderOf(calls, {}, calls).sell(body(o));
+    assert.equal(code(a), "bad_signature", `${name}: ${JSON.stringify(a.body)}`);
+    assert.ok(detail(a).includes(says), `${name}: ${detail(a)}`);
+    assert.equal(calls.length, 0, name);
+  }
+});
+
+test("the deadline is unix seconds: 59 s away is deadline_near, 60 s is fine, 600 s is fine, 601 s and one written in ms are deadline_far; nothing read", async () => {
+  const cases: [string, bigint, string][] = [
+    ["59 s away", NOW_S + 59n, "deadline_near"],
+    ["60 s away", NOW_S + 60n, "ok"],
+    ["600 s away", NOW_S + 600n, "ok"],
+    ["601 s away", NOW_S + 601n, "deadline_far"],
+    ["in milliseconds", BigInt(NOW) + 300_000n, "deadline_far"],
+  ];
+  for (const [name, deadline, want] of cases) {
+    const calls: Calls = [];
+    const a = await senderOf(calls).sell(body({ sell: { deadline } }));
+    assert.equal(code(a), want, `${name}: ${JSON.stringify(a.body)}`);
+    if (want !== "ok") assert.equal(calls.length, 0, name);
+  }
+});
+
+test("bad_shape: one trailing byte, a byte short, another selector, a changed offset, length or padding, a 64-byte signature, too long, any other key; nothing read", async () => {
+  const good = body().data;
+  const at = (i: number) => 2 + 8 + 64 * i; // the hex index of calldata word i
+  const flip = (i: number, ch: string) => `${good.slice(0, i)}${ch}${good.slice(i + 1)}`;
+  const words = (good.length - 10) / 64;
+  const sig64 = (() => {
+    // the signature's length word 64, its padding the same 96 bytes
+    const lenAt = at(words - 4);
+    return `${good.slice(0, lenAt)}${w32(64n)}${good.slice(lenAt + 64)}`;
+  })();
+  const cases: [string, unknown][] = [
+    ["one trailing byte", { ...body(), data: `${good}00` }],
+    ["a byte short", { ...body(), data: good.slice(0, -2) }],
+    ["a word more", { ...body(), data: `${good}${w32(0n)}` }],
+    ["another selector", { ...body(), data: flip(2, good[2] === "0" ? "1" : "0") }],
+    ["the tuple's offset", { ...body(), data: flip(at(0) + 63, "1") }],
+    ["the signature's offset", { ...body(), data: flip(at(2) + 62, "f") }],
+    ["the data's offset", { ...body(), data: flip(at(3 + 3) + 63, "1") }],
+    ["an address's high bytes", { ...body(), data: flip(at(3) + 2, "1") }],
+    ["the data's padding", { ...body(), data: flip(at(3 + 11) + 64 * 4 - 1, "1") }],
+    ["the signature's padding", { ...body(), data: flip(good.length - 1, "1") }],
+    ["a 64-byte signature", { ...body(), data: sig64 }],
+    ["too long", body({ sell: { data: `0x${"ab".repeat(2_000)}` } })],
+    ["an extra key", { ...body(), extra: 1 }],
+    ["no authorization", { pool: POOL, w: W, data: good }],
+    ["an extra authorization key", { ...body(), authorization: { ...AUTH, v: "0x1b" } }],
+    ["an authorization as a list", { ...body(), authorization: [AUTH] }],
+    ["a nonce as a number", { ...body(), authorization: { ...AUTH, nonce: 3 } }],
+    ["a nonce written 0x03", { ...body(), authorization: { ...AUTH, nonce: "0x03" } }],
+    ["r of 31 bytes", { ...body(), authorization: { ...AUTH, r: AUTH.r.slice(0, -2) } }],
+    ["another pool in the body", { ...body(), pool: "0x000000000000000000000000000000000000beef" }],
+    ["W not an address", { ...body(), w: "0x1234" }],
+    ["W not the Sell's signer field", { ...body(), w: "0x000000000000000000000000000000000000beef" }],
+  ];
+  for (const [name, b] of cases) {
+    const calls: Calls = [];
+    const a = await senderOf(calls, {}, calls).sell(b);
+    assert.ok(["bad_shape", "bad_authorization", "bad_signature"].includes(code(a)), `${name}: ${JSON.stringify(a.body)}`);
+    if (name !== "W not the Sell's signer field") assert.equal(code(a), "bad_shape", `${name}: ${JSON.stringify(a.body)}`);
+    assert.equal(calls.length, 0, `${name}: no RPC call`);
+  }
+});
+
+test("a sim that reverts is simulation_failed and sends nothing; a provider's other error is upstream", async () => {
+  const calls: Calls = [];
+  const a = await senderOf(calls, { revert: true }).sell(body());
+  assert.equal(code(a), "simulation_failed", JSON.stringify(a.body));
+  assert.equal(sends(calls).length, 0);
+  const down: EvmRpc = async (m, p) => (m === "eth_call" && (p[0] as { to: string }).to === W ? Promise.reject(new Error("HTTP 502")) : rpc([])(m, p));
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, floor: 1n }, [down, rpc([])], () => NOW);
+  assert.equal(code(await s.sell(body())), "upstream");
+});
+
+test("the chain: the providers on different chains, or both on a chain that is not the venue's, is upstream; nothing sent", async () => {
+  for (const [oa, ob] of [[{ chain: "0x2105" }, {}], [{ chain: "0x2105" }, { chain: "0x2105" }]] as [Opts, Opts][]) {
+    const calls: Calls = [];
+    const b: Calls = [];
+    assert.equal(code(await senderOf(calls, oa, b, ob).sell(body())), "upstream", JSON.stringify([oa, ob]));
+    assert.equal(sends(calls).length + sends(b).length, 0);
+  }
+});
+
+test("once per (W, Sell nonce): a repeat in flight or after, even as other bytes, gets the first hash and sends nothing; another nonce is the next send on the same nonce lane", async () => {
+  const calls: Calls = [];
+  const s = senderOf(calls);
+  const [a, b] = await Promise.all([s.sell(body()), s.sell(body())]);
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.deepEqual(b, a);
+  const copy = await s.sell(body({ fee: FEE - 1n }));
+  assert.deepEqual(copy, a, "the same (W, nonce) in other bytes");
+  assert.equal(sends(calls).length, 1);
+  const next = await s.sell(body({ sell: { nonce: 1n } }));
+  assert.equal(next.status, 200, JSON.stringify(next.body));
+  assert.notDeepEqual(next, a);
+  const raws = sends(calls).map((r) => dec(unhex(r).subarray(1)) as Rlp[]);
+  assert.equal(raws.length, 2);
+  assert.equal(num(raws[1]![1]!), num(raws[0]![1]!) + 1n, "the next sender nonce");
+  // a refused sell frees its (W, nonce): it is checked again
+  const r: Calls = [];
+  const t = senderOf(r, { revert: true });
+  assert.equal(code(await t.sell(body())), "simulation_failed");
+  assert.equal(code(await t.sell(body())), "simulation_failed");
+  assert.equal(r.filter((c) => c.method === "eth_call" && (c.params[0] as { to: string }).to === W).length, 2);
+});
+
+test("the fee answer names the sender's address, so the kit can pin and check it", async () => {
+  const s = senderOf();
+  assert.equal(s.sender, SENDER);
+  const calls: Calls = [];
+  const chain = rpc(calls);
+  // the fee reads the epoch's first block: a chain whose blocks are 2 s apart up to now
+  const blocks: EvmRpc = async (m, p) => {
+    if (m !== "eth_getBlockByNumber") return chain(m, p);
+    const latest = 1000n;
+    const n = p[0] === "latest" ? latest : BigInt(p[0] as string);
+    return { number: `0x${n.toString(16)}`, timestamp: `0x${(NOW_S - 2n * (latest - n)).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" };
+  };
+  const f = await evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, floor: 1n }, [blocks, blocks], () => NOW).fee(NOW);
+  assert.equal(f?.sender, SENDER);
+});
