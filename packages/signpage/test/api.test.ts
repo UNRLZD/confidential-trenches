@@ -32,6 +32,17 @@ const state = (id = uuid()) => ({ v: 1, id, type: "state" });
 const notAllowed = (id: string) => ({ v: 1, id, ok: false, error: { code: "not_allowed" } });
 const idReused = (id: string) => ({ v: 1, id, ok: false, error: { code: "id_reused" } });
 const stateAnswer = (id: string) => ({ v: 1, id, ok: true, result: signedOutState() });
+// The api answers after an off-thread SHA-256 of each message, so on a loaded runner an answer comes when it comes: a
+// wait for one waits until its condition holds, bounded at 2 s with a named failure, never for a set time. A set wait is
+// left only before a check that nothing came, where it can let a late post through but never fail.
+async function until(cond: () => boolean, what: string, ms = 2_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > end) assert.fail(`not within ${ms} ms: ${what}`);
+    await new Promise((ok) => setTimeout(ok, 1));
+  }
+}
+const idOf = (m: unknown) => (m as { id?: string } | null)?.id;
 
 test("ready: posted once at start, to the parent, with targetOrigin APP_HOST, in the frozen shape", () => {
   const p = page();
@@ -355,7 +366,7 @@ test("a kind whose handler answers later is answered with its result once it set
   await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(posted.filter((m) => (m as { id?: string }).id === a || (m as { id?: string }).id === b), [], "answered before the handler settled");
   release();
-  await new Promise((r) => setTimeout(r, 20));
+  await until(() => posted.filter((m) => idOf(m) === a || idOf(m) === b).length === 2, "both answers once the handler settled");
   const answers = posted.filter((m) => (m as { id?: string }).id !== undefined);
   assert.deepEqual(answers, [{ v: 1, id: a, ok: true, result: { pending: true } }, stateAnswer(b)]);
   assert.deepEqual(ran, ["then"]);
@@ -415,10 +426,10 @@ test("a running kind (a trade) gets its id, holds no other message, runs once fo
   send({ ...buy, id: a, side: "buy", amount: "20" });
   send({ ...buy, id: b, side: "sell" });
   send(state(c));
-  await new Promise((r) => setTimeout(r, 20));
+  await until(() => posted.length >= 4, "the repeat's, the sell's and the state's answers");
   assert.deepEqual(posted.slice(1), [idReused(a), { v: 1, id: b, ok: false, error: { code: "quote_check_failed" } }, stateAnswer(c)], "nothing waits for the trade; its repeat is not run");
   release();
-  await new Promise((r) => setTimeout(r, 20));
+  await until(() => posted.length >= 7, "a's answer and its two progress events");
   assert.deepEqual(ids, [a, b], "one run for a");
   assert.deepEqual(posted.slice(4), [
     { v: 1, id: a, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: "sig" }] } },
@@ -426,7 +437,7 @@ test("a running kind (a trade) gets its id, holds no other message, runs once fo
     { v: 1, type: "progress", id: a, stage: "filled" },
   ]);
   send({ ...buy, id: a, side: "buy" });
-  await new Promise((r) => setTimeout(r, 20));
+  await until(() => posted.length >= 8, "a's answer again for its repeat");
   assert.deepEqual(posted.slice(7), [{ v: 1, id: a, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: "sig" }] } }], "a repeat after the answer gets it again");
 });
 
@@ -458,7 +469,7 @@ test("a running id's answer refreshes its place among the remembered ids, so ids
   for (let i = 0; i < REMEMBERED_IDS - 1; i++) send({ ...buy, id: uuid(), side: "sell" });
   await api.idle();
   release();
-  await new Promise((r) => setTimeout(r, 20));
+  await until(() => posted.some((m) => idOf(m) === a && (m as { ok?: boolean }).ok === true), "a's answer once its run settled");
   send({ ...buy, id: uuid(), side: "sell" }); // one more: the oldest remembered id goes, which is no longer a
   send({ ...buy, id: a, side: "buy" });
   await api.idle();
