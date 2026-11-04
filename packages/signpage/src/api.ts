@@ -20,7 +20,7 @@
 // src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
 import type { BuyRoute, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
-import { SIGNPAGE_PARAM_SCHEMAS } from "../../kit/src/signpage/schema.ts";
+import { SIGNPAGE_PARAM_SCHEMAS, signpageProgressRouteSchema } from "../../kit/src/signpage/schema.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
 export const APP_ORIGIN = "https://confidential.unrealized.trade";
@@ -105,8 +105,9 @@ export interface KindContext {
   /** The SHA-256 (hex) of the request's JSON: a kind that keeps its id past a reload keeps it too (wallet.md §7 item 4). */
   sha: string;
   progress(stage: Stage): void;
-  /** Posts one route event (messages.ts BuyRoute) for the id at once, in the queue: not held for the answer, since it
-   *  ends nothing and is shown as it comes (card signpage-buy-route-events). */
+  /** Posts one route event (messages.ts BuyRoute) for the id, queued in order with the id's stage events once they are
+   *  posted; not held for the answer, which is posted on its own, so a route event may follow it (card
+   *  signpage-buy-route-events). One the kit's client would refuse is not posted. */
   route?(r: BuyRoute): void;
 }
 
@@ -260,10 +261,14 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
       if (waiting) return void waiting.push(stage);
       queue = queue.then(() => post({ v: 1, type: "progress", id, stage })).catch(() => {});
     };
-    // the event names each field itself, so nothing but the route's own fields is ever posted
+    // the event names each field itself from the object's own keys, so nothing but the route's own fields is ever
+    // posted, and only an event the kit's client takes (signpageProgressRouteSchema): anything else is not told
     const route = (r: BuyRoute): void => {
-      const f: BuyRoute = "wallet" in r ? { wallet: r.wallet } : "venue" in r ? { venue: r.venue, pool: r.pool } : { out: r.out };
-      queue = queue.then(() => post({ v: 1, type: "progress", id, ...f })).catch(() => {});
+      const own = (k: string): boolean => Object.hasOwn(r, k);
+      const f: BuyRoute | null = own("wallet") ? { wallet: (r as { wallet: string }).wallet } : own("venue") ? { venue: (r as { venue: string }).venue, pool: (r as { pool: string }).pool } : own("out") ? { out: (r as { out: string }).out } : null;
+      const msg: ProgressRouteEvent | null = f && { v: 1, type: "progress", id, ...f };
+      if (msg === null || !signpageProgressRouteSchema(msg)) return;
+      queue = queue.then(() => post(msg)).catch(() => {});
     };
     // a progress event before the id's answer waits for it (give posts it after)
     held.set(id, []);

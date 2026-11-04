@@ -1,6 +1,6 @@
 {
  "good": {
-  "at": "2026-11-04T17:21:04.312Z",
+  "at": "2026-11-04T18:03:32.852Z",
   "hosts": {
    "sign": {
     "source": "this checkout, packages/signpage",
@@ -21,7 +21,7 @@
     "pageStatus": 200,
     "js": [
      {
-      "url": "/assets/index-tn68l98g.js",
+      "url": "/assets/index-Hf6GbsIU.js",
       "status": 200,
       "found": [
        "the kit client's onRoute",
@@ -31,10 +31,10 @@
     ]
    }
   },
-  "note": "this card at 887c521: packages/signpage as committed (index.html, public/app.js) and apps/terminal built fresh (vite build), read from disk"
+  "note": "this card at fold 1: packages/signpage as committed (index.html, public/app.js) and apps/terminal built fresh (vite build), read from disk"
  },
  "bad": {
-  "at": "2026-11-04T17:21:04.345Z",
+  "at": "2026-11-04T18:03:32.898Z",
   "hosts": {
    "sign": {
     "source": "https://sign.confidential.unrealized.trade/",
@@ -52,7 +52,7 @@
     "pageStatus": 200,
     "js": [
      {
-      "url": "/assets/index-BG0SJzHL.js",
+      "url": "/assets/index-CGu2AHWq.js",
       "status": 200,
       "found": []
      }

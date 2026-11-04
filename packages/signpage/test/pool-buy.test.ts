@@ -17,7 +17,7 @@ import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vaul
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
+import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
 import type { IncomingMessage } from "../src/api.ts";
@@ -96,7 +96,7 @@ type Plant = {
   /** provider B's state page without the proof's root */
   rootOnOne?: boolean;
   /** getTransaction's answer for the helper's signature; "lieOne": the chain holds it, RPC 1 answers another tx */
-  readBack?: "ours" | "none" | "other" | "failed" | "lieOne";
+  readBack?: "ours" | "none" | "other" | "failed" | "lieOne" | "metaJunk";
   /** RPC 1's first read of the pool account is a slot behind: its state tree one leaf short */
   sizeSkewOnce?: boolean;
   /** what each call of ready() answers, in turn (the last one again after); the queue's own ready attempt is the last's */
@@ -112,6 +112,10 @@ type Plant = {
   /** the token W received as each RPC's getTransaction meta says it (raw units, 6 decimals); absent: a meta with no
    *  token balances. Each meta also lists the fee payer's account of the mint and W's of another mint, never W's fill */
   received?: readonly [bigint, bigint];
+  /** the token's decimals in those balances (6 when not given) */
+  decimals?: number;
+  /** the seed the page hands is another one: the W it derives is not the proof's recipient */
+  seedOther?: boolean;
 };
 
 async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
@@ -171,9 +175,11 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         const tx = sent.slice();
         tx.set(base58.decode(SIG), 1);
         if (how === "other" || (how === "lieOne" && p === 1)) tx[tx.length - 1]! ^= 1;
+        if (how === "metaJunk") return { transaction: [base64.encode(tx), "base64"], meta: "x" };
         const err = how === "failed" ? { InstructionError: [2, { Custom: 6 }] } : null;
         if (!plant.received) return { transaction: [base64.encode(tx), "base64"], meta: { err } };
-        const bal = (owner: string, mint: string, amount: bigint) => ({ accountIndex: 3, mint, owner, programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", uiTokenAmount: { amount: amount.toString(), decimals: 6, uiAmount: Number(amount) / 1e6, uiAmountString: String(Number(amount) / 1e6) } });
+        const dp = plant.decimals ?? 6;
+        const bal = (owner: string, mint: string, amount: bigint) => ({ accountIndex: 3, mint, owner, programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", uiTokenAmount: { amount: amount.toString(), decimals: dp, uiAmount: Number(amount) / 10 ** dp, uiAmountString: String(Number(amount) / 10 ** dp) } });
         const other = base58.encode(new Uint8Array(32).fill(3));
         return {
           transaction: [base64.encode(tx), "base64"],
@@ -203,7 +209,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       st = "RESERVED";
       return current;
     },
-    seed64: async () => (log.push("seed"), SEED64.slice()),
+    seed64: async () => (log.push("seed"), plant.seedOther ? wordsToSeed64(entropyToWords(new Uint8Array(16).fill(1))) : SEED64.slice()),
     send: async (pool, tx) => {
       log.push("send");
       assert.equal(pool, POOL);
@@ -487,7 +493,7 @@ const whole6 = (x: bigint): string => {
   return f ? `${x / 1_000_000n}.${f}` : `${x / 1_000_000n}`;
 };
 
-test("a fixture buy posts its route under its id, each once and in order: W, the venue and its pool, the amount W received on both RPCs", async () => {
+test("a fixture buy posts its route under its id, each once and in order: W, the venue and its pool, the amount W received on both RPCs; queued in order with the stage events, it may follow the answer", async () => {
   const w0 = await world();
   const w = await world({ received: [w0.E, w0.E] });
   const posted: unknown[] = [];
@@ -521,9 +527,11 @@ test("a fixture buy posts its route under its id, each once and in order: W, the
     { v: 1, id, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } },
     { v: 1, type: "progress", id, stage: "filled" },
   ]);
-  // W and the venue are told before anything leaves the device; the amount only once both RPCs read the transaction back
+  // queued in order with the id's stage events: the amount before the filled event (the answer, posted on its own, may
+  // come before or after the route events)
   const out = posted.indexOf(route[2]);
-  assert.ok(posted.indexOf(route[1]) < out);
+  assert.ok(posted.indexOf(route[0]) < posted.indexOf(route[1]) && posted.indexOf(route[1]) < out);
+  assert.ok(out < posted.indexOf(stages[1]), "the amount before filled");
   // nothing posted carries more than an address, a venue name or an amount
   assert.ok(!JSON.stringify(posted).includes(Buffer.from(SEED64).toString("hex")));
 });
@@ -555,4 +563,99 @@ test("a buy refused before its check passes tells no route; a route listener tha
   const b = await runPoolBuy({ ...ok.host, route: () => { throw new Error("app display"); } }, ASK);
   assert.deepEqual(b, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
   assert.equal(ok.state(), "SPENT");
+});
+
+// Card signpage-buy-route-events, fold 1: nothing is told until the check passed, W is the proof's recipient and the take
+// holds the note (M1, L1); an amount past the kit's bound is never told (L3); an unreadable meta proves nothing and the
+// answer keeps the transaction's ref (L4).
+const tellRun = async (plant: Plant, over: Partial<PoolBuyHost> = {}) => {
+  const w = await world(plant);
+  const told: unknown[] = [];
+  const a = await runPoolBuy({ ...w.host, ...over, route: (x) => void told.push(x) }, ASK);
+  return { w, a, told };
+};
+
+test("fold 1 (M1): a buy the check refuses inside checkSolanaBuy (a quote 100 slots old) tells nothing, the seed never read", async () => {
+  const { w, a, told } = await tellRun({ slotAhead: 100 });
+  assert.deepEqual(a, { error: "quote_check_failed" });
+  assert.ok(w.log.includes("0:getLatestBlockhash"), "the run reached the check");
+  assert.ok(!w.log.includes("seed"));
+  assert.deepEqual(told, []);
+});
+
+test("fold 1 (M1): a seed whose W is not the proof's recipient tells nothing: nothing taken or sent", async () => {
+  const { w, a, told } = await tellRun({ seedOther: true });
+  assert.deepEqual(a, { error: "failed" });
+  assert.ok(w.log.includes("seed"), "the run reached W's derivation");
+  assert.deepEqual(told, []);
+  assert.equal(w.sentTx(), null);
+  assert.equal(w.state(), "HELD");
+});
+
+test("fold 1 (L1): a take the queue refuses tells nothing: W and the pool are told only once the take holds the note", async () => {
+  const w = await world({ readies: [[readyProof()], [readyProof()], [readyProof()], [readyProof({ attempt: "attempt-2" })]] });
+  const told: unknown[] = [];
+  const a = await runPoolBuy({ ...w.host, ready: async () => [readyProof()], route: (x) => void told.push(x) }, ASK);
+  assert.deepEqual(a, { error: "failed" });
+  assert.ok(w.log.includes("take:note-1"));
+  assert.equal(w.sentTx(), null);
+  assert.deepEqual(told, []);
+  // a take that holds it: told after the take, before the send
+  const ok = await world({ received: [w.E, w.E] });
+  const order: string[] = [];
+  const log = ok.log;
+  await runPoolBuy({ ...ok.host, route: (x) => void order.push(`${Object.keys(x)[0]}@${log.filter((l) => l === "take:note-1" || l === "send").join(",")}`) }, ASK);
+  assert.deepEqual(order, ["wallet@take:note-1", "venue@take:note-1", "out@take:note-1,send"]);
+});
+
+test("fold 1 (L3): an amount past the kit's bound (a token of 80 decimals) is never told; W and the venue still are", async () => {
+  const base = await world();
+  const { a, told } = await tellRun({ received: [base.E, base.E], decimals: 80 });
+  assert.equal("stage" in a && a.stage, "filled");
+  assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: base.curve }]);
+});
+
+test("fold 1 (L4): this very transaction with an unreadable meta on both RPCs proves nothing: the answer keeps its ref", async () => {
+  const { a, told } = await tellRun({ readBack: "metaJunk", landsAtSettle: "never" });
+  assert.deepEqual(a, { stage: "not_landed", txs: [{ chain: "solana", hash: SIG }] });
+  assert.ok(!told.some((x) => Object.hasOwn(x as object, "out")));
+});
+
+test("fold 1 (L4): readBack (pool-sell.ts reads its transaction here too): a meta that says nothing is none, never failed or other", async () => {
+  const signed = new Uint8Array(200).fill(7);
+  signed[0] = 1;
+  const tx = signed.slice();
+  tx.set(base58.decode(SIG), 1);
+  const at = (meta: unknown): SolanaRpc => (async () => ({ transaction: [base64.encode(tx), "base64"], meta })) as SolanaRpc;
+  for (const meta of ["x", 1, true, [], {}, { err: undefined }, null, undefined]) assert.equal(await readBack(at(meta), SIG, signed), "none", JSON.stringify(meta));
+  assert.equal(await readBack(at({ err: null }), SIG, signed), "ok");
+  assert.equal(await readBack(at({ err: { InstructionError: [2, { Custom: 6 }] } }), SIG, signed), "failed");
+  assert.equal(await readBack(at({ err: "AccountInUse" }), SIG, signed), "failed");
+});
+
+test("fold 1 (L3): the page's poster names each field from the route's own keys and posts only what the kit's client takes", async () => {
+  const posted: unknown[] = [];
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  let ctx: { route?: (r: unknown) => void } | null = null;
+  const api = startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: () => signedOutState(),
+    kinds: { "pool.buy": (_p, c) => ((ctx = c as never), { running: true, after: new Promise<void>(() => {}), answer: () => ({ error: "failed" }) }) },
+  });
+  const id = crypto.randomUUID();
+  listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "pool.buy", chain: "solana", token: fx.pump.mint, amount: "0.005", slippage_bps: 300 } });
+  await api.idle();
+  const route = ctx!.route!;
+  route({ wallet: W.address, secretKey: "deadbeef", seed: "00" }); // extra keys: only W is posted
+  route(Object.create({ venue: "pumpswap", pool: W.address })); // inherited: nothing
+  route({ out: "1", v: 9, id: "other-id", type: "state" }); // its own id and type win
+  route({ wallet: "W1" }); // not an address: not posted
+  route({ out: `0.${"0".repeat(79)}1` }); // past the kit's bound: not posted
+  await api.idle();
+  assert.deepEqual(posted.filter((m) => (m as { type?: string }).type === "progress"), [
+    { v: 1, type: "progress", id, wallet: W.address },
+    { v: 1, type: "progress", id, out: "1" },
+  ]);
 });

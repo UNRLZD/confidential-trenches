@@ -64,14 +64,14 @@ const set = (st: Route["st"], i: number, s: StepState): Route["st"] => st.map((x
 const link = (l: Route["links"], i: number): Route["links"] => l.map((x, j) => (j === i ? true : x)) as unknown as Route["links"];
 
 export function routeEvent(r: Route, ev: RouteEvent): Route {
-  if (r.k !== "running" || r.id !== ev.id) return r;
+  if (r.k === "idle" || r.id !== ev.id) return r;
+  // the buy's data may follow its answer (the page queues it with the stages, the answer is posted on its own): it fills
+  // its value on the strip of its own id, done or failed; it checks nothing
+  if (ev.t === "wallet") return { ...r, wallet: ev.address };
+  if (ev.t === "route") return { ...r, venue: ev.venue, pool: ev.pool };
+  if (ev.t === "out") return { ...r, out: ev.amount };
+  if (r.k !== "running") return r;
   switch (ev.t) {
-    case "wallet":
-      return { ...r, wallet: ev.address };
-    case "route":
-      return { ...r, venue: ev.venue, pool: ev.pool };
-    case "out":
-      return { ...r, out: ev.amount };
     case "taken":
       return r.st[0] === "active" ? { ...r, st: set(set(r.st, 0, "done"), 1, "active"), links: link(r.links, 0) } : r;
     case "sent":
@@ -126,20 +126,26 @@ export type RouteData = Extract<RouteEvent, { t: "wallet" | "route" | "out" }>;
 const VENUE_PAD: Readonly<Record<string, string>> = { "pump-curve": "pump.fun" };
 
 /** One route event of the kit (the signing page's own reads, by the buy's id) as the strip's data. */
-export function fromBuyRoute(id: string, r: BuyRoute): RouteData {
-  if ("wallet" in r) return { t: "wallet", id, address: r.wallet };
-  if ("venue" in r) {
-    const pad = Object.hasOwn(VENUE_PAD, r.venue) ? padOf(VENUE_PAD[r.venue]) : null;
-    return { t: "route", id, venue: pad ? pad.name : null, pool: r.pool };
+export function fromBuyRoute(id: string, r: BuyRoute): RouteData | null {
+  // the kit's own keys only (its client checked the shape): an inherited field names nothing
+  const x = r as Partial<Record<"wallet" | "venue" | "pool" | "out", string>>;
+  if (Object.hasOwn(r, "wallet") && x.wallet) return { t: "wallet", id, address: x.wallet };
+  if (Object.hasOwn(r, "venue") && Object.hasOwn(r, "pool") && x.venue !== undefined && x.pool) {
+    const pad = Object.hasOwn(VENUE_PAD, x.venue) ? padOf(VENUE_PAD[x.venue]) : null;
+    return { t: "route", id, venue: pad ? pad.name : null, pool: x.pool };
   }
-  return { t: "out", id, amount: r.out };
+  if (Object.hasOwn(r, "out") && x.out) return { t: "out", id, amount: x.out };
+  return null;
 }
 
 /** TradeKit.route on the kit's route events (client.onRoute): each one, by its buy's id, as the strip's data. */
 export const liveRoute =
   (onRoute: (fn: (id: string, r: BuyRoute) => void) => () => void) =>
   (on: (d: RouteData) => void): (() => void) =>
-    onRoute((id, r) => on(fromBuyRoute(id, r)));
+    onRoute((id, r) => {
+      const d = fromBuyRoute(id, r);
+      if (d) on(d);
+    });
 
 const short = (a: string): string => `${a.slice(0, 4)}…${a.slice(-4)}`;
 

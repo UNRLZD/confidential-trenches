@@ -160,3 +160,33 @@ test("a venue id with no name already on screen names no venue (the bare label),
   assert.deepEqual(fromBuyRoute("b1", { wallet: WALLET }), { t: "wallet", id: "b1", address: WALLET });
   assert.deepEqual(fromBuyRoute("b1", { out: "7" }), { t: "out", id: "b1", amount: "7" });
 });
+
+// fold 1 (L2): the page queues a buy's route events with its stages but posts the answer on its own, so a route event may
+// come after the answer: it still fills its value on the strip of its own id, done or failed, and checks nothing.
+test("a route event after the answer still fills its value, done or failed; another buy's never does", () => {
+  let r = fromStage(tap(), "b1", "filled", "sig");
+  assert.equal(r.k, "done");
+  r = routeEvent(r, { t: "wallet", id: "b1", address: WALLET });
+  r = routeEvent(r, { t: "route", id: "b1", venue: "pump.fun", pool: POOL });
+  r = routeEvent(r, { t: "out", id: "b1", amount: "10600" });
+  assert.deepEqual(values(r), ["$25.00", "9DJa…Zst6", "G19c…TQki", "10600"]);
+  assert.deepEqual(steps(r), ["done", "done", "done", "done"], "data checks nothing");
+  let f = fromStage(fromStage(tap(), "b1", "sent", "sig"), "b1", "not_landed");
+  assert.equal(f.k, "failed");
+  f = routeEvent(f, { t: "route", id: "b1", venue: null, pool: POOL });
+  assert.equal(f.pool, POOL);
+  assert.deepEqual(steps(f), ["done", "done", "error", "off"]);
+  assert.equal(routeEvent(r, { t: "out", id: "b2", amount: "1" }).out, "10600", "another buy's id");
+  assert.equal(routeEvent(IDLE, { t: "wallet", id: "b1", address: WALLET }), IDLE, "no strip before a tap");
+});
+
+// fold 1 (L3): the kit's own keys only: an inherited field names nothing, and nothing reaches the strip
+test("fromBuyRoute reads only the event's own keys: an inherited wallet, venue or out names nothing", () => {
+  for (const proto of [{ wallet: WALLET }, { venue: "pump-curve", pool: POOL }, { out: "7" }]) {
+    assert.equal(fromBuyRoute("b1", Object.create(proto) as BuyRoute), null, JSON.stringify(proto));
+  }
+  const seen: unknown[] = [];
+  const route = liveRoute((fn) => (fn("b1", Object.create({ wallet: WALLET }) as BuyRoute), () => {}));
+  route((d) => void seen.push(d));
+  assert.deepEqual(seen, []);
+});

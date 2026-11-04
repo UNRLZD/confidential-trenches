@@ -3,8 +3,8 @@
 // venue and pool address, the amount W received read back on both RPCs) reaches the trade box's buy strip as the kit's
 // route events (messages.ts BuyRoute). It reads what the two hosts serve and checks each deployed bundle carries its half:
 //   - sign: SIGN_HOST's served page and the script it names (/app.js) answer 200, and the script holds the API's route
-//     poster (src/api.ts: the event names each BuyRoute field itself, `wallet` in r ? {wallet: r.wallet} ...) and hands
-//     it to the kinds' context next to `progress` (progress: ..., route: ...);
+//     poster (src/api.ts: the event names each BuyRoute field itself from the route's own keys, own("wallet") ?
+//     {wallet: r.wallet} ...) and hands it to the kinds' context next to `progress` (progress: ..., route: ...);
 //   - app: APP_HOST's served page and every script it names answer 200, and the scripts hold the kit client's onRoute
 //     (packages/kit/src/signpage/client.ts) and the trade source's live seam fed from it (source.tsx: route:
 //     client ? liveRoute(client.onRoute.bind(client)) : null).
@@ -36,7 +36,7 @@ const ID = "[\\w$]+";
 /** Each host's markers, by name: a regex over its scripts, robust to the minifier's names. */
 export const MARKERS = {
   sign: {
-    "the route poster": new RegExp(`${Q}wallet${Q}\\s*in\\s*${ID}\\s*\\?\\s*\\{\\s*wallet:\\s*${ID}\\.wallet\\s*\\}`),
+    "the route poster": new RegExp(`${ID}\\(${Q}wallet${Q}\\)\\s*\\?\\s*\\{\\s*wallet:\\s*${ID}\\.wallet\\s*\\}`),
     "the kinds' route context": new RegExp(`progress:\\s*${ID},\\s*route:\\s*${ID}\\s*\\}`),
   },
   app: {

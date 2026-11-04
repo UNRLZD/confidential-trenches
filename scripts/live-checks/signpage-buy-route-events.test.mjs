@@ -58,8 +58,8 @@ test("planted: a script the host did not answer, a page naming no script, an unk
 });
 
 test("the markers match the bundles' own minified text and not the bundles before this card", () => {
-  // the lines as the bundlers wrote them (packages/signpage/public/app.js and apps/terminal/dist at 887c521)
-  const sign = "m=e=>{let t=`wallet`in e?{wallet:e.wallet}:`venue`in e?{venue:e.venue,pool:e.pool}:{out:e.out};c=c.then(()=>r({v:1,type:`progress`,id:u,...t})).catch(()=>{})};n.set(u,[]);let h=Cc(e,l,{id:u,sha:d,progress:p,route:m});";
+  // the lines as the bundlers wrote them (packages/signpage/public/app.js at fold 1, apps/terminal/dist at 887c521)
+  const sign = "m=e=>{let t=t=>Object.hasOwn(e,t),n=t(`wallet`)?{wallet:e.wallet}:t(`venue`)?{venue:e.venue,pool:e.pool}:t(`out`)?{out:e.out}:null,i=n&&{v:1,type:`progress`,id:u,...n};i!==null&&_c(i)&&(c=c.then(()=>r(i)).catch(()=>{}))};n.set(u,[]);let h=jc(e,l,{id:u,sha:d,progress:p,route:m});";
   const app = "onProgress(e){return c.add(e),()=>void c.delete(e)},onRoute(e){return l.add(e),()=>void l.delete(e)},request(e,t){} onProgress:t?t.onProgress.bind(t):null,route:t?ap(t.onRoute.bind(t)):null}),[t,i]);";
   for (const [name, re] of Object.entries(MARKERS.sign)) assert.match(sign, re, name);
   for (const [name, re] of Object.entries(MARKERS.app)) assert.match(app, re, name);

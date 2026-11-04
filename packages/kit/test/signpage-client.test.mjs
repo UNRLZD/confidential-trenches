@@ -802,6 +802,32 @@ test("route events reach onRoute by the buy's id, in order, never onProgress; a 
   assert.equal(routes.length, 4);
 });
 
+// fold 1 (L3): `out` an amount above 0 with no leading or trailing zero, at most 78 digits each side; W and the pool
+// base58 addresses of 32 bytes; the venue a free string
+test("route events: out, wallet and pool are checked as the kit's own shapes; the venue is a free string", async () => {
+  const at = (x) => S.signpageProgressRouteSchema({ v: 1, type: "progress", id: "x", ...x });
+  for (const out of ["1", "0.5", "1234.5", "10", "1".repeat(78), `0.${"0".repeat(77)}1`, `${"9".repeat(78)}.${"9".repeat(78)}`]) assert.equal(at({ out }), true, out);
+  for (const out of ["0", "00", "01", "0.0", "1.50", "1.", ".5", "-1", "+1", "1e9", " 1", "1 ", "1".repeat(79), `0.${"0".repeat(78)}1`, "", 1, null]) assert.equal(at({ out }), false, String(out));
+  const short = "1".repeat(31);
+  const bytes31 = "2".repeat(43); // base58 that is not 32 bytes
+  for (const wallet of ["W1", short, bytes31, "0".repeat(44), "O".repeat(44), "l".repeat(44), `${W_ADDR}x`, "", 1]) {
+    assert.equal(at({ wallet }), false, String(wallet));
+    assert.equal(at({ venue: "pump-curve", pool: wallet }), false, `pool ${wallet}`);
+  }
+  assert.equal(at({ wallet: W_ADDR }), true);
+  assert.equal(at({ wallet: "11111111111111111111111111111111" }), true, "the system program is 32 zero bytes");
+  for (const venue of ["pump-curve", "pumpswap", "Raydium", "a venue"]) assert.equal(at({ venue, pool: W_ADDR }), true, venue);
+  assert.equal(at({ venue: "", pool: W_ADDR }), false);
+  // the client drops each refused one: no listener called
+  const { h, c } = await readyClient();
+  const seen = [];
+  c.onRoute((id, r) => seen.push(r));
+  h.post({ v: 1, type: "progress", id: "x", out: "0" });
+  h.post({ v: 1, type: "progress", id: "x", wallet: "W1" });
+  h.post({ v: 1, type: "progress", id: "x", venue: "pump-curve", pool: short });
+  assert.deepEqual(seen, []);
+});
+
 test("an app of an earlier kit drops every route event and still reads every stage around them", async () => {
   // the stage schema is the earlier kit's, exact keys: it refuses each route event and any stage event carrying a route field
   for (const m of ROUTE) assert.equal(S.signpageProgressSchema(m), false);
