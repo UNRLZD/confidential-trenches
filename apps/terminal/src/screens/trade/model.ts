@@ -313,3 +313,12 @@ export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: 
   const p = poolOf(pools, chain);
   return p ? { kind: "pool.sell", params: { chain: p.chain as PoolChain, token, amount, slippage_bps: slippageBps } } : null;
 }
+
+/**
+ * The trade box's Bal (card trade-box-bal-cash): on a chain with no pool, the one balance the header and Portfolio's
+ * Cash tile draw (balanceOf), never a second sum; on a chain whose pool the signing page reports, that pool's balance
+ * in USD (poolView), null while it cannot be priced. One number for the amount gate (amountOk) either way.
+ */
+export function tradeBal(onPool: boolean, pool: PoolView | null, cash: Cents | null): { from: "cash" | "pool"; cents: Cents | null } {
+  return onPool ? { from: "pool", cents: pool?.balance ?? null } : { from: "cash", cents: cash };
+}
