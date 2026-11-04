@@ -1236,7 +1236,7 @@ test("P5 a found pool of a pinned hook in a shape the venue does not list is pri
   assert.ok(seen.some((o) => o.replaces.includes(ZORA_HOOK)), JSON.stringify(seen));
 });
 
-// The review of edb4dbb (probes PA-PG, re-run by the CO 12:17Z): F1 the sell goes one level further exactly where the
+// The review of edb4dbb (probes PA-PG, re-run 12:17Z): F1 the sell goes one level further exactly where the
 // buy does, where X has no market that fills; F2 the sell quotes the token into X once per pool and prices X's markets
 // at that amount; F3 `bought` is required; F5 `bought` is read under the found pools' rule and kept only where the sell
 // builder takes it; F6 minOut is the slippage off the reference. (PE, a hook that admits only the quoter, and F7 are
