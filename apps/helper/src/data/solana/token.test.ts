@@ -12,7 +12,7 @@ import { createProxy } from "../../proxy/proxy.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
-  CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, LAUNCH_WAIT_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
+  CANDLES_FIELDS, createSolanaToken, GT_PAGE_WAIT_MS, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, LAUNCH_WAIT_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
 } from "./token.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
@@ -87,6 +87,7 @@ test("fold 6 (R5c): Jupiter's batched search draws on the helper's own reserve, 
   const searched: string[] = [];
   const proxy = createProxy({}, {
     now: () => NOW,
+    sleep: async () => {}, // the clock is frozen: a refused build's bounded queue wait ends on its rounds, not 3 s of real time
     fetch: (async (url: string) => {
       const u = new URL(url);
       if (u.pathname !== "/tokens/v2/search") return new Response('{"ok":1}', { status: 200, headers: { "content-type": "application/json" } });
@@ -530,6 +531,30 @@ test("candles: the server's one GeckoTerminal budget: the page takes what the li
   const over = await t.candles(CURVE, "1d", 1793620800 - 40 * 86_400, 10);
   assert.deepEqual([over.status, over.retryAfterS], [429, WINDOW_MS / 1000], "a call past the window is a throttle naming the exact wait to its oldest call leaving it");
 });
+test("card helper-crowd-429: a cold chart read with GeckoTerminal's minute spent waits for the next free call within GT_PAGE_WAIT_MS and answers 200, not 429 (market-data-solana-token, live run 41923006818 at 22:12Z)", async () => {
+  const g = fakeGecko();
+  let skew = 0;
+  const now = () => performance.timeOrigin + performance.now() + skew;
+  const shared = geckoBudget(now);
+  for (let i = 0; i < GT_PER_MIN; i++) assert.equal(shared.take("pages"), true);
+  skew = WINDOW_MS - 1_200; // the minute's calls leave the window in 1.2 s
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now, fetch: g.fetch, gecko: shared });
+  const t0 = performance.now();
+  const a = await t.candles(PUMP, "1h", null, 24);
+  const waited = performance.now() - t0;
+  assert.equal(a.status, 200, `${a.status} ${a.body}`);
+  assert.ok(waited >= 1_000 && waited < GT_PAGE_WAIT_MS * 2, `waited ${Math.round(waited)} ms`);
+  assert.equal(g.urls.length, 2, "its pool, then its bars");
+  // a minute that frees past the bound still answers 429 at once with the wait named
+  const full = geckoBudget(now);
+  for (let i = 0; i < GT_PER_MIN; i++) full.take("pages");
+  const t2 = createSolanaToken(fakeProxy(), fakeRpc(), { now, fetch: g.fetch, gecko: full });
+  const t1 = performance.now();
+  const over = await t2.candles(CURVE, "1h", null, 24);
+  assert.deepEqual([over.status, over.retryAfterS], [429, WINDOW_MS / 1000]);
+  assert.ok(performance.now() - t1 < 500, "no wait past the bound");
+});
+
 test("review F-E: a GeckoTerminal 429 (and the paused queue after it) answers 429 with a wait, not 503", async () => {
   let gt = 0;
   const proxy = { handle: async () => ({ status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' }) };
