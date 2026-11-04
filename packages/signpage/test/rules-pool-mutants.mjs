@@ -26,6 +26,7 @@ const SELL = "Solana sell:";
 const EBUY = "EVM buy:";
 const EWD = "EVM withdraw:";
 const ESELL = "EVM sell and authorization";
+const ESIM = "EVM sim sell:";
 
 // [text, replacement, the test that must fail]
 export const MUTANTS = [
@@ -119,6 +120,16 @@ export const MUTANTS = [
   ['if (built.deadline * 1000n <= ctx.nowMs) return refuse("deadline_past");', "", ESELL],
   ['if (nonceReads[0] !== nonceReads[1] || nonce !== nonceReads[0]) return refuse("nonce");', "", ESELL],
   ['if (pins.sellDelegate === undefined) return refuse("delegate_not_pinned");', "", ESELL],
+  // the sim sell (card evm-quote-exec-sim): never able to land, W's own token and amount, only what the check passed
+  ['if (!pins.sellDelegate) return refuse("delegate_not_pinned");', "", ESIM],
+  ['if (sim.chain !== chain) return refuse("chain");', "", ESIM],
+  ['if (lower(sim.w) !== lower(ctx.wallet)) return refuse("wallet");', "", ESIM],
+  ['if (lower(sim.token) !== lower(ask.token ?? "")) return refuse("token");', "", ESIM],
+  ['if (sim.amount !== ask.amount) return refuse("amount");', "", ESIM],
+  ['if (lower(sim.pool) !== EVM_SELL_SIM) return refuse("sim_pool");', "", ESIM],
+  ['|| sim.deadline > blockTimestamp) return refuse("sim_deadline");', ') return refuse("sim_deadline");', ESIM],
+  ['if (blockTimestamp * 1000n > ctx.nowMs) return refuse("sim_block_after_clock");', "", ESIM],
+  ['  passed("evm.sim", sim, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, sim: { blockTimestamp, nowMs: ctx.nowMs } });\n', "", ESIM],
   // the compute budget caps
   ['> SOLANA_POOL_CU_LIMIT_MAX) refuse("cu_limit");', '> 0xffffffff) refuse("cu_limit");', DEP],
   ['if (u64le(ixs[n]!.data, 1) > SOLANA_CU_PRICE_MAX) refuse("cu_price");', "", DEP],

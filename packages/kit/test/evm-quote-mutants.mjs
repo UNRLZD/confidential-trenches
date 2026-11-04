@@ -21,6 +21,8 @@ const H = "test/evm-quote-head.test.ts";
 // the sell quote (card evm-sell-device-quote) and the index's sell builder and signer that take only one
 const SELLQ = "src/trade/evm/sell.ts";
 const S = "test/evm-sell-quote.test.ts";
+// the sim sell's builder and signer (card evm-quote-exec-sim)
+const SELLU = "src/trade/evm/sell-unpinned.ts";
 
 // [file, text, replacement, test file, the test that must fail]
 export const MUTANTS = [
@@ -221,6 +223,25 @@ export const MUTANTS = [
   [QUOTE, "const exits = evmSellExits(chain, t, bought) ? bought : undefined;", "const exits = bought;", R, "PC "],
   [QUOTE, "const minOut = (reference!.amountOut * BigInt(10000 - slippageBps)) / 10000n;", "const minOut = (pick.amountOut * BigInt(10000 - slippageBps)) / 10000n;", R, "PD "],
   [QUOTE, "return Object.freeze({ venue: r.venue, hops: Object.freeze(hops.reverse()) });", "return Object.freeze({ venue: r.venue, hops: Object.freeze(hops) });", R, "P4 "],
+  // card evm-quote-exec-sim: a route through an unlisted hook above the builder's best counts only where W's own sell
+  // through it executes (the sim), where the chain pins a sell delegate; elsewhere the lower of its two quotes stays
+  [QUOTE, 'const toSim = routes.filter((r) => r.amountOut > floor && simRule(chain, r.route, delegate) === "sim");', "const toSim: Filled[] = [];", R, "PE a pool"],
+  [QUOTE, 'return sellDelegate !== undefined ? "sim" : "keep-min";', 'return "sim";', R, "PE (keep-min)"],
+  [QUOTE, 'return sellDelegate !== undefined ? "sim" : "keep-min";', 'return "keep-min";', R, "PE a pool"],
+  [QUOTE, 'if (typeof signSim !== "function") return refuse("bad_request",', 'if (false) return refuse("bad_request",', R, "PE a pool"],
+  [QUOTE, "nonce: n!.amountOut, deadline: block.timestamp });", "nonce: n!.amountOut, deadline: block.timestamp + 60n });", R, "PE a pool"],
+  [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } } };", "override: { ...asW } };", R, "PE a pool"],
+  [QUOTE, "const asW = { [lower(w)]: { code: designator(delegate!) } };", "const asW = { [lower(w)]: { code: EVM_NOOP_HOOK_CODE } };", R, "PE a pool"],
+  [QUOTE, "const takes = best(filled.filter((r) => evmSellExits(chain, t, r.route)));", "const takes = best(filled);", R, "PE a pool"],
+  // (no mutant drops the signer's pool check: only a sim the builder made is signed, frozen with EVM_SELL_SIM as its
+  // pool, so the check cannot fail there; the signing page's rule, which takes any object, holds it: sim_pool)
+  [SELLU, "sim.deadline > blockTimestamp) return refuse(", "sim.deadline > blockTimestamp + 1n) return refuse(", S, "planted: the sim signer"],
+  [SELLU, "if (!Number.isFinite(nowMs) || blockTimestamp * 1000n > BigInt(Math.floor(nowMs))) return refuse(", "if (!Number.isFinite(nowMs)) return refuse(", S, "planted: the sim signer"],
+  [SELLU, 'if (!SIMS.has(sim) || sim.chain !== chain) return refuse("not_built", "W signs only a sim', 'if (sim.chain !== chain) return refuse("not_built", "W signs only a sim', S, "planted: the sim signer"],
+  [SELLU, 'if (addressOf(secretKey) !== lower(sim.w)) return refuse("bad_key", "the key is not W\'s");\n  return signDigest(secretKey, sellDigest(sim));', "return signDigest(secretKey, sellDigest(sim));", S, "planted: the sim signer"],
+  [SELLU, 'if (pinsOf(venues, chain).sellDelegate === undefined) return refuse("not_deployed", `${chain} has no pinned sell delegate yet`);\n  return evmPoolSignSimSellUnpinned', "return evmPoolSignSimSellUnpinned", S, "planted: the sim signer"],
+  [SELLU, "pool: EVM_SELL_SIM, precommitment: 0n, feeCap: 0n,", "pool: venue.weth, precommitment: 0n, feeCap: 0n,", S, "planted: the sim signer"],
+  [SELLU, "    if (!anyHook && lower(hooks as string) !== NATIVE) {", "    if (lower(hooks as string) !== NATIVE) {", R, "PE a pool"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`
@@ -242,7 +263,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let bad = 0;
   try {
     for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
-    const src = new Map([QUOTE, BUY, BUYU, SELLQ].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
     for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
       const r = run(dir, file, t);
       if (r !== "pass") {

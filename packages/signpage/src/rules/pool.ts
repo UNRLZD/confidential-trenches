@@ -73,7 +73,7 @@ import {
   type SolanaPoolRelease,
 } from "../../../kit/src/trade/solana/pool-buy.ts";
 import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolProofBinding, type EvmPoolVenueList } from "../../../kit/src/trade/evm/buy-unpinned.ts";
-import { pinnedSignSell, pinnedSignSellAuthorization, type EvmPoolSell, type EvmPoolSellAuthorization } from "../../../kit/src/trade/evm/sell-unpinned.ts";
+import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
 
 /** The four pool kinds the page signs for (the kit's messages.ts). */
@@ -113,13 +113,14 @@ export const SOLANA_POOL_SELL_RESERVE_MAX = SOLANA_POOL_TX_FEE_MAX + (128n + 17n
 // Every payload a check passed, by identity and by what it is, with what the check read: the signers below sign only
 // these, and only from that read (the pins, the venue list, the proof's values), never from a payload or a context
 // read again, so no path reaches a key around a check, and a proof checked as a buy is never signed as a withdraw
-type Checked = "evm.buy" | "evm.withdraw" | "evm.sell" | "evm.authorization";
+type Checked = "evm.buy" | "evm.withdraw" | "evm.sell" | "evm.sim" | "evm.authorization";
 /** What a check read for its signer: the venue list it checked against, the pool and chain id, a proof's values. */
-type Read = { readonly venues: EvmPoolVenueList; readonly pool: string; readonly chainId: bigint; readonly proof?: Readonly<EvmPoolProofBinding> };
+type Read = { readonly venues: EvmPoolVenueList; readonly pool: string; readonly chainId: bigint; readonly proof?: Readonly<EvmPoolProofBinding>; readonly sim?: { readonly blockTimestamp: bigint; readonly nowMs: bigint } };
 const CHECKED: Readonly<Record<Checked, WeakMap<object, Read>>> = Object.freeze({
   "evm.buy": new WeakMap<object, Read>(),
   "evm.withdraw": new WeakMap<object, Read>(),
   "evm.sell": new WeakMap<object, Read>(),
+  "evm.sim": new WeakMap<object, Read>(),
   "evm.authorization": new WeakMap<object, Read>(),
 });
 const passed = (as: Checked, x: object, read: Read): void => {
@@ -599,6 +600,27 @@ export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext 
   return { chain: ask.chain, op: ask.kind, token: built.token, amount: built.amount, feeCap: built.feeCap, pool: pins.pool, to: pins.pool, decimals: ask.decimals, back: built.minOut };
 }
 
+/** A sim sell (card evm-quote-exec-sim): the device's sell quote prices a route through a hook the venue does not list
+ *  only where W's own sell through it executes, an eth_call of SellDelegate.sell that needs W's signature. W signs one
+ *  only where it can never land: its pool is EVM_SELL_SIM (no code, no key or init code known, so a deposit into it
+ *  reverts on chain), its deadline is at most `blockTimestamp`, the quote's agreed block's (SellDelegate.sol:140 refuses
+ *  it in every later block), and that timestamp is at most the device's clock; it sells the request's own token and
+ *  amount from W, on a chain that pins a sell delegate. Any route: the sim is what drops a route that is not real. */
+export function checkEvmSellSim(sim: EvmSellSim, blockTimestamp: bigint, ask: PoolAsk, ctx: PoolContext, testnet = false): void {
+  if (ask.kind !== "pool.sell") return refuse("kind");
+  const chain = evmChainOf(ask, testnet);
+  const pins = evmPins(ctx, chain);
+  if (!pins.sellDelegate) return refuse("delegate_not_pinned");
+  if (sim.chain !== chain) return refuse("chain");
+  if (lower(sim.w) !== lower(ctx.wallet)) return refuse("wallet");
+  if (lower(sim.token) !== lower(ask.token ?? "")) return refuse("token");
+  if (sim.amount !== ask.amount) return refuse("amount");
+  if (lower(sim.pool) !== EVM_SELL_SIM) return refuse("sim_pool");
+  if (typeof blockTimestamp !== "bigint" || typeof sim.deadline !== "bigint" || sim.deadline > blockTimestamp) return refuse("sim_deadline");
+  if (blockTimestamp * 1000n > ctx.nowMs) return refuse("sim_block_after_clock");
+  passed("evm.sim", sim, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, sim: { blockTimestamp, nowMs: ctx.nowMs } });
+}
+
 /** The pinned sell delegate W's EIP-7702 authorization names, at `nonce`, W's account nonce read on two RPCs. */
 export type EvmAuthorizationChecked = { readonly chain: EvmPoolChain; readonly delegate: string; readonly nonce: bigint };
 export function checkEvmAuthorization(ask: PoolAsk, ctx: PoolContext, nonce: bigint, nonceReads: readonly [bigint, bigint], testnet = false): EvmAuthorizationChecked {
@@ -627,6 +649,12 @@ export function signEvmBuy(secretKey: Uint8Array, _ctx: PoolContext, built: EvmP
 export function signEvmSell(secretKey: Uint8Array, _ctx: PoolContext, built: EvmPoolSell): Uint8Array {
   const read = mustHavePassed("evm.sell", built);
   return pinnedSignSell(read.venues, secretKey, built.chain, built);
+}
+/** W's signature of a sim sell checkEvmSellSim passed, at the block timestamp and clock it read (the kit's pinned sim
+ *  signer holds the same three rules again). */
+export function signEvmSellSim(secretKey: Uint8Array, _ctx: PoolContext, sim: EvmSellSim): Uint8Array {
+  const read = mustHavePassed("evm.sim", sim);
+  return pinnedSignSimSell(read.venues, secretKey, sim.chain, sim, read.sim!.blockTimestamp, Number(read.sim!.nowMs));
 }
 /** W's EIP-7702 authorization of the chain's pinned sell delegate only, at the nonce checkEvmAuthorization passed. */
 export function signEvmAuthorization(secretKey: Uint8Array, _ctx: PoolContext, checked: EvmAuthorizationChecked): EvmPoolSellAuthorization {
