@@ -87,6 +87,21 @@ test("upstreamBudget: hold(key) stops every caller's draw on that key until the 
   assert.equal(b.heldFor("solana"), 0);
 });
 
+test("upstreamBudget fold 3: hold(key, until, true), the provider's 429 on a background read, stops only background draws; callers and reserved reads draw; a caller's hold stops background draws too", () => {
+  const c = moving(5_000_000, 0);
+  const b = upstreamBudget(() => ({ total: 100, perClient: 10, userRoom: 50 }), c.now);
+  b.hold("solana", c.at() + 30_000, true);
+  assert.equal(b.take("solana", undefined), 30, "a background read waits out the reset");
+  assert.equal(b.heldFor("solana", true), 30);
+  assert.equal(b.heldFor("solana"), 0, "nothing holds callers");
+  assert.equal(b.take("solana", "caller"), 0, "a caller draws");
+  assert.equal(b.take("solana", undefined, 1, false, true), 0, "a reserved own read draws");
+  c.jump(30_000);
+  assert.equal(b.take("solana", undefined), 0, "at the reset the background reads draw again");
+  b.hold("solana", c.at() + 5_000);
+  assert.deepEqual([b.take("solana", "caller"), b.take("solana", undefined)], [5, 5], "a caller's hold stops both");
+});
+
 test("upstreamBudget: the total is counted over the provider's own sliding window, so no stretch of it ever holds more than the total, the fixed windows' edges included (re-check F-D)", () => {
   // a vendor's minute: 60 a sliding minute; callers at a 10 s share of 4, 40 addresses drawing as fast as they may
   let t = 7_000_000;
