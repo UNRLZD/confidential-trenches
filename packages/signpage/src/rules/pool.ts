@@ -26,11 +26,13 @@
 //   exactly that min out less the device's reserve for W's fees. Its
 //   teardown frames (card solana-sell-teardown) go through the kit's checkSolanaTeardown for W.
 // - EVM buy and withdraw: the proof binds a context; the device recomputes it from the relay data and the pinned pool
-//   and holds W the recipient, the pinned fee recipient, the fee cap and the deadline. The buy's adapter is a pin, its
-//   token the request's; the kit's pinned signer refuses any buy its builder did not return.
+//   and holds W the recipient, the pinned fee recipient, the fee cap and the deadline. The buy is one the kit built from
+//   the device's own quote (kit trade/evm/quoted.ts evmQuotedBuy: its route, min out and empty hook data the device's,
+//   card evm-buy-hookdata-fee), its adapter a pin, its token the request's; any other build is refused before signing.
 // - EVM sell: W's own sell into the pinned pool, the request's token and amount, the device's precommitment (else the
-//   proceeds are another's note), the fee cap and deadline held here;
-//   the kit's pinned signer refuses any sell its builder did not return.
+//   proceeds are another's note), the fee cap and deadline held here; a sell the kit built from the device's own sell
+//   quote only (quoted.ts evmQuotedSell: its route and min out the device's, its fee cap within the device's fee rule),
+//   any other build refused before signing.
 // - EVM authorization (EIP-7702): only the chain's pinned sell delegate, at W's account nonce read on two RPCs.
 // - The request: its amount in the pool asset's decimals (SOL 9, ETH 18), or for a sell the token's, from the device's
 //   two-RPC read of the mint or decimals() (tokenDecimalsOf); bound by u64 on Solana and uint256 on EVM.
@@ -74,6 +76,7 @@ import {
 } from "../../../kit/src/trade/solana/pool-buy.ts";
 import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolProofBinding, type EvmPoolVenueList } from "../../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
+import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
 import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
 
 /** The four pool kinds the page signs for (the kit's messages.ts). */
@@ -552,6 +555,8 @@ function checkRelay(proof: EvmPoolProofBinding, relay: EvmRelayData, pins: Retur
  *  own floor from its two-RPC pool reads, less the user's slippage), the proof's relay data the device's. */
 export function checkEvmBuy(built: EvmPoolBuy, pool: string, given: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, floor: bigint, testnet = false): PoolDraw {
   if (ask.kind !== "pool.buy") return refuse("kind");
+  // only a buy built from the device's own quote: never a server's route, hook data or min out
+  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");
   const proof = snapProof(given);
   const chain = evmChainOf(ask, testnet);
   const pins = evmPins(ctx, chain);
@@ -585,6 +590,8 @@ export function checkEvmWithdraw(pool: string, given: EvmPoolProofBinding, relay
  *  device's own, from its two-RPC pool reads), within the fee cap, unexpired. */
 export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext & { precommitment: bigint }, floor: bigint, testnet = false): PoolDraw {
   if (ask.kind !== "pool.sell") return refuse("kind");
+  // only a sell built from the device's own sell quote: never a server's route, min out or fee cap
+  if (!evmIsQuotedSell(built)) return refuse("not_quoted");
   const chain = evmChainOf(ask, testnet);
   const pins = evmPins(ctx, chain);
   if (built.chain !== chain) return refuse("chain");

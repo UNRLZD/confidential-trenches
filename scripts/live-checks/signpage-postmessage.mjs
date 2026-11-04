@@ -35,6 +35,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { consoleError } from "./console-errors.mjs";
 
 const KEY = "signpage-postmessage";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -75,6 +76,15 @@ export function releasePin(tag = null) {
 }
 
 /** `pin`: the release whose /app.js the deposit run must have been served (the newest list's when not given). */
+/** A console line that means the frame's script was refused: its integrity, the CSP or Trusted Types. */
+export const BLOCKED = /integrity|Content Security Policy|Trusted Type/i;
+
+/** The check's console hook: every console error, kept through the shared collector (console-errors.mjs) as its text and
+ *  its address's origin and path. */
+export function onConsole(errors) {
+  return (m) => m.type() === "error" && errors.push(consoleError(m));
+}
+
 export function judge(rec, pin = releasePin()) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -88,7 +98,10 @@ export function judge(rec, pin = releasePin()) {
         continue;
       }
       if (headers === "served") say(s.loaded === false, `${label}: the frame is ${s.loaded ? "loaded" : "blocked by frame-ancestors"}`);
-      else say(s.loaded === true && s.scriptRan === true, `${label}: the frame ${s.loaded ? "loads" : "does not load"} and its script ${s.scriptRan ? "runs" : "does not run"}`);
+      else {
+        const why = s.scriptRan === true ? [] : (s.errors ?? []).filter((e) => BLOCKED.test(e));
+        say(s.loaded === true && s.scriptRan === true, `${label}: the frame ${s.loaded ? "loads" : "does not load"} and its script ${s.scriptRan ? "runs" : "does not run"}${why.length ? `: ${why.join("; ")}` : ""}`);
+      }
       const n = (s.messages ?? []).length;
       say(n === 0, `${label}: ${n} message(s) reached the parent${n ? ` (${JSON.stringify(s.messages.map((m) => m.data))})` : ""}, want none`);
     }
@@ -227,7 +240,7 @@ async function run(browser, { parent, headers, signUrl, dir }) {
   });
   const page = await ctx.newPage();
   const errors = [];
-  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  page.on("console", onConsole(errors));
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(`${parent}/`, { waitUntil: "load" });
   await page.waitForFunction(() => window.__log.some((m) => m.data?.type === "ready"), null, { timeout: READY_MS, polling: 50 }).catch(() => {});
@@ -244,7 +257,7 @@ async function run(browser, { parent, headers, signUrl, dir }) {
   const sentAt = await page.evaluate(() => window.__sentAt);
   // the module ran when its script was fetched and the frame logged no CSP or integrity error
   const apiFetched = signRequests.some((r) => r.type === "script" && r.status === 200);
-  const scriptRan = loaded && apiFetched && !errors.some((e) => /integrity|Content Security Policy|Trusted Type/i.test(e));
+  const scriptRan = loaded && apiFetched && !errors.some((e) => BLOCKED.test(e));
   await ctx.close();
   return { parent, headers, loaded, frames, rendered, sentAt, scriptRan, signRequests, sent, messages, errors };
 }

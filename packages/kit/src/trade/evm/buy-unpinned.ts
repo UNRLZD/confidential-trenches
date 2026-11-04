@@ -334,6 +334,10 @@ function checkRoute(chain: EvmPoolChain, route: EvmRoute, quoted = false): strin
         refuse("bad_route", `a v4 tick spacing is 1 to ${MAX_TICK_SPACING}`);
       }
       if (hexBytes(h.hookData).length > EVM_POOL_MAX_HOOK_DATA) refuse("bad_route", `hook data is at most ${EVM_POOL_MAX_HOOK_DATA} bytes`);
+      // a quoted buy's hook data is the device's own, and the device makes none, as a sell's (sell-unpinned.ts v4Data;
+      // card evm-buy-hookdata-fee): a listed hook that read a referrer or a price from it would let whoever wrote it
+      // steer what W signs
+      if (quoted && h.hookData !== "0x") refuse("bad_route", "a quoted buy's hook data is the device's own: empty");
     }
     tokens = [currencyIn, ...hops.map((h) => h.currency)];
   }

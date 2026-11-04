@@ -36,6 +36,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { consoleError } from "./console-errors.mjs";
 
 const KEY = "app-verify-mount";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -122,6 +123,12 @@ function judgeAllRequests(say, n, r, rec, named) {
   const outside = posts.filter((x) => x.rpcId === "verify" && x.phase !== "open" && x.phase !== "reopen");
   const bad = [...offPair.map((x) => `${host(x.url)} (not the pair) in ${x.phase}`), ...offAccount.map((x) => `account ${x.account ?? "none"} in ${x.phase}`), ...outside.map((x) => `a Verify read in ${x.phase}`)];
   say(bad.length === 0, `${n}: ${posts.length} NEAR request(s) over the run, each to the pair, each of ${[...accounts].join(" or ")}, Verify's only while open${bad.length ? `; not so: ${bad.join("; ")}` : ""}`);
+}
+
+/** The check's console hook: every error the terminal's frame (an APP_HOST address) logs, kept through the shared
+ *  collector (console-errors.mjs) as its text and its address's origin and path. */
+export function onConsole(errors) {
+  return (m) => m.type() === "error" && (m.location()?.url ?? "").startsWith(APP_HOST) && errors.push(consoleError(m));
 }
 
 export function judge(rec) {
@@ -253,7 +260,7 @@ async function runOne({ browser, w, shots, route, beforeReopen, duringReopen }) 
       const e = byReq.get(res.request());
       if (e) e.status = res.status();
     });
-    page.on("console", (m) => m.type() === "error" && (m.location()?.url ?? "").startsWith(APP_HOST) && run.errors.push(m.text()));
+    page.on("console", onConsole(run.errors));
     await page.goto(APP_HOST + PATH, { waitUntil: "commit" });
     const f = await appFrame(page);
     if (!f) return run;

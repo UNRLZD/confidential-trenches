@@ -10,8 +10,9 @@
 //
 // --sell-helper <url>: each sell goes to that helper's POST /v1/pool/evm/sell (apps/helper/src/pool/evm.ts) as the
 // device sends it, { pool, w, data, authorization }, instead of from the run key; the helper's sell sender sends the
-// type-4 transaction and takes the fee, which is then at least the helper's bound (EVM_POOL_SELL_GAS x (2 x the base
-// fee + the kit's tip) + twice the L1 bound, on the fee step). The record's sell rows carry via "helper" and the
+// type-4 transaction and takes the fee, the quote's feeMax (the kit's evmPoolSellFeeMax: 2 x (EVM_POOL_SELL_GAS x (the
+// base fee + the kit's tip) + the chain fee), on the fee step), which covers the helper's bound at the quote's base
+// fee. The record's sell rows carry via "helper" and the
 // sender the receipt names; scripts/live-checks/helper-evm-sender.mjs reads them back.
 //
 // What runs, and whose code:
@@ -113,13 +114,10 @@ export const GAS = Object.freeze({ deposit: 300_000n, buy: 1_600_000n, sell: 1_0
 const TX_BYTES = 2_600n;
 /** The chunk each release takes: the wallet's ladder's smallest (EVM_LADDER.min, 0.001 ETH). */
 export const CHUNK = 1_000_000_000_000_000n;
-/** The epoch fee the run's relayer asks and the device recomputes (M356 (4), before the L1 fee): 2 x G(depth) x the
- *  epoch block's base fee, rounded up to the helper's step of 1e13 wei. */
-export const FEE_STEP = 10_000_000_000_000n;
-export const epochFee = ({ baseFeePerGas, depth }) => {
-  const f = 2n * kit.evmPoolGas(depth) * baseFeePerGas;
-  return ((f + FEE_STEP - 1n) / FEE_STEP) * FEE_STEP;
-};
+/** The epoch fee the run's relayer asks and the device recomputes: the kit's one relay fee rule (pool-fee.ts evmPoolFee,
+ *  M356 (4)) with G(depth) at the epoch block's base fee and its chain fee, no floor, on the helper's step of 1e13 wei. */
+export const FEE_STEP = kit.EVM_POOL_FEE_STEP;
+export const epochFee = ({ baseFeePerGas, depth, chainFee }) => kit.evmPoolFee({ floor: 0n, gas: kit.evmPoolGas(depth), gasPrice: baseFeePerGas, chainFee });
 /** The pool's events (contracts/pool-evm/src/interfaces/IPrivacyPool.sol:65, 78, 253) */
 export const EVENTS = Object.freeze({
   Deposited: "Deposited(address,uint256,uint256,uint256,uint256)",
@@ -254,7 +252,10 @@ export async function main(args, io = {}) {
   const relayFee = async (epochStartMs) => {
     const block = await evmEpochBlock(rpcs, epochStartMs);
     const depth = await relaySync.depthAt(block.number);
-    const fee = epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas, depth });
+    // the chain fee at that block, as the device reads it (wallet pool/evm.ts bind), here on the relayer's first RPC
+    const reads = kit.evmPoolChainFeeReads(chain, kit.evmPoolGas(depth));
+    const answers = await Promise.all(reads.map(async (r) => BigInt(await rpcs[0]("eth_call", [{ to: r.to, data: r.data }, { blockHash: block.hash }]))));
+    const fee = epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas, depth, chainFee: kit.evmPoolChainFee(chain, kit.EVM_POOL_TX_BYTES, answers) });
     return { chain: "evm", network: chain, pool, fee_recipient: relayer, epoch_ms: Number(EVM_EPOCH_MS), epoch_start_ms: Number(epochStartMs), block: `0x${block.number.toString(16)}`, fee: fee.toString(), step: FEE_STEP.toString() };
   };
   const device = evmPool({ pin, rpcs, relayFee, epochFee });
@@ -384,7 +385,7 @@ export async function main(args, io = {}) {
         const ev = poolLog(r, T.Bought);
         if (!ev) throw new Error(`${step}: no Bought event`);
         const d = words(ev.data);
-        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref, v, route: q.route });
+        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref, v, route: q.route, block: BigInt(r.blockNumber) });
         Object.assign(steps.at(-1), { out: String(d[6]), newCommitment: String(d[4]), value: String(withdrawn), fee: String(fee) });
       } else {
         const sig = sign65(withdrawDigest(chainId, pool, nullifier, b.context, withdrawn), W.secretKey);
@@ -418,22 +419,15 @@ export async function main(args, io = {}) {
         await sleep(2000);
       }
       if (amount !== BigInt(b.out)) throw new Error(`W ${W.address} holds ${amount} of the token, not the ${b.out} its buy paid, after 60 s`);
-      // the sender's fee for a sell: the fee step at least (the kit refuses a fee cap of 0)
-      const baseFee = BigInt((await call("eth_getBlockByNumber", ["latest", false])).baseFeePerGas);
-      const f0 = epochFee({ baseFeePerGas: baseFee, depth: 0 });
-      let fee = f0 > FEE_STEP ? f0 : FEE_STEP;
-      // through a helper: at least its bound, with room for the base fee to double before the send
-      if (sellHelper) {
-        const bound = kit.EVM_POOL_SELL_GAS * (2n * baseFee + kit.evmPoolSellTip(chain)) + 2n * (await l1Bound(TX_BYTES));
-        const stepped = ((bound + FEE_STEP - 1n) / FEE_STEP) * FEE_STEP;
-        if (stepped > fee) fee = stepped;
-      }
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
       const { q, built } = await fresh(
-        // `bought`: the route of the buy that paid W the token, which the sell quote requires
-        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route }),
-        (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, feeCap: fee, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
+        // `bought` and `boughtBlock`: the route of the buy that paid W the token and the block it landed in, which the
+        // sell quote requires (it reads at that block or a later one)
+        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block }),
+        // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole
+        (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
       );
+      const fee = built.feeCap;
       const sv = q.route.venue === "uniswap-v4" ? "v4" : "v3";
       const sig = kit.evmPoolSignSell(W.secretKey, chain, built);
       const auth = kit.evmPoolSignSellAuthorization(W.secretKey, chain, BigInt(await call("eth_getTransactionCount", [W.address, "latest"])));

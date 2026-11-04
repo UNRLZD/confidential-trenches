@@ -133,6 +133,9 @@ export const MUTANTS = [
   // the compute budget caps
   ['> SOLANA_POOL_CU_LIMIT_MAX) refuse("cu_limit");', '> 0xffffffff) refuse("cu_limit");', DEP],
   ['if (u64le(ixs[n]!.data, 1) > SOLANA_CU_PRICE_MAX) refuse("cu_price");', "", DEP],
+  // only a build from the device's own quote (card evm-buy-hookdata-fee, review fold 1 M1)
+  ['  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");\n', "", EBUY],
+  ['  if (!evmIsQuotedSell(built)) return refuse("not_quoted");\n', "", ESELL],
   // the EVM floors
   ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', "checkRelay", EBUY],
   ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],

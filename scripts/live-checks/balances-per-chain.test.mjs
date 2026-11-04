@@ -14,7 +14,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ANSWER, base, judge, POOLS } from "./balances-per-chain.mjs";
+import { ANSWER, base, judge, onConsole, POOLS } from "./balances-per-chain.mjs";
+import { APP_HOST } from "./app-in-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "balances-per-chain.answers.json"), "utf8"));
@@ -92,4 +93,22 @@ test("planted: a ready drawn as a dash where the pool sent one: FAIL", () => {
     x.text[2] = "—";
   });
   assert.equal(r.ok, false);
+});
+
+test("planted on the good answer: a recorded 429 names its resource's origin and path in the BAD line, and an error with no location still fails (card live-console-url)", () => {
+  const text = "Failed to load resource: the server responded with a status of 429 ()";
+  const msg = (t, location) => ({ type: () => "error", text: () => t, location: () => location });
+  const kept = [];
+  const hook = onConsole(kept);
+  hook(msg(text, { url: `${APP_HOST}/assets/index-abc.js?v=1` }));
+  hook(msg("the shell's own", { url: "https://sign.confidential.unrealized.trade/assets/shell.js" }));
+  hook({ type: () => "warning", text: () => "a warning", location: () => ({ url: `${APP_HOST}/` }) });
+  assert.deepEqual(kept, [`${text} (${APP_HOST}/assets/index-abc.js)`]);
+  let r = mut((rec) => rec.runs[1].errors.push(kept[0]));
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.endsWith(`console ${text} (${APP_HOST}/assets/index-abc.js)`)), r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => l.includes("?v=1")), "no query in a line");
+  r = mut((rec) => rec.runs[0].errors.push("Uncaught boom"));
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.endsWith(": console Uncaught boom")), r.lines.join("\n"));
 });

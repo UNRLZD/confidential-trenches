@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, THREAD_CSP, THREAD_PATH, THREAD_PIN, threadsFor } from "./signpage-prover-threads.mjs";
+import { consoleLineOf, judge, THREAD_CSP, THREAD_PATH, THREAD_PIN, threadsFor } from "./signpage-prover-threads.mjs";
 
 after(() => globalThis.curve_bn128?.terminate?.());
 
@@ -93,4 +93,14 @@ test("planted: a planted worker that ran, one thread, a proof that does not veri
   bad(await judge(planted((a) => a.page.violations.push({ where: "worker", directive: "worker-src", blocked: "blob" }))), "CSP and Trusted Types violations");
   bad(await judge(planted((a) => (a.page.violations = []))), "CSP and Trusted Types violations");
   bad(await judge(planted((a) => delete a.page)), "the page: not run");
+});
+
+// The check judges no console line: the planted data: and blob: workers make CSP errors by design. Its console lines are
+// for the reader, and name their resource like every other check's (card live-console-url).
+test("a console line the run keeps names its resource's origin and path, never the query; one with no location is its text", () => {
+  const msg = (type, t, location) => ({ type: () => type, text: () => t, location: () => location });
+  const text = "Failed to load resource: the server responded with a status of 429 ()";
+  assert.equal(consoleLineOf(msg("error", text, { url: "https://sign.confidential.unrealized.trade/zk/withdraw.zkey?x=1" })), `error ${text} (https://sign.confidential.unrealized.trade/zk/withdraw.zkey)`);
+  assert.equal(consoleLineOf(msg("error", "Refused to create a worker", { url: "blob:https://sign.confidential.unrealized.trade/9a7e" })), "error Refused to create a worker (blob:https://sign.confidential.unrealized.trade)");
+  assert.equal(consoleLineOf(msg("log", "x".repeat(400), { url: "" })), `log ${"x".repeat(296)}`);
 });

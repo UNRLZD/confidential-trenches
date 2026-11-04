@@ -24,7 +24,8 @@
 //     PoolManager (PoolNotInitialized), so W keeps its token;
 // - the deadline is unix seconds, at least EVM_POOL_SELL_DEADLINE_MIN_S and at most EVM_POOL_SELL_DEADLINE_MAX_S past
 //   now;
-// - the fee cap is above 0 and under minOut, so the deposit always holds something;
+// - the fee cap is above 0 and under minOut, so the deposit always holds something (and, in the kit's index, at most
+//   the device's own fee rule, evmPoolSellFeeMax: trade/evm/sell.ts);
 // and returns the sell frozen, held in a module-private set.
 //
 // W signs Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,
@@ -33,6 +34,7 @@
 // rlp([chainId, delegate, nonce])) with the chain's own id from the venue list, never 0 (M363 (4)). No export here takes
 // a digest. A stuck sell is replaced by building and signing again with the same nonce and a new deadline; a burned
 // precommitment by signing again with a fresh one.
+import { EVM_POOL_FEE_STEP, evmPoolFee } from "./pool-fee.ts";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
@@ -482,6 +484,14 @@ export const evmPoolSellTip = (chain: EvmPoolChain): bigint => (chain === "base"
  *  authorization list does not charge: the sim's gas is EVM_POOL_SELL_GAS less it, so its execution is given what the
  *  sale's is. */
 export const EVM_7702_AUTH_GAS = 25_000n;
+
+/** The device's own cap on what the sender takes from a sale (card evm-buy-hookdata-fee): the kit's relay fee rule
+ *  (pool-fee.ts evmPoolFee) with the sale's gas limit EVM_POOL_SELL_GAS at the base fee of the sell quote's agreed block
+ *  plus the sale's tip, the chain fee read at that block on both providers (evmPoolChainFeeReads), and a floor of one
+ *  step. Never a caller's figure: the kit's sell builder refuses a fee cap above it (quoted.ts). */
+export function evmPoolSellFeeMax(chain: EvmPoolChain, baseFeePerGas: bigint, chainFee: bigint): bigint {
+  return evmPoolFee({ floor: EVM_POOL_FEE_STEP, gas: EVM_POOL_SELL_GAS, gasPrice: baseFeePerGas + evmPoolSellTip(chain), chainFee });
+}
 
 /** A sim sell: as EvmPoolSell, into EVM_SELL_SIM, with no fee and no precommitment. */
 export type EvmSellSim = EvmPoolSell & { readonly sim: true };
