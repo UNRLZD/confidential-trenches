@@ -1,10 +1,10 @@
 {
  "good": {
   "check": "trade-box-pool",
-  "at": "2026-11-04T10:47:12.537Z",
-  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with the devnet pool",
+  "at": "2026-11-04T12:03:02.496Z",
+  "source": "live https://confidential.unrealized.trade, the stand-in shell signed in with the devnet pool",
   "browser": "157.0.8103.38",
-  "entry": "/assets/index-C3OwX5g8.js",
+  "entry": "/assets/index-D2sAQfy_.js",
   "runs": [
    {
     "width": "desktop",
@@ -15,7 +15,7 @@
      "path": "pool",
      "proof": "ready",
      "proofText": "Proof ready",
-     "cta": "Buy DJT"
+     "cta": "Buy CRCLx"
     },
     "sent": [],
     "shot": "desktop-ready.png"
@@ -29,7 +29,7 @@
      "path": "pool",
      "proof": "ready",
      "proofText": "Proof ready",
-     "cta": "Buy DJT"
+     "cta": "Buy CRCLx"
     },
     "sent": [],
     "shot": "phone-ready.png"
@@ -43,7 +43,7 @@
      "path": "pool",
      "proof": "making",
      "proofText": "Making proof",
-     "cta": "Buy DJT"
+     "cta": "Buy CRCLx"
     },
     "sent": [],
     "shot": "desktop-making.png"
@@ -57,7 +57,7 @@
      "path": "pool",
      "proof": "making",
      "proofText": "Making proof",
-     "cta": "Buy DJT"
+     "cta": "Buy CRCLx"
     },
     "sent": [],
     "shot": "phone-making.png"
