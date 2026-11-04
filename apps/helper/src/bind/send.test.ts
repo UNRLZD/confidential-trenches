@@ -1122,21 +1122,31 @@ const emptyRecord = (u: string) => ({ u, p: "1", prepaid_bytes: 0, failed: 0, st
 /** How long a lock probe's child holds the store at most while it waits for the other children's results. */
 const PROBE_HOLD_CAP_MS = 10_000;
 /**
- * A child process that opens the store on `dir`, writes `won` or `lost` to `dir/<tag>`, then holds it `holdMs`; with
- * `peers`, it holds it instead until every peer has written its own result (at most PROBE_HOLD_CAP_MS), so two wins can
- * only mean two holders at once, never a start that came after a holder's exit on a slow runner.
+ * A child process that opens the store on `dir`, writes `won` or `lost` to `dir/<tag>` whole (`<tag>.part` renamed in,
+ * so the file is never seen empty: CI run 41689364892 read `''` between a plain write's create and its bytes), then
+ * holds it: `hold` ms; or, `{ until }`, until `dir/<until>` exists (at most PROBE_HOLD_CAP_MS), then exits; or, with
+ * `peers`, until every peer has written its own result (at most PROBE_HOLD_CAP_MS), so two wins can only mean two
+ * holders at once, never a start that came after a holder's exit on a slow runner.
  */
-function storeChild(dir: string, tag: string, holdMs: number, peers?: string[]) {
+function storeChild(dir: string, tag: string, hold: number | { until: string }, peers?: string[]) {
   const src = `
-    import { existsSync, writeFileSync } from "node:fs";
+    import { existsSync, renameSync, writeFileSync } from "node:fs";
     import { createFileStore } from ${JSON.stringify(new URL("./send.ts", import.meta.url).href)};
     const dir = ${JSON.stringify(dir)};
     let out = "won";
     try { globalThis.store = createFileStore(dir); } catch (e) { out = "lost " + e.message; } // kept for the hold
-    writeFileSync(dir + "/" + ${JSON.stringify(tag)}, out);
+    // not a ".tmp-" name: a store's start sweeps those, and another child may be starting on this directory
+    writeFileSync(dir + "/" + ${JSON.stringify(tag)} + ".part", out);
+    renameSync(dir + "/" + ${JSON.stringify(tag)} + ".part", dir + "/" + ${JSON.stringify(tag)});
     const peers = ${JSON.stringify(peers ?? null)};
-    if (peers === null) setTimeout(() => {}, ${holdMs});
-    else for (const t0 = Date.now(); !peers.every((t) => existsSync(dir + "/" + t)) && Date.now() - t0 < ${PROBE_HOLD_CAP_MS}; ) await new Promise((r) => setTimeout(r, 5));`;
+    const hold = ${JSON.stringify(hold)};
+    const spin = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    if (peers !== null) for (const t0 = Date.now(); !peers.every((t) => existsSync(dir + "/" + t)) && Date.now() - t0 < ${PROBE_HOLD_CAP_MS}; ) await new Promise((r) => setTimeout(r, 5));
+    else if (typeof hold === "number") setTimeout(() => {}, hold);
+    else {
+      for (const t0 = Date.now(); !existsSync(dir + "/" + hold.until) && Date.now() - t0 < ${PROBE_HOLD_CAP_MS}; ) spin(1);
+      process.exit(0); // the lock goes with the process
+    }`;
   return spawn(process.execPath, ["--input-type=module", "-e", src], { stdio: "ignore" });
 }
 const exited = (c: ReturnType<typeof spawn>) => new Promise((r) => c.on("exit", r));
@@ -1217,11 +1227,28 @@ test("PROBE N3: starts at the same moment leave exactly one holder", async () =>
 
 test("a start that meets a holder in its last moments (a restart overlapping the old process's exit) waits it out and opens", async () => {
   const dir = mkdtempSync(join(tmpdir(), "bind-overlap-"));
-  const child = storeChild(dir, "old", 100);
-  while (!existsSync(join(dir, "old"))) await new Promise((r) => setTimeout(r, 1));
+  const child = storeChild(dir, "old", { until: "go" });
+  const gone = exited(child); // listened from the start
+  await until(() => existsSync(join(dir, "old")));
   assert.equal(readFileSync(join(dir, "old"), "utf8"), "won");
-  createFileStore(dir).close(); // the old holder lets go within the wait
-  await exited(child);
+  assert.throws(() => createFileStore(dir), /is held by another process/, "the old process holds the store until told to go");
+  // the old process exits on this signal: the start below begins while it still holds and waits its exit out, so the
+  // test waits on the holder's real exit, not a fixed time
+  writeFileSync(join(dir, "go"), "");
+  createFileStore(dir).close();
+  assert.equal(await gone, 0, "the old process exited on its own");
+});
+
+test("planted: a start that meets a holder that does not let go within the wait refuses (a restart that cannot open is never passed)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-overlap-held-"));
+  const child = storeChild(dir, "old", { until: "go" });
+  const gone = exited(child);
+  await until(() => existsSync(join(dir, "old")));
+  assert.equal(readFileSync(join(dir, "old"), "utf8"), "won");
+  assert.throws(() => createFileStore(dir), /is held by another process/);
+  assert.equal(child.exitCode, null, "the holder is still running");
+  child.kill("SIGKILL");
+  await gone;
 });
 
 /**
