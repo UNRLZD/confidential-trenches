@@ -18,6 +18,13 @@
 //   accounts from the pin's lookup table: none is pinned for the devnet pool yet (DEVNET_TABLE), so pool.buy is refused
 //   not_allowed, with no read, until one is. Each state read also settles the pool's RESERVED notes (solanaSettleReserved:
 //   spent, freed past the deadline, or held), so no outcome of a send leaves a note RESERVED for good.
+// - pool.sell (card signpage-pool-sell): src/pool-sell.ts on the devnet pool, W one of the page's buy wallets: the Ws
+//   of the pool's SPENT and RESERVED notes (../../wallet/src/pool/buy-wallets.ts spentNotesOf, buyWallets) with their
+//   holdings. A testnet-only choice: those holdings are read on ONE devnet RPC (solanaHoldingsReader on the first),
+//   since devnet has no helper route, and a read naming W reaches that public RPC (mainnet reads them on the helper's
+//   keyed route, buy-wallets.ts). They only pick W: the run reads W's token account and lamports again on both RPCs.
+//   Its ops record goes in the page's wallet store, and each state read settles a sell a closed page left INCOMING
+//   (pool-sell.ts settlePoolSells), writing its record's stage.
 // main.ts takes these only in the testnet build; SIGN_HOST's build keeps its mainnet deps and carries none of this.
 import { base64 } from "@scure/base";
 import { solanaJsonRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -33,6 +40,8 @@ import { TRADE_HELPER } from "./trade.ts";
 import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
+import { poolSellKind, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
+import { buyWallets, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import type { PoolChain } from "./rules/pool.ts";
@@ -68,7 +77,7 @@ export type TestnetOver = {
   /** The lookup table pool.buy loads (DEVNET_TABLE otherwise). */
   table?: string | null;
   /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
-  locks?: Pick<LockManager, "request"> | null;
+  locks?: Pick<LockManager, "request" | "query"> | null;
 };
 
 /** The devnet pool's lookup table: none is created and pinned yet (scripts/live-checks/pool-sol-deploy.devnet.json
@@ -120,7 +129,7 @@ export async function devnetRelayFee(pool: string, epochStartMs: bigint, signal?
 }
 
 export type TestnetPool = {
-  /** The pool kinds' flow: pool.deposit on the devnet pool. */
+  /** The pool kinds' flow: pool.deposit, pool.buy and pool.sell on the devnet pool. */
   flow: NonNullable<PoolKindsDeps["flow"]>;
   /** The deposit run's host (a new one per run): its `landed` runs the proof queue's pass. */
   host(): PoolDepositHost;
@@ -260,10 +269,56 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return p;
   };
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
+  // pool.sell: W from the page's buy wallets; one run per tap, one at a time (the sell kind's lock)
+  const sellHost = (): PoolSellKindHost & { end(): void } => {
+    const r = rpcs();
+    let notes: Promise<NoteStore> | null = null;
+    const store = (): Promise<NoteStore> => (notes ??= page.store().then((w) => openNoteStore(w)));
+    return {
+      pin: pin!,
+      rpcs: r,
+      notes: store,
+      ops: page.store,
+      seed64: page.seed64,
+      // the pool's Ws with their holdings, read on one devnet RPC (the header's testnet-only choice); none: no read
+      wallets: async () => {
+        const spent = await spentNotesOf(await store(), scope!);
+        if (spent.length === 0) return [];
+        const seed64 = await page.seed64();
+        try {
+          const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: solanaHoldingsReader(r[0]) }]);
+          if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
+          return got.wallets;
+        } finally {
+          seed64.fill(0);
+        }
+      },
+      end: () => void notes?.then((n) => n.close(), () => {}),
+    };
+  };
+  const sell = poolSellKind(() => sellHost());
+  // the sells a closed or reloaded page left INCOMING: each settled by the run's own verdict rules, its ops record's
+  // stage written; under the seed's shared lock, as every pass that writes the store (a sign out waits for it)
+  const settleSells = async (): Promise<void> => {
+    if (!locks) return;
+    await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const notes = await openNoteStore(await page.store());
+      try {
+        const ops = await page.store();
+        const ends: Promise<void>[] = [];
+        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, settled: (signature, stage) => void ends.push(settleSellOps(ops, signature, stage).catch(() => {})) }, locks);
+        await Promise.all(ends);
+      } finally {
+        notes.close();
+      }
+    });
+  };
   // one state read's pass at a time: set before its first await, so a read that comes while it runs (its note read
   // included) gets the same promise and never starts a second pass. No follow-up pass: a note turns INCOMING only in an
   // ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later state read settles what it leaves.
   let reading: Promise<void> | null = null;
+  // the dead pending sell records are settled once per page load, not on every state read (a re-ask settles its own)
+  let deadSettled = false;
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
   // once both RPCs' block time is past their deadline with no spent mark, or held (../../wallet/src/pool/solana-restore.ts
   // solanaSettleReserved); a freed note is proved again by the open queue's next pass
@@ -294,6 +349,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
         if (mine.some((n) => n.state === "INCOMING")) await settle();
         if (mine.some((n) => n.state === "RESERVED")) await settleReserved();
+        if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R")))) await settleSells();
+        // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
+        if (locks && !deadSettled) {
+          await settleDeadSellOps(await page.store(), locks);
+          deadSettled = true;
+        }
       } catch {
         // a state read never fails for this; the next read tries again
       }
@@ -311,7 +372,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           ? deposit(ask, ctx)
           : ask.kind === "pool.buy" && table !== null
             ? buy(ask, ctx)
-            : { error: "not_allowed" },
+            : ask.kind === "pool.sell"
+              ? sell(ask, ctx)
+              : { error: "not_allowed" },
     host: () => host(),
     settle,
     stateRead,

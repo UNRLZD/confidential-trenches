@@ -80,8 +80,11 @@ export const NOTE_EDGES: Readonly<Record<NoteState, readonly NoteState[]>> = Obj
   // INCOMING: money on its way. TAKEN: a deposit index with history this store did not record (:347-348)
   PLANNED: Object.freeze(["INCOMING", "TAKEN"] as const),
   // UNSPENT: its leaf read on two RPCs (:418). TAKEN: a pool deposit's precommitment another deposit used first (card
-  // signpage-pool-notes): its mark is not one of its own sends', every one of which failed or expired
-  INCOMING: Object.freeze(["UNSPENT", "TAKEN"] as const),
+  // signpage-pool-notes): its mark is not one of its own sends', every one of which failed or expired. PLANNED: a
+  // sell's deposit (a return note or an R second arrival, card signpage-pool-sell) that failed or never landed, its
+  // precommitment's mark on neither RPC: the send is dropped and the next sell of that W deposits on the same note, so
+  // the restore's walk (return, then R 0, 1, ... with no gap) still finds every one that lands
+  INCOMING: Object.freeze(["UNSPENT", "TAKEN", "PLANNED"] as const),
   // HELD: a proof of this device has started. SPENT: another device's withdrawal spent it (:230-231)
   UNSPENT: Object.freeze(["HELD", "SPENT"] as const),
   // UNSPENT: the proof dropped or too late to send (:389-390); RESERVED: written before the proof is sent; HELD: the
@@ -129,8 +132,9 @@ export type BindCall = {
 };
 export type NewBindCall = Omit<BindCall, "tx_hashes">;
 
-/** A pool deposit tx U signed for a note (card signpage-pool-notes): its signature (base58), the value it deposits and
- *  the last block height its blockhash is valid to, as the device read it. */
+/** A pool deposit tx U signed for a note (card signpage-pool-notes), or W for a sell's return or R note (card
+ *  signpage-pool-sell): its signature (base58), the value it deposits and the last block height its blockhash is valid
+ *  to, as the device read it. */
 export type PoolSend = { signature: string; value: bigint; last_valid_block_height: bigint };
 
 /** A note born PLANNED (a return, move or second-arrival note) or UNSPENT (a change or refund note, or one restore found). */
@@ -238,6 +242,9 @@ function secondIdKey(id: SecondId): string {
   }
 }
 // The id's first note, which second arrival 0 follows (:186-192); an arming account A has none.
+/** A sell's deposit (card signpage-pool-sell): W's return note or one of its R second arrivals. */
+const sellNote = (ref: NoteRef): boolean => ref.kind === "return" || (ref.kind === "second" && ref.id.id === "R");
+
 function firstOf(id: SecondId): NoteRef | null {
   switch (id.id) {
     case "U": return { kind: "deposit", s: id.s, i: id.i };
@@ -361,7 +368,7 @@ function checkRecord(id: string, r: unknown): NoteRecord {
     checkCalls(n.calls, id);
   }
   if (n.sends !== undefined) {
-    if (n.ref.kind !== "deposit" && n.ref.kind !== "second") throw new Error(`note ${id}: only a deposit or second-arrival note has sends`);
+    if (n.ref.kind !== "deposit" && n.ref.kind !== "second" && n.ref.kind !== "return") throw new Error(`note ${id}: only a deposit, return or second-arrival note has sends`);
     if (n.state === "PLANNED") throw new Error(`note ${id}: sends from INCOMING on`);
     checkSends(n.sends, id);
   }
@@ -490,6 +497,8 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
         delete next.deadlineMs;
         delete next.attempt;
       }
+      // a sell's deposit planned again: its dropped send goes with it (the next send is written with the next move)
+      if (to === "PLANNED") delete next.sends;
     }
     await write(next);
     return next;
@@ -522,6 +531,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (cur.state !== from) throw new Error(`note ${id} is ${cur.state}, not ${from}`);
     if (!(NOTE_EDGES[from] as readonly NoteState[]).includes(to)) throw new Error(`a note never goes from ${from} to ${to}`);
     if (to === "TAKEN" && cur.ref.kind !== "deposit" && cur.ref.kind !== "second") throw new Error("only a deposit index or a second arrival is marked taken");
+    if (from === "INCOMING" && to === "PLANNED" && !sellNote(cur.ref)) throw new Error("only a sell's deposit (a return note or an R second arrival) is planned again");
     if (fields.send !== undefined && !(from === "PLANNED" && to === "INCOMING")) throw new Error("a send is written with the move PLANNED -> INCOMING only");
     const time = fields.blockTimeMs === undefined ? undefined : u64(fields.blockTimeMs, "blockTimeMs");
     const own = fields.attempt !== undefined && fields.attempt === cur.attempt && cur.tab === tab;

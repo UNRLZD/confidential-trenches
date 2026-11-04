@@ -162,3 +162,25 @@ test("the handover is bounded: newest first within HANDOVER_MAX bytes, and only 
   t += 61_000 + (Date.parse(FX.tokens[PUMP].fetched_at) < NOW ? NOW - Date.parse(FX.tokens[PUMP].fetched_at) : 0);
   assert.equal((old.state!() as { page: unknown[] }).page.length, 0, "a page past its staleness is not handed over");
 });
+
+test("history before a time is kept an hour: a second read of the same mint:tf:before within the hour makes no GeckoTerminal call; the newest range is still read again after 60 s", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  const before = Math.floor(NOW / 1000) - 3_600; // the first own bar an hour back, as trades.ts asks it
+  assert.equal((await tok.candles(PUMP, "15m", before, 500)).status, 200);
+  const ohlcv = () => gt.urls.filter((u) => u.includes("/ohlcv/")).length;
+  assert.equal(ohlcv(), 1);
+  t += 30 * 60_000;
+  assert.equal((await tok.candles(PUMP, "15m", before, 500)).status, 200);
+  assert.equal(ohlcv(), 1, "30 min later: no call");
+  t += 31 * 60_000;
+  await tok.candles(PUMP, "15m", before, 500);
+  assert.equal(ohlcv(), 2, "past the hour: read again");
+  await tok.candles(PUMP, "15m", null, 500);
+  assert.equal(ohlcv(), 3);
+  t += 61_000;
+  await tok.candles(PUMP, "15m", null, 500);
+  assert.equal(ohlcv(), 4, "the newest range moves with every trade: 60 s");
+});

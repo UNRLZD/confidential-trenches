@@ -6,7 +6,8 @@
 // names the same networks), page 1 each (20 pools), with the pools' base tokens included. GeckoTerminal answers one
 // address a few calls a minute (../gecko.ts), shared with the Solana token page's candles, which go first: each tick
 // reads the stalest list older than LIST_MS, one call at a time while the "lists" lane yields a call, so the lists
-// slow down while pages are opened and answer 503 only past STALE_MS.
+// slow down while pages are opened. Once a list is read the lists never answer 503: a snapshot behind STALE_MS is
+// served as is, dated by its as_of_ms and X-Helper-Fetched-At (the oldest list read), while the next tick reads again.
 //
 // Launchpad (the maker), read on two RPC providers that must answer and agree; a token no listed launchpad made gets
 // null, never a guess. A token's maker never changes, so it is read once and kept (MAKER_MAX tokens); a refresh reads
@@ -51,7 +52,8 @@ export const LIST_MS = 60_000;
 export const LIST_URGENT_MS = 240_000;
 /** The snapshot is rebuilt on the Solana lists' cadence (D-S2's 12 s): makers not settled yet are read again. */
 export const TICK_MS = 12_000;
-/** A snapshot whose oldest list read is older than this answers 503, never a stale list passed as fresh. */
+/** A snapshot whose oldest list read is older than this is behind: still served, dated by its oldest read, never
+ *  passed as fresh; a warm file older than this is not taken over (../warm.ts). */
 export const STALE_MS = 300_000;
 /** A pool younger than this whose block shows no creation event is read again, since a provider may not hold its logs yet. */
 export const SETTLE_MS = 60_000;
@@ -696,13 +698,12 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return running;
   }
 
-  /** The snapshot, or 503 when no list read is newer than STALE_MS. A cold call waits for one tick. */
+  /** The snapshot, dated by its oldest list read however far behind, with a read started when it is behind; 503 only
+   *  while no list was ever read. A cold call waits for one tick. */
   async function get(): Promise<ListsAnswer> {
     if (last === null) await start();
-    if (last === null || now() - last.asOfMs > STALE_MS) {
-      void start();
-      return UPSTREAM;
-    }
+    if (last === null) return UPSTREAM;
+    if (now() - last.asOfMs > LIST_MS) void start();
     return last;
   }
 
@@ -721,7 +722,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return out;
   }
 
-  /** A previous process's state (hostile input, as a vendor's): each list read under STALE_MS old is parsed again by
+  /** A previous process's state (hostile input, as a vendor's): each list read, however old, is parsed again by
    *  toRows; a maker is kept only as an address and one of this chain's pads or null. Reads held already are kept.
    *  True when every list is held after it, so the lists answer without a GeckoTerminal call. */
   function restore(st: unknown): boolean {
@@ -730,7 +731,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     const rs = (o.reads ?? {}) as Record<string, unknown>;
     for (const k of LIST_KEYS) {
       const r = (Object.hasOwn(rs, k) ? rs[k] : undefined) as { raw?: unknown; at?: unknown } | undefined;
-      if (reads[k] !== undefined || typeof r?.raw !== "string" || r.raw.length > ANSWER_MAX || typeof r.at !== "number" || !Number.isFinite(r.at) || r.at > t || t - r.at >= STALE_MS) continue;
+      if (reads[k] !== undefined || typeof r?.raw !== "string" || r.raw.length > ANSWER_MAX || typeof r.at !== "number" || !Number.isFinite(r.at) || r.at > t) continue;
       try {
         const rows = toRows(chain, JSON.parse(r.raw), r.at);
         if (rows !== null) reads[k] = { ...rows, at: r.at, raw: r.raw };

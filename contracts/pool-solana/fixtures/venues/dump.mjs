@@ -3,6 +3,8 @@
 //
 // Run from contracts/pool-solana:
 //   node fixtures/venues/dump.mjs [--pump <mint>] [--pumpswap <mint>]   writes pump.json, pumpswap.json, programs/*.so
+//   node fixtures/venues/dump.mjs --pumpswap <mint> --out <name>.json   writes only that PumpSwap pool, to <name>.json
+//                                                                        (pumpswap-cashback.json: CASHBACK_MINT)
 //   node fixtures/venues/dump.mjs --programs-only                        re-fetches the ELFs; fails unless each sha256
 //                                                                        equals the JSON's
 // KIT_DIR: the kit's package folder (default this repo's packages/kit, after `pnpm install`); its readSolanaPoolBuyVenue,
@@ -11,7 +13,7 @@
 // - Every account is read on two public RPCs at `confirmed`; provider A's copy is written, and the accounts whose two
 //   copies differ (moving state) are listed in `providers_differed`.
 // - A program's code is its programdata after the 45-byte header, and must hash the same on both providers.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -19,8 +21,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const KIT_DIR = process.env.KIT_DIR ?? join(HERE, "..", "..", "..", "..", "packages", "kit");
-// What to run when mainnet's code no longer hashes as the JSON says: a fresh dump of both venues, from the repo root.
-const REFRESH = "pnpm install --frozen-lockfile && node contracts/pool-solana/fixtures/venues/dump.mjs";
+// A PumpSwap pool whose coin is cashback (Pool byte 244 = 1), for the sell from a W with no cashback accounts
+// (card signpage-pool-sell): found by getProgramAccounts on api.mainnet-beta, 2026-11-04 11:50Z.
+const CASHBACK_MINT = "2hbzoDxzvyspvXhxFkHkuxRNDyo3j2Z6aXUDy1A7pump";
+// What to run when mainnet's code no longer hashes as the JSON says: a fresh dump of every fixture, from the repo root.
+const REFRESH = "pnpm install --frozen-lockfile && node contracts/pool-solana/fixtures/venues/dump.mjs && " +
+  `node contracts/pool-solana/fixtures/venues/dump.mjs --pumpswap ${CASHBACK_MINT} --out pumpswap-cashback.json`;
 // VENUE_RPCS and VENUE_RPC_BACKOFF_MS are for dump.test.mjs, which points the script at local fake RPCs.
 const RPCS = process.env.VENUE_RPCS ? process.env.VENUE_RPCS.split(",") : ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 // An RPC's error or rate limit is retried 3 times, after 0.5, 1 and 2 s, before the run fails as an RPC failure.
@@ -32,6 +38,12 @@ const PUMP_SELL = [51, 230, 133, 164, 1, 127, 131, 173];
 
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
+// --out names one PumpSwap fixture beside the others: a bare lowercase name, never a path, refused before any read.
+const OUT = arg("--out");
+if (process.argv.includes("--out")) {
+  if (typeof OUT !== "string" || !/^[a-z0-9-]{1,40}\.json$/.test(OUT) || OUT === "pump.json") { console.log("FAIL: --out takes a bare name like pumpswap-cashback.json"); process.exit(64); }
+  if (!arg("--pumpswap") || process.argv.includes("--pump") || process.argv.includes("--programs-only")) { console.log("FAIL: --out dumps one PumpSwap pool: give --pumpswap <mint> and no other venue"); process.exit(64); }
+}
 
 /** An RPC that did not answer, rate-limited or answered with an error, every try: no read of mainnet's code. */
 class RpcFailure extends Error {}
@@ -92,7 +104,8 @@ if (process.argv.includes("--programs-only")) {
   };
   let bad = 0;
   try {
-    for (const name of ["pump.json", "pumpswap.json"]) {
+    // every fixture in this folder: pump.json, pumpswap.json and any --out one
+    for (const name of readdirSync(HERE).filter((f) => f.endsWith(".json")).sort()) {
       const fx = JSON.parse(readFileSync(join(HERE, name), "utf8"));
       const got = await dumpPrograms(fx.programs.map((p) => p.address));
       for (const p of fx.programs) {
@@ -243,11 +256,16 @@ async function dumpVenue(kind, mint) {
     buy: buy.map(stepJson), sell: sell.map(stepJson),
     providers_differed: differed,
   };
-  const file = kind === "pump-curve" ? "pump.json" : "pumpswap.json";
+  const file = OUT ?? (kind === "pump-curve" ? "pump.json" : "pumpswap.json");
   writeFileSync(join(HERE, file), JSON.stringify(out, null, 1) + "\n");
   console.log(`${file}: ${mint}, slot ${slot}, time ${unix}, ${accounts.length} accounts (${differed.length} differed between providers: ${differed.join(",") || "none"}), E ${expectedOut}, min out ${minOut}, ${buy.length} buy step(s), ${sell.length} sell step(s)`);
 }
 
-await dumpVenue("pump-curve", arg("--pump") ?? "FGmQ6Csma7PPdYyoQT7Pw38cqCPg8Y7GxBKjspXKpump");
-await dumpVenue("pumpswap", arg("--pumpswap") ?? "9rZR9nCQbaiBvotWVpifN8z1vckVFshnsATuAJrXpump");
-if (!existsSync(join(HERE, "pump.json")) || !existsSync(join(HERE, "pumpswap.json"))) process.exit(1);
+if (OUT) {
+  await dumpVenue("pumpswap", arg("--pumpswap"));
+  if (!existsSync(join(HERE, OUT))) process.exit(1);
+} else {
+  await dumpVenue("pump-curve", arg("--pump") ?? "FGmQ6Csma7PPdYyoQT7Pw38cqCPg8Y7GxBKjspXKpump");
+  await dumpVenue("pumpswap", arg("--pumpswap") ?? "9rZR9nCQbaiBvotWVpifN8z1vckVFshnsATuAJrXpump");
+  if (!existsSync(join(HERE, "pump.json")) || !existsSync(join(HERE, "pumpswap.json"))) process.exit(1);
+}

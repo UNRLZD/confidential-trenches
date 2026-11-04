@@ -366,9 +366,11 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   // callers zero W's key at once and export no signer, so the signer derives W itself rather than through a pass-through.
   // And where a pool buy signs at the tap (signpage src/pool-buy.ts runPoolBuy: W_{sol,l,j} of the ready proof, refused
   // unless it is the proof's recipient, signs only the message signSolana's check passed, its key zeroed in a finally;
-  // card signpage-pool-buy).
+  // card signpage-pool-buy), and where a pool sell signs at the tap (signpage src/pool-sell.ts runPoolSell: W_{sol,l,j}
+  // of the buy wallet it picked, refused unless it is the W the checked bytes were built for, signs only the message
+  // checkSolanaSell passed, its key zeroed in a finally; card signpage-pool-sell).
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/signpage/src/pool-buy.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts"]);
+  assert.deepEqual(calls, ["packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-sell.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts"]);
 });
 
 // ---------- fold 2 ----------

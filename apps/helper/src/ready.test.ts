@@ -150,7 +150,11 @@ test("the EVM lists a helper read come back whole in the next one, parsed again,
   // hostile or stale state is not taken
   const fresh = () => createEvmLists("base", gk.geckoBudget(() => now), { fetch, now: () => now }) as typeof first;
   assert.equal(fresh().restore({ reads: { new: { raw: "not json", at: now }, trending_5m: st.reads.trending_5m, trending_1h: st.reads.trending_1h } }), false, "an answer that does not parse");
-  assert.equal(fresh().restore({ reads: Object.fromEntries(Object.entries(st.reads).map(([k, r]: [string, any]) => [k, { ...r, at: now - 300_000 }])) }), false, "older than STALE_MS");
+  // a read behind STALE_MS is taken over and served dated by it (card app-console-429: the lists never 503 once read)
+  const behind = fresh();
+  assert.equal(behind.restore({ reads: Object.fromEntries(Object.entries(st.reads).map(([k, r]: [string, any]) => [k, { ...r, at: now - 300_001 }])) }), true, "older than STALE_MS is taken, dated");
+  const old = await behind.get();
+  assert.deepEqual([old.status, JSON.parse(old.body).as_of_ms], [200, now - 300_001], "served with its own read time");
   assert.equal(fresh().restore({ reads: Object.fromEntries(Object.entries(st.reads).map(([k, r]: [string, any]) => [k, { ...r, at: now + 1 }])) }), false, "from the future");
   const m = fresh();
   m.restore({ ...st, makers: [["0x" + "b".repeat(40), "not-a-pad"], ["not an address", null]] });

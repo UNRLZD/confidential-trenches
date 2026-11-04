@@ -383,3 +383,66 @@ test("helperPoolSend posts {pool, tx} to the helper and takes only a 200 within 
   const big = (async () => new Response(JSON.stringify({ signature: "x".repeat(5000) }), { status: 200 })) as unknown as typeof fetch;
   await assert.rejects(helperPoolSend("P", Uint8Array.of(1), big), /over 4096 B/);
 });
+
+// ---- card signpage-pool-sell: pool.sell on the devnet pool ----
+
+test("pool.sell on the devnet pool runs the sell kind: a page whose buys left no W holding the token answers not_funded with no read", async () => {
+  const { w } = await wallet();
+  const reads: string[] = [];
+  const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [offline("a"), offline("b")] });
+  const ask: Ask = { kind: "pool.sell", chain: "solana", token: SOL_TOKEN, amount: 1n, slippageBps: 100, decimals: 9 };
+  const r = t.flow(ask, ctx as never) as { running?: true; after: Promise<unknown>; answer: () => unknown };
+  assert.equal(r.running, true, "the sell runs");
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "not_funded" });
+  assert.deepEqual(reads, [], "no W: no read");
+  assert.deepEqual(t.flow({ ...ask, chain: "base" }, ctx as never), { error: "not_allowed" });
+});
+
+test("a state read settles a sell a closed page left INCOMING (the review of signpage-pool-sell 4b6223a, high): its mark read on both RPCs, the note kept while they fail", async () => {
+  const { w, ns } = await wallet();
+  const calls: string[] = [];
+  const rpc = async (m: string, p: readonly unknown[]) => {
+    calls.push(`${m} ${typeof p?.[0] === "string" ? p[0] : ""}`.trim());
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string, p: readonly unknown[]) => rpc(m, p)], prover: { vault: signalsProver(), stop: () => {} } });
+  const ref: NoteRef = { kind: "return", c: "sol", l: 7n, j: 0 };
+  const precommitment = noteSecrets(SEED64, ref).precommitment;
+  const n = await ns.add({ ref, scope: SCOPE, precommitment, state: "PLANNED" });
+  await ns.move(n.id, "PLANNED", "INCOMING", { send: { signature: "1".repeat(64), value: 5_000_000n, last_valid_block_height: 151n } });
+  await t.stateRead();
+  const { solanaProgramAddress } = await import("../../kit/src/checks/solana/message.ts");
+  const be = Uint8Array.from({ length: 32 }, (_, i) => Number((precommitment >> BigInt(8 * (31 - i))) & 255n));
+  const mark = solanaProgramAddress([new TextEncoder().encode("pre"), be], SOL_POOLS.devnet!.program);
+  // the sell's settle read the note's mark on both RPCs (the deposit's settle never reads a sell note); offline: kept
+  assert.equal(calls.filter((c) => c === `getAccountInfo ${mark}`).length, 2, calls.join(" | "));
+  assert.deepEqual(await states(ns), ["INCOMING"]);
+});
+
+// The second re-review of signpage-pool-sell (low): a dead "pending" sell record is settled once per page load, not by
+// reading every ops record on every state read.
+test("a state read refuses a dead pending sell record once per page load, never reading the ops records again on the next state reads", async () => {
+  const { w } = await wallet();
+  let opsKeys = 0;
+  const counted = new Proxy(w, {
+    get(t, k, r) {
+      const v = Reflect.get(t, k, r);
+      if (k === "keys") return (st: string) => (st === "ops" && opsKeys++, v.call(t, st));
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+  });
+  const rpc = async () => {
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => counted, seed64: async () => SEED64.slice() }, { rpcs: [rpc, rpc], prover: { vault: signalsProver(), stop: () => {} } });
+  await w.put("ops", "z1", { kind: "sell", pool: "sol", sha: "cc", stage: "pending", txs: [], created_ms: 1 });
+  await t.stateRead();
+  assert.deepEqual(await w.get("ops", "z1"), { kind: "sell", pool: "sol", sha: "cc", stage: "refused", code: "failed", txs: [], created_ms: 1 });
+  const once = opsKeys;
+  assert.equal(once, 1);
+  await t.stateRead();
+  await t.stateRead();
+  assert.equal(opsKeys, once, "read once per page load");
+});
