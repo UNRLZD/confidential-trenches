@@ -1,13 +1,14 @@
 // A list the helper serves from an older read shows its age (card app-list-age). Since app-console-429 the helper answers
 // its last good read, dated by as_of_ms, and never a 503 once it has one: a list can be hours old on a 200. Discover draws
-// how old it is once it is older than 60 s, counted from the list's own read time, and the 60 s rule for a failed re-read
-// counts from that time too, never from the last good HTTP answer.
+// how old it is once it is older than 60 s, counted from the list's own read time. The error state is the other signal,
+// the helper not answering: a failed re-read keeps the lists until 60 s pass with no 200, however old the lists are.
 //   node --test apps/terminal/test/list-age.test.ts
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { keepOnFail, STALE_MS } from "../src/screens/discover/data.ts";
+import { afterFail, STALE_MS } from "../src/screens/discover/data.ts";
 import { listAge } from "../src/screens/discover/model.ts";
 import { ageLine, WORDS } from "../src/screens/discover/words.ts";
+import { solana } from "./discover-screens/snapshots.ts";
 
 const NOW = Date.parse("2026-11-04T13:00:00Z");
 const MIN = 60_000;
@@ -32,11 +33,19 @@ test("the age line is the draft words with the age in them, marked a draft until
   assert.equal(WORDS.updated.draft, true);
 });
 
-test("a failed re-read keeps the lists only while their own read is at most 60 s old", () => {
-  assert.equal(keepOnFail(NOW - 30_000, NOW), true);
-  assert.equal(keepOnFail(NOW - STALE_MS, NOW), true);
-  // a list the helper served 2 h old, then a failed read: the screen goes to Offline, whatever the last 200 was
-  assert.equal(keepOnFail(NOW - 2 * 60 * MIN, NOW), false);
+test("a 2 h old list survives a failed re-read, still drawing its age; the error state comes only after 60 s with no 200", () => {
+  const old = { status: "ready", snapshot: { ...solana, as_of_ms: NOW - 2 * 60 * MIN } } as const;
+  const age = (d: ReturnType<typeof afterFail>) => (d.status === "ready" ? listAge(d.snapshot.as_of_ms, NOW) : null);
+  // the last 200 came 12 s ago, one blip: kept, and the line still says how old the lists are
+  const kept = afterFail(old, NOW - 12_000, NOW);
+  assert.equal(kept, old);
+  assert.equal(ageLine(age(kept) ?? ""), "Updated 2h ago");
+  assert.equal(afterFail(old, NOW - STALE_MS, NOW), old);
+  // 60 s with no 200: the helper is not answering
+  assert.deepEqual(afterFail(old, NOW - STALE_MS - 1, NOW), { status: "error" });
+  // a fresh list is held to the same rule
+  const fresh = { status: "ready", snapshot: { ...solana, as_of_ms: NOW - 5_000 } } as const;
+  assert.deepEqual(afterFail(fresh, NOW - STALE_MS - 1, NOW), { status: "error" });
   // nothing read yet
-  assert.equal(keepOnFail(null, NOW), false);
+  assert.deepEqual(afterFail({ status: "loading" }, null, NOW), { status: "error" });
 });
