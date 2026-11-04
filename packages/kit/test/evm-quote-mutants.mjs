@@ -23,6 +23,7 @@ const SELLQ = "src/trade/evm/sell.ts";
 const S = "test/evm-sell-quote.test.ts";
 // the sim sell's builder and signer (card evm-quote-exec-sim)
 const SELLU = "src/trade/evm/sell-unpinned.ts";
+const QD = "src/trade/evm/quoted.ts";
 
 // [file, text, replacement, test file, the test that must fail]
 export const MUTANTS = [
@@ -196,9 +197,11 @@ export const MUTANTS = [
   [QUOTE, "|| firstHop.some((c) => fills(c)))", ")", R, "R7 "],
   // only a device quote builds, within 30 s, and W signs only that build
   [QUOTE, "QUOTED.add(quote);", "", Q, "Q7 "],
-  [BUY, "if (!evmIsDeviceQuote(quote)) throw", "if (false) throw", Q, "Q7 "],
-  [BUY, "if (!Number.isFinite(nowMs) || nowMs - Number(quote.block.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) {", "if (!Number.isFinite(nowMs)) {", Q, "Q7 "],
-  [BUY, "if (!QUOTED_BUILDS.has(built)) throw", "if (false) throw", Q, "Q7 "],
+  [QD, "if (!evmIsDeviceQuote(quote)) throw", "if (false) throw", Q, "Q7 "],
+  [QD, "if (!Number.isFinite(nowMs) || nowMs - Number(blockTimestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) {", "if (!Number.isFinite(nowMs)) {", Q, "Q7 "],
+  [QD, "  fresh(quote.block.timestamp, nowMs);\n  const built = pinnedBuildQuoted(", "  const built = pinnedBuildQuoted(", Q, "Q7 "],
+  [BUY, "if (!evmIsQuotedBuy(built)) throw", "if (false) throw", Q, "Q7 "],
+  [QD, "  QUOTED_BUILDS.add(built);", "", Q, "Q7 "],
   // the request and the providers
   [QUOTE, "amountIn <= 0n || amountIn >= MAX_IN", "amountIn <= 0n", Q, "Q8 "],
   [QUOTE, "(slippageBps as number) < 0 || (slippageBps as number) >= 10000", "(slippageBps as number) < 0", Q, "Q8 "],
@@ -213,11 +216,11 @@ export const MUTANTS = [
   // the sell quote: no route from a caller, the device's own pool, minOut, probe and age
   [QUOTE, 'if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");', "", S, "planted: a server's route"],
   [QUOTE, "QUOTED_SELLS.add(quote);", "", S, "planted: a server's route"],
-  [SELLQ, "if (!evmIsDeviceSellQuote(quote)) throw new EvmQuoteError(", "if (false) throw new EvmQuoteError(", S, "planted: a server's route"],
-  [SELLQ, 'if (!QUOTED_SELLS.has(built)) throw new EvmPoolSellError("not_built"', 'if (false) throw new EvmPoolSellError("not_built"', S, "planted: a server's route"],
-  [SELLQ, "QUOTED_SELLS.add(built);", "", S, "planted: a server's route"],
-  [SELLQ, "|| nowMs - Number(quote.block.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) {", ") {", S, "planted: a stale quote"],
-  [SELLQ, "> EVM_QUOTE_MAX_AGE_MS) {\n    throw new EvmQuoteError(\"stale_quote\"", "> 10 * EVM_QUOTE_MAX_AGE_MS) {\n    throw new EvmQuoteError(\"stale_quote\"", S, "planted: a stale quote"],
+  [QD, "if (!evmIsDeviceSellQuote(quote)) throw new EvmQuoteError(", "if (false) throw new EvmQuoteError(", S, "planted: a server's route"],
+  [SELLQ, 'if (!evmIsQuotedSell(built)) throw new EvmPoolSellError("not_built"', 'if (false) throw new EvmPoolSellError("not_built"', S, "planted: a server's route"],
+  [QD, "QUOTED_SELLS.add(built);", "", S, "planted: a server's route"],
+  [QD, "  fresh(quote.block.timestamp, nowMs);\n  if (typeof fields", "  if (typeof fields", S, "planted: a stale quote"],
+  [QD, "> EVM_QUOTE_MAX_AGE_MS) {\n    throw new EvmQuoteError(\"stale_quote\"", "> 10 * EVM_QUOTE_MAX_AGE_MS) {\n    throw new EvmQuoteError(\"stale_quote\"", S, "planted: a stale quote"],
   [QUOTE, 'if (probe!.kind !== "out" || probe!.amountOut !== amountIn) {', "if (false) {", S, "planted: a fee-on-transfer"],
   [QUOTE, 'if (probe!.kind !== "out" || probe!.amountOut !== amountIn) {', 'if (probe!.kind !== "out") {', S, "planted: a fee-on-transfer"],
   [QUOTE, 'if (probe!.kind !== "out" || probe!.amountOut !== amountIn) {', 'if (probe!.kind !== "out" || probe!.amountOut < amountIn) {', S, "planted: a fee-on-transfer"],
@@ -307,9 +310,9 @@ export const MUTANTS = [
   [SELLU, "(baseFeePerGas + evmPoolSellTip(chain))", "baseFeePerGas", S, "planted: the sender's fee cap"],
   [SELLU, "((f + EVM_POOL_FEE_STEP - 1n) / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP", "(f / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP", S, "planted: the sender's fee cap"],
   [SELLU, "return stepped > EVM_POOL_FEE_STEP ? stepped : EVM_POOL_FEE_STEP;", "return stepped;", S, "planted: the sender's fee cap"],
-  [SELLQ, "if (feeCap > feeMax) throw", "if (false) throw", S, "planted: the sender's fee cap"],
-  [SELLQ, "if (feeCap > feeMax) throw", "if (feeCap > feeMax + 1n) throw", S, "planted: the sender's fee cap"],
-  [SELLQ, "const feeCap = asked === undefined ? feeMax : asked;", "const feeCap = asked === undefined ? feeMax - 1n : asked;", S, "planted: the sender's fee cap"],
+  [QD, "if (feeCap > feeMax) throw", "if (false) throw", S, "planted: the sender's fee cap"],
+  [QD, "if (feeCap > feeMax) throw", "if (feeCap > feeMax + 1n) throw", S, "planted: the sender's fee cap"],
+  [QD, "const feeCap = asked === undefined ? feeMax : asked;", "const feeCap = asked === undefined ? feeMax - 1n : asked;", S, "planted: the sender's fee cap"],
   [QUOTE, 'if (typeof boughtBlock !== "bigint" || boughtBlock < 1n) return refuse(', "if (false) return refuse(", S, "planted: a sell quote takes the buy's block"],
   [QUOTE, "boughtBlock < 1n) return refuse(", "boughtBlock < 0n) return refuse(", S, "planted: a sell quote takes the buy's block"],
   [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "break;", R, "L5 "],
@@ -343,7 +346,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let bad = 0;
   try {
     for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
-    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
     for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
       const r = run(dir, file, t);
       if (r !== "pass") {
