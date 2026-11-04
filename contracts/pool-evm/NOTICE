@@ -152,10 +152,13 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
 
  16. SellDelegate's exact debit (card evm-selldelegate-exact-debit): the sell reads W's balance of the token before the
      target call (v3) or the unlock (v4) and after it, and reverts DebitNotExact unless it fell by exactly the signed
-     amount, as the v3 pool checks its own balance (IIA). A token that takes more from W only on chain, where the
-     device's eth_call probe cannot see it (an extra debit only in transferFrom, only toward the pool, only inside the
-     PoolManager's unlock), and a target that gives part of the token back, both revert the whole sell; a balance that
-     rose is an underflow revert (test/ExactDebit.t.sol, test/HostileSell.t.sol). The kit's probe stays as the early
+     amount, as the v3 pool checks its own balance (IIA). A token whose balanceOf shows the extra debit, taking more
+     from W only on chain, where the device's eth_call probe cannot see it (an extra debit only in transferFrom, only
+     toward the pool, only inside the PoolManager's unlock), and a target that gives part of the token back, both
+     revert the whole sell; a balance that rose is an underflow revert (Panic 0x11); a token whose debit is the amount
+     plus or minus one (share rounding) is now refused too, and W loses nothing (test/ExactDebit.t.sol,
+     test/HostileSell.t.sol). A token whose balanceOf hides the extra debit passes the check: the check reads only
+     what the token reports. The kit's probe stays as the early
      refusal, so the sender's gas is not spent on such a token. The cost, two balanceOf reads: the mock-router sell at
      depth 0 442,886 to 445,008 and at depth 32 1,757,396 to 1,759,518, the v4 one hop to ETH 491,954 to 494,066 and at
      depth 32 1,806,385 to 1,808,497 (forge 1.7.1, test/Sell.t.sol and test/SellV4.t.sol).
