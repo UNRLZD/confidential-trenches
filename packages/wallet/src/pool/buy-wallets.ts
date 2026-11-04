@@ -105,7 +105,7 @@ export const EVM_HOLDINGS_ROUNDS = 4;
  * 6 or 7 of 9 are refused (02:10Z, 02:12Z); 1.1 s apart, 27 of 27 answer (02:15Z). So about 10 of it in 10 s, never in
  * a burst: a round's two in 3 s keep it at 6.7. A JSON-RPC batch of the three is no fix: its answers came from
  * backends of two versions, and batches drew a 429 at one in 2.2 s (03:47-03:49Z). */
-export const HOLDINGS_RPC_LIMIT: SolanaRpcLimit = Object.freeze({ windowMs: 3_000, total: 3, perMethod: 2 });
+export const HOLDINGS_RPC_LIMIT: SolanaRpcLimit = /* @__PURE__ */ Object.freeze({ windowMs: 3_000, total: 3, perMethod: 2 });
 /** Solana's JSON-RPC code for a minContextSlot the node has not reached. */
 const MIN_CONTEXT_SLOT_NOT_REACHED = "-32016";
 /** The JSON-RPC code of an eth_call that reverted ("execution reverted"); every other error is the provider's. */

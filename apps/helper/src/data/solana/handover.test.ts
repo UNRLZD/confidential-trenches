@@ -162,3 +162,63 @@ test("the handover is bounded: newest first within HANDOVER_MAX bytes, and only 
   t += 61_000 + (Date.parse(FX.tokens[PUMP].fetched_at) < NOW ? NOW - Date.parse(FX.tokens[PUMP].fetched_at) : 0);
   assert.equal((old.state!() as { page: unknown[] }).page.length, 0, "a page past its staleness is not handed over");
 });
+
+test("history before a time is kept an hour: a second read of the same mint:tf:before within the hour makes no GeckoTerminal call; the newest range is still read again after 60 s", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  const before = Math.floor(NOW / 1000) - 3_600; // the first own bar an hour back, as trades.ts asks it
+  assert.equal((await tok.candles(PUMP, "15m", before, 500)).status, 200);
+  const ohlcv = () => gt.urls.filter((u) => u.includes("/ohlcv/")).length;
+  assert.equal(ohlcv(), 1);
+  t += 30 * 60_000;
+  assert.equal((await tok.candles(PUMP, "15m", before, 500)).status, 200);
+  assert.equal(ohlcv(), 1, "30 min later: no call");
+  t += 31 * 60_000;
+  await tok.candles(PUMP, "15m", before, 500);
+  assert.equal(ohlcv(), 2, "past the hour: read again");
+  await tok.candles(PUMP, "15m", null, 500);
+  assert.equal(ohlcv(), 3);
+  t += 76_000; // past 60 s, and past the budget's window, so the refresh lane has room (../gecko.ts COLD_RESERVE)
+  await tok.candles(PUMP, "15m", null, 500);
+  assert.equal(ohlcv(), 4, "the newest range moves with every trade: 60 s");
+});
+
+test("under a spent budget a held token's refresh yields to a cold token's first read: the cold candles answer 200, the held ones are served from what was held, dated by their read (live suite at 567a181: candles 429 under parallel load)", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const budget = geckoBudget(now);
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: budget, holdersRpc: chain(() => false) });
+  const COLD = "Q1vecEMQEgDyrw1txmBgFwUrkeQurqkEe1bGMzFpump";
+  const first = await tok.candles(PUMP, "1m", null, 24);
+  assert.equal(first.status, 200);
+  const readAt = first.asOfMs;
+  // 11 minutes on: PUMP's bars (60 s) and top pool (10 min) are both past fresh; the lists take two calls of the window
+  t += 11 * 60_000;
+  assert.deepEqual([budget.take("lists"), budget.take("lists")], [true, true]);
+  // PUMP's page is open and re-read first, then a token nobody holds is opened
+  const held = await tok.candles(PUMP, "1m", null, 24);
+  const cold = await tok.candles(COLD, "1m", null, 24);
+  assert.equal(cold.status, 200, `the cold token's first read is served (${cold.body.slice(0, 80)})`);
+  assert.equal(held.status, 200, "the held token is served");
+  assert.equal(held.asOfMs, readAt, "from what it held, dated by its own read");
+  assert.equal(JSON.parse(held.body).as_of_ms, readAt);
+});
+
+test("the last good bars are handed over across a swap for a day, not an hour", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
+  const st = JSON.parse(JSON.stringify(old.state()));
+  t += 6 * 3_600_000; // the old helper's bars are six hours old at the swap
+  const spent = geckoBudget(now);
+  for (let i = 0; i < GT_LIMIT_PER_MIN; i++) spent.take("pages");
+  const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: spent, holdersRpc: chain(() => false) });
+  next.restore(st);
+  const a = await next.candles(PUMP, "1m", null, 24);
+  assert.deepEqual([a.status, a.asOfMs], [200, NOW], "served from the handover, dated by its read");
+});

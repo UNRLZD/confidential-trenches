@@ -363,7 +363,7 @@ test("two providers must answer and agree: one failing is covered by the third, 
   assert.equal(fresh.size, 0, "none is not settled within SETTLE_MS of the pool");
 });
 
-test("the lists: tagged rows, the tokens not read yet named in unsettled, the lists read once per LIST_MS within the lane's yield; 503 when GeckoTerminal never answered or the read is past STALE_MS", async () => {
+test("the lists: tagged rows, the tokens not read yet named in unsettled, the lists read once per LIST_MS within the lane's yield; 503 only while GeckoTerminal never answered, a read past STALE_MS served dated by it", async () => {
   let now = NOW;
   const r = recorded();
   const gecko = geckoBudget(() => now);
@@ -394,7 +394,7 @@ test("the lists: tagged rows, the tokens not read yet named in unsettled, the li
   assert.equal(gecko.take("lists"), false, "the lists leave PAGE_RESERVE free");
   assert.equal(gecko.take("pages"), true, "which a page finds");
 
-  // GeckoTerminal fails from now on: the last read serves until STALE_MS, then 503, never a stale list as fresh
+  // GeckoTerminal fails from now on: the last read serves past STALE_MS too, dated by its own read time, never as fresh
   let down = createEvmLists("base", geckoBudget(() => now), { fetch: recorded({ gt: 503 }).fetch, now: () => now });
   assert.deepEqual([(await down.get()).status, JSON.parse((await down.get()).body)], [503, { error: { code: "upstream" } }]);
   const t0 = now;
@@ -407,7 +407,10 @@ test("the lists: tagged rows, the tokens not read yet named in unsettled, the li
   await down.tick();
   assert.equal((await down.get()).status, 200);
   now = t0 + STALE_MS + 1;
-  assert.equal((await down.get()).status, 503);
+  const behind = await down.get();
+  assert.deepEqual([behind.status, JSON.parse(behind.body).as_of_ms, behind.asOfMs], [200, t0, t0], "behind STALE_MS: served, dated at the read");
+  now = t0 + 3_600_000;
+  assert.equal((await down.get()).status, 200, "an hour behind: still served, still dated");
 });
 
 test("a helper started fresh on Robinhood settles its lists in its first tick: none of the recorded lists' 46 tokens left unsettled (the live check allows half), each tagged as its launchpad's record says, from the records only", async () => {

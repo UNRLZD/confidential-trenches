@@ -130,12 +130,21 @@ export type Venues = {
   pons: readonly string[];
   /** The most blocks one `eth_getLogs` asks (the smallest the chain's providers take). */
   span: number;
-  /** The blocks a token's first read and its discovery go back, and the ETH price's first read. */
+  /** The blocks a token's first read and its discovery may go back: COLD_S of the chain's measured block time. */
   cold: number;
-  refCold: number;
+  /** The blocks one round of that walk reads, newest first: an active token's swaps are found in the first. */
+  step: number;
+  /** The blocks the ETH price is read before the earliest block a book reads, so its first swap has a price before it. */
+  refBack: number;
   /** A provider this many blocks behind the other is passed over for the third. */
   lagMax: number;
 };
+/** How far back a token's discovery and first read may walk: 20 minutes on every chain, Base's window before
+ *  (600 blocks of 2 s), so a token quiet for a few minutes still has its pool, tape and bars (card app-console-429: at
+ *  Robinhood's 3,000 blocks, 306 s, a v4 token with $36.6k of 5-minute volume had no transfer and answered an empty
+ *  chart, 2026-11-04 12:59Z). */
+export const COLD_S = 1_200;
+const coldOf = (blockMs: number) => Math.ceil((COLD_S * 1000) / blockMs);
 export const VENUES: Readonly<Record<EvmChain, Venues>> = {
   base: {
     poolManager: BASE_VENUES.poolManager,
@@ -147,16 +156,18 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     refPoolId: REF_POOL_ID,
     pons: [],
     span: 1_000,
-    cold: 600,
-    refCold: 2_000,
+    // Base's clock: one block every 2 s (lists.ts BLOCK_CLOCK)
+    cold: coldOf(2_000),
+    step: 600,
+    refBack: 1_400,
     lagMax: 10,
   },
-  // Robinhood makes about 10 blocks a second (10,000 blocks over 1,024 s, 2026-11-03 19:1xZ): 3,000 blocks are its last
-  // five minutes (600, one minute, found no pool for a v4 token with 213 swaps in the 2,000 blocks before, read live
-  // 2026-11-03 19:5xZ), the bars before them come from GeckoTerminal's OHLCV as on Base; 100 blocks is the widest
-  // `eth_getLogs` its keyless providers all take (api.blockvectra.com "block range exceeds 100 blocks",
-  // robinhood.drpc.org refuses 500), so a first read is 30 spans, batched; the ETH price pool's longest gap read was
-  // 386 blocks, so its first read goes 1,000 blocks further back
+  // Robinhood makes about 10 blocks a second (10,000 blocks over 1,024 s, 2026-11-03 19:1xZ): a step of 3,000 blocks is
+  // its last five minutes (600, one minute, found no pool for a v4 token with 213 swaps in the 2,000 blocks before, read
+  // live 2026-11-03 19:5xZ), and a quiet token is walked back up to COLD_S, the bars before our first coming from
+  // GeckoTerminal's OHLCV as on Base; 100 blocks is the widest `eth_getLogs` its keyless providers all take
+  // (api.blockvectra.com "block range exceeds 100 blocks", robinhood.drpc.org refuses 500), so a step is 30 spans,
+  // batched; the ETH price pool's longest gap read was 386 blocks, so it is read 1,000 blocks before a book's first
   robinhood: {
     poolManager: ROBINHOOD_VENUES.poolManager,
     positionManager: ROBINHOOD_VENUES.positionManager,
@@ -167,8 +178,10 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     refPoolId: ROBINHOOD_REF_POOL_ID,
     pons: [ROBINHOOD_VENUES.ponsV2],
     span: 100,
-    cold: 3_000,
-    refCold: 4_000,
+    // 102 ms a block: 3,000 blocks over 306 s at head 105918391 (robinhood.daybreak-rpc.network, 2026-11-04 12:59Z)
+    cold: coldOf(102),
+    step: 3_000,
+    refBack: 1_000,
     lagMax: 50,
   },
 };
@@ -195,7 +208,7 @@ const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://ba
  *  reorg a few unsafe blocks; its `safe` head trails by about 40 s (proofs/evm-safe-lag, 20 blocks), so 10 re-read blocks
  *  are enough for the reorgs seen and the live tape stays within seconds. */
 export const REWIND_BLOCKS = 10;
-/** The blocks a token's first read goes back on Base (06c §4.12's cold open); each chain's own is VENUES[chain].cold. */
+/** The blocks a token's first read may go back on Base (06c §4.12's cold open); each chain's own is VENUES[chain].cold. */
 export const COLD_BLOCKS = VENUES.base.cold;
 /** The blocks of a token's Transfer logs its main pool is found from: the chain's cold window, so the book's first read
  *  is the discovery's own. */
@@ -205,8 +218,8 @@ const CANDIDATES_MAX = 6;
 const V4_TXS = 3;
 /** A token's main pool is looked for again after this. */
 export const POOL_KEEP_MS = 6 * 3_600_000;
-/** The blocks the ETH price's first read goes back, so that a swap in the cold window has one before it (Base). */
-export const REF_COLD_BLOCKS = VENUES.base.refCold;
+/** The blocks the ETH price's first read goes back, so that a swap in the first step has one before it (Base). */
+export const REF_COLD_BLOCKS = VENUES.base.step + VENUES.base.refBack;
 /** The most blocks one `eth_getLogs` asks on Base, and the most such reads one tick makes for a token past its cold
  *  window (which takes cold / span reads). */
 export const SPAN_MAX = VENUES.base.span;
@@ -579,9 +592,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   async function findPool(token: string): Promise<Found | null> {
     const head = await agreedHead();
     if (head === null) throw new Error("no agreed head");
-    const from = head.n - V.cold + 1;
-    const tlogs = await agreedRange(head.with, (lo, hi) => ({ address: token, topics: [TOPIC.transfer], fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }), from, head.n);
-    if (tlogs == null) throw new Error("transfers not agreed");
+    // the token's transfers newest first, a step at a time, until a tape's worth or the cold window [design: twice
+    // TRADES_MAX transfers, since a swap through a router moves the token twice, pool to router to trader]
+    const tw = await walk(head.with, (lo, hi) => ({ address: token, topics: [TOPIC.transfer], fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }), head.n, 2 * TRADES_MAX, (part) => part.length);
+    if (tw == null) throw new Error("transfers not agreed");
+    let from = tw.from;
+    const tlogs = tw.logs;
     // who held and moved the token, and the PoolManager's latest transactions
     const count = new Map<string, number>();
     const pmTxs: string[] = [];
@@ -666,15 +682,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const [swaps, [d], refOk] = await Promise.all([
       Promise.all(cands.map((c) => agreedRange(head.with, (lo, hi) => swapFilter(c, lo, hi, chain), from, head.n))),
       callsAgreed(head.n, [{ to: token, data: SEL.decimals }]),
-      cands.some((c) => c.quote.kind === "eth") ? readRef(head.with, head.n) : Promise.resolve(true),
+      cands.some((c) => c.quote.kind === "eth") ? readRef(head.with, head.n, from) : Promise.resolve(true),
     ]);
     const score = cands.map((c, i) => (swaps[i] == null ? -1 : swaps[i]!.filter((l) => decodeSwap(c, l, chain) !== null).length));
     if (score.every((x) => x < 0)) throw new Error("swaps not agreed");
     const best = cands.map((c, i) => ({ c, i, n: score[i]! })).sort((x, y) => y.n - x.n || (x.c.id < y.c.id ? -1 : 1))[0]!;
-    if (best.n <= 0) return null;
+    if (best.n <= 0 && from === head.n - V.cold + 1) return null;
+    // the main pool's swaps further back, while the tape is short of TRADES_MAX and the cold window not read
+    let logs = swaps[best.i]!;
+    let n = best.n;
+    if (n < TRADES_MAX && from > head.n - V.cold + 1) {
+      const w = await walk(head.with, (lo, hi) => swapFilter(best.c, lo, hi, chain), from - 1, TRADES_MAX - n, (part) => part.filter((l) => decodeSwap(best.c, l, chain) !== null).length, head.n - V.cold + 1);
+      if (w == null) throw new Error("swaps not agreed");
+      logs = w.logs.concat(logs);
+      n += w.logs.filter((l) => decodeSwap(best.c, l, chain) !== null).length;
+      from = w.from;
+    }
+    if (n <= 0) return null;
+    const ref = best.c.quote.kind === "eth" ? await readRef(head.with, head.n, from) : true;
     const decimals = d !== undefined && /^0x[0-9a-f]{64}$/.test(d) ? Number(BigInt(d)) : NaN;
     if (!Number.isInteger(decimals) || decimals > 77) throw new Error("decimals not agreed");
-    return { pool: best.c, decimals, seed: refOk || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs: swaps[best.i]! } : undefined };
+    return { pool: best.c, decimals, seed: (refOk && ref) || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs } : undefined };
   }
 
   /** A listed token's main pool, null when our reads find none (served as an empty chart), "unlisted" off the lists. */
@@ -703,19 +731,56 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
   let refTo: number | null = null;
+  let refFrom: number | null = null; // the earliest block the ETH price is read from
+  let refLock: Promise<unknown> = Promise.resolve();
   const traders = new Map<string, string | null>();
 
-  /** Reads the ETH price pool's swaps up to `to` (once per tick, shared). */
-  async function readRef(urls: readonly string[], to: number): Promise<boolean> {
-    const from = refTo === null ? to - V.refCold + 1 : refTo + 1 - REWIND_BLOCKS;
-    if (from > to) return true;
-    const logs = await agreedRange(urls, (lo, hi) => refFilter(lo, hi, chain), from, to);
-    if (logs == null) return false;
-    const events = refEvents.filter((e) => e.block < from).concat(logs.map((l) => decodeRef(l, chain)).filter((r): r is Ref => r !== null));
-    // kept: the last refCold blocks, so a book's first swaps always have a price before them
-    refEvents = events.filter((e) => e.block > to - V.refCold);
-    refTo = to;
+  /** Reads the ETH price pool's swaps up to `to`, and back to refBack before `need` (the earliest block a book reads:
+   *  a book walked back further than any before has the blocks before what is held read first). One read at a time. */
+  function readRef(urls: readonly string[], to: number, need = to - V.step + 1): Promise<boolean> {
+    const run = refLock.then(() => readRefNow(urls, to, need));
+    refLock = run.catch(() => undefined);
+    return run;
+  }
+  async function readRefNow(urls: readonly string[], to: number, need: number): Promise<boolean> {
+    const want = need - V.refBack;
+    if (refFrom !== null && want < refFrom) {
+      const older = await agreedRange(urls, (lo, hi) => refFilter(lo, hi, chain), want, refFrom - 1);
+      if (older == null) return false;
+      refEvents = older.map((l) => decodeRef(l, chain)).filter((r): r is Ref => r !== null).concat(refEvents);
+      refFrom = want;
+    }
+    const from = refTo === null ? want : Math.max(refTo + 1 - REWIND_BLOCKS, 0);
+    if (from <= to) {
+      const logs = await agreedRange(urls, (lo, hi) => refFilter(lo, hi, chain), from, to);
+      if (logs == null) return false;
+      refEvents = refEvents.filter((e) => e.block < from).concat(logs.map((l) => decodeRef(l, chain)).filter((r): r is Ref => r !== null));
+      if (refFrom === null) refFrom = from;
+      refTo = Math.max(refTo ?? to, to);
+    }
+    // kept: the cold window and refBack before it, so a book's first swaps always have a price before them
+    const keep = (refTo ?? to) - V.cold - V.refBack;
+    refEvents = refEvents.filter((e) => e.block > keep);
+    if (refFrom !== null) refFrom = Math.max(refFrom, keep + 1);
     return true;
+  }
+
+  /** A filter's logs walked back from `to` one step at a time, newest first, until `want` of them count (`count`) or
+   *  the chain's cold window is read: an active pool costs one step, as before, and only a quiet one the whole window. */
+  async function walk(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown>, to: number, want: number, count: (logs: Log[]) => number, start = to - V.cold + 1): Promise<{ from: number; logs: Log[] } | null> {
+    let hi = to;
+    let logs: Log[] = [];
+    let n = 0;
+    while (hi >= start) {
+      const lo = Math.max(start, hi - V.step + 1);
+      const part = await agreedRange(urls, filter, lo, hi);
+      if (part == null) return null;
+      logs = part.concat(logs);
+      n += count(part);
+      if (n >= want || lo === start) return { from: lo, logs };
+      hi = lo - 1;
+    }
+    return { from: start, logs };
   }
 
   /** Folds the logs of blocks `from` to `to` (read up to the agreed block `headN`) into a book; false when a log lies outside them
@@ -752,9 +817,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  the ETH price is read to the same block (an ETH-quoted book; read at the same time, so a tick is one round). */
   async function readBook(e: Entry, urls: readonly string[], head: { n: number; t: number }, refReady: Promise<boolean>): Promise<boolean> {
     const first = e.book.settledTo < 0 && e.readAt === null;
-    const from = first ? head.n - V.cold + 1 : e.book.settledTo + 1;
-    // one tick reads at most the cold window, or CHUNKS_MAX spans past it; the rest is read the next tick
-    const to = Math.min(head.n, from + Math.max(V.cold, CHUNKS_MAX * V.span) - 1);
+    if (first) {
+      // a first read with no discovery's seed: newest first, until the tape's TRADES_MAX swaps or the cold window
+      const w = await walk(urls, (lo, hi) => swapFilter(e.pool, lo, hi, chain), head.n, TRADES_MAX, (part) => part.filter((l) => decodeSwap(e.pool, l, chain) !== null).length);
+      if (w == null || (e.pool.quote.kind === "eth" && !((await refReady) && (await readRef(urls, head.n, w.from))))) return false;
+      return apply(e, w.from, head.n, head.n, w.logs);
+    }
+    const from = e.book.settledTo + 1;
+    // one tick reads at most a step, or CHUNKS_MAX spans past it; the rest is read the next tick
+    const to = Math.min(head.n, from + Math.max(V.step, CHUNKS_MAX * V.span) - 1);
     if (from > to) return true;
     const logs = await agreedRange(urls, (lo, hi) => swapFilter(e.pool, lo, hi, chain), from, to);
     if (logs == null || (e.pool.quote.kind === "eth" && !(await refReady))) return false;
@@ -826,7 +897,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       e = books.get(token);
       if (e === undefined) {
         e = { pool: found.pool, decimals: found.decimals, book: createBook({ decimals: found.decimals, quote: found.pool.quote }), touched: now(), readAt: null, headN: 0 };
-        // the discovery already read the pool's last COLD_BLOCKS blocks on two providers: that is the book's first read
+        // the discovery already read the pool's newest swaps on two providers (walked back to a tape's worth or the cold
+        // window): that is the book's first read
         if (found.seed !== undefined) apply(e, found.seed.from, found.seed.to, found.seed.headN, found.seed.logs);
         books.set(token, e);
       }
@@ -857,6 +929,43 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // -------------------------------------------------------------------------------------------------------------
 
   const history = new Map<string, { at: number; bars: Candle[] }>();
+  /** A listed token our reads find no pool of: GeckoTerminal's top pool for it, kept POOL_FRESH_MS (null: it names none). */
+  const gtPools = new Map<string, { id: string | null; at: number }>();
+  const GT_POOL_FRESH_MS = 600_000;
+  /** Its candles: GeckoTerminal's bars of its top pool, src "geckoterminal", dated by their read, as a Solana token off
+   *  the lists is served (card app-console-429); an empty chart from our own reads when GeckoTerminal has none to give. */
+  async function noneCandles(token: string, tf: Tf, to: number | null, limit: number): Promise<DataAnswer> {
+    const none = empty({ tf, candles: [] });
+    if (deps.gecko === undefined || !Object.hasOwn(GT_TF, tf)) return none;
+    const gecko = deps.gecko;
+    let p = gtPools.get(token);
+    if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
+      // a held pool's re-read is a refresh: refused, the pool held serves
+      if (gecko.take(p === undefined ? "pages" : "refresh")) {
+        try {
+          const r = await doFetch(`${GT_BASE}/networks/${chain}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+          if (r.status === 429) throttledUntil(gecko, r.headers.get("retry-after"), now());
+          if (r.status === 200 && Number(r.headers.get("content-length") ?? "0") <= ANSWER_MAX) {
+            const text = await r.text();
+            const id = text.length > ANSWER_MAX ? undefined : (JSON.parse(text) as { data?: { attributes?: { address?: unknown } }[] })?.data?.[0]?.attributes?.address;
+            p = { id: typeof id === "string" && /^0x[0-9a-f]{40}([0-9a-f]{24})?$/.test(id.toLowerCase()) ? id.toLowerCase() : null, at: now() };
+            if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
+            gtPools.set(token, p);
+          } else await r.body?.cancel();
+        } catch {
+          // GeckoTerminal did not answer: the pool held, if any
+        }
+      }
+    }
+    if (p === undefined || p.id === null) return none;
+    const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to);
+    const bars = Array.isArray(got) ? got.filter((c) => to === null || c[0] < to).slice(-limit) : [];
+    if (bars.length === 0) return none;
+    const at = history.get(`${p.id}:${tf}:${to ?? ""}`)?.at ?? kept.get(`${p.id}:${tf}`)?.at ?? now();
+    const body = { tf, candles: bars, src: "geckoterminal", as_of_ms: at };
+    return { status: 200, body: JSON.stringify(body), src: "geckoterminal", asOfMs: at };
+  }
+
   /** The last good bars per pool and tf (the newest range read): served when a read is throttled or fails. */
   const kept = new Map<string, { at: number; bars: Candle[] }>();
   /** GeckoTerminal's bars before `before` (unix seconds; null: its newest range, one cache key however often asked),
@@ -869,11 +978,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const fresh = history.get(k);
     if (fresh !== undefined && now() - fresh.at < GT_FRESH_MS) return fresh.bars;
     const fallback = (fail: DataAnswer): Candle[] | DataAnswer => {
+      if (fresh !== undefined && fresh.bars.length > 0) return fresh.bars;
       const cut = (kept.get(`${e.pool.id}:${tf}`)?.bars ?? []).filter((c) => before === null || c[0] < before);
       return cut.length > 0 ? cut : fail;
     };
     const wait = (why = "geckoterminal budget") => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
-    if (!gecko.take("pages")) return fallback(wait());
+    // a re-read of bars held (this range's, or the newest range's kept bars) is a refresh (../gecko.ts): it leaves a cold
+    // page its calls, and refused, the bars held are served (card app-console-429)
+    const held = fresh !== undefined || (before === null && kept.has(`${e.pool.id}:${tf}`));
+    if (!gecko.take(held ? "refresh" : "pages")) return fallback(wait(held ? "geckoterminal refresh" : undefined));
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
       const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;
@@ -942,7 +1055,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = evmAddress(token);
       if (t === null || !(TFS as readonly string[]).includes(tf) || tf === "1s" || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
       const e = await open(t);
-      if (e === "none") return empty({ tf, candles: [] });
+      if (e === "none") return noneCandles(t, tf as Tf, to, limit);
       if (!("book" in e)) return e;
       const own = e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book.ownFrom(tf as Tf);

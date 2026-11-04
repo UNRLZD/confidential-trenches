@@ -195,3 +195,67 @@ test("providers that write hex in upper case: the Pons curve is found and its ta
   const all = await tapeWith(["https://a.test", "https://b.test", "https://c.test"]);
   assert.deepEqual(all.tape.trades, lower.tape.trades, "every provider in upper case");
 });
+
+// card app-console-429: Robinhood's window was 3,000 blocks, its last 306 s (2026-11-04 12:59Z), so a token quiet for five
+// minutes answered an empty chart and tape though it had a pool and trades; the window is now COLD_S on every chain,
+// walked newest first a step at a time
+test("a token quiet for longer than a step (its last trades 5,000 blocks back) is still found and its tape served: the walk goes back to COLD_S", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead + 5_000;
+  const s = open(chain, undefined, { pools: new Map() });
+  const tape = await bodyOf(s.trades(CURVE_TOKEN, 50));
+  s.stop();
+  const whole = rebuild(POOL_CURVE, REC.lastHead);
+  assert.ok(whole.tape(50).length > 0, "the recording holds curve trades");
+  assert.deepEqual(tape.trades.map((t: { tx: string }) => t.tx), whole.tape(50).map((t) => t.tx), "every recorded curve trade, 5,000 blocks back");
+  assert.ok(VENUES.robinhood.cold * 102 >= 1_200_000, "the window is 20 minutes of Robinhood's 102 ms blocks");
+});
+
+test("an active token stops after its first step: its first read asks no more spans than before the wider window", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const s = open(chain);
+  const tape = await bodyOf(s.trades(MAG, 50));
+  s.stop();
+  assert.equal(tape.trades.length, 50, "a full tape");
+  const step = VENUES.robinhood.step / VENUES.robinhood.span;
+  const ref = (VENUES.robinhood.step + VENUES.robinhood.refBack) / VENUES.robinhood.span;
+  // every range is asked of two providers that must agree
+  const asked = chain.st.spans.length / 2;
+  assert.ok(asked <= step + ref + 1, `${asked} getLogs ranges, at most one step (${step}), the ETH price's first read (${ref}) and the head's`);
+  assert.ok(asked < VENUES.robinhood.cold / VENUES.robinhood.span, "never the whole window");
+});
+
+test("a listed token our reads find no pool of: its candles are GeckoTerminal's bars of its top pool, src geckoterminal, dated by their read; with GeckoTerminal silent, the empty chart as before", async () => {
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
+  const gtUrls: string[] = [];
+  let gtUp = true;
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    gtUrls.push(url);
+    if (!gtUp) return new Response("down", { status: 503 });
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: `0x${"ab".repeat(32)}` } }] }), { status: 200 });
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: geckoBudget(() => clock.t) });
+  const token = `0x${"34".repeat(20)}`;
+  const a = await s.candles(token, "1m", null, 60);
+  assert.equal(a.status, 200, a.body);
+  const c = JSON.parse(a.body);
+  assert.deepEqual([Object.keys(c), c.src, a.src, c.as_of_ms, a.asOfMs], [["tf", "candles", "src", "as_of_ms"], "geckoterminal", "geckoterminal", clock.t, clock.t]);
+  assert.ok(c.candles.length > 0, "GeckoTerminal's bars");
+  assert.ok(gtUrls.some((u) => u.includes(`/pools/0x${"ab".repeat(32)}/ohlcv/`)), "of the top pool GeckoTerminal names");
+  const tape = JSON.parse((await s.trades(token, 10)).body);
+  assert.deepEqual([tape.trades, tape.src], [[], "chain"], "the tape is ours alone: empty, never a vendor's");
+  const quiet = open(chain, clock, { pools: new Map(), fetch: ((u: string, i: RequestInit) => ((gtUp = false), fetch(u, i))) as never, gecko: geckoBudget(() => clock.t) });
+  const e = JSON.parse((await quiet.candles(`0x${"35".repeat(20)}`, "1m", null, 60)).body);
+  assert.deepEqual([e.candles, e.src], [[], "chain"], "GeckoTerminal silent: the empty chart");
+  s.stop();
+  quiet.stop();
+});

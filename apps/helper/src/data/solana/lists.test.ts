@@ -324,7 +324,7 @@ test("the lists: one read of the three Jupiter lists through the proxy, shared u
   assert.equal(f.calls.length, 3);
 });
 
-test("the lists: past FRESH_MS the last answer serves while one refresh runs; with the vendor down it serves up to STALE_MS, then 503", async () => {
+test("the lists: past FRESH_MS the last answer serves while one refresh runs; with the vendor down it still serves past STALE_MS, dated by its own read, never 503 once read", async () => {
   let down = false;
   const f = fakes({ fail: () => down });
   const lists = createSolanaLists(f.proxy, recordedRpc, { now: f.now });
@@ -339,9 +339,12 @@ test("the lists: past FRESH_MS the last answer serves while one refresh runs; wi
   const held = await lists.get();
   assert.equal(held.status, 200);
   f.step(1);
-  const gone = await lists.get();
-  assert.equal(gone.status, 503);
-  assert.deepEqual(JSON.parse(gone.body), { error: { code: "upstream" } });
+  const behind = await lists.get();
+  assert.deepEqual([behind.status, behind.body, behind.asOfMs], [200, held.body, held.asOfMs], "behind STALE_MS: the last answer, dated at its read");
+  await new Promise((ok) => setImmediate(ok));
+  f.step(3_600_000);
+  const hour = await lists.get();
+  assert.deepEqual([hour.status, hour.asOfMs], [200, held.asOfMs], "an hour behind: still served, still dated");
 });
 
 test("the lists: one list down or not a list answers 503 when there is no last answer", async () => {

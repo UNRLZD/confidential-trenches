@@ -138,9 +138,12 @@ test("tap_max from the kit's rules: solanaTapSpendOf (the worst venue, the proof
   const funds = (spend: bigint, tip: bigint) => solanaPoolBuyFunds({ withdrawnValue: LAMPORTS / 10n, relayFee: fee } as SolanaPoolRelease, SOLANA_POOL_WORST_BUY_VENUE as never, { spend, tip }, rent).problem;
   for (const tip of [0n, SOLANA_JITO_TIP_MIN, SOL_TIP_CAP]) assert.equal(funds(tapMax, tip), null, `tip ${tip}`);
   assert.notEqual(funds(tapMax + 1n, SOL_TIP_CAP), null);
-  // priced at the minimum tip instead (92,735,080 here), a tap at a higher tip would not fill
+  // priced at the minimum tip instead (91,383,880 here: 0.1 SOL less the relay fee, the tip, W's token account (195) and
+  // pump's volume account (137), then its sell's up-front need once the coin graduates to PumpSwap: the fee, the
+  // wrapped-SOL account (165) and, on a cashback coin, W's PumpSwap volume account (137) and its wrapped-SOL account
+  // (165); the re-review of signpage-pool-sell 3bdca74), a tap at a higher tip would not fill
   const atMin = solanaPoolBuyMaxSpend({ withdrawnValue: LAMPORTS / 10n, relayFee: fee }, SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent);
-  assert.equal(atMin, 92_735_080n);
+  assert.equal(atMin, 91_383_880n);
   assert.notEqual(funds(atMin, SOL_TIP_CAP), null);
   assert.equal(out[1]!.tap_max, "0.001", "an EVM tap asks for the whole chunk");
   // a Solana proof whose request names no tip cap, or a bad one, is refused

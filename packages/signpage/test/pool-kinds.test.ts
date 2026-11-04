@@ -127,3 +127,23 @@ test("a sell whose token is not an address of its chain makes no provider read a
   }
   assert.equal(p.calls.length, 0);
 });
+
+test("card signpage-pool-sell: a sell's flow that runs (a trade) is answered with its run's answer, and the api's queue never waits on it", async () => {
+  const sol = providers(() => mint(6));
+  let finish!: () => void;
+  const ran = new Promise<void>((r) => (finish = r));
+  const result = { result: { stage: "sent", txs: [{ chain: "solana", hash: "s" }] } };
+  const k = poolKinds({ pinned: () => true, rpcs: () => sol.pair, flow: () => ({ running: true, after: ran, answer: () => result }) as never });
+  const r = k["pool.sell"]({ chain: "solana", token: SOL_TOKEN, amount: "1", slippage_bps: 100 }, ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
+  assert.equal(r.running, true, "a sell is a trade: the api answers it without holding its queue");
+  let settled = false;
+  void r.after.then(() => (settled = true));
+  await new Promise((res) => setTimeout(res, 10));
+  assert.equal(settled, false, "answered once the run's own wait settles");
+  finish();
+  await r.after;
+  assert.deepEqual(r.answer(), result);
+  // a refusal before any run is still a refusal, answered the same way
+  const no = poolKinds({ pinned: () => true, rpcs: () => sol.pair, flow: () => ({ error: "busy" }) })["pool.sell"]({ chain: "solana", token: SOL_TOKEN, amount: "1", slippage_bps: 100 }, ctx);
+  assert.deepEqual(await settle(no), { error: "busy" });
+});

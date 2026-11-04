@@ -49,6 +49,7 @@ import {
   SOLANA_CU_PRICE_MAX,
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_JITO_TIP_MIN,
+  SOLANA_LAMPORTS_PER_SIGNATURE,
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_PUMP_PROGRAM,
   SOLANA_SOL_MINT,
@@ -557,11 +558,61 @@ function perVenue<T>(table: Readonly<Record<SolanaPoolVenue, T>>, kind: unknown)
 }
 
 /**
+ * What W must hold before its sell runs, in lamports (the review of signpage-pool-sell 4b6223a): W pays the sell's fee
+ * (one signature, no compute budget: SOLANA_POOL_SELL_FEE) before any instruction runs, and the runtime refuses a fee
+ * payer that has no account, holds less than the fee, or after the fee holds more than 0 and less than rent(0). On
+ * PumpSwap the sell makes W's wrapped-SOL account (165 bytes) before any proceeds arrive, so W pays its rent up front
+ * too (it comes back when the sell closes it). So: the fee and rent(0) on pump's curve (W after a buy holds 0 or at
+ * least rent(0), and after the fee the same), the fee and rent(165) on PumpSwap, plus SOLANA_POOL_AMM_CASHBACK_SIZES'
+ * rent on a cashback coin whose PumpSwap cashback accounts W lacks. The buy keeps the largest of these over every venue
+ * the coin sells on in W (solanaPoolBuySellNeed, solanaPoolBuyFunds) and the sell refuses a W short of its own before
+ * it builds (packages/signpage/src/pool-sell.ts).
+ */
+export const SOLANA_POOL_SELL_FEE = SOLANA_LAMPORTS_PER_SIGNATURE;
+/** The bytes of the account W keeps rent for up front: none beyond its own on pump's curve (rent(0)), the wrapped-SOL
+ *  account on PumpSwap (whose rent is above rent(0), so it covers W's own floor too). */
+const SELL_UP_FRONT_SIZE = { "pump-curve": 0, pumpswap: TOKEN_ACCOUNT_SIZE } as const;
+/**
+ * W's accounts a PumpSwap sell of a cashback coin names, writable: W's PumpSwap volume account (137 bytes, as the
+ * PumpSwap buy makes it: SOLANA_POOL_VOLUME_ACCOUNT_SIZE) and its wrapped-SOL account (165), the remaining accounts
+ * solanaPoolSellSteps lists, as pump-swap-sdk 2.2.0's sellInstructionsNoPool does, with no instruction of the user's
+ * to make them. A PumpSwap buy makes both (solanaPoolBuyFunds keeps their rent); a curve buy makes neither, and the
+ * sell then makes each one missing itself, at W's cost (the re-review of signpage-pool-sell 3bdca74). Proven on
+ * mainnet's PumpSwap code in LiteSVM: contracts/pool-solana/svm-tests/tests/release.rs
+ * venue_pumpswap_cashback_sell_makes_ws_cashback_accounts (fixtures/venues/pumpswap-cashback.json) sells from a W with
+ * neither account holding exactly this need, the accumulator made at 137 B owned by PumpSwap and its wrapped-SOL
+ * account at 165 B owned by the Token program, W paying the fee and both rents; the same sell without them is refused.
+ */
+export const SOLANA_POOL_AMM_CASHBACK_SIZES = [SOLANA_POOL_VOLUME_ACCOUNT_SIZE.pumpswap, TOKEN_ACCOUNT_SIZE] as const;
+/** What W needs up front for a sell on `venue`. `has`: which of W's PumpSwap cashback accounts already exist (its
+ *  volume account, that account's wrapped-SOL account); each one missing is counted on its own as made by the sell. */
+export type SolanaPoolAmmCashbackHeld = { ammVolume: boolean; ammVolumeAta: boolean };
+export function solanaPoolSellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "cashback">, rent: SolanaRent, has: SolanaPoolAmmCashbackHeld = { ammVolume: false, ammVolumeAta: false }): bigint {
+  const [volume, ata] = SOLANA_POOL_AMM_CASHBACK_SIZES;
+  const made = venue.kind === "pumpswap" && venue.cashback === true ? (has.ammVolume ? 0n : solanaRentMin(rent, volume)) + (has.ammVolumeAta ? 0n : solanaRentMin(rent, ata)) : 0n;
+  return SOLANA_POOL_SELL_FEE + solanaRentMin(rent, perVenue(SELL_UP_FRONT_SIZE, venue.kind)) + made;
+}
+/**
+ * What a buy on `venue` leaves W for its sell: the largest need of every venue the coin can be sold on after the buy
+ * (the re-review of signpage-pool-sell 3bdca74: a coin bought on pump's curve that graduates sells on PumpSwap only, a
+ * complete curve being no sell candidate). A curve coin: PumpSwap's need with neither cashback account (a curve buy
+ * makes neither), which is above the curve's own; a PumpSwap coin: PumpSwap's, its buy having made both.
+ */
+export function solanaPoolBuySellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "cashback">, rent: SolanaRent): bigint {
+  perVenue(SELL_UP_FRONT_SIZE, venue.kind);
+  return venue.kind === "pump-curve"
+    ? solanaPoolSellNeed({ kind: "pumpswap", cashback: venue.cashback }, rent)
+    : solanaPoolSellNeed(venue, rent, { ammVolume: true, ammVolumeAta: true });
+}
+
+/**
  * What W's chunk must cover, in lamports, on today's rent (every account counted as made new, which only raises W's
  * balance when one already exists):
  * - the spend, W's token account (its size from the mint: Token-2022 adds its extensions), the venue's volume account;
  * - PumpSwap: W's wrapped-SOL account while the spend sits in it (its rent comes back when it is closed);
- * - W after the buy holds 0 or at least rent(0), the runtime's floor for a system account.
+ * - W after the buy holds what its sell needs up front on every venue the coin can be sold on (solanaPoolBuySellNeed:
+ *   on PumpSwap for a curve coin, which may graduate), above rent(0), the runtime's floor for a system account, so a
+ *   bought W can always sell.
  * `peak` is what W pays out at its lowest point, `left` what W holds after.
  */
 export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "spend" | "tip">, rent: SolanaRent): { chunk: bigint; peak: bigint; left: bigint; problem: string | null } {
@@ -570,27 +621,28 @@ export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPool
     (venue.kind === "pumpswap" && venue.cashback ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const peak = kept + (venue.kind === "pumpswap" ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const left = chunk - kept;
-  const floor = solanaRentMin(rent, 0);
+  const need = solanaPoolBuySellNeed(venue, rent);
   const problem =
     chunk < 0n ? "the relay fee and the tip are more than the release"
     : chunk < peak ? `the chunk ${chunk} does not cover the spend and W's new accounts (${peak})`
-    : left > 0n && left < floor ? `W would keep ${left} lamports, under the ${floor} a wallet must hold or 0`
+    : left < need ? `W would keep ${left} lamports, under the ${need} its sell needs up front on any venue the coin sells on`
     : null;
   return { chunk, peak, left, problem };
 }
 
 /**
  * The most a tap can spend from one release on `venue`: the largest spend solanaPoolBuyFunds passes, 0 when none does.
- * The chunk less the relay fee, the tip and W's new accounts at the peak: at that spend W keeps 0 (pump's curve) or the
- * wrapped-SOL account's rent, which is above rent(0) (PumpSwap), so the floor never binds. The tap and the signing
- * page's state.pools tap_max share this one rule; it is checked against solanaPoolBuyFunds itself before it is given.
+ * The chunk less the relay fee, the tip, W's new accounts and what W's sell needs up front (solanaPoolBuySellNeed): at
+ * that spend W keeps exactly that need, which also covers the peak (PumpSwap's wrapped-SOL rent is part of it). The tap
+ * and the signing page's state.pools tap_max share this one rule; it is checked against solanaPoolBuyFunds itself
+ * before it is given.
  */
 export function solanaPoolBuyMaxSpend(release: Pick<SolanaPoolRelease, "withdrawnValue" | "relayFee">, venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback">, tip: bigint, rent: SolanaRent): bigint {
   if (typeof release?.withdrawnValue !== "bigint" || typeof release.relayFee !== "bigint" || typeof tip !== "bigint" || tip < 0n) throw new Error("withdrawnValue, relayFee and tip are bigints, the tip at least 0");
   const r = release as SolanaPoolRelease;
   const v = venue as SolanaPoolBuyVenue;
   const at0 = solanaPoolBuyFunds(r, v, { spend: 0n, tip }, rent);
-  const max = at0.chunk - at0.peak;
+  const max = at0.left - solanaPoolBuySellNeed(v, rent);
   if (max <= 0n) return 0n;
   const p = solanaPoolBuyFunds(r, v, { spend: max, tip }, rent).problem;
   if (p !== null) throw new Error(`the max spend ${max} does not pass the funds rule: ${p}`);
@@ -745,10 +797,11 @@ const T22_ACCOUNT_EXT = new Map([[1, 8], [9, 0], [14, 1], [26, 0]]);
  * account with its type byte, ImmutableOwner, and each of the four extensions a mint can ask of it once (Token-2022
  * holds one extension of each type): 195 bytes. */
 export const SOLANA_TOKEN_ACCOUNT_MAX_SIZE = TOKEN_ACCOUNT_SIZE + 1 + 4 + [...T22_ACCOUNT_EXT.values()].reduce((s, x) => s + 4 + x, 0);
-/** The venue that costs W the most of its chunk (solanaPoolBuyFunds): PumpSwap (its wrapped-SOL account at the peak),
- * a cashback coin (one more token account kept) and the largest token account. tap_max is priced on it, before the tap
- * knows its venue, so the tap's real venue always funds that spend. */
-export const SOLANA_POOL_WORST_BUY_VENUE = Object.freeze({ kind: "pumpswap", tokenAccountSize: SOLANA_TOKEN_ACCOUNT_MAX_SIZE, cashback: true } as const);
+/** The venue that costs W the most of its chunk (solanaPoolBuyFunds): pump's curve on a cashback coin with the largest
+ * token account. A curve buy keeps the most for its sell (PumpSwap's need after graduation, with both cashback
+ * accounts the sell makes: one volume account more than a PumpSwap buy, which keeps one cashback account and makes the
+ * other). tap_max is priced on it, before the tap knows its venue, so the tap's real venue always funds that spend. */
+export const SOLANA_POOL_WORST_BUY_VENUE = Object.freeze({ kind: "pump-curve", tokenAccountSize: SOLANA_TOKEN_ACCOUNT_MAX_SIZE, cashback: true } as const);
 
 /** The size of W's new associated token account for `mint`: 165 for Token; for Token-2022 165, the account type byte
  * and a 4-byte TLV head per extension: ImmutableOwner (the associated token program always adds it) and the one each

@@ -94,10 +94,21 @@ export const SOLANA_POOL_CU_LIMIT_MAX = 1_400_000;
 /** The most one transaction W signs alone can cost W: one signature and the priority fee at the compute and price caps
  *  above (5,000 + 1,400,000 lamports). */
 export const SOLANA_POOL_TX_FEE_MAX = SOLANA_LAMPORTS_PER_SIGNATURE + (BigInt(SOLANA_POOL_CU_LIMIT_MAX) * SOLANA_CU_PRICE_MAX) / 1_000_000n;
-/** The most a sell may keep on W, out of the pool: its own fee and its teardown's first frame's, each at that cap
- *  (2,810,000 lamports). The teardown's later frames are paid by the rent the first gives back. A larger reserve is
- *  money held back from the user's note, whoever asks for it. */
-export const SOLANA_POOL_SELL_RESERVE_MAX = 2n * SOLANA_POOL_TX_FEE_MAX;
+/** The most rent per byte the sell's reserve cap allows: the Rent sysvar's long-standing rate, 3,480 lamports a
+ *  byte-year exempt at 2 years (6,960 lamports a byte; devnet asks less). */
+export const SOLANA_RENT_PER_BYTE_MAX = 6_960n;
+/** The most a sell may keep on W, out of the pool: its worst legitimate cost on W beyond what W holds as the buy and
+ *  sell rules leave it (src/pool-sell.ts: W holds the sell's own need before it, and keeps rent(0) after a whole sale
+ *  or the next sell's need after a partial one), so the cap refuses only an illegitimate short, never a funded W:
+ *  the sell's fee at its cap, the rent of the precommitment's mark (17 bytes) and, at a page boundary of both trees,
+ *  of a new page on each (a 16-byte header and one 72-byte entry), every account's rent being (128 + bytes) × rate:
+ *      1,405,000   SOLANA_POOL_TX_FEE_MAX
+ *    + 1,009,200   (128 + 17) × 6,960
+ *    + 3,006,720   2 × (128 + 16 + 72) × 6,960
+ *    = 5,420,920 lamports.
+ *  A larger reserve is money held back from the user's note, whoever asks for it (the re-review of signpage-pool-sell
+ *  fd5eec3: the old cap, two fees, 2,810,000, refused a funded W whose deposit opened a page on both trees). */
+export const SOLANA_POOL_SELL_RESERVE_MAX = SOLANA_POOL_TX_FEE_MAX + (128n + 17n) * SOLANA_RENT_PER_BYTE_MAX + 2n * (128n + 16n + 72n) * SOLANA_RENT_PER_BYTE_MAX;
 
 // Every payload a check passed, by identity and by what it is, with what the check read: the signers below sign only
 // these, and only from that read (the pins, the venue list, the proof's values), never from a payload or a context

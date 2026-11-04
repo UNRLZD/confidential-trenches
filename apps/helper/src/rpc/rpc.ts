@@ -23,6 +23,13 @@
 // caller's read it throttles in turn holds the chain. Each hold is one log line: the chain, whose read (caller or
 // background) and the seconds. A 503 is never a wait.
 //
+// A keyed provider limits per second, not per 10 s (Helius free: 10 requests a second, its plan's 100 per 10 s in
+// RPC_BUDGET_SOLANA; research scripts/deploy/helius-key.sh:7), so a burst inside the 10 s budget would still make it
+// throttle and hold the chain for every caller (4 Nov: holders 429 within 0.08 s of a crowd, card app-console-429).
+// Its sends are paced to a tenth of the budget's total in any 1 s: a send over the second's room waits for the next
+// room, up to PACE_MAX_MS; past that only that caller gets a 429, never a hold. The public endpoint, whose published
+// limit is per 10 s, is not paced.
+//
 // Refusals, in the kit's error shape { error: { code } } (v1.ts HelperRpcCode and the common codes):
 //   404 not_found           a chain that is not one of RPC_CHAINS;
 //   413 too_large           a body over RPC_BODY_MAX bytes, or a batch of more than RPC_BATCH_MAX;
@@ -30,7 +37,7 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { budgetFromEnv, EVM_LIMIT_CODE, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
+import { budgetFromEnv, EVM_LIMIT_CODE, LIMIT_WINDOW_MS, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
@@ -61,6 +68,12 @@ export const RPC_CLIENT_MAX = 16;
  * number of RPC_BUDGET_SOLANA, or none (two numbers: no limit per method).
  */
 export const RPC_METHOD_MAX = 40;
+/** The longest a send waits for a keyed provider's second to have room. [design: 2 s: one caller's whole share at
+ *  Helius free (RPC_CLIENT_MAX 16 at 10 a second) is two seconds' room, so a caller behind a full share still goes.] */
+export const PACE_MAX_MS = 2_000;
+/** A keyed provider's second as paced: a provider counts sends as they arrive, and our timers and the network move
+ *  them by a few ms to tens of ms, so two seconds' sends must leave more than 1 s apart. [design: 100 ms margin.] */
+export const PACE_SECOND_MS = 1_100;
 /**
  * Requests per 10 s kept on each chain (its total and each method's) for the helper's own reads that serve every
  * user, which only those reads may draw, whatever RPC_BUDGET_<CHAIN> says. Solana: Discover's curve reads, one
@@ -229,6 +242,22 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     budget.hold(c, now() + seconds * 1000, whose === "background");
     log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s`);
   };
+  // each keyed provider's sends booked for the last second and ahead, oldest first (PACE_MAX_MS)
+  const booked = new Map<string, number[]>();
+  /** How long `n` sends to `key` wait for its second's room, booked when within PACE_MAX_MS; 0 for the public endpoint
+   *  and a chain on its default provider. A batch larger than a second's room goes alone in its own second. */
+  const pace = (key: string, n: number): number => {
+    if (key === PUBLIC_KEY || upstreams[key as RpcChain].forms.length === 0) return 0;
+    const perSecond = Math.max(1, Math.ceil(limitsOf(key).total / (LIMIT_WINDOW_MS / 1000)));
+    const t = now();
+    const s = (booked.get(key) ?? []).filter((x) => x > t - PACE_SECOND_MS);
+    // bookings only move forward, so `s` stays sorted: the send goes once the booking `i` has left its second
+    const i = s.length + n - perSecond - 1;
+    const at = i < 0 ? t : Math.max(t, s[Math.min(i, s.length - 1)]! + PACE_SECOND_MS);
+    if (at - t <= PACE_MAX_MS) for (let k = 0; k < n; k++) s.push(at);
+    booked.set(key, s);
+    return at - t;
+  };
   const drawsOf = (c: string, methods: readonly string[]): [string, number][] => {
     const draws: [string, number][] = [[c, methods.length]];
     if (limitsOf(c).perMethod !== undefined) for (const m of methods) draws.push([`${c} ${m}`, 1]);
@@ -304,6 +333,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (held > 0) return throttled(held, undefined, `${key} held`);
     const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
+    const paced = pace(key, methods.length);
+    if (paced > PACE_MAX_MS) return throttled(Math.ceil((paced - PACE_MAX_MS) / 1000), undefined, `${key} pace`);
+    if (paced > 0) await new Promise((ok) => setTimeout(ok, paced));
     let r: Response;
     let text: string | undefined;
     const sent = now();

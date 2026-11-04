@@ -500,3 +500,57 @@ test("provider URLs: from the environment, http(s) only; an error names the vari
     );
   }
 });
+
+// a keyed provider in memory that keeps a per-second limit, as Helius free does (10 requests/s, research
+// scripts/deploy/helius-key.sh:7): past `perSecond` requests sent in any 1 s it answers 429 (Retry-After 1)
+const keepsPerSecond = (perSecond: number) => {
+  const p = { calls: 0, throttled: 0, sent: [] as number[] };
+  const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
+    const t = Date.now();
+    const body = JSON.parse(String(init.body)) as { id: unknown } | { id: unknown }[];
+    const n = Array.isArray(body) ? body.length : 1;
+    p.sent = p.sent.filter((x) => x > t - 1000);
+    for (let i = 0; i < n; i++) p.sent.push(t);
+    p.calls += n;
+    if (p.sent.length > perSecond) return (p.throttled++, new Response("slow down", { status: 429, headers: { "retry-after": "1" } }));
+    const one = (r: { id: unknown }) => ({ jsonrpc: "2.0", id: r.id, result: 1 });
+    return new Response(JSON.stringify(Array.isArray(body) ? body.map(one) : one(body)), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return { p, fetch };
+};
+
+test("card app-console-429: one caller's burst of 35 on a keyed provider (Helius free, 100 per 10 s = 10 a second) is paced to the provider's second, so it never throttles, nothing is held, and another caller's read answers 200", async () => {
+  const provider = keepsPerSecond(10);
+  const lines: string[] = [];
+  const r = createRpc({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: "100,16" }, { fetch: provider.fetch as never, log: (l) => lines.push(l) });
+  const burst = await Promise.all(Array.from({ length: 35 }, (_, i) => r.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), "203.0.113.7")));
+  const other = await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "203.0.113.8");
+  assert.equal(provider.p.throttled, 0, `the provider never throttled (${provider.p.calls} sent)`);
+  assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), [], "no hold");
+  assert.equal(other.status, 200, "another caller is served");
+  assert.equal(burst.filter((a) => a.status === 200).length, 16, "the burst's caller gets its share, RPC_CLIENT_MAX");
+  for (const a of burst.filter((x) => x.status !== 200)) assert.equal(a.status, 429, "the rest of the burst is that caller's own 429");
+});
+
+test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller over it gets a 429 with no hold; the public endpoint is not paced", async () => {
+  const lines: string[] = [];
+  const env = { SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: "1000,100" };
+  // a plan of 1000 per 10 s is 100 a second: 40 callers at once all go now, none waits
+  const r = createRpc(env, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l) });
+  const t0 = Date.now();
+  const all = await Promise.all(Array.from({ length: 40 }, (_, i) => r.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
+  assert.equal(all.filter((a) => a.status === 200).length, 40);
+  assert.ok(Date.now() - t0 < 500, "within the plan's second nothing waits");
+  const tight = createRpc({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, RPC_BUDGET_SOLANA: "100,90" }, { fetch: keepsPerSecond(10).fetch as never, log: (l) => lines.push(l) });
+  const many = await Promise.all(Array.from({ length: 40 }, (_, i) => tight.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
+  const refused = many.filter((a) => a.status === 429);
+  assert.equal(many.filter((a) => a.status === 200).length, 20, "10 now, 10 a PACE_SECOND_MS later: the room within PACE_MAX_MS");
+  assert.equal(refused.length, 20, "the rest are refused, each its own caller's 429");
+  for (const a of refused) assert.equal(a.why, "solana pace", "named as the pace, not the provider");
+  // the public endpoint (no SOLANA_RPC_URL): its limit is per 10 s, so 20 callers at once all go now
+  const pub = createRpc({}, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l) });
+  const t1 = Date.now();
+  const open = await Promise.all(Array.from({ length: 20 }, (_, i) => pub.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `192.0.2.${i}`)));
+  assert.deepEqual([open.filter((a) => a.status === 200).length, Date.now() - t1 < 500], [20, true], "not paced");
+  assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), [], "no hold");
+});
