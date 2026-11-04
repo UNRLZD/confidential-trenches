@@ -174,13 +174,25 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return p;
   };
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
-  const stateRead = async (): Promise<void> => {
-    if (scope === null || settling) return;
-    try {
-      if ((await readNotes(await page.store())).some((n) => n.state === "INCOMING" && n.scope === scope)) await settle();
-    } catch {
-      // a state read never fails for this; the next read tries again
-    }
+  // one state read's pass at a time: set before its first await, so a read that comes while it runs (its note read
+  // included) gets the same promise and never starts a second pass. No follow-up pass: a note turns INCOMING only in an
+  // ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later state read settles what it leaves.
+  let reading: Promise<void> | null = null;
+  const stateRead = (): Promise<void> => {
+    if (scope === null) return Promise.resolve();
+    if (reading) return reading;
+    const p = (async () => {
+      try {
+        if (settling) return await settling;
+        if ((await readNotes(await page.store())).some((n) => n.state === "INCOMING" && n.scope === scope)) await settle();
+      } catch {
+        // a state read never fails for this; the next read tries again
+      }
+    })().finally(() => {
+      if (reading === p) reading = null;
+    });
+    reading = p;
+    return p;
   };
   return {
     flow: (ask, ctx) => (ask.kind === "pool.deposit" && ask.chain === "solana" && pin !== undefined ? deposit(ask, ctx) : { error: "not_allowed" }),

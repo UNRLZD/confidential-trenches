@@ -201,12 +201,27 @@ test("a state read settles a pool note still INCOMING, one pass at a time; with 
     calls.push(m);
     throw new Error("offline");
   };
-  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], prover: { vault: signalsProver(), stop: () => {} } });
+  // a store open the test holds: made to wait while `armed`, at the moment it is asked for
+  let armed = false;
+  let open!: () => void;
+  const gate = new Promise<void>((ok) => (open = ok));
+  const store = async () => {
+    if (armed) await gate;
+    return w;
+  };
+  const t = testnetPool({ store, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], prover: { vault: signalsProver(), stop: () => {} } });
   await t.stateRead();
   assert.deepEqual(calls, [], "no note open: no pass, no read");
   await incoming(ns, null, 3);
-  // two state reads at once: one pass (its first read is the pool account, on both RPCs)
-  await Promise.all([t.stateRead(), t.stateRead()]);
+  // two state reads at once, the second's note read held until the first's pass has ended (the CI race on a loaded
+  // runner, made certain): one pass, whose first read is the pool account on both RPCs
+  const first = t.stateRead();
+  armed = true;
+  const second = t.stateRead();
+  armed = false;
+  await first;
+  open();
+  await second;
   assert.deepEqual(calls, ["getAccountInfo", "getAccountInfo"]);
   // a later read, the note still INCOMING: settled again
   await t.stateRead();
