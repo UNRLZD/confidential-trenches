@@ -780,6 +780,26 @@ test("X2 seventeen currencies, the shallowest by liquidity included: each is pri
     return true;
   });
 });
+test("X4 one scan request of several currencies finds the market of each, not only the first one's: the real currency, scanned last, is priced through its market", async () => {
+  const token = "0x00000000000000000000000000000000000f5f4f";
+  const x = xAt(0x5000);
+  const real: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  // two currencies with no market, whose pools with the token have ids below the real one's, so they are scanned first
+  const others: ModelPool[] = [];
+  for (let i = 0; others.length < 2; i++) {
+    const k = keyOf(token, xAt(0x5010 + i), 3000, 60, NATIVE);
+    if (pidOf(k) < pidOf(real.key)) others.push({ key: k, give: (a) => a });
+  }
+  // its market of a shape only the scan finds, a hundred times the price
+  const market: ModelPool = { key: keyOf(x, NATIVE, 2500, 50, NATIVE), give: (a) => 100n * a };
+  const pools = [best(token), ...others, real, market];
+  const logs = [...others, real, market].map((p, i) => ({ key: p.key, at: 4_100_000 + i }));
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) }, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "below_reference", String(e));
+    assert.equal(e.reference!.amountOut, 100n * AMOUNT);
+    return true;
+  });
+});
 test("X3 an X with 16,384 empty markets beside its real one is priced through the real one (card evm-quote-one-round: a bound never leaves X's markets unread)", async () => {
   const token = "0x00000000000000000000000000000000000ff7ff";
   const x = xAt(0x900);

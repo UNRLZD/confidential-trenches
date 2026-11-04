@@ -147,7 +147,7 @@ export const MUTANTS = [
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
   [QUOTE, "    return a < b ? a : b;", "    return a;", R, "H2 "],
   [QUOTE, "      const span = part.length === 1 ? s.span : Math.min(s.span, s.orSpan ?? s.span);", "      const span = s.span;", R, "B1 "],
-  [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X2 "],
+  [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X4 "],
   [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
   [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1a "],
   [QUOTE, "const fromScan = scanned?.pools.get(lower(token)) ?? [];", "const fromScan: EvmPoolKey[] = [];", R, "N1a "],
