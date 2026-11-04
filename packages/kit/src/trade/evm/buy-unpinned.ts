@@ -437,6 +437,12 @@ export function pinnedBuild(venues: EvmPoolVenueList, chain: EvmPoolChain, adapt
   return evmPoolBuildUnpinned(chain, adapter, r, minOut, token, quoted);
 }
 
+/** pinnedBuild of a route the device quoted itself (buy.ts evmPoolBuildQuoted, which takes only a device quote): a v4
+ *  route may pass through a middle that is not listed (see checkRoute). */
+export function pinnedBuildQuoted(venues: EvmPoolVenueList, chain: EvmPoolChain, adapter: string, route: EvmRoute, minOut: bigint, token: string): EvmPoolBuy {
+  return pinnedBuild(venues, chain, adapter, route, minOut, token, true);
+}
+
 /** evmPoolSignBuyUnpinned into the chain's pinned pool only, of a buy through a pinned adapter. */
 export function pinnedSignBuy(venues: EvmPoolVenueList, secretKey: Uint8Array, chain: EvmPoolChain, pool: string, built: EvmPoolBuy, proof: EvmPoolProofBinding): Uint8Array {
   const v = venuePins(venues, chain);

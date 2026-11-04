@@ -6,7 +6,7 @@
 import {
   EvmPoolBuyError,
   evmPoolVenues,
-  pinnedBuild,
+  pinnedBuildQuoted,
   pinnedSignBuy,
   type EvmPoolBuy,
   type EvmPoolChain,
@@ -53,7 +53,7 @@ export function evmPoolBuildQuoted(adapter: string, quote: EvmPoolBuyQuote): Evm
     throw new EvmQuoteError("stale_quote", "the quote's block is more than 30 s old");
   }
   // the device quoted this route itself on both providers, so a v4 route may pass through a middle that is not listed
-  const built = pinnedBuild(evmPoolVenues(), quote.chain, adapter, quote.route, quote.minOut, quote.token, true);
+  const built = pinnedBuildQuoted(evmPoolVenues(), quote.chain, adapter, quote.route, quote.minOut, quote.token);
   QUOTED_BUILDS.add(built);
   return built;
 }

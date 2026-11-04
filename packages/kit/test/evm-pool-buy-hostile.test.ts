@@ -12,7 +12,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import * as kit from "../src/index.ts";
 import { evmPoolVenues, EvmPoolBuyError, evmPoolRouteData, type EvmPoolChain, type EvmPoolVenue, type EvmRoute, type EvmV4Hop } from "../src/index.ts";
 // the checks through the unpinned builder and signer; the pinned ones (M370) at the end, with a pinned list of the test's
-import { evmPoolBuildUnpinned as evmPoolBuild, evmPoolSignBuyUnpinned as evmPoolSignBuy, pinnedBuild, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
+import { evmPoolBuildUnpinned as evmPoolBuild, evmPoolSignBuyUnpinned as evmPoolSignBuy, pinnedBuild, pinnedBuildQuoted, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
 
 const CAST = JSON.parse(readFileSync(new URL("./evm-pool-buy-hostile.cast.json", import.meta.url), "utf8"));
 const PROOFS = JSON.parse(readFileSync(new URL("../../../contracts/pool-evm/test/fixtures/buy-proofs.json", import.meta.url), "utf8"));
@@ -311,6 +311,17 @@ test("M370 a pinned build takes only the chain's adapter for the route's venue",
   const route = { get venue() { return reads++ === 0 ? "uniswap-v4" : "uniswap-v3"; }, currencyIn: ZERO, hops: [hop(X)] } as unknown as EvmRoute;
   assert.equal(code(() => pinnedBuild(PINNED, "base", A_V4, route, 1n, X)), "built");
   assert.equal(reads, 1);
+});
+
+test("Q1 the quoted pinned build takes a v4 route through a middle that is not listed; the plain one and any v3 route do not", () => {
+  // the route evmPoolBuildQuoted builds from a device quote (checks/evm/quote.ts): its middles need not be listed
+  const route = v4(ZERO, hop(Z), hop(X));
+  const built = pinnedBuildQuoted(PINNED, "base", A_V4, route, 1n, X);
+  assert.equal(built.data, evmPoolBuild("base", A_V4, route, 1n, X, true).data);
+  assert.equal(code(() => pinnedBuild(PINNED, "base", A_V4, route, 1n, X)), "middle_not_listed");
+  assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", A_V3, v3([B.weth, Z, X]), 1n, X)), "middle_not_listed");
+  // the pins still hold
+  assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", ADAPTER, route, 1n, X)), "not_pinned");
 });
 
 test("M370 a pinned signature goes only to the chain's pool, of a buy through a pinned adapter", () => {

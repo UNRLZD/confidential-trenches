@@ -85,7 +85,7 @@ export const MUTANTS = [
   ['if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);', "", "F1 "],
   ["if (!BUILT.has(built) || built.chain !== chain)", "if (built.chain !== chain)", "F2b "],
   ["if (!BUILT.has(built) || built.chain !== chain)", "if (!BUILT.has(built))", "F3 "],
-  ["const r = copyRoute(route);\n  const token = checkRoute(chain, r);", "const r = copyRoute(route);\n  const token = checkRoute(chain, copyRoute(route));", "F4 "],
+  ["const r = copyRoute(route);\n  const token = checkRoute(chain, r, quoted);", "const r = copyRoute(route);\n  const token = checkRoute(chain, copyRoute(route), quoted);", "F4 "],
   ['if (typeof h !== "object" || h === null) return refuse("bad_route", "a hop is an object");', "", "F5 "],
   ['if (typeof route !== "object" || route === null) return refuse("bad_route", "a route is an object");', "", "F5 "],
   ["if (!Number.isSafeInteger(n) || n > COPY_MAX)", "if (!Number.isSafeInteger(n))", "R8 "],
@@ -103,7 +103,10 @@ export const MUTANTS = [
   ['if (pin === undefined) return refuse("not_deployed", `${chain} has no pinned ${r.venue} adapter yet`);', "", "M370 a pinned build"],
   ['if (!samePin(adapter, pin)) return refuse("not_pinned", `the adapter is not ${chain}\'s pinned ${r.venue} adapter`);', "", "M370 a pinned build"],
   ['const pin = r.venue === "uniswap-v3" ? v.v3 : v.v4;', 'const pin = r.venue === "uniswap-v3" ? v.v4 : v.v3;', "M370 a pinned build"],
-  ["return evmPoolBuildUnpinned(chain, adapter, r, minOut, token);", "return evmPoolBuildUnpinned(chain, adapter, route, minOut, token);", "M370 a pinned build"],
+  // the quoted pinned build (buy.ts evmPoolBuildQuoted) admits a v4 route through a middle that is not listed
+  ["return pinnedBuild(venues, chain, adapter, route, minOut, token, true);", "return pinnedBuild(venues, chain, adapter, route, minOut, token, false);", "Q1 "],
+  ["return evmPoolBuildUnpinned(chain, adapter, r, minOut, token, quoted);", "return evmPoolBuildUnpinned(chain, adapter, r, minOut, token);", "Q1 "],
+  ["return evmPoolBuildUnpinned(chain, adapter, r, minOut, token, quoted);", "return evmPoolBuildUnpinned(chain, adapter, route, minOut, token, quoted);", "M370 a pinned build"],
   ['if (v.pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);', "", "M370 a pinned signature"],
   ['if (!samePin(pool, v.pool)) return refuse("not_pinned", `the pool is not ${chain}\'s pinned pool`);', "", "M370 a pinned signature"],
   ["if (BUILT.has(built) && !((v.v3 !== undefined && samePin(built.adapter, v.v3)) || (v.v4 !== undefined && samePin(built.adapter, v.v4)))) {", "if (false) {", "M370 a pinned signature"],
@@ -167,7 +170,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (bad > 0) process.exit(1);
   MUTANTS.forEach(([find, repl, t], i) => {
     if (src.split(find).length !== 2) {
-      console.log(`FAIL mutant ${i + 1}: its text is not in buy.ts exactly once`);
+      console.log(`FAIL mutant ${i + 1}: its text is not in buy-unpinned.ts exactly once`);
       bad++;
       return;
     }
@@ -178,7 +181,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     } finally {
       writeFileSync(SRC, src);
     }
-    if (readFileSync(SRC, "utf8") !== src) throw new Error(`mutant ${i + 1} left buy.ts changed`);
+    if (readFileSync(SRC, "utf8") !== src) throw new Error(`mutant ${i + 1} left buy-unpinned.ts changed`);
     console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
     if (r !== "fail") bad++;
   });
