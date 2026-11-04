@@ -45,6 +45,11 @@
 //   settles it (../../wallet/src/pool/solana-restore.ts solanaSettleReserved: SPENT once its spent mark and change read
 //   on both RPCs, UNSPENT once both RPCs' block time is past its deadline with no spent mark, so the queue proves it
 //   again).
+// - The route (card signpage-buy-route-events): the run tells the app, through the kind's route events (messages.ts
+//   BuyRoute), only what it bound or read itself: W and the venue with its pool once the check passed, W derived to the
+//   proof's recipient and signed, and the take holds the note, before the transaction leaves; then the amount W
+//   received, read from this very transaction's token balances on both RPCs (the two the same, at least the min out,
+//   within the kit's bound), once it reads back as succeeded on both. Not read plainly on both: not told.
 // - Every read names a public account or the transaction itself; no request carries a key, the words or which note is
 //   whose. Nothing here logs.
 import { base58, base64 } from "@scure/base";
@@ -68,7 +73,8 @@ import { solanaDecodeLookupTable, type SolanaLookupTable } from "../../kit/src/c
 import { SOLANA_CU_PRICE_MAX, SOLANA_JITO_TIP_MIN } from "../../kit/src/checks/solana/checks.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof } from "../../kit/src/vault/shapes.ts";
-import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
+import type { BuyRoute, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
+import { SIGNPAGE_ROUTE_OUT } from "../../kit/src/signpage/schema.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
@@ -103,6 +109,10 @@ export type PoolBuyHost = {
   wait?(ms: number): Promise<void>;
   /** The transaction was sent: its signature (the helper's word until it reads back). */
   sent?(signature: string): void;
+  /** The buy's route as the run binds and reads it (messages.ts BuyRoute): W and the venue with its pool once the check
+   *  passed and W derived to the proof's recipient, then the amount W received once the transaction read back on both
+   *  RPCs as the same. Each once, in that order; a throw here never stops the buy. */
+  route?(r: BuyRoute): void;
   /** The notes a run on this page has picked and not finished: a second tap picks another ready proof. */
   claimed?: Set<string>;
   /** Tests only: the venue's fee recipient and the Jito tip account, else random. */
@@ -313,18 +323,64 @@ export async function pastOnEither(rpcs: readonly [SolanaRpc, SolanaRpc], last: 
   return (await Promise.all(rpcs.map(one))).some(Boolean);
 }
 
-/** The transaction under `signature` on one RPC: "none" (not seen yet), "ok", "failed" or "other" (not ours). */
+/** The transaction under `signature` on one RPC: "none" (not seen yet, or this very transaction with a meta that says
+ *  nothing), "ok", "failed" or "other" (not ours). pool-sell.ts reads its transaction here too. */
 export async function readBack(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<"none" | "ok" | "failed" | "other"> {
+  return (await readBackMeta(rpc, signature, signed)).got;
+}
+
+/** readBack, with the transaction's meta when it is this very transaction (the token balances the fill is read from). */
+async function readBackMeta(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<{ got: "none" | "ok" | "failed" | "other"; meta?: Record<string, unknown> }> {
   const r = (await rpc("getTransaction", [signature, { encoding: "base64", commitment: "confirmed", maxSupportedTransactionVersion: 0 }])) as { transaction?: unknown; meta?: { err?: unknown } } | null;
-  if (r === null) return "none";
+  if (r === null) return { got: "none" };
   const t = r?.transaction;
-  if (!Array.isArray(t) || t[1] !== "base64" || typeof t[0] !== "string") return "other";
+  if (!Array.isArray(t) || t[1] !== "base64" || typeof t[0] !== "string") return { got: "other" };
   const got = base64.decode(t[0]);
   const want = signed.slice();
   want.set(base58.decode(signature), 1);
-  if (!sameBytes(got, want)) return "other";
-  if (r.meta === undefined || r.meta === null) return "other";
-  return r.meta.err === null ? "ok" : "failed";
+  if (!sameBytes(got, want)) return { got: "other" };
+  // this very transaction, its meta unreadable (absent, not an object, no `err`): it proves nothing either way, so the
+  // reads go on and the answer keeps the transaction's ref
+  const meta = r.meta as unknown;
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta) || !Object.hasOwn(meta, "err") || (meta as { err: unknown }).err === undefined) return { got: "none" };
+  return { got: (meta as { err: unknown }).err === null ? "ok" : "failed", meta: meta as Record<string, unknown> };
+}
+
+/** What `owner` received of `mint` in one transaction, from its meta's token balances (post less pre, summed over the
+ *  owner's accounts of that mint): the raw amount and the mint's decimals, or null when the meta does not say it
+ *  plainly (an entry malformed, two decimals, nothing after). Never throws: a fill it cannot read is not shown. */
+export function tokenReceived(meta: Record<string, unknown> | undefined, owner: string, mint: string): { raw: bigint; decimals: number } | null {
+  if (!meta) return null;
+  let decimals: number | null = null;
+  const sum = (key: "preTokenBalances" | "postTokenBalances"): bigint | null => {
+    const list = meta[key];
+    if (!Array.isArray(list)) return null;
+    let total = 0n;
+    for (const e of list as unknown[]) {
+      const b = e as { mint?: unknown; owner?: unknown; uiTokenAmount?: { amount?: unknown; decimals?: unknown } } | null;
+      if (typeof b !== "object" || b === null) return null;
+      if (b.mint !== mint || b.owner !== owner) continue;
+      const amount = b.uiTokenAmount?.amount;
+      const d = b.uiTokenAmount?.decimals;
+      if (typeof amount !== "string" || !/^(0|[1-9][0-9]{0,77})$/.test(amount) || !Number.isSafeInteger(d) || (d as number) < 0 || (d as number) > 255) return null;
+      if (decimals !== null && decimals !== d) return null;
+      decimals = d as number;
+      total += BigInt(amount);
+    }
+    return total;
+  };
+  const pre = sum("preTokenBalances");
+  const post = sum("postTokenBalances");
+  if (pre === null || post === null || decimals === null || post <= pre) return null;
+  return { raw: post - pre, decimals };
+}
+
+/** A raw amount in whole units of `decimals`, as a decimal string with no trailing zeros ("1234.5", "7"). */
+export function unitsOf(raw: bigint, decimals: number): string {
+  const s = raw.toString().padStart(decimals + 1, "0");
+  const int = s.slice(0, s.length - decimals);
+  const frac = s.slice(s.length - decimals).replace(/0+$/, "");
+  return frac ? `${int}.${frac}` : int;
 }
 
 type Ready = ReadyProof<SolanaReleaseRequest>;
@@ -336,6 +392,13 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   let key: Uint8Array | null = null;
   let claim: string | null = null;
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  const tell = (x: BuyRoute): void => {
+    try {
+      h.route?.(x);
+    } catch {
+      /* the app's display never stops a buy */
+    }
+  };
   try {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || ask.token === null || h.table === null) no("not_allowed");
     const token = ask.token!;
@@ -406,7 +469,10 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       key = null;
       const signed = built.wire.slice();
       signed.set(sig, 1 + 64);
-      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait);
+      // the route as bound, told once the take holds the note (sendAndSettle): W, then the venue the check passed and its
+      // pool (the curve's account or the AMM pool's)
+      const bound: readonly BuyRoute[] = [{ wallet: w.address }, { venue: venue.kind, pool: venue.kind === "pump-curve" ? venue.curve : venue.pool }];
+      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound });
     }
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
@@ -420,10 +486,15 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
 }
 
 /** The take, the send, the read-back on both RPCs and the settle; every answer but filled tries the settle first. */
-async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>): Promise<PoolBuyAnswer> {
+async function sendAndSettle(
+  h: PoolBuyHost, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
+  fill: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[] },
+): Promise<PoolBuyAnswer> {
   // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD
   const taken = await h.take(r.noteId, r.attempt);
   if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();
+  // the take holds the note for this very transaction: W and the venue with its pool, told before it leaves
+  for (const x of fill.bound) fill.tell(x);
   const reads = h.reads ?? POOL_BUY_READS;
   // the wall clock from the signature (the page's clock, h.now, in tests): bounds the resends and the read-back
   const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
@@ -466,12 +537,23 @@ async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolReleas
   let landed = false;
   for (let i = 0; i < reads && !landed && (i === 0 || inTime()); i++) {
     if (i > 0) await wait(POOL_BUY_WAIT_MS);
-    const got: readonly Got[] = await both(h, (rpc) => readBack(rpc, signature, signed)).catch((): Got[] => ["none", "none"]);
+    type Read = Awaited<ReturnType<typeof readBackMeta>>;
+    const metas: readonly Read[] = await both(h, (rpc) => readBackMeta(rpc, signature, signed)).catch((): Read[] => [{ got: "none" }, { got: "none" }]);
+    const got: readonly Got[] = metas.map((m) => m.got);
     // another transaction under that name on both RPCs: the helper's signature is not this one's
     if (got[0] === "other" && got[1] === "other") return unlanded([]);
     // this very transaction failed on chain, on both RPCs: it spent nothing, and it can never land again
     if (got[0] === "failed" && got[1] === "failed") return (await spent()) ? { stage: "filled", txs } : { stage: "refused", txs };
     landed = got[0] === "ok" && got[1] === "ok";
+    if (landed) {
+      // the amount W received, from this very transaction on both RPCs: the two the same and at least the min out the
+      // device asked, else not shown
+      const outs = metas.map((m) => tokenReceived(m.meta, r.wallet.address, fill.token));
+      const [a, b] = outs;
+      const out = a && b && a.raw === b.raw && a.decimals === b.decimals && a.raw >= fill.minOut ? unitsOf(a.raw, a.decimals) : null;
+      // never an amount past the kit's bound (SIGNPAGE_ROUTE_OUT: 78 digits each side), which a client refuses
+      if (out !== null && SIGNPAGE_ROUTE_OUT.test(out)) fill.tell({ out });
+    }
   }
   if (!landed) return unlanded(txs);
   // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized)
@@ -500,7 +582,7 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
           const a = await runPoolBuy({ ...h, sent: (signature) => {
             if (!answer) answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } };
             give();
-          } }, ask);
+          }, route: (x) => ctx?.route?.(x) }, ask);
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           else if ("stage" in a) ctx?.progress(a.stage);
         } finally {
