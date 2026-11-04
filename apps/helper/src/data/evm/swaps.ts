@@ -52,7 +52,7 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
-import { EVM_LIMIT_CODE, RETRY_AFTER_MAX_S, upstreamRetryAfterS } from "../../limits/limits.ts";
+import { EVM_LIMIT_CODE, EVM_LIMIT_MESSAGE, RETRY_AFTER_MAX_S, upstreamRetryAfterS } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 
@@ -560,8 +560,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
   }
 
-  /** One JSON-RPC batch (at most the provider's batch size) to a provider. */
+  /** One JSON-RPC batch (at most the provider's batch size) to a provider. Its hold is read right before the fetch: a
+   *  batch queued behind INFLIGHT_MAX before the provider refused sends nothing while it holds and fails as a refused
+   *  read does, so the caller asks the next provider (card helper-rpc-hold-queued: 2026-11-04 18:55Z on the helper box,
+   *  seven batches queued before the chain's own Robinhood RPC's 429 were sent within 190 ms of it). */
   async function one(url: string, part: Call[]): Promise<Reply[] | null> {
+    if ((held.get(url) ?? 0) > now()) return null;
     try {
       const r = await doFetch(url, {
         method: "POST",
@@ -572,7 +576,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       });
       if (r.status === 429) {
         await r.body?.cancel();
-        held.set(url, now() + upstreamRetryAfterS(r.headers, now()) * 1000);
+        // a later, shorter wait never cuts a longer one, as the limit path below
+        held.set(url, Math.max(held.get(url) ?? 0, now() + upstreamRetryAfterS(r.headers, now()) * 1000));
         return null;
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
@@ -591,7 +596,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           // the helper's RPC rules (rpc.ts): -32005 or a limit message is a throttle, held for the wait it names
           const e = obj(o.error);
           const s = Number(obj(e.data).backoff_seconds);
-          const limited = e.code === EVM_LIMIT_CODE || /rate.?limit|too many requests|limit (reached|exceeded)|request limit/i.test(String(e.message ?? ""));
+          const limited = e.code === EVM_LIMIT_CODE || EVM_LIMIT_MESSAGE.test(String(e.message ?? ""));
           const wait = limited ? (Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1) : 0;
           if (wait > 0) held.set(url, Math.max(held.get(url) ?? 0, now() + wait * 1000));
           got[o.id as number] = { ok: false, wait };
