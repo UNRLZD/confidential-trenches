@@ -25,7 +25,9 @@ const out = {};
 for (const [chain, urls] of Object.entries(RPCS)) {
   for (let tries = 0; ; tries++) {
     const calls = [];
-    const p = await poolUsdPrice({ chain, rpcs: urls.map((u) => recording(u, calls)) });
+    // Robinhood's read holds it to Base's: Base's calls are kept in a list of their own (Base's own record is above)
+    const baseRpcs = chain === "robinhood" ? RPCS.base.map((u) => recording(u, [])) : undefined;
+    const p = await poolUsdPrice({ chain, rpcs: urls.map((u) => recording(u, calls)), ...(baseRpcs ? { baseRpcs } : {}) });
     if (chain !== "solana" || calls.length === 2 || tries >= 10) {
       out[chain] = { rpcs: urls, calls };
       console.error(`${chain}: price ${p.price} x 10^${p.expo}, published ${new Date(p.publishedS * 1000).toISOString()}, at ${p.at}`);

@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { base64 } from "@scure/base";
 import {
+  POOL_USD_CROSS_BPS,
   POOL_USD_FEEDS,
   POOL_USD_MAX_AHEAD_S,
   poolUsdPrice,
@@ -94,8 +95,14 @@ function words(rec: Recorded): bigint[] {
   const h = (c.result as string).slice(2);
   return [0, 1, 2, 3, 4].map((i) => BigInt(`0x${h.slice(64 * i, 64 * i + 64)}`));
 }
+/** Base's two RPCs for a Robinhood read, its updatedAt moved to `nowMs` so only Robinhood's own age is under test. */
+const baseAt = (nowMs: number, edit?: Edit): [SolanaRpc, SolanaRpc] => {
+  const fresh = wordEdit(LRD, 3, BigInt(Math.floor(nowMs / 1000)));
+  const both: Edit = (m, p, r) => fresh(m, p, edit ? edit(m, p, r) : r);
+  return pair(FX.base, [both, both]);
+};
 const evm = (chain: "base" | "robinhood", edits?: Parameters<typeof pair>[1], nowMs = NOW) =>
-  poolUsdToUnits({ chain, usd: "100", rpcs: pair(FX[chain], edits), nowMs });
+  poolUsdToUnits({ chain, usd: "100", rpcs: pair(FX[chain], edits), nowMs, ...(chain === "robinhood" ? { baseRpcs: baseAt(nowMs) } : {}) });
 
 // ------------------------------------------------------------------------------------------------ ok
 test("ok: the recorded Pyth SOL/USD read turns USD into lamports, rounded down, never more than the USD asked", async () => {
@@ -119,10 +126,10 @@ test("ok: the recorded Pyth SOL/USD read turns USD into lamports, rounded down, 
 test("ok: the recorded Chainlink ETH/USD reads on Base and on Robinhood turn USD into wei, each from its own chain's feed", async () => {
   for (const chain of ["base", "robinhood"] as const) {
     const [, answer] = words(FX[chain]);
-    const p = await poolUsdPrice({ chain, rpcs: pair(FX[chain]), nowMs: NOW });
+    const p = await poolUsdPrice({ chain, rpcs: pair(FX[chain]), nowMs: NOW, baseRpcs: pair(FX.base) });
     assert.deepEqual({ asset: p.asset, decimals: p.decimals, price: p.price, expo: p.expo, source: p.source }, { asset: "ETH", decimals: 18, price: answer!, expo: -8, source: "chainlink" });
     assert.equal(await evm(chain), (100n * 10n ** 26n) / answer!, chain);
-    assert.equal(await poolUsdToUnits({ chain, usd: "0.5", rpcs: pair(FX[chain]), nowMs: NOW }), (5n * 10n ** 25n) / answer!, chain);
+    assert.equal(await poolUsdToUnits({ chain, usd: "0.5", rpcs: pair(FX[chain]), nowMs: NOW, baseRpcs: pair(FX.base) }), (5n * 10n ** 25n) / answer!, chain);
   }
   // two feeds of one asset: within the two feeds' deviation thresholds (0.15% and 0.5%) of each other
   const [b, r] = [words(FX.base)[1]!, words(FX.robinhood)[1]!];
@@ -188,13 +195,34 @@ test("agreement: Chainlink answers that differ between the two RPCs in any field
 test("agreement: both Chainlink reads are at one block, the lower of the two RPCs' heads, never latest on each", async () => {
   for (const chain of ["base", "robinhood"] as const) {
     const log: Call[] = [];
-    await poolUsdPrice({ chain, rpcs: pair(FX[chain], [], log), nowMs: NOW });
+    await poolUsdPrice({ chain, rpcs: pair(FX[chain], [], log), nowMs: NOW, baseRpcs: pair(FX.base) });
     const heads = FX[chain].calls.filter((c) => c.method === "eth_blockNumber").map((c) => BigInt(c.result as string));
     const low = `0x${(heads[0]! < heads[1]! ? heads[0]! : heads[1]!).toString(16)}`;
     const blocks = log.filter((c) => c.method === "eth_call").map((c) => c.params[1]);
     assert.equal(blocks.length, 4, chain);
     assert.deepEqual(new Set(blocks), new Set([low]), chain);
   }
+});
+
+test("agreement: Robinhood's ETH/USD is used only within 1% of Base's, read in the same call; with no Base RPCs it is refused", async () => {
+  assert.equal(POOL_USD_CROSS_BPS, 100n);
+  const [b, r] = [words(FX.base)[1]!, words(FX.robinhood)[1]!];
+  const at = (price: bigint) => poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood), nowMs: NOW, baseRpcs: baseAt(NOW, wordEdit(LRD, 1, price)) });
+  // Base's price that puts Robinhood's exactly 1% away, either side (lo = the lower of the two), and one step past
+  const over = (r * 10_100n) / 10_000n; // Base above: lo = r, 1% of r
+  assert.equal((await at(over)).price, r, "1% above: used");
+  await assert.rejects(at(over + 1n), /more than 100 bps from Base's/);
+  const under = (r * 10_000n + 10_099n) / 10_100n; // Base below: r - b <= 1% of b
+  assert.equal((await at(under)).price, r, "1% below: used");
+  await assert.rejects(at(under - 1n), /more than 100 bps from Base's/);
+  assert.ok(b > 0n);
+  // a halted Robinhood feed far from Base's, still inside its 24 h age bound: refused
+  await assert.rejects(poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood, [wordEdit(LRD, 1, r / 2n), wordEdit(LRD, 1, r / 2n)]), nowMs: NOW, baseRpcs: pair(FX.base) }), /more than 100 bps/);
+  await assert.rejects(poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood), nowMs: NOW }), /Base's two RPCs are needed/);
+  // Base's own reads are held as Base's: its age, its chain id, its two providers
+  await assert.rejects(poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood), nowMs: NOW, baseRpcs: pair(FX.robinhood) }), /chain id/);
+  const one = pair(FX.base)[0];
+  await assert.rejects(poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood), nowMs: NOW, baseRpcs: [one, one] }), /one provider twice/);
 });
 
 test("agreement: hex in upper case on one RPC is the same answer (as the wallet's evmRpcHex reads it)", async () => {

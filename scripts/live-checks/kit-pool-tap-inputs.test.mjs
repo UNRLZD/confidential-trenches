@@ -52,11 +52,12 @@ test("the recorded bad run fails: the two Solana RPCs disagree on the Pyth accou
   fails(await run(A.bad), /solana: pyth .*the two RPCs disagree on the Pyth account/);
 });
 
-test("the good run replayed two hours later fails: every price but Robinhood's is stale", async () => {
+test("the good run replayed two hours later fails: every price is stale, Robinhood's through Base's, which holds it", async () => {
   const r = await run(A.good, { nowMs: A.good.nowMs + 2 * 3600_000 });
   fails(r, /solana: .*older than 60 s/);
   fails(r, /base: .*older than 1500 s/);
-  assert.ok(r.lines.some((l) => l.startsWith("PASS robinhood: chainlink")), "Robinhood's bound is its 24 h heartbeat");
+  // Robinhood's own feed is inside its 24 h bound; the Base read that holds it is not
+  fails(r, /robinhood: chainlink .*older than 1500 s/);
 });
 
 test("one RPC's Chainlink round that is another fails, a description that is not ETH / USD fails", async () => {
@@ -74,7 +75,7 @@ test("Base and Robinhood ETH/USD far apart fails", async () => {
     const w = (BigInt(`0x${h.slice(64, 128)}`) * 2n).toString(16).padStart(64, "0");
     j.result = `0x${h.slice(0, 64)}${w}${h.slice(128)}`;
   });
-  fails(await run(far), /ETH\/USD on Base .* within 1%/);
+  fails(await run(far), /robinhood: chainlink .*more than 100 bps from Base's/);
 });
 
 test("one operator twice on a chain fails", async () => {

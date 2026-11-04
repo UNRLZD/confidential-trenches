@@ -8,7 +8,9 @@
 //   - Base and Robinhood: each chain's own Chainlink ETH/USD proxy (POOL_USD_FEEDS.base, .robinhood) answers the same
 //     decimals and latestRoundData on both RPCs at one block, positive and within the chain's bound; and description()
 //     at that block is "ETH / USD" on both;
-//   - the two ETH/USD feeds are within 1% of each other (their deviation thresholds are 0.15% and 0.5%);
+//   - the two ETH/USD feeds are within 1% of each other (their deviation thresholds are 0.15% and 0.5%): the kit itself
+//     refuses a Robinhood price more than POOL_USD_CROSS_BPS from Base's, read in the same call on Base's two RPCs, and
+//     this line checks the two reads above once more;
 //   - poolUsdToUnits turns $100 into base units on each chain, rounded down, within 0.5% of 100 / the price read.
 //   node scripts/live-checks/kit-pool-tap-inputs.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read and the time of the run, for the test's replay (kit-pool-tap-inputs.answers.json).
@@ -44,6 +46,7 @@ export async function check({ fetchFn = fetch, nowMs = Date.now(), rpcs = RPCS }
     lines.push(`${pass ? "PASS" : "FAIL"} ${text}`);
   };
   const eth = {};
+  const basePair = rpcs.base.map((u) => solanaJsonRpc(u, { fetch: fetchFn }));
   for (const chain of ["solana", "base", "robinhood"]) {
     const [u0, u1] = rpcs[chain];
     const pair = [solanaJsonRpc(u0, { fetch: fetchFn }), solanaJsonRpc(u1, { fetch: fetchFn })];
@@ -51,7 +54,7 @@ export async function check({ fetchFn = fetch, nowMs = Date.now(), rpcs = RPCS }
     const feed = POOL_USD_FEEDS[chain];
     let p;
     try {
-      p = await poolUsdPrice({ chain, rpcs: pair, nowMs });
+      p = await poolUsdPrice({ chain, rpcs: pair, nowMs, ...(chain === "robinhood" ? { baseRpcs: basePair } : {}) });
     } catch (e) {
       say(false, `${chain}: ${feed.kind} ${feed.kind === "pyth" ? feed.account : feed.proxy}: ${String(e?.message ?? e).split("\n")[0]}`);
       continue;
@@ -70,7 +73,7 @@ export async function check({ fetchFn = fetch, nowMs = Date.now(), rpcs = RPCS }
       }
     }
     try {
-      const units = await poolUsdToUnits({ chain, usd: "100", rpcs: pair, nowMs });
+      const units = await poolUsdToUnits({ chain, usd: "100", rpcs: pair, nowMs, ...(chain === "robinhood" ? { baseRpcs: basePair } : {}) });
       // 100 / the read's price, in base units: the second read may be a newer round, so within 0.5%
       const want = (100n * 10n ** BigInt(p.decimals - p.expo)) / p.price;
       const gap = units > want ? units - want : want - units;

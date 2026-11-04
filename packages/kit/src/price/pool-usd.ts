@@ -12,7 +12,9 @@
 // - Base and Robinhood (the pools hold native ETH, 18 decimals): ETH/USD from the chain's own Chainlink feed, decimals()
 //   and latestRoundData() by eth_call on both RPCs at one block number, the lower of their two eth_blockNumber heads
 //   (each has it; never "latest" on each). Every word must be the same on both. Robinhood has its own Chainlink ETH/USD
-//   feed (read below), so it is read there, not on Base.
+//   feed (read below), so it is read there, not on Base. Its heartbeat is 24 h, so a halted feed would pass the age
+//   check for up to a day: the same call reads Base's ETH/USD too (its 1200 s heartbeat, on Base's two RPCs) and refuses
+//   a Robinhood price more than POOL_USD_CROSS_BPS from it. The two feeds' deviation thresholds are 0.5% and 0.15%.
 // - Rounding: down, to the asset's base unit. A tap never spends more than the USD asked.
 //
 // Read on 4 Nov 2026, 07:40-07:45Z:
@@ -43,6 +45,9 @@ import { solanaSameProvider, type SolanaRpc } from "../trade/solana/send.ts";
 export const POOL_USD_MAX_AHEAD_S = 60;
 /** Reads of the Pyth account on both RPCs before two answers that still differ are refused. */
 export const POOL_USD_READ_ROUNDS = 3;
+/** Robinhood's ETH/USD is used only within this many bps of Base's, read in the same call: the two feeds' deviation
+ * thresholds (0.5% and 0.15%) with room for one round each. */
+export const POOL_USD_CROSS_BPS = 100n;
 /** One RPC call's bound. */
 export const POOL_USD_CALL_TIMEOUT_MS = 5_000;
 
@@ -117,6 +122,8 @@ export type PoolUsdArgs = {
   rpcs: readonly [SolanaRpc, SolanaRpc];
   /** The device's clock, unix ms: Date.now() when not given. */
   nowMs?: number;
+  /** Robinhood only, and needed there: two RPCs of two providers on Base, whose ETH/USD holds Robinhood's to it. */
+  baseRpcs?: readonly [SolanaRpc, SolanaRpc];
 };
 
 const fail = (why: string): never => {
@@ -275,7 +282,19 @@ async function chainlinkPrice(chain: "base" | "robinhood", feed: PoolUsdChainlin
  */
 export async function poolUsdPrice(args: PoolUsdArgs): Promise<PoolUsdPrice> {
   const { feed, chain, rpcs, nowS } = checkArgs(args);
-  return feed.kind === "pyth" ? pythPrice(feed, rpcs, nowS) : chainlinkPrice(chain as "base" | "robinhood", feed, rpcs, nowS);
+  if (feed.kind === "pyth") return pythPrice(feed, rpcs, nowS);
+  if (chain !== "robinhood") return chainlinkPrice(chain as "base", feed, rpcs, nowS);
+  // Robinhood: its own feed, held to Base's ETH/USD read now
+  const base = checkArgs({ chain: "base", rpcs: args.baseRpcs ?? (fail("robinhood: Base's two RPCs are needed to hold its ETH/USD to Base's") as never), nowMs: nowS * 1000 });
+  const [p, b] = await Promise.all([chainlinkPrice("robinhood", feed, rpcs, nowS), chainlinkPrice("base", base.feed as PoolUsdChainlinkFeed, base.rpcs, nowS)]);
+  // both at one exponent, the finer
+  const e = Math.min(p.expo, b.expo);
+  const x = p.price * 10n ** BigInt(p.expo - e);
+  const y = b.price * 10n ** BigInt(b.expo - e);
+  const lo = x < y ? x : y;
+  const gap = x < y ? y - x : x - y;
+  if (gap * 10_000n > POOL_USD_CROSS_BPS * lo) fail(`Robinhood's ETH/USD ${p.price} (10^${p.expo}) is more than ${POOL_USD_CROSS_BPS} bps from Base's ${b.price} (10^${b.expo})`);
+  return p;
 }
 
 /** A USD amount: a positive decimal string, up to 16 whole digits and 18 after the point, no sign, exponent or space. */

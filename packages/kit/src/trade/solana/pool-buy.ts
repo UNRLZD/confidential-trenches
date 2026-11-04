@@ -763,11 +763,14 @@ export function solanaTokenAccountSize(mint: { owner: string; data: Uint8Array }
   let size = TOKEN_ACCOUNT_SIZE + 1 + 4; // account type, ImmutableOwner
   if (d.length === 82) return size;
   if (d.length < 166 || d[165] !== 1) throw new Error("not a Token-2022 mint");
+  const seen = new Set<number>(); // Token-2022 holds at most one extension of each type: a mint listing one twice is forged
   for (let at = 166; at < d.length; ) {
     if (at + 4 > d.length) throw new Error("a Token-2022 extension runs past the mint");
     const type = d[at]! | (d[at + 1]! << 8);
     const len = d[at + 2]! | (d[at + 3]! << 8);
     if (type === 0) break; // Uninitialized: the rest is padding
+    if (seen.has(type)) throw new Error(`a Token-2022 mint lists extension ${type} twice`);
+    seen.add(type);
     at += 4 + len;
     if (at > d.length) throw new Error("a Token-2022 extension runs past the mint");
     const extra = T22_ACCOUNT_EXT.get(type);
