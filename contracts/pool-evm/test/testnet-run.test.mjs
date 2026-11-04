@@ -88,3 +88,33 @@ test("a note spent by a try that landed late is not tried again", async () => {
   assert.equal(await withdrawLeft(notes, async (x) => { n++; x.spent = true; throw new Error("receipt: timed out"); }, () => {}), true);
   assert.equal(n, 1);
 });
+
+// Every name the run takes from the kit and the wallet is one they export (card evm-sell-v4-kit: from 1343935 on, the run
+// called kit.evmPoolBuild, which the kit's index no longer exported, and failed only at its first buy). The run loads
+// them with imp(path) at run time, so nothing checks a name before it is called: this test does, for each
+// `const { a, b } = await imp(path)` and each `kit.<name>` of the kit's index.
+const RUN = readFileSync(new URL("../script/testnet-run.mjs", import.meta.url), "utf8");
+const REPO = new URL("../../../", import.meta.url);
+async function unexported(src) {
+  const missing = [];
+  const named = [...src.matchAll(/const \{([^}]+)\} = await imp\("([^"]+)"\)/g)];
+  for (const [, names, p] of named) {
+    const m = await import(new URL(p, REPO).href);
+    for (const n of names.split(",").map((s) => s.trim()).filter(Boolean)) if (!(n in m)) missing.push(`${n} from ${p}`);
+  }
+  const ns = [...src.matchAll(/const (\w+) = await imp\("([^"]+)"\)/g)];
+  for (const [, bind, p] of ns) {
+    const m = await import(new URL(p, REPO).href);
+    for (const n of new Set([...src.matchAll(new RegExp(`\\b${bind}\\.(\\w+)`, "g"))].map((x) => x[1]))) if (!(n in m)) missing.push(`${bind}.${n} from ${p}`);
+  }
+  return { missing, named: named.length, ns: ns.length };
+}
+test("every name the run takes from the kit and the wallet is exported there", async () => {
+  const r = await unexported(RUN);
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.named, 6); // the buy's pinned builder, and the wallet's pool, restore, notes, derive and queue
+  assert.equal(r.ns, 1); // the kit's index as kit
+  // planted: the name the run called from 1343935 on, and a destructured name the module does not export
+  assert.deepEqual((await unexported(RUN.replace("pinnedBuild(kit.evmPoolVenues()", "kit.evmPoolBuild(kit.evmPoolVenues()"))).missing, ["kit.evmPoolBuild from packages/kit/src/index.ts"]);
+  assert.deepEqual((await unexported(RUN.replace("{ pinnedBuild, pinnedSignBuy }", "{ pinnedBuild, pinnedSignBuy, evmPoolBuild }"))).missing, ["evmPoolBuild from packages/kit/src/trade/evm/buy-unpinned.ts"]);
+});
