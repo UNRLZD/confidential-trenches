@@ -48,7 +48,7 @@ test("evmSellRouteOf refuses: another target, a changed byte, a word more, a v3 
   const v4 = call(built("base", { target: B.poolManager!, route: { venue: "uniswap-v4", hops: [hop(NATIVE)] } }));
   const flip = (d: string, i: number) => `${d.slice(0, i)}${d[i] === "0" ? "1" : "0"}${d.slice(i + 1)}`;
   const cases: [string, EvmSignedSellCall, string][] = [
-    ["a target that is neither (the probe's 0x…dead, token 0x…deadbeef)", { ...v3, target: "0x000000000000000000000000000000000000dead", token: "0x00000000000000000000000000000000deadbeef", data: `0x${"ff".repeat(32)}` }, "bad_target"],
+    ["a target that is neither (0x…dead, token 0x…deadbeef)", { ...v3, target: "0x000000000000000000000000000000000000dead", token: "0x00000000000000000000000000000000deadbeef", data: `0x${"ff".repeat(32)}` }, "bad_target"],
     ["a v4 path to a listed router", { ...v4, target: B.routers[0]! }, "bad_route"],
     ["a v3 call to the PoolManager", { ...v3, target: B.poolManager! }, "bad_route"],
     ["another chain's PoolManager", { ...v4, target: BS.poolManager! }, "bad_target"],
