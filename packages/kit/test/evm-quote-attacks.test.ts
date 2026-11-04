@@ -1355,3 +1355,15 @@ test("PG (F3) a Zora coin held past the scan depth: with `bought` the sell leave
   assert.equal((withBought as { amountOut?: bigint }).amountOut, AMOUNT, show(withBought));
   assert.deepEqual(await sellVerdict(sellOn(pools, token, scanner(5_000_000, logs), null)), { accepted: false, code: "bad_request" });
 });
+
+test("PB2 (F2) the sell prices X's markets at the X its pool gives, not at the user's amount of the token", async () => {
+  const token = "0x00000000000000000000000000000000000c0b1b";
+  const x = xAt(0x5c0);
+  // the token's pool with X gives a thousandth; X's thin market pays twice the deep one's for up to a hundredth of the
+  // amount and runs out above it
+  const pool: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a / 1000n };
+  const thin: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, NATIVE), give: (a) => (a <= AMOUNT / 100n ? 2n * a : AMOUNT / 50n) };
+  const deep = marketOf(x);
+  const s = await sellVerdict(sellOn([pool, thin, deep], token, scanner(5_000_000, [{ key: pool.key, at: 4_500_000 }])));
+  assert.equal((s as { amountOut?: bigint }).amountOut, (2n * AMOUNT) / 1000n, show(s));
+});
