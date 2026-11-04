@@ -372,7 +372,12 @@ export function createSolanaTrades(deps: {
 
   /** Refolds the entry's held events into its book, settling those SETTLE_SLOTS behind its coverage. */
   function fold(e: Entry): void {
-    if (e.book === null) return;
+    // a token with no priced trade yet has an empty tape that is as current as the stream: its read time moves on too,
+    // or a quiet token answers 503 a minute after it opened
+    if (e.book === null) {
+      e.readAt = now();
+      return;
+    }
     const from = e.book.settledTo + 1;
     const events: Event[] = [];
     // the ref in force before the first held slot, then each ref read since
