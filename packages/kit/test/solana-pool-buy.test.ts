@@ -264,12 +264,17 @@ test("a chunk too small to land is refused: W's token account, the volume accoun
     // the review's GAP-2: the spend takes the whole chunk, nothing for W's accounts
     assert.match(at(chunk).problem ?? "", /does not cover/);
     // the review's GAP-3: W would keep 1 lamport (on PumpSwap the wrapped SOL account's rent is not there at the peak)
-    assert.match(at(chunk - ata - vol - 1n).problem ?? "", v === "pump" ? /under the 650240/ : /does not cover/);
-    // W keeps exactly 0: lands, unless the wrapped SOL account's rent is not there at the peak (PumpSwap)
-    assert.equal(at(chunk - ata - vol).problem, v === "pump" ? null : `the chunk ${chunk} does not cover the spend and W's new accounts (${chunk + wsol})`);
-    // W keeps rent(0), or more than the wrapped SOL: lands
-    assert.equal(at(chunk - ata - vol - wsol - 650_240n).problem, null);
-    assert.equal(at(chunk - ata - vol - 650_240n).left, 650_240n);
+    assert.match(at(chunk - ata - vol - 1n).problem ?? "", v === "pump" ? /under the 655240 its sell needs up front/ : /does not cover/);
+    // W keeps exactly 0 (pump) or the wrapped SOL's rent (PumpSwap), the old max spend: refused, its sell could never
+    // pay the fee and, on PumpSwap, the wrapped SOL account it makes first (the review of signpage-pool-sell 4b6223a)
+    assert.match(at(chunk - ata - vol).problem ?? "", v === "pump" ? /W would keep 0 lamports, under the 655240/ : /does not cover/);
+    assert.notEqual(at(chunk - ata - vol - wsol).problem, null);
+    // W keeps rent(0) only: after the sell's fee it would hold less than rent(0), refused
+    assert.match(at(chunk - ata - vol - 650_240n).problem ?? "", v === "pump" ? /its sell needs up front/ : /does not cover/);
+    // W keeps the sell's fee and the rent of what it makes before proceeds arrive: lands
+    const need = 5_000n + (v === "pumpswap" ? wsol : 650_240n);
+    assert.equal(at(chunk - ata - vol - need).problem, null);
+    assert.equal(at(chunk - ata - vol - need).left, need);
     assert.match(solanaPoolBuyFunds(release, venue, { spend: 1n, tip: release.withdrawnValue }, rent).problem ?? "", /more than the release/);
   }
 });
@@ -370,7 +375,8 @@ test("the check refuses a chunk too small to land, though the message is the dev
   const vol = solanaRentMin(rent, SOLANA_POOL_VOLUME_ACCOUNT_SIZE["pump-curve"]);
   // built on a rent of 1 lamport a byte, as a server that lies about rent would; checked on the rent the device read
   const cheap = { lamportsPerByte: 1n, factor: 1n } as const;
-  for (const spend of [chunk - 2_000n, chunk - ata - vol - 1n]) {
+  // (10,000 short of the chunk: on the cheap rent W keeps over the sell's fee and rent(0), 5,128 lamports there)
+  for (const spend of [chunk - 10_000n, chunk - ata - vol - 1n]) {
     const s = await setup("pump", spend);
     const built = buildSolanaPoolBuy(cfg, release, venue, s.req, { ...chain, rent: cheap });
     assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, s.req, chain), /does not cover|under the/);

@@ -78,12 +78,51 @@ test("Solana: the worst venue's max spend passes on every venue the reader admit
   }
 });
 
-test("Solana: the max spend is the chunk less the fee, the tip and W's new accounts (at 5,080 a byte, 0.1 SOL)", () => {
+test("Solana: the max spend is the chunk less the fee, the tip, W's new accounts and the sell's up-front need (at 5,080 a byte, 0.1 SOL)", () => {
   const rent = RENTS[0]!;
   const fee = solanaPoolFee(rent); // 1,300,000
   const r = (n: number) => solanaRentMin(rent, n);
-  // W's token account (195), the volume accumulator (137), the cashback account (165), the wrapped-SOL account (165)
-  assert.equal(solanaPoolBuyMaxSpend(release(SOL / 10n, fee), SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent), SOL / 10n - fee - SOLANA_JITO_TIP_MIN - r(195) - r(137) - r(165) - r(165));
+  // W's token account (195), the volume accumulator (137), the cashback account (165), then what the sell needs up
+  // front on PumpSwap: its fee (5,000) and the wrapped-SOL account (165) it makes before any proceeds arrive
+  assert.equal(solanaPoolBuyMaxSpend(release(SOL / 10n, fee), SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent), SOL / 10n - fee - SOLANA_JITO_TIP_MIN - r(195) - r(137) - r(165) - 5_000n - r(165));
+});
+
+// The review of signpage-pool-sell 4b6223a (critical): W pays its sell's fee before anything runs, and the runtime
+// refuses a fee payer with no account, short of the fee, or left between 0 and rent(0) after it; PumpSwap's sell makes
+// W's wrapped-SOL account (165 bytes) before any proceeds arrive. A max-spend buy left W at 0 (pump's curve) or at the
+// wrapped-SOL rent (PumpSwap), so its sell could never pass simulation. The need is written out here, not read from the
+// kit, so the test says what the runtime asks.
+test("Solana: a max-spend buy leaves W what its sell needs up front, on both venues", () => {
+  for (const rent of RENTS) {
+    const fee = solanaPoolFee(rent);
+    const need = { "pump-curve": 5_000n + solanaRentMin(rent, 0), pumpswap: 5_000n + solanaRentMin(rent, 165) };
+    for (const chunk of CHUNKS) {
+      for (const v of VENUES) {
+        const max = solanaPoolBuyMaxSpend(release(chunk, fee), v, SOLANA_JITO_TIP_MIN, rent);
+        if (max === 0n) continue;
+        const { left } = solanaPoolBuyFunds(release(chunk, fee), venue(v), { spend: max, tip: SOLANA_JITO_TIP_MIN }, rent);
+        const at = `rent ${rent.lamportsPerByte}x${rent.factor} ${JSON.stringify(v)} chunk ${chunk}`;
+        assert.ok(left >= need[v.kind], `${at}: W keeps ${left}, its sell needs ${need[v.kind]}`);
+        // after the fee W holds at least rent(0), never between 0 and it
+        assert.ok(left - 5_000n >= solanaRentMin(rent, 0), at);
+      }
+    }
+  }
+});
+
+test("Solana: a buy that would leave W short of its sell's up-front need is refused", () => {
+  const rent = RENTS[0]!;
+  const fee = solanaPoolFee(rent);
+  for (const v of VENUES) {
+    const max = solanaPoolBuyMaxSpend(release(SOL / 10n, fee), v, 0n, rent);
+    const need = 5_000n + solanaRentMin(rent, v.kind === "pumpswap" ? 165 : 0);
+    assert.equal(solanaPoolBuyFunds(release(SOL / 10n, fee), venue(v), { spend: max, tip: 0n }, rent).left, need, JSON.stringify(v));
+    // a spend that leaves W 1 lamport short, the fee short, or at the old max (W at 0 on the curve, the wrapped-SOL rent
+    // on PumpSwap) is refused
+    const oldMax = max + (v.kind === "pumpswap" ? 5_000n : need);
+    for (const spend of [max + 1n, max + 5_000n, oldMax])
+      assert.match(String(solanaPoolBuyFunds(release(SOL / 10n, fee), venue(v), { spend, tip: 0n }, rent).problem), /its sell needs up front/, `${JSON.stringify(v)} spend ${spend}`);
+  }
 });
 
 test("Solana: never below 0: a chunk the fee, the tip and the accounts eat is 0", () => {

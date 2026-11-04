@@ -17,7 +17,7 @@ import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
-import { openWalletStore } from "@blindfill/wallet/store";
+import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import { solanaPoolAccount, solanaPoolPage, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -29,7 +29,8 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_SELL_LOCK, poolSellKind, runPoolSell, type PoolSellHost } from "../src/pool-sell.ts";
+import { POOL_SELL_LOCK, poolSellKind, runPoolSell, type PoolSellHost, type PoolSellKindHost } from "../src/pool-sell.ts";
+import { opOf } from "../src/state.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
@@ -39,6 +40,10 @@ const W = freshWallet(SEED64, "sol", L, J);
 W.secretKey.fill(0);
 const PIN = { program: PROGRAM, feePayer: FEE_PAYER };
 const { scope: SCOPE } = solanaPoolOf(PROGRAM);
+type Venue = "pump" | "pumpswap";
+/** Each recorded venue's mint, its read (a Token-2022 mint on both), W's token account under it, the reference both
+ *  providers give for exactly this sell and the floor the run's min out comes from. */
+const VF = {} as Record<Venue, { mint: string; mintRead: { owner: string; data: [string, string] }; ata: string; slot: number; minOut: bigint }>;
 const MINT = fx.pump.mint as string;
 /** 4,000,000 tokens (6 decimals): the recorded curve gives about 0.11 SOL for them. */
 const AMOUNT = 4_000_000_000_000n;
@@ -61,13 +66,18 @@ const TOKEN_PROGRAM = MINT_READ.owner;
 const ATA = solanaAta(W.address, MINT, TOKEN_PROGRAM);
 // the reference both providers give for exactly this sell, and its slot: what the run's floor comes from
 const REF = (await readSolanaReference(providers("pump"), { side: "sell", token: MINT, amount: AMOUNT }))!;
-const SLOT = REF.slot! + 2;
 const MIN_OUT = (REF.pools.find((p) => p.venue === "pump-curve")!.expectedOut * BigInt(10_000 - SLIPPAGE)) / 10_000n;
+for (const v of ["pump", "pumpswap"] as const) {
+  const mint = fx[v].mint as string;
+  const mintRead = (Object.entries(fx[v].reads[0]).find(([k]) => JSON.parse(k)[0] === mint)![1] as { value: { owner: string; data: [string, string] }[] }).value[0]!;
+  const ref = (await readSolanaReference(providers(v), { side: "sell", token: mint, amount: AMOUNT }))!;
+  VF[v] = { mint, mintRead, ata: solanaAta(W.address, mint, mintRead.owner), slot: ref.slot! + 2, minOut: (ref.pools[0]!.expectedOut * BigInt(10_000 - SLIPPAGE)) / 10_000n };
+}
 
 type Acc = { owner: string; lamports: number; data: Uint8Array };
-const tokenAccount = (amount: bigint, state = 1): Uint8Array => {
+const tokenAccount = (amount: bigint, state = 1, mint = MINT): Uint8Array => {
   const d = new Uint8Array(165);
-  d.set(base58.decode(MINT), 0);
+  d.set(base58.decode(mint), 0);
   d.set(base58.decode(W.address), 32);
   new DataView(d.buffer).setBigUint64(64, amount, true);
   d[108] = state;
@@ -85,6 +95,8 @@ const pageBytes = (tree: 0 | 1, leaves: bigint[]): Uint8Array => {
 };
 
 type Plant = {
+  /** the recorded venue the sell goes to (pump's curve when not given) */
+  venue?: Venue;
   /** W's lamports (ENOUGH when not given) */
   lamports?: number;
   /** RPC 1's read of W's token account: this amount */
@@ -103,6 +115,8 @@ type Plant = {
 
 /** One chain: the planted accounts, the program's deposit applied to a signed sell. */
 function chain(plant: Plant = {}) {
+  const v = plant.venue ?? "pump";
+  const { mint, mintRead, ata } = VF[v];
   const accounts = new Map<string, Acc>();
   const pool = new Uint8Array(2179);
   pool.set(enc.encode("bfpool01"));
@@ -114,9 +128,10 @@ function chain(plant: Plant = {}) {
   accounts.set(solanaPoolPage(PROGRAM, 0, 0), { owner: PROGRAM, lamports: 1, data: pageBytes(0, Array.from({ length: N }, (_, i) => 1000n + BigInt(i))) });
   accounts.set(solanaPoolPage(PROGRAM, 1, 0), { owner: PROGRAM, lamports: 1, data: pageBytes(1, Array.from({ length: N }, (_, i) => vaultLabelOf(keccak_256, SCOPE, BigInt(i + 1)))) });
   accounts.set(fx.rent.account, { owner: fx.rent.answers[0].owner, lamports: 1, data: base64.decode(fx.rent.answers[0].data) });
-  accounts.set(MINT, { owner: MINT_READ.owner, lamports: 1, data: base64.decode(MINT_READ.data[0]) });
-  accounts.set(ATA, { owner: TOKEN_PROGRAM, lamports: 1, data: tokenAccount(AMOUNT) });
-  accounts.set(W.address, { owner: "11111111111111111111111111111111", lamports: plant.lamports ?? ENOUGH, data: new Uint8Array(0) });
+  accounts.set(mint, { owner: mintRead.owner, lamports: 1, data: base64.decode(mintRead.data[0]) });
+  accounts.set(ata, { owner: mintRead.owner, lamports: 1, data: tokenAccount(AMOUNT, 1, mint) });
+  // W at 0 lamports has no account
+  if (plant.lamports !== 0) accounts.set(W.address, { owner: "11111111111111111111111111111111", lamports: plant.lamports ?? ENOUGH, data: new Uint8Array(0) });
   const txs = new Map<string, { tx: Uint8Array; err: unknown }>();
   const log: string[] = [];
 
@@ -169,15 +184,15 @@ function chain(plant: Plant = {}) {
       if (p === 1 && plant.hideOn1 === address) return null;
       const a = accounts.get(address);
       if (!a) return null;
-      const data = p === 1 && address === ATA && plant.heldOn1 !== undefined ? tokenAccount(plant.heldOn1) : a.data;
+      const data = p === 1 && address === ata && plant.heldOn1 !== undefined ? tokenAccount(plant.heldOn1, 1, mint) : a.data;
       return { owner: a.owner, lamports: a.lamports, data: [base64.encode(data), "base64"], executable: false, rentEpoch: 0, space: data.length };
     };
-    const ctx = { context: { slot: SLOT } };
+    const ctx = { context: { slot: VF[v].slot } };
     return (async (method: string, params: readonly unknown[]) => {
       log.push(`${p}:${method}`);
       switch (method) {
         case "getMultipleAccounts": {
-          const recorded = fx.pump.reads[p][JSON.stringify(params[0])];
+          const recorded = fx[v].reads[p][JSON.stringify(params[0])];
           if (recorded) return structuredClone(recorded);
           return { ...ctx, value: (params[0] as string[]).map(answer) };
         }
@@ -220,7 +235,7 @@ function chain(plant: Plant = {}) {
         }
         case "getTransaction": {
           const t = txs.get(params[0] as string);
-          return t ? { slot: SLOT, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err } } : null;
+          return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err } } : null;
         }
         default:
           throw new Error(`no fixture for ${method}`);
@@ -232,22 +247,22 @@ function chain(plant: Plant = {}) {
 
 const closers: (() => void)[] = [];
 after(() => closers.forEach((f) => f()));
-async function notes(): Promise<NoteStore> {
+async function notes(): Promise<{ store: WalletStore; ns: NoteStore }> {
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   closers.push(() => w.close());
   await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
   const ns = await openNoteStore(w);
   closers.push(() => ns.close());
-  return ns;
+  return { store: w, ns };
 }
-const wallet = (amount: bigint, frozen = false): BuyWallet => ({
+const wallet = (amount: bigint, frozen = false, mint = MINT): BuyWallet => ({
   pool: PROGRAM, chain: "sol", note: "n1", l: L, j: J, path: W.path, address: W.address,
-  holdings: { native: 0n, tokens: new Map([[MINT, { amount, frozen }]]), unreadable: [] },
+  holdings: { native: 0n, tokens: new Map([[mint, { amount, frozen }]]), unreadable: [] },
 });
-type World = { c: ReturnType<typeof chain>; ns: NoteStore; host: PoolSellHost; seeds: Uint8Array[]; sent: string[] };
-async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT)]): Promise<World> {
+type World = { c: ReturnType<typeof chain>; ns: NoteStore; store: WalletStore; host: PoolSellHost; seeds: Uint8Array[]; sent: string[] };
+async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, false, VF[plant.venue ?? "pump"].mint)]): Promise<World> {
   const c = chain(plant);
-  const ns = await notes();
+  const { store, ns } = await notes();
   const seeds: Uint8Array[] = [];
   const sent: string[] = [];
   const host: PoolSellHost = {
@@ -267,7 +282,7 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT)])
     wait: async () => {},
     pick: () => 2,
   };
-  return { c, ns, host, seeds, sent };
+  return { c, ns, store, host, seeds, sent };
 }
 const ours = async (ns: NoteStore) => (await ns.list()).filter((n) => n.scope === SCOPE).map((n) => ({ ref: n.ref, state: n.state, value: n.leaf?.value, leafIndex: n.leaf?.leafIndex }));
 const rentMin = (size: number): bigint => solanaRentMin(rent, size);
@@ -357,33 +372,47 @@ test("proceeds bent to any pool but the pinned one are refused by the rule befor
   assert.deepEqual(await ours(w.ns), []);
 });
 
-test("a sell that never reads back, its blockhash never past on both RPCs, is sent: no note stored (the next sell or a restore finds it)", async () => {
+test("a sell that never reads back, its blockhash never past on both RPCs, is sent: its note INCOMING with W's send (written before the send), for the next load to settle", async () => {
   const w = await world({ lands: false, finalHeight: 50 });
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "sent");
   assert.equal((a as { txs: unknown[] }).txs.length, 1);
-  assert.deepEqual(await ours(w.ns), []);
+  const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
+  const [n] = (await w.ns.list()).filter((x) => x.scope === SCOPE);
+  assert.deepEqual({ ref: n!.ref, state: n!.state, sends: n!.sends }, { ref: RETURN, state: "INCOMING", sends: [{ signature: sig, value: MIN_OUT, last_valid_block_height: 151n }] });
   assert.equal(w.c.log.filter((x) => x === "0:getTransaction").length, 3, "read back each round");
 });
 
-test("past the blockhash's last height on both RPCs with no mark: not_landed, no note", async () => {
-  const w = await world({ lands: false });
+test("past the blockhash's last height on both RPCs with no mark: not_landed, the note PLANNED again (its send dropped), and the next sell deposits on that same note", async () => {
+  const plant: Plant = { lands: false };
+  const w = await world(plant);
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "not_landed");
-  assert.deepEqual(await ours(w.ns), []);
+  const [n] = (await w.ns.list()).filter((x) => x.scope === SCOPE);
+  assert.deepEqual({ ref: n!.ref, state: n!.state, sends: n!.sends }, { ref: RETURN, state: "PLANNED", sends: undefined });
+  // the next sell takes the same return note, never R 0, so the restore's walk (return, then R 0, 1, ... with no gap)
+  // finds every note that lands
+  plant.lands = true;
+  const b = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in b && b.stage, "filled");
+  assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
 });
 
-test("another deposit takes the return note's precommitment first: the sell fails on chain as a whole, refused, and nothing is stored", async () => {
+test("another deposit takes the return note's precommitment first: the sell fails on chain as a whole, refused, and that deposit is stored as the user's own note (only the seed names it)", async () => {
   const w = await world({ frontRun: true });
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "refused");
-  assert.deepEqual(await ours(w.ns), []);
-  // the sell dropped, its precommitment taken by another deposit of another value: not the sale's deposit, never
-  // stored as one (the next sell's walk adopts that mark as the user's note); past the last height, not_landed
+  assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: 1n, leafIndex: BigInt(N) }]);
+  // the sell dropped, its precommitment taken by another deposit of another value: not the sale's deposit (not
+  // filled), and it can never land (its deposit would be refused): not_landed, the note stored with the mark's value
   const x = await world({ frontRun: true, lands: false });
   const b = await runPoolSell(x.host, ASK);
   assert.equal("stage" in b && b.stage, "not_landed");
-  assert.deepEqual(await ours(x.ns), []);
+  assert.deepEqual(await ours(x.ns), [{ ref: RETURN, state: "UNSPENT", value: 1n, leafIndex: BigInt(N) }]);
+  // the next sell of that W takes R 0
+  const c = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in c && c.stage, "filled");
+  assert.deepEqual((await ours(w.ns)).find((n) => n.leafIndex === BigInt(N + 1))?.ref, SECOND(0));
 });
 
 test("a mark already on both RPCs for the return note, not in the store, is the user's own: adopted UNSPENT with its leaf, and the sell takes second arrival 0", async () => {
@@ -426,13 +455,39 @@ test("a token or chain that is not the ask's own is refused not_allowed with no 
   assert.deepEqual(w.c.log, []);
 });
 
-test("the kind runs under the seed's shared lock and the sell lock (one sell at a time, every tab), answers at the send, then posts filled", async () => {
+/** Web Locks as one tab sees them: each name held by one callback at a time; ifAvailable gets null while it is held. */
+function fakeLocks(modes: string[] = []): Pick<LockManager, "request"> {
+  const held = new Map<string, Promise<void>>();
+  return {
+    request: (async (name: string, opts: { mode: string; ifAvailable?: boolean }, f: (l: unknown) => Promise<unknown>) => {
+      modes.push(`${name}:${opts.mode}${opts.ifAvailable ? "?" : ""}`);
+      if (opts.mode === "shared") return f({ name });
+      if (held.has(name)) {
+        if (opts.ifAvailable) return f(null);
+        while (held.has(name)) await held.get(name);
+      }
+      let done!: () => void;
+      held.set(name, new Promise<void>((r) => (done = r)));
+      try {
+        return await f({ name });
+      } finally {
+        held.delete(name);
+        done();
+      }
+    }) as never,
+  };
+}
+type KindAnswer = { running: true; after: Promise<void>; answer: () => { result?: { stage: string; txs: { hash: string }[] }; error?: string } };
+const kindHost = (w: World, ended = { n: 0 }): (() => PoolSellKindHost) => () => ({ ...w.host, ops: async () => w.store, end: () => void ended.n++ });
+const ctxOf = (id: string, sha = "00", stages: string[] = []) => ({ id, sha, progress: (s: string) => void stages.push(s) }) as never;
+
+test("the kind runs under the seed's shared lock, the request's own lock and the sell lock (one sell at a time, every tab), answers at the send, then posts filled", async () => {
   const w = await world();
   const modes: string[] = [];
-  const locks = { request: (name: string, opts: { mode: string }, f: () => Promise<void>) => (modes.push(`${name}:${opts.mode}`), f()) } as unknown as Pick<LockManager, "request">;
+  const locks = fakeLocks(modes);
   const stages: string[] = [];
-  let ended = 0;
-  const r = poolSellKind(() => ({ ...w.host, end: () => void ended++ }), locks)(ASK, { id: "r1", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { running: true; after: Promise<void>; answer: () => { result?: { stage: string; txs: { hash: string }[] } } };
+  const ended = { n: 0 };
+  const r = poolSellKind(kindHost(w, ended), locks)(ASK, ctxOf("r1", "00", stages)) as KindAnswer;
   assert.equal(r.running, true);
   await r.after;
   const ans = r.answer();
@@ -440,11 +495,152 @@ test("the kind runs under the seed's shared lock and the sell lock (one sell at 
   assert.equal(ans.result?.txs.length, 1);
   await new Promise((res) => setTimeout(res, 50));
   assert.deepEqual(stages, ["filled"]);
-  assert.equal(ended, 1);
+  assert.equal(ended.n, 1);
   assert.equal(POOL_SELL_LOCK, "ct-pool/sell");
-  assert.deepEqual(modes, ["ct-wallet/seed:shared", "ct-pool/sell:exclusive"]);
+  assert.deepEqual(modes, ["ct-wallet/seed:shared", "ct-wallet/trade/r1:exclusive?", "ct-pool/sell:exclusive"]);
   assert.deepEqual((await ours(w.ns)).map((n) => n.state), ["UNSPENT"]);
-  // another kind, or no Web Locks: refused, nothing run
-  assert.deepEqual(poolSellKind(() => w.host, locks)({ ...ASK, kind: "pool.buy" }, null), { error: "not_allowed" });
-  assert.deepEqual(poolSellKind(() => w.host, null)(ASK, null), { error: "not_allowed" });
+  // another kind, no Web Locks or no request: refused, nothing run
+  assert.deepEqual(poolSellKind(kindHost(w), locks)({ ...ASK, kind: "pool.buy" }, ctxOf("r2")), { error: "not_allowed" });
+  assert.deepEqual(poolSellKind(kindHost(w), null)(ASK, ctxOf("r3")), { error: "not_allowed" });
+  assert.deepEqual(poolSellKind(kindHost(w), locks)(ASK, null), { error: "not_allowed" });
+});
+
+// The review of signpage-pool-sell 4b6223a (medium): the kit's client gives pool.sell 10 s; a run's reads before the
+// send can take longer, so the app gets client_timeout while the page still signs, and a re-tap (or a reload's retry)
+// with the same id sold again. Each request id now has an ops record, as trade.ts keeps a trade's.
+test("a request id seen before never runs twice: answered from its ops record, which the app reads in state.ops as the running sell's stage", async () => {
+  const w = await world();
+  const locks = fakeLocks();
+  const r = poolSellKind(kindHost(w), locks)(ASK, ctxOf("t1", "aa")) as KindAnswer;
+  await r.after;
+  const sig = r.answer().result!.txs[0]!.hash;
+  await new Promise((res) => setTimeout(res, 50));
+  // the record, as state.ts's op contract reads it: a sell, its stage and W's signature, nothing secret
+  const rec = (await w.store.get("ops", "t1")) as Record<string, unknown>;
+  assert.deepEqual(opOf("t1", rec), { id: "t1", kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sig }] });
+  assert.deepEqual(Object.keys(rec).sort(), ["created_ms", "kind", "pool", "sha", "stage", "txs"]);
+  // the same id again (a reload, or the app's retry after client_timeout): its record's answer, no second sale
+  const sendsBefore = sends(w).length;
+  const again = poolSellKind(kindHost(w), locks)(ASK, ctxOf("t1", "aa")) as KindAnswer;
+  await again.after;
+  assert.deepEqual(again.answer(), { result: { stage: "filled", txs: [{ chain: "solana", hash: sig }] } });
+  assert.equal(sends(w).length, sendsBefore, "never sent again");
+  // the same id with another request: id_reused
+  const other = poolSellKind(kindHost(w), locks)(ASK, ctxOf("t1", "bb")) as KindAnswer;
+  await other.after;
+  assert.deepEqual(other.answer(), { error: "id_reused" });
+});
+
+test("the same id in a second tab while the first runs is id_reused at once; the app reads 'sent' in the record while the verdict runs", async () => {
+  const plant: Plant = { lands: false, finalHeight: 50 };
+  const w = await world(plant);
+  const locks = fakeLocks();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const host = (): PoolSellKindHost => ({ ...w.host, reads: 2, wait: () => gate, ops: async () => w.store });
+  const first = poolSellKind(host, locks)(ASK, ctxOf("t2")) as KindAnswer;
+  await first.after;
+  const sig = first.answer().result!.txs[0]!.hash;
+  await new Promise((res) => setTimeout(res, 20));
+  assert.deepEqual(opOf("t2", await w.store.get("ops", "t2")), { id: "t2", kind: "sell", stage: "sent", txs: [{ chain: "solana", hash: sig }] });
+  const second = poolSellKind(host, locks)(ASK, ctxOf("t2")) as KindAnswer;
+  await second.after;
+  assert.deepEqual(second.answer(), { error: "id_reused" });
+  release();
+});
+
+// The review of signpage-pool-sell 4b6223a (critical): W pays the sell's fee before anything runs. The runtime refuses
+// a fee payer with no account (W at 0 lamports), short of the fee, or left between 0 and rent(0) after it; PumpSwap's
+// sell makes W's wrapped-SOL account (165 bytes) before any proceeds arrive. Such a sell can never pass simulation,
+// so the run refuses it plainly before it builds anything.
+const NEED = { pump: BigInt(FEE) + rentMin(0), pumpswap: BigInt(FEE) + rentMin(165) };
+const nothingBuilt = (w: World) => assert.ok(!w.c.log.some((x) => /getFeeForMessage|simulateTransaction|sendTransaction/.test(x)), w.c.log.join(" "));
+
+test("W at 0 lamports (no account) cannot pay its sell's fee: not_funded before anything is built, nothing signed, sent or stored", async () => {
+  for (const venue of ["pump", "pumpswap"] as const) {
+    const w = await world({ venue, lamports: 0 });
+    assert.deepEqual(await runPoolSell(w.host, { ...ASK, token: VF[venue].mint }), { error: "not_funded" }, venue);
+    nothingBuilt(w);
+    assert.deepEqual(w.sent, []);
+    assert.deepEqual(await ours(w.ns), []);
+  }
+});
+
+test("PumpSwap: W at exactly rent(165), the old max-spend buy's W, cannot pay the fee and the wrapped-SOL account its sell makes first: not_funded before anything is built", async () => {
+  const w = await world({ venue: "pumpswap", lamports: Number(rentMin(165)) });
+  assert.deepEqual(await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint }), { error: "not_funded" });
+  nothingBuilt(w);
+  assert.deepEqual(w.sent, []);
+});
+
+test("W at exactly what its sell needs up front sells, on both venues; a lamport less is not_funded before anything is built", async () => {
+  for (const venue of ["pump", "pumpswap"] as const) {
+    const ask = { ...ASK, token: VF[venue].mint };
+    const ok = await world({ venue, lamports: Number(NEED[venue]) });
+    const a = await runPoolSell(ok.host, ask);
+    assert.equal("stage" in a && a.stage, "filled", `${venue}: ${JSON.stringify(a)}`);
+    const short = await world({ venue, lamports: Number(NEED[venue] - 1n) });
+    assert.deepEqual(await runPoolSell(short.host, ask), { error: "not_funded" }, venue);
+    nothingBuilt(short);
+  }
+});
+
+// The review of signpage-pool-sell 4b6223a (high): the note was stored only once both RPCs showed its mark, so a page
+// closed or reloaded between the send and finality lost it on this device until a restore. Its record is now written
+// before the send and settled on load by the same verdict rules.
+test("a page killed right after the send keeps the note: the reload's settle stores it UNSPENT once both RPCs show it, and writes the request's stage", async () => {
+  const w = await world();
+  const locks = fakeLocks();
+  // the page dies at the send: no verdict read at all
+  const r = poolSellKind(() => ({ ...w.host, reads: 0, ops: async () => w.store }), locks)(ASK, ctxOf("k1")) as KindAnswer;
+  await r.after;
+  const sig = r.answer().result!.txs[0]!.hash;
+  await new Promise((res) => setTimeout(res, 20));
+  assert.deepEqual((await w.ns.list()).filter((n) => n.scope === SCOPE).map((n) => ({ ref: n.ref, state: n.state })), [{ ref: RETURN, state: "INCOMING" }]);
+  // the reload: a new note store on the same wallet store, the settle the page runs at its state reads
+  const ns2 = await openNoteStore(w.store);
+  closers.push(() => ns2.close());
+  const { settlePoolSells, settleSellOps } = await import("../src/pool-sell.ts");
+  const ends: Promise<void>[] = [];
+  await settlePoolSells({ pin: PIN, rpcs: w.c.rpcs, notes: async () => ns2, settled: (s, stage) => void ends.push(settleSellOps(w.store, s, stage)) }, locks);
+  await Promise.all(ends);
+  assert.deepEqual(await ours(ns2), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+  assert.deepEqual(opOf("k1", await w.store.get("ops", "k1")), { id: "k1", kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sig }] });
+  // settled once: a second pass changes nothing
+  await settlePoolSells({ pin: PIN, rpcs: w.c.rpcs, notes: async () => ns2 }, locks);
+  assert.deepEqual((await ours(ns2)).length, 1);
+});
+
+test("a page killed after a send that never lands: the reload's settle waits while the blockhash lives, then plans the note again and writes not_landed; the next sell deposits on it", async () => {
+  const plant: Plant = { lands: false, finalHeight: 50 };
+  const w = await world(plant);
+  const locks = fakeLocks();
+  const r = poolSellKind(() => ({ ...w.host, reads: 0, ops: async () => w.store }), locks)(ASK, ctxOf("k2")) as KindAnswer;
+  await r.after;
+  await new Promise((res) => setTimeout(res, 20));
+  const { settlePoolSells, settleSellOps } = await import("../src/pool-sell.ts");
+  const pass = async () => {
+    const ends: Promise<void>[] = [];
+    await settlePoolSells({ pin: PIN, rpcs: w.c.rpcs, notes: async () => w.ns, settled: (s, stage) => void ends.push(settleSellOps(w.store, s, stage)) }, locks);
+    await Promise.all(ends);
+  };
+  await pass();
+  assert.deepEqual((await w.ns.list()).filter((n) => n.scope === SCOPE).map((n) => n.state), ["INCOMING"], "its blockhash still lives");
+  plant.finalHeight = 1_000;
+  await pass();
+  assert.deepEqual((await w.ns.list()).filter((n) => n.scope === SCOPE).map((n) => n.state), ["PLANNED"]);
+  assert.equal(opOf("k2", await w.store.get("ops", "k2"))?.stage, "not_landed");
+  plant.lands = true;
+  const b = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in b && b.stage, "filled");
+  assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+});
+
+test("the next sell of a W whose last sell a closed page left landing is refused while it may still land, and settles it first once it has", async () => {
+  const plant: Plant = { lands: false, finalHeight: 50 };
+  const w = await world(plant);
+  w.host.reads = 0;
+  await runPoolSell(w.host, ASK);
+  assert.deepEqual(await runPoolSell({ ...w.host, reads: 3 }, ASK), { error: "failed" });
+  assert.equal(sends(w).length, 2, "one sale sent, never a second");
 });

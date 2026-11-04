@@ -445,7 +445,7 @@ function noted(rec: { stage?: unknown; txs?: unknown }, sig: string, end: LegEnd
 }
 
 /** A repeated id's answer from its ops record: its trade stage and txs, its code; id_reused while it is pending or when the request differs. */
-function fromRecord(rec: unknown, sha: string): Answer {
+export function fromRecord(rec: unknown, sha: string): Answer {
   const r = rec as { kind?: unknown; sha?: unknown; stage?: unknown; txs?: unknown; code?: unknown } | null;
   if (!r || (r.kind !== "buy" && r.kind !== "sell") || typeof r.sha !== "string" || r.sha !== sha) return { error: "id_reused" };
   if (typeof r.code === "string") return { error: r.code };
