@@ -11,6 +11,8 @@
 //   - every transaction of the run succeeded, was sent by the record's deployer, and the deploy made the record's address;
 //   - the deployer has no code, a nonce equal to the transactions it sent, and at most DUST wei left.
 //   node scripts/live-checks/evm-sell-v4.mjs [--deployment <file>[,<file>]] [--rpc <url>,<url>] [--record <file>]
+//     [--write-record]   on PASS, writes the run record scripts/live-checks/evm-sell-v4.md (Money path: yes, one Tx
+//                        line per transaction), which the money gate reads back; never for a dry run
 //     PASS exit 0, FAIL exit 1, error exit 2
 // With no --deployment it checks every chain's record present. --rpc applies to a single record. --record writes
 // { notes, rpcs, deployments, good } to <file>: every RPC answer read, with the records and the RPCs they were read on,
@@ -24,6 +26,22 @@ import { BUILD, CHAINS, DUST, EIP1967, keccak, operatorProblems, recorder, rpc, 
 const KEY = "evm-sell-v4";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const recordFile = (chain) => path.join(HERE, `${KEY}.${chain}.json`);
+export const RUN_RECORD = path.join(HERE, `${KEY}.md`);
+
+/** The run record (the money gate reads it) from the redeploy records, after a PASS: each redeploy's transactions */
+export function runRecord(ds) {
+  for (const d of ds) if (d.dryRun || !CHAINS[d.chain]) throw new Error(`no run record for ${d.dryRun ? "a dry run" : d.chain}`);
+  return [
+    `CARD ${KEY} / live: PASS`,
+    "Money path: yes",
+    ...ds.flatMap((d) => d.txs.map((t) => `Tx: ${d.chain} ${t.hash}`)),
+    "",
+    ...ds.flatMap((d) => [
+      `${d.chain}: contracts/pool-evm/script/deploy.mjs --only SellDelegate at ${d.at}; steps: ${d.txs.map((t) => t.step).join(", ")}. SellDelegate ${d.contracts.SellDelegate.address}, its code the build's, POOL_MANAGER() ${CHAINS[d.chain].poolManager.address} and WETH() ${CHAINS[d.chain].weth.address}, read by this live check on ${CHAINS[d.chain].rpcs.join(" and ")}. Deployer ${d.deployer}, a run key that lived only in the run, swept back to ${d.return}.`,
+      "",
+    ]),
+  ].join("\n");
+}
 const addrWord = (a) => "0x" + a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 
 export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep }) {
@@ -119,6 +137,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       writeFileSync(opt("--record"), JSON.stringify(out) + "\n");
     }
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"}`);
+    if (ok && args.includes("--write-record")) {
+      writeFileSync(RUN_RECORD, runRecord(ds));
+      console.log(`live-check ${KEY}: wrote ${path.relative(process.cwd(), RUN_RECORD)}`);
+    }
     process.exit(ok ? 0 : 1);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${String(e.message).split("\n")[0]}`);

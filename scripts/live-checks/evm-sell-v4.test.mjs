@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { check } from "./evm-sell-v4.mjs";
+import { check, runRecord } from "./evm-sell-v4.mjs";
 import { BUILD, CHAINS, DUST, EIP1967, runtimeOf, selector } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-sell-v4.answers.json", import.meta.url), "utf8"));
@@ -117,4 +117,14 @@ test("another chain id fails, a record naming more than the delegate fails, and 
     const r = await check({ deployment: A.deployments["base-sepolia"], fetchFn: replay([]), rpcs: CHAINS["base-sepolia"].rpcs, sleep: async () => {} });
     fails(r, /dry-run record read on a non-loopback RPC/);
   }
+});
+
+test("the run record lists every transaction of each real redeploy as money-path Tx lines, and refuses a dry run", () => {
+  const real = Object.values(A.deployments).map((d) => ({ ...d, dryRun: false }));
+  const text = runRecord(real);
+  const lines = text.split("\n");
+  assert.equal(lines[1], "Money path: yes");
+  assert.deepEqual(lines.filter((l) => l.startsWith("Tx: ")), real.flatMap((d) => d.txs.map((t) => `Tx: ${d.chain} ${t.hash}`)));
+  assert.ok(real.every((d) => text.includes(d.contracts.SellDelegate.address)));
+  assert.throws(() => runRecord(Object.values(A.deployments)), /dry run/);
 });
