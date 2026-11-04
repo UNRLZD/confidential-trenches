@@ -1,8 +1,8 @@
 // node --test scripts/live-checks/trade-box-pool.test.mjs: the live check's verdict replays recorded runs
 // (trade-box-pool.answers.json), each read on 4 Nov by trade-box-pool.mjs collect() in headless Chromium, the stand-in
 // shell sending a signed-in state with the devnet Solana pool (one 0.01 SOL note), its proof ready and still making:
-//   good: this card's build served at APP_HOST's name (--harness --build): at 1440 and 390 the token page's box is on
-//         the pool path, its proof label is the state's, and a tap asks for no vault buy: PASS;
+//   good: the deployed APP_HOST at main 27d7ce0 (entry /assets/index-D2sAQfy_.js), read at 12:03Z: at 1440 and 390 the
+//         token page's box is on the pool path, its proof label is the state's, and a tap asks for no vault buy: PASS;
 //   bad:  the deployed APP_HOST on 4 Nov, before this card: the box is on the vault's path with no proof label: FAIL.
 // Planted from the good run: a tap that sends the vault's buy, a proof label that is not the state's or has no words, a
 // box off the pool path, a missing run, a terminal outside the shell, no entry script.
