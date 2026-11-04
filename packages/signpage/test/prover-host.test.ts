@@ -174,6 +174,24 @@ test("proofs run one at a time: a second proof asked while one runs waits for it
   assert.deepEqual(s.log, ["start 1", "load 1 withdraw", "prove 1 withdraw", "prove 1 withdraw"]);
 });
 
+test("vault (card signpage-pool-notes-2): the proof queue's prover is the same worker, in the same line: its load starts nothing, a worker loads once, a dead one is replaced and loaded again, stop() refuses", async () => {
+  let proves = 0;
+  const s = starter((n) => (n === 1 ? { prove: async () => (++proves === 3 ? Promise.reject(new Error("prover worker: terminated")) : { proof: PROOF, publicSignals: [...SIGNALS], proveMs: 1 }) } : {}));
+  const host = proverHost(s.start);
+  await host.vault.load("withdraw");
+  assert.deepEqual(s.log, [], "no worker at load");
+  await host.vault.prove("withdraw", {});
+  await host.proveWithdraw(fixtureArgs(CV));
+  assert.deepEqual(s.log, ["start 1", "load 1 withdraw", "prove 1 withdraw", "prove 1 withdraw"], "one worker, loaded once for both paths");
+  await assert.rejects(host.vault.prove("withdraw", {}), (e) => isProverDead(e));
+  await host.vault.prove("withdraw", {});
+  assert.deepEqual(s.log.slice(4), ["prove 1 withdraw", "stop 1", "start 2", "load 2 withdraw", "prove 2 withdraw"], "the new worker loads the circuit again");
+  const late = host.vault.prove("withdraw", {});
+  host.stop();
+  await assert.rejects(late, (e) => isProverDead(e));
+  assert.deepEqual(s.log.slice(9), ["stop 2"], "a prove asked before stop() never reaches a worker");
+});
+
 // ---- the kit's real startProver (client.ts) on a fake Worker and fetch ----
 
 const SIGN = "https://sign.confidential.unrealized.trade";
