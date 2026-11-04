@@ -945,9 +945,9 @@ test("an idle hole on the sell lane: a sale dropped from both providers with no 
 /** A lane's send stuck at 7: pending on both providers (the count at pending 8 once it is sent), never mined (latest 7,
  *  or `mined` once given or set). Past its deadline plus the 60 s margin, the watch's next read finds it still unmined;
  *  the base fee, tip and refusals are `base`, `tip` and `refuse` from then, and each of `then` moves the clock (and those)
- *  on again. `network` and `arbL1` (ArbGasInfo's estimate) for Robinhood. */
+ *  on again. `network` and `arbL1` (ArbGasInfo's estimate; provider b answers `arbL1B` when given) for Robinhood. */
 type Step = { atMs: number; base?: bigint; tip?: bigint };
-const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ status: number; body: unknown }>, deadlineMs: number, o2: { mined?: bigint; base?: bigint; tip?: bigint; refuse?: (m: string) => boolean; network?: string; arbL1?: bigint; then?: Step[] } = {}) => {
+const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ status: number; body: unknown }>, deadlineMs: number, o2: { mined?: bigint; base?: bigint; tip?: bigint; refuse?: (m: string) => boolean; network?: string; arbL1?: bigint; arbL1B?: bigint; then?: Step[] } = {}) => {
   let clock = NOW;
   let pending = 7n;
   let mined = o2.mined ?? 7n;
@@ -955,8 +955,10 @@ const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ st
   const count = (t: string, who: string) => (!lanes.has(who) ? 7n : t === "pending" ? pending : mined);
   const x: Calls = [];
   const o: Opts = { receipt: () => null, tx: () => ({}), count, ...(o2.arbL1 === undefined ? {} : { arbL1: o2.arbL1 }) };
+  // provider b: o's answers as they change, but its own ArbGasInfo estimate when one is given
+  const ob: Opts = o2.arbL1B === undefined ? o : (Object.create(o, { arbL1: { value: o2.arbL1B } }) as Opts);
   const lines: string[] = [];
-  const s = evmPoolSender({ network: o2.network ?? "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, feeRecipient: FEE_TO, receiptPollMs: 1, log: (l: string) => lines.push(l) }, [rpc(x, o), rpc([], o)], () => clock);
+  const s = evmPoolSender({ network: o2.network ?? "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, feeRecipient: FEE_TO, receiptPollMs: 1, log: (l: string) => lines.push(l) }, [rpc(x, o), rpc([], ob)], () => clock);
   const first = await send(s);
   assert.equal(first.status, 200, JSON.stringify(first.body));
   const hash = (first.body as { hash: string }).hash;
@@ -1115,11 +1117,12 @@ test("a tend that fails logs once and sends nothing: a provider refusing eth_max
 
 test("the replacement's gas on Robinhood: 21,000 + the L1 poster's gas (the kit's ArbGasInfo chain fee, the higher, over the lower base fee) + a fifth", async () => {
   const fee = evmEpochFee(1n, BASE);
-  const E = 2_000_000n; // ArbGasInfo's L1 base fee estimate
-  const r = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x84n), epoch: NOW }), NOW + 300_000, { network: "robinhood-testnet", arbL1: E, base: 2n * BASE });
+  const E = 2_000_000n; // ArbGasInfo's L1 base fee estimate on provider a; b answers twice it, the higher
+  const r = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x84n), epoch: NOW }), NOW + 300_000, { network: "robinhood-testnet", arbL1: E, arbL1B: 2n * E, base: 2n * BASE });
   const repl = r.raws[1]!;
   const txBytes = BigInt(evmTx4MaxLength({ chainId: CHAIN_ID, nonce: 7n, maxPriorityFeePerGas: repl.tip, maxFeePerGas: repl.maxFee, gas: 1n << 32n, to: evmAddressOf(KEY), data: new Uint8Array(), authorizations: [] }));
-  const l1 = evmPoolChainFee("robinhood-testnet", txBytes, [E]);
+  const l1 = evmPoolChainFee("robinhood-testnet", txBytes, [2n * E]);
+  assert.ok(l1 > evmPoolChainFee("robinhood-testnet", txBytes, [E]), "the two estimates price apart");
   const poster = (l1 + 2n * BASE - 1n) / (2n * BASE);
   assert.ok(poster > 0n);
   assert.equal(repl.gas, 21_000n + poster + (poster + 4n) / 5n);
