@@ -323,11 +323,12 @@ contract HostileSellTest is SellBase {
     bytes memory _sig = _signed(_s);
     vm.expectRevert(stdError.arithmeticError);
     _send(_s, 0, _sig);
-    // target = WETH, data = withdraw: the plain unwrap is refused the same way
+    // target = WETH, data = withdraw, amount 0: the plain unwrap takes 1 WETH where W signed 0, so it is refused
+    // before the WETH count (card evm-selldelegate-exact-debit: W's balance falls by exactly the amount)
     SellDelegate.Sell memory _u =
       _base(address(_hw), 0, address(_hw), abi.encodeCall(IWETH.withdraw, (1 ether)), 1 ether, 0);
     _sig = _signed(_u);
-    vm.expectRevert(stdError.arithmeticError);
+    vm.expectRevert(bytes4(keccak256('DebitNotExact()')));
     _send(_u, 0, _sig);
     assertEq(_hw.balanceOf(W), 1 ether, 'W keeps its WETH');
     assertEq(W.balance, 0);
@@ -370,6 +371,24 @@ contract HostileSellTest is SellBase {
     _send(_s, FEE, _sig);
     assertEq(token.balanceOf(W), AMOUNT * 10, 'W keeps every token');
     assertEq(_w().nonce(), 0);
+  }
+
+  /// The device's sell sim (card evm-quote-exec-sim) signed and sent for real: pool = EVM_SELL_SIM, the low 20 bytes
+  /// of keccak256("blindfill.sell.sim.v1"), which has no code, and deadline = the agreed block's timestamp. On a chain
+  /// where several blocks share one timestamp (Robinhood) the deadline alone does not stop it; the deposit into the
+  /// codeless address does: its empty return cannot be decoded, the whole sell reverts, W keeps every token and the
+  /// nonce is not used
+  function test_R_aSimSellAtTheBlockTimestampReverts() public {
+    address _sim = address(uint160(uint256(keccak256('blindfill.sell.sim.v1'))));
+    assertEq(_sim.code.length, 0, 'the sim pool has no code');
+    SellDelegate.Sell memory _s = _good(0);
+    _s.pool = _sim;
+    _s.deadline = block.timestamp;
+    bytes memory _sig = _signed(_s);
+    vm.expectRevert();
+    _send(_s, FEE, _sig);
+    assertEq(token.balanceOf(W), AMOUNT * 10, 'W keeps every token');
+    assertEq(_w().nonce(), 0, 'the nonce is not used');
   }
 
   /// An ERC-777-style hook on transferFrom that calls back into W with another signed sell: Reentrancy
