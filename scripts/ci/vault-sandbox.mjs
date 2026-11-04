@@ -62,11 +62,16 @@ export function matches(file, paths = PATHS) {
 // relayer_withdraw 27 joins shard 3, the lightest). With both tokens: withdraw_spend 65 s (CI, 2026-11-03) and
 // s02 85 s (Mac, 2026-11-04, with VT-S03's refusals), so shard 3 ran heaviest; relayer_withdraw moves to shard 4,
 // for test seconds of about 273, 255, 296 and 260.
+// CI run 41786418173 (11f07e5, 2026-11-04), each shard's cargo compile plus its targets' seconds: 63 + 274, 69 + 261,
+// 48 + 291 and 105 + 258 (s10 176, s20 138, s04 94, relayer_send 91, s02 86, payouts 67, s17 69, withdraw_spend 66,
+// ragequit 45, deposit_msg 42, settle 41, tree_prop 29, real_token 27, relayer_withdraw 27, smoke 25, s01 20,
+// lib 12, withdraw_context 12, prepay 10, groth16 6, the rest under 1). Each target adds about 8 s of compile and
+// link, so shard 4, with ten, ran longest: prepay moves to shard 2, for about 337, 348, 339 and 345.
 export const SHARDS = [
   ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey"],
-  ["s04", "relayer_send", "groth16", "events", "poseidon", "s17"],
+  ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay"],
   ["payouts", "s20", "s02", "withdraw_vectors"],
-  ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "prepay", "relayer_withdraw"],
+  ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw"],
 ];
 
 // Every test target of contracts/vault: the lib's unit tests and one per tests/*.rs.
