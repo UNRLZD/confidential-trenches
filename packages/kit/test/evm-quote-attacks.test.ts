@@ -2681,6 +2681,23 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   });
   assert.equal((await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(low.urls, low.f), NOW))).accepted, true);
   assert.equal(hostOf(quoteMod.evmRanked(low.urls).at(-1)!), "b.v13.test");
+  // the edges (re-review of 47109a7, LOW-1): the first head, then one 6 or 10 blocks below it (not near), then the spare
+  // the two pair on; the head between is exactly maxLag below the lower of the pair, or one below a pair that spans
+  // maxLag: neither is held
+  for (const [hi, mid, lo] of [
+    [5_000_005, 4_999_995, 5_000_000],
+    [5_000_005, 4_999_999, 5_000_000],
+  ] as const) {
+    quoteMod.evmSpeedReset();
+    const edge = hosted({
+      "a.e.v13.test": { rpc: byNum(chain(pools, 0, hi)), ms: 1 },
+      "x.e.v13.test": { rpc: byNum(chain(pools, 0, mid)), ms: 3 },
+      "b.e.v13.test": { rpc: byNum(chain(pools, 1, lo)), ms: 10 },
+    });
+    const w = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(edge.urls, edge.f), NOW));
+    assert.equal((w as { block?: bigint }).block, BigInt(lo), big(w));
+    assert.notEqual(hostOf(quoteMod.evmRanked(edge.urls).at(-1)!), "x.e.v13.test", `${mid} under ${hi}/${lo} is not held: ${quoteMod.evmRanked(edge.urls).map(hostOf).join(",")}`);
+  }
 });
 
 test("V14 a contested read whose majority no provider left can reach refuses at once, never waiting on a provider that hangs", { timeout: 20_000 }, async () => {
@@ -2712,4 +2729,8 @@ test("V15 a confirm that can no longer reach a majority stops asking", async () 
   // the lower head's block (OLD) against the higher's, then two more against: one vote of five, one provider left
   assert.equal(big(await buyN(v3direct, [oldNode(), higher, honestNode(), honestNode(), counted(honestNode())])), big({ accepted: false, code: "rpc_disagree" }));
   assert.equal(asked, 0, "the fifth is never asked to confirm");
+  // the paired provider and the next two fail their confirm, none holding another block: one hold of five, one left
+  asked = 0;
+  assert.equal(big(await buyN(v3direct, [honestNode(), honestNode("throws"), honestNode("throws"), honestNode("throws"), counted(honestNode())])), big({ accepted: false, code: "rpc_error" }));
+  assert.equal(asked, 0, "the fifth is never asked to confirm when no answer can bring the block to three");
 });

@@ -214,6 +214,10 @@ export const MUTANTS = [
   [QUOTE, "    // a head past maxLag is a missing answer, not a vote\n    false,\n", "", R, "V13 "],
   [QUOTE, "      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails < need) return lose();\n", "", R, "V14 "],
   [QUOTE, "      if (strict() && holds + others.length - n < need) break;\n", "", R, "V15 "],
+  // the re-review of 47109a7: the held head's edges (E3, E4) and the confirm's early stop without a vote against (E6)
+  [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => x.number + maxLag <= (a.number <= b.number ? a.number : b.number),", R, "V13 "],
+  [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? b.number : a.number),", R, "V13 "],
+  [QUOTE, "      if (strict() && holds + others.length - n < need) break;", "      if (against.length > 0 && holds + others.length - n < need) break;", R, "V15 "],
   // the scan's spans: each that came back is kept, also when another failed, never past a head named beyond maxLag;
   // a throttled span is asked again whole
   [QUOTE, "  await settle(jobs.map((j) => one(j))).catch((e) => failing(e));", "  await settle(jobs.map((j) => one(j)));", R, "J1 "],
