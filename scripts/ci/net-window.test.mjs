@@ -70,6 +70,7 @@ export const CHANGED = [
   "scripts/live-checks/vault-testnet-t01.mjs",
   "scripts/live-checks/vault-testnet-t04.mjs",
   "scripts/live-checks/wallet-passkey-prf.mjs",
+  "scripts/live-checks/wallet-rpc-hex-case.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.
