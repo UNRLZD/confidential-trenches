@@ -43,11 +43,12 @@ export type Snapshot = { chain: "solana"; lists: Record<(typeof LISTS)[number], 
 export const LIST_MAX = 100;
 /** The Jupiter reads, each with limit=100 (D-S2, D-S3). */
 export const READS = { new: "/tokens/v2/recent", trending_5m: "/tokens/v2/toptrending/5m", trending_1h: "/tokens/v2/toptrending/1h" } as const;
-/** The refresh cadence (D-S2's 12 s): a snapshot built within it is served as is; older, it is still served (up to
- *  STALE_MS) while one refresh runs. warm() refreshes on this cadence, so no caller waits on a vendor: a cold read of
+/** The refresh cadence (D-S2's 12 s): a snapshot built within it is served as is; older, it is still served, dated by
+ *  its as_of_ms and X-Helper-Fetched-At, while one refresh runs. warm() refreshes on this cadence, so no caller waits on a vendor: a cold read of
  *  the three lists and the curve accounts took 1.6 s from a Mac (Jupiter's 1h list alone 2.4 s once, 1 Nov 15:25Z). */
 export const FRESH_MS = 12_000;
-/** The last good snapshot serves up to 60 s; after that, with no new read, the lists answer 503 (D1's helper rules). */
+/** A snapshot whose data is older than this is behind: still served, dated by its read, never passed as fresh; the
+ *  lists answer 503 (or the vendor's 429) only while no snapshot was ever built (card app-console-429). */
 export const STALE_MS = 60_000;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -370,7 +371,7 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
 
   async function refresh(): Promise<ListsAnswer> {
     const [n, t5, t1] = await Promise.all([read(READS.new), read(READS.trending_5m), read(READS.trending_1h)]);
-    if (n === null || t5 === null || t1 === null) return last !== null && now() - last.asOfMs <= STALE_MS ? last : UPSTREAM;
+    if (n === null || t5 === null || t1 === null) return last ?? UPSTREAM;
     const asOf = Math.min(n.at, t5.at, t1.at);
     const hints = new Map([...n.hints, ...t5.hints, ...t1.hints]);
     const asks = [...n.rows, ...t5.rows, ...t1.rows].map((r) => ({ mint: r.token as string, hint: hints.get(r.token as string), createdS: r.created_s as number | null }));
@@ -384,17 +385,17 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
   function start(): Promise<ListsAnswer> {
     if (!running) {
       running = refresh()
-        .catch((e) => (last !== null && now() - last.asOfMs <= STALE_MS ? last : e instanceof Throttled ? { status: 429, body: JSON.stringify({ error: { code: "rate_limited" } }), retryAfterS: e.retryAfterS, why: e.why } : UPSTREAM))
+        .catch((e) => (last !== null ? last : e instanceof Throttled ? { status: 429, body: JSON.stringify({ error: { code: "rate_limited" } }), retryAfterS: e.retryAfterS, why: e.why } : UPSTREAM))
         .finally(() => (running = null));
     }
     return running;
   }
 
-  /** The current snapshot: as is when built within FRESH_MS; while its data is under STALE_MS old, as is while one
-   *  refresh runs; else the refresh's own answer. */
+  /** The current snapshot: as is when built within FRESH_MS; older, as is (dated by its read) while one refresh runs;
+   *  with none built yet, the first refresh's own answer. */
   async function get(): Promise<ListsAnswer> {
     if (last !== null && now() - builtAt < FRESH_MS) return last;
-    if (last !== null && now() - last.asOfMs <= STALE_MS) {
+    if (last !== null) {
       void start();
       return last;
     }
