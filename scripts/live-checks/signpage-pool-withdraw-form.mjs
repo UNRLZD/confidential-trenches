@@ -27,8 +27,14 @@ export const TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
 export const SYSTEM = "11111111111111111111111111111111";
 export const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
 /** The run's parts (signpage-pool-withdraw-form.md): each part's release and onward signatures and the lamports it
- *  sends To. Empty until the run lands on the deployed helper: the check fails until then. */
-export const RUN = Object.freeze([]);
+ *  sends To. One part: the run of 2026-11-04 18:49-18:50Z on the deployed helper. */
+export const RUN = Object.freeze([
+  Object.freeze({
+    release: "PxtcgoCUumR3YoQAbA2RXe1MasuWiPxWAvfvNmPccmwSrB43oamuy2qkSPE8ABHPNwaEnEUEsxvYo3y9N9LpZ8e",
+    onward: "5p4dXVDiCJ7ntFTXXaZPvBZeYP5gpgeHCucRxe1dcPzjmRojSMiRdrPHNmMgXgn3NnuActEYszjest2ssrANLMmW",
+    part: "2177099",
+  }),
+]);
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const b58 = (b) => {

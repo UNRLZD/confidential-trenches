@@ -1,5 +1,5 @@
 {
- "_note": "Recorded 2026-11-04 by node scripts/live-checks/signpage-pool-withdraw-form.mjs --record. bad (reshaped for two transactions a part, review #232: its reads as recorded, in the release's place, with no onward send): the flow run's devnet pool buy (2MbB4Fq7\u2026, a tag 3 that loads the lookup table) read in the withdraw's place with --tx, on both devnet RPCs at finalized, and SIGN_HOST as served: FAIL. none: SIGN_HOST before the run, no withdraw recorded: FAIL. good: recorded from the devnet withdraw run (two transactions a part), at the sign deploy.",
+ "_note": "Recorded 2026-11-04 by node scripts/live-checks/signpage-pool-withdraw-form.mjs --record. bad (reshaped for two transactions a part, review #232: its reads as recorded, in the release's place, with no onward send): the flow run's devnet pool buy (2MbB4Fq7\u2026, a tag 3 that loads the lookup table) read in the withdraw's place with --tx, on both devnet RPCs at finalized, and SIGN_HOST as served: FAIL. none: SIGN_HOST before the run, no withdraw recorded: FAIL. good: the devnet withdraw run of 2026-11-04 18:49-18:50Z (signpage-pool-withdraw-form.md), its one part's release and onward read with RUN on both devnet RPCs at finalized, and SIGN_HOST as served at the recording (main's release, before release-24 deploys): PASS.",
  "bad": {
   "sign": {
    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-NZoOlVbMw29bKzAsZ+j1Cc4MwTa4yIw5BSGv7ix2TNlkFH5FNAtMqa4oh7VdRdzc\"></script>\n  </head>\n  <body></body>\n</html>\n",
@@ -779,5 +779,276 @@
    "sha384": "sha384-NZoOlVbMw29bKzAsZ+j1Cc4MwTa4yIw5BSGv7ix2TNlkFH5FNAtMqa4oh7VdRdzc"
   },
   "run": []
+ },
+ "good": {
+  "sign": {
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IMd7H1BZhT402xm7iN3wisoIs3KqRWX81cFRV5GN+arPTp2J4Z92ht8iV24k28Tu\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-IMd7H1BZhT402xm7iN3wisoIs3KqRWX81cFRV5GN+arPTp2J4Z92ht8iV24k28Tu"
+  },
+  "run": [
+   {
+    "part": "2177099",
+    "release": {
+     "signature": "PxtcgoCUumR3YoQAbA2RXe1MasuWiPxWAvfvNmPccmwSrB43oamuy2qkSPE8ABHPNwaEnEUEsxvYo3y9N9LpZ8e",
+     "reads": [
+      {
+       "blockTime": 1793818222,
+       "meta": {
+        "computeUnitsConsumed": 122919,
+        "costUnits": 125981,
+        "err": null,
+        "fee": 10000,
+        "innerInstructions": [
+         {
+          "index": 1,
+          "instructions": [
+           {
+            "accounts": [
+             0,
+             3
+            ],
+            "data": "1111A8cS7kFAcnFiyR1SHgF7xf1wfVqySCgU5ptSh7sWFNbTh9L7NNsTURZRR9CL4xdJFu",
+            "programIdIndex": 8,
+            "stackHeight": 2
+           },
+           {
+            "accounts": [
+             0,
+             4
+            ],
+            "data": "3Bxs4Z4ujkmgbEYf",
+            "programIdIndex": 8,
+            "stackHeight": 2
+           }
+          ]
+         }
+        ],
+        "loadedAddresses": {
+         "readonly": [],
+         "writable": []
+        },
+        "logMessages": [
+         "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+         "Program ComputeBudget111111111111111111111111111111 success",
+         "Program 5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ invoke [1]",
+         "Program 11111111111111111111111111111111 invoke [2]",
+         "Program 11111111111111111111111111111111 success",
+         "Program 11111111111111111111111111111111 invoke [2]",
+         "Program 11111111111111111111111111111111 success",
+         "Program 5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ consumed 122769 of 399850 compute units",
+         "Program 5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ success"
+        ],
+        "postBalances": [
+         1000210820,
+         2182099,
+         78657234,
+         716280,
+         7315200,
+         1,
+         833120,
+         5486400,
+         1
+        ],
+        "postTokenBalances": [],
+        "preBalances": [
+         1000002860,
+         0,
+         82139333,
+         0,
+         6949440,
+         1,
+         833120,
+         5486400,
+         1
+        ],
+        "preTokenBalances": [],
+        "rewards": [],
+        "status": {
+         "Ok": null
+        }
+       },
+       "slot": 518672460,
+       "transaction": [
+        "AhPNjl31+Yu/3wSeJcyzA7rjBXIVz5C0vtMvq9dAF/wkPcV4fkmY+Y0z+o6S6Hl5mtXwiHNi+OzK2UO4Y/HpvANJQo21CHVt5tiapKTdhdORZpyTCsYs2lrwGyNquYlUZ9DRS2QgS57qWawPTbU1ATj8aqOzh5D+C9aEyNFrIHwOgAIABAl9iVbB0gln+/OtZMPY0l4v9LfxQnxVTMJ6aXe3ou7L4lr4YDB3Ra5XVDoj1RlNnGmcuLjMsr2dbSJWck+U1wVwFUjMbsXY0F7JN5lNdpjQp0+AFYH/ShnfTSPIzCGYFakCBnO2FmTxs4fR5O4fRmzGDyMkfLMSRpCNMNh1nahNdRrtkaOMasApLXGRAJzZNGyDdDtlohseUVvVsZGeGn+iAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAABCpNxvCnq9GgAFIJxTiiYrE3dNhWjO2MS2hguLyzfB9MoqSgBRmyiTttUkbSpWHouZGrBsuM1nAkItYQN5o5MvAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACbGG1774YxR/B5wL3sENvesfqRdfPUB2kYiDgjX/yWggIFAAUCgBoGAAYIAgEAAwQHBAiDAwIZHqvZ4i+Xlr02uqnX2+K52mswR4pLPnv8qX46LZ52uQSRNSIOnS0Zup0vzMA4gRmFjQGFC/3pc7yIvsXXN4J0Kwe1cILO+B3fGRmKZF+CAmw6NVm6M8K22rApOCmxvmMq+ESQvkKnI3ioayP41mfCY+2q6RtMj6dX26yCwRegpB8DBisgIZjUfMmaSEbum0Q3Ija5i9X8hT0CpHkqttg4FYHCKppohxZ5zc1eWERC/QvkOlQ+VoqInVSCLCVAMBgZXpzvy1kBrLN3gJPAciEzXgm/CpMtyDQ2+bfi9pcWTAJn7+Yantbn+BB5jtDn7jo24fywRKRvj0oGFZToBMKtCn8dUCqWMUYCxCAKZPYi2rXDQJP2xvYqprI+NKjQxx8bdv7KHi1eKTlWbVRMV9fUzl0oGmn55amHXyr0ZWM69fMhNQAAAAAAEAAAAAUMAAAABCDWEwAAAAAAINYTAAAAAAAAAAAAAAAAAOBG6KehAQAAOmjWddVKbY/jmZByCXZqIAA=",
+        "base64"
+       ],
+       "transactionIndex": 24,
+       "version": 0
+      },
+      {
+       "blockTime": 1793818222,
+       "meta": {
+        "computeUnitsConsumed": 122919,
+        "costUnits": 125981,
+        "err": null,
+        "fee": 10000,
+        "innerInstructions": [
+         {
+          "index": 1,
+          "instructions": [
+           {
+            "accounts": [
+             0,
+             3
+            ],
+            "data": "1111A8cS7kFAcnFiyR1SHgF7xf1wfVqySCgU5ptSh7sWFNbTh9L7NNsTURZRR9CL4xdJFu",
+            "programIdIndex": 8,
+            "stackHeight": 2
+           },
+           {
+            "accounts": [
+             0,
+             4
+            ],
+            "data": "3Bxs4Z4ujkmgbEYf",
+            "programIdIndex": 8,
+            "stackHeight": 2
+           }
+          ]
+         }
+        ],
+        "loadedAddresses": {
+         "readonly": [],
+         "writable": []
+        },
+        "logMessages": [
+         "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+         "Program ComputeBudget111111111111111111111111111111 success",
+         "Program 5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ invoke [1]",
+         "Program 11111111111111111111111111111111 invoke [2]",
+         "Program 11111111111111111111111111111111 success",
+         "Program 11111111111111111111111111111111 invoke [2]",
+         "Program 11111111111111111111111111111111 success",
+         "Program 5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ consumed 122769 of 399850 compute units",
+         "Program 5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ success"
+        ],
+        "postBalances": [
+         1000210820,
+         2182099,
+         78657234,
+         716280,
+         7315200,
+         1,
+         833120,
+         5486400,
+         1
+        ],
+        "postTokenBalances": [],
+        "preBalances": [
+         1000002860,
+         0,
+         82139333,
+         0,
+         6949440,
+         1,
+         833120,
+         5486400,
+         1
+        ],
+        "preTokenBalances": [],
+        "rewards": [],
+        "status": {
+         "Ok": null
+        }
+       },
+       "slot": 518672460,
+       "transaction": [
+        "AhPNjl31+Yu/3wSeJcyzA7rjBXIVz5C0vtMvq9dAF/wkPcV4fkmY+Y0z+o6S6Hl5mtXwiHNi+OzK2UO4Y/HpvANJQo21CHVt5tiapKTdhdORZpyTCsYs2lrwGyNquYlUZ9DRS2QgS57qWawPTbU1ATj8aqOzh5D+C9aEyNFrIHwOgAIABAl9iVbB0gln+/OtZMPY0l4v9LfxQnxVTMJ6aXe3ou7L4lr4YDB3Ra5XVDoj1RlNnGmcuLjMsr2dbSJWck+U1wVwFUjMbsXY0F7JN5lNdpjQp0+AFYH/ShnfTSPIzCGYFakCBnO2FmTxs4fR5O4fRmzGDyMkfLMSRpCNMNh1nahNdRrtkaOMasApLXGRAJzZNGyDdDtlohseUVvVsZGeGn+iAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAABCpNxvCnq9GgAFIJxTiiYrE3dNhWjO2MS2hguLyzfB9MoqSgBRmyiTttUkbSpWHouZGrBsuM1nAkItYQN5o5MvAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACbGG1774YxR/B5wL3sENvesfqRdfPUB2kYiDgjX/yWggIFAAUCgBoGAAYIAgEAAwQHBAiDAwIZHqvZ4i+Xlr02uqnX2+K52mswR4pLPnv8qX46LZ52uQSRNSIOnS0Zup0vzMA4gRmFjQGFC/3pc7yIvsXXN4J0Kwe1cILO+B3fGRmKZF+CAmw6NVm6M8K22rApOCmxvmMq+ESQvkKnI3ioayP41mfCY+2q6RtMj6dX26yCwRegpB8DBisgIZjUfMmaSEbum0Q3Ija5i9X8hT0CpHkqttg4FYHCKppohxZ5zc1eWERC/QvkOlQ+VoqInVSCLCVAMBgZXpzvy1kBrLN3gJPAciEzXgm/CpMtyDQ2+bfi9pcWTAJn7+Yantbn+BB5jtDn7jo24fywRKRvj0oGFZToBMKtCn8dUCqWMUYCxCAKZPYi2rXDQJP2xvYqprI+NKjQxx8bdv7KHi1eKTlWbVRMV9fUzl0oGmn55amHXyr0ZWM69fMhNQAAAAAAEAAAAAUMAAAABCDWEwAAAAAAINYTAAAAAAAAAAAAAAAAAOBG6KehAQAAOmjWddVKbY/jmZByCXZqIAA=",
+        "base64"
+       ],
+       "transactionIndex": 24,
+       "version": 0
+      }
+     ]
+    },
+    "onward": {
+     "signature": "5p4dXVDiCJ7ntFTXXaZPvBZeYP5gpgeHCucRxe1dcPzjmRojSMiRdrPHNmMgXgn3NnuActEYszjest2ssrANLMmW",
+     "reads": [
+      {
+       "blockTime": 1793818234,
+       "meta": {
+        "computeUnitsConsumed": 150,
+        "costUnits": 1481,
+        "err": null,
+        "fee": 5000,
+        "innerInstructions": [],
+        "loadedAddresses": {
+         "readonly": [],
+         "writable": []
+        },
+        "logMessages": [
+         "Program 11111111111111111111111111111111 invoke [1]",
+         "Program 11111111111111111111111111111111 success"
+        ],
+        "postBalances": [
+         0,
+         7420385259,
+         1
+        ],
+        "postTokenBalances": [],
+        "preBalances": [
+         2182099,
+         7418208160,
+         1
+        ],
+        "preTokenBalances": [],
+        "rewards": [],
+        "status": {
+         "Ok": null
+        }
+       },
+       "slot": 518672509,
+       "transaction": [
+        "AfCnKYzItS6/+kq5OxdKEme/WRIiauUhNJh/YQ0WA6yewPWog/+1ryKKzD2oSgjsBXxWfDnHq6AE57MCoAECjg2AAQABA1r4YDB3Ra5XVDoj1RlNnGmcuLjMsr2dbSJWck+U1wVwIzVIa3etlwVdbbx1Bft88JtI+jggDLuKlxDqFz6dpJsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACmMbleo0qUK28QBv9j4VV4x7JXm5Xm9YTFS2fbTm7SaAQICAAEMAgAAAEs4IQAAAAAAAA==",
+        "base64"
+       ],
+       "transactionIndex": 23,
+       "version": 0
+      },
+      {
+       "blockTime": 1793818234,
+       "meta": {
+        "computeUnitsConsumed": 150,
+        "costUnits": 1481,
+        "err": null,
+        "fee": 5000,
+        "innerInstructions": [],
+        "loadedAddresses": {
+         "readonly": [],
+         "writable": []
+        },
+        "logMessages": [
+         "Program 11111111111111111111111111111111 invoke [1]",
+         "Program 11111111111111111111111111111111 success"
+        ],
+        "postBalances": [
+         0,
+         7420385259,
+         1
+        ],
+        "postTokenBalances": [],
+        "preBalances": [
+         2182099,
+         7418208160,
+         1
+        ],
+        "preTokenBalances": [],
+        "rewards": [],
+        "status": {
+         "Ok": null
+        }
+       },
+       "slot": 518672509,
+       "transaction": [
+        "AfCnKYzItS6/+kq5OxdKEme/WRIiauUhNJh/YQ0WA6yewPWog/+1ryKKzD2oSgjsBXxWfDnHq6AE57MCoAECjg2AAQABA1r4YDB3Ra5XVDoj1RlNnGmcuLjMsr2dbSJWck+U1wVwIzVIa3etlwVdbbx1Bft88JtI+jggDLuKlxDqFz6dpJsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACmMbleo0qUK28QBv9j4VV4x7JXm5Xm9YTFS2fbTm7SaAQICAAEMAgAAAEs4IQAAAAAAAA==",
+        "base64"
+       ],
+       "transactionIndex": 23,
+       "version": 0
+      }
+     ]
+    }
+   }
+  ]
  }
 }

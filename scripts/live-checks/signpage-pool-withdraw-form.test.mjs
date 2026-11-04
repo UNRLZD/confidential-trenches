@@ -1,15 +1,22 @@
 // node --test scripts/live-checks/signpage-pool-withdraw-form.test.mjs: the live check replays recorded answers
 // (signpage-pool-withdraw-form.answers.json). bad: a real devnet pool buy read in the withdraw's place: FAIL, a table
 // and no transfer named. none: no run recorded yet: FAIL. Planted on the bad one's SIGN_HOST read: a served /app.js
-// that is not the pinned one: FAIL. The good answer is recorded from the devnet withdraw run (the run record). Until it
-// lands, a synthesized good part (the release alone to W, then W's own transfer of the part to To, W at 0) must PASS
-// and each way a part can go wrong, planted on it, must FAIL (review #232b LOW 6).
+// that is not the pinned one: FAIL. good: the devnet withdraw run as recorded (signpage-pool-withdraw-form.md): PASS.
+// A synthesized good part (the release alone to W, then W's own transfer of the part to To, W at 0) must PASS and
+// each way a part can go wrong, planted on it, must FAIL (review #232b LOW 6).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { COMPUTE_BUDGET, judge, PIN, SYSTEM, TO } from "./signpage-pool-withdraw-form.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./signpage-pool-withdraw-form.answers.json", import.meta.url), "utf8"));
+
+test("recorded good answer: the devnet withdraw run, its part's release then W's transfer to To, W at 0: PASS", () => {
+  const v = judge(ANSWERS.good);
+  assert.equal(v.ok, true, v.lines.join("\n"));
+  assert.equal(ANSWERS.good.run.length, 1);
+  assert.equal(ANSWERS.good.run[0].part, "2177099");
+});
 
 test("recorded bad answer: a devnet pool buy in the withdraw's place: FAIL, its table and its instructions named", () => {
   const v = judge(ANSWERS.bad);
