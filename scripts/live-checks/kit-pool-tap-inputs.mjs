@@ -6,7 +6,8 @@
 //     PriceUpdateV2 of the SOL/USD feed, fully verified, its price positive, its confidence within the bound and its
 //     publish time within 60 s of now (poolUsdPrice refuses otherwise);
 //   - Base and Robinhood: each chain's own Chainlink ETH/USD proxy (POOL_USD_FEEDS.base, .robinhood) answers the same
-//     decimals and latestRoundData on both RPCs at one block, positive and within the chain's bound; and description()
+//     decimals and latestRoundData on both RPCs at one block (the same hash on both, its time within 60 s of now),
+//     positive and within the chain's bound; and description()
 //     at that block is "ETH / USD" on both;
 //   - the two ETH/USD feeds are within 1% of each other (their deviation thresholds are 0.15% and 0.5%): the kit itself
 //     refuses a Robinhood price more than POOL_USD_CROSS_BPS from Base's, read in the same call on Base's two RPCs, and

@@ -4,10 +4,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { NoteRecord, NoteState } from "../src/notes/store.ts";
-import { SOLANA_JITO_TIP_MIN, SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyMaxSpend, solanaPoolFee, type SolanaRent } from "@blindfill/kit";
+import { SOLANA_JITO_TIP_MIN, SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyFunds, solanaPoolBuyMaxSpend, solanaPoolFee, type SolanaPoolRelease, type SolanaRent } from "@blindfill/kit";
 import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof } from "../src/pool/balances.ts";
 import { EVM_LADDER } from "../src/pool/evm.ts";
-import { SOL_LADDER } from "../src/pool/solana.ts";
+import { SOL_LADDER, SOL_TIP_CAP } from "../src/pool/solana.ts";
 
 const LAMPORTS = 1_000_000_000n; // 1 SOL, 9 decimals
 const WEI = 1_000_000_000_000_000_000n; // 1 ETH, 18 decimals
@@ -120,22 +120,32 @@ test("tap_max: the most one ready proof can spend at the tap, the largest of the
   assert.throws(() => poolBalances([a], [S1], [{ ...proof(S1, a, LAMPORTS), binding: { feeCap: -1n } }]), /fee cap/);
 });
 
-test("tap_max from the kit's rules: solanaTapSpendOf (the worst venue, the mainnet tip, the read rent) and evmTapSpendOf", () => {
+test("tap_max from the kit's rules: solanaTapSpendOf (the worst venue, the proof's own tip cap, the read rent) and evmTapSpendOf", () => {
   const rent: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
   const fee = solanaPoolFee(rent);
-  const S = solanaBalancePool("s", 11n, solanaTapSpendOf(rent, "mainnet"));
-  const D = solanaBalancePool("d", 12n, solanaTapSpendOf(rent, "devnet"));
+  assert.equal(fee, 1_300_000n);
+  const S = solanaBalancePool("s", 11n, solanaTapSpendOf(rent));
   const B = evmBalancePool("b", "base", 22n, evmTapSpendOf);
   const s = note(11n, "HELD", LAMPORTS / 10n);
-  const d = note(12n, "HELD", LAMPORTS / 10n);
   const e = note(22n, "HELD", WEI / 1000n);
-  const out = poolBalances([s, e], [S, B], [proof(S, s, LAMPORTS / 10n, undefined, fee), proof(B, e, WEI / 1000n, undefined, 10n ** 13n)]);
-  const sol = solanaPoolBuyMaxSpend({ withdrawnValue: LAMPORTS / 10n, relayFee: fee }, SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent);
-  assert.equal(out[0]!.tap_max, `0.${sol.toString().padStart(9, "0")}`.replace(/0+$/, ""));
+  // the proof's release lets the tap tip up to its tip cap (./solana.ts SOL_TIP_CAP, 0.001 SOL), well above the minimum
+  assert.ok(SOL_TIP_CAP > SOLANA_JITO_TIP_MIN);
+  const sp = { ...proof(S, s, LAMPORTS / 10n, undefined, fee), binding: { feeCap: fee, request: { tipCap: SOL_TIP_CAP } } };
+  const out = poolBalances([s, e], [S, B], [sp, proof(B, e, WEI / 1000n, undefined, 10n ** 13n)]);
+  const tapMax = BigInt(out[0]!.tap_max!.replace("0.", "").padEnd(9, "0"));
+  assert.equal(tapMax, solanaPoolBuyMaxSpend({ withdrawnValue: LAMPORTS / 10n, relayFee: fee }, SOLANA_POOL_WORST_BUY_VENUE, SOL_TIP_CAP, rent));
+  // a tap of tap_max fills on the worst venue at any tip the proof allows, its cap included; one lamport more does not
+  const funds = (spend: bigint, tip: bigint) => solanaPoolBuyFunds({ withdrawnValue: LAMPORTS / 10n, relayFee: fee } as SolanaPoolRelease, SOLANA_POOL_WORST_BUY_VENUE as never, { spend, tip }, rent).problem;
+  for (const tip of [0n, SOLANA_JITO_TIP_MIN, SOL_TIP_CAP]) assert.equal(funds(tapMax, tip), null, `tip ${tip}`);
+  assert.notEqual(funds(tapMax + 1n, SOL_TIP_CAP), null);
+  // priced at the minimum tip instead (92,735,080 here), a tap at a higher tip would not fill
+  const atMin = solanaPoolBuyMaxSpend({ withdrawnValue: LAMPORTS / 10n, relayFee: fee }, SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent);
+  assert.equal(atMin, 92_735_080n);
+  assert.notEqual(funds(atMin, SOL_TIP_CAP), null);
   assert.equal(out[1]!.tap_max, "0.001", "an EVM tap asks for the whole chunk");
-  const dev = poolBalances([d], [D], [proof(D, d, LAMPORTS / 10n, undefined, fee)]);
-  assert.equal(BigInt(dev[0]!.tap_max!.replace("0.", "").padEnd(9, "0")), sol + SOLANA_JITO_TIP_MIN, "devnet tips 0");
-  assert.throws(() => solanaTapSpendOf(rent, "testnet" as never), /cluster/);
+  // a Solana proof whose request names no tip cap, or a bad one, is refused
+  assert.throws(() => poolBalances([s], [S], [proof(S, s, LAMPORTS / 10n, undefined, fee)]), /tip cap/);
+  assert.throws(() => poolBalances([s], [S], [{ ...sp, binding: { feeCap: fee, request: { tipCap: -1n } } }]), /tip cap/);
 });
 
 test("one entry per chain in the order of the pool table: a configured chain with no notes is \"0\", two pools of one asset on one chain sum", () => {

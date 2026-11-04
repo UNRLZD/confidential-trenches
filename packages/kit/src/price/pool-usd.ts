@@ -11,7 +11,9 @@
 //   minContextSlot = the newer slot, POOL_USD_READ_ROUNDS reads in all; still different is a refusal.
 // - Base and Robinhood (the pools hold native ETH, 18 decimals): ETH/USD from the chain's own Chainlink feed, decimals()
 //   and latestRoundData() by eth_call on both RPCs at one block number, the lower of their two eth_blockNumber heads
-//   (each has it; never "latest" on each). Every word must be the same on both. Robinhood has its own Chainlink ETH/USD
+//   (each has it; never "latest" on each). That block must be one block on both (eth_getBlockByNumber: the same hash and
+//   time) and its time within POOL_USD_BLOCK_MAX_AGE_S of the device's clock, so one RPC answering a low head cannot
+//   pick an older round. Every word must be the same on both. Robinhood has its own Chainlink ETH/USD
 //   feed (read below), so it is read there, not on Base. Its heartbeat is 24 h, so a halted feed would pass the age
 //   check for up to a day: the same call reads Base's ETH/USD too (its 1200 s heartbeat, on Base's two RPCs) and refuses
 //   a Robinhood price more than POOL_USD_CROSS_BPS from it. The two feeds' deviation thresholds are 0.5% and 0.15%.
@@ -48,6 +50,9 @@ export const POOL_USD_READ_ROUNDS = 3;
 /** Robinhood's ETH/USD is used only within this many bps of Base's, read in the same call: the two feeds' deviation
  * thresholds (0.5% and 0.15%) with room for one round each. */
 export const POOL_USD_CROSS_BPS = 100n;
+/** The Chainlink reads' block (the lower of the two RPCs' heads) is used only this close to the device's clock, either
+ * way: one RPC that answers a low head can pick no older block, so no older round. */
+export const POOL_USD_BLOCK_MAX_AGE_S = 60;
 /** One RPC call's bound. */
 export const POOL_USD_CALL_TIMEOUT_MS = 5_000;
 
@@ -137,7 +142,7 @@ function within<T>(p: Promise<T>, what: string): Promise<T> {
 const call = (rpc: SolanaRpc, method: string, params: readonly unknown[], what: string): Promise<unknown> =>
   within(Promise.resolve().then(() => rpc(method, params)), what);
 
-function checkArgs(a: PoolUsdArgs): { feed: PoolUsdPythFeed | PoolUsdChainlinkFeed; chain: PoolUsdChain; rpcs: readonly [SolanaRpc, SolanaRpc]; nowS: number } {
+function checkArgs(a: PoolUsdArgs): { feed: PoolUsdPythFeed | PoolUsdChainlinkFeed; chain: PoolUsdChain; rpcs: readonly [SolanaRpc, SolanaRpc]; nowS: number; nowMs: number } {
   const chain = a?.chain as unknown;
   if (typeof chain !== "string" || !Object.hasOwn(POOL_USD_FEEDS, chain)) fail(`no USD price for chain ${String(chain)}`);
   const rpcs = a?.rpcs as unknown;
@@ -145,7 +150,7 @@ function checkArgs(a: PoolUsdArgs): { feed: PoolUsdPythFeed | PoolUsdChainlinkFe
   if (solanaSameProvider((rpcs as SolanaRpc[])[0]!, (rpcs as SolanaRpc[])[1]!)) fail("the two RPCs are one provider twice: a price must never rest on one provider's word");
   const nowMs = a?.nowMs === undefined ? Date.now() : a.nowMs;
   if (typeof nowMs !== "number" || !Number.isSafeInteger(nowMs) || nowMs < 0) fail("nowMs: not a time in unix ms");
-  return { feed: POOL_USD_FEEDS[chain as PoolUsdChain], chain: chain as PoolUsdChain, rpcs: rpcs as [SolanaRpc, SolanaRpc], nowS: nowMs / 1000 };
+  return { feed: POOL_USD_FEEDS[chain as PoolUsdChain], chain: chain as PoolUsdChain, rpcs: rpcs as [SolanaRpc, SolanaRpc], nowS: nowMs / 1000, nowMs };
 }
 
 /** The price's age against the device's clock: older than maxAgeS, or ahead by more than POOL_USD_MAX_AHEAD_S, refused. */
@@ -247,6 +252,20 @@ async function chainlinkPrice(chain: "base" | "robinhood", feed: PoolUsdChainlin
   const heads = await Promise.all(rpcs.map(async (rpc, k) => quantity(await call(rpc, "eth_blockNumber", [], `rpc ${k} eth_blockNumber`), `rpc ${k} eth_blockNumber`)));
   const block = heads[0]! < heads[1]! ? heads[0]! : heads[1]!;
   const at = `0x${block.toString(16)}`;
+  // that block on both RPCs: one block (the same hash), its time within POOL_USD_BLOCK_MAX_AGE_S of the device's clock
+  const blocks = await Promise.all(
+    rpcs.map(async (rpc, k) => {
+      const b = (await call(rpc, "eth_getBlockByNumber", [at, false], `rpc ${k} eth_getBlockByNumber`)) as { number?: unknown; hash?: unknown; timestamp?: unknown } | null;
+      const hash = rpcHex(b?.hash);
+      if (hash === null || hash.length !== 66) fail(`rpc ${k}: block ${block} has no hash`);
+      if (quantity(b!.number, `rpc ${k} block number`) !== block) fail(`rpc ${k}: answered another block than ${block}`);
+      return { hash: hash!, timeS: quantity(b!.timestamp, `rpc ${k} block timestamp`) };
+    }),
+  );
+  if (blocks[0]!.hash !== blocks[1]!.hash) fail(`the two RPCs disagree on block ${block}'s hash`);
+  const blockS = Number(blocks[0]!.timeS);
+  if (blocks[0]!.timeS !== blocks[1]!.timeS) fail(`the two RPCs disagree on block ${block}'s time`);
+  if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(`block ${block}'s time ${blockS} is more than ${POOL_USD_BLOCK_MAX_AGE_S} s from the device's clock ${Math.floor(nowS)}`);
   const reads: RoundRead[] = await Promise.all(
     rpcs.map(async (rpc, k) => {
       const [dec, round] = await Promise.all([
@@ -281,11 +300,11 @@ async function chainlinkPrice(chain: "base" | "robinhood", feed: PoolUsdChainlin
  * maxConfBps, an account or answer that is not the feed's, an unknown chain or one provider twice.
  */
 export async function poolUsdPrice(args: PoolUsdArgs): Promise<PoolUsdPrice> {
-  const { feed, chain, rpcs, nowS } = checkArgs(args);
+  const { feed, chain, rpcs, nowS, nowMs } = checkArgs(args);
   if (feed.kind === "pyth") return pythPrice(feed, rpcs, nowS);
   if (chain !== "robinhood") return chainlinkPrice(chain as "base", feed, rpcs, nowS);
   // Robinhood: its own feed, held to Base's ETH/USD read now
-  const base = checkArgs({ chain: "base", rpcs: args.baseRpcs ?? (fail("robinhood: Base's two RPCs are needed to hold its ETH/USD to Base's") as never), nowMs: nowS * 1000 });
+  const base = checkArgs({ chain: "base", rpcs: args.baseRpcs ?? (fail("robinhood: Base's two RPCs are needed to hold its ETH/USD to Base's") as never), nowMs });
   const [p, b] = await Promise.all([chainlinkPrice("robinhood", feed, rpcs, nowS), chainlinkPrice("base", base.feed as PoolUsdChainlinkFeed, base.rpcs, nowS)]);
   // both at one exponent, the finer
   const e = Math.min(p.expo, b.expo);

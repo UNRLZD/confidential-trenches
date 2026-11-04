@@ -52,12 +52,12 @@ test("the recorded bad run fails: the two Solana RPCs disagree on the Pyth accou
   fails(await run(A.bad), /solana: pyth .*the two RPCs disagree on the Pyth account/);
 });
 
-test("the good run replayed two hours later fails: every price is stale, Robinhood's through Base's, which holds it", async () => {
+test("the good run replayed two hours later fails: every price is stale, each EVM read's block first", async () => {
   const r = await run(A.good, { nowMs: A.good.nowMs + 2 * 3600_000 });
   fails(r, /solana: .*older than 60 s/);
-  fails(r, /base: .*older than 1500 s/);
-  // Robinhood's own feed is inside its 24 h bound; the Base read that holds it is not
-  fails(r, /robinhood: chainlink .*older than 1500 s/);
+  // the Chainlink reads' block is held within 60 s of the clock, before any round's own age
+  fails(r, /base: .*block \d+'s time \d+ is more than 60 s from the device's clock/);
+  fails(r, /robinhood: chainlink .*block \d+'s time \d+ is more than 60 s from the device's clock/);
 });
 
 test("one RPC's Chainlink round that is another fails, a description that is not ETH / USD fails", async () => {

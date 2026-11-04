@@ -35,6 +35,16 @@ export const MUTANTS = [
   [PRICE, "if (a.round[i] !== b.round[i]) fail(", "if (i !== 0 && a.round[i] !== b.round[i]) fail(", AGREE],
   [PRICE, "[{ to: feed.proxy, data: LATEST_ROUND_DATA }, at]", '[{ to: feed.proxy, data: LATEST_ROUND_DATA }, "latest"]', AGREE],
   [PRICE, "const block = heads[0]! < heads[1]! ? heads[0]! : heads[1]!;", "const block = heads[0]! > heads[1]! ? heads[0]! : heads[1]!;", AGREE],
+  // agreement: the read's block is one block on both RPCs, and near the device's clock (one RPC's low head picks no
+  // older round)
+  [PRICE, "if (blocks[0]!.hash !== blocks[1]!.hash) fail(", "if (false) fail(", AGREE],
+  [PRICE, "if (blocks[0]!.timeS !== blocks[1]!.timeS) fail(", "if (false) fail(", AGREE],
+  [PRICE, "!== block) fail(`rpc ${k}: answered another block", "!== block && false) fail(`rpc ${k}: answered another block", AGREE],
+  [PRICE, "if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (false) fail(", AGREE],
+  [PRICE, "if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (false) fail(", STALE],
+  [PRICE, "if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (nowS - blockS > POOL_USD_BLOCK_MAX_AGE_S) fail(", STALE],
+  [PRICE, "if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (Math.abs(nowS - blockS) >= POOL_USD_BLOCK_MAX_AGE_S) fail(", STALE],
+  [PRICE, "export const POOL_USD_BLOCK_MAX_AGE_S = 60;", "export const POOL_USD_BLOCK_MAX_AGE_S = 1_500;", STALE],
   // agreement: Robinhood's ETH/USD held to Base's, read in the same call
   [PRICE, "if (gap * 10_000n > POOL_USD_CROSS_BPS * lo) fail(", "if (false) fail(", AGREE],
   [PRICE, "if (gap * 10_000n > POOL_USD_CROSS_BPS * lo) fail(", "if (gap * 10_000n > 2n * POOL_USD_CROSS_BPS * lo) fail(", AGREE],

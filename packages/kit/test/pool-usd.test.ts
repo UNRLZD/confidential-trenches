@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { base64 } from "@scure/base";
 import {
+  POOL_USD_BLOCK_MAX_AGE_S,
   POOL_USD_CROSS_BPS,
   POOL_USD_FEEDS,
   POOL_USD_MAX_AHEAD_S,
@@ -95,14 +96,22 @@ function words(rec: Recorded): bigint[] {
   const h = (c.result as string).slice(2);
   return [0, 1, 2, 3, 4].map((i) => BigInt(`0x${h.slice(64 * i, 64 * i + 64)}`));
 }
-/** Base's two RPCs for a Robinhood read, its updatedAt moved to `nowMs` so only Robinhood's own age is under test. */
+/** An edit of every eth_getBlockByNumber answer: its fields through `f`. */
+const blockEdit = (f: (b: Record<string, unknown>) => void): Edit => (method, _p, r) => {
+  if (method === "eth_getBlockByNumber" && r !== null) f(r as Record<string, unknown>);
+  return r;
+};
+/** The read's block timed at `nowMs`, as a block read then would be: a test that moves the clock moves the block too. */
+const blockAt = (nowMs: number): Edit => blockEdit((b) => void (b.timestamp = `0x${Math.floor(nowMs / 1000).toString(16)}`));
+const then = (a: Edit | undefined, b: Edit): Edit => (m, p, r) => b(m, p, a ? a(m, p, r) : r);
+/** Base's two RPCs for a Robinhood read, its updatedAt and block moved to `nowMs` so only Robinhood's own age is under test. */
 const baseAt = (nowMs: number, edit?: Edit): [SolanaRpc, SolanaRpc] => {
   const fresh = wordEdit(LRD, 3, BigInt(Math.floor(nowMs / 1000)));
-  const both: Edit = (m, p, r) => fresh(m, p, edit ? edit(m, p, r) : r);
+  const both: Edit = then(then(edit, fresh), blockAt(nowMs));
   return pair(FX.base, [both, both]);
 };
-const evm = (chain: "base" | "robinhood", edits?: Parameters<typeof pair>[1], nowMs = NOW) =>
-  poolUsdToUnits({ chain, usd: "100", rpcs: pair(FX[chain], edits), nowMs, ...(chain === "robinhood" ? { baseRpcs: baseAt(nowMs) } : {}) });
+const evm = (chain: "base" | "robinhood", edits: Parameters<typeof pair>[1] = [], nowMs = NOW) =>
+  poolUsdToUnits({ chain, usd: "100", rpcs: pair(FX[chain], nowMs === NOW ? edits : [then(edits[0], blockAt(nowMs)), then(edits[1], blockAt(nowMs))]), nowMs, ...(chain === "robinhood" ? { baseRpcs: baseAt(nowMs) } : {}) });
 
 // ------------------------------------------------------------------------------------------------ ok
 test("ok: the recorded Pyth SOL/USD read turns USD into lamports, rounded down, never more than the USD asked", async () => {
@@ -204,6 +213,35 @@ test("agreement: both Chainlink reads are at one block, the lower of the two RPC
   }
 });
 
+test("agreement: the read's block is one block on both RPCs (its hash, number and time); one RPC's low head cannot pick an older block", async () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    await assert.rejects(evm(chain, [undefined, blockEdit((b) => void (b.hash = `0x${"ab".repeat(32)}`))]), /disagree on block .* hash/, chain);
+    await assert.rejects(evm(chain, [blockEdit((b) => void (b.number = `0x${(BigInt(b.number as string) + 1n).toString(16)}`)), undefined]), /answered another block/, chain);
+    await assert.rejects(evm(chain, [undefined, blockEdit((b) => void (b.timestamp = `0x${(BigInt(b.timestamp as string) - 1n).toString(16)}`))]), /disagree on block .* time/, chain);
+    await assert.rejects(evm(chain, [blockEdit((b) => void delete b.hash), undefined]), /has no hash/, chain);
+  }
+  // one RPC answers a head 700 blocks back (about 23 min on Base, a real block both RPCs hold): the read is at that
+  // block, whose round is still inside the feed's age bound, and the block's own time refuses it
+  const rec = FX.base;
+  const heads = rec.calls.filter((c) => c.method === "eth_blockNumber").map((c) => BigInt(c.result as string));
+  const head = heads[0]! < heads[1]! ? heads[0]! : heads[1]!;
+  const recorded = `0x${head.toString(16)}`;
+  const low = `0x${(head - 700n).toString(16)}`;
+  const block = rec.calls.find((c) => c.method === "eth_getBlockByNumber")!.result as { timestamp: string };
+  const lowTime = `0x${(BigInt(block.timestamp) - 1400n).toString(16)}`;
+  const lowHead = (k: 0 | 1): SolanaRpc => {
+    const r = replay(rec, k);
+    return Object.assign(async (method: string, params: readonly unknown[]) => {
+      if (method === "eth_blockNumber" && k === 1) return low;
+      const p = params.map((x) => (x === low ? recorded : x));
+      const a = await r(method, p);
+      if (method === "eth_getBlockByNumber" && params[0] === low) return { ...(a as object), number: low, hash: `0x${"cd".repeat(32)}`, timestamp: lowTime };
+      return a;
+    }, { url: rec.rpcs[k] });
+  };
+  await assert.rejects(poolUsdPrice({ chain: "base", rpcs: [lowHead(0), lowHead(1)], nowMs: NOW }), /more than 60 s from the device's clock/);
+});
+
 test("agreement: Robinhood's ETH/USD is used only within 1% of Base's, read in the same call; with no Base RPCs it is refused", async () => {
   assert.equal(POOL_USD_CROSS_BPS, 100n);
   const [b, r] = [words(FX.base)[1]!, words(FX.robinhood)[1]!];
@@ -231,6 +269,27 @@ test("agreement: hex in upper case on one RPC is the same answer (as the wallet'
 });
 
 // ------------------------------------------------------------------------------------------------ staleness
+test("staleness: the read's block is used within 60 s of the device's clock, either way; past that it is refused", async () => {
+  assert.equal(POOL_USD_BLOCK_MAX_AGE_S, 60);
+  for (const chain of ["base", "robinhood"] as const) {
+    const t = Number(BigInt((FX[chain].calls.find((c) => c.method === "eth_getBlockByNumber")!.result as { timestamp: string }).timestamp));
+    const timed = (s: number) => blockEdit((b) => void (b.timestamp = `0x${s.toString(16)}`));
+    // the clock set so the block is exactly 60 s old, or 60 s ahead: used
+    for (const d of [60, -60]) assert.ok(await poolUsdPrice({ chain, rpcs: pair(FX[chain]), nowMs: (t + d) * 1000, baseRpcs: baseAt((t + d) * 1000) }), `${chain} ${d}`);
+    for (const d of [61, -61]) await assert.rejects(poolUsdPrice({ chain, rpcs: pair(FX[chain]), nowMs: (t + d) * 1000, baseRpcs: baseAt((t + d) * 1000) }), /more than 60 s from the device's clock/, `${chain} ${d}`);
+    // a block 25 min old, inside Base's 1,500 s round bound: refused for the block's age alone
+    await assert.rejects(evm(chain, [timed(t - 1400), timed(t - 1400)]), /more than 60 s from the device's clock/, chain);
+  }
+});
+
+test("staleness: Robinhood's read holds Base's at the device's own clock, as given: a time that does not survive ms -> s -> ms is used", async () => {
+  const nowMs = 4_294_973_501_871; // (nowMs / 1000) * 1000 !== nowMs in floating point
+  assert.notEqual((nowMs / 1000) * 1000, nowMs);
+  const fresh = then(wordEdit(LRD, 3, BigInt(Math.floor(nowMs / 1000))), blockAt(nowMs));
+  const p = await poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood, [fresh, fresh]), nowMs, baseRpcs: baseAt(nowMs) });
+  assert.equal(p.price, words(FX.robinhood)[1]);
+});
+
 test("staleness: a Pyth price older than 60 s is refused; at 60 s it is used; one ahead of the clock is refused", async () => {
   const f = POOL_USD_FEEDS.solana;
   assert.equal(f.maxAgeS, 60);
