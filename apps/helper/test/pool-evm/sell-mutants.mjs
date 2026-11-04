@@ -12,7 +12,9 @@
 // authorization's address never equals undefined), the yParity and v range tests where only the detail differs (a
 // recovery id of 2 or more recovers no key), the body's and the decoder's two data size bounds (each holds without the
 // other), the % 32 length test (the word count test refuses the same), and either fee_low test without the other
-// (fee >= gas x (base + tip) + L1 exactly when (fee - L1) / gas >= base + tip; both are removed together below).
+// (fee >= gas x (base + tip) + L1 exactly when (fee - L1) / gas >= base + tip; both are removed together below), and a
+// replacement's "a base fee of 0 prices no poster gas" test on Robinhood (without it the poster gas's division by that 0
+// throws all the same, failing the tend).
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -161,12 +163,17 @@ export const MUTANTS = [
   [EVM, "    return seen.every((y) => y.status === \"fulfilled\" && y.value === null) ? n : null;", "    return n;", T, "a hole is only where neither provider returns the lane's send by hash (Q1)"],
   // fold 4, H2 (2): a send unmined past its deadline plus the margin is replaced once at its nonce, whatever its price;
   // fold 3's pricing (2 x the base fee now + tip, a tenth over, never over the ceiling)
-  [EVM, "    const stuck = low !== undefined && now() > low[1].stuckAfter;", "    const stuck = false;", T, "a stuck sale on the sell lane"],
-  [EVM, "    const stuck = low !== undefined && now() > low[1].stuckAfter;", "    const stuck = false;", T, "a stuck withdraw on the withdraw lane"],
-  [EVM, "    if (stuck && old!.replacement && old!.maxFee >= 2n * base + tipNow) return;", "    if (stuck && old!.maxFee >= 2n * base + tipNow) return;", T, "a sale one provider's stale pool still counts (Q5)"],
-  [EVM, "    if (stuck && old!.replacement && old!.maxFee >= 2n * base + tipNow) return;", "    if (stuck && old!.maxFee >= 2n * base + tipNow) return;", T, "a stuck sale that covers 2 x base + tip"],
-  [EVM, "    if (stuck && old!.replacement && old!.maxFee >= 2n * base + tipNow) return;", "    if (stuck && old!.replacement && old!.maxFee > 2n * base + tipNow) return;", T, "at a steady base fee, a stuck sale"],
-  [EVM, "    if (stuck && old!.replacement && old!.maxFee >= 2n * base + tipNow) return;", "", T, "at a steady base fee, a stuck sale"],
+  [EVM, "const todo: [bigint, Sent | undefined, boolean][] = [...lane.sent].filter(([, x]) => now() > x.stuckAfter || now() > x.bound)", "const todo: [bigint, Sent | undefined, boolean][] = [...lane.sent].filter(([, x]) => now() > x.bound)", T, "a stuck sale on the sell lane"],
+  [EVM, "const todo: [bigint, Sent | undefined, boolean][] = [...lane.sent].filter(([, x]) => now() > x.stuckAfter || now() > x.bound)", "const todo: [bigint, Sent | undefined, boolean][] = [...lane.sent].filter(([, x]) => now() > x.bound)", T, "a stuck withdraw on the withdraw lane"],
+  [EVM, "const todo: [bigint, Sent | undefined, boolean][] = [...lane.sent].filter(([, x]) => now() > x.stuckAfter || now() > x.bound)", "const todo: [bigint, Sent | undefined, boolean][] = [...lane.sent].filter(([, x]) => now() > x.stuckAfter)", T, "a lane held behind a nonce the chain dropped"],
+  [EVM, "        const covers = old!.replacement && old!.maxFee >= 2n * base + tipNow && old!.tip >= tipNow;", "        const covers = old!.maxFee >= 2n * base + tipNow && old!.tip >= tipNow;", T, "a sale one provider's stale pool still counts (Q5)"],
+  [EVM, "        const covers = old!.replacement && old!.maxFee >= 2n * base + tipNow && old!.tip >= tipNow;", "        const covers = old!.maxFee >= 2n * base + tipNow && old!.tip >= tipNow;", T, "a stuck sale that covers 2 x base + tip"],
+  [EVM, "        const covers = old!.replacement && old!.maxFee >= 2n * base + tipNow && old!.tip >= tipNow;", "        const covers = old!.replacement && old!.maxFee > 2n * base + tipNow && old!.tip >= tipNow;", T, "at a steady base fee, a stuck sale"],
+  [EVM, "        const covers = old!.replacement && old!.maxFee >= 2n * base + tipNow && old!.tip >= tipNow;", "        const covers = old!.replacement && old!.maxFee >= 2n * base + tipNow;", T, "a stuck replacement whose maxFeePerGas still covers"],
+  [EVM, "        const covers = old!.replacement && old!.maxFee >= 2n * base + tipNow && old!.tip >= tipNow;", "        const covers = old!.replacement && old!.maxFee >= 2n * base + tipNow && old!.tip > tipNow;", T, "a stuck replacement whose maxFeePerGas still covers"],
+  [EVM, "        if (covers && !gone) continue;", "", T, "at a steady base fee, a stuck sale"],
+  [EVM, "        if (covers && !gone) continue;", "        if (covers) continue;", T, "a lane held behind a nonce the chain dropped"],
+  [EVM, "        again = covers && old!.raw !== undefined;", "        again = false;", T, "a lane held behind a nonce the chain dropped"],
   [EVM, "    const raise = (v: bigint) => (v * 11n) / 10n + 1n;", "    const raise = (v: bigint) => v;", T, "a stuck sale on the sell lane"],
   [EVM, "    const maxFee = higher(2n * base + tip, old === undefined ? 0n : raise(old.maxFee));", "    const maxFee = old === undefined ? 2n * base + tip : raise(old.maxFee);", T, "a stuck sale on the sell lane"],
   [EVM, "    if (maxFee > EVM_SELL_MAX_FEE_PER_GAS) {", "    if (false) {", T, "a base fee whose 2 x base + tip is over"],
@@ -180,8 +187,9 @@ export const MUTANTS = [
   [EVM, "[a, b].map(async (r) => evmPoolChainFee(net, txBytes", "[a, a].map(async (r) => evmPoolChainFee(net, txBytes", T, "the replacement's gas on Robinhood"],
   [EVM, "      gas += poster + (poster + 4n) / 5n;", "      gas += poster;", T, "the replacement's gas on Robinhood"],
   // fold 4, L1: a failing tend logs once and is never recorded as sent
-  [EVM, "    if (sent.every((x) => x.status === \"rejected\")) throw new Error(", "    if (false) throw new Error(", T, "a tend that fails logs once"],
-  [EVM, "          if (!lane.failSaid) log(", "          log(", T, "a tend that fails logs once"],
+  [EVM, "    if (sent.every((x) => x.status === \"rejected\")) throw new Error(`both providers refused the replacement at nonce ${n}:", "    if (false) throw new Error(`both providers refused the replacement at nonce ${n}:", T, "a tend that fails logs once"],
+  [EVM, "        if (!lane.failSaid) log(", "        log(", T, "a tend that fails logs once"],
+  [EVM, "        lane.failSaid = false;", "", T, "a tend that fails logs once"],
   // fold 4, H2 (3): every watch ends (a receipt, the lane's replacement, or its bound with one log line); a lane whose
   // lowest unmined send is past its bound answers 503 with Retry-After
   [EVM, "      if (mine === undefined || lane.sent.get(nonce) !== mine) return;", "      if (mine === undefined) return;", T, "at a steady base fee, a stuck sale"],
@@ -189,7 +197,21 @@ export const MUTANTS = [
   [EVM, "      if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);", "", T, "an idle hole on the sell lane"],
   [EVM, "      if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);", "", T, "a stuck sale on the sell lane"],
   [EVM, "      const stuck = await laneHeld(sellLane);", "      const stuck = null;", T, "a lane's watch ends at its bound"],
-  [EVM, "    if (low === undefined || now() <= low[1].bound) return null;", "    return null;", T, "a lane's watch ends at its bound"],
+  [EVM, "      if (low === undefined || now() <= low[1].bound) return undefined;", "      return undefined;", T, "a lane's watch ends at its bound"],
+  // fold 5: a held lane recovers (a held answer tends at most once per EVM_LANE_RETRY_S and reads again; a send with a
+  // receipt on either provider is mined; a nonce's bound is kept by its resends; one provider's count never releases it)
+  [EVM, "    if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {", "    if (false) {", T, "a lane held behind a nonce the chain dropped"],
+  [EVM, "    if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {", "    if (low !== undefined && lane.key !== undefined) {", T, "a lane held behind a nonce the chain dropped"],
+  [EVM, "      low = await heldLow(lane);", "", T, "a lane held behind a nonce the chain dropped"],
+  [EVM, "      if (!(await receiptOf(low[1].hash))) return low;", "      return low;", T, "a lane held while the chain halts"],
+  [EVM, "    return rc.some((x) => x.status === \"fulfilled\" && x.value !== null && typeof x.value === \"object\");", "    return rc.every((x) => x.status === \"fulfilled\" && x.value !== null && typeof x.value === \"object\");", T, "a lane held while the chain halts"],
+  [EVM, "    prune(lane, lower(c.la, c.lb));", "    prune(lane, higher(c.la, c.lb));", T, "a lane's watch ends at its bound"],
+  [EVM, "bound: bound ?? stuckAfter + EVM_LANE_WATCH_MS,", "bound: stuckAfter + EVM_LANE_WATCH_MS,", T, "a lane held behind a nonce the chain dropped"],
+  [EVM, "    const bound = mine?.bound ?? until + EVM_LANE_WATCH_MS;", "    const bound = until + EVM_LANE_WATCH_MS;", T, "a lane held behind a nonce the chain dropped"],
+  [EVM, "        if (sent <= bound) log(", "        log(", T, "a lane's watch ends at its bound"],
+  // fold 5, MEDIUM: one provider's "not found" never cancels a live send; the poster's gas on the lower base fee
+  [EVM, "    return seen.every((y) => y.status === \"fulfilled\" && y.value === null) ? n : null;", "    return seen.some((y) => y.status === \"fulfilled\" && y.value === null) ? n : null;", T, "a hole is only where neither provider returns the lane's send by hash (Q1)"],
+  [EVM, "        const baseLow = lower(xa, xb);", "        const baseLow = higher(xa, xb);", T, "the replacement's gas on Robinhood"],
   // fold 4, M2: a withdraw repeat frees its nullifier when its first send was dropped or the lane's replacement took it
   [EVM, "      if (end === \"waiting\") return first;", "      return first;", T, "a withdraw repeat after its first send was dropped"],
   [EVM, "    if (superseded.has(hash)) return \"dropped\";", "", T, "a withdraw repeat whose first send the lane's replacement took"],

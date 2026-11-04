@@ -945,18 +945,21 @@ test("an idle hole on the sell lane: a sale dropped from both providers with no 
 /** A lane's send stuck at 7: pending on both providers (the count at pending 8 once it is sent), never mined (latest 7,
  *  or `mined` once given or set). Past its deadline plus the 60 s margin, the watch's next read finds it still unmined;
  *  the base fee, tip and refusals are `base`, `tip` and `refuse` from then, and each of `then` moves the clock (and those)
- *  on again. `network` and `arbL1` (ArbGasInfo's estimate; provider b answers `arbL1B` when given) for Robinhood. */
+ *  on again. `network` and `arbL1` (ArbGasInfo's estimate; provider b answers `arbL1B` when given) for Robinhood; provider
+ *  b's base fee is `baseB` from then when given, and its latest count `setMinedB`'s once set. */
 type Step = { atMs: number; base?: bigint; tip?: bigint };
-const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ status: number; body: unknown }>, deadlineMs: number, o2: { mined?: bigint; base?: bigint; tip?: bigint; refuse?: (m: string) => boolean; network?: string; arbL1?: bigint; arbL1B?: bigint; then?: Step[] } = {}) => {
+const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ status: number; body: unknown }>, deadlineMs: number, o2: { mined?: bigint; base?: bigint; tip?: bigint; refuse?: (m: string) => boolean; network?: string; arbL1?: bigint; arbL1B?: bigint; baseB?: bigint; then?: Step[] } = {}) => {
   let clock = NOW;
   let pending = 7n;
   let mined = o2.mined ?? 7n;
   const lanes = new Set([SENDER, evmAddressOf(KEY)]); // a W's own count stays at 7: its authorization's nonce
+  let minedB: bigint | undefined;
   const count = (t: string, who: string) => (!lanes.has(who) ? 7n : t === "pending" ? pending : mined);
+  const countB = (t: string, who: string) => (!lanes.has(who) ? 7n : t === "pending" ? pending : (minedB ?? mined));
   const x: Calls = [];
   const o: Opts = { receipt: () => null, tx: () => ({}), count, ...(o2.arbL1 === undefined ? {} : { arbL1: o2.arbL1 }) };
-  // provider b: o's answers as they change, but its own ArbGasInfo estimate when one is given
-  const ob: Opts = o2.arbL1B === undefined ? o : (Object.create(o, { arbL1: { value: o2.arbL1B } }) as Opts);
+  // provider b: o's answers as they change, but its own latest count once set, and its ArbGasInfo estimate when given
+  const ob: Opts = Object.create(o, { count: { value: countB }, ...(o2.arbL1B === undefined ? {} : { arbL1: { value: o2.arbL1B } }) }) as Opts;
   const lines: string[] = [];
   const s = evmPoolSender({ network: o2.network ?? "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, feeRecipient: FEE_TO, receiptPollMs: 1, log: (l: string) => lines.push(l) }, [rpc(x, o), rpc([], ob)], () => clock);
   const first = await send(s);
@@ -967,6 +970,7 @@ const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ st
   for (let i = 0; i < 30; i++) await tick();
   const early = sends(x).length;
   if (o2.base !== undefined) o.base = o2.base;
+  if (o2.baseB !== undefined) ob.base = o2.baseB;
   if (o2.tip !== undefined) o.maxTip = o2.tip;
   if (o2.refuse !== undefined) o.refuse = o2.refuse;
   clock = deadlineMs + 60_001;
@@ -979,7 +983,7 @@ const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ st
     await settle(() => false, 80);
   };
   for (const st of o2.then ?? []) await step(st);
-  return { s, x, hash, early, replaced, raws: sends(x).map(fieldsOf), lines, step, setMined: (n: bigint) => (mined = n), at: () => clock, opts: o };
+  return { s, x, hash, early, replaced, raws: sends(x).map(fieldsOf), lines, step, setMined: (n: bigint) => (mined = n), setMinedB: (n: bigint | undefined) => (minedB = n), at: () => clock, opts: o };
 };
 /** The tip and maxFeePerGas a replacement takes over `old`: each over the old by more than a tenth, the tip at least the
  *  providers' eth_maxPriorityFeePerGas (the mock's 1), maxFeePerGas at least 2 x the base fee + that tip. */
@@ -1090,13 +1094,19 @@ test("a lane's watch ends at its bound with one log line; while the lowest unmin
   assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, `one line: ${r.lines.join(" | ")}`);
   await r.step({ atMs: deadlineMs + 60_000 + 700_000 });
   assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, "the watch has ended");
-  const sent = sends(r.x).length;
   const held = await r.s.sell(freshBody("W-behind", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
   assert.deepEqual([held.status, code(held), held.retryAfterS], [503, "upstream", 60], JSON.stringify(held.body));
-  assert.equal(sends(r.x).length, sent, "nothing sent behind it");
-  r.setMined(8n); // both providers' latest counts pass 7
+  assert.deepEqual(sends(r.x).map((t) => fieldsOf(t).nonce), [7n, 7n], "nothing sent behind it; the held answer's tend replaced 7 once the base fee fell");
+  await r.step({ atMs: r.at() + 1_000 });
+  assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, "the held tend's replacement, its watch started past the bound, ends with no second line");
+  r.setMined(8n);
+  r.setMinedB(7n); // only provider a's latest count passes 7, and no receipt: still held
+  const one = await r.s.sell(freshBody("W-one", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
+  assert.deepEqual([one.status, code(one)], [503, "upstream"], `one provider's count never releases the hold: ${JSON.stringify(one.body)}`);
+  r.setMinedB(undefined); // both providers' latest counts pass 7
   const next = await r.s.sell(freshBody("W-after", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
   assert.equal(next.status, 200, JSON.stringify(next.body));
+  assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, "the held tend's replacement, its watch started past the bound, logs nothing more");
 });
 
 test("a tend that fails logs once and sends nothing: a provider refusing eth_maxPriorityFeePerGas, or both refusing the replacement; a refused replacement is never recorded as sent, and goes once the providers answer", async () => {
@@ -1112,14 +1122,20 @@ test("a tend that fails logs once and sends nothing: a provider refusing eth_max
     const went = raws.slice(1).at(-1)!;
     assert.deepEqual([went.type, went.nonce], [2, 7n], `${name}: the replacement goes once the providers answer`);
     assert.deepEqual({ tip: went.tip, maxFee: went.maxFee }, raised(sale, 2n * BASE), `${name}: raised over the sale, not over a refused replacement`);
+    // a tend that fails after one ran through logs again
+    r.opts.refuse = (m: string) => m === "eth_maxPriorityFeePerGas";
+    await r.step({ atMs: deadlineMs + 400_000 });
+    assert.equal(r.lines.filter((l) => l.includes("tend failed")).length, 2, `${name}: a new failure, a new line: ${r.lines.join(" | ")}`);
   }
 });
 
 test("the replacement's gas on Robinhood: 21,000 + the L1 poster's gas (the kit's ArbGasInfo chain fee, the higher, over the lower base fee) + a fifth", async () => {
   const fee = evmEpochFee(1n, BASE);
   const E = 2_000_000n; // ArbGasInfo's L1 base fee estimate on provider a; b answers twice it, the higher
-  const r = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x84n), epoch: NOW }), NOW + 300_000, { network: "robinhood-testnet", arbL1: E, arbL1B: 2n * E, base: 2n * BASE });
+  // the base fee 2 x BASE on a and 3 x BASE on b: the price on the higher, the poster's gas on the lower
+  const r = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x84n), epoch: NOW }), NOW + 300_000, { network: "robinhood-testnet", arbL1: E, arbL1B: 2n * E, base: 2n * BASE, baseB: 3n * BASE });
   const repl = r.raws[1]!;
+  assert.ok(repl.maxFee >= 2n * (3n * BASE) + repl.tip, "priced on the higher base fee");
   const txBytes = BigInt(evmTx4MaxLength({ chainId: CHAIN_ID, nonce: 7n, maxPriorityFeePerGas: repl.tip, maxFeePerGas: repl.maxFee, gas: 1n << 32n, to: evmAddressOf(KEY), data: new Uint8Array(), authorizations: [] }));
   const l1 = evmPoolChainFee("robinhood-testnet", txBytes, [2n * E]);
   assert.ok(l1 > evmPoolChainFee("robinhood-testnet", txBytes, [E]), "the two estimates price apart");
@@ -1128,7 +1144,7 @@ test("the replacement's gas on Robinhood: 21,000 + the L1 poster's gas (the kit'
   assert.equal(repl.gas, 21_000n + poster + (poster + 4n) / 5n);
 });
 
-test("one provider's count never moves a lane (Q2-A): B answering the sell sender's counts 1,000 high, sales go at 7, 8, 9 and the one replacement at 7, none at 1007; one high answer then honest, the next sale is 8", async () => {
+test("one provider's count never moves a lane (Q2-A): B answering the sell sender's counts 1,000 high, sales go at 7, 8, 9 and one replacement at each, lowest first, none at 1007; one high answer then honest, the next sale is 8", async () => {
   let clock = NOW;
   const x: Calls = [];
   const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, [rpc(x, { receipt: () => null, tx: () => ({}), count: (t, who) => (who === SENDER && t === "pending" ? 7n + BigInt(sends(x).length) : 7n) }), rpc([], { receipt: () => null, tx: () => ({}), count: (_t, who) => (who === SENDER ? 1007n : 7n) })], () => clock);
@@ -1139,7 +1155,7 @@ test("one provider's count never moves a lane (Q2-A): B answering the sell sende
     clock = Number(SELL.deadline) * 1000 + at;
     await settle(() => false, 60);
   }
-  assert.deepEqual(sends(x).map(fieldsOf).map((f) => [f.type, f.nonce]), [[4, 7n], [4, 8n], [4, 9n], [2, 7n]]);
+  assert.deepEqual(sends(x).map(fieldsOf).map((f) => [f.type, f.nonce]), [[4, 7n], [4, 8n], [4, 9n], [2, 7n], [2, 8n], [2, 9n]]);
   // Q2-B: one high answer, then honest
   const y: Calls = [];
   let high = true;
@@ -1151,7 +1167,7 @@ test("one provider's count never moves a lane (Q2-A): B answering the sell sende
   assert.deepEqual(sends(y).map((r) => fieldsOf(r).nonce), [7n, 8n]);
 });
 
-test("a sale one provider's stale pool still counts (Q5): its fee covers 2 x base + tip, yet past its deadline plus the margin it is replaced once at 7, and the sales behind it are left to mine", async () => {
+test("a sale one provider's stale pool still counts (Q5): its fee covers 2 x base + tip, yet past its deadline plus the margin it is replaced once at 7, and the sales behind it, past theirs too, once each in the same tend", async () => {
   let clock = NOW;
   const x: Calls = [];
   const fee5 = 5n * 10n ** 13n;
@@ -1164,7 +1180,7 @@ test("a sale one provider's stale pool still counts (Q5): its fee covers 2 x bas
     await settle(() => false, 60);
   }
   const t = sends(x).map(fieldsOf);
-  assert.deepEqual(t.map((f) => [f.type, f.nonce]), [[4, 7n], [4, 8n], [4, 9n], [2, 7n]]);
+  assert.deepEqual(t.map((f) => [f.type, f.nonce]), [[4, 7n], [4, 8n], [4, 9n], [2, 7n], [2, 8n], [2, 9n]]);
   assert.ok(t[0]!.maxFee >= 2n * BASE + 1n, "the sale covered 2 x base + tip");
 });
 
@@ -1179,6 +1195,16 @@ test("a hole is only where neither provider returns the lane's send by hash (Q1)
   assert.equal(sends(x).length, 1, "Q1-A: no self-transfer at the live sale's nonce");
   assert.equal((await s.sell(freshBody("W-q1b", { sell: { deadline: NOW_S + 361n } }))).status, 200);
   assert.deepEqual(sends(x).map((r) => fieldsOf(r).nonce), [7n, 8n], "Q1-B");
+  // Q1-C: one provider's "not found" never cancels a send the other still returns
+  const y: Calls = [];
+  const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, [rpc(y, { receipt: () => null, tx: () => null }), rpc([], live)], () => clock);
+  clock = NOW;
+  assert.equal((await t.sell(body())).status, 200);
+  clock = NOW + 61_000;
+  await settle(() => false, 60);
+  assert.equal(sends(y).length, 1, "Q1-C: no self-transfer");
+  assert.equal((await t.sell(freshBody("W-q1c", { sell: { deadline: NOW_S + 361n } }))).status, 200);
+  assert.deepEqual(sends(y).map((r) => fieldsOf(r).nonce), [7n, 8n], "Q1-C: the next sale takes 8");
 });
 
 test("a withdraw repeat after its first send was dropped (no receipt and no tx on either provider past its deadline plus the margin) is sent again; until then it gets the first hash", async () => {
@@ -1214,6 +1240,123 @@ test("a withdraw repeat whose first send the lane's replacement took the nonce o
   assert.equal(again.status, 200, JSON.stringify(again.body));
   assert.notEqual((again.body as { hash: string }).hash, r.hash);
   assert.equal(sends(r.x).length, 3, "the withdraw sent again");
+});
+
+test("a stuck replacement whose maxFeePerGas still covers 2 x base + tip but whose tip is under the providers' is raised again; at their tip it is left", async () => {
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  const r = await stuck((s) => s.sell(body()), deadlineMs, { base: 2n * BASE });
+  const repl = r.raws[1]!;
+  await r.step({ atMs: deadlineMs + 200_000, base: BASE, tip: repl.tip });
+  assert.equal(sends(r.x).length, 2, "the base fee fell, the tip the same: covered");
+  await r.step({ atMs: deadlineMs + 300_000, tip: repl.tip + 1n });
+  assert.ok(repl.maxFee >= 2n * BASE + repl.tip + 1n, "its maxFeePerGas still covers");
+  const again = sends(r.x).map(fieldsOf);
+  assert.equal(again.length, 3, "raised for the tip");
+  assert.deepEqual([again[2]!.type, again[2]!.nonce], [2, 7n]);
+  assert.ok(again[2]!.tip >= repl.tip + 1n);
+});
+
+/** A chain for the held-lane tests, read the same on both providers: the sell sender's latest count `c`, pending past
+ *  each nonce from `c` that a send holds; a send at `c` and those after it mine at once, unless `drop` (every send
+ *  vanishes: no count, no tx) or `halt` (sends held unmined: counted at pending, returned by hash). `lagB` freezes
+ *  provider b's latest count at 7, and it returns no receipt. A W's own count stays at 7. */
+const chainOf = () => {
+  const st = { c: 7n, drop: false, halt: false, lagB: false };
+  const held = new Map<bigint, string>();
+  const mined = new Map<string, unknown>();
+  const mine = () => {
+    if (st.halt) return;
+    while (held.has(st.c)) {
+      mined.set(held.get(st.c)!, { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: `0x${(BASE + 1n).toString(16)}` });
+      held.delete(st.c);
+      st.c++;
+    }
+  };
+  const x: Calls = [];
+  const prov = (b: boolean, calls: Calls): EvmRpc => {
+    const r = rpc(calls, {
+      receipt: (h) => (mine(), b && st.lagB ? null : (mined.get(h) ?? null)),
+      tx: (h) => (mined.has(h) || [...held.values()].includes(h) ? { hash: h } : null),
+      count: (t, who) => {
+        if (who !== SENDER) return 7n;
+        mine();
+        if (t === "latest") return b && st.lagB ? 7n : st.c;
+        let n = st.c;
+        while (held.has(n)) n++;
+        return n;
+      },
+    });
+    return async (method, params) => {
+      const out = await r(method, params);
+      if (method === "eth_sendRawTransaction" && !st.drop) {
+        const n = fieldsOf(params[0] as string).nonce;
+        if (n >= st.c) held.set(n, out as string);
+        mine();
+      }
+      return out;
+    };
+  };
+  return { st, x, providers: [prov(false, x), prov(true, [])] as [EvmRpc, EvmRpc] };
+};
+
+test("a lane held behind a nonce the chain dropped recovers once the chain does: each held answer tends at most once per EVM_LANE_RETRY_S, sending the dropped nonce again whatever its price, and the first sale after the chain heals goes", async () => {
+  const ch = chainOf();
+  ch.st.drop = true;
+  let clock = NOW;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, ch.providers, () => clock);
+  assert.equal((await s.sell(body())).status, 200);
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  for (const at of [60_001, 200_000, 400_000, 700_000, 900_000]) {
+    clock = deadlineMs + at;
+    await settle(() => false, 60);
+  }
+  const atNonce = () => sends(ch.x).map((r) => fieldsOf(r).nonce);
+  const later = (label: string) => s.sell(freshBody(label, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
+  const before = sends(ch.x).length;
+  const h1 = await later("W-held-1");
+  assert.deepEqual([h1.status, code(h1), h1.retryAfterS], [503, "upstream", 60], JSON.stringify(h1.body));
+  assert.equal(sends(ch.x).length, before + 1, "the held answer sent 7 again");
+  clock += 30_000;
+  assert.equal((await later("W-held-2")).status, 503);
+  assert.equal(sends(ch.x).length, before + 1, "no second tend within EVM_LANE_RETRY_S");
+  clock += 30_000; // EVM_LANE_RETRY_S since the first held tend
+  assert.equal((await later("W-held-3")).status, 503);
+  assert.equal(sends(ch.x).length, before + 2, "one more once EVM_LANE_RETRY_S has passed");
+  assert.ok(atNonce().every((n) => n === 7n), `nothing sent behind 7: ${atNonce().join(",")}`);
+  assert.equal(new Set(sends(ch.x).filter((r) => fieldsOf(r).type === 2)).size, 1, "each resend the same signed self-transfer, never raised again");
+  // past the nonce's bound only a held answer tends: its resends' watches end at that bound, sending nothing
+  for (const step of [61_000, 61_000]) {
+    clock += step;
+    await settle(() => false, 60);
+  }
+  assert.equal(sends(ch.x).length, before + 2, "nothing sent in the background past the bound");
+  ch.st.drop = false; // the chain heals
+  clock += 1_000;
+  const healed = await later("W-healed");
+  assert.equal(healed.status, 200, JSON.stringify(healed.body));
+  assert.deepEqual(atNonce().slice(-2), [7n, 8n], "7 sent again and mined, then the sale at 8");
+  assert.equal(ch.st.c, 9n);
+});
+
+test("a lane held while the chain halts recovers when it resumes, though provider b's latest count stays behind: a held send whose receipt either provider returns is mined", async () => {
+  const ch = chainOf();
+  ch.st.halt = true;
+  ch.st.lagB = true;
+  let clock = NOW;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, ch.providers, () => clock);
+  assert.equal((await s.sell(body())).status, 200);
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  for (const at of [60_001, 200_000, 400_000, 700_000, 900_000]) {
+    clock = deadlineMs + at;
+    await settle(() => false, 60);
+  }
+  const later = (label: string) => s.sell(freshBody(label, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
+  assert.equal((await later("W-halt-1")).status, 503, "held while the chain halts");
+  ch.st.halt = false; // the chain resumes: 7 mines on a, b's latest count stays at 7
+  clock += 1_000;
+  const resumed = await later("W-resumed");
+  assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
+  assert.deepEqual(sends(ch.x).map((r) => fieldsOf(r).nonce).at(-1), 8n);
 });
 
 test("the sender's whole budget holds every sale (H1): 20 clients, each with one paid landing, then their reverting sales from fresh Ws and tokens stop at EVM_SELL_UNPAID_BUDGET_WEI with 429 and its wait", async () => {
