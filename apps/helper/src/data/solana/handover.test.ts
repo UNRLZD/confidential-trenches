@@ -224,3 +224,25 @@ test("the last good bars are handed over across a swap for a day, not an hour", 
   const a = await next.candles(PUMP, "1m", null, 24);
   assert.deepEqual([a.status, a.asOfMs], [200, NOW], "served from the handover, dated by its read");
 });
+
+test("card helper-chart-fresh: history before a time held past its hour stays a refresh, whatever its age: with the window at the refresh lane's room it is served as held and a cold token's first read finds its calls", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const budget = geckoBudget(now);
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: budget, holdersRpc: chain(() => false) });
+  const COLD = "Q1vecEMQEgDyrw1txmBgFwUrkeQurqkEe1bGMzFpump";
+  const before = Math.floor(NOW / 1000) - 600; // the minute bars before our first, ten minutes back
+  const first = await tok.candles(PUMP, "1m", before, 500);
+  assert.equal(first.status, 200);
+  assert.ok(JSON.parse(first.body).candles.length > 0);
+  t += 2 * 3_600_000; // past HISTORY_FRESH_MS and REFRESH_URGENT_MS
+  assert.deepEqual([budget.take("lists"), budget.take("lists"), budget.take("lists")], [true, true, true]);
+  const ohlcv = () => gt.urls.filter((u) => u.includes("/ohlcv/")).length;
+  const n = ohlcv();
+  const held = await tok.candles(PUMP, "1m", before, 500);
+  assert.equal(held.status, 200, held.body);
+  assert.equal(ohlcv(), n, "the history held is not read again past the refresh lane's room");
+  const cold = await tok.candles(COLD, "1m", null, 24);
+  assert.equal(cold.status, 200, `the cold token's first read is served (${cold.body.slice(0, 80)})`);
+});

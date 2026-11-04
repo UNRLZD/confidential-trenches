@@ -289,3 +289,34 @@ test("card helper-chart-fresh: a listed token with no pool of ours, its GeckoTer
   }
   s.stop();
 });
+
+test("card helper-chart-fresh: GeckoTerminal history before a time held past its hour stays a refresh: with the window at the refresh lane's room it is served as held, no call made, and a cold token's first read finds its calls", async () => {
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const start = Date.parse("2026-11-02T13:53:00Z");
+  const clock = { t: start };
+  const ohlcv: string[] = [];
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: `0x${"ab".repeat(32)}` } }] }), { status: 200 });
+    ohlcv.push(url);
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const budget = geckoBudget(() => clock.t);
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: budget });
+  const before = Math.floor(start / 1000) - 600;
+  const first = JSON.parse((await s.candles(`0x${"34".repeat(20)}`, "1m", before, 60)).body);
+  assert.ok(first.candles.length > 0 && ohlcv.length === 1);
+  clock.t = start + 2 * 3_600_000;
+  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE; i++) assert.equal(budget.take("lists"), true);
+  const held = JSON.parse((await s.candles(`0x${"34".repeat(20)}`, "1m", before, 60)).body);
+  assert.deepEqual([held.candles, ohlcv.length], [first.candles, 1], "the history held is served, not read again");
+  const cold = await s.candles(`0x${"35".repeat(20)}`, "1m", null, 60);
+  assert.equal(cold.status, 200, cold.body);
+  assert.equal(JSON.parse(cold.body).src, "geckoterminal", "a cold token's first read finds its calls");
+  s.stop();
+});
