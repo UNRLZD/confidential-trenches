@@ -499,7 +499,10 @@ async fn vt_s03_deposit_refusals(kind: TokenKind) -> R<()> {
     prepay(&h, &relayer, &p5, gross(m.nonce + 1)).await?;
     let sink = h.account("sink", 5).await?;
     let _ = h.storage_deposit(&h.root, sink.id()).await?;
-    let _ = h.call(&u5, &h.token, "ft_transfer", json!({"receiver_id": sink.id(), "amount": HELD.to_string()}), NearToken::from_yoctonear(1), Gas::from_tgas(30)).await?;
+    // U holds no NEAR for gas (the kit's U only signs): its own transfer out goes as its DelegateAction too
+    h.delegate_call(&relayer, &u5, &h.token, "ft_transfer", json!({"receiver_id": sink.id(), "amount": HELD.to_string()}), 1, Gas::from_tgas(30))
+        .await?
+        .expect_all_ok("U's own transfer out")?;
     assert_eq!(h.token_balance(u5.id()).await?, 0, "U still holds tokens");
     let before = (h.token_balance(&h.vault).await?, vault_state(&h).await?);
     let o = u_call(&h, &relayer, &u5, 1_000_000, &message(&p5, u5.id())).await?;
