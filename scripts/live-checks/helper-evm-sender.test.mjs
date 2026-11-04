@@ -24,11 +24,30 @@ const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (run, asked, f, network) => ({ ...run, pools: run.pools.map((p) => (network && p.network !== network ? p : { ...p, reads: p.reads.map((x) => (x.asked === asked ? f(x) : x)) })) });
 const body = (x, f) => ({ ...x, body: JSON.stringify(f(JSON.parse(x.body))) });
 const OTHER = "0x000000000000000000000000000000000000beef";
+/** The kit's list with each testnet's sell sender pin set to `pins[network]` (null: no pin). The recorded good run is a
+ *  local helper with throwaway sell keys (the answers' notes), so it is judged against its own senders as the pins; the
+ *  kit's real pins are the helper box's keys, which only the deployed helper holds. */
+const venuesWith = (pins) => {
+  const v = evmPoolVenues();
+  const out = { ...v };
+  for (const [n, pin] of Object.entries(pins)) {
+    const { sellSender: _, ...rest } = v[n];
+    out[n] = pin === null ? rest : { ...rest, sellSender: pin };
+  }
+  return out;
+};
+const LOCAL = () => venuesWith(sendersOf(A.good));
+/** judge with the recording's own senders as the pins, so each case below fails for its one change alone */
+const judgeL = (run) => judge(run, { venues: LOCAL() });
 
 test("recorded good run: both testnet pools' fee answers name a sell sender, every plant refused with its own code: PASS", () => {
-  const r = judge(A.good);
+  const r = judge(A.good, { venues: LOCAL() });
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.deepEqual(A.good.pools.map((p) => p.network), Object.keys(evmPoolRecords()), "a pool for each deploy record");
+  // against the kit's own pins (the helper box's sell keys), the local helper's throwaway senders fail each testnet
+  const kit = judge(A.good);
+  assert.equal(kit.ok, false);
+  for (const n of NETWORKS) assert.ok(bad(kit).some((l) => l.startsWith(`BAD [${n} fee] sell_sender`) && l.includes(`the kit's pin ${evmPoolVenues()[n].sellSender}`)), bad(kit).join("\n"));
 });
 
 test("recorded bad run: HELPER_HOST with no EVM pool (404 on the fee and on every plant): FAIL", () => {
@@ -42,16 +61,19 @@ test("the sell sender: where the kit pins one, the fee answer's sell_sender must
   assert.equal(SENDER_FIELD, "sell_sender");
   const sender = JSON.parse(g.pools[0].reads.find((x) => x.asked === "fee").body)[SENDER_FIELD];
   assert.match(sender, /^0x[0-9a-f]{40}$/);
-  const venues = evmPoolVenues();
+  const venues = LOCAL();
   const pinned = (pin) => ({ ...venues, [g.pools[0].network]: { ...venues[g.pools[0].network], sellSender: pin } });
+  assert.equal(evmPoolVenues()["base-sepolia"].sellSender, "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553");
+  assert.equal(evmPoolVenues()["robinhood-testnet"].sellSender, "0xd12d83097671d731df2db731e973ad9a07673607");
   assert.equal(judge(g, { venues: pinned(sender) }).ok, true, "the pin is the sender");
   assert.equal(judge(g, { venues: pinned(sender.toUpperCase().replace("0X", "0x")) }).ok, true, "a pin in another case is the same address");
   const other = judge(g, { venues: pinned(OTHER) });
   assert.equal(other.ok, false);
   assert.ok(bad(other).some((l) => l.includes(`the kit's pin ${OTHER}`)), bad(other).join("\n"));
-  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, [SENDER_FIELD]: "0x1234" })))).ok, false, "a sell sender that is no address");
+  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, [SENDER_FIELD]: "0x1234" }))), { venues: venuesWith({ "base-sepolia": null, "robinhood-testnet": null }) }).ok, false, "a sell sender that is no address");
   const none = edit(g, "fee", (x) => body(x, (b) => ({ ...b, [SENDER_FIELD]: null })), g.pools[0].network);
-  assert.equal(judge(none).ok, true, "no sell key and no pin: null");
+  assert.equal(judge(none, { venues: venuesWith({ ...sendersOf(g), [g.pools[0].network]: null }) }).ok, true, "no sell key and no pin: null");
+  assert.equal(judge(none).ok, false, "no sell key where the kit pins one (its own list)");
   assert.equal(judge(none, { venues: pinned(sender) }).ok, false, "no sell key where the kit pins one");
   assert.deepEqual(sendersOf(none), { ...sendersOf(g), [g.pools[0].network]: null });
   assert.equal(sendersOf(g)[g.pools[0].network], sender);
@@ -60,31 +82,31 @@ test("the sell sender: where the kit pins one, the fee answer's sell_sender must
 test("the fee answer: a field missing or added, another chain, network or pool, an off-grid epoch: each FAIL", () => {
   const g = A.good;
   for (const k of FIELDS) {
-    assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => {
+    assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => {
       const { [k]: _, ...rest } = b;
       return rest;
     }))).ok, false, `${k} missing`);
   }
-  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, extra: 1 })))).ok, false, "a field added");
-  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, chain: "solana" })))).ok, false);
-  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, network: "base" })))).ok, false);
-  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, pool: OTHER })))).ok, false);
-  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, epoch_start_ms: b.epoch_start_ms + 1 })))).ok, false);
-  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "-1" })))).ok, false);
-  assert.equal(judge(edit(g, "fee", (x) => ({ ...x, status: 503 }))).ok, false);
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, extra: 1 })))).ok, false, "a field added");
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, chain: "solana" })))).ok, false);
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, network: "base" })))).ok, false);
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, pool: OTHER })))).ok, false);
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, epoch_start_ms: b.epoch_start_ms + 1 })))).ok, false);
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "-1" })))).ok, false);
+  assert.equal(judgeL(edit(g, "fee", (x) => ({ ...x, status: 503 }))).ok, false);
 });
 
 test("a plant sent (200 with a hash) or refused with another code: each FAIL, on each pool", () => {
   const g = A.good;
   for (const { network } of g.pools) {
     for (const [asked, , code] of PLANTS) {
-      const sent = judge(edit(g, asked, (x) => ({ ...x, status: 200, body: `{"hash":"0x${"11".repeat(32)}"}` }), network));
+      const sent = judgeL(edit(g, asked, (x) => ({ ...x, status: 200, body: `{"hash":"0x${"11".repeat(32)}"}` }), network));
       assert.equal(sent.ok, false, `${network} ${asked} sent`);
       assert.ok(bad(sent).some((l) => l.startsWith(`BAD [${network} ${asked}]`)), bad(sent).join("\n"));
       const other = code === "simulation_failed" ? "auth_nonce" : "simulation_failed";
-      assert.equal(judge(edit(g, asked, (x) => ({ ...x, body: `{"error":{"code":"${other}"}}` }), network)).ok, false, `${network} ${asked} as ${other}`);
-      assert.equal(judge(edit(g, asked, (x) => ({ ...x, status: x.status === 400 ? 422 : 400 }), network)).ok, false, `${network} ${asked} at another status`);
-      assert.equal(judge({ ...g, pools: g.pools.map((p) => (p.network === network ? { ...p, reads: p.reads.filter((x) => x.asked !== asked) } : p)) }).ok, false, `${network} ${asked} not read`);
+      assert.equal(judgeL(edit(g, asked, (x) => ({ ...x, body: `{"error":{"code":"${other}"}}` }), network)).ok, false, `${network} ${asked} as ${other}`);
+      assert.equal(judgeL(edit(g, asked, (x) => ({ ...x, status: x.status === 400 ? 422 : 400 }), network)).ok, false, `${network} ${asked} at another status`);
+      assert.equal(judgeL({ ...g, pools: g.pools.map((p) => (p.network === network ? { ...p, reads: p.reads.filter((x) => x.asked !== asked) } : p)) }).ok, false, `${network} ${asked} not read`);
     }
   }
 });
@@ -92,14 +114,14 @@ test("a plant sent (200 with a hash) or refused with another code: each FAIL, on
 test("X-Helper-Commit missing or short on any answer, or a pool not read: FAIL", () => {
   const g = A.good;
   for (const asked of ["fee", ...PLANTS.map(([a]) => a)]) {
-    const none = judge(edit(g, asked, (x) => ({ ...x, headers: Object.fromEntries(Object.entries(x.headers).filter(([k]) => k !== "x-helper-commit")) })));
+    const none = judgeL(edit(g, asked, (x) => ({ ...x, headers: Object.fromEntries(Object.entries(x.headers).filter(([k]) => k !== "x-helper-commit")) })));
     assert.equal(none.ok, false, `${asked}: no commit`);
     assert.ok(bad(none).some((l) => l.includes(`${asked}] X-Helper-Commit: none`)), bad(none).join("\n"));
-    assert.equal(judge(edit(g, asked, (x) => ({ ...x, headers: { ...x.headers, "x-helper-commit": x.headers["x-helper-commit"].slice(0, 7) } }))).ok, false, `${asked}: a short commit`);
+    assert.equal(judgeL(edit(g, asked, (x) => ({ ...x, headers: { ...x.headers, "x-helper-commit": x.headers["x-helper-commit"].slice(0, 7) } }))).ok, false, `${asked}: a short commit`);
   }
-  for (const n of NETWORKS) if (g.pools.some((p) => p.network === n)) assert.equal(judge({ ...g, pools: g.pools.filter((p) => p.network !== n) }).ok, false, `${n} not read`);
-  assert.equal(judge({ ...g, pools: [] }).ok, false, "no pool read");
-  assert.equal(judge({ ...g, pools: g.pools.map((p) => ({ ...p, pool: OTHER })) }).ok, false, "another pool than the record's");
+  for (const n of NETWORKS) if (g.pools.some((p) => p.network === n)) assert.equal(judgeL({ ...g, pools: g.pools.filter((p) => p.network !== n) }).ok, false, `${n} not read`);
+  assert.equal(judgeL({ ...g, pools: [] }).ok, false, "no pool read");
+  assert.equal(judgeL({ ...g, pools: g.pools.map((p) => ({ ...p, pool: OTHER })) }).ok, false, "another pool than the record's");
 });
 
 // ---- The plants against the helper's own checks ----

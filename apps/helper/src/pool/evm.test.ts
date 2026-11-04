@@ -331,9 +331,14 @@ test("the EVM pool sell sender's address is the kit's pinned sell sender for its
   const noSell: Record<string, string> = { ...env };
   delete noSell.POOL_EVM_SELL_KEY_BASE_SEPOLIA;
   assert.equal(evmPoolSendersFromEnv(noSell, pinned(own)).get(POOL)!.sellSender, null);
-  // the kit's own list pins no sell sender on any chain yet (no public read of the helper's sender address): it starts
-  for (const c of ["base", "robinhood", "base-sepolia", "robinhood-testnet"] as const) assert.equal(Object.hasOwn(kit[c], "sellSender"), false, c);
-  assert.equal(evmPoolSendersFromEnv(env).get(POOL)!.sellSender, own);
+  // the kit's own list pins each testnet's sell sender (the helper box's key) and no mainnet's yet: a test key on Base
+  // Sepolia is refused at start against the kit's own pin; on a chain with no pin it starts
+  assert.equal(kit["base-sepolia"].sellSender, "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553");
+  assert.equal(kit["robinhood-testnet"].sellSender, "0xd12d83097671d731df2db731e973ad9a07673607");
+  for (const c of ["base", "robinhood"] as const) assert.equal(Object.hasOwn(kit[c], "sellSender"), false, c);
+  assert.throws(() => evmPoolSendersFromEnv(env), (e: Error) => e.message.includes("POOL_EVM_SELL_KEY_BASE_SEPOLIA") && e.message.includes(kit["base-sepolia"].sellSender!));
+  const unpinned = { ...kit, "base-sepolia": Object.fromEntries(Object.entries(kit["base-sepolia"]).filter(([k]) => k !== "sellSender")) as typeof kit["base-sepolia"] };
+  assert.equal(evmPoolSendersFromEnv(env, unpinned).get(POOL)!.sellSender, own);
 });
 
 test("the withdraw's deadline again after the queue's wait: a carry whose deadline came within the margin while it waited is deadline_near, nothing sent", async () => {
