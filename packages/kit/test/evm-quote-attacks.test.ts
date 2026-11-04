@@ -373,6 +373,63 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   assert.deepEqual(await quoteOn(pools, "0x00000000000000000000000000000000000a22a2", seededRoute("0x00000000000000000000000000000000000a22a2"), broken), { accepted: false, code: "rpc_error" });
 });
 
+test("card evm-quote-head-watch: a scan provider that fails a full span (a timeout, too many logs) is asked by halves, and the real pool it finds still holds a seeded one", async () => {
+  const token = "0x00000000000000000000000000000000000a33a3";
+  const pools = [seeded(token), real(token)];
+  const asked: [number, number][] = [];
+  const inner = scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked);
+  // base-rpc.publicnode.com, 2026-11-04 10:50Z: a 50,000-block span of USDC's logs took up to 10.8 s, past the timeout
+  const slow: EvmRpc = async (calls) => {
+    const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
+    if (calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 12_500) throw new Error("The operation was aborted due to timeout");
+    return inner(calls);
+  };
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), slow), below);
+  assert.ok(asked.length > 0 && asked.every(([a, b]) => b - a + 1 <= 12_500), "every answered request is a half, a quarter or an eighth of a span");
+  // a span answered with more logs than SCAN_MAX_LOGS is asked by halves too
+  const token2 = "0x00000000000000000000000000000000000a44a4";
+  const pools2 = [seeded(token2), real(token2)];
+  const inner2 = scanner(5_000_000, [{ key: real(token2).key, at: 4_500_000 }]);
+  const full: EvmRpc = async (calls) => {
+    const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
+    const out = await inner2(calls);
+    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 25_000 ? out.map((o) => ({ ...(o as object), result: new Array(10_001).fill(null) })) : out;
+  };
+  assert.deepEqual(await quoteOn(pools2, token2, seededRoute(token2), full), below);
+});
+
+test("card evm-quote-head-watch: the agreed block is picked once the token's scan has its logs, so the reads land at a block no older than the scan", async () => {
+  const token = "0x00000000000000000000000000000000000a55a5";
+  const pools = [seeded(token), real(token)];
+  const order: string[] = [];
+  const inner = scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }]);
+  const scan: EvmRpc = async (calls) => {
+    const out = await inner(calls);
+    if (calls[0]!.method === "eth_getLogs") order.push("logs");
+    return out;
+  };
+  const watched = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest")) order.push("head");
+    return rpc(calls);
+  };
+  const v = await verdict(
+    evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [watched(chain(pools, 0)), watched(chain(pools, 1))], NOW, scan),
+  );
+  assert.deepEqual(v, below);
+  assert.equal(order.filter((x) => x === "logs").length, 20);
+  assert.ok(order.lastIndexOf("logs") < order.indexOf("head"), `the heads after every log read: ${order.join(" ")}`);
+});
+
+test("card evm-quote-head-watch: a scan that ends more than maxLag blocks behind the agreed block is scanned on up to it, and a pool made in those blocks still holds a seeded one", async () => {
+  const token = "0x00000000000000000000000000000000000a66a6";
+  const pools = [seeded(token), real(token)];
+  const asked: [number, number][] = [];
+  // the scan provider's head 4,999,990, ten blocks behind the agreed 5,000,000 (Base's maxLag 5); the real pool at 4,999,995
+  const both = scanner(4_999_990, [{ key: real(token).key, at: 4_999_995 }], asked);
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), both), below);
+  assert.deepEqual(asked.slice(-2), [[4_999_991, 5_000_000], [4_999_991, 5_000_000]]);
+});
+
 test("N1b a seeded standard pool is held to the token's real pool the caller lists", async () => {
   const token = "0x00000000000000000000000000000000000b11b1";
   assert.deepEqual(await quoteOn([seeded(token), real(token)], token, seededRoute(token), undefined, [real(token).key]), below);

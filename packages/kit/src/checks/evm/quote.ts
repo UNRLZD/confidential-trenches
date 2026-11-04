@@ -429,6 +429,82 @@ async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, nowM
 /** The oldest block a quote reads, and the oldest quote a buy is built from, behind the device's clock. */
 export const EVM_QUOTE_MAX_AGE_MS = 30_000;
 
+// The held head (card evm-quote-head-watch): the last block both providers agreed on and confirmed by number (same hash
+// and time), kept between quotes so a tap runs only the read round. A quote reads at it only while its block is at
+// most EVM_HEAD_REUSE_MS behind the device's clock, well inside the 30 s rule and inside the state the pinned providers
+// keep (Robinhood's about 13 s: 2 of 11 USDG quotes refused when their reads landed past it, 2026-11-04, card
+// evm-pool-buy-quote fold 8); past it the quote agrees on a new block as before. While quotes are asked the head is read
+// again every EVM_HEAD_EVERY_MS in the background, each new one held only once confirmed, until EVM_HEAD_IDLE_MS after
+// the last quote. A held block never comes from one provider alone, and the stale_quote rule is unchanged.
+export const EVM_HEAD_REUSE_MS = 5_000;
+const EVM_HEAD_EVERY_MS = 1_500;
+const EVM_HEAD_IDLE_MS = 60_000;
+export type EvmHeadWatch = {
+  /** The block a quote reads at and its confirmation, which runs beside the reads (a held block's already passed). */
+  head(nowMs: number): Promise<{ block: Block; confirm: () => Promise<void> }>;
+  /** Keeps the head fresh in the background until EVM_HEAD_IDLE_MS from now. */
+  keep(): void;
+};
+/** A held head on the providers `rpcs`; `clock` is the device's (Date.now; the tests set their own), and `background`
+ *  false reads only when a quote asks (the tests that count reads). */
+export function evmHeadWatch(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, clock: () => number = Date.now, background = true): EvmHeadWatch {
+  let held: Block | null = null;
+  let until = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let refreshing: Promise<void> | null = null;
+  const hold = (b: Block) => {
+    if (held === null || b.number > held.number) held = b;
+  };
+  const refresh = () =>
+    (refreshing ??= (async () => {
+      try {
+        const { block, confirm } = await agreedBlock(rpcs, maxLag, clock());
+        await confirm();
+        hold(block);
+      } catch {
+        // nothing held changes: the next quote past EVM_HEAD_REUSE_MS agrees on its own block
+      } finally {
+        refreshing = null;
+      }
+    })());
+  const tick = () => {
+    timer = null;
+    if (clock() >= until) return;
+    void refresh().then(() => {
+      if (timer === null && clock() < until) {
+        timer = setTimeout(tick, EVM_HEAD_EVERY_MS);
+        (timer as { unref?: () => void }).unref?.(); // never holds a process open
+      }
+    });
+  };
+  const keep = () => {
+    if (!background) return;
+    until = clock() + EVM_HEAD_IDLE_MS;
+    if (timer === null && refreshing === null) tick();
+  };
+  return {
+    keep,
+    async head(nowMs) {
+      keep();
+      // the device's clock now: a quote asks after its scan, which may have run for seconds since `nowMs`
+      const t = Math.max(nowMs, clock());
+      const h = held;
+      if (h !== null && t - Number(h.timestamp) * 1000 <= EVM_HEAD_REUSE_MS) return { block: h, confirm: async () => {} };
+      const a = await agreedBlock(rpcs, maxLag, t);
+      return {
+        block: a.block,
+        confirm: async () => {
+          await a.confirm();
+          hold(a.block);
+        },
+      };
+    },
+  };
+}
+// the pinned providers' held heads, one per chain, made at a chain's first quote (no top-level call: the kit's index
+// reaches the signing page's bundle)
+const WATCHES = new Map<EvmPoolChain, EvmHeadWatch>();
+
 const v3Direct = (weth: string, token: string, fee: number): EvmV3Route => ({ venue: "uniswap-v3", tokens: [weth, token], fees: [fee] });
 const v4Direct = (from: string, to: string, [fee, tickSpacing]: readonly [number, number]): EvmV4Route => ({
   venue: "uniswap-v4",
@@ -517,6 +593,12 @@ const INITIALIZE = "dd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d
 const SCANS = new Map<string, { to: number; pools: EvmPoolKey[] }>();
 const SCAN_TOKENS = 4096;
 const SCAN_MAX_LOGS = 10_000;
+/** A scan request that fails or answers more logs than SCAN_MAX_LOGS is asked again as its two halves, at most
+ *  SCAN_SPLITS times over (card evm-quote-head-watch): base-rpc.publicnode.com took 3.6 to 10.8 s for a 50,000-block
+ *  span of USDC's Initialize logs with 20 at once, past the 10 s timeout, and 0.9 to 2.4 s for 10,000 (2026-11-04
+ *  10:50Z), so a cold scan of USDC refused every quote and never kept what it read. At the smallest span the request is
+ *  asked as before (askScan) and a failure refuses. */
+const SCAN_SPLITS = 3;
 /** The most currencies one getLogs request names: an OR of topics, so the currencies of a quote's scan cost the
  *  requests of one. */
 const SCAN_OR = 256;
@@ -563,12 +645,14 @@ async function scanHeadOf(rpc: EvmRpc, gate: Gate): Promise<bigint> {
   if (scanHead > BigInt(Number.MAX_SAFE_INTEGER)) return refuse("rpc_disagree", "the scan provider's head is past any block");
   return scanHead;
 }
-/** The scan of the currencies `cs` up to the scan provider's head, which must be within `maxLag` blocks of the agreed
- *  block `agreed` (review of 5452011, S2: a head of 2^40 scanned an empty future and its end was kept): a head behind
- *  it misses at most the pools of those blocks, for this quote only; one ahead of it reads pools the agreed block does
- *  not hold yet, which its extsload reads drop. The currencies that scan from the same block share each request, as
- *  an OR of topics. `commit` keeps what it read; the quote calls it only once its block is confirmed on both
- *  providers. */
+/** The scan of the currencies `cs` up to the scan provider's head, then the agreed block `agreed()`, picked once those
+ *  logs are in (card evm-quote-head-watch: a block picked before a long scan had aged past what Robinhood's providers
+ *  keep of state by the reads). The head must not be more than `maxLag` blocks past the agreed block (review of
+ *  5452011, S2: a head of 2^40 scanned an empty future and its end was kept): one ahead of it reads pools the agreed
+ *  block does not hold yet, which its extsload reads drop. A head behind it within `maxLag` misses at most the pools of
+ *  those blocks, for this quote only; one further behind (the scan outlasted maxLag blocks) is scanned on up to the
+ *  agreed block. The currencies that scan from the same block share each request, as an OR of topics. `commit` keeps
+ *  what it read; the quote calls it only once its block is confirmed on both providers. */
 async function scanPools(
   chain: EvmPoolChain,
   cs: readonly string[],
@@ -577,7 +661,7 @@ async function scanPools(
   pm: string,
   rpc: EvmRpc,
   s: { span: number; depth: number; parallel: number; orSpan?: number },
-  agreed: Promise<bigint>,
+  agreed: () => Promise<bigint>,
   maxLag: bigint,
   gate: Gate,
   headOfScan: Promise<bigint>,
@@ -598,15 +682,16 @@ async function scanPools(
   for (const e of each) groups.set(e.from, [...(groups.get(e.from) ?? []), e]);
   const w = (c: string) => "0x" + word(BigInt(c));
   const jobs: { part: Each[]; a: number; b: number }[] = [];
-  for (const [from, g] of groups) {
+  const jobsOf = (g: Each[], from: number, to: number) => {
     for (let i = 0; i < g.length; i += SCAN_OR) {
       const part = g.slice(i, i + SCAN_OR);
       // a provider may span fewer blocks a request when a topic position holds more than one value (orSpan)
       const span = part.length === 1 ? s.span : Math.min(s.span, s.orSpan ?? s.span);
-      for (let a = from; a <= head; a += span) jobs.push({ part, a, b: Math.min(head, a + span - 1) });
+      for (let a = from; a <= to; a += span) jobs.push({ part, a, b: Math.min(to, a + span - 1) });
     }
-  }
-  const one = async ({ part, a, b }: (typeof jobs)[number]) => {
+  };
+  for (const [from, g] of groups) jobsOf(g, from, head);
+  const one = async ({ part, a, b }: (typeof jobs)[number], splits = SCAN_SPLITS): Promise<{ part: Each[]; a: number; b: number; logs: unknown[] }[]> => {
     const f = (topics: (string | string[] | null)[]) => ({ method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics }] });
     const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));
     // Initialize's topics are the event, the pool id, currency0 and currency1 (a log read on base-rpc.publicnode.com,
@@ -614,18 +699,30 @@ async function scanPools(
     // the native asset (address 0, always currency0) or WETH, one value a position
     const e0 = "0x" + INITIALIZE;
     const filters = kind === "all" ? [[e0, null, t], [e0, null, null, t]] : [[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]];
-    const out = await gate(() => askScan(rpc, filters.map(f)));
-    return out.map((x) => {
-      const r = (x as { result?: unknown } | null)?.result;
-      if (!Array.isArray(r) || r.length > SCAN_MAX_LOGS) return refuse("rpc_error", "the scan provider answered no logs");
-      return { part, a, b, logs: r as unknown[] };
-    });
+    const logsOf = (out: readonly unknown[]) => out.map((x) => (x as { result?: unknown } | null)?.result);
+    const fine = (rs: unknown[]) => rs.every((r) => Array.isArray(r) && r.length <= SCAN_MAX_LOGS);
+    if (splits > 0 && b > a) {
+      const rs = await gate(() => ask(rpc, filters.map(f))).then(logsOf, () => null);
+      if (rs !== null && fine(rs)) return rs.map((r) => ({ part, a, b, logs: r as unknown[] }));
+      const mid = a + Math.floor((b - a) / 2);
+      return (await Promise.all([one({ part, a, b: mid }, splits - 1), one({ part, a: mid + 1, b }, splits - 1)])).flat();
+    }
+    const rs = logsOf(await gate(() => askScan(rpc, filters.map(f))));
+    if (!fine(rs)) return refuse("rpc_error", "the scan provider answered no logs");
+    return rs.map((r) => ({ part, a, b, logs: r as unknown[] }));
   };
-  const reading = Promise.all(jobs.map(one));
-  reading.catch(() => {}); // a refusal below never awaits it
-  const b = await agreed;
-  if (scanHead - b > maxLag || b - scanHead > maxLag) return refuse("rpc_disagree", `the scan provider's head ${scanHead} is more than ${maxLag} blocks from the agreed block ${b}`);
-  for (const { part, a, b, logs } of (await reading).flat()) {
+  const got = (await Promise.all(jobs.map((j) => one(j)))).flat();
+  const b = await agreed();
+  if (scanHead - b > maxLag) return refuse("rpc_disagree", `the scan provider's head ${scanHead} is more than ${maxLag} blocks past the agreed block ${b}`);
+  let to = head;
+  if (b - scanHead > maxLag) {
+    // the scan outlasted maxLag blocks: on up to the agreed block, every currency from the block after the head
+    jobs.length = 0;
+    jobsOf(each, head + 1, Number(b));
+    got.push(...(await Promise.all(jobs.map((j) => one(j)))).flat());
+    to = Number(b);
+  }
+  for (const { part, a, b, logs } of got) {
     for (const l of logs) {
       const o = l as { address?: unknown; topics?: unknown; data?: unknown; blockNumber?: unknown };
       const topics = o?.topics;
@@ -649,7 +746,7 @@ async function scanPools(
   const commit = () => {
     for (const e of each) {
       if (!SCANS.has(e.key) && SCANS.size >= SCAN_TOKENS) SCANS.delete(SCANS.keys().next().value!);
-      SCANS.set(e.key, { to: Math.max(head, e.cached?.to ?? 0), pools: e.pools });
+      SCANS.set(e.key, { to: Math.max(to, e.cached?.to ?? 0), pools: e.pools });
     }
   };
   return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };
@@ -664,8 +761,10 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   const p = venue(req.chain).providers;
   if (p === undefined) return refuse("no_quoter", `${req.chain} has no pinned providers`);
   const s = venue(req.chain).scan;
+  let watch = WATCHES.get(req.chain);
+  if (watch === undefined) WATCHES.set(req.chain, (watch = evmHeadWatch(evmProviders(p, fetch), venue(req.chain).maxLag)));
   // a scan's answer is a list of logs, bounded by the scan provider's own cap per request (16 MiB read at most)
-  return evmPoolBuyQuoteWith(req, evmProviders(p, fetch), Date.now(), s === undefined ? undefined : evmJsonRpc(s.url, fetch, 16 << 20));
+  return evmPoolBuyQuoteWith(req, evmProviders(p, fetch), Date.now(), s === undefined ? undefined : evmJsonRpc(s.url, fetch, 16 << 20), watch);
 }
 
 /** Two providers from two https URLs on different hosts. */
@@ -687,7 +786,7 @@ export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): [E
 
 /** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
  *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
-export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc): Promise<EvmPoolBuyQuote> {
+export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, watch?: EvmHeadWatch): Promise<EvmPoolBuyQuote> {
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
   if (!Number.isFinite(nowMs)) return refuse("bad_request", "the device's clock");
   const { chain, token, amountIn, slippageBps } = req;
@@ -771,16 +870,22 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // liquidity, which a narrow range inflates for the price of a dust position) decides what is read, quoted or
   // refused (review of 2afa8b6): a bound only leaves pools unread, and what is read is priced by its quote at the
   // user's own amount
-  const agreed = agreedBlock(rpcs, v.maxLag, nowMs);
-  const agreedNumber = agreed.then((x) => x.block.number);
-  agreedNumber.catch(() => {}); // a scan that fails first never awaits it; Promise.all below reports the heads' refusal
+  // the agreed block, picked once (the held head while fresh), after the token's scan has its logs; a held head is
+  // checked against the 30 s rule like a new one
+  let agreed: ReturnType<typeof agreedBlock> | undefined;
+  const agreedOnce = () =>
+    (agreed ??= (watch === undefined ? agreedBlock(rpcs, v.maxLag, nowMs) : watch.head(nowMs)).then((x) =>
+      nowMs - Number(x.block.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS ? refuse("stale_quote", `block ${x.block.number} is more than 30 s old`) : x,
+    ));
+  const agreedNumber = () => agreedOnce().then((x) => x.block.number);
   const gate = gateOf(v.scan?.parallel ?? 1);
   let headOfScan: Promise<bigint> | undefined;
   const scanOf = (cs: readonly string[], kind: ScanKind) =>
     scan !== undefined && v.poolManager !== undefined && v.scan !== undefined && cs.length > 0
       ? scanPools(chain, cs, kind, lower(v.weth), v.poolManager, scan, v.scan, agreedNumber, v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)))
       : null;
-  const [{ block, confirm }, scanned] = await Promise.all([agreed, scanOf([lower(token)], "all")]);
+  const scanned = await scanOf([lower(token)], "all");
+  const { block, confirm } = await agreedOnce();
   const pinned = new Set(v.hookedPools.map((h) => lower(h.hooks)));
   const replaced = (h: string) => h !== NATIVE && !pinned.has(h);
   // the override of a read through pools with these hooks: each hook not pinned, replaced by the hook that does
