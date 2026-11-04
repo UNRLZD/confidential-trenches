@@ -15,8 +15,7 @@
 //   which frees its notes and zeroes its seed copy, and ends the prover's worker; a landing after it finds no seed.
 // - pool.buy (card signpage-pool-buy): src/pool-buy.ts on the queue's ready proofs, sent through the helper's POST
 //   /v1/pool/solana/send and settled through the wallet's solanaSettleSpent once it reads back. A tag 3 loads its
-//   accounts from the pin's lookup table: none is pinned for the devnet pool yet (DEVNET_TABLE), so pool.buy is refused
-//   not_allowed, with no read, until one is. Each state read also settles the pool's RESERVED notes (solanaSettleReserved:
+//   accounts from the pin's lookup table (DEVNET_TABLE, card signpage-pool-flow-run). Each state read also settles the pool's RESERVED notes (solanaSettleReserved:
 //   spent, freed past the deadline, or held), so no outcome of a send leaves a note RESERVED for good.
 // - pool.sell (card signpage-pool-sell): src/pool-sell.ts on the devnet pool, W one of the page's buy wallets: the Ws
 //   of the pool's SPENT and RESERVED notes (../../wallet/src/pool/buy-wallets.ts spentNotesOf, buyWallets) with their
@@ -27,7 +26,8 @@
 //   (pool-sell.ts settlePoolSells), writing its record's stage.
 // main.ts takes these only in the testnet build; SIGN_HOST's build keeps its mainnet deps and carries none of this.
 import { base64 } from "@scure/base";
-import { solanaJsonRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { pageRpc } from "./page-rpc.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -39,7 +39,7 @@ import { proverHost } from "./prover-host.ts";
 import { TRADE_HELPER } from "./trade.ts";
 import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
-import { poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
+import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { poolSellKind, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
@@ -59,7 +59,7 @@ const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinh
 export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
   return {
     pinned: (chain) => (chain === "solana" ? SOL_POOLS.devnet !== undefined : EVM_POOLS[EVM_TESTNET[chain]] !== undefined),
-    rpcs: (chain) => TESTNET_RPCS[chain].map((u) => solanaJsonRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc],
+    rpcs: (chain) => TESTNET_RPCS[chain].map((u) => pageRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc],
     ...(flow ? { flow } : {}),
   };
 }
@@ -80,9 +80,11 @@ export type TestnetOver = {
   locks?: Pick<LockManager, "request" | "query"> | null;
 };
 
-/** The devnet pool's lookup table: none is created and pinned yet (scripts/live-checks/pool-sol-deploy.devnet.json
- *  records the pool and no table), so pool.buy is refused until it is. */
-const DEVNET_TABLE: string | null = null;
+/** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
+ *  its pages to entry 2,047, the token programs, wSOL and the pump curve venue's program-wide accounts, created by devnet
+ *  tx 4K48NMp5awMjg1789a6uS6JE9Xr3JUwECC2bZnPCUQnfRAQGDYm252CDcAuPDHPJudUoBwqrj9juokXRC8TneWJ3 and read back the same on
+ *  both devnet RPCs (scripts/live-checks/signpage-pool-flow.mjs reads it after every deploy). */
+export const DEVNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
 /** The pool send's own window: the helper answers a tag 3 only once it has simulated and sent it, and a send may wait
  *  out a blockhash's life (~60 to 90 s), so this is over 90 s, never the client's 10 s for the pool.buy kind's answer
  *  (the kit's SIGNPAGE_TIMEOUT_MS["pool.buy"]: the run answers at the send, and goes on whatever the client waits). */
@@ -101,6 +103,22 @@ export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: type
       body: JSON.stringify({ pool, tx: base64.encode(tx) }),
       signal: window.signal,
     });
+    if (res.status === 429) {
+      // busy (the helper's rate_limited or in_flight, or its per-caller throttle): its Retry-After (whole seconds) and
+      // its code, read from a body no larger than the route's limit; pool-buy.ts sends the same bytes again after it
+      const header = res.headers.get("retry-after");
+      const after = header === null || header.trim() === "" ? Number.NaN : Number(header);
+      const ms = Number.isInteger(after) && after >= 0 && after <= 3_600 ? after * 1_000 : POOL_SEND_BUSY_WAIT_MS.min;
+      const body = new Uint8Array(await res.arrayBuffer());
+      let code: PoolSendBusy["code"] = "throttled";
+      try {
+        const c = body.length <= 4_096 ? (JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) as { error?: { code?: unknown } })?.error?.code : undefined;
+        if (c === "rate_limited" || c === "in_flight") code = c;
+      } catch {
+        // a body that is not the helper's: still its 429
+      }
+      throw new PoolSendBusy(code, ms);
+    }
     if (res.status !== 200) throw new Error(`pool send: HTTP ${res.status}`);
     const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/solana/send")!.limitBytes!;
     const bytes = new Uint8Array(await res.arrayBuffer());
@@ -146,7 +164,7 @@ export type TestnetPool = {
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
 export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetPool {
   const pin = SOL_POOLS.devnet;
-  const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? [solanaJsonRpc(TESTNET_RPCS.solana[0]), solanaJsonRpc(TESTNET_RPCS.solana[1])];
+  const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? [pageRpc(TESTNET_RPCS.solana[0]), pageRpc(TESTNET_RPCS.solana[1])];
   const prover = over.prover ?? proverHost();
 
   // the proof queue: opened at the first landing, closed at sign out

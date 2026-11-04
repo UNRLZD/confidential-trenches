@@ -139,7 +139,7 @@ test("F2 no input of W's signer takes a digest: an EIP-7702 delegation of W to t
   // evmPoolBuyQuote (checks/evm/quote.ts) reads quotes and evmPoolBuildQuoted builds from one: no key and no digest;
   // evmPoolSellQuote reads a sell's quotes and evmPoolBuildSell builds from one (card evm-sell-device-quote): no key and
   // no digest; no builder takes its caller's minOut (the review of cefe7a0)
-  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuildQuoted", "evmPoolBuildSell", "evmPoolBuyQuote", "evmPoolGas", "evmPoolRouteData", "evmPoolSellQuote", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
+  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuildQuoted", "evmPoolBuildSell", "evmPoolBuyQuote", "evmPoolGas", "evmPoolRouteData", "evmPoolSellQuote", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolSignSimSell", "evmPoolVenues"]);
 });
 
 test("F2b W signs only the buy object the builder returned: a copy, an edit or a hand-made buy is refused", () => {

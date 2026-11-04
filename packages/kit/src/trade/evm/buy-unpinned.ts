@@ -40,6 +40,11 @@ export type EvmPoolVenue = {
   readonly pool?: string;
   readonly adapters?: Readonly<{ v3?: string; v4?: string }>;
   readonly sellDelegate?: string;
+  /** The helper's EVM pool sender (apps/helper pool/evm.ts), which sends each sale to W: the sim of a sale runs from it
+   *  (checks/evm/quote.ts simRule, card evm-quote-exec-sim), so a hook sees the sim as it sees the sale. A kit pin, never
+   *  read from the helper; the helper refuses to start a sender whose key is not the pin (evmPoolSendersFromEnv). A
+   *  chain with none sims no sale ("keep-min"): no chain has one until the helper publishes its sender's address. */
+  readonly sellSender?: string;
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
   readonly quoters?: Readonly<{ v3?: string; v4?: string }>;

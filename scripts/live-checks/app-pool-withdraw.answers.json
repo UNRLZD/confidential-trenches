@@ -1,0 +1,171 @@
+{
+ "_note": "Recorded 4 Nov by app-pool-withdraw.mjs --record: good = this card build (--harness --build apps/terminal/dist), bad = the deployed APP_HOST before this card; both framed by the stand-in shell signed in with POOLS.",
+ "good": {
+  "check": "app-pool-withdraw",
+  "at": "2026-11-04T13:51:54.024Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
+  "browser": "157.0.8103.38",
+  "runs": [
+   {
+    "width": "phone",
+    "shell": "refused",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": true,
+     "base": true,
+     "robinhood": false
+    },
+    "asked": [
+     {
+      "chain": "base",
+      "return_key": "withdraw",
+      "v": 1,
+      "id": "9d03da3c-4b5b-4432-8759-90c2cb0fadcc",
+      "type": "pool.withdraw"
+     }
+    ],
+    "line": "refused",
+    "unlocked": true,
+    "inside": true
+   },
+   {
+    "width": "phone",
+    "shell": "opened",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": true,
+     "base": true,
+     "robinhood": false
+    },
+    "asked": [
+     {
+      "chain": "base",
+      "return_key": "withdraw",
+      "v": 1,
+      "id": "570cfcfd-5e5e-4b6b-a0fc-6262f5b2839a",
+      "type": "pool.withdraw"
+     }
+    ],
+    "line": null,
+    "unlocked": true,
+    "inside": true
+   },
+   {
+    "width": "desktop",
+    "shell": "refused",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": true,
+     "base": true,
+     "robinhood": false
+    },
+    "asked": [
+     {
+      "chain": "base",
+      "return_key": "withdraw",
+      "v": 1,
+      "id": "622b341a-cb9a-4536-baa7-b2ccd0237d04",
+      "type": "pool.withdraw"
+     }
+    ],
+    "line": "refused",
+    "unlocked": true,
+    "inside": true
+   },
+   {
+    "width": "desktop",
+    "shell": "opened",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": true,
+     "base": true,
+     "robinhood": false
+    },
+    "asked": [
+     {
+      "chain": "base",
+      "return_key": "withdraw",
+      "v": 1,
+      "id": "4872a182-96e5-4738-a42e-a8f2edd84ebe",
+      "type": "pool.withdraw"
+     }
+    ],
+    "line": null,
+    "unlocked": true,
+    "inside": true
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-pool-withdraw",
+  "at": "2026-11-04T13:53:00.590Z",
+  "source": "live https://confidential.unrealized.trade, the stand-in shell signed in",
+  "browser": "157.0.8103.38",
+  "runs": [
+   {
+    "width": "phone",
+    "shell": "refused",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": null,
+     "base": null,
+     "robinhood": null
+    },
+    "asked": [],
+    "line": null,
+    "unlocked": false,
+    "inside": true
+   },
+   {
+    "width": "phone",
+    "shell": "opened",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": null,
+     "base": null,
+     "robinhood": null
+    },
+    "asked": [],
+    "line": null,
+    "unlocked": false,
+    "inside": true
+   },
+   {
+    "width": "desktop",
+    "shell": "refused",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": null,
+     "base": null,
+     "robinhood": null
+    },
+    "asked": [],
+    "line": null,
+    "unlocked": false,
+    "inside": true
+   },
+   {
+    "width": "desktop",
+    "shell": "opened",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": null,
+     "base": null,
+     "robinhood": null
+    },
+    "asked": [],
+    "line": null,
+    "unlocked": false,
+    "inside": true
+   }
+  ]
+ }
+}

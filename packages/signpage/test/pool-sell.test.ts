@@ -29,7 +29,7 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_SELL_LOCK, poolSellKind, runPoolSell, settleDeadSellOps, type PoolSellHost, type PoolSellKindHost } from "../src/pool-sell.ts";
+import { POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_WAIT_MS, poolSellKind, runPoolSell, settleDeadSellOps, type PoolSellHost, type PoolSellKindHost } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { tradeLock, type TradeStore } from "../src/trade.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
@@ -1005,4 +1005,14 @@ test("a sell that takes its lock and writes pending while the settle runs is nev
   assert.equal(((await w.store.get("ops", "d1")) as { stage?: string }).stage, "refused");
   release();
   await live;
+});
+
+// the review of 54b2f65 (finding 1, in every path): the read-back is a time budget, so one RPC down (each read its own
+// retry) never holds the seed's lock for minutes
+test("a sell that never reads back stops at POOL_SELL_READS seconds on the wall clock, whatever its read count: sent, the note INCOMING", async () => {
+  const w = await world({ lands: false, finalHeight: 100 });
+  let waited = 0;
+  const a = await runPoolSell({ ...w.host, reads: 1_000, wait: async (ms: number) => void (waited += ms), now: () => BigInt(1_000 + waited) }, ASK);
+  assert.equal("stage" in a && a.stage, "sent");
+  assert.ok(waited <= POOL_SELL_READS * POOL_SELL_WAIT_MS, `waited ${waited} ms`);
 });
