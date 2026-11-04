@@ -13,6 +13,7 @@ import * as kit from "../src/index.ts";
 import { evmPoolVenues, EvmPoolBuyError, evmPoolRouteData, type EvmPoolChain, type EvmPoolVenue, type EvmRoute, type EvmV4Hop } from "../src/index.ts";
 // the checks through the unpinned builder and signer; the pinned ones (M370) at the end, with a pinned list of the test's
 import { evmPoolBuildUnpinned as evmPoolBuild, evmPoolSignBuyUnpinned as evmPoolSignBuy, pinnedBuild, pinnedBuildQuoted, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
+import * as builder from "../src/trade/evm/buy-unpinned.ts";
 
 const CAST = JSON.parse(readFileSync(new URL("./evm-pool-buy-hostile.cast.json", import.meta.url), "utf8"));
 const PROOFS = JSON.parse(readFileSync(new URL("../../../contracts/pool-evm/test/fixtures/buy-proofs.json", import.meta.url), "utf8"));
@@ -323,6 +324,16 @@ test("Q1 the quoted pinned build takes a v4 route through a middle that is not l
   assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", A_V3, v3([B.weth, Z, X]), 1n, X)), "middle_not_listed");
   // the pins still hold
   assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", ADAPTER, route, 1n, X)), "not_pinned");
+});
+
+test("HD2 the quoted pinned build takes no hook data: a hop that carries any is refused, as a sell's (card evm-buy-hookdata-fee)", () => {
+  const hooked = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc"; // Base's pinned Clanker hook, in its own shape
+  for (const r of [v4(B.weth, hop(X, { fee: 0x800000, tickSpacing: 200, hooks: hooked, hookData: "0xdeadbeef" })), v4(ZERO, hop(X, { hookData: "0x00" })), v4(ZERO, hop(Z), hop(X, { hookData: "0x" + "ab".repeat(32) }))]) {
+    assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", A_V4, r, 1n, X)), "bad_route");
+    assert.equal(code(() => builder.evmPoolRouteDataQuoted("base", r)), "bad_route");
+  }
+  // the same route with the device's own hook data, none, builds
+  assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", A_V4, v4(B.weth, hop(X, { fee: 0x800000, tickSpacing: 200, hooks: hooked })), 1n, X)), "built");
 });
 
 test("M370 a pinned signature goes only to the chain's pool, of a buy through a pinned adapter", () => {

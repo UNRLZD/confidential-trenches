@@ -359,7 +359,7 @@ export async function main(args, io = {}) {
         const ev = poolLog(r, T.Bought);
         if (!ev) throw new Error(`${step}: no Bought event`);
         const d = words(ev.data);
-        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref, v, route: q.route });
+        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref, v, route: q.route, block: BigInt(r.blockNumber) });
         Object.assign(steps.at(-1), { out: String(d[6]), newCommitment: String(d[4]), value: String(withdrawn), fee: String(fee) });
       } else {
         const sig = sign65(withdrawDigest(chainId, pool, nullifier, b.context, withdrawn), W.secretKey);
@@ -384,15 +384,15 @@ export async function main(args, io = {}) {
     const W = freshWallet(seed64, "evm", b.l, b.j);
     try {
       const amount = BigInt(await call("eth_call", [{ to: token, data: balanceOfData(W.address) }, "latest"]));
-      // the sender's fee for a sell: the fee step at least (the kit refuses a fee cap of 0)
-      const f0 = epochFee({ baseFeePerGas: BigInt((await call("eth_getBlockByNumber", ["latest", false])).baseFeePerGas), depth: 0 });
-      const fee = f0 > FEE_STEP ? f0 : FEE_STEP;
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
       const { q, built } = await fresh(
-        // `bought`: the route of the buy that paid W the token, which the sell quote requires
-        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route }),
-        (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, feeCap: fee, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
+        // `bought` and `boughtBlock`: the route of the buy that paid W the token and the block it landed in, which the
+        // sell quote requires (it reads at that block or a later one)
+        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block }),
+        // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole
+        (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
       );
+      const fee = built.feeCap;
       const sv = q.route.venue === "uniswap-v4" ? "v4" : "v3";
       const sig = kit.evmPoolSignSell(W.secretKey, chain, built);
       const auth = kit.evmPoolSignSellAuthorization(W.secretKey, chain, BigInt(await call("eth_getTransactionCount", [W.address, "latest"])));

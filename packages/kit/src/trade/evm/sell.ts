@@ -30,9 +30,10 @@ export {
   type EvmV4SellRoute,
 } from "./sell-unpinned.ts";
 
-/** What W adds to a device sell quote: the return note's precommitment, the sender's fee cap, the deadline (unix
- *  seconds) and W's sell nonce. */
-export type EvmPoolSellFields = { precommitment: bigint; feeCap: bigint; deadline: bigint; nonce: bigint };
+/** What W adds to a device sell quote: the return note's precommitment, the deadline (unix seconds), W's sell nonce,
+ *  and the sender's fee cap: by default the quote's feeMax, the device's own fee rule (card evm-buy-hookdata-fee); a
+ *  lower one may be named, a higher one is refused (bad_fee). */
+export type EvmPoolSellFields = { precommitment: bigint; feeCap?: bigint; deadline: bigint; nonce: bigint };
 
 // Every sell evmPoolBuildSell returned: W signs no other. The kit exports no builder that takes a route or a minOut.
 const QUOTED_SELLS = new WeakSet<EvmPoolSell>();
@@ -48,8 +49,11 @@ export function evmPoolBuildSell(quote: EvmPoolSellQuote, fields: EvmPoolSellFie
     throw new EvmQuoteError("stale_quote", "the quote's block is more than 30 s old");
   }
   if (typeof fields !== "object" || fields === null) throw new EvmPoolSellError("bad_amount", "the sell's fields are an object");
-  const { precommitment, feeCap, deadline, nonce } = fields;
-  const { chain, w, token, amountIn: amount, target, route, minOut } = quote;
+  const { precommitment, feeCap: asked, deadline, nonce } = fields;
+  const { chain, w, token, amountIn: amount, target, route, minOut, feeMax } = quote;
+  // the sender takes no more than the device's own fee rule allows, never a figure a caller or a server names
+  const feeCap = asked === undefined ? feeMax : asked;
+  if (feeCap > feeMax) throw new EvmPoolSellError("bad_fee", `the fee cap is above the device's fee rule's ${feeMax}`);
   const built = pinnedBuildSell(evmPoolVenues(), chain, { w, token, amount, target, route, minOut, precommitment, feeCap, deadline, nonce });
   QUOTED_SELLS.add(built);
   return built;

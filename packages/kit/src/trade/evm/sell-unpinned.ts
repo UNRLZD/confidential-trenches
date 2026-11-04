@@ -24,7 +24,8 @@
 //     PoolManager (PoolNotInitialized), so W keeps its token;
 // - the deadline is unix seconds, at least EVM_POOL_SELL_DEADLINE_MIN_S and at most EVM_POOL_SELL_DEADLINE_MAX_S past
 //   now;
-// - the fee cap is above 0 and under minOut, so the deposit always holds something;
+// - the fee cap is above 0 and under minOut, so the deposit always holds something (and, in the kit's index, at most
+//   the device's own fee rule, evmPoolSellFeeMax: trade/evm/sell.ts);
 // and returns the sell frozen, held in a module-private set.
 //
 // W signs Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,
@@ -420,6 +421,19 @@ export const evmPoolSellTip = (chain: EvmPoolChain): bigint => (chain === "base"
  *  authorization list does not charge: the sim's gas is EVM_POOL_SELL_GAS less it, so its execution is given what the
  *  sale's is. */
 export const EVM_7702_AUTH_GAS = 25_000n;
+
+/** The step every EVM relay fee rounds up to: the helper's EVM_FEE_STEP (apps/helper pool/evm.ts), 1e13 wei. */
+export const EVM_POOL_FEE_STEP = 10_000_000_000_000n;
+/** The device's own cap on what the sender takes from a sale (card evm-buy-hookdata-fee): the relay fee rule the device
+ *  computes for a withdraw (M356 (4), as the helper's evmEpochFee: 2 x the gas x the base fee, rounded up to the step),
+ *  with the sale's gas limit EVM_POOL_SELL_GAS and the sale's tip, at `baseFeePerGas`, the base fee of the sell quote's
+ *  agreed block (the same on both providers); at least one step. Never a caller's figure: the kit's sell builder
+ *  refuses a fee cap above it (trade/evm/sell.ts). */
+export function evmPoolSellFeeMax(chain: EvmPoolChain, baseFeePerGas: bigint): bigint {
+  const f = 2n * EVM_POOL_SELL_GAS * (baseFeePerGas + evmPoolSellTip(chain));
+  const stepped = ((f + EVM_POOL_FEE_STEP - 1n) / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP;
+  return stepped > EVM_POOL_FEE_STEP ? stepped : EVM_POOL_FEE_STEP;
+}
 
 /** A sim sell: as EvmPoolSell, into EVM_SELL_SIM, with no fee and no precommitment. */
 export type EvmSellSim = EvmPoolSell & { readonly sim: true };

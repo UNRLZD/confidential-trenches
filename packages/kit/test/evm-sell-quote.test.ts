@@ -82,11 +82,14 @@ type Model = {
   /** what the probe answers for (token, to, amount); null: it reverts */
   probe?: (token: string, to: string, amount: bigint) => bigint | null;
   headSec?: number;
+  /** the block's base fee (Base's 5,000,000 wei by default); null: the block names none */
+  baseFee?: bigint | null;
 };
 type Seen = { pools: Pool[]; probes: { w: string; token: string; to: string; amount: bigint; code: string }[] };
 /** A provider on the modelled chain; every quote it is asked lands in `seen`. */
 function provider(m: Model, seen: Seen = { pools: [], probes: [] }): EvmRpc {
-  const head = { number: "0x100", hash: HASH, timestamp: "0x" + (m.headSec ?? Math.floor(Date.now() / 1000) - 2).toString(16) };
+  const fee = m.baseFee === undefined ? 5_000_000n : m.baseFee;
+  const head = { number: "0x100", hash: HASH, timestamp: "0x" + (m.headSec ?? Math.floor(Date.now() / 1000) - 2).toString(16), ...(fee === null ? {} : { baseFeePerGas: "0x" + fee.toString(16) }) };
   const one = (data: string): bigint | null => {
     const sel = data.slice(0, 8);
     if (sel === "c45a0155") return BigInt(FACTORY);
@@ -127,7 +130,7 @@ const verdict = async (p: Promise<kit.EvmPoolSellQuote>) => {
 };
 // the route the buy that paid W took (required, review of edb4dbb F3): the standard 0.3% native pool
 const BOUGHT = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
-const req = (chain: EvmPoolChain = "base", o: Record<string, unknown> = {}) => ({ chain, token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, bought: BOUGHT, ...o });
+const req = (chain: EvmPoolChain = "base", o: Record<string, unknown> = {}) => ({ chain, token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, bought: BOUGHT, boughtBlock: 0x100n, ...o });
 const sell = (m: Model, chain: EvmPoolChain = "base", o: Record<string, unknown> = {}, m2: Model = m) =>
   sellQuoteWith(req(chain, o), [provider(m), provider(m2)], Date.now());
 /** v4 to the native asset, fee 3000: 2 ETH a token; every other pool 1 */
@@ -169,7 +172,7 @@ test("planted: a server's route is never taken: a request with a route is refuse
   const route = { venue: "uniswap-v4", hops: [{ currency: NATIVE, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
   assert.deepEqual(await verdict(sell({ price: flat }, "base", { route })), { accepted: false, code: "bad_request" });
   assert.deepEqual(await verdict(sell({ price: flat }, "base", { route: undefined })), { accepted: false, code: "bad_request" });
-  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 14n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
   const code = (f: () => unknown) => {
     try {
       f();
@@ -208,7 +211,7 @@ test("planted: a stale quote is refused, when quoted (a head 31 s old) and when 
   const old = Math.floor(Date.now() / 1000) - 31;
   assert.deepEqual(await verdict(sell({ price: flat, headSec: old })), { accepted: false, code: "stale_quote" });
   const q = await sellQuoteWith(req("base-sepolia"), [provider({ price: flat }), provider({ price: flat })], Date.now());
-  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 14n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
   const later = Number(q.block.timestamp) * 1000 + 30_001;
   mock.timers.enable({ apis: ["Date"], now: later });
   try {
@@ -299,7 +302,7 @@ function hardhatAccount0(): Uint8Array {
 
 test("the sell quote reads each field of its request once (review of c71a4d0..a9f1d32, LOW 2): a getter cannot name one chain for the providers and another for the reads", async () => {
   let reads = 0;
-  const req = { token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, bought: BOUGHT } as Record<string, unknown>;
+  const req = { token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, bought: BOUGHT, boughtBlock: 1n } as Record<string, unknown>;
   Object.defineProperty(req, "chain", { enumerable: true, get: () => (reads++ === 0 ? "base" : "robinhood") });
   // no network: every provider request fails at once
   const f = mock.method(globalThis, "fetch", async () => {
@@ -367,4 +370,44 @@ test("planted: the sim signer refuses a live deadline, the real pool, a block pa
   // a key not W's; a chain with no pinned sell delegate
   assert.equal(code(() => evmPoolSignSimSellUnpinned(new Uint8Array(32).fill(7), "base-sepolia", s, ts, now)), "bad_key");
   assert.equal(code(() => pinnedSignSimSell(evmPoolVenues(), key, "base", s, ts, now)), "not_deployed");
+});
+
+// card evm-buy-hookdata-fee: the sender's fee cap was the caller's, bounded only by minOut (review low L3)
+test("planted: the sender's fee cap is the device's own rule's at the agreed block, never above it: a caller's higher cap is refused bad_fee", async () => {
+  const code = (f: () => unknown) => {
+    try {
+      f();
+      return "built";
+    } catch (e) {
+      return (e as { code?: string }).code ?? String(e);
+    }
+  };
+  const f = { precommitment: 0x5e11n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  // 2 x EVM_POOL_SELL_GAS (1,000,000) x (the block's base fee + the sale's tip: Base's 1,000,000 wei, Robinhood's 0),
+  // rounded up to the 1e13 wei step, at least one step
+  const cases: [EvmPoolChain, bigint, bigint][] = [
+    ["base-sepolia", 5_000_000n, 20_000_000_000_000n],
+    ["base-sepolia", 0n, 10_000_000_000_000n],
+    ["robinhood-testnet", 30_000_000_000n, 60_000_000_000_000_000n],
+    ["robinhood-testnet", 0n, 10_000_000_000_000n],
+  ];
+  for (const [chain, baseFee, want] of cases) {
+    const q = await sellQuoteWith(req(chain), [provider({ price: flat, baseFee }), provider({ price: flat, baseFee })], Date.now());
+    assert.equal((q as { feeMax?: bigint }).feeMax, want, `${chain} at ${baseFee}`);
+    // no cap named: the rule's; the rule's own or a lower one: as named; above it: refused
+    assert.equal(kit.evmPoolBuildSell(q, f).feeCap, want);
+    assert.equal(kit.evmPoolBuildSell(q, { ...f, feeCap: want }).feeCap, want);
+    assert.equal(kit.evmPoolBuildSell(q, { ...f, feeCap: want - 1n }).feeCap, want - 1n);
+    assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeCap: want + 1n })), "bad_fee");
+    assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeCap: q.minOut - 1n })), "bad_fee");
+  }
+  // a block that names no base fee caps nothing: no quote
+  assert.deepEqual(await verdict(sell({ price: flat, baseFee: null })), { accepted: false, code: "rpc_error" });
+});
+
+test("planted: a sell quote takes the buy's block (boughtBlock): none, 0, a negative or a number is refused bad_request", async () => {
+  for (const boughtBlock of [undefined, 0n, -1n, 256]) {
+    assert.deepEqual(await verdict(sell({ price: flat }, "base", { boughtBlock })), { accepted: false, code: "bad_request" }, String(boughtBlock));
+  }
+  assert.equal((await verdict(sell({ price: flat }, "base", { boughtBlock: 1n }))).accepted, true);
 });
