@@ -72,6 +72,8 @@ export type Plant = {
   stale?: boolean;
   /** the release's read-back never answers: the run hangs there, as a tab closed during the send */
   hangReadBack?: boolean;
+  /** W's history as RPC p lists it (newest first): the world's own by default */
+  history?: (sigs: string[], p: 0 | 1) => string[];
 };
 /** Both RPCs' finalized slot in the world. */
 export const FINAL_SLOT = 20;
@@ -121,6 +123,11 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   const order: string[] = [];
   const fees: Uint8Array[] = [];
   const owed: unknown[] = [];
+  // each landed release by its own id (the fee payer's signature, distinct per release) with its wire, for W's history
+  // (getSignaturesForAddress, newest first) and its getTransaction; `history` holds every landed tx naming an address
+  const landed = new Map<string, Uint8Array>();
+  const history = new Map<string, string[]>();
+  const touch = (address: string, sig: string) => history.set(address, [sig, ...(history.get(address) ?? [])]);
   const keysOf = (wire: Uint8Array) => solanaDecodeMessage(wire.subarray(1 + 64 * wire[0]!));
   const rpc = (p: 0 | 1): SolanaRpc =>
     (async (method: string, params: readonly unknown[]) => {
@@ -161,10 +168,17 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         add(from, -(v + fee));
         add(to, v);
         onwards.set(sig, wire.slice());
+        touch(from, sig);
         return sig;
+      }
+      if (method === "getSignaturesForAddress") {
+        const sigs = history.get(params[0] as string) ?? [];
+        return (plant.history?.(sigs, p) ?? sigs).map((signature) => ({ signature, slot: FINAL_SLOT, err: null }));
       }
       if (method === "getTransaction") {
         const sig = params[0] as string;
+        const rel = landed.get(sig);
+        if (rel) return { transaction: [base64.encode(rel), "base64"], meta: { err: null } };
         const on = onwards.get(sig);
         if (on) return { transaction: [base64.encode(on), "base64"], meta: { err: null } };
         const last = releases.at(-1);
@@ -193,6 +207,11 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         const ix = m.instructions.at(-1)!;
         const r = solanaDecodePoolRelease(ix.data);
         add(m.staticKeys[ix.accounts[1]!]!, r.withdrawnValue - r.relayFee);
+        const id = base58.encode(new Uint8Array(64).fill(100 + landed.size));
+        const wire = tx.slice();
+        wire.set(base58.decode(id), 1);
+        landed.set(id, wire);
+        touch(m.staticKeys[ix.accounts[1]!]!, id);
         plant.afterRelease?.(m.staticKeys[ix.accounts[1]!]!);
       }
       return { signature: SIG };
@@ -210,7 +229,27 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     stage: (s, _txs, pending) => void (stages.push(s), pendings.push(pending)),
     owe: async (p) => void (owed.push(p), order.push(`owe:${(await ns.get(p.noteId))?.state}`)),
   };
-  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, pendings, binds, plant, fees, owed };
+  /** Another device's spend of a landed release: its salt changed, so its context is not this device's attempt's. */
+  const foreign = (i = 0): void => {
+    const id = [...landed.keys()][i]!;
+    const wire = landed.get(id)!;
+    wire[wire.length - 2]! ^= 1; // the salt's last byte: the release data ends the message, before its 0 lookups
+    landed.set(id, wire);
+  };
+  /** Another device's release of note `noteId`'s part to W, never this device's (its context another attempt's):
+   *  this device's own release bytes for it, its salt changed, landed on W. */
+  const foreignLand = (wire: Uint8Array, value: bigint): void => {
+    const m = keysOf(wire);
+    const ix = m.instructions.at(-1)!;
+    const id = base58.encode(new Uint8Array(64).fill(200 + landed.size));
+    const tx = wire.slice();
+    tx.set(base58.decode(id), 1);
+    tx[tx.length - 2]! ^= 1;
+    landed.set(id, tx);
+    touch(m.staticKeys[ix.accounts[1]!]!, id);
+    add(m.staticKeys[ix.accounts[1]!]!, value);
+  };
+  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, pendings, binds, plant, fees, owed, landed, foreign, foreignLand };
 }
 
 /** A wire's signers and instructions, as keys: [signers, [program, accounts, data][]]. */

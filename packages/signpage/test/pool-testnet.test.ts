@@ -23,8 +23,10 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
+// the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
+const WORLD = await import("./pool-withdraw-world.ts");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
 
 const RECORD = JSON.parse(readFileSync(new URL("../../../scripts/live-checks/pool-sol-deploy.devnet.json", import.meta.url), "utf8")) as { cluster: string; program_id: string; pool: string };
@@ -533,11 +535,59 @@ test("an owed onward send's finish: a sign out never waits on its slow RPC read,
   assert.equal(reads, before, "not tried again at once");
 });
 
+// card signpage-withdraw-own-spend (4): the testnet page's own owed-note rules
+const owedPending = (noteId: string, to: string) => ({ noteId, attempt: "ab".repeat(16), context: "1", to, last: true, feeCap: "5000" });
+
+test("a note the reserved pass freed settles the op owing its send as stopped, the send dropped; another note's op stays owed", async () => {
+  const { w } = await wallet();
+  const to = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
+  await w.put("ops", "op1", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 1, owed: "n1" });
+  await oweSend(w, "op1", owedPending("n1", to));
+  await w.put("ops", "op2", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 2, owed: "n2" });
+  await oweSend(w, "op2", owedPending("n2", to));
+  // a record from before the owed store: its pending in the op
+  await w.put("ops", "op3", { kind: "withdraw", stage: "proving", txs: [], created_ms: 3, pending: owedPending("n3", to) });
+  await settleFreedOps(w, ["n1", "n3"]);
+  const op1 = (await w.get("ops", "op1")) as Record<string, unknown>;
+  assert.equal(op1.stage, "stopped");
+  assert.equal(op1.owed, undefined);
+  assert.deepEqual(await w.get("owed", "op1"), {});
+  const op2 = (await w.get("ops", "op2")) as Record<string, unknown>;
+  assert.equal(op2.stage, "in_transit");
+  assert.equal(op2.owed, "n2");
+  assert.deepEqual(Object.keys((await w.get("owed", "op2")) as object), ["n2"]);
+  const op3 = (await w.get("ops", "op3")) as Record<string, unknown>;
+  assert.equal(op3.stage, "stopped");
+  assert.equal(op3.pending, undefined);
+});
+
+test("the withdraw screen's funds leave out a note an op still owes a send for, and a run never plans it, until the op is settled", async () => {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n, 30_000_000n]);
+  const [n0, n1] = wd.ids as [string, string];
+  await wd.w.put("ops", "op1", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 1, owed: n0 });
+  await oweSend(wd.w, "op1", owedPending(n0, TO));
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    return new Response(JSON.stringify(await wd.host.send(pool, base64.decode(tx))), { status: 200 });
+  }) as unknown as typeof fetch;
+  const t = testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn });
+  const f = await t.withdrawDeps("solana", "op2").funds();
+  assert.deepEqual(f.notes.map((n) => n.id), [n1], "the owed note is out of the screen's funds");
+  // an amount only both notes can send: the run's plan has no owed note, so it stops with no release
+  await t.withdraw({ chain: "solana", to: TO, amount: 40_000_000n, maxFee: 2n * COST }, "op2");
+  assert.equal(((await wd.w.get("ops", "op2")) as { stage: string }).stage, "stopped");
+  assert.equal(wd.releases.length, 0);
+  // op 1 settled: the note is back in the funds
+  await wd.w.update("ops", "op1", (v) => mergeWithdrawOp(v, { stage: "stopped", clear: n0 }));
+  assert.equal((await t.withdrawDeps("solana", "op3").funds()).notes.length, 2);
+});
+
 // Review #232b fold 3, HIGH 1: the page's own withdraw run, its tab closed while the release's read-back is out (the
 // run never answers): the op owes the send from before the release leaves, in_transit, and the reopened page's state
 // read sends it on, W at 0 and To given the amount.
 test("a withdraw whose tab closed during the release's read-back: the reopened page sends the part on, W at 0, To the amount", async () => {
-  const { world, TO, COST } = await import("./pool-withdraw-world.ts");
+  const { world, TO, COST } = WORLD;
   const wd = await world([30_000_000n], { hangReadBack: true });
   const fetchFn = (async (_url: string, init: { body: string }) => {
     const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
@@ -553,17 +603,26 @@ test("a withdraw whose tab closed during the release's read-back: the reopened p
   assert.equal(wd.releases.length, 1, "the release went out");
   await new Promise((r) => setTimeout(r, 20));
   const W = wd.binds[0]!.recipient;
-  const rec = (await wd.w.get("ops", "op-w")) as { stage: string; pending?: unknown };
+  const rec = (await wd.w.get("ops", "op-w")) as { stage: string; owed?: unknown };
   assert.equal(rec.stage, "in_transit", "never proving while a release is out");
-  assert.ok(rec.pending, "the send owed");
+  // card signpage-withdraw-own-spend (2): the op (which the frame reads) names only the note; the send owed, with its
+  // attempt and context, is in the "owed" store, keyed by the op id, which the frame never reads
+  const held = (await wd.ns.get(wd.ids[0]!))!;
+  assert.equal(rec.owed, wd.ids[0], "the send owed, by its note's id");
+  const owedRec = (await wd.w.get("owed", "op-w")) as Record<string, { attempt: string; context: string }>;
+  assert.deepEqual(Object.keys(owedRec), [wd.ids[0]]);
+  assert.equal(owedRec[wd.ids[0]!]!.context, held.contexts!.at(-1)!.context);
+  const text = JSON.stringify(rec);
+  assert.ok(!text.includes(held.contexts!.at(-1)!.context) && !text.includes(held.attempt!) && !text.includes(TO), "no context, attempt or To in the op record");
   assert.equal(wd.balance.get(W), amount + 5_000n, "the part on W");
   // the tab is gone (its run never answers); the page opened again reads its state
   const t2 = testnetPool(page, { ...over, fetch: undefined });
   await t2.stateRead();
   assert.equal(wd.balance.get(W), 0n);
   assert.equal(wd.balance.get(TO), amount);
-  const after = (await wd.w.get("ops", "op-w")) as { stage: string; pending?: unknown; txs: { hash: string }[] };
+  const after = (await wd.w.get("ops", "op-w")) as { stage: string; owed?: unknown; txs: { hash: string }[] };
   assert.equal(after.stage, "sent");
-  assert.equal(after.pending, undefined);
+  assert.equal(after.owed, undefined);
+  assert.deepEqual(await wd.w.get("owed", "op-w"), {}, "the send owed dropped once sent");
   assert.equal(after.txs.length, 1, "the onward send's tx");
 });

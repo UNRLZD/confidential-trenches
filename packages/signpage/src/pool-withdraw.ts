@@ -30,13 +30,22 @@
 //   sent, in_transit once it landed and the part is on W, sent once every part's onward send read back on both RPCs,
 //   stopped when a part was refused or did not land (the parts sent before it stay sent). txs lists every
 //   transaction's signature, release and onward.
+// - W goes on only once both RPCs read that the release which spent its note is this attempt's (spendOwner, card
+//   signpage-withdraw-own-spend): another device signed in with the same 12 words spends the same note to the same W
+//   and keeps its own note store, so a spent note and a full W never say whose part it is.
+// - The owed send (PendingOnward: the attempt, its context, To) goes to the host's owe; the testnet page keeps it in the
+//   wallet store's "owed", keyed by op id, which the frame never reads, and the op record names only the note's id.
 // - Every read names a public account or the transaction itself; no request carries a key, the words or which note is
 //   whose (W's fee is read on a fixed message from the pool). Nothing here logs.
 import { base58, base64 } from "@scure/base";
 import { poolProveWithdraw, type VaultProver } from "../../kit/src/prover/prove.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
+import { solanaDecodeTransaction } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
-import { readSolanaRent, solanaEncodePoolRelease, solanaPoolAccount, solanaPoolFee, solanaPoolReleaseAccounts, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import {
+  readSolanaRent, SOLANA_POOL_PROOF_BYTES, SOLANA_POOL_PROOF_COMPRESSED_BYTES, SOLANA_POOL_TAG_RELEASE, SOLANA_POOL_TAG_RELEASE_AND_BUY, solanaDecodePoolRelease,
+  solanaEncodePoolRelease, solanaPoolAccount, solanaPoolFee, solanaPoolReleaseAccounts, solanaRentMin, type SolanaRent,
+} from "../../kit/src/trade/solana/pool-buy.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
@@ -44,7 +53,7 @@ import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { checkBinding, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { blockhashOf, pastOnBoth, readBack, releaseOf, rootIndex, sendAndSettle, treeSizes, type PoolBuyHost } from "./pool-buy.ts";
 import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana, SOLANA_RESERVED_KEYS, type PoolAsk } from "./rules/pool.ts";
 
@@ -226,6 +235,79 @@ async function balanceOf(rpcs: readonly [SolanaRpc, SolanaRpc], address: string,
   const bal = await Promise.all(rpcs.map(async (rpc) => lamports(((await rpc("getBalance", [address, opts])) as { value?: unknown } | null)?.value)));
   return { balance: agree(bal[0]!, bal[1]!), each: [bal[0]!, bal[1]!] };
 }
+/** The page of W's history getSignaturesForAddress gives at most (its documented limit). */
+export const HISTORY_PAGE = 1_000;
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const be = (b: Uint8Array): bigint => b.reduce((v, x) => (v << 8n) | BigInt(x), 0n);
+const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
+/** One RPC's word on the spend: the landed transaction whose pool instruction names the nullifier hash, and whether
+ *  it is this attempt's; null when its history holds none (not yet final there, or not served). */
+async function spendOn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number): Promise<{ sig: string; mine: boolean } | null> {
+  const landed: string[] = []; // newest first, as the RPC lists them
+  let before: string | undefined;
+  for (;;) {
+    const page = await rpc("getSignaturesForAddress", [w, { commitment: "finalized", limit: HISTORY_PAGE, minContextSlot: minSlot, ...(before !== undefined ? { before } : {}) }]);
+    if (!Array.isArray(page) || page.length > HISTORY_PAGE) return stop("read");
+    for (const e of page) {
+      if (!isObj(e) || typeof e.signature !== "string" || e.signature === before) return stop("read");
+      if (e.err === null) landed.push(e.signature);
+    }
+    if (page.length < HISTORY_PAGE) break;
+    before = (page.at(-1) as { signature: string }).signature;
+  }
+  const { scope } = solanaPoolOf(pin.program);
+  // oldest first: the spent mark lets one release of the note land, so the first that names it is the spend
+  for (const sig of landed.reverse()) {
+    const r = await rpc("getTransaction", [sig, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+    if (r === null) return null;
+    const t = isObj(r) ? r.transaction : undefined;
+    const meta = isObj(r) ? r.meta : undefined;
+    if (!Array.isArray(t) || t[1] !== "base64" || typeof t[0] !== "string" || !isObj(meta) || !Object.hasOwn(meta, "err")) return stop("read");
+    const wire = base64.decode(t[0]);
+    const tx = solanaDecodeTransaction(wire);
+    // the transaction the RPC was asked for: its first signature is the id
+    if (base58.encode(wire.subarray(1, 65)) !== sig) return stop("read");
+    if (meta.err !== null) continue;
+    const keys = tx.message.staticKeys;
+    for (const ix of tx.message.instructions) {
+      if (keys[ix.programIndex] !== pin.program) continue;
+      const d = ix.data;
+      const proof = d[0] === SOLANA_POOL_TAG_RELEASE ? SOLANA_POOL_PROOF_BYTES : d[0] === SOLANA_POOL_TAG_RELEASE_AND_BUY ? (d[1] === 1 ? SOLANA_POOL_PROOF_COMPRESSED_BYTES : SOLANA_POOL_PROOF_BYTES) : -1;
+      const at = (d[0] === SOLANA_POOL_TAG_RELEASE ? 1 : 2) + proof + 32;
+      if (proof < 0 || d.length < at + 32 || be(d.subarray(at, at + 32)) !== nullifierHash) continue;
+      // the spend: this attempt's only when it is a release (a buy never is) to W, every account in the message,
+      // whose context (context.rs, from its own fields and accounts) is this attempt's
+      if (d[0] !== SOLANA_POOL_TAG_RELEASE) return { sig, mine: false };
+      const acc = ix.accounts.map((i) => keys[i]);
+      if (acc.length < 3 || acc.some((k) => k === undefined) || acc[1] !== w) return { sig, mine: false };
+      try {
+        const rel = solanaDecodePoolRelease(d);
+        const q: SolanaReleaseRequest = {
+          program: pin.program, pool: acc[0]!, recipient: acc[1]!, feePayer: acc[2]!, relayFee: rel.relayFee, relayFeeCap: rel.relayFeeCap, tipCap: rel.tipCap, deadlineMs: rel.deadlineMs, salt: hex(rel.salt),
+        };
+        return { sig, mine: solanaContextOf(q, scope).toString() === context };
+      } catch {
+        return { sig, mine: false };
+      }
+    }
+  }
+  return null;
+}
+
+/** Whose release spent the note (round-3 review LOW 1): two devices on the same 12 words derive the same note and the
+ *  same W, so a spent note and a full W never say it. On both RPCs, at or past `minSlot` (read after the spend was read
+ *  at finalized), W's finalized history holds the one landed pool instruction naming the note's nullifier hash (a
+ *  release, or a release and buy). "mine" when on both it is the same transaction and a release to W carrying
+ *  `context`; "other" when on both it is the same transaction and not; null otherwise (an RPC holds none, or they
+ *  differ): the money may be this attempt's, so nothing is decided. The reads name W, which the balance reads name
+ *  already, and transactions of its history. */
+export async function spendOwner(rpcs: readonly [SolanaRpc, SolanaRpc], pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number): Promise<"mine" | "other" | null> {
+  const [a, b] = await Promise.all(rpcs.map((rpc) => spendOn(rpc, pin, w, nullifierHash, context, minSlot)));
+  if (!a || !b || a.sig !== b.sig || a.mine !== b.mine) return null;
+  return a.mine ? "mine" : "other";
+}
+
 const transferIx = (from: string, to: string, v: bigint) => ({
   program: SOLANA_SYSTEM_PROGRAM,
   accounts: [{ key: from, signer: true, writable: true }, { key: to, signer: false, writable: true }],
@@ -287,6 +369,8 @@ const wOf = (seed: Uint8Array, n: NoteRecord): string => {
   w.secretKey.fill(0);
   return w.address;
 };
+/** A note's W and its nullifier hash (public once spent: the release carries it). */
+const spendKeysOf = (seed: Uint8Array, n: NoteRecord): { w: string; nullifierHash: bigint } => ({ w: wOf(seed, n), nullifierHash: noteSecrets(seed, n.ref).nullifierHash });
 
 /** To on the pool's own terms: never the pool, its program, the fee payer, a key the runtime keeps read-only (a
  *  sysvar or a native program: nothing can be paid there), nor any W of the plan. */
@@ -323,16 +407,16 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     const wCap = maxFee / BigInt(plan!.length) - fee;
     // To checked before any note moves, so no release is made for a send that could never land: never the pool's own
     // keys, a read-only key or one of the plan's own Ws, and on both RPCs never executable nor the pool program's
-    const ws = await seedUse(h)(async (seed) => {
-      const out: string[] = [];
+    const spends = await seedUse(h)(async (seed) => {
+      const out: { w: string; nullifierHash: bigint }[] = [];
       for (const p of plan!) {
         const n = await notes.get(p.noteId);
         if (n?.leaf === undefined) stop("note");
-        out.push(wOf(seed, n!));
+        out.push(spendKeysOf(seed, n!));
       }
       return out;
     });
-    if (toRefused(to, h.pin, pool, ws)) stop("to");
+    if (toRefused(to, h.pin, pool, spends.map((x) => x.w))) stop("to");
     await checkTo(h, to);
     for (const [i, p] of plan!.entries()) {
       say("proving");
@@ -348,9 +432,19 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
       // review #232b HIGH 1: any other answer short of filled (the release read back but its spend not yet read at
       // finalized, or the helper's error while it may still land) keeps the part owed, for finishPoolOnward
       if (got.stage !== "filled") return end(pending ? "in_transit" : "stopped");
-      // the release landed: the part is on W; W read at or past both RPCs' finalized slot after the spend was read there
+      // the note's spend read at finalized: W is sent on only once both RPCs read that the release which spent it is
+      // this attempt's (another device on the same 12 words spends the same note to the same W, round-3 review LOW 1);
+      // another's ends the run with nothing sent from W, its money left for that device's own send
       say("in_transit");
-      const on = await sendOnward(h, ask, got.l, got.j, to, got.releaseAccounts, { minSlot: await finalSlot(h.rpcs), feeCap: wCap });
+      const minSlot = await finalSlot(h.rpcs);
+      const owner = await spendOwner(h.rpcs, h.pin, spends[i]!.w, spends[i]!.nullifierHash, (pending as PendingOnward | null)?.context ?? "", minSlot);
+      if (owner === "other") {
+        pending = null;
+        return end("stopped");
+      }
+      if (owner === null) return end("in_transit");
+      // the part is on W; W read at or past both RPCs' finalized slot after the spend was read there
+      const on = await sendOnward(h, ask, got.l, got.j, to, got.releaseAccounts, { minSlot, feeCap: wCap });
       if (on.signature !== "") txs.push({ chain: "solana", hash: on.signature });
       if (on.state === "fee") feeNeeded = on.need;
       if (on.state === "ok") arrived[on.signature] = on.amount.toString();
@@ -369,14 +463,16 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
  *  leaves "proving" or "in_transit"): settles every case, never waits forever, never sends another spend's money.
  *  - The note not this pending's attempt's (RESERVED by another attempt, back UNSPENT, HELD, SPENT after a later
  *    attempt, gone): that attempt never landed, or its send is settled: stopped, nothing sent (review #232b MEDIUM 1).
- *  - W read first (LOW 3), at or past both RPCs' finalized slot once the spend is read (LOW 2):
+ *  - Whose release spent the note, on both RPCs (spendOwner, W's finalized history; round-3 review LOW 1: another
+ *    device on the same 12 words spends the same note to the same W, and its note store is its own). Another's:
+ *    stopped, nothing sent (its money is that device's to send on). None read yet: the note's own spend read; still
+ *    RESERVED by this attempt with no spend: null, read again by the next pass (the reserved pass frees it once both
+ *    RPCs' block time is past its deadline: the note store's rule for every RESERVED note,
+ *    packages/wallet/src/notes/store.ts, a sent proof can land until its deadline).
+ *  - This attempt's: W read at or past both RPCs' finalized slot read after the spend (LOW 2):
  *    - W holds lamports: its send onward, all it holds less its fee, to To; a fee over the part's ceiling keeps it
  *      owed (feeNeeded), and so does a To the checks now refuse (null): the money is on W, so nothing drops it;
- *    - W at 0 and the note spent by this attempt: its send went (this tab's or another's): sent, or stopped when parts
- *      were left after it;
- *    - W at 0 and the note still RESERVED by this attempt with no spend read: null, read again by the next pass (the
- *      reserved pass frees it once both RPCs' block time is past its deadline: the note store's rule for every
- *      RESERVED note, packages/wallet/src/notes/store.ts, a sent proof can land until its deadline).
+ *    - W at 0: its send went (this tab's or another's): sent, or stopped when parts were left after it.
  *  null also when a read or the send fails: the money may be on W, so the pass goes on trying. */
 export async function finishPoolOnward(
   h: Pick<PoolWithdrawHost, "rpcs" | "pin" | "seed64" | "withSeed" | "now" | "wait" | "notes" | "settle">,
@@ -395,24 +491,29 @@ export async function finishPoolOnward(
     if (!mine(n)) return done("stopped");
     const l = n.leaf.label;
     const j = jOf(n.ref);
-    const W = await seedUse(h)((seed) => wOf(seed, n));
-    // a 0 is believed only at or past both RPCs' finalized slot read after the spend was read (LOW 2); lamports on W
-    // while the note is RESERVED by this attempt are its release's (any earlier attempt never landed)
-    let spent = n.state === "SPENT";
-    let minSlot = spent ? await finalSlot(h.rpcs) : undefined;
-    let { balance } = await balanceOf(h.rpcs, W, minSlot);
-    if (balance === 0n && !spent) {
-      spent = (await h.settle(pending.noteId)).kind === "spent";
+    const { w: W, nullifierHash } = await seedUse(h)((seed) => spendKeysOf(seed, n));
+    // the spend first: lamports on W say nothing of whose release put them there. Its finalized release in W's history
+    // on both RPCs; none there yet, the note's own spend read settles it (spent: read the history again; freed by the
+    // reserved pass: no longer this attempt's)
+    let minSlot = await finalSlot(h.rpcs);
+    let owner = await spendOwner(h.rpcs, h.pin, W, nullifierHash, pending.context, minSlot);
+    if (owner === null) {
+      if (n.state === "SPENT") return null;
+      const spent = (await h.settle(pending.noteId)).kind === "spent";
       const now = await notes.get(pending.noteId);
       if (now === undefined || !mine(now)) return done("stopped");
       if (!spent) return null;
       minSlot = await finalSlot(h.rpcs);
-      ({ balance } = await balanceOf(h.rpcs, W, minSlot));
+      owner = await spendOwner(h.rpcs, h.pin, W, nullifierHash, pending.context, minSlot);
+      if (owner === null) return null;
     }
+    if (owner === "other") return done("stopped");
+    // a 0 is believed only at or past both RPCs' finalized slot read after the spend was read (LOW 2)
+    const { balance } = await balanceOf(h.rpcs, W, minSlot);
     if (balance === 0n) return done(pending.last ? "sent" : "stopped");
     if (toRefused(pending.to, h.pin, solanaPoolAccount(h.pin.program), [W])) return null;
     await checkTo(h, pending.to);
-    const on = await sendOnward(h, ask, l, j, pending.to, [], { ...(minSlot !== undefined ? { minSlot } : {}), feeCap: BigInt(pending.feeCap) });
+    const on = await sendOnward(h, ask, l, j, pending.to, [], { minSlot, feeCap: BigInt(pending.feeCap) });
     if (on.state === "ok") return done(pending.last ? "sent" : "stopped", [{ chain: "solana", hash: on.signature }], { [on.signature]: on.amount.toString() });
     if (on.state === "fee") return { stage: "in_transit", txs: [], arrived: {}, feeNeeded: on.need.toString() };
     return null;

@@ -710,3 +710,26 @@ test("nameDeposit: the record is written only by a compare on the seed record: a
   }
   assert.deepEqual(await s.get("meta", "seed"), SEED(true), "the aborted compare left the seed as it was");
 });
+
+// card signpage-withdraw-own-spend: a withdraw's owed sends (attempt, context) live in "owed", which the frame's reader
+// never opens; a database from before it (version 1) is upgraded at the next top-level open
+test("the owed store: a version 1 database gets it at the next open, and the frame's reader refuses to read it", async () => {
+  const idb = new IDBFactory();
+  await new Promise<void>((ok, no) => {
+    const r = idb.open("ct-wallet", 1);
+    r.onupgradeneeded = () => {
+      for (const s of ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta"]) r.result.createObjectStore(s);
+    };
+    r.onsuccess = () => (r.result.close(), ok());
+    r.onerror = () => no(r.error);
+  });
+  const s = await openWalletStore({ indexedDB: idb });
+  await s.insertSeed(SEED(true));
+  await s.put("owed", "op1", { n1: { noteId: "n1", context: "7" } });
+  assert.deepEqual(await s.get("owed", "op1"), { n1: { noteId: "n1", context: "7" } });
+  const reader = (await openWalletStoreReader({ indexedDB: idb }))!;
+  assert.ok(reader, "the reader opens the upgraded database");
+  await assert.rejects(reader.get("owed", "op1"), /reader opens meta\/status, meta\/deposit\/<scope> and ops only/);
+  reader.close();
+  s.close();
+});

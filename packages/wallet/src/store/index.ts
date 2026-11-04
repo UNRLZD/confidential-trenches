@@ -39,8 +39,13 @@ export const WALLET_LOCK = "ct-wallet/counters"; // the store's own; 06b:743 nam
 export const WALLET_SEED_LOCK = "ct-wallet/seed"; // the store's own: sign out and every seed write
 export const WALLET_CHANNEL = "ct-wallet"; // 06b:746
 export const WALLET_LANES = 8; // wallet.md:247
-// wallet.md:197-204, the note store table.
-export const WALLET_STORES = ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta"] as const;
+// wallet.md:197-204, the note store table; "owed" (card signpage-withdraw-own-spend): a withdraw op's onward sends still
+// owed, keyed by op id, with the attempt and its context, which the frame never reads (signpage src/state.ts op
+// contract). Database version 2 adds it; the reader opens a version 1 database too, as it never reads "owed".
+export const WALLET_STORES = ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta", "owed"] as const;
+const WALLET_DB_VERSION = 2;
+/** The stores the read-only open needs: every one but "owed", which it never reads. */
+const READER_STORES = WALLET_STORES.filter((s) => s !== "owed");
 export type WalletStoreName = (typeof WALLET_STORES)[number];
 // The meta keys a caller may write: the seed record and the settings (wallet.md:204, 06b:585-634). K_wrap and the lane
 // are the store's own.
@@ -258,7 +263,7 @@ async function unwrapWith(kWrap: CryptoKey, store: WalletStoreName, key: string,
 }
 
 function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
-  const r = idb.open(name, 1);
+  const r = idb.open(name, WALLET_DB_VERSION);
   r.onupgradeneeded = () => {
     for (const s of WALLET_STORES) if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s);
   };
@@ -597,7 +602,7 @@ export async function openWalletStoreReader(
   };
   const getRaw = async (store: WalletStoreName, key: string): Promise<unknown> =>
     req(live().transaction(store, "readonly").objectStore(store).get(key));
-  if (!WALLET_STORES.every((n) => opened.objectStoreNames.contains(n))) return (shut(), null);
+  if (!READER_STORES.every((n) => opened.objectStoreNames.contains(n))) return (shut(), null);
   const k = (await getRaw("meta", K_WRAP).catch(() => undefined)) as CryptoKey | undefined;
   if (!(k instanceof CryptoKey) || k.extractable || k.algorithm.name !== "AES-GCM") return (shut(), null);
   return {

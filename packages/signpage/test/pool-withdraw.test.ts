@@ -386,19 +386,17 @@ test("another tab sent a part on first: the run goes on to its next part, never 
   assert.equal(wd.balance.get(TO), 33_000_000n);
 });
 
-const pend = (noteId: string, last: boolean): PendingOnward => ({ noteId, attempt: "00".repeat(16), context: "1", to: TO, last, feeCap: W_FEE.toString() });
-
 test("a withdraw op's writes merge: another tab's onward tx and arrival are never dropped, a later part's pending never cleared", () => {
-  const b = mergeWithdrawOp({ kind: "withdraw", stage: "in_transit", txs: [{ chain: "solana", hash: "R1" }], created_ms: 1, pending: pend("n1", false) }, { stage: "stopped", txs: [{ chain: "solana", hash: "O1" }], arrived: { O1: "5" }, clear: "n1" });
+  const b = mergeWithdrawOp({ kind: "withdraw", stage: "in_transit", txs: [{ chain: "solana", hash: "R1" }], created_ms: 1, owed: "n1" }, { stage: "stopped", txs: [{ chain: "solana", hash: "O1" }], arrived: { O1: "5" }, clear: "n1" });
   assert.deepEqual(b.txs, [{ chain: "solana", hash: "R1" }, { chain: "solana", hash: "O1" }]);
-  assert.equal(b.pending, undefined);
+  assert.equal(b.owed, undefined);
   // tab A's own write comes after: its txs are added to B's, B's onward and arrival stay
-  const a = mergeWithdrawOp(b, { stage: "in_transit", txs: [{ chain: "solana", hash: "R1" }, { chain: "solana", hash: "R2" }], arrived: {}, pending: pend("n2", true) });
+  const a = mergeWithdrawOp(b, { stage: "in_transit", txs: [{ chain: "solana", hash: "R1" }, { chain: "solana", hash: "R2" }], arrived: {}, owe: "n2" });
   assert.deepEqual((a.txs as { hash: string }[]).map((t) => t.hash), ["R1", "O1", "R2"]);
   assert.deepEqual(a.arrived, { O1: "5" });
   // B's late clear of part 1 leaves part 2's pending
   const late = mergeWithdrawOp(a, { stage: "stopped", txs: [], clear: "n1" });
-  assert.deepEqual(late.pending, pend("n2", true));
+  assert.equal(late.owed, "n2");
   assert.equal(late.created_ms, 1);
 });
 
@@ -502,4 +500,90 @@ test("an owed send that names no attempt or context is no attempt's: stopped, no
   assert.deepEqual(await finishPoolOnward(wd.host, { ...a.pending!, attempt: "" }), { stage: "stopped", txs: [], arrived: {} });
   assert.equal(wd.onwards().length, 0);
   assert.equal(n.state, "RESERVED");
+});
+
+// ---------- card signpage-withdraw-own-spend: the round-3 review's LOW 1 ----------
+
+// Two devices signed in with the same 12 words derive the same note and the same W, and each keeps its own note store.
+// A spent note and a full W never say whose release it was: W goes on only once both RPCs read that the release which
+// spent the note carries this attempt's context.
+const youngRpcs = (wd: Awaited<ReturnType<typeof world>>): PoolWithdrawHost["rpcs"] => {
+  const [r0, r1] = wd.host.rpcs;
+  const young = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (m === "getBlockHeight" ? 0 : rpc(m, p))) as SolanaRpc;
+  return [young(r0), young(r1)];
+};
+
+test("another device's release spent the note to the same W: the run sends nothing from W and ends stopped", async () => {
+  const wd = await world([30_000_000n]);
+  // the release that landed carries another attempt's context (another device's, same words, same W)
+  wd.plant.afterRelease = () => wd.foreign();
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  const W = wd.binds[0]!.recipient;
+  assert.equal(a.stage, "stopped");
+  assert.equal(a.pending, null);
+  assert.equal(wd.onwards().length, 0, "nothing sent from W");
+  assert.equal(wd.balance.get(TO) ?? 0n, 0n);
+  assert.equal(wd.balance.get(W), 5_000_000n + W_FEE, "the other device's part stays on W for that device");
+});
+
+test("an owed send whose note another device spent, W already sent on by it: the finish is stopped, never sent", async () => {
+  const wd = await world([30_000_000n], { landed: false, readBack: "none" });
+  const op1 = await runPoolWithdraw({ ...wd.host, rpcs: youngRpcs(wd) }, ASK, TO, 5_000_000n, COST);
+  assert.equal(op1.stage, "in_transit");
+  // device 2 spends the note (to the same W) and sends W on: W at 0, the note spent on chain
+  wd.foreignLand(wd.releases[0]!, 0n);
+  wd.plant.landed = true;
+  wd.plant.readBack = "ours";
+  assert.deepEqual(await finishPoolOnward(wd.host, op1.pending!), { stage: "stopped", txs: [], arrived: {} }, "never reported sent with nothing arrived");
+  assert.equal(wd.onwards().length, 0);
+});
+
+test("an owed send whose note another device spent, its part still on W: the finish sends nothing to this device's To", async () => {
+  const wd = await world([30_000_000n], { landed: false, readBack: "none" });
+  const op1 = await runPoolWithdraw({ ...wd.host, rpcs: youngRpcs(wd) }, ASK, TO, 5_000_000n, COST);
+  const W = wd.binds[0]!.recipient;
+  wd.foreignLand(wd.releases[0]!, 7_000_000n);
+  wd.plant.landed = true;
+  wd.plant.readBack = "ours";
+  assert.deepEqual(await finishPoolOnward(wd.host, op1.pending!), { stage: "stopped", txs: [], arrived: {} });
+  assert.equal(wd.onwards().length, 0);
+  assert.equal(wd.balance.get(TO) ?? 0n, 0n);
+  assert.equal(wd.balance.get(W), 7_000_000n, "device 2's part stays on W");
+});
+
+test("whose release it was must be read on both RPCs: one that lists no spend, or another transaction, decides nothing", async () => {
+  for (const history of [(s: string[], p: 0 | 1) => (p === 1 ? [] : s), (s: string[], p: 0 | 1) => (p === 0 ? [...s, base58.encode(new Uint8Array(64).fill(7))] : s)]) {
+    const wd = await world([30_000_000n], { settleUnspent: true });
+    const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+    wd.plant.settleUnspent = false;
+    wd.plant.history = history;
+    const W = wd.binds[0]!.recipient;
+    const f = await finishPoolOnward(wd.host, a.pending!);
+    assert.equal(f, null, "read again later: the money may be this attempt's");
+    assert.equal(wd.onwards().length, 0);
+    assert.equal(wd.balance.get(W), 5_000_000n + W_FEE);
+    // both RPCs agree: this attempt's release, so W goes on
+    wd.plant.history = undefined;
+    assert.equal((await finishPoolOnward(wd.host, a.pending!))?.stage, "sent");
+    assert.equal(wd.balance.get(TO), 5_000_000n);
+  }
+});
+
+// card signpage-withdraw-own-spend (3): a stage written with a clear is that note's verdict (round-3 review
+// probe3-merge): it never stands over a later part's send still owed
+test("a stale finish's stage for one note never stands over another note's send still owed; it does once none is owed", () => {
+  const owed2 = { kind: "withdraw", stage: "in_transit", txs: [{ chain: "solana", hash: "rel1" }, { chain: "solana", hash: "on1" }, { chain: "solana", hash: "rel2" }], created_ms: 1, owed: "n2" };
+  const r2 = mergeWithdrawOp(owed2, { stage: "stopped", clear: "n1" });
+  assert.equal(r2.stage, "in_transit", "part 2 still owed: not stopped");
+  assert.equal(r2.owed, "n2");
+  const r3 = mergeWithdrawOp(r2, { stage: "sent", txs: [{ chain: "solana", hash: "on2" }], arrived: { on2: "5000000" }, clear: "n2" });
+  assert.equal(r3.stage, "sent");
+  assert.equal(r3.owed, undefined);
+  // no send owed: the stage applies (the op's own end, or a freed note's stopped)
+  assert.equal(mergeWithdrawOp({ ...owed2, owed: undefined }, { stage: "stopped", clear: "n1" }).stage, "stopped");
+  assert.equal(mergeWithdrawOp({ ...owed2, owed: "n1" }, { stage: "stopped", clear: "n1" }).stage, "stopped");
+  // a fee_needed goes with its own note's clear only
+  const f = mergeWithdrawOp(owed2, { feeNeeded: "10000" });
+  assert.equal(mergeWithdrawOp(f, { clear: "n1" }).fee_needed, "10000");
+  assert.equal(mergeWithdrawOp(f, { clear: "n2" }).fee_needed, undefined);
 });
