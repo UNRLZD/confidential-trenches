@@ -127,8 +127,14 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org only about 100 (read 19:37Z). publicnode answered every request with HTTP 200 and no error at
       // 4, 8, 12, 16, 20 and 30 requests at once, twice each, and at 40 (two cold scans at once), three times
       // (2026-11-03 20:11-20:24Z): 20, one cold scan's every span at once, takes no 429
+      // A span of 10,000 blocks (card evm-quote-warm-round, fold 4): at 50,000 a request took 4.5 to 5.4 s at the median
+      // with 20 at once and some reached the 10 s timeout (3 of 26 and 2 of 24 in two cold quotes, each asked again as
+      // halves), so a cold quote took 19.6 s from a home line and 79 to 99 s on GitHub's runner, one ending rpc_error;
+      // at 10,000 the same cold quotes' 100 requests took 0.8 s at the median and 4.9 s at most, none timed out, and
+      // the quotes 8.6 s and 7.6 s (2026-11-04 21:31-21:34Z). publicnode limits each address's getLogs work: about two
+      // cold scans back to back, at either span, then 429 for most requests for under a minute (21:26-21:27Z).
       poolManager: "0x498581fF718922c3f8e6A244956aF099B2652b2b",
-      scan: bare({ url: "https://base-rpc.publicnode.com", span: 50_000, depth: 1_000_000, parallel: 20 }),
+      scan: bare({ url: "https://base-rpc.publicnode.com", span: 10_000, depth: 1_000_000, parallel: 20 }),
     }),
     robinhood: bare({
       chainId: 4663,

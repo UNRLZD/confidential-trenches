@@ -71,7 +71,7 @@ export function check(run, venues = evmPoolVenues()) {
     say(n >= N_MIN + 1, `${name}: ${n} quotes, ${N_MIN + 1} needed (one cold, ${N_MIN} warm)`);
     if (n < 2) continue;
     const wrong = quotes.filter((q) => q.code !== want);
-    say(wrong.length === 0, `${name}: ${quotes.length - wrong.length} of ${quotes.length} quotes end ${want}${wrong.length ? ` (others: ${[...new Set(wrong.map((q) => q.code))].join(", ")})` : ""}`);
+    say(wrong.length === 0, `${name}: ${quotes.length - wrong.length} of ${quotes.length} quotes end ${want}${wrong.length ? ` (others: ${[...new Set(wrong.map((q) => (q.message === undefined ? q.code : `${q.code} at quote ${quotes.indexOf(q)}, ${q.ms} ms: ${q.message}`)))].join("; ")})` : ""}`);
     const warm = quotes.slice(1).map((q) => q.ms);
     const p95 = pct(warm, 95);
     say(p95 < P95_MS, `${name}: warm p50 ${Math.round(pct(warm, 50))} ms, p95 ${Math.round(p95)} ms over ${warm.length} (under ${P95_MS} ms)`);
@@ -98,27 +98,81 @@ export async function preflight(venues = evmPoolVenues()) {
   return out;
 }
 
+/** Every request `f` makes, while it runs, summed per host and the methods of its body: the count, the median and
+ *  longest time to the answer's headers, and each answer that was no 200 or held an error (fold 4 of the card's
+ *  review: a cold quote on GitHub's runners took 79 to 99 s, one ending rpc_error, where the box took 10 to 15 s). */
+export async function traced(f) {
+  const real = globalThis.fetch;
+  const log = [];
+  globalThis.fetch = async (u, init) => {
+    const t = performance.now();
+    let m = "?";
+    try {
+      const b = JSON.parse(String(init?.body));
+      m = [...new Set((Array.isArray(b) ? b : [b]).map((x) => x?.method))].join("+");
+    } catch {}
+    const e = { host: new URL(String(u)).hostname, m, ms: 0, bad: null };
+    log.push(e);
+    try {
+      const r = await real(u, init);
+      e.ms = Math.round(performance.now() - t);
+      if (r.status !== 200) e.bad = `HTTP ${r.status}`;
+      // an error inside a 200 answer, read off a copy so the kit reads the answer as it came
+      r.clone().text().then((x) => {
+        const err = /"error"\s*:\s*\{[^}]*"message"\s*:\s*"([^"]{0,100})/.exec(x)?.[1];
+        if (err !== undefined) e.bad = `${e.bad ?? "error"}: ${err}`;
+      }, () => {});
+      return r;
+    } catch (x) {
+      e.ms = Math.round(performance.now() - t);
+      e.bad = String(x?.name ?? x);
+      throw x;
+    }
+  };
+  try {
+    await f();
+  } finally {
+    globalThis.fetch = real;
+  }
+  await new Promise((r) => setTimeout(r, 50));
+  const by = new Map();
+  for (const e of log) by.set(`${e.host} ${e.m}`, [...(by.get(`${e.host} ${e.m}`) ?? []), e]);
+  return [...by].map(([k, es]) => {
+    const ms = es.map((e) => e.ms).sort((a, b) => a - b);
+    const bad = es.filter((e) => e.bad !== null);
+    return { at: k, n: es.length, p50: ms[ms.length >> 1], max: ms.at(-1), bad: bad.length, why: [...new Set(bad.map((e) => e.bad))].slice(0, 3) };
+  });
+}
+
 /** The preflights, then one cold and `n` warm quotes of each case, 1.5 s apart, through the kit's public
- *  evmPoolBuyQuote. */
+ *  evmPoolBuyQuote: each refusal with its message, and the cold quote's requests per provider (`traced`). */
 export async function measure(n = N_MIN, only = null) {
   const run = { recorded: new Date().toISOString(), preflight: await preflight(), cases: {} };
   for (const [name, req] of CASES) {
     if (only !== null && !only.includes(name)) continue;
     const quotes = [];
+    let cold = null;
     for (let i = 0; i <= n; i++) {
       if (i > 0) await new Promise((r) => setTimeout(r, 1500));
       const t = performance.now();
       let code = "ok";
-      try {
-        await evmPoolBuyQuote(req);
-      } catch (e) {
-        if (!(e instanceof EvmQuoteError)) throw e;
-        code = e.code;
-      }
-      quotes.push({ ms: Math.round(performance.now() - t), code });
-      console.log(`${name} ${i} ${quotes[i].ms} ms ${code}`);
+      let message;
+      const quote = async () => {
+        try {
+          await evmPoolBuyQuote(req);
+        } catch (e) {
+          if (!(e instanceof EvmQuoteError)) throw e;
+          code = e.code;
+          message = String(e.message).slice(0, 300);
+        }
+      };
+      if (i === 0) cold = await traced(quote);
+      else await quote();
+      quotes.push({ ms: Math.round(performance.now() - t), code, ...(message === undefined ? {} : { message }) });
+      console.log(`${name} ${i} ${quotes[i].ms} ms ${code}${message === undefined ? "" : `: ${message}`}`);
+      if (i === 0) for (const c of cold) console.log(`  cold ${c.at}: ${c.n} requests, p50 ${c.p50} ms, max ${c.max} ms${c.bad ? `, ${c.bad} failed (${c.why.join(" | ")})` : ""}`);
     }
-    run.cases[name] = { quotes };
+    run.cases[name] = { quotes, cold };
   }
   return run;
 }

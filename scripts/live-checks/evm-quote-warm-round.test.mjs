@@ -57,3 +57,11 @@ test("each rule fails alone on the good answer with one thing changed", () => {
     assert.equal(check({ ...A.good, preflight: { ...pre, "https://f.example": bad } }, three).ok, false, JSON.stringify(bad));
   }
 });
+
+test("a refused quote's line names its code, its place, its time and the kit's message (re-review of 037627c, MEDIUM-1)", () => {
+  const run = structuredClone(A.good);
+  run.cases["base-partial-v4"].quotes[0] = { ms: 99444, code: "rpc_error", message: "the scan provider answered no logs" };
+  const r = check(run);
+  assert.equal(r.ok, false);
+  has(r.lines, /^FAIL base-partial-v4: 20 of 21 quotes end partial_fill \(others: rpc_error at quote 0, 99444 ms: the scan provider answered no logs\)$/);
+});

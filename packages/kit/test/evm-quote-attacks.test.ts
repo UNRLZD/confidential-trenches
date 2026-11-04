@@ -462,9 +462,9 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   assert.equal((await quoteOn(pools, token, seededRoute(token))).accepted, true);
   const asked: [number, number][] = [];
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked)), below);
-  // the first scan reads 1M blocks back in 50k spans; the next one only from where it stopped
+  // the first scan reads 1M blocks back in Base's 10k spans; the next one only from where it stopped
   assert.equal(Math.min(...asked.map((x) => x[0])), 4_000_001);
-  assert.equal(asked.length, 2 * 20);
+  assert.equal(asked.length, 2 * 100);
   asked.length = 0;
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_010, [], asked), undefined, "base", 5_000_010), below);
   assert.deepEqual(asked, [[5_000_001, 5_000_010], [5_000_001, 5_000_010]]);
@@ -481,11 +481,11 @@ test("card evm-quote-head-watch: a scan provider that fails a full span (a timeo
   // base-rpc.publicnode.com, 2026-11-04 10:50Z: a 50,000-block span of USDC's logs took up to 10.8 s, past the timeout
   const slow: EvmRpc = async (calls) => {
     const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
-    if (calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 12_500) throw new Error("The operation was aborted due to timeout");
+    if (calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 2_500) throw new Error("The operation was aborted due to timeout");
     return inner(calls);
   };
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), slow), below);
-  assert.ok(asked.length > 0 && asked.every(([a, b]) => b - a + 1 <= 12_500), "every answered request is a half, a quarter or an eighth of a span");
+  assert.ok(asked.length > 0 && asked.every(([a, b]) => b - a + 1 <= 2_500), "every answered request is a quarter or an eighth of a span");
   // a span answered with more logs than SCAN_MAX_LOGS is asked by halves too
   const token2 = "0x00000000000000000000000000000000000e72e7";
   const pools2 = [seeded(token2), real(token2)];
@@ -493,7 +493,7 @@ test("card evm-quote-head-watch: a scan provider that fails a full span (a timeo
   const full: EvmRpc = async (calls) => {
     const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
     const out = await inner2(calls);
-    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 25_000 ? out.map((o) => ({ ...(o as object), result: new Array(10_001).fill(null) })) : out;
+    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 5_000 ? out.map((o) => ({ ...(o as object), result: new Array(10_001).fill(null) })) : out;
   };
   assert.deepEqual(await quoteOn(pools2, token2, seededRoute(token2), full), below);
 });
@@ -516,7 +516,7 @@ test("card evm-quote-head-watch: the agreed block is picked once the token's sca
     evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [watched(chain(pools, 0)), watched(chain(pools, 1))], NOW, scan),
   );
   assert.deepEqual(v, below);
-  assert.equal(order.filter((x) => x === "logs").length, 20);
+  assert.equal(order.filter((x) => x === "logs").length, 100);
   assert.ok(order.lastIndexOf("logs") < order.indexOf("head"), `the heads after every log read: ${order.join(" ")}`);
 });
 
@@ -580,7 +580,7 @@ test("review of 4830f1f, L: a scan head more than a span behind the agreed block
   const capped: EvmRpc = async (calls) => {
     const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
     const out = await inner(calls);
-    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 25_000 ? out.map((o) => ({ ...(o as object), result: new Array(10_000).fill(null) })) : out;
+    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 5_000 ? out.map((o) => ({ ...(o as object), result: new Array(10_000).fill(null) })) : out;
   };
   assert.deepEqual(await quoteOn(pools2, token2, seededRoute(token2), capped), below);
 });
@@ -783,7 +783,7 @@ test("S2b a scan is kept only once the quote's block is confirmed on both provid
   // the next quote scans the whole depth again
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked)), below);
   assert.equal(Math.min(...asked.map((x) => x[0])), 4_000_001);
-  assert.equal(asked.length, 2 * 20);
+  assert.equal(asked.length, 2 * 100);
 });
 
 test("S3c a market whose hook is not pinned is quoted only once it exists, with its hook and the pool's replaced in one read", async () => {
@@ -2315,9 +2315,9 @@ test("J1 a scan that lost one span keeps every other: the next quote reads only 
   failing = false;
   asked.length = 0;
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scan));
-  // the token's blocks read again: the smallest part of the failed span (50,000 blocks halved three times), not 1,000,000
+  // the token's blocks read again: the smallest part of the failed span (10,000 blocks halved three times), not 1,000,000
   const ranges = [...new Set(asked.map((r) => r.join("-")))];
-  assert.deepEqual(ranges, ["4493751-4500000"], "the token's scan reads only the part that failed");
+  assert.deepEqual(ranges, ["4498751-4500000"], "the token's scan reads only the part that failed");
   // and it decides as a quote on a scan that never failed
   const t2 = "0x00000000000000000000000000000000000ee0f5";
   const c2 = warmCase(t2, xAt(0x3b10));
@@ -2332,9 +2332,9 @@ test("J2 a span the scan provider throttles past ask's retries is asked again wh
     const { pools, logs } = warmCase(token, xAt(0x3b20 + 16 * i));
     const inner = scanner(5_000_000, logs);
     const asked: [number, number][] = [];
-    // the span 4,450,001 to 4,500,000 is throttled for its first five requests
+    // the span 4,490,001 to 4,500,000 is throttled for its first five requests
     let left = 5;
-    const throttled = (calls: readonly EvmRpcCall[]) => getLogsOf(calls).some((f) => Number(f.fromBlock) === 4_450_001 && Number(f.toBlock) === 4_500_000) && left-- > 0;
+    const throttled = (calls: readonly EvmRpcCall[]) => getLogsOf(calls).some((f) => Number(f.fromBlock) === 4_490_001 && Number(f.toBlock) === 4_500_000) && left-- > 0;
     const record = (calls: readonly EvmRpcCall[]) => getLogsOf(calls).forEach((f) => asked.push([Number(f.fromBlock), Number(f.toBlock)]));
     const scan: EvmRpc = http
       ? evmJsonRpc("https://scan.j2.test", (async (_u: string, init: RequestInit) => {
@@ -2350,7 +2350,7 @@ test("J2 a span the scan provider throttles past ask's retries is asked again wh
         };
     const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scan));
     assert.equal(v.accepted, true, String((v as { code?: string }).code));
-    const narrow = asked.filter(([a, b]) => a >= 4_450_001 && b <= 4_500_000 && b - a + 1 < 50_000);
+    const narrow = asked.filter(([a, b]) => a >= 4_490_001 && b <= 4_500_000 && b - a + 1 < 10_000);
     assert.deepEqual(narrow, [], `${http ? "HTTP 429" : "a named limit"}: no half of the throttled span is asked`);
   }
 });
@@ -2594,7 +2594,7 @@ test("J6 a scan of two currencies with different blocks left keeps each span onl
   asked.length = 0;
   // X2's market through which B pays ten times the seeded route: found, so the seeded route is refused
   assert.equal(big(await q()), big({ accepted: false, code: "below_reference" }));
-  assert.deepEqual([...new Set(asked)], ["5075001-5081250"]);
+  assert.deepEqual([...new Set(asked)], ["5078751-5080000"]);
 });
 
 test("V10 a block two colluders name, which the other three providers hold otherwise, is never read at: a contested block needs more than half the listed providers", async () => {
