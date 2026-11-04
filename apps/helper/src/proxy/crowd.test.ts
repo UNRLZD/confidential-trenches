@@ -54,9 +54,10 @@ test("card helper-crowd-429: solana-jupiter-build's own calls from one runner (a
   assert.deepEqual([list.status, ...builds.map((a) => a.status)], [200, 200, 200, 200, 200], builds.map((a) => `${a.status} ${a.why ?? ""}`).join(", "));
 });
 
-test("card helper-crowd-429: two devices contending for Jupiter's callers' part: the minute's cap is never passed, the heavy one is lent only while half stays free, and the other is never starved of its share", async () => {
+test("card helper-crowd-429: two devices contending for Jupiter's callers' part: the minute's cap is never passed, the heavy one keeps a share a minute and is lent only above what the others keep, and the other is never starved of its share", async () => {
   const j = jupiterFree();
-  const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: j.clock.sleep });
+  // a refused build's queue wait passes no time here, so the three minutes are the clock's own
+  const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: async () => {} });
   let heavy = 0;
   let light = 0;
   const lightRefused: string[] = [];
@@ -73,12 +74,19 @@ test("card helper-crowd-429: two devices contending for Jupiter's callers' part:
   assert.equal(j.stats().throttled, 0, "Jupiter never throttled");
   assert.ok(j.stats().peak <= 60, `peak ${j.stats().peak} in a sliding minute`);
   assert.deepEqual(lightRefused, [], "the light device's every build served");
-  assert.ok(heavy >= 3 * 13, `the heavy device lent past its share: ${heavy} builds in three minutes`);
+  console.log(`  [contention] heavy ${heavy} builds in three minutes, light ${light}, peak ${j.stats().peak}`);
+  // fold 4: the heavy device keeps one share a minute on the total alone and is lent above LEND_NEW_SHARES shares and
+  // one for the light device (16 of the callers' 26); at fold 2 this read 39 only because each refused build's queue
+  // wait moved the fake clock 3 s, so its "three minutes" ran far longer
+  assert.ok(heavy >= 3 * 4, `the heavy device keeps a share a minute: ${heavy} builds in three minutes`);
 });
 
 test("card helper-crowd-429 fold 3: two heavy devices drawing Jupiter as fast as they are served for two minutes never make a third or a fourth device wait or 429 for a trade inside its own share", async () => {
   const j = jupiterFree();
-  const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: j.clock.sleep });
+  // a refused build's queue wait passes no time here (each poll counted), so the schedule below is the clock's own:
+  // with the fake clock's sleep, every refused heavy build moved the clock 3 s and spread two minutes over half an hour
+  let polls = 0;
+  const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: async () => void polls++ });
   const refused: string[] = [];
   let heavy = 0;
   // the third device trades (4 builds, 200 ms apart) every minute from 20 s, the fourth every minute from 35 s: each
@@ -88,9 +96,9 @@ test("card helper-crowd-429 fold 3: two heavy devices drawing Jupiter as fast as
     for (const ip of ["198.51.100.1", "198.51.100.2"]) if ((await p.handle("jupiter", BUILD, `h=${ip}-${ms}`, "", ip)).status === 200) heavy++;
     for (const [ip, from] of trades) {
       if (ms < from || (ms - from) % 60_000 >= 4 * 200) continue;
-      const t0 = j.clock.now();
+      const p0 = polls;
       const a = await p.handle("jupiter", BUILD, `l=${ip}-${ms}`, "", ip);
-      if (a.status !== 200 || j.clock.now() !== t0) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${j.clock.now() - t0} ms`);
+      if (a.status !== 200 || polls !== p0) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
     }
     j.clock.add(200);
   }
@@ -98,4 +106,31 @@ test("card helper-crowd-429 fold 3: two heavy devices drawing Jupiter as fast as
   assert.equal(j.stats().throttled, 0, "Jupiter never throttled");
   assert.ok(j.stats().peak <= 60, `peak ${j.stats().peak} in a sliding minute`);
   assert.ok(heavy > 0, `the heavy devices still lent what is left: ${heavy}`);
+});
+
+test("card helper-crowd-429 fold 4: one heavy device drawing Jupiter as fast as it is served for two minutes, beside a device trading inside its share, never makes a third, fourth or fifth first-time device wait or 429", async () => {
+  const j = jupiterFree();
+  // a refused build's queue wait passes no time here (each poll counted), so the schedule below is the clock's own:
+  // with the fake clock's sleep, every refused heavy build moved the clock 3 s and spread two minutes over half an hour
+  let polls = 0;
+  const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: async () => void polls++ });
+  const refused: string[] = [];
+  let heavy = 0;
+  // the normal device trades (4 builds, 200 ms apart) every 30 s from 5 s; three first-time devices trade once each,
+  // at 20 s, 70 s and 100 s, while the heavy one asks a build every 200 ms from the start
+  const trades: [string, number, number][] = [["198.51.100.2", 5_000, 30_000], ["198.51.100.3", 20_000, Infinity], ["198.51.100.4", 70_000, Infinity], ["198.51.100.5", 100_000, Infinity]];
+  for (let ms = 0; ms < 120_000; ms += 200) {
+    if ((await p.handle("jupiter", BUILD, `h=${ms}`, "", "198.51.100.1")).status === 200) heavy++;
+    for (const [ip, from, every] of trades) {
+      if (ms < from || (ms - from) % every >= 4 * 200 || (every === Infinity && ms - from >= 4 * 200)) continue;
+      const p0 = polls;
+      const a = await p.handle("jupiter", BUILD, `l=${ip}-${ms}`, "", ip);
+      if (a.status !== 200 || polls !== p0) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
+    }
+    j.clock.add(200);
+  }
+  assert.deepEqual(refused, [], "every build of the normal and the first-time devices served at once");
+  assert.equal(j.stats().throttled, 0, "Jupiter never throttled");
+  assert.ok(j.stats().peak <= 60, `peak ${j.stats().peak} in a sliding minute`);
+  assert.ok(heavy > 0, `the heavy device still lent what is left: ${heavy}`);
 });

@@ -3,6 +3,7 @@
 // back past a short wait answers 429 with its reset, one that answers anything but JSON answers 503 upstream; only public lists are cached, never a quote.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { LEND_NEW_SHARES } from "../limits/limits.ts";
 import * as proxyModule from "./proxy.ts";
 import { ANSWER_MAX, createProxy, PROXY_BODY_MAX, readKeys, resetMs, WAIT_MAX_MS } from "./proxy.ts";
 // read off the module, so this file still loads at a base without it
@@ -223,7 +224,7 @@ test("each vendor is one budget callers draw from fairly: a heavy caller is lent
   const p = createProxy({ ...ENV, ...WIDE }, { fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: async () => {} });
   // past its share the heavy caller is lent from the idle total (lend) while a share stays free for the next caller
   const part = PROXY_VENDOR_MAX - PROXY_BUDGETS.jupiter!.reserve!;
-  const lent = part - PROXY_CLIENT_MAX;
+  const lent = part - LEND_NEW_SHARES * PROXY_CLIENT_MAX; // fold 4: three shares stay free for callers not seen yet
   for (let i = 0; i < lent; i++) assert.equal((await p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "heavy")).status, 200, `build ${i}`);
   const h = await p.handle("jupiter", "/swap/v2/build", "n=x", "", "heavy");
   assert.equal(h.status, 429);
