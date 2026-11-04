@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { tokenHref } from "../../routes/routes.ts";
 import type { MarketSnapshot } from "./fields.ts";
-import { COLUMNS, columnRows, rowView } from "./model.ts";
+import { COLUMNS, columnRows, listAge, rowView } from "./model.ts";
 import type { ColumnKey, Level, RowView, Win } from "./model.ts";
-import { WORDS } from "./words.ts";
+import { ageLine, WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import "./discover.css";
 import { Avatar } from "../market/Avatar.tsx";
@@ -28,9 +28,9 @@ const ARC: Record<ColumnKey, [number, number, string]> = {
 };
 const SKELETON_ROWS = 9;
 
-/** A word, marked when it is still the owner's draft. */
-function W({ id }: { id: WordId }) {
-  const w = WORDS[id];
+/** A word, marked when it is still the owner's draft; `age` fills the list's age line (ageLine). */
+function W({ id, age }: { id: WordId; age?: string }) {
+  const w = age === undefined ? WORDS[id] : { ...WORDS[id], text: ageLine(age) };
   return w.draft ? <span data-draft-copy={w.text}>{w.text}</span> : <>{w.text}</>;
 }
 
@@ -209,10 +209,17 @@ const countOf = (data: DiscoverData, k: ColumnKey) => (data.status === "ready" ?
 export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: number; onRetry: () => void }) {
   const [tab, setTab] = useState<ColumnKey>("new");
   const tabWin = COLUMNS.find((c) => c.key === tab)!.win;
+  // a list the helper served from an older read says how old it is (card app-list-age); a fresh one says nothing
+  const age = data.status === "ready" ? listAge(data.snapshot.as_of_ms, nowMs) : null;
   return (
     <section className="dsc" data-discover={data.status}>
       <div className="dsc-bar">
         <h1 className="dsc-title"><W id="discover" /></h1>
+        {age && (
+          <span className="dsc-age" data-testid="list-age" data-age={age}>
+            <W id="updated" age={age} />
+          </span>
+        )}
       </div>
       <div className="dsc-grid">
         {COLUMNS.map((c) => (

@@ -23,8 +23,9 @@ interface Row { screen: string; key: string; text: string; pick: string }
 const SCREENS: Record<string, { WORDS: Record<string, Word>; DRAFTS: readonly string[] }> = { deposit, discover, portfolio, signin, token, verify, withdraw };
 const ROWS = JSON.parse(readFileSync(new URL("./words-final.json", import.meta.url), "utf8")) as Row[];
 const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "owner 3 Nov 09:17Z, keep"];
-// the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name
-const STILL_DRAFT: Record<string, string[]> = { deposit: [], discover: [], portfolio: ["more"], signin: [], token: [], verify: [], withdraw: [] };
+// the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name, Discover's list age
+// line (card app-list-age, on the owner's next picks page)
+const STILL_DRAFT: Record<string, string[]> = { deposit: [], discover: ["updated"], portfolio: ["more"], signin: [], token: [], verify: [], withdraw: [] };
 
 test("the list: 103 words on these screens, each once, each with a pick", () => {
   assert.equal(ROWS.length, 103);

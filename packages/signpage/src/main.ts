@@ -79,7 +79,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import type { PoolChain } from "./rules/pool.ts";
 import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
-import { solanaHelperRpc, solanaJsonRpc } from "../../kit/src/trade/solana/send.ts";
+import { pageHelperRpc, pageRpc } from "./page-rpc.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
@@ -166,7 +166,7 @@ else {
           ? testnetPoolDeps(testnet.flow)
           : {
               pinned: poolPinned,
-              rpcs: (chain) => (chain === "solana" ? [solanaJsonRpc(SOLANA_PROVIDER_A), solanaHelperRpc(TRADE_HELPER)] : null),
+              rpcs: (chain) => (chain === "solana" ? [pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)] : null),
             },
       ),
     },
