@@ -14,10 +14,13 @@
 //   waits for U to hold exactly that, or that plus at least an empty account's rent. Someone else funds U.
 // - What differs from the page in a browser, and only that: the prover is snarkjs's fullProve in this process, the one
 //   the prover worker makes (the setup files checked by sha256 against ZK_SETUP_FILES); <table> is the lookup table
-//   (DEVNET_TABLE once pinned); each devnet RPC call that fails in transport (an HTTP 429 or a JSON-RPC -32029, a 5xx,
-//   a non-JSON page, a timeout) is logged and asked again, up to 10 times, a short wait apart; the helper's answers are logged by status;
-//   and a kind that answers failed or quote_check_failed (nothing sent) is tapped again, up to 4 times. Every check,
+//   (DEVNET_TABLE once pinned); the RPCs are the page's own (src/page-rpc.ts: its bounded retry of a 429, a 5xx,
+//   -32029/-32429, a non-JSON answer or a stall is the page's, never this script's), each answer of 429 or 5xx logged,
+//   and a call that still fails logged with its named fault; the helper's answers are logged by status. Every check,
 //   the send and every read-back are the page's own code.
+// - FLOW_BURST=1 injects throttles the way a public devnet provider gives them: on each devnet RPC host, the 1st and 2nd
+//   of every 15 requests answer 429 with Retry-After 1 (never reaching the provider), and the helper's first POST
+//   /v1/pool/solana/send answers its 429 rate_limited with Retry-After 1 (not forwarded). Each injection is logged.
 // - Each kind answers at its send and its run goes on; this waits for the run's end (the seed's lock), then reads the
 //   notes: the deposit landed when its note is UNSPENT, the buy filled when that note is SPENT and no stage but sent or
 //   filled was told, the sell filled when a return note is UNSPENT with a leaf and no stage but sent or filled was told.
@@ -29,8 +32,8 @@
 //   each stranded 0.01 SOL). FLOW_RESUME=<that file> runs again from it: no U, no deposit; the notes restored from the
 //   seed on both devnet RPCs (the wallet's solanaRestoreNotes) into the store, then the buy and the sell as above.
 //   FLOW_CRASH_AFTER=deposit stops the run right after its deposit (the resume's test).
-// - A buy that does not land on its tap is a failed run, recorded as one: it is never tapped again (a re-tap would hide
-//   a page that gives up on a busy provider).
+// - Each kind is tapped once. A kind that does not land on its tap is a failed run, recorded as one: it is never tapped
+//   again (a re-tap would hide a page that gives up on a busy provider).
 import { randomBytes, createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -48,7 +51,7 @@ const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { solanaRestoreNotes } = await import("../../wallet/src/pool/solana-restore.ts");
 const { refKey } = await import("../../wallet/src/notes/store.ts");
-const { solanaJsonRpc } = await import("../../kit/src/trade/solana/send.ts");
+const { pageRpc } = await import("../src/page-rpc.ts");
 const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
@@ -62,24 +65,40 @@ const RUNG = 10_000_000n;
 const FEE = 5_000n;
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const patient = (rpc) => {
+const BURST = process.env.FLOW_BURST === "1";
+const RPC_HOSTS = new Set(Object.values(TESTNET_RPCS).flat().map((u) => new URL(u).host));
+const injected = { rpc: 0, send: 0 };
+const asked = new Map();
+// every devnet RPC answer of 429 or 5xx is logged (the page retries it); FLOW_BURST injects the bursts above
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (u, init) => {
+  const host = new URL(String(u)).host;
+  if (!RPC_HOSTS.has(host)) return realFetch(u, init);
+  const n = (asked.get(host) ?? 0) + 1;
+  asked.set(host, n);
+  if (BURST && n % 15 <= 2 && n % 15 >= 1) {
+    injected.rpc++;
+    log(`rpc ${host}: 429 injected (request ${n})`);
+    return new Response("Too Many Requests", { status: 429, headers: { "retry-after": "1" } });
+  }
+  const r = await realFetch(u, init);
+  if (r.status === 429 || r.status >= 500) log(`rpc ${host}: HTTP ${r.status} from the provider (request ${n})`);
+  return r;
+};
+// a call that still fails after the page's retry: logged with its named fault (public reads only, never a key or the words)
+const logged = (rpc) => {
   const p = async (method, params) => {
-    for (let i = 0; ; i++) {
-      try {
-        return await rpc(method, params);
-      } catch (e) {
-        // every failed call is logged (its method and error: public reads only, never a key or the words)
-        log(`rpc ${new URL(rpc.url).host} ${method}: ${String(e?.message).slice(0, 120)}`);
-        // short waits, so a retried read never ages the quote past the rule's 25 slots
-        if (i >= 9 || !/429|-32029|fetch failed|not a JSON-RPC answer|HTTP 5\d\d|timed out|aborted/i.test(String(e?.message))) throw e;
-        await sleep(Math.min(500 * (i + 1), 3_000));
-      }
+    try {
+      return await rpc(method, params);
+    } catch (e) {
+      log(`rpc ${new URL(rpc.url).host} ${method}: ${String(e?.message).slice(0, 160)}`);
+      throw e;
     }
   };
   p.url = rpc.url; // the kit tells two providers apart by their URL
   return p;
 };
-const rpcs = [patient(solanaJsonRpc(TESTNET_RPCS.solana[0])), patient(solanaJsonRpc(TESTNET_RPCS.solana[1]))];
+const rpcs = [logged(pageRpc(TESTNET_RPCS.solana[0])), logged(pageRpc(TESTNET_RPCS.solana[1]))];
 
 // the prover: snarkjs's fullProve in this process, on the release's pinned withdraw files
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);
@@ -123,6 +142,11 @@ const page = { store: async () => w, seed64: async () => seed64.slice() };
 // the relay fee the helper gave the proof's pass (GET /v1/pool/fee), for a "max" spend
 let relayFee = null;
 const helperFetch = async (url, init) => {
+  if (BURST && injected.send === 0 && new URL(url).pathname === "/v1/pool/solana/send") {
+    injected.send++;
+    log(`helper POST /v1/pool/solana/send: 429 rate_limited injected (not forwarded)`);
+    return new Response(JSON.stringify({ error: { code: "rate_limited" } }), { status: 429, headers: { "retry-after": "1", "content-type": "application/json" } });
+  }
   const r = await fetch(url, init);
   log(`helper ${init?.method ?? "GET"} ${new URL(url).pathname}: HTTP ${r.status}`);
   if (new URL(url).pathname === "/v1/pool/fee" && r.status === 200) relayFee = BigInt(JSON.parse(await r.clone().text()).fee);
@@ -144,18 +168,8 @@ const once = async (kind, params) => {
   await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
   return { answer, notes: await noteList() };
 };
-// a kind that answers failed or quote_check_failed sent nothing (each sends only after every check, and answers a stage
-// from the send on): tapped again, as a user would, after the proof queue's pass, up to 4 times
-const run = async (kind, params) => {
-  for (let k = 1; ; k++) {
-    const r = await once(kind, params);
-    const err = r.answer?.error;
-    if ((err !== "failed" && err !== "quote_check_failed") || k >= 4) return r;
-    log(`${kind} answered ${err} (try ${k}): again in 10 s`);
-    await sleep(10_000);
-    if (kind === "pool.buy") await t.proofs();
-  }
-};
+// each kind is tapped once: one that answers an error is the run's failure, recorded as one
+const run = (kind, params) => once(kind, params);
 const noteList = async () => (await ns.list()).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null, leafIndex: n.leaf ? String(n.leaf.leafIndex) : null, sends: (n.sends ?? []).map((s) => s.signature) }));
 
 // U: the index the note store plans (the flow's planDeposit names the same one until money reaches it)
@@ -252,7 +266,7 @@ log(`notes ${JSON.stringify(notes)}`);
 const told = (kind) => !stages.some((x) => x.kind === kind && x.stage !== "sent" && x.stage !== "filled");
 const filled = landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
 seed64.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, U, need: String(NEED), deposit, buy, sell, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, U, need: String(NEED), deposit, buy, sell, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();
