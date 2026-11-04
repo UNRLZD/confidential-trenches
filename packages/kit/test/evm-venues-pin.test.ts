@@ -23,9 +23,12 @@ const code = (f: () => unknown): string => {
 };
 const record = (chain: string) =>
   JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/pool-evm-deploy.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
+// the SellDelegate that sells through the v4 PoolManager, deployed again by card evm-sell-v4
+const sellRecord = (chain: string) =>
+  JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/evm-sell-v4.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
 
 // pool-evm-deploy's pinned chain table: the WETH each testnet's contracts were deployed with
-const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string } }> };
+const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string }; poolManager: { address: string } }> };
 
 const NOW = 1_800_000_000;
 mock.timers.enable({ apis: ["Date"], now: NOW * 1000 });
@@ -57,7 +60,9 @@ test("the testnet chains' pins are pool-evm-deploy's records: pool, v3 and v4 ad
     assert.equal(lower(v.pool), lower(r.PrivacyPoolSimple!.address), chain);
     assert.equal(lower(v.adapters?.v4), lower(r.UniswapV4Adapter!.address), chain);
     assert.equal(lower(v.adapters?.v3), lower(r.UniswapV3Adapter?.address), chain); // none on Robinhood testnet (M365)
-    assert.equal(lower(v.sellDelegate), lower(r.SellDelegate!.address), chain);
+    assert.equal(lower(v.sellDelegate), lower(sellRecord(chain).SellDelegate!.address), chain);
+    assert.notEqual(lower(v.sellDelegate), lower(r.SellDelegate!.address), chain); // the v1 delegate sells through no PoolManager
+    assert.equal(lower(v.poolManager), lower(DEPLOY.CHAINS[chain]!.poolManager.address), chain);
     assert.equal(Object.getPrototypeOf(v), null, chain);
     assert.equal(Object.getPrototypeOf(v.adapters), null, chain);
     assert.ok(Object.isFrozen(v) && Object.isFrozen(v.adapters) && Object.isFrozen(v.middles) && Object.isFrozen(v.routers), chain);
@@ -110,14 +115,19 @@ test("a sell pays only into the chain's pinned pool, and W's authorization names
       assert.equal(lower(built.pool), lower(r.PrivacyPoolSimple!.address), chain);
       assert.equal(kit.evmPoolSignSell(W_KEY, c, built).length, 65, chain);
     } else {
-      // Robinhood testnet has no v3 router (M365), so no sell is built there
+      // Robinhood testnet has no v3 router (M365), so no v3 sell is built there
       assert.equal(code(() => kit.evmPoolBuildSell(c, req)), "bad_target", chain);
     }
+    // a v4 sell goes through the pinned PoolManager on every testnet (card evm-sell-v4-kit)
+    const v4sell = { ...req, target: v.poolManager!, route: { venue: "uniswap-v4" as const, hops: [{ currency: ZERO, fee: 10000, tickSpacing: 200, hooks: ZERO, hookData: "0x" }] } };
+    const built4 = kit.evmPoolBuildSell(c, v4sell);
+    assert.equal(lower(built4.target), lower(v.poolManager), chain);
+    assert.equal(lower(built4.pool), lower(r.PrivacyPoolSimple!.address), chain);
     const a = kit.evmPoolSignSellAuthorization(W_KEY, c, 0n);
-    assert.equal(lower(a.address), lower(r.SellDelegate!.address), chain);
+    assert.equal(lower(a.address), lower(sellRecord(chain).SellDelegate!.address), chain);
     assert.equal(a.chainId, chainId, chain);
     // the authorization takes no delegate: a fourth argument is not read
     const b = (kit.evmPoolSignSellAuthorization as (...x: unknown[]) => typeof a)(W_KEY, c, 0n, OTHER);
-    assert.equal(lower(b.address), lower(r.SellDelegate!.address), chain);
+    assert.equal(lower(b.address), lower(sellRecord(chain).SellDelegate!.address), chain);
   }
 });

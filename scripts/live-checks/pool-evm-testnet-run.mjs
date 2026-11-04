@@ -10,6 +10,8 @@
 //                 the signed minOut, and the token's Transfer of out to W in the same receipt;
 //       sell:     a type 4 transaction to W whose one authorization names the pinned SellDelegate on this chain, and
 //                 Deposited(depositor W, commitment, label, value, precommitment) with value at least minOut less fee;
+//                 a v4 sell's target is the pinned PoolManager and its receipt holds one Swap from that PoolManager
+//                 whose sender is W (the SellDelegate code at W swapped there itself), a v3 sell's is the pinned router;
 //       withdraw: Withdrawn(W, fee recipient the run key, value, fee, nullifier, new commitment);
 //       sweep:    to the record's return address;
 //   - the pool at one block both RPCs hold with one hash (the lower of their latest): currentRoot, currentTreeSize,
@@ -17,10 +19,12 @@
 //     the run spent marked in nullifierHashes and every precommitment it used in usedPrecommitments, on both;
 //   - each W that sold: its code on both RPCs is the EIP-7702 designator 0xef0100 ‖ the pinned SellDelegate;
 //   - the run key: no more than DUST wei left, and its nonce the number of transactions it sent.
-// The pins (the pool, the sell delegate) come from card pool-evm-deploy's record; nothing else is taken from the
-// run's record but what it claims, and each claim is read back.
-// A chain in NO_SELL has no router the sell can go through, so its record has no sell; the gap is written into the
-// run record with where the sell is proven instead.
+// The pins: the pool from card pool-evm-deploy's record, the sell delegate from card evm-sell-v4's (the one that sells
+// through the v4 PoolManager), the PoolManager and the router from pool-evm-deploy.mjs's CHAINS; nothing else is taken
+// from the run's record but what it claims, and each claim is read back. Every chain's run has a sell.
+// A run that stopped part way (its record names why in `stopped`, pool-evm-testnet-run.<chain>.stopped.json) is read
+// back the same way, every transaction and the run key's rest, and needs only its deposit: its Tx lines go into the run
+// record with the others, so the money gate reads them too.
 //   node scripts/live-checks/pool-evm-testnet-run.mjs [--record-file <file>] [--rpc <url>,<url>] [--record <answers>]
 //     [--write-record]
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -34,22 +38,19 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { recorder } from "./notes-per-pool-evm.mjs";
+import { CHAINS as DEPLOYED } from "./pool-evm-deploy.mjs";
 
 const KEY = "pool-evm-testnet-run";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RECORD = path.join(HERE, `${KEY}.md`);
 export const recordFileOf = (chain) => path.join(HERE, `${KEY}.${chain}.json`);
+export const stoppedFileOf = (chain) => path.join(HERE, `${KEY}.${chain}.stopped.json`);
+/** Every record file there is, in the run record's order: each chain's run, then its stopped run if it has one. */
+export const recordFiles = () => CHAINS.flatMap((c) => [recordFileOf(c), stoppedFileOf(c)]).filter((f) => existsSync(f));
 // What a run key may keep: pool-evm-deploy.mjs's DUST (1e13 wei, a transfer's cost many times over)
 export const DUST = 10n ** 13n;
 /** The testnets a run may have a record for, in the run record's order. */
 export const CHAINS = Object.freeze(["base-sepolia", "robinhood-testnet"]);
-/** A chain whose run has no sell, and why, as the run record says it. SellDelegate (contracts/pool-evm/src/
- *  SellDelegate.sol) approves the target for the amount and calls it, and refuses unless the target pulled all of it
- *  with transferFrom: a router does that, the v4 PoolManager (unlock and settle, no allowance) does not. */
-export const NO_SELL = Object.freeze({
-  "robinhood-testnet":
-    "No sell on robinhood-testnet: the chain has no Uniswap v3 SwapRouter02 (no code at mainnet's 0xCaf681a66D020601342297493863E78C959E5cb2 on either RPC, 4 Nov) and SellDelegate sells only through a router that pulls the token with transferFrom, so the W that bought keeps its token. The Robinhood sell is proven on a Robinhood mainnet fork (contracts/pool-evm/test/SellFork.t.sol, SellForkRobinhoodTest, through that router) and lands for real in card pool-evm-mainnet-run.",
-});
 
 // @noble/hashes from the helper's own dependencies (apps/ is outside Blindfill), for the selectors and topics
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
@@ -61,6 +62,9 @@ export const TOPICS = Object.freeze({
   Withdrawn: k256("Withdrawn(address,address,uint256,uint256,uint256,uint256)"),
   Bought: k256("Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)"),
   Transfer: k256("Transfer(address,address,uint256)"),
+  // Uniswap v4 IPoolManager.Swap(PoolId indexed id, address indexed sender, int128 amount0, int128 amount1,
+  // uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)
+  Swap: k256("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)"),
 });
 export const VIEWS = Object.freeze({
   currentRoot: sel("currentRoot()"), currentTreeSize: sel("currentTreeSize()"), currentLabelRoot: sel("currentLabelRoot()"),
@@ -68,10 +72,17 @@ export const VIEWS = Object.freeze({
   nullifierHashes: sel("nullifierHashes(uint256)"), usedPrecommitments: sel("usedPrecommitments(uint256)"),
 });
 
-// Each chain: its two RPCs (scripts/ci/money-gate.mjs RPCS), and its pins from card pool-evm-deploy's record
+// Each chain: its two RPCs (scripts/ci/money-gate.mjs RPCS), and its pins (see the header)
 const pinsOf = (chain) => {
   const d = JSON.parse(readFileSync(path.join(HERE, `pool-evm-deploy.${chain}.json`), "utf8"));
-  return { pool: d.contracts.PrivacyPoolSimple.address.toLowerCase(), sellDelegate: d.contracts.SellDelegate.address.toLowerCase() };
+  const s = JSON.parse(readFileSync(path.join(HERE, `evm-sell-v4.${chain}.json`), "utf8"));
+  const c = DEPLOYED[chain];
+  return {
+    pool: d.contracts.PrivacyPoolSimple.address.toLowerCase(),
+    sellDelegate: s.contracts.SellDelegate.address.toLowerCase(),
+    poolManager: c.poolManager.address.toLowerCase(),
+    router: c.router?.address ? c.router.address.toLowerCase() : null,
+  };
 };
 export const RPCS = Object.freeze({
   "base-sepolia": ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
@@ -116,7 +127,8 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
     if (!Array.isArray(rec.txs) || rec.txs.length === 0) throw new Error("the record lists no transaction");
     const relayer = lower(rec.relayer);
     const kinds = new Set(rec.txs.map((t) => t.kind));
-    for (const k of ["deposit", "buy", ...(NO_SELL[rec.chain] ? [] : ["sell"]), "withdraw"]) if (!kinds.has(k)) throw new Error(`the record has no ${k}`);
+    if ("stopped" in rec && (typeof rec.stopped !== "string" || rec.stopped.length === 0)) throw new Error("a stopped run's record names why it stopped");
+    for (const k of rec.stopped ? ["deposit"] : ["deposit", "buy", "sell", "withdraw"]) if (!kinds.has(k)) throw new Error(`the record has no ${k}`);
     const nullifiers = [], precommitments = [], sellers = [];
     let sent = 0;
     for (const t of rec.txs) {
@@ -152,8 +164,14 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
           const auths = tx.authorizationList ?? [];
           if (auths.length !== 1 || lower(auths[0].address) !== pins.sellDelegate || BigInt(auths[0].chainId) !== BigInt(rec.chainId)) throw new Error(`${t.step} ${t.hash}: its authorization is not this chain's pinned SellDelegate ${pins.sellDelegate}`);
           if (value < BigInt(t.minOut) - BigInt(t.fee)) throw new Error(`${t.step} ${t.hash}: deposited ${value}, under minOut ${t.minOut} less the fee ${t.fee}`);
+          const through = t.venue === "v4" ? pins.poolManager : t.venue === "v3" ? pins.router : null;
+          if (!through || lower(t.target) !== through) throw new Error(`${t.step} ${t.hash}: a ${t.venue} sell through ${t.target}, not this chain's pinned ${t.venue === "v4" ? "PoolManager" : "router"} ${through}`);
+          if (t.venue === "v4") {
+            const sw = log(TOPICS.Swap, pins.poolManager);
+            if (topicAddr(sw.topics[2]) !== lower(t.w)) throw new Error(`${t.step} ${t.hash}: the PoolManager's Swap names sender ${topicAddr(sw.topics[2])}, not W ${t.w}`);
+          }
           sellers.push(lower(t.w));
-          said = `type 4 to W ${lower(t.w)} authorizing SellDelegate ${pins.sellDelegate}, ${said}`;
+          said = `type 4 to W ${lower(t.w)} authorizing SellDelegate ${pins.sellDelegate}, ${t.venue === "v4" ? `Swap by W on the PoolManager ${through}` : `through the router ${through}`}, ${said}`;
         }
       } else if (t.kind === "buy" || t.kind === "withdraw") {
         const l = log(t.kind === "buy" ? TOPICS.Bought : TOPICS.Withdrawn);
@@ -231,14 +249,14 @@ export function runRecord(recs) {
 const runLines = (rec) => [
     `${rec.chain} (chain id ${rec.chainId}), contracts/pool-evm/script/testnet-run.mjs at ${rec.at}, the pool ${rec.pool}, the token ${rec.coin}, venues ${rec.venues.join(" and ")}. Its steps, in the order of its Tx lines above: ${rec.txs.map((t) => t.step).join(", ")}.`,
     `The run key ${rec.relayer} lived only in the run, sent every transaction but the Ws' own sweeps as the relayer, was funded with ${rec.need} wei (the printed need) and swept back to ${rec.return}. The run's 12 words lived only in the run; every note came from them.`,
+    ...(rec.stopped ? [rec.stopped] : []),
     rec.restore ? `The restore from the words (packages/wallet evmRestoreNotes) at block ${rec.restore.block}: ${rec.restore.notes} notes, ${rec.restore.spends} spends, the Ws ${rec.restore.wallets.map((w) => `${w.w} (${(w.tokens ?? ["unread"]).join(", ") || "no token"})`).join(", ")}.` : "No restore was run.",
-    ...(NO_SELL[rec.chain] ? [NO_SELL[rec.chain]] : []),
     "",
 ];
 
 async function main(argv) {
   const at = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : undefined);
-  const files = at("--record-file") ? [at("--record-file")] : CHAINS.map(recordFileOf).filter((f) => existsSync(f));
+  const files = at("--record-file") ? [at("--record-file")] : recordFiles();
   if (files.length === 0) throw new Error("no run record");
   const runs = [];
   let ok = true;

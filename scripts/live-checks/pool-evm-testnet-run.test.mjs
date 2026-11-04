@@ -2,15 +2,17 @@
 // pool-evm-testnet-run.answers.json holds, per run (Base Sepolia, Robinhood testnet), the check's reads of the real run
 // on the chain's two RPCs (good) and the same reads with every nullifierHashes answer false on both (bad: a spend the
 // pool never marked). Good passes every line; bad fails on the first nullifier; each record it reads is the one
-// committed beside it, and the run record names every tx of every run and the no-sell gap where there is one.
+// committed beside it, and the run record names every tx of every run. Every chain's run sells (card evm-sell-v4-kit):
+// Robinhood testnet through the v4 PoolManager, Base Sepolia through it and through the v3 router. A run that stopped
+// part way (Robinhood testnet's first, 4 Nov 08:45Z) is read back too and its Tx lines are in the run record.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { replayer } from "./notes-per-pool-evm.mjs";
-import { CHAINS, NO_SELL, VIEWS, check, recordFileOf, runRecord, spoil } from "./pool-evm-testnet-run.mjs";
+import { CHAINS, TOPICS, VIEWS, check, recordFileOf, recordFiles, runRecord, spoil } from "./pool-evm-testnet-run.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-evm-testnet-run.answers.json", import.meta.url), "utf8"));
-const RECS = CHAINS.map((c) => JSON.parse(readFileSync(recordFileOf(c), "utf8")));
+const RECS = recordFiles().map((f) => JSON.parse(readFileSync(f, "utf8")));
 
 test("the answers were read from the committed run records, and the run record names every one of their txs", () => {
   assert.deepEqual(A.runs.map((r) => r.record), RECS);
@@ -18,15 +20,18 @@ test("the answers were read from the committed run records, and the run record n
   assert.equal(md, runRecord(RECS));
   assert.match(md, /^Money path: yes$/m);
   assert.deepEqual([...md.matchAll(/^Tx: (\S+) (0x[0-9a-f]{64})$/gm)].map((m) => `${m[1]} ${m[2]}`), RECS.flatMap((rec) => rec.txs.map((t) => `${rec.chain} ${t.hash}`)));
-  for (const rec of RECS) {
+  assert.deepEqual(RECS.filter((r) => !r.stopped).map((r) => r.chain), CHAINS);
+  for (const c of CHAINS) assert.deepEqual(JSON.parse(readFileSync(recordFileOf(c), "utf8")), RECS.find((r) => r.chain === c && !r.stopped));
+  for (const rec of RECS.filter((r) => r.stopped)) assert.ok(md.includes(rec.stopped), `${rec.chain}: why the run stopped`);
+  for (const rec of RECS.filter((r) => !r.stopped)) {
     assert.equal(rec.dryRun, false);
-    for (const k of ["deposit", "buy", "withdraw", "sweep", ...(NO_SELL[rec.chain] ? [] : ["sell"])]) assert.ok(rec.txs.some((t) => t.kind === k), `${rec.chain} ${k}`);
-    if (NO_SELL[rec.chain]) assert.ok(md.includes(NO_SELL[rec.chain]), `${rec.chain}: the gap line`);
+    for (const k of ["deposit", "buy", "withdraw", "sweep", "sell"]) assert.ok(rec.txs.some((t) => t.kind === k), `${rec.chain} ${k}`);
+    assert.ok(rec.txs.some((t) => t.kind === "sell" && t.venue === "v4"), `${rec.chain}: a sell through the v4 PoolManager`);
   }
 });
 
 for (const run of A.runs) {
-  const chain = run.record.chain;
+  const chain = run.record.chain + (run.record.stopped ? " (stopped run)" : "");
   test(`${chain}: the recorded good run passes: every tx, the pool's views, the nullifiers, the Ws' delegation, the run key`, async () => {
     const r = await check(run.record, replayer(run.good), run.urls);
     assert.equal(r.ok, true, r.lines.join("\n"));
@@ -44,6 +49,19 @@ for (const run of A.runs) {
     assert.equal(r.ok, false);
     assert.match(r.lines.at(-1), /nullifierHashes\(\d+\) is not set on both/);
   });
+  if (run.record.stopped) {
+    test(`${chain}: a stopped run that does not say why, or has no deposit, fails`, async () => {
+      for (const stopped of ["", 1]) {
+        const r = await check({ ...run.record, stopped }, replayer(run.good), run.urls);
+        assert.equal(r.ok, false);
+        assert.match(r.lines.at(-1), /names why it stopped/);
+      }
+      const r = await check({ ...run.record, txs: run.record.txs.filter((t) => t.kind !== "deposit") }, replayer(run.good), run.urls);
+      assert.equal(r.ok, false);
+      assert.match(r.lines.at(-1), /the record has no deposit/);
+    });
+    continue;
+  }
 
   test(`${chain}: a record that claims another out than the chain's Bought event fails`, async () => {
     const rec = structuredClone(run.record);
@@ -53,16 +71,49 @@ for (const run of A.runs) {
     assert.equal(r.ok, false);
     assert.match(r.lines.at(-1), /out is \d+, the record says \d+/);
   });
-}
 
-test("a run with no sell on a chain that has a router fails", async () => {
-  const run = A.runs.find((r) => !NO_SELL[r.record.chain]);
-  const rec = structuredClone(run.record);
-  rec.txs = rec.txs.filter((t) => t.kind !== "sell");
-  const r = await check(rec, replayer(run.good), run.urls);
-  assert.equal(r.ok, false);
-  assert.match(r.lines.at(-1), /the record has no sell/);
-});
+  test(`${chain}: a run with no sell fails`, async () => {
+    const rec = structuredClone(run.record);
+    rec.txs = rec.txs.filter((t) => t.kind !== "sell");
+    const r = await check(rec, replayer(run.good), run.urls);
+    assert.equal(r.ok, false);
+    assert.match(r.lines.at(-1), /the record has no sell/);
+  });
+
+  test(`${chain}: a v4 sell the record says went through another target than the pinned PoolManager fails`, async () => {
+    const rec = structuredClone(run.record);
+    const sell = rec.txs.find((t) => t.kind === "sell" && t.venue === "v4");
+    sell.target = "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4";
+    const r = await check(rec, replayer(run.good), run.urls);
+    assert.equal(r.ok, false);
+    assert.match(r.lines.at(-1), /a v4 sell through 0x94cc\w+, not this chain's pinned PoolManager/);
+  });
+
+  test(`${chain}: a v4 sell whose receipt holds no Swap by W on the PoolManager fails`, async () => {
+    const sell = run.record.txs.find((t) => t.kind === "sell" && t.venue === "v4");
+    const log = structuredClone(run.good);
+    let cut = 0;
+    for (const e of log)
+      if (e.method === "eth_getTransactionReceipt" && e.params[0] === sell.hash && e.result) {
+        const n = e.result.logs.length;
+        e.result.logs = e.result.logs.filter((l) => l.topics[0] !== TOPICS.Swap);
+        cut += n - e.result.logs.length;
+      }
+    assert.ok(cut >= 2, "the Swap read on both RPCs");
+    const r = await check(run.record, replayer(log), run.urls);
+    assert.equal(r.ok, false);
+    assert.match(r.lines.at(-1), /0 Swap events from 0x[0-9a-f]{40}, not 1/);
+  });
+
+  test(`${chain}: a sell whose authorization names another delegate than the pinned SellDelegate fails`, async () => {
+    const sell = run.record.txs.find((t) => t.kind === "sell");
+    const log = structuredClone(run.good);
+    for (const e of log) if (e.method === "eth_getTransactionByHash" && e.params[0] === sell.hash && e.result) e.result.authorizationList[0].address = "0x23ad5aabcc139650597f8dc79e9def8bd817ef88";
+    const r = await check(run.record, replayer(log), run.urls);
+    assert.equal(r.ok, false);
+    assert.match(r.lines.at(-1), /its authorization is not this chain's pinned SellDelegate/);
+  });
+}
 
 test("a transaction the two RPCs answer apart in any field but blockTimestamp fails", async () => {
   const run = A.runs.find((r) => r.good.some((e) => e.method === "eth_getTransactionByHash" && e.result?.blockTimestamp));

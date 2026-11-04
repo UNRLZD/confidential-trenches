@@ -149,17 +149,27 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"]),
       pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
       adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645", v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb1" }),
-      sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef88",
+      // the delegate that also sells through the v4 PoolManager (card evm-sell-v4: scripts/live-checks/
+      // evm-sell-v4.base-sepolia.json, deploy tx 0x795b888806de773381fd8659cfea6faa7614bc3ddbf225f3d273ea66c1c1a505;
+      // its POOL_MANAGER() read 0x05e7…3408 on sepolia.base.org and base-sepolia-rpc.publicnode.com, 4 Nov 08:33Z)
+      sellDelegate: "0xfa1442419b6984b8e3aa8933c690f80f063b6adf",
+      // Uniswap v4's PoolManager (pool-evm-deploy.mjs CHAINS, its code hash pinned there), the target of a v4 sell
+      poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408",
     }),
     "robinhood-testnet": bare({
       chainId: 46630,
       weth: "0x7943e237c7f95da44e0301572d358911207852fa", // behind an upgradeable proxy (pool-evm-deploy.mjs CHAINS, M365)
       middles: Object.freeze([]),
-      // no Uniswap v3 on Robinhood testnet (M365): no v3 adapter and no router, so no sell is built there
+      // no Uniswap v3 on Robinhood testnet (M365): no v3 adapter and no router; a sell goes through the PoolManager
       routers: Object.freeze([]),
       pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
       adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" }),
-      sellDelegate: "0x0ec8c6627939624aeaac3b2f0276136e6e289e23",
+      // the delegate that also sells through the v4 PoolManager (card evm-sell-v4: scripts/live-checks/
+      // evm-sell-v4.robinhood-testnet.json, deploy tx 0x8b9e35f0ae4bbf7b749ac95285e91c294d15fda299a947e7495a7066d3fbb2fd;
+      // its POOL_MANAGER() read 0x8366…0951 on rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com,
+      // 4 Nov 08:33Z), so a sell here goes through v4 alone
+      sellDelegate: "0xaafb86fed9b651933773a0750d5dba22ca8b8a02",
+      poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
     }),
   }));
 
@@ -327,10 +337,16 @@ function routeData(chain: EvmPoolChain, route: EvmRoute, quoted: boolean): { dat
     r.fees.forEach((f, i) => parts.push(Uint8Array.of(f >> 16, (f >> 8) & 0xff, f & 0xff), addressBytes(r.tokens[i + 1]!)));
     return { data: concat(...parts), token };
   }
-  // abi.encode(address, (address,uint24,int24,address,bytes)[]): the head (currencyIn, offset 0x40), the array's
-  // length, one offset per element (from the first offset's word), then each element: five head words (the bytes'
-  // offset 0xa0) and its bytes, length then right-padded to 32
-  const elems = r.hops.map((h) => {
+  // abi.encode(address, (address,uint24,int24,address,bytes)[]): the head (currencyIn, offset 0x40), then the array
+  return { data: concat(addressWord(r.currencyIn), word(0x40n), pathKeysAbi(r.hops)), token };
+}
+
+/** The ABI tail of a PathKey[] (v4-periphery's (address,uint24,int24,address,bytes)[]): the array's length, one offset
+ *  per element (from the first offset's word), then each element: five head words (the bytes' offset 0xa0) and its
+ *  bytes, length then right-padded to 32. For hops already checked; the buy's adapter data and the sell's
+ *  SellDelegate data (sell-unpinned.ts) both encode through this. */
+export function pathKeysAbi(hops: readonly EvmV4Hop[]): Uint8Array {
+  const elems = hops.map((h) => {
     const d = hexBytes(h.hookData);
     const padded = new Uint8Array(Math.ceil(d.length / 32) * 32);
     padded.set(d);
@@ -339,7 +355,7 @@ function routeData(chain: EvmPoolChain, route: EvmRoute, quoted: boolean): { dat
   const offsets: Uint8Array[] = [];
   let at = 32 * elems.length;
   for (const e of elems) offsets.push(word(BigInt(at))), (at += e.length);
-  return { data: concat(addressWord(r.currencyIn), word(0x40n), word(BigInt(elems.length)), ...offsets, ...elems), token };
+  return concat(word(BigInt(elems.length)), ...offsets, ...elems);
 }
 
 /** The pool's Buy: what PrivacyPoolSimple.buy takes beside the request and the proof, what W signs, and the chain it

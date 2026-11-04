@@ -1,0 +1,60 @@
+{
+  "key": "pool-evm-testnet-run",
+  "chain": "robinhood-testnet",
+  "chainId": 46630,
+  "dryRun": false,
+  "at": "2026-11-04T08:45:58.000Z",
+  "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+  "coin": "0x10e626a1d0857174b9a5bdb7a1397068811fbbbc",
+  "venues": [
+    "v4"
+  ],
+  "relayer": "0x1a57afd7865bb438bebf93e4c3ec856c7cc7a7a2",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "2119800000000000",
+  "stopped": "Stopped after its deposit: Robinhood testnet's own RPC answered null for block 148245096, which the other held, and the run read the pool's time once (since then through the wallet's evmRetryLag); its finally withdrew the deposit note to its W and swept that W and the run key back. Its record is rebuilt from the chain (each receipt on both RPCs), the run's own file having been overwritten by the next run's.",
+  "txs": [
+    {
+      "step": "deposit",
+      "hash": "0x6f809459ffe06ba471405339c32f18928fd02421de388970846cd106ba7f633a",
+      "from": "0x1a57afd7865bb438bebf93e4c3ec856c7cc7a7a2",
+      "kind": "deposit",
+      "block": "148244977",
+      "gasUsed": "311421",
+      "commitment": "20219666683723324300220960752208794033965399421029539304777655483277834391814",
+      "label": "298825609191071039330391664409582220245646990985239719114313503581528226700",
+      "value": "2000000000000000",
+      "precommitment": "15511592428623248711440738203771282158812735684670090099458845984424195460593"
+    },
+    {
+      "step": "withdraw",
+      "hash": "0xd1c8a15985c29e25e01b0f8fbe4f87cc7b6ee2e81ea093d0e5abea38fd0ec685",
+      "from": "0x1a57afd7865bb438bebf93e4c3ec856c7cc7a7a2",
+      "kind": "withdraw",
+      "block": "148245440",
+      "gasUsed": "469040",
+      "w": "0xc144d80ce61f87304318b50651a98aedd42a4e5b",
+      "nullifier": "6612775873640891189135151224456106752339803070484375653171032395602273340825",
+      "value": "2000000000000000",
+      "fee": "20000000000000",
+      "newCommitment": "18617009925901961830461726099818903817791692822956240738504778225577198449348"
+    },
+    {
+      "step": "sweep (a W's ETH back)",
+      "hash": "0x5dc6c576562b94a5acb1db70f94b2784bcad285bb447f63c29cfb0cc57740b93",
+      "from": "0xc144d80ce61f87304318b50651a98aedd42a4e5b",
+      "kind": "sweep",
+      "block": "148245485",
+      "gasUsed": "21000",
+      "w": "0xc144d80ce61f87304318b50651a98aedd42a4e5b"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0xd10e4b31af1839ccd71ca53df2eadbd6091e3ebc5dcdeaad7b8ebc5aed9a2adb",
+      "from": "0x1a57afd7865bb438bebf93e4c3ec856c7cc7a7a2",
+      "kind": "sweep",
+      "block": "148245530",
+      "gasUsed": "21000"
+    }
+  ]
+}
