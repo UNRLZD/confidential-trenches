@@ -2077,17 +2077,21 @@ const warmCase = (token: string, x: string) => {
 };
 const warmReq = (token: string) => ({ chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) });
 
-test("W1 a token's second quote within the range takes one round of reads, and decides as the first", async () => {
-  const token = "0x00000000000000000000000000000000000ee0e1";
-  const { pools, logs } = warmCase(token, xAt(0x3a00));
-  const first = counted(chain(pools, 0));
-  const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [first.rpc, chain(pools, 1)], NOW, scanner(5_000_000, logs)));
-  assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
-  assert.ok(first.n.calls >= 3, `the first quote's rounds: ${first.n.calls}`);
-  const second = counted(chain(pools, 0));
-  const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [second.rpc, chain(pools, 1)], NOW, scanner(5_000_000, logs)));
-  assert.deepEqual(v2, v1);
-  assert.equal(second.n.calls, 1, "one round of reads");
+test("W1 a token's second quote within the range takes one round of reads, and decides as the first; a pool behind an unlisted hook adds the one round its override waits for", async () => {
+  const run = async (token: string, x: string, hooked: boolean) => {
+    const c = warmCase(token, x);
+    const pools = hooked ? c.pools : c.pools.filter((p) => p.key.hooks !== UNPINNED);
+    const first = counted(chain(pools, 0));
+    const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [first.rpc, chain(pools, 1)], NOW, scanner(5_000_000, c.logs)));
+    assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+    assert.ok(first.n.calls >= 3, `the first quote's rounds: ${first.n.calls}`);
+    const second = counted(chain(pools, 0));
+    const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [second.rpc, chain(pools, 1)], NOW, scanner(5_000_000, c.logs)));
+    assert.deepEqual(v2, v1);
+    return second.n.calls;
+  };
+  assert.equal(await run("0x00000000000000000000000000000000000ee0e1", xAt(0x3a00), false), 1, "one round of reads");
+  assert.equal(await run("0x00000000000000000000000000000000000ee0e9", xAt(0x3a80), true), 2, "the hooked pool's override waits for its state");
 });
 
 test("W2 a pool seeded inside the range is found by the scan and read: it sets the reference the second quote is held to", async () => {
@@ -2184,4 +2188,16 @@ test("W5 a kept read the quote did not ask again is not kept for the next: a cha
   await q(AMOUNT);
   await q(AMOUNT / 2n);
   assert.equal(await q(AMOUNT / 2n), warmHalf);
+});
+
+test("W6 a warm quote puts no hook's override into a read before its own reads find the pool held: a hooked pool that vanished inside the range is never overridden (review of 5452011, S1)", async () => {
+  const token = "0x00000000000000000000000000000000000ee0e8";
+  const { pools, logs } = warmCase(token, xAt(0x3a70));
+  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)));
+  // the hooked pool is gone at the new block
+  const gone = pools.filter((p) => p.key.hooks !== UNPINNED);
+  const seen: Overridden[] = [];
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(gone, 0, 5_000_000, seen), chain(gone, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logs)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.deepEqual(seen.flatMap((o) => o.replaces), [], "no override for a pool the PoolManager does not hold");
 });

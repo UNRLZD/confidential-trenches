@@ -163,6 +163,7 @@ export const MUTANTS = [
   [QUOTE, "  if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {", "  if (plan !== undefined) {", R, "W4 "],
   [QUOTE, "  PLANS.set(planKey, {", "  if (false) PLANS.set(planKey, {", R, "W1 "],
   [QUOTE, "!kept.has(readKey(reads[first + j]!)) || hit.has(first + j)", "!kept.has(readKey(reads[first + j]!)) || true", R, "W5 "],
+  [QUOTE, "filter((r, j) => r.override === undefined && (", "filter((r, j) => (", R, "W6 "],
   [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W1b "],
   [QUOTE, "if (e instanceof TypeError && typeof code === \"string\" && CONNECT_ERRORS.has(code)) throw new Unreachable(", "if (false) throw new Unreachable(", R, "T7b "],
   [QUOTE, "if (e instanceof TypeError && typeof code === \"string\" && CONNECT_ERRORS.has(code)) throw new Unreachable(", "if (e instanceof Error) throw new Unreachable(", R, "T7b "],

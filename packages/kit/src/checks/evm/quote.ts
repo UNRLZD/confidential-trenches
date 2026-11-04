@@ -1315,6 +1315,7 @@ async function routeSet(a: {
   if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {
     const own = new Set(reads.map(readKey));
     for (const r of plan.reads) {
+      if (r.override !== undefined) continue;
       const k = readKey(r);
       if (own.has(k) || kept.has(k)) continue;
       kept.set(k, reads.push(r) - 1);
@@ -1590,7 +1591,9 @@ async function routeSet(a: {
   }
   // what the next quote of the token asks in its first round: this one's later reads, and the kept ones it asked again
   PLANS.delete(planKey);
-  PLANS.set(planKey, { ts: block.timestamp, reads: [...reads.slice(first).filter((_, j) => !kept.has(readKey(reads[first + j]!)) || hit.has(first + j))], scans: asked });
+  // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
+  // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
+  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && (!kept.has(readKey(r)) || hit.has(first + j))), scans: asked });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled };
 }
