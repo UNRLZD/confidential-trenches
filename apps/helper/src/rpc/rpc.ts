@@ -95,6 +95,8 @@ export const HOLD_WAIT_MS = 1_500;
  */
 export function createPacer() {
   const booked = new Map<string, number[]>();
+  /** Per URL: when each send left, oldest first. */
+  const left = new Map<string, number[]>();
   return {
     /**
      * When `n` sends to `url` at `t` may go so that no PACE_SECOND_MS holds more than `perSecond` of them, from `from`
@@ -111,6 +113,22 @@ export function createPacer() {
       if (i >= 0) at = Math.max(at, s[Math.min(i, s.length - 1)]! + PACE_SECOND_MS);
       if (at - t <= opts.maxWaitMs && opts.book !== false) for (let k = 0; k < n; k++) s.push(at);
       return at - t;
+    },
+    /**
+     * The send itself, at `t`: 0 when fewer than `perSecond` - `n` + 1 sends left in the last PACE_SECOND_MS, and then it
+     * is counted; else the ms until one leaves. A booking names when a send may go, but a busy event loop can start
+     * it late, so two seconds' sends would land closer than a second (seen on the box at load 26: 11 in one second);
+     * this counts the sends where they leave, on the process's own monotonic clock (the provider counts real time,
+     * whatever clock a test gives the budget).
+     */
+    go(url: string, n: number, perSecond: number): number {
+      const t = performance.now();
+      const q = (left.get(url) ?? []).filter((x) => x > t - PACE_SECOND_MS);
+      left.set(url, q);
+      const i = q.length + n - Math.max(perSecond, n) - 1;
+      if (i >= 0) return q[i]! + PACE_SECOND_MS - t;
+      for (let k = 0; k < n; k++) q.push(t);
+      return 0;
     },
   };
 }
@@ -400,6 +418,17 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         if (waits && tries < 2 && (await holdOver(key, deadline))) continue;
         return throttled(Math.max(1, budget.heldFor(key)), undefined, `${key} held`);
       }
+      // the send counted where it leaves (Pacer.go), within the deadline
+      const p = pacedOf(key);
+      const goBy = performance.now() + Math.max(0, deadline - now());
+      let gate = p === null ? 0 : pacer.go(p.url, methods.length, p.perSecond);
+      for (let round = 0; gate > 0; round++) {
+        // a few rounds at most: each waits for a send to leave the second, so more mean a crowd past the deadline
+        if (round >= 4 || performance.now() + gate > goBy) return throttled(Math.max(1, Math.ceil(gate / 1000)), undefined, `${key} pace`);
+        await sleep(gate);
+        gate = pacer.go(p!.url, methods.length, p!.perSecond);
+      }
+      if (budget.heldFor(key) > 0) return throttled(Math.max(1, budget.heldFor(key)), undefined, `${key} held`);
       sent = now();
       try {
         r = await doFetch(url, {
@@ -469,7 +498,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // always find the rest
     const p = pacedOf(key);
     const room = { maxWaitMs: 0, share: p === null ? 0 : p.perSecond - userRoomOf(p.perSecond) };
-    if (p !== null && pacer.at(p.url, now(), 1, p.perSecond, { ...room, book: false }) > 0) return 1;
+    // the walk sends at once (data/solana/trades.ts): counted as it leaves, within the same half of the sends that left
+    if (p !== null && (pacer.at(p.url, now(), 1, p.perSecond, { ...room, book: false }) > 0 || pacer.go(p.url, 1, room.share) > 0)) return 1;
     const wait = budget.takeEach(drawsOf(key, [method]), undefined, false, false);
     if (wait === 0 && p !== null) pacer.at(p.url, now(), 1, p.perSecond, room);
     return wait;
