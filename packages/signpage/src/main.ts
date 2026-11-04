@@ -74,7 +74,7 @@ import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
 import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
 import { releaseTradeDeps, SOLANA_PROVIDER_A, TRADE_HELPER, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
-import { testnetPoolDeps, testnetPoolFlow, testnetPoolSettle } from "./pool-testnet.ts";
+import { testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import type { PoolChain } from "./rules/pool.ts";
 import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
@@ -117,6 +117,9 @@ if (framed) root.dataset.framed = "true";
 // asks (signin.open, signout, backup.open and withdraw.open here; export.open is refused until its card builds it) and
 // closes on signed in, signed out by the signout kind, or Cancel
 let shell: Shell | null = null;
+// the testnet build, top-level: the devnet pool's deposit flow, its settling and the next buy's proofs
+// (src/pool-testnet.ts); the store and the seed are opened when a run needs them
+const testnet = POOL_TESTNET && !framed ? testnetPool({ store: () => open(), seed64: () => openSeed64() }) : null;
 if (framed) document.body.append(root);
 else {
   // the shell's own channel: it hears this document's store and other tabs' (a sign-in, Saved, a sign out)
@@ -137,7 +140,12 @@ else {
     // reload waits for a running trade; sign out does too, in every tab (the trade holds the seed lock shared)
     settle: () => trades.idle(),
     // the private balance per chain's pool, from this page's own notes (src/pools.ts); the frame's state has none
-    state: () => fs.state().then((s) => withPools(s, pageNotes, PAGE_POOLS)),
+    // the testnet build: a state read while a deposit note is still landing settles it again (src/pool-testnet.ts)
+    state: () =>
+      fs.state().then((s) => {
+        if (POOL_TESTNET && s.signed_in) void testnet?.stateRead();
+        return withPools(s, pageNotes, PAGE_POOLS);
+      }),
     watch: fs.watch,
     kinds: {
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
@@ -154,8 +162,8 @@ else {
       // network pins (mainnet: none yet, every one refused not_allowed, no read made; the testnet build: the devnet
       // pool, src/pool-testnet.ts, whose flow deposits into it); a sell's decimals read on two providers
       ...poolKinds(
-        POOL_TESTNET
-          ? testnetPoolDeps(testnetPoolFlow({ store: () => open(), seed64: () => openSeed64() }))
+        POOL_TESTNET && testnet
+          ? testnetPoolDeps(testnet.flow)
           : {
               pinned: poolPinned,
               rpcs: (chain) => (chain === "solana" ? [solanaJsonRpc(SOLANA_PROVIDER_A), solanaHelperRpc(TRADE_HELPER)] : null),
@@ -405,6 +413,7 @@ const open = async (): Promise<WalletStore> =>
       if (e.kind !== "signout") return;
       store = null;
       openedBy = null;
+      if (POOL_TESTNET) void testnet?.signedOut();
       show("signed-out");
     },
   }));
@@ -438,6 +447,8 @@ async function readSeedSettled(): Promise<Seed | undefined> {
 function storeMoved(e: WalletEvent): void {
   if (e?.kind === "signout" || (e?.kind === "changed" && Array.isArray(e.stores) && e.stores.includes("meta"))) moved += 1;
   else return;
+  // another tab signed out: the proof queue and its seed copy go now
+  if (POOL_TESTNET && e.kind === "signout") void testnet?.signedOut();
   void resync();
 }
 // the resync in flight, which open kinds wait for (openKind)
@@ -500,7 +511,7 @@ function notesMoved(e: WalletEvent): void {
 async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
   // the testnet build: a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
-  if (POOL_TESTNET && !framed) testnetPoolSettle({ store: () => open(), seed64: () => openSeed64() });
+  if (POOL_TESTNET) void testnet?.settle();
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }
@@ -587,6 +598,8 @@ async function signOut(): Promise<void> {
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;
+  // after the store signed out: a deposit that landed while it waited cannot open the queue again (no seed)
+  if (POOL_TESTNET) await testnet?.signedOut();
   show("signed-out");
   // signed out by the signout kind: back to the app, which shows signed out
   if (openedBy === "signout") closeLayer();
