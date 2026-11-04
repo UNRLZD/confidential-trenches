@@ -649,3 +649,26 @@ test("a 429 on every round is a refusal at the bound, after a wait between round
     assert.deepEqual(waits, [], chain);
   }
 });
+
+// ---- card wallet-rpc-hex-case: an RPC's hex in either case ----
+
+/** robinhood-testnet.drpc.org's case (eth_chainId "0xB626", read 3 Nov 23:07Z): every hex digit upper-cased, "0x" kept. */
+const upperHex = (v: unknown): unknown =>
+  typeof v === "string" && /^0x[0-9a-f]+$/.test(v) ? `0x${v.slice(2).toUpperCase()}`
+  : v !== null && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, upperHex(x)]))
+  : v;
+
+test("EVM: an upper-case provider reads as lower case (the block's hash is sent back lower-cased); a \"0X\" prefix or a digit that is not hex is refused", async () => {
+  // block 11: its hash and number carry letters (…0b, 0xb)
+  const c = (): EvmChain => ({ blocks: [...Array(11).fill({ wei: new Map(), tokens: new Map() }), evmState()] });
+  const want = await evmReader(c()).read(evmW(L, 0));
+  assert.deepEqual(view(want), [123n, { [USDC]: 1_000_000n, [TOKEN_X]: 0n }, []]);
+  log.length = 0;
+  assert.deepEqual(view(await evmReader(c(), (_m, o) => upperHex(o)).read(evmW(L, 0))), view(want));
+  for (const [m, p] of log.slice(1)) assert.ok(p.endsWith(`{"blockHash":"${hashOf(11)}"}]`), `${m} at the block read, lower-cased`);
+  const bad = (method: string, f: (o: string) => string): Edit => (m, o) => (m === method && typeof o === "string" ? f(o) : m === method ? { ...(o as object), number: f((o as { number: string }).number) } : o);
+  await assert.rejects(evmReader(c(), bad("eth_getBlockByNumber", (n) => n.replace("0x", "0X"))).read(evmW(L, 0)), /eth_getBlockByNumber: not a block/);
+  await assert.rejects(evmReader(c(), bad("eth_getBalance", (n) => n.replace("0x", "0X"))).read(evmW(L, 0)), /eth_getBalance: not a quantity/);
+  await assert.rejects(evmReader(c(), bad("eth_getBalance", () => "0x7G")).read(evmW(L, 0)), /eth_getBalance: not a quantity/);
+  await assert.rejects(evmReader(c(), bad("eth_call", (n) => n.replace("0x", "0X"))).read(evmW(L, 0)), /not one 32-byte word/);
+});

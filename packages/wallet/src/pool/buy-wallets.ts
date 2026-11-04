@@ -43,6 +43,7 @@ import { base64 } from "@scure/base";
 import { freshWallet, toChecksum } from "../derive/index.ts";
 import type { NoteRef } from "../notes/secrets.ts";
 import { refKey, type NoteStore } from "../notes/store.ts";
+import { evmRpcHex } from "./evm.ts";
 import { jOf } from "./queue.ts";
 import { solanaRestoreNotes, type SolanaRestoredNote, type SolanaRestoredSpend } from "./solana-restore.ts";
 import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "./solana.ts";
@@ -352,8 +353,9 @@ export async function solanaRestoreWallets(a: { seed64: Uint8Array; program: str
 }
 
 // ---------- EVM ----------
-const QUANTITY = /^0x(0|[1-9a-f][0-9a-f]*)$/i;
-const WORD = /^0x[0-9a-f]{64}$/i;
+// every hex an RPC gives is read through evmRpcHex (./evm.ts): "0x", then hex digits in either case, lower-cased
+const QUANTITY = /^0x(0|[1-9a-f][0-9a-f]*)$/;
+const WORD = /^0x[0-9a-f]{64}$/;
 const BALANCE_OF = "0x70a08231"; // balanceOf(address)
 
 /** One EVM provider's reader (production: evmHelperHoldings): one block, then every call at its hash. */
@@ -381,10 +383,11 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
     const w = toChecksum(address).toLowerCase();
     signal?.throwIfAborted();
     const blk = (await call(rpc, "eth_getBlockByNumber", ["latest", false])) as { hash?: unknown; number?: unknown } | null;
-    if (typeof blk?.hash !== "string" || !WORD.test(blk.hash) || typeof blk.number !== "string" || !QUANTITY.test(blk.number)) throw new Error("eth_getBlockByNumber: not a block");
-    const at = { blockHash: blk.hash };
-    const b = await call(rpc, "eth_getBalance", [w, at]);
-    if (typeof b !== "string" || !QUANTITY.test(b)) throw new Error("eth_getBalance: not a quantity");
+    const hash = evmRpcHex(blk?.hash), number = evmRpcHex(blk?.number);
+    if (hash === null || !WORD.test(hash) || number === null || !QUANTITY.test(number)) throw new Error("eth_getBlockByNumber: not a block");
+    const at = { blockHash: hash };
+    const b = evmRpcHex(await call(rpc, "eth_getBalance", [w, at]));
+    if (b === null || !QUANTITY.test(b)) throw new Error("eth_getBalance: not a quantity");
     const out = new Map<string, TokenHolding>();
     const unreadable: string[] = [];
     for (const t of list) {
@@ -398,9 +401,10 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
         if (e instanceof RpcFailed && e.code === EXECUTION_REVERTED) { unreadable.push(t); continue; }
         throw e;
       }
-      if (r === "0x") { unreadable.push(t); continue; } // no code at this address on this chain
-      if (typeof r !== "string" || !WORD.test(r)) throw new Error(`eth_call: token ${list.indexOf(t)}: not one 32-byte word`);
-      out.set(t, { amount: BigInt(r), frozen: false });
+      const word = evmRpcHex(r);
+      if (word === "0x") { unreadable.push(t); continue; } // no code at this address on this chain
+      if (word === null || !WORD.test(word)) throw new Error(`eth_call: token ${list.indexOf(t)}: not one 32-byte word`);
+      out.set(t, { amount: BigInt(word), frozen: false });
     }
     return { native: BigInt(b), tokens: out, unreadable };
   }

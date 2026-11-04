@@ -149,15 +149,26 @@ const addr20 = (a: unknown, what: string): Uint8Array => {
 };
 const lower = (a: string): string => a.toLowerCase();
 const tag = (n: bigint): string => `0x${n.toString(16)}`;
-/** A JSON-RPC quantity, canonical (no leading zero), as the spec writes it. */
+/**
+ * An RPC's hex string as viem and ethers read one: "0x", then hex digits in either case, lower-cased; null for anything
+ * else. robinhood-testnet.drpc.org answers eth_chainId "0xB626" where rpc.testnet.chain.robinhood.com and
+ * robinhood-sepolia-rpc.publicnode.com answer "0xb626" (read 3 Nov 23:07Z). Every hex an RPC gives is read through
+ * this before it is checked or compared, so two RPCs' answers that differ only in case are one answer, and any other
+ * difference is still one.
+ */
+export const evmRpcHex = (v: unknown): string | null => (typeof v === "string" && /^0x[0-9a-fA-F]*$/.test(v) ? v.toLowerCase() : null);
+/** A JSON-RPC quantity, canonical (no leading zero), as the spec writes it, in either case. */
 const qty = (v: unknown, what: string): bigint => {
-  if (typeof v !== "string" || !/^0x(0|[1-9a-f][0-9a-f]{0,63})$/.test(v)) throw new Error(`${what}: not a quantity`);
-  return BigInt(v);
+  const h = evmRpcHex(v);
+  if (h === null || !/^0x(0|[1-9a-f][0-9a-f]{0,63})$/.test(h)) throw new Error(`${what}: not a quantity`);
+  return BigInt(h);
 };
 const H32 = /^0x[0-9a-f]{64}$/;
+/** A 32-byte hash or word, in either case: lower-cased. */
 const hash32 = (v: unknown, what: string): string => {
-  if (typeof v !== "string" || !H32.test(v)) throw new Error(`${what}: not a 32-byte hash`);
-  return v;
+  const h = evmRpcHex(v);
+  if (h === null || !H32.test(h)) throw new Error(`${what}: not a 32-byte hash`);
+  return h;
 };
 
 /** The pool's scope, as its constructor computes it (src/State.sol:105). */
@@ -313,8 +324,9 @@ async function view(rpc: EvmRpc, pool: string, data: string, blockHash: string, 
     if (PRUNED.test(String((e as Error)?.message ?? e))) lag(`${what}: the RPC no longer keeps the state of block ${blockHash}`);
     throw e;
   }
-  if (typeof r !== "string" || !H32.test(r)) throw new Error(`${what}: not one 32-byte word`);
-  return BigInt(r);
+  const h = evmRpcHex(r);
+  if (h === null || !H32.test(h)) throw new Error(`${what}: not one 32-byte word`);
+  return BigInt(h);
 }
 
 const VIEWS = {
@@ -369,8 +381,9 @@ function decodeLog(raw: unknown, pool: string, from: bigint, to: bigint, what: s
   const words = DATA_WORDS[t0];
   if (words === undefined) throw new Error(`${what}: not Deposited, Withdrawn or Bought`);
   if (BigInt(t1) >> 160n !== 0n) throw new Error(`${what}: the indexed address is not an address`);
-  if (typeof l.data !== "string" || !new RegExp(`^0x[0-9a-f]{${64 * words}}$`).test(l.data)) throw new Error(`${what}: not ${words} data words`);
-  const w = (i: number): bigint => BigInt(`0x${(l.data as string).slice(2 + 64 * i, 2 + 64 * (i + 1))}`);
+  const data = evmRpcHex(l.data);
+  if (data === null || !new RegExp(`^0x[0-9a-f]{${64 * words}}$`).test(data)) throw new Error(`${what}: not ${words} data words`);
+  const w = (i: number): bigint => BigInt(`0x${data.slice(2 + 64 * i, 2 + 64 * (i + 1))}`);
   // Deposited: _commitment, _label, _value, _precommitmentHash; Withdrawn and Bought: _feeRecipient, _value, _fee,
   // _spentNullifier, _newCommitment, then Bought's _token, _out
   const dep = t0 === TOPIC_DEPOSITED;
@@ -381,7 +394,7 @@ function decodeLog(raw: unknown, pool: string, from: bigint, to: bigint, what: s
     if (v >> 160n !== 0n) throw new Error(`${what}: ${name} is not an address`);
     return `0x${v.toString(16).padStart(40, "0")}`;
   };
-  const bytes = [tag(block), blockHash, tag(logIndex), tx, tag(txIndex), pool, t0, t1, l.data].join(" ");
+  const bytes = [tag(block), blockHash, tag(logIndex), tx, tag(txIndex), pool, t0, t1, data].join(" ");
   return {
     block, blockHash, logIndex, bytes, state, label,
     kind: dep ? "deposit" : t0 === TOPIC_WITHDRAWN ? "withdraw" : "buy",
@@ -487,13 +500,13 @@ function decodeTransfer(raw: unknown, w: string, from: bigint, to: bigint, what:
   const logIndex = qty(l.logIndex, `${what} logIndex`);
   const tx = hash32(l.transactionHash, `${what} transactionHash`);
   const txIndex = qty(l.transactionIndex, `${what} transactionIndex`);
-  const topics = l.topics;
-  if (!Array.isArray(topics) || (topics.length !== 3 && topics.length !== 4)) throw new Error(`${what}: not a Transfer's three or four topics`);
-  topics.forEach((t, i) => hash32(t, `${what} topic ${i}`));
+  if (!Array.isArray(l.topics) || (l.topics.length !== 3 && l.topics.length !== 4)) throw new Error(`${what}: not a Transfer's three or four topics`);
+  const topics = l.topics.map((t, i) => hash32(t, `${what} topic ${i}`));
   if (topics[0] !== EVM_TRANSFER_TOPIC) throw new Error(`${what}: not a Transfer`);
   if (topics[2] !== `0x${w.slice(2).padStart(64, "0")}`) throw new Error(`${what}: not a Transfer to the W asked`);
-  if (typeof l.data !== "string" || !/^0x([0-9a-f]{2})*$/.test(l.data)) throw new Error(`${what}: data not hex bytes`);
-  const bytes = [tag(block), blockHash, tag(logIndex), tx, tag(txIndex), token, ...topics, l.data].join(" ");
+  const data = evmRpcHex(l.data);
+  if (data === null || !/^0x([0-9a-f]{2})*$/.test(data)) throw new Error(`${what}: data not hex bytes`);
+  const bytes = [tag(block), blockHash, tag(logIndex), tx, tag(txIndex), token, ...topics, data].join(" ");
   return { block, blockHash, logIndex, bytes, token };
 }
 
@@ -881,7 +894,7 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
       const f = await a.relayFee(epochStartMs, signal);
       if (f?.chain !== "evm" || f.network !== a.pin.network || typeof f.pool !== "string" || lower(f.pool) !== pool || typeof f.fee_recipient !== "string" || lower(f.fee_recipient) !== feeRecipient)
         throw new Error("relayFee: not this pool's or this fee recipient's answer");
-      if (f.epoch_ms !== Number(EVM_EPOCH_MS) || f.epoch_start_ms !== Number(epochStartMs) || f.block !== tag(block.number)) throw new Error("relayFee: not this epoch's or not its first block");
+      if (f.epoch_ms !== Number(EVM_EPOCH_MS) || f.epoch_start_ms !== Number(epochStartMs) || evmRpcHex(f.block) !== tag(block.number)) throw new Error("relayFee: not this epoch's or not its first block");
       if (typeof f.fee !== "string" || f.fee !== fee.toString()) throw new Error(`relayFee: the helper's ${String(f.fee)} is not the epoch's fee ${fee}`);
       if (fee * 10_000n > chunk * MAX_RELAY_FEE_BPS) throw new Error("chunk: under the pool's backstop at this fee");
       const salt = (a.salt ?? (() => crypto.getRandomValues(new Uint8Array(16))))();
