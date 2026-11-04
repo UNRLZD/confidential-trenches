@@ -2,11 +2,12 @@
 // (app-pool-withdraw.answers.json), each read on 4 Nov by app-pool-withdraw.mjs collect() in headless Chromium, APP_HOST
 // framed by the stand-in shell signed in with POOLS, at 390 and 1440, the shell refusing pool.withdraw and opening it:
 //   good: this card's build at APP_HOST's name (--harness --build): Withdraw on for Solana and Base, off for the empty
-//         Robinhood pool; Base's tap asks one pool.withdraw {chain, id, return_key, type, v}; refused draws its line,
-//         opened draws none: PASS;
+//         Robinhood pool; Base's tap asks one pool.withdraw {chain, id, return_key, type, v}; refused draws its line
+//         and unlocks, opened draws none and holds the control (card app-hop-sync-lock, re-recorded 4 Nov): PASS;
 //   bad:  the deployed APP_HOST on 4 Nov, before this card: no pool row Withdraw, nothing asked: FAIL.
 // Planted from the good run: an address or an amount in the request, another chain, two requests, the empty pool's
-// Withdraw on, a pool row pushed out of its panel, the refused line missing, a line on an opened run, a control left locked, a missing run.
+// Withdraw on, a pool row pushed out of its panel, the refused line missing, a line on an opened run, a refused control left
+// locked, an opened control unlocked before the shell's screen, a missing run.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -55,7 +56,8 @@ test("planted: the empty pool's Withdraw on, an answer not drawn, a locked contr
   const opened = ANSWERS.good.runs.findIndex((x) => x.shell === "opened");
   fails(planted((r) => (r.runs[refused].line = null)), /the answer drawn/);
   fails(planted((r) => (r.runs[opened].line = "refused")), /the answer drawn/);
-  fails(planted((r) => (r.runs[opened].unlocked = false)), /still locked/);
+  fails(planted((r) => (r.runs[refused].unlocked = false)), /still locked/);
+  fails(planted((r) => (r.runs[opened].unlocked = true)), /control unlocked/);
   fails(planted((r) => r.runs.pop()), /run\(s\) of 4/);
   fails(planted((r) => (r.runs[0].framed = false)), /not inside/);
   fails(planted((r) => (r.runs[refused].inside = false)), /a pool row outside its panel/);

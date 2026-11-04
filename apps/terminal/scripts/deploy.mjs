@@ -27,7 +27,7 @@ const REPO = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
 // every live check that reads APP_HOST, run after each deploy (a test holds this list to scripts/live-checks/app-*.mjs
 // and signpage-release, which reads APP_HOST alone against this commit's own build, so a SIGN_HOST that lags does not
 // fail this deploy)
-export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "app-no-test-token", "app-launchpad-badges", "app-token-route", "app-trade-box-mount", "app-token-chart", "app-harness-signin-e2e", "app-verify-mount", "app-no-blank-pages", "app-portfolio-mount", "signpage-release", "trade-box-pool", "app-console-429", "trade-box-bal-cash", "app-list-age", "app-pool-withdraw", "signpage-pool-price", "app-buy-route-strip"];
+export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "app-no-test-token", "app-launchpad-badges", "app-token-route", "app-trade-box-mount", "app-token-chart", "app-harness-signin-e2e", "app-verify-mount", "app-no-blank-pages", "app-portfolio-mount", "signpage-release", "trade-box-pool", "app-console-429", "trade-box-bal-cash", "app-list-age", "app-pool-withdraw", "signpage-pool-price", "app-buy-route-strip", "app-hop-sync-lock"];
 /** Live checks that hold APP_HOST's address and run after no deploy, each with why (card app-live-list-complete; held by
  *  check-deploy.test.ts: every other check holding APP_HOST's address is in a host's LIVE_CHECKS). */
 export const ONE_OFF = {
