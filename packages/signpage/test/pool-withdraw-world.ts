@@ -128,6 +128,10 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   const landed = new Map<string, Uint8Array>();
   const history = new Map<string, string[]>();
   const touch = (address: string, sig: string) => history.set(address, [sig, ...(history.get(address) ?? [])]);
+  // transactions that landed and failed (the runtime's error in their meta): W's history lists them too
+  const failed = new Set<string>();
+  // older than every transaction W's history holds so far
+  const touchOldest = (address: string, sig: string) => history.set(address, [...(history.get(address) ?? []), sig]);
   const keysOf = (wire: Uint8Array) => solanaDecodeMessage(wire.subarray(1 + 64 * wire[0]!));
   const rpc = (p: 0 | 1): SolanaRpc =>
     (async (method: string, params: readonly unknown[]) => {
@@ -178,7 +182,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
       if (method === "getTransaction") {
         const sig = params[0] as string;
         const rel = landed.get(sig);
-        if (rel) return { transaction: [base64.encode(rel), "base64"], meta: { err: null } };
+        if (rel) return { transaction: [base64.encode(rel), "base64"], meta: { err: failed.has(sig) ? { InstructionError: [1, { Custom: 6 }] } : null } };
         const on = onwards.get(sig);
         if (on) return { transaction: [base64.encode(on), "base64"], meta: { err: null } };
         const last = releases.at(-1);
@@ -249,7 +253,29 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     touch(m.staticKeys[ix.accounts[1]!]!, id);
     add(m.staticKeys[ix.accounts[1]!]!, value);
   };
-  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, pendings, binds, plant, fees, owed, landed, foreign, foreignLand };
+  /** Another id for a landed release's very bytes: what an RPC that names another transaction for it would list. */
+  const alias = (sig: string): string => {
+    const id = base58.encode(new Uint8Array(64).fill(150 + landed.size));
+    const tx = landed.get(sig)!.slice();
+    tx.set(base58.decode(id), 1);
+    landed.set(id, tx);
+    return id;
+  };
+  /** A transaction in W's history older than the rest: `wire` with its own id, failed or landed. `nullifier` set: its
+   *  release's nullifier hash's last byte changed (a release of another note to W, which anyone can make). */
+  const landOlder = (wire: Uint8Array, o: { failed?: boolean; nullifier?: boolean } = {}): string => {
+    const m = keysOf(wire);
+    const ix = m.instructions.at(-1)!;
+    const id = base58.encode(new Uint8Array(64).fill(230 + landed.size));
+    const tx = wire.slice();
+    tx.set(base58.decode(id), 1);
+    if (o.nullifier) tx[tx.length - 1 - 387 + 1 + 256 + 63]! ^= 1;
+    landed.set(id, tx);
+    if (o.failed) failed.add(id);
+    touchOldest(m.staticKeys[ix.accounts[1]!]!, id);
+    return id;
+  };
+  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, pendings, binds, plant, fees, owed, landed, foreign, foreignLand, alias, landOlder };
 }
 
 /** A wire's signers and instructions, as keys: [signers, [program, accounts, data][]]. */

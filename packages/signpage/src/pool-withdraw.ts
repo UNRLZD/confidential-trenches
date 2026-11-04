@@ -249,9 +249,10 @@ async function spendOn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierH
   for (;;) {
     const page = await rpc("getSignaturesForAddress", [w, { commitment: "finalized", limit: HISTORY_PAGE, minContextSlot: minSlot, ...(before !== undefined ? { before } : {}) }]);
     if (!Array.isArray(page) || page.length > HISTORY_PAGE) return stop("read");
+    // every listed transaction, its outcome read from the transaction itself below
     for (const e of page) {
       if (!isObj(e) || typeof e.signature !== "string" || e.signature === before) return stop("read");
-      if (e.err === null) landed.push(e.signature);
+      landed.push(e.signature);
     }
     if (page.length < HISTORY_PAGE) break;
     before = (page.at(-1) as { signature: string }).signature;
@@ -276,9 +277,9 @@ async function spendOn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierH
       const proof = d[0] === SOLANA_POOL_TAG_RELEASE ? SOLANA_POOL_PROOF_BYTES : d[0] === SOLANA_POOL_TAG_RELEASE_AND_BUY ? (d[1] === 1 ? SOLANA_POOL_PROOF_COMPRESSED_BYTES : SOLANA_POOL_PROOF_BYTES) : -1;
       const at = (d[0] === SOLANA_POOL_TAG_RELEASE ? 1 : 2) + proof + 32;
       if (proof < 0 || d.length < at + 32 || be(d.subarray(at, at + 32)) !== nullifierHash) continue;
-      // the spend: this attempt's only when it is a release (a buy never is) to W, every account in the message,
-      // whose context (context.rs, from its own fields and accounts) is this attempt's
-      if (d[0] !== SOLANA_POOL_TAG_RELEASE) return { sig, mine: false };
+      // the spend: this attempt's only when it is a release to W (a buy, tag 3, never is: the decode below refuses
+      // any tag but 2), every account in the message, whose context (context.rs, from its own fields and accounts) is
+      // this attempt's
       const acc = ix.accounts.map((i) => keys[i]);
       if (acc.length < 3 || acc.some((k) => k === undefined) || acc[1] !== w) return { sig, mine: false };
       try {

@@ -733,3 +733,22 @@ test("the owed store: a version 1 database gets it at the next open, and the fra
   reader.close();
   s.close();
 });
+
+test("the frame's reader opens a database with no owed store (one from before it): it never needs it", async () => {
+  const idb = new IDBFactory();
+  const s = await openWalletStore({ indexedDB: idb });
+  await s.insertSeed(SEED(true));
+  await s.put("ops", "op1", { kind: "deposit", stage: "waiting", txs: [] });
+  s.close();
+  // the same database with its owed store taken away, as a version 1 database lacks it
+  await new Promise<void>((ok, no) => {
+    const r = idb.open("ct-wallet", 3);
+    r.onupgradeneeded = () => r.result.deleteObjectStore("owed");
+    r.onsuccess = () => (r.result.close(), ok());
+    r.onerror = () => no(r.error);
+  });
+  const reader = await openWalletStoreReader({ indexedDB: idb });
+  assert.ok(reader, "the reader still opens it");
+  assert.deepEqual(await reader!.keys("ops"), ["op1"]);
+  reader!.close();
+});

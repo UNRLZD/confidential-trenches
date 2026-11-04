@@ -552,8 +552,16 @@ test("an owed send whose note another device spent, its part still on W: the fin
 });
 
 test("whose release it was must be read on both RPCs: one that lists no spend, or another transaction, decides nothing", async () => {
-  for (const history of [(s: string[], p: 0 | 1) => (p === 1 ? [] : s), (s: string[], p: 0 | 1) => (p === 0 ? [...s, base58.encode(new Uint8Array(64).fill(7))] : s)]) {
+  type Wd = Awaited<ReturnType<typeof world>>;
+  const histories: ((wd: Wd) => (s: string[], p: 0 | 1) => string[])[] = [
+    () => (s, p) => (p === 1 ? [] : s),
+    () => (s, p) => (p === 0 ? [...s, base58.encode(new Uint8Array(64).fill(7))] : s),
+    // the second RPC names another transaction (the same bytes under another id) for the spend
+    (wd) => (s, p) => (p === 1 ? s.map((x) => (wd.landed.has(x) ? wd.alias(x) : x)) : s),
+  ];
+  for (const historyOf of histories) {
     const wd = await world([30_000_000n], { settleUnspent: true });
+    const history = historyOf(wd);
     const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
     wd.plant.settleUnspent = false;
     wd.plant.history = history;
@@ -586,4 +594,37 @@ test("a stale finish's stage for one note never stands over another note's send 
   const f = mergeWithdrawOp(owed2, { feeNeeded: "10000" });
   assert.equal(mergeWithdrawOp(f, { clear: "n1" }).fee_needed, "10000");
   assert.equal(mergeWithdrawOp(f, { clear: "n2" }).fee_needed, undefined);
+});
+
+test("a failed transaction of the note in W's history is no spend: another device's landed release after it decides, nothing sent", async () => {
+  const wd = await world([30_000_000n], { landed: false, readBack: "none" });
+  const op1 = await runPoolWithdraw({ ...wd.host, rpcs: youngRpcs(wd) }, ASK, TO, 5_000_000n, COST);
+  const W = wd.binds[0]!.recipient;
+  // this device's release landed and failed (the note spent first by device 2), then device 2's landed
+  wd.foreignLand(wd.releases[0]!, 7_000_000n);
+  wd.landOlder(wd.releases[0]!, { failed: true });
+  wd.plant.landed = true;
+  wd.plant.readBack = "ours";
+  assert.deepEqual(await finishPoolOnward(wd.host, op1.pending!), { stage: "stopped", txs: [], arrived: {} });
+  assert.equal(wd.onwards().length, 0);
+  assert.equal(wd.balance.get(W), 7_000_000n);
+});
+
+test("a release of another note to W (anyone may send one there) before this attempt's never decides whose spend it was", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.landOlder(wd.releases[0]!, { nullifier: true });
+  const f = await finishPoolOnward(wd.host, a.pending!);
+  assert.equal(f?.stage, "sent");
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+});
+
+test("the run: an RPC that lists no spend for the part decides nothing: in_transit, nothing sent from W, the part owed", async () => {
+  const wd = await world([30_000_000n], { history: (s, p) => (p === 1 ? [] : s) });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  const W = wd.binds[0]!.recipient;
+  assert.equal(a.stage, "in_transit");
+  assert.ok(a.pending);
+  assert.equal(wd.onwards().length, 0);
+  assert.equal(wd.balance.get(W), 5_000_000n + W_FEE);
 });
