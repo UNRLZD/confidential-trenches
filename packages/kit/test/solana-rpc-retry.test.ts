@@ -152,6 +152,19 @@ test("without retry, every fault rejects as the client did before the option: on
   }
 });
 
+test("a refusal whose body is a JSON-RPC error keeps its words after the status: dRPC's range cap is told from any other 400", async () => {
+  const drpc = { status: 400, body: JSON.stringify({ id: 1, jsonrpc: "2.0", error: { message: "ranges over 10000 blocks are not supported on free plan", code: 35 } }) };
+  for (const retry of [undefined, FAST]) {
+    const p = provider([drpc]);
+    const e = await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, ...(retry ? { retry } : {}) })("eth_getLogs", []).catch((x: unknown) => x);
+    assert.ok(e instanceof Error && !(e instanceof SolanaRpcTransportError));
+    assert.equal(e.message, "HTTP 400: RPC error 35: ranges over 10000 blocks are not supported on free plan");
+    assert.equal(p.tries(), 1, "a 400 is never tried again");
+  }
+  const bare = provider([{ status: 400, body: "<html>bad request</html>" }]);
+  await assert.rejects(solanaJsonRpc("https://rpc.example", { fetch: bare.fetch })("eth_getLogs", []), (e: Error) => e.message === "HTTP 400");
+});
+
 test("with retry, a slow answer inside the deadline lands: an answer at 2.5 s, which the client without retry takes, resolves", async () => {
   const slow = (_u: string, i: RequestInit): Promise<Response> =>
     new Promise((res, rej) => {
