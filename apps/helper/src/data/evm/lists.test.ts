@@ -434,3 +434,22 @@ test("a helper started fresh on Robinhood settles its lists in its first tick: n
   assert.ok(rows.filter((x) => x.launchpad !== null).length >= 10, "the lists' launchpad tokens are tagged");
   assert.deepEqual([...new Set(r.methods)], ["eth_call"]);
 });
+
+// card helper-rpc-hex-case: robinhood-testnet.drpc.org writes hex in upper case (eth_chainId "0xB626", read 3 Nov 23:07Z)
+test("providers that write hex in upper case: the recorded Robinhood makers come out the same, from the records and from the creation events", async () => {
+  const up = (v: unknown): unknown =>
+    typeof v === "string" && /^0x[0-9a-f]+$/.test(v) ? `0x${v.slice(2).toUpperCase()}` : Array.isArray(v) ? v.map(up) : v !== null && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, up(x)])) : v;
+  const asks = RH.cases.map((c) => ({ token: c.address, createdS: c.created_s }));
+  const lower = await readMakers("robinhood", rhRecords().fetch, asks, REC_NOW);
+  let changed = 0;
+  for (const which of [[0], [0, 1, 2]]) {
+    const upper = await readMakers("robinhood", rhRecords({ lie: (w, _q, r) => (which.includes(w) ? (JSON.stringify(up(r)) !== JSON.stringify(r) && changed++, up(r)) : r) }).fetch, asks, REC_NOW);
+    assert.deepEqual([...upper], [...lower], `providers ${which.join(", ")} in upper case`);
+  }
+  assert.ok(changed > 0, "answers with hex letters were sent in upper case");
+  // the creation events: a pad named from upper-case logs as from the recorded ones
+  for (const c of RH.cases) for (const which of [0, 1]) {
+    const logs = joinLogs(c.answers[which]!);
+    if (logs !== undefined) assert.equal(padOf("robinhood", c.address, up(logs)), c.pad, `${c.symbol} on provider ${which}`);
+  }
+});

@@ -142,8 +142,9 @@ export const EVM_BUSY_RETRY_S = 2;
 export type EvmBlock = { number: bigint; timestamp: bigint; hash: string; baseFeePerGas: bigint };
 const blockOf = (v: unknown): EvmBlock => {
   const b = v as { number?: unknown; timestamp?: unknown; hash?: unknown; baseFeePerGas?: unknown } | null;
-  if (typeof b?.hash !== "string" || !/^0x[0-9a-f]{64}$/.test(b.hash)) throw new Error("not a block");
-  return { number: qty(b.number), timestamp: qty(b.timestamp), hash: b.hash, baseFeePerGas: qty(b.baseFeePerGas) };
+  const hash = evmRpcHex(b?.hash);
+  if (hash === null || !/^0x[0-9a-f]{64}$/.test(hash)) throw new Error("not a block");
+  return { number: qty(b!.number), timestamp: qty(b!.timestamp), hash, baseFeePerGas: qty(b!.baseFeePerGas) };
 };
 const tag = (n: bigint) => `0x${n.toString(16)}`;
 
@@ -204,9 +205,19 @@ export type EvmPoolSender = {
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HEX = /^0x([0-9a-f]{2})+$/;
+/**
+ * An RPC's hex string as viem and ethers read one, and as the device does (packages/wallet/src/pool/evm.ts evmRpcHex,
+ * card wallet-rpc-hex-case): "0x", then hex digits in either case, lower-cased; null for anything else.
+ * robinhood-testnet.drpc.org answers eth_chainId "0xB626" where Robinhood's own RPC and publicnode answer "0xb626"
+ * (read 3 Nov 23:07Z). Every hex a provider gives is read through this before it is checked or compared, so two
+ * providers' answers that differ only in case are one answer, and any other difference is still one.
+ */
+export const evmRpcHex = (v: unknown): string | null => (typeof v === "string" && /^0x[0-9a-fA-F]*$/.test(v) ? v.toLowerCase() : null);
+/** A JSON-RPC quantity, canonical (no leading zero), as the spec writes it, in either case. */
 const qty = (v: unknown): bigint => {
-  if (typeof v !== "string" || !/^0x(0|[1-9a-f][0-9a-f]{0,63})$/.test(v)) throw new Error("not a quantity");
-  return BigInt(v);
+  const h = evmRpcHex(v);
+  if (h === null || !/^0x(0|[1-9a-f][0-9a-f]{0,63})$/.test(h)) throw new Error("not a quantity");
+  return BigInt(h);
 };
 /**
  * The node ran the call and it failed in execution: a JSON-RPC error (the kit's client words it "RPC error <code>:
