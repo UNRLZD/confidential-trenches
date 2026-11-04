@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { KLineData } from "klinecharts";
 import { useParams } from "react-router";
 import { parseTokenRoute } from "../../routes/routes.ts";
@@ -8,13 +9,15 @@ import { Avatar } from "../market/Avatar.tsx";
 import { useSigninSheet } from "../signin/source.tsx";
 import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
+import { safetyCells } from "../trade/safety.ts";
+import { SIGN_HOST_URL } from "../../shell/signpage-frame.tsx";
 import { TradeBox } from "../trade/TradeBox.tsx";
 import { CHART_TFS, DEFAULT_TF, loadCandles } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { drawBars, mountChart, unmountChart } from "./chart.ts";
 import type { Drawn } from "./chart.ts";
-import { tokenView } from "./model.ts";
-import type { Curve, TokenView } from "./model.ts";
+import { copyText, readWatch, shareHref, toggleWatch, tokenLinks, tokenView } from "./model.ts";
+import type { TokenView } from "./model.ts";
 import { useToken, useTopToken } from "./source.ts";
 import type { TokenData } from "./source.ts";
 import { WORDS } from "./words.ts";
@@ -46,35 +49,98 @@ const SkLine = ({ cls, w }: { cls: string; w: number }) => <span className={`${c
 /** The identity line's skeleton: the filled line holds a mono age and address, so its height is the mono face's line. */
 const SkMeta = ({ w }: { w: number }) => <span className="tkp-meta tkp-sk" style={{ width: w }} aria-hidden="true"><span className="tkp-num">{"\u00a0"}</span></span>;
 
-/** The curve's value and, only on a curve, its bar (R5 U.about tk-curve). */
-function CurveValue({ c }: { c: Curve }) {
-  return (
-    <>
-      <span className="tkp-val" data-curve={c.on}>{c.text}</span>
-      {c.on && (
-        <span className="tkp-bar" data-testid="curve-bar" aria-hidden="true">
-          <i style={{ width: `${(c.fill * 100).toFixed(2)}%` }} />
-        </span>
-      )}
-    </>
-  );
-}
-
-function Tile({ label, value, dir, k }: { label: WordId; value: string | null; dir?: string; k: string }) {
+function Tile({ label, value, dir, tone, k }: { label: WordId; value: string | null; dir?: string; tone?: string; k: string }) {
   return (
     <div className="tkp-tile" data-k={k}>
       <span className="tkp-lbl"><W id={label} /></span>
-      {value === null ? <SkLine cls="tkp-val" w={64} /> : <span className="tkp-val" data-dir={dir}>{value}</span>}
+      {value === null ? <SkLine cls="tkp-val" w={64} /> : <span className="tkp-val" data-dir={dir} data-tone={tone}>{value}</span>}
     </div>
   );
 }
 
-function CurveTile({ v, phone }: { v: TokenView | null; phone?: boolean }) {
+// R5's line icons (assets/app.js I, drawn by P.ic in a 12 box): the identity's links, star, copy, share and back
+const ICONS: Record<string, readonly (string | readonly [string, Record<string, number>])[]> = {
+  link: ["M5 7l2-2", "M4.2 5.2L3 6.4a2 2 0 002.8 2.8L7 8", "M7.8 6.8L9 5.6a2 2 0 00-2.8-2.8L5 4"],
+  search: [["circle", { cx: 5.2, cy: 5.2, r: 3.7 }], "M8 8l2.8 2.8"],
+  star: ["M6 1.2l1.5 3 3.3.5-2.4 2.3.6 3.3L6 8.8l-3 1.5.6-3.3-2.4-2.3 3.3-.5z"],
+  copy: [["rect", { x: 4, y: 4, width: 6.5, height: 6.5, rx: 1.2 }], "M8 4V2.7c0-.7-.5-1.2-1.2-1.2H2.7c-.7 0-1.2.5-1.2 1.2v4.1c0 .7.5 1.2 1.2 1.2H4"],
+  share: ["M6 7.5V1.5M3.5 4L6 1.5 8.5 4", "M2 7v2.5c0 .6.4 1 1 1h6c.6 0 1-.4 1-1V7"],
+  back: ["M7.5 2.5L4 6l3.5 3.5"],
+};
+function Ic({ n, size = 13, stroke = 1.25, filled = false }: { n: keyof typeof ICONS; size?: number; stroke?: number; filled?: boolean }) {
   return (
-    <div className={phone ? "tkp-mtile" : "tkp-tile"} data-k="curve">
-      <span className="tkp-lbl"><W id="curve" /></span>
-      {v === null ? <SkLine cls="tkp-val" w={64} /> : <CurveValue c={v.curve} />}
-    </div>
+    <svg className="tkp-ic" width={size} height={size} viewBox="0 0 12 12" aria-hidden="true">
+      <g fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round">
+        {ICONS[n]!.map((p, i) => (typeof p === "string" ? <path key={i} d={p} /> : p[0] === "circle" ? <circle key={i} {...p[1]} /> : <rect key={i} {...p[1]} />))}
+      </g>
+    </svg>
+  );
+}
+
+/** The page's own copy command: a framed page whose parent keeps the async clipboard from it still copies on a tap. */
+function pageCopy(t: string): boolean {
+  const el = document.createElement("textarea");
+  el.value = t;
+  el.setAttribute("readonly", "");
+  el.style.cssText = "position:fixed;top:-100px;opacity:0";
+  document.body.appendChild(el);
+  el.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    el.remove();
+  }
+}
+const copy = (t: string) => copyText(t, navigator.clipboard, pageCopy);
+
+/** Copy contract (R5 hd-copy): the address to the clipboard; `data-copied` lights it once it took. */
+function CopyBtn({ token, cls, children }: { token: string; cls: string; children?: ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <button type="button" className={cls} data-copied={copied} aria-label={WORDS.copy.text} title={token} onClick={() => void copy(token).then(setCopied)}>
+      {children}
+      <Ic n="copy" size={cls === "tkp-copy" ? 14 : 13} />
+    </button>
+  );
+}
+
+const storage = (): Storage | null => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+};
+/** The watchlist star (R5 token-watch): kept on this device (model.ts readWatch). */
+function Star({ v, cls, size }: { v: TokenView; cls: string; size: number }) {
+  const key = `${v.chain}/${v.token}`;
+  const [on, setOn] = useState(() => readWatch(storage()).includes(key));
+  const label = (on ? WORDS.watchRemove.text : WORDS.watchAdd.text).replace("{sym}", v.symbol);
+  return (
+    <button type="button" className={cls} data-on={on} aria-pressed={on} aria-label={label} title={label} onClick={() => setOn(toggleWatch(storage(), key))}>
+      <Ic n="star" size={size} filled={on} />
+    </button>
+  );
+}
+
+/** The link icons (R5 socials and explorers): only those with data behind them (model.ts tokenLinks). */
+function Links({ v }: { v: TokenView }) {
+  return (
+    <>
+      {tokenLinks(v.chain, v.token).map((l) => {
+        const name = l.id === "xSearch" ? WORDS.searchX.text : WORDS[l.name].text;
+        return (
+          <a key={l.id} className="tkp-ib" href={l.href} target="_blank" rel="noopener noreferrer" aria-label={name} title={name} data-link={l.id}>
+            <Ic n={l.id === "xSearch" ? "search" : "link"} size={l.id === "xSearch" ? 12 : 13} />
+          </a>
+        );
+      })}
+    </>
   );
 }
 
@@ -221,8 +287,12 @@ function Ticket({ r }: { r: Ready }) {
   return <TradeBox chain={row.chain} token={row.token} symbol={row.symbol} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} />} />;
 }
 
+/** The strip's and the tiles' Tax: the token read's transfer fee as the safety grid draws it (trade/safety.ts). */
+const taxOf = (r: Ready) => safetyCells(r.data.row, r.data.risk, r.nowMs).find((c) => c.id === "tax")!;
+
 function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartState }) {
   const s = (x: string | undefined) => (v === null ? null : x!);
+  const tax = r ? taxOf(r) : null;
   return (
     <div className="tkp-desk">
       <div className="tkp-main">
@@ -232,6 +302,12 @@ function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartSt
             <div className="tkp-idtext">
               <div className="tkp-symrow">
                 {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={120} />}
+                {v && (
+                  <div className="tkp-icons" data-testid="token-links">
+                    <Links v={v} />
+                    <Star v={v} cls="tkp-ib" size={13} />
+                  </div>
+                )}
               </div>
               {v ? (
                 <div className="tkp-meta">
@@ -240,6 +316,7 @@ function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartSt
                   <span className="tkp-num">{v.age}</span>
                   <span className="tkp-sep" aria-hidden="true">|</span>
                   <span className="tkp-num tkp-ca" title={v.token}>{v.token}</span>
+                  <CopyBtn token={v.token} cls="tkp-copy" />
                 </div>
               ) : (
                 <SkMeta w={220} />
@@ -253,10 +330,10 @@ function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartSt
             </div>
             <Tile k="price" label="price" value={s(v?.priceTile)} />
             <Tile k="change" label="change" value={s(v?.chgTile)} dir={v?.chg.dir} />
+            <Tile k="tax" label="tax" value={tax?.text ?? null} tone={tax?.tone} />
             <Tile k="vol" label="vol" value={s(v?.vol)} />
-            <Tile k="liq" label="liq" value={s(v?.liq)} />
+            <Tile k="liq" label={v?.curve.on ? "inCurve" : "liq"} value={s(v?.liq)} />
             <Tile k="holders" label="holders" value={s(v?.holders)} />
-            <CurveTile v={v} />
           </div>
         </header>
         <Chart c={c} />
@@ -301,17 +378,36 @@ function TradeSheet({ v, r, onClose }: { v: TokenView; r: Ready; onClose: () => 
   );
 }
 
+/** Share (R5 m-token-share): the token's public address, by the system sheet where the page may use it, else copied. */
+function share(v: TokenView) {
+  const url = shareHref(SIGN_HOST_URL, v.chain, v.token);
+  if (typeof navigator.share === "function") return void navigator.share({ title: v.symbol, url }).catch(() => void copy(url));
+  void copy(url);
+}
+
+/** Back (R5 pp-back): where the visitor came from in the terminal, else Discover's first page. */
+function back() {
+  if (window.history.length > 1) window.history.back();
+  else window.location.assign("/");
+}
+
 function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartState }) {
   const [sheet, setSheet] = useState(false);
+  const tax = r ? taxOf(r) : null;
+  const cells = r ? safetyCells(r.data.row, r.data.risk, r.nowMs) : null;
+  const cell = (id: "top10" | "dev") => cells?.find((x) => x.id === id) ?? null;
   const open = () => setSheet(true);
   const close = useCallback(() => setSheet(false), []);
   return (
     <div className="tkp-phone">
+      <div className="tkp-nav" data-testid="token-nav">
+        <button type="button" className="tkp-navbtn" aria-label={WORDS.back.text} onClick={back}><Ic n="back" size={20} stroke={1.4} /></button>
+        {v ? <Avatar symbol={v.symbol} size={30} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 30, height: 30 }} />}
+        {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={100} />}
+        {v && <Star v={v} cls="tkp-navbtn tkp-star" size={20} />}
+        {v && <button type="button" className="tkp-navbtn" aria-label={WORDS.share.text} onClick={() => share(v)}><Ic n="share" size={19} /></button>}
+      </div>
       <div className="tkp-hero">
-        <div className="tkp-symrow">
-          {v ? <Avatar symbol={v.symbol} size={32} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 32, height: 32 }} />}
-          {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={100} />}
-        </div>
         <div className="tkp-pricerow">
           {v ? <span className="tkp-price">{v.price}</span> : <SkLine cls="tkp-price" w={160} />}
           {v && <span className="tkp-chg" data-dir={v.chg.dir}>{v.chg.text}</span>}
@@ -323,24 +419,38 @@ function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartStat
             {v.name && <span className="tkp-dot" aria-hidden="true" />}
             <span className="tkp-num">{v.age}</span>
             <span className="tkp-dot" aria-hidden="true" />
-            <span className="tkp-num tkp-ca" title={v.token}>{v.token}</span>
+            <CopyBtn token={v.token} cls="tkp-mca">
+              <span className="tkp-num tkp-ca">{v.token}</span>
+            </CopyBtn>
           </div>
         ) : (
           <SkMeta w={240} />
         )}
+        {v && (
+          <div className="tkp-links" data-testid="token-links">
+            <Links v={v} />
+          </div>
+        )}
       </div>
       <Chart c={c} phone />
       <div className="tkp-mtiles">
-        {(["mc", "curve", "liq", "vol", "holders"] as const).map((k) =>
-          k === "curve" ? (
-            <CurveTile key={k} v={v} phone />
-          ) : (
-            <div key={k} className="tkp-mtile" data-k={k}>
-              <span className="tkp-lbl"><W id={k} /></span>
-              {v ? <span className="tkp-val">{v[k]}</span> : <SkLine cls="tkp-val" w={70} />}
-            </div>
-          ),
-        )}
+        {(
+          [
+            ["mc", "mc", v?.mc, undefined],
+            ["liq", v?.curve.on ? "inCurve" : "liq", v?.liq, undefined],
+            ["vol", "vol", v?.vol, undefined],
+            ["holders", "holders", v?.holders, undefined],
+            ["top10", "top10", cell("top10")?.text, cell("top10")?.tone],
+            ["dev", "dev", cell("dev")?.text, cell("dev")?.tone],
+            ["tax", "tax", tax?.text, tax?.tone],
+          ] as const
+        ).map(([k, label, value, tone]) => (
+          <div key={k} className="tkp-mtile" data-k={k}>
+            <span className="tkp-lbl"><W id={label} /></span>
+            {value !== undefined && v ? <span className="tkp-val" data-tone={tone}>{value}</span> : <SkLine cls="tkp-val" w={70} />}
+            <span className="tkp-viz" aria-hidden="true" />
+          </div>
+        ))}
       </div>
       {v && (
         <div className="tkp-bottom" data-testid="token-bar">
