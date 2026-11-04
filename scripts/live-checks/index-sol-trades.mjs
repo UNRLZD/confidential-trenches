@@ -106,19 +106,30 @@ export function judge(run) {
   if (hit === null) return { ok: false, lines };
   const ms = hit.p.answeredMs - f.heldAtMs;
   say(ms <= FRESH_MS, `on the tape ${ms} ms after the check held it on chain (at most ${FRESH_MS})`);
+  // where the time went (the helper's clock for as_of_ms, so within the two hosts' clock skew): the helper folded the
+  // trade after the last read that lacked it was sent and by the as_of_ms of the read that holds it; the rest is the
+  // read's own round trip
+  const prev = hit.i > 0 ? polls[hit.i - 1] : null;
+  const asOf = JSON.parse(hit.p.body).as_of_ms;
+  lines.push(`    timing: the helper folded it after +${prev === null ? "?" : prev.atMs - f.heldAtMs} ms (read ${hit.i} sent, without it) and by +${asOf - f.heldAtMs} ms (as_of_ms of read ${hit.i + 1}); read ${hit.i + 1} sent at +${hit.p.atMs - f.heldAtMs} ms, answered in ${hit.p.answeredMs - hit.p.atMs} ms`);
   say(hit.row.side === f.side && hit.row.t_ms === f.ts * 1000 && hit.row.trader === f.user, `its side ${show(hit.row.side)}, time ${hit.row.t_ms} and trader ${show(hit.row.trader)} are the event's (${f.side}, ${f.ts * 1000}, ${f.user})`);
   const c = answer(say, `GET ${CANDLES_PATH(run.coin)}`, run.candles, run.candles?.answeredMs);
   if (c === undefined) return { ok: false, lines };
   const bar = Array.isArray(c.candles) ? c.candles.find((b) => Array.isArray(b) && b[0] === f.ts) : undefined;
   say(c.tf === "1s" && bar !== undefined && bar.length === 6 && bar.slice(1).every((v) => typeof v === "string" && DEC.test(v)) && Number(bar[5]) > 0, `the 1s candles hold the trade's second ${f.ts}: ${show(bar)}`);
-  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
+/** One read, its error naming the request (a run's ERROR line says which read failed, and a timeout says so). */
 async function get(base, path, fetchFn) {
   const t0 = Date.now();
-  const r = await fetchFn(`${base}${path}`, { headers: { origin: APP }, signal: AbortSignal.timeout(10_000) });
-  const body = await r.text();
-  return { atMs: t0, answeredMs: Date.now(), status: r.status, headers: Object.fromEntries(r.headers), body };
+  try {
+    const r = await fetchFn(`${base}${path}`, { headers: { origin: APP }, signal: AbortSignal.timeout(10_000) });
+    const body = await r.text();
+    return { atMs: t0, answeredMs: Date.now(), status: r.status, headers: Object.fromEntries(r.headers), body };
+  } catch (e) {
+    throw new Error(`GET ${path} ${e?.name === "TimeoutError" ? "timed out after 10 s" : `failed: ${e?.message}`}`);
+  }
 }
 
 /** The quotes the helper prices a trade in (trades.ts): a curve or pool quoted in another token (a tokenized stock, say)
@@ -167,6 +178,15 @@ function watchOnce(open, ws) {
   });
 }
 
+/** Reads each of `open`'s tapes every `everyMs` until the returned stop is called: the helper closes a token nobody read
+ *  for IDLE_MS (60 s, trades.ts), and a wait for a trade can outlast that (a run once waited 66 s). */
+export function keepOpen(base, open, fetchFn = fetch, everyMs = 20_000) {
+  const timer = setInterval(() => {
+    for (const t of open) void fetchFn(`${base}${TRADES_PATH(t)}`, { headers: { origin: APP }, signal: AbortSignal.timeout(10_000) }).then((r) => r.body?.cancel()).catch(() => undefined);
+  }, everyMs);
+  return () => clearInterval(timer);
+}
+
 /** One live run against `base`. */
 export async function read(base = BASE, fetchFn = fetch, ws = WS) {
   const lists = await get(base, LISTS_PATH, fetchFn);
@@ -180,13 +200,18 @@ export async function read(base = BASE, fetchFn = fetch, ws = WS) {
   if (open.length === 0) return { base, coin: tokens[0] ?? null, fresh: null, polls: tokens.length ? [first[tokens[0]]] : [], candles: null };
   // the public websocket refuses a connection now and then (several in a row from one address): five tries, 2 s apart
   let fresh;
-  for (let attempt = 1; fresh === undefined; attempt++) {
-    try {
-      fresh = await watchOnce(open, ws);
-    } catch (e) {
-      if (attempt === 5 || !/websocket error/.test(e.message)) throw e;
-      await new Promise((r) => setTimeout(r, 2_000));
+  const stop = keepOpen(base, open, fetchFn);
+  try {
+    for (let attempt = 1; fresh === undefined; attempt++) {
+      try {
+        fresh = await watchOnce(open, ws);
+      } catch (e) {
+        if (attempt === 5 || !/websocket error/.test(e.message)) throw e;
+        await new Promise((r) => setTimeout(r, 2_000));
+      }
     }
+  } finally {
+    stop();
   }
   const polls = [];
   while (Date.now() - fresh.heldAtMs < FRESH_MS + 3_000) {

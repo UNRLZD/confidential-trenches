@@ -122,5 +122,6 @@ async fn intents_at_df_takes_a_usdc_deposit() -> R<()> {
     assert_eq!(usdc_balance(&h, &intents).await?, AMOUNT);
     println!("intents.near at DF: u's deposit of {AMOUNT} credited ({token_id}), USDC u {} intents.near {AMOUNT}", HELD - AMOUNT);
     println!("{}", h.gas_table());
+    h.i1().await?;
     Ok(())
 }

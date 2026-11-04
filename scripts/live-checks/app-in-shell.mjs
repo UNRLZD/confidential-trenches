@@ -392,8 +392,8 @@ export async function collect({ launchers, shots, source, expect, routes }) {
 // are SIGN_HOST's _headers with section 4's frame rules: frame-ancestors 'none' and frame-src APP_HOST.
 const SIGNED_IN = { release: "harness-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "1250.00", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
-const shellJs = (kind) => `const APP = ${JSON.stringify(APP_HOST)};
-const STATE = ${JSON.stringify(kind === "tap" ? SIGNED_OUT : SIGNED_IN)};
+const shellJs = (kind, state = null) => `const APP = ${JSON.stringify(APP_HOST)};
+const STATE = ${JSON.stringify(state ?? (kind === "tap" ? SIGNED_OUT : SIGNED_IN))};
 const API = ${kind === "update" ? 2 : 1};
 const HOLD = ${kind === "late" || kind === "silent" ? LATE_READY_MS : 0};
 let answering = ${kind !== "silent"};
@@ -408,6 +408,8 @@ f.addEventListener("load", () => setTimeout(() => {
 }, HOLD));
 addEventListener("message", (e) => {
   if (!answering || e.origin !== APP || e.source !== f.contentWindow || !e.data || typeof e.data.id !== "string") return;
+  // every request kind the app sent, for a check to read
+  (window.__ctShellSeen ??= []).push(e.data.type);
   const ok = (result) => ({ v: 1, id: e.data.id, ok: true, result });
   const no = { v: 1, id: e.data.id, ok: false, error: { code: "not_allowed" } };
   const p = e.data.path;
@@ -449,7 +451,7 @@ const TOKEN_ANSWER = { ...TOKEN_READ.rest, row: unzipRows(TOKEN_READ.fields, [TO
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json" };
 
-export async function harnessRoute(appBuild, kind = "signed") {
+export async function harnessRoute(appBuild, kind = "signed", { state = null } = {}) {
   const { parseHeadersFile } = await import("../../apps/terminal/scripts/check-deploy.ts");
   const { headersFor } = await import("../../apps/terminal/test/harness/server.mjs");
   const rulesOf = (text) => {
@@ -459,7 +461,7 @@ export async function harnessRoute(appBuild, kind = "signed") {
   };
   const appRules = rulesOf(readFileSync(path.join(appBuild, "_headers"), "utf8"));
   const signRules = rulesOf(shellHeaders(readFileSync(path.join(REPO, "packages/signpage/public/_headers"), "utf8")));
-  const js = shellJs(kind);
+  const js = shellJs(kind, state);
   const shellFiles = { "/shell.js": js, "/shell.css": SHELL_CSS };
   const headers = (rules, p, type) => ({ ...Object.fromEntries(headersFor(rules, p)), "content-type": type });
   return async (route) => {
