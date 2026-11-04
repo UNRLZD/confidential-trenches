@@ -256,7 +256,9 @@ const RH_PM = "0x8366a39cc670b4001a1121b8f6a443a643e40951"; // Robinhood Chain's
 const CLANKER = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc";
 const UNPINNED = "0x00000000000000000000000000000000000020cc";
 const kk = (h: string) => Buffer.from(keccak_256(Buffer.from(h, "hex"))).toString("hex");
-type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; only?: 0 | 1; state?: [bigint, bigint] };
+// `exec`: what the pool pays a swap that is not the quoter's (W's own sell, card evm-quote-exec-sim); by default what
+// it pays the quoter with its hook as it is
+type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; exec?: (a: bigint) => bigint | null; only?: 0 | 1; state?: [bigint, bigint] };
 const pidOf = (k: EvmPoolKey) => kk(W(BigInt(k.currency0)) + W(BigInt(k.currency1)) + W(BigInt(k.fee)) + W(BigInt(k.tickSpacing)) + W(BigInt(k.hooks)));
 const keyOf = (token: string, other: string, fee: number, tickSpacing: number, hooks: string): EvmPoolKey => {
   const [currency0, currency1] = BigInt(other) < BigInt(token) ? [other, token] : [token, other];
@@ -323,10 +325,40 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         const words = Array.from({ length: n }, (_, k) => slots.get(data.slice(138 + 64 * k, 202 + 64 * k)) ?? 0n);
         return { jsonrpc: "2.0", id, result: "0x" + W(32n) + W(BigInt(n)) + words.map(W).join("") };
       }
-      const o = one(to, data.slice(2), overridden);
+      const asW = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code;
+      const o = to.toLowerCase() === SELL_W && asW?.startsWith("0xef0100") ? simSell(data.slice(2), c.params[2] as Record<string, { code: string }>) : one(to, data.slice(2), overridden);
       return o === null ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted" } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
     });
+  // W's own sell through SellDelegate (card evm-quote-exec-sim), W's code the delegate's 7702 designator: nonce() is 0;
+  // sell(sell, fee, signature) swaps hop by hop from the token at each pool's `exec`, reverts below minOut, and returns
+  // what W gained (the sim pool's code returns msg.value)
+  function simSell(d: string, o: Record<string, { code: string }>): bigint | null {
+    assert.ok(o[SELL_W]!.code.startsWith("0xef0100"), "W's code is a 7702 designator");
+    if (d.startsWith("affed0e0")) return 0n;
+    assert.ok(d.startsWith(SEL_SELL), d.slice(0, 8));
+    const h = d.slice(8);
+    const w = (i: number) => BigInt("0x" + h.slice(64 * i, 64 * i + 64));
+    const t = Number(w(0)) / 32; // the tuple's first word
+    const [token, amount, minOut, pool, deadline] = ["0x" + W(w(t)).slice(24), w(t + 1), w(t + 4), "0x" + W(w(t + 5)).slice(24), w(t + 8)];
+    assert.equal(pool, sellMod.EVM_SELL_SIM, "a sim's pool is EVM_SELL_SIM");
+    assert.ok(o[sellMod.EVM_SELL_SIM] !== undefined && deadline === BigInt(T), "into the sim pool, at the block's own time");
+    const at = t + Number(w(t + 3)) / 32 + 1; // the route's bytes: abi.encode(PathKey[])
+    const n = Number(w(at + 1));
+    let [from, got] = [token, amount];
+    for (let i = 0; i < n; i++) {
+      const e = at + 2 + Number(w(at + 2 + i)) / 32;
+      const [cur, fee, ts, hooks] = ["0x" + W(w(e)).slice(24), Number(w(e + 1)), Number(w(e + 2)), "0x" + W(w(e + 3)).slice(24)];
+      const k = keyOf(cur, from, fee, ts, hooks);
+      const p = byPid.get(pidOf({ ...k, currency0: k.currency0.toLowerCase(), currency1: k.currency1.toLowerCase(), hooks: k.hooks.toLowerCase() }));
+      if (p === undefined) return null;
+      const next = p.exec !== undefined ? p.exec(got) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
+      if (next === null) return null;
+      [from, got] = [cur, next];
+    }
+    return got < minOut ? null : got;
+  }
 }
+const SEL_SELL = Buffer.from(keccak_256(new TextEncoder().encode("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)"))).toString("hex").slice(0, 8);
 /** The scan provider: its head, and the Initialize logs of `pools` at `at`; `asked` keeps each getLogs range. */
 /** `orSpan`: the most blocks a request with more than one value in a topic position may span, as Robinhood's RPC
  *  answers (-32602 "only 100000 are allowed for this request"). */
@@ -1140,8 +1172,8 @@ test("T8 a quote's reads go to each provider at most the chain's limit at once (
 const SELL_W = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"; // Hardhat account 0, a published test key
 // `bought` is required (review of edb4dbb, F3): by default the seeded pool's route, the one a server would send, so the
 // sell must still find the token's market from its own set; null leaves it out
-const sellOn = (pools: ModelPool[], token: string, scan?: EvmRpc, bought: EvmRoute | null = seededRoute(token), slippageBps = 100) =>
-  evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps, ...(bought !== null ? { bought } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scan);
+const sellOn = (pools: ModelPool[], token: string, scan?: EvmRpc, bought: EvmRoute | null = seededRoute(token), slippageBps = 100, venues?: builder.EvmPoolVenueList, signSim?: EvmPoolSellQuoteRequest["signSim"]) =>
+  evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps, ...(bought !== null ? { bought } : {}), ...(signSim ? { signSim } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scan, venues);
 const sellVerdict = async (p: ReturnType<typeof sellOn>) => {
   try {
     const q = await p;
@@ -1366,4 +1398,48 @@ test("PB2 (F2) the sell prices X's markets at the X its pool gives, not at the u
   const deep = marketOf(x);
   const s = await sellVerdict(sellOn([pool, thin, deep], token, scanner(5_000_000, [{ key: pool.key, at: 4_500_000 }])));
   assert.equal((s as { amountOut?: bigint }).amountOut, (2n * AMOUNT) / 1000n, show(s));
+});
+
+// card evm-quote-exec-sim: a route through a hook the venue does not list sets the sell's reference only where W's own
+// sell through it executes at that price (an eth_call of SellDelegate.sell from W at the agreed block); Base's venue
+// here with a sell delegate pinned, as pool-evm-deploy pins it
+const DELEGATED: builder.EvmPoolVenueList = Object.freeze({ ...builder.evmPoolVenues(), base: Object.freeze({ ...builder.evmPoolVenues().base, sellDelegate: "0x00000000000000000000000000000000de1e9a7e" }) });
+const signed: { deadline: bigint; ts: bigint }[] = [];
+const signSim: EvmPoolSellQuoteRequest["signSim"] = (sim, ts) => (signed.push({ deadline: sim.deadline, ts }), new Uint8Array(65));
+
+test("PE a pool behind a hook that lets only the quoter trade, priced above the market, freezes no sell where the sell delegate is pinned", async () => {
+  const token = "0x00000000000000000000000000000000000c0e0e";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  // twice the market to the quoter, hook replaced or as it is; W's own swap is refused
+  const blocker: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, exec: () => null };
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: blocker.key, at: 4_500_001 }];
+  signed.length = 0;
+  const s = await sellVerdict(sellOn([market, blocker], token, scanner(5_000_000, logs), undefined, 100, DELEGATED, signSim));
+  assert.equal((s as { amountOut?: bigint }).amountOut, AMOUNT, show(s));
+  // W signed one sim, its deadline the agreed block's own time
+  assert.deepEqual(signed, [{ deadline: BigInt(T), ts: BigInt(T) }]);
+  // the same pool, honest to W too, still sets the reference: the seeded route is refused
+  const t2 = "0x00000000000000000000000000000000000c0e1e";
+  const honest: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a };
+  const h = await sellVerdict(sellOn([seeded(t2), honest], t2, scanner(5_000_000, [{ key: honest.key, at: 4_500_001 }]), undefined, 100, DELEGATED, signSim));
+  assert.deepEqual(h, { accepted: false, code: "below_reference" });
+  // a W's sell through it short of the quoter's price is no reference either
+  const t3 = "0x00000000000000000000000000000000000c0e2e";
+  const short: ModelPool = { key: keyOf(t3, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, exec: (a) => a / 20n };
+  const m3: ModelPool = { key: keyOf(t3, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const v3 = await sellVerdict(sellOn([m3, short], t3, scanner(5_000_000, [{ key: m3.key, at: 4_500_000 }, { key: short.key, at: 4_500_001 }]), undefined, 100, DELEGATED, signSim));
+  assert.equal((v3 as { amountOut?: bigint }).amountOut, AMOUNT, show(v3));
+  // without a signer the sim cannot run: refused, never signed unsimmed
+  const t4 = "0x00000000000000000000000000000000000c0e3e";
+  const b4: ModelPool = { ...blocker, key: keyOf(t4, NATIVE, 3000, 60, UNPINNED) };
+  const m4: ModelPool = { key: keyOf(t4, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  assert.deepEqual(await sellVerdict(sellOn([m4, b4], t4, scanner(5_000_000, [{ key: m4.key, at: 4_500_000 }, { key: b4.key, at: 4_500_001 }]), undefined, 100, DELEGATED)), { accepted: false, code: "bad_request" });
+});
+
+test("PE (keep-min) where no sell delegate is pinned, the same pool keeps the lower of its two quotes in the reference: refused, not signed at the market", async () => {
+  const token = "0x00000000000000000000000000000000000c0e4e";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const blocker: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, exec: () => null };
+  const s = await sellVerdict(sellOn([market, blocker], token, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: blocker.key, at: 4_500_001 }])));
+  assert.deepEqual(s, { accepted: false, code: "below_reference" });
 });

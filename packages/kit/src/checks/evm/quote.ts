@@ -53,12 +53,13 @@ import {
   evmPoolVenues,
   pathKeysAbi,
   type EvmPoolChain,
+  type EvmPoolVenueList,
   type EvmRoute,
   type EvmV3Route,
   type EvmV4Hop,
   type EvmV4Route,
 } from "../../trade/evm/buy-unpinned.ts";
-import { evmHookListed, evmSellRouteCheck, type EvmSellRoute } from "../../trade/evm/sell-unpinned.ts";
+import { EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmSellCallData, evmSellRouteCheck, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -167,10 +168,9 @@ const append = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
 };
 
 /** The pinned quoters and rules of `chain`: own keys of the frozen venue list only. */
-function venue(chain: EvmPoolChain) {
-  const all = evmPoolVenues();
-  if (typeof chain !== "string" || !Object.hasOwn(all, chain)) return refuse("bad_request", "no such chain");
-  const v = all[chain];
+function venue(chain: EvmPoolChain, all: EvmPoolVenueList = evmPoolVenues()) {
+  const v = typeof chain === "string" && Object.hasOwn(all, chain) ? all[chain] : undefined;
+  if (v === undefined) return refuse("bad_request", "no such chain");
   const q = Object.hasOwn(v, "quoters") ? v.quoters : undefined;
   const own = (k: "v3" | "v4") => (q !== undefined && Object.hasOwn(q, k) && isAddress(q[k]) ? q[k] : undefined);
   const pin = (k: "poolManager" | "pool" | "sellDelegate") => (Object.hasOwn(v, k) ? v[k] : undefined);
@@ -188,6 +188,7 @@ function venue(chain: EvmPoolChain) {
     maxLag: Object.hasOwn(v, "maxLag") && Number.isSafeInteger(v.maxLag) ? BigInt(v.maxLag!) : 0n,
     hookedPools: Object.hasOwn(v, "hookedPools") ? v.hookedPools! : [],
     poolManager: Object.hasOwn(v, "poolManager") && isAddress(v.poolManager) ? lower(v.poolManager) : undefined,
+    sellDelegate: isAddress(pin("sellDelegate")) ? lower(pin("sellDelegate") as string) : undefined,
     scan: Object.hasOwn(v, "scan") ? v.scan : undefined,
     called: new Set(called.filter(isAddress).map(lower)),
   };
@@ -991,6 +992,48 @@ function sellRead(v: Venue, token: string, r: EvmRoute, amount: bigint): { to: s
 
 type Venue = ReturnType<typeof venue>;
 
+/** How a route's price counts, the one rule for the buy and the sell (card evm-quote-exec-sim): a route with no hook,
+ *  or only hooks of launchpads the venue lists in their own shapes (evmHookListed), keeps the quoter's price. A route
+ *  through any other hook may be priced by a hook that lets only the quoter trade (review of edb4dbb, F4), so where the
+ *  chain pins a sell delegate it counts only once an eth_call of the exact trade from W executes it at that price
+ *  ("sim"); where it pins none (mainnet until pool-evm-deploy) it keeps the lower of its quote with the hook replaced and
+ *  as it is ("keep-min"), which refuses rather than signs at a seeded price. The freeze a hook that lets only the
+ *  quoter trade can put on a token's trades (probe PE) therefore lasts on such a chain until pool-evm-deploy pins its
+ *  sell delegate. A requested buy through such a hook is refused no_exit (evmSellExits) on every chain. */
+function simRule(chain: EvmPoolChain, route: EvmRoute, sellDelegate: string | undefined): "quoter" | "sim" | "keep-min" {
+  if (route.venue !== "uniswap-v4" || hopKeys(route).every((k) => k.hooks === NATIVE || evmHookListed(chain, k.hooks, k.fee, k.tickSpacing))) return "quoter";
+  return sellDelegate !== undefined ? "sim" : "keep-min";
+}
+
+const SEL_NONCE = "affed0e0"; // SellDelegate.nonce()
+/** The sim pool's code: CALLVALUE PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN, so sell() returns what W gained. */
+const SIM_POOL_CODE = "0x3460005260206000f3";
+/** W's code in a sim: the 7702 designator of the chain's pinned sell delegate, as on chain (test/evm-sim-facts.test.ts:
+ *  every pinned provider runs the delegate in W's own context). */
+const designator = (delegate: string) => "0xef0100" + lower(delegate).slice(2);
+
+/** The sell routes in `routes` whose price holds against an eth_call of W's own sell through them (simRule "sim") at
+ *  the agreed block on both providers: each such route above `floor` is simmed once, with minOut its price; a route
+ *  whose sim reverts is dropped. W's nonce is read at the block; each sim is its own eth_call (one call's state would
+ *  carry into the next). */
+async function simmedSells(chain: EvmPoolChain, delegate: string | undefined, rpcs: readonly [EvmRpc, EvmRpc], block: Block, w: string, token: string, amountIn: bigint, routes: Filled[], floor: bigint, signSim: EvmPoolSellQuoteRequest["signSim"]): Promise<Filled[]> {
+  const toSim = routes.filter((r) => r.amountOut > floor && simRule(chain, r.route, delegate) === "sim");
+  if (toSim.length === 0) return routes;
+  if (typeof signSim !== "function") return refuse("bad_request", "a route through a hook the venue does not list needs a sim sell W signs (signSim)");
+  const asW = { [lower(w)]: { code: designator(delegate!) } };
+  const [n] = await readBoth(rpcs, block.hash, [{ to: lower(w), data: "0x" + SEL_NONCE, override: asW }]);
+  if (n!.kind !== "out") return refuse("no_quote", "W's sell nonce does not read through the sell delegate");
+  const reads: Read[] = toSim.map((r) => {
+    const s = evmSellRouteOf(r.route) as EvmV4SellRoute;
+    const sim = evmPoolBuildSimSellUnpinned(chain, { w, token, amount: amountIn, hops: s.hops, minOut: r.amountOut, nonce: n!.amountOut, deadline: block.timestamp });
+    const sig = signSim(sim, block.timestamp);
+    return { to: lower(w), data: evmSellCallData(sim, 0n, sig), override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } } };
+  });
+  const ans = await readBoth(rpcs, block.hash, reads);
+  const failed = new Set(toSim.filter((_, i) => { const a = ans[i]!; return a.kind !== "out" || a.amountOut < toSim[i]!.amountOut; }));
+  return routes.filter((r) => !failed.has(r));
+}
+
 /**
  * The device's route set for `token` (card evm-route-parity): one set of pools, the buy's and the sell's alike, each a
  * route from the native asset or WETH into the token. The buy quotes each forwards at its amount of the native asset;
@@ -1439,7 +1482,17 @@ export const evmIsDeviceQuote = (q: unknown): q is EvmPoolBuyQuote => typeof q =
 /** The user's own sell: the token W holds, the amount of it to sell, W, and their slippage. No route. `bought`
  *  (required): the route of the buy that paid W the token (its EvmPoolBuyQuote's route), one more candidate and
  *  reference where the sell builder takes it, never trusted. */
-export type EvmPoolSellQuoteRequest = { chain: EvmPoolChain; token: string; w: string; amountIn: bigint; slippageBps: number; bought: EvmRoute };
+export type EvmPoolSellQuoteRequest = {
+  chain: EvmPoolChain;
+  token: string;
+  w: string;
+  amountIn: bigint;
+  slippageBps: number;
+  bought: EvmRoute;
+  /** W's signature of a sim sell at the agreed block's timestamp (the kit's evmPoolSignSimSell with W's key), needed
+   *  only where a route through a hook the venue does not list would set the reference (card evm-quote-exec-sim). */
+  signSim?: (sim: EvmSellSim, blockTimestamp: bigint) => Uint8Array;
+};
 
 export type EvmPoolSellQuote = {
   readonly chain: EvmPoolChain;
@@ -1487,18 +1540,18 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
 
 /** evmPoolSellQuote on the providers `rpcs` with the device's clock at `nowMs`, and the scan provider `scan`. Not in
  *  the index. */
-export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc): Promise<EvmPoolSellQuote> {
+export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, venues?: EvmPoolVenueList): Promise<EvmPoolSellQuote> {
   if (typeof req !== "object" || req === null) return refuse("bad_request", "a request is an object");
   if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");
   const { chain, token, w, amountIn, slippageBps } = req;
   checkAsk(nowMs, rpcsIn, amountIn, slippageBps);
-  const v = venue(chain);
+  const v = venue(chain, venues);
   if (!isAddress(token) || lower(token) === NATIVE || lower(token) === lower(v.weth)) return refuse("bad_request", "the token is not an address, or is WETH");
   // the probe replaces W's code: never an address the reads call, the token, nor a listed hook
   if (!isAddress(w) || lower(w) === NATIVE || lower(w) === lower(token) || v.called.has(lower(w)) || v.hookedPools.some((h) => lower(h.hooks) === lower(w))) {
     return refuse("bad_request", "W is not an address, or is one the quote calls");
   }
-  const all = evmPoolVenues()[chain];
+  const all = (venues ?? evmPoolVenues())[chain]!; // venue(chain, venues) above refuses a chain the list does not hold
   const router = all.routers.length > 0 ? lower(all.routers[0]!) : undefined;
   if ((v.v3 === undefined || router === undefined) && (v.v4 === undefined || v.poolManager === undefined)) return refuse("no_quoter", `${chain} has no pinned quoter with a sell target`);
   // the pool the note was bought in: the buy quote's own route, required, since a scan finds a pool only while its
@@ -1515,7 +1568,10 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const factory = v.v3 !== undefined && router !== undefined ? reads.push({ to: v.v3, data: "0x" + SEL_FACTORY }) - 1 : -1;
   const exits = evmSellExits(chain, t, bought) ? bought : undefined;
   const { block, out, filled } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true });
-  const routes = [...filled];
+  // a route through a hook the venue does not list, priced above the best route the sell builder takes, counts only
+  // where W's own sell through it executes at that price (card evm-quote-exec-sim; review of edb4dbb, F4)
+  const takes = best(filled.filter((r) => evmSellExits(chain, t, r.route)));
+  const routes = await simmedSells(chain, v.sellDelegate, rpcs, block, lower(w), t, amountIn, filled, takes?.amountOut ?? 0n, req.signSim);
   // The pick: the best route the sell builder takes. The reference: the best of every route, the sell builder's or
   // not (a pool of a hook not listed, priced at the lower of its quote with the hook replaced and as it is). A pick
   // more than the slippage below the reference is refused, so a seeded pool is never picked over the token's real
