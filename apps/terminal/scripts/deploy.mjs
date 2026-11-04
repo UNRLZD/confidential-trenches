@@ -31,6 +31,7 @@ export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "ap
 /** Live checks that hold APP_HOST's address and run after no deploy, each with why (card app-live-list-complete; held by
  *  check-deploy.test.ts: every other check holding APP_HOST's address is in a host's LIVE_CHECKS). */
 export const ONE_OFF = {
+  "evm-quote-warm-round": "the kit's pinned Base and Robinhood providers, timed over 21 quotes a case (about 2.5 min) and each preflighted: it judges packages/kit/src/trade/evm/buy-unpinned.ts against those providers, not what a host serves; APP_HOST is only the Origin of its preflights",
   "kit-freeze-helper-api": "the kit's /v1 freeze at a named tag (--tag): it judges packages/kit/src/helper/v1.ts on GitHub against pins and the tag, not what a host serves; APP_HOST is only the Origin it reads the helper's health from",
 };
 export const LIVE_ARGS = { "app-in-shell": "--engines chromium,firefox,webkit", "app-harness-signin-e2e": "--host app", "signpage-release": "--host app" };
