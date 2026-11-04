@@ -671,11 +671,46 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // the change notes it wrote are proved for the next buy by the queue's next pass
     if (open !== null) void proofs();
   };
+  // the sends owed whose fee rose past the Max fee drawn (fee_needed), for the screen to draw the Max fee again
+  const owedFees = async (): Promise<{ opId: string; need: bigint }[]> => {
+    const ops = await page.store();
+    const out: { opId: string; need: bigint; t: number }[] = [];
+    for (const k of await ops.keys("ops")) {
+      const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; fee_needed?: unknown; created_ms?: unknown } | undefined;
+      if (rec?.kind === "withdraw" && typeof rec.owed === "string" && typeof rec.fee_needed === "string" && /^(0|[1-9][0-9]{0,19})$/.test(rec.fee_needed)) {
+        out.push({ opId: k, need: BigInt(rec.fee_needed), t: typeof rec.created_ms === "number" ? rec.created_ms : 0 });
+      }
+    }
+    return out.sort((a, b) => a.t - b.t).map(({ opId, need }) => ({ opId, need }));
+  };
+  // the Max fee drawn again at `need`, the fee the screen showed: only while the op still owes that send at that fee;
+  // its ceiling raised to it in the "owed" store, fee_needed cleared, and the finish tried again at once
+  const redraw = async (opId: string, need: bigint): Promise<void> => {
+    const ops = await page.store();
+    const rec = (await ops.get("ops", opId)) as { owed?: unknown; fee_needed?: unknown } | undefined;
+    const noteId = rec?.owed;
+    if (typeof noteId !== "string" || rec?.fee_needed !== need.toString()) throw new Error("the fee shown is no longer the one owed");
+    const raised = await ops.update("owed", opId, (v) => {
+      const r = v as OwedSends | undefined;
+      const p = r !== undefined && Object.hasOwn(r, noteId) ? r[noteId]! : undefined;
+      return p === undefined ? undefined : { ...r, [noteId]: { ...p, feeCap: need.toString() } };
+    });
+    if (raised === undefined) throw new Error("no send owed");
+    await ops.update("ops", opId, (v) => {
+      const r = { ...(v as Record<string, unknown>) };
+      if (r.fee_needed !== need.toString()) return undefined;
+      delete r.fee_needed;
+      return r;
+    });
+    owedRetry.delete(opId);
+    owedScan = true;
+    await stateRead();
+  };
   const withdrawDeps = (chain: PoolChain, opId: string): PoolWithdrawFormDeps => ({
     chain,
     keys: chain === "solana" && pin !== undefined ? { pool: solanaPoolOf(pin.program).pool, program: pin.program, feePayer: pin.feePayer } : { pool: "" },
     funds: () => (chain === "solana" && pin !== undefined ? funds() : Promise.reject(new Error("no flow for this chain"))),
-    ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId) } : {}),
+    ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw } : {}),
   });
   return {
     flow: (ask, ctx) =>

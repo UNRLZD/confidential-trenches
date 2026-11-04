@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CHECK_IDLE_MS } from "../src/withdraw/form.ts";
 import { SOLANA_RESERVED_KEYS } from "../src/rules/pool.ts";
-import { checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, parseUnits, poolRefusalWords, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady } from "../src/withdraw/pool-form.ts";
+import { checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, parseUnits, poolRefusalWords, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady, type PoolWithdrawFormDeps } from "../src/withdraw/pool-form.ts";
 
 const POOL = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
 // stand-ins that are no key the runtime reserves, so each refusal below is its own check's
@@ -90,7 +90,7 @@ class El {
 }
 const settle = () => new Promise((r) => setTimeout(r, CHECK_IDLE_MS + 60));
 
-function drawn(funds: () => Promise<PoolFunds> = async () => FUNDS) {
+function drawn(funds: () => Promise<PoolFunds> = async () => FUNDS, more: Partial<PoolWithdrawFormDeps> = {}) {
   const handed: PoolReady[] = [];
   const steps: Promise<void>[] = [];
   const doc = { createElement: (tag: string) => new El(tag) } as unknown as Document;
@@ -101,7 +101,7 @@ function drawn(funds: () => Promise<PoolFunds> = async () => FUNDS) {
     b.addEventListener("click", onClick);
     return b as unknown as HTMLButtonElement;
   };
-  const form = drawPoolWithdrawForm(doc, { chain: "solana", keys: KEYS, funds, handoff: (r) => void handed.push(r) }, button, (s) => void steps.push(s())) as unknown as El;
+  const form = drawPoolWithdrawForm(doc, { chain: "solana", keys: KEYS, funds, handoff: (r) => void handed.push(r), ...more }, button, (s) => void steps.push(s())) as unknown as El;
   const input = (k: string) => form.find((e) => e.dataset.input === k)!;
   return {
     form, handed,
@@ -187,4 +187,39 @@ test("the press reads the funds again: a note spent meanwhile hands nothing over
   await f.tap();
   assert.deepEqual(f.handed, []);
   assert.equal(f.form.dataset.state, "refused");
+});
+
+// card signpage-withdraw-own-spend (5): a send owed whose network fee rose past the Max fee drawn; the words are drafts
+test("a send owed whose fee rose: its line and button drawn with the fee it needs, the press hands over that very fee", async () => {
+  const calls: [string, bigint][] = [];
+  const f = drawn(async () => FUNDS, { owedFees: async () => [{ opId: "op1", need: 15_000n }], redraw: async (id, need) => void calls.push([id, need]) });
+  await settle();
+  const rose = f.form.find((e) => e.dataset.lines === "fee-rose")!;
+  assert.equal(rose.hidden, false);
+  const line = rose.find((e) => e.dataset.draftCopy === "fee-rose")!;
+  assert.equal(line.textContent, "Network fee rose. New max fee: 0.000015 SOL.");
+  const again = rose.find((e) => e.dataset.action === "fee-redraw")!;
+  assert.equal(again.textContent, "Send at new fee");
+  assert.equal(again.dataset.draftCopy, "fee-redraw");
+  again.fire("click");
+  again.fire("click");
+  await settle();
+  assert.deepEqual(calls, [["op1", 15_000n]], "once, with the fee shown");
+  assert.equal(rose.hidden, true);
+});
+
+test("no send owed, none read, or a read that fails: no fee line; a redraw that fails keeps it, enabled", async () => {
+  for (const owedFees of [undefined, async () => [], async () => Promise.reject(new Error("offline"))]) {
+    const f = drawn(async () => FUNDS, { ...(owedFees ? { owedFees } : {}), redraw: async () => {} });
+    await settle();
+    assert.equal(f.form.find((e) => e.dataset.lines === "fee-rose")!.hidden, true);
+  }
+  const f = drawn(async () => FUNDS, { owedFees: async () => [{ opId: "op1", need: 15_000n }], redraw: async () => Promise.reject(new Error("no")) });
+  await settle();
+  const rose = f.form.find((e) => e.dataset.lines === "fee-rose")!;
+  const again = rose.find((e) => e.dataset.action === "fee-redraw")!;
+  again.fire("click");
+  await settle();
+  assert.equal(rose.hidden, false);
+  assert.equal(again.disabled, false);
 });

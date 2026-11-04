@@ -583,6 +583,31 @@ test("the withdraw screen's funds leave out a note an op still owes a send for, 
   assert.equal((await t.withdrawDeps("solana", "op3").funds()).notes.length, 2);
 });
 
+test("a send owed whose fee rose past the Max fee: the screen reads the fee it needs, and drawing it again at that fee sends it on", async () => {
+  const { world, TO, COST, W_FEE } = WORLD;
+  let rose = false;
+  const wd = await world([30_000_000n], { feeFor: () => (rose ? 2n * W_FEE : W_FEE), afterRelease: () => void (rose = true) });
+  // the part's run (the world's own settle), its op written as the page's run writes it: the send owed in "owed"
+  const { runPoolWithdraw } = await import("../src/pool-withdraw.ts");
+  const ran = await runPoolWithdraw(wd.host, { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 }, TO, 5_000_000n, COST);
+  assert.equal(ran.stage, "in_transit");
+  await wd.w.put("ops", "op-f", { kind: "withdraw", stage: "in_transit", txs: ran.txs, created_ms: 1, owed: ran.pending!.noteId, fee_needed: ran.feeNeeded });
+  await oweSend(wd.w, "op-f", ran.pending!);
+  const t = testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} } });
+  const deps = t.withdrawDeps("solana", "op-g");
+  assert.deepEqual(await deps.owedFees!(), [{ opId: "op-f", need: 2n * W_FEE }]);
+  // a fee other than the one owed (the screen's read gone stale) raises nothing
+  await assert.rejects(deps.redraw!("op-f", 3n * W_FEE));
+  assert.equal(wd.onwards().length, 0);
+  await deps.redraw!("op-f", 2n * W_FEE);
+  const op = (await wd.w.get("ops", "op-f")) as { stage: string; fee_needed?: unknown; owed?: unknown };
+  assert.equal(op.stage, "sent");
+  assert.equal(op.fee_needed, undefined);
+  assert.equal(op.owed, undefined);
+  assert.equal(wd.balance.get(TO), 5_000_000n - W_FEE, "To never less than the amount less the Max fee drawn again");
+  assert.deepEqual(await deps.owedFees!(), []);
+});
+
 // Review #232b fold 3, HIGH 1: the page's own withdraw run, its tab closed while the release's read-back is out (the
 // run never answers): the op owes the send from before the release leaves, in_transit, and the reopened page's state
 // read sends it on, W at 0 and To given the amount.
