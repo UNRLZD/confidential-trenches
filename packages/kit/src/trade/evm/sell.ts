@@ -10,7 +10,9 @@ import {
   pinnedBuildSell,
   pinnedSignSell,
   pinnedSignSellAuthorization,
+  pinnedSignSimSell,
   type EvmPoolSell,
+  type EvmSellSim,
   type EvmPoolSellAuthorization,
 } from "./sell-unpinned.ts";
 import { EVM_QUOTE_MAX_AGE_MS, EvmQuoteError, evmIsDeviceSellQuote, type EvmPoolSellQuote } from "../../checks/evm/quote.ts";
@@ -19,9 +21,11 @@ export {
   EVM_POOL_SELL_DEADLINE_MAX_S,
   EVM_POOL_SELL_DEADLINE_MIN_S,
   EvmPoolSellError,
+  EVM_SELL_SIM,
   type EvmPoolSell,
   type EvmPoolSellAuthorization,
   type EvmPoolSellErrorCode,
+  type EvmSellSim,
   type EvmSellRoute,
   type EvmV4SellRoute,
 } from "./sell-unpinned.ts";
@@ -61,4 +65,12 @@ export function evmPoolSignSell(secretKey: Uint8Array, chain: EvmPoolChain, buil
 /** W's EIP-7702 authorization of the chain's pinned sell delegate at W's account nonce `nonce`. */
 export function evmPoolSignSellAuthorization(secretKey: Uint8Array, chain: EvmPoolChain, nonce: bigint): EvmPoolSellAuthorization {
   return pinnedSignSellAuthorization(evmPoolVenues(), secretKey, chain, nonce);
+}
+
+/** W's signature of a sim sell the device's sell quote built (card evm-quote-exec-sim), only where its pool is
+ *  EVM_SELL_SIM and its deadline <= `blockTimestamp` (the quote's agreed block's) <= the device's clock: a signature that
+ *  can never land (see sell-unpinned.ts). */
+export function evmPoolSignSimSell(secretKey: Uint8Array, chain: EvmPoolChain, sim: EvmSellSim, blockTimestamp: bigint): Uint8Array {
+  // no caller sets the clock
+  return pinnedSignSimSell(evmPoolVenues(), secretKey, chain, sim, blockTimestamp, Date.now());
 }

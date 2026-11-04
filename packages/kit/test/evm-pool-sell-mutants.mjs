@@ -105,7 +105,9 @@ export const MUTANTS = [
   [SELL, "if (v === 0n) return Uint8Array.of(0x80);", "if (v === 0n) return Uint8Array.of(0x00);", AUTH],
   [SELL, "if (!isUint(nonce, U64 - 1n))", "if (!isUint(nonce, U64))", AUTHIN],
   [SELL, 'if (!isWallet(delegate)) return refuse("bad_route", "the delegate is not an address");', "", AUTHIN],
-  [SELL, 'const rec = secp256k1.sign(digest, secretKey, { prehash: false, lowS: true, format: "recovered" });', 'const rec = secp256k1.sign(digest, secretKey, { prehash: false, lowS: false, format: "recovered" });', AUTHIN],
+  // the authorization's own signature (the sell's and the sim's go through signDigest since card evm-quote-exec-sim)
+  [SELL, 'const rec = secp256k1.sign(digest, secretKey, { prehash: false, lowS: true, format: "recovered" });\n  return Object.freeze({ chainId,', 'const rec = secp256k1.sign(digest, secretKey, { prehash: false, lowS: false, format: "recovered" });\n  return Object.freeze({ chainId,', AUTHIN],
+  [SELL, 'const rec = secp256k1.sign(digest, secretKey, { prehash: false, lowS: true, format: "recovered" });\n  // noble', 'const rec = secp256k1.sign(digest, secretKey, { prehash: false, lowS: false, format: "recovered" });\n  // noble', SIGS],
   // the review's (8fd535f): checks its mutants passed
   [SELL, "|| (x as number) < 0 ||", "||", REVIEW],
   [SELL, "if (!Number.isSafeInteger(n) || n > COPY_MAX)", "if (!Number.isSafeInteger(n))", REVIEW],
@@ -128,7 +130,7 @@ export const MUTANTS = [
   [BUY, 'if (typeof o !== "object" || o === null || !Object.hasOwn(o, k)) return undefined;', 'if (typeof o !== "object" || o === null) return undefined;', "M370 a polluted Object.prototype names no pool"],
   // a v4 sell (card evm-sell-v4-kit): only to the pinned PoolManager, a checked PathKey[] ending at native or WETH
   [SELL, "if (pm === undefined || lower(target) !== pm)", "if (pm === undefined)", V4],
-  [SELL, 'const pm = Object.hasOwn(venue, "poolManager") && isAddress(venue.poolManager) ? lower(venue.poolManager) : undefined;', "const pm = lower(target);", V4],
+  [SELL, 'const pm = Object.hasOwn(venue, "poolManager") && isAddress(venue.poolManager) ? lower(venue.poolManager) : undefined;\n  if (kind === "uniswap-v4") {', 'const pm = lower(target);\n  if (kind === "uniswap-v4") {', V4],
   [SELL, "if (hops.length < 1 || hops.length > EVM_POOL_MAX_HOPS)", "if (hops.length > EVM_POOL_MAX_HOPS)", V4],
   [SELL, "if (hops.length < 1 || hops.length > EVM_POOL_MAX_HOPS)", "if (hops.length < 1)", V4],
   [SELL, "if (!isAddress(currency) || !isAddress(hooks))", "if (!isAddress(currency))", V4],
@@ -143,7 +145,7 @@ export const MUTANTS = [
   // shape, on any hop (item 2 as card evm-route-parity narrowed it: evmHookListed, the one rule the quotes use too)
   [SELL, 'if (hookData !== "0x") refuse("bad_route", "a sell\'s hook data is the device\'s own: empty");', "", V4],
   [SELL, 'if (hookData !== "0x") refuse(', 'if (hookData !== "0x" && lower(hooks as string) === NATIVE) refuse(', V4],
-  [SELL, "if (lower(hooks as string) !== NATIVE) {", "if (false) {", V4],
+  [SELL, "if (!anyHook && lower(hooks as string) !== NATIVE) {", "if (false) {", V4],
   [SELL, "lower(p.hooks) === lower(hooks) && ", "", V4],
   [SELL, "lower(p.hooks) === lower(hooks) && ", "", V4CAST],
   // the shape check dropped: the listed hook at any fee or tick spacing (card evm-route-parity)
