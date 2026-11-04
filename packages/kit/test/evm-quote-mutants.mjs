@@ -230,7 +230,7 @@ export const MUTANTS = [
   [QUOTE, "    if (res.status === 429) throw new RateLimited(", "    if (false) throw new RateLimited(", R, "T7 "],
   [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {", "      if (true) {", R, "T7 "],
   [QUOTE, "      if (i < 3 && Array.isArray(out) && out.some(limited)) throw", "      if (false) throw", R, "T7 "],
-  [QUOTE, "    return (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));", "    return (calls: readonly EvmRpcCall[]) => rpc(calls);", R, "T8 "],
+  [QUOTE, "    const f = (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));", "    const f = (calls: readonly EvmRpcCall[]) => rpc(calls);", R, "T8 "],
   [BUYU, "  if (!(quoted && route.venue === \"uniswap-v4\")) {", "  if (!quoted) {", R, "D1 "],
   [BUYU, "  return routeData(chain, route, true);", "  return routeData(chain, route, false);", R, "D1 "],
   [BUYU, "  const { data, token: buys } = routeData(chain, route, quoted);", "  const { data, token: buys } = routeData(chain, route, false);", R, "D1 "],
