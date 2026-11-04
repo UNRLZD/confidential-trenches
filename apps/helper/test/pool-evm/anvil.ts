@@ -6,8 +6,9 @@
 // pool, with input equal to the calldata received, status 1, consecutive nonces, maxFeePerGas x gas at most the fee;
 // the first nullifier sent again must answer its first hash and send nothing. Each send passes the M356 checks on a real
 // node: the recipient's code read at pending and latest, then eth_call at pending with the gas and fee fields it signs
-// (anvil-grief.ts shows what they refuse). The pool address holds no code here, so the call is
-// accepted as is: this proves the send and the signature, not the pool's withdraw (pool-evm-core's forge tests do).
+// (anvil-grief.ts shows what they refuse). The pool's code here answers every call with one word, its tree depth 2,
+// so the call is accepted as is: this proves the fee's reads, the send and the signature, not the pool's withdraw
+// (pool-evm-core's forge tests do).
 // The sender key is a test key: sha256("helper-pool-senders/test-key/EVM_SENDER"), funded by anvil_setBalance.
 import { createHash } from "node:crypto";
 import { evmAddressOf, evmPoolSender, WITHDRAW_SELECTOR } from "../../src/pool/evm.ts";
@@ -27,12 +28,18 @@ const FEE_TO = "0x000000000000000000000000000000000000fee1";
 const FLOOR = 10n ** 12n;
 const w32 = (n: bigint) => n.toString(16).padStart(64, "0");
 const a32 = (a: string) => a.slice(2).padStart(64, "0");
-const s = evmPoolSender({ network: "anvil", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [call, (m, p) => call(m, p)]);
+// the fee's reads (kit trade/evm/pool-fee.ts) as a real node answers them at the epoch block's hash: Base Sepolia's
+// GasPriceOracle predeploy, here code returning one word, 7,917 wei, for its L1 fee bound and its operator fee alike
+const WORD = (n: bigint) => `0x7f${n.toString(16).padStart(64, "0")}60005260206000f3`; // PUSH32 n, MSTORE, RETURN 32 bytes
+await call("anvil_setCode", ["0x420000000000000000000000000000000000000f", WORD(7_917n)]);
+// the pool: code answering every call with one word, 2, its tree depth (currentTreeDepth) and an accepted withdraw
+await call("anvil_setCode", [POOL, WORD(2n)]);
+const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [call, (m, p) => call(m, p)]);
 // a block in the epoch now, then that epoch's fee, as a device reads it before it proves
 await call("evm_mine", []);
 const epoch = epochStartOf(Date.now());
 const published = await s.fee(epoch);
-const again = await evmPoolSender({ network: "anvil", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [call, (m, p) => call(m, p)]).fee(epoch);
+const again = await evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [call, (m, p) => call(m, p)]).fee(epoch);
 let ok = published !== null && JSON.stringify(published) === JSON.stringify(again);
 console.log(`${ok ? "ok " : "BAD"} epoch ${epoch} fee ${published?.fee} wei from block ${published?.block}, the same for a second sender`);
 const FEE = BigInt(published?.fee ?? "0");

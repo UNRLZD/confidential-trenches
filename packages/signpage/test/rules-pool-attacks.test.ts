@@ -24,8 +24,11 @@ import {
   solanaPoolSellSteps,
   type SolanaPoolRelease,
 } from "../../kit/src/trade/solana/pool-buy.ts";
-import { evmPoolVenues, pinnedBuild, type EvmPoolVenue } from "../../kit/src/trade/evm/buy-unpinned.ts";
-import { pinnedBuildSell } from "../../kit/src/trade/evm/sell-unpinned.ts";
+import { evmPoolVenues, pinnedBuild, pinnedBuildQuoted, type EvmPoolVenue } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { evmPoolSellFeeMax, pinnedBuildSell } from "../../kit/src/trade/evm/sell-unpinned.ts";
+import { evmPoolBuyQuoteWith, type EvmPoolBuyQuote, type EvmRpc, type EvmRpcCall } from "../../kit/src/checks/evm/quote.ts";
+import { evmQuotedBuy, evmQuotedSell } from "../../kit/src/trade/evm/quoted.ts";
+import { flat, provider as sellModel, req as sellReq, sellQuoteWith } from "../../kit/test/evm-sell-quote-fx.ts";
 import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import { FEE_PAYER, PROGRAM as FX_PROGRAM, W as FX_W, release as fxRelease, setup } from "../../kit/test/solana-pool-buy-fx.ts";
 import {
@@ -145,19 +148,30 @@ const relay = (o: Partial<EvmRelayData> = {}): EvmRelayData => ({ recipient: EVM
 const ctxOf = (r: EvmRelayData, pool = EVM_POOL) => evmPoolContextOf({ processooor: pool, relay: r }, evmPoolScopeOf(pool, BigInt(B.chainId)));
 const proofOf = (r: EvmRelayData, value = 10n ** 16n) => ({ nullifier: 11n, context: ctxOf(r), value });
 const v3 = (tokens: string[]) => ({ venue: "uniswap-v3" as const, tokens, fees: tokens.slice(1).map(() => 500) });
+// The device's own quotes (the page signs only builds made from one, card evm-buy-hookdata-fee M1): a buy replayed from
+// Base's recorded answers (kit test/fixtures/evm-quote.json "base-ok", at the recording's clock), a sell on the kit's
+// modelled chain (kit test/evm-sell-quote-fx.ts), W the page's
+type Exchange = { calls: EvmRpcCall[]; answers: unknown[] };
+const QF = (JSON.parse(readFileSync(new URL("../../kit/test/fixtures/evm-quote.json", import.meta.url), "utf8")) as Record<string, { request: Record<string, unknown>; now: number; exchanges: [Exchange[], Exchange[]] }>)["base-ok"]!;
+const replay = (ex: Exchange[]): EvmRpc => async (calls) => structuredClone(ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls))!.answers);
+const buyQuote = (): Promise<EvmPoolBuyQuote> => {
+  const { buys, amountIn, ...rest } = QF.request;
+  return evmPoolBuyQuoteWith({ ...(rest as object), token: buys as string, amountIn: BigInt(amountIn as string) } as never, [replay(QF.exchanges[0]), replay(QF.exchanges[1])], QF.now);
+};
+const sellQuote = () => sellQuoteWith(sellReq("base", { w: EVM_W }), [sellModel({ price: flat }), sellModel({ price: flat })], Date.now());
 
 // ======================= the reviewer's planted attacks: each payload must be refused =======================
 const refused = (f: () => unknown) => assert.throws(f, (e: unknown) => e instanceof PoolRuleRefused);
 
 // A1: the EVM sell's proceeds deposited under a precommitment the device did not make (the helper's own note)
-test("ATTACK A1: EVM sell whose Sell carries the attacker's precommitment is refused", () => {
+test("ATTACK A1: EVM sell whose Sell carries the attacker's precommitment is refused", async () => {
   const t = BigInt(Math.floor(Date.now() / 1000));
   const ATTACKER_PRE = 666n; // the device's would be ctx.precommitment; the Solana sell holds it, the EVM sell must too
-  const req = { w: EVM_W, token: X, amount: 10n ** 18n, target: B.routers[0]!, route: v3([X, B.weth]), minOut: 10n ** 15n, precommitment: ATTACKER_PRE, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n };
-  const built = pinnedBuildSell(VENUES, "base", req);
-  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: 10n ** 18n, slippageBps: 100, decimals: 18 };
+  const q = await sellQuote();
+  const built = evmQuotedSell(VENUES, q, { precommitment: ATTACKER_PRE, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n }, Date.now());
+  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: q.token, amount: q.amountIn, slippageBps: 100, decimals: 18 };
   const ctx = { ...evmCtx({ nowMs: t * 1000n }), precommitment: 5n };
-  refused(() => { checkEvmSell(built, ask, ctx, req.minOut); signEvmSell(EVM_SECRET, ctx, built); });
+  assert.throws(() => { checkEvmSell(built, ask, ctx, q.minOut); signEvmSell(EVM_SECRET, ctx, built); }, (e: unknown) => e instanceof PoolRuleRefused && e.rule === "precommitment");
 });
 
 // A2: the withdraw draws "amount X to <typed address>" while the signed bytes send 1 lamport (or nothing) there
@@ -261,16 +275,65 @@ test("RECHECK R1: a Solana sell whose 'reserve' leaves 1 lamport for the pool is
 });
 
 // R2: an EVM buy's built and proof from two different checks are signed together.
-test("RECHECK R2: an EVM buy signs only the built and the proof one check passed together", () => {
+test("RECHECK R2: an EVM buy signs only the built and the proof one check passed together", async () => {
   const r1 = relay();
   const r2 = relay({ salt: "0x" + "cd".repeat(16) });
-  const builtSmall = pinnedBuild(VENUES, "base", A_V3, v3([B.weth, X]), 10n, X); // min out for 0.01 ETH
-  const builtBig = pinnedBuild(VENUES, "base", A_V3, v3([B.weth, X]), 10n ** 9n, X); // min out for 1 ETH
+  const q = await buyQuote();
+  const builtSmall = evmQuotedBuy(VENUES, A_V3, q, QF.now); // the device's quote for 0.01 ETH
+  const builtBig = evmQuotedBuy(VENUES, A_V3, q, QF.now); // a second build of it, checked with a 1 ETH proof
   const p1 = proofOf(r1, 10n ** 16n);
   const p2 = proofOf(r2, 10n ** 18n);
-  checkEvmBuy(builtSmall, EVM_POOL, p1, r1, { kind: "pool.buy", chain: "base", token: X, amount: 10n ** 16n, slippageBps: 100, decimals: 18 }, evmCtx(), 10n);
-  checkEvmBuy(builtBig, EVM_POOL, p2, r2, { kind: "pool.buy", chain: "base", token: X, amount: 10n ** 18n, slippageBps: 100, decimals: 18 }, evmCtx(), 10n ** 9n);
+  checkEvmBuy(builtSmall, EVM_POOL, p1, r1, { kind: "pool.buy", chain: "base", token: q.token, amount: 10n ** 16n, slippageBps: 100, decimals: 18 }, evmCtx(), q.minOut);
+  checkEvmBuy(builtBig, EVM_POOL, p2, r2, { kind: "pool.buy", chain: "base", token: q.token, amount: 10n ** 18n, slippageBps: 100, decimals: 18 }, evmCtx(), q.minOut);
   let sig: Uint8Array | null = null;
   try { sig = signEvmBuy(EVM_SECRET, evmCtx(), builtSmall, EVM_POOL, p2); } catch (e) { if (!(e instanceof PoolRuleRefused)) throw e; }
   assert.equal(sig, null, "W signed a Buy pairing check 1's built (min out 10) with check 2's 1 ETH proof");
+});
+
+// M1 (card evm-buy-hookdata-fee, review fold 1): the page's EVM buy and sell were signed for any build the kit's unpinned
+// builders return, a server's hook data and a fee cap far above the device's rule included. Only builds from the
+// device's own quote pass (kit trade/evm/quoted.ts); every other is refused not_quoted, and nothing is signed.
+const quotedRefusal = (e: unknown) => e instanceof PoolRuleRefused && e.code === "not_allowed" && e.rule === "not_quoted";
+
+test("PLANTED M1a: an EVM buy with a server's hook data (the kit's unquoted pinned builder) is refused not_quoted, and never signed", async () => {
+  const CLANKER = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc"; // Base's pinned Clanker hook, in its own shape
+  const route = { venue: "uniswap-v4" as const, currencyIn: B.weth, hops: [{ currency: X, fee: 0x800000, tickSpacing: 200, hooks: CLANKER, hookData: "0x" + "de".repeat(20) }] };
+  const r = relay();
+  const ask: PoolAsk = { kind: "pool.buy", chain: "base", token: X, amount: 10n ** 16n, slippageBps: 100, decimals: 18 };
+  const hooked = pinnedBuild(VENUES, "base", A_V4, route, 1n, X);
+  assert.ok(hooked.data.includes("de".repeat(20)), "the build carries the server's hook data");
+  const proof = proofOf(r);
+  assert.throws(() => checkEvmBuy(hooked, EVM_POOL, proof, r, ask, evmCtx(), 1n), quotedRefusal);
+  assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), hooked, EVM_POOL, proof), (e: unknown) => e instanceof PoolRuleRefused && e.rule === "unchecked");
+  // the quoted pinned builder, which takes a caller's route, and a copy of a quoted build: not the device's quote either
+  const q = await buyQuote();
+  const quoted = evmQuotedBuy(VENUES, A_V3, q, QF.now);
+  const qAsk: PoolAsk = { ...ask, token: q.token };
+  for (const b of [pinnedBuildQuoted(VENUES, "base", A_V3, q.route, q.minOut, q.token), { ...quoted }]) {
+    assert.throws(() => checkEvmBuy(b, EVM_POOL, proofOf(r), r, qAsk, evmCtx(), q.minOut), quotedRefusal);
+  }
+  // the device's own build of the same quote passes and signs
+  checkEvmBuy(quoted, EVM_POOL, proof, r, qAsk, evmCtx(), q.minOut);
+  assert.equal(signEvmBuy(EVM_SECRET, evmCtx(), quoted, EVM_POOL, proof).length, 65);
+});
+
+test("PLANTED M1b: an EVM sell with a fee cap 45 x the device's fee rule (the kit's unquoted pinned builder) is refused not_quoted, though the page's cap is above it", async () => {
+  const t = BigInt(Math.floor(Date.now() / 1000));
+  const q = await sellQuote();
+  const feeMax = evmPoolSellFeeMax("base", 5_000_000n, 0n); // the model's block: a 5,000,000 wei base fee, no chain fee
+  assert.equal(q.feeMax, feeMax);
+  const cap = 45n * feeMax;
+  assert.ok(cap < q.minOut, "below min out, so the unpinned builder takes it");
+  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: q.token, amount: q.amountIn, slippageBps: 100, decimals: 18 };
+  const ctx = { ...evmCtx({ nowMs: t * 1000n, feeCap: 10n ** 18n }), precommitment: 5n };
+  const greedy = pinnedBuildSell(VENUES, "base", { w: EVM_W, token: q.token, amount: q.amountIn, target: q.target, route: q.route, minOut: q.minOut, precommitment: 5n, feeCap: cap, deadline: t + 120n, nonce: 0n });
+  assert.throws(() => checkEvmSell(greedy, ask, ctx, q.minOut), quotedRefusal);
+  assert.throws(() => signEvmSell(EVM_SECRET, ctx, greedy), (e: unknown) => e instanceof PoolRuleRefused && e.rule === "unchecked");
+  // the device's builder refuses that cap itself, and a copy of its build is not its build
+  assert.throws(() => evmQuotedSell(VENUES, q, { precommitment: 5n, feeCap: cap, deadline: t + 120n, nonce: 0n }, Date.now()), (e: unknown) => (e as { code?: string }).code === "bad_fee");
+  const quoted = evmQuotedSell(VENUES, q, { precommitment: 5n, deadline: t + 120n, nonce: 0n }, Date.now());
+  assert.throws(() => checkEvmSell({ ...quoted }, ask, ctx, q.minOut), quotedRefusal);
+  // the device's own, at the rule's cap, passes and signs
+  assert.equal(checkEvmSell(quoted, ask, ctx, q.minOut).feeCap, feeMax);
+  assert.equal(signEvmSell(EVM_SECRET, ctx, quoted).length, 65);
 });
