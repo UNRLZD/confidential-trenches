@@ -1270,7 +1270,9 @@ test("T7b a request that made no connection (fetch failed, a connect error as it
   const v = await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), once.rpc], NOW));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   // every request fails to connect: a refusal after the fourth
-  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), failing(1000, unconnected).rpc], NOW)), { accepted: false, code: "rpc_error" });
+  const never = failing(1000, unconnected);
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), never.rpc], NOW)), { accepted: false, code: "rpc_error" });
+  assert.equal(never.asked.n, 4);
   // a request that ran out of time may have been served: never asked again
   const timedOut = failing(1, () => new DOMException("The operation was aborted due to timeout", "TimeoutError"));
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), timedOut.rpc], NOW)), { accepted: false, code: "rpc_error" });
@@ -2128,4 +2130,58 @@ test("W4 past EVM_WARM_RANGE_S of block time nothing kept is asked: the quote ta
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [late.rpc, counted(chain(pools, 1), 61).rpc], NOW + 61_000, scanner(5_000_000, logs)));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   assert.ok(late.n.calls >= 3, `rounds: ${late.n.calls}`);
+});
+
+test("W1b a warm quote asks its kept scans beside the token's: X's markets are scanned before its first round of reads is answered", async () => {
+  const token = "0x00000000000000000000000000000000000ee0e5";
+  const x = xAt(0x3a40);
+  const { pools, logs } = warmCase(token, x);
+  const events: string[] = [];
+  const watched = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    if (!calls.some((c) => c.method === "eth_call")) return rpc(calls);
+    await new Promise((r) => setTimeout(r, 20));
+    const out = await rpc(calls);
+    events.push("round");
+    return out;
+  };
+  const scanWatched = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    for (const c of calls) if (c.method === "eth_getLogs" && JSON.stringify(c.params).includes(W(BigInt(x)))) events.push("scan X");
+    return rpc(calls);
+  };
+  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)));
+  events.length = 0;
+  // ten blocks on: each scan asks the blocks since its last
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [watched(chain(pools, 0, 5_000_010)), watched(chain(pools, 1, 5_000_010))], NOW, scanWatched(scanner(5_000_010, logs))));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(events.indexOf("scan X") >= 0 && events.indexOf("scan X") < events.indexOf("round"), events.join(", "));
+});
+
+test("W5 a kept read the quote did not ask again is not kept for the next: a change of amount leaves the old amount's quotes behind", async () => {
+  // a provider that adds up the calldata of its eth_calls
+  const sized = (rpc: EvmRpc) => {
+    const n = { bytes: 0 };
+    const wrapped: EvmRpc = async (calls) => {
+      for (const c of calls) if (c.method === "eth_call") n.bytes += JSON.stringify(c.params).length;
+      return rpc(calls);
+    };
+    return { rpc: wrapped, n };
+  };
+  const quoter = (token: string, x: string) => {
+    const { pools, logs } = warmCase(token, x);
+    return async (amountIn: bigint) => {
+      const s = sized(chain(pools, 0));
+      const v = await verdict(evmPoolBuyQuoteWith({ ...warmReq(token), amountIn }, [s.rpc, chain(pools, 1)], NOW, scanner(5_000_000, logs)));
+      assert.equal(v.accepted, true, String((v as { code?: string }).code));
+      return s.n.bytes;
+    };
+  };
+  // the same pools under another token and X (addresses of the same length): its warm quote at half the amount is
+  // what a quote that kept only that amount's reads asks
+  const plain = quoter("0x00000000000000000000000000000000000ee0e7", xAt(0x3a60));
+  await plain(AMOUNT / 2n);
+  const warmHalf = await plain(AMOUNT / 2n);
+  const q = quoter("0x00000000000000000000000000000000000ee0e6", xAt(0x3a50));
+  await q(AMOUNT);
+  await q(AMOUNT / 2n);
+  assert.equal(await q(AMOUNT / 2n), warmHalf);
 });
