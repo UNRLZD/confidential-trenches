@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { POOL_ASSET_DECIMALS } from "../../packages/kit/src/index.ts";
 import { APP_HOST, harnessRoute, shellHeaders, SIGN_HOST } from "./app-in-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { consoleError } from "./console-errors.mjs";
 
 const KEY = "balances-per-chain";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -55,6 +56,12 @@ export function base(s, asset) {
 }
 
 // ------------------------------------------------------------------------------------------------ the verdict
+/** The check's console hook: every error the terminal's frame (an APP_HOST address) logs, kept through the shared
+ *  collector (console-errors.mjs) as its text and its address's origin and path. */
+export function onConsole(errors) {
+  return (m) => m.type() === "error" && (m.location()?.url ?? "").startsWith(APP_HOST) && errors.push(consoleError(m));
+}
+
 export function judge(rec) {
   const lines = [];
   const say = (ok, s) => lines.push(`${ok ? "ok " : "BAD"} ${s}`);
@@ -156,7 +163,7 @@ async function runOne(browser, w, shots, handler) {
     await ctx.route("**/*", handler);
     await ctx.addInitScript(INIT, { app: APP_HOST });
     const page = await ctx.newPage();
-    page.on("console", (m) => m.type() === "error" && (m.location()?.url ?? "").startsWith(APP_HOST) && run.errors.push(m.text()));
+    page.on("console", onConsole(run.errors));
     await page.goto(SIGN_HOST + PATH, { waitUntil: "commit" });
     const until = Date.now() + READY_MS;
     let f = null;

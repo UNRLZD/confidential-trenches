@@ -175,8 +175,8 @@ try {
           check(calls.length === 1 && JSON.stringify({ kind: calls[0].kind, params: calls[0].params }) === JSON.stringify(ask), `${tag}: sent ${JSON.stringify(calls)}, want ${JSON.stringify(ask)}`);
           // tap to filled under 2 s once a proof is ready: the kit's filled stage at 1.1 s ends the box at Filled 1.1s
           await page.clock.runFor(1_100);
-          const filled = await settle(async () => norm(await cta.innerText()), "Filled 1.1s");
-          check(filled === "Filled 1.1s", `${tag}: after the tap "${filled}", want "Filled 1.1s"`);
+          const filled = await settle(async () => norm(await cta.innerText()), "Filled 1.1s Final");
+          check(filled === "Filled 1.1s Final", `${tag}: after the tap "${filled}", want "Filled 1.1s Final"`);
           if (SHOTS && name === "sol-ready") (await page.screenshot({ path: path.join(SHOTS, `${name}-filled-${w.name}-${scheme}.png`) }), shots++);
         } else check(calls.length === 0, `${tag}: a tap on an off button sent ${JSON.stringify(calls)}`);
         await ctx.close();

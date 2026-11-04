@@ -60,6 +60,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
+import { consoleError } from "./console-errors.mjs";
 
 const KEY = "wallet-passkey-prf";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -228,7 +229,7 @@ export function judge(rec) {
   const ty = n.typed ?? {};
   say(ty.state === "signed-in" && HEX64.test(ty.expected ?? "") && ty.account === ty.expected && ty.codeSaved === "true" && ty.seedWrapped === true,
     `no-prf: the typed 12 words of A.8's seed sign in as its T_0 with code_saved true (${ty.state}, ${ty.account === ty.expected ? "equal to the check's own" : "differs"}, code_saved ${ty.codeSaved})`);
-  say((rec.errors ?? []).length === 0, `no page error or CSP violation (${(rec.errors ?? []).length})`);
+  say((rec.errors ?? []).length === 0, `no page error or CSP violation (${(rec.errors ?? []).length})${(rec.errors ?? []).length ? `: ${rec.errors.join("; ")}` : ""}`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -374,10 +375,12 @@ async function click(page, action) {
   }, before, { timeout: WAIT_MS }).catch(() => {});
   return settled(page);
 }
-function watch(page, errors) {
+/** The check's page and console hooks: a page error, and a console error kept through the shared collector
+ *  (console-errors.mjs) as its text and its address's origin and path. */
+export function watch(page, errors) {
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => {
-    if (m.type() === "error") errors.push(`console: ${m.text()}`);
+    if (m.type() === "error") errors.push(`console: ${consoleError(m)}`);
   });
 }
 

@@ -44,6 +44,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { kitTakesState } from "../signpage-state.mjs";
+import { consoleError } from "./console-errors.mjs";
 
 const KEY = "signpage-signin-kinds";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -174,7 +175,7 @@ export function judge(rec) {
   const bk = rec.broken ?? {};
   say(inLayer(bk.open, "signed-out") && bk.planted === true && bk.cancel?.layer === "hidden" && bk.cancel?.frame === true,
     `broken store: Cancel goes back to the app when the stored seed cannot be read (${bk.cancel?.state ?? "no step"}, layer ${bk.cancel?.layer ?? "?"})`);
-  say(Array.isArray(rec.errors) && rec.errors.length === 0, `no page error or CSP violation (${Array.isArray(rec.errors) ? rec.errors.length : "no record"})`);
+  say(Array.isArray(rec.errors) && rec.errors.length === 0, `no page error or CSP violation (${Array.isArray(rec.errors) ? rec.errors.length : "no record"})${Array.isArray(rec.errors) && rec.errors.length ? `: ${rec.errors.join("; ")}` : ""}`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -234,9 +235,11 @@ async function passkeyNoPrf(page) {
   });
 }
 
-function watch(page, errors) {
+/** The check's page and console hooks: a page error, and a console error kept through the shared collector
+ *  (console-errors.mjs) as its text and its address's origin and path. */
+export function watch(page, errors) {
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
-  page.on("console", (m) => m.type() === "error" && errors.push(`console: ${m.text()}`));
+  page.on("console", (m) => m.type() === "error" && errors.push(`console: ${consoleError(m)}`));
 }
 
 // Sign out buttons in every frame of the page, each read in its own frame (cross-origin ones too).
@@ -258,7 +261,7 @@ async function framedTry(page) {
   host.on("console", (m) => {
     if (m.type() !== "error") return;
     if (/frame-ancestors/.test(m.text()) && m.text().includes(SIGN_HOST)) refusals.push(m.text().slice(0, 200));
-    else errors.push(`console: ${m.text()}`);
+    else errors.push(`console: ${consoleError(m)}`);
   });
   await host.setContent(`<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`);
   const answer = await host.evaluate((origin) => new Promise((done) => {

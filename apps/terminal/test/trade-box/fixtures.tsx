@@ -17,6 +17,7 @@ import { createRoot } from "react-dom/client";
 import { centsToDecimal, ladderSplit, parseUsd } from "../../src/screens/trade/model.ts";
 import { TradeBox } from "../../src/screens/trade/TradeBox.tsx";
 import { TradeSourceProvider } from "../../src/screens/trade/source.tsx";
+import type { RouteData } from "../../src/screens/trade/route.ts";
 import type { SetPreviewAnswer, TradeKit, TradeSource } from "../../src/screens/trade/source.tsx";
 import { fontsReady } from "../../src/shell/fonts.ts";
 import "../../src/shell/shell.css";
@@ -52,6 +53,13 @@ const PRICES = { solana: { price: 9_301_048_308n, expo: -8, decimals: 9 }, base:
 const EVM_TOKEN = "0x00000000000000000000000000000000000f1fe7";
 
 const listeners = new Set<(id: string, stage: Stage) => void>();
+// ?route=1 (card app-buy-route-strip): the signing page's route data for a buy, which it does not send yet: the buy's
+// wallet and the quote's venue and pool 100 ms after the tap, the filled amount with the fill (shapes of the film's still)
+const routeFeed = q.get("route") === "1";
+const routeListeners = new Set<(d: RouteData) => void>();
+const WALLET = "9DJaQ4m2x7Vn8Kp3Rt5Yb1Zc6Hf0LsEw9GdUaBZst6";
+const POOL_ADDR = "G19cYh2Wq8Nv4Tp7Kx3Rb5Zm1Dc6Fs0LeAuJgHhTQki";
+const SIG = "5".repeat(88);
 let n = 0;
 
 const kit: TradeKit = {
@@ -86,11 +94,17 @@ const kit: TradeKit = {
         setTimeout(() => resolve({ ok: false, error: { code } }), 300);
         return;
       }
+      const feed = (d: Record<string, string>) => routeListeners.forEach((l) => l({ ...d, id } as RouteData));
+      if (routeFeed) {
+        setTimeout(() => feed({ t: "wallet", address: WALLET }), 100);
+        setTimeout(() => feed({ t: "route", venue: "Raydium", pool: POOL_ADDR }), 100);
+      }
       setTimeout(() => emit("signed"), 80);
       setTimeout(() => {
         emit("sent");
-        resolve({ ok: true, result: { stage: "sent", txs: [] } });
+        resolve({ ok: true, result: { stage: "sent", txs: routeFeed ? [{ chain: "solana", hash: SIG }] : [] } });
       }, 150);
+      if (routeFeed) setTimeout(() => feed({ t: "out", amount: "10600" }), 1_099);
       // slow: still landing past 5 s, filled at 8 s; notlanded: the deadline's re-read at 3 s; partial: 1 of 2 slices
       if (f === "slow") setTimeout(() => emit("filled"), 8_000);
       else if (f === "notlanded") setTimeout(() => emit("not_landed"), 3_000);
@@ -99,6 +113,12 @@ const kit: TradeKit = {
     });
     return { id, outcome };
   }) as TradeKit["request"],
+  route: routeFeed
+    ? (on) => {
+        routeListeners.add(on);
+        return () => void routeListeners.delete(on);
+      }
+    : null,
   part: (id) => (f === "partial" && id.startsWith("buy-") ? { filled: 1, of: 2 } : null),
   onProgress: (fn) => {
     listeners.add(fn);

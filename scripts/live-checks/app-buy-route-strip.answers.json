@@ -1,0 +1,56 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-04T16:31:02.024Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-D8O-fl36.js",
+    "status": 200,
+    "found": [
+     "route-strip",
+     "route-balance",
+     "route-wallet",
+     "route-pool",
+     "route-token",
+     "data-steps",
+     "fill-toast",
+     "New one-time wallet"
+    ]
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-BivwsiBw.css",
+    "status": 200,
+    "found": [
+     ".rs-grp",
+     ".rs-ld",
+     "rs-glow",
+     "rs-pop"
+    ]
+   }
+  ],
+  "note": "this card: apps/terminal built fresh (vite build, 4 Nov 2026) and read from disk (--root); the page names one script and one stylesheet, which hold the strip"
+ },
+ "bad": {
+  "source": "https://confidential.unrealized.trade/",
+  "at": "2026-11-04T16:30:44.755Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-B2gyYlk5.js",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-BETpRdiH.css",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "note": "APP_HOST as deployed before this card (read 4 Nov 2026 over https): the script and the stylesheet hold none of the strip"
+ }
+}
