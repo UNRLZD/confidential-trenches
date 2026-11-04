@@ -19,8 +19,8 @@
 //
 // src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
-import type { ErrorCode, ProgressEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
-import { SIGNPAGE_PARAM_SCHEMAS } from "../../kit/src/signpage/schema.ts";
+import type { BuyRoute, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
+import { SIGNPAGE_PARAM_SCHEMAS, signpageProgressRouteSchema } from "../../kit/src/signpage/schema.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
 export const APP_ORIGIN = "https://confidential.unrealized.trade";
@@ -105,6 +105,10 @@ export interface KindContext {
   /** The SHA-256 (hex) of the request's JSON: a kind that keeps its id past a reload keeps it too (wallet.md §7 item 4). */
   sha: string;
   progress(stage: Stage): void;
+  /** Posts one route event (messages.ts BuyRoute) for the id, queued in order with the id's stage events once they are
+   *  posted; not held for the answer, which is posted on its own, so a route event may follow it (card
+   *  signpage-buy-route-events). One the kit's client would refuse is not posted. */
+  route?(r: BuyRoute): void;
 }
 
 /**
@@ -231,7 +235,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
   // answer null: a Running kind's id whose answer is not posted yet; `held` keeps its progress events until it is
   const answered = new Map<string, { sha: string; answer: SignpageAnswer | null }>();
   const held = new Map<string, Stage[]>();
-  const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent) => host.parent.postMessage(msg, APP_ORIGIN);
+  const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent) => host.parent.postMessage(msg, APP_ORIGIN);
   // the JSON of the last state sent; null until the first `state` answer
   let sent: string | null = null;
   const read = async (): Promise<SignpageState> => {
@@ -257,9 +261,18 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
       if (waiting) return void waiting.push(stage);
       queue = queue.then(() => post({ v: 1, type: "progress", id, stage })).catch(() => {});
     };
+    // the event names each field itself from the object's own keys, so nothing but the route's own fields is ever
+    // posted, and only an event the kit's client takes (signpageProgressRouteSchema): anything else is not told
+    const route = (r: BuyRoute): void => {
+      const own = (k: string): boolean => Object.hasOwn(r, k);
+      const f: BuyRoute | null = own("wallet") ? { wallet: (r as { wallet: string }).wallet } : own("venue") ? { venue: (r as { venue: string }).venue, pool: (r as { pool: string }).pool } : own("out") ? { out: (r as { out: string }).out } : null;
+      const msg: ProgressRouteEvent | null = f && { v: 1, type: "progress", id, ...f };
+      if (msg === null || !signpageProgressRouteSchema(msg)) return;
+      queue = queue.then(() => post(msg)).catch(() => {});
+    };
     // a progress event before the id's answer waits for it (give posts it after)
     held.set(id, []);
-    const got = hostAnswer(host, m, { id, sha, progress });
+    const got = hostAnswer(host, m, { id, sha, progress, route });
     if (got && "running" in got) {
       answered.set(id, { sha, answer: null });
       void got.after.catch(() => {}).then(() => give(id, sha, got.answer(), progress));

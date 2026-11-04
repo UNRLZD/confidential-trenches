@@ -4,6 +4,7 @@
 // checked against its kind's params before it is built, so a field its kind does not allow is never sent.
 // The types these schemas mirror are messages.ts's; the test checks one valid and several invalid values per kind.
 
+import { base58 } from "@scure/base";
 import { CHAINS, type Chain } from "../orders/record.ts";
 import { POOL_ASSET_DECIMALS, POOL_ASSETS, POOL_CHAINS, SIGNPAGE_KINDS } from "./messages.ts";
 import type { PoolAsset, SignpageKind } from "./messages.ts";
@@ -283,6 +284,26 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
 export const signpageReadySchema = obj({ v: lit(1), type: lit("ready"), release: str, api: uint });
 export const signpageStateEventSchema = obj({ v: lit(1), type: lit("state"), state });
 export const signpageProgressSchema = obj({ v: lit(1), type: lit("progress"), id: str, stage: oneOf(STAGES) });
+/** A route event's `out`: a token amount above 0 in whole units, at most 78 digits each side of the point, no leading
+ *  zero, no trailing zero after it. The signing page tells no amount this refuses (src/pool-buy.ts). */
+export const SIGNPAGE_ROUTE_OUT = /^(0|[1-9]\d{0,77})(\.\d{0,77}[1-9])?$/;
+const routeOutAmount: SignpageSchema = (v) => typeof v === "string" && v !== "0" && SIGNPAGE_ROUTE_OUT.test(v);
+/** A Solana address: base58 of exactly 32 bytes. */
+const solAddress: SignpageSchema = (v) => {
+  if (typeof v !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v)) return false;
+  try {
+    return base58.decode(v).length === 32;
+  } catch {
+    return false;
+  }
+};
+/** A route event (messages.ts BuyRoute): a progress event with no stage and exactly one of its three shapes. W and the
+ *  pool are addresses; the venue is the page's name for it, a free string. */
+const routeHead = { v: lit(1), type: lit("progress"), id: str };
+const routeWallet = obj({ ...routeHead, wallet: solAddress });
+const routeVenue = obj({ ...routeHead, venue: str, pool: solAddress });
+const routeOut = obj({ ...routeHead, out: routeOutAmount });
+export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v) || routeVenue(v) || routeOut(v);
 
 /** An answer's envelope; the result inside is checked against its kind's schema by the client. */
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });

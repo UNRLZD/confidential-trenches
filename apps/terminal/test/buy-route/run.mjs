@@ -33,14 +33,14 @@ const WIDTHS = [
 const SIG = "9DJa…Zst6";
 const ROWS = [
   ["idle", "ready", null, "off off off off", ["", "", "", ""], "Pool", "Buy TORCH", null],
-  ["tap", "ready", 100, "active off off off", ["", "", "", ""], "Raydium pool", "Sending", null],
-  ["before-sent", "ready", 149, "active off off off", ["", "", "", ""], "Raydium pool", "Sending", null],
-  ["sent", "ready", 150, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "Raydium pool", "Landing 0.1s", null],
-  ["landing", "ready", 400, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "Raydium pool", "Landing 0.4s", null],
-  ["before-filled", "ready", 1_099, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "Raydium pool", "Landing 1.0s", null],
-  ["filled", "ready", 1_100, "done done done done", ["$25.00", SIG, "G19c…TQki", "10.6K"], "Raydium pool", "Filled 1.1s Final", "Filled 1.1s · 10.6K TORCH · $25.00"],
+  ["tap", "ready", 100, "active off off off", ["", "", "", ""], "pump.fun pool", "Sending", null],
+  ["before-sent", "ready", 149, "active off off off", ["", "", "", ""], "pump.fun pool", "Sending", null],
+  ["sent", "ready", 150, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Landing 0.1s", null],
+  ["landing", "ready", 400, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Landing 0.4s", null],
+  ["before-filled", "ready", 1_099, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Landing 1.0s", null],
+  ["filled", "ready", 1_100, "done done done done", ["$25.00", SIG, "G19c…TQki", "10.6K"], "pump.fun pool", "Filled 1.1s Final", "Filled 1.1s · 10.6K TORCH · $25.00"],
   ["refused", "refuse", 400, "error off off off", ["", "", "", ""], "Pool", "Retry", null],
-  ["notlanded", "notlanded", 3_100, "done done error off", ["$25.00", SIG, "G19c…TQki", ""], "Raydium pool", "Retry", null],
+  ["notlanded", "notlanded", 3_100, "done done error off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Retry", null],
 ];
 
 async function build() {

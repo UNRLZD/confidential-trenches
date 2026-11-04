@@ -26,7 +26,7 @@
 // snapshots and outcomes in both.
 
 import { OPEN_KINDS } from "./messages.ts";
-import type { ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
+import type { BuyRoute, ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
 import {
   SIGNPAGE_MAX_REQUEST_BYTES,
   SIGNPAGE_PARAM_SCHEMAS,
@@ -35,6 +35,7 @@ import {
   signpageAnswerOkSchema,
   signpageIsKind,
   signpageIsPlainMessage,
+  signpageProgressRouteSchema,
   signpageProgressSchema,
   signpageReadySchema,
   signpageStateEventSchema,
@@ -151,6 +152,9 @@ export interface SignpageClient {
   subscribe(fn: (s: SignpageClientSnapshot) => void): () => void;
   /** Called on every `progress` event; returns the unsubscribe. */
   onProgress(fn: (id: string, stage: Stage) => void): () => void;
+  /** Called on every route event of a running buy (messages.ts BuyRoute), by the request's id; returns the unsubscribe.
+   *  A page of an earlier release sends none. */
+  onRoute(fn: (id: string, route: BuyRoute) => void): () => void;
   /** Sends one request once READY. Throws at once when its params are not exactly its kind's. */
   request<K extends SignpageKind>(kind: K, params: SignpageParams[K]): SignpageRequestHandle<K>;
   /** A fresh iframe (parent mode: none) and a new handshake now. */
@@ -209,6 +213,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   let snap: SignpageClientSnapshot = { status: "connecting", release: null, state: null, stale: false };
   const listeners = new Set<(s: SignpageClientSnapshot) => void>();
   const progressListeners = new Set<(id: string, stage: Stage) => void>();
+  const routeListeners = new Set<(id: string, route: BuyRoute) => void>();
   /** Posted requests, by id. */
   const pending = new Map<string, Pending>();
   const drops: Record<SignpageDropReason, number> = { origin: 0, source: 0, shape: 0, id: 0 };
@@ -427,6 +432,11 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       for (const f of progressListeners) f(m.id as string, m.stage as Stage);
       return;
     }
+    if (signpageProgressRouteSchema(m)) {
+      const { v: _v, type: _t, id, ...route } = m;
+      for (const f of routeListeners) f(id as string, route as BuyRoute);
+      return;
+    }
     drops.shape++;
   };
 
@@ -445,6 +455,10 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     onProgress(fn) {
       progressListeners.add(fn);
       return () => void progressListeners.delete(fn);
+    },
+    onRoute(fn) {
+      routeListeners.add(fn);
+      return () => void routeListeners.delete(fn);
     },
     request(kind, params) {
       const id = crypto.randomUUID();
@@ -476,6 +490,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       frame = null;
       listeners.clear();
       progressListeners.clear();
+      routeListeners.clear();
     },
   };
 
