@@ -133,6 +133,22 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      receipts' gasUsed 460,811 and 435,811, the 25,000 apart. On a live chain the sender sets the limit from
      eth_estimateGas; Robinhood's gasUsed also includes the cost of posting the transaction to its parent chain.
 
+ 15. SellDelegate through Uniswap v4 (card evm-sell-v4): a coin whose only pool is v4 (Clanker coins on Base, the
+     hooked pools on Robinhood) has no router that pulls it, so a Sell whose target is the chain's v4 PoolManager
+     (an immutable, the constructor's second argument) goes through the PoolManager directly, as v4-periphery's
+     V4Router does: W unlocks it, and W's unlockCallback swaps exactly the amount along data = abi.encode(PathKey[])
+     (each hop must take all it is given, else PartialFill; the route ends in the native asset or WETH, else
+     InvalidRoute), settles the token with W's own transfer (sync, transfer, settle: no approval is ever given) and
+     takes the whole output to W. The callback runs only when the PoolManager calls it (NotPoolManager) and only once
+     inside W's own sell: the sell sets a one-shot flag at the ERC-7201 transient slot of "blindfill.sell.v4" just
+     before the unlock and the callback clears it (NotInSell otherwise, so a transaction W's key sends to the
+     PoolManager cannot run it). The PoolManager reverts the unlock unless nothing is left owed (a token that
+     delivers less than it moves fails with CurrencyNotSettled). minOut, the fee and the deposit are as in 14; the v3
+     router path is unchanged. Gas (forge 1.7.1, one type-4 transaction with W's authorization, trees empty,
+     test/SellV4Fork.t.sol): Base, Clanker coin BTC1 through its hooked WETH pool, 699,266; Robinhood, CRYBABYTRUMP
+     through its hooked WETH pool, 495,223. Planted pools on Base's PoolManager code (test/SellV4.t.sol): one hop to
+     ETH 491,560, to WETH 502,251, two hops 573,026, depth 32 1,805,991.
+
 Gas, each pool call its own transaction (isolate = true in foundry.toml), so a figure is what a sender pays: the
 21,000 base, calldata and cold reads included. The kit's real proofs (test/fixtures/buy-proofs.json), fee 0.01 ETH.
 The change commitment's insert hashes one level per level of the state tree, about 21,518 gas each, so a release
