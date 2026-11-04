@@ -11,6 +11,7 @@
 // --record writes every RPC answer the run read to <file>, so the check's test can replay it. A NEAR signature
 // ("ed25519:" and 86-88 base58) has the shape of a NEAR secret key, which the secret scan refuses, so the recording keeps
 // none: each is replaced by SIGNATURE (the gate reads no signature).
+// Runs: once, the money gate's own read of recorded NEAR testnet txs; no host deploy changes it
 import "../net-window.mjs";
 import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";

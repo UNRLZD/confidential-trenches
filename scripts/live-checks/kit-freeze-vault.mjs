@@ -27,6 +27,7 @@
 //   node scripts/live-checks/kit-freeze-vault.mjs [--tag <tag>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the files the run read to <file> ({ref: {shapes: [lines], vectors: [lines]}}), so the check's test
 // can replay them.
+// Runs: once, the kit freeze: the vault's shapes on GitHub at the freeze tag, not what a host serves
 if (!process.argv.includes("--child")) await import("../net-window.mjs"); // the sandboxed child may read this one file only
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";

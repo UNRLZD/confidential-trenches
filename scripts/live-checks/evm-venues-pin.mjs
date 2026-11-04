@@ -19,6 +19,7 @@
 //     both read at each RPC's latest block (the one value here an upgrade can change).
 //   node scripts/live-checks/evm-venues-pin.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read to <file>, for the test's replay (evm-venues-pin.answers.json).
+// Runs: once, the kit's EVM pins against the contracts on chain; it changes only with a card that redeploys a contract
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
