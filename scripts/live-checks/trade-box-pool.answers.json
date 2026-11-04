@@ -1,0 +1,132 @@
+{
+ "good": {
+  "check": "trade-box-pool",
+  "at": "2026-11-04T10:47:12.537Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with the devnet pool",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-C3OwX5g8.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "proof": "ready",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "proof": "ready",
+     "proofText": "Proof ready",
+     "cta": "Buy DJT"
+    },
+    "sent": [],
+    "shot": "desktop-ready.png"
+   },
+   {
+    "width": "phone",
+    "proof": "ready",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "proof": "ready",
+     "proofText": "Proof ready",
+     "cta": "Buy DJT"
+    },
+    "sent": [],
+    "shot": "phone-ready.png"
+   },
+   {
+    "width": "desktop",
+    "proof": "making",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "proof": "making",
+     "proofText": "Making proof",
+     "cta": "Buy DJT"
+    },
+    "sent": [],
+    "shot": "desktop-making.png"
+   },
+   {
+    "width": "phone",
+    "proof": "making",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "proof": "making",
+     "proofText": "Making proof",
+     "cta": "Buy DJT"
+    },
+    "sent": [],
+    "shot": "phone-making.png"
+   }
+  ]
+ },
+ "bad": {
+  "check": "trade-box-pool",
+  "at": "2026-11-04T10:47:29.906Z",
+  "source": "live https://confidential.unrealized.trade, the stand-in shell signed in with the devnet pool",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-BjgBW9E7.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "proof": "ready",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": null,
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy ZEC"
+    },
+    "sent": [],
+    "shot": "desktop-ready.png"
+   },
+   {
+    "width": "phone",
+    "proof": "ready",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": null,
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy ZEC"
+    },
+    "sent": [],
+    "shot": "phone-ready.png"
+   },
+   {
+    "width": "desktop",
+    "proof": "making",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": null,
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy ZEC"
+    },
+    "sent": [],
+    "shot": "desktop-making.png"
+   },
+   {
+    "width": "phone",
+    "proof": "making",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": null,
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy ZEC"
+    },
+    "sent": [],
+    "shot": "phone-making.png"
+   }
+  ]
+ }
+}

@@ -206,7 +206,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
           {WORDS.bal.text} {balance === null ? "—" : fmtUsd(balance)}
         </span>
       </div>
-      <label className="trb-amount" data-bad={!signedOut && amount !== null && amount > 0n && !amountOk(amount, max, balance)}>
+      <label className="trb-amount" data-bad={!signedOut && amount !== null && amount > 0n && (onPool ? pool?.tapMax != null && !askable(amount) : !amountOk(amount, max, balance))}>
         <input
           className="trb-input"
           value={text}
