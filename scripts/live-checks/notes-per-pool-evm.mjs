@@ -18,6 +18,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of notes-per-pool-evm.answers.json, and its bad run: the same
 // answers with currentTreeSize one higher on both RPCs, which the sync must refuse.
+// Runs: pending notes-per-pool-evm-base-hang, it reads no host and hangs on Base Sepolia today (no line in 20 min, 4 Nov 20:07Z; Robinhood testnet PASS in 28 s); fixed, it is a Runs: once
 import "../net-window.mjs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
