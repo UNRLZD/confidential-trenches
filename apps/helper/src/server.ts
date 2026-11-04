@@ -26,7 +26,7 @@ import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER
 import { createSolanaLists } from "./data/solana/lists.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
-import { geckoBudget, type GeckoBudget } from "./data/gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
 import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
 import { health, releaseOf, type Part } from "./health.ts";
@@ -36,12 +36,17 @@ import { createRpc } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
 import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
-import { feeQuoterFromEnv, FeeReadRefused } from "./withdraw/fee.ts";
+import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./withdraw/fee.ts";
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
 import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
 import { clientOf, clientWindow, throttled, throttleOf } from "./limits/limits.ts";
+import { openDurableDir } from "./store/durable.ts";
+import { readWarm, writeWarm } from "./data/warm.ts";
+import { TICK_MS } from "./data/evm/lists.ts";
+import * as nodeFs from "node:fs";
+import { join } from "node:path";
 
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
@@ -74,6 +79,19 @@ function bindAnswerWithin<A>(carry: Promise<A>, late: A): Promise<A> {
   return Promise.race([carry, bound]).finally(() => clearTimeout(timer));
 }
 const BIND_LATE = { status: (HELPER_CODE_STATUS as Record<string, number>).in_flight ?? 400, body: { error: { code: "in_flight" as const } } };
+/**
+ * How long a send waits for this process to hold the senders (sendersFromEnv): during a deploy's swap the new helper
+ * takes traffic a moment before the old one has finished its last request and exited, which hands the store over
+ * [design: past docker stop's 30 s (deploy/redeploy.sh), after which the old one is killed and its lock is gone].
+ */
+export const SENDERS_WAIT_MS = 35_000;
+const SENDERS_LATE = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
+/** Whether `held` settles fulfilled within SENDERS_WAIT_MS. */
+function heldWithin(held: Promise<unknown>): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<boolean>((ok) => (timer = setTimeout(() => ok(false), SENDERS_WAIT_MS)));
+  return Promise.race([held.then(() => true, () => false), late]).finally(() => clearTimeout(timer));
+}
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
@@ -167,6 +185,8 @@ export function handler(
   now: () => number = Date.now,
   evmLists: EvmLists = {},
   evmSwaps: Swaps = {},
+  ready: () => boolean = () => true,
+  senders: Promise<unknown> = Promise.resolve(),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // GET /v1/token-status serves each network's token from that network's own watch
@@ -214,7 +234,7 @@ export function handler(
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit, SERVED, release), cors(req));
+        return send(200, health(commit, SERVED, release, ready()), cors(req));
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
@@ -280,6 +300,7 @@ export function handler(
             const name = typeof body === "object" && body !== null ? (body as { pool?: unknown }).pool : undefined;
             const pool = typeof name === "string" ? pools.get(name) : undefined;
             if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
+            if (!(await heldWithin(senders))) return SENDERS_LATE;
             const a = await pool.carry(body, clientOf(req));
             return { status: a.status, headers: (a.retryAfterS === undefined ? {} : { "Retry-After": String(a.retryAfterS) }) as Headers, body: JSON.stringify(a.body) };
           })
@@ -304,6 +325,7 @@ export function handler(
             const name = typeof body === "object" && body !== null ? (body as { pool?: unknown }).pool : undefined;
             const pool = typeof name === "string" ? evmPools.get(name) : undefined;
             if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
+            if (!(await heldWithin(senders))) return SENDERS_LATE;
             const a = await pool.carry(body, clientOf(req));
             return { status: a.status, headers: (a.retryAfterS === undefined ? {} : { "Retry-After": String(a.retryAfterS) }) as Headers, body: JSON.stringify(a.body) };
           })
@@ -323,6 +345,7 @@ export function handler(
             } catch {
               return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
             }
+            if (!(await heldWithin(senders))) return SENDERS_LATE;
             const a = await withdraw.carry(body);
             return { status: a.status, body: JSON.stringify(a.body) };
           })
@@ -343,6 +366,7 @@ export function handler(
             } catch {
               return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
             }
+            if (!(await heldWithin(senders))) return SENDERS_LATE;
             const a = await bindAnswerWithin(bind.carry(body), BIND_LATE);
             return { status: a.status, body: JSON.stringify(a.body) };
           })
@@ -510,7 +534,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
  * the bars before our first from the token page's GeckoTerminal candles. The stream is SOLANA_STREAM_WS_URL when set (a
  * keyed provider's websocket), else the public one; requests go to SOLANA_TRADES_RPC_URL first when set.
  */
-export function solanaTradesFromEnv(env: Record<string, string | undefined>, lists: Lists, token: Token): SolanaTrades {
+export function solanaTradesFromEnv(env: Record<string, string | undefined>, lists: Lists, token: Token, rpc?: Rpc): SolanaTrades {
   const ws = env.SOLANA_STREAM_WS_URL;
   const url = env.SOLANA_TRADES_RPC_URL;
   let seen: { asOfMs: number; tokens: Set<string> } | null = null;
@@ -519,6 +543,8 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
     rpcs: url === undefined || url === "" ? TRADES_RPCS : [url, ...TRADES_RPCS],
     history: (mint, tf, to, limit) => token.candles(mint, tf, to, limit),
     log: (line) => console.log(`helper: ${line}`),
+    // the walks draw the Solana budget callers draw, behind them (rpc.ts userRoomOf)
+    ...(rpc === undefined ? {} : { budget: (u: string, m: string) => rpc.background("solana", u, m), throttled: (u: string, h: globalThis.Headers) => rpc.backgroundThrottled("solana", u, h) }),
     listed: async (mint) => {
       const a = await lists.get();
       if (a.status !== 200 || a.asOfMs === undefined) return false;
@@ -531,19 +557,107 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
   });
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps): Server {
+/**
+ * The senders' handover (card helper-ready-gate). A deploy starts the new helper next to the old one, and both are
+ * pointed at one store (HELPER_STORE_DIR), whose folders one process holds at a time (store/durable.ts). The new one
+ * takes the `senders` folder's lock, which the running helper holds for its life, and then builds the fee quoter,
+ * which opens its own store; while either is held by the other helper it tries again every `retryMs`, and only once
+ * both are its own do its sends go (`held`): the withdrawal and deposit relayers start, and POST /v1/withdraw,
+ * /v1/bind and the pool sends wait for it (SENDERS_WAIT_MS), so two helpers never send with one key or write one
+ * store. `peer`: another helper held one of them at the start, so this one takes no traffic until it is ready. The
+ * fee quoter's network is known from the environment at once (a quoter with no store), its quotes wait for `held`.
+ */
+export function sendersFromEnv(env: Record<string, string | undefined>, retryMs = 250): { fee: FeeQuoter; held: Promise<void>; peer: boolean } {
+  const dir = env[STORE_ENV] ?? "";
+  const bare = feeQuoterFromEnv({ ...env, [STORE_ENV]: "" });
+  if (dir === "") return { fee: bare, held: Promise.resolve(), peer: false };
+  let real: FeeQuoter | null = null;
+  const isHeld = (e: unknown) => /is held by another process/.test((e as Error | undefined)?.message ?? "");
+  /** One try: the senders lock (kept for the process's life), then the fee quoter; false while another holds either. */
+  let sendersLock = false;
+  const attempt = (): boolean => {
+    try {
+      if (!sendersLock) {
+        openDurableDir(join(dir, "senders"), nodeFs, () => undefined);
+        sendersLock = true;
+      }
+      real = feeQuoterFromEnv(env);
+      return true;
+    } catch (e) {
+      if (isHeld(e)) return false;
+      throw e;
+    }
+  };
+  const peer = !attempt();
+  const held = peer
+    ? new Promise<void>((ok, fail) => {
+        const t = setInterval(() => {
+          try {
+            if (attempt()) clearInterval(t), ok();
+          } catch (e) {
+            clearInterval(t);
+            fail(e);
+          }
+        }, retryMs);
+      })
+    : Promise.resolve();
+  const fee: FeeQuoter = {
+    networkOf: (token) => bare.networkOf(token),
+    quote: async (token) => (await held, real!.quote(token)),
+    reads: (network) => ({ feeMin: async (w) => (await held, real!.reads(network).feeMin(w)) }),
+  };
+  return { fee, held, peer };
+}
+
+/** A token page read is part of being ready: one of the Solana list's tokens. */
+type Ready = { lists: Pick<Lists, "get">; evmLists: Record<string, Pick<ReturnType<typeof createEvmLists>, "get">>; token: Pick<Token, "page" | "holders"> };
+/** How often the warm-up asks again while not ready. */
+export const READY_EVERY_MS = 2_000;
+/**
+ * Whether this helper is ready (card helper-ready-gate): the Solana list and every EVM chain's lists answer 200, and a
+ * Solana token page and its holders answer 200 for a token on the Solana list. Each read is the one a caller makes (and
+ * stays cached for them).
+ */
+export async function isReady(p: Ready): Promise<boolean> {
+  const sol = await p.lists.get();
+  if (sol.status !== 200) return false;
+  for (const l of Object.values(p.evmLists)) if ((await l.get()).status !== 200) return false;
+  const snap = JSON.parse(sol.body) as { lists?: Record<string, { token?: unknown }[]> };
+  const mint = Object.values(snap.lists ?? {}).flat().find((r) => typeof r?.token === "string")?.token as string | undefined;
+  if (mint === undefined) return false;
+  const [page, holders] = await Promise.all([p.token.page(mint, READY_CLIENT), p.token.holders(mint, READY_CLIENT)]);
+  return page.status === 200 && holders.status === 200;
+}
+/** The client the warm-up's token reads draw as (a caller's share, the callers' room). */
+const READY_CLIENT = "helper-ready";
+/** Asks isReady every READY_EVERY_MS until it is true, then resolves. */
+export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promise<void> {
+  for (;;) {
+    if (await isReady(p).catch(() => false)) return;
+    await new Promise((ok) => setTimeout(ok, everyMs));
+  }
+}
+
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve()): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools, undefined, undefined, evmLists, evmSwaps),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools, undefined, undefined, evmLists, evmSwaps, ready, senders),
   );
   server.listen(port);
-  // the relayers start with the helper: a restart resends their open sends and settles before any request
-  withdraw?.warm();
-  bind?.warm();
+  // the relayers start once this process holds the senders (sendersFromEnv): a restart resends their open sends and
+  // settles before any request
+  void senders.then(() => {
+    withdraw?.warm();
+    bind?.warm();
+  }, () => undefined);
   return server;
 }
+
+/** A stop (SIGTERM, docker stop) lets the requests in flight finish for at most this long, then exits [design: under
+ *  docker stop's 30 s in deploy/redeploy.sh, which then kills]. */
+export const STOP_MS = 25_000;
 
 /** How long each outbound connect may try one address before the next (node's default is 250 ms): long enough for one
  *  lost SYN (resent at 1 s), so a slow connect is not turned into a 503. Seen 2026-11-03 15:25Z: GeckoTerminal's IPv4
@@ -559,19 +673,44 @@ if (import.meta.main) {
     console.error("helper: HELPER_COMMIT must be a full 40-hex commit");
     process.exit(2);
   }
-  let server: Server;
+  const storeDir = process.env[STORE_ENV] ?? "";
+  let server: Server | null = null;
+  let saveWarm = () => undefined as void;
   try {
     checkVendorPlans(process.env);
     const proxy = createProxy(process.env);
     const rpc = createRpc(process.env);
     const lists = createSolanaLists(proxy, rpc);
+    // the senders' handover (sendersFromEnv): `peer` when the helper this one replaces still runs
+    const senders = sendersFromEnv(process.env);
+    senders.held.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
     // GeckoTerminal's one keyless budget (src/data/gecko.ts): the Solana token page's candles first, the EVM lists after
     const SERVED_EVM: readonly EvmChain[] = ["base", "robinhood"];
     const gecko = geckoBudget(Date.now);
     const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko)]));
+    // card helper-ready-gate: the previous helper's warm file (data/warm.ts) seeds the EVM lists and its GeckoTerminal
+    // calls; while it still runs (peer), this one makes no GeckoTerminal call until the handover, then takes its last
+    // calls from the file it wrote at its stop. With no file, a replaced helper may have spent the window: none for one.
+    const warm = readWarm(storeDir, Date.now());
+    if (warm !== null) {
+      gecko.seed(warm.gecko);
+      const whole = SERVED_EVM.map((c) => evmLists[c]!.restore(warm.evm[c])).every(Boolean);
+      // held only when the file gave every list: a list it lacks is read now, inside the seeded budget
+      if (senders.peer && whole) {
+        gecko.hold();
+        void senders.held.then(() => (gecko.seed(readWarm(storeDir, Date.now())?.gecko ?? []), gecko.release()));
+      }
+    } else if (senders.peer) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => Date.now()));
+    saveWarm = () => {
+      try {
+        writeWarm(storeDir, { at: Date.now(), gecko: gecko.calls(), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])) });
+      } catch {
+        // the next helper reads its lists from GeckoTerminal
+      }
+    };
     const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko);
     const watches = tokenWatchesFromEnv(process.env);
-    const fee = feeQuoterFromEnv(process.env);
+    const fee = senders.fee;
     // each network's carry is held by its own watch only
     const withdraw = withdrawSenderFromEnv(process.env, fee, statusesOf(watches));
     const bind = bindSenderFromEnv(process.env, watches);
@@ -579,18 +718,33 @@ if (import.meta.main) {
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
     const pools = solanaPoolSendersFromEnv(process.env);
     for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token) };
-    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps); // warms both relayers
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token, rpc) };
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
+    setInterval(saveWarm, TICK_MS).unref();
+    // ready (health.ts): once the lists, a token page and its holders answer 200. A helper that replaces a running one
+    // (peer) listens only then, so the proxy, which tries each helper of the service in turn, never reaches it cold
+    // (deploy/redeploy.sh waits for it, bounded, before it stops the old one); one that starts alone listens at once.
+    let ready = false;
+    const warmed = warmUntilReady({ lists, evmLists, token }).then(() => void (ready = true));
+    const listen = () => {
+      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held); // warms both relayers once the senders are ours
+      server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready ? "" : ", warming"}`));
+    };
+    if (senders.peer) void warmed.then(listen);
+    else listen();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
     process.exit(2);
   }
-  server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}`));
+  // a stop finishes the requests in flight (the old helper of a deploy's swap): no new connection, idle ones closed,
+  // the warm file written for the next helper, exit once the last answer is out or at STOP_MS
   const stop = () => {
+    saveWarm();
+    if (server === null) process.exit(0);
     server.close(() => process.exit(0));
-    server.closeAllConnections();
+    server.closeIdleConnections();
+    setTimeout(() => process.exit(0), STOP_MS).unref();
   };
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);

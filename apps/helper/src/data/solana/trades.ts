@@ -270,6 +270,11 @@ export function createSolanaTrades(deps: {
   /** One line per stream drop and return (the host's log), so a deploy's tape can be read back. */
   log?: (line: string) => void;
   tickMs?: number;
+  /** The shared RPC budget (../../rpc/rpc.ts background, card helper-ready-gate): before each request to `url`, the
+   *  seconds to wait (0: go); a provider with a wait is skipped for the next, so callers' reads keep their room. */
+  budget?: (url: string, method: string) => number;
+  /** That provider's 429, which holds its budget for every caller. */
+  throttled?: (url: string, headers: Headers) => void;
 }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
@@ -284,8 +289,10 @@ export function createSolanaTrades(deps: {
   /** One request, to each provider in turn until one answers a result. */
   async function rpc(method: string, params: unknown[]): Promise<unknown> {
     for (const url of rpcs) {
+      if ((deps.budget?.(url, method) ?? 0) > 0) continue;
       try {
         const r = await doFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+        if (r.status === 429) deps.throttled?.(url, r.headers);
         if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
           await r.body?.cancel();
           continue;
