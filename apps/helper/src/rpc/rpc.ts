@@ -15,9 +15,13 @@
 // more than RPC_CLIENT_MAX of them a window, a batch drawing one per request in it), and where the provider also limits
 // one method (Solana's public endpoint, RPC_METHOD_MAX), each method a budget of its own drawn in the same step. The
 // totals sit at the provider's own limits, so no set of callers can make the provider throttle us; a draw past a share
-// or a total answers 429 rate_limited with the seconds until it would go ahead. If the provider throttles anyway (its 429), the helper, its one client, holds the chain until the reset
-// it named (at most a minute): every draw on that chain, the helper's own reads included, answers 429 with the seconds
-// left and nothing reaches the provider. A 503 is never a wait.
+// or a total answers 429 rate_limited with the seconds until it would go ahead. If the provider throttles a caller's
+// read anyway (its 429), the helper, its one client, holds the chain until the reset it named (at most RETRY_AFTER_MAX_S):
+// every draw on that chain, the helper's own reads included, answers 429 with the seconds left and nothing reaches the
+// provider. If it throttles a background read (the trade walks), only the background reads wait out the reset: they go
+// behind callers, so a caller is not refused for their 429 (4 Nov 09:15-09:19Z, after a restart's cold walks); a
+// caller's read it throttles in turn holds the chain. Each hold is one log line: the chain, whose read (caller or
+// background) and the seconds. A 503 is never a wait.
 //
 // Refusals, in the kit's error shape { error: { code } } (v1.ts HelperRpcCode and the common codes):
 //   404 not_found           a chain that is not one of RPC_CHAINS;
@@ -115,7 +119,7 @@ export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: s
 
 export type RpcAnswer = { status: number; body: string };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-type Deps = { fetch?: Fetch; now?: () => number };
+type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void };
 type Answer = RpcAnswer & { headers?: Record<string, string> };
 type Upstream = { url: string; forms: Buffer[] };
 
@@ -188,6 +192,7 @@ function check(chain: RpcChain, r: unknown): Record<string, unknown> | undefined
 export function createRpc(env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
+  const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
   const limits = Object.fromEntries(
     RPC_CHAINS.map((ch) => {
@@ -200,6 +205,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const [ch, method] = key.split(" ") as [RpcChain, string | undefined];
     return method === undefined ? limits[ch] : { total: limits[ch].perMethod!, perClient: Infinity, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(limits[ch].perMethod!) };
   }, now);
+  /** The provider throttled `whose` read on `c` for `seconds`: the chain is held (every draw for a caller's, the
+   *  background draws for a background read's), logged as one line with no caller in it. */
+  const hold = (c: RpcChain, seconds: number, whose: "caller" | "background"): void => {
+    budget.hold(c, now() + seconds * 1000, whose === "background");
+    log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s`);
+  };
   const drawsOf = (c: RpcChain, methods: readonly string[]): [string, number][] => {
     const draws: [string, number][] = [[c, methods.length]];
     if (limits[c].perMethod !== undefined) for (const m of methods) draws.push([`${c} ${m}`, 1]);
@@ -274,7 +285,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       });
       if (r.status === 429) {
         await r.body?.cancel();
-        budget.hold(c, now() + upstreamRetryAfterS(r.headers, now()) * 1000);
+        hold(c, upstreamRetryAfterS(r.headers, now()), "caller");
         return throttled(budget.heldFor(c));
       }
       text = await readAnswer(r);
@@ -293,7 +304,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
     const limited = evmLimited(c, answer);
     if (limited > 0) {
-      budget.hold(c, now() + limited * 1000);
+      hold(c, limited, "caller");
       return throttled(budget.heldFor(c));
     }
     const b = Buffer.from(text, "utf8");
@@ -304,18 +315,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   /**
    * The helper's own background reads that reach a chain's provider by another path (data/solana/trades.ts, with the
    * provider's URL): `url` is this chain's provider when it is the one configured here, and then each request draws
-   * from the chain's budget as a background read (userRoomOf) and its 429 holds the chain as a caller's would. A URL
-   * that is another provider draws nothing here. Returns the seconds to wait, 0 to go.
+   * from the chain's budget as a background read (userRoomOf), waiting out any hold on it. A URL that is another
+   * provider draws nothing here. Returns the seconds to wait, 0 to go.
    */
   function background(chain: RpcChain, url: string, method: string): number {
     if (url !== upstreams[chain].url) return 0;
-    const held = budget.heldFor(chain);
-    if (held > 0) return held;
     return budget.takeEach(drawsOf(chain, [method]), undefined, false, false);
   }
-  /** That provider answered 429 to a background read: the chain is held to its reset, as for a caller's. */
+  /** That provider answered 429 to a background read: the background reads wait out its reset; callers go on. */
   function backgroundThrottled(chain: RpcChain, url: string, headers: Headers): void {
-    if (url === upstreams[chain].url) budget.hold(chain, now() + upstreamRetryAfterS(headers, now()) * 1000);
+    if (url === upstreams[chain].url) hold(chain, upstreamRetryAfterS(headers, now()), "background");
   }
 
   return { handle, background, backgroundThrottled };
