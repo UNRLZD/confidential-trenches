@@ -11,7 +11,7 @@ import { base58, base64 } from "@scure/base";
 import { SOLANA_ANSWER_MAX_BYTES, VaultTree, solanaJsonRpc, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { SOL_MARK_BUCKET, SOL_MARK_TAG, SOL_PRE_MARK_LEN, SOL_SPENT_MARK_LEN, solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
+import { SOL_MARK_BUCKET, SOL_MARK_TAG, SOL_PRE_MARK_LEN, SOL_SPENT_MARK_LEN, solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleReserved, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore } from "../src/store/index.ts";
@@ -1090,6 +1090,36 @@ test("already spent: a send refused as spent marks the note SPENT with its chang
   await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: pair(chain, chain) }));
   // a note of another pool is refused before any read
   await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: b58(R.pool), rpcs: pair(chain, chain) }), /not a landed note of this pool/);
+});
+
+test("a pass over RESERVED notes: spent is settled; no mark and both RPCs' block time past the deadline frees; else it is held", async () => {
+  const { chain, beforeSpend, l0 } = restorePool();
+  const DEADLINE_S = 1_800_000_200n; // reservedDeposit0's deadline_ms, in the Clock's seconds
+  const at = (c: Chain, s: bigint): Chain => ({ ...c, time: () => s });
+  const pass = (ns: NoteStore, rs: [SolanaRpc, SolanaRpc]) => solanaSettleReserved({ seed64: SEED, notes: ns, program: PROGRAM, rpcs: rs });
+  // the chain holds the spend: settled, SPENT with its change, whatever the time
+  const a = await reservedDeposit0(l0);
+  assert.deepEqual(await pass(a.ns, pair(at(chain, DEADLINE_S - 100n), at(chain, DEADLINE_S - 100n))), { spent: [a.id], freed: [], held: [] });
+  assert.equal((await a.ns.get(a.id))!.state, "SPENT");
+  // no mark: held while either RPC's finalized block is not past the deadline (its send may still land), freed after
+  const b = await reservedDeposit0(l0);
+  for (const [x, y] of [[DEADLINE_S - 1n, DEADLINE_S - 1n], [DEADLINE_S, DEADLINE_S], [DEADLINE_S + 5n, DEADLINE_S], [DEADLINE_S, DEADLINE_S + 5n]] as const) {
+    assert.deepEqual(await pass(b.ns, pair(at(beforeSpend, x), at(beforeSpend, y))), { spent: [], freed: [], held: [b.id] }, `${x} ${y}`);
+    assert.equal((await b.ns.get(b.id))!.state, "RESERVED");
+  }
+  // one RPC shows the spent mark the other lacks: held, never freed, though both are past the deadline
+  const spent0 = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
+  const claimed: Chain = { ...beforeSpend, marks: new Map(beforeSpend.marks!).set(spent0, spentData(50_000_000n, 0)) };
+  for (const [x, y] of [[claimed, beforeSpend], [beforeSpend, claimed]] as const) {
+    assert.deepEqual(await pass(b.ns, pair(at(x, DEADLINE_S + 1n), at(y, DEADLINE_S + 1n))), { spent: [], freed: [], held: [b.id] });
+    assert.equal((await b.ns.get(b.id))!.state, "RESERVED");
+  }
+  // both past it, no mark on either: freed, so the queue proves it again
+  assert.deepEqual(await pass(b.ns, pair(at(beforeSpend, DEADLINE_S + 1n), at(beforeSpend, DEADLINE_S + 1n))), { spent: [], freed: [b.id], held: [] });
+  assert.equal((await b.ns.get(b.id))!.state, "UNSPENT");
+  // nothing RESERVED: no read at all
+  const quiet: SolanaRpc = Object.assign(async () => assert.fail("no read"), { url: "https://q.example" });
+  assert.deepEqual(await pass(b.ns, [quiet, Object.assign(async () => assert.fail("no read"), { url: "https://r.example" })]), { spent: [], freed: [], held: [] });
 });
 
 test("already spent (MX6): the settle reads the pages at or past its marks' slot, and reads them whether or not the mark is there", async () => {
