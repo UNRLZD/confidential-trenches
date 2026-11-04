@@ -385,34 +385,63 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
 }
 
 /** The answers of two of the providers `rpcs` that are `same`: the first two are asked at once, and one more of the
- *  rest, in order, whenever one asked fails, two that answered differ, or the others are late: once one has answered,
- *  as long again as it took and at least EVM_HEDGE_MS, and while none has, 4 x EVM_HEDGE_MS (card
- *  evm-quote-warm-round: a provider that is slow or has dropped out is never waited on while two others agree, the
- *  industry's hedged request; a spare asked a fixed time after the start ran every provider of a cbBTC quote's round,
- *  whose heaviest batch takes 0.65 s on the fastest). Every answer used is one two different providers gave. With none
- *  left to ask it throws the first failure, or, where two answered and none agree, `differ` on the first two. */
+ *  rest, in order, whenever an answer is missing: one asked fails, two answered without a pair that is `same` (`vote`
+ *  false: a head past maxLag), or the others are late: once one has answered, as long again as its own request took and
+ *  at least EVM_HEDGE_MS, and while none has, 4 x EVM_HEDGE_MS (card evm-quote-warm-round: a provider that is slow or has
+ *  dropped out is never waited on while two others agree, the industry's hedged request; a spare asked a fixed time
+ *  after the start ran every provider of a cbBTC quote's round, whose heaviest batch takes 0.65 s on the fastest). With
+ *  `vote`, an answer that differs from another is a vote: from then every provider is asked, and a value is used only
+ *  once more than half of `rpcs` gave it, so two that agree on a lie never outvote an honest one (review of bc189de,
+ *  M-1). A provider whose answer differs from the one used is held (HOLD). Every answer used is one two different
+ *  providers gave. With no value to use it throws `differ` on two that differ, or where none differ, the first failure. */
 export const EVM_HEDGE_MS = 400;
-function agreeing<T>(rpcs: readonly EvmRpc[], one: (rpc: EvmRpc, k: number) => Promise<T>, same: (a: T, b: T) => boolean, differ: (a: T, b: T) => never): Promise<{ a: T; b: T; i: number; j: number }> {
+// a provider's hold (timed, EVM_HOLD_MS), for an answer that differs from the one a quote used (review of bc189de, M-2)
+const HOLD = new WeakMap<EvmRpc, () => void>();
+function agreeing<T>(rpcs: readonly EvmRpc[], one: (rpc: EvmRpc, k: number) => Promise<T>, same: (a: T, b: T) => boolean, differ: (a: T, b: T) => never, vote = true): Promise<{ a: T; b: T; i: number; j: number }> {
   const list = [...rpcs];
+  const need = Math.floor(list.length / 2) + 1;
   return new Promise((resolve, reject) => {
     const got: { k: number; v: T }[] = [];
     let started = 0;
     let settled = 0;
+    let fails = 0;
     let done = false;
+    let contested = false;
     let failed: { e: unknown } | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const end = () => {
-      if (done || settled < started || started < list.length) return;
+    const lose = () => {
       done = true;
-      if (got.length >= 2) {
+      clearTimeout(timer);
+      const x = got[0];
+      const y = x === undefined ? undefined : (got.find((g) => !same(x.v, g.v)) ?? got[1]);
+      if (x !== undefined && y !== undefined) {
         try {
-          differ(got[0]!.v, got[1]!.v);
+          differ(x.v, y.v);
         } catch (e) {
           reject(e);
         }
       } else reject(failed?.e);
     };
-    const t0 = performance.now();
+    const end = () => {
+      if (done) return;
+      // contested: a value no count of the providers left can bring to `need` is never used
+      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails < need) return lose();
+      if (settled < started || started < list.length) return;
+      lose();
+    };
+    const win = (g: { k: number; v: T }, h: { k: number; v: T }) => {
+      done = true;
+      clearTimeout(timer);
+      // the quote's next rounds ask these two first: one that was slow, failed or differed is a spare from now on
+      // (`rpcs` is the quote's own list, gated(); reordered only while no other round has)
+      if (!Object.isFrozen(rpcs) && list.every((r, n) => rpcs[n] === r)) {
+        const order = [list[g.k]!, list[h.k]!, ...list.filter((_, n) => n !== g.k && n !== h.k)];
+        order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));
+      }
+      for (const x of got) if (!same(g.v, x.v) && !same(h.v, x.v)) HOLD.get(list[x.k]!)?.();
+      resolve({ a: g.v, b: h.v, i: g.k, j: h.k });
+    };
+    const t0: number[] = [];
     let first = -1;
     const arm = () => {
       clearTimeout(timer);
@@ -424,32 +453,30 @@ function agreeing<T>(rpcs: readonly EvmRpc[], one: (rpc: EvmRpc, k: number) => P
     const start = () => {
       if (done || started >= list.length) return;
       const k = started++;
+      t0[k] = performance.now();
       one(list[k]!, k).then(
         (v) => {
           settled++;
           if (done) return;
-          const g = got.find((x) => same(x.v, v));
-          if (g !== undefined) {
-            done = true;
-            clearTimeout(timer);
-            // the quote's next rounds ask these two first: one that was slow, failed or differed is a spare from now on
-            // (`rpcs` is the quote's own list, gated(); reordered only while no other round has)
-            if (!Object.isFrozen(rpcs) && list.every((r, n) => rpcs[n] === r)) {
-              const order = [list[g.k]!, list[k]!, ...list.filter((_, n) => n !== g.k && n !== k)];
-              order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));
-            }
-            return resolve({ a: g.v, b: v, i: g.k, j: k });
+          const now = { k, v };
+          got.push(now);
+          const peers = got.filter((x) => same(x.v, v));
+          if (vote && peers.length < got.length && !contested) {
+            contested = true;
+            while (started < list.length) start();
           }
-          got.push({ k, v });
-          if (got.length >= 2) start();
+          if (!contested && peers.length >= 2) return win(peers[0]!, now);
+          if (contested && peers.length >= need) return win(peers[0]!, peers[1]!);
+          if (!contested && got.length >= 2) start();
           else if (first < 0) {
-            first = performance.now() - t0;
+            first = performance.now() - t0[k]!;
             arm();
           }
           end();
         },
         (e) => {
           settled++;
+          fails++;
           failed ??= { e };
           if (done) return;
           start();
@@ -534,25 +561,40 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
     async (rpc, k) => header((await ask(rpc, [call]))[0], `provider ${k + 1}`),
     near,
     (x, y) => refuse("rpc_disagree", `the providers' heads ${x.number} and ${y.number} are more than ${maxLag} blocks apart`),
+    // a head past maxLag is a missing answer, not a vote
+    false,
   );
   const [lo, at] = a.number <= b.number ? [a, j] : [b, i];
   if (nowMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse("stale_quote", `block ${lo.number} is more than 30 s old`);
   // confirmed on the provider of the other head, or where that one fails, on the next of the rest (never the lower
-  // head's own provider): a block one provider alone named is never read at
+  // head's own provider): a block one provider alone named is never read at. A provider that holds another block there
+  // is a vote against it, as in agreeing: the next of the rest is asked, and the block is read at only once more than
+  // half the providers hold it, the lower head's own provider one of them (review of bc189de, M-2)
   const others = [at, ...list.map((_, k) => k).filter((k) => k !== i && k !== j)];
+  const need = Math.floor(list.length / 2) + 1;
   const confirm = async () => {
     const by = { method: "eth_getBlockByNumber", params: ["0x" + lo.number.toString(16), false] };
-    let back: Block | undefined;
-    for (let n = 0; back === undefined; n++) {
+    let holds = 1;
+    const against: number[] = [];
+    let failed: { e: unknown } | null = null;
+    const enough = () => holds >= (against.length === 0 ? 2 : need);
+    for (let n = 0; n < others.length && !enough(); n++) {
+      // contested, and too few left to bring it to `need`
+      if (against.length > 0 && holds + others.length - n < need) break;
+      let back: Block;
       try {
         back = header((await askAt(list[others[n]!]!, [by]))[0], `provider ${others[n]! + 1}`);
       } catch (e) {
-        if (n === others.length - 1) throw e;
+        failed ??= { e };
+        continue;
       }
+      if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {
+        against.push(others[n]!);
+      } else holds++;
     }
-    if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {
-      return refuse("rpc_disagree", `the providers hold different blocks at ${lo.number}`);
-    }
+    if (enough()) return against.forEach((k) => HOLD.get(list[k]!)?.());
+    if (against.length > 0) return refuse("rpc_disagree", `the providers hold different blocks at ${lo.number}`);
+    throw failed?.e;
   };
   return { block: lo, confirm };
 }
@@ -1030,30 +1072,41 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
 // does not wait on it either.
 const SPEED = new Map<string, { ms: number | null; held: number; out: number[] }>();
 export const EVM_HOLD_MS = 30_000;
-const timed = (url: string, rpc: EvmRpc): EvmRpc => async (calls) => {
-  const t = performance.now();
+/** Forgets every provider's measured time and hold: for the tests, which share this module's state (not in the index). */
+export const evmSpeedReset = (): void => SPEED.clear();
+const speedOf = (url: string) => {
   const s = SPEED.get(url) ?? { ms: null, held: 0, out: [] };
   SPEED.set(url, s);
-  s.out.push(t);
-  try {
-    const out = await rpc(calls);
-    if (out.some(limited)) s.held = performance.now() + EVM_HOLD_MS;
-    else s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
-    return out;
-  } catch (e) {
-    s.held = performance.now() + EVM_HOLD_MS;
-    throw e;
-  } finally {
-    s.out.splice(s.out.indexOf(t), 1);
-  }
+  return s;
+};
+const timed = (url: string, rpc: EvmRpc): EvmRpc => {
+  const f: EvmRpc = async (calls) => {
+    const t = performance.now();
+    const s = speedOf(url);
+    s.out.push(t);
+    try {
+      const out = await rpc(calls);
+      if (out.some(limited)) s.held = performance.now() + EVM_HOLD_MS;
+      else s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
+      return out;
+    } catch (e) {
+      s.held = performance.now() + EVM_HOLD_MS;
+      throw e;
+    } finally {
+      s.out.splice(s.out.indexOf(t), 1);
+    }
+  };
+  HOLD.set(f, () => void (speedOf(url).held = performance.now() + EVM_HOLD_MS));
+  return f;
 };
 /** `urls` in the order a quote asks them: those neither held nor with a request out past EVM_HEDGE_MS by their
- *  measured time (the unmeasured after them, in the venue list's order), then the rest in the same order. */
+ *  measured time (the unmeasured after them, in the venue list's order), then those with a request out, then the held,
+ *  each in the same order. */
 export function evmRanked(urls: readonly string[], now: number = performance.now()): string[] {
   const rank = (u: string, k: number) => {
     const s = SPEED.get(u);
-    const slow = s !== undefined && (s.held > now || s.out.some((t) => now - t > EVM_HEDGE_MS));
-    return [slow ? 1 : 0, s?.ms ?? Number.MAX_VALUE, k] as const;
+    const slow = s === undefined ? 0 : s.held > now ? 2 : s.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0;
+    return [slow, s?.ms ?? Number.MAX_VALUE, k] as const;
   };
   return urls
     .map((u, k) => ({ u, r: rank(u, k) }))
@@ -1095,7 +1148,10 @@ function checkAsk(nowMs: number, rpcsIn: unknown, amountIn: unknown, slippageBps
 function gated(rpcsIn: readonly EvmRpc[], parallel: number): readonly EvmRpc[] {
   return rpcsIn.map((rpc) => {
     const g = gateOf(parallel);
-    return (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));
+    const f = (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));
+    const hold = HOLD.get(rpc);
+    if (hold !== undefined) HOLD.set(f as unknown as EvmRpc, hold);
+    return f;
   }) as unknown as readonly EvmRpc[];
 }
 
@@ -1424,11 +1480,13 @@ async function routeSet(a: {
   const gate = gateOf(v.scan?.parallel ?? 1);
   let headOfScan: Promise<bigint> | undefined;
   // a scan the quote waits for that fails refuses the quote, so it may pick the agreed block to keep its spans; a kept
-  // scan started early waits for the quote to pick it
-  const scanAt = (cs: readonly string[], kind: ScanKind, early = false) =>
-    scan !== undefined && v.poolManager !== undefined && v.scan !== undefined && cs.length > 0
-      ? scanPools(chain, cs, kind, lower(v.weth), v.poolManager, scan, v.scan, agreedHead, v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)), early ? () => picked : agreedHead)
-      : null;
+  // scan started early waits for the quote to pick it, whether it ends or fails (review of bc189de, L-3: one that ended
+  // before the token's scan picked the block itself, before the token's logs were in)
+  const scanAt = (cs: readonly string[], kind: ScanKind, early = false) => {
+    if (scan === undefined || v.poolManager === undefined || v.scan === undefined || cs.length === 0) return null;
+    const at = early ? () => picked : agreedHead;
+    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, scan, v.scan, at, v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)), at);
+  };
   // the warm round: the token's kept reads and scans; a scan asked again in this quote is the one started here
   const planKey = `${chain}:${a.sell ? "sell" : "buy"}:${lower(token)}`;
   const plan = PLANS.get(planKey);

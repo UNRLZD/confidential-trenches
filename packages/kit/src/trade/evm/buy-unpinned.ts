@@ -90,14 +90,25 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
-      // Keyless, of five operators (Allnodes, Bware Labs' Blast, Nodies, Coinbase, BlockPI), timed on one warm quote's six
-      // eth_call batches (109 kB) at each one's newest block hash, 10 rounds each, every answer equal to publicnode's
-      // (card evm-quote-warm-round, 2026-11-04 16:4xZ from this Mac): p50/p95 146/207 ms, 315/476, 383/532, 863/1,380
-      // and 816/1,549 ms. Passed over: base.drpc.org and Tenderly's gateway (429 on 6 batches at once), meowrpc, zan,
-      // onfinality, 1rpc, thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), base.api.pocket.network
-      // (10 of 60 answers differed), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr
-      // (no head); third-party proxies of unknown operators are not listed
-      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://base-public.nodies.app", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
+      // Keyless, of five operators, timed on one warm quote's six eth_call batches (109 kB) at each one's newest block
+      // hash, 10 rounds each, every answer equal to publicnode's (card evm-quote-warm-round, 2026-11-04 16:4xZ from this
+      // Mac): publicnode (Allnodes) p50/p95 146/207 ms; Blast 315/476, served by Alchemy (its answers carry
+      // x-alchemy-trace-id, 18:56Z); mainnet.base.org (Coinbase) 863/1,380, behind QuickNode's request filter (eth_nope:
+      // -32611 "rejected due to request filter settings", 18:56Z); BlockPI 816/1,549. All four sit behind Cloudflare
+      // (server: cloudflare and cf-ray on every answer, 18:55Z). bloXroute's base.rpc.blxrbdn.com does not (no cf-ray, its
+      // own edge) and passes the quote's own reads (18:56Z: reth like the rest, 6 batches of 20 eth_calls at a block hash
+      // at once, 5 rounds, 255-273 ms warm, every answer publicnode's; a state override; eth_getLogs over 10 blocks; the
+      // browser's CORS preflight from the app's origin, 204 with access-control-allow-origin *). It replaces
+      // base-public.nodies.app, which the device never reaches: its preflight answers no access-control-allow-origin
+      // (review of bc189de, L-5; the live check evm-quote-warm-round preflights every listed provider). Passed over:
+      // base.drpc.org and Tenderly's gateway (429 on 6 batches at once, again 18:56Z), meowrpc, zan, onfinality, 1rpc,
+      // thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), base.api.pocket.network (10 of 60
+      // answers differed), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
+      // third-party proxies of unknown operators are not listed.
+      // What the list holds against a lie: a quote decides on two that agree, and a value any provider asked contradicts
+      // is used only where more than half of these five gave it (review of bc189de, M-1). Left, as the device has always
+      // had it on two providers: two that collude, answer first and agree are not checked by a third.
+      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://base.rpc.blxrbdn.com", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
       maxLag: 5, // 2 s blocks: 10 s
       // Each launchpad factory's recent creations (apps/helper/src/data/evm/lists.ts) and the PoolManager Initialize log in
       // the same transaction, read 2026-11-03 18:49Z on base-rpc.publicnode.com; each hook's code the same on both
