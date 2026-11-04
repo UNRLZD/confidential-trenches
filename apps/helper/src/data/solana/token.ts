@@ -42,6 +42,9 @@ export const LAUNCH_WAIT_MS = 300;
 export const HOLDERS_FRESH_MS = 60_000;
 /** 06b: the OHLCV history is cached 60 s and shared; a token's top pool is kept 10 minutes. */
 export const CANDLES_FRESH_MS = 60_000;
+/** History before a given time (a read with `to`: the bars before our own first bar, or a range scrolled back) never
+ *  changes: kept an hour, as the EVM chains keep theirs (../evm/swaps.ts GT_FRESH_MS) (card app-console-429). */
+export const HISTORY_FRESH_MS = 3_600_000;
 export const POOL_FRESH_MS = 600_000;
 /** L-05: GeckoTerminal's public API, as measured (../gecko.ts GT_LIMIT_PER_MIN); the server shares one budget with the
  *  EVM lists, which yield to the token page. */
@@ -334,7 +337,7 @@ export const KEPT_HANDOVER_MS = 3_600_000;
  *  upstream failure. `opts.revalidate`: a good answer past `freshMs` whose data is under STALE_MS old is answered at
  *  once while one refresh runs, so a caller never waits on a slow upstream for what it was just served. `opts.view`:
  *  every kept answer as served (the token page fills a launch read since). */
-function cached(freshMs: number, now: () => number, read: (key: string, client?: string) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer } = {}) {
+function cached(freshMs: number | ((key: string) => number), now: () => number, read: (key: string, client?: string) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer } = {}) {
   const view = (key: string, a: DataAnswer) => (opts.view === undefined ? a : opts.view(key, a));
   const last = bounded<{ a: DataAnswer; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<DataAnswer>>();
@@ -360,7 +363,7 @@ function cached(freshMs: number, now: () => number, read: (key: string, client?:
     },
     get(key: string, client?: string): Promise<DataAnswer> {
       const hit = last.get(key);
-      if (hit !== undefined && now() - hit.at < freshMs) return Promise.resolve(view(key, hit.a));
+      if (hit !== undefined && now() - hit.at < (typeof freshMs === "number" ? freshMs : freshMs(key))) return Promise.resolve(view(key, hit.a));
       const usable = opts.revalidate === true && hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS;
       let p = running.get(key);
       if (p === undefined) {
@@ -630,7 +633,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   /** The last good GeckoTerminal bars per mint and tf: served when a read is throttled or fails (an empty chart is never
    *  the answer for a token with known history). */
   const kept = bounded<{ bars: Candle[]; at: number }>(CACHE_MAX);
-  const bars = cached(CANDLES_FRESH_MS, now, async (key) => {
+  // the newest range (no `to`) moves with every trade: CANDLES_FRESH_MS; a range before a time is history: an hour
+  const bars = cached((key) => (key.endsWith(":") ? CANDLES_FRESH_MS : HISTORY_FRESH_MS), now, async (key) => {
     const [mint, tf, to] = key.split(":") as [string, Tf, string];
     const p = await pools.get(mint);
     if (p.status !== 200) {
