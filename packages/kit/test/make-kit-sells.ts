@@ -53,9 +53,15 @@ const TEST_PINS: Kit = {
   sign: (k, c, b) => pinnedSignSell(VENUES, k, c, b),
   auth: (k, c, n) => pinnedSignSellAuthorization(VENUES, k, c, n),
 };
-// Base Sepolia (card evm-venues-pin): the kit's index as an app calls it, with the kit's own pins; SellFork.t.sol
-// SellForkBaseSepoliaPinsTest runs it on the Base fork at Base Sepolia's chain id, pool, delegate and router addresses
-const KIT: Kit = { build: kit.evmPoolBuildSell, sign: kit.evmPoolSignSell, auth: kit.evmPoolSignSellAuthorization };
+// Base Sepolia (card evm-venues-pin): the pinned builder and signer under the kit's index, with the kit's own pins (the
+// index builds only from a device sell quote, card evm-sell-device-quote, which a fork's fixed values cannot give);
+// SellFork.t.sol SellForkBaseSepoliaPinsTest runs it on the Base fork at Base Sepolia's chain id, pool, delegate and
+// router addresses
+const KIT: Kit = {
+  build: (c, r) => pinnedBuildSell(evmPoolVenues(), c, r),
+  sign: (k, c, b) => pinnedSignSell(evmPoolVenues(), k, c, b),
+  auth: kit.evmPoolSignSellAuthorization,
+};
 const SELLS: [EvmPoolChain, Fork, Kit][] = [["base", FORK.base, TEST_PINS], ["robinhood", FORK.robinhood, TEST_PINS], ["base-sepolia", FORK.base, KIT]];
 
 /** The fork sells, built and signed by the kit; `at(sec, f)` runs f with the device's clock at `sec`. */

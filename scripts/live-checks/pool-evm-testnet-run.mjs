@@ -10,8 +10,10 @@
 //                 the signed minOut, and the token's Transfer of out to W in the same receipt;
 //       sell:     a type 4 transaction to W whose one authorization names the pinned SellDelegate on this chain, and
 //                 Deposited(depositor W, commitment, label, value, precommitment) with value at least minOut less fee;
-//                 a v4 sell's target is the pinned PoolManager and its receipt holds one Swap from that PoolManager
-//                 whose sender is W (the SellDelegate code at W swapped there itself), a v3 sell's is the pinned router;
+//                 the target W signed, decoded from the transaction's input as both RPCs return it (SellDelegate.sell's
+//                 Sell.target), is the record's and the pinned one of its venue: a v4 sell's the pinned PoolManager,
+//                 whose receipt holds one Swap from that PoolManager whose sender is W (the SellDelegate code at W
+//                 swapped there itself), a v3 sell's the pinned router;
 //       withdraw: Withdrawn(W, fee recipient the run key, value, fee, nullifier, new commitment);
 //       sweep:    to the record's return address;
 //   - the pool at one block both RPCs hold with one hash (the lower of their latest): currentRoot, currentTreeSize,
@@ -94,6 +96,18 @@ const words = (data) => (String(data).slice(2).match(/.{64}/g) ?? []).map((w) =>
 const addrOf = (w) => `0x${w.toString(16).padStart(40, "0")}`;
 const topicAddr = (t) => lower(`0x${String(t).slice(26)}`);
 const word = (x) => BigInt(x).toString(16).padStart(64, "0");
+export const SELL_SELECTOR = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)");
+/** The target W signed, from a SellDelegate.sell call's input (the Sell tuple's third word), or null when the input is
+ *  not one. */
+export function sellTarget(input) {
+  const h = String(input).toLowerCase();
+  if (!h.startsWith(SELL_SELECTOR) || !/^0x[0-9a-f]*$/.test(h)) return null;
+  const w = (i) => (h.length >= 10 + 64 * (i + 1) ? BigInt(`0x${h.slice(10 + 64 * i, 10 + 64 * (i + 1))}`) : null);
+  const at = w(0);
+  if (at === null || at % 32n !== 0n || at > BigInt(h.length)) return null;
+  const t = w(Number(at / 32n) + 2);
+  return t === null || t >= 1n << 160n ? null : addrOf(t);
+}
 
 /** The check of one run record: { ok, lines }. `transport(url, method, params)` answers { result } or { error }. */
 export async function check(rec, transport, urls = RPCS[rec.chain]) {
@@ -165,7 +179,12 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
           if (auths.length !== 1 || lower(auths[0].address) !== pins.sellDelegate || BigInt(auths[0].chainId) !== BigInt(rec.chainId)) throw new Error(`${t.step} ${t.hash}: its authorization is not this chain's pinned SellDelegate ${pins.sellDelegate}`);
           if (value < BigInt(t.minOut) - BigInt(t.fee)) throw new Error(`${t.step} ${t.hash}: deposited ${value}, under minOut ${t.minOut} less the fee ${t.fee}`);
           const through = t.venue === "v4" ? pins.poolManager : t.venue === "v3" ? pins.router : null;
-          if (!through || lower(t.target) !== through) throw new Error(`${t.step} ${t.hash}: a ${t.venue} sell through ${t.target}, not this chain's pinned ${t.venue === "v4" ? "PoolManager" : "router"} ${through}`);
+          // the target W signed, from the chain's own answer: a record cannot say one and the chain hold another (the
+          // review of a22060d, item 1)
+          const signed = sellTarget(tx.input);
+          if (signed === null) throw new Error(`${t.step} ${t.hash}: its input is not a SellDelegate.sell call`);
+          if (signed !== lower(t.target)) throw new Error(`${t.step} ${t.hash}: W signed the target ${signed}, the record says ${t.target}`);
+          if (!through || signed !== through) throw new Error(`${t.step} ${t.hash}: a ${t.venue} sell through ${signed}, not this chain's pinned ${t.venue === "v4" ? "PoolManager" : "router"} ${through}`);
           if (t.venue === "v4") {
             const sw = log(TOPICS.Swap, pins.poolManager);
             if (topicAddr(sw.topics[2]) !== lower(t.w)) throw new Error(`${t.step} ${t.hash}: the PoolManager's Swap names sender ${topicAddr(sw.topics[2])}, not W ${t.w}`);

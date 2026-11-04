@@ -338,7 +338,9 @@ test("the router lists are frozen with the rest of the venue list, and the kit e
   assert.throws(() => void (v.base!.routers[0] = Y), TypeError);
   assert.throws(() => void (v.robinhood!.routers[0] = Y), TypeError);
   assert.equal(code(() => evmPoolBuildSell("base", req({ target: Y }))), "bad_target");
-  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuildQuoted", "evmPoolBuildSell", "evmPoolBuyQuote", "evmPoolGas", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
+  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuildQuoted", "evmPoolBuildSell", "evmPoolBuyQuote", "evmPoolGas", "evmPoolRouteData", "evmPoolSellQuote", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
+  // the index's builder takes a device sell quote, never a route (card evm-sell-device-quote)
+  assert.throws(() => (kit.evmPoolBuildSell as (...a: unknown[]) => unknown)("base", req()), (e: unknown) => e instanceof kit.EvmQuoteError && e.code === "bad_request");
 });
 
 test("the fork fixture is the kit's own output: forkSells() equals contracts/pool-evm/test/fixtures/kit-sells.json", () => {
@@ -376,14 +378,16 @@ const PINNED = Object.freeze({
 });
 const { pool: _pool, ...pinnedReq } = req();
 
-test("M370 today no pool or sell delegate is pinned: the kit's evmPoolBuildSell, evmPoolSignSell and evmPoolSignSellAuthorization refuse not_deployed", () => {
+test("M370 today no pool or sell delegate is pinned: the pinned builder and signer under the kit's evmPoolBuildSell and evmPoolSignSell, and evmPoolSignSellAuthorization, refuse not_deployed", () => {
   for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
     const v = evmPoolVenues()[chain];
     assert.equal(v.pool, undefined);
     assert.equal(v.sellDelegate, undefined);
     const r = { ...pinnedReq, target: v.routers[0]!, route: v3([X, v.weth]) };
-    assert.equal(code(() => kit.evmPoolBuildSell(chain, r)), "not_deployed", chain);
-    assert.equal(code(() => kit.evmPoolSignSell(W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: PIN_POOL }))), "not_deployed", chain);
+    assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), chain, r)), "not_deployed", chain);
+    assert.equal(code(() => pinnedSignSell(evmPoolVenues(), W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: PIN_POOL }))), "not_deployed", chain);
+    // the kit's signer signs only a sell its quoted builder returned
+    assert.equal(code(() => kit.evmPoolSignSell(W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: PIN_POOL }))), "not_built", chain);
     assert.equal(code(() => kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n)), "not_deployed", chain);
   }
 });
@@ -436,8 +440,8 @@ test("M370 a polluted Object.prototype names no pool and no delegate: every sell
     for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
       const v = evmPoolVenues()[chain];
       const r = { ...pinnedReq, target: v.routers[0]!, route: v3([X, v.weth]) };
-      assert.equal(code(() => kit.evmPoolBuildSell(chain, r)), "not_deployed", chain);
-      assert.equal(code(() => kit.evmPoolSignSell(W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL }))), "not_deployed", chain);
+      assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), chain, r)), "not_deployed", chain);
+      assert.equal(code(() => pinnedSignSell(evmPoolVenues(), W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL }))), "not_deployed", chain);
       assert.equal(code(() => kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n)), "not_deployed", chain);
       assert.equal(code(() => pinnedBuildSell(noPins, chain, r)), "not_deployed", chain);
       assert.equal(code(() => pinnedSignSell(noPins, W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL }))), "not_deployed", chain);
@@ -459,11 +463,17 @@ const sellV4 = (route: unknown, o: Partial<EvmPoolSellRequest> = {}, chain: EvmP
 
 test("a v4 sell's data is SellDelegate's PathKey[] as cast encodes it, from the token to the native asset or WETH", () => {
   assert.equal(sellV4(v4(hop(NATIVE))).data, V4CAST.oneHopNative);
-  const clanker = hop(B.weth, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks, hookData: "0x1234" });
-  assert.equal(sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), clanker)).data, V4CAST.usdcThenClanker);
+  const clanker = hop(B.weth, { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks });
+  assert.equal(sellV4(v4(clanker)).data, V4CAST.clankerFromToken);
+  assert.equal(sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), hop(NATIVE))).data, V4CAST.usdcThenNative);
+  // the review of a22060d, item 2: a listed hook on a pool that does not spend the token sold (USDC, then a Clanker
+  // hop of USDC to WETH) is no launchpad pool of the token
+  assert.equal(code(() => sellV4(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), clanker))), "bad_route");
   const built = sellV4(v4(hop(NATIVE)), {}, "robinhood-testnet");
-  assert.equal(built.target, evmPoolVenues()["robinhood-testnet"].poolManager);
   assert.ok(Object.isFrozen(built));
+  // item 3: the target is the pinned PoolManager because nothing else builds, not because the test passed it in
+  assert.equal(code(() => sellV4(v4(hop(NATIVE)), { target: evmPoolVenues()["base-sepolia"].poolManager! }, "robinhood-testnet")), "bad_target");
+  assert.equal(code(() => sellV4(v4(hop(NATIVE)), { target: Y }, "robinhood-testnet")), "bad_target");
 });
 
 test("planted: a v4 sell through another target, to a wrong pool key, or through a hook not on a listed pool is refused", () => {
@@ -513,10 +523,16 @@ test("planted: a v4 sell through another target, to a wrong pool key, or through
   assert.equal(c(v4(hop(NATIVE, { hooks: 5 as unknown as string }))), "bad_route");
   assert.equal(c(v4(hop(NATIVE, { hookData: "0x00" }))), "bad_route"); // hook data with no hook
   assert.equal(c(v4(hop(NATIVE, { hookData: "1234" }))), "bad_route");
+  // the review of a22060d, item 5: hook data is the device's own, empty, even on a listed hook (a hook that reads a
+  // trade referrer from it would let the route's writer name itself)
   const listed = { fee: CLANKER.fee, tickSpacing: CLANKER.tickSpacing, hooks: CLANKER.hooks };
-  assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0x" + "ab".repeat(1024) }))), "built");
-  assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0x" + "ab".repeat(1025) }))), "bad_route");
+  assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0x" }))), "built");
+  assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0x00" }))), "bad_route");
+  assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0x" + "ab".repeat(1024) }))), "bad_route");
   assert.equal(c(v4(hop(B.weth, { ...listed, hookData: "0xabc" }))), "bad_route");
-  // the token sold is the route's start: a route from another token is no route of this sell
-  assert.equal(c(v4(hop(NATIVE)), { token: B.weth }), "bad_route");
+  // item 4: the token sold is the route's start, refused in the route check: a v3 path from another token, and a listed
+  // hook's pool reached from another token
+  assert.equal(c(v3([Y, B.weth]), { target: B.routers[0]! }), "token_mismatch");
+  assert.equal(c(v4(hop(B.weth, listed)), { token: Y }), "built");
+  assert.equal(c(v4(hop(USDC, { fee: 500, tickSpacing: 10 }), hop(B.weth, listed)), { token: Y }), "bad_route");
 });

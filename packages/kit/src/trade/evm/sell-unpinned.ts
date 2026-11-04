@@ -16,10 +16,11 @@
 //     PoolManager unlock (contracts/pool-evm/src/SellDelegate.sol): from the token, each hop's currency the next, the
 //     last the native asset or the chain's WETH and neither one before it, a middle only from the venue list; each
 //     hop's fee a u24, tick spacing 1 to 32,767, and hooks either none (no hook data) or exactly a launchpad pool the
-//     venue lists (evmPoolVenues().hookedPools: hook, fee, tick spacing, and the asset it pairs the token with), its
-//     hook data at most EVM_POOL_MAX_HOOK_DATA bytes. A hook is part of the price, and the sell has no quote of its
-//     own yet (card evm-sell-device-quote), so an unlisted hook, or a listed one with another fee or tick spacing, is
-//     refused rather than bounded by minOut alone. A key that names no initialized pool reverts the whole sell in the
+//     venue lists (evmPoolVenues().hookedPools: hook, fee, tick spacing, and the asset it pairs the token with) on the
+//     hop that spends the token sold; every hop's hook data empty (the device's own, never a route's). A hook is part of
+//     the price, so an unlisted hook, or a listed one with another fee or tick spacing, is refused rather than bounded
+//     by minOut alone; the kit's index builds a sell only from the device's own quote (checks/evm/quote.ts
+//     evmPoolSellQuote, card evm-sell-device-quote). A key that names no initialized pool reverts the whole sell in the
 //     PoolManager (PoolNotInitialized), so W keeps its token;
 // - the deadline is unix seconds, at least EVM_POOL_SELL_DEADLINE_MIN_S and at most EVM_POOL_SELL_DEADLINE_MAX_S past
 //   now;
@@ -35,7 +36,6 @@
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
-  EVM_POOL_MAX_HOOK_DATA,
   EVM_POOL_MAX_HOPS,
   evmPoolVenues,
   pathKeysAbi,
@@ -206,19 +206,19 @@ function v4Data(chain: EvmPoolChain, token: string, hopsIn: unknown): string {
     if (!Number.isInteger(tickSpacing) || (tickSpacing as number) < 1 || (tickSpacing as number) > MAX_TICK_SPACING) {
       refuse("bad_route", `a v4 tick spacing is 1 to ${MAX_TICK_SPACING}`);
     }
-    if (typeof hookData !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(hookData)) refuse("bad_route", "hook data is 0x hex");
     const to = lower(currency as string);
     const last = i === hops.length - 1;
     if (to === from) refuse("bad_route", "a hop buys what it spends");
     if (last ? to !== NATIVE && to !== weth : to === NATIVE || to === weth) refuse("bad_route", "a v4 sell ends at the native asset or the chain's WETH, and only there");
     if (!last && !listed.has(to)) refuse("middle_not_listed", `${currency} is not on the venue list`);
-    if (lower(hooks as string) === NATIVE) {
-      if (hookData !== "0x") refuse("bad_route", "a hop with no hook carries no hook data");
-    } else {
-      if (((hookData as string).length - 2) / 2 > EVM_POOL_MAX_HOOK_DATA) refuse("bad_route", `hook data is at most ${EVM_POOL_MAX_HOOK_DATA} bytes`);
-      // a hook only on a launchpad pool the venue lists, with its own fee and tick spacing, paired with its asset
-      const on = shapes.some((p) => lower(p.hooks) === lower(hooks as string) && p.fee === fee && p.tickSpacing === tickSpacing && to === (p.from === "native" ? NATIVE : weth));
-      if (!on) refuse("bad_route", `the hook ${hooks} with fee ${fee} and tick spacing ${tickSpacing} is not a pool the venue lists`);
+    // hook data is the device's, and the device makes none: a listed hook that reads a trade referrer from it would
+    // let whoever wrote it name itself (review of a22060d, item 5)
+    if (hookData !== "0x") refuse("bad_route", "a sell's hook data is the device's own: empty");
+    if (lower(hooks as string) !== NATIVE) {
+      // a hook only on a launchpad pool the venue lists, with its own fee and tick spacing, that spends the token sold
+      // and pays the asset the venue pairs it with (review of a22060d, item 2: a listed hook on a USDC/WETH pool built)
+      const on = from === lower(token) && shapes.some((p) => lower(p.hooks) === lower(hooks as string) && p.fee === fee && p.tickSpacing === tickSpacing && to === (p.from === "native" ? NATIVE : weth));
+      if (!on) refuse("bad_route", `the hook ${hooks} with fee ${fee} and tick spacing ${tickSpacing} is not a pool of the token the venue lists`);
     }
     from = to;
   });

@@ -320,8 +320,11 @@ test("Q8 a bad request refuses before any read", async () => {
     await refused(evmPoolBuyQuoteWith(bad as EvmPoolBuyQuoteRequest, [none, other], now), code);
   }
   await refused(evmPoolBuyQuoteWith(r, [none, none], now), "bad_request");
-  await refused(evmPoolBuyQuoteWith({ ...r, chain: "base-sepolia" }, [none, other], now), "no_quoter");
-  await refused(kit.evmPoolBuyQuote({ ...r, chain: "base-sepolia" }), "no_quoter");
+  // Robinhood testnet pins a V4Quoter and no QuoterV2 (no v3 there, M365; card evm-sell-device-quote): a v3 route is
+  // refused before any read, on any providers and on the pinned ones
+  const rhV3 = { ...r, chain: "robinhood-testnet" as const, route: { venue: "uniswap-v3" as const, tokens: [kit.evmPoolVenues()["robinhood-testnet"].weth, r.token], fees: [3000] } };
+  await refused(evmPoolBuyQuoteWith(rhV3, [none, other], now), "no_quoter");
+  await refused(kit.evmPoolBuyQuote(rhV3), "no_quoter");
   // two providers on one host, or not https, are refused
   assert.throws(() => evmProviders(["https://a.example.org/x", "https://A.example.org/y"], fetch), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
   assert.throws(() => evmProviders(["http://a.example.org", "https://b.example.org"], fetch), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
