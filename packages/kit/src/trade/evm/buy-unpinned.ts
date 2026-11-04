@@ -107,7 +107,9 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // third-party proxies of unknown operators are not listed.
       // What the list holds against a lie: a quote decides on two that agree, and a value any provider asked contradicts
       // is used only where more than half of these five gave it (review of bc189de, M-1). Left, as the device has always
-      // had it on two providers: two that collude, answer first and agree are not checked by a third.
+      // had it on two providers: two that collude and agree, each answering more than the hedge (EVM_HEDGE_MS, 400 ms)
+      // sooner than the honest provider they are asked beside, decide before its answer lands (re-review of fd9dd16,
+      // Q10).
       providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://base.rpc.blxrbdn.com", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
       maxLag: 5, // 2 s blocks: 10 s
       // Each launchpad factory's recent creations (apps/helper/src/data/evm/lists.ts) and the PoolManager Initialize log in

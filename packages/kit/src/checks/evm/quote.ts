@@ -397,7 +397,15 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
 export const EVM_HEDGE_MS = 400;
 // a provider's hold (timed, EVM_HOLD_MS), for an answer that differs from the one a quote used (review of bc189de, M-2)
 const HOLD = new WeakMap<EvmRpc, () => void>();
-function agreeing<T>(rpcs: readonly EvmRpc[], one: (rpc: EvmRpc, k: number) => Promise<T>, same: (a: T, b: T) => boolean, differ: (a: T, b: T) => never, vote = true): Promise<{ a: T; b: T; i: number; j: number }> {
+function agreeing<T>(
+  rpcs: readonly EvmRpc[],
+  one: (rpc: EvmRpc, k: number) => Promise<T>,
+  same: (a: T, b: T) => boolean,
+  differ: (a: T, b: T) => never,
+  vote = true,
+  // which answers that differ from the two used are held (by default, any that is `same` as neither)
+  held: (x: T, a: T, b: T) => boolean = (x, a, b) => !same(a, x) && !same(b, x),
+): Promise<{ a: T; b: T; i: number; j: number }> {
   const list = [...rpcs];
   const need = Math.floor(list.length / 2) + 1;
   return new Promise((resolve, reject) => {
@@ -438,7 +446,7 @@ function agreeing<T>(rpcs: readonly EvmRpc[], one: (rpc: EvmRpc, k: number) => P
         const order = [list[g.k]!, list[h.k]!, ...list.filter((_, n) => n !== g.k && n !== h.k)];
         order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));
       }
-      for (const x of got) if (!same(g.v, x.v) && !same(h.v, x.v)) HOLD.get(list[x.k]!)?.();
+      for (const x of got) if (held(x.v, g.v, h.v)) HOLD.get(list[x.k]!)?.();
       resolve({ a: g.v, b: h.v, i: g.k, j: h.k });
     };
     const t0: number[] = [];
@@ -563,6 +571,9 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
     (x, y) => refuse("rpc_disagree", `the providers' heads ${x.number} and ${y.number} are more than ${maxLag} blocks apart`),
     // a head past maxLag is a missing answer, not a vote
     false,
+    // held: only a head more than maxLag below the lower of the two, never one above them (re-review of fd9dd16, LOW-1:
+    // a liar's old head and a lagging honest one held the provider that was up to date)
+    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),
   );
   const [lo, at] = a.number <= b.number ? [a, j] : [b, i];
   if (nowMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse("stale_quote", `block ${lo.number} is more than 30 s old`);
@@ -577,15 +588,21 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
     let holds = 1;
     const against: number[] = [];
     let failed: { e: unknown } | null = null;
-    const enough = () => holds >= (against.length === 0 ? 2 : need);
+    // where the other head's provider gives no answer (a failure, or no such block), or one holds another block, the
+    // block is read at only with `need`: a spare alone never confirms what the lower head's provider named (re-review
+    // of fd9dd16, MEDIUM-1: two colluders confirmed their block when the honest one of the pair failed its confirm)
+    let unsure = false;
+    const strict = () => unsure || against.length > 0;
+    const enough = () => holds >= (strict() ? need : 2);
     for (let n = 0; n < others.length && !enough(); n++) {
-      // contested, and too few left to bring it to `need`
-      if (against.length > 0 && holds + others.length - n < need) break;
+      // too few left to bring it to `need`
+      if (strict() && holds + others.length - n < need) break;
       let back: Block;
       try {
         back = header((await askAt(list[others[n]!]!, [by]))[0], `provider ${others[n]! + 1}`);
       } catch (e) {
         failed ??= { e };
+        if (n === 0) unsure = true;
         continue;
       }
       if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {

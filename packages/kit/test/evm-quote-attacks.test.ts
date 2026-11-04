@@ -2625,3 +2625,91 @@ test("V11 a fast provider whose reads the others outvote is held: the next quote
   assert.equal(big(await verdict(evmPoolBuyQuoteWith(req, quoteMod.evmProviders(quoteMod.evmRanked(urls), f), NOW))), big({ accepted: false, code: "below_reference" }));
   assert.equal(hostOf(quoteMod.evmRanked(urls).at(-1)!), "l1.v11.test", "the provider the others outvoted is ranked last");
 });
+
+// ------------------------------------------------------------------ the re-review of fd9dd16 (card evm-quote-warm-round)
+const priceAtOld = (p: Pool, hash: string) => (hash === OLD ? p.amount : p.hops === 2 ? 3n * p.amount : p.amount);
+// an honest node: it holds no block with the hash OLD ("header not found" to a read there); `confirm` "throws" fails
+// every block by number, "null" answers it as not held yet (a load balancer's lagging backend)
+const honestNode = (confirm: "ok" | "throws" | "null" = "ok"): EvmRpc => {
+  const inner = provider(head("0x2000000"), priceAtOld);
+  return async (calls) => {
+    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest")) {
+      if (confirm === "throws") throw new TypeError("fetch failed");
+      if (confirm === "null") return calls.map((_, id) => ({ jsonrpc: "2.0", id, result: null }));
+    }
+    const out = await inner(calls);
+    return out.map((a, i) => ((calls[i]!.params[1] as { blockHash?: string } | undefined)?.blockHash === OLD ? { jsonrpc: "2.0", id: i, error: { code: -32000, message: "header not found" } } : a));
+  };
+};
+// a colluder: the honest head's number with the hash OLD, and that block by number
+const oldNode = () => provider(head("0x2000000", OLD), priceAtOld, { "0x2000000": head("0x2000000", OLD) });
+
+test("V12 the pair's honest provider gives no confirm (it fails, or holds no such block): a colluding spare alone never confirms the liar's block", async () => {
+  for (const c of ["throws", "null"] as const) {
+    assert.equal(big(await buyN(v3direct, [oldNode(), honestNode(c), oldNode(), honestNode(), honestNode()])), big({ accepted: false, code: "rpc_disagree" }), c);
+  }
+  // all honest, the other head's provider failing its confirm: three of five hold the block
+  const v = await buyN(v3direct, [honestNode(), honestNode("throws"), honestNode(), honestNode(), honestNode()]);
+  assert.equal(big(v), big({ accepted: false, code: "below_reference" }), "read at the block, priced, refused on its own merits");
+});
+
+test("V13 a head is held only when more than maxLag below the lower of the two used: a liar's old head and a lagging honest one never hold the up-to-date provider", async () => {
+  quoteMod.evmSpeedReset();
+  const token = freshToken();
+  const pools = [best(token)];
+  // Base's maxLag is 5: l1 names 4,999,990, h2 lags at 4,999,992, h1, h3 and h4 are at 5,000,000; each block by number
+  // answered as that number's block (every model block carries the hash NEW)
+  const byNum = (rpc: EvmRpc): EvmRpc => async (calls) =>
+    calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest") ? calls.map((c, id) => ({ jsonrpc: "2.0", id, result: head(c.params[0] as string) })) : rpc(calls);
+  const { f, urls } = hosted({
+    "l1.v13.test": { rpc: byNum(chain(pools, 0, 4_999_990)), ms: 1 },
+    "h1.v13.test": { rpc: byNum(chain(pools, 0, 5_000_000)), ms: 5 },
+    "h2.v13.test": { rpc: byNum(chain(pools, 1, 4_999_992)), ms: 5 },
+    "h3.v13.test": { rpc: byNum(chain(pools, 1, 5_000_000)), ms: 50 },
+    "h4.v13.test": { rpc: byNum(chain(pools, 1, 5_000_000)), ms: 50 },
+  });
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(urls, f), NOW));
+  // the heads are no vote: the first two near ones (l1, h2) pick the block, the lower
+  assert.equal((v as { block?: bigint }).block, 4_999_990n, big(v));
+  assert.notEqual(hostOf(quoteMod.evmRanked(urls).at(-1)!), "h1.v13.test", `h1 is not held: ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
+  // a head more than maxLag below is held
+  quoteMod.evmSpeedReset();
+  const low = hosted({
+    "a.v13.test": { rpc: chain(pools, 0, 5_000_000), ms: 1 },
+    "b.v13.test": { rpc: chain(pools, 0, 4_999_000), ms: 1 },
+    "c.v13.test": { rpc: chain(pools, 1, 5_000_000), ms: 5 },
+  });
+  assert.equal((await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(low.urls, low.f), NOW))).accepted, true);
+  assert.equal(hostOf(quoteMod.evmRanked(low.urls).at(-1)!), "b.v13.test");
+});
+
+test("V14 a contested read whose majority no provider left can reach refuses at once, never waiting on a provider that hangs", { timeout: 20_000 }, async () => {
+  const { pools, req } = liarCase(freshToken());
+  const failing: EvmRpc = async (calls) => {
+    if (calls.some((c) => c.method === "eth_call")) throw new TypeError("fetch failed");
+    return chain(pools, 0)(calls);
+  };
+  const hung: EvmRpc = async (calls) => {
+    if (calls.some((c) => c.method === "eth_call")) {
+      await pause(4000);
+      throw new TypeError("fetch failed");
+    }
+    return chain(pools, 0)(calls);
+  };
+  const t = performance.now();
+  // need 3 of 4: one honest, one liar, one failed, one out: at most 2
+  assert.equal(big(await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1), failing, hung], NOW))), big({ accepted: false, code: "rpc_disagree" }));
+  assert.ok(performance.now() - t < 2_000, `${Math.round(performance.now() - t)} ms`);
+});
+
+test("V15 a confirm that can no longer reach a majority stops asking", async () => {
+  let asked = 0;
+  const counted = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest")) asked++;
+    return rpc(calls);
+  };
+  const higher = provider(head("0x2000001"), priceAtOld, { "0x2000000": head("0x2000000") });
+  // the lower head's block (OLD) against the higher's, then two more against: one vote of five, one provider left
+  assert.equal(big(await buyN(v3direct, [oldNode(), higher, honestNode(), honestNode(), counted(honestNode())])), big({ accepted: false, code: "rpc_disagree" }));
+  assert.equal(asked, 0, "the fifth is never asked to confirm");
+});
