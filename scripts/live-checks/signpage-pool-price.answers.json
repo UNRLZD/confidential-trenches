@@ -1,0 +1,228 @@
+{
+ "good": {
+  "check": "signpage-pool-price",
+  "at": "2026-11-04T14:41:51.867Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with the devnet pool and the page's own price read",
+  "browser": "156.0.8078.79",
+  "read": {
+   "rpcs": [
+    "https://solana-rpc.publicnode.com",
+    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+   ],
+   "price": "9388311299",
+   "expo": -8,
+   "published_s": 1793803309,
+   "read_ms": 1793803313572
+  },
+  "entry": "/assets/index-ByRV7dR0.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "price": "fresh",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "bal": "Bal $0.93",
+     "ctaOn": true,
+     "cta": "Buy DJT"
+    },
+    "asked": [
+     {
+      "type": "pool.buy",
+      "params": {
+       "chain": "solana",
+       "amount": "0.000532577",
+       "slippage_bps": 1000,
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
+      }
+     }
+    ],
+    "shot": "desktop-fresh.png"
+   },
+   {
+    "width": "phone",
+    "price": "fresh",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "bal": "Bal $0.93",
+     "ctaOn": true,
+     "cta": "Buy DJT"
+    },
+    "asked": [
+     {
+      "type": "pool.buy",
+      "params": {
+       "chain": "solana",
+       "amount": "0.000532577",
+       "slippage_bps": 1000,
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
+      }
+     }
+    ],
+    "shot": "phone-fresh.png"
+   },
+   {
+    "width": "desktop",
+    "price": "stale",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "bal": "Bal \u2014",
+     "ctaOn": false,
+     "cta": "Buy DJT"
+    },
+    "asked": [],
+    "shot": "desktop-stale.png"
+   },
+   {
+    "width": "phone",
+    "price": "stale",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "bal": "Bal \u2014",
+     "ctaOn": false,
+     "cta": "Buy DJT"
+    },
+    "asked": [],
+    "shot": "phone-stale.png"
+   },
+   {
+    "width": "desktop",
+    "price": "none",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "bal": "Bal \u2014",
+     "ctaOn": false,
+     "cta": "Buy DJT"
+    },
+    "asked": [],
+    "shot": "desktop-none.png"
+   },
+   {
+    "width": "phone",
+    "price": "none",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "bal": "Bal \u2014",
+     "ctaOn": false,
+     "cta": "Buy DJT"
+    },
+    "asked": [],
+    "shot": "phone-none.png"
+   }
+  ]
+ },
+ "bad": {
+  "check": "signpage-pool-price",
+  "at": "2026-11-04T14:42:03.594Z",
+  "source": "live https://confidential.unrealized.trade, the stand-in shell signed in with the devnet pool and the page's own price read",
+  "browser": "156.0.8078.79",
+  "read": {
+   "rpcs": [
+    "https://solana-rpc.publicnode.com",
+    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+   ],
+   "price": "9389103399",
+   "expo": -8,
+   "published_s": 1793803319,
+   "read_ms": 1793803324461
+  },
+  "entry": "/assets/index-BqB1l2a4.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "price": "fresh",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "vault",
+     "bal": "Bal \u2014",
+     "ctaOn": true,
+     "cta": "Sign in to trade"
+    },
+    "asked": [],
+    "shot": "desktop-fresh.png"
+   },
+   {
+    "width": "phone",
+    "price": "fresh",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "vault",
+     "bal": "Bal \u2014",
+     "ctaOn": true,
+     "cta": "Sign in to trade"
+    },
+    "asked": [],
+    "shot": "phone-fresh.png"
+   },
+   {
+    "width": "desktop",
+    "price": "stale",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "vault",
+     "bal": "Bal \u2014",
+     "ctaOn": true,
+     "cta": "Sign in to trade"
+    },
+    "asked": [],
+    "shot": "desktop-stale.png"
+   },
+   {
+    "width": "phone",
+    "price": "stale",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "vault",
+     "bal": "Bal \u2014",
+     "ctaOn": true,
+     "cta": "Sign in to trade"
+    },
+    "asked": [],
+    "shot": "phone-stale.png"
+   },
+   {
+    "width": "desktop",
+    "price": "none",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "bal": "Bal \u2014",
+     "ctaOn": false,
+     "cta": "Buy cbBTC"
+    },
+    "asked": [],
+    "shot": "desktop-none.png"
+   },
+   {
+    "width": "phone",
+    "price": "none",
+    "framed": true,
+    "route": "token",
+    "box": {
+     "path": "pool",
+     "bal": "Bal \u2014",
+     "ctaOn": false,
+     "cta": "Buy cbBTC"
+    },
+    "asked": [],
+    "shot": "phone-none.png"
+   }
+  ]
+ }
+}
