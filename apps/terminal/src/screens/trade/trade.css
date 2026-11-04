@@ -132,9 +132,9 @@
 .rs-ld > i { --dot: var(--acc); width: 0; opacity: 0.9; transition: width 0.25s ease-out; }
 .rs-l[data-full] .rs-ld > i { width: 100%; }
 /* the wallet step and its link grow in from nothing at the tap, from the middle; the padding and negative margin keep the glow and badge unclipped */
-.rs-grp { display: flex; align-items: flex-start; flex: none; box-sizing: content-box; max-width: 0; margin: -10px; padding: 10px; overflow: hidden; opacity: 0; transition: max-width 0.3s cubic-bezier(0.65, 0, 0.35, 1), opacity 0.3s cubic-bezier(0.65, 0, 0.35, 1); }
-.rs-grp[data-in] { max-width: 220px; opacity: 1; }
-.rs-grp > .rs-l { flex: 1 1 24px; }
+.rs-grp { display: flex; align-items: flex-start; flex: 1 1 auto; box-sizing: content-box; max-width: 0; margin: -10px; padding: 10px; overflow: hidden; opacity: 0; transition: max-width 0.3s cubic-bezier(0.65, 0, 0.35, 1), opacity 0.3s cubic-bezier(0.65, 0, 0.35, 1); }
+.rs-grp[data-in] { max-width: 260px; opacity: 1; }
+.rs-grp > .rs-l { flex: 1 1 0; min-width: 12px; }
 /* the fill toast: centred at the top, fades in and slides down 12 px */
 .rs-toast { position: fixed; z-index: 95; left: 50%; top: 68px; width: min(340px, calc(100vw - 32px)); box-sizing: border-box; display: flex; align-items: flex-start; gap: 12px; padding: 14px; border-radius: 12px; background: var(--bg-raised); border: 1px solid var(--border-strong); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); opacity: 0; transform: translateX(-50%) translateY(-12px); transition: opacity 0.3s cubic-bezier(0.65, 0, 0.35, 1), transform 0.3s cubic-bezier(0.65, 0, 0.35, 1); cursor: default; }
 .rs-toast[data-shown] { opacity: 1; transform: translateX(-50%) translateY(0); }
