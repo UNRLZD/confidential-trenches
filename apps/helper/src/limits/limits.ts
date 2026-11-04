@@ -164,11 +164,16 @@ export function clientWindow(max: number, now: () => number = Date.now, windowMs
  * not reserved: the trade walks) go only while every draw in the window, callers' included, leaves it free, so callers
  * go ahead of them and a walk never makes a caller wait for room it took. */
 /** `lend` (card helper-crowd-429): the share is work-conserving. A caller past its 10 s share, or whose draws in the
- * vendor's window already took half the callers' part, still draws while the total, less the reserve, keeps a share
- * free for the next caller and one for each other caller drawing in this 10 s window: the share only orders callers
+ * vendor's window already took LEND_FREE_SHARES shares or half the callers' part, still draws while the total, less the reserve, keeps a share
+ * free for the next caller and one for each other caller with a draw in the vendor's window (fold 3): the share only orders callers
  * when the total is contended (the heavy one goes behind), and a device's second trade inside 10 s is no longer
  * refused while the budget sits idle. A draw that reaches no vendor (a cache hit) keeps its share. The total and the
  * reserve are unchanged. */
+/** A lending key's caller draws its first LEND_FREE_SHARES shares in the vendor's window (two trades of Jupiter
+ * builds a minute) on the total alone; past them it is lent, behind every other caller (card helper-crowd-429 fold 3:
+ * with half the callers' part as the only mark, two heavy callers drew all of it before either was lent, and a third
+ * caller's trade got 429). */
+export const LEND_FREE_SHARES = 2;
 export type BudgetLimits = { total: number; perClient: number; windowMs?: number; reserve?: number; userRoom?: number; lend?: boolean };
 
 /**
@@ -197,6 +202,20 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     const from = t - (lim.windowMs ?? windowMs);
     while (d.length > 0 && d[0]! <= from) d.shift();
     return d.length;
+  };
+  /** Per lending key: each client's last draw that reached the vendor, oldest first (card helper-crowd-429 fold 3). */
+  const active = new Map<string, Map<string, number>>();
+  /** The other clients with a draw in the vendor's window: the oldest leave first, their draws with them. */
+  const activeOthers = (key: string, client: string, t: number, lim: BudgetLimits): number => {
+    const a = active.get(key);
+    if (a === undefined) return 0;
+    const from = t - (lim.windowMs ?? windowMs);
+    for (const [c, at] of a) {
+      if (at > from) break;
+      a.delete(c);
+      drawn.get(key)?.delete(c);
+    }
+    return a.size - (a.has(client) ? 1 : 0);
   };
   /** Per key: [second, requests sent in it, of them not reserved], oldest first, kept while the provider's window may
    * still count them. */
@@ -260,10 +279,12 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
       const overShare = client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient;
       // a lending key's caller past its share, or past half the callers' part in the vendor's window (its draws so far
       // took that much), is lent only while a share stays free for the caller asking next and for each other caller
-      // drawing in this window (card helper-crowd-429): it goes behind them when the total is contended, never ahead
-      const heavy = lim.lend === true && client !== undefined && !shareOnly && (overShare || drawnBy(key, client, t, lim) + n > Math.ceil((lim.total - (lim.reserve ?? 0)) / 2));
+      // with a draw in the vendor's window (card helper-crowd-429 fold 3: counted over the vendor's window, a minute for
+      // Jupiter, not the 10 s share window, so a caller that drew earlier in the minute never drops out of the count at
+      // a 10 s boundary): it goes behind them when the total is contended, never ahead
+      const heavy = lim.lend === true && client !== undefined && !shareOnly && (overShare || drawnBy(key, client, t, lim) + n > Math.min(LEND_FREE_SHARES * lim.perClient, Math.ceil((lim.total - (lim.reserve ?? 0)) / 2)));
       if (heavy) {
-        const keep = lim.perClient * (1 + [...(shares.get(key)?.keys() ?? [])].filter((c) => c !== client).length);
+        const keep = lim.perClient * (1 + activeOthers(key, client, t, lim));
         const tk = totalWait(key, n + keep, t, lim, reserved, background);
         if (tk > wait) (wait = tk), (refusedBy = `${key} ${overShare ? "share" : "total"}`);
       } else if (overShare) {
@@ -291,6 +312,15 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
         if (d.length === 0 && m.size >= clients) m.delete(m.keys().next().value as string);
         for (let i = 0; i < n; i++) d.push(t);
         m.set(client, d);
+        let a = active.get(key);
+        if (a === undefined) active.set(key, (a = new Map()));
+        a.delete(client);
+        if (a.size >= clients) {
+          const first = a.keys().next().value as string;
+          a.delete(first);
+          m.delete(first);
+        }
+        a.set(client, t);
       }
       let q = sent.get(key);
       if (q === undefined) sent.set(key, (q = []));

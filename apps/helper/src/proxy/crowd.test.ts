@@ -75,3 +75,27 @@ test("card helper-crowd-429: two devices contending for Jupiter's callers' part:
   assert.deepEqual(lightRefused, [], "the light device's every build served");
   assert.ok(heavy >= 3 * 13, `the heavy device lent past its share: ${heavy} builds in three minutes`);
 });
+
+test("card helper-crowd-429 fold 3: two heavy devices drawing Jupiter as fast as they are served for two minutes never make a third or a fourth device wait or 429 for a trade inside its own share", async () => {
+  const j = jupiterFree();
+  const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: j.clock.sleep });
+  const refused: string[] = [];
+  let heavy = 0;
+  // the third device trades (4 builds, 200 ms apart) every minute from 20 s, the fourth every minute from 35 s: each
+  // trade inside its 10 s share, while the two heavy ones ask a build every 200 ms each
+  const trades: [string, number][] = [["198.51.100.3", 20_000], ["198.51.100.4", 35_000]];
+  for (let ms = 0; ms < 120_000; ms += 200) {
+    for (const ip of ["198.51.100.1", "198.51.100.2"]) if ((await p.handle("jupiter", BUILD, `h=${ip}-${ms}`, "", ip)).status === 200) heavy++;
+    for (const [ip, from] of trades) {
+      if (ms < from || (ms - from) % 60_000 >= 4 * 200) continue;
+      const t0 = j.clock.now();
+      const a = await p.handle("jupiter", BUILD, `l=${ip}-${ms}`, "", ip);
+      if (a.status !== 200 || j.clock.now() !== t0) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${j.clock.now() - t0} ms`);
+    }
+    j.clock.add(200);
+  }
+  assert.deepEqual(refused, [], "every build of the third and fourth device served at once");
+  assert.equal(j.stats().throttled, 0, "Jupiter never throttled");
+  assert.ok(j.stats().peak <= 60, `peak ${j.stats().peak} in a sliding minute`);
+  assert.ok(heavy > 0, `the heavy devices still lent what is left: ${heavy}`);
+});
