@@ -537,6 +537,13 @@ test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the a
   }
   // only the sim the check passed is signed: a copy is not it, and a real sell is never signed as a sim
   assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, { ...s }), refusedAs("unchecked"));
+  // a real sell (the kit's sell builder, into the pinned pool, live for 120 s), even one the sell check passed, is
+  // refused by the sim check and by the sim signer
+  const real = pinnedBuildSell(VENUES, "base", { w: EVM_W, token: X, amount: 10n ** 18n, target: B.routers[0]!, route: v3([X, B.weth]), minOut: 10n ** 15n, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n });
+  assert.throws(() => checkEvmSellSim(real as never, t, ask, ctx), refusedAs("sim_pool"));
+  assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));
+  checkEvmSell(real, ask, { ...ctx, precommitment: 5n }, 10n ** 15n);
+  assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));
 });
 
 // ---------- no rule reads a server ----------

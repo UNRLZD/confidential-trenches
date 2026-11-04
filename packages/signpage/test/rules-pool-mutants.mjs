@@ -141,6 +141,8 @@ export const MUTANTS = [
   ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', 'if (!read) return refuse("unchecked");', "Solana deposit: the pinned pool's tag 1"],
   // the signers: only what a check passed, as it read it, by what it is
   ['return r ?? refuse("unchecked");', 'return r ?? CHECKED["evm.buy"].get(x) ?? CHECKED["evm.withdraw"].get(x) ?? refuse("unchecked");', EBUY],
+  // a real sell the sell check passed is no sim the sim signer signs (review of the exec sim, LOW 3)
+  ['return r ?? refuse("unchecked");', 'return r ?? CHECKED["evm.sell"].get(x) ?? refuse("unchecked");', ESIM],
   ['if (!k || p.nullifier !== k.nullifier || p.context !== k.context || p.value !== k.value) return refuse("unchecked");', 'if (!k) return refuse("unchecked");', EBUY],
   ['  passed("evm.buy", given, read);\n', "", EBUY],
   ['if (lower(pool) !== lower(read.pool) || b.pool !== read.pool || b.venues !== read.venues || b.proof !== read.proof) return refuse("unchecked");', "", EBUY],

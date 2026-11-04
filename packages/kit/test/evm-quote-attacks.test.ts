@@ -74,7 +74,7 @@ function encodeAggregate(outs: (bigint | null)[]): string {
   });
   return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("");
 }
-type Head = { number: string; hash: string; timestamp: string };
+type Head = { number: string; hash: string; timestamp: string; baseFeePerGas?: string };
 /** A provider: `head` is its latest block, `byNumber` the other blocks it holds, `price` answers each quote at the
  *  block hash asked (null: the quote reverts). */
 function provider(head: Head, price: (p: Pool, hash: string) => bigint | null, byNumber: Record<string, Head> = {}): EvmRpc {
@@ -109,7 +109,9 @@ const AMOUNT = 10n ** 18n;
 const v3direct: EvmRoute = { venue: "uniswap-v3", tokens: [WETH, TOKEN], fees: [10000] };
 const buy = (route: EvmRoute, a: EvmRpc, b: EvmRpc, chain: "base" | "robinhood" = "base") =>
   verdict(evmPoolBuyQuoteWith({ chain, token: TOKEN, amountIn: AMOUNT, slippageBps: 100, route }, [a, b], NOW));
-const head = (number: string, hash = NEW, timestamp = T): Head => ({ number, hash, timestamp });
+// every modelled block's base fee (Base's, read 2026-11-04 14:10Z on mainnet.base.org and base-rpc.publicnode.com)
+const BASE_FEE = 5_000_000n;
+const head = (number: string, hash = NEW, timestamp = T): Head => ({ number, hash, timestamp, baseFeePerGas: "0x" + BASE_FEE.toString(16) });
 const flat = (p: Pool) => p.amount;
 
 test("R1 one provider alone picks a stale block: a fake low head number with an old canonical hash", async () => {
@@ -166,6 +168,17 @@ test("R5 heads within the chain's lag whose lower block the other provider holds
   const ok = await buy(v3direct, a, provider(head("0x100"), flat, { "0xfe": head("0xfe", OLD) }));
   assert.equal(ok.accepted, true, String((ok as { code?: string }).code));
   assert.equal((ok as { block: bigint }).block, 0xfen);
+});
+
+test("R11 the lower block's base fee is the other provider's too, and well formed: the sim prices from it (card evm-quote-exec-sim)", async () => {
+  const a = provider(head("0xfe", OLD), flat);
+  // the other provider holds 0xfe with the same hash and time but another base fee
+  assert.deepEqual(await buy(v3direct, a, provider(head("0x100"), flat, { "0xfe": { ...head("0xfe", OLD), baseFeePerGas: "0x1" } })), { accepted: false, code: "rpc_disagree" });
+  // a base fee that is not a quantity
+  const bad = provider({ ...head("0xfe", OLD), baseFeePerGas: "0xzz" }, flat);
+  assert.deepEqual(await buy(v3direct, bad, provider(head("0x100"), flat, { "0xfe": head("0xfe", OLD) })), { accepted: false, code: "rpc_error" });
+  // the same on both: it reads
+  assert.equal((await buy(v3direct, a, provider(head("0x100"), flat, { "0xfe": head("0xfe", OLD) }))).accepted, true);
 });
 
 test("R6 a block both providers agree on but more than 30 s behind the device's clock refuses", async () => {
@@ -258,7 +271,9 @@ const UNPINNED = "0x00000000000000000000000000000000000020cc";
 const kk = (h: string) => Buffer.from(keccak_256(Buffer.from(h, "hex"))).toString("hex");
 // `exec`: what the pool pays a swap that is not the quoter's (W's own sell, card evm-quote-exec-sim); by default what
 // it pays the quoter with its hook as it is
-type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; exec?: (a: bigint) => bigint | null; only?: 0 | 1; state?: [bigint, bigint] };
+// `ctx`: the context the call to W runs in, as a node runs an eth_call (see simCtx)
+type SimCtx = { origin: string; sender: string; gas: bigint; gasPrice: bigint };
+type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; exec?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint] };
 const pidOf = (k: EvmPoolKey) => kk(W(BigInt(k.currency0)) + W(BigInt(k.currency1)) + W(BigInt(k.fee)) + W(BigInt(k.tickSpacing)) + W(BigInt(k.hooks)));
 const keyOf = (token: string, other: string, fee: number, tickSpacing: number, hooks: string): EvmPoolKey => {
   const [currency0, currency1] = BigInt(other) < BigInt(token) ? [other, token] : [token, other];
@@ -326,13 +341,16 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         return { jsonrpc: "2.0", id, result: "0x" + W(32n) + W(BigInt(n)) + words.map(W).join("") };
       }
       const asW = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code;
-      const o = to.toLowerCase() === SELL_W && asW?.startsWith("0xef0100") ? simSell(data.slice(2), c.params[2] as Record<string, { code: string }>) : one(to, data.slice(2), overridden);
+      const isSim = to.toLowerCase() === SELL_W && asW?.startsWith("0xef0100");
+      const ctx = isSim ? simCtx(c.params[0] as CallArgs, (c.params[2] ?? {}) as Record<string, { balance?: string }>) : null;
+      if (typeof ctx === "string") return { jsonrpc: "2.0", id, error: { code: -32000, message: ctx } };
+      const o = isSim ? simSell(data.slice(2), c.params[2] as Record<string, { code: string }>, ctx!) : one(to, data.slice(2), overridden);
       return o === null ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted" } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
     });
   // W's own sell through SellDelegate (card evm-quote-exec-sim), W's code the delegate's 7702 designator: nonce() is 0;
   // sell(sell, fee, signature) swaps hop by hop from the token at each pool's `exec`, reverts below minOut, and returns
   // what W gained (the sim pool's code returns msg.value)
-  function simSell(d: string, o: Record<string, { code: string }>): bigint | null {
+  function simSell(d: string, o: Record<string, { code: string }>, ctx: SimCtx): bigint | null {
     assert.ok(o[SELL_W]!.code.startsWith("0xef0100"), "W's code is a 7702 designator");
     if (d.startsWith("affed0e0")) return 0n;
     assert.ok(d.startsWith(SEL_SELL), d.slice(0, 8));
@@ -351,12 +369,31 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       const k = keyOf(cur, from, fee, ts, hooks);
       const p = byPid.get(pidOf({ ...k, currency0: k.currency0.toLowerCase(), currency1: k.currency1.toLowerCase(), hooks: k.hooks.toLowerCase() }));
       if (p === undefined) return null;
-      const next = p.exec !== undefined ? p.exec(got) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
+      const next = p.exec !== undefined ? p.exec(got, ctx) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
       if (next === null) return null;
       [from, got] = [cur, next];
     }
     return got < minOut ? null : got;
   }
+}
+// An eth_call's context as geth runs one (internal/ethapi TransactionArgs, core/state_transition.go): no `from` is the
+// zero address as tx.origin and msg.sender; no `gas` is the provider's cap (publicnode's 50,000,000); no fee fields are
+// tx.gasprice 0; with fees, maxFeePerGas under the block's base fee is refused, tx.gasprice is min(maxFee, base fee +
+// tip), and the sender's balance must cover gas x maxFeePerGas (here only a state override gives one). A string is the
+// node's refusal.
+type CallArgs = { from?: string; gas?: string; gasPrice?: string; maxFeePerGas?: string; maxPriorityFeePerGas?: string };
+const GAS_CAP = 50_000_000n;
+function simCtx(a: CallArgs, o: Record<string, { balance?: string }>): SimCtx | string {
+  const from = (a.from ?? NATIVE).toLowerCase();
+  const gas = a.gas !== undefined ? BigInt(a.gas) : GAS_CAP;
+  const maxFee = a.maxFeePerGas !== undefined ? BigInt(a.maxFeePerGas) : a.gasPrice !== undefined ? BigInt(a.gasPrice) : 0n;
+  const tip = a.maxPriorityFeePerGas !== undefined ? BigInt(a.maxPriorityFeePerGas) : maxFee;
+  if (maxFee === 0n && tip === 0n) return { origin: from, sender: from, gas, gasPrice: 0n };
+  if (maxFee < BASE_FEE) return "max fee per gas less than block base fee";
+  const gasPrice = maxFee < BASE_FEE + tip ? maxFee : BASE_FEE + tip;
+  const bal = Object.entries(o).find(([k]) => k.toLowerCase() === from)?.[1]?.balance;
+  if (BigInt(bal ?? "0x0") < gas * maxFee) return "insufficient funds for gas * price + value";
+  return { origin: from, sender: from, gas, gasPrice };
 }
 const SEL_SELL = Buffer.from(keccak_256(new TextEncoder().encode("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)"))).toString("hex").slice(0, 8);
 /** The scan provider: its head, and the Initialize logs of `pools` at `at`; `asked` keeps each getLogs range. */
@@ -1403,7 +1440,9 @@ test("PB2 (F2) the sell prices X's markets at the X its pool gives, not at the u
 // card evm-quote-exec-sim: a route through a hook the venue does not list sets the sell's reference only where W's own
 // sell through it executes at that price (an eth_call of SellDelegate.sell from W at the agreed block); Base's venue
 // here with a sell delegate pinned, as pool-evm-deploy pins it
-const DELEGATED: builder.EvmPoolVenueList = Object.freeze({ ...builder.evmPoolVenues(), base: Object.freeze({ ...builder.evmPoolVenues().base, sellDelegate: "0x00000000000000000000000000000000de1e9a7e" }) });
+// and the helper's EVM pool sender pinned as its sell sender (Hardhat account 1, a published test key's address)
+const SENDER = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
+const DELEGATED: builder.EvmPoolVenueList = Object.freeze({ ...builder.evmPoolVenues(), base: Object.freeze({ ...builder.evmPoolVenues().base, sellDelegate: "0x00000000000000000000000000000000de1e9a7e", sellSender: SENDER }) });
 const signed: { deadline: bigint; ts: bigint }[] = [];
 const signSim: EvmPoolSellQuoteRequest["signSim"] = (sim, ts) => (signed.push({ deadline: sim.deadline, ts }), new Uint8Array(65));
 
@@ -1442,4 +1481,97 @@ test("PE (keep-min) where no sell delegate is pinned, the same pool keeps the lo
   const blocker: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, exec: () => null };
   const s = await sellVerdict(sellOn([market, blocker], token, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: blocker.key, at: 4_500_001 }])));
   assert.deepEqual(s, { accepted: false, code: "below_reference" });
+});
+
+// The review of the exec sim, HIGH 1 (probe PROBE): the sim must run as the sale runs, so a hook cannot tell them apart.
+// The sale is the helper's EVM pool sender's EIP-7702 transaction to W calling SellDelegate.sell: tx.origin and
+// msg.sender that sender, tx.gasprice the block's base fee plus its tip, and the sale's gas limit. Each hook below swaps
+// at twice the market only where the call is not such a sale, and reverts otherwise; each must set no reference, so the
+// sell goes at the market.
+const SALE_GAS = 1_000_000n; // the sale's gas limit (contracts/pool-evm/script/testnet-run.mjs GAS.sell)
+const gatedSell = async (token: string, exec: (a: bigint, ctx: SimCtx) => bigint | null) => {
+  const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const gated: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, exec };
+  return sellVerdict(sellOn([market, gated], token, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: gated.key, at: 4_500_001 }]), undefined, 100, DELEGATED, signSim));
+};
+const atMarket = (s: unknown) => assert.deepEqual({ ...(s as object), route: undefined }, { accepted: true, amountOut: AMOUNT, minOut: (AMOUNT * 9900n) / 10000n, route: undefined }, show(s));
+
+test("PE1 a hook that executes only at tx.gasprice 0 sets no reference: the sell goes at the market", async () => {
+  atMarket(await gatedSell("0x00000000000000000000000000000000000c0e5e", (a, ctx) => (ctx.gasPrice === 0n ? 2n * a : null)));
+});
+
+test("PE2 a hook that executes only where tx.origin is the zero address sets no reference: the sell goes at the market", async () => {
+  atMarket(await gatedSell("0x00000000000000000000000000000000000c0e6e", (a, ctx) => (ctx.origin === NATIVE ? 2n * a : null)));
+});
+
+test("PE3 a hook that executes only with more gas than the sale's limit (the provider's cap) sets no reference: the sell goes at the market", async () => {
+  atMarket(await gatedSell("0x00000000000000000000000000000000000c0e7e", (a, ctx) => (ctx.gas > SALE_GAS ? 2n * a : null)));
+});
+
+test("PE4 a hook that executes only where W's caller is not the pinned sender sets no reference: the sell goes at the market", async () => {
+  atMarket(await gatedSell("0x00000000000000000000000000000000000c0e8e", (a, ctx) => (ctx.sender !== SENDER ? 2n * a : null)));
+});
+
+test("PE5 a chain that pins a sell delegate but no sell sender sims nothing: the hooked pool keeps the lower of its quotes (keep-min)", async () => {
+  const token = "0x00000000000000000000000000000000000c0e9e";
+  const base = (DELEGATED.base ?? {}) as Record<string, unknown>;
+  const noSender = Object.freeze({ ...DELEGATED, base: Object.freeze(Object.fromEntries(Object.entries(base).filter(([k]) => k !== "sellSender"))) }) as builder.EvmPoolVenueList;
+  const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const blocker: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, exec: () => null };
+  signed.length = 0;
+  const s = await sellVerdict(sellOn([market, blocker], token, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: blocker.key, at: 4_500_001 }]), undefined, 100, noSender, signSim));
+  assert.deepEqual(s, { accepted: false, code: "below_reference" });
+  assert.deepEqual(signed, [], "no sim is signed");
+});
+
+test("PE7 a sim on a block with no base fee is refused: it cannot be priced as the sale", async () => {
+  const token = "0x00000000000000000000000000000000000c0ebe";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a };
+  const noFee = (rpc: EvmRpc): EvmRpc => async (calls) =>
+    (await rpc(calls)).map((r, i) => {
+      if (calls[i]!.method !== "eth_getBlockByNumber") return r;
+      const { baseFeePerGas: _, ...h } = (r as { result: Head }).result;
+      return { ...(r as object), result: h };
+    });
+  const pools = [market, hooked];
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), signSim } as EvmPoolSellQuoteRequest;
+  const v = await sellVerdict(evmPoolSellQuoteWith(req, [noFee(chain(pools, 0)), noFee(chain(pools, 1))], NOW, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]), DELEGATED));
+  assert.deepEqual(v, { accepted: false, code: "rpc_error" });
+});
+
+test("PE6 the sim's eth_call and its nonce read go from the pinned sender, with the sale's gas and the agreed block's base fee plus the sale's tip", async () => {
+  const token = "0x00000000000000000000000000000000000c0eae";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, exec: () => null };
+  const seen: { args: Record<string, unknown>; state: Record<string, { balance?: string }> }[] = [];
+  const wrap = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    for (const c of calls) {
+      const p = c.params[0] as { to?: string };
+      // W's calls through its designator (the fee-on-transfer probe is W's code too, and no sale)
+      const code = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code;
+      if (c.method === "eth_call" && p.to?.toLowerCase() === SELL_W && code?.startsWith("0xef0100")) seen.push({ args: c.params[0] as Record<string, unknown>, state: c.params[2] as Record<string, { balance?: string }> });
+    }
+    return rpc(calls);
+  };
+  const pools = [market, hooked];
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), signSim } as EvmPoolSellQuoteRequest;
+  atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [wrap(chain(pools, 0)), wrap(chain(pools, 1))], NOW, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]), DELEGATED)));
+  const k = sellMod as unknown as { EVM_POOL_SELL_GAS?: bigint; evmPoolSellTip?: (c: string) => bigint };
+  assert.equal(k.EVM_POOL_SELL_GAS, SALE_GAS);
+  const tip = k.evmPoolSellTip?.("base");
+  assert.equal(tip, 1_000_000n, "Base's tip (eth_maxPriorityFeePerGas on mainnet.base.org and base-rpc.publicnode.com, 2026-11-04 14:10Z)");
+  // the nonce read, then the sim: two calls on each provider, each the sale's context
+  const sel = (a: Record<string, unknown>) => String(a.data).slice(2, 10);
+  assert.deepEqual(seen.map((x) => sel(x.args)).sort(), ["affed0e0", "affed0e0", SEL_SELL, SEL_SELL].sort());
+  for (const { args, state } of seen) {
+    assert.equal(String(args.from).toLowerCase(), SENDER);
+    // the sale's gas less its authorization's intrinsic cost (EIP-7702 PER_EMPTY_ACCOUNT_COST), which an eth_call with no
+    // authorization list does not charge: the hook is given what the sale's execution is given
+    assert.equal(BigInt(String(args.gas)), SALE_GAS - 25_000n);
+    assert.equal(BigInt(String(args.maxPriorityFeePerGas)), tip);
+    assert.equal(BigInt(String(args.maxFeePerGas)), BASE_FEE + tip!);
+    assert.equal(args.gasPrice, undefined, "EIP-1559 fields only");
+    assert.ok(BigInt(state[SENDER]!.balance!) >= BigInt(String(args.gas)) * (BASE_FEE + tip!), "the sender's balance covers the gas");
+  }
 });

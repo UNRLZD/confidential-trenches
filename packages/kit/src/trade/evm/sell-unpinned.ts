@@ -390,12 +390,13 @@ export function evmPoolSignSellAuthorizationUnpinned(secretKey: Uint8Array, chai
 
 // The sim sell (card evm-quote-exec-sim): the device prices a route only where W's own sell through it executes, shown
 // by an eth_call of SellDelegate.sell from W at the quote's agreed block on both providers (checks/evm/quote.ts). That
-// call needs W's signature, so W signs a sim Sell, which can never land on chain, for two separate reasons:
-// - its deadline is the agreed block's own timestamp (an eth_call at a block hash runs at that block's timestamp: test/
-//   evm-sim-facts.test.ts), and SellDelegate.sell reverts once block.timestamp > deadline (SellDelegate.sol:140), so
-//   every block after the agreed one, where any transaction lands, refuses it;
-// - its pool is EVM_SELL_SIM, which has no code: the eth_call puts code there that returns msg.value, and on chain
-//   SellDelegate's deposit call to it reverts decoding its empty answer as a uint256.
+// call needs W's signature, so W signs a sim Sell, which can never land on chain for one reason: its pool is
+// EVM_SELL_SIM, which has no code, so SellDelegate's deposit call to it reverts when its empty answer is decoded as a
+// uint256 (the eth_call puts code there that returns msg.value). Its deadline is the agreed block's own timestamp (an
+// eth_call at a block hash runs at that block's timestamp: test/evm-sim-facts.test.ts), but that does not stop it
+// landing: SellDelegate.sell reverts only once block.timestamp > deadline (SellDelegate.sol:140), and later blocks can
+// share the agreed block's timestamp (Robinhood blocks 105948851-105948858 share 1793800266, read on
+// rpc.mainnet.chain.robinhood.com 2026-11-04 14:2xZ, so a deadline at 105948851's time holds for the 7 blocks after it).
 // The signer takes only a sim whose pool is EVM_SELL_SIM and whose deadline is at most the agreed block's timestamp,
 // itself at most the device's clock. A sim may carry any route (one the sell builder refuses can still be the
 // reference: the sim is what drops the fake ones); its nonce is W's real one, read at the block (a hook can read
@@ -404,6 +405,21 @@ export function evmPoolSignSellAuthorizationUnpinned(secretKey: Uint8Array, chai
 /** The sim sell's pool: the low 20 bytes of keccak256("blindfill.sell.sim.v1"). No key and no init code is known
  *  for it, so no code and no 7702 delegation can ever be put there. */
 export const EVM_SELL_SIM = toHex(keccak_256(utf8("blindfill.sell.sim.v1")).slice(12));
+
+/** The sale as the helper's EVM pool sender sends it, which the sim's eth_call copies (checks/evm/quote.ts): its gas
+ *  limit, and its tip per chain (maxPriorityFeePerGas; maxFeePerGas is at least the base fee plus it, so tx.gasprice is
+ *  the base fee plus it). Pins, never reads: the helper's sell sender signs with exactly these. The gas is the bound
+ *  above every measured sell (contracts/pool-evm/script/testnet-run.mjs GAS.sell); each tip is what
+ *  eth_maxPriorityFeePerGas answered on the chain's providers (mainnet.base.org, base-rpc.publicnode.com,
+ *  sepolia.base.org, rpc.mainnet.chain.robinhood.com, rpc.testnet.chain.robinhood.com, 2026-11-04 14:10Z): Base's
+ *  1,000,000 wei, Robinhood's 0 (an Arbitrum chain, whose gas price is the base fee). */
+export const EVM_POOL_SELL_GAS = 1_000_000n;
+// a function, not a table: no top-level call (the kit's index reaches the signing page's bundle)
+export const evmPoolSellTip = (chain: EvmPoolChain): bigint => (chain === "base" || chain === "base-sepolia" ? 1_000_000n : 0n);
+/** The intrinsic gas of the sale's one EIP-7702 authorization (PER_EMPTY_ACCOUNT_COST), which an eth_call with no
+ *  authorization list does not charge: the sim's gas is EVM_POOL_SELL_GAS less it, so its execution is given what the
+ *  sale's is. */
+export const EVM_7702_AUTH_GAS = 25_000n;
 
 /** A sim sell: as EvmPoolSell, into EVM_SELL_SIM, with no fee and no precommitment. */
 export type EvmSellSim = EvmPoolSell & { readonly sim: true };

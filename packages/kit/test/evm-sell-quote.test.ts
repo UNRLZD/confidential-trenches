@@ -298,8 +298,9 @@ function hardhatAccount0(): Uint8Array {
 }
 
 // card evm-quote-exec-sim: W signs a sim sell only into EVM_SELL_SIM, with a deadline at most the agreed block's time,
-// itself at most the device's clock; such a signature can never land (SellDelegate.sol:140 refuses it after that block,
-// and the deposit into the codeless sim pool reverts decoding its answer)
+// itself at most the device's clock. Such a signature can never land for one reason: the deposit into the codeless
+// sim pool reverts when its empty answer is decoded. The deadline does not stop it: later blocks can share the agreed
+// block's timestamp (Robinhood blocks 105948851-105948858 share one), and SellDelegate.sol:140 refuses only after it
 test("planted: the sim signer refuses a live deadline, the real pool, a block past the device's clock, and a real sell", () => {
   const key = hardhatAccount0();
   const ts = 1_793_798_391n;
@@ -312,7 +313,21 @@ test("planted: the sim signer refuses a live deadline, the real pool, a block pa
   assert.equal(s.pool, kit.EVM_SELL_SIM);
   const sig = evmPoolSignSimSellUnpinned(key, "base-sepolia", s, ts, now);
   assert.equal(sig.length, 65);
-  // the signature is W's, over the sim as SellDelegate digests it, and its calldata carries the sim exactly
+  // the signature is W's, over the sim as SellDelegate digests it (its EIP-712 digest written out here, as
+  // SellDelegate._sellDigest makes it under W's own address and Base Sepolia's chain id), and its calldata carries the
+  // sim exactly
+  const w32 = (v: bigint) => Buffer.from(v.toString(16).padStart(64, "0"), "hex");
+  const a32 = (a: string) => w32(BigInt(a));
+  const domain = keccak_256(Buffer.concat([keccak("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"), keccak("Blindfill"), keccak("1"), w32(84532n), a32(WALLET)]));
+  const struct = keccak_256(Buffer.concat([
+    keccak("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)"),
+    a32(s.token), w32(s.amount), a32(s.target), keccak_256(Buffer.from(s.data.slice(2), "hex")), w32(s.minOut), a32(s.pool), w32(s.precommitment), w32(s.feeCap), w32(s.deadline), w32(s.nonce),
+  ]));
+  const digest = keccak_256(Buffer.concat([Uint8Array.of(0x19, 0x01), domain, struct]));
+  assert.ok(sig[64] === 27 || sig[64] === 28, "v is 27 or 28");
+  const pub = secp256k1.recoverPublicKey(Uint8Array.of(sig[64]! - 27, ...sig.subarray(0, 64)), digest, { prehash: false });
+  const signer = "0x" + Buffer.from(keccak_256(secp256k1.Point.fromBytes(pub).toBytes(false).subarray(1)).subarray(12)).toString("hex");
+  assert.equal(signer, WALLET, "the sim's signature recovers to W");
   const data = evmSellCallData(s, 0n, sig);
   assert.equal(data.slice(2, 10), Buffer.from(keccak("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)")).subarray(0, 4).toString("hex"));
   const code = (f: () => unknown) => {

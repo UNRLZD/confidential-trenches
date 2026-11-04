@@ -602,10 +602,12 @@ export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext 
 
 /** A sim sell (card evm-quote-exec-sim): the device's sell quote prices a route through a hook the venue does not list
  *  only where W's own sell through it executes, an eth_call of SellDelegate.sell that needs W's signature. W signs one
- *  only where it can never land: its pool is EVM_SELL_SIM (no code, no key or init code known, so a deposit into it
- *  reverts on chain), its deadline is at most `blockTimestamp`, the quote's agreed block's (SellDelegate.sol:140 refuses
- *  it in every later block), and that timestamp is at most the device's clock; it sells the request's own token and
- *  amount from W, on a chain that pins a sell delegate. Any route: the sim is what drops a route that is not real. */
+ *  only where it can never land, and the one guarantee is its pool: EVM_SELL_SIM has no code (no key or init code is
+ *  known for it), so the deposit into it reverts when its empty answer is decoded. Its deadline is at most
+ *  `blockTimestamp`, the quote's agreed block's, and that timestamp at most the device's clock, but the deadline does
+ *  not stop a landing: later blocks can share that timestamp (Robinhood blocks 105948851-105948858 share one), and
+ *  SellDelegate.sol:140 refuses only after it. It sells the request's own token and amount from W, on a chain that
+ *  pins a sell delegate. Any route: the sim is what drops a route that is not real. */
 export function checkEvmSellSim(sim: EvmSellSim, blockTimestamp: bigint, ask: PoolAsk, ctx: PoolContext, testnet = false): void {
   if (ask.kind !== "pool.sell") return refuse("kind");
   const chain = evmChainOf(ask, testnet);
