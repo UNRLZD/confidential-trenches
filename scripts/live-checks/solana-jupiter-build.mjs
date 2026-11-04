@@ -6,8 +6,10 @@
 // build, and uncapped, the one retry the paper allows when the cap finds no route (P4S run 3, Fail 3). So four:
 //   S-1 buy at maxAccounts=40, S-1 buy uncapped, S-2 sell at maxAccounts=40, S-2 sell uncapped.
 // Every build goes through the kit's fetchSolanaJupiterBuild (its query, its one retry, its parse), live and on replay.
-// One live token: the first pump.fun token (the lane's subject, M1's end state) in the helper's Jupiter top-trending
-// (1h) list with at least $50k of liquidity, or --token. The taker is a random address nobody holds a key for, made
+// One live token: the first pump.fun token (the lane's subject, M1's end state) on the helper's Solana Discover lists
+// (GET /v1/market/lists?chain=solana, the read a device makes; Trending 1h first) with at least $50k of liquidity, or
+// --token. So the check's Jupiter calls are a device's builds and nothing else (card helper-crowd-429: its own
+// top-trending read was a fifth Jupiter call from one runner, over a device's share). The taker is a random address nobody holds a key for, made
 // per run (so no wallet is linked to the check).
 // The device's reads come from two public RPCs: the mint and every lookup table the builds name (processed), and the
 // blockhash from getLatestBlockhash at finalized on the first (never the build's blockhashWithMetadata).
@@ -144,9 +146,9 @@ export async function judge(r) {
 }
 
 // The token list only; every build goes through the kit's fetchSolanaJupiterBuild.
-async function post(base, path, query) {
+async function get(base, path) {
   const t = performance.now();
-  const r = await fetch(`${base}${path}${query ? `?${query}` : ""}`, { method: "POST", redirect: "error", credentials: "omit", headers: { "cache-control": "no-cache" } });
+  const r = await fetch(`${base}${path}`, { redirect: "error", credentials: "omit", headers: { "cache-control": "no-cache" } });
   const body = await r.text();
   return { status: r.status, body, ms: performance.now() - t };
 }
@@ -155,12 +157,13 @@ export async function read({ base = BASE, token } = {}) {
   base = base.replace(/\/$/, "");
   const readAt = new Date().toISOString();
   if (!token) {
-    const l = await post(base, "/v1/proxy/jupiter/tokens/v2/toptrending/1h", "limit=50");
-    if (l.status !== 200) throw new Error(`top-trending list: HTTP ${l.status}`);
-    const rows = JSON.parse(l.body);
-    const pick = Array.isArray(rows) ? rows.find((t) => typeof t?.id === "string" && t.id !== SOLANA_SOL_MINT && t.launchpad === "pump.fun" && (t.liquidity ?? 0) >= 50_000) : undefined;
-    if (!pick) throw new Error("no top-trending pump.fun token with $50k of liquidity");
-    token = pick.id;
+    const l = await get(base, "/v1/market/lists?chain=solana");
+    if (l.status !== 200) throw new Error(`Solana lists: HTTP ${l.status}`);
+    const lists = JSON.parse(l.body)?.lists ?? {};
+    const rows = ["trending_1h", "trending", "trending_5m", "graduating", "new"].flatMap((k) => (Array.isArray(lists[k]) ? lists[k] : []));
+    const pick = rows.find((t) => typeof t?.token === "string" && t.token !== SOLANA_SOL_MINT && t.launchpad === "pump.fun" && Number(t.liq_usd ?? 0) >= 50_000);
+    if (!pick) throw new Error("no listed pump.fun token with $50k of liquidity");
+    token = pick.token;
   }
   const wallet = base58(globalThis.crypto.getRandomValues(new Uint8Array(32)));
   const amounts = { buy: BUY_LAMPORTS.toString(), sell: "" };

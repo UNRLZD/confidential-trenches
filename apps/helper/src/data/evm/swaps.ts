@@ -1221,9 +1221,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a range we do not hold: bars before our first
       if (own.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
+        // GeckoTerminal's history is an optional seed (card helper-crowd-429): refused or failed, the answer is our
+        // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed)
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before);
-        // nothing of ours and no history to serve: GeckoTerminal's 429 or 503, so the page retries, never an empty chart
-        if (!Array.isArray(got) && own.length === 0) return got;
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);
