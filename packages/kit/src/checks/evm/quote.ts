@@ -30,10 +30,12 @@
 //   shown, below. The best one that fills completely is the reference R. A buy is refused unless its output is at
 //   least R (below_reference, M366 (4)), so a helper cannot steer it into a pool it seeded while the token's real
 //   pool is one the device found; with no R it is refused (no_reference). Every found pool's state is read first (up
-//   to EVM_QUOTE_MAX_KEYS, past which the quote refuses), and only pools that hold liquidity are quoted. Each list a
-//   quote reads past its top (EVM_QUOTE_TOP_*) keeps the pools deepest in range, never by pool id, and first drops
-//   those that cannot beat the route ("The cut" in routeSet); no count refuses. The residual risk is
-//   economic: pushing out a real pool takes more of the token in range than that pool holds, in every top-K slot. A
+//   to EVM_QUOTE_MAX_KEYS, past which the quote refuses), and only pools that hold liquidity are quoted. No pool that
+//   could beat the route is left unquoted: one is dropped only where all of the amount at its spot price, after its fee,
+//   gives less than the route's Q ("The prune" in routeSet); every other is quoted, and past EVM_QUOTE_MAX_QUOTED such
+//   routes or EVM_QUOTE_MAX_OTHER currencies the quote refuses (too_many_pools), never cuts. The residual risk is a
+//   refusal: anyone can seed a token with more pools that could beat its route than a quote reads, and its buy is then
+//   refused, never bought through a seeded pool. A
 //   held pool that no route from the native asset reaches adds nothing. What is left: a pool of the token created
 //   before the scan's depth (about 23 days on Base, 12 days on Robinhood), of a shape the device has not pinned, that
 //   the helper leaves off its list while it routes the buy into a standard pool it seeded;
@@ -542,19 +544,15 @@ const startsNative = (r: EvmRoute) => r.venue === "uniswap-v4" && lower(r.curren
 /** The most pools a caller may list. */
 export const EVM_QUOTE_MAX_HINTS = 16;
 // EVM_QUOTE_MAX_KEYS: the most pools' state (two extsload words each) a quote reads, the token's scanned ones, X's
-// markets and X's other pools; past it the quote refuses (too_many_pools), the one bound that does: a pool is ranked
-// by its state, so none is cut unread. The caller's list has its own EVM_QUOTE_MAX_HINTS beside it, so it never pushes
-// a token past it (review of c71a4d0..a9f1d32, LOW 1).
+// markets and X's other pools; past it the quote refuses (too_many_pools), as past every bound here: none cuts a pool
+// unread. The caller's list has its own EVM_QUOTE_MAX_HINTS beside it, so it never pushes a token past it (review of
+// c71a4d0..a9f1d32, LOW 1).
 export const EVM_QUOTE_MAX_KEYS = 65_536;
-// The top of each list a quote reads, by in-range depth in the currency the hop buys (see "The cut" in
-// routeSet); a list within its top is read whole, with no bitmap read: the token's pools of the native asset
-// or WETH, the other currencies X of its pools, each X's markets, each X's pools with the token, and each X's pools
-// with another currency Y (one level further).
-export const EVM_QUOTE_TOP_DIRECT = 64;
-export const EVM_QUOTE_TOP_X = 16;
-export const EVM_QUOTE_TOP_MARKETS = 4;
-export const EVM_QUOTE_TOP_POOLS = 4;
-export const EVM_QUOTE_TOP_VIAS = 4;
+// The most currencies X and Y a quote prices (one getLogs request names at most SCAN_OR of them), and the most routes
+// the device makes from found pools that could beat the route (each quoted at the amount and twice it); past either
+// the quote refuses (too_many_pools), never cuts (review of 13a063e, HIGH).
+export const EVM_QUOTE_MAX_OTHER = 1_024;
+export const EVM_QUOTE_MAX_QUOTED = 1_024;
 /** With no more found pools than this, those of the native asset or WETH whose hook is none or pinned are quoted in
  *  the first round already. */
 const EVM_QUOTE_EARLY = 64;
@@ -567,26 +565,6 @@ const poolId = (k: EvmPoolKey) =>
   keccak(word(BigInt(k.currency0)) + word(BigInt(k.currency1)) + word(BigInt(k.fee)) + word(BigInt.asUintN(256, BigInt(k.tickSpacing))) + word(BigInt(k.hooks)));
 /** The pool's state slot in the PoolManager (StateLibrary._getPoolStateSlot): slot0 there, liquidity 3 words on. */
 const stateSlot = (id: string) => keccak(id + word(POOLS_SLOT));
-/** The pool's tickBitmap word `w` (Pool.State's tickBitmap, 5 words past slot0: a mapping of int16 to uint256). */
-const bitmapSlot = (id: string, w: number) => keccak(word(BigInt.asUintN(256, BigInt(w))) + word(BigInt("0x" + stateSlot(id)) + 5n));
-const MIN_TICK = -887272;
-const MAX_TICK = 887272;
-// v4-core TickMath.getSqrtPriceAtTick, bit for bit (each factor is 2^128 / sqrt(1.0001)^(2^i))
-const TICK_FACTORS = [
-  0xfffcb933bd6fad37aa2d162d1a594001n, 0xfff97272373d413259a46990580e213an, 0xfff2e50f5f656932ef12357cf3c7fdccn, 0xffe5caca7e10e4e61c3624eaa0941cd0n,
-  0xffcb9843d60f6159c9db58835c926644n, 0xff973b41fa98c081472e6896dfb254c0n, 0xff2ea16466c96a3843ec78b326b52861n, 0xfe5dee046a99a2a811c461f1969c3053n,
-  0xfcbe86c7900a88aedcffc83b479aa3a4n, 0xf987a7253ac413176f2b074cf7815e54n, 0xf3392b0822b70005940c7a398e4b70f3n, 0xe7159475a2c29b7443b29c7fa6e889d9n,
-  0xd097f3bdfd2022b8845ad8f792aa5825n, 0xa9f746462d870fdf8a65dc1f90e061e5n, 0x70d869a156d2a1b890bb3df62baf32f7n, 0x31be135f97d08fd981231505542fcfa6n,
-  0x9aa508b5b7a84e1c677de54f3e99bc9n, 0x5d6af8dedb81196699c329225ee604n, 0x2216e584f5fa1ea926041bedfe98n, 0x48a170391f7dc42444e8fa2n,
-];
-export function evmSqrtPriceAtTick(tick: number): bigint {
-  const t = Math.min(MAX_TICK, Math.max(MIN_TICK, tick));
-  const abs = Math.abs(t);
-  let ratio = abs & 1 ? TICK_FACTORS[0]! : 1n << 128n;
-  for (let i = 1; i < 20; i++) if (abs & (1 << i)) ratio = (ratio * TICK_FACTORS[i]!) >> 128n;
-  if (t > 0) ratio = ((1n << 256n) - 1n) / ratio;
-  return (ratio >> 32n) + (ratio % (1n << 32n) === 0n ? 0n : 1n);
-}
 /** `p` as a pool key of the token paired with any other currency, or null when it is malformed or not the token's. */
 function keyOf(p: unknown, token: string): EvmPoolKey | null {
   if (typeof p !== "object" || p === null) return null;
@@ -1075,7 +1053,7 @@ async function routeSet(a: {
   /** the caller's refusals on the first round's answers, before any later round */
   firstRound?: (out: (i: number) => bigint | null, answer: (i: number) => Answer) => void;
   /** what a route must give to matter, read once the first round is in (the buy's own route's Q): a pool that cannot
-   *  give it is never quoted (see "The cut"); none for the sell */
+   *  give it is never quoted (see "The prune"); none for the sell */
   floor?: (out: (i: number) => bigint | null) => bigint;
 }): Promise<{ block: Block; out: (i: number) => bigint | null; fills: (c: { at: number; twice: number }, v3?: boolean) => boolean; filled: Filled[] }> {
   const { chain, v, token, amountIn, rpcs, scan, reads } = a;
@@ -1128,9 +1106,8 @@ async function routeSet(a: {
   // into a read (review of 5452011, S1). A pool of another currency X counts through X's own markets with the native
   // asset or WETH (see "X's markets" below).
   // The order below (the caller's list, the native asset or WETH, a listed middle, the rest, by pool id) only makes
-  // the reads the same on every run; what is cut is decided by depth in range (see "The cut"), which a narrow range
-  // cannot inflate (review of 2afa8b6: liquidity at the price alone can), and what is read is priced by its quote at
-  // the user's own amount
+  // the reads the same on every run; nothing is cut (see "The prune"), and what is read is priced by its quote at the
+  // user's own amount
   // the agreed block, picked once (the held head while fresh), after the token's scan has its logs; a new one is held
   // to the 30 s rule in agreedBlock, a held one in the watch's reuse bound on both clocks
   let agreed: ReturnType<typeof agreedBlock> | undefined;
@@ -1162,8 +1139,7 @@ async function routeSet(a: {
   const byId = (x: { id: string }, y: { id: string }) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
   // `real`: the same route with its hooks as they are, read where a hook is replaced (see valueOf)
   type Quote = { route: EvmRoute; at: number; twice: number; real?: { at: number; twice: number } };
-  // `bitmap`: the read of its tickBitmap word toward the hop's next tick, made only when its list passes its top
-  type Found = { key: EvmPoolKey; id: string; other: string; price: number; liquidity: number; quotes: Quote[]; bitmap?: number };
+  type Found = { key: EvmPoolKey; id: string; other: string; price: number; liquidity: number; quotes: Quote[] };
   // a read into `into`: the reads of this round (`reads`) or of a later one, answered after the ones before
   const put = (into: Read[], r: Read) => (into === reads ? 0 : reads.length) + into.push(r) - 1;
   // (each pool id once: USDG's 9,942 pools on Robinhood spent about a second of the device's time on repeats)
@@ -1175,8 +1151,13 @@ async function routeSet(a: {
   let keysLeft = EVM_QUOTE_MAX_KEYS;
   // a route the device made from found pools, at the amount and twice it, each hook not pinned replaced, and where one
   // is, the same route with its hooks as they are. A sell's part of a route reads from `from` at `amount` (see "X's
-  // markets")
+  // markets"). Past EVM_QUOTE_MAX_QUOTED the quote refuses: a route the prune kept could beat Q, so none is cut
+  let quotesLeft = EVM_QUOTE_MAX_QUOTED;
   const quoteOf = (into: Read[], r: EvmV4Route, hooks: EvmPoolKey[], from = token, amount = amountIn): Quote => {
+    if (quotesLeft-- === 0) return refuse("too_many_pools", `more than the ${EVM_QUOTE_MAX_QUOTED} routes a quote reads could beat the route`);
+    return quoteAt(into, r, hooks, from, amount);
+  };
+  const quoteAt = (into: Read[], r: EvmV4Route, hooks: EvmPoolKey[], from: string, amount: bigint): Quote => {
     const c: Quote = { route: r, at: put(into, { ...readOf(r, amount, true, from), ...noop(hooks) }), twice: put(into, { ...readOf(r, 2n * amount, true, from), ...noop(hooks) }) };
     if (hooks.some(replaced)) c.real = { at: put(into, readOf(r, amount, true, from)), twice: put(into, readOf(r, 2n * amount, true, from)) };
     return c;
@@ -1185,7 +1166,7 @@ async function routeSet(a: {
   // pinned replaced, and the lower of that and its quote as it is), never cut (review of edb4dbb, F5)
   const bought: Quote | null =
     a.bought === undefined ? null
-    : a.bought.venue === "uniswap-v4" ? quoteOf(reads, a.bought, hopKeys(a.bought))
+    : a.bought.venue === "uniswap-v4" ? quoteAt(reads, a.bought, hopKeys(a.bought), token, amountIn)
     : { route: a.bought, at: at(a.bought, amountIn), twice: at(a.bought, 2n * amountIn) };
   const found: Found[] = [];
   if (v4 && v.poolManager !== undefined) {
@@ -1260,99 +1241,42 @@ async function routeSet(a: {
   const hopTo = (c: string, k: EvmPoolKey) => ({ currency: c, fee: k.fee, tickSpacing: k.tickSpacing, hooks: k.hooks, hookData: "0x" });
   const ok = v4 && v.poolManager !== undefined;
 
-  // The cut. Each list a quote reads past its top (EVM_QUOTE_TOP_*) keeps the pools deepest in range: the amount of the
-  // currency the hop buys that the pool gives before its liquidity can change (its next initialized tick in the
-  // tickBitmap word toward which the hop moves the price, else that word's edge), the slot read in one more round only
-  // for a list past its top. Depth costs real tokens: a dust position, an empty pool and a narrow position rank by what
-  // they hold in range, never by the liquidity they read, so they sort below a real pool and never push it out. Before
-  // the cut, a pool of the token with the native asset or WETH that cannot beat the buy's route is dropped: its exact
-  // in-range swap with its fee, and past the range's edge the rest at the edge's price, which only worsens beyond it, is
-  // below Q. The residual risk is economic: pushing out a real pool takes more of the token in range than that pool
-  // holds, in every top-K slot. No top refuses (review of c71a4d0..a9f1d32, HIGH: 64 dust pools took the quote bound and
-  // 16,381 empty ones the markets' state bound, each moving the real pool out by pool id; USDG on Robinhood pairs with
-  // 2,636 currencies)
+  // The prune (review of 13a063e, HIGH: a dust position next to the real pool's price made it read as shallow, and
+  // any ranked cut pushed it out). A buy's pool is dropped only where it cannot beat the route's Q: all it is asked to
+  // pay, after its fee, at its spot price gives less, and the price only worsens as it swaps; a route through several
+  // pools is dropped only where that bound through each of them does. A pool behind a pinned hook, which runs as it
+  // is, has no bound and is always quoted (LOW 1). Every pool kept is quoted; past EVM_QUOTE_MAX_QUOTED routes or
+  // EVM_QUOTE_MAX_OTHER currencies the quote refuses, never cuts. The residual risk is a refusal: anyone can seed a
+  // token with more pools that could beat its route than a quote reads, and its buy is then refused (too_many_pools),
+  // never bought through a seeded pool. A sell has no Q and drops nothing
   const MASK160 = (1n << 160n) - 1n;
-  const Q96 = 1n << 96n;
-  const cdiv = (a: bigint, b: bigint) => (a + b - 1n) / b;
-  // the hop pays currency0 for currency1, moving the price down: a buy's hop pays `other` for the currency it was found
-  // for, a sell's the other way round
-  const zf = (f: Found) => (f.other === f.key.currency0) !== a.sell;
-  const slot0 = (f: Found) => out(f.price)!;
-  const sqrtOf = (f: Found) => slot0(f) & MASK160;
-  const liqOf = (f: Found) => out(f.liquidity)! & ((1n << 128n) - 1n);
-  // slot0: sqrtPriceX96 (160 bits), tick (24), protocolFee (24), lpFee (24)
-  const compressed = (f: Found) => Math.floor(Number(BigInt.asIntN(24, slot0(f) >> 160n)) / f.key.tickSpacing);
-  // v4-core TickBitmap.nextInitializedTickWithinOneWord: toward a lower price the word of the tick, else of the next
-  const wordOf = (f: Found) => (zf(f) ? compressed(f) : compressed(f) + 1) >> 8;
-  const bitmapOf = (fs: readonly Found[], into: Read[]) => {
-    for (const f of fs) if (f.bitmap === undefined) f.bitmap = put(into, { to: v.poolManager!, data: "0x" + SEL_EXTSLOAD + bitmapSlot(f.id, wordOf(f)), state: true });
+  const cdiv = (x: bigint, y: bigint) => (x + y - 1n) / y;
+  // a buy's hop pays `other` for the currency it was found for: currency0 for currency1 where `other` is currency0
+  const zf = (f: Found) => f.other === f.key.currency0;
+  // the most the hop gives for `x` of what it pays (null: no bound); slot0 is the price (160 bits), tick (24), protocol
+  // fee (24) and LP fee (24), the fee a hook replaced by one that does nothing leaves the swap
+  const ubOf = (f: Found, x: bigint | null): bigint | null => {
+    if (x === null || (f.key.hooks !== NATIVE && !replaced(f.key))) return null;
+    const s0 = out(f.price)!;
+    const fee = (s0 >> 208n) & 0xffffffn;
+    const y = cdiv(x * (1_000_000n - (fee < 1_000_000n ? fee : 1_000_000n)), 1_000_000n);
+    const p = s0 & MASK160;
+    return zf(f) ? cdiv(y * p * p, 1n << 192n) : cdiv(y << 192n, p * p);
   };
-  const msb = (x: bigint) => x.toString(2).length - 1;
-  // the sqrt price where the hop's liquidity can first change; a state whose tick and price disagree moves nowhere
-  const edgeOf = (f: Found): bigint => {
-    const c = compressed(f);
-    const w = out(f.bitmap!)!;
-    let t: number;
-    if (zf(f)) {
-      const bit = c & 255;
-      const m = w & ((1n << BigInt(bit + 1)) - 1n);
-      t = (m !== 0n ? c - (bit - msb(m)) : c - bit) * f.key.tickSpacing;
-    } else {
-      const bit = (c + 1) & 255;
-      const m = w & ~((1n << BigInt(bit)) - 1n);
-      t = (m !== 0n ? c + 1 + (msb(m & -m) - bit) : c + 1 + (255 - bit)) * f.key.tickSpacing;
-    }
-    const [e, p] = [evmSqrtPriceAtTick(t), sqrtOf(f)];
-    return zf(f) ? (e < p ? e : p) : e > p ? e : p;
-  };
-  // the currency the hop buys that the pool gives before its edge
-  const depths = new Map<Found, bigint>();
-  const depthOf = (f: Found): bigint => {
-    let d = depths.get(f);
-    if (d === undefined) {
-      const [p, e, l] = [sqrtOf(f), edgeOf(f), liqOf(f)];
-      depths.set(f, (d = zf(f) ? (l * (p - e)) / Q96 : (l * Q96 * (e - p)) / (p * e)));
-    }
-    return d;
-  };
-  const deeper = (a: Found, b: Found) => {
-    const [x, y] = [depthOf(a), depthOf(b)];
-    return x > y ? -1 : x < y ? 1 : byId(a, b);
-  };
-  const top = (fs: Found[], k: number) => (fs.length <= k ? fs : [...fs].sort(deeper).slice(0, k));
-  // the most the hop can give for `a`: the exact swap within its range with its fee (a hook as it is may set its own
-  // fee, so none counts), and past the edge the rest at the edge's price; with no bitmap read, all at the spot price
-  const ubOf = (f: Found, a: bigint): bigint => {
-    const fee = f.key.hooks !== NATIVE && !replaced(f.key) ? 0n : (slot0(f) >> 208n) & 0xffffffn;
-    const x = cdiv(a * (1_000_000n - (fee < 1_000_000n ? fee : 1_000_000n)), 1_000_000n);
-    const [p, l] = [sqrtOf(f), liqOf(f)];
-    const e = f.bitmap === undefined ? p : edgeOf(f);
-    if (zf(f)) {
-      const cap = (l * Q96 * (p - e)) / (p * e);
-      if (x <= cap) return cdiv(l * (p - (l * Q96 * p) / (l * Q96 + x * p)), Q96);
-      return cdiv(l * (p - e), Q96) + cdiv((x - cap) * e * e, 1n << 192n);
-    }
-    const cap = (l * (e - p)) / Q96;
-    if (x <= cap) {
-      const n = p + cdiv(x * Q96, l);
-      return cdiv(l * Q96 * (n - p), p * n);
-    }
-    return cdiv(l * Q96 * (e - p), p * e) + cdiv((x - cap) << 192n, e * e);
+  // whether the hop can give at least Q for `x`
+  const can = (f: Found, x: bigint | null) => {
+    if (floor === null) return true;
+    const u = ubOf(f, x);
+    return u === null || u >= floor;
   };
 
-  // The token's held pools of the native asset or WETH, each quoted where not already: past their top, those that can
-  // beat the route, the deepest first
+  // The token's held pools of the native asset or WETH, each quoted where not already and where it can beat the route
   const xPools = new Map<string, Found[]>();
   for (const f of held) if (!startsBuy(f.other)) append(xPools, f.other, f);
-  const direct = held.filter((f) => startsBuy(f.other) && f.quotes.length === 0);
-  const xRanked = xPools.size > EVM_QUOTE_TOP_X || [...xPools.values()].some((fs) => fs.length > EVM_QUOTE_TOP_POOLS);
-  const ranks: Read[] = [];
-  if (direct.length > EVM_QUOTE_TOP_DIRECT) bitmapOf(direct, ranks);
-  if (xRanked) bitmapOf([...xPools.values()].flat(), ranks);
-  await round(ranks);
   const second: Read[] = [];
-  const beats = floor !== null && direct.length > EVM_QUOTE_TOP_DIRECT ? direct.filter((f) => ubOf(f, amountIn) >= floor) : direct;
-  for (const f of top(beats, EVM_QUOTE_TOP_DIRECT)) f.quotes.push(quoteOf(second, routeOfKey(f.key, token), [f.key]));
+  for (const f of held) {
+    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(quoteOf(second, routeOfKey(f.key, token), [f.key]));
+  }
   // X's markets: a held pool of the token with another currency X counts through X's markets with the native asset or
   // WETH: X's standard and pinned shapes, which need no scan, and the pools of X with them that one scan for every X
   // finds (an OR of topics, cached per X, kept once the block is confirmed). Each is read like the token's pools: its
@@ -1366,18 +1290,19 @@ async function routeSet(a: {
   // way at an amount of X: the most X one of the token's held pools with X gives for the user's amount of the token,
   // each such pool quoted once (and Y's at the most Y one of X's pools with Y gives for that), so a sell quotes
   // |markets| + 2 x |pools| per X as the buy quotes |markets| + |pools|, and goes one level further exactly where the
-  // buy does: where X has no market that fills (review of edb4dbb, F1, F2). Past their tops: the X's whose deepest pool
-  // with the token is deepest (each in the currency its hop gives), each X's deepest pools with the token, markets and
-  // pools with Y
+  // buy does: where X has no market that fills (review of edb4dbb, F1, F2). A buy quotes a market, a pool and a route
+  // through them only where the prune's bound through them can beat Q
   const smallest = (fs: readonly Found[]) => fs.map((f) => f.id).sort()[0]!;
   const others = (m: Map<string, Found[]>) =>
     [...m.keys()]
       .map((c) => ({ c, id: smallest(m.get(c)!) }))
       .sort((x, y) => Number(!listed.has(x.c)) - Number(!listed.has(y.c)) || byId(x, y))
       .map((e) => e.c);
-  const deepest = new Map([...xPools].map(([c, fs]) => [c, xRanked ? [...fs].sort(deeper)[0]! : fs[0]!]));
-  const xs = xPools.size <= EVM_QUOTE_TOP_X ? others(xPools) : [...xPools.keys()].sort((a, b) => deeper(deepest.get(a)!, deepest.get(b)!)).slice(0, EVM_QUOTE_TOP_X);
-  for (const x of xs) xPools.set(x, top(xPools.get(x)!, EVM_QUOTE_TOP_POOLS));
+  const xs = others(xPools);
+  const priced = (n: number) => {
+    if (n > EVM_QUOTE_MAX_OTHER) return refuse("too_many_pools", `the token's held pools are paired with more than the ${EVM_QUOTE_MAX_OTHER} other currencies a quote reads`);
+  };
+  priced(xs.length);
   // c's markets: its standard and pinned shapes, then the scanned ones by pool id; past the state bound the quote
   // refuses (review of c71a4d0..a9f1d32, HIGH: 16,381 empty pools of the token left X's markets unread)
   const marketsOf = (c: string, scannedKeys: readonly EvmPoolKey[], into: Read[]): Found[] => {
@@ -1406,14 +1331,6 @@ async function routeSet(a: {
       markets.set(c, marketsOf(c, sc?.pools.get(c) ?? [], into));
     }
   };
-  // each currency's held markets, past their top the deepest (in that currency)
-  const keepMarkets = async (cs: readonly string[]) => {
-    const more: Read[] = [];
-    const lists = cs.map((c) => [c, (markets.get(c) ?? []).filter(holds)] as const);
-    for (const [, fs] of lists) if (fs.length > EVM_QUOTE_TOP_MARKETS) bitmapOf(fs, more);
-    await round(more);
-    for (const [c, fs] of lists) if (markets.has(c)) markets.set(c, top(fs, EVM_QUOTE_TOP_MARKETS));
-  };
   if (ok) await readMarkets(xs, second);
   // a sell's part of a route into c: the most of c a quote of it gives for the user's amount of the token, and the
   // part that gives it (a quote that does not fill gives nothing)
@@ -1434,15 +1351,23 @@ async function routeSet(a: {
     }
   }
   await round(second);
-  await keepMarkets(xs);
   const marketQuote = new Map<Found, Quote>();
-  // each held market of c, quoted from the native asset or WETH at the user's amount (a buy), or from c at the most
-  // of c the sell's part of a route into c gives (a sell; none where no such part fills)
+  // one level further: X's held pools with Y, by X
+  const vias = new Map<string, Found[]>();
+  // whether `x` of c can give Q through one of the token's pools with c, or one level further through one of c's pools
+  // with another X and that X's pools with the token
+  const needs = (c: string, x: bigint | null): boolean =>
+    floor === null ||
+    (xPools.get(c) ?? []).some((p) => can(p, x)) ||
+    [...vias].some(([x2, fs]) => fs.some((via) => via.other === c && (xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))));
+  // each held market of c not yet quoted, from the native asset or WETH at the user's amount (a buy, where it can give
+  // Q), or from c at the most of c the sell's part of a route into c gives (a sell; none where no such part fills)
   const quoteMarkets = (cs: readonly string[], into: Read[]) => {
     for (const c of cs) {
       const leg = a.sell ? legOf(c) : null;
       if (a.sell && leg === null) continue;
       for (const mk of (markets.get(c) ?? []).filter(holds)) {
+        if (marketQuote.has(mk) || !needs(c, ubOf(mk, amountIn))) continue;
         marketQuote.set(mk, leg === null ? quoteOf(into, routeOfKey(mk.key, c), [mk.key]) : quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));
       }
     }
@@ -1473,12 +1398,11 @@ async function routeSet(a: {
     // more than Q is not quoted
     const xa = out(marketQuote.get(mk)!.at)!;
     for (const p of xPools.get(x)!) {
-      if (floor !== null && ubOf(p, xa) < floor) continue;
+      if (!can(p, xa)) continue;
       p.quotes.push(quoteOf(fourth, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]));
     }
   }
   // one level further: X's pools with Y, from one scan of every such X's pools
-  const vias = new Map<string, Found[]>();
   if (ok && further.length > 0) {
     const sc = await scanOf(further, "all");
     sc?.commit();
@@ -1493,13 +1417,11 @@ async function routeSet(a: {
     }
   }
   await round(fourth);
-  const viaRanks: Read[] = [];
-  for (const fs of vias.values()) if (fs.filter(holds).length > EVM_QUOTE_TOP_VIAS) bitmapOf(fs.filter(holds), viaRanks);
-  await round(viaRanks);
-  for (const [x, fs] of vias) vias.set(x, top(fs.filter(holds), EVM_QUOTE_TOP_VIAS));
+  for (const [x, fs] of vias) vias.set(x, fs.filter(holds));
   const yPools = new Map<string, Found[]>();
   for (const fs of vias.values()) for (const f of fs) append(yPools, f.other, f);
   const ys = others(yPools);
+  priced(xs.length + ys.filter((y) => !xs.includes(y)).length);
   const fifth: Read[] = [];
   if (ok) await readMarkets(ys, fifth);
   // a sell's part of a route into Y: the token into X through X's pool that gives the most X, then X into Y
@@ -1513,16 +1435,18 @@ async function routeSet(a: {
     }
   }
   await round(fifth);
-  await keepMarkets(ys.filter((y) => !xs.includes(y)));
   const sixth: Read[] = [];
-  quoteMarkets(ys.filter((y) => !xs.includes(y)), sixth);
+  // a buy's Y that is also an X: its markets the X prune left out may still give Q through X's pools with Y
+  quoteMarkets(a.sell ? ys.filter((y) => !xs.includes(y)) : ys, sixth);
   await round(sixth);
   const seventh: Read[] = [];
   for (const [x, fs] of vias) {
     for (const via of fs) {
       const mk = ys.includes(via.other) ? bestMarket(via.other) : null;
       if (mk === null) continue;
+      const xa = ubOf(via, out(marketQuote.get(mk)!.at)!);
       for (const p of xPools.get(x)!) {
+        if (!can(p, xa)) continue;
         const r: EvmV4Route = { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)] };
         p.quotes.push(quoteOf(seventh, r, [mk.key, via.key, p.key]));
       }
