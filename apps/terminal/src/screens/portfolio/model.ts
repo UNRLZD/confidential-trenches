@@ -285,9 +285,10 @@ export function portfolio(snap: SignpageClientSnapshot, d: PortfolioData, now: n
   return { view: rows.length ? "S10.3" : "S10.2", offline, rows, totals: totals(s, rows, d.closed, now), pools: pools(s, offline) };
 }
 
-/** The one balance the app draws: Portfolio's Total (totals()), for the header, the deposit and withdraw screens and the
- *  restore screen alike, so no two of them ever differ; null before the first state. */
-export const balanceOf = (snap: SignpageClientSnapshot, d: PortfolioData, now: number): bigint | null => portfolio(snap, d, now).totals?.total ?? null;
+/** The one balance the app draws: Portfolio's Cash (totals(); design-lock-r5 S10.3 shows Cash in the header), for the
+ *  header, the deposit and withdraw screens and the restore screen alike, so no two of them ever differ; null before the
+ *  first state. */
+export const balanceOf = (snap: SignpageClientSnapshot, d: PortfolioData, now: number): bigint | null => portfolio(snap, d, now).totals?.cash ?? null;
 
 // ------------------------------------------------------------------------------------------------- the pools (A1)
 

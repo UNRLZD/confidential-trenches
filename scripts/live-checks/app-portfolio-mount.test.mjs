@@ -2,17 +2,17 @@
 // (app-portfolio-mount.answers.json), each read on 4 Nov by app-portfolio-mount.mjs collect() in headless Chromium, the
 // stand-in shell sending the fixed signed-in account (ACCOUNT):
 //   good: this card's build served at APP_HOST's name (--harness --build): /portfolio draws Portfolio at 390 and 1440,
-//         dark and light, the header's balance is Portfolio's Total ($83.05), and Withdraw, Export, Deposit and Sell
+//         dark and light, the header's balance is Portfolio's Cash ($67.87), and Withdraw, Export, Deposit and Sell
 //         go where they belong: PASS;
-//   bad:  the deployed APP_HOST on 4 Nov 06:20Z, before this card: signed in, /portfolio draws nothing: FAIL.
-// Planted from the good run: a header that differs from the Total, a Total that is not the account's, a tap that asks
+//   bad:  the deployed APP_HOST on 4 Nov, before this card: signed in, /portfolio draws nothing: FAIL.
+// Planted from the good run: a header that differs from the Cash tile, a Cash that is not the account's, a tap that asks
 // for the wrong kind, a Sell that opens something, an empty route, a missing run, a terminal outside the shell.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ACCOUNT, judge, TOTAL } from "./app-portfolio-mount.mjs";
+import { ACCOUNT, CASH, judge } from "./app-portfolio-mount.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-portfolio-mount.answers.json"), "utf8"));
@@ -28,16 +28,16 @@ const fails = (r, re) => {
   assert.ok(bad(r).some((l) => re.test(l)), r.lines.join("\n"));
 };
 
-test("the account's total is what the check expects: 40.50 + 7.25 + 20.12 + 10.12 + 3.06 + 2.00", () => {
+test("the account's cash is what the check expects: 40.50 + 7.25 + 20.12 (READY), not the ARMING wallet or the positions", () => {
   const cents = (s) => Math.round(Number(s) * 100);
-  const sum = cents(ACCOUNT.vault_balance) + cents(ACCOUNT.pools.find((p) => p.asset === "USDC").balance) + ACCOUNT.wallets.reduce((a, w) => a + cents(w.size), 0) + ACCOUNT.positions.reduce((a, p) => a + cents(p.cost), 0);
-  assert.equal(`$${(sum / 100).toFixed(2)}`, TOTAL);
+  const sum = cents(ACCOUNT.vault_balance) + cents(ACCOUNT.pools.find((p) => p.asset === "USDC").balance) + ACCOUNT.wallets.filter((w) => w.state === "READY").reduce((a, w) => a + cents(w.size), 0);
+  assert.equal(`$${(sum / 100).toFixed(2)}`, CASH);
 });
 
-test("recorded good answer: Portfolio at both widths and schemes, header = Total, every tap where it belongs: PASS", () => {
+test("recorded good answer: Portfolio at both widths and schemes, header = Cash, every tap where it belongs: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  for (const x of ANSWERS.good.runs) assert.equal(x.header, TOTAL, `${x.width} ${x.scheme}`);
+  for (const x of ANSWERS.good.runs) assert.deepEqual([x.header, x.cash], [CASH, CASH], `${x.width} ${x.scheme}`);
 });
 
 test("recorded bad answer: the deployed app before this card draws nothing at /portfolio signed in: FAIL", () => {
@@ -47,9 +47,10 @@ test("recorded bad answer: the deployed app before this card draws nothing at /p
   assert.ok(bad(r).some((l) => /^BAD phone light: \/portfolio draws no Portfolio/.test(l)), r.lines.join("\n"));
 });
 
-test("planted: a header that differs from Portfolio's Total fails, and so does a Total that is not the account's", () => {
-  fails(mut((rec) => (run(rec, "desktop", "dark").header = "$75.81")), /^BAD desktop dark: the header's balance \$75\.81, Portfolio's Total \$83\.05/);
-  fails(mut((rec) => Object.assign(run(rec, "phone", "light"), { total: "7581", header: "$75.81" })), /^BAD phone light: the header's balance \$75\.81, Portfolio's Total \$75\.81, the account's total \$83\.05/);
+test("planted: a header that differs from Portfolio's Cash fails (the Total, as before this fix), and so does a Cash that is not the account's", () => {
+  fails(mut((rec) => (run(rec, "desktop", "dark").header = "$83.05")), /^BAD desktop dark: the header's balance \$83\.05, Portfolio's Cash \$67\.87/);
+  fails(mut((rec) => Object.assign(run(rec, "phone", "light"), { cash: "$75.81", header: "$75.81" })), /^BAD phone light: the header's balance \$75\.81, Portfolio's Cash \$75\.81, the account's cash \$67\.87/);
+  fails(mut((rec) => (run(rec, "phone", "dark").cash = null)), /^BAD phone dark: the header's balance \$67\.87, Portfolio's Cash none/);
 });
 
 test("planted: a tap that asks for the wrong kind, or a Sell that opens something, fails", () => {

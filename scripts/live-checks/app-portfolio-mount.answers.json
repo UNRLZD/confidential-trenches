@@ -1,8 +1,8 @@
 {
   "good": {
     "check": "app-portfolio-mount",
-    "at": "2026-11-04T06:19:11.726Z",
-    "source": "harness, terminal build of card/app-portfolio-mount at fe5017a, the stand-in shell signed in",
+    "at": "2026-11-04T06:29:08.070Z",
+    "source": "harness, terminal build of card/app-portfolio-mount at 94eeddf with header = Cash, the stand-in shell signed in",
     "browser": "156.0.8078.80",
     "runs": [
       {
@@ -13,8 +13,8 @@
         "text": 320,
         "screen": "portfolio",
         "state": "S10.3",
-        "total": "8305",
-        "header": "$83.05",
+        "cash": "$67.87",
+        "header": "$67.87",
         "taps": {
           "withdraw": "withdraw.open",
           "export": "export.open",
@@ -30,8 +30,8 @@
         "text": 320,
         "screen": "portfolio",
         "state": "S10.3",
-        "total": "8305",
-        "header": "$83.05"
+        "cash": "$67.87",
+        "header": "$67.87"
       },
       {
         "width": "desktop",
@@ -41,8 +41,8 @@
         "text": 765,
         "screen": "portfolio",
         "state": "S10.3",
-        "total": "8305",
-        "header": "$83.05",
+        "cash": "$67.87",
+        "header": "$67.87",
         "taps": {
           "withdraw": "withdraw.open",
           "export": "export.open",
@@ -57,14 +57,14 @@
         "text": 765,
         "screen": "portfolio",
         "state": "S10.3",
-        "total": "8305",
-        "header": "$83.05"
+        "cash": "$67.87",
+        "header": "$67.87"
       }
     ]
   },
   "bad": {
     "check": "app-portfolio-mount",
-    "at": "2026-11-04T06:20:29.624Z",
+    "at": "2026-11-04T06:30:26.232Z",
     "source": "live https://confidential.unrealized.trade, the stand-in shell signed in",
     "browser": "156.0.8078.80",
     "runs": [
@@ -76,7 +76,7 @@
         "text": 0,
         "screen": null,
         "state": null,
-        "total": null,
+        "cash": null,
         "header": "$65.68"
       },
       {
@@ -87,7 +87,7 @@
         "text": 0,
         "screen": null,
         "state": null,
-        "total": null,
+        "cash": null,
         "header": "$65.68"
       },
       {
@@ -98,7 +98,7 @@
         "text": 0,
         "screen": null,
         "state": null,
-        "total": null,
+        "cash": null,
         "header": "$65.68"
       },
       {
@@ -109,7 +109,7 @@
         "text": 0,
         "screen": null,
         "state": null,
-        "total": null,
+        "cash": null,
         "header": "$65.68"
       }
     ]

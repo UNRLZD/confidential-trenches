@@ -60,7 +60,7 @@ test("a stale state keeps its header (the page went down after READY)", () => {
   assert.equal(m.kind, "balance");
 });
 
-test("CH-001: the balance is Portfolio's Total: the notes, READY wallets, money on the way and positions; an EMPTY wallet does not count", () => {
+test("CH-001: the balance is Portfolio's Cash: the notes and READY wallets; money on the way, positions and an EMPTY wallet do not count", () => {
   const s = st({
     vault_balance: "50.00",
     wallets: [
@@ -70,7 +70,7 @@ test("CH-001: the balance is Portfolio's Total: the notes, READY wallets, money 
     ],
     positions: [{ chain: "solana", token: "t", amount: "1000", cost: "3.06", wallets: ["a"] }],
   });
-  assert.equal(hm(snap(s)).cents, 8330n);
+  assert.equal(hm(snap(s)).cents, 7012n);
 });
 
 test("S2.1: passkey first, wallet second, the 12 words last; none while signed in (W:921)", () => {

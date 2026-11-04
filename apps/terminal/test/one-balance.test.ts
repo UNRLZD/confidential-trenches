@@ -1,8 +1,8 @@
 // One balance (card app-portfolio-mount): the header, the deposit sheet, the withdraw screen, the restore screen and
-// Portfolio's Total all draw one number, Portfolio's totals() (positions at value, priceless at cost), so they can never
-// differ. Held two ways: no file but the portfolio model sums the signing page's balances, and the header's model
-// given that number draws exactly Portfolio's Total on states where a second sum would differ (a USDC pool, money on
-// the way, a priced position).
+// Portfolio's Cash tile all draw one number, the cash in Portfolio's totals() (the design-lock-r5 header shows Cash), so
+// they can never differ. Held two ways: no file but the portfolio model sums the signing page's balances, and the
+// header's model given that number draws exactly Portfolio's Cash on states where a second sum would differ (a USDC
+// pool, money on the way, a priced position).
 //   node --test apps/terminal/test/one-balance.test.ts
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -56,22 +56,24 @@ const state = (over: Partial<SignpageState> = {}): SignpageState => ({
 const snap = (s: SignpageState): SignpageClientSnapshot => ({ status: "ready", release: "signpage-v1", stale: false, state: s });
 const PRICED: PortfolioData = { ...NO_DATA, market: (_c, t) => (t === "PRICED" ? { symbol: "P", name: "P", price: "0.01", route: true } : null) };
 
-test("the header draws Portfolio's Total, the one number, where a second sum would differ", () => {
+test("the header draws Portfolio's Cash, the one number, where a second sum would differ", () => {
   for (const [name, s, d] of [
     ["no market reads (live today)", state(), NO_DATA],
     ["a priced position", state(), PRICED],
     ["no pools sent", state({ pools: undefined }), PRICED],
     ["nothing on the way", state({ wallets: [] }), NO_DATA],
   ] as const) {
-    const total = portfolio(snap(s), d, NOW).totals!.total;
+    const cash = portfolio(snap(s), d, NOW).totals!.cash;
     const b = balanceOf(snap(s), d, NOW);
-    assert.equal(b, total, name);
-    assert.equal(headerModel(snap(s), b).cents, total, name);
+    assert.equal(b, cash, name);
+    assert.equal(headerModel(snap(s), b).cents, cash, name);
     assert.equal(headerModel(snap(s), b).kind, "balance", name);
   }
-  // the values: 40.50 vault + 7.25 USDC pool + 20.12 ready + 10.12 on the way + positions (3.06 and 2.00 at cost, or 10.00 at price)
-  assert.equal(balanceOf(snap(state()), NO_DATA, NOW), 8305n);
-  assert.equal(balanceOf(snap(state()), PRICED, NOW), 8999n);
+  // the values: 40.50 vault + 7.25 USDC pool + 20.12 ready; never the 10.12 on the way or the positions, priced or not
+  assert.equal(balanceOf(snap(state()), NO_DATA, NOW), 6787n);
+  assert.equal(balanceOf(snap(state()), PRICED, NOW), 6787n);
+  assert.equal(balanceOf(snap(state({ pools: undefined })), PRICED, NOW), 6062n);
+  assert.equal(balanceOf(snap(state({ wallets: [] })), NO_DATA, NOW), 4775n);
 });
 
 test("signed out or before the first state there is no balance, and the header says so", () => {
@@ -82,5 +84,5 @@ test("signed out or before the first state there is no balance, and the header s
 
 test("the restore screen counts the same number", () => {
   const s = state({ ops: [{ id: "r", kind: "restore", stage: "scanning", txs: [] }] as SignpageState["ops"] });
-  assert.equal(restoreModel(s, balanceOf(snap(s), NO_DATA, NOW))!.cents, 8305n);
+  assert.equal(restoreModel(s, balanceOf(snap(s), NO_DATA, NOW))!.cents, 6787n);
 });

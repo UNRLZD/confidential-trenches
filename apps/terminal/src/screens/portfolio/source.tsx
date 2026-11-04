@@ -41,7 +41,7 @@ export function usePortfolioSource(act: (a: PortfolioAction) => void): Portfolio
   return fixture ?? { snapshot, data: NO_DATA, now: Date.now, tzMin: -new Date().getTimezoneOffset(), act };
 }
 
-/** The one balance for `snapshot` (balanceOf: Portfolio's Total), from the same data Portfolio reads. */
+/** The one balance for `snapshot` (balanceOf: Portfolio's Cash), from the same data Portfolio reads. */
 export function useBalance(snapshot: SignpageClientSnapshot): bigint | null {
   const fixture = useContext(Fixture);
   return balanceOf(snapshot, fixture?.data ?? NO_DATA, fixture?.now() ?? Date.now());

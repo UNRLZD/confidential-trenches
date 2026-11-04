@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Live check of card app-portfolio-mount: signed in, /portfolio draws Portfolio and Activity, its taps go where they
-// belong, and the header's balance is Portfolio's Total. APP_HOST's terminal is framed by a stand-in for SIGN_HOST's
+// belong, and the header's balance is Portfolio's Cash. APP_HOST's terminal is framed by a stand-in for SIGN_HOST's
 // shell (app-in-shell.mjs) that sends one fixed signed-in account (ACCOUNT: cash in the vault, a USDC pool, a READY
 // wallet, money on the way, two positions), since no check can sign a real account in. Headless Chromium opens
 // /portfolio at 390 x 844 (phone, dpr 2, touch) and 1440 x 900 (desktop, dpr 1), dark and light, and reads:
 //   - the terminal is inside the shell and draws the portfolio route with Portfolio on it (data-screen="portfolio"), not
 //     the loading state and not an empty page;
-//   - the visible header's balance equals Portfolio's Total, to the cent, and both equal ACCOUNT's total (TOTAL);
+//   - the visible header's balance equals Portfolio's visible Cash tile, to the cent, and both equal ACCOUNT's cash
+//     (CASH; design-lock-r5 S10.3 shows Cash in the header);
 //   - in dark: Withdraw asks the shell for withdraw.open; Export (the row's menu on desktop, the position's sheet on the
 //     phone) asks for export.open; Deposit (phone) opens the deposit sheet; Sell asks the shell for nothing and opens
 //     no sheet (its screen is another card's).
@@ -52,8 +53,8 @@ export const ACCOUNT = {
   held: [],
   ops: [],
 };
-/** ACCOUNT's total: 40.50 cash + 7.25 NEAR USDC pool + 20.12 READY + 10.12 on the way + 5.06 positions at cost (no price read). */
-export const TOTAL = "$83.05";
+/** ACCOUNT's cash: 40.50 in the vault + 7.25 NEAR USDC pool + 20.12 READY; never the 10.12 on the way or the 5.06 in positions. */
+export const CASH = "$67.87";
 export const WIDTHS = [
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
@@ -62,11 +63,6 @@ export const SCHEMES = ["dark", "light"];
 const READY_MS = 15_000;
 
 // ------------------------------------------------------------------------------------------------ the verdict
-const usdOf = (cents) => {
-  const c = BigInt(cents);
-  return `$${(c / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${(c % 100n).toString().padStart(2, "0")}`;
-};
-
 export function judge(rec) {
   const lines = [];
   const say = (ok, s) => lines.push(`${ok ? "ok " : "BAD"} ${s}`);
@@ -79,8 +75,8 @@ export function judge(rec) {
     say(r.framed === true, `${n}: ${r.framed ? "inside SIGN_HOST's shell" : "not inside SIGN_HOST's shell"}`);
     const drawn = r.route === "portfolio" && r.screen === "portfolio" && (r.state === "S10.2" || r.state === "S10.3");
     say(drawn, `${n}: /portfolio ${drawn ? `draws Portfolio (${r.state})` : `draws ${r.screen ? `Portfolio in ${r.state}` : "no Portfolio"} on route ${r.route ?? "none"}, ${r.text ?? 0} char(s) of text`}`);
-    const total = r.total === null || r.total === undefined ? null : usdOf(r.total);
-    say(total !== null && total === r.header && total === TOTAL, `${n}: the header's balance ${r.header ?? "none"}, Portfolio's Total ${total ?? "none"}, the account's total ${TOTAL}`);
+    const cash = r.cash ?? null;
+    say(cash !== null && cash === r.header && cash === CASH, `${n}: the header's balance ${r.header ?? "none"}, Portfolio's Cash ${cash ?? "none"}, the account's cash ${CASH}`);
     if (r.scheme !== "dark") continue;
     const t = r.taps ?? {};
     say(t.withdraw === "withdraw.open", `${n}: Withdraw asks the shell for ${t.withdraw ?? "nothing"}`);
@@ -102,7 +98,7 @@ const READ = () => {
     text: (main?.innerText ?? "").trim().length,
     screen: pf ? "portfolio" : null,
     state: pf?.dataset.state ?? null,
-    total: pf?.querySelector("[data-total]")?.dataset.total ?? null,
+    cash: [...(pf?.querySelectorAll("[data-tile='cash'] .pvv") ?? [])].find(vis)?.textContent ?? null,
     header: head?.textContent ?? null,
   };
 };
