@@ -25,7 +25,7 @@ import { address, dec, toRow, type Row } from "./lists.ts";
 import { createOrigins, hintsOf, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
-import { VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
+import { QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -425,7 +425,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // Jupiter's search (D-S6, card helper-token-page-cold): every mint asked while a search is out joins the next one, of
   // up to SEARCH_MAX mints, the mints callers wait for first. The next search goes when the last returns if a caller
   // waits for one of its mints (`cold`) and the counted minute has room; with only refreshes waiting, JUP_GAP_MS after
-  // the last search and while COLD_ROOM stay free. A mint's row is kept JUP_FRESH_MS from our own read.
+  // the last search and while COLD_ROOM stay free; after a search that failed, JUP_GAP_MS after it either way. A mint's
+  // row is kept JUP_FRESH_MS from our own read.
   type JupRow = { row: Record<string, unknown> | null; at: number };
   const jrows = bounded<JupRow & { readAt: number }>(CACHE_MAX);
   const waiting = new Map<string, { cold: boolean; ws: { ok: (r: JupRow) => void; fail: (e: Error) => void }[] }>();
@@ -433,6 +434,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   const sent: number[] = [];
   const SPAN_S = VENDOR_WINDOW_MS / 1000;
   let lastSearch = -Infinity;
+  /** When the last search that failed (a 429, an upstream failure) went: the next waits JUP_GAP_MS from it, so callers
+   *  asking again after a failure never spend the counted minute on a vendor that is refusing. */
+  let lastFailed = -Infinity;
   let searching = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let timerAt = Infinity;
@@ -447,7 +451,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     if (searching || waiting.size === 0) return;
     const t = now();
     const cold = [...waiting.values()].some((w) => w.cold);
-    const at = cold ? roomAt(SEARCH_PER_SPAN, t) : Math.max(lastSearch + JUP_GAP_MS, roomAt(SEARCH_PER_SPAN - COLD_ROOM, t));
+    const at = Math.max(lastFailed + JUP_GAP_MS, cold ? roomAt(SEARCH_PER_SPAN, t) : Math.max(lastSearch + JUP_GAP_MS, roomAt(SEARCH_PER_SPAN - COLD_ROOM, t)));
     if (at - t > SEARCH_WAIT_MAX_MS) {
       // too far off to hold a caller: each answers 429 with the wait; the mints stay for that search
       for (const w of waiting.values()) for (const f of w.ws.splice(0)) f.fail(new Throttled(secondsUntil(at, t), "jupiter search"));
@@ -469,7 +473,15 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
 
   async function search() {
     const keys = [...waiting.keys()];
-    const batch = [...keys.filter((m) => waiting.get(m)!.cold), ...keys.filter((m) => !waiting.get(m)!.cold)].slice(0, SEARCH_MAX);
+    // the mints callers wait for first, up to SEARCH_MAX and within the proxy's QUERY_MAX (100 mints of 44 characters
+    // are 4.5 KB, past it: the proxy would refuse the whole search 413); the rest go in the next
+    const batch: string[] = [];
+    let size = "query=".length - 1;
+    for (const m of [...keys.filter((k) => waiting.get(k)!.cold), ...keys.filter((k) => !waiting.get(k)!.cold)]) {
+      if (batch.length === SEARCH_MAX || size + 1 + m.length > QUERY_MAX) break;
+      batch.push(m);
+      size += 1 + m.length;
+    }
     searching = true;
     lastSearch = now();
     sent.push(lastSearch);
@@ -488,6 +500,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     } catch {
       rows = null;
     }
+    if (!Array.isArray(rows)) lastFailed = lastSearch;
     for (const mint of batch) {
       const ws = waiting.get(mint)?.ws ?? [];
       waiting.delete(mint);

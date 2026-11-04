@@ -287,3 +287,39 @@ test("card helper-token-page-cold: a caller waiting on a mint already queued as 
   assert.equal(proxy.calls.length, n + 1);
   assert.deepEqual(proxy.calls[n]!.mints, [mint(0)]);
 });
+
+test("card helper-token-page-cold: after a search that failed, callers asking again wait JUP_GAP_MS from it: a refusing vendor never spends the counted minute", async (t) => {
+  clock(t);
+  let down = true;
+  const ok = searchProxy();
+  const proxy = { calls: ok.calls, handle: (v: string, p: string, q: string) => (down ? (ok.calls.push({ at: Date.now(), mints: [] }), Promise.resolve({ status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' })) : ok.handle(v, p, q)) };
+  const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
+  // a crowd re-asking a cold mint every 100 ms while the search fails
+  const asks: ReturnType<typeof ask>[] = [];
+  for (let i = 0; i < 30; i++) {
+    asks.push(ask(tok, mint(0)));
+    await run(t, 100);
+  }
+  assert.ok(proxy.calls.length <= 1 + Math.floor(3_000 / T.JUP_GAP_MS), `${proxy.calls.length} failing searches in 3 s`);
+  down = false;
+  await run(t, T.JUP_GAP_MS);
+  const after = ask(tok, mint(0));
+  await run(t, 1_000);
+  assert.equal(after.done?.status, 200, "the search goes again once the gap from the failure is past");
+});
+
+test("card helper-token-page-cold: a search carries at most what the proxy's QUERY_MAX takes (100 mints of 44 characters do not fit); the rest go in the next", async (t) => {
+  clock(t);
+  const proxy = searchProxy();
+  const real = createProxy({}, { fetch: (async () => new Response("[]", { status: 200, headers: { "content-type": "application/json" } })) as never, now: () => Date.now() });
+  const sized = { calls: proxy.calls, handle: async (v: string, p: string, q: string) => ((await real.handle(v, p, q, "", undefined, true)).status === 413 ? { status: 413, headers: {}, body: "{}" } : proxy.handle(v, p, q)) };
+  const tok = T.createSolanaToken(sized, rpc, { now: () => Date.now() });
+  // 100 mints of 44 characters, asked together
+  const long: string[] = [];
+  for (let n = 0; long.length < T.SEARCH_MAX; n++) if (mint(n).length === 44) long.push(mint(n));
+  const pages = long.map((m) => ask(tok, m));
+  await run(t, 2_000);
+  assert.ok(pages.every((h) => h.done?.status === 200), `${pages.filter((h) => h.done?.status !== 200).length} pages not 200`);
+  assert.equal(proxy.calls.length, 2, "two searches");
+  assert.ok(proxy.calls.every((c) => `query=${c.mints.join(",")}`.length <= 4_096));
+});
