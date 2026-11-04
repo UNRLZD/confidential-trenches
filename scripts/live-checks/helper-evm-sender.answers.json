@@ -1,0 +1,653 @@
+{
+ "notes": [
+  "good: a local helper (apps/helper/src/server.ts start(), --base http://127.0.0.1:<port>) at commit 6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1, both EVM testnet pools set in its own process: each sender key sha256 of a label (a throwaway), the fee floor 10000000000000 wei, the RPCs https://sepolia.base.org,https://base-sepolia-rpc.publicnode.com and https://rpc.testnet.chain.robinhood.com,https://robinhood-sepolia-rpc.publicnode.com. Re-recorded on HELPER_HOST after the helper is redeployed with its EVM pools.",
+  "bad_deployed: HELPER_HOST (https://api.confidential.unrealized.trade) before that redeploy: it carries no EVM pool, so the fee and every plant answer 404.",
+  "Each plant is built at run time with a throwaway W key; no key is recorded."
+ ],
+ "good": {
+  "base": "http://127.0.0.1:57002",
+  "pools": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-04T15:30:33.636Z",
+      "status": 200,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "322",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:33 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0xbd5da033bb56754344493db4befa4cd5a5f4d797\",\"sender\":\"0xbd5da033bb56754344493db4befa4cd5a5f4d797\",\"epoch_ms\":60000,\"epoch_start_ms\":1793806200000,\"block\":\"0x33e6898\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "auth_chain_zero",
+      "readAt": "2026-11-04T15:30:33.669Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "70",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:33 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"bad_authorization\",\"detail\":\"chainId 0, not 84532\"}}"
+     },
+     {
+      "asked": "auth_other_delegate",
+      "readAt": "2026-11-04T15:30:33.671Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:33 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"bad_authorization\",\"detail\":\"address 0x000000000000000000000000000000000000dead, not the pinned delegate 0xfa1442419b6984b8e3aa8933c690f80f063b6adf\"}}"
+     },
+     {
+      "asked": "sell_other_signer",
+      "readAt": "2026-11-04T15:30:33.677Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "105",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:33 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"bad_signature\",\"detail\":\"signed by 0xb854795564c427cd44652abc889cf67e51d8f621, not W\"}}"
+     },
+     {
+      "asked": "deadline_in_ms",
+      "readAt": "2026-11-04T15:30:33.683Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "91",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:33 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_far\",\"detail\":\"deadline 1793806533639 s, now 1793806233682 ms\"}}"
+     },
+     {
+      "asked": "deadline_near",
+      "readAt": "2026-11-04T15:30:33.691Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "89",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:33 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1793806292 s, now 1793806233691 ms\"}}"
+     },
+     {
+      "asked": "sell_other_pool",
+      "readAt": "2026-11-04T15:30:33.692Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "29",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:33 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"not_pool\"}}"
+     },
+     {
+      "asked": "fee_over_cap",
+      "readAt": "2026-11-04T15:30:33.693Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "83",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:33 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"fee_over_cap\",\"detail\":\"fee 30000000000001, cap 30000000000000\"}}"
+     },
+     {
+      "asked": "trailing_byte",
+      "readAt": "2026-11-04T15:30:33.694Z",
+      "status": 400,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:33 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     }
+    ]
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-04T15:30:37.061Z",
+      "status": 200,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "327",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:37 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xc57958256e1aef45cfe058cf868b3e3e8724ab7b\",\"sender\":\"0xc57958256e1aef45cfe058cf868b3e3e8724ab7b\",\"epoch_ms\":60000,\"epoch_start_ms\":1793806200000,\"block\":\"0x8d8f419\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "auth_chain_zero",
+      "readAt": "2026-11-04T15:30:37.067Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "70",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:37 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"bad_authorization\",\"detail\":\"chainId 0, not 46630\"}}"
+     },
+     {
+      "asked": "auth_other_delegate",
+      "readAt": "2026-11-04T15:30:37.067Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:37 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"bad_authorization\",\"detail\":\"address 0x000000000000000000000000000000000000dead, not the pinned delegate 0xaafb86fed9b651933773a0750d5dba22ca8b8a02\"}}"
+     },
+     {
+      "asked": "sell_other_signer",
+      "readAt": "2026-11-04T15:30:37.070Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "105",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:37 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"bad_signature\",\"detail\":\"signed by 0x33a86a33723df11bac6214dcb775427421b12ea6, not W\"}}"
+     },
+     {
+      "asked": "deadline_in_ms",
+      "readAt": "2026-11-04T15:30:37.074Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "91",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:37 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_far\",\"detail\":\"deadline 1793806537061 s, now 1793806237073 ms\"}}"
+     },
+     {
+      "asked": "deadline_near",
+      "readAt": "2026-11-04T15:30:37.080Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "89",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:37 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1793806296 s, now 1793806237079 ms\"}}"
+     },
+     {
+      "asked": "sell_other_pool",
+      "readAt": "2026-11-04T15:30:37.081Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "29",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:37 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"not_pool\"}}"
+     },
+     {
+      "asked": "fee_over_cap",
+      "readAt": "2026-11-04T15:30:37.082Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "83",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:37 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"fee_over_cap\",\"detail\":\"fee 30000000000001, cap 30000000000000\"}}"
+     },
+     {
+      "asked": "trailing_byte",
+      "readAt": "2026-11-04T15:30:37.083Z",
+      "status": 400,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:37 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "6e6fa4c6c7059e41cf51a87309b9ab2c257e2fe1"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     }
+    ]
+   }
+  ]
+ },
+ "bad_deployed": {
+  "base": "https://api.confidential.unrealized.trade",
+  "pools": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-04T15:30:44.535Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "30",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:44 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     },
+     {
+      "asked": "auth_chain_zero",
+      "readAt": "2026-11-04T15:30:45.457Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:45 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "auth_other_delegate",
+      "readAt": "2026-11-04T15:30:45.726Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:45 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "sell_other_signer",
+      "readAt": "2026-11-04T15:30:45.991Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:45 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "deadline_in_ms",
+      "readAt": "2026-11-04T15:30:46.259Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:46 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "deadline_near",
+      "readAt": "2026-11-04T15:30:46.524Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:46 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "sell_other_pool",
+      "readAt": "2026-11-04T15:30:46.795Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:46 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "fee_over_cap",
+      "readAt": "2026-11-04T15:30:47.062Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:46 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "trailing_byte",
+      "readAt": "2026-11-04T15:30:47.330Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:47 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     }
+    ]
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-04T15:30:47.599Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "30",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:47 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     },
+     {
+      "asked": "auth_chain_zero",
+      "readAt": "2026-11-04T15:30:47.871Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:47 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "auth_other_delegate",
+      "readAt": "2026-11-04T15:30:48.137Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:48 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "sell_other_signer",
+      "readAt": "2026-11-04T15:30:48.407Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:48 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "deadline_in_ms",
+      "readAt": "2026-11-04T15:30:48.674Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:48 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "deadline_near",
+      "readAt": "2026-11-04T15:30:48.942Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:48 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "sell_other_pool",
+      "readAt": "2026-11-04T15:30:49.214Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:49 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "fee_over_cap",
+      "readAt": "2026-11-04T15:30:49.480Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:49 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     {
+      "asked": "trailing_byte",
+      "readAt": "2026-11-04T15:30:49.746Z",
+      "status": 404,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "21",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 04 Nov 2026 15:30:49 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "50e15a6b9b4f9a82612195a5fd0d4717e58ad582"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     }
+    ]
+   }
+  ]
+ }
+}
