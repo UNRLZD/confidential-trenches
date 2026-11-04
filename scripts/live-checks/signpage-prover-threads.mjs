@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import { expected, gateBuild, openBrowser, PINS, policies, siteServer, WORKER_PATH, zkPath } from "./signpage-prover-host.mjs";
 import { APP, CSP as SITE_CSP, SIGN } from "./signpage-skeleton.mjs";
 import { browserLabel } from "../browsers.mjs";
+import { consoleLine } from "./console-errors.mjs";
 
 const KEY = "signpage-prover-threads";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -62,6 +63,12 @@ function snarkjs() {
 }
 
 /** The check on one recorded answer. Async: snarkjs verifies each proof. */
+/** One console line as the run keeps it for the reader (the judge reads none of it): its type and text, cut at 300
+ *  characters, then its address's origin and path through the shared collector (console-errors.mjs). */
+export function consoleLineOf(m) {
+  return consoleLine(`${m.type()} ${m.text()}`.slice(0, 300), m.location()?.url ?? "");
+}
+
 export async function judge(rec, want = expected()) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -225,7 +232,7 @@ async function readPage(serve, engine, proofs) {
     });
     const page = await ctx.newPage();
     const consoleLines = [];
-    page.on("console", (m) => consoleLines.length < 50 && consoleLines.push(`${m.type()} ${m.text()}`.slice(0, 300)));
+    page.on("console", (m) => consoleLines.length < 50 && consoleLines.push(consoleLineOf(m)));
     page.on("pageerror", (e) => consoleLines.length < 50 && consoleLines.push(`pageerror ${e.message}`.slice(0, 300)));
     page.on("worker", (w) => consoleLines.length < 50 && consoleLines.push(`worker ${w.url().slice(0, 120)}`));
     await page.goto(`${SIGN}/`, { waitUntil: "load" });

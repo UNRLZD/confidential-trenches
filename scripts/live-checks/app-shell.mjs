@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
+import { consoleError } from "./console-errors.mjs";
 import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "app-shell";
@@ -185,18 +186,16 @@ const originOf = (u) => {
   }
 };
 
-/** One console error as the check keeps it: its text and the address it names (m.location().url, the resource that
- *  failed to load or the script that logged it), so a FAIL names what failed, not only "a status of 429". */
-export function consoleError(m) {
-  const url = m.location()?.url ?? "";
-  return url === "" ? m.text() : `${m.text()} (${url})`;
+/** The check's console hook: every error an APP_HOST document (or one with no address) logs, kept through the shared
+ *  collector (console-errors.mjs) as its text and its address's origin and path; the shell's are SIGN_HOST's to check. */
+export function onConsole(consoleErrors) {
+  return (m) => m.type() === "error" && originOf(m.location()?.url ?? "") !== SIGN_HOST && consoleErrors.push(consoleError(m));
 }
 
 function watch(page, origin) {
   const consoleErrors = [];
   const loadedScripts = [];
-  // the console of APP_HOST's documents only; the shell's is SIGN_HOST's to check
-  page.on("console", (m) => m.type() === "error" && originOf(m.location()?.url ?? "") !== SIGN_HOST && consoleErrors.push(consoleError(m)));
+  page.on("console", onConsole(consoleErrors));
   page.on("pageerror", (e) => consoleErrors.push(String(e)));
   // every frame's script is recorded with its frame's address and whether that frame shows an APP_HOST document
   page.on("response", (r) => {

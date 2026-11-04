@@ -27,6 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ROW_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
 import { launchBrowser } from "../browsers.mjs";
+import { consoleLine } from "./console-errors.mjs";
 
 const KEY = "app-discover-live";
 export const APP_HOST = "https://confidential.unrealized.trade";
@@ -89,6 +90,12 @@ export function keysFault(row) {
 }
 
 /** The check on one recorded run. */
+/** The console errors a load keeps: those of Discover's own origin, of the helper, and those with no address (a page
+ *  error), each through the shared collector (console-errors.mjs) as its text and its address's origin and path. */
+export function frameErrors(entries, origin) {
+  return entries.filter((e) => e.src === "" || e.src.startsWith(origin) || e.src.startsWith(HELPER_HOST)).map((e) => consoleLine(e.text, e.src));
+}
+
 export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -172,7 +179,7 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
         if (r.request().isNavigationRequest()) navs.push(r);
         if (r.url() === LISTS_URL && !lists) lists = r;
       });
-      page.on("console", (m) => m.type() === "error" && consoleErrors.push({ text: m.text(), src: m.location().url }));
+      page.on("console", (m) => m.type() === "error" && consoleErrors.push({ text: m.text(), src: m.location()?.url ?? "" }));
       page.on("pageerror", (e) => consoleErrors.push({ text: String(e), src: "" }));
       await page.goto(url, { waitUntil: "load" });
       // the frame that draws Discover (the page itself, or one inside it), once it has left its loading state
@@ -239,7 +246,7 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
         trendingSides: m.trendingSides,
         csp: doc ? parseCsp(doc.headers()["content-security-policy"]) : null,
         violations,
-        consoleErrors: consoleErrors.filter((e) => e.src === "" || e.src.startsWith(origin) || e.src.startsWith(HELPER_HOST)).map((e) => e.text),
+        consoleErrors: frameErrors(consoleErrors, origin),
         requests: requests.filter((r) => own(r) || childNav(r)).map((r) => ({ url: r.url().startsWith("data:") ? r.url().slice(0, 40) : r.url(), type: r.resourceType() })),
         lists: lists ? { url: lists.url(), status: lists.status(), rows, badRows } : null,
         shot,
