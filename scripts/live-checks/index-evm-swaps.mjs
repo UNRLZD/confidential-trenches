@@ -110,6 +110,11 @@ export function judge(run) {
   const timeOf = (n) => (net === "base" ? blockTime(n) : run.chain?.blockTimes?.[n] ?? null);
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  // the lists the token is picked from did not answer: nothing else to judge
+  if (run.lists !== undefined) {
+    say(false, `GET ${run.lists.path ?? `/v1/market/lists?chain=${net}`} answers ${run.lists.status}${run.lists.status === 200 ? " with no lists" : ""} (${net})`);
+    return { ok: false, lines };
+  }
   const readAt = Date.parse(run.readAt);
   const parsed = {};
   for (const [k, fault, path, source] of [
@@ -241,8 +246,16 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   let candidates = token === undefined ? [] : [token];
   if (token === undefined) {
     const l = await get(base, LISTS_PATH(net), fetchFn);
-    const snap = JSON.parse(l.body);
-    candidates = [...new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token)))];
+    let snap;
+    try {
+      snap = JSON.parse(l.body);
+    } catch {}
+    // a lists answer that is not a 200 with lists (card app-console-429: robinhood's 503 at 11:03:50Z crashed the check
+    // with exit 2) is the run's answer, which judge() names as a BAD line with the chain and the status
+    if (l.status !== 200 || !isObj(snap) || !isObj(snap.lists) || !Object.values(snap.lists).every(Array.isArray)) {
+      return { base, ...(net === "base" ? {} : { net }), coin: null, readAt, lists: { path: LISTS_PATH(net), status: l.status, body: l.body.slice(0, 500) }, reads: {}, chain: {} };
+    }
+    candidates = [...new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r?.token)).filter((t) => typeof t === "string"))];
   }
   // the first listed token with trades to check (a listed token with no pool our reads find answers an empty 200); else
   // the first that answered, whose empty tape the check then fails, never a pass

@@ -130,7 +130,8 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
  *  calls the public endpoint refuses (holders' getTokenLargestAccounts: HTTP 429 "Too many requests for a specific RPC
  *  call" on every try, read 2026-11-04 10:04Z), which answers 503 while fallen back and its caller serves its own. */
 type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean };
-type Answer = RpcAnswer & { headers?: Record<string, string> };
+/** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
+type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string };
 type Upstream = { url: string; forms: Buffer[] };
 
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
@@ -300,9 +301,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). */
     const fellBack = (): Promise<Answer> => (publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : Promise.resolve(UPSTREAM()));
     const held = budget.heldFor(key);
-    if (held > 0) return throttled(held);
+    if (held > 0) return throttled(held, undefined, `${key} held`);
     const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
-    if (wait > 0) return throttled(wait);
+    if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
     let r: Response;
     let text: string | undefined;
     const sent = now();
@@ -319,7 +320,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         const waitS = upstreamRetryAfterS(r.headers, now());
         if (viaSlot && (CREDITS.test(body) ? (slot.fail("credits"), true) : slot.throttled(waitS))) return fellBack();
         hold(key, waitS, "caller");
-        return throttled(budget.heldFor(key));
+        return throttled(budget.heldFor(key), undefined, `${key} provider 429`);
       }
       text = await readAnswer(r);
     } catch {
@@ -344,7 +345,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const limited = evmLimited(c, answer);
     if (limited > 0) {
       hold(key, limited, "caller");
-      return throttled(budget.heldFor(key));
+      return throttled(budget.heldFor(key), undefined, `${key} provider limit`);
     }
     const b = Buffer.from(text, "utf8");
     if (secretForms.some((f) => b.includes(f))) return UPSTREAM();

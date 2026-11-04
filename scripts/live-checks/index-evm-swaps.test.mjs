@@ -188,3 +188,14 @@ test("Robinhood: a trade time off its block's time, a block time not read on two
   pl.logs.push({ blockNumber: `0x${pl.to.toString(16)}`, transactionHash: `0x${"ab".repeat(32)}`, t: Math.floor(Date.parse(lacks.readAt) / 1000) });
   assert.ok(bad(judge(lacks)).some((l) => /1 missing from the tape/.test(l)));
 });
+
+test("a lists answer that is not a 200 with lists is a BAD line naming the chain and the status, never a crash (card app-console-429: robinhood's 503 at 11:03:50Z exited 2)", async () => {
+  for (const [status, body] of [[503, JSON.stringify({ error: { code: "upstream" } })], [429, JSON.stringify({ error: { code: "rate_limited" } })], [200, "not json"], [200, JSON.stringify({ lists: null })]]) {
+    const asked = [];
+    const fetchFn = async (url) => (asked.push(url), new Response(body, { status, headers: { "content-type": "application/json" } }));
+    const r = judge(await read("https://helper.test", undefined, fetchFn, [], "robinhood"));
+    assert.equal(r.ok, false);
+    assert.deepEqual(bad(r), [`BAD GET /v1/market/lists?chain=robinhood answers ${status}${status === 200 ? " with no lists" : ""} (robinhood)`], r.lines.join("\n"));
+    assert.deepEqual(asked, ["https://helper.test/v1/market/lists?chain=robinhood"], "nothing read past the lists");
+  }
+});

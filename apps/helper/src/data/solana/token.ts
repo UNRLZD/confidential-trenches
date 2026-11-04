@@ -270,16 +270,17 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
 type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean): Promise<Answer> };
-type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string }> };
+type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string; why?: string }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
-export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number };
+/** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
+export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number; why?: string };
 
 const err = (status: number, code: string): DataAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 export const NOT_FOUND = err(404, "not_found");
 export const UPSTREAM = err(503, "upstream");
 /** A throttled read with nothing good to serve: 429 with its wait, never 503 (a 503 never means "wait"). */
-const limited = (retryAfterS: number): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS });
+const limited = (retryAfterS: number, why?: string): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS, ...(why === undefined ? {} : { why }) });
 
 /** A map that keeps at most `max` keys, dropping the oldest written. */
 function bounded<V>(max: number) {
@@ -292,8 +293,39 @@ function bounded<V>(max: number) {
       while (m.size > max) m.delete(m.keys().next().value!);
     },
     size: () => m.size,
+    entries: () => [...m],
   };
 }
+
+/** A warm entry's answer, read back from the previous process's file (hostile input, as a vendor's answer): a 200 whose
+ *  body passes `body`, read no later than now and, when `maxAgeMs` is set, whose data is under it old. */
+type Kept = { at: number; body: string; src?: string; asOfMs: number };
+function keptOf(v: unknown, nowMs: number, maxAgeMs: number, body: (b: string) => boolean): Kept | null {
+  const o = v as Partial<Kept> | null;
+  if (typeof o !== "object" || o === null) return null;
+  if (typeof o.at !== "number" || !Number.isFinite(o.at) || o.at > nowMs || typeof o.asOfMs !== "number" || !Number.isFinite(o.asOfMs) || o.asOfMs > nowMs || nowMs - o.asOfMs > maxAgeMs) return null;
+  if (typeof o.body !== "string" || o.body.length > ANSWER_MAX || !body(o.body)) return null;
+  if (o.src !== undefined && (typeof o.src !== "string" || !/^[a-z,]{1,40}$/.test(o.src))) return null;
+  return { at: o.at, body: o.body, asOfMs: o.asOfMs, ...(o.src === undefined ? {} : { src: o.src }) };
+}
+/** A body that is one JSON object (a page or holders answer as built). */
+const isObjectBody = (b: string): boolean => {
+  try {
+    const v = JSON.parse(b);
+    return typeof v === "object" && v !== null && !Array.isArray(v);
+  } catch {
+    return false;
+  }
+};
+const DEC = /^\d{1,30}(\.\d{1,30})?$/;
+/** Bars as kept: at most 1000 Candles, each [t_s, o, h, l, c, vol] with t a whole second and the rest decimals. */
+const isBars = (v: unknown): v is Candle[] =>
+  Array.isArray(v) && v.length <= 1_000 && v.every((c) => Array.isArray(c) && c.length === 6 && Number.isSafeInteger(c[0]) && c[0] > 0 && c.slice(1).every((x) => typeof x === "string" && DEC.test(x)));
+/** The bytes of answers a process hands the next one (data/warm.ts holds the whole file under WARM_MAX, 16 MB, with
+ *  the EVM lists' answers) [design: 4 MB, a few hundred pages and holders and two dozen charts' last bars]. */
+export const HANDOVER_MAX = 4 * 1024 * 1024;
+/** The last good bars handed over are at most this old [design: an hour; a helper down longer reads them again]. */
+export const KEPT_HANDOVER_MS = 3_600_000;
 
 /** A read cached per key: fresh within `freshMs` of our own read; a failed refresh serves the last good one while its
  *  data is under STALE_MS old; one read per key at a time. `client`, the caller whose request makes the read, draws
@@ -308,6 +340,24 @@ function cached(freshMs: number, now: () => number, read: (key: string, client?:
   const running = new Map<string, Promise<DataAnswer>>();
   return {
     size: last.size,
+    /** Its good answers whose data is under STALE_MS old, newest last: what the next process serves (card
+     *  app-console-429). */
+    state: (): [string, Kept][] =>
+      last
+        .entries()
+        .filter(([, v]) => v.a.status === 200 && now() - (v.a.asOfMs ?? v.at) <= STALE_MS)
+        .map(([k, v]) => [k, { at: v.at, body: v.a.body, asOfMs: v.a.asOfMs ?? v.at, ...(v.a.src === undefined ? {} : { src: v.a.src }) }]),
+    /** A previous process's answers: each kept when its key passes `key` and it is newer than what this one holds. */
+    restore(entries: unknown, key: (k: string) => boolean, body: (b: string) => boolean): void {
+      if (!Array.isArray(entries)) return;
+      const t = now();
+      for (const e of entries.slice(-CACHE_MAX)) {
+        if (!Array.isArray(e) || e.length !== 2 || typeof e[0] !== "string" || !key(e[0])) continue;
+        const v = keptOf(e[1], t, STALE_MS, body);
+        if (v === null || (last.get(e[0])?.at ?? -Infinity) >= v.at) continue;
+        last.set(e[0], { a: { status: 200, body: v.body, asOfMs: v.asOfMs, ...(v.src === undefined ? {} : { src: v.src }) }, at: v.at });
+      }
+    },
     get(key: string, client?: string): Promise<DataAnswer> {
       const hit = last.get(key);
       if (hit !== undefined && now() - hit.at < freshMs) return Promise.resolve(view(key, hit.a));
@@ -320,7 +370,7 @@ function cached(freshMs: number, now: () => number, read: (key: string, client?:
             if (a.status === 200 || a.status === 404) last.set(key, { a, at: started });
             return a;
           })
-          .catch((e) => (hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS ? hit.a : e instanceof Throttled ? limited(e.retryAfterS) : UPSTREAM))
+          .catch((e) => (hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS ? hit.a : e instanceof Throttled ? limited(e.retryAfterS, e.why) : UPSTREAM))
           .finally(() => running.delete(key));
         running.set(key, p);
       }
@@ -343,7 +393,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
 
   async function call(method: string, params: unknown[], via: Rpc = rpc, client?: string): Promise<{ result: Record<string, unknown> }> {
     const a = await via.handle("solana", "application/json", rpcBody(method, params), client);
-    if (a.status === 429) throw new Throttled(retryAfterOf(a.headers));
+    if (a.status === 429) throw new Throttled(retryAfterOf(a.headers), a.why);
     if (a.status !== 200) throw new Upstream();
     const j = obj(JSON.parse(a.body));
     if (!Object.hasOwn(j, "result")) throw new Upstream();
@@ -373,9 +423,10 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     let rows: unknown = null;
     let at = now();
     let wait = 0;
+    let why: string | undefined;
     try {
       const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true); // proxy.ts PROXY_RESERVE
-      if (a.status === 429) wait = retryAfterOf(a.headers);
+      if (a.status === 429) (wait = retryAfterOf(a.headers)), (why = (a as { why?: string }).why);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
@@ -388,7 +439,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const ws = waiting.get(mint) ?? [];
       waiting.delete(mint);
       if (!Array.isArray(rows)) {
-        for (const w of ws) w.fail(wait > 0 ? new Throttled(wait) : new Upstream());
+        for (const w of ws) w.fail(wait > 0 ? new Throttled(wait, why) : new Upstream());
         continue;
       }
       const r: JupRow = { row: searchRow(rows, mint), at };
@@ -558,10 +609,10 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // naming the wait to the budget's next free call or the pause's end (card helper-abuse-limits)
   const gt = deps.gecko ?? geckoBudget(now, GT_PER_MIN);
   async function gecko(path: string): Promise<unknown> {
-    if (!gt.take("pages")) throw new Throttled(secondsUntil(gt.retryAt("pages"), now()));
+    if (!gt.take("pages")) throw new Throttled(secondsUntil(gt.retryAt("pages"), now()), "geckoterminal budget");
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
-      throw new Throttled(secondsUntil(throttledUntil(gt, r.headers.get("retry-after"), now()), now()));
+      throw new Throttled(secondsUntil(throttledUntil(gt, r.headers.get("retry-after"), now()), now()), "geckoterminal 429");
     }
     if (r.status === 404) return null;
     if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) throw new Upstream();
@@ -584,7 +635,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     const p = await pools.get(mint);
     if (p.status !== 200) {
       if (p.status === 404) return NOT_FOUND;
-      if (p.status === 429) throw new Throttled(p.retryAfterS ?? 1);
+      if (p.status === 429) throw new Throttled(p.retryAfterS ?? 1, p.why);
       throw new Upstream();
     }
     const { period, aggregate } = TF[tf];
@@ -596,7 +647,54 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return { status: 200, body: JSON.stringify(candles), src: "geckoterminal", asOfMs: at };
   });
 
+  const mintKey = (k: string) => address(k) !== null;
+  const isPool = (b: string) => address(b) !== null;
+
   return {
+    /**
+     * The answers this process holds, as the next one takes them over (card app-console-429): a deploy's new helper
+     * starts with the pages, holders, top pools and last good bars the old one was serving, so the first loads after a
+     * swap are answered as the old helper would have answered them, under the same freshness rules, instead of all
+     * going upstream at once into a GeckoTerminal budget the old helper spent. Newest first within HANDOVER_MAX bytes.
+     */
+    state(): { page: [string, Kept][]; holders: [string, Kept][]; pools: [string, Kept][]; kept: [string, { bars: Candle[]; at: number }][] } {
+      let room = HANDOVER_MAX;
+      const fit = <T>(list: [string, T][]): [string, T][] => {
+        const out: [string, T][] = [];
+        for (let i = list.length - 1; i >= 0; i--) {
+          const n = JSON.stringify(list[i]).length;
+          if (n > room) break;
+          room -= n;
+          out.unshift(list[i]!);
+        }
+        return out;
+      };
+      const t = now();
+      return {
+        page: fit(page.state()),
+        holders: fit(holders.state()),
+        pools: fit(pools.state()),
+        kept: fit(kept.entries().filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS)),
+      };
+    },
+    /** A previous process's state (data/warm.ts, hostile input): every entry checked as an answer of ours would be. */
+    restore(st: unknown): void {
+      const o = (typeof st === "object" && st !== null ? st : {}) as Record<string, unknown>;
+      page.restore(o.page, mintKey, isObjectBody);
+      holders.restore(o.holders, mintKey, isObjectBody);
+      pools.restore(o.pools, mintKey, isPool);
+      if (!Array.isArray(o.kept)) return;
+      const t = now();
+      for (const e of o.kept.slice(-CACHE_MAX)) {
+        if (!Array.isArray(e) || e.length !== 2 || typeof e[0] !== "string") continue;
+        const [mint, tf, more] = e[0].split(":");
+        const v = e[1] as { bars?: unknown; at?: unknown } | null;
+        if (more !== undefined || !mintKey(mint!) || !Object.hasOwn(TF, tf ?? "") || typeof v !== "object" || v === null) continue;
+        if (typeof v.at !== "number" || !Number.isFinite(v.at) || v.at > t || t - v.at > KEPT_HANDOVER_MS || !isBars(v.bars) || v.bars.length === 0) continue;
+        const had = kept.get(e[0]);
+        if (had === undefined || had.at < v.at) kept.set(e[0], { bars: v.bars, at: v.at });
+      }
+    },
     /** 06b TokenPage for a Solana mint: 404 when it is no mint or Jupiter does not list it, 503 on an upstream failure. */
     page: (mint: string, client?: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : page.get(mint, client)),
     /** 06b Holders (20 rows, merged per owner), or Jupiter's fallback. */

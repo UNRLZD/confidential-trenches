@@ -107,7 +107,7 @@ export function judge(rec) {
       if (st.reloaded) bad.push(`${st.href} reloaded the page`);
       if (st.route !== st.expect) bad.push(`${st.href} drew ${st.route ?? "nothing"}`);
     }
-    if (s.violations.length || s.consoleErrors.length) bad.push(`${s.violations.length} CSP violation(s), ${s.consoleErrors.length} console error(s)`);
+    if (s.violations.length || s.consoleErrors.length) bad.push(`${s.violations.length} CSP violation(s), ${s.consoleErrors.length} console error(s)${s.consoleErrors.length ? `: ${s.consoleErrors.join("; ")}` : ""}`);
     say(bad.length === 0, `${s.width} inside the shell, ${s.steps.length} link(s): ${bad.length ? bad.join("; ") : "CLS 0, no reload"}`);
   }
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
@@ -185,11 +185,18 @@ const originOf = (u) => {
   }
 };
 
+/** One console error as the check keeps it: its text and the address it names (m.location().url, the resource that
+ *  failed to load or the script that logged it), so a FAIL names what failed, not only "a status of 429". */
+export function consoleError(m) {
+  const url = m.location()?.url ?? "";
+  return url === "" ? m.text() : `${m.text()} (${url})`;
+}
+
 function watch(page, origin) {
   const consoleErrors = [];
   const loadedScripts = [];
   // the console of APP_HOST's documents only; the shell's is SIGN_HOST's to check
-  page.on("console", (m) => m.type() === "error" && originOf(m.location()?.url ?? "") !== SIGN_HOST && consoleErrors.push(m.text()));
+  page.on("console", (m) => m.type() === "error" && originOf(m.location()?.url ?? "") !== SIGN_HOST && consoleErrors.push(consoleError(m)));
   page.on("pageerror", (e) => consoleErrors.push(String(e)));
   // every frame's script is recorded with its frame's address and whether that frame shows an APP_HOST document
   page.on("response", (r) => {
