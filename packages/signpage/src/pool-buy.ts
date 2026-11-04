@@ -31,10 +31,13 @@
 //   ready. A refusal before the take leaves the proof ready for the next tap.
 // - The send: the helper's POST /v1/pool/solana/send ({pool, tx}); its answer is hostile. The signature it names must
 //   read back on both RPCs as this very transaction (the same message, W's signature in slot 1, that signature in slot
-//   0) and succeeded. Another transaction under that name on both RPCs ends the reads early; on one RPC only it is that
-//   RPC's word against the other's, so the reads go on. A transaction that failed on chain spent nothing (the release
-//   and the buy are one transaction): refused. Before any answer but filled, the note's settle is tried once, so a
-//   buy that landed is never answered not_landed on one RPC's word.
+//   0) and succeeded. On one RPC only, another transaction under that name is that RPC's word against the other's, so
+//   the reads go on. This very transaction failed on chain on both spent nothing (the release and the buy are one
+//   transaction) and can never land: refused. A send the helper refused or never answered, a signature that is not
+//   one, another transaction under it on both RPCs, or none read back: the signed transaction may still land, so the
+//   answer is not_landed only once both RPCs' finalized height is past the blockhash's last valid one (the higher of
+//   RPC 0's word and RPC 1's height + 151) and the note's settle still finds no spend; a spend found first is filled,
+//   and past the reads it is "sent".
 // - Spent: only then is the note settled through the wallet's one place for it (solanaSettleSpent: the spent mark and
 //   the change leaf read on two RPCs, the change written UNSPENT naming the note, which goes SPENT). That SPENT note is
 //   W's record: the buy wallets list (../../wallet/src/pool/buy-wallets.ts spentNotesOf) finds W and reads its holdings.
@@ -243,14 +246,35 @@ async function tableOf(h: PoolBuyHost, address: string): Promise<{ table: Solana
   return { table: solanaDecodeLookupTable(a.data), reads: { [address]: [a, b] } };
 }
 
-/** The blockhash on RPC 0 and its slot (the device's own slot for the quote's age), valid on RPC 1. */
-async function blockhashOf(h: PoolBuyHost): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number }> {
+/** A blockhash is valid for 150 blocks after the one it names (Solana's MAX_PROCESSING_AGE), so at most height + 151. */
+const BLOCKHASH_LIFE = 151;
+
+/** The blockhash on RPC 0 and its slot (the device's own slot for the quote's age), valid on RPC 1; and `lastHeight`,
+ *  a block height past which no transaction on it can land, whichever RPC lies: the higher of RPC 0's
+ *  lastValidBlockHeight and RPC 1's height (read after it) + 151. A liar can only raise it, which only waits longer. */
+async function blockhashOf(h: PoolBuyHost): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number; lastHeight: number }> {
   const r = (await h.rpcs[0]("getLatestBlockhash", [{ commitment: "confirmed" }])) as { context?: { slot?: unknown }; value?: { blockhash?: unknown; lastValidBlockHeight?: unknown } };
   const blockhash = r?.value?.blockhash;
   if (typeof blockhash !== "string") return no();
-  const ok = (await h.rpcs[1]("isBlockhashValid", [blockhash, { commitment: "confirmed" }])) as { value?: unknown };
+  const [ok, height] = await Promise.all([
+    h.rpcs[1]("isBlockhashValid", [blockhash, { commitment: "confirmed" }]) as Promise<{ value?: unknown }>,
+    h.rpcs[1]("getBlockHeight", [{ commitment: "confirmed" }]),
+  ]);
   if (ok?.value !== true) return no();
-  return { blockhash, lastValidBlockHeight: int(r.value!.lastValidBlockHeight), slot: int(r.context?.slot) };
+  const said = int(r.value!.lastValidBlockHeight);
+  const cap = int(height) + BLOCKHASH_LIFE;
+  return { blockhash, lastValidBlockHeight: said, slot: int(r.context?.slot), lastHeight: said > cap ? said : cap };
+}
+
+/** True once both RPCs' finalized block height is past `last`: no transaction on that blockhash can land after, and
+ *  any that did is final, so a spent mark read now at finalized is the whole answer. A failed read is "not yet". */
+async function pastOnBoth(h: PoolBuyHost, last: number): Promise<boolean> {
+  try {
+    const hs = await both(h, (rpc) => rpc("getBlockHeight", [{ commitment: "finalized" }]));
+    return hs.every((x) => int(x) > last);
+  } catch {
+    return false;
+  }
 }
 
 /** The transaction under `signature` on one RPC: "none" (not seen yet), "ok", "failed" or "other" (not ours). */
@@ -346,7 +370,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       key = null;
       const signed = built.wire.slice();
       signed.set(sig, 1 + 64);
-      return await sendAndSettle(h, r, release, pool, signed, wait);
+      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait);
     }
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
@@ -360,25 +384,35 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
 }
 
 /** The take, the send, the read-back on both RPCs and the settle; every answer but filled tries the settle first. */
-async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, wait: (ms: number) => Promise<void>): Promise<PoolBuyAnswer> {
+async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>): Promise<PoolBuyAnswer> {
   // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD
   const taken = await h.take(r.noteId, r.attempt);
   if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();
   const reads = h.reads ?? POOL_BUY_READS;
+  const spent = async (): Promise<boolean> => (await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }))).kind === "spent";
   // the chain's word on the note (its spent mark and change on both RPCs) over the helper's or one RPC's: spent is
-  // filled, shown with the helper's signature only when it read back as this transaction
-  const settled = async (txs: TxRef[], otherwise: PoolBuyAnswer): Promise<PoolBuyAnswer> => {
-    const s = await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }));
-    return s.kind === "spent" ? { stage: "filled", txs } : otherwise;
+  // filled, shown with the helper's signature only when it read back as this transaction. not_landed only once both
+  // RPCs' finalized height is past the blockhash's last one and the settle still finds no spend (the kit's rule: never
+  // not_landed while the transaction may still land, packages/kit/src/trade/solana/flow.ts finishSolanaSet); until then
+  // the reads go on, and past them the answer is "sent", the note RESERVED for the state reads' pass to settle or free
+  const unlanded = async (txs: TxRef[]): Promise<PoolBuyAnswer> => {
+    for (let i = 0; i < reads; i++) {
+      if (i > 0) await wait(POOL_BUY_WAIT_MS);
+      const past = await pastOnBoth(h, lastHeight); // before the settle: a spend final by then is in its read
+      if (await spent()) return { stage: "filled", txs };
+      if (past) return { stage: "not_landed", txs };
+    }
+    return { stage: "sent", txs };
   };
   let answer: unknown;
   try {
     answer = await h.send(pool, signed);
   } catch {
-    return settled([], { stage: "not_landed", txs: [] });
+    // the helper's error says nothing of the chain: a broken-in helper may answer 502 and send it anyway
+    return unlanded([]);
   }
   const signature = (answer as { signature?: unknown } | null)?.signature;
-  if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature) || base58.decode(signature).length !== 64) return settled([], { stage: "not_landed", txs: [] });
+  if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature) || base58.decode(signature).length !== 64) return unlanded([]);
   h.sent?.(signature);
   const txs: TxRef[] = [{ chain: "solana", hash: signature }];
   let landed = false;
@@ -386,11 +420,12 @@ async function sendAndSettle(h: PoolBuyHost, r: Ready, release: SolanaPoolReleas
     if (i > 0) await wait(POOL_BUY_WAIT_MS);
     const got: readonly Got[] = await both(h, (rpc) => readBack(rpc, signature, signed)).catch((): Got[] => ["none", "none"]);
     // another transaction under that name on both RPCs: the helper's signature is not this one's
-    if (got[0] === "other" && got[1] === "other") return settled([], { stage: "not_landed", txs: [] });
-    if (got[0] === "failed" && got[1] === "failed") return settled(txs, { stage: "refused", txs });
+    if (got[0] === "other" && got[1] === "other") return unlanded([]);
+    // this very transaction failed on chain, on both RPCs: it spent nothing, and it can never land again
+    if (got[0] === "failed" && got[1] === "failed") return (await spent()) ? { stage: "filled", txs } : { stage: "refused", txs };
     landed = got[0] === "ok" && got[1] === "ok";
   }
-  if (!landed) return settled(txs, { stage: "not_landed", txs });
+  if (!landed) return unlanded(txs);
   // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized)
   for (let i = 0; i < reads; i++) {
     if (i > 0) await wait(POOL_BUY_WAIT_MS);

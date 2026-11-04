@@ -23,7 +23,7 @@ import { base64 } from "@scure/base";
 import { solanaJsonRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
-import type { WalletStore } from "@blindfill/wallet/store";
+import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore, readNotes, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
@@ -67,6 +67,8 @@ export type TestnetOver = {
   hardwareConcurrency?: number;
   /** The lookup table pool.buy loads (DEVNET_TABLE otherwise). */
   table?: string | null;
+  /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
+  locks?: Pick<LockManager, "request"> | null;
 };
 
 /** The devnet pool's lookup table: none is created and pinned yet (scripts/live-checks/pool-sol-deploy.devnet.json
@@ -265,17 +267,23 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
   // once both RPCs' block time is past their deadline with no spent mark, or held (../../wallet/src/pool/solana-restore.ts
   // solanaSettleReserved); a freed note is proved again by the open queue's next pass
+  // It holds a seed copy, so it runs under the seed's shared lock, as every run that does (a sign out, in any tab, waits
+  // for it; one that came first leaves no seed, and the pass ends at its seed read). No Web Locks: no pass.
+  const locks = over.locks === undefined ? (globalThis.navigator?.locks ?? null) : over.locks;
   const settleReserved = async (): Promise<void> => {
-    const notes = await openNoteStore(await page.store());
-    let seed64: Uint8Array | null = null;
-    try {
-      seed64 = await page.seed64();
-      const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: rpcs() });
-      if (pass.freed.length > 0 && open !== null) void proofs();
-    } finally {
-      seed64?.fill(0);
-      notes.close();
-    }
+    if (!locks) return;
+    await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const notes = await openNoteStore(await page.store());
+      let seed64: Uint8Array | null = null;
+      try {
+        seed64 = await page.seed64();
+        const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: rpcs() });
+        if (pass.freed.length > 0 && open !== null) void proofs();
+      } finally {
+        seed64?.fill(0);
+        notes.close();
+      }
+    });
   };
   const stateRead = (): Promise<void> => {
     if (scope === null) return Promise.resolve();

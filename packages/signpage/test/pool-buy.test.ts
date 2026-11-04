@@ -90,6 +90,12 @@ type Plant = {
   sizeSkewOnce?: boolean;
   /** what each call of ready() answers, in turn (the last one again after); the queue's own ready attempt is the last's */
   readies?: ReadyProof<SolanaReleaseRequest>[][];
+  /** the helper's answer: an HTTP 502 (thrown) or a signature that is not one; either way it sent the transaction */
+  helper?: "502" | "badSig";
+  /** the chain holds the transaction only from the settle of this number on (1: at once), or never */
+  landsAtSettle?: number | "never";
+  /** RPC p's finalized block height at its i-th read (1,000 when not given: past the blockhash's last height) */
+  finalHeight?: (p: 0 | 1, i: number) => number;
 };
 
 async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
@@ -102,6 +108,8 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   // the queue's ready proof for the note now: the last list's (a remake swaps it in place, the note HELD)
   const current = readies.at(-1)![0] ?? proof;
   let skewed = false;
+  let settles = 0;
+  const heightReads = [0, 0];
   const accounts = (p: 0 | 1): Record<string, { owner: string; data: Uint8Array }> => ({
     [s.tableAddr]: { owner: ALT, data: s.tableData },
     [POOL]: { owner: PROGRAM, data: poolAccount() },
@@ -134,6 +142,11 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       }
       if (method === "getLatestBlockhash") return { context: { slot: s.ref.slot! + (plant.slotAhead ?? 2) }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 100 } };
       if (method === "isBlockhashValid") return { value: true };
+      if (method === "getBlockHeight") {
+        // confirmed: RPC 1's height beside the blockhash, so the last height is max(100, 0 + 151) = 151
+        if ((params[0] as { commitment: string }).commitment === "confirmed") return 0;
+        return plant.finalHeight?.(p, heightReads[p]!++) ?? 1_000;
+      }
       if (method === "getTransaction") {
         const how = plant.readBack ?? "ours";
         if (how === "none" || sent === null) return null;
@@ -167,13 +180,16 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       assert.equal(pool, POOL);
       assert.equal(st, "RESERVED", "the note is RESERVED before the transaction leaves");
       sent = tx.slice();
-      return { signature: SIG };
+      if (plant.helper === "502") throw new Error("pool send: HTTP 502");
+      return { signature: plant.helper === "badSig" ? "not-a-signature" : SIG };
     },
     // the wallet's solanaSettleSpent: spent only when the chain holds the transaction (its mark and change)
     settle: async (id) => {
       log.push(`settle:${id}`);
       const how = plant.readBack ?? "ours";
-      if (sent === null || (how !== "ours" && how !== "lieOne")) return { kind: "unspent" };
+      settles++;
+      const lands = plant.landsAtSettle ?? 1;
+      if (sent === null || (how !== "ours" && how !== "lieOne") || lands === "never" || settles < lands) return { kind: "unspent" };
       st = "SPENT";
       return { kind: "spent" };
     },
@@ -248,6 +264,30 @@ test("a helper answer whose tx does not read back, or reads back as another tx, 
   assert.equal(w.state(), "RESERVED");
 });
 
+test("fold 2 (1): the helper's 502 or a signature that is not one, the transaction landing later: never not_landed, filled and SPENT", async () => {
+  for (const helper of ["502", "badSig"] as const) {
+    // the chain shows the spend from the third settle; the height is never past the blockhash's last
+    const w = await world({ helper, landsAtSettle: 3, finalHeight: () => 50 });
+    assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [] }, helper);
+    assert.equal(w.state(), "SPENT", helper);
+  }
+});
+
+test("fold 2 (1): a transaction that never lands is not_landed only once both RPCs' finalized height is past its blockhash's last", async () => {
+  // RPC 0 past from its first read, RPC 1 only from its third: two rounds go on, the third answers not_landed
+  const w = await world({ helper: "502", landsAtSettle: "never", finalHeight: (p, i) => (p === 0 || i >= 2 ? 1_000 : 50) });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "not_landed", txs: [] });
+  assert.equal(w.log.filter((x) => x === "settle:note-1").length, 3);
+  assert.equal(w.state(), "RESERVED", "the state reads' pass frees it past its deadline");
+  // the last height is the higher of RPC 0's word (100) and RPC 1's height + 151 (151): 120 on both is not past it
+  const x = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 120 });
+  assert.deepEqual(await runPoolBuy(x.host, ASK), { stage: "sent", txs: [] }, "never past within the reads: sent, not not_landed");
+  assert.equal(x.state(), "RESERVED");
+  // a read-back that never shows the helper's signature: the same rule, with its signature shown
+  const n = await world({ readBack: "none", finalHeight: () => 50 });
+  assert.deepEqual(await runPoolBuy(n.host, ASK), { stage: "sent", txs: [{ chain: "solana", hash: SIG }] });
+});
+
 test("fold 1 (3): one RPC answering another tx under the helper's signature does not turn a landed buy into not_landed", async () => {
   const w = await world({ readBack: "lieOne" });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
@@ -298,7 +338,7 @@ test("fold 1 (4): the device's slot read is last before signing: no RPC read bet
   const bh = w.log.indexOf("0:getLatestBlockhash");
   const take = w.log.indexOf("take:note-1");
   const between = w.log.slice(bh + 1, take);
-  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && x !== "1:isBlockhashValid"), [], between.join(" "));
+  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && x !== "1:isBlockhashValid" && x !== "1:getBlockHeight"), [], between.join(" "));
   assert.ok(w.log.indexOf("seed") > bh, "W is derived after the slot read");
   // a proof whose l, j derive another W than it names: refused before W signs, nothing taken
   const x = await world({}, readyProof({ j: 1 }));

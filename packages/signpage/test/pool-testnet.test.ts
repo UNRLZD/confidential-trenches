@@ -256,6 +256,52 @@ test("a state read runs the RESERVED pass (card signpage-pool-buy fold 1): a not
   assert.deepEqual(await states(ns), ["RESERVED"]);
 });
 
+test("fold 2 (2): the RESERVED pass runs under the seed's shared lock: a sign out during it waits for it; after it, none starts", async () => {
+  const { w, ns } = await wallet();
+  // the pass's first read held open until the test lets it go
+  let release!: () => void;
+  const held = new Promise<void>((ok) => (release = ok));
+  let reads = 0;
+  const rpc = async (m: string) => {
+    reads++;
+    if (m === "getSlot") await held;
+    throw new Error("offline");
+  };
+  let signedIn = true;
+  const seed64 = async () => {
+    if (!signedIn) throw new Error("no seed: signed out");
+    return SEED64.slice();
+  };
+  const t = testnetPool({ store: async () => w, seed64 }, { rpcs: [rpc, async (m: string) => rpc(m)], prover: { vault: signalsProver(), stop: () => {} } });
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 6));
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "1" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  const pass = t.stateRead();
+  while (reads === 0) await new Promise((r) => setTimeout(r, 1));
+  // the store's sign out takes the seed lock exclusive: it waits while the pass holds it shared
+  let out = false;
+  const signOut = navigator.locks.request("ct-wallet/seed", { mode: "exclusive" }, async () => {
+    signedIn = false;
+    out = true;
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(out, false, "the sign out waits for the pass");
+  release();
+  await pass;
+  await signOut;
+  assert.equal(out, true);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
+  // signed out: the next state read's pass ends at its seed read, with no chain read
+  const before = reads;
+  await t.stateRead();
+  assert.equal(reads, before);
+  // no Web Locks: no pass at all
+  const bare = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], prover: { vault: signalsProver(), stop: () => {} }, locks: null });
+  await bare.stateRead();
+  assert.equal(reads, before);
+});
+
 test("the page's queue runs on solanaPool with the devnet pin and the page's two devnet RPCs: a landing reads the pool's time on both", async () => {
   const { w, ns } = await wallet();
   const calls: string[][] = [[], []];

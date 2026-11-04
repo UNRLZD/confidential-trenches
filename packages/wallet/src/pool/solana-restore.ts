@@ -462,9 +462,19 @@ export type SolanaReservedPass = { spent: string[]; freed: string[]; held: strin
  * Solana pool note, whatever its send did (filled, refused by the helper or the chain, never answered, sent by a page
  * that died). Run on each of the signing page's state reads while such a note is open.
  * - First each RPC's finalized slot and its block time; then, per note, solanaSettleSpent with each RPC's marks read at
- *   or past that slot. A release lands only before its deadline (contracts/pool-solana src/release.rs row 2, the
- *   Clock's unix_timestamp), so once both RPCs' finalized block time is past deadline_ms, any release of the note is in
- *   a block at or before the ones whose time was read, and so in both marks reads that follow.
+ *   or past that slot. A release lands only while the Clock's unix_timestamp * 1000 is at most deadline_ms
+ *   (contracts/pool-solana src/release.rs:179-183, row 2), so once both RPCs' finalized block time is past deadline_ms,
+ *   any release of the note is in a block before the ones whose time was read, and so in both marks reads that follow.
+ *   That rests on two facts of the Solana validator, read in agave at 8fcd3dde0442c47e0ef0caa1fdee8400eb480181 (master,
+ *   4 Nov 2026), https://github.com/anza-xyz/agave/blob/8fcd3dde0442c47e0ef0caa1fdee8400eb480181/<path>#L<line>:
+ *   (1) the Clock's unix_timestamp never decreases from a bank to its child: runtime/src/bank.rs:2567-2574
+ *       (update_clock: an estimate below the ancestor's unix_timestamp is raised to it); under Alpenglow the footer's
+ *       time must be at least the parent's + 1 ns (runtime/src/block_component_processor.rs:715-742
+ *       enforce_nanosecond_clock_bounds, :774 nanosecond_time_bounds), and the Clock takes it in whole seconds
+ *       (runtime/src/bank.rs:3659, :3674);
+ *   (2) getBlockTime(slot) is that bank's Clock unix_timestamp: rpc/src/rpc.rs:1742-1773 (get_block_time: a rooted
+ *       slot's from the blockstore, which rpc/src/transaction_status_service.rs:385 writes as
+ *       bank.clock().unix_timestamp; a newer slot's from bank.clock().unix_timestamp, :1769).
  * - A spent mark on either RPC (the marks are the union): settled through solanaSettleSpent, whose change both RPCs'
  *   pages must hold; a mark whose change is not yet on both is held, never freed.
  * - No spent mark, and the lower of the two block times past deadline_ms: RESERVED -> UNSPENT (the store's own rule,
