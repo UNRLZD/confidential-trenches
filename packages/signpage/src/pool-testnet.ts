@@ -90,6 +90,8 @@ export function mergeWithdrawOp(
     delete r.owed;
     delete r.fee_needed;
   }
+  // a record from before the "owed" store holds its send in `pending`: cleared the same way
+  if (w.clear !== undefined && (r.pending as PendingOnward | undefined)?.noteId === w.clear) delete r.pending;
   return r;
 }
 
@@ -118,11 +120,7 @@ export async function settleFreedOps(ops: WalletStore, freed: readonly string[])
     const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; pending?: PendingOnward } | undefined;
     const owed = rec?.kind !== "withdraw" ? undefined : typeof rec.owed === "string" ? rec.owed : rec.pending?.noteId;
     if (owed === undefined || !freed.includes(owed)) continue;
-    await ops.update("ops", k, (v) => {
-      const r = mergeWithdrawOp(v, { stage: "stopped", clear: owed });
-      if ((r.pending as PendingOnward | undefined)?.noteId === owed) delete r.pending;
-      return r;
-    });
+    await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: "stopped", clear: owed }));
     await dropSend(ops, k, owed);
   }
 }
