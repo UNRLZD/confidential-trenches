@@ -1,6 +1,6 @@
 import type { Chain } from "@blindfill/kit";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { busy, outcome, progress, READY, tap } from "../trade/model.ts";
+import { busy, outcome, poolSellAsk, progress, READY, tap } from "../trade/model.ts";
 import type { Phase } from "../trade/model.ts";
 import { useTradeSource } from "../trade/source.tsx";
 import type { PartCount } from "../trade/States.tsx";
@@ -47,6 +47,8 @@ export interface Sell {
   bps: number | null;
   /** The kit can take a sell now. */
   ready: boolean;
+  /** The sell goes into the chain's pool: its proceeds land back in the pool (pool.sell). */
+  pool: boolean;
   /** A part-filled sell's count of slices, when the kit gives it (TradeKit.part, not in the kit yet). */
   part: PartCount | null;
   now(): number;
@@ -84,11 +86,15 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000): Sell {
     phase,
     bps,
     ready,
+    pool: poolSellAsk(src.snapshot.state?.pools, chain, token, "0", slippageBps) !== null,
     part: phase.k === "ended" ? (kit.part?.(phase.id) ?? null) : null,
     now: src.now,
     sell(amount, b) {
       if (!ready || amount === null || busy(ref.current)) return;
-      const h = kit.request!("buy", { chain, token, side: "sell", amount, slippage_bps: slippageBps });
+      // a chain whose pool the signing page reports sells into it: the proceeds go back into the pool in the same
+      // transaction (card trade-box-pool); other chains keep the vault's sell
+      const ask = poolSellAsk(src.snapshot.state?.pools, chain, token, amount, slippageBps);
+      const h = ask ? kit.request!(ask.kind, ask.params) : kit.request!("buy", { chain, token, side: "sell", amount, slippage_bps: slippageBps });
       const next = tap(ref.current, h.id, src.now());
       ref.current = next;
       setPhase(next);

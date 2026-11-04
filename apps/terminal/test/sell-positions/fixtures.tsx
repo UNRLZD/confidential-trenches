@@ -7,7 +7,8 @@
 // refuse (the sell refused with quote_check_failed at 300 ms). The trade states (app-trade-box-states), on up's
 // position: notsent (signpage_down) and other (not_allowed) refusals, slow (filled at 8 s), notlanded (not_landed at 3 s),
 // partial (part_filled, the kit's count 1 of 2) and partial-nocount. Every request is recorded in window.__calls; every Share
-// tap in window.__shares. Test only.
+// tap in window.__shares. ?pool=sol puts the devnet Solana pool in the state (card trade-box-pool: the 0.01 SOL note of
+// scripts/live-checks/signpage-pool-notes.run.json), so the sell goes into the pool (pool.sell). Test only.
 import type { SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -61,6 +62,7 @@ const STATE: SignpageState = {
   orders: [],
   held: [],
   ops: [],
+  ...(q.get("pool") === "sol" ? { pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }] } : {}),
 };
 const MARKET: TokenMarket = { symbol: "TORCH", name: "Torch", price: P.price, route: P.route };
 const DATA: PortfolioData = {
@@ -79,6 +81,7 @@ let n = 0;
 const kit: TradeKit = {
   setPreview: null,
   maxBuy: () => "100",
+  poolPrice: () => null,
   request: ((kind: string, params: unknown) => {
     const id = `sell-${++n}`;
     window.__calls.push({ kind, params, id });
