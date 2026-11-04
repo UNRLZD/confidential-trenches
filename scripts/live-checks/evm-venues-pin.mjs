@@ -3,9 +3,11 @@
 // holds that code on chain. For every chain of the kit's venue list (evmPoolVenues(), through the kit's public entry)
 // that has a deployment record (pool-evm-deploy.<chain>.json):
 //   - the pins are the record's: the pool is PrivacyPoolSimple, the v3 and v4 adapters UniswapV3Adapter and
-//     UniswapV4Adapter (a record without one, a venue without that pin), the sell delegate SellDelegate;
-//   - the chain's WETH and routers are the ones pool-evm-deploy pinned (CHAINS: WETH; the v3 router, or none), and no
-//     middle is listed;
+//     UniswapV4Adapter (a record without one, a venue without that pin), the sell delegate SellDelegate, which card
+//     evm-sell-v4 deployed again to sell through the v4 PoolManager: its record (evm-sell-v4.<chain>.json), where there
+//     is one, names the SellDelegate in place of pool-evm-deploy's;
+//   - the chain's WETH, PoolManager and routers are the ones pool-evm-deploy pinned (CHAINS: WETH; the PoolManager; the
+//     v3 router, or none), and no middle is listed;
 //   - on the chain's two RPCs of two operators (the money gate's), each answering the chain's id: at the newest block
 //     both have (the lower of their two eth_blockNumber answers, so no archive read is needed), each pin's code is the
 //     same on both and is the build's (pool-evm-deploy.build.json, pinnedBuild: the same length and, with the immutables' bytes
@@ -18,6 +20,7 @@
 // --record writes every RPC answer read to <file>, for the test's replay (evm-venues-pin.answers.json).
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { CHAINS, EIP1967, deploymentFile, gettersOf, keccak, operatorProblems, pinnedBuild, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
@@ -32,8 +35,19 @@ const PINS = [
   ["sell delegate", (v) => v.sellDelegate, "SellDelegate"],
 ];
 
+const sellV4File = (c) => path.join(path.dirname(fileURLToPath(import.meta.url)), `evm-sell-v4.${c}.json`);
+/** pool-evm-deploy's record of `chain`, its SellDelegate the one card evm-sell-v4 deployed where that card has a record */
+export function recordOf(chain) {
+  if (!existsSync(deploymentFile(chain))) return null;
+  const d = JSON.parse(readFileSync(deploymentFile(chain), "utf8"));
+  if (!existsSync(sellV4File(chain))) return d;
+  const s = JSON.parse(readFileSync(sellV4File(chain), "utf8"));
+  if (s.chain !== chain || s.dryRun !== false) throw new Error(`${sellV4File(chain)} is not ${chain}'s real run`);
+  return { ...d, contracts: { ...d.contracts, SellDelegate: s.contracts.SellDelegate } };
+}
+
 /** The chains of the kit's venue list that pool-evm-deploy has a record for, with that record */
-export function deployed(venues = evmPoolVenues(), read = (c) => (existsSync(deploymentFile(c)) ? JSON.parse(readFileSync(deploymentFile(c), "utf8")) : null)) {
+export function deployed(venues = evmPoolVenues(), read = recordOf) {
   return Object.keys(CHAINS).filter((c) => Object.hasOwn(venues, c)).map((c) => [c, read(c)]).filter(([, d]) => d !== null);
 }
 
@@ -55,6 +69,7 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
     if (pin !== undefined && lower(pin) === lower(rec)) want.push([role, pin, name]);
   }
   say(lower(venue.weth) === lower(c.weth.address), `WETH ${venue.weth} is pool-evm-deploy's ${c.weth.address}`);
+  say(lower(venue.poolManager) === lower(c.poolManager.address), `the PoolManager ${venue.poolManager ?? "(none)"} is pool-evm-deploy's ${c.poolManager.address}`);
   const routers = c.router ? [lower(c.router.address)] : [];
   say(JSON.stringify(venue.routers.map(lower)) === JSON.stringify(routers), `the routers ${JSON.stringify(venue.routers)} are pool-evm-deploy's ${JSON.stringify(routers)}`);
   say(venue.middles.length === 0, `no middle is listed: ${JSON.stringify(venue.middles)}`);

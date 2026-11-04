@@ -134,10 +134,11 @@ test("the frozen v1 sell delegate is the build only at the addresses the build f
   assert.equal(pinnedBuild("base-sepolia", "SellDelegate", "0x" + "12".repeat(20)), BUILD.contracts.SellDelegate);
   assert.equal(pinnedBuild("base-sepolia", "PrivacyPoolSimple", f.at["base-sepolia"]), BUILD.contracts.PrivacyPoolSimple);
   assert.notEqual(f.masked, BUILD.contracts.SellDelegate.masked, "the frozen build is not the current one");
-  // the v1 delegate's code as deployed on Base Sepolia (evm-venues-pin's recording of it), served for the dry run's
-  // delegate, an address the build file does not freeze: it fails
-  const V = JSON.parse(readFileSync(new URL("./evm-venues-pin.answers.json", import.meta.url), "utf8"));
-  const v1 = V.good.find((a) => a.method === "eth_getCode" && lower(a.params[0]) === f.at["base-sepolia"]).json.result;
+  // the v1 delegate's code as deployed on Base Sepolia (sell-delegate-v1.code.json, read on both RPCs), served for the
+  // dry run's delegate, an address the build file does not freeze: it fails
+  const V = JSON.parse(readFileSync(new URL("./sell-delegate-v1.code.json", import.meta.url), "utf8"));
+  assert.equal(lower(V.address), f.at["base-sepolia"]);
+  const v1 = V.code;
   assert.equal(runtimeOf(v1, f.immutables).masked, f.masked, "the recorded code is the frozen v1 build");
   const del = A.deployments["base-sepolia"].contracts.SellDelegate.address;
   fails(await run("base-sepolia", mutate("base-sepolia", isCode(del), (j) => (j.result = v1))), /SellDelegate \S+ code is the build's: 4119 bytes/);

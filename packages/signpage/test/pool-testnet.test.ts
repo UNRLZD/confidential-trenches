@@ -4,7 +4,7 @@
 // Base Sepolia and Robinhood testnet, and a pool buy on the pinned devnet pool reaches the flow. Another chain (no EVM
 // pool pinned), a page with no flow, or the mainnet tables are refused. Its own file: the network is read once, at
 // import, so this process runs as the testnet build does (test/pool-network.test.ts runs the mainnet one).
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
@@ -23,7 +23,8 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS } = await import("../src/pool-testnet.ts");
+const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
 
 const RECORD = JSON.parse(readFileSync(new URL("../../../scripts/live-checks/pool-sol-deploy.devnet.json", import.meta.url), "utf8")) as { cluster: string; program_id: string; pool: string };
@@ -80,7 +81,7 @@ test("the testnet flow (card signpage-pool-notes): a Solana pool.deposit runs th
   await d.after;
   assert.deepEqual(d.answer(), { error: "failed" });
   assert.equal(opened, 1);
-  assert.deepEqual(k["pool.buy"](buy("solana"), ctx), { error: "not_allowed" }, "a pool buy waits for its card");
+  assert.deepEqual(k["pool.buy"](buy("solana"), ctx), { error: "not_allowed" }, "no lookup table is pinned for the devnet pool: no read, refused");
   assert.deepEqual(k["pool.deposit"]({ chain: "base", amount: "0.01" }, ctx), { error: "not_allowed" });
 });
 
@@ -229,6 +230,78 @@ test("a state read settles a pool note still INCOMING, one pass at a time; with 
   assert.deepEqual(await states(ns), ["INCOMING"]);
 });
 
+test("a state read runs the RESERVED pass (card signpage-pool-buy fold 1): a note a buy left RESERVED is read on both RPCs, held while they fail", async () => {
+  const { w, ns } = await wallet();
+  const calls: string[] = [];
+  const rpc = async (m: string) => {
+    calls.push(m);
+    throw new Error("offline");
+  };
+  const seeds: Uint8Array[] = [];
+  const t = testnetPool({ store: async () => w, seed64: async () => (seeds.push(SEED64.slice()), seeds.at(-1)!) }, { rpcs: [rpc, async (m: string) => rpc(m)], prover: { vault: signalsProver(), stop: () => {} } });
+  // a landed note, taken by a buy (HELD -> RESERVED), whose send never answered
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 5));
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "1" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  await t.stateRead();
+  // the pass's first read: each RPC's finalized slot; offline, so the note is held, never freed blind
+  assert.deepEqual(calls, ["getSlot", "getSlot"]);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
+  assert.equal(seeds.length, 1);
+  assert.ok(seeds[0]!.every((b) => b === 0), "the pass's seed copy is zeroed");
+  // a later read tries again
+  await t.stateRead();
+  assert.equal(calls.length, 4);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
+});
+
+test("fold 2 (2): the RESERVED pass runs under the seed's shared lock: a sign out during it waits for it; after it, none starts", async () => {
+  const { w, ns } = await wallet();
+  // the pass's first read held open until the test lets it go
+  let release!: () => void;
+  const held = new Promise<void>((ok) => (release = ok));
+  let reads = 0;
+  const rpc = async (m: string) => {
+    reads++;
+    if (m === "getSlot") await held;
+    throw new Error("offline");
+  };
+  let signedIn = true;
+  const seed64 = async () => {
+    if (!signedIn) throw new Error("no seed: signed out");
+    return SEED64.slice();
+  };
+  const t = testnetPool({ store: async () => w, seed64 }, { rpcs: [rpc, async (m: string) => rpc(m)], prover: { vault: signalsProver(), stop: () => {} } });
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 6));
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "1" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  const pass = t.stateRead();
+  while (reads === 0) await new Promise((r) => setTimeout(r, 1));
+  // the store's sign out takes the seed lock exclusive: it waits while the pass holds it shared
+  let out = false;
+  const signOut = navigator.locks.request("ct-wallet/seed", { mode: "exclusive" }, async () => {
+    signedIn = false;
+    out = true;
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(out, false, "the sign out waits for the pass");
+  release();
+  await pass;
+  await signOut;
+  assert.equal(out, true);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
+  // signed out: the next state read's pass ends at its seed read, with no chain read
+  const before = reads;
+  await t.stateRead();
+  assert.equal(reads, before);
+  // no Web Locks: no pass at all
+  const bare = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], prover: { vault: signalsProver(), stop: () => {} }, locks: null });
+  await bare.stateRead();
+  assert.equal(reads, before);
+});
+
 test("the page's queue runs on solanaPool with the devnet pin and the page's two devnet RPCs: a landing reads the pool's time on both", async () => {
   const { w, ns } = await wallet();
   const calls: string[][] = [[], []];
@@ -244,4 +317,69 @@ test("the page's queue runs on solanaPool with the devnet pin and the page's two
   assert.ok(calls.every((c) => c.every((m) => ["getSlot", "getBlockTime", "getBlockHeight", "getMultipleAccounts", "getAccountInfo"].includes(m))), calls.flat().join(","));
   assert.deepEqual(await states(ns), ["UNSPENT"], "a pass that cannot read the pool holds no note");
   await t.signedOut();
+});
+
+// ---- card signpage-pool-buy: pool.buy on the devnet pool once its lookup table is pinned ----
+
+test("pool.buy runs on the pinned devnet pool once a lookup table is pinned; with none it is refused with no read", async () => {
+  let opened = 0;
+  const page = { store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) };
+  const reads: string[] = [];
+  const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
+  const k = poolKinds(testnetPoolDeps(testnetPool(page, { table: base58.encode(new Uint8Array(32).fill(9)), rpcs: [offline("a"), offline("b")] }).flow));
+  const r = k["pool.buy"](buy("solana"), ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
+  assert.equal(r.running, true, "the buy runs");
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "failed" }, "a queue that cannot open: failed, nothing sent");
+  assert.equal(opened, 1);
+  assert.deepEqual(reads, [], "no proof ready: no read");
+  const none = poolKinds(testnetPoolDeps(testnetPool(page, { table: null }).flow));
+  assert.deepEqual(none["pool.buy"](buy("solana"), ctx), { error: "not_allowed" });
+  assert.equal(opened, 1, "no table: no store opened, no read");
+});
+
+test("a pool send still pending at the kind's 10 s, and at 90 s, is not aborted: its own window is over 90 s", async () => {
+  assert.equal(SIGNPAGE_TIMEOUT_MS["pool.buy"], 10_000);
+  assert.ok(POOL_SEND_TIMEOUT_MS > 90_000);
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    let signal!: AbortSignal;
+    let answer!: (r: Response) => void;
+    const slow = ((_url: string, init: RequestInit) => {
+      signal = init.signal!;
+      return new Promise<Response>((ok, no) => {
+        answer = ok;
+        signal.addEventListener("abort", () => no(signal.reason));
+      });
+    }) as unknown as typeof fetch;
+    // still pending at the kind's 10 s and at 90 s: then answered, and taken
+    const p = helperPoolSend("P", Uint8Array.of(1), slow);
+    mock.timers.tick(SIGNPAGE_TIMEOUT_MS["pool.buy"]);
+    assert.equal(signal.aborted, false, "not aborted at 10 s");
+    mock.timers.tick(90_000 - SIGNPAGE_TIMEOUT_MS["pool.buy"]);
+    assert.equal(signal.aborted, false, "not aborted at 90 s");
+    answer(new Response(JSON.stringify({ signature: "x" }), { status: 200 }));
+    assert.deepEqual(await p, { signature: "x" });
+    // one with no answer at all ends at its own window
+    const q = helperPoolSend("P", Uint8Array.of(1), slow);
+    mock.timers.tick(POOL_SEND_TIMEOUT_MS - 1);
+    assert.equal(signal.aborted, false);
+    mock.timers.tick(1);
+    assert.equal(signal.aborted, true);
+    await assert.rejects(q, /no answer in 120000 ms/);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("helperPoolSend posts {pool, tx} to the helper and takes only a 200 within the v1 table's limit", async () => {
+  const seen: { url: string; body: unknown }[] = [];
+  const ok = (async (url: string, init: RequestInit) => (seen.push({ url, body: JSON.parse(String(init.body)) }), new Response(JSON.stringify({ signature: "x" }), { status: 200 }))) as unknown as typeof fetch;
+  assert.deepEqual(await helperPoolSend("P", Uint8Array.of(1, 2, 3), ok), { signature: "x" });
+  assert.match(seen[0]!.url, /\/v1\/pool\/solana\/send$/);
+  assert.deepEqual(seen[0]!.body, { pool: "P", tx: "AQID" });
+  const refused = (async () => new Response("{}", { status: 422 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSend("P", Uint8Array.of(1), refused), /HTTP 422/);
+  const big = (async () => new Response(JSON.stringify({ signature: "x".repeat(5000) }), { status: 200 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSend("P", Uint8Array.of(1), big), /over 4096 B/);
 });
