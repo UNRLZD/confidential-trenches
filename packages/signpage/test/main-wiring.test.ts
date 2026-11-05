@@ -266,7 +266,7 @@ test("main.ts wires the pool kinds: on the page's mainnet no pool is pinned, so 
     { type: "pool.deposit", chain: "solana", amount: "1" },
     { type: "pool.buy", chain: "base", token: "0xF111111111111111111111111111111111111111", amount: "1", slippage_bps: 100 },
     { type: "pool.sell", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "1", slippage_bps: 100 },
-    { type: "pool.withdraw", chain: "robinhood" },
+    { type: "pool.withdraw", chain: "robinhood", return_key: "portfolio" },
   ]) {
     const id = crypto.randomUUID();
     const from = asked.length;

@@ -125,6 +125,10 @@ new DataView(rentData.buffer).setBigUint64(0, RENT.lamportsPerByte, true);
 new DataView(rentData.buffer).setFloat64(8, 2, true);
 rentData[16] = 50;
 const rentReads: string[] = [];
+const SELL_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const mintData = new Uint8Array(82);
+mintData[44] = 6;
+mintData[45] = 1;
 g.fetch = async (url: unknown, init?: RequestInit) => {
   let body: { id?: unknown; method?: string; params?: unknown[] } = {};
   try {
@@ -134,6 +138,11 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
   if (body.method === "getAccountInfo" && body.params?.[0] === "SysvarRent111111111111111111111111111111111") {
     rentReads.push(String(url));
     const value = { owner: "Sysvar1111111111111111111111111111111111111", data: [base64.encode(rentData), "base64"], lamports: 1009200, executable: false, rentEpoch: 0, space: 17 };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value } }), { status: 200 });
+  }
+  // the sold token's mint (an SPL Token mint, 6 decimals, initialized): pool.sell's decimals read on the page's pair
+  if (body.method === "getAccountInfo" && body.params?.[0] === SELL_MINT) {
+    const value = { owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data: [base64.encode(mintData), "base64"], lamports: 1461600, executable: false, rentEpoch: 0, space: 82 };
     return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value } }), { status: 200 });
   }
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "not in this test" } }), { status: 200 });
@@ -189,12 +198,22 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
 });
 
 test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw reach the page's pool flow: none is refused not_allowed", async () => {
-  for (const data of [
-    { type: "pool.deposit", chain: "solana", amount: "0.02" },
-    { type: "pool.buy", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "0.001", slippage_bps: 100 },
-    { type: "pool.sell", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "1", slippage_bps: 100 },
-    { type: "pool.withdraw", chain: "solana" },
-  ]) {
+  // each answer is the flow's own (src/pool-testnet.ts): the deposit's reads fail on this test's RPCs, the buy finds no
+  // proof it may spend and the sell no W holding the token, and the withdraw opens the page's screen
+  for (const [data, want] of [
+    [{ type: "pool.deposit", chain: "solana", amount: "0.02" }, { ok: false, error: { code: "failed" } }],
+    [{ type: "pool.buy", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "0.001", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
+    [{ type: "pool.sell", chain: "solana", token: SELL_MINT, amount: "1", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
+    [{ type: "pool.withdraw", chain: "solana", return_key: "portfolio" }, { ok: true, result: { pending: true } }],
+  ] as const) {
+    // pool.withdraw's flow opens the page's screen only as withdraw.open does, on the signed-in page (main.ts
+    // openPoolWithdraw): the page is set to it here, since this DOM draws no page
+    if (data.type === "pool.withdraw") {
+      const find = (el: El): El | undefined => (el.id === "signin" ? el : el.children.map(find).find((x) => x !== undefined));
+      const root = find(doc.body);
+      assert.ok(root, "the page's root is in the document");
+      root.dataset.signin = "signed-in";
+    }
     const id = crypto.randomUUID();
     const e = new Event("message");
     Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, ...data } } });
@@ -206,5 +225,27 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
     }
     assert.ok(a, `${data.type}: answered`);
     assert.notEqual(a?.error?.code, "not_allowed", `${data.type} was refused not_allowed: it never reached the flow`);
+    const { v: _v, id: _id, ...got } = a as Record<string, unknown>;
+    assert.deepEqual(got, want, `${data.type}: the flow's own answer`);
   }
+});
+
+test("the mainnet build's pool reads on the network's own pair and fee route: SIGN_HOST's provider A and the helper's keyed route, and GET /v1/pool/fee with cluster=mainnet", async () => {
+  const { pageSolanaRpcs, poolRelayFee, PAGE_CLUSTER, PAGE_SOL_PIN } = await import("../src/pool-testnet.ts");
+  assert.equal(PAGE_CLUSTER, "mainnet");
+  assert.equal(PAGE_SOL_PIN, SOL_POOLS.mainnet, "the mainnet pin, never the devnet one");
+  // the pair: one read each, to two hosts
+  const before = rentReads.length;
+  const [a, b] = pageSolanaRpcs();
+  await a("getAccountInfo", ["SysvarRent111111111111111111111111111111111", { encoding: "base64" }]);
+  await b("getAccountInfo", ["SysvarRent111111111111111111111111111111111", { encoding: "base64" }]);
+  assert.deepEqual(
+    rentReads.slice(before).map((u) => new URL(u).origin),
+    ["https://solana-rpc.publicnode.com", "https://api.confidential.unrealized.trade"],
+  );
+  const pool = solanaPoolOf(PROGRAM).pool;
+  const asked: string[] = [];
+  const fetchFn = (async (url: string | URL | Request) => (asked.push(String(url)), new Response("{}", { status: 404 }))) as typeof fetch;
+  await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchFn), /HTTP 404/);
+  assert.equal(asked[0], `https://api.confidential.unrealized.trade/v1/pool/fee?cluster=mainnet&pool=${pool}&epoch=1800000000000`);
 });
