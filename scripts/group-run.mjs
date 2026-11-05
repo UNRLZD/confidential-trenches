@@ -57,11 +57,9 @@ export function run(cmd, args, { timeoutMs, maxBuffer = 1 << 26, ...opts }) {
     let error;
     const pgid = c.pid;
     if (pgid > 0) live.add(pgid);
+    // once only: a group id once gone can be another group's later
     const end = () => {
-      if (pgid > 0) {
-        killGroup(pgid);
-        live.delete(pgid);
-      }
+      if (live.delete(pgid)) killGroup(pgid);
     };
     const timer = setTimeout(() => {
       timedOut = true;
