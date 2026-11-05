@@ -16,6 +16,7 @@ import {
   SOLANA_TOKEN_PROGRAM,
   SolanaWalletLinks,
   runSolanaTrade,
+  SOLANA_TRADE_BUILD_WAIT_MS,
   solanaAta,
   solanaDecodeMessage,
   solanaRouteAmounts,
@@ -503,4 +504,53 @@ test("the floor's rebuild finds no route at the search's cap: refused for the fl
   assert.doesNotMatch(l.refused ?? "", /^build no_route/);
   assert.equal(l.buildCalls, 2);
   assert.equal(l.dry, undefined);
+});
+
+// Card solana-legs-share-wait: a leg the helper answers past its share waits the Retry-After inside the trade's bound,
+// then asks the cap another leg fitted; a wait past the bound refuses that leg alone; onBuilds shows the wait.
+const takerOf = (url: string) => new URL(url).searchParams.get("taker");
+function fakeTime(realMs = 0) {
+  let t = 1_000;
+  // the clock moves by the wait; `realMs` of real time lets the other legs' reads land meanwhile, as in a real wait
+  return { now: () => t, sleep: async (ms: number) => { t += ms; if (realMs) await new Promise((ok) => setTimeout(ok, realMs)); }, at: () => t };
+}
+
+test("a sell over 3 wallets, no route at 40: the leg answered 429 waits its Retry-After, then asks 48, the cap the others fitted, once", async () => {
+  const w = capWorld(noRouteBelow(48));
+  const req = request(SELL);
+  const late = req.legs[2]!.wallet;
+  let refusedOnce = false;
+  const fetch = async (url: string): Promise<Response> => {
+    if (takerOf(url) === late && !refusedOnce) { refusedOnce = true; return new Response('{"error":{"code":"rate_limited"}}', { status: 429, headers: { "retry-after": "2" } }); }
+    return w.fetch(url);
+  };
+  const time = fakeTime(200);
+  const seen: { built: number; waiting: number; total: number }[] = [];
+  const r = await runSolanaTrade(req, { ...deps(SELL), fetch, now: time.now, sleep: time.sleep, onBuilds: (p) => seen.push(p) });
+  for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+  const lateRec = r.legs.find((l) => l.wallet === late)!;
+  assert.deepEqual(lateRec.buildCaps, [{ maxAccounts: 48, outcome: "fits" }], "after the wait, the cap another leg fitted: 1 build");
+  for (const l of r.legs.filter((x) => x.wallet !== late)) assert.deepEqual(l.buildCaps, [{ maxAccounts: 40, outcome: "no_route" }, { maxAccounts: 48, outcome: "fits" }]);
+  assert.ok(seen.some((p) => p.waiting === 1), "the wait was shown");
+  assert.deepEqual(seen.at(-1), { built: 3, waiting: 0, total: 3 });
+});
+
+test("a leg whose waits would end past the trade's 10-minute bound is refused alone; the others go on", async () => {
+  assert.equal(SOLANA_TRADE_BUILD_WAIT_MS, 600_000);
+  const req = request(SELL);
+  const late = req.legs[0]!.wallet;
+  const base = builds([]);
+  let asks = 0;
+  const fetch = async (url: string): Promise<Response> => {
+    if (takerOf(url) === late) { asks++; return new Response('{"error":{"code":"upstream"}}', { status: 503, headers: { "retry-after": "61" } }); }
+    return base(url);
+  };
+  const time = fakeTime();
+  const t0 = time.at();
+  const r = await runSolanaTrade(req, { ...deps(SELL), fetch, now: time.now, sleep: time.sleep });
+  const lateRec = r.legs.find((l) => l.wallet === late)!;
+  assert.equal(lateRec.refused, "build upstream: upstream: HTTP 503: no room by the trade's bound (Retry-After 61 s)");
+  assert.equal(asks, 10, "9 waits of 61 s fit in 600 s, the tenth would not");
+  assert.ok(time.at() - t0 <= SOLANA_TRADE_BUILD_WAIT_MS);
+  for (const l of r.legs.filter((x) => x.wallet !== late)) assert.equal(l.refused, undefined, l.refused);
 });

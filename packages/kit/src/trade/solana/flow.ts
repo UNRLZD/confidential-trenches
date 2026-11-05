@@ -50,6 +50,7 @@ import {
 import { SOLANA_ALT_PROGRAM, solanaAta, solanaDecodeLookupTable, type SolanaLookupTable } from "../../checks/solana/message.ts";
 import {
   SolanaBuildError,
+  SolanaBuildRoom,
   assembleSolanaSwap,
   buildSolanaTeardown,
   fetchSolanaJupiterBuild,
@@ -85,6 +86,16 @@ export type SolanaTradeRequest = {
   readonly heldMints?: readonly string[];
 };
 export type SolanaTradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed";
+/** `built`: legs whose build is done (fitted or refused); `waiting`: legs waiting for the helper's room now; `total`:
+ * the legs being built. */
+export type SolanaBuildsProgress = { built: number; waiting: number; total: number };
+/**
+ * The longest a trade's builds wait for the helper's room (card solana-legs-share-wait): a 64-leg trade on Jupiter's
+ * Free plan, one device lent about 14 builds a minute (apps/helper/src/limits/limits.ts: the callers' 26 less
+ * LEND_NEW_SHARES 3 x the share 4), asks 64 builds plus a floor rebuild for some legs, 64 to 128: 4.6 to 9.1 minutes;
+ * 10 minutes is that and a margin. A wait that would end past it refuses its leg.
+ */
+export const SOLANA_TRADE_BUILD_WAIT_MS = 10 * 60_000;
 export type SolanaTradeDeps = {
   /** The helper's origin, for the Jupiter build proxy. */
   readonly helper: string;
@@ -103,6 +114,11 @@ export type SolanaTradeDeps = {
   readonly fetch?: SolanaFetch;
   readonly now?: () => number;
   readonly onProgress?: (stage: SolanaTradeStage) => void;
+  /** The legs' builds while they wait for the helper's room (card solana-legs-share-wait): the state the app shows
+   * during a long trade, called when a leg's build lands or a leg starts or ends a wait. */
+  readonly onBuilds?: (p: SolanaBuildsProgress) => void;
+  /** The wait's sleep, for tests (with `now`, the clock the trade's bound is held on). */
+  readonly sleep?: (ms: number) => Promise<void>;
   /** sendSolanaSet's deadline, for tests. */
   readonly deadlineMs?: number;
   readonly pollMs?: number;
@@ -292,7 +308,7 @@ async function prepareLeg(
   req: SolanaTradeRequest,
   leg: SolanaTradeLeg,
   rec: SolanaLegRecord,
-  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[] },
+  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[]; room: SolanaBuildRoom },
 ): Promise<Prepared | null> {
   const { deps, blockhash } = ctx;
   const [pa, pb] = deps.providers;
@@ -307,7 +323,9 @@ async function prepareLeg(
   const minOut = rec.minOut as bigint;
   const t0 = now();
   const breq: SolanaBuildRequest = { side: req.side, wallet: w, token: req.token, amount: leg.amount, slippageBps: req.slippageBps };
-  const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}) };
+  const room = ctx.room;
+  // past the helper's share or room, a build waits the Retry-After inside the trade's bound (SolanaBuildRoom)
+  const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}), wait: room.wait };
   // The build, and with it on both providers the reads that do not depend on it: the rents in play (the wallet's
   // token account, its size from the mint, and the pump volume account) and the pre-state the simulation is held to
   // (the wallet, its token account, its two volume accounts: this wallet's only), which also gives spendable.
@@ -344,6 +362,7 @@ async function prepareLeg(
   // one floor rebuild a leg, so K legs ask Jupiter K to 4K builds; a one-leg trade at most 4, the helper's share).
   const found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, opts);
   rec.buildCaps = found.steps;
+  room.fitted(found.maxAccounts);
   let calls = found.calls.length;
   let build = found.build;
   let fitted = found.fitted;
@@ -567,16 +586,25 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
     r.legExpectedOut = (ref.expectedOuts as readonly bigint[])[j] as bigint;
     if ((r.minOut as bigint) <= 0n) r.refused = "the floor rounds to 0";
   });
+  const room = new SolanaBuildRoom({
+    total: live.filter((i) => !(recs[i] as SolanaLegRecord).refused).length,
+    boundMs: SOLANA_TRADE_BUILD_WAIT_MS,
+    ...(deps.now ? { clock: deps.now } : {}),
+    ...(deps.sleep ? { sleep: deps.sleep } : {}),
+    ...(deps.onBuilds ? { onProgress: deps.onBuilds } : {}),
+  });
   const prepared = (
     await Promise.all(
       live.map(async (i) => {
         const rec = recs[i] as SolanaLegRecord;
         if (rec.refused) return null;
         try {
-          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints });
+          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints, room });
         } catch (err) {
           rec.refused = err instanceof SolanaBuildError ? `build ${err.code}: ${err.message.slice(0, 160)}` : `error: ${String((err as Error)?.message ?? err).slice(0, 200)}`;
           return null;
+        } finally {
+          room.done();
         }
       }),
     )

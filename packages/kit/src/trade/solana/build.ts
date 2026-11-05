@@ -162,7 +162,74 @@ export type SolanaBuildFetched = {
   maxAccounts: number;
   calls: SolanaBuildCall[];
 };
-export type SolanaBuildOptions = { fetch?: SolanaFetch; timeoutMs?: number; now?: () => number };
+export type SolanaBuildOptions = { fetch?: SolanaFetch; timeoutMs?: number; now?: () => number; wait?: SolanaBuildWait };
+/**
+ * Waiting for the helper's room (card solana-legs-share-wait): a 429 (past the device's share) or 503 (the vendor's
+ * total or reset) that names a Retry-After is waited out and asked again, never a cap step, while the wait ends by
+ * `until` (on `clock`, ms); one that would end past it is refused ("upstream", no room by the trade's bound). After a
+ * wait, a search that has no step yet asks `knownCap()` when it names one: the cap another leg of the trade already
+ * found. With no `wait`, such an answer is "upstream" at once, as before.
+ */
+export type SolanaBuildWait = {
+  until: number;
+  clock?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  knownCap?: () => number | undefined;
+  onWait?: (ms: number) => void;
+};
+/**
+ * A trade's wait for the helper's room, shared by its legs (card solana-legs-share-wait): every leg searches at once;
+ * a leg the helper answers past its share or room waits the Retry-After inside the trade's bound (`until`, on `clock`),
+ * then asks the cap another leg already fitted (`fitted`), 1 build plus its floor rebuild. `progress` is what the app
+ * shows: legs built (fitted or refused), legs waiting now, legs in all.
+ */
+export class SolanaBuildRoom {
+  readonly until: number;
+  readonly total: number;
+  cap: number | undefined;
+  built = 0;
+  waiting = 0;
+  readonly #clock: () => number;
+  readonly #sleep: (ms: number) => Promise<void>;
+  readonly #tell: ((p: { built: number; waiting: number; total: number }) => void) | undefined;
+  constructor(o: { total: number; boundMs: number; clock?: () => number; sleep?: (ms: number) => Promise<void>; onProgress?: (p: { built: number; waiting: number; total: number }) => void }) {
+    this.#clock = o.clock ?? (() => performance.now());
+    this.#sleep = o.sleep ?? ((ms) => new Promise<void>((ok) => setTimeout(ok, ms)));
+    this.#tell = o.onProgress;
+    this.total = o.total;
+    this.until = this.#clock() + o.boundMs;
+  }
+  get progress(): { built: number; waiting: number; total: number } {
+    return { built: this.built, waiting: this.waiting, total: this.total };
+  }
+  #told(): void {
+    try { this.#tell?.(this.progress); } catch { /* the caller's display never stops a trade */ }
+  }
+  /** The wait a leg's builds take (SolanaBuildOptions.wait). */
+  get wait(): SolanaBuildWait {
+    return {
+      until: this.until,
+      clock: this.#clock,
+      knownCap: () => this.cap,
+      sleep: async (ms) => {
+        this.waiting++;
+        this.#told();
+        try { await this.#sleep(ms); } finally { this.waiting--; this.#told(); }
+      },
+    };
+  }
+  /** A leg's search fitted at `cap`: the cap a leg asks after its wait, when no leg fitted before. */
+  fitted(cap: number): void {
+    this.cap ??= cap;
+  }
+  /** A leg's build is done, fitted or refused. */
+  done(): void {
+    this.built++;
+    this.#told();
+  }
+}
+/** The longest Retry-After the device takes from the helper: the vendor's minute and its second. */
+export const SOLANA_BUILD_RETRY_AFTER_MAX_S = 61;
 
 const isKey = (v: unknown): v is string => {
   if (typeof v !== "string" || v.length < 32 || v.length > 44) return false;
@@ -267,11 +334,38 @@ function helperOrigin(origin: string): string {
   return u.origin;
 }
 
-type BuildAnswer = { status: number; body: unknown };
+type BuildAnswer = { status: number; body: unknown; cap: number | null };
 const isNoRoute = (a: BuildAnswer) => a.status === 400 && typeof a.body === "object" && a.body !== null && (a.body as { error?: unknown }).error === SOLANA_JUPITER_NO_ROUTE;
 
-/** One build call at one cap, its time and status kept in `calls`. */
-async function askBuild(base: string, req: SolanaBuildRequest, maxAccounts: number | null, opts: SolanaBuildOptions, calls: SolanaBuildCall[]): Promise<BuildAnswer> {
+/** A Retry-After in whole seconds, 0 to SOLANA_BUILD_RETRY_AFTER_MAX_S, else null (the helper's own form). */
+function retryAfterS(r: Response): number | null {
+  const v = r.headers.get("retry-after");
+  if (v === null || !/^\d{1,4}$/.test(v)) return null;
+  const s = Number(v);
+  return s <= SOLANA_BUILD_RETRY_AFTER_MAX_S ? s : null;
+}
+
+/**
+ * One build at one cap, each call's time and status kept in `calls`; with `opts.wait`, a 429 or 503 naming a
+ * Retry-After is waited out and asked again (SolanaBuildWait), at `knownCap()` after a wait when `first` (the search's
+ * first ask). Returns the answer and the cap it was asked at.
+ */
+async function askBuild(base: string, req: SolanaBuildRequest, maxAccounts: number | null, opts: SolanaBuildOptions, calls: SolanaBuildCall[], first = false): Promise<BuildAnswer> {
+  for (;;) {
+    const a = await askOnce(base, req, maxAccounts, opts, calls);
+    const w = opts.wait;
+    if (!w || (a.status !== 429 && a.status !== 503) || a.retryAfterS === null) return { status: a.status, body: a.body, cap: maxAccounts };
+    const clock = w.clock ?? (() => Date.now());
+    const ms = Math.max(a.retryAfterS, 1) * 1000;
+    if (clock() + ms > w.until) throw new SolanaBuildError("upstream", `HTTP ${a.status}: no room by the trade's bound (Retry-After ${a.retryAfterS} s)`);
+    w.onWait?.(ms);
+    await (w.sleep ?? ((d: number) => new Promise<void>((ok) => setTimeout(ok, d))))(ms);
+    const known = first ? w.knownCap?.() : undefined;
+    if (known !== undefined && Number.isInteger(known) && known >= 1 && known <= 64) maxAccounts = known;
+  }
+}
+
+async function askOnce(base: string, req: SolanaBuildRequest, maxAccounts: number | null, opts: SolanaBuildOptions, calls: SolanaBuildCall[]): Promise<{ status: number; body: unknown; retryAfterS: number | null }> {
   const doFetch: SolanaFetch = opts.fetch ?? ((u, i) => fetch(u, i));
   const now = opts.now ?? (() => performance.now());
   const url = `${base}${SOLANA_JUPITER_BUILD_PROXY_PATH}?${solanaJupiterBuildQuery(req, maxAccounts)}`;
@@ -293,7 +387,7 @@ async function askBuild(base: string, req: SolanaBuildRequest, maxAccounts: numb
   } catch {
     throw new SolanaBuildError(r.status === 200 ? "bad_answer" : "upstream", `HTTP ${r.status}, not JSON`);
   }
-  return { status: r.status, body };
+  return { status: r.status, body, retryAfterS: retryAfterS(r) };
 }
 
 /** A 200 build parsed; any other answer but "No routes found" is "upstream". */
@@ -371,7 +465,8 @@ export async function fetchSolanaJupiterBuildThatFits<T>(
   let hi = 65;
   let largest: string | null = null;
   while (cap !== null && steps.length < maxBuilds) {
-    const a = await askBuild(base, req, cap, opts, calls);
+    const a = await askBuild(base, req, cap, opts, calls, steps.length === 0);
+    cap = a.cap as number;
     if (isNoRoute(a)) {
       steps.push({ maxAccounts: cap, outcome: "no_route" });
       lo = cap;
