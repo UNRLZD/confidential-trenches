@@ -11,13 +11,13 @@ import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createHash } from "node:crypto";
-import { evmPoolFee, evmPoolGas, VaultTree } from "@blindfill/kit";
+import { evmPoolFee, evmPoolGas, evmPoolVenues, solanaSameProvider, VaultTree } from "@blindfill/kit";
 import { evmPoolSender } from "../../../apps/helper/src/pool/evm.ts";
 import { evmAddress } from "../src/derive/index.ts";
 import { checkPool } from "../src/pool/pool.ts";
 import { SOL_LADDER } from "../src/pool/solana.ts";
 import {
-  EvmLagError, EVM_CHAIN_IDS, EVM_LADDER, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_POOL_EVENTS, evmContextPreimage, evmEpochBlock, evmNow, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
+  EvmLagError, EVM_CHAIN_IDS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_POOL_EVENTS, evmContextPreimage, evmEpochBlock, evmNow, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc,
 } from "../src/pool/evm.ts";
 
@@ -755,7 +755,7 @@ test("F3a a log index behind its own head (sepolia.base.org's and publicnode's w
   }
 });
 
-test("F3b only a provider's cap shrinks the page (its real words, thousands separators too), and the page grows back", async () => {
+test("F3b a provider's cap shrinks the page (its real words, thousands separators too), and the page grows back", async () => {
   // publicnode's cap (3 Nov 05:35Z) on one RPC, a docs' "limited to a 2,000 range" on the other
   const c = chain([...deps(PP, [10, 1200, 4800]), { block: 9000, kind: "buy", leaf: 997n }], 20000, 19000);
   const la: string[] = [], lb: string[] = [];
@@ -1060,4 +1060,39 @@ test("hex in either case: bind on an upper-case RPC and the helper's block \"0x1
   assert.deepEqual([got.context, got.feeCap, got.request], [want.context, want.feeCap, want.request]);
   await assert.rejects(p("0x1F").bind(bindArgs()), /not its first block/);
   await assert.rejects(p("0X1E").bind(bindArgs()), /not its first block/);
+});
+
+// ---- card wallet-restore-transfer-rpcs: one pager for every log the device reads ----
+
+test("the pool's sync pages under a cap in words never read before (Tenderly's 'invalid params', Robinhood's own 'only 30000 are allowed', read live 5 Nov)", async () => {
+  for (const words of ["RPC error -32602: invalid params", "RPC error -32602: query spans 39984 blocks (106696878 to 106736861), but only 30000 are allowed for this request; narrow the block range, or add an address filter"]) {
+    const c = C3();
+    const capped = { getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 30) throw new Error(words); } };
+    const t = await evmTreeSync({ rpcs: pair(c, c, {}, capped), pin: PIN, sleep: async () => {} }).trees(after(25));
+    assert.equal(t.stateTree.size, 4, words);
+  }
+});
+
+test("EVM_TRANSFER_RPCS: every network two keyless https providers of two operators, none an operator of the kit's providers but the two named exceptions, no Pocket on Robinhood and no dRPC on Base Sepolia (5 Nov)", () => {
+  // an operator: the host's last two labels (tenderly.co, pocket.network, thirdweb.com, daybreak-rpc.network, drpc.org)
+  const operator = (u: string) => new URL(u).hostname.split(".").slice(-2).join(".");
+  assert.deepEqual(Object.keys(EVM_TRANSFER_RPCS).sort(), Object.keys(EVM_CHAIN_IDS).sort());
+  for (const [net, urls] of Object.entries(EVM_TRANSFER_RPCS)) {
+    assert.ok(Object.isFrozen(urls), net);
+    assert.equal(urls.length, 2, net);
+    for (const u of urls) assert.match(u, /^https:\/\/[a-z0-9.-]+$/, `${net}: ${u} is a keyless https URL`);
+    assert.notEqual(operator(urls[0]!), operator(urls[1]!), `${net}: two operators`);
+    const rpcOf = (url: string): EvmRpc => Object.assign(async () => null, { url });
+    assert.equal(solanaSameProvider(rpcOf(urls[0]!), rpcOf(urls[1]!)), false, `${net}: two providers to the kit`);
+  }
+  // the two exceptions, each the doc comment's: Robinhood's own on Robinhood (no keyless third operator answers every
+  // read there: Pocket's backends refuse a filter with no address) and dRPC on Robinhood testnet (no keyless third)
+  const shared: Record<string, string[]> = { base: [], robinhood: ["robinhood.com"], "base-sepolia": [], "robinhood-testnet": ["drpc.org"] };
+  for (const chain of Object.keys(EVM_TRANSFER_RPCS) as (keyof typeof EVM_TRANSFER_RPCS)[]) {
+    const kit = evmPoolVenues()[chain].providers ?? assert.fail(`${chain}: the kit pins no providers`);
+    const both = EVM_TRANSFER_RPCS[chain].map(operator).filter((o) => kit.some((p) => operator(p) === o));
+    assert.deepEqual(both, shared[chain], `${chain}: the operators the Transfer pair shares with the kit's providers`);
+  }
+  assert.ok(!EVM_TRANSFER_RPCS["base-sepolia"].some((u) => operator(u) === "drpc.org"), "base-sepolia.drpc.org fails a W's read");
+  assert.ok(!EVM_TRANSFER_RPCS.robinhood.some((u) => operator(u) === "pocket.network"), "robinhood.api.pocket.network's backends refuse a filter with no address");
 });
