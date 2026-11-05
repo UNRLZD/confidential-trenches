@@ -148,9 +148,10 @@ export const MUTANTS = [
   [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
   [QUOTE, "  const fast = second !== undefined && jobs.reduce(", "  const fast = second !== undefined && 0 * jobs.reduce(", R, "SP2 "],
   [QUOTE, "    const top = p === null;", "    const top = false;", R, "SP3 "],
-  // review of 22e29c9, B2: the block check on the request up to the head alone (SP7 on the second, SP9 on a lone first)
-  [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SP7 "],
-  [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SP9 "],
+  // review of 22e29c9, B2: the block check on the request up to the head alone; since card evm-rpc-spare-list a not-yet
+  // newest request is asked again whole, never as halves (SL3), so SP7 and SP9 send no request below the head and pass
+  // on this mutant: SL5 holds it, a lag over one span, so the lower request ends past the backend too
+  [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SL5 "],
   // review of 22e29c9, B1: a head read on the second sent the scan's requests there too
   [QUOTE, "headFrom(f).then((head) => ({ head, first: f })));", "headFrom(f).then((head) => ({ head, first: f.next ?? f })));", R, "SP6 "],
   // review of 22e29c9, N4: the 2 s hold where no second follows (the head read), and a not-yet block as an answer

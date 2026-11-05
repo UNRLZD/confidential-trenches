@@ -2507,7 +2507,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     if (text.length > maxBytes) throw new Error("the answer is too long");
     const parsed: unknown = JSON.parse(text);
     // a batch of one call answered as that call's answer alone, not in a batch: Pocket's way on Base and Robinhood
-    // (robinhood.api.pocket.network and base.api.pocket.network, every try, 2026-11-06 19:49Z): it still counts only
+    // (robinhood.api.pocket.network and base.api.pocket.network, every try, 2026-11-05 19:49Z): it still counts only
     // with this call's id. Any other answer that is not a batch is refused.
     const arr: unknown = !Array.isArray(parsed) && calls.length === 1 && typeof parsed === "object" && parsed !== null ? [parsed] : parsed;
     if (!Array.isArray(arr)) throw new Error("the answer is not a batch");

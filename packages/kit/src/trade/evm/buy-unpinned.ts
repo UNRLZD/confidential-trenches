@@ -153,12 +153,12 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // POST allow-origin *; its getLogs spans up to 1,000 blocks without a key ("Block range too large" at 2,500); a
       // range past its head answers -32602 "block range extends beyond current head block", never []. 3 at once (card
       // evm-rpc-spare-list, re-review of 156ece1 LOW-1): its header says x-tdly-limit 20, and the scan's own batches of
-      // 1,000 blocks at the head (3 calls for kind `all`, 4 for `markets`), five rounds 1.2 s apart, 2026-11-06
+      // 1,000 blocks at the head (3 calls for kind `all`, 4 for `markets`), five rounds 1.2 s apart, 2026-11-05
       // 19:50-19:52Z from this Mac: 2 at once 0 of 10 and 2 of 10 answered 429 -32005, 3 at once 1 of 12 and 4 of 12,
       // 4 at once 4 of 12 (8 at once, 19:07-19:19Z: 3 to 6 of 8). A 429 waits 0.5 s and is asked again whole within the
       // first's EVM_SCAN_HOLD_MS share, so 3 carries a warm scan (scanPools `fast`), one round of 3,000 blocks, with at
       // most one wait; a cold one stays on the first.
-      // The third: Pocket (base.api.pocket.network; card evm-rpc-spare-list, 2026-11-06 19:47-19:48Z from this Mac). Its
+      // The third: Pocket (base.api.pocket.network; card evm-rpc-spare-list, 2026-11-05 19:47-19:48Z from this Mac). Its
       // preflight answers 204, allow-origin the app's origin, content-type allowed, and its POST the same; some of its
       // backends refuse a getLogs over 500 blocks (-32602 "block range exceeds maximum 500", 2 of 6 at 1,000), so 500;
       // the scan's own batches of 500 blocks, 4 at once, seven rounds, all 28 answered with the head block in 205-1,223
@@ -167,7 +167,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // every request 503 "No server is available to handle this request" at 18:07-18:09Z, so the live check's held
       // Base quotes ended rpc_error. Passed over: Blast (10 blocks a getLogs), dRPC ("ranges over 10000 blocks are not
       // supported on free plan" on 2,500-block spans, 18:08Z; "Batch of more than 3 requests are not allowed on free
-      // plan" to the scan's 4-call batch, 2026-11-06 19:47Z), nodies (base-pokt.nodies.app: "Block range too large" at
+      // plan" to the scan's 4-call batch, 2026-11-05 19:47Z), nodies (base-pokt.nodies.app: "Block range too large" at
       // 100 blocks, answered as a bare object, and its preflight names no allow-origin, 19:48Z), thirdweb (429 -32005
       // at once, 19:47Z), BlockPI ("Apikey not found", 18:08Z), mainnet.base.org
       // (-32011 "request limit reached" on its first getLogs, 18:08Z), 1rpc (50 blocks), meowrpc (no eth_getLogs), ankr
@@ -232,7 +232,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Robinhood's own, log for log (14 and 6). The live check's quotes with the first held (refused, no logs) all ended
       // ok. It carries a warm scan whole: one round of its requests, 4 x 2,000 blocks, about 13.6 minutes of Robinhood's
       // blocks (scanPools `fast`); a cold one stays on the first.
-      // The third: Pocket (robinhood.api.pocket.network; card evm-rpc-spare-list, 2026-11-06 19:48Z from this Mac). Its
+      // The third: Pocket (robinhood.api.pocket.network; card evm-rpc-spare-list, 2026-11-05 19:48Z from this Mac). Its
       // preflight answers 204, allow-origin the app's origin, content-type allowed, and its POST the same; the scan's own
       // batches of 2,000 blocks at the head, 4 at once, five rounds, all 20 answered with the head block in 193-2,238
       // ms (5,000 blocks in about 210 ms, 2026-11-05). A one-call batch is answered as a bare object (the head read:
@@ -240,7 +240,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // that call's answer (evmJsonRpc). It carries what the first two left. Passed over: Globalstake (9.4 s and 10 s
       // timeouts on 70-block requests: 3 of 4 held quotes ended at the 60 s bound, 16:57-17:03Z),
       // rpc-robinhood.blockmachine.io (429 after six batches, "limit":60 compute units, retry after 25 s; -32002
-      // "keyless requests are served for the most recent 5000 blocks", 2026-11-06 19:48Z), publicnode ("Archive requests
+      // "keyless requests are served for the most recent 5000 blocks", 2026-11-05 19:48Z), publicnode ("Archive requests
       // require a personal token" for the newest 100 blocks), dRPC (1,000-block spans refused on its free plan; 100
       // blocks answer, but no batch of more than 3, so never the scan's 4-call one), bloXroute
       // (no eth_getLogs).

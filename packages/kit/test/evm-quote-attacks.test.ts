@@ -4109,3 +4109,20 @@ test("SL4 a one-call batch answered as a bare object (Pocket's way) is that call
   await assert.rejects(bare({ jsonrpc: "2.0", id: 0, result: "0x1" })([...one, ...one]), /not a batch/);
   await assert.rejects(bare("0x1")(one), /not a batch/);
 });
+
+test("SL5 a lone scan provider whose logs backend lags its head by more than a span: no request below the head keeps its [] as read", { timeout: 60_000 }, async () => {
+  // SP9 at two requests: with a lag under one span the newest request alone ends past the backend, and is asked again
+  // whole (SL3); here the lower request ends past it too, so its own block check is what keeps its [] out
+  const token = "0x00000000000000000000000000000000005c4613";
+  const pools = [seeded(token), real(token)];
+  const lone = (scan: EvmRpc, headNo: number) => verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan));
+  await lone(scanner(5_000_000, []), 5_000_000);
+  // its head read answers 5,020,000; its getLogs and blocks are a backend at 5,005,000
+  const front = scanner(5_020_000, []);
+  const back = scanner(5_005_000, []);
+  await lone((calls, signal) => (calls.some((c) => c.method === "eth_blockNumber") ? front(calls, signal) : back(calls, signal)), 5_020_000);
+  // then one that answers: the token's real pool was made at 5,007,000, in the lower request's blocks
+  const asked: [number, number][] = [];
+  assert.deepEqual(await lone(scanner(5_020_010, realAt(token, 5_007_000), asked), 5_020_010), below);
+  assert.ok(asked.some(([a, b]) => a <= 5_007_000 && b >= 5_007_000), `block 5,007,000 was not asked again: ${JSON.stringify(asked)}`);
+});
