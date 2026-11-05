@@ -341,23 +341,29 @@ const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such bl
 //   limited to 0 - 50 blocks range"; base-mainnet.public.blastapi.io "up to a 10 block range"; thirdweb "-32005: Log
 //   response size exceeded. Maximum allowed number of requested blocks is 1000"; base-sepolia.drpc.org HTTP 500 code 19
 //   "Temporary internal error. Please retry" at 10 to 101 blocks, code 35 above.
-/** A provider throttling or timing out, never its range cap: the page is tried again at its size. The rule: HTTP 429
- *  and the kit's throttle codes (-32029, -32429, -429, dRPC's 15) in any client's words; -32005 unless its words name
- *  a cap (results, range, blocks, logs matched, response size); an answer that never came; or the kit client's
- *  transport fault (SolanaRpcTransportError: 429, 5xx, a throttle code, a timeout, no connection, after its own
- *  retry). -32005 is EIP-1474's "limit exceeded", which providers use for both. The reads behind it: the review of card
- *  wallet-restore-transfer-rpcs (5 Nov) read 8453.rpc.thirdweb.com answering HTTP 429 and -32005 "Rate limit
- *  exceeded" after about 4 calls, Retry-After up to 9 s, and daybreak timing out; this card's live check (5 Nov
+/** What a refused page was. "throttle": a provider's rate limit, never its range cap: the page is tried again at its
+ *  size. "slow": no answer in time: a page over one block is halved (a range too heavy for the provider's time: under
+ *  the device's 3.5 s client base-testnet.api.pocket.network answered no 10,000-block page, 5 Nov 13:44Z, and the
+ *  retry at that size never would), one block is tried again as a throttle. The rule: HTTP 429 and the kit's throttle
+ *  codes (-32029, -32429, -429, dRPC's 15) in any client's words, -32005 unless its words name a cap (results, range,
+ *  blocks, logs matched, response size), and the kit client's transport faults but a timeout (SolanaRpcTransportError:
+ *  429, 5xx, a throttle code, no connection, after its own retry) are throttles; a timeout in any words, or the kit
+ *  client's, is slow. -32005 is EIP-1474's "limit exceeded", which providers use for both. The reads behind it: the
+ *  review of card wallet-restore-transfer-rpcs (5 Nov) read 8453.rpc.thirdweb.com answering HTTP 429 and -32005 "Rate
+ *  limit exceeded" after about 4 calls, Retry-After up to 9 s, and daybreak timing out; this card's live check (5 Nov
  *  13:36Z) read thirdweb's own cap as -32005 "Log response size exceeded. Maximum allowed number of requested blocks
  *  is 1000" on Base and Robinhood testnet; the team's data run (2 Nov) read -32005 "query exceeds max results 20000". */
-const THROTTLE_WORDS = /HTTP 429\b|(RPC error |"code":\s*)(-32029|-32429|-429|15)\b|no answer in \d+ ms|\btimed? ?out\b|TimeoutError|ETIMEDOUT/i;
+const THROTTLE_WORDS = /HTTP 429\b|(RPC error |"code":\s*)(-32029|-32429|-429|15)\b/i;
+const SLOW_WORDS = /no answer in \d+ ms|\btimed? ?out\b|TimeoutError|ETIMEDOUT/i;
 const LIMIT_32005 = /(RPC error |"code":\s*)-32005\b/;
 const CAP_WORDS = /\b(results?|range|blocks?|logs? matched|response size)\b/i;
-const throttled = (e: unknown): { afterMs: number | null } | null => {
-  const t = e as { name?: unknown; afterMs?: unknown; message?: unknown } | null;
-  if (t?.name === "SolanaRpcTransportError") return { afterMs: typeof t.afterMs === "number" ? t.afterMs : null };
+const throttled = (e: unknown): { kind: "throttle" | "slow"; afterMs: number | null } | null => {
+  const t = e as { name?: unknown; afterMs?: unknown; message?: unknown; fault?: unknown } | null;
+  const afterMs = typeof t?.afterMs === "number" ? t.afterMs : null;
+  if (t?.name === "SolanaRpcTransportError") return { kind: t.fault === "timeout" ? "slow" : "throttle", afterMs };
   const m = String(t?.message ?? e);
-  if ((e as Error)?.name === "TimeoutError" || THROTTLE_WORDS.test(m) || (LIMIT_32005.test(m) && !CAP_WORDS.test(m))) return { afterMs: null };
+  if ((e as Error)?.name === "TimeoutError" || SLOW_WORDS.test(m)) return { kind: "slow", afterMs: null };
+  if (THROTTLE_WORDS.test(m) || (LIMIT_32005.test(m) && !CAP_WORDS.test(m))) return { kind: "throttle", afterMs: null };
   return null;
 };
 /** A page past the provider's own head (its log index behind its block headers): a lag, never a smaller page. */
@@ -467,10 +473,11 @@ export type EvmLogFilter = { address?: string; topics: readonly (string | readon
 export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to: bigint, what: string) => E;
 
 /**
- * One RPC's logs of a filter over from..to, in pages that end at or below `to`. A throttle (`throttled`: a rate limit
- * or a timeout) is no cap: the same page again after the provider's Retry-After (else 1 s doubled per try, at most
- * EVM_LOG_THROTTLE_WAIT_MAX_MS), at most EVM_LOG_THROTTLE_TRIES tries, then the read's failure (unread, never an empty
- * list). Any other refusal of a page over one block (a provider's cap, in whatever words) halves its page; after a
+ * One RPC's logs of a filter over from..to, in pages that end at or below `to`. A throttle (`throttled`: a rate
+ * limit, or a one-block page with no answer in time) is no cap: the same page again after the provider's Retry-After
+ * (else 1 s doubled per try, at most EVM_LOG_THROTTLE_WAIT_MAX_MS), at most EVM_LOG_THROTTLE_TRIES tries, then the
+ * read's failure (unread, never an empty list). Any other refusal of a page over one block (a provider's cap, in
+ * whatever words, or no answer in time) halves its page; after a
  * full page reads, the page doubles again, up to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read,
  * so a cap lifted or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG) is a lag. A page of
  * one block refused is the read's failure, with the provider's own error.
@@ -492,7 +499,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       const m = String((e as Error)?.message ?? e);
       if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
       const t = throttled(e);
-      if (t !== null) {
+      if (t !== null && (t.kind === "throttle" || end === at)) {
         if (++tries >= EVM_LOG_THROTTLE_TRIES) throw e;
         const ms = Math.min(EVM_LOG_THROTTLE_WAIT_MAX_MS, Math.max(t.afterMs ?? 0, 1_000 * 2 ** (tries - 1)));
         await sleep(ms, signal);

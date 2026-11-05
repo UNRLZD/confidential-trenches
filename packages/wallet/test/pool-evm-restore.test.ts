@@ -747,10 +747,11 @@ const THROTTLES: [string, (b: Body) => Response | Promise<Response>][] = [
   ["thirdweb's -32005 \"Rate limit exceeded\" in a 200", (b) => new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32005, message: "Rate limit exceeded" } }))],
   ["thirdweb's HTTP 429 \"Rate limit exceeded\"", () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32005, message: "Rate limit exceeded" } }), { status: 429, headers: { "retry-after": "9" } })],
   ["-32029 in a 200", (b) => new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32029, message: "rate limit" } }))],
-  ["no answer in time", () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"))],
 ];
+/** No answer in time, as the fetch rejects it: slow, not throttled (./evm.ts throttled). */
+const timedOut = () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"));
 
-test("T1 a throttle (429 with Retry-After, -32005, a kit throttle code, a timeout; through the kit's client with and without its retry) keeps the page: the same page again after the wait, every W's tokens and every block read", async () => {
+test("T1 a throttle (429 with Retry-After, -32005 naming no cap, a kit throttle code; through the kit's client with and without its retry) keeps the page: the same page again after the wait, every W's tokens and every block read", async () => {
   const { world, W0, W1 } = seeded();
   const want = await restore(pair(world, world), wpair(world));
   for (const [name, throttle] of THROTTLES) {
@@ -836,4 +837,35 @@ test("T3 RPC 0 fails at once and RPC 1's call rejects after the abort with cap w
   fail0 = false;
   assert.deepEqual(await evmTokensSentTo([rpc0, rpc1], `0x${"22".repeat(20)}`, 1n, anchors, page), []);
   assert.equal(firsts[0], 10_000, "the next W's first page on RPC 1");
+});
+
+test("T4 no answer in time halves a page over one block (Pocket's 10,000-block pages under the device's 3.5 s client, 5 Nov), and tries one block again as a throttle, bounded", async () => {
+  for (const [client, via] of [["plain", viaKitClient], ["retry", viaRetryClient]] as const) {
+    // a page over 7 blocks never answers in time: halved under it, every W's tokens and every block read
+    const { world, W0, W1 } = seeded();
+    const want = await restore(pair(world, world), wpair(world));
+    const pages: { w: string; from: number; to: number }[] = [], waits: number[] = [];
+    const slow = (b: Body) => (b.method === "eth_getLogs" && (b.params[0] as { address?: string }).address === undefined && span(b).to - span(b).from + 1 > 7 ? (timedOut() as unknown as Response) : undefined);
+    const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), via("https://d.example", answered(rpc(world), pages, "https://m.example"), slow)], { sleep: async (ms) => void waits.push(ms) });
+    assert.deepEqual(r.wallets, want.wallets, client);
+    assert.ok(pages.length > 2 && pages.every((x) => x.to - x.from + 1 <= 7), `${client}: ${JSON.stringify(pages)}`);
+    tiles(pages, W0, 20, 100);
+    tiles(pages, W1, 40, 100);
+    assert.deepEqual(waits, [], `${client}: a slow page is halved at once, never waited on`);
+    // every page slow, one block too: one block tried EVM_LOG_THROTTLE_TRIES times, then that W unread
+    const w2 = seeded();
+    const ones: number[] = [], waits2: number[] = [];
+    const never = (b: Body) => {
+      if (!namesW(b, w2.W0)) return undefined;
+      const { from, to } = span(b);
+      if (to === from) ones.push(from);
+      return timedOut() as unknown as Response;
+    };
+    const r2 = await restore(pair(w2.world, w2.world), [viaKitClient("https://c.example", rpc(w2.world), () => undefined), via("https://d.example", rpc(w2.world), never)], { sleep: async (ms) => void waits2.push(ms) });
+    assert.equal(r2.wallets.find((w) => w.w === w2.W0)!.tokens, null, client);
+    assert.equal(ones.length, EVM_LOG_THROTTLE_TRIES, `${client}: ${ones}`);
+    assert.equal(new Set(ones).size, 1, `${client}: the same block`);
+    assert.equal(waits2.length, EVM_LOG_THROTTLE_TRIES - 1, client);
+    assert.deepEqual(r2.wallets.find((w) => w.w === w2.W1)!.tokens, [TY], client);
+  }
 });

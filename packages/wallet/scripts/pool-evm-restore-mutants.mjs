@@ -73,7 +73,9 @@ const M = [
   [S, "      if (end > at) {\n        refused = end - at + 1n;", "      if (false) {\n        refused = end - at + 1n;", T, "paging past|^D1 |^R1 |^R2 "],
   // a throttle is no cap: the same page again, bounded (the review of card wallet-restore-transfer-rpcs, MEDIUM); a
   // -32005 naming a cap halves; the read the other RPC stopped never shrinks this one's page (LOW)
-  [S, "      if (t !== null) {\n        if (++tries", "      if (false) {\n        if (++tries", T, "^T1 |^T2 "],
+  [S, "      if (t !== null && (t.kind === \"throttle\" || end === at)) {", "      if (false) {", T, "^T1 |^T2 "],
+  // no answer in time halves a page over one block (Pocket's under the device's 3.5 s client)
+  [S, "      if (t !== null && (t.kind === \"throttle\" || end === at)) {", "      if (t !== null) {", T, "^T4 "],
   [S, "(LIMIT_32005.test(m) && !CAP_WORDS.test(m))", "LIMIT_32005.test(m)", T, "^R1 "],
   [S, "(LIMIT_32005.test(m) && !CAP_WORDS.test(m))", "false", T, "^T1 |^T2 "],
   [S, "      // the other RPC failed and this read was stopped: never a smaller page for the next W\n      signal?.throwIfAborted();\n", "", T, "^T3 "],
