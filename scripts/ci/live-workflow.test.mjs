@@ -110,14 +110,14 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's nineteen checks (signpage-shell runs four ways, kit-renewal-read-bounded the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's twenty checks (signpage-shell runs four ways, kit-renewal-read-bounded the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 19);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 20);
   assert.ok(sign.include.some((e) => e.key === "kit-renewal-read-bounded" && e.args === ""), "kit-renewal-read-bounded runs after every sign deploy");
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 27, "the app's twenty-seven checks, app-export-every-wallet and evm-quote-warm-round the newest");
+  assert.equal(app.include.length, 28, "the app's twenty-eight checks, evm-quote-warm-round and evm-quote-lag-held the newest");
   assert.ok(app.include.some((e) => e.key === "evm-quote-warm-round" && e.args === ""), "evm-quote-warm-round runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "balances-per-chain" && e.chrome && e.args === ""), "balances-per-chain runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "app-export-every-wallet" && e.chrome && e.args === ""), "app-export-every-wallet runs on APP_HOST in Chrome");
@@ -153,7 +153,7 @@ test("a job gets Chrome when its check reaches the launcher, and Firefox or WebK
   assert.deepEqual(enginesFor(""), []);
   const sign = await planFor("sign", { commit: COMMIT });
   assert.ok(sign.include.filter((e) => e.chrome).length >= 6);
-  assert.ok(sign.include.filter((e) => ["signpage-skeleton", "signpage-release", "signpage-withdraw-form", "signpage-withdraw-own-spend", "app-harness-signin-e2e"].includes(e.key)).every((e) => !e.chrome));
+  assert.ok(sign.include.filter((e) => ["signpage-skeleton", "signpage-release", "signpage-withdraw-form", "signpage-withdraw-own-spend", "signpage-buy-own-spend", "app-harness-signin-e2e"].includes(e.key)).every((e) => !e.chrome));
 });
 
 test("a plan refuses a commit that is not 40 hex, an unknown host, a network that is neither, an argument a job would split wrongly", async () => {

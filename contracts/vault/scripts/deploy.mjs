@@ -27,19 +27,35 @@
 // 5. Registration: the parent calls the token config() names, `storage_deposit(vault, registration_only)` with the
 //    token's own `storage_balance_bounds().min`, signed only when min = max and min <= MAX_REGISTRATION (0.01 N), then
 //    reads `storage_balance_of(vault)` back.
-// It writes the record (--out) and prints the live check to run next (nextLine: testnet's; a sandbox deploy has none).
+// It prints the recipe's tx hash before sending it, writes a partial record (--out) as soon as the send lands, then the
+// whole record after the read-back and the registration, and prints the live check to run next (nextLine: testnet's
+// and mainnet's; a sandbox deploy has none).
+//
+// Mainnet (card vault-mainnet-test): the owner's paste, signed by the parent's key file in the owner's process. It never
+// builds: it deploys --wasm (the vault-build workflow's artifact, two clean ubuntu-24.04 builds) only when three agree:
+// the wasm's sha256, MAINNET_PINS' pin for --vault (in this file, so a record edited alone cannot move it), and the
+// --deployment record's (contracts/vault/deployments/mainnet-test.json), whose builds agree, whose code_hash is the
+// pin's base58, whose account is --vault and whose network is mainnet. The wasm must export REQUIRED_EXPORTS (the
+// methods without which a note could not be paid out on a vault with no upgrade) and hold mainnet USDC and neither test
+// token. Both mainnet RPCs (MAINNET_RPCS, two operators) must answer chain_id mainnet, the parent's key must be its
+// full-access key, its balance must cover the code storage, the registration and MAINNET_GAS_MARGIN, the vault must
+// not exist, and the signed batch must be exactly the recipe (recipeProblems: no AddKey), else nothing is sent. Then
+// the read-back on both RPCs at final and the registration on mainnet USDC. The record --out keeps the pre-deploy
+// record's fields and adds the deploy's. Testnet's and the sandbox's rules are unchanged by any of this.
 //
 // The signer's key comes from --key-file, a path given at run time: the near CLI's keychain file
 // (~/.near-credentials/<network>/<parent>.json) or any file holding {account_id, public_key, private_key}. A path inside
 // this repository is refused. The key is read and checked before the build, into this process only, to sign: it is
 // never printed, written or sent.
-// Sandbox runs use the sandbox's own genesis key. No mainnet: a mainnet deploy is the owner's, by another card.
+// Sandbox runs use the sandbox's own genesis key.
 //
 //   node contracts/vault/scripts/deploy.mjs --build-only [--flavor testnet|mainnet] [--build-dir <new dir>]
 //   node contracts/vault/scripts/deploy.mjs --network testnet --parent <name>.testnet --key-file <path>
 //     [--vault <label>.<parent>] [--build-dir <new dir>] [--out <file>]
 //   node contracts/vault/scripts/deploy.mjs --network sandbox --rpc <url> --parent <id> --key-file <path>
 //     [--wasm <file> | --flavor mainnet|testnet] [--vault <id>] [--out <file>]
+//   node contracts/vault/scripts/deploy.mjs --network mainnet --parent <name>.near --vault <label>.<parent>
+//     --key-file <path> --wasm <file> --deployment <pre-deploy record> --out <file>
 import "../../../scripts/net-window.mjs";
 import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
@@ -48,8 +64,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { b58decode, b58encode, functionCallTx, recipeTx } from "./near-tx.mjs";
-import { RPCS as TESTNET_RPCS, TESTNET_VERSION, wasmProblems } from "../../../scripts/live-checks/vault-skeleton.mjs";
-import { TESTNET_TOKEN, networkProblems } from "../../../scripts/live-checks/vault-testnet-t01.mjs";
+import { EXPORTS_ALLOWED, RPCS as TESTNET_RPCS, TESTNET_VERSION, wasmProblems } from "../../../scripts/live-checks/vault-skeleton.mjs";
+import { MAINNET_USDC, TESTNET_TOKEN, networkProblems, tokenProblems } from "../../../scripts/live-checks/vault-testnet-t01.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CRATE = path.resolve(HERE, "..");
@@ -64,12 +80,28 @@ export const TOOLCHAIN = "1.96.0";
 export const CARGO_NEAR = "cargo-near-near 0.22.0";
 export const BUILD_ARGS = ["near", "build", "non-reproducible-wasm", "--no-embed-abi", "--locked"];
 export const LIVE_CHECK = "scripts/live-checks/vault-testnet-t01.mjs";
+export const MAINNET_LIVE_CHECK = "scripts/live-checks/vault-mainnet.mjs";
+// FastNEAR and dRPC, mainnet's two operators: vault-mainnet.mjs MAINNET_RPCS, held equal by deploy.test.mjs. Written
+// here, not imported: that module's imports reach scripts/ci (money-gate.mjs), which the sandbox suite does not read.
+export const MAINNET_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
+// The one wasm each mainnet vault may be deployed with (review MED-1): the pin of its pre-deploy record, held here too.
+export const MAINNET_PINS = { "vault-test.confidential.unrlzd.near": "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a" };
+// config().version of a mainnet build (contracts/vault/src/constants.rs NETWORK)
+export const MAINNET_VERSION = /^blindfill-vault \S+ mainnet$/;
+// What the parent must hold on mainnet beyond the code storage and the registration: the recipe's 100 Tgas config call
+// and the deploy's own gas (testnet-v1's vault receipt burnt 23.7 Tgas), with room: 0.05 N.
+export const MAINNET_GAS_MARGIN = NEAR / 20n;
+// The methods a mainnet vault must export (vault.md 2.5.7): without any one of them a note could not be made, spent,
+// paid out, taken back or settled, and the vault has no upgrade to add it later. Each is also inside EXPORTS_ALLOWED.
+export const REQUIRED_EXPORTS = ["settle", "withdraw", "on_payout", "ragequit", "ft_on_transfer", "storage_prepay", "config"];
+for (const e of REQUIRED_EXPORTS) if (!EXPORTS_ALLOWED.has(e)) throw new Error(`REQUIRED_EXPORTS names ${e}, which vault-skeleton.mjs EXPORTS_ALLOWED refuses`);
 
 // The line a deploy on `network` ends with: the live check to run next. Testnet's vault has LIVE_CHECK, which reads two
 // public testnet RPCs and refuses any build but the testnet one. A sandbox deploy lives on this machine only, so no
-// live check can read it (tests/s20.rs checks its end state). Mainnet is refused before any build or send.
-export function nextLine(network, record) {
+// live check can read it (tests/s20.rs checks its end state). Mainnet's is vault-mainnet.mjs on the vault it made.
+export function nextLine(network, record, { account, signer } = {}) {
   if (network === "testnet") return `next: node ${LIVE_CHECK} --deployment ${record}`;
+  if (network === "mainnet") return `next: node ${MAINNET_LIVE_CHECK} --network mainnet --account ${account} --signer ${signer} --deployment ${record}`;
   if (network === "sandbox") return "next: no live check (a sandbox deploy lives on this machine only; tests/s20.rs checks its end state)";
   throw new Error(`no network ${network}`);
 }
@@ -225,7 +257,79 @@ export function deployProblems(wasm, network, problems = wasmProblems) {
   const big = functionBodies(wasm).filter((n) => n > MAX_FUNCTION_BODY);
   if (big.length) p.push(`${big.length} function bod${big.length === 1 ? "y" : "ies"} over ${MAX_FUNCTION_BODY} B: ${big.join(", ")}`);
   if (network === "testnet") p.push(...networkProblems(wasm).map((x) => `not a testnet build: ${x}`));
+  if (network === "mainnet") {
+    const fns = new Set(wasmProblems(wasm).functionExports);
+    const missing = REQUIRED_EXPORTS.filter((e) => !fns.has(e));
+    if (missing.length) p.push(`missing exports (vault.md 2.5.7): ${missing.join(", ")}`);
+    p.push(...tokenProblems(wasm, MAINNET_USDC).map((x) => `not a mainnet build: ${x}`));
+  }
   return p;
+}
+
+// What keeps `wasm` from being the pinned mainnet build of `record` (the pre-deploy record): its sha256 is the record's
+// wasm_sha256 and `pins`' pin for the vault (`vault`, else the record's account), the record's builds (at least two) all
+// agree on it, its code_hash is that sha's base58, the record is a mainnet one and, with `vault`, the record's account
+// is `vault`. [] when it is the pin.
+export function pinProblems(wasm, record, vault, pins = MAINNET_PINS) {
+  const p = [];
+  const sha = sha256(wasm);
+  const id = vault ?? record?.account_id;
+  const pin = Object.hasOwn(pins, id) ? pins[id] : undefined;
+  if (pin === undefined) p.push(`MAINNET_PINS holds no pin for ${id}`);
+  else {
+    if (sha !== pin) p.push(`the wasm's sha256 ${sha} is not MAINNET_PINS' pin ${pin} for ${id}`);
+    if (record?.wasm_sha256 !== pin) p.push(`the record's pin ${record?.wasm_sha256} is not MAINNET_PINS' pin ${pin} for ${id}`);
+  }
+  if (!/^[0-9a-f]{64}$/.test(record?.wasm_sha256 ?? "")) return [...p, `the record pins no wasm_sha256: ${JSON.stringify(record?.wasm_sha256 ?? null)}`];
+  if (sha !== record.wasm_sha256) p.push(`the wasm's sha256 ${sha} is not the pin ${record.wasm_sha256}`);
+  const builds = record.wasm_builds_sha256;
+  if (!Array.isArray(builds) || builds.length < 2 || !builds.every((b) => b === record.wasm_sha256)) p.push(`the record's builds do not all agree on the pin: ${JSON.stringify(builds ?? null)}`);
+  if (record.code_hash !== b58encode(Buffer.from(record.wasm_sha256, "hex"))) p.push(`the record's code_hash ${record.code_hash} is not the base58 of its pin`);
+  if (record.network !== "mainnet") p.push(`the record is a ${record.network} record, not mainnet`);
+  if (vault !== undefined && record.account_id !== vault) p.push(`the record is ${record.account_id}'s, not ${vault}'s`);
+  return p;
+}
+
+// The action tags of an encoded transaction (near-tx.mjs's V0 layout): CreateAccount 0, DeployContract 1, FunctionCall 2,
+// Transfer 3, Stake 4, AddKey 5, DeleteKey 6, DeleteAccount 7, Delegate 8. Reads the header to the action count, then
+// each action's tag and the fields of the four the recipe holds; any other tag ends the read (its fields are not parsed).
+export function txActionTags(tx) {
+  const b = Buffer.from(tx);
+  let p = 0;
+  const u32 = () => ((p += 4), b.readUInt32LE(p - 4));
+  // the length is read first, then added: `p += u32()` would add it to p as it was before the length's own 4 bytes
+  const str = () => {
+    const n = u32();
+    p += n;
+  };
+  str(); // signer
+  p += 1 + 32 + 8; // key tag, key, nonce
+  str(); // receiver
+  p += 32; // block hash
+  const tags = [];
+  for (let n = u32(); n > 0; n--) {
+    const t = b[p++];
+    tags.push(t);
+    if (t === 0) continue;
+    else if (t === 3) p += 16;
+    else if (t === 1) str();
+    else if (t === 2) (str(), str(), (p += 8 + 16));
+    else break;
+  }
+  return tags;
+}
+
+// What keeps `tx` from being exactly the 2.8 recipe [CreateAccount, Transfer, DeployContract, FunctionCall]: any other
+// action (an AddKey above all) would leave a key on the vault, or do something the recipe does not. [] when it is.
+export function recipeProblems(tx) {
+  const tags = txActionTags(tx);
+  return tags.join(",") === "0,3,1,2" ? [] : [`the batch's actions are [${tags.join(", ")}], want exactly [0, 3, 1, 2] (CreateAccount, Transfer, DeployContract, FunctionCall), no AddKey`];
+}
+
+// What keeps a mainnet parent holding `amount` yocto from paying the recipe's `transfer`, the registration and the gas.
+export function balanceProblems(amount, transfer) {
+  const need = BigInt(transfer) + MAX_REGISTRATION + MAINNET_GAS_MARGIN;
+  return BigInt(amount) >= need ? [] : [`the parent holds ${amount} yocto, short of ${need} (code storage ${transfer} + registration ${MAX_REGISTRATION} + gas ${MAINNET_GAS_MARGIN})`];
 }
 
 // The vault's account: a direct sub-account of the parent (CreateAccount makes no other), never an implicit id.
@@ -259,6 +363,7 @@ export function rpcProblems(network, url) {
 // What is wrong with the chain id an RPC answers for `network`.
 export function chainProblems(network, chainId) {
   if (network === "testnet") return chainId === "testnet" ? [] : [`chain_id ${JSON.stringify(chainId)}, want "testnet"`];
+  if (network === "mainnet") return chainId === "mainnet" ? [] : [`chain_id ${JSON.stringify(chainId)}, want "mainnet"`];
   if (network === "sandbox") return typeof chainId === "string" && SANDBOX_CHAIN.test(chainId) ? [] : [`chain_id ${JSON.stringify(chainId)}, want near-sandbox's test-chain-<id>`];
   return [`no network ${network}`];
 }
@@ -360,7 +465,7 @@ async function send(url, tx, privateKey, what) {
 }
 
 function parseArgs(argv) {
-  const known = new Set(["--build-only", "--flavor", "--build-dir", "--network", "--rpc", "--parent", "--key-file", "--vault", "--wasm", "--out"]);
+  const known = new Set(["--build-only", "--flavor", "--build-dir", "--network", "--rpc", "--parent", "--key-file", "--vault", "--wasm", "--out", "--deployment"]);
   const flags = new Set(["--build-only"]);
   const o = {};
   for (let i = 0; i < argv.length; i++) {
@@ -385,15 +490,25 @@ async function main() {
     console.log(`reproducible: both builds sha256 ${b.sha}, ${b.wasm.length} B; wasm ${b.file}`);
     const p = deployProblems(b.wasm, o.flavor ?? "testnet");
     if (p.length) throw new Error(`the build would be refused: ${p.join("; ")}`);
+    if (o.deployment) {
+      const pp = pinProblems(b.wasm, JSON.parse(readFileSync(o.deployment, "utf8")));
+      if (pp.length) throw new Error(`the build is not the pin of ${o.deployment}: ${pp.join("; ")}`);
+      console.log(`the pin of ${o.deployment}: the build's sha256 ${b.sha} equals it`);
+    }
     return;
   }
 
   const network = o.network;
-  if (network === "mainnet") throw new Error("no mainnet: a mainnet vault deploy is the owner's, by its own card");
-  if (network !== "testnet" && network !== "sandbox") throw new Error("--network testnet|sandbox");
+  if (network !== "testnet" && network !== "sandbox" && network !== "mainnet") throw new Error("--network testnet|sandbox|mainnet");
+  // mainnet deploys the pinned wasm only: never built on the owner's machine, never another vault by default
+  let record = null;
+  if (network === "mainnet") {
+    if (!o.wasm || !o.deployment || !o.vault || !o.out || o.rpc || o.flavor || o["build-dir"]) throw new Error("--network mainnet takes --wasm, --deployment, --vault and --out, and no --rpc, --flavor or --build-dir: it deploys the pinned build to two public RPCs' network");
+    record = JSON.parse(readFileSync(o.deployment, "utf8"));
+  }
   if (!o.parent || !o["key-file"]) throw new Error("--parent and --key-file are required");
   const parent = o.parent;
-  const rpcs = network === "testnet" ? TESTNET_RPCS : [o.rpc];
+  const rpcs = network === "testnet" ? TESTNET_RPCS : network === "mainnet" ? MAINNET_RPCS : [o.rpc];
   if (!rpcs[0]) throw new Error("--network sandbox needs --rpc <url>");
   const rp = rpcProblems(network, rpcs[0]);
   if (rp.length) throw new Error(rp.join("; "));
@@ -424,8 +539,12 @@ async function main() {
     console.log(`reproducible: both builds sha256 ${b.sha}`);
   }
   const sha = sha256(wasm);
-  const problems = deployProblems(wasm, network);
+  const problems = [...deployProblems(wasm, network), ...(network === "mainnet" ? pinProblems(wasm, record, vault) : [])];
   if (problems.length) throw new Error(`refused before any send: ${problems.join("; ")}`);
+  if (network === "mainnet") {
+    build = record.build;
+    shas = record.wasm_builds_sha256;
+  }
   const bodies = functionBodies(wasm);
   console.log(`wasm ${wasm.length} B, sha256 ${sha}, ${bodies.length} functions, largest body ${Math.max(...bodies)} B (limit ${MAX_FUNCTION_BODY})`);
 
@@ -446,17 +565,33 @@ async function main() {
     if (!/UNKNOWN_ACCOUNT|does not exist/.test(e.message)) throw e;
   }
   const transfer = BigInt(wasm.length + 100) * BYTE + NEAR / 100n;
+  if (network === "mainnet") {
+    const acct = await rpc(url, "query", { request_type: "view_account", account_id: parent, finality: "final" });
+    const bp = balanceProblems(acct.amount, transfer);
+    if (bp.length) throw new Error(`refused before any send: ${bp.join("; ")}`);
+    console.log(`the parent holds ${acct.amount} yocto: it pays ${transfer} of code storage, the registration and the gas`);
+  }
   let block = await rpc(url, "block", { finality: "final" });
   const tx = recipeTx({ signer: parent, publicKey: pub, nonce: BigInt(ak.nonce) + 1n, receiver: vault, blockHash: b58decode(block.header.hash), wasm, transfer, configGas: CONFIG_GAS });
-  console.log(`sending [CreateAccount, Transfer(${transfer}), DeployContract(${wasm.length} B), FunctionCall(config, ${CONFIG_GAS / TGAS} Tgas, 0)] from ${parent} to ${vault}, no AddKey`);
+  const rcp = recipeProblems(tx);
+  if (rcp.length) throw new Error(`refused before any send: ${rcp.join("; ")}`);
+  console.log(`sending tx ${signTx(tx, privateKey).hash}: [CreateAccount, Transfer(${transfer}), DeployContract(${wasm.length} B), FunctionCall(config, ${CONFIG_GAS / TGAS} Tgas, 0)] from ${parent} to ${vault}, no AddKey`);
   const d = await send(url, tx, privateKey, "the recipe");
+  // the deploy is on chain from here: its record is written before any read that could stop the run
+  mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
+  writeFileSync(out, JSON.stringify({ ...(network === "mainnet" ? record : {}), network, account_id: vault, parent, tx_hash: d.hash, stage: "deployed: the read-back and the registration are not recorded yet", wasm_sha256: sha, deployed_at: new Date().toISOString() }, null, 2) + "\n");
+  console.log(`deployed: tx ${d.hash}; partial record ${out}`);
   const config = JSON.parse(Buffer.from(d.r.status.SuccessValue, "base64").toString("utf8"));
   if (network === "testnet" && (config.asset !== TESTNET_TOKEN || !TESTNET_VERSION.test(config.version))) throw new Error(`deployed, but config() names asset ${config.asset}, version ${config.version}: not the testnet build`);
+  if (network === "mainnet" && (config.asset !== MAINNET_USDC || !MAINNET_VERSION.test(config.version))) throw new Error(`deployed ${vault} (tx ${d.hash}), but config() names asset ${config.asset}, version ${config.version}: not the mainnet build`);
+  // the scope the record computed ahead (context.rs scope_for over the account and the token) against the one the vault
+  // answers: said, never thrown, since the vault is deployed by now and the read-back and the registration must still run
+  if (network === "mainnet" && record.scope !== undefined) console.log(config.scope === record.scope ? `config() scope ${config.scope} is the record's` : `SCOPE DIFFERS: config() names ${config.scope}, the record computed ${record.scope}; the record now holds config()'s`);
   const vaultReceipt = d.r.receipts_outcome.find((x) => x.outcome.executor_id === vault);
   console.log(`deployed: tx ${d.hash}; config() asset ${config.asset}, version ${config.version}; the vault's receipt burnt ${vaultReceipt?.outcome.gas_burnt} gas`);
 
   // 4. read back: no key, the build's code
-  const reads = network === "testnet" ? rpcs.map((u) => [u, "final"]) : [[url, "optimistic"], [url, "final"]];
+  const reads = network === "sandbox" ? [[url, "optimistic"], [url, "final"]] : rpcs.map((u) => [u, "final"]);
   const codeHash = b58encode(Buffer.from(sha, "hex"));
   for (const [u, finality] of reads) {
     let acct;
@@ -492,6 +627,7 @@ async function main() {
   console.log(`registered: tx ${reg.hash}, ${token}.storage_deposit(${vault}) with ${min} yocto; storage_balance_of ${JSON.stringify(balance)}`);
 
   const doc = {
+    ...(network === "mainnet" ? record : {}),
     network,
     account_id: vault,
     parent,
@@ -516,7 +652,7 @@ async function main() {
   mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
   writeFileSync(out, JSON.stringify(doc, null, 2) + "\n");
   console.log(`wrote ${out}`);
-  console.log(nextLine(network, path.relative(path.resolve(CRATE, "../.."), path.resolve(out))));
+  console.log(nextLine(network, path.relative(path.resolve(CRATE, "../.."), path.resolve(out)), { account: vault, signer: parent }));
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
