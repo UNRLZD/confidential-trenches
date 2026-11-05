@@ -8,10 +8,11 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-test("every pool rule mutant fails its named test, and pool.ts is left as it was", { timeout: 1_200_000 }, () => {
+test("every pool rule mutant fails its named test, and pool.ts is left as it was", { timeout: 1_200_000 }, (t) => {
   const runner = fileURLToPath(new URL("./rules-pool-mutants.mjs", import.meta.url));
   const r = spawnSync(process.execPath, [runner], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
   assert.equal(r.status, 0, out.split("\n").filter((l) => /^(LIVE|BAD)/.test(l)).join("\n") || out.slice(-2000));
   assert.match(out, /^all \d+ mutants killed$/m);
+  t.diagnostic(out.match(/^all \d+ mutants killed$/m)[0]); // the kill count, in the run's log
 });
