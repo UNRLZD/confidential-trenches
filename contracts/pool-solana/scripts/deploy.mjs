@@ -112,9 +112,12 @@ export const PRIORITY_MICRO_LAMPORTS = 100_000n;
 // QUIC), and the RPC carries only the blockhash and status reads. --max-sign-attempts re-signs what is unconfirmed when
 // its blockhash expires, about 60 s each (agave v4.4.0 cli/src/program.rs: default 5; the guide's example 10). A try
 // that still fails is tried again from the run's own buffer (--buffer: agave writes only the chunks whose bytes differ,
-// program.rs do_process_program_deploy), at most DEPLOY_TRIES times, before the cleanup closes it.
-export const DEPLOY_SIGN_ATTEMPTS = 30;
-export const DEPLOY_TRIES = 3;
+// program.rs do_process_program_deploy), at most DEPLOY_TRIES times, before the cleanup closes it. Ten attempts a try
+// and six tries, each a new CLI process, rather than thirty in one: v4.4.0 picks its leaders from one slotsUpdates
+// websocket that never reconnects (tpu-client-next websocket_node_address_service.rs), so a dead socket costs one
+// short try, not the whole run (review a763a51d).
+export const DEPLOY_SIGN_ATTEMPTS = 10;
+export const DEPLOY_TRIES = 6;
 export const PRIORITY_CU_BOUND = 1_400_000n;
 export const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
 export const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
@@ -353,6 +356,14 @@ export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve 
   return { swept, signatures, after: null, problems };
 }
 
+/** getProgramAccounts' config for the upgradeable loader's accounts of `tag` (1 a buffer, 3 a programdata) whose
+ * authority (the 33-byte Option at offset `at`) is Some(funder): no data, only their addresses. */
+const byAuthority = (funder, tag, at) => ({
+  encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 0 },
+  filters: [{ memcmp: { offset: 0, bytes: b58encode(Uint8Array.of(tag, 0, 0, 0)) } }, { memcmp: { offset: at, bytes: b58encode(cat(Uint8Array.of(1), funder.pub)) } }],
+});
+const buffersOf = (funder) => byAuthority(funder, 1, 4);
+
 /**
  * The chain calls of a run's cleanup and its key check. `cli` runs the solana CLI (the test plants one). The program's
  * upgrade authority is read at confirmed, and a read that fails throws: a finalized read of a deploy that landed a
@@ -388,6 +399,16 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
       }
       const said = `${r.stdout}${r.stderr}`.trim().split("\n").filter(Boolean).slice(-1)[0] ?? "";
       say(`buffers closed: ${said}`);
+      // agave v4.4.0 prints "Failed to close buffer ..." and still exits 0 (cli/src/program.rs, the --buffers loop): the
+      // close is done only once both RPCs read no buffer under the funder, read again for about 30 s
+      let left = [];
+      for (let i = 0; i < 15; i++) {
+        left = [];
+        for (const u of [...new Set([url, second ?? url])]) for (const a of await rpc(fetchFn, u, "getProgramAccounts", [LOADER_V3, buffersOf(funder)])) left.push(`${a.pubkey} on ${u}`);
+        if (!left.length) return;
+        await wait(2000);
+      }
+      throw new Error(`buffer ${left.join(", ")} still has the funder as its authority after its close (the CLI said: ${said})`);
     },
     upgradeableByFunder: byFunder,
     closeProgram: async () => {
@@ -463,10 +484,7 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
         }
       }
       for (const [tag, at, what] of [[1, 4, "buffer"], [3, 12, "upgradeable program's data"]]) {
-        const found = await rpc(fetchFn, url, "getProgramAccounts", [LOADER_V3, {
-          encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 0 },
-          filters: [{ memcmp: { offset: 0, bytes: b58encode(Uint8Array.of(tag, 0, 0, 0)) } }, { memcmp: { offset: at, bytes: b58encode(cat(Uint8Array.of(1), funder.pub)) } }],
-        }]);
+        const found = await rpc(fetchFn, url, "getProgramAccounts", [LOADER_V3, byAuthority(funder, tag, at)]);
         for (const a of found) out.push(`${what} ${a.pubkey} still has the funder as its authority`);
       }
       return out;
@@ -506,7 +524,15 @@ export function tableProblems(acc, list, authority) {
 async function tableReadBack(fetchFn, urls, table, list, authority, { wait = sleep, now = Date.now } = {}) {
   let why = [];
   for (const until = now() + 90_000; ; await wait(2000)) {
-    const reads = await Promise.all(urls.map((u) => account(fetchFn, u, table)));
+    let reads;
+    try {
+      reads = await Promise.all(urls.map((u) => account(fetchFn, u, table)));
+    } catch (e) {
+      // a read that fails (its tries all rate-limited) is read again, until the deadline
+      why = [`not read: ${e.message}`];
+      if (now() > until) throw new Error(`lookup table ${table}: ${why.join("; ")}`);
+      continue;
+    }
     const same = reads.every((r) => r && reads[0] && r.owner === reads[0].owner && Buffer.from(r.data).equals(Buffer.from(reads[0].data)));
     why = [...(same ? [] : [`the reads on ${urls.join(" and ")} are not the same bytes`]), ...tableProblems(reads[0], list, authority)];
     if (!why.length) return reads[0];
@@ -543,26 +569,56 @@ export async function chainRecord(fetchFn, url, d) {
  * "confirmed", reads are "finalized". */
 async function settled(fetchFn, url, addr, ready = () => true, { wait = sleep, now = Date.now } = {}) {
   const until = now() + 60_000;
+  let failed = null;
   for (;;) {
-    const a = await account(fetchFn, url, addr);
+    // a read that fails (its tries all rate-limited) is read again until the deadline, like one that reads nothing
+    let a = null;
+    try {
+      a = await account(fetchFn, url, addr);
+      failed = null;
+    } catch (e) {
+      failed = e;
+    }
     if (a && ready(a)) return a;
-    if (now() > until) throw new Error(`${addr} not readable at finalized in 60 s`);
+    if (now() > until) throw new Error(`${addr} not readable at finalized in 60 s${failed ? `: ${failed.message}` : ""}`);
     await wait(2000);
   }
+}
+
+/** `read()`'s answer, read again 2 s apart for up to 90 s while it throws (its tries all rate-limited or reset). */
+async function readAgain(read, what, { wait = sleep, now = Date.now } = {}) {
+  for (const until = now() + 90_000; ; ) {
+    try {
+      return await read();
+    } catch (e) {
+      if (now() > until) throw new Error(`${what} not read in 90 s: ${e.message}`);
+      log(`${what} not read (${e.message}): reading it again in 2 s`);
+      await wait(2000);
+    }
+  }
+}
+
+/** What a deploy try left, read at confirmed on `url`: "final" (this code, upgrade authority none), "upgradeable" (this
+ * code, the funder its upgrade authority: the deploy landed and --final's SetAuthority did not), or "absent" (no
+ * program, or not this code: deployed again from the buffer). */
+export async function deployedState(fetchFn, url, programId, so, funderId) {
+  const p = await programProblems(fetchFn, url, programId, so, "confirmed");
+  if (!p.length) return "final";
+  return p.length === 1 && p[0] === `upgrade authority ${funderId} is set on ${url}` ? "upgradeable" : "absent";
 }
 
 /** What keeps `programId` from being this build, final, on `url`: [] when it is executable, owned by the upgradeable
  * loader, its programdata the one its id derives, its upgrade authority none, and its code `so` with only zeros
  * after it. A resume (--program) reads it on two RPCs before it spends a lamport. */
-export async function programProblems(fetchFn, url, programId, so) {
+export async function programProblems(fetchFn, url, programId, so, commitment = "finalized") {
   const out = [];
-  const pa = await account(fetchFn, url, programId);
+  const pa = await account(fetchFn, url, programId, undefined, commitment);
   const pdAddr = programDataAddress(programId);
   if (!pa) return [`${programId}: no account on ${url}`];
   if (!pa.executable || pa.owner !== LOADER_V3 || pa.data.length !== 36 || pa.data[0] !== 2 || b58encode(pa.data.subarray(4, 36)) !== pdAddr) {
     out.push(`${programId} is not an executable upgradeable-loader program pointing at ${pdAddr} on ${url}`);
   }
-  const pd = await account(fetchFn, url, pdAddr);
+  const pd = await account(fetchFn, url, pdAddr, undefined, commitment);
   if (!pd || pd.owner !== LOADER_V3 || pd.data.length < 45 || pd.data[0] !== 3) return [...out, `programdata ${pdAddr} missing or not the loader's on ${url}`];
   if (pd.data[12] !== 0) out.push(`upgrade authority ${b58encode(pd.data.subarray(13, 45))} is set on ${url}`);
   const code = pd.data.subarray(45);
@@ -786,15 +842,17 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
       const balance = BigInt((await rpc(fetchFn, url, "getBalance", [k.id, { commitment: "confirmed" }])).value);
       const ins = await incoming(k);
       for (const i of ins) if (!known.has(i.signature)) known.add(i.signature), j.txs.push({ step: `funding (to ${k === funder ? "the funder" : "the program id"})`, signature: i.signature, state: "landed" });
-      if (balance <= FEE_PER_SIGNATURE) continue;
+      // a close or freeze that failed keeps the reserve in the funder, so a later --sweep-kept can still pay for it
+      const keep = k === funder && failed.length ? CLEANUP_RESERVE : 0n;
+      if (balance <= FEE_PER_SIGNATURE + keep) continue;
       // to the run's return address, which the run read as a wallet in use before any key; --return may name another
       // only when it sent to this key (a funding from another wallet of the owner's)
       const sources = [...new Set(ins.map((i) => i.from))];
       if (to && !sources.includes(to) && to !== j.return_to) throw new Error(`--return ${to} is neither a sender to ${k.id} (${sources.join(", ") || "none read"}) nor the run's return address`);
       const dest = to ?? j.return_to;
-      const sig = await sendAndConfirm(fetchFn, url, [transferIx(k.id, dest, balance - FEE_PER_SIGNATURE)], k, [k], { wait, now });
+      const sig = await sendAndConfirm(fetchFn, url, [transferIx(k.id, dest, balance - FEE_PER_SIGNATURE - keep)], k, [k], { wait, now });
       j.txs.push({ step: `sweep (kept keys, to ${dest === j.return_to ? "the run's return address" : "a sender of the funding"} ${dest})`, signature: sig, state: "landed" });
-      log(`sweep-kept: ${balance - FEE_PER_SIGNATURE} lamports from ${k.id} to ${dest}: ${sig}`);
+      log(`sweep-kept: ${balance - FEE_PER_SIGNATURE - keep} lamports from ${k.id} to ${dest}: ${sig}`);
     }
     // what is left, read again for about 20 s while it is not nothing: a read right after the sweep can lag on either RPC
     const leftNow = async () => {
@@ -1099,7 +1157,19 @@ export async function main(argv, fetchFn = fetch, io = {}) {
         if (held >= need.total) break;
         await wait(WAITS.poll);
       }
-      const funding = await history();
+      // the funding's history: a read that fails is read again, as the balance is (a run that ended here would sweep
+      // the owner's transfer back with no deploy: one more paste)
+      let funding;
+      for (;;) {
+        if (stop) throw new Error(`stopped by ${stop}`);
+        try {
+          funding = await history();
+          break;
+        } catch (e) {
+          log(`the funder's history not read (${e.message}): reading it again in ${WAITS.poll / 1000} s`);
+          await wait(WAITS.poll);
+        }
+      }
       txs.push(...funding);
       funded = true;
       stoppedRecord();
@@ -1113,9 +1183,38 @@ export async function main(argv, fetchFn = fetch, io = {}) {
         for (const sig of prior) txs.push({ step: "first run (--prior)", signature: sig, state: "landed" });
         log(`resume: ${priorTxs.length + prior.length} prior transaction(s) kept for the record`);
       } else {
-        let dep;
+        // each try is a new CLI process (a fresh leader socket: v4.4.0 reads leaders from one websocket that never
+        // reconnects). Before a retry, what the last try left is read at confirmed: final with this code is done; this
+        // code with the funder as its authority (the deploy landed, --final's SetAuthority did not) is made final with
+        // set-upgrade-authority, never deployed again (the CLI's upgrade path refuses it and the cleanup would close it);
+        // anything else is deployed again from the run's buffer
+        let dep = null;
+        const failedTry = (attempt, what, r) => {
+          const why = (r.stderr || r.stdout || r.error?.message || "").trim().split("\n").slice(-3).join(" | ");
+          if (attempt >= DEPLOY_TRIES) throw new Error(`solana program ${what}: exit ${r.status}: ${why} (try ${attempt} of ${DEPLOY_TRIES})`);
+          log(`deploy try ${attempt} of ${DEPLOY_TRIES} failed: ${why}: trying again from the run's buffer in ${WAITS.poll / 1000} s`);
+        };
         for (let attempt = 1; ; attempt++) {
           if (stop) throw new Error(`stopped by ${stop}`);
+          const left = attempt === 1 ? "absent" : await readAgain(() => deployedState(fetchFn, url, program.id, so, funder.id), "the program", clock);
+          if (left === "final") {
+            log(`the last try left ${program.id} final with this code`);
+            break;
+          }
+          if (left === "upgradeable") {
+            log(`deploy try ${attempt} of ${DEPLOY_TRIES}: the last try's deploy landed with the funder as its authority: set-upgrade-authority --final`);
+            let fin;
+            try {
+              fin = runCli(["program", "set-upgrade-authority", program.id, "--final", "--upgrade-authority", funderFile, ...common], { allowFail: true });
+            } finally {
+              await afterCli("the solana CLI: program set-upgrade-authority --final").catch((e) => log(`the CLI's transactions not read: ${e.message}`));
+            }
+            if (fin.status === 0) break;
+            failedTry(attempt, "set-upgrade-authority --final", fin);
+            await wait(WAITS.poll);
+            continue;
+          }
+          log(`deploy try ${attempt} of ${DEPLOY_TRIES}: at most about ${DEPLOY_SIGN_ATTEMPTS} min (${DEPLOY_SIGN_ATTEMPTS} sign attempts, a blockhash's ~60 s each)`);
           try {
             dep = runCli(["program", "deploy", codeFile, "--program-id", programFile, "--upgrade-authority", funderFile, "--buffer", bufferFile, "--max-len", String(so.length),
               "--final", "--max-sign-attempts", String(DEPLOY_SIGN_ATTEMPTS), ...(cluster === "mainnet" ? ["--with-compute-unit-price", String(PRIORITY_MICRO_LAMPORTS)] : []), "--output", "json", ...common], { allowFail: true });
@@ -1123,23 +1222,30 @@ export async function main(argv, fetchFn = fetch, io = {}) {
             await afterCli(`the solana CLI: program deploy${attempt > 1 ? ` (try ${attempt})` : ""} (buffer, writes, deploy, SetAuthority)`).catch((e) => log(`the CLI's transactions not read: ${e.message}`));
           }
           if (dep.status === 0) break;
-          const why = (dep.stderr || dep.stdout || dep.error?.message || "").trim().split("\n").slice(-3).join(" | ");
-          if (attempt >= DEPLOY_TRIES) throw new Error(`solana program deploy: exit ${dep.status}: ${why} (try ${attempt} of ${DEPLOY_TRIES})`);
-          log(`deploy try ${attempt} of ${DEPLOY_TRIES} failed: ${why}: trying again from the run's buffer`);
+          failedTry(attempt, "deploy", dep);
+          dep = null;
+          await wait(WAITS.poll);
         }
-        const out = JSON.parse(dep.stdout.slice(dep.stdout.indexOf("{")));
-        if (out.programId !== program.id) throw new Error(`deployed ${out.programId}, not ${program.id}`);
-        const t = txs.find((x) => x.signature === out.signature);
-        if (t) Object.assign(t, { step: "deploy with the upgradeable loader, --final", cli: false });
-        else txs.push({ step: "deploy with the upgradeable loader, --final", signature: out.signature, state: "landed" });
+        if (dep) {
+          const out = JSON.parse(dep.stdout.slice(dep.stdout.indexOf("{")));
+          if (out.programId !== program.id) throw new Error(`deployed ${out.programId}, not ${program.id}`);
+          const t = txs.find((x) => x.signature === out.signature);
+          if (t) Object.assign(t, { step: "deploy with the upgradeable loader, --final", cli: false });
+          else txs.push({ step: "deploy with the upgradeable loader, --final", signature: out.signature, state: "landed" });
+        }
         stoppedRecord();
         await settled(fetchFn, url, programDataAddress(program.id), undefined, clock);
         // --final's SetAuthority is the CLI's second transaction: a finalized read right after the deploy can still show
         // the funder as authority (the table rehearsal on a local validator, 5 Nov), so the read is retried up to 90 s
-        // on both RPCs: the run is done only once each reads the program final with this code
+        // on both RPCs: the run is done only once each reads the program final with this code. A read that fails is a
+        // problem of that pass, read again
         let problems;
         for (const until = clock.now() + 90_000; ; await clock.wait(2000)) {
-          problems = [...(await programProblems(fetchFn, url, program.id, so)), ...(await programProblems(fetchFn, second, program.id, so))];
+          try {
+            problems = [...(await programProblems(fetchFn, url, program.id, so)), ...(await programProblems(fetchFn, second, program.id, so))];
+          } catch (e) {
+            problems = [`not read: ${e.message}`];
+          }
           if (!problems.length || clock.now() > until) break;
         }
         if (problems.length) throw new Error(problems.join("; "));
@@ -1253,7 +1359,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       }
       if (left.length) {
         Object.assign(keys, { state: "kept", why: left });
-        log(`KEYS KEPT in ${dir} (0700; funder.json${programFile ? ", program.json" : ""}): ${left.join("; ")}; sweep them later with: ${keys.sweep}`);
+        log(`KEYS KEPT in ${dir} (0700; funder.json${programFile ? ", program.json" : ""}${bufferFile ? ", buffer.json" : ""}): ${left.join("; ")}; sweep them later with: ${keys.sweep}`);
       } else {
         rmSync(dir, { recursive: true, force: true });
         Object.assign(keys, { state: existsSync(dir) ? "kept" : "removed", why: existsSync(dir) ? ["the folder could not be removed"] : ["the funder and the program id read 0 on both RPCs, nothing under the funder's authority"] });
