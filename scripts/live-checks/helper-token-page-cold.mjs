@@ -133,7 +133,9 @@ export function judge(run) {
   const noTrip = reads.filter((r) => !Number.isSafeInteger(r.rttMs));
   say(noTrip.length === 0, `${reads.length - noTrip.length} of ${reads.length} round trips read (GET /v1/health twice before each page read)`);
   const failed = reads.filter((r) => r.status !== 200);
-  const kinds = [...new Set(failed.map((r) => `${r.status}${r.retryAfter ? ` Retry-After ${r.retryAfter}` : ""}${r.error ? ` ${r.error}` : ""}`))];
+  // card helper-ready-page-warm: a not-ready page names its cause in Server-Timing (search-room, search-gap, search-held,
+  // search-429, search-upstream, rpc), printed with the FAIL so no one needs the helper's log
+  const kinds = [...new Set(failed.map((r) => `${r.status}${r.retryAfter ? ` Retry-After ${r.retryAfter}` : ""}${r.timing ? ` Server-Timing ${r.timing}` : ""}${r.error ? ` ${r.error}` : ""}`))];
   say(failed.length === 0, `${reads.length - failed.length} of ${reads.length} page reads answered 200${failed.length ? `; ${failed.length} did not: ${kinds.join(", ")}` : ""}`);
   const ok = reads.filter((r) => r.status === 200 && Number.isSafeInteger(r.rttMs));
   const c = ok.filter(cold);

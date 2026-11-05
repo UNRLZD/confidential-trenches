@@ -653,3 +653,36 @@ test("MEDIUM-1 a Solana pool whose configured fee is not the kit's stops the sta
   assert.ok(r.readies.length > 0, "the helper answered its health while the check waited");
   assert.ok(r.readies.every((x) => x === false), `never ready before the exit: ${JSON.stringify(r.readies)}`);
 });
+
+test("card helper-ready-page-warm: the settle rule holds ready only for READY_SETTLE_MAX_MS from the warm-up's start: past it, lists that answer 200 are enough and one line names each chain still unsettled with its counts, so a maker-RPC outage never blocks a deploy (a security fix included)", async (t) => {
+  const NOW0 = Date.parse("2026-11-05T22:00:00Z");
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "Date"], now: NOW0 });
+  t.after(() => resetTimers(t.mock.timers));
+  const lines: string[] = [];
+  t.mock.method(console, "log", (l: string) => void lines.push(String(l)));
+  const row = (token: string) => ({ token });
+  const unsettledBase = ok({ lists: { new: [row("0xa"), row("0xb")], trending_5m: [row("0xc")], trending_1h: [row("0xd")], trending: [row("0xd")], graduating: [] }, unsettled: ["0xa", "0xb", "0xc"] });
+  const parts = {
+    lists: { get: async () => ok({ lists: { new: [{ token: MINT }] } }) },
+    evmLists: { base: { get: async () => unsettledBase }, robinhood: { get: async () => ok({ lists: {}, unsettled: [] }) } },
+    token: { page: async () => ok({}), holders: async () => ok({}) },
+  };
+  const bound: number = (S.READY_SETTLE_MAX_MS as number | undefined) ?? 240_000;
+  assert.ok(bound > 0 && bound < 300_000, "inside redeploy.sh's REDEPLOY_READY_S default (300 s)");
+  let done = false;
+  void (S.warmUntilReady(parts, 1_000) as Promise<void>).then(() => (done = true));
+  const step = async (ms: number) => {
+    for (let left = ms; left > 0; left -= 1_000) {
+      for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
+      t.mock.timers.tick(Math.min(1_000, left));
+    }
+    for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
+  };
+  await step(bound - 2_000);
+  assert.equal(done, false, "before the bound: 3 of 4 unsettled holds ready");
+  await step(4_000);
+  assert.equal(done, true, "past the bound: the lists answering 200 are enough");
+  assert.deepEqual(lines.filter((l) => /unsettled/.test(l)).length, 1, "one line");
+  assert.match(lines.find((l) => /unsettled/.test(l)) ?? "", /base 3 of 4/);
+  assert.doesNotMatch(lines.find((l) => /unsettled/.test(l)) ?? "", /robinhood/);
+});
