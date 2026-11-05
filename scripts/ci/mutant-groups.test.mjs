@@ -43,6 +43,8 @@ test("never ends", async () => {
 // the processes whose working folder is `dir` (lsof +d reads that one folder; it exits 1 when there are none)
 function inFolder(dir) {
   const r = spawnSync("lsof", ["-t", "-a", "-d", "cwd", "+d", dir], { encoding: "utf8" });
+  // no lsof, or lsof failing, is never a clean read
+  assert.ok(!r.error && (r.status === 0 || (r.status === 1 && r.stdout === "")), `lsof did not read ${dir}: ${r.error?.message ?? r.stderr}`);
   return (r.stdout ?? "").split("\n").filter(Boolean).map(Number).filter((p) => p !== process.pid);
 }
 
