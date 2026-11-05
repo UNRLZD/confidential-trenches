@@ -39,7 +39,7 @@
 // A provider that lags (more than VENUES[chain].lagMax blocks behind the other) is passed over for the third; one that refuses (429,
 // -32005, a limit message) is held for the wait it names (the helper's RPC rules, ../../rpc/rpc.ts); an answer over
 // ANSWER_MAX bytes or not JSON is a failure. A tick that cannot agree changes nothing; the book keeps serving what it
-// holds until STALE_MS, then the routes answer 503.
+// holds, dated by its last read, and a read asked of a book STALE_MS old starts one (card helper-live-bars-no-503).
 //
 // Block times on Base come from its fixed clock (BLOCK_CLOCK, lists.ts): checked against each tick's newest block on both
 // providers, and a tick whose block disagrees with the clock reads nothing. Robinhood has no fixed clock (it put 10 or
@@ -352,7 +352,7 @@ export const TICK_MS = 1_000;
 /** An agreed head read within this is every reader's (agreedHead). [design: a tick's period, so a tick reads at most one
  *  head of its own and a dozen first reads at once read one.] */
 export const HEAD_SHARE_MS = TICK_MS;
-/** A book not read for this long answers 503 rather than a stale chart. */
+/** A book not read for this long starts a read when asked; it is served as held meanwhile, dated by its last read. */
 export const STALE_MS = 60_000;
 export const OPEN_MAX = 40;
 /** Books read at once in a tick. */
@@ -1688,10 +1688,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (e.readAt === null) await firstRead(e);
     for (let attempt = 0; e.readAt === null && attempt < 2; attempt++) await start();
     if (e.readAt === null) return UPSTREAM;
-    if (now() - e.readAt > STALE_MS) {
-      void start();
-      return UPSTREAM;
-    }
+    // a book not read for STALE_MS starts a read and is served as held, dated by its last read (readAt, the answer's
+    // as_of_ms and X-Fetched-At), never a 503: the page prints a failed load for every non-2xx answer (card
+    // helper-live-bars-no-503: 6 of 100 Base live reads 503 at 12:00Z); 503 is for a token with nothing held
+    if (now() - e.readAt > STALE_MS) void start();
     return e;
   }
 
