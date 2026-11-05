@@ -1,11 +1,12 @@
 // node --test scripts/live-checks/evm-buy-hookdata-fee.test.mjs: card evm-buy-hookdata-fee's live check, replayed.
 // evm-buy-hookdata-fee.answers.json holds a real run (good: every chain the kit pins, each provider answering the fee's
-// state reads at a block 600 s old) and a real run on Robinhood testnet with its old second provider,
-// robinhood-sepolia-rpc.publicnode.com (bad: "historical state ... is not available" at that block).
+// state reads at a block 600 s old, on each chain's fee pair) and a real run on Robinhood with its second fee provider
+// replaced by robinhood-rpc.publicnode.com, a quote provider (bad: "historical state ... is not available" there).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { AGE_S, OLD_RH_TESTNET, check, pinned, replayer } from "./evm-buy-hookdata-fee.mjs";
+import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { AGE_S, QUOTE_ONLY_RH, check, pinned, replayer } from "./evm-buy-hookdata-fee.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-buy-hookdata-fee.answers.json", import.meta.url), "utf8"));
 
@@ -23,11 +24,17 @@ test("the recorded good run passes: every pinned provider of every chain answers
   assert.ok(calls.length >= 16 && calls.every((e) => /^0x[0-9a-f]{64}$/.test(e.params[1].blockHash) && typeof e.result === "string"));
 });
 
-test("the recorded bad run (Robinhood testnet's old pin, PublicNode) fails on its pruned state", async () => {
-  const rh = pinned().find((c) => c.chain === "robinhood-testnet");
-  const r = await check(replayer(A.bad), [{ ...rh, providers: [rh.providers[0], OLD_RH_TESTNET] }]);
+test("the recorded bad run (a Robinhood quote provider, PublicNode, in the fee pair) fails on its pruned state", async () => {
+  const rh = pinned().find((c) => c.chain === "robinhood");
+  const r = await check(replayer(A.bad), [{ ...rh, providers: [rh.providers[0], QUOTE_ONLY_RH] }]);
   assert.equal(r.ok, false);
-  assert.match(r.lines[0], /^robinhood-testnet: robinhood-sepolia-rpc\.publicnode\.com: eth_call: RPC error -32000: historical state [0-9a-f]+ is not available$/);
+  assert.match(r.lines[0], /^robinhood: robinhood-rpc\.publicnode\.com: eth_call: RPC error -32000: historical state [0-9a-f]+ is not available$/);
+});
+
+// card evm-quote-warm-round fold 8: the check reads each chain's fee pair, never its quote providers
+test("the check reads each chain's feeProviders, which a quote provider without the state is not part of", () => {
+  for (const c of pinned()) assert.deepEqual(c.providers, evmPoolVenues()[c.chain].feeProviders, c.chain);
+  assert.ok(evmPoolVenues().robinhood.providers.includes(QUOTE_ONLY_RH) && !evmPoolVenues().robinhood.feeProviders.includes(QUOTE_ONLY_RH));
 });
 
 test("a provider's error on any one fee read fails the check, as does a missing answer", async () => {

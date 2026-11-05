@@ -1,6 +1,8 @@
-// Weakens src/price/pool-usd.ts's agreement and staleness checks (Robinhood's hold to Base's ETH/USD among them), and
+// Weakens src/price/pool-usd.ts's agreement and staleness checks (Robinhood's hold to Base's ETH/USD among them) and its
+// bounded retry of a slow or lagging provider, its one bound per read and its stop once the read ends (card
+// signpage-price-read-retry), and
 // src/trade/solana/pool-buy.ts's refusal of a Token-2022 mint that lists an extension twice, one at a time, and runs
-// the tests named for each (test/pool-usd.test.ts "agreement" and "staleness", test/solana-pool-buy.test.ts
+// the tests named for each (test/pool-usd.test.ts "agreement", "staleness" and "retry", test/solana-pool-buy.test.ts
 // "Token-2022"), and S6's Token-2022 sides of a shared route in src/checks/solana/checks.ts (test/solana-shared-route.test.ts,
 // card solana-shared-2022-side): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
@@ -23,6 +25,7 @@ const S6_TEST = path.join(BASE, "test/solana-shared-route.test.ts");
 
 const AGREE = "agreement";
 const STALE = "staleness";
+const RETRY = "retry";
 const T22 = "Token-2022";
 
 // [file, text, replacement, the tests that must fail, their file (test/pool-usd.test.ts when none)]
@@ -43,10 +46,10 @@ export const MUTANTS = [
   [PRICE, "if (blocks[0]!.hash !== blocks[1]!.hash) fail(", "if (false) fail(", AGREE],
   [PRICE, "if (blocks[0]!.timeS !== blocks[1]!.timeS) fail(", "if (false) fail(", AGREE],
   [PRICE, "!== block) fail(`rpc ${k}: answered another block", "!== block && false) fail(`rpc ${k}: answered another block", AGREE],
-  [PRICE, "if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (false) fail(", AGREE],
-  [PRICE, "if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (false) fail(", STALE],
-  [PRICE, "if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (nowS - blockS > POOL_USD_BLOCK_MAX_AGE_S) fail(", STALE],
-  [PRICE, "if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (Math.abs(nowS - blockS) >= POOL_USD_BLOCK_MAX_AGE_S) fail(", STALE],
+  [PRICE, "if (Math.abs(blockNowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (false) fail(", AGREE],
+  [PRICE, "if (Math.abs(blockNowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (false) fail(", STALE],
+  [PRICE, "if (Math.abs(blockNowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (blockNowS - blockS > POOL_USD_BLOCK_MAX_AGE_S) fail(", STALE],
+  [PRICE, "if (Math.abs(blockNowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(", "if (Math.abs(blockNowS - blockS) >= POOL_USD_BLOCK_MAX_AGE_S) fail(", STALE],
   [PRICE, "export const POOL_USD_BLOCK_MAX_AGE_S = 60;", "export const POOL_USD_BLOCK_MAX_AGE_S = 1_500;", STALE],
   // agreement: Robinhood's ETH/USD held to Base's, read in the same call
   [PRICE, "if (gap * 10_000n > POOL_USD_CROSS_BPS * lo) fail(", "if (false) fail(", AGREE],
@@ -58,12 +61,38 @@ export const MUTANTS = [
   [PRICE, "if (nowS > goodUntil(publishedS, nowS, maxAgeS)) fail(", "if (nowS >= goodUntil(publishedS, nowS, maxAgeS)) fail(", STALE],
   [PRICE, "Math.min(publishedS, readS) + maxAgeS", "publishedS + maxAgeS", STALE],
   [PRICE, "if (publishedS - nowS > POOL_USD_MAX_AHEAD_S) fail(", "if (false) fail(", STALE],
-  [PRICE, "checkAge(publishedS, feed.maxAgeS, nowS);\n  return { chain: \"solana\"", "return { chain: \"solana\"", STALE],
-  [PRICE, "checkAge(publishedS, feed.maxAgeS, nowS);\n  return { chain, asset", "return { chain, asset", STALE],
+  [PRICE, "checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  return { chain: \"solana\"", "return { chain: \"solana\"", STALE],
+  [PRICE, "checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  return { chain, asset", "return { chain, asset", STALE],
   [PRICE, "    maxAgeS: 60,", "    maxAgeS: 600,", STALE],
   [PRICE, "maxAgeS: 1_500 }", "maxAgeS: 15_000 }", STALE],
   [PRICE, "maxAgeS: 86_700 }", "maxAgeS: 867_000 }", STALE],
   [PRICE, "if (updatedAt === 0n || updatedAt >= U64) fail(", "if (updatedAt >= U64) fail(", STALE],
+  // the age as the read returns, not as it began
+  [PRICE, "nowS + (Date.now() - bound.start) / 1000", "nowS", STALE],
+  // retry: a provider behind (-32016) or slow (no answer in a try's bound, its own or its client's) is asked again, alone,
+  // after a doubling backoff, inside the read's bound; nothing else is asked again
+  [PRICE, "if (!behind(e) && !slow(e)) throw e;", "throw e;", RETRY],
+  [PRICE, "if (!behind(e) && !slow(e)) throw e;", "", RETRY],
+  [PRICE, 'e.message.startsWith("RPC error -32016:")', "false", RETRY],
+  [PRICE, "e instanceof NoAnswer || (e instanceof", "(e instanceof", RETRY],
+  [PRICE, '(e instanceof SolanaRpcTransportError && e.fault === "timeout")', "false", RETRY],
+  [PRICE, '(e instanceof SolanaRpcTransportError && e.fault === "timeout")', "e instanceof SolanaRpcTransportError", RETRY],
+  [PRICE, "const waitMs = POOL_USD_RETRY_BACKOFF_MS * 2 ** (tries - 1);", "const waitMs = 0;", RETRY],
+  [PRICE, "const waitMs = POOL_USD_RETRY_BACKOFF_MS * 2 ** (tries - 1);", "const waitMs = POOL_USD_RETRY_BACKOFF_MS;", RETRY],
+  [PRICE, "if (Date.now() + waitMs >= bound.end) return fail(", "if (false) return fail(", RETRY],
+  [PRICE, "Math.min(POOL_USD_CALL_TIMEOUT_MS, left)", "POOL_USD_CALL_TIMEOUT_MS", RETRY],
+  [PRICE, "export const POOL_USD_READ_DEADLINE_MS = 12_000;", "export const POOL_USD_READ_DEADLINE_MS = 120_000;", RETRY],
+  // one bound for the whole read: every round of the Pyth read, and each Chainlink read, Robinhood's and Base's beside it
+  [PRICE, "`rpc ${k} getMultipleAccounts`, bound)", "`rpc ${k} getMultipleAccounts`, { ...bound, end: Date.now() + POOL_USD_READ_DEADLINE_MS })", RETRY],
+  [PRICE, "readPythOnce(rpcs[0], 0, feed.account, min, bound), readPythOnce(rpcs[1], 1, feed.account, min, bound)", "readPythOnce(rpcs[0], 0, feed.account, min, { ...bound, end: Date.now() + POOL_USD_READ_DEADLINE_MS }), readPythOnce(rpcs[1], 1, feed.account, min, { ...bound, end: Date.now() + POOL_USD_READ_DEADLINE_MS })", RETRY],
+  [PRICE, 'if (chain !== "robinhood") return chainlinkPrice(chain as "base", feed, rpcs, nowS, bound);', 'if (chain !== "robinhood") return chainlinkPrice(chain as "base", feed, rpcs, nowS, { ...bound, end: Infinity });', RETRY],
+  [PRICE, "`rpc ${k} eth_chainId`, bound)", "`rpc ${k} eth_chainId`, { ...bound, end: Infinity })", RETRY],
+  [PRICE, 'chainlinkPrice("robinhood", feed, rpcs, nowS, bound)', 'chainlinkPrice("robinhood", feed, rpcs, nowS, { ...bound, end: Infinity })', RETRY],
+  // only a timeout of the provider's client is slow: its other faults, already retried there, fail the read at once
+  [PRICE, '(e instanceof SolanaRpcTransportError && e.fault === "timeout")', '(e instanceof SolanaRpcTransportError && e.fault !== "http_429")', RETRY],
+  // a read that has ended asks no provider again
+  [PRICE, "    bound.stopped = true;\n", "", RETRY],
+  [PRICE, "if (bound.stopped) return fail(", "if (false) return fail(", RETRY],
   // a Token-2022 mint that lists one extension type twice
   [BUY, "if (seen.has(type)) throw", "if (false) throw", T22, BUY_TEST],
   [BUY, "    seen.add(type);\n", "", T22, BUY_TEST],

@@ -9,10 +9,10 @@ import { test } from "node:test";
 import { base64 } from "@scure/base";
 import { POOL_USD_FEEDS, type PoolUsdArgs, type PoolUsdPrice } from "../../kit/src/price/pool-usd.ts";
 import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import type { BalancePool } from "../../wallet/src/pool/balances.ts";
-import { POOL_PRICE_REFRESH_MS, poolPrices, type PoolPriceDeps } from "../src/pool-price.ts";
+import { POOL_PRICE_REFRESH_MS, POOL_PRICE_RETRY_AFTER_MAX_MS, POOL_PRICE_RETRY_MS, poolPrices, type PoolPriceDeps } from "../src/pool-price.ts";
 import { withPools } from "../src/pools.ts";
 import { stateOf } from "../src/state.ts";
 
@@ -160,6 +160,125 @@ test("refresh: one read per chain at a time, again only once its last try is POO
   h.p.refresh(["solana"]);
   await settled();
   assert.deepEqual(asked, ["solana", "solana"], "due: read again");
+});
+
+test("retry: a failed first read is read again within 2 s and its good price reaches the state; failures in a row wait longer, up to POOL_PRICE_REFRESH_MS", async () => {
+  // the kit's read fails as sign live run 41920575578 did (4 Nov 22:00Z), then answers
+  // (false: it throws; "base": an answer of another chain, which is a failure too)
+  const outcomes: (boolean | "base")[] = [false, true];
+  const asked: number[] = [];
+  const read = async (): Promise<PoolUsdPrice> => {
+    asked.push(h.clock.ms);
+    const o = outcomes.shift() ?? true;
+    if (o === false) throw new Error("rpc 0 getMultipleAccounts: no answer in 3500 ms (timeout, 1 try at solana-rpc.publicnode.com)");
+    return { chain: o === "base" ? "base" : "solana", asset: "SOL", decimals: 9, price: SOL_PRICE, expo: -8, publishedS: Math.floor(h.clock.ms / 1000), source: "pyth", at: 1n };
+  };
+  const waits: { ms: number; fn: () => void }[] = [];
+  const h = holder({ read, after: (ms, fn) => void waits.push({ ms, fn }) });
+  /** A tick: the clock moves to it and the watchers hear it, and the state read that follows refreshes the chain. */
+  const tick = async (): Promise<number> => {
+    const w = waits.shift()!;
+    h.clock.ms += w.ms;
+    w.fn();
+    h.p.refresh(["solana"]);
+    await settled();
+    return w.ms;
+  };
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(h.p.get("solana"), null, "the first read failed: no price");
+  assert.equal(h.told.length, 1, "a failed read's end is told");
+  assert.equal(await tick(), POOL_PRICE_RETRY_MS);
+  assert.ok(POOL_PRICE_RETRY_MS <= 2_000);
+  assert.deepEqual(asked, [FX.nowMs, FX.nowMs + POOL_PRICE_RETRY_MS], "read again at the failure's tick");
+  assert.notEqual(h.p.get("solana"), null, "the good read is in the state");
+  // a good read: the next one POOL_PRICE_REFRESH_MS on, as before, and a state read before then starts none
+  assert.equal(waits.at(-1)!.ms, POOL_PRICE_REFRESH_MS);
+  h.clock.ms += POOL_PRICE_REFRESH_MS - 1;
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(asked.length, 2, "not due before POOL_PRICE_REFRESH_MS");
+  h.clock.ms -= POOL_PRICE_REFRESH_MS - 1;
+  // failures in a row: 1 s, 2 s, 4 s, 8 s, then POOL_PRICE_REFRESH_MS, each read at its tick; a good read ends the run
+  outcomes.push(false, false, false, false, false, false, true, false);
+  const seen: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    seen.push(await tick());
+    if (i === 0) assert.notEqual(h.p.get("solana"), null, "a failed read keeps the last good one");
+  }
+  assert.deepEqual(seen, [POOL_PRICE_REFRESH_MS, 1_000, 2_000, 4_000, 8_000, POOL_PRICE_REFRESH_MS, POOL_PRICE_REFRESH_MS, POOL_PRICE_REFRESH_MS]);
+  assert.equal(asked.length, 10, "every tick read once");
+  assert.equal(waits.at(-1)!.ms, POOL_PRICE_RETRY_MS, "the failure after a good read waits POOL_PRICE_RETRY_MS again");
+  outcomes.push("base");
+  assert.equal(await tick(), POOL_PRICE_RETRY_MS);
+  assert.equal(waits.at(-1)!.ms, 2 * POOL_PRICE_RETRY_MS, "an answer of another chain is a failure in the run");
+  // not due before its wait: a state read 1 ms early starts nothing
+  h.clock.ms += POOL_PRICE_RETRY_MS - 1;
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(asked.length, 11);
+});
+
+test("retry: a failed read is due POOL_PRICE_RETRY_MS after it ends, not after it began", async () => {
+  const asked: number[] = [];
+  const read = async (): Promise<PoolUsdPrice> => {
+    asked.push(h.clock.ms);
+    // the read takes 3 s, then fails
+    h.clock.ms += 3_000;
+    throw new Error("rpc 0 getMultipleAccounts: no answer in 3000 ms");
+  };
+  const h = holder({ read });
+  h.p.refresh(["solana"]);
+  await settled();
+  const end = h.clock.ms;
+  h.clock.ms = end + POOL_PRICE_RETRY_MS - 1;
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(asked.length, 1, "not due before POOL_PRICE_RETRY_MS after its end");
+  h.clock.ms = end + POOL_PRICE_RETRY_MS;
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(asked.length, 2, "due then");
+});
+
+test("retry: a read whose price is past its bound as it ends is a failure: read again in POOL_PRICE_RETRY_MS, the last good price kept", async () => {
+  const maxS = POOL_USD_FEEDS.solana.maxAgeS;
+  let ageS = 0;
+  const read = async (): Promise<PoolUsdPrice> => ({ chain: "solana", asset: "SOL", decimals: 9, price: SOL_PRICE, expo: -8, publishedS: Math.floor(h.clock.ms / 1000) - ageS, source: "pyth", at: 1n });
+  const waits: number[] = [];
+  const h = holder({ read, after: (ms) => void waits.push(ms) });
+  h.p.refresh(["solana"]);
+  await settled();
+  const good = h.p.get("solana");
+  assert.notEqual(good, null);
+  assert.equal(waits.at(-1), POOL_PRICE_REFRESH_MS);
+  // the next read answers a price 64 s old (the kit's own bound is 60 s)
+  ageS = maxS + 4;
+  h.clock.ms += POOL_PRICE_REFRESH_MS;
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(waits.at(-1), POOL_PRICE_RETRY_MS, "a failure: read again soon");
+  assert.deepEqual(h.p.get("solana"), good, "the last good price stands");
+});
+
+test("retry: a provider's Retry-After is waited before the chain is read again, up to POOL_PRICE_RETRY_AFTER_MAX_MS", async () => {
+  const faults: unknown[] = [
+    new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc.example", 5_000),
+    new Error("rpc 0 getMultipleAccounts: no answer in 3500 ms"),
+    new SolanaRpcTransportError("http_429", "HTTP 429", 1, "rpc.example", 600_000),
+    new SolanaRpcTransportError("http_429", "HTTP 429", 1, "rpc.example"),
+  ];
+  const read = async (): Promise<PoolUsdPrice> => {
+    throw faults.shift();
+  };
+  const waits: number[] = [];
+  const h = holder({ read, after: (ms) => void waits.push(ms) });
+  for (let i = 0; i < 4; i++) {
+    h.p.refresh(["solana"]);
+    await settled();
+    h.clock.ms += waits.at(-1)!;
+  }
+  assert.deepEqual(waits, [5_000, 2 * POOL_PRICE_RETRY_MS, POOL_PRICE_RETRY_AFTER_MAX_MS, 8 * POOL_PRICE_RETRY_MS], "Retry-After when longer, capped; the backoff otherwise");
 });
 
 test("no pair, NEAR or no chain named: no read and no price; Robinhood reads on its pair with Base's pair beside it", async () => {

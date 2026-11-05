@@ -43,7 +43,7 @@ export type EvmPoolVenue = {
   /** The helper's EVM pool sender (apps/helper pool/evm.ts), which sends each sale to W: the sim of a sale runs from it
    *  (checks/evm/quote.ts simRule, card evm-quote-exec-sim), so a hook sees the sim as it sees the sale. A kit pin, never
    *  read from the helper; the helper refuses to start a sender whose key is not the pin (evmPoolSendersFromEnv). A
-   *  chain with none sims no sale ("keep-min"): no chain has one until the helper publishes its sender's address. */
+   *  chain with none sims no sale ("keep-min"): the testnets pin theirs, the mainnets none until their sell keys. */
   readonly sellSender?: string;
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
@@ -51,8 +51,16 @@ export type EvmPoolVenue = {
   /** A route starts from the native asset whenever a native v4 pool exists and its route quotes at least as much as the
    *  WETH route (the chain's WETH is behind an upgradeable proxy). */
   readonly nativeFirst?: boolean;
-  /** The two RPC providers the device's quote reads (different hosts), and how many blocks their heads may differ. */
-  readonly providers?: readonly [string, string];
+  /** The RPC providers the device's quote reads, two at least, on different hosts of different operators, fastest first
+   *  as measured: a quote asks two and the rest when one fails, is slow or differs (quote.ts agreeing, evmRanked); and
+   *  how many blocks two heads may differ. */
+  readonly providers?: readonly string[];
+  /** The two providers every read at a past block goes to (card evm-quote-warm-round fold 8): the chain fee and the
+   *  pool's tree depth at an epoch's first block, read by the device before it binds and by the helper when it prices a
+   *  proof's epoch, up to a proof's life (the helper's POOL_LIFE_MAX_MS, 600 s) back. Each keeps state that far back,
+   *  which live check evm-buy-hookdata-fee reads after every deploy; `providers` need not (a quote reads the latest
+   *  block). */
+  readonly feeProviders?: readonly [string, string];
   readonly maxLag?: number;
   /** The launchpads' hooked v4 pool shapes the device reads as reference pools (a route through any other hook has only
    *  the standard pools to be held to): the asset the pool pairs the token with, fee, tick spacing and hook. */
@@ -88,7 +96,31 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
-      providers: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
+      // Keyless, of five operators, timed on one warm quote's six eth_call batches (109 kB) at each one's newest block
+      // hash, 10 rounds each, every answer equal to publicnode's (card evm-quote-warm-round, 2026-11-04 16:4xZ from this
+      // Mac): publicnode (Allnodes) p50/p95 146/207 ms; Blast 315/476, served by Alchemy (its answers carry
+      // x-alchemy-trace-id, 18:56Z); mainnet.base.org (Coinbase) 863/1,380, behind QuickNode's request filter (eth_nope:
+      // -32611 "rejected due to request filter settings", 18:56Z); BlockPI 816/1,549. All four sit behind Cloudflare
+      // (server: cloudflare and cf-ray on every answer, 18:55Z). bloXroute's base.rpc.blxrbdn.com does not (no cf-ray, its
+      // own edge) and passes the quote's own reads (18:56Z: reth like the rest, 6 batches of 20 eth_calls at a block hash
+      // at once, 5 rounds, 255-273 ms warm, every answer publicnode's; a state override; eth_getLogs over 10 blocks; the
+      // browser's CORS preflight from the app's origin, 204 with access-control-allow-origin *). It replaces
+      // base-public.nodies.app, which the device never reaches: its preflight answers no access-control-allow-origin
+      // (review of bc189de, L-5; the live check evm-quote-warm-round preflights every listed provider). Passed over:
+      // base.drpc.org and Tenderly's gateway (429 on 6 batches at once, again 18:56Z), meowrpc, zan, onfinality, 1rpc,
+      // thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), base.api.pocket.network (10 of 60
+      // answers differed), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
+      // third-party proxies of unknown operators are not listed.
+      // What the list holds against a lie: a quote decides on two that agree, and a value any provider asked contradicts
+      // is used only where more than half of these five gave it (review of bc189de, M-1). Left, as the device has always
+      // had it on two providers: two that collude and agree, each answering more than the hedge (EVM_HEDGE_MS, 400 ms)
+      // sooner than the honest provider they are asked beside, decide before its answer lands (re-review of fd9dd16,
+      // Q10).
+      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://base.rpc.blxrbdn.com", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
+      // all five kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
+      // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
+      // 600 s (fold 3, 2026-11-04 20:12Z)
+      feeProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
       maxLag: 5, // 2 s blocks: 10 s
       // Each launchpad factory's recent creations (apps/helper/src/data/evm/lists.ts) and the PoolManager Initialize log in
       // the same transaction, read 2026-11-03 18:49Z on base-rpc.publicnode.com; each hook's code the same on both
@@ -105,8 +137,14 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org only about 100 (read 19:37Z). publicnode answered every request with HTTP 200 and no error at
       // 4, 8, 12, 16, 20 and 30 requests at once, twice each, and at 40 (two cold scans at once), three times
       // (2026-11-03 20:11-20:24Z): 20, one cold scan's every span at once, takes no 429
+      // A span of 10,000 blocks (card evm-quote-warm-round, fold 4): at 50,000 a request took 4.5 to 5.4 s at the median
+      // with 20 at once and some reached the 10 s timeout (3 of 26 and 2 of 24 in two cold quotes, each asked again as
+      // halves), so a cold quote took 19.6 s from a home line and 79 to 99 s on GitHub's runner, one ending rpc_error;
+      // at 10,000 the same cold quotes' 100 requests took 0.8 s at the median and 4.9 s at most, none timed out, and
+      // the quotes 8.6 s and 7.6 s (2026-11-04 21:31-21:34Z). publicnode limits each address's getLogs work: about two
+      // cold scans back to back, at either span, then 429 for most requests for under a minute (21:26-21:27Z).
       poolManager: "0x498581fF718922c3f8e6A244956aF099B2652b2b",
-      scan: bare({ url: "https://base-rpc.publicnode.com", span: 50_000, depth: 1_000_000, parallel: 20 }),
+      scan: bare({ url: "https://base-rpc.publicnode.com", span: 10_000, depth: 1_000_000, parallel: 20 }),
     }),
     robinhood: bare({
       chainId: 4663,
@@ -120,10 +158,18 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
       nativeFirst: true,
-      // both hold state 600 s back, a proof's life (card evm-buy-hookdata-fee, fold 3; 30 of 30 each at 600 s,
-      // 2026-11-04 20:12Z): Robinhood's own answers 630 s and refuses 660 s, robinhood-rpc.publicnode.com about 15 s
-      // (refused at 20 s), so it is never a pin; live check evm-buy-hookdata-fee reads both at 600 s
-      providers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
+      // Keyless, of five operators (Allnodes, dRPC, Robinhood, bloXroute, Globalstake), timed on the first five eth_call
+      // batches of a USDG quote (1.31 MB) at each one's newest block hash, 10 rounds each, every answer equal to
+      // Robinhood's (card evm-quote-warm-round, 2026-11-04 16:5xZ from this Mac): p50/p95 511/1,014 ms, 606/845,
+      // 823/1,180, 766/2,801 and 2,349/4,972 ms. Passed over: daybreak (413 on a batch this size), blockvectra (outside
+      // its history window), pocket and blockmachine (8 s and more, timeouts), thirdweb (refused requests), tatum,
+      // nodeflare (no head)
+      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
+      // only these two of the five keep state 600 s back: Robinhood's own answers 630 s and refuses 660 s, dRPC 600 s
+      // (card evm-buy-hookdata-fee, fold 3; 30 of 30 each at 600 s, 2026-11-04 20:12Z); publicnode, bloXroute and
+      // Globalstake refused a state read at the block 600 s back, "historical state ... is not available" (card
+      // evm-quote-warm-round fold 8, 2026-11-05 01:15Z from this Mac)
+      feeProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
       maxLag: 100,
@@ -162,6 +208,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // base-sepolia.json, deploy tx 0xa889469f4b7386072b3343b295002c09a4aff89638d29b304ac940c0c6168121; its code the
       // build's, read by that card's live check on sepolia.base.org and base-sepolia-rpc.publicnode.com, 4 Nov)
       sellDelegate: "0xe39f1b9934810792c090d8ab8f555b9955527260",
+      // the helper's sell sender (POOL_EVM_SELL_KEY_BASE_SEPOLIA, made on the helper box by
+      // scripts/deploy/evm-sender-key.mjs, which printed only this address; 0.001 ETH read on sepolia.base.org and
+      // base-sepolia-rpc.publicnode.com, 4 Nov 17:33Z); the helper does not start with any other sell key
+      sellSender: "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553",
       // Uniswap v4's PoolManager (pool-evm-deploy.mjs CHAINS, its code hash pinned there), the target of a v4 sell
       poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408",
       // Uniswap's QuoterV2 and V4Quoter (developers.uniswap.org's Base Sepolia deployments); eth_getCode on
@@ -169,6 +219,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 0x156c129c…, factory() 0x4752ba5d…ad24; and 5,820 bytes, keccak 0x2dddcef8…, poolManager() the PoolManager above
       quoters: bare({ v3: "0xc5290058841028f1614f3a6f0f5816cad0df5e27", v4: "0x4a6513c898fe1b2d0e78d3b0e0a4a151589b1cba" }),
       providers: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
+      feeProviders: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
       // 2 s blocks; the two heads were 5 blocks apart in one read (2026-11-04 09:53Z), so 10 blocks, 20 s
       maxLag: 10,
     }),
@@ -186,6 +237,9 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 0x62c517784feda75d5597229118cb9c4eb2a370fc34114694c1d009ce84158459; its code the build's, read by that card's
       // live check on rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 4 Nov)
       sellDelegate: "0x9909a660c8a55829335dd4d894c8375bfcfcd65b",
+      // the helper's sell sender (POOL_EVM_SELL_KEY_ROBINHOOD_TESTNET, made as on Base Sepolia; 0.001 ETH read on
+      // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 4 Nov 17:33Z)
+      sellSender: "0xd12d83097671d731df2db731e973ad9a07673607",
       poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
       // Uniswap's V4Quoter at mainnet's address with mainnet's code (testnet-run.mjs NETS); eth_getCode on
       // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, the same on both (2026-11-04 09:55Z):
@@ -199,6 +253,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 600 s, and rpc.testnet.chain.robinhood.com 30 of 30 at 600 s (read 2026-11-04 20:09-20:13Z; live check
       // evm-buy-hookdata-fee holds every pinned provider to 600 s)
       providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
+      feeProviders: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
       // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 10 s
       maxLag: 100,
     }),

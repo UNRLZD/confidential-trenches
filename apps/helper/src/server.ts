@@ -40,8 +40,8 @@ import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./w
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
-import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
-import { clientOf, clientWindow, refusalLog, throttled, throttleOf } from "./limits/limits.ts";
+import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
+import { clientOf, clientWindow, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
@@ -61,9 +61,9 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES] = MOUNTED.proxy;
-const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND] = MOUNTED.relay;
+const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
@@ -251,7 +251,7 @@ export function handler(
       }
       route = routeOf(path);
       // every route but the pool, RPC and proxy routes (which have their own windows below) counts in the client's window
-      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_EVM_SEND) {
+      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL) {
         const wait = apiRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
       }
@@ -332,12 +332,14 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
-      if (path === POOL_EVM_SEND) {
+      if (path === POOL_EVM_SEND || path === POOL_EVM_SELL) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         const wait = poolRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
-        // pool/evm.ts: { pool, data }, the pool one this helper carries (else 404 not_found)
-        void readBody(req, POOL_EVM_BODY_MAX)
+        // pool/evm.ts: a withdraw { pool, data, epoch } or a sell { pool, w, data, authorization }, the pool one this
+        // helper carries (else 404 not_found); both draw on the pool's one queue and its held limit per client
+        const sell = path === POOL_EVM_SELL;
+        void readBody(req, sell ? POOL_EVM_SELL_BODY_MAX : POOL_EVM_BODY_MAX)
           .then(async (text) => {
             if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
             let body: unknown;
@@ -350,7 +352,7 @@ export function handler(
             const pool = typeof name === "string" ? evmPools.get(name) : undefined;
             if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
             if (!(await heldWithin(senders))) return SENDERS_LATE;
-            const a = await pool.carry(body, clientOf(req));
+            const a = await (sell ? pool.sell(body, clientOf(req)) : pool.carry(body, clientOf(req)));
             return { status: a.status, headers: (a.retryAfterS === undefined ? {} : { "Retry-After": String(a.retryAfterS) }) as Headers, body: JSON.stringify(a.body) };
           })
           .then(reply)
@@ -534,24 +536,32 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
  * served only when its chain's Discover lists hold it. Base's providers are the host's BASE_RPC_URL when set (a keyed
  * one, asked first), then the public ones (SWAP_RPCS); Robinhood's are the public ones.
  */
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget): Swaps {
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
     if (lists === undefined) continue;
     const url = chain === "base" ? env.BASE_RPC_URL : undefined;
-    let seen: { asOfMs: number; tokens: Set<string> } | null = null;
+    let seen: { asOfMs: number; tokens: Set<string>; pools: Record<string, string> } | null = null;
+    // the lists' newest answer, read once per answer: its tokens, and each one's pool as the list names it
+    const snapshot = async () => {
+      const a = await lists.get();
+      if (a.status !== 200 || a.asOfMs === undefined) return null;
+      if (seen === null || seen.asOfMs !== a.asOfMs) {
+        const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]>; pools?: Record<string, string> };
+        seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))), pools: snap.pools ?? {} };
+      }
+      return seen;
+    };
     out[chain] = createSwaps(chain, {
       gecko,
+      holds,
       rpcs: url === undefined || url === "" ? SWAP_RPCS[chain] : [url, ...SWAP_RPCS[chain]],
-      listed: async (token) => {
-        const a = await lists.get();
-        if (a.status !== 200 || a.asOfMs === undefined) return false;
-        if (seen === null || seen.asOfMs !== a.asOfMs) {
-          const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]> };
-          seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))) };
-        }
-        return seen.tokens.has(token);
+      listed: async (token) => (await snapshot())?.tokens.has(token) ?? false,
+      // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's
+      hint: async (token) => {
+        const s = await snapshot();
+        return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : null;
       },
     });
   }
@@ -776,7 +786,12 @@ if (import.meta.main) {
   try {
     checkVendorPlans(process.env);
     const proxy = createProxy(process.env);
-    const rpc = createRpc(process.env);
+    // one hold per provider, shared by every path that reads it (card helper-robinhood-capacity: the swap and maker reads
+    // and /v1/rpc/robinhood all read rpc.mainnet.chain.robinhood.com)
+    const holds = providerHolds();
+    // an EVM chain's callers may be answered by the swap reads' pinned providers when its own is held or has no room
+    // (rpc.ts callEvm): a user's call never pays for the helper's background load
+    const rpc = createRpc(process.env, { holds, pinned: SWAP_RPCS });
     const lists = createSolanaLists(proxy, rpc);
     // the senders' handover (sendersFromEnv): `peer` when the helper this one replaces still runs
     const senders = sendersFromEnv(process.env);
@@ -784,7 +799,7 @@ if (import.meta.main) {
     // GeckoTerminal's one keyless budget (src/data/gecko.ts): the Solana token page's candles first, the EVM lists after
     const SERVED_EVM: readonly EvmChain[] = ["base", "robinhood"];
     const gecko = geckoBudget(Date.now);
-    const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko)]));
+    const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko, { holds })]));
     // card helper-ready-gate: the previous helper's warm file (data/warm.ts) seeds the EVM lists and its GeckoTerminal
     // calls; while it still runs (peer), this one makes no GeckoTerminal call until the handover, then takes its last
     // calls from the file it wrote at its stop. With no file, a replaced helper may have spent the window: none for one.
@@ -825,7 +840,7 @@ if (import.meta.main) {
     // card evm-buy-hookdata-fee: an EVM pool RPC that cannot answer the fee's state reads 10 min back stops the start;
     // both pool kinds' start checks run from here, and ready (below) waits for them
     const checked = poolsChecked(pools, evmPools, (e) => (console.error(`helper: ${e.message}`), process.exit(2)));
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();

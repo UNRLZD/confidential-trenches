@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The local dry run of deploy.mjs on a fresh solana-test-validator: five runs, each funded with exactly the need the
+# The local dry run of deploy.mjs on a fresh solana-test-validator: seven runs, each funded with exactly the need the
 # script prints, from a local stand-in for the devnet wallet (a key made here, airdropped, never leaving this run):
 #   1. the whole run with planted transient failures (--flaky: every third RPC call throws "fetch failed"): build,
 #      deploy --final, init, deposit, sweep; then the live check on two loopback URLs, recorded;
 #   2. a planted stop just past the deploy (--fail-after deploy): the cleanup sweeps, the program stays final;
 #   3. the resume of that program (--program, --flaky): init and deposit only; the live check on its record;
 #   4. a second resume of it: its pool exists, so init is skipped;
-#   5. the CLI stopped while it writes the buffer (SIGTERM): the cleanup closes the buffer and sweeps.
-# After each, the funder must hold 0. Outputs go to contracts/pool-solana/out/dry-run/ (ignored by git).
+#   5. the CLI stopped while it writes the buffer (SIGTERM): the cleanup closes the buffer and sweeps;
+#   6. a terminal closing while the CLI writes (SIGHUP to the run and its CLI): the same stop, cleanup and sweep;
+#   7. SIGHUP in the funding wait, the funding sent 30 s after it: the run sweeps at once, watches the balance 60 s,
+#      sweeps it back and keeps its keys (it stopped before its funding was read); its journal (late.journal.json,
+#      complete: false) gives the --sweep-kept command, which runs next and removes the keys once both RPCs read 0.
+# After each, the funder must hold 0; at the end all 7 runs must have removed their keys and no buffer may be left. Any
+# of these failing, or a live check failing, exits 1 (CI's pool-solana job runs this script). Outputs go to
+# contracts/pool-solana/out/dry-run/ (ignored by git).
 #   bash contracts/pool-solana/scripts/dry-run.sh   (with solana-test-validator, the solana CLI and cargo-build-sbf on PATH)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -21,6 +27,7 @@ URL="http://127.0.0.1:$PORT"
 VPID=
 cleanup() { [ -n "$VPID" ] && kill "$VPID" 2>/dev/null; wait 2>/dev/null; rm -rf "$W"; }
 trap cleanup EXIT
+FAILS=()
 solana-test-validator --reset --quiet --ledger "$W/ledger" --rpc-port "$PORT" --faucet-port $((PORT + 2)) \
   --gossip-port $((PORT + 3)) --dynamic-port-range $((PORT + 10))-$((PORT + 60)) >"$W/validator.log" 2>&1 &
 VPID=$!
@@ -42,6 +49,11 @@ run() {
   local line; line=$(grep "^deploy: waiting for" "$log")
   local funder; funder=$(awk '{print $4}' <<<"$line")
   local need; need=$(awk '{print $7}' <<<"$line")
+  if [ "$name" = late ]; then
+    kill -HUP $pid
+    echo "dry-run [$name]: sent SIGHUP in the funding wait; funding in 30 s"
+    sleep 30
+  fi
   solana -u "$URL" transfer --from "$W/d.json" --fee-payer "$W/d.json" --allow-unfunded-recipient "$funder" "$(sol "$need")" >/dev/null
   echo "dry-run [$name]: funded $funder with exactly $need lamports"
   if [ "$name" = stopped ]; then
@@ -50,9 +62,20 @@ run() {
     pkill -TERM -P $pid -f "program deploy" || true
     echo "dry-run [$name]: sent SIGTERM to the CLI while it writes"
   fi
+  if [ "$name" = hangup ]; then
+    for _ in $(seq 600); do solana -u "$URL" program show --buffers --buffer-authority "$funder" 2>/dev/null | grep -q "$funder" && break; sleep 0.1; done
+    pkill -HUP -P $pid -f "program deploy" || true
+    kill -HUP $pid
+    echo "dry-run [$name]: sent SIGHUP to the run and its CLI while it writes (a terminal closing)"
+  fi
   local rc=0; wait $pid || rc=$?
+  if [ "$name" = late ]; then
+    node "$ROOT/contracts/pool-solana/scripts/deploy.mjs" --url "$URL" --sweep-kept "$OUT/late.journal.json" >>"$log" 2>&1 || true
+  fi
   cat "$log"
-  echo "dry-run [$name]: exit $rc; funder $funder holds $(solana -u "$URL" balance "$funder" --lamports)"
+  local left; left=$(solana -u "$URL" balance "$funder" --lamports | awk '{print $1}')
+  echo "dry-run [$name]: exit $rc; funder $funder holds $left lamports"
+  [ "$left" = 0 ] || FAILS+=("$name: the funder holds $left lamports")
 }
 run whole --flaky
 run planted --no-build --fail-after deploy
@@ -60,9 +83,17 @@ PROGRAM=$(awk '/^deploy: program id /{print $4}' "$OUT/planted.log")
 run resumed --no-build --flaky --program "$PROGRAM"
 run resumed-again --no-build --program "$PROGRAM"
 run stopped --no-build
+run hangup --no-build
+run late --no-build
 echo "dry-run: stand-in wallet $D holds $(solana -u "$URL" balance "$D" --lamports) after every run"
-echo "dry-run: runs whose cleanup read the funder empty with nothing left, so removed its keys: $(grep -l 'keys removed (gone)' "$OUT"/*.log | wc -l | tr -d ' ') of 5; kept: $(grep -h 'KEYS KEPT' "$OUT"/*.log | wc -l | tr -d ' ')"
-echo "dry-run: buffers left with any authority: $(solana -u "$URL" program show --buffers --all 2>&1 | tail -n +1 | grep -c '^ *[1-9A-HJ-NP-Za-km-z]\{32,44\} ' || true)"
+REMOVED=$({ grep -lE 'keys removed \(gone\)|sweep-kept: keys removed' "$OUT"/*.log || true; } | wc -l | tr -d ' ')
+echo "dry-run: runs whose cleanup read the funder empty with nothing left, so removed its keys: $REMOVED of 7; kept on the way: $({ grep -h 'KEYS KEPT' "$OUT"/*.log || true; } | wc -l | tr -d ' ')"
+[ "$REMOVED" = 7 ] || FAILS+=("only $REMOVED of 7 runs removed their keys")
+BUFFERS=$(solana -u "$URL" program show --buffers --all 2>&1 | grep -c '^ *[1-9A-HJ-NP-Za-km-z]\{32,44\} ' || true)
+echo "dry-run: buffers left with any authority: $BUFFERS"
+[ "$BUFFERS" = 0 ] || FAILS+=("$BUFFERS buffer(s) left")
 node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/whole.json" --rpc "$URL,http://localhost:$PORT" --record "$OUT/whole-answers.json"
 node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/resumed.json" --rpc "$URL,http://localhost:$PORT" | tail -1
 node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/resumed-again.json" --rpc "$URL,http://localhost:$PORT" | tail -1
+if [ ${#FAILS[@]} -gt 0 ]; then printf 'dry-run: FAIL: %s\n' "${FAILS[@]}"; exit 1; fi
+echo "dry-run: PASS (7 runs, every funder at 0, every key folder removed, no buffer left, live checks passed)"
