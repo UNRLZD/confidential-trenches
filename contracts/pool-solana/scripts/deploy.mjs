@@ -607,6 +607,20 @@ export function ciCode(runId, { gh = ghCli } = {}) {
   }
 }
 
+/** Why `addr` is not a wallet the funder's rest can go back to on `url`, or null when it is: a point on the ed25519
+ * curve (a key signs for it, so never a program address), and a system account holding lamports (a wallet in use). */
+export async function returnProblems(fetchFn, url, addr) {
+  try {
+    ed25519.Point.fromBytes(address(addr));
+  } catch {
+    return "is not on the ed25519 curve (no key signs for it: a program address, or a typo)";
+  }
+  const a = await account(fetchFn, url, addr);
+  if (!a || !(a.lamports > 0)) return `holds no lamports on ${url}`;
+  if (a.owner !== SYSTEM || a.executable) return `is owned by ${a.owner}, not the system program, on ${url}`;
+  return null;
+}
+
 /** A record's journal: the record's path with .journal.json. */
 export const journalOf = (outFile) => outFile.replace(/\.json$/, "") + ".journal.json";
 
@@ -752,6 +766,15 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   const returnTo = opt("--return");
   if (!returnTo) throw new Error("--return <address> is required: the funder's rest goes back there");
   address(returnTo);
+  // a public cluster: the return address is a wallet someone holds, read on both RPCs before any key. A typo or a
+  // program address still decodes to 32 bytes, and the funder's rest (all of the funding, should the run stop after
+  // it) would go where nobody can spend it
+  if (cluster !== "localnet") {
+    for (const u of [url, second0]) {
+      const why = await returnProblems(fetchFn, u, returnTo);
+      if (why) throw new Error(`${cluster} refused: --return ${returnTo} ${why}: nothing was made or sent`);
+    }
+  }
   const failAfter = opt("--fail-after");
   if ((failAfter || argv.includes("--flaky") || argv.includes("--table")) && cluster !== "localnet") throw new Error("--fail-after, --flaky and --table are for the local dry run only");
   if (argv.includes("--flaky")) {
@@ -928,7 +951,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       Object.assign(fields, { need: String(need.total), need_parts: Object.fromEntries(Object.entries(need.parts).map(([k, v]) => [k, String(v)])) });
       log(`program id ${program.id}`);
       log(`funder ${funder.id} needs ${need.total} lamports (${Object.entries(need.parts).map(([k, v]) => `${k} ${v}`).join(", ")}); the rest is swept back to ${returnTo}`);
-      log(`waiting for ${funder.id} to hold ${need.total} lamports`);
+      log(`waiting for ${funder.id} to hold ${need.total} lamports: send from ${returnTo}, the return address`);
       for (;;) {
         if (stop) throw new Error(`stopped by ${stop}`);
         if ((await ops.balance()) >= need.total) break;

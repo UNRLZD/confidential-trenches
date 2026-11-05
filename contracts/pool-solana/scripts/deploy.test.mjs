@@ -1155,6 +1155,7 @@ test("mainnet: refused before any key without --mainnet, with --mainnet on anoth
     const f = fakeGh();
     const genesisOnly = (g1, g2 = g1) => async (url, init) => {
       if (JSON.parse(init.body).method === "getGenesisHash") return okR(url === MAIN_URL ? g1 : g2);
+      if (isReturnRead(init)) return okR(sysAccount());
       return noCall("read")();
     };
     const io = { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, pin: f.sha };
@@ -1178,6 +1179,7 @@ test("mainnet: refused before any key without --mainnet, with --mainnet on anoth
 test("--table is the local dry run's only: refused on devnet before any key", async () => {
   const devnet = async (u, init) => {
     if (JSON.parse(init.body).method === "getGenesisHash") return okR("EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG");
+    if (isReturnRead(init)) return okR(sysAccount());
     throw new Error("no other call");
   };
   await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--return", RETURN, "--table"], devnet, { keysBase: TEST_KEYS }), /--fail-after, --flaky and --table are for the local dry run only/);

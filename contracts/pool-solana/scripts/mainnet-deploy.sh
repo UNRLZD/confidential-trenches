@@ -12,10 +12,10 @@
 # 2. deploy.mjs --mainnet with CI run 42012187381's pool-solana build. Before any key, journal or transaction it refuses:
 #    code whose sha256 is not the pin (scripts/pin.mjs: contracts/pool-review-2.md, c86fc7fc..., 79,088 B), a URL other
 #    than api.mainnet-beta.solana.com, either of the two mainnet RPCs not answering mainnet's genesis, a return address
-#    that is not one, and pump Global (the lookup table's venue) read differently on the two RPCs. Then it prints the
+#    that is not a wallet in use on both RPCs (a key on the ed25519 curve, a system account holding lamports), and pump Global (the lookup table's venue) read differently on the two RPCs. Then it prints the
 #    program id, the funder and the need with its parts, computed from the code's size and mainnet's rent, and waits.
-#    Send exactly that many lamports to the printed funder from your own wallet: nothing is sent while the funder holds
-#    less. Every signature it signs is journaled before its send (contracts/pool-solana/deployments/mainnet.journal.json);
+#    Send exactly that many lamports to the printed funder from the address you passed (the line says "send from" it):
+#    nothing is sent while the funder holds less. Every signature it signs is journaled before its send (contracts/pool-solana/deployments/mainnet.journal.json);
 #    it deploys --final (upgrade authority none), makes the pool, makes the pool buy's lookup table from the kit's list,
 #    reads it back, freezes it and reads it back, all on both RPCs at finalized, sweeps the rest back to your address
 #    and writes contracts/pool-solana/deployments/mainnet.json.
