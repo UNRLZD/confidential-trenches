@@ -1165,14 +1165,15 @@ async function scanPools(
     // backend behind the head another answered would read as blocks with no pools, kept as read (2026-11-05 16:14-16:22Z)
     const top = p === null && b === head;
     const calls = p === null && !top ? filters.map(f) : [...filters.map(f), { method: "eth_getBlockByNumber", params: ["0x" + (p === null ? b : p.number).toString(16), false] }];
-    // a provider whose answer holds no block at the head (null: not yet) is asked again, as a failure: its next try may
-    // reach a backend that does; a first with a second behind it passes the request to the second at once
+    // a provider that answers it holds no block at the head (null: not yet) is asked again, as a failure: its next try
+    // may reach a backend that does; a first with a second behind it passes the request to the second at once. Any
+    // other answer without the block counts as an answer with no logs (logsOf)
     const rpc: EvmRpc = !top
       ? on.rpc
       : async (cs, signal) => {
           const out = await on.rpc(cs, signal);
-          const h = (out[filters.length] as { result?: { hash?: unknown } | null } | null)?.result;
-          if (Array.isArray(out) && typeof h?.hash !== "string" && !out.some(limited)) {
+          const h = (out[filters.length] as { result?: unknown } | null)?.result;
+          if (Array.isArray(out) && h === null && !out.some(limited)) {
             const m = `the scan provider does not hold block ${b} yet`;
             throw spare !== undefined && on !== spare ? new ScanRefused("rpc_error", m) : new Error(m);
           }
@@ -1180,10 +1181,10 @@ async function scanPools(
         };
     // the logs' answers, and where pinned, a refusal unless the batch's provider holds the agreed block
     const logsOf = (out: readonly unknown[]) => {
+      const h = (out[filters.length] as { result?: { hash?: unknown } | null } | null)?.result;
       if (p !== null) {
-        const h = (out[filters.length] as { result?: { hash?: unknown } | null } | null)?.result;
         if (typeof h?.hash !== "string" || lower(h.hash) !== p.hash) return refuse("rpc_disagree", `the scan provider's logs are not read at the agreed block ${p.number}`);
-      }
+      } else if (top && typeof h?.hash !== "string") return filters.map(() => undefined);
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
     const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[] })));
