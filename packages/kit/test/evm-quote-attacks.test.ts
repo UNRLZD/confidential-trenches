@@ -3497,7 +3497,7 @@ test("LH1 the provider ranked first answers its head maxLag back: ten warm quote
     const h = hostOf(u);
     // the lagger answers first: every other provider a little later
     await pause(h === lagger ? 1 : 15);
-    const out: unknown[] =
+    const out: readonly unknown[] =
       calls.some((c) => c.method === "eth_getLogs" || c.method === "eth_blockNumber") ? await scan(asked)
       : calls.some((c) => c.method === "eth_getBlockByNumber") ? asked.map((c) => {
           if (c.params[0] === "latest" && h === lagger) laggerHeads++;
