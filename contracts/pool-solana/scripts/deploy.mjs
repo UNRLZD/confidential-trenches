@@ -74,7 +74,7 @@
 import "../../../scripts/net-window.mjs";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -903,10 +903,28 @@ export async function main(argv, fetchFn = fetch, io = {}) {
 
   const outFile = opt("--out", path.join(REPO, `scripts/live-checks/pool-sol-deploy.${cluster}.json`));
   // the run's journal, beside the record and never the record itself: a stopped run leaves the record as it was. One
-  // that exists is a stopped run's (its keys may be kept): never written over
+  // that exists is a stopped run's, never written over: refused while its keys are kept (its sweep goes first), when it
+  // is another cluster's, when it is another program's than --program, and for a fresh run while its program is final
+  // with this code (that run is resumed, not deployed twice). Otherwise it is moved aside unchanged, and a resume takes
+  // its landed transactions (not the CLI's writes) into the record
   const journalFile = journalOf(outFile);
+  const priorTxs = [];
   if (existsSync(journalFile)) {
-    throw new Error(`${journalFile} exists: a stopped run's journal, its keys perhaps kept; sweep them with its keys.sweep command, then move it aside, before another run to ${outFile}`);
+    const j = JSON.parse(readFileSync(journalFile, "utf8"));
+    const refuse = (why) => {
+      throw new Error(`${journalFile} exists: a stopped run's journal ${why}`);
+    };
+    if (j.genesis_hash !== genesis) refuse(`of genesis ${j.genesis_hash}, not ${url}'s: move it aside before another run to ${outFile}`);
+    if (j.keys?.state !== "removed") refuse(`, its keys ${j.keys?.state ?? "in an unknown state"}: sweep them first with: ${j.keys?.sweep ?? "its keys.sweep command"}`);
+    if (resumeId && j.program_id !== resumeId) refuse(`of program ${j.program_id}, not --program ${resumeId}: move it aside before another run to ${outFile}`);
+    if (!resumeId && j.program_id && !(await programProblems(fetchFn, url, j.program_id, so)).length && !(await programProblems(fetchFn, second0, j.program_id, so)).length) {
+      refuse(`, its program ${j.program_id} is final with this code: resume it with --program ${j.program_id}${cluster === "mainnet" ? ` (sh contracts/pool-solana/scripts/mainnet-deploy.sh ${returnTo} --program ${j.program_id})` : ""}`);
+    }
+    const aside = `${outFile.replace(/\.json$/, "")}.stopped-${String(j.stopped_at ?? j.at ?? new Date().toISOString()).replace(/[^0-9TZ]/g, "")}.journal.json`;
+    if (existsSync(aside)) refuse(`, and ${aside} exists too: move one of them aside`);
+    if (resumeId) for (const t of j.txs ?? []) if (t.state === "landed" && !t.cli) priorTxs.push({ step: `first run: ${t.step}`, signature: t.signature });
+    renameSync(journalFile, aside);
+    log(`the stopped run's journal (keys removed) moved to ${aside}${resumeId ? `; its ${priorTxs.length} landed transaction(s) go in the record` : ""}`);
   }
   const base = io.keysBase ?? keysBase();
   mkdirSync(base, { recursive: true, mode: 0o700 });
@@ -1035,8 +1053,9 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       if (resumeId) {
         // the first run's transactions: its own (--prior: its funding and sweep), then the program's history before now
         // (the record adds the programdata's own: the deploy and its SetAuthority)
+        for (const t of priorTxs) txs.push({ ...t, state: "landed" });
         for (const sig of prior) txs.push({ step: "first run (--prior)", signature: sig, state: "landed" });
-        log(`resume: ${prior.length} prior transaction(s) kept for the record`);
+        log(`resume: ${priorTxs.length + prior.length} prior transaction(s) kept for the record`);
       } else {
         let dep;
         try {

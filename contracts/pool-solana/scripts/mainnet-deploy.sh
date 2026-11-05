@@ -4,7 +4,9 @@
 #   sh contracts/pool-solana/scripts/mainnet-deploy.sh <your Solana address: where the run's leftover SOL goes back>
 #   sh contracts/pool-solana/scripts/mainnet-deploy.sh <your Solana address> --program <id>
 #     the resume of a run that stopped after its deploy (the program is final already): it reads the program on both
-#     RPCs as the pinned code with authority none, then makes the pool if missing and the lookup table, as below
+#     RPCs as the pinned code with authority none, then makes the pool if missing and the lookup table, as below. The
+#     stopped run's journal is moved aside (deployments/mainnet.stopped-<time>.journal.json) and its landed
+#     transactions go in the record; while its keys are kept, it refuses and names --sweep-kept, below, to run first
 #   sh contracts/pool-solana/scripts/mainnet-deploy.sh --sweep-kept [<address>]
 #     a stopped run whose keys were kept (its last line says so): with the same pinned CLI, closes what is left under
 #     the run's key (a buffer, a program it can still upgrade), freezes its lookup table if live, sends every lamport
