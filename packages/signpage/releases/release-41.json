@@ -1,7 +1,7 @@
 {
- "release": "release-38",
- "commit": "d221a0c552ba70d80a9b96b4bc2c8329dffa5a99",
- "tree": "5d0698cb12676513e0b5a9d8cd104e35761efab6",
+ "release": "release-41",
+ "commit": "8f2a11eb6cdcd00196ca5034aa5cfad56ef7d82e",
+ "tree": "4f62b88ad70b940a9b5f3bc8e74b4f3f2fbef8c8",
  "hosts": {
   "SIGN_HOST": {
    "origin": "https://sign.confidential.unrealized.trade",
@@ -14,8 +14,8 @@
     {
      "path": "/",
      "bytes": 382,
-     "sha256": "35472b38a9a005171044264f8ab22eacb5c514b4d4acb6a623176e0a749d83b4",
-     "sha384": "sha384-cVqtU7H3fK2jNDLHHfQ9kkd8Ll4+ZgrJ8jNv65fCXZqY4kUW4wrFkE8S11JgpPQ8",
+     "sha256": "eb5d4c5c21ddab64d404c8020418d1e596f8f6fac2e0773daf8fc3ee2d2d3150",
+     "sha384": "sha384-8aDMYsk0+F2PO9e4UNfbn+RV7aS36t82IorWhiW6+4HYVhx3UP6g1+5AFr1C/Ydr",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
       "integrity-policy": "blocked-destinations=(script)",
@@ -30,9 +30,9 @@
     },
     {
      "path": "/app.js",
-     "bytes": 540937,
-     "sha256": "71d87ca75d291262a0ca5e9d597f32c6ce47f60c886d8f9aeef3edcb6bc9b102",
-     "sha384": "sha384-vprn47GplVg43GZGbvcSE6RWF13X+s8W3sctUJhgJy635YPs8BEiSYzxdW1VVRSO",
+     "bytes": 540881,
+     "sha256": "ca6ca827651fadf47cf4ea9be3ca8f28a8ab1eecf8ce85a668859096774487bb",
+     "sha384": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
       "integrity-policy": "blocked-destinations=(script)",
