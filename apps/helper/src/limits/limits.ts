@@ -415,6 +415,17 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   /** Per key: [second, requests sent in it, of them not reserved], oldest first, kept while the provider's window may
    * still count them. */
   const sent = new Map<string, [number, number, number][]>();
+  /** Per key: the draws another helper on the same upstream made (card helper-deploy-reads-fast: the one a deploy runs
+   *  beside this one, proxy/shared-calls.ts), [second, requests, requests], oldest first; counted as every draw is, and replaced
+   *  whole by the next seed of the key, so a file read twice counts once. */
+  const seeded = new Map<string, [number, number, number][]>();
+  /** The key's draws in its window, ours and the seeded ones, oldest first. */
+  const windowOf = (key: string, sec: number, w: number): [number, number, number][] => {
+    const q = sent.get(key) ?? [];
+    while (q.length > 0 && q[0]![0] < sec - w) q.shift();
+    const s = (seeded.get(key) ?? []).filter((b) => b[0] >= sec - w);
+    return s.length === 0 ? q : [...q, ...s].sort((a, b) => a[0] - b[0]);
+  };
   /** Per key (never a client): when the provider's own reset ends, for every draw; and for background draws only. */
   const heldUntil = new Map<string, number>();
   const backgroundHeldUntil = new Map<string, number>();
@@ -437,8 +448,7 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   const totalWait = (key: string, n: number, t: number, lim: BudgetLimits, reserved: boolean, background: boolean): number => {
     const w = Math.ceil((lim.windowMs ?? windowMs) / 1000);
     const sec = Math.floor(t / 1000);
-    const q = sent.get(key) ?? [];
-    while (q.length > 0 && q[0]![0] < sec - w) q.shift();
+    const q = windowOf(key, sec, w);
     const until = (i: 1 | 2, cap: number): number => {
       let used = 0;
       for (const b of q) used += b[i];
@@ -529,6 +539,20 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   }
   return {
     takeEach,
+    /** The ms times of this helper's own draws on `key` its upstream may still count (its window and a second), oldest
+     *  first, never the seeded ones: what the other helpers on the same upstream count (card helper-deploy-reads-fast). */
+    calls(key: string): number[] {
+      const lim = limitsOf(key);
+      const w = Math.ceil((lim.windowMs ?? windowMs) / 1000);
+      const sec = Math.floor(now() / 1000);
+      return (sent.get(key) ?? []).filter((b) => b[0] >= sec - w).flatMap((b) => Array.from({ length: b[1] }, () => b[0] * 1000));
+    },
+    /** Counts `times` (ms) as draws another helper made on `key`'s upstream, in place of the last seed of the key. */
+    seed(key: string, times: readonly number[]): void {
+      const by = new Map<number, number>();
+      for (const x of times) if (Number.isFinite(x)) by.set(Math.floor(x / 1000), (by.get(Math.floor(x / 1000)) ?? 0) + 1);
+      seeded.set(key, [...by].sort((a, b) => a[0] - b[0]).map(([sec, n]) => [sec, n, n]));
+    },
     /** What refused the last refused draw (read right after it): "<key> held", "<key> share" or "<key> total". */
     refusedBy: (): string => refusedBy,
     /** One key: n requests for `client` (undefined: the helper's own read, which draws from the total only). */
