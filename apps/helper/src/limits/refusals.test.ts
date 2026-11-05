@@ -53,3 +53,39 @@ test("a refused budget draw names what refused it: the provider's hold, the call
   assert.ok(b.take("solana", "d") > 0);
   assert.equal(b.refusedBy(), "solana held");
 });
+
+test("card helper-ready-page-warm: a token page or holders read answered not ready with a cause is counted under it, and the cause is never sent", async () => {
+  const { handler } = await import("../server.ts");
+  const counted: string[] = [];
+  const page = async () => ({ status: 503, body: '{"error":{"code":"upstream"}}', why: "jupiter held" });
+  const token = { page, holders: page } as never;
+  const h = handler("0123456789abcdef0123456789abcdef01234567", {} as never, { slot: { state: () => "public" } } as never, {} as never, {} as never, {} as never, {} as never, token, {} as never, null, new Map(), new Map(), () => Date.now(), {}, {}, () => true, Promise.resolve(), () => ({}), { count: (route: string, why: string) => counted.push(`${route} ${why}`) });
+  const { createServer, get } = await import("node:http");
+  const srv = createServer(h).listen(0);
+  const port = await new Promise<number>((ok) => srv.on("listening", () => ok((srv.address() as { port: number }).port)));
+  const read = (path: string) => new Promise<{ status: number; body: string }>((ok) => get({ port, path }, (r) => { let b = ""; r.on("data", (d) => (b += d)).on("end", () => ok({ status: r.statusCode ?? 0, body: b })); }));
+  const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
+  const a = await read(`/v1/market/token?chain=solana&token=${PUMP}`);
+  const b = await read(`/v1/market/holders?chain=solana&token=${PUMP}`);
+  srv.close();
+  assert.deepEqual([a.status, JSON.parse(a.body), b.status], [503, { error: { code: "upstream" } }, 503]);
+  assert.ok(!a.body.includes("jupiter"), "never sent");
+  assert.deepEqual(counted, ["/v1/market/token jupiter held", "/v1/market/holders jupiter held"]);
+});
+
+test("card helper-ready-page-warm: the token route sends a not-ready answer's cause as its Server-Timing header, the body unchanged", async () => {
+  const { handler } = await import("../server.ts");
+  const page = async () => ({ status: 503, body: '{"error":{"code":"upstream"}}', why: "jupiter held", timing: 'search-held;desc="jupiter held"' });
+  const token = { page, holders: page } as never;
+  const h = handler("0123456789abcdef0123456789abcdef01234567", {} as never, { slot: { state: () => "public" } } as never, {} as never, {} as never, {} as never, {} as never, token, {} as never, null, new Map(), new Map(), () => Date.now(), {}, {}, () => true, Promise.resolve(), () => ({}), { count: () => undefined });
+  const { createServer, get } = await import("node:http");
+  const srv = createServer(h).listen(0);
+  const port = await new Promise<number>((ok) => srv.on("listening", () => ok((srv.address() as { port: number }).port)));
+  const read = (path: string) => new Promise<{ status: number; body: string; timing: unknown }>((ok) => get({ port, path }, (r) => { let b = ""; r.on("data", (d) => (b += d)).on("end", () => ok({ status: r.statusCode ?? 0, body: b, timing: r.headers["server-timing"] })); }));
+  const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
+  const a = await read(`/v1/market/token?chain=solana&token=${PUMP}`);
+  const b = await read(`/v1/market/holders?chain=solana&token=${PUMP}`);
+  srv.close();
+  assert.deepEqual([a.status, a.body, a.timing], [503, '{"error":{"code":"upstream"}}', 'search-held;desc="jupiter held"']);
+  assert.deepEqual([b.status, b.timing], [503, 'search-held;desc="jupiter held"']);
+});
