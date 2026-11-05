@@ -32,5 +32,10 @@
     "wasm_sha256": "the pin: two clean builds on the team's Linux x64 box at 1656ae5 (deploy.mjs --build-only --flavor mainnet, 5 Nov 11:11Z, both 57535ae7...ca6a, 229,864 B); .github/workflows/vault-build.yml rebuilds it twice on ubuntu-24.04 on every vault change and fails unless it is this pin; deploy.mjs pinProblems refuses any other wasm on mainnet"
   },
   "wasm_bytes": 229864,
-  "largest_function_body": 14026
+  "largest_function_body": 14026,
+  "wasm_witnesses": [
+    "the team's Linux x64 box (rustc 1.96.0, cargo-near-near 0.22.0), deploy.mjs --build-only --flavor mainnet at 1656ae5, 2026-11-05 11:11Z: builds a and b both 57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a, 229864 B",
+    "GitHub Actions ubuntu-24.04, .github/workflows/vault-build.yml run 42017944135 at f3318ce, 2026-11-05 11:20-11:21Z: builds a and b both 57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a, 229864 B, and its pin step passed",
+    "the team's Linux x64 box again, deploy.mjs --build-only --deployment mainnet-test.json at 86cd904, 2026-11-05 11:25Z (VT-S12's pin run): both builds 57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a, the pin"
+  ]
 }
