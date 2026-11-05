@@ -113,6 +113,7 @@ contract ExactDebitV3Test is SellBase {
       pool: address(pool),
       precommitment: 0x1234,
       feeCap: FEE,
+      feeRecipient: SENDER,
       deadline: block.timestamp + 60,
       nonce: 0
     });
@@ -229,6 +230,7 @@ contract ExactDebitRoseTest is SellBase {
       pool: address(pool),
       precommitment: 0x1234,
       feeCap: FEE,
+      feeRecipient: SENDER,
       deadline: block.timestamp + 60,
       nonce: 0
     });
