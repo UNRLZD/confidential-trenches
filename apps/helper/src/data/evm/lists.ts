@@ -28,13 +28,16 @@
 import { gzipSync } from "node:zlib";
 import { dec, LIST_MAX, ROW_FIELDS, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { throttledUntil, type GeckoBudget } from "../gecko.ts";
-import { EVM_LIMIT_CODE, EVM_LIMIT_MESSAGE } from "../../limits/limits.ts";
+import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 
 export const EVM_CHAINS = ["base", "robinhood"] as const;
 export type EvmChain = (typeof EVM_CHAINS)[number];
 /** `unsettled`: the listed tokens whose maker is not read yet; their rows' launchpad null means "not read yet", every
- *  other row's null means no listed factory made the token. Not a row field: the frozen rows are unchanged. */
-export type EvmSnapshot = { chain: EvmChain; lists: Record<"new" | "trending" | "trending_5m" | "trending_1h" | "graduating", Row[]>; as_of_ms: number; unsettled: string[] };
+ *  other row's null means no listed factory made the token. `pools`: each listed token's pool as its list names it (a
+ *  v4 pool id or a pool's address; Trending 1h's row first, then 5m's, then New's), which the swap reads take as a hint
+ *  and check on chain before reading it (swaps.ts fromHint, card helper-robinhood-capacity fold 3). Neither is a row
+ *  field: the frozen rows are unchanged. */
+export type EvmSnapshot = { chain: EvmChain; lists: Record<"new" | "trending" | "trending_5m" | "trending_1h" | "graduating", Row[]>; as_of_ms: number; unsettled: string[]; pools: Record<string, string> };
 
 export const GT_BASE = "https://api.geckoterminal.com/api/v2";
 /** GeckoTerminal's network id per chain (read 2026-11-03 11:25Z: `networks/base/new_pools` and `networks/robinhood/new_pools`, 20 pools each). */
@@ -83,7 +86,10 @@ export const MAKER_RPCS: Readonly<Record<EvmChain, readonly [string, string, str
   robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"],
 };
 /** Requests per JSON-RPC batch a provider takes (drpc's free plan: 3); others 10. */
-export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3 };
+/** daybreak counts each call of a batch as one of the about 4 concurrent requests it takes (a batch of 5 at 4 posts a
+ *  second refused at its 4th post with -32005 "too many concurrent requests", 2026-11-04 20:51Z, from the Mac): one call a
+ *  post, three posts out at once (limits.ts PROVIDER_PACE). */
+export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3, "https://robinhood.daybreak-rpc.network": 1 };
 
 /** Base makes a block every 2 s from genesis at 1686789347 (eth_getBlockByNumber latest on mainnet.base.org and
  *  base.drpc.org, 2026-11-03 11:28Z: block 53457954 at 1793705255, 1793705255 - 2 x 53457954 = 1686789347). */
@@ -239,7 +245,7 @@ function seconds(v: unknown, nowMs: number): number | null {
 
 /** A GeckoTerminal pools answer as rows (at most LIST_MAX, each token once, invalid rows dropped), with each row's pool
  *  creation time kept aside for the maker read; null when it is not a pools answer. */
-export function toRows(chain: EvmChain, answer: unknown, asOfMs: number): { rows: Row[]; created: Map<string, number> } | null {
+export function toRows(chain: EvmChain, answer: unknown, asOfMs: number): { rows: Row[]; created: Map<string, number>; pools: Map<string, string> } | null {
   const a = obj(answer);
   if (!Array.isArray(a.data)) return null;
   const tokens = new Map<string, Record<string, unknown>>();
@@ -251,6 +257,7 @@ export function toRows(chain: EvmChain, answer: unknown, asOfMs: number): { rows
   const net = GT_NETWORK[chain];
   const rows: Row[] = [];
   const created = new Map<string, number>();
+  const pools = new Map<string, string>();
   for (const raw of a.data.slice(0, LIST_MAX)) {
     const p = obj(raw);
     if (p.type !== "pool") continue;
@@ -269,6 +276,9 @@ export function toRows(chain: EvmChain, answer: unknown, asOfMs: number): { rows
     const [m5, h1, h24] = [obj(tx.m5), obj(tx.h1), obj(tx.h24)];
     const createdS = seconds(at.pool_created_at, asOfMs);
     created.set(token, createdS ?? -1);
+    // the row's pool, as the list names it: a v4 pool id or a pool's address (checked on chain before any read of it)
+    const pool = typeof at.address === "string" && /^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(at.address) ? at.address.toLowerCase() : null;
+    if (pool !== null) pools.set(token, pool);
     rows.push({
       chain,
       token,
@@ -310,7 +320,7 @@ export function toRows(chain: EvmChain, answer: unknown, asOfMs: number): { rows
       sells_1h: count(h1.sells),
     } satisfies Record<(typeof ROW_FIELDS)[number], unknown>);
   }
-  return { rows, created };
+  return { rows, created, pools };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -392,6 +402,47 @@ export function padOf(chain: EvmChain, token: string, logs: unknown): string | n
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
+/**
+ * The maker reads' fetch kept by the helper's one hold and pace per provider (limits.ts providerHolds, card
+ * helper-robinhood-capacity): a provider that is held is sent nothing and answers a 429 here (batch() stops on it); its
+ * 429 holds it for the wait it names, and a JSON-RPC throttle in its answer (evmThrottleS) for that one's.
+ */
+export function heldFetch(doFetch: Fetch, holds: ProviderHolds, now: () => number = Date.now): Fetch {
+  return async (url, init) => {
+    const left = holds.heldFor(url);
+    if (left > 0) return new Response("{}", { status: 429, headers: { "retry-after": String(left) } });
+    // the provider's pace, drawn as a background read (limits.ts take): its calls wait for their units; a wait past a
+    // second answers as a hold does, so the maker read asks its next provider
+    let calls = 1;
+    try {
+      const b: unknown = JSON.parse(String(init.body));
+      if (Array.isArray(b)) calls = b.length;
+    } catch {}
+    const w = holds.take(url, calls, true);
+    const busy = new Response("{}", { status: 429, headers: { "retry-after": String(Math.max(1, Math.ceil(w / 1000))) } });
+    if (w > 1_000) return busy;
+    if (w > 0) {
+      await new Promise((go) => setTimeout(go, w));
+      if (holds.take(url, calls, true) > 0) return busy;
+    }
+    const r = await doFetch(url, init);
+    if (r.status === 429) {
+      holds.hold(url, upstreamRetryAfterS(r.headers, now()));
+      return r;
+    }
+    if (r.status !== 200) return r;
+    const text = await r.text();
+    try {
+      const parsed: unknown = JSON.parse(text);
+      for (const a of Array.isArray(parsed) ? parsed : [parsed]) {
+        const wait = Object.hasOwn(obj(a), "error") ? evmThrottleS(obj(a).error) : 0;
+        if (wait > 0) holds.hold(url, wait);
+      }
+    } catch {}
+    return new Response(text, { status: r.status, headers: r.headers });
+  };
+}
+
 /** JSON-RPC batches to one provider (BATCH_MAX calls each, one after another): each call's `result`, by position;
  *  undefined for any that failed. A provider that refuses a batch (its HTTP 429, a JSON-RPC -32005 or limit message) is
  *  sent none of the batches after it: they fail as refused reads, so the caller's third provider answers (card
@@ -438,8 +489,7 @@ async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; p
     for (const a of answers) {
       const o = obj(a);
       if (Object.hasOwn(o, "error")) {
-        const e = obj(o.error);
-        if (e.code === EVM_LIMIT_CODE || EVM_LIMIT_MESSAGE.test(String(e.message ?? ""))) refused = true;
+        if (evmThrottleS(o.error) > 0) refused = true;
         continue;
       }
       if (Number.isSafeInteger(o.id) && (o.id as number) >= 0 && (o.id as number) < calls.length && Object.hasOwn(o, "result")) out[o.id as number] = o.result;
@@ -627,15 +677,17 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
 // ---------------------------------------------------------------------------------------------------------------
 
 const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
-type Read = { rows: Row[]; created: Map<string, number>; at: number; raw: string };
+type Read = { rows: Row[]; created: Map<string, number>; pools: Map<string, string>; at: number; raw: string };
 /** What a restart's next process takes over (../warm.ts, card helper-ready-gate): each list's GeckoTerminal answer as
  *  read and its read time, and the makers read. The answers are parsed again by toRows, as from GeckoTerminal. */
 export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][] };
 
 /** Discover's lists for one EVM chain: GeckoTerminal's lists once per LIST_MS, makers read and kept, rebuilt per TICK_MS. */
-export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetch?: Fetch; now?: () => number } = {}) {
+/** `holds`: the helper's one hold per provider (limits.ts providerHolds), which the maker reads keep (heldFetch). */
+export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetch?: Fetch; now?: () => number; holds?: ProviderHolds } = {}) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
+  const rpcFetch = deps.holds === undefined ? doFetch : heldFetch(doFetch, deps.holds, now);
   const makers = new Map<string, string | null>();
   const tries = new Map<string, number>(); // maker reads that settled nothing, per token
   const reads: Partial<Record<ListKey, Read>> = {};
@@ -675,7 +727,9 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     const asOf = Math.min(read.new.at, read.trending_5m.at, read.trending_1h.at);
     const lists = { new: tag(read.new.rows), trending: tag(read.trending_1h.rows), trending_5m: tag(read.trending_5m.rows), trending_1h: tag(read.trending_1h.rows), graduating: [] as Row[] };
     const unsettled = [...new Set([read.new, read.trending_5m, read.trending_1h].flatMap((r) => r.rows.map((x) => x.token as string)))].filter((t) => !makers.has(t));
-    const body = JSON.stringify({ chain, lists, as_of_ms: asOf, unsettled } satisfies EvmSnapshot);
+    const pools: Record<string, string> = {};
+    for (const r of [read.trending_1h, read.trending_5m, read.new]) for (const [t, p] of r.pools) if (!Object.hasOwn(pools, t)) pools[t] = p;
+    const body = JSON.stringify({ chain, lists, as_of_ms: asOf, unsettled, pools } satisfies EvmSnapshot);
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: asOf };
   }
 
@@ -694,7 +748,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     // the least-tried first, so a token whose read keeps failing never holds the others back
     const ask = [...wanted].sort((a, b) => (tries.get(a[0]) ?? 0) - (tries.get(b[0]) ?? 0)).slice(0, RECORDS[chain] === null ? MAKER_PER_TICK : RECORDS_PER_TICK).map(([token, createdS]) => ({ token, createdS }));
     if (ask.length > 0) {
-      const got = await readMakers(chain, doFetch, ask, now());
+      const got = await readMakers(chain, rpcFetch, ask, now());
       for (const a of ask) {
         const pad = got.get(a.token);
         if (pad === undefined) {

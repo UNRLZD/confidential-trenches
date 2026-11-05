@@ -252,6 +252,9 @@ test("a provider that refuses is held for the wait it names (the helper's RPC ru
   clock.t += 7_000;
   chain.st.faults.delete(URLS[0]!);
   chain.st.faults.delete(URLS[1]!);
+  // the third down, so the pair after the wait is the two that refused (which two free providers are asked first
+  // takes turns: swaps.ts ranked)
+  chain.st.faults.set(URLS[2]!, { down: true });
   await s.tick();
   s.stop();
   assert.ok(chain.st.calls.get(URLS[0]!)! > a0, "asked again after the wait");

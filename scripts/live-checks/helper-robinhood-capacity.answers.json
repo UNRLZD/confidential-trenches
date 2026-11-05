@@ -1,0 +1,205 @@
+{
+ "_note": "good: the branch helper at 95730cb run on the Mac (port 18182), its Robinhood lists warmed, read by helper-robinhood-capacity.mjs --base http://127.0.0.1:18182 --record at 2026-11-04 20:10Z: 12 of 12 tapes 200, p50 4420 ms, max 11452 ms. bad_pre_card: the deployed helper at 6832227, read at 19:07Z: 0 of 12 within 15 s (7 x 503 after 52-57 s, 3 timeouts at 60 s). Each tape's token is recorded as \"address\" (the runs recorded it as \"token\", which gitleaks' generic-api-key rule reads as a key beside a 40-hex value); nothing else is changed.",
+ "good": {
+  "base": "http://127.0.0.1:18182",
+  "at": "2026-11-04T20:10:11.063Z",
+  "lists": {
+   "status": 200,
+   "ms": 21,
+   "tokens": 12
+  },
+  "answers": [
+   {
+    "address": "0xc465130ac047cc363d3839b4de1c8f35cf8ae9fd",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 1979,
+    "shape": "tape"
+   },
+   {
+    "address": "0xe258427467c5d5ed73b1d0c838cbc2d140fb88e9",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 3094,
+    "shape": "tape"
+   },
+   {
+    "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 11452,
+    "shape": "tape"
+   },
+   {
+    "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 4420,
+    "shape": "tape"
+   },
+   {
+    "address": "0x9f4ba41f91a59a34e17ee8c9eb3a51363b11abd5",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 8337,
+    "shape": "tape"
+   },
+   {
+    "address": "0x56910d4409f3a0c78c64dd8d0545ff0705389870",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 10551,
+    "shape": "tape"
+   },
+   {
+    "address": "0x3018e275da8d1acd16e7b803e74fca9c251fd60f",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 2159,
+    "shape": "tape"
+   },
+   {
+    "address": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 2399,
+    "shape": "tape"
+   },
+   {
+    "address": "0x1d5aad3c0d6066078ea60f384a2492a550db30b0",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 2633,
+    "shape": "tape"
+   },
+   {
+    "address": "0xea0071a8778fa02c12378e88868255e0e0952be6",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 10404,
+    "shape": "tape"
+   },
+   {
+    "address": "0xe4d2422ed4d203a0f1ec2043a4db1eda426fca18",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 5112,
+    "shape": "tape"
+   },
+   {
+    "address": "0xb0007d59fe4050a1636c2fa19038973d16481337",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 2340,
+    "shape": "tape"
+   }
+  ]
+ },
+ "bad_pre_card": {
+  "base": "https://api.confidential.unrealized.trade",
+  "at": "2026-11-04T19:07:36.388Z",
+  "lists": {
+   "status": 200,
+   "ms": 590,
+   "tokens": 12
+  },
+  "answers": [
+   {
+    "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+    "status": 503,
+    "retryAfter": null,
+    "ms": 52604,
+    "shape": null,
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   },
+   {
+    "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+    "status": 0,
+    "retryAfter": null,
+    "ms": 60001,
+    "shape": null,
+    "error": "The operation was aborted due to timeout",
+    "body": ""
+   },
+   {
+    "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "status": 503,
+    "retryAfter": null,
+    "ms": 52602,
+    "shape": null,
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   },
+   {
+    "address": "0xb63d07cef74be747231d601bb2faa6b252c68106",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 55275,
+    "shape": "tape"
+   },
+   {
+    "address": "0xedbf91223639800bcd5756815caf908df3b890be",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 52602,
+    "shape": "tape"
+   },
+   {
+    "address": "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111",
+    "status": 503,
+    "retryAfter": null,
+    "ms": 52601,
+    "shape": null,
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   },
+   {
+    "address": "0x6adb9cd443f4653572101e2f91b35ea1ed5f6b69",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 55291,
+    "shape": "tape"
+   },
+   {
+    "address": "0xe4d2422ed4d203a0f1ec2043a4db1eda426fca18",
+    "status": 503,
+    "retryAfter": null,
+    "ms": 55735,
+    "shape": null,
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   },
+   {
+    "address": "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3",
+    "status": 503,
+    "retryAfter": null,
+    "ms": 57170,
+    "shape": null,
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   },
+   {
+    "address": "0x6511c233790ec10f7d673c64dc82c3f941d57828",
+    "status": 0,
+    "retryAfter": null,
+    "ms": 60000,
+    "shape": null,
+    "error": "The operation was aborted due to timeout",
+    "body": ""
+   },
+   {
+    "address": "0x000de658153f47f23e92973c8eb1e89762703676",
+    "status": 0,
+    "retryAfter": null,
+    "ms": 60000,
+    "shape": null,
+    "error": "The operation was aborted due to timeout",
+    "body": ""
+   },
+   {
+    "address": "0x56910d4409f3a0c78c64dd8d0545ff0705389870",
+    "status": 503,
+    "retryAfter": null,
+    "ms": 56320,
+    "shape": null,
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   }
+  ]
+ }
+}
