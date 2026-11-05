@@ -1,0 +1,25 @@
+{
+  "_note": "good: the testnet build of this card, the one build that sends pool transactions: the hook after the helper signature is named (a name to read back). live: SIGN_HOST read 5 Nov 13:07Z, its mainnet build, which sends no pool transaction (no pinned pool yet). bad: the testnet build of main a95cce2, before this card: the hook after the helper signature is sent, the app told it before any read-back.",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-276+NI1p/q4+6jJbNlLQ3GiLrLoNkRANvYb8xNZtozh5QA9HpDlDHt2wDbtU8e/P\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-276+NI1p/q4+6jJbNlLQ3GiLrLoNkRANvYb8xNZtozh5QA9HpDlDHt2wDbtU8e/P",
+    "poolSend": true,
+    "hooks": [
+      "named"
+    ]
+  },
+  "live": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-iwK5k++7TjhzqMjcKPOuO1jNw2IiiaLHv9mcglgocwOnUS+IH/WHTtBDoscxi0fH\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-iwK5k++7TjhzqMjcKPOuO1jNw2IiiaLHv9mcglgocwOnUS+IH/WHTtBDoscxi0fH",
+    "poolSend": false,
+    "hooks": []
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-AJgdcOugnslavLP8X1WtHsR4iBqyBoc31VGV6kycAZ/U2ratd5Pi+CbUiSNg8+MM\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-AJgdcOugnslavLP8X1WtHsR4iBqyBoc31VGV6kycAZ/U2ratd5Pi+CbUiSNg8+MM",
+    "poolSend": true,
+    "hooks": [
+      "sent"
+    ]
+  }
+}
