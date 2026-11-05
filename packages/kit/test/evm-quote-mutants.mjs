@@ -10,12 +10,11 @@
 // after another took 266 s and the named tests one by one 140 s on GitHub's runner, readme-fresh-run at 47109a7).
 // Each line prints its time.
 //   node packages/kit/test/evm-quote-mutants.mjs     (a heavy job: run it on a machine with spare cores)
-import { execFile } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { run as runGroup } from "../../../scripts/group-run.mjs";
 
 const KIT = fileURLToPath(new URL("..", import.meta.url));
 const QUOTE = "src/checks/evm/quote.ts";
@@ -44,7 +43,7 @@ export const MUTANTS = [
   [QUOTE, "if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {", "if (false) {", R, "R1b "],
   [QUOTE, "back.number !== lo.number || back.hash !== lo.hash || back.timestamp", "back.number !== lo.number || back.timestamp", R, "R5 "],
   [QUOTE, " || back.timestamp !== lo.timestamp || back.baseFeePerGas", " || back.baseFeePerGas", R, "R5 "],
-  [QUOTE, "const [lo, at] = a.number <= b.number ? [a, j] : [b, i];", "const [lo, at] = a.number <= b.number ? [a, i] : [b, j];", R, "R5 "],
+  [QUOTE, "const [lo, at, own] = a.number <= b.number ? [a, j, i] : [b, i, j];", "const [lo, at, own] = a.number <= b.number ? [a, i, i] : [b, j, j];", R, "R5 "],
   [QUOTE, 'if (confirmed.status === "rejected") throw confirmed.reason;', "", R, "R1b "],
   [QUOTE, "if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse(", "if (false) return refuse(", Q, "Q14 "],
   [QUOTE, "if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse(", "if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS + 1000) return refuse(", R, "R6 "],
@@ -159,7 +158,7 @@ export const MUTANTS = [
   // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
   // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
   // build; scans as ORs within a provider's span; 429s asked again; each provider at most its limit at once
-  [QUOTE, "    if (!behind || i === 3) return out;", "    return out;", R, "R10 "],
+  [QUOTE, "    if (!out.some(notYet) || i === 3) return out;", "    return out;", R, "R10 "],
   [QUOTE, "for (const { k, id } of ordered) {", "for (const { k, id } of [] as typeof ordered) {", R, "N1a "],
   [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (false) f.quotes.push(", R, "A1 "],
   // (no mutant reads `found` for `held` here: a buy's pool the PoolManager does not hold reads a price of 0, which the
@@ -193,7 +192,35 @@ export const MUTANTS = [
   [QUOTE, "    return [slow, s?.ms ?? Number.MAX_VALUE, k] as const;", "    return [0, s?.ms ?? Number.MAX_VALUE, k] as const;", R, "V4 "],
   [QUOTE, "s.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0;", "0;", R, "V4 "],
   [QUOTE, "s.held > now ? 2 : ", "s.held > now ? 1 : ", R, "V4 "],
-  [QUOTE, "      if (out.some(limited)) s.held = performance.now() + EVM_HOLD_MS;\n      else s.ms", "      s.ms", R, "V4 "],
+  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) s.ms", "      s.ms", R, "V4 "],
+  // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
+  // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
+  [QUOTE, "    if (!(await behind(got.block))) return got;\n    if (got.low === undefined) {", "    return got;\n    if (got.low === undefined) {", R, "LH1 "],
+  [QUOTE, "    const low = got.low!;\n    HOLD.get(low)?.();", "    const low = got.low!;", R, "LH1 "],
+  [QUOTE, "    if (!Object.isFrozen(rpcs)) [...rest, low].forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "LH1 "],
+  [QUOTE, "return { block: lo, confirm, low: list[own]! };", "return { block: lo, confirm, low: list[at]! };", R, "LH1 "],
+  [QUOTE, "if (out.some(limited) || out.some(stateless)) s.held", "if (out.some(limited)) s.held", R, "LH2 "],
+  // the review of the lag hold: each no-longer answer, never a revert, a non-2xx answer, the whole list's majority, the
+  // two-provider list, one wait
+  [QUOTE, "/historical state \\S+ is not available|archive", "/archive", R, "LH2b "],
+  [QUOTE, "|archive requests require a personal token|", "|", R, "LH2b "],
+  [QUOTE, "!reverted(a) && /historical state", "/historical state", R, "LH2b "],
+  [QUOTE, "  return e?.code === 3 || (typeof e?.message", "  return (typeof e?.message", R, "LH2b "],
+  [QUOTE, " || (typeof e?.message === \"string\" && /^execution reverted/i.test(e.message));", ";", R, "LH2b "],
+  [QUOTE, "    if (!res.ok) {", "    if (false) {", R, "LH3 "],
+  // the re-review of the fold: drpc's no-longer answer, a revert never a state or a limit, a refused answer's body, a
+  // not-yet answer untimed, a compute-units limit
+  [QUOTE, "|^unknown state\\b/i", "/i", R, "LH2b "],
+  [QUOTE, "|^unknown state\\b/i", "/i", R, "RQ1 "],
+  [QUOTE, "(!reverted(a) && typeof o?.error?.message", "(typeof o?.error?.message", R, "RQ2 "],
+  [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ3 "],
+  [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ4 "],
+  [QUOTE, "      await res.body?.cancel().catch(() => {});\n", "", R, "LQ3 "],
+  [QUOTE, "      else if (!out.some(notYet)) s.ms", "      else s.ms", R, "LQ4 "],
+  [QUOTE, "|too many requests|exceeded its compute units per second/i", "|too many requests/i", R, "LQ5 "],
+  [QUOTE, "const need = Math.floor(Math.max(of, list.length) / 2) + 1;", "const need = Math.floor(list.length / 2) + 1;", R, "LM2 "],
+  [QUOTE, "    if (rest.length < 2) return got;", "", R, "LL4 "],
+  [QUOTE, "(waitFrom ??= (a.mono ?? monotonic)())", "(a.mono ?? monotonic)()", R, "LW "],
   [QUOTE, "      s.held = performance.now() + EVM_HOLD_MS;\n      throw e;", "      throw e;", R, "V4 "],
   // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the
   // block's confirmation (M-2); a provider that differs from what the quote used is held; the spare's timer counts
@@ -457,9 +484,9 @@ export const MUTANTS = [
   [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs;", R, "L2 "],
   // the age from the quote's entry, the scan's time included, on a sell and a buy (review fold 2, LOW-1)
   [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs + Math.max(0, mono() - t0);", R, "LOW-1 "],
-  [QUOTE, "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start)", "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono)", R, "LOW-1 "],
+  [QUOTE, "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start,", "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, undefined,", R, "LOW-1 "],
   [QUOTE, "    watch,\n    mono,\n    start,\n", "    watch,\n    mono,\n", R, "LOW-1 "],
-  [QUOTE, "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start)", "agreedBlock(rpcs, v.maxLag, a.nowMs)", R, "L5 "],
+  [QUOTE, "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start,", "agreedBlock(on, v.maxLag, a.nowMs, undefined, undefined, undefined,", R, "L5 "],
   [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, mono, start });", R, "L5 "],
   [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, minBlock: boughtBlock - 1n, mono, start });", R, "L5 "],
   [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, minBlock: boughtBlock, start });", R, "M2 "],
@@ -471,25 +498,24 @@ export const MUTANTS = [
 ];
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
-const run$ = promisify(execFile);
 // each test run's own environment: without the node --test runner's NODE_TEST_CONTEXT, which turns a child's report
 // from TAP into the runner's own stream (the runner's test calls these judges from inside node --test)
 const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT"));
 // The longest one test run takes before it is killed and counts as failed: a mutant that leaves a wait with no end
-// (the scan gate's bound removed, a Retry-After of 120 s asked again for ever) never holds up the sweep
+// (the scan gate's bound removed, a Retry-After of 120 s asked again for ever) never holds up the sweep; the run's whole
+// process group is killed with it (scripts/group-run.mjs), so node --test's per-file child never lives on
 const RUN_MS = 60_000;
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`
 let lastFail = "";
 async function run(dir, file, name) {
-  try {
-    const { stdout } = await run$("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, env: ENV, encoding: "utf8", maxBuffer: 1 << 26, timeout: RUN_MS });
-    // a test of that name passed: a file that runs no test still reports itself as one that passed
-    const ran = [...stdout.matchAll(/^\s*ok \d+ - (.*?)(?: # .*)?$/gm)].some((m) => m[1].replace(/\\#/g, "#").replace(/\\\\/g, "\\").startsWith(name));
-    return ran ? "pass" : "none";
-  } catch (e) {
-    lastFail = (e.killed ? `killed after ${RUN_MS} ms\n` : "") + `${e.stdout ?? ""}${e.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 8).join("\n");
+  const r = await runGroup("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, env: ENV, maxBuffer: 1 << 26, timeoutMs: RUN_MS });
+  if (r.status !== 0) {
+    lastFail = (r.timedOut ? `killed after ${RUN_MS} ms\n` : "") + `${r.stdout}${r.stderr}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 8).join("\n");
     return "fail";
   }
+  // a test of that name passed: a file that runs no test still reports itself as one that passed
+  const ran = [...r.stdout.matchAll(/^\s*ok \d+ - (.*?)(?: # .*)?$/gm)].some((m) => m[1].replace(/\\#/g, "#").replace(/\\\\/g, "\\").startsWith(name));
+  return ran ? "pass" : "none";
 }
 /** Each named test's "pass", "fail" or "none" on the code as it is, judged as the kill phase judges a mutant: each name
  *  alone, by its run's exit code (`run`), as many at once as there are copies `dirs` (re-review of 037627c, LOW-1: one

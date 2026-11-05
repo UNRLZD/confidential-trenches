@@ -191,7 +191,8 @@ export type TestnetOver = {
 export const DEVNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
 /** The pool send's own window: the helper answers a tag 3 only once it has simulated and sent it, and a send may wait
  *  out a blockhash's life (~60 to 90 s), so this is over 90 s, never the client's 10 s for the pool.buy kind's answer
- *  (the kit's SIGNPAGE_TIMEOUT_MS["pool.buy"]: the run answers at the send, and goes on whatever the client waits). */
+ *  (the kit's SIGNPAGE_TIMEOUT_MS["pool.buy"]: the run answers once both RPCs read its transaction back, or at its
+ *  end, and goes on whatever the client waits; its final stage also goes out as progress). */
 export const POOL_SEND_TIMEOUT_MS = 120_000;
 
 /** POST /v1/pool/solana/send: the helper's answer as it came (pool-buy.ts reads it back on two RPCs). */

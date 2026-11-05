@@ -57,6 +57,9 @@ import { readFileSync, readdirSync, existsSync, realpathSync, lstatSync } from "
 import { fileURLToPath } from "node:url";
 import { operatorOf as nearOperatorOf } from "./near-rpc-operators.mjs";
 import { RPC_OPERATORS } from "./rpc-operators.mjs";
+import { NOT_WAITED, exactJson, hostOf, rpc, wait } from "./rpc-wait.mjs";
+
+export { exactJson };
 
 // Public RPCs, none ours; each answered a tx read on 2026-10-26 between 11:48 and 11:54Z. NEAR lists two operators on
 // three hosts: FastNEAR's archival RPC, dRPC (which keeps only recent txs, enough for a fresh live record), and
@@ -221,72 +224,6 @@ export function parseLive(text, key) {
   if (moneyPath === null) problems.push('the live record has no "Money path: yes|no" line');
   else if (moneyPath && txs.length === 0 && problems.length === 0) problems.push("a money-path live record lists no Tx");
   return { moneyPath, txs, deleted, real: txs.filter((t) => !TESTNET.has(t.chain)), problems, verdict };
-}
-
-// A rate limit is waited out, never read as an answer: a public RPC may answer HTTP 429 (or code -429) with a
-// Retry-After (near.org's archival RPC gave 43 s to 600 s, read 2026-10-31).
-// A 429 waits its Retry-After seconds, or 2 s doubling when it gives none (or a date), and asks again, up to
-// RATE_TRIES waits in a row; a Retry-After past RATE_CAP seconds is no answer at once. Other trouble (no reply, a
-// reply that is not JSON, an HTTP error with no RPC error) is asked 3 times, 2 s and 4 s apart. Each host is asked
-// at most once a second.
-// A 429 is waited only while the host could add a second operator: once two operators have read a tx ok, or the
-// host's own operator has, it is still asked once, but with rateWait off: its 429 is no answer at once (NOT_WAITED),
-// never waited and never decisive. A failed or old answer from it still refuses. One operator's read never passes a tx
-// alone: a NEAR tx no second operator reads passes only by its light-client proof (proveNearTx), which needs no
-// second read on the same operator.
-const RATE_TRIES = 5;
-const RATE_CAP = 600;
-const NOT_WAITED = "rate limited, not waited: its read could add no second operator";
-const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
-const lastAsked = new Map();
-const hostOf = (url) => {
-  try {
-    return new URL(url).host;
-  } catch {
-    return null; // not a URL (a test's stub name): no host to pace
-  }
-};
-
-// JSON with every integer past 2^53 kept as its digits: a NEAR tx JSON carries u64s JavaScript numbers cannot hold (a
-// Delegate's max_block_height of u64::MAX, read 2026-11-01), and its bytes are rebuilt from them (findTxBytes). Node 24's
-// JSON.parse hands a reviver each value's source text.
-export const exactJson = (text) => JSON.parse(text, (k, v, ctx) => (typeof v === "number" && !Number.isSafeInteger(v) && /^\d+$/.test(ctx?.source ?? "") ? ctx.source : v));
-
-async function rpc(fetchFn, url, method, params, sleep = wait, rateWait = true) {
-  let last;
-  let rate = 0;
-  for (let attempt = 0; attempt < 3; ) {
-    const host = hostOf(url);
-    if (host) {
-      const gap = (lastAsked.get(host) ?? 0) + 1000 - Date.now();
-      if (gap > 0) await sleep(gap);
-      lastAsked.set(host, Date.now());
-    }
-    try {
-      const r = await fetchFn(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        signal: AbortSignal.timeout(20000),
-      });
-      const j = r.status === 429 ? null : typeof r.text === "function" ? exactJson(await r.text()) : await r.json();
-      if (r.status === 429 || j.error?.code === -429 || j.error?.code === 429) {
-        if (!rateWait) throw Object.assign(new Error(NOT_WAITED), { rate: true, notWaited: true });
-        const after = Number(r.headers?.get?.("retry-after") ?? NaN);
-        if (Number.isFinite(after) && after > RATE_CAP) throw Object.assign(new Error(`rate limited, Retry-After ${after} s is past the ${RATE_CAP} s cap`), { rate: true });
-        if (++rate > RATE_TRIES) throw Object.assign(new Error(`rate limited ${rate} times in a row`), { rate: true });
-        await sleep(Number.isFinite(after) && after >= 0 ? after * 1000 : 2000 * 2 ** (rate - 1));
-        continue;
-      }
-      if (!r.ok && !j.error) throw new Error(`HTTP ${r.status}`);
-      return j;
-    } catch (e) {
-      if (e?.rate) throw e;
-      last = e;
-    }
-    if (++attempt < 3) await sleep(2000 * attempt);
-  }
-  throw last;
 }
 
 // How many receipts of an EXPERIMENTAL_tx_status answer failed; a receipt whose status is not an object counts as
