@@ -458,6 +458,7 @@ test("a public cluster's code is CI's build: the artifact whose sha256 and size 
 test("devnet refuses a host build and --no-build: only --ci-run, before any key or transaction", async () => {
   const devnet = async (u, init) => {
     if (JSON.parse(init.body).method === "getGenesisHash") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" }) };
+    if (isReturnRead(init)) return okR(sysAccount());
     throw new Error("no other call before the code is CI's");
   };
   const run = (args, opts = {}) => main(["--url", "https://api.devnet.solana.com", "--return", RETURN, ...args], devnet, opts);
@@ -470,6 +471,7 @@ test("devnet refuses a host build and --no-build: only --ci-run, before any key 
 test("devnet refuses CI's build when its sha256 is not the pinned code, before any key or transaction", async () => {
   const devnet = async (u, init) => {
     if (JSON.parse(init.body).method === "getGenesisHash") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" }) };
+    if (isReturnRead(init)) return okR(sysAccount());
     throw new Error("no other call before the code is the pinned code");
   };
   const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
@@ -489,7 +491,7 @@ test("devnet refuses CI's build when its sha256 is not the pinned code, before a
     // missing), still before any key
     const missing = async (u, init) => {
       const { method } = JSON.parse(init.body);
-      if (method === "getAccountInfo") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: null } }) };
+      if (method === "getAccountInfo" && !isReturnRead(init)) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: null } }) };
       return devnet(u, init);
     };
     await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--program", RD.program_id, "--return", RETURN, "--out", path.join(work, "record.json")], missing, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, pin: f.sha }), new RegExp(`--program ${RD.program_id} refused`));
@@ -1133,6 +1135,7 @@ const asMainnet = (c, genesis2 = MAINNET) => {
 };
 const asMainnetReads = (c, genesis2) => wrap(c, (url, { method, params }, real) => {
   if (method === "getGenesisHash") return okR(url === MAIN_URL ? MAINNET : genesis2);
+  if (method === "getAccountInfo" && params[0] === RETURN) return okR(sysAccount());
   if (method === "getMultipleAccounts") {
     assert.deepEqual(params[0], [PUMP_GLOBAL]);
     assert.equal(params[1].commitment, "finalized");
@@ -1356,4 +1359,58 @@ test("--final's SetAuthority finalized a moment after the deploy: the run waits 
   }
   assert.ok(said.some((l) => /deployed \S+, upgrade authority none/.test(l)), said.join("\n"));
   assert.ok(pdReads >= 3);
+});
+
+// ---- the review of ae4a874: each finding a test, red at ae4a874 ----
+/** A getAccountInfo of the run's --return (a public cluster reads it before any key). */
+function isReturnRead(init) {
+  const { method, params } = JSON.parse(init.body);
+  return method === "getAccountInfo" && params[0] === RETURN;
+}
+/** A system account holding `lamports`, as getAccountInfo answers it. */
+function sysAccount(lamports = 5_000_000_000) {
+  return { context: { slot: 1 }, value: { owner: SYSTEM_ID, executable: false, lamports, data: ["", "base64"], rentEpoch: 0, space: 0 } };
+}
+
+test("review 1: mainnet refuses a --return that is off the curve, not a system account, empty, or read differently on the two RPCs, before any key or CI read; a good one is read and the funding line says send from it", async () => {
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const { w, out } = work();
+  const realLog = console.log;
+  console.log = () => {};
+  const PROGRAM_OWNED = { context: { slot: 1 }, value: { owner: RD.program_id, executable: false, lamports: 1_000_000, data: ["", "base64"] } };
+  // a fetch: mainnet's genesis on both, `answer(url, address)` for getAccountInfo, nothing else
+  const reads = (answer) => async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getGenesisHash") return okR(MAINNET);
+    if (method === "getAccountInfo") return okR(answer(url, params[0]));
+    throw new Error(`no ${method} after the refusal`);
+  };
+  try {
+    const f = fakeGh();
+    const io = { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, pin: f.sha };
+    const withReturn = (r) => mainArgs(out).map((a) => (a === RETURN ? r : a));
+    // the pool address: a PDA, 32 bytes that no key signs for
+    await assert.rejects(main(withReturn(RD.pool), reads(() => sysAccount()), io), new RegExp(`mainnet refused: --return ${RD.pool} is not on the ed25519 curve`));
+    await assert.rejects(main(mainArgs(out), reads(() => PROGRAM_OWNED), io), new RegExp(`mainnet refused: --return ${RETURN} is owned by ${RD.program_id}, not the system program, on ${MAIN_URL.replace(/\./g, "\\.")}`));
+    await assert.rejects(main(mainArgs(out), reads(() => ({ context: { slot: 1 }, value: null })), io), new RegExp(`mainnet refused: --return ${RETURN} holds no lamports on ${MAIN_URL.replace(/\./g, "\\.")}`));
+    await assert.rejects(main(mainArgs(out), reads((u) => (u === MAIN_URL ? sysAccount() : { context: { slot: 1 }, value: null })), io), /mainnet refused: --return \S+ holds no lamports on https:\/\/solana-rpc\.publicnode\.com/);
+    assert.equal(f.calls.length, 0, "no CI read before the return address reads right");
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+  }
+  const made = ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x));
+  for (const k of made) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  assert.deepEqual(made, [], "no key was made");
+  // a good one: the run goes on, and the funding line names where to send from
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const { w: w2, out: out2 } = work();
+  const r = await runAt(c, out2, [], mainArgs(out2, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.stack));
+    assert.ok(r.said.some((l) => l.includes(`waiting for `) && l.includes(`send from ${RETURN}`)), r.said.join("\n"));
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w2, { recursive: true, force: true });
+  }
 });
