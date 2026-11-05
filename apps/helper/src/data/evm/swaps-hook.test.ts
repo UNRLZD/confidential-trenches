@@ -65,13 +65,14 @@ test("hookOf: the pool's real key (it hashes to the id) names the hook, whose ad
   assert.equal(hookOf("0x12"), undefined);
 });
 
-test("poolFilters: a hooked pool's read is three filters with one address each: the pool's swaps with its other PoolManager calls (one topic list, the pool's id), the token's transfers between the PoolManager and the hook, and the PoolManager's ERC-6909 claims of the token (card helper-v4-hook-liquidity: a hook's cut minted as claims); an unhooked pool's, its swaps alone", () => {
+test("poolFilters: a hooked pool's read is three filters with one address each: the pool's swaps with its other PoolManager calls (one topic list, the pool's id, and its siblings' ids when the discovery found any), every transfer of the token, and the PoolManager's ERC-6909 claims of the token (card helper-v4-hook-liquidity: what each swap's sender took or paid, and a hook's cut minted as claims); an unhooked pool's, its swaps alone", () => {
   const f = poolFilters(POOL, 10, 109, "robinhood");
   assert.equal(f.length, 3);
   assert.deepEqual(f[0], { address: PM, topics: [[TOPIC.swap4, TOPIC.initialize, TOPIC.modifyLiquidity, TOPIC.donate], ID], fromBlock: "0xa", toBlock: "0x6d" });
-  const ends = [PM, HOOK].map((a) => `0x${a.slice(2).padStart(64, "0")}`);
-  assert.deepEqual(f[1], { address: COIN, topics: [TOPIC.transfer, ends, ends], fromBlock: "0xa", toBlock: "0x6d" });
+  assert.deepEqual(f[1], { address: COIN, topics: [TOPIC.transfer], fromBlock: "0xa", toBlock: "0x6d" });
   assert.deepEqual(f[2], { address: PM, topics: [TOPIC.claims, null, null, `0x${COIN.slice(2).padStart(64, "0")}`], fromBlock: "0xa", toBlock: "0x6d" });
+  const sib = `0x${"5".repeat(64)}`;
+  assert.deepEqual(poolFilters({ ...POOL, siblings: [sib] }, 10, 109, "robinhood")[0], { address: PM, topics: [[TOPIC.swap4, TOPIC.initialize, TOPIC.modifyLiquidity, TOPIC.donate], [ID, sib]], fromBlock: "0xa", toBlock: "0x6d" });
   const { hook: _, ...plain } = POOL;
   assert.deepEqual(poolFilters(plain, 10, 109, "robinhood"), [{ address: PM, topics: [TOPIC.swap4, ID], fromBlock: "0xa", toBlock: "0x6d" }]);
 });
