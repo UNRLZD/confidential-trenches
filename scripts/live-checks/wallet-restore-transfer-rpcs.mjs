@@ -8,8 +8,11 @@
 // entry for this file and no check here is a second implementation of the wallet's) on each network's pair:
 //   - Base Sepolia: that run's v3 buy's W 0x809286a1…078e from its buy's block 54553944 to the newest agreed block,
 //     which must list the USDC it bought (0x036cbd53…3dcf7e), read on both providers alike;
-//   - Base, Robinhood and Robinhood testnet: a W's Transfer read over the newest 2,000 blocks, which must answer on
-//     both providers alike (Base's Tenderly caps at 1,000 blocks as "invalid params", Robinhood testnet's dRPC at 101).
+//   - Robinhood, Base and Robinhood testnet: a W's Transfer read over the newest 100,000, 50,000 and 10,000 blocks,
+//     which must answer on both providers alike (Robinhood's own caps at 30,000 blocks and daybreak at 2,000, Base's
+//     Tenderly and thirdweb at 1,000, thirdweb throttling after about 4 calls, Robinhood testnet's dRPC at 101).
+// Every call goes through the device's own client (the signing page's pageRpc: the kit's solanaJsonRpc with
+// SOLANA_RPC_RETRY), so a throttle reaches the wallet's pager as it does on the device.
 // It fails if any read is refused, the two providers disagree, or the W's USDC is not listed.
 //   node scripts/live-checks/wallet-restore-transfer-rpcs.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -17,6 +20,7 @@
 // same answers with every Transfer log of the Base Sepolia W taken out on both providers (a read that finds no USDC).
 // Runs: once, it reads no host: the wallet at the checkout against public RPCs; the wallet tests hold the pager
 import "../net-window.mjs";
+import { solanaJsonRpc, SOLANA_RPC_RETRY } from "../../packages/kit/src/index.ts";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
@@ -31,34 +35,21 @@ export const W = "0x809286a1bf1585b1eeeefcc7a7f3508158fd078e";
 export const USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
 export const JOBS = Object.freeze([
   { network: "base-sepolia", w: W, from: "54553944", want: USDC },
-  { network: "base", w: W, back: "2000" },
-  { network: "robinhood", w: W, back: "2000" },
+  { network: "base", w: W, back: "50000" },
+  { network: "robinhood", w: W, back: "100000" },
   // evm-buy-hookdata-fee.robinhood-testnet.json's first W
-  { network: "robinhood-testnet", w: "0x764c5ac2e39fec9d25af6d3eaf9400f91d82a531", back: "2000" },
+  { network: "robinhood-testnet", w: "0x764c5ac2e39fec9d25af6d3eaf9400f91d82a531", back: "10000" },
 ]);
 
-const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** One JSON-RPC call over the network: { result } or { error }; a 429, a 5xx or a failed fetch is tried 4 times. */
+const clients = new Map();
+/** One JSON-RPC call through the device's client (pageRpc: solanaJsonRpc with SOLANA_RPC_RETRY, its 3.5 s retry and
+ * no more): { result } or { error, name, afterMs }, the name and Retry-After a throttle carries to the wallet's pager. */
 export async function post(url, method, params) {
-  for (let t = 1; ; t++) {
-    try {
-      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(20_000) });
-      if ((r.status === 429 || r.status >= 500) && t < 4) {
-        await pause(1000 * t);
-        continue;
-      }
-      const j = await r.json();
-      if (j?.error) return { error: `RPC error ${j.error.code}: ${j.error.message}` };
-      if (!r.ok) return { error: `HTTP ${r.status}` };
-      return { result: j.result };
-    } catch (e) {
-      if (t < 4) {
-        await pause(1000 * t);
-        continue;
-      }
-      return { error: `fetch failed: ${e?.message ?? e}` };
-    }
+  if (!clients.has(url)) clients.set(url, solanaJsonRpc(url, { retry: SOLANA_RPC_RETRY }));
+  try {
+    return { result: await clients.get(url)(method, params) };
+  } catch (e) {
+    return { error: String(e?.message ?? e), name: String(e?.name ?? "Error"), afterMs: typeof e?.afterMs === "number" ? e.afterMs : null };
   }
 }
 
@@ -86,7 +77,7 @@ export function replayer(log) {
     const q = queues.get(JSON.stringify([url, method, params]));
     const e = q?.length > 1 ? q.shift() : q?.[0];
     if (e === undefined) return { error: `no recorded answer to ${method} ${JSON.stringify(params)} on ${url}` };
-    return "error" in e ? { error: e.error } : { result: e.result };
+    return "error" in e ? { error: e.error, ...(e.name ? { name: e.name } : {}), ...(e.afterMs !== undefined ? { afterMs: e.afterMs } : {}) } : { result: e.result };
   };
 }
 
