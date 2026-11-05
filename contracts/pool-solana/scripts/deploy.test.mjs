@@ -1894,3 +1894,43 @@ test("paste 1: a CLI deploy that fails mid-upload is retried in the same run fro
   assert.ok(said.some((l) => /deploy try 1 of 3 failed: .*Max retries exceeded.*: trying again from the run's buffer/.test(l)), said.join("\n"));
 });
 import { DEPLOY_SIGN_ATTEMPTS } from "./deploy.mjs";
+
+test("devnet rehearsal 5 Nov: a funding wait whose balance read meets a burst of 429s keeps waiting, never ends the run before the funding is read", async () => {
+  const f = fakeGh();
+  let clock = Date.now(); // a clock of its own, so a run that stops ends its cleanup at once
+  let balanceReads = 0;
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance":
+        // the first read's five tries all rate-limited, as api.devnet answered at 18:47Z
+        if (++balanceReads <= 5) return { ok: false, status: 429, json: async () => ({ code: 429, message: "Connection rate limits exceeded" }) };
+        return ok({ value: 1_000_000_000 });
+      case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
+      case "getAccountInfo": return ok({ value: null });
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const cli = (args) => {
+    if (args[1] === "deploy") throw new Error("stop at the deploy: the funding was read");
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const realLog = console.log;
+  const said = [];
+  console.log = (s) => said.push(String(s));
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, now: () => (clock += 1000), cli, gh: f.gh, keysBase: TEST_KEYS }), /stop at the deploy: the funding was read/);
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+  assert.equal(said.filter((l) => /waiting for \S+ to hold/.test(l)).length, 1, "one funding wait");
+  assert.ok(said.some((l) => /the funder's balance not read \(getBalance: HTTP 429.*\): reading it again/.test(l)), said.join("\n"));
+  assert.ok(said.some((l) => /funded: /.test(l)), said.join("\n"));
+});
