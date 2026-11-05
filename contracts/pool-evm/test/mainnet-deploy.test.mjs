@@ -4,7 +4,7 @@
 //   node --test contracts/pool-evm/test/mainnet-deploy.test.mjs
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -14,17 +14,21 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PASTE = path.join(HERE, "../script/mainnet-deploy.sh");
 const A = "0x49f2425b7f33f3a10912de8add6839226ce663a2";
 
-/** Runs the paste with stub node and forge; `fail` names a node script whose stub exits 2. Returns its exit, output
- * and the node calls, each as its argv. */
+/** Runs a copy of the paste in a folder of its own (its repository root) with stub node and forge; deploy.mjs's stub
+ * writes the chain's record, as a completed run does; `fail` names a node script whose stub exits 2. Returns its
+ * exit, output, root and the node calls, each as its argv. */
 function paste(args, { fail = null, forge = true } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "pool-evm-paste-"));
+  const root = path.join(dir, "root");
+  mkdirSync(path.join(root, "contracts/pool-evm/script"), { recursive: true });
+  copyFileSync(PASTE, path.join(root, "contracts/pool-evm/script/mainnet-deploy.sh"));
   const calls = path.join(dir, "calls");
   writeFileSync(calls, "");
-  writeFileSync(path.join(dir, "node"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${calls}"\ncase "$1" in ${fail ?? "__none__"}) exit 2 ;; esac\nexit 0\n`);
+  writeFileSync(path.join(dir, "node"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${calls}"\ncase "$1" in ${fail ?? "__none__"}) exit 2 ;; esac\nif [ "$1" = contracts/pool-evm/script/deploy.mjs ] && [ "$5" = --return ]; then echo "{}" > "contracts/pool-evm/deployments/$4.json"; fi\nexit 0\n`);
   chmodSync(path.join(dir, "node"), 0o755);
   if (forge) writeFileSync(path.join(dir, "forge"), "#!/bin/sh\nexit 0\n"), chmodSync(path.join(dir, "forge"), 0o755);
-  const r = spawnSync("sh", [PASTE, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir }, timeout: 20_000 });
-  return { status: r.status, out: r.stdout + r.stderr, calls: readFileSync(calls, "utf8").split("\n").filter(Boolean) };
+  const r = spawnSync("sh", [path.join(root, "contracts/pool-evm/script/mainnet-deploy.sh"), ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir }, timeout: 20_000 });
+  return { status: r.status, out: r.stdout + r.stderr, root, calls: readFileSync(calls, "utf8").split("\n").filter(Boolean) };
 }
 
 test("the paste exists and is the one the deploy script names", () => {
@@ -41,8 +45,7 @@ test("a deploy: deploy.mjs --mainnet with the chain and the return address, then
       `scripts/live-checks/pool-evm-deploy.mjs --deployment contracts/pool-evm/deployments/${chain}.json`,
     ]);
     // the record is the one-deploy guard: the paste names its folder, says to commit it now and to paste only there
-    const root = path.resolve(HERE, "../../..");
-    assert.ok(r.out.includes(`mainnet-deploy: the record contracts/pool-evm/deployments/${chain}.json in ${root} is the one-deploy guard: commit it now, and run every later paste for ${chain} in ${root}`), r.out);
+    assert.ok(r.out.includes(`mainnet-deploy: the record contracts/pool-evm/deployments/${chain}.json in ${r.root} is the one-deploy guard: commit it now, and run every later paste for ${chain} in ${r.root}`), r.out);
   }
 });
 

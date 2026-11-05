@@ -17,6 +17,9 @@
 #    the v4 adapter, the v3 adapter and the sell delegate, each checked as the build's code on both RPCs, sweeps the
 #    rest back to your address and writes contracts/pool-evm/deployments/<chain>.json.
 # 2. The live check on that record, on both of the chain's RPCs: no owner, no proxy, the pinned code, the run key empty.
+# The record is the one-deploy guard, so the paste line names the folder it runs in (cd <the repository> && sh ...),
+# and the record is committed right after; a stopped run writes no record, and the same paste in the same folder
+# resumes it with its kept key, reusing every contract it made.
 # Nothing is typed in: no seed phrase or key is asked for. The run key is made in memory and kept in a 0700 folder
 # (~/.local/state/pool-evm-deploy) only until both RPCs read it empty; every transaction it signs is journaled
 # beside the record before it is sent. Ctrl-C or a closed terminal stops the run at its next step and the sweep sends
@@ -47,5 +50,12 @@ if [ "$FORM" = sweep ]; then
 fi
 command -v forge >/dev/null 2>&1 || { echo "forge is not on PATH (https://getfoundry.sh): nothing was sent"; exit 1; }
 mkdir -p contracts/pool-evm/deployments
-node contracts/pool-evm/script/deploy.mjs --mainnet --chain "$CHAIN" --return "$2"
+RC=0
+node contracts/pool-evm/script/deploy.mjs --mainnet --chain "$CHAIN" --return "$2" || RC=$?
+# the record, written only by a completed run, is the one-deploy guard: a later paste for this chain is refused only
+# where it sits, so it is committed at once and every later paste runs in this folder
+if [ -e "contracts/pool-evm/deployments/$CHAIN.json" ]; then
+  echo "mainnet-deploy: the record contracts/pool-evm/deployments/$CHAIN.json in $ROOT is the one-deploy guard: commit it now, and run every later paste for $CHAIN in $ROOT"
+fi
+[ "$RC" = 0 ] || exit "$RC"
 node scripts/live-checks/pool-evm-deploy.mjs --deployment "contracts/pool-evm/deployments/$CHAIN.json"
