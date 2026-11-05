@@ -628,7 +628,17 @@ export function traderLeg(s: Pick<Swap, "side" | "amt">, take: bigint | undefine
 // ---------------------------------------------------------------------------------------------------------------
 
 type Call = { method: string; params: unknown[] };
-type Reply = { ok: true; result: unknown } | { ok: false; wait: number };
+type Reply = { ok: true; result: unknown } | { ok: false; wait: number; reverted?: true };
+/** An `eth_call` the provider ran and the contract reverted: geth's code 3 (a revert with data) or a message naming the
+ *  revert (-32000 "execution reverted", as daybreak, blockmachine, drpc and the chain's own RPC answer one). It is the
+ *  call's answer at that block, as a result is, never a failed read. */
+const isRevert = (e: unknown): boolean => {
+  const o = obj(e);
+  return o.code === 3 || (typeof o.message === "string" && /revert/i.test(o.message));
+};
+/** callsAgreed's word for a call two providers say reverted at that block: agreed and kept like a result, answered as
+ *  no value (undefined), as a call not agreed is. */
+const REVERTED = "reverted";
 
 export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
   const now = deps.now ?? Date.now;
@@ -761,7 +771,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           // the helper's one rule for a provider's error (limits.ts evmThrottleS): a throttle is held for the wait it names
           const wait = evmThrottleS(o.error);
           if (wait > 0) holds.hold(url, wait);
-          got[o.id as number] = { ok: false, wait };
+          got[o.id as number] = wait === 0 && isRevert(o.error) ? { ok: false, wait, reverted: true } : { ok: false, wait };
         } else if (Object.hasOwn(o, "result")) got[o.id as number] = { ok: true, result: o.result };
       }
       return got;
@@ -1039,7 +1049,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       ask.length,
       async (u, idx, patient) => {
         const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [ask[i], `0x${n.toString(16)}`] })), patient);
-        return idx.map((_, k) => (r?.[k]?.ok && typeof (r[k] as { result: unknown }).result === "string" ? (r[k] as { result: string }).result.toLowerCase() : null));
+        // a revert is the call's answer, alike between providers, so a call that reverts is agreed by two as a result is,
+        // never asked of every provider and again patiently (fold 9: a discovery's factory() of six transfer addresses,
+        // routers among them, took 9.1 to 13.9 s of 12 cold tapes at once, 06:25Z)
+        return idx.map((_, k) => {
+          const x = r?.[k];
+          if (x?.ok) return typeof x.result === "string" ? x.result.toLowerCase() : null;
+          return x?.reverted === true ? REVERTED : null;
+        });
       },
       (a, b) => a === b,
       false,
@@ -1050,7 +1067,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (called.size >= CALLED_MAX) called.delete(called.keys().next().value!);
       called.set(key(c), x);
     });
-    return calls.map((c) => called.get(key(c)) ?? undefined);
+    return calls.map((c) => {
+      const x = called.get(key(c));
+      return x === REVERTED ? undefined : x;
+    });
   }
 
   // -------------------------------------------------------------------------------------------------------------
