@@ -2,7 +2,8 @@
 // bounded retry of a slow or lagging provider (card signpage-price-read-retry), and
 // src/trade/solana/pool-buy.ts's refusal of a Token-2022 mint that lists an extension twice, one at a time, and runs
 // the tests named for each (test/pool-usd.test.ts "agreement", "staleness" and "retry", test/solana-pool-buy.test.ts
-// "Token-2022"): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
+// "Token-2022"), and S6's Token-2022 sides of a shared route in src/checks/solana/checks.ts (test/solana-shared-route.test.ts,
+// card solana-shared-2022-side): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/pool-usd-mutants.mjs
@@ -18,6 +19,8 @@ const PRICE = path.join(BASE, "src/price/pool-usd.ts");
 const TEST = path.join(BASE, "test/pool-usd.test.ts");
 const BUY = path.join(BASE, "src/trade/solana/pool-buy.ts");
 const BUY_TEST = path.join(BASE, "test/solana-pool-buy.test.ts");
+const S6 = path.join(BASE, "src/checks/solana/checks.ts");
+const S6_TEST = path.join(BASE, "test/solana-shared-route.test.ts");
 
 const AGREE = "agreement";
 const STALE = "staleness";
@@ -79,6 +82,37 @@ export const MUTANTS = [
   // a Token-2022 mint that lists one extension type twice
   [BUY, "if (seen.has(type)) throw", "if (false) throw", T22, BUY_TEST],
   [BUY, "    seen.add(type);\n", "", T22, BUY_TEST],
+  // S6 on a shared route: each side the wallet's own account or the authority's ATA, the source side unbounded, a
+  // Token-2022 destination through the authority's ATA only for a mint read equal on both providers without a transfer
+  // fee or hook
+  [S6, "if (key === solanaAta(c.req.wallet, mint, tp)) return;", "if (false) return;", "every recorded shared-route build passes", S6_TEST],
+  [S6, "if (key !== solanaAta(pa, mint, tp)) { wrong.push(", "if (false) { wrong.push(", "Token-2022 sell", S6_TEST],
+  [S6, "if (tp !== SOLANA_TOKEN_2022_PROGRAM) return;", "return;", "S6 refused", S6_TEST],
+  [S6, "if (tp !== SOLANA_TOKEN_2022_PROGRAM) return;", "if (what !== \"destination\" || tp !== SOLANA_TOKEN_2022_PROGRAM) return;", "S6 refused: the recorded transfer-fee", S6_TEST],
+  [S6, "if (tp !== SOLANA_TOKEN_2022_PROGRAM) return;", "if (what !== \"source\" || tp !== SOLANA_TOKEN_2022_PROGRAM) return;", "S6 refused: the recorded transfer-fee", S6_TEST],
+  [S6, "  if (tp !== SOLANA_TOKEN_2022_PROGRAM) return;\n", "", "S6 pass: through the wallet's own", S6_TEST],
+  [S6, "if (why) wrong.push(", "if (false) wrong.push(", "S6 refused", S6_TEST],
+  [S6, "if (!a || !b) return \"the mint is not read", "if (!a) return \"the mint is not read", "S6 refused: the mint not read", S6_TEST],
+  [S6, "if (a.owner !== b.owner || !eqBytes(a.data, b.data)) return \"the providers disagree", "if (!eqBytes(a.data, b.data)) return \"the providers disagree", "S6 refused: the providers disagree on the owner", S6_TEST],
+  [S6, "if (a.owner !== b.owner || !eqBytes(a.data, b.data)) return \"the providers disagree", "if (a.owner !== b.owner) return \"the providers disagree", "S6 refused: the providers disagree: B reads", S6_TEST],
+  [S6, "  if (d.length === 82) return null;\n", "", "S6 pass: every", S6_TEST],
+  [S6, "if (d.length < 166 || d[165] !== 1) return `the mint of", "if (d.length < 166) return `the mint of", "S6 refused: no mint account type", S6_TEST],
+  [S6, "if (o + 4 + len > d.length) return `the mint's extension", "if (false) return `the mint's extension", "S6 refused: an extension that runs past", S6_TEST],
+  [S6, "if (type === EXT_TRANSFER_FEE_CONFIG) {", "if (false) {", "S6 refused: a transfer-fee mint", S6_TEST],
+  [S6, "if (type === EXT_TRANSFER_HOOK) {", "if (false) {", "S6 refused: a transfer-hook mint", S6_TEST],
+  [S6, "u16(d, slot + 16) !== 0 && u64(d, slot + 8) !== 0n", "true", "S6 pass: a fee config", S6_TEST],
+  [S6, " && u64(d, slot + 8) !== 0n", "", "S6 pass: a fee config", S6_TEST],
+  [S6, "u16(d, slot + 16) !== 0 && ", "", "S6 pass: a fee config", S6_TEST],
+  [S6, "feeCharged(d, body + 72) || ", "", "S6 refused: a fee in the older slot only", S6_TEST],
+  [S6, " || feeCharged(d, body + 90)", "", "S6 refused: a fee in the newer slot only", S6_TEST],
+  [S6, "if (len !== 108) return", "if (false) return", "S6 refused: a fee config of 107 bytes", S6_TEST],
+  [S6, "if (len !== 64) return", "if (false) return", "S6 refused: a transfer hook of 63 bytes", S6_TEST],
+  [S6, "d.subarray(body + 32, body + 64).some((x) => x !== 0)", "d.subarray(body, body + 32).some((x) => x !== 0)", "S6 refused: a hook program with no hook authority", S6_TEST],
+  [S6, "if (o !== d.length && d.subarray(o).some((x) => x !== 0)) return \"the mint has bytes", "if (false) return \"the mint has bytes", "S6 refused: bytes after", S6_TEST],
+  [S6, "u16(d, slot + 16) !== 0 &&", "(d[slot + 16] as number) !== 0 &&", "S6 refused: a fee of 256 bps", S6_TEST],
+  [S6, "d.subarray(body + 32, body + 64).some((x) => x !== 0)", "d.subarray(body + 32, body + 64).every((x) => x !== 0)", "S6 refused: a hook program whose last byte alone is set", S6_TEST],
+  [S6, "d.subarray(body + 32, body + 64).some((x) => x !== 0)", "d[body + 32] !== 0", "S6 refused: a hook program whose first byte is 0", S6_TEST],
+  [S6, "      if (feeCharged(d, body + 72) || feeCharged(d, body + 90)) return \"the mint charges a transfer fee (TransferFeeConfig)\";\n    }", "      if (feeCharged(d, body + 72) || feeCharged(d, body + 90)) return \"the mint charges a transfer fee (TransferFeeConfig)\";\n      return null;\n    }", "S6 refused: a zero fee config followed by a hook program", S6_TEST],
 ];
 
 // a child test run must not inherit this process's own node --test context

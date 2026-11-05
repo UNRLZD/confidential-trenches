@@ -50,6 +50,10 @@ export const MUTANTS = [
   ["h.tickSpacing < 1 ||", "", SHAPE],
   ["|| h.tickSpacing > MAX_TICK_SPACING", "", SHAPE],
   ["if (hexBytes(h.hookData).length > EVM_POOL_MAX_HOOK_DATA)", "if (false)", SHAPE],
+  // card evm-buy-hookdata-fee: a quoted buy's hook data is the device's own, none; an unquoted route (not signed by the
+  // index) still encodes any
+  ['if (quoted && h.hookData !== "0x") refuse(', "if (false) refuse(", "HD2 "],
+  ['if (quoted && h.hookData !== "0x") refuse(', 'if (h.hookData !== "0x") refuse(', HOOKED],
   ["if (!isAddress(h.currency) || !isAddress(h.hooks))", "if (false)", SHAPE],
   ['if (lower(out) === NATIVE || lower(out) === lower(tokens[tokens.length - 2]!)) return refuse("bad_route", "the route buys no token");', "", SHAPE],
   // the encodings

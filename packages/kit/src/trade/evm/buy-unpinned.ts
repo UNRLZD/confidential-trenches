@@ -43,7 +43,7 @@ export type EvmPoolVenue = {
   /** The helper's EVM pool sender (apps/helper pool/evm.ts), which sends each sale to W: the sim of a sale runs from it
    *  (checks/evm/quote.ts simRule, card evm-quote-exec-sim), so a hook sees the sim as it sees the sale. A kit pin, never
    *  read from the helper; the helper refuses to start a sender whose key is not the pin (evmPoolSendersFromEnv). A
-   *  chain with none sims no sale ("keep-min"): no chain has one until the helper publishes its sender's address. */
+   *  chain with none sims no sale ("keep-min"): the testnets pin theirs, the mainnets none until their sell keys. */
   readonly sellSender?: string;
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
@@ -120,6 +120,9 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
       nativeFirst: true,
+      // both hold state 600 s back, a proof's life (card evm-buy-hookdata-fee, fold 3; 30 of 30 each at 600 s,
+      // 2026-11-04 20:12Z): Robinhood's own answers 630 s and refuses 660 s, robinhood-rpc.publicnode.com about 15 s
+      // (refused at 20 s), so it is never a pin; live check evm-buy-hookdata-fee reads both at 600 s
       providers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
@@ -159,6 +162,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // base-sepolia.json, deploy tx 0xa889469f4b7386072b3343b295002c09a4aff89638d29b304ac940c0c6168121; its code the
       // build's, read by that card's live check on sepolia.base.org and base-sepolia-rpc.publicnode.com, 4 Nov)
       sellDelegate: "0xe39f1b9934810792c090d8ab8f555b9955527260",
+      // the helper's sell sender (POOL_EVM_SELL_KEY_BASE_SEPOLIA, made on the helper box by
+      // scripts/deploy/evm-sender-key.mjs, which printed only this address; 0.001 ETH read on sepolia.base.org and
+      // base-sepolia-rpc.publicnode.com, 4 Nov 17:33Z); the helper does not start with any other sell key
+      sellSender: "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553",
       // Uniswap v4's PoolManager (pool-evm-deploy.mjs CHAINS, its code hash pinned there), the target of a v4 sell
       poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408",
       // Uniswap's QuoterV2 and V4Quoter (developers.uniswap.org's Base Sepolia deployments); eth_getCode on
@@ -183,13 +190,22 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 0x62c517784feda75d5597229118cb9c4eb2a370fc34114694c1d009ce84158459; its code the build's, read by that card's
       // live check on rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 4 Nov)
       sellDelegate: "0x9909a660c8a55829335dd4d894c8375bfcfcd65b",
+      // the helper's sell sender (POOL_EVM_SELL_KEY_ROBINHOOD_TESTNET, made as on Base Sepolia; 0.001 ETH read on
+      // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 4 Nov 17:33Z)
+      sellSender: "0xd12d83097671d731df2db731e973ad9a07673607",
       poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
       // Uniswap's V4Quoter at mainnet's address with mainnet's code (testnet-run.mjs NETS); eth_getCode on
       // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, the same on both (2026-11-04 09:55Z):
       // 6,118 bytes, keccak 0xd707b1da…, poolManager() the PoolManager above. No v3 here (M365)
       quoters: bare({ v4: "0x8dc178efb8111bb0973dd9d722ebeff267c98f94" }),
       nativeFirst: true,
-      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"] as const),
+      // dRPC, not PublicNode, beside Robinhood's own (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A): the relay fee
+      // reads state at the epoch's first block, up to a proof's 10-min life old (the helper's POOL_LIFE_MAX_MS), and
+      // robinhood-sepolia-rpc.publicnode.com keeps about 15 s ("historical state ... is not available" at 20 s, 6 of 6;
+      // at 600 s, 6 of 6), where robinhood-testnet.drpc.org answered 6 of 6 at 20, 210, 600 and 700 s and 30 of 30 at
+      // 600 s, and rpc.testnet.chain.robinhood.com 30 of 30 at 600 s (read 2026-11-04 20:09-20:13Z; live check
+      // evm-buy-hookdata-fee holds every pinned provider to 600 s)
+      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
       // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 10 s
       maxLag: 100,
     }),
@@ -327,6 +343,10 @@ function checkRoute(chain: EvmPoolChain, route: EvmRoute, quoted = false): strin
         refuse("bad_route", `a v4 tick spacing is 1 to ${MAX_TICK_SPACING}`);
       }
       if (hexBytes(h.hookData).length > EVM_POOL_MAX_HOOK_DATA) refuse("bad_route", `hook data is at most ${EVM_POOL_MAX_HOOK_DATA} bytes`);
+      // a quoted buy's hook data is the device's own, and the device makes none, as a sell's (sell-unpinned.ts v4Data;
+      // card evm-buy-hookdata-fee): a listed hook that read a referrer or a price from it would let whoever wrote it
+      // steer what W signs
+      if (quoted && h.hookData !== "0x") refuse("bad_route", "a quoted buy's hook data is the device's own: empty");
     }
     tokens = [currencyIn, ...hops.map((h) => h.currency)];
   }

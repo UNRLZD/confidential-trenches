@@ -13,6 +13,7 @@ import * as kit from "../src/index.ts";
 import { evmPoolVenues, EvmPoolBuyError, evmPoolRouteData, type EvmPoolChain, type EvmPoolVenue, type EvmRoute, type EvmV4Hop } from "../src/index.ts";
 // the checks through the unpinned builder and signer; the pinned ones (M370) at the end, with a pinned list of the test's
 import { evmPoolBuildUnpinned as evmPoolBuild, evmPoolSignBuyUnpinned as evmPoolSignBuy, pinnedBuild, pinnedBuildQuoted, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
+import * as builder from "../src/trade/evm/buy-unpinned.ts";
 
 const CAST = JSON.parse(readFileSync(new URL("./evm-pool-buy-hostile.cast.json", import.meta.url), "utf8"));
 const PROOFS = JSON.parse(readFileSync(new URL("../../../contracts/pool-evm/test/fixtures/buy-proofs.json", import.meta.url), "utf8"));
@@ -136,10 +137,13 @@ test("F2 no input of W's signer takes a digest: an EIP-7702 delegation of W to t
   // the kit's public entry exports no digest maker and no signer but the one
   assert.equal("evmPoolBuyDigest" in kit, false);
   // evmPoolGas (trade/evm/pool-fee.ts) takes only a tree depth and gives the gas of one release: no key and no digest;
+  // evmPoolFee, evmPoolChainFeeReads and evmPoolChainFee (pool-fee.ts, card evm-buy-hookdata-fee) are the relay fee
+  // rule and the oracle reads it takes: numbers and calldata, no key and no digest;
   // evmPoolBuyQuote (checks/evm/quote.ts) reads quotes and evmPoolBuildQuoted builds from one: no key and no digest;
   // evmPoolSellQuote reads a sell's quotes and evmPoolBuildSell builds from one (card evm-sell-device-quote): no key and
-  // no digest; no builder takes its caller's minOut (the review of cefe7a0)
-  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuildQuoted", "evmPoolBuildSell", "evmPoolBuyQuote", "evmPoolGas", "evmPoolRouteData", "evmPoolSellQuote", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolSignSimSell", "evmPoolVenues"]);
+  // no digest; no builder takes its caller's minOut (the review of cefe7a0); evmPoolSellTip (trade/evm/sell-unpinned.ts)
+  // gives a chain's pinned sale tip, a constant: no key and no digest
+  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuildQuoted", "evmPoolBuildSell", "evmPoolBuyQuote", "evmPoolChainFee", "evmPoolChainFeeReads", "evmPoolFee", "evmPoolGas", "evmPoolRouteData", "evmPoolSellQuote", "evmPoolSellTip", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolSignSimSell", "evmPoolVenues"]);
 });
 
 test("F2b W signs only the buy object the builder returned: a copy, an edit or a hand-made buy is refused", () => {
@@ -323,6 +327,16 @@ test("Q1 the quoted pinned build takes a v4 route through a middle that is not l
   assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", A_V3, v3([B.weth, Z, X]), 1n, X)), "middle_not_listed");
   // the pins still hold
   assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", ADAPTER, route, 1n, X)), "not_pinned");
+});
+
+test("HD2 the quoted pinned build takes no hook data: a hop that carries any is refused, as a sell's (card evm-buy-hookdata-fee)", () => {
+  const hooked = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc"; // Base's pinned Clanker hook, in its own shape
+  for (const r of [v4(B.weth, hop(X, { fee: 0x800000, tickSpacing: 200, hooks: hooked, hookData: "0xdeadbeef" })), v4(ZERO, hop(X, { hookData: "0x00" })), v4(ZERO, hop(Z), hop(X, { hookData: "0x" + "ab".repeat(32) }))]) {
+    assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", A_V4, r, 1n, X)), "bad_route");
+    assert.equal(code(() => builder.evmPoolRouteDataQuoted("base", r)), "bad_route");
+  }
+  // the same route with the device's own hook data, none, builds
+  assert.equal(code(() => pinnedBuildQuoted(PINNED, "base", A_V4, v4(B.weth, hop(X, { fee: 0x800000, tickSpacing: 200, hooks: hooked })), 1n, X)), "built");
 });
 
 test("M370 a pinned signature goes only to the chain's pool, of a buy through a pinned adapter", () => {

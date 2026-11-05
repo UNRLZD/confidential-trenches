@@ -40,8 +40,8 @@ import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./w
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
-import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
-import { clientOf, clientWindow, refusalLog, throttled, throttleOf } from "./limits/limits.ts";
+import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
+import { clientOf, clientWindow, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
@@ -61,9 +61,9 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES] = MOUNTED.proxy;
-const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND] = MOUNTED.relay;
+const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
@@ -234,7 +234,8 @@ export function handler(
     };
     let route = "other";
     const reply = (a: { status: number; headers?: Headers; body: string; why?: string }) => {
-      if (a.status === 429) refusals.count(route, a.why ?? "unnamed");
+      // a 429, and a 503 a vendor's hold or room answered (card helper-crowd-429: proxy.ts notReady), both named
+      if (a.status === 429 || (a.status === 503 && a.why !== undefined)) refusals.count(route, a.why ?? "unnamed");
       const h: Headers = { ...base, ...cors(req), ...a.headers, "Content-Type": "application/json; charset=utf-8", "Content-Length": String(Buffer.byteLength(a.body)) };
       if (a.status === 413) h.Connection = "close";
       res.writeHead(a.status, h);
@@ -250,7 +251,7 @@ export function handler(
       }
       route = routeOf(path);
       // every route but the pool, RPC and proxy routes (which have their own windows below) counts in the client's window
-      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_EVM_SEND) {
+      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL) {
         const wait = apiRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
       }
@@ -331,12 +332,14 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
-      if (path === POOL_EVM_SEND) {
+      if (path === POOL_EVM_SEND || path === POOL_EVM_SELL) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         const wait = poolRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
-        // pool/evm.ts: { pool, data }, the pool one this helper carries (else 404 not_found)
-        void readBody(req, POOL_EVM_BODY_MAX)
+        // pool/evm.ts: a withdraw { pool, data, epoch } or a sell { pool, w, data, authorization }, the pool one this
+        // helper carries (else 404 not_found); both draw on the pool's one queue and its held limit per client
+        const sell = path === POOL_EVM_SELL;
+        void readBody(req, sell ? POOL_EVM_SELL_BODY_MAX : POOL_EVM_BODY_MAX)
           .then(async (text) => {
             if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
             let body: unknown;
@@ -349,7 +352,7 @@ export function handler(
             const pool = typeof name === "string" ? evmPools.get(name) : undefined;
             if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
             if (!(await heldWithin(senders))) return SENDERS_LATE;
-            const a = await pool.carry(body, clientOf(req));
+            const a = await (sell ? pool.sell(body, clientOf(req)) : pool.carry(body, clientOf(req)));
             return { status: a.status, headers: (a.retryAfterS === undefined ? {} : { "Retry-After": String(a.retryAfterS) }) as Headers, body: JSON.stringify(a.body) };
           })
           .then(reply)
@@ -521,7 +524,9 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   const holders = env.SOLANA_HOLDERS_RPC_URL;
   // card helper-solana-failover: the holders key's slot has no public fallback (the public endpoint refuses
   // getTokenLargestAccounts, rpc/rpc.ts Deps): fallen back, its reads answer 503 at once and the page serves Jupiter's
-  const holdersRpc = holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false });
+  // card helper-crowd-429: the holders key set to the main one is one provider's second, so it shares the main pacer
+  const holdersRpc =
+    holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false, ...(holders === env.SOLANA_RPC_URL ? { pacer: rpc.pacer } : {}) });
   if (holdersRpc !== undefined) slots?.set("holders", holdersRpc.slot);
   return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc });
 }
@@ -531,24 +536,32 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
  * served only when its chain's Discover lists hold it. Base's providers are the host's BASE_RPC_URL when set (a keyed
  * one, asked first), then the public ones (SWAP_RPCS); Robinhood's are the public ones.
  */
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget): Swaps {
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
     if (lists === undefined) continue;
     const url = chain === "base" ? env.BASE_RPC_URL : undefined;
-    let seen: { asOfMs: number; tokens: Set<string> } | null = null;
+    let seen: { asOfMs: number; tokens: Set<string>; pools: Record<string, string> } | null = null;
+    // the lists' newest answer, read once per answer: its tokens, and each one's pool as the list names it
+    const snapshot = async () => {
+      const a = await lists.get();
+      if (a.status !== 200 || a.asOfMs === undefined) return null;
+      if (seen === null || seen.asOfMs !== a.asOfMs) {
+        const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]>; pools?: Record<string, string> };
+        seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))), pools: snap.pools ?? {} };
+      }
+      return seen;
+    };
     out[chain] = createSwaps(chain, {
       gecko,
+      holds,
       rpcs: url === undefined || url === "" ? SWAP_RPCS[chain] : [url, ...SWAP_RPCS[chain]],
-      listed: async (token) => {
-        const a = await lists.get();
-        if (a.status !== 200 || a.asOfMs === undefined) return false;
-        if (seen === null || seen.asOfMs !== a.asOfMs) {
-          const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]> };
-          seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))) };
-        }
-        return seen.tokens.has(token);
+      listed: async (token) => (await snapshot())?.tokens.has(token) ?? false,
+      // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's
+      hint: async (token) => {
+        const s = await snapshot();
+        return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : null;
       },
     });
   }
@@ -690,6 +703,23 @@ export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promis
   }
 }
 
+/**
+ * Every pool's start check (card evm-buy-hookdata-fee, review fold 4 MEDIUM-1): each Solana pool's configured fee at its
+ * first good rent read (pool/solana.ts ready; a failed read is asked again every `everyMs` until one is good) and each
+ * EVM pool's state reads a proof's life back (pool/evm.ts ready). Resolves once all have passed; the first refusal calls
+ * `refuse` (main: exit 2) and rejects, so the helper's ready never turns true over a refused start.
+ */
+export function poolsChecked(pools: ReadonlyMap<string, Pick<SolanaPoolSender, "ready">>, evmPools: ReadonlyMap<string, Pick<EvmPoolSender, "ready">>, refuse: (e: Error) => void, everyMs = READY_EVERY_MS): Promise<void> {
+  const sol = [...pools.values()].map((p) => {
+    const again = setInterval(() => void p.ready, everyMs);
+    again.unref();
+    return p.ready.finally(() => clearInterval(again));
+  });
+  const checks = [...sol, ...[...evmPools.values()].map((p) => p.ready())];
+  for (const c of checks) c.catch(refuse);
+  return Promise.all(checks).then(() => undefined);
+}
+
 export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
@@ -756,7 +786,12 @@ if (import.meta.main) {
   try {
     checkVendorPlans(process.env);
     const proxy = createProxy(process.env);
-    const rpc = createRpc(process.env);
+    // one hold per provider, shared by every path that reads it (card helper-robinhood-capacity: the swap and maker reads
+    // and /v1/rpc/robinhood all read rpc.mainnet.chain.robinhood.com)
+    const holds = providerHolds();
+    // an EVM chain's callers may be answered by the swap reads' pinned providers when its own is held or has no room
+    // (rpc.ts callEvm): a user's call never pays for the helper's background load
+    const rpc = createRpc(process.env, { holds, pinned: SWAP_RPCS });
     const lists = createSolanaLists(proxy, rpc);
     // the senders' handover (sendersFromEnv): `peer` when the helper this one replaces still runs
     const senders = sendersFromEnv(process.env);
@@ -764,7 +799,7 @@ if (import.meta.main) {
     // GeckoTerminal's one keyless budget (src/data/gecko.ts): the Solana token page's candles first, the EVM lists after
     const SERVED_EVM: readonly EvmChain[] = ["base", "robinhood"];
     const gecko = geckoBudget(Date.now);
-    const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko)]));
+    const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko, { holds })]));
     // card helper-ready-gate: the previous helper's warm file (data/warm.ts) seeds the EVM lists and its GeckoTerminal
     // calls; while it still runs (peer), this one makes no GeckoTerminal call until the handover, then takes its last
     // calls from the file it wrote at its stop. With no file, a replaced helper may have spent the window: none for one.
@@ -802,26 +837,34 @@ if (import.meta.main) {
     // a restart loop until redeploy.sh's bound (18:55-18:58Z: a partial POOL_EVM_*_BASE_SEPOLIA set)
     const evmPools = evmPoolSendersFromEnv(process.env);
     const release = releaseOf(process.env);
-    for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    // card evm-buy-hookdata-fee: an EVM pool RPC that cannot answer the fee's state reads 10 min back stops the start;
+    // both pool kinds' start checks run from here, and ready (below) waits for them
+    const checked = poolsChecked(pools, evmPools, (e) => (console.error(`helper: ${e.message}`), process.exit(2)));
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();
     // card helper-restart-fresh: the charts callers read lately are re-read ahead of their next read, one GeckoTerminal
     // call at most a tick in its "ahead" lane (data/solana/token.ts ahead), so a swap hands over bars inside the bound
     setInterval(() => void token.ahead().catch(() => undefined), AHEAD_TICK_MS).unref();
+    // card helper-crowd-429: GeckoTerminal's calls a minute by lane and read, so a refused chart is named from the log
+    setInterval(() => void ((l) => l !== null && console.log(`helper: ${l}`))(gecko.minute()), 60_000).unref();
     // ready (health.ts): once the lists, a token page and its holders answer 200. A helper that replaces a running one
     // (peer) listens only then, so the proxy, which tries each helper of the service in turn, never reaches it cold
     // (deploy/redeploy.sh waits for it, bounded, before it stops the old one); one that starts alone listens at once.
+    // Every pool's start check is part of it, so a start that refuses (exit 2) is never ready and the old one stays.
     let ready = false;
-    const warmed = warmUntilReady({ lists, evmLists, token }).then(() => void (ready = true));
+    const warmed = Promise.all([warmUntilReady({ lists, evmLists, token }), checked]).then(() => void (ready = true));
     const listen = () => {
       server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools); // warms both relayers once the senders are ours
       drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready ? "" : ", warming"}`));
     };
-    if (senders.peer) void warmed.then(listen);
-    else listen();
+    if (senders.peer) void warmed.then(listen, () => undefined); // a refusal: poolsChecked's exit 2, never a listen
+    else {
+      listen();
+      void warmed.catch(() => undefined);
+    }
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
     process.exit(2);

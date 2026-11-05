@@ -28,7 +28,10 @@
 // throttle and hold the chain for every caller (4 Nov: holders 429 within 0.08 s of a crowd, card app-console-429).
 // Its sends are paced to a tenth of the budget's total in any 1 s: a send over the second's room waits for the next
 // room, up to PACE_MAX_MS; past that only that caller gets a 429, never a hold. The public endpoint, whose published
-// limit is per 10 s, is not paced.
+// limit is per 10 s, is not paced. Every send to a keyed URL is in its one pacer (card helper-crowd-429, createPacer):
+// the trade walks' too, behind callers, and a second client's on the same URL. A hold the provider named that ends
+// within HOLD_WAIT_MS is waited out by the callers inside it, the throttled send sent once more, and their sends paced
+// from its end, instead of a 429 to each.
 //
 // Refusals, in the kit's error shape { error: { code } } (v1.ts HelperRpcCode and the common codes):
 //   404 not_found           a chain that is not one of RPC_CHAINS;
@@ -37,7 +40,7 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { budgetFromEnv, EVM_LIMIT_CODE, LIMIT_WINDOW_MS, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
+import { budgetFromEnv, evmThrottleS, LIMIT_WINDOW_MS, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
@@ -75,6 +78,67 @@ export const PACE_MAX_MS = 2_000;
  *  them by a few ms to tens of ms, so two seconds' sends must leave more than 1 s apart. [design: 100 ms margin.] */
 export const PACE_SECOND_MS = 1_100;
 /**
+ * The longest a caller waits out a provider's hold before its send is paced (card helper-crowd-429): a hold ending
+ * within it is waited, then the send booked from its end, instead of a 429 to every caller inside it; a longer one is
+ * still the caller's 429 with the seconds left. [design: 1.5 s: Helius's 429 names no reset, so its hold is 1 s
+ * (limits.ts upstreamRetryAfterS); this wait, PACE_MAX_MS after it and the send stay inside the kit's 5 s
+ * SOLANA_CALL_TIMEOUT_MS (packages/kit/src/trade/solana/send.ts:61).]
+ */
+export const HOLD_WAIT_MS = 1_500;
+/** Past a hold's end, the wait's margin: Node's timers and Date.now() round to whole ms, so a wait of exactly the
+ *  hold's length can wake 1 ms inside it (seen on the box: every caller of a crowd woke inside a 1 s hold). */
+const HOLD_MARGIN_MS = 5;
+
+/**
+ * Each keyed provider URL's sends, booked for the last second and ahead, oldest first (card helper-crowd-429): one per
+ * helper, shared by every RPC client on that URL (Deps.pacer: the holders client when its key is the main one) and by
+ * the helper's own background reads of it (rpc.background), so every send the provider counts is in one second's room.
+ * At b07b71a the trade walks sent to the main key unpaced (SOLANA_TRADES_RPC_URL is SOLANA_RPC_URL's URL on the host):
+ * 12 walks and 10 callers in one second, the provider's 429, and the chain held for every caller (live run 41911437956).
+ */
+export function createPacer() {
+  const booked = new Map<string, number[]>();
+  /** Per URL: when each send left, oldest first. */
+  const left = new Map<string, number[]>();
+  return {
+    /**
+     * When `n` sends to `url` may go so that no PACE_SECOND_MS holds more than `perSecond` of them, `fromMs` from now
+     * on (a hold's end) and after every send booked before (first come, first sent), `share` the most of a second's
+     * room these may fill (a background read: half, so a caller always finds the rest). Booked when within `maxWaitMs`
+     * (and `book`), else only named: the ms to wait. Every time here is the process's monotonic clock
+     * (performance.now), never the wall clock: on the box Date.now() stepped back 0.5 s and 8 s inside a test (traced
+     * 4 Nov 22:14Z), and bookings on it let 11 sends into one real second, then refused callers for the step's length.
+     */
+    at(url: string, n: number, perSecond: number, opts: { fromMs?: number; maxWaitMs: number; share?: number; book?: boolean }): number {
+      const t = performance.now();
+      const cap = Math.max(1, opts.share ?? perSecond);
+      const s = (booked.get(url) ?? []).filter((x) => x > t - PACE_SECOND_MS);
+      booked.set(url, s);
+      const i = s.length + n - cap - 1;
+      let at = Math.max(t + (opts.fromMs ?? 0), s[s.length - 1] ?? t);
+      if (i >= 0) at = Math.max(at, s[Math.min(i, s.length - 1)]! + PACE_SECOND_MS);
+      if (at - t <= opts.maxWaitMs && opts.book !== false) for (let k = 0; k < n; k++) s.push(at);
+      return at - t;
+    },
+    /**
+     * The send itself, now: 0 when fewer than `perSecond` - `n` + 1 sends left in the last PACE_SECOND_MS, and then it is
+     * counted; else the ms until one leaves. A booking names the earliest a send may go, and a lagging event loop
+     * starts some later than booked, which would put them under a second from the next second's on-time sends: this
+     * counts each send where it leaves.
+     */
+    go(url: string, n: number, perSecond: number): number {
+      const t = performance.now();
+      const q = (left.get(url) ?? []).filter((x) => x > t - PACE_SECOND_MS);
+      left.set(url, q);
+      const i = q.length + n - Math.max(perSecond, n) - 1;
+      if (i >= 0) return q[i]! + PACE_SECOND_MS - t;
+      for (let k = 0; k < n; k++) q.push(t);
+      return 0;
+    },
+  };
+}
+export type Pacer = ReturnType<typeof createPacer>;
+/**
  * Requests per 10 s kept on each chain (its total and each method's) for the helper's own reads that serve every
  * user, which only those reads may draw, whatever RPC_BUDGET_<CHAIN> says. Solana: Discover's curve reads, one
  * getMultipleAccounts per 100 pump.fun mints (data/solana/lists.ts l.338), of at most 300 rows (three Jupiter lists of
@@ -101,16 +165,15 @@ export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?:
 };
 /** The chains whose providers speak EVM JSON-RPC, where -32005 is a throttle (limits.ts EVM_LIMIT_CODE). */
 const EVM_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
-/** The whole seconds an EVM provider's -32005 in `answer` (one answer or a batch) asks to wait, 1 to RETRY_AFTER_MAX_S;
- * 0 when there is none or the chain is not EVM. */
+/** The whole seconds an EVM provider's throttle in `answer` (one answer or a batch) asks to wait, by the helper's one
+ * rule (limits.ts evmThrottleS: -32005 or a rate or request limit message, never a limit on the read's size), 1 to
+ * RETRY_AFTER_MAX_S; 0 when there is none or the chain is not EVM. */
 function evmLimited(chain: RpcChain, answer: unknown): number {
   if (!EVM_CHAINS.has(chain)) return 0;
   let wait = 0;
   for (const a of Array.isArray(answer) ? answer : [answer]) {
-    const e = (a as { error?: { code?: unknown; data?: { backoff_seconds?: unknown } } } | null)?.error;
-    if (e?.code !== EVM_LIMIT_CODE) continue;
-    const s = Number(e.data?.backoff_seconds);
-    wait = Math.max(wait, Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1);
+    const e = (a as { error?: unknown } | null)?.error;
+    if (e !== undefined) wait = Math.max(wait, evmThrottleS(e));
   }
   return wait;
 }
@@ -142,7 +205,14 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `slot`: the Solana slot's name for its log lines and health (rpc/slot.ts); `publicFallback: false` for a slot whose
  *  calls the public endpoint refuses (holders' getTokenLargestAccounts: HTTP 429 "Too many requests for a specific RPC
  *  call" on every try, read 2026-11-04 10:04Z), which answers 503 while fallen back and its caller serves its own. */
-type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean };
+/** `holds`: the helper's one hold per provider (limits.ts providerHolds, card helper-robinhood-capacity): an EVM chain's
+ *  provider held by any path of the helper (the swap and maker reads use the same public Robinhood RPC) is sent no
+ *  caller's read inside that hold either (a short one is waited out, holdOver; a longer one answers 429 with the seconds
+ *  left); its throttle here holds it for those paths too. */
+/** `pinned`: an EVM chain's other providers, in order (server.ts: swaps.ts SWAP_RPCS), each of which may answer a
+ *  caller's read when the configured one is held or has no room in its pace (callEvm). */
+/** `pacer`: another client's, when this one sends to the same keyed URL (card helper-crowd-429); else its own. */
+type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
 type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string };
 type Upstream = { url: string; forms: Buffer[] };
@@ -215,7 +285,9 @@ function check(chain: RpcChain, r: unknown): Record<string, unknown> | undefined
 
 export function createRpc(env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
-  const now = deps.now ?? Date.now;
+  // the budgets', holds' and paces' clock: monotonic, in epoch ms (a wall clock that steps back would hold callers
+  // for the step's length; card helper-crowd-429)
+  const now = deps.now ?? (() => performance.timeOrigin + performance.now());
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
   // a keyed Solana provider's slot: its fallback is the public endpoint, on a budget of its own
@@ -242,21 +314,37 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     budget.hold(c, now() + seconds * 1000, whose === "background");
     log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s`);
   };
-  // each keyed provider's sends booked for the last second and ahead, oldest first (PACE_MAX_MS)
-  const booked = new Map<string, number[]>();
-  /** How long `n` sends to `key` wait for its second's room, booked when within PACE_MAX_MS; 0 for the public endpoint
-   *  and a chain on its default provider. A batch larger than a second's room goes alone in its own second. */
-  const pace = (key: string, n: number): number => {
-    if (key === PUBLIC_KEY || upstreams[key as RpcChain].forms.length === 0) return 0;
-    const perSecond = Math.max(1, Math.ceil(limitsOf(key).total / (LIMIT_WINDOW_MS / 1000)));
+  const pacer = deps.pacer ?? createPacer();
+  /** A keyed provider's URL and its sends a second, or null for the public endpoint and a chain on its default
+   *  provider, which are not paced (their published limits are per 10 s). */
+  const pacedOf = (key: string): { url: string; perSecond: number } | null =>
+    key === PUBLIC_KEY || upstreams[key as RpcChain].forms.length === 0 ? null : { url: upstreams[key as RpcChain].url, perSecond: Math.max(1, Math.ceil(limitsOf(key).total / (LIMIT_WINDOW_MS / 1000))) };
+  /** How long `n` sends to `key` wait for their second's room, from a hold's end on, booked when within `maxWaitMs`;
+   *  0 when not paced. A batch larger than a second's room goes alone in its own second. */
+  const pace = (key: string, n: number, maxWaitMs: number, url?: string): number => {
+    const p = pacedOf(key);
+    return p === null ? 0 : pacer.at(p.url, n, p.perSecond, { fromMs: Math.max(0, heldUntilOf(key, url) - now()), maxWaitMs });
+  };
+  const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+  /** When `key`'s hold ends (epoch ms, 0 when free), and with `url`, an EVM provider's hold for every path of the helper
+   *  (Deps holds, card helper-robinhood-capacity) beside it. */
+  const heldUntilOf = (key: string, url?: string): number => {
+    const ms = url === undefined ? 0 : (deps.holds?.heldMs(url) ?? 0);
+    return Math.max(budget.heldUntil(key), ms > 0 ? now() + ms : 0);
+  };
+  /** The seconds left on `key`'s hold, and with `url` on the provider's shared one. */
+  const heldOf = (key: string, url?: string): number => Math.max(budget.heldFor(key), url === undefined ? 0 : (deps.holds?.heldFor(url) ?? 0));
+  /** A hold on `key` (with `url`, the provider's shared one too) that ends within HOLD_WAIT_MS and by `deadline` is
+   *  waited out: true once nothing holds it (card helper-crowd-429); a longer one, or one set again meanwhile, is false
+   *  at once or after the one wait. */
+  const holdOver = async (key: string, deadline: number, url?: string): Promise<boolean> => {
+    const until = heldUntilOf(key, url);
     const t = now();
-    const s = (booked.get(key) ?? []).filter((x) => x > t - PACE_SECOND_MS);
-    // bookings only move forward, so `s` stays sorted: the send goes once the booking `i` has left its second
-    const i = s.length + n - perSecond - 1;
-    const at = i < 0 ? t : Math.max(t, s[Math.min(i, s.length - 1)]! + PACE_SECOND_MS);
-    if (at - t <= PACE_MAX_MS) for (let k = 0; k < n; k++) s.push(at);
-    booked.set(key, s);
-    return at - t;
+    if (until <= t) return true;
+    if (until > Math.min(deadline, t + HOLD_WAIT_MS)) return false;
+    // a timer can fire a few ms before the clock reads its end: the wait is the hold's end plus HOLD_MARGIN_MS
+    await sleep(until - t + HOLD_MARGIN_MS);
+    return heldOf(key, url) === 0;
   };
   const drawsOf = (c: string, methods: readonly string[]): [string, number][] => {
     const draws: [string, number][] = [[c, methods.length]];
@@ -315,8 +403,98 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const methods = ((Array.isArray(out) ? out : [out]) as { method: string }[]).map((r) => r.method);
     // a keyed Solana provider fallen back (rpc/slot.ts): the public endpoint, on its own budget; the key while it serves
     if (c === "solana" && keyed && !slot.useKeyed()) return publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : UPSTREAM();
+    if (EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) return callEvm(c, forward, methods, client, reserved, deps.holds);
     return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved);
   }
+
+  /**
+   * A caller's read on an EVM chain with pinned providers (card helper-robinhood-capacity fold 2): a user's call never
+   * pays for the helper's background load. It draws on the chain's budget once (a caller's share, as call() does), then
+   * goes to the first of the configured provider and the pinned ones that is not held and has room in its pace for a
+   * caller (limits.ts take: background reads leave CALLER_ROOM of it); one that refuses it (its 429, or a throttle in its
+   * answer) is held for every path of the helper, and the next is asked. When none can take it, the soonest one's hold
+   * or pace wait is waited out when it ends within HOLD_WAIT_MS (card helper-crowd-429's rule), and only past that does
+   * the caller get a 429, with the soonest wait any of them names. The chain itself is never held here: a provider's
+   * refusal holds that provider alone.
+   */
+  async function callEvm(c: RpcChain, forward: string, methods: string[], client: string | undefined, reserved: boolean, holds: ProviderHolds): Promise<Answer> {
+    // card helper-crowd-429's rule on this path too: a hold that ends within HOLD_WAIT_MS and by `deadline` is waited out
+    // (the chain's, or the soonest of its providers' when none could take the read), then the read is asked once more
+    const deadline = now() + HOLD_WAIT_MS + PACE_MAX_MS;
+    if (!(await holdOver(c, deadline))) return throttled(budget.heldFor(c), undefined, `${c} held`);
+    const wait = budget.takeEach(drawsOf(c, methods), client, false, reserved);
+    if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
+    const list = [...new Set([upstreams[c].url, ...(deps.pinned?.[c] ?? [])])];
+    for (let tries = 0; ; tries++) {
+      let soonestMs = Infinity;
+      let down = false;
+      let sent = false;
+      for (const url of list) {
+        const secretForms = url === upstreams[c].url ? upstreams[c].forms : [];
+        const h = holds.heldMs(url);
+        if (h > 0) {
+          soonestMs = Math.min(soonestMs, h);
+          continue;
+        }
+        const room = holds.take(url, methods.length, false);
+        if (room > 0) {
+          soonestMs = Math.min(soonestMs, room);
+          continue;
+        }
+        let r: Response;
+        let text: string | undefined;
+        sent = true;
+        try {
+          r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+          if (r.status === 429) {
+            await r.body?.cancel();
+            const s = upstreamRetryAfterS(r.headers, now());
+            holds.hold(url, s);
+            log(`rpc hold ${c} ${new URL(url).host} caller ${s} s`);
+            soonestMs = Math.min(soonestMs, holds.heldMs(url));
+            continue;
+          }
+          text = await readAnswer(r);
+        } catch {
+          down = true;
+          continue;
+        }
+        if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400) || text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) {
+          down = true;
+          continue;
+        }
+        let answer: unknown;
+        try {
+          answer = JSON.parse(text);
+        } catch {
+          down = true;
+          continue;
+        }
+        const limited = evmLimited(c, answer);
+        if (limited > 0) {
+          holds.hold(url, limited);
+          log(`rpc hold ${c} ${new URL(url).host} caller ${limited} s`);
+          soonestMs = Math.min(soonestMs, holds.heldMs(url));
+          continue;
+        }
+        if (secretForms.some((f) => Buffer.from(text, "utf8").includes(f))) return UPSTREAM();
+        return { status: r.status, body: text };
+      }
+      // none could take it: the soonest provider's short hold or pace wait is waited out, and the read asked again (a
+      // read sent and refused draws on the budget once more, as any send does)
+      const waitMs = soonestMs + HOLD_MARGIN_MS;
+      if (tries < 2 && soonestMs <= HOLD_WAIT_MS && now() + waitMs <= deadline) {
+        await sleep(waitMs);
+        if (!sent) continue;
+        const again = budget.takeEach(drawsOf(c, methods), client, false, reserved);
+        if (again === 0) continue;
+        return throttled(again, undefined, budget.refusedBy());
+      }
+      // every provider failed (none held or out of room): upstream, so the device reads its own; else the soonest wait
+      return down && soonestMs === Infinity ? UPSTREAM() : throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.max(1, Math.ceil(soonestMs / 1000)), undefined, `${c} every provider held`);
+    }
+  }
+
 
   /**
    * One call to one provider: `key` is its budget (a chain, or PUBLIC_KEY). The provider's reset holds every caller, the
@@ -329,41 +507,70 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const viaSlot = c === "solana" && keyed && key !== PUBLIC_KEY;
     /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). */
     const fellBack = (): Promise<Answer> => (publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : Promise.resolve(UPSTREAM()));
-    const held = budget.heldFor(key);
-    if (held > 0) return throttled(held, undefined, `${key} held`);
+    // card helper-crowd-429: a hold that ends within HOLD_WAIT_MS is waited out and the send paced from its end, and a
+    // send the provider throttles is sent once more after its short hold, all by `deadline`; a longer hold is the
+    // caller's 429 with its seconds. An EVM chain's provider is held for every path of the helper that reads it (Deps
+    // holds, card helper-robinhood-capacity): that hold is waited out and paced from the same way.
+    const shared = EVM_CHAINS.has(c) ? url : undefined;
+    const heldAt = (): number => heldOf(key, shared);
+    const deadline = now() + HOLD_WAIT_MS + PACE_MAX_MS;
+    if (!(await holdOver(key, deadline, shared))) return throttled(heldAt(), undefined, `${key} held`);
     const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
-    const paced = pace(key, methods.length);
-    if (paced > PACE_MAX_MS) return throttled(Math.ceil((paced - PACE_MAX_MS) / 1000), undefined, `${key} pace`);
-    if (paced > 0) {
-      await new Promise((ok) => setTimeout(ok, paced));
-      // the hold is read again right before the send: the provider may have asked us to wait while this one waited
-      // for its second (card helper-rpc-hold-queued)
-      const heldNow = budget.heldFor(key);
-      if (heldNow > 0) return throttled(heldNow, undefined, `${key} held`);
-    }
-    let r: Response;
+    let r!: Response;
     let text: string | undefined;
-    const sent = now();
-    try {
-      r = await doFetch(url, {
-        method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        body: forward,
-        redirect: "error",
-        signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
-      });
-      if (r.status === 429) {
-        const body = viaSlot ? ((await readAnswer(r).catch(() => undefined)) ?? "") : (await r.body?.cancel(), "");
-        const waitS = upstreamRetryAfterS(r.headers, now());
-        if (viaSlot && (CREDITS.test(body) ? (slot.fail("credits"), true) : slot.throttled(waitS))) return fellBack();
-        hold(key, waitS, "caller");
-        return throttled(budget.heldFor(key), undefined, `${key} provider 429`);
+    let sent = now();
+    for (let tries = 0; ; tries++) {
+      const room = Math.max(0, Math.min(PACE_MAX_MS, deadline - now()));
+      const paced = pace(key, methods.length, room, shared);
+      if (paced > room) return throttled(Math.max(1, Math.ceil((paced - room) / 1000)), undefined, `${key} pace`);
+      if (paced > 0) await sleep(paced);
+      // the hold is read again right before the send: the provider may have asked us to wait while this one waited
+      // for its second (card helper-rpc-hold-queued); a short one is waited out and the send paced again
+      if (heldAt() > 0) {
+        if (tries < 2 && (await holdOver(key, deadline, shared))) continue;
+        return throttled(Math.max(1, heldAt()), undefined, `${key} held`);
       }
-      text = await readAnswer(r);
-    } catch {
-      if (viaSlot) return slot.unanswered(sent), fellBack();
-      return UPSTREAM();
+      // the send counted where it leaves (Pacer.go), within the deadline
+      const p = pacedOf(key);
+      const goBy = performance.now() + Math.max(0, deadline - now());
+      let gate = p === null ? 0 : pacer.go(p.url, methods.length, p.perSecond);
+      for (let round = 0; gate > 0; round++) {
+        // a few rounds at most: each waits for a send to leave the second, so more mean a crowd past the deadline
+        if (round >= 4 || performance.now() + gate > goBy) return throttled(Math.max(1, Math.ceil(gate / 1000)), undefined, `${key} pace`);
+        await sleep(gate);
+        gate = pacer.go(p!.url, methods.length, p!.perSecond);
+      }
+      if (heldAt() > 0) return throttled(Math.max(1, heldAt()), undefined, `${key} held`);
+      sent = now();
+      try {
+        r = await doFetch(url, {
+          method: "POST",
+          headers: { accept: "application/json", "content-type": "application/json" },
+          body: forward,
+          redirect: "error",
+          signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+        });
+        if (r.status === 429) {
+          const body = viaSlot ? ((await readAnswer(r).catch(() => undefined)) ?? "") : (await r.body?.cancel(), "");
+          const waitS = upstreamRetryAfterS(r.headers, now());
+          if (viaSlot && (CREDITS.test(body) ? (slot.fail("credits"), true) : slot.throttled(waitS))) return fellBack();
+          hold(key, waitS, "caller");
+          if (shared !== undefined) deps.holds?.hold(url, waitS);
+          // sent once more after a short hold, drawing on the budget as any send does
+          if (tries < 2 && (await holdOver(key, deadline, shared))) {
+            const again = budget.takeEach(drawsOf(key, methods), client, false, reserved);
+            if (again === 0) continue;
+            return throttled(again, undefined, budget.refusedBy());
+          }
+          return throttled(Math.max(1, heldAt()), undefined, `${key} provider 429`);
+        }
+        text = await readAnswer(r);
+      } catch {
+        if (viaSlot) return slot.unanswered(sent), fellBack();
+        return UPSTREAM();
+      }
+      break;
     }
     if (viaSlot && (r.status === 401 || r.status === 403)) return slot.fail(String(r.status)), fellBack();
     if (viaSlot && r.status >= 400 && CREDITS.test(text ?? "")) return slot.fail("credits"), fellBack();
@@ -378,11 +585,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
     // a JSON-RPC error that says the plan is spent is the key's end, as a 401 is
     if (viaSlot && (Array.isArray(answer) ? answer : [answer]).some((a) => CREDITS.test(String((a as { error?: { message?: unknown } } | null)?.error?.message ?? "")))) return slot.fail("credits"), fellBack();
-    // an EVM provider's -32005 (limits.ts EVM_LIMIT_CODE) in any answer is its throttle, as its 429 is: the chain is held
-    // for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
+    // an EVM provider's throttle in any answer (evmLimited: -32005 or a rate or request limit message) is its throttle, as
+    // its 429 is: the chain is held for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
     const limited = evmLimited(c, answer);
     if (limited > 0) {
       hold(key, limited, "caller");
+      if (shared !== undefined) deps.holds?.hold(url, limited);
       return throttled(budget.heldFor(key), undefined, `${key} provider limit`);
     }
     const b = Buffer.from(text, "utf8");
@@ -399,7 +607,17 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    */
   function background(chain: RpcChain, url: string, method: string): number {
     const key = keyOf(chain, url);
-    return key === null ? 0 : budget.takeEach(drawsOf(key, [method]), undefined, false, false);
+    if (key === null) return 0;
+    // card helper-crowd-429: on a paced provider the read also takes a place in its second, now or never (a wait skips
+    // it to the next provider), behind every send booked before and in at most half the second's room, so callers
+    // always find the rest
+    const p = pacedOf(key);
+    const room = { maxWaitMs: 0, share: p === null ? 0 : p.perSecond - userRoomOf(p.perSecond) };
+    // the walk sends at once (data/solana/trades.ts): counted as it leaves, within the same half of the sends that left
+    if (p !== null && (pacer.at(p.url, 1, p.perSecond, { ...room, book: false }) > 0 || pacer.go(p.url, 1, room.share) > 0)) return 1;
+    const wait = budget.takeEach(drawsOf(key, [method]), undefined, false, false);
+    if (wait === 0 && p !== null) pacer.at(p.url, 1, p.perSecond, room);
+    return wait;
   }
   /** That provider answered 429 to a background read: the background reads wait out its reset; callers go on. */
   function backgroundThrottled(chain: RpcChain, url: string, headers: Headers): void {
@@ -410,5 +628,5 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  Solana provider is set (its fallback, whose budget every reader of it shares), else none (another provider). */
   const keyOf = (chain: RpcChain, url: string): string | null => (url === upstreams[chain].url ? chain : chain === "solana" && keyed && url === SOLANA_PUBLIC ? PUBLIC_KEY : null);
 
-  return { handle, background, backgroundThrottled, slot };
+  return { handle, background, backgroundThrottled, slot, pacer };
 }

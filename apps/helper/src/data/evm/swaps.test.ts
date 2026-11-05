@@ -252,6 +252,9 @@ test("a provider that refuses is held for the wait it names (the helper's RPC ru
   clock.t += 7_000;
   chain.st.faults.delete(URLS[0]!);
   chain.st.faults.delete(URLS[1]!);
+  // the third down, so the pair after the wait is the two that refused (which two free providers are asked first
+  // takes turns: swaps.ts ranked)
+  chain.st.faults.set(URLS[2]!, { down: true });
   await s.tick();
   s.stop();
   assert.ok(chain.st.calls.get(URLS[0]!)! > a0, "asked again after the wait");
@@ -384,7 +387,7 @@ test("a listed token whose pool our reads do not find answers 200 empty from our
   assert.equal(off.status, 404);
 });
 
-test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later serves the last good bars of that pool and tf; with none kept and no bars of ours, 429 with the wait, never an empty 200", async () => {
+test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later serves the last good bars of that pool and tf; with none kept, the chain's own bars alone (card helper-crowd-429: the seed is optional, its 429 never the answer)", async () => {
   // app live run 41787804457 (4 Nov 06:49Z): a throttled GeckoTerminal read left a chart with no bars (the Solana
   // path; the EVM path merged GeckoTerminal the same way)
   const { readFileSync } = await import("node:fs");
@@ -413,7 +416,29 @@ test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later
   assert.deepEqual(JSON.parse(kept.body).candles, first.candles);
   assert.equal(kept.src, "chain,geckoterminal");
   const none = await s.candles(ICNT, "5m", null, 500); // paused by the 429, nothing kept for 5m
-  assert.equal(none.status, 429, none.body);
-  assert.ok((none.retryAfterS ?? 0) > 0);
+  assert.equal(none.status, 200, none.body);
+  assert.deepEqual([none.src, JSON.parse(none.body).candles], ["chain", []], "our own bars alone: none yet");
   s.stop();
+});
+
+test("card helper-crowd-429: GeckoTerminal's bars before a book of ours are an optional seed, a stale read: with one call left in the window it is not taken, the chart answers our own bars, and the call stays for a chart with nothing to serve", async () => {
+  const { geckoBudget, GT_LIMIT_PER_MIN } = await import("../gecko.ts");
+  const chain = fakeChain();
+  const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
+  const gt: string[] = [];
+  const fetchFn = (async (url: string, init: RequestInit) => {
+    if (!url.includes("geckoterminal")) return chain.fetch(url, init);
+    gt.push(url);
+    return new Response(JSON.stringify({ data: { attributes: { ohlcv_list: [] } } }), { status: 200 });
+  }) as typeof chain.fetch;
+  const budget = geckoBudget(() => clock.t);
+  budget.seed(Array.from({ length: GT_LIMIT_PER_MIN - 1 }, () => clock.t - 1_000)); // the old helper's calls at a swap
+  const s = open(chain, clock, { fetch: fetchFn, gecko: budget });
+  chain.st.head = REC.firstHead + 200;
+  const got = await bodyOf(s.candles(ICNT, "1m", null, 500));
+  s.stop();
+  assert.ok(got.own_from_s !== undefined && got.candles.length > 0, "bars of ours");
+  assert.equal(got.src, "chain");
+  assert.deepEqual(gt, [], "no GeckoTerminal call for the seed");
+  assert.equal(budget.take("pages"), true, "the window's last call is still there for a cold chart");
 });

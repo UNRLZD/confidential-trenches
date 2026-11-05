@@ -52,7 +52,7 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
-import { EVM_LIMIT_CODE, EVM_LIMIT_MESSAGE, RETRY_AFTER_MAX_S, upstreamRetryAfterS } from "../../limits/limits.ts";
+import { CALLER_ROOM, evmThrottleS, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 
@@ -209,13 +209,39 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // -32601 "method not available" at 14:36:28Z). With two providers needed alike, one slow provider left no pair:
   // 503. rpc.mainnet.chain.robinhood.com, the chain's own, answered 100-block reads 11,000 blocks back in 0.4-1.3 s
   // and a batch of 10 in 2.0 s, its logs' `blockTimestamp` still 0x0 and its block headers' `timestamp` set: it is
-  // header-timed (HEADER_TIMED). Ordered by those reads, the fastest first.
-  robinhood: ["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network", "https://api.blockvectra.com/v1/robinhood_mainnet/public"],
+  // header-timed (HEADER_TIMED).
+  //
+  // Read again 2026-11-04 19:37-19:42Z (card helper-robinhood-capacity), every Robinhood mainnet RPC chainid.network and
+  // chainlist.org list, from the helper box and from the Mac: two more keyless operators answer `eth_getLogs` 3,000
+  // blocks back with each log's blockTimestamp and batches of 10: robinhood.api.pocket.network (served 11 calls a second
+  // for 8 s, none refused) and rpc-robinhood.blockmachine.io (10 a second, then -32029; keyless reads only of about the
+  // newest 10,000 blocks; its 429 at 20:12Z named x-ratelimit-limit 60, unit cu_per_minute, Retry-After 3). Sustained from the Mac, 4 at once for 8 s: drpc 33 calls a second none refused, daybreak 29
+  // then -32005 "too many concurrent requests", the chain's own 3.8 then 429. Not added: robinhood-rpc.publicnode.com
+  // (-32602 archive), blockreq.com (only the newest blocks), rpc.ordofi.network (no answer), robinhood.rpc.blxrbdn.com
+  // and rpc.nodeflare.app (403), lb.routeme.sh and 4663.rpc.thirdweb.com (429 at once), the Tatum gateway (5 a minute),
+  // rpc.degenprotocol.io (502s; logs blockTimestamp 0x0) and rpc-robinhood.globalstake.io (10 s timeouts). Asked in
+  // order of expected answer time (ranked: each one's in-flight queue and pace, the wide providers (WIDE_SPAN) first among
+  // equals), so the chain's own RPC, whose logs cost a second post for their headers and whose pace /v1/rpc/robinhood's
+  // callers share, is asked whenever its bucket has room for that.
+  robinhood: ["https://robinhood.daybreak-rpc.network", "https://rpc-robinhood.blockmachine.io", "https://robinhood.api.pocket.network", "https://robinhood.drpc.org", "https://api.blockvectra.com/v1/robinhood_mainnet/public", "https://rpc.mainnet.chain.robinhood.com"],
 };
 
 /** Providers whose logs carry no block time on a chain timed by them (Robinhood): their logs are timed by their own
  *  `eth_getBlockByNumber` of each log's block, and count for a swap's time only where another provider logged the same. */
 export const HEADER_TIMED: ReadonlySet<string> = new Set(["https://rpc.mainnet.chain.robinhood.com"]);
+/** The most blocks one `eth_getLogs` asks of a provider that takes more than its chain's VENUES span (card
+ *  helper-robinhood-capacity, read 2026-11-04 19:44Z from the Mac, the v4 PoolManager's logs 500, 1,000 and 3,000 blocks
+ *  back to the head): robinhood.api.pocket.network 1,532 logs over 1,000 blocks in 1.9 s and 3,000 in 7.4 s;
+ *  rpc-robinhood.blockmachine.io 1,000 in 1.0 s and 3,000 in 0.6 s; robinhood.daybreak-rpc.network 1,000 in 0.9 s, 3,000
+ *  refused -32602 "query exceeds max block range 2000"; rpc.mainnet.chain.robinhood.com 3,000 in 0.6 s. A 3,000-block
+ *  cold window is 3 reads on them, not 30. [design: 1,000: the widest every one of them answered within 2 s, and the
+ *  busiest filter's 1,000 blocks (a pool's swaps, under the whole PoolManager's 1,500 logs) fit ANSWER_MAX and LOGS_MAX.] */
+const WIDE_SPAN: Readonly<Record<string, number>> = {
+  "https://robinhood.api.pocket.network": 1_000,
+  "https://rpc-robinhood.blockmachine.io": 1_000,
+  "https://robinhood.daybreak-rpc.network": 1_000,
+  "https://rpc.mainnet.chain.robinhood.com": 1_000,
+};
 
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
  *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ). */
@@ -223,6 +249,24 @@ const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://ba
 
 /** Requests out to one provider at once (swaps.ts batchTo). */
 export const INFLIGHT_MAX = 4;
+/** A provider's answer time before its first answer, and the weight of each new one in its moving average (waitOf).
+ *  [design: 500 ms, about a wide 1,000-block read's (WIDE_SPAN: 0.6 to 1.9 s; heads and calls under 0.3 s), and 0.3, so
+ *  three slow answers in a row move the rank.] */
+const LATENCY_START_MS = 1_000;
+/** A post slot gave back from a provider's queue (its requests unanswered there). */
+const GAVE_UP = Symbol("gave up");
+const LATENCY_WEIGHT = 0.3;
+/** Expected waits within this of each other rank alike, and free budget orders them (ranked). [design: 100 ms, under
+ *  one answer time, so the rank follows free budget until a queue or a pace wait is a real one.] */
+const WAIT_GRAIN_MS = 100;
+/** The longest a read waits for its provider's pace (limits.ts PROVIDER_PACE) before it is the next provider's to
+ *  answer. [design: 1.5 s, ten of daybreak's posts at its pace; a provider whose bucket is that far spent is not the
+ *  one to wait for while another has room.] A provider that holds is passed over at once: the pace keeps the reads
+ *  under each provider's limit, so the short holds HOLD_WAIT_S waited out (cd22743) no longer start. */
+export const PACE_WAIT_MAX_MS = 1_500;
+/** The longest a read waits for its provider's pace when no other provider answered it (agreed's last round), so it
+ *  never fails on the pace alone. [design: 5 s, a third of the 15 s a cold tape is given, within TIMEOUT_MS.] */
+export const PACE_PATIENT_MS = 5_000;
 
 /** Blocks read again every tick, and so the blocks an agreed head must be ahead of a settled block. Base's sequencer can
  *  reorg a few unsafe blocks; its `safe` head trails by about 40 s (proofs/evm-safe-lag, 20 blocks), so 10 re-read blocks
@@ -244,7 +288,8 @@ export const REF_COLD_BLOCKS = VENUES.base.step + VENUES.base.refBack;
  *  window (which takes cold / span reads). */
 export const SPAN_MAX = VENUES.base.span;
 const CHUNKS_MAX = 3;
-/** Providers asked for one answer at most: two, and two more when they differ. */
+/** Providers that answer one read at most: two, and two more when they differ (agreed: one that answers nothing, past
+ *  its pace's or its queue's wait or held, does not count, and the next is asked). */
 const PROVIDERS_MAX = 4;
 /** A provider this many blocks behind the other is passed over for the third (Base). */
 export const LAG_MAX = VENUES.base.lagMax;
@@ -252,6 +297,9 @@ export const LAG_MAX = VENUES.base.lagMax;
 export const IDLE_MS = 60_000;
 /** The tick period. */
 export const TICK_MS = 1_000;
+/** An agreed head read within this is every reader's (agreedHead). [design: a tick's period, so a tick reads at most one
+ *  head of its own and a dozen first reads at once read one.] */
+export const HEAD_SHARE_MS = TICK_MS;
 /** A book not read for this long answers 503 rather than a stale chart. */
 export const STALE_MS = 60_000;
 export const OPEN_MAX = 40;
@@ -262,6 +310,8 @@ const ANSWER_MAX = 4 * 1024 * 1024;
 const TIMEOUT_MS = 8_000;
 const LOGS_MAX = 20_000;
 const TRADERS_MAX = 5_000;
+/** Agreed eth_call results kept (callsAgreed), oldest out first. */
+const CALLED_MAX = 5_000;
 export const TRADES_MAX = 50;
 export const CANDLES_MAX = 500;
 /** History before our first bar never changes: kept this long. */
@@ -515,7 +565,7 @@ export function traderLeg(s: Pick<Swap, "side" | "amt">, take: bigint | undefine
 type Call = { method: string; params: unknown[] };
 type Reply = { ok: true; result: unknown } | { ok: false; wait: number };
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -531,31 +581,56 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     for (let lo = from; lo <= to; lo += V.span) out.push([lo, Math.min(to, lo + V.span - 1)]);
     return out;
   };
-  const held = new Map<string, number>(); // provider -> held until (ms)
+  // each provider's hold, shared with every other path of the helper that reads it (limits.ts providerHolds)
+  const holds = deps.holds ?? providerHolds(now);
 
   /** One JSON-RPC batch to a provider: each call's reply, or the wait a refusal names; null when it failed. */
-  async function batchTo(url: string, calls: Call[]): Promise<Reply[] | null> {
+  async function batchTo(url: string, calls: Call[], patient = false): Promise<Reply[] | null> {
     const max = BATCH_SIZE[url] ?? 10;
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
-    const got = await Promise.all(parts.map((part) => slot(url, () => one(url, part))));
-    return got.some((g) => g === null) ? null : got.flat() as Reply[];
+    const got = await Promise.all(parts.map((part) => slot(url, part.length, patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS, () => one(url, part, patient))));
+    // a part given back from the queue (slot) is no answer for its requests alone: the parts answered are kept, and only
+    // its requests are asked of the next provider
+    if (got.every((g) => g === GAVE_UP)) return null;
+    return got.some((g) => g === null) ? null : got.flatMap((g, k) => (g === GAVE_UP ? parts[k]!.map((): Reply => ({ ok: false, wait: 0 })) : (g as Reply[])));
   }
 
   // at most INFLIGHT_MAX requests out to a provider at once, the rest queued in order: a first read's walk sent 246 at
   // once to the Robinhood providers, which answered 429, -32005, drpc's code 30 and timeouts that one at a time they
   // did not (card helper-chart-fresh, 2026-11-04 14:49Z)
-  const inflight = new Map<string, { n: number; queue: (() => void)[] }>();
-  async function slot<T>(url: string, run: () => Promise<T>): Promise<T> {
-    const q = inflight.get(url) ?? { n: 0, queue: [] };
+  // (`calls`: the calls out or queued to it, by which free counts its budget; `queue`: each queued post's calls, by
+  // which waitOf counts the units it will take)
+  const inflight = new Map<string, { n: number; calls: number; queue: { go: () => void; calls: number }[] }>();
+  // a post queued past `maxWaitMs` is another provider's, as a read past its pace's wait is (one): GAVE_UP, counted in
+  // `paced` so agreed's patient round may ask it again (fold 4: at c780282 a cold dozen's reads waited 68.7 s in all in
+  // daybreak's queue, and the slowest tape took 16.7 s)
+  async function slot<T>(url: string, calls: number, maxWaitMs: number, run: () => Promise<T>): Promise<T | typeof GAVE_UP> {
+    const q = inflight.get(url) ?? { n: 0, calls: 0, queue: [] };
     inflight.set(url, q);
-    if (q.n >= INFLIGHT_MAX) await new Promise<void>((go) => q.queue.push(go));
-    else q.n++;
+    q.calls += calls;
+    if (q.n >= (holds.paceOf(url)?.inflight ?? INFLIGHT_MAX)) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const sent = await new Promise<boolean>((go) => {
+        const entry = { go: () => go(true), calls };
+        q.queue.push(entry);
+        timer = setTimeout(() => {
+          // handed a slot meanwhile (shifted out and resolved true): nothing to take back
+          const i = q.queue.indexOf(entry);
+          if (i < 0) return;
+          q.queue.splice(i, 1);
+          go(false);
+        }, maxWaitMs);
+      });
+      clearTimeout(timer);
+      if (!sent) return (q.calls -= calls), paced.set(url, (paced.get(url) ?? 0) + 1), GAVE_UP;
+    } else q.n++;
     try {
       return await run();
     } finally {
+      q.calls -= calls;
       const next = q.queue.shift();
-      if (next !== undefined) next();
+      if (next !== undefined) next.go();
       else q.n--;
     }
   }
@@ -564,8 +639,32 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  batch queued behind INFLIGHT_MAX before the provider refused sends nothing while it holds and fails as a refused
    *  read does, so the caller asks the next provider (card helper-rpc-hold-queued: 2026-11-04 18:55Z on the helper box,
    *  seven batches queued before the chain's own Robinhood RPC's 429 were sent within 190 ms of it). */
-  async function one(url: string, part: Call[]): Promise<Reply[] | null> {
-    if ((held.get(url) ?? 0) > now()) return null;
+  /** Reads each provider passed at its pace's wait, by which agreed's last round knows whom to ask again. */
+  const paced = new Map<string, number>();
+  /** Each provider's answer time, a moving average of its posts' (waitOf), from LATENCY_START_MS; `out`: when each post
+   *  now out to it was sent, so a provider whose answers are late counts as slow before the first returns. */
+  const latency = new Map<string, number>();
+  const out = new Map<string, Set<number>>();
+  const latencyOf = (u: string): number => {
+    const ewma = latency.get(u) ?? LATENCY_START_MS;
+    const o = out.get(u);
+    return o === undefined || o.size === 0 ? ewma : Math.max(ewma, performance.now() - Math.min(...o));
+  };
+  async function one(url: string, part: Call[], patient = false): Promise<Reply[] | null> {
+    if (holds.heldFor(url) > 0) return null;
+    // the provider's pace, which every path of the helper draws from (limits.ts providerHolds take): a background read
+    // waits for its units, the hold read again after each wait; past PACE_WAIT_MAX_MS of waits it is another provider's,
+    // past PACE_PATIENT_MS when no other provider answered it (agreed's last round)
+    for (let w = holds.take(url, part.length, true), slept = 0; w > 0; w = holds.take(url, part.length, true)) {
+      if (slept + w > (patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS)) return (paced.set(url, (paced.get(url) ?? 0) + 1), null);
+      await new Promise((go) => setTimeout(go, w));
+      slept += w;
+      if (holds.heldFor(url) > 0) return null;
+    }
+    const sent = performance.now();
+    const o = out.get(url) ?? new Set<number>();
+    out.set(url, o);
+    o.add(sent);
     try {
       const r = await doFetch(url, {
         method: "POST",
@@ -574,10 +673,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         redirect: "error",
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
+      latency.set(url, (latency.get(url) ?? LATENCY_START_MS) * (1 - LATENCY_WEIGHT) + (performance.now() - sent) * LATENCY_WEIGHT);
       if (r.status === 429) {
         await r.body?.cancel();
-        // a later, shorter wait never cuts a longer one, as the limit path below
-        held.set(url, Math.max(held.get(url) ?? 0, now() + upstreamRetryAfterS(r.headers, now()) * 1000));
+        // a later, shorter wait never cuts a longer one (providerHolds), as the limit path below
+        holds.hold(url, upstreamRetryAfterS(r.headers, now()));
         return null;
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
@@ -593,40 +693,119 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         const o = obj(a);
         if (!Number.isSafeInteger(o.id) || (o.id as number) < 0 || (o.id as number) >= part.length) continue;
         if (Object.hasOwn(o, "error")) {
-          // the helper's RPC rules (rpc.ts): -32005 or a limit message is a throttle, held for the wait it names
-          const e = obj(o.error);
-          const s = Number(obj(e.data).backoff_seconds);
-          const limited = e.code === EVM_LIMIT_CODE || EVM_LIMIT_MESSAGE.test(String(e.message ?? ""));
-          const wait = limited ? (Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1) : 0;
-          if (wait > 0) held.set(url, Math.max(held.get(url) ?? 0, now() + wait * 1000));
+          // the helper's one rule for a provider's error (limits.ts evmThrottleS): a throttle is held for the wait it names
+          const wait = evmThrottleS(o.error);
+          if (wait > 0) holds.hold(url, wait);
           got[o.id as number] = { ok: false, wait };
         } else if (Object.hasOwn(o, "result")) got[o.id as number] = { ok: true, result: o.result };
       }
       return got;
     } catch {
       return null;
+    } finally {
+      o.delete(sent);
     }
   }
-  const usable = (urls: readonly string[]) => urls.filter((u) => (held.get(u) ?? 0) <= now());
+  const usable = (urls: readonly string[]) => urls.filter((u) => holds.heldFor(u) === 0);
+  /** `urls` less a provider that takes one request a post (BATCH_SIZE 1: daybreak, blockvectra) when `calls` would be
+   *  more than one post to it: it takes single-post reads only (card helper-robinhood-capacity fold 5: at fa4b98d a
+   *  cold dozen sent daybreak 94 eth_getLogs posts, each wide read 3 to 6 of them in its 3 slots). */
+  const single = (urls: readonly string[], calls: number): string[] => urls.filter((u) => (BATCH_SIZE[u] ?? 10) > 1 || calls <= 1);
+  /** Providers by free budget, the most first. */
+  const byFree = (urls: readonly string[]) => urls.map((u) => ({ u, f: free(u) })).sort((a, b) => b.f - a.f).map((x) => x.u);
+  /** A provider's free budget, in calls: what its pace lets background reads send within the next second (the free
+   *  units above CALLER_ROOM and a second's refill, times the calls a post carries where it counts posts), less the calls
+   *  already out or queued to it (slot), so a dozen walks starting at once see each other's reads. A provider with no
+   *  pace counts what INFLIGHT_MAX posts carry. */
+  const free = (u: string): number => {
+    const batch = BATCH_SIZE[u] ?? 10;
+    const p = holds.paceOf(u);
+    const per = p === undefined || p.unit === "post" ? batch : 1;
+    const room = p === undefined ? INFLIGHT_MAX : Math.max(0, holds.room(u) * p.burst - p.burst * CALLER_ROOM) + p.perS;
+    return room * per - (inflight.get(u)?.calls ?? 0);
+  };
+  /** How long a read of `calls` calls to `u` (with `headers`, a second post each for their headers) expects to wait
+   *  for its answer (card helper-robinhood-capacity fold 4): one answer time (latency) after the longer of its in-flight
+   *  queue (the posts out and queued ahead of it and its own, past the provider's in-flight cap, each round one answer
+   *  time long) and its pace (the units the queued posts and its own will take, past the bucket's free units above
+   *  CALLER_ROOM, at the provider's refill). Free budget alone
+   *  ranked daybreak first while its queue was longest: at c780282 a cold dozen's reads waited 68.7 s in all in
+   *  daybreak's queue against 12.1 s of its pace, and the slowest tape took 16.7 s. */
+  const waitOf = (u: string, calls: number, headers: boolean): number => {
+    const batch = BATCH_SIZE[u] ?? 10;
+    const posts = Math.ceil(Math.max(calls, 1) / batch) * (headers ? 2 : 1);
+    const q = inflight.get(u);
+    const p = holds.paceOf(u);
+    const cap = p?.inflight ?? INFLIGHT_MAX;
+    const ahead = (q?.n ?? 0) + (q?.queue.length ?? 0);
+    const lat = latencyOf(u);
+    const queued = Math.floor((ahead + posts - 1) / cap) * lat;
+    if (p === undefined) return queued + lat;
+    const units = (q?.queue ?? []).reduce((a, x) => a + (p.unit === "post" ? 1 : x.calls), 0) + (p.unit === "post" ? posts : Math.max(calls, 1) * (headers ? 2 : 1));
+    const short = units - Math.max(0, holds.room(u) * p.burst - p.burst * CALLER_ROOM);
+    return Math.max(queued, short > 0 ? (short * 1000) / p.perS : 0) + lat;
+  };
+  /** Providers in the order to ask them (card helper-robinhood-capacity fold 2, fold 4): the wide ones (WIDE_SPAN) first
+   *  for a read of a block range, then by expected wait (waitOf: a header-timed provider's logs cost a second post, for
+   *  their headers), the shortest first, then by free budget, the most first, so the walks share the wide providers, one
+   *  whose queue is longer than another's pace wait goes second, and a 100-block one (drpc) is the last resort; ties
+   *  take turns, so a dozen walks starting on full buckets do not all start on the same two. A read that names no block
+   *  range (an eth_call, a receipt, a sender) is ranked by expected wait and free budget alone (wideFirst false). */
+  let turn = 0;
+  const ranked = (urls: readonly string[], wideFirst = true, calls = 1): string[] => {
+    const t = turn++;
+    const n = Math.max(urls.length, 1);
+    const key = (u: string, i: number): number[] => {
+      // a read of a block range is `calls` reads of V.span blocks: a wide provider joins them up to its span (logsOf)
+      const span = wideFirst ? Math.max(WIDE_SPAN[u] ?? V.span, V.span) : V.span;
+      return [
+        wideFirst && span > V.span ? 1 : 0,
+        -Math.round(waitOf(u, Math.ceil(calls / Math.floor(span / V.span)), wideFirst && clock === null && headerTimed.has(u)) / WAIT_GRAIN_MS),
+        Math.round(free(u)),
+        -((i - (t % n) + n) % n),
+      ];
+    };
+    return urls
+      .map((u, i) => ({ u, k: key(u, i) }))
+      .sort((a, b) => b.k[0]! - a.k[0]! || b.k[1]! - a.k[1]! || b.k[2]! - a.k[2]! || b.k[3]! - a.k[3]!)
+      .map((x) => x.u);
+  };
 
   /** The block both providers have, and its time: the newest block of the two heads (the second highest of three when
    *  the first two differ by more than LAG_MAX), with the providers that have it. Null when it cannot be read. */
-  async function agreedHead(): Promise<{ n: number; t: number; with: string[] } | null> {
+  // one agreed head per HEAD_SHARE_MS, shared by every first read and discovery of the chain that asks within it (card
+  // helper-robinhood-capacity fold 3: a dozen cold tapes read a dozen heads, two or three providers each); a tick
+  // (`fresh`) always reads its own, the newest, and leaves it for them
+  let headShared: { at: number; p: Promise<{ n: number; t: number; with: string[] } | null> } | null = null;
+  function agreedHead(fresh = false): Promise<{ n: number; t: number; with: string[] } | null> {
+    if (!fresh && headShared !== null && now() - headShared.at < HEAD_SHARE_MS) return headShared.p;
+    const p = agreedHeadNow();
+    const mine = { at: now(), p };
+    headShared = mine;
+    // a head not read is not kept: the next asks again
+    void p.then((h) => {
+      if (h === null && headShared === mine) headShared = null;
+    });
+    return p;
+  }
+  async function agreedHeadNow(): Promise<{ n: number; t: number; with: string[] } | null> {
     const heads = new Map<string, { n: number; t: number }>();
-    const read = async (urls: string[]) => {
+    const read = async (urls: string[], patient = false) => {
       await Promise.all(
         urls.map(async (u) => {
-          const r = await batchTo(u, [{ method: "eth_getBlockByNumber", params: ["latest", false] }]);
+          const r = await batchTo(u, [{ method: "eth_getBlockByNumber", params: ["latest", false] }], patient);
           const b = r?.[0]?.ok ? obj(r[0].result) : {};
           const [n, t] = [hexInt(b.number), hexInt(b.timestamp)];
           if (n !== null && t !== null) heads.set(u, { n, t });
         }),
       );
     };
-    const ok = usable(rpcs);
+    const ok = ranked(usable(rpcs));
     await read(ok.slice(0, 2));
     const first = [...heads.values()];
     if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await read(ok.slice(2, 3));
+    // no two heads within the pace's wait: the providers not read yet, and those that passed, read patiently
+    if (heads.size < 2) await read(ok.filter((u) => !heads.has(u)).slice(0, 2), true);
     const sorted = [...heads].sort((a, b) => b[1].n - a[1].n);
     if (sorted.length < 2) return null;
     const agreed = sorted[1]![1].n; // the newest block at least two providers have
@@ -637,19 +816,29 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return { n: agreed, t: clock.genesisS + clock.blockS * agreed, with: withIt };
   }
 
-  /** The providers to ask, in order: those of `urls` not held, then any other of ours not held (a provider that was held
-   *  since the head was read, or lags, is made up for by the next), at most PROVIDERS_MAX. */
-  const askOrder = (urls: readonly string[]): string[] => [...new Set([...usable(urls), ...usable(rpcs)])].slice(0, PROVIDERS_MAX);
+  /** The providers to ask, in order (ranked): those of `urls` not held, then any other of ours alike (a provider held
+   *  since the head was read, or lags, is made up for by the next); agreed stops at PROVIDERS_MAX that answered. */
+  const askOrder = (urls: readonly string[], wideFirst: boolean, calls = 1): string[] => {
+    const have = ranked(usable(urls), wideFirst, calls);
+    return [...new Set([...have, ...ranked(usable(rpcs).filter((u) => !have.includes(u)), wideFirst, calls)])];
+  };
 
   /** Asks `urls` the same `n` requests, two at once and then one more at a time while some answer has no two alike.
-   *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. */
-  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[]) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean): Promise<(A | null)[]> {
-    const order = askOrder(urls);
+   *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. Each next one,
+   *  of the rest and the wide ones (WIDE_SPAN) of the first two (a read past its pace's or queue's wait or held answers
+   *  nothing at once), is ranked when it is asked, by expected answer time with the requests still left (fold 4). */
+  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true): Promise<(A | null)[]> {
+    const order = askOrder(urls, wideFirst, n);
+    const passedBefore = new Map(order.map((u) => [u, paced.get(u) ?? 0]));
     const got: A[][] = Array.from({ length: n }, () => []);
-    const run = async (u: string, idx: number[]) => {
-      const r = await ask(u, idx);
+    const by: Set<string>[] = Array.from({ length: n }, () => new Set());
+    // the providers that answered something: PROVIDERS_MAX of them at most (a read past its pace's wait or held answers
+    // nothing, and the next is asked instead; fold 4: capping the asks left drpc out while daybreak's queue held tapes)
+    const answered = new Set<string>();
+    const run = async (u: string, idx: number[], patient = false) => {
+      const r = await ask(u, idx, patient);
       idx.forEach((i, k) => {
-        if (r[k] != null) got[i]!.push(r[k]!);
+        if (r[k] != null) got[i]!.push(r[k]!), by[i]!.add(u), answered.add(u);
       });
     };
     const pick = (i: number): A | null => {
@@ -659,12 +848,55 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     };
     const all = Array.from({ length: n }, (_, i) => i);
     await Promise.all(order.slice(0, 2).map((u) => run(u, all)));
-    for (const u of order.slice(2)) {
-      const left = all.filter((i) => pick(i) === null);
-      if (left.length === 0) break;
-      await run(u, left);
+    const wide = (u: string) => (WIDE_SPAN[u] ?? 0) > V.span;
+    const rest = order.slice(2);
+    // the next one is ranked when it is asked, not when the read began: a dozen tapes ranked at once saw no queue yet,
+    // and all asked daybreak next, 37 slow posts in its 3 slots (fold 4)
+    const tier = [...rest, ...order.slice(0, 2).filter(wide)];
+    while (tier.length > 0 && answered.size < PROVIDERS_MAX && !all.every((i) => pick(i) !== null)) {
+      const want = all.filter((i) => pick(i) === null);
+      const u = ranked(tier, wideFirst, want.length)[0]!;
+      tier.splice(tier.indexOf(u), 1);
+      const left = want.filter((i) => !by[i]!.has(u));
+      if (left.length > 0) await run(u, left);
+    }
+    // a request still without two alike answers: asked again, patiently, of each provider (not held) that passed a read
+    // at its pace's wait meanwhile, so a read fails on a refusal or a disagreement, never on the pace alone (card
+    // helper-robinhood-capacity fold 3: on the loaded box every bucket spent at once left 1 or 2 of 12 cold tokens no
+    // pair, 503)
+    for (const u of order) {
+      if (all.every((i) => pick(i) !== null)) break;
+      const left = all.filter((i) => pick(i) === null && !by[i]!.has(u));
+      if (left.length > 0 && holds.heldFor(u) === 0 && (paced.get(u) ?? 0) > passedBefore.get(u)!) await run(u, left, true);
     }
     return all.map(pick);
+  }
+
+  /** Each filter's logs as `u` answers them, null where it did not. A provider that takes wider ranges (WIDE_SPAN) is
+   *  asked fewer, wider reads: a run of the same filter over adjacent ranges is joined up to its span, and the answer
+   *  split back by block, so each filter is still compared with the other provider's answer for that range alone. */
+  async function logsOf(u: string, fs: Record<string, unknown>[], patient = false): Promise<(Log[] | null)[]> {
+    const max = WIDE_SPAN[u] ?? V.span;
+    const at = (f: Record<string, unknown>): [number, number] => [hexInt(f.fromBlock) ?? -1, hexInt(f.toBlock) ?? -1];
+    const rest = (f: Record<string, unknown>) => JSON.stringify({ ...f, fromBlock: null, toBlock: null });
+    const groups: { f: Record<string, unknown>; from: number; to: number; of: number[] }[] = [];
+    fs.forEach((f, i) => {
+      const [from, to] = at(f);
+      const g = groups.at(-1);
+      if (g !== undefined && from >= 0 && to >= from && rest(g.f) === rest(f) && from === g.to + 1 && to - g.from + 1 <= max) (g.to = to), g.of.push(i);
+      else groups.push({ f, from, to, of: [i] });
+    });
+    const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })), patient);
+    const out: (Log[] | null)[] = fs.map(() => null);
+    groups.forEach((g, k) => {
+      const logs = r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null;
+      if (logs === null) return;
+      for (const i of g.of) {
+        const [from, to] = at(fs[i]!);
+        out[i] = logs.filter((l) => l.block >= from && l.block <= to);
+      }
+    });
+    return out;
   }
 
   /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
@@ -672,10 +904,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return agreed<Log[]>(
       urls,
       filters.length,
-      async (u, idx) => {
-        const r = await batchTo(u, idx.map((i) => ({ method: "eth_getLogs", params: [filters[i]] })));
-        const got = idx.map((_, k) => (r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null));
-        return clock === null && headerTimed.has(u) ? timedByHeaders(u, got) : got;
+      async (u, idx, patient) => {
+        const got = await logsOf(u, idx.map((i) => filters[i]!), patient);
+        return clock === null && headerTimed.has(u) ? timedByHeaders(u, got, patient) : got;
       },
       (a, b) => sameLogs(a, b, clock === null),
     );
@@ -684,10 +915,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** A header-timed provider's logs (it logs no block time) timed by its own headers of their blocks; an answer with a
    *  block it gives no time for is no answer. Its times count only where another provider logged the same (agreedLogs'
    *  sameLogs with times), so a header for the wrong block or a 0 is no agreement. */
-  async function timedByHeaders(u: string, got: (Log[] | null)[]): Promise<(Log[] | null)[]> {
+  async function timedByHeaders(u: string, got: (Log[] | null)[], patient = false): Promise<(Log[] | null)[]> {
     const blocks = [...new Set(got.flatMap((g) => (g ?? []).map((l) => l.block)))];
     if (blocks.length === 0) return got;
-    const r = await batchTo(u, blocks.map((n) => ({ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] })));
+    const r = await batchTo(u, blocks.map((n) => ({ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] })), patient);
     const times = new Map<number, number>();
     blocks.forEach((n, i) => {
       const b = r?.[i]?.ok ? obj((r[i] as { result: unknown }).result) : {};
@@ -699,22 +930,37 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** One filter's logs over blocks `from` to `to`, read in spans the providers take: null when any span is not agreed. */
   async function agreedRange(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number): Promise<Log[] | null> {
-    const parts = await agreedLogs(urls, spans(from, to).flatMap(([lo, hi]) => [filter(lo, hi)].flat()));
-    return parts.some((x) => x == null) ? null : (parts as Log[][]).flat();
+    // each filter's spans one after another, so a wide provider joins them (logsOf); the logs back in block order
+    const per = spans(from, to).map(([lo, hi]) => [filter(lo, hi)].flat());
+    const parts = await agreedLogs(urls, per.length === 0 ? [] : per[0]!.flatMap((_, k) => per.map((fs) => fs[k]!)));
+    return parts.some((x) => x == null) ? null : (parts as Log[][]).flat().sort((a, b) => a.block - b.block || a.index - b.index);
   }
 
-  /** The same `eth_call`s at block `n`: each result two providers gave alike, else undefined. */
+  /** The same `eth_call`s at block `n`: each result two providers gave alike, else undefined. A call at a mined block
+   *  never answers otherwise, so each agreed one is kept by (to, data, block) (`called`, at most CALLED_MAX, oldest out
+   *  first) and every tape and tick asks it once (card helper-robinhood-capacity fold 5). */
   async function callsAgreed(n: number, calls: { to: string; data: string }[]): Promise<(string | undefined)[]> {
+    const key = (c: { to: string; data: string }) => `${c.to.toLowerCase()} ${c.data.toLowerCase()} ${n}`;
+    const out: (string | undefined)[] = calls.map((c) => called.get(key(c)));
+    const ask = [...new Set(calls.filter((_, i) => out[i] === undefined).map(key))].map((k) => calls.find((c) => key(c) === k)!);
+    if (ask.length === 0) return out;
     const got = await agreed<string>(
       rpcs,
-      calls.length,
-      async (u, idx) => {
-        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [calls[i], `0x${n.toString(16)}`] })));
+      ask.length,
+      async (u, idx, patient) => {
+        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [ask[i], `0x${n.toString(16)}`] })), patient);
         return idx.map((_, k) => (r?.[k]?.ok && typeof (r[k] as { result: unknown }).result === "string" ? (r[k] as { result: string }).result.toLowerCase() : null));
       },
       (a, b) => a === b,
+      false,
     );
-    return got.map((x) => x ?? undefined);
+    ask.forEach((c, i) => {
+      const x = got[i];
+      if (x == null) return;
+      if (called.size >= CALLED_MAX) called.delete(called.keys().next().value!);
+      called.set(key(c), x);
+    });
+    return calls.map((c) => called.get(key(c)) ?? undefined);
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -730,6 +976,67 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const pad32 = (a: string) => a.slice(2).padStart(64, "0");
 
   const wordAddr = (r: string | undefined, i = 0): string | null => (r !== undefined && /^0x([0-9a-f]{64})+$/.test(r) && r.length >= 2 + 64 * (i + 1) ? `0x${r.slice(2 + 64 * i + 24, 2 + 64 * (i + 1))}` : null);
+
+  /** A pool's quote by the other token: USD, or ETH (WETH, or native ETH where `native`). */
+  const quoteOf = (other: string, native: boolean): Pool["quote"] | null =>
+    other === V.usd ? { kind: "usd", decimals: 6 } : other === V.weth || (native && other === ZERO) ? { kind: "eth", decimals: 18 } : null;
+  /** A v2 or v3 pool of the token: its factory one of the chain's venues, the token one of its two, quoted in USD or WETH. */
+  function pairPool(token: string, a: string, factory: string | undefined, token0: string | undefined, token1: string | undefined): Pool | null {
+    const [f, t0, t1] = [wordAddr(factory), wordAddr(token0), wordAddr(token1)];
+    if (f === null || t0 === null || t1 === null || !(V.v2.includes(f) || V.v3.includes(f))) return null;
+    const tokenIs0 = t0 === token;
+    if (!tokenIs0 && t1 !== token) return null;
+    const quote = quoteOf(tokenIs0 ? t1 : t0, false);
+    return quote === null ? null : { venue: V.v2.includes(f) ? "v2" : "v3", id: a, token, tokenIs0, quote };
+  }
+  /** A v4 pool of the token from a pool key that hashes to its id, quoted in USD or ETH, with its hook. */
+  function v4Pool(token: string, id: string, k: string | undefined): Pool | null {
+    if (k === undefined || !/^0x[0-9a-f]{320}$/.test(k) || keccakHex(k) !== id) return null;
+    const [c0, c1] = [wordAddr(k, 0)!, wordAddr(k, 1)!];
+    const tokenIs0 = c0 === token;
+    if (!tokenIs0 && c1 !== token) return null;
+    const quote = quoteOf(tokenIs0 ? c1 : c0, true);
+    const hook = hookOf(k);
+    return quote === null ? null : { venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }) };
+  }
+  /** The Pons curves the factories' records of the token name (a record of another token, or not live, names none). */
+  const curvePools = (token: string, recs: readonly (string | undefined)[]): Pool[] =>
+    recs.flatMap((r) => {
+      if (r === undefined || !/^0x[0-9a-f]{960}$/.test(r) || wordAddr(r, 0) !== token || BigInt(`0x${r.slice(2 + 64 * 14)}`) !== 1n) return [];
+      const [curve, pair] = [wordAddr(r, 1)!, wordAddr(r, 4)!];
+      const quote = quoteOf(pair, true);
+      return curve !== ZERO && quote !== null ? [{ venue: "curve" as const, id: curve, token, tokenIs0: false, quote }] : [];
+    });
+  const decimalsOf = (d: string | undefined): number | null => {
+    const n = d !== undefined && /^0x[0-9a-f]{64}$/.test(d) ? Number(BigInt(d)) : NaN;
+    return Number.isInteger(n) && n <= 77 ? n : null;
+  };
+
+  /**
+   * A listed token's pool from its list's entry (card helper-robinhood-capacity fold 3): the pool the list names, taken
+   * only once the chain says it is the token's, read at the agreed head on two agreeing providers in one round (a v4
+   * id: the PositionManager's key, which must hash to it; an address: its factory and two tokens, a v2 or v3 venue of
+   * ours, or the Pons factories' record naming it as the token's curve), with the token's decimals. Null when the chain
+   * does not say so (a pool of no venue of ours, a v4 key the PositionManager does not hold): the token is discovered
+   * as one in no list is. Its first read is the book's own (readBook), not the discovery's walks over every venue.
+   */
+  async function fromHint(token: string, hint: string): Promise<Found | null> {
+    const head = await agreedHead();
+    if (head === null) throw new Error("no agreed head");
+    const id = /^0x[0-9a-f]{64}$/.test(hint);
+    // first the token's decimals with the v4 key or the Pons records (a curve answers no factory, a revert), then, for an
+    // address no record names, its factory and two tokens
+    const first: { to: string; data: string }[] = id ? [{ to: V.positionManager, data: `${SEL.poolKeys}${hint.slice(2, 2 + 50).padEnd(64, "0")}` }] : V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` }));
+    const got = await callsAgreed(head.n, [{ to: token, data: SEL.decimals }, ...first]);
+    const decimals = decimalsOf(got[0]);
+    if (decimals === null) throw new Error("decimals not agreed");
+    let pool = id ? v4Pool(token, hint, got[1]) : (curvePools(token, got.slice(1)).find((c) => c.id === hint) ?? null);
+    if (pool === null && !id) {
+      const [f, t0, t1] = await callsAgreed(head.n, [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: hint, data })));
+      pool = pairPool(token, hint, f, t0, t1);
+    }
+    return pool === null ? null : { pool, decimals };
+  }
 
   async function findPool(token: string): Promise<Found | null> {
     const head = await agreedHead();
@@ -762,21 +1069,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     });
     const pairs = await callsAgreed(head.n, ofVenue.flatMap((a) => [SEL.token0, SEL.token1].map((data) => ({ to: a, data }))));
     ofVenue.forEach((a, i) => {
-      const [f, t0, t1] = [wordAddr(factories[top.indexOf(a)]), wordAddr(pairs[2 * i]), wordAddr(pairs[2 * i + 1])];
-      if (f === null || t0 === null || t1 === null) return;
-      const isV2 = V.v2.includes(f);
-      const tokenIs0 = t0 === token;
-      if (!tokenIs0 && t1 !== token) return;
-      const other = tokenIs0 ? t1 : t0;
-      const quote = other === V.usd ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth ? ({ kind: "eth", decimals: 18 } as const) : null;
-      if (quote !== null) cands.push({ venue: isV2 ? "v2" : "v3", id: a, token, tokenIs0, quote });
+      const c = pairPool(token, a, factories[top.indexOf(a)], pairs[2 * i], pairs[2 * i + 1]);
+      if (c !== null) cands.push(c);
     });
     // v4 pools: the pool ids the PoolManager's recent swaps in the token's transactions name. A key is the
     // PositionManager's own record of it when there is one; a pool made without it (Doppler, Zora) has its key worked out
     // from the swap's own fee and the addresses in its transaction (v4Key). Either way the key must hash to the id.
     if (pmTxs.length > 0) {
       const seen = new Map<string, { fee: number; around: Set<string> }>();
-      for (const u of usable(rpcs)) {
+      for (const u of single(byFree(usable(rpcs)), Math.min(pmTxs.length, V4_TXS))) {
         const r = await batchTo(u, pmTxs.slice(-V4_TXS).map((t) => ({ method: "eth_getTransactionReceipt", params: [t] })));
         if (r === null) continue;
         for (const x of r) {
@@ -793,19 +1094,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const list = [...seen.keys()].slice(0, CANDIDATES_MAX);
       const keys = await callsAgreed(head.n, list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` })));
       list.forEach((id, i) => {
-        let k: string | undefined = keys[i];
-        if (k === undefined || !/^0x[0-9a-f]{320}$/.test(k) || keccakHex(k) !== id) {
-          const e = seen.get(id)!;
-          k = v4Key(id, token, e.fee, [...e.around], chain) ?? undefined; // the key must hash to the id
-        }
-        if (k === undefined) return;
-        const [c0, c1] = [wordAddr(k, 0)!, wordAddr(k, 1)!];
-        const tokenIs0 = c0 === token;
-        if (!tokenIs0 && c1 !== token) return;
-        const other = tokenIs0 ? c1 : c0;
-        const quote = other === V.usd ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth || other === ZERO ? ({ kind: "eth", decimals: 18 } as const) : null;
-        const hook = hookOf(k);
-        if (quote !== null) cands.push({ venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }) });
+        const e = seen.get(id)!;
+        // the PositionManager's key when it hashes to the id, else one worked out from the swap (it must hash to the id)
+        const c = v4Pool(token, id, keys[i]) ?? v4Pool(token, id, v4Key(id, token, e.fee, [...e.around], chain) ?? undefined);
+        if (c !== null) cands.push(c);
       });
     }
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
@@ -813,12 +1105,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const recs = await callsAgreed(head.n, V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` })));
       // a record not read is no answer: never kept as "no pool" (a token with none answers the empty record)
       if (recs.some((r) => r === undefined)) throw new Error("pons records not agreed");
-      for (const r of recs) {
-        if (r === undefined || !/^0x[0-9a-f]{960}$/.test(r) || wordAddr(r, 0) !== token || BigInt(`0x${r.slice(2 + 64 * 14)}`) !== 1n) continue;
-        const [curve, pair] = [wordAddr(r, 1)!, wordAddr(r, 4)!];
-        const quote = pair === V.usd ? ({ kind: "usd", decimals: 6 } as const) : pair === ZERO || pair === V.weth ? ({ kind: "eth", decimals: 18 } as const) : null;
-        if (curve !== ZERO && quote !== null) cands.push({ venue: "curve", id: curve, token, tokenIs0: false, quote });
-      }
+      cands.push(...curvePools(token, recs));
     }
     if (cands.length === 0) return null;
     // the pool with most swaps in the window is the main pool (ties: the lower id); its logs are the book's first read
@@ -843,8 +1130,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     if (n <= 0) return null;
     const ref = best.c.quote.kind === "eth" ? await readRef(head.with, head.n, from) : true;
-    const decimals = d !== undefined && /^0x[0-9a-f]{64}$/.test(d) ? Number(BigInt(d)) : NaN;
-    if (!Number.isInteger(decimals) || decimals > 77) throw new Error("decimals not agreed");
+    const decimals = decimalsOf(d);
+    if (decimals === null) throw new Error("decimals not agreed");
     return { pool: best.c, decimals, seed: (refOk && ref) || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs } : undefined };
   }
 
@@ -856,7 +1143,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (kept !== undefined && kept.found === null && now() - kept.at < NONE_MS) return null;
     let p = resolving.get(token);
     if (p === undefined) {
-      p = findPool(token).finally(() => resolving.delete(token));
+      // the list's pool, checked on chain, else the discovery a token in no list has
+      p = (async () => {
+        const hint = (await deps.hint?.(token)) ?? null;
+        return (hint !== null ? await fromHint(token, hint) : null) ?? findPool(token);
+      })().finally(() => resolving.delete(token));
       resolving.set(token, p);
     }
     const found = await p;
@@ -869,7 +1160,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // The books
   // -------------------------------------------------------------------------------------------------------------
 
-  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number };
+  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; first?: Promise<void> };
   const books = new Map<string, Entry>();
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
@@ -877,16 +1168,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   let refFrom: number | null = null; // the earliest block the ETH price is read from
   let refLock: Promise<unknown> = Promise.resolve();
   const traders = new Map<string, string | null>();
+  /** Agreed `eth_call` results by (to, data, block) (callsAgreed): a call at a mined block never answers otherwise, so
+   *  each is read once and shared by every tape and tick (fold 5). */
+  const called = new Map<string, string>();
 
   /** Reads the ETH price pool's swaps up to `to`, and back to refBack before `need` (the earliest block a book reads:
    *  a book walked back further than any before has the blocks before what is held read first). One read at a time. */
-  function readRef(urls: readonly string[], to: number, need = to - V.step + 1): Promise<boolean> {
-    const run = refLock.then(() => readRefNow(urls, to, need));
+  function readRef(urls: readonly string[], to: number, need = to - V.step + 1, fresh = false): Promise<boolean> {
+    const run = refLock.then(() => readRefNow(urls, to, need, fresh));
     refLock = run.catch(() => undefined);
     return run;
   }
-  async function readRefNow(urls: readonly string[], to: number, need: number): Promise<boolean> {
+  async function readRefNow(urls: readonly string[], to: number, need: number, fresh: boolean): Promise<boolean> {
     const want = need - V.refBack;
+    // a first read or discovery at a block already read, back to `want` (a dozen first reads at one shared head):
+    // nothing to read again; a tick (`fresh`) reads its new blocks and the REWIND_BLOCKS before them, as before
+    if (!fresh && refTo !== null && refFrom !== null && to <= refTo && want >= refFrom) return true;
     if (refFrom !== null && want < refFrom) {
       const older = await agreedRange(urls, (lo, hi) => refFilter(lo, hi, chain), want, refFrom - 1);
       if (older == null) return false;
@@ -978,20 +1275,34 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return apply(e, from, to, head.n, logs);
   }
 
+  /** A new book's first read, at once (card helper-robinhood-capacity fold 3): a dozen cold tapes opened together
+   *  waited for the tick in progress, which read READ_PARALLEL other books, and then for the next; each now reads its
+   *  own, at the shared agreed head and ETH price (agreedHead, readRef), once however many callers ask. */
+  function firstRead(e: Entry): Promise<void> {
+    e.first ??= (async () => {
+      const head = await agreedHead();
+      if (head !== null) await readBook(e, head.with, head, Promise.resolve(true)).catch(() => false);
+    })().finally(() => {
+      e.first = undefined;
+    });
+    return e.first;
+  }
+
   let running: Promise<void> | null = null;
   /** The timer fired while a tick ran: the next starts as soon as it ends, never a skipped period. */
   let again = false;
   async function tick(): Promise<void> {
     for (const [t, e] of books) if (now() - e.touched > IDLE_MS) books.delete(t);
     if (books.size === 0) return;
-    const head = await agreedHead();
+    const head = await agreedHead(true);
     if (head === null) return;
     // the ETH price and the books are read at once; an ETH-quoted book is folded in only once the ETH price is read to
     // the same block, so no swap is priced by an older price (a tick of three rounds one after another outlasted 1 s)
     const needRef = [...books.values()].some((e) => e.pool.quote.kind === "eth");
-    const refReady = needRef ? readRef(head.with, head.n).catch(() => false) : Promise.resolve(true);
-    // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks
-    const due = [...books.values()];
+    const refReady = needRef ? readRef(head.with, head.n, undefined, true).catch(() => false) : Promise.resolve(true);
+    // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks; a
+    // book whose first read is in flight (firstRead) is that read's
+    const due = [...books.values()].filter((e) => e.first === undefined);
     for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));
     await refReady;
   }
@@ -1051,6 +1362,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     e.touched = now();
     ensureTimer();
+    if (e.readAt === null) await firstRead(e);
     for (let attempt = 0; e.readAt === null && attempt < 2; attempt++) await start();
     if (e.readAt === null) return UPSTREAM;
     if (now() - e.readAt > STALE_MS) {
@@ -1087,7 +1399,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
       // a held pool's re-read is a refresh: refused, the pool held serves
-      if (gecko.take(p === undefined ? "pages" : "refresh")) {
+      if (gecko.take(p === undefined ? "pages" : "refresh", false, false, `${chain} pool`)) {
         try {
           const r = await doFetch(`${GT_BASE}/networks/${chain}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
           if (r.status === 429) throttledUntil(gecko, r.headers.get("retry-after"), now());
@@ -1142,8 +1454,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // served (card app-console-429); the newest range is a page read once its kept bars are REFRESH_URGENT_MS old, so
     // the lists' calls never leave it served the same bars for good (refreshLane, card helper-chart-fresh); history
     // before a time stays a refresh
-    const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : "pages";
-    if (!gecko.take(lane)) return fallback(wait(lane === "refresh" ? "geckoterminal refresh" : undefined));
+    // the history before a book of ours (not `alone`) is an optional seed, the answer our chain bars without it: a stale
+    // read, so it never takes the call a chart with nothing to serve needs (card helper-crowd-429)
+    const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : alone ? "pages" : "stale";
+    if (!gecko.take(lane, false, false, `${chain} bars`)) return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
       const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;
@@ -1180,15 +1494,25 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // The served answers
   // -------------------------------------------------------------------------------------------------------------
 
-  /** Traders of the txs, the sender of each (06c §4.12), read in batches of 10 from the first provider that answers; a
-   *  tx whose read fails stays null this time and is asked again the next. */
+  /** Traders of the txs, the sender of each (06c §4.12). A dozen cold tokens ask about 600 at once (card
+   *  helper-robinhood-capacity fold 2), so they are split across the providers not held by free budget (free), each share
+   *  read at once, and a share whose read fails asked of the others in turn; a tx whose read fails everywhere stays null
+   *  this time and is asked again the next. */
   async function tradersOf(txs: string[]): Promise<void> {
     const need = [...new Set(txs)].filter((t) => !traders.has(t));
     if (need.length === 0) return;
-    for (const u of usable(rpcs)) {
-      const r = await batchTo(u, need.map((t) => ({ method: "eth_getTransactionByHash", params: [t] })));
-      if (r === null) continue;
-      need.forEach((t, i) => {
+    // per-swap lookups go in batches: a provider that takes one request a post is asked none of them (fold 5)
+    const order = single(usable(rpcs), 2).map((u) => ({ u, f: Math.max(free(u), 0) })).sort((x, y) => y.f - x.f);
+    const sum = order.reduce((n, x) => n + x.f, 0);
+    let at = 0;
+    const shares = order.map(({ u, f }, i) => {
+      const k = i === order.length - 1 ? need.length - at : Math.min(need.length - at, Math.round((need.length * (sum > 0 ? f : 1)) / (sum > 0 ? sum : order.length)));
+      return { u, part: need.slice(at, (at += k)) };
+    });
+    const read = async (u: string, part: string[]): Promise<boolean> => {
+      const r = await batchTo(u, part.map((t) => ({ method: "eth_getTransactionByHash", params: [t] })));
+      if (r === null) return false;
+      part.forEach((t, i) => {
         const x = r[i];
         const tx = x?.ok ? obj(x.result) : null;
         const from = tx === null ? null : evmAddress(tx.from);
@@ -1197,8 +1521,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           traders.set(t, from);
         }
       });
-      return;
-    }
+      return true;
+    };
+    await Promise.all(
+      shares.filter((x) => x.part.length > 0).map(async ({ u, part }) => {
+        if (await read(u, part)) return;
+        // a share whose read failed: only its hashes still without a trader, of the others in turn
+        for (const v of byFree(usable(rpcs))) {
+          const left = part.filter((t) => !traders.has(t));
+          if (left.length === 0) return;
+          if (v !== u && single([v], 2).length > 0 && (await read(v, left))) return;
+        }
+      }),
+    );
   }
 
   return {
@@ -1221,9 +1556,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a range we do not hold: bars before our first
       if (own.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
+        // GeckoTerminal's history is an optional seed (card helper-crowd-429): refused or failed, the answer is our
+        // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed)
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before);
-        // nothing of ours and no history to serve: GeckoTerminal's 429 or 503, so the page retries, never an empty chart
-        if (!Array.isArray(got) && own.length === 0) return got;
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);

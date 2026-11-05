@@ -15,6 +15,7 @@ export const LIVE_CHECKS = [
   "helper-token-watch",
   "helper-usdc-event-watch",
   "helper-pool-senders",
+  "helper-evm-sender",
   "helper-abuse-limits",
   "market-data-solana-lists",
   "market-data-solana-token",
@@ -29,6 +30,7 @@ export const LIVE_CHECKS = [
   "helper-token-page-cold",
   "solana-jupiter-build",
   "wallet-per-buy",
+  "evm-buy-hookdata-fee",
 ];
 
 // `{commit}` is the deployed commit

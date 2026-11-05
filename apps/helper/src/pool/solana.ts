@@ -417,12 +417,10 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     for (const m of [epochFees, known]) for (const k of [...m.keys()]) if (k < epoch - POOL_LIFE_MAX_MS) m.delete(k);
     return p;
   };
-  let asked = false;
+  // each ask before the check reads this epoch's rent unless a read of it is under way or done (feeOf keeps it); a failed
+  // read is dropped, so the next ask (server.ts poolsChecked asks every READY_EVERY_MS) reads again
   const ready = (): Promise<void> => {
-    if (!asked) {
-      asked = true;
-      feeOf(epochStartOf((deps.now ?? Date.now)())).catch(() => {}); // a failed read: the next ask reads again
-    }
+    if (configured === "unchecked") feeOf(epochStartOf((deps.now ?? Date.now)())).catch(() => {});
     return readyP;
   };
   const send = deps.send ?? sendSolanaSet;

@@ -96,9 +96,136 @@ export function throttleOf(e: unknown, evm = false): number {
  * {"code": -32005, "message": "project ID request rate exceeded"} (docs.infura.io/reference/ethereum/json-rpc-methods,
  * read 2026-11-03 09:16Z). Any other -320xx stays a provider failure. */
 export const EVM_LIMIT_CODE = -32005;
-/** A JSON-RPC error message that names a rate or request limit, whatever its code (mainnet.base.org's "request limit
- *  reached", Tenderly's "rate limit exceeded"): a throttle, held as EVM_LIMIT_CODE is (data/evm/swaps.ts, lists.ts). */
-export const EVM_LIMIT_MESSAGE = /rate.?limit|too many requests|limit (reached|exceeded)|request limit/i;
+/** A JSON-RPC error message that names a rate or request limit, whatever its code: mainnet.base.org's "request limit
+ *  reached", Tenderly's "rate limit exceeded", and on Robinhood (read 2026-11-04 19:37-19:42Z) blockvectra's "public
+ *  request rate limit exceeded", daybreak's "too many concurrent requests", blockmachine's -32029 "rate limit exceeded".
+ *  A limit on what one read asks is not a throttle (EVM_RANGE_MESSAGE). */
+export const EVM_LIMIT_MESSAGE = /rate.?limit|too many (concurrent )?requests|request limit/i;
+/** A JSON-RPC error that names a limit on one read's size, not on our rate: daybreak's "query exceeds max block range
+ *  2000", drpc's "ranges over 10000 blocks are not supported on freetier", "block range limit exceeded", Infura's -32005
+ *  "query returned more than 10000 results", "Log response size exceeded". Asked again, it answers the same. */
+export const EVM_RANGE_MESSAGE = /block range|max(imum)? (block )?range|ranges? over|returned more than|response size/i;
+/** The one rule for what an EVM provider's JSON-RPC error is (card helper-robinhood-capacity: rpc.ts, data/evm/swaps.ts
+ *  and lists.ts read it alike): the seconds it asks us to wait, 1 to RETRY_AFTER_MAX_S (its data.backoff_seconds, else
+ *  1), when it is EVM_LIMIT_CODE or names a rate or request limit and no limit on the read's size; else 0. */
+export function evmThrottleS(error: unknown): number {
+  const e = (typeof error === "object" && error !== null ? error : {}) as { code?: unknown; message?: unknown; data?: { backoff_seconds?: unknown } };
+  const m = String(e.message ?? "");
+  if (EVM_RANGE_MESSAGE.test(m) || (e.code !== EVM_LIMIT_CODE && !EVM_LIMIT_MESSAGE.test(m))) return 0;
+  const s = Number(e.data?.backoff_seconds);
+  return Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1;
+}
+
+/**
+ * One hold per provider URL, shared by every path of this helper that reads it (card helper-robinhood-capacity): the
+ * Robinhood swap reads (data/evm/swaps.ts), the maker reads (data/evm/lists.ts) and /v1/rpc/robinhood (rpc/rpc.ts) all
+ * read rpc.mainnet.chain.robinhood.com from the one address the provider limits. hold(url, s) holds it s seconds more
+ * from now unless it is held longer (at most RETRY_AFTER_MAX_S); heldFor(url) is the seconds left, 0 when it is free, and
+ * heldMs(url) the same in milliseconds.
+ *
+ * And one pace per provider (card helper-robinhood-capacity fold 2), a token bucket (PROVIDER_PACE) every path draws
+ * from before it sends: take(url, calls, background) takes the post's units (1, or its calls for a provider that counts
+ * calls) and answers 0, or the ms until they fit and takes nothing. Background reads (the swap and maker reads) draw
+ * only down to the CALLER_ROOM a provider keeps for callers' reads (/v1/rpc), so our own load never spends the room a
+ * user's call needs. room(url) is the bucket's free share, 0 to 1 (1 for a provider with no pace), by which the swap
+ * reads pick the providers they ask; paceOf(url) the pace they were made with.
+ */
+export type ProviderHolds = {
+  heldFor(url: string): number;
+  heldMs(url: string): number;
+  hold(url: string, seconds: number): void;
+  take(url: string, calls: number, background: boolean): number;
+  room(url: string): number;
+  paceOf(url: string): Pace | undefined;
+};
+
+/** A provider's pace: `perS` units a second, at most `burst` at once; a unit is a post (one HTTP request, a batch or
+ *  not) or a call (each request in a batch); `inflight`, the posts it takes at once. */
+export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number };
+/**
+ * Each paced provider, set under the point where it refuses (reads cited):
+ *   - robinhood.daybreak-rpc.network: refuses two ways. -32005 "rate limited" with Retry-After 10 at 61 to 72 posts in
+ *     the 5 s before it, 12 to 14 a second (the markets lead's upstream logs, 4 runs 2026-11-04 20:0xZ, 151 to 341 calls
+ *     in the 10 s before); and -32005 "too many concurrent requests" past about 4 calls at once: single 1,000-block
+ *     eth_getLogs at 10 posts a second (4.4 in flight, p50 442 ms) refused at 4.1 s, at 8 a second (3.2 in flight) none
+ *     in 12 s, and batches of 5 at 4 posts a second refused at the 4th post (sweep from the Mac 2026-11-04 20:48-20:52Z).
+ *     Its concurrency, measured (single 1,000-block PoolManager eth_getLogs from the Mac, 2026-11-04 23:32-23:35Z): bursts
+ *     of 3 and of 4 at once (five each, 2.5 s apart) all served, 15 of 15 and 20 of 20; of 6, 20 of 30, and of 8, 20 of
+ *     40, each refused HTTP 429 -32005 "too many concurrent requests" with no Retry-After; held at 3, 4, 6 and 8 in flight
+ *     at most 7 posts a second for 10 s, all served (63, 56, 71, 71). It serves 4 at once. Paced at 7 posts a second, one
+ *     call a post (lists.ts BATCH_MAX) and 3 out at once: the 4th is left for /v1/rpc's callers (rpc.ts callEvm sends to
+ *     it with no in-flight count), the in-flight form of CALLER_ROOM.
+ *   - rpc-robinhood.blockmachine.io: its 429 names x-ratelimit-limit 60, x-ratelimit-unit cu_per_minute (the same logs,
+ *     Retry-After 41-42 s); the sweep's single eth_getLogs, 1 then 2 a second for 12 s each, passed, and 4 a second was
+ *     refused at its 31st post, the minute's 67th call, Retry-After 23 (20:53Z). Paced under its header's 60 a minute: half
+ *     a call a second, 25 at once, at most 55 in any minute.
+ *   - robinhood.api.pocket.network: x-ratelimit-limit 1200, its reset 60 s ahead, remaining one less per call (read
+ *     2026-11-04 20:49Z). Paced at 15 calls a second, 200 at once: 1,100 in any minute.
+ *   - robinhood.drpc.org: 33 calls a second for 8 s, none refused (SWAP_RPCS' note, 2026-11-04 19:4xZ). Paced at 15, 15 at once: at most 30 in
+ *     any second.
+ *   - rpc.mainnet.chain.robinhood.com, the chain's own and /v1/rpc/robinhood's first: 3.8 posts a second, then 429 (the
+ *     same note), and a fourth quick read refused 429 (19:2xZ). Paced at 1, 2 at once: at most 3 in any second.
+ * api.blockvectra.com (100 blocks, last) is not paced: its holds keep it, as before.
+ */
+export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
+  "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
+  "https://rpc-robinhood.blockmachine.io": { perS: 0.5, burst: 25, unit: "call" },
+  "https://robinhood.api.pocket.network": { perS: 15, burst: 200, unit: "call" },
+  "https://robinhood.drpc.org": { perS: 15, burst: 15, unit: "call" },
+  "https://rpc.mainnet.chain.robinhood.com": { perS: 1, burst: 2, unit: "post" },
+};
+/** The share of a paced provider's burst background reads leave for callers' reads. [design: a quarter, so a caller's
+ *  read finds room at once on the provider it asks first while the walks run at three quarters of its pace.] */
+export const CALLER_ROOM = 0.25;
+
+// the holds' and paces' clock: monotonic, in epoch ms, as rpc.ts's (card helper-crowd-429: the box's wall clock stepped
+// back inside a test, which would hold a provider for the step's length)
+export function providerHolds(now: () => number = () => performance.timeOrigin + performance.now(), pace: Readonly<Record<string, Pace>> = PROVIDER_PACE): ProviderHolds {
+  const until = new Map<string, number>();
+  const buckets = new Map<string, { tokens: number; at: number }>();
+  const fill = (url: string, p: Pace) => {
+    const t = now();
+    const b = buckets.get(url) ?? { tokens: p.burst, at: t };
+    b.tokens = Math.min(p.burst, b.tokens + ((t - b.at) * p.perS) / 1000);
+    b.at = t;
+    buckets.set(url, b);
+    return b;
+  };
+  return {
+    take(url, calls, background) {
+      const p = pace[url];
+      if (p === undefined) return 0;
+      const b = fill(url, p);
+      const floor = background ? p.burst * CALLER_ROOM : 0;
+      // a post larger than the bucket waits for a full one
+      const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
+      if (b.tokens - units >= floor) {
+        b.tokens -= units;
+        return 0;
+      }
+      return Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
+    },
+    room(url) {
+      const p = pace[url];
+      return p === undefined ? 1 : fill(url, p).tokens / p.burst;
+    },
+    paceOf(url) {
+      return pace[url];
+    },
+    heldFor(url) {
+      const u = until.get(url) ?? 0;
+      if (u <= now()) return 0;
+      return secondsUntil(u, now());
+    },
+    heldMs(url) {
+      return Math.max((until.get(url) ?? 0) - now(), 0);
+    },
+    hold(url, seconds) {
+      const t = now();
+      until.set(url, Math.max(until.get(url) ?? 0, t + Math.min(Math.max(seconds, 0), RETRY_AFTER_MAX_S) * 1000));
+    },
+  };
+}
 
 /** A read behind a cached answer was throttled (its upstream's 429, the helper's own budget, a paused queue): the
  * cache answers 429 with `retryAfterS` instead of 503 when it has nothing good to serve. */
@@ -163,7 +290,22 @@ export function clientWindow(max: number, now: () => number = Date.now, windowMs
  * `userRoom` of the total is kept for callers (card helper-ready-gate): the helper's own background reads (no caller,
  * not reserved: the trade walks) go only while every draw in the window, callers' included, leaves it free, so callers
  * go ahead of them and a walk never makes a caller wait for room it took. */
-export type BudgetLimits = { total: number; perClient: number; windowMs?: number; reserve?: number; userRoom?: number };
+/** `lend` (card helper-crowd-429): the share is work-conserving. A caller past its 10 s share, or whose draws in the
+ * vendor's window already took LEND_FREE_SHARES shares or half the callers' part, still draws while the total, less
+ * the reserve, keeps LEND_NEW_SHARES shares free for callers not seen yet and one for each other caller with a draw in
+ * the vendor's window (folds 3 and 4): the share only orders callers when the total is contended (the heavy one goes
+ * behind), and a device's second trade inside 10 s is no longer refused while the budget sits idle. A draw that
+ * reaches no vendor (a cache hit) keeps its share. The total and the reserve are unchanged. */
+/** A lending key's caller draws its first LEND_FREE_SHARES shares in the vendor's window (two trades of Jupiter
+ * builds a minute) on the total alone; past them it is lent, behind every other caller (card helper-crowd-429 fold 3:
+ * with half the callers' part as the only mark, two heavy callers drew all of it before either was lent, and a third
+ * caller's trade got 429). */
+export const LEND_FREE_SHARES = 2;
+/** The shares a lent caller leaves free for callers not seen yet in the vendor's window, beside one for each caller
+ * seen (card helper-crowd-429 fold 4: with one, a heavy device and one user drawing inside its share refused a third
+ * first-time user for up to a minute). A lone heavy device draws 26 - 3 * 4 = 14 of Jupiter's callers' part a minute. */
+export const LEND_NEW_SHARES = 3;
+export type BudgetLimits = { total: number; perClient: number; windowMs?: number; reserve?: number; userRoom?: number; lend?: boolean };
 
 /**
  * A shared upstream budget per key (a chain's RPC provider, one RPC method on it, a vendor). Every call that reaches
@@ -183,6 +325,51 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   let window = -1;
   /** Per key and client: the share drawn in the current fixed window. */
   const shares = new Map<string, Map<string, number>>();
+  /** Per lending key and client: when each of its draws reached the vendor, kept for the vendor's window. */
+  const drawn = new Map<string, Map<string, number[]>>();
+  const drawnBy = (key: string, client: string, t: number, lim: BudgetLimits): number => {
+    const d = drawn.get(key)?.get(client);
+    if (d === undefined) return 0;
+    const from = t - (lim.windowMs ?? windowMs);
+    while (d.length > 0 && d[0]! <= from) d.shift();
+    return d.length;
+  };
+  /** Per lending key: each client's last draw that reached the vendor, oldest first (card helper-crowd-429 fold 3). */
+  const active = new Map<string, Map<string, number>>();
+  /** Per lending key: when each client last asked as a lent caller, drawn or refused, oldest first (fold 4). A caller
+   * that asked past its free shares in the vendor's window keeps one share a window on the total alone and is lent the
+   * rest: without this a heavy caller drew all its free shares again each time its old draws left the window, and two
+   * heavy callers' free shares beside two users' trades overran the callers' part. */
+  const lentAt = new Map<string, Map<string, number>>();
+  const lentIn = (key: string, client: string, t: number, lim: BudgetLimits): boolean => {
+    const l = lentAt.get(key);
+    if (l === undefined) return false;
+    const from = t - (lim.windowMs ?? windowMs);
+    for (const [c, at] of l) {
+      if (at > from) break;
+      l.delete(c);
+    }
+    return l.has(client);
+  };
+  const markLent = (key: string, client: string, t: number): void => {
+    let l = lentAt.get(key);
+    if (l === undefined) lentAt.set(key, (l = new Map()));
+    l.delete(client);
+    if (l.size >= clients) l.delete(l.keys().next().value as string);
+    l.set(client, t);
+  };
+  /** The other clients with a draw in the vendor's window: the oldest leave first, their draws with them. */
+  const activeOthers = (key: string, client: string, t: number, lim: BudgetLimits): number => {
+    const a = active.get(key);
+    if (a === undefined) return 0;
+    const from = t - (lim.windowMs ?? windowMs);
+    for (const [c, at] of a) {
+      if (at > from) break;
+      a.delete(c);
+      drawn.get(key)?.delete(c);
+    }
+    return a.size - (a.has(client) ? 1 : 0);
+  };
   /** Per key: [second, requests sent in it, of them not reserved], oldest first, kept while the provider's window may
    * still count them. */
   const sent = new Map<string, [number, number, number][]>();
@@ -242,7 +429,19 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     }
     for (const [key, n] of want) {
       const lim = limitsOf(key);
-      if (client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient) {
+      const overShare = client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient;
+      // a lending key's caller past its share, or past LEND_FREE_SHARES shares or half the callers' part in the vendor's
+      // window, is lent only while LEND_NEW_SHARES shares stay free for callers not seen yet and one for each other
+      // caller with a draw in the vendor's window (card helper-crowd-429 folds 3 and 4: counted over the vendor's window,
+      // a minute for Jupiter, not the 10 s share window, so a caller that drew earlier in the minute never drops out of
+      // the count at a 10 s boundary): it goes behind them when the total is contended, never ahead
+      const heavy = lim.lend === true && client !== undefined && !shareOnly && (overShare || drawnBy(key, client, t, lim) + n > (lentIn(key, client, t, lim) ? lim.perClient : Math.min(LEND_FREE_SHARES * lim.perClient, Math.ceil((lim.total - (lim.reserve ?? 0)) / 2))));
+      if (heavy) {
+        markLent(key, client, t);
+        const keep = lim.perClient * (LEND_NEW_SHARES + activeOthers(key, client, t, lim));
+        const tk = totalWait(key, n + keep, t, lim, reserved, background);
+        if (tk > wait) (wait = tk), (refusedBy = `${key} ${overShare ? "share" : "total"}`);
+      } else if (overShare) {
         const s = toWindowEnd(t, windowMs);
         if (s > wait) (wait = s), (refusedBy = `${key} share`);
       }
@@ -260,6 +459,23 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
         k.set(client, c + n);
       }
       if (shareOnly) continue;
+      if (client !== undefined && limitsOf(key).lend === true) {
+        let m = drawn.get(key);
+        if (m === undefined) drawn.set(key, (m = new Map()));
+        const d = m.get(client) ?? [];
+        if (d.length === 0 && m.size >= clients) m.delete(m.keys().next().value as string);
+        for (let i = 0; i < n; i++) d.push(t);
+        m.set(client, d);
+        let a = active.get(key);
+        if (a === undefined) active.set(key, (a = new Map()));
+        a.delete(client);
+        if (a.size >= clients) {
+          const first = a.keys().next().value as string;
+          a.delete(first);
+          m.delete(first);
+        }
+        a.set(client, t);
+      }
       let q = sent.get(key);
       if (q === undefined) sent.set(key, (q = []));
       const last = q[q.length - 1];
@@ -277,6 +493,9 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     take: (key: string, client: string | undefined, n = 1, shareOnly = false, reserved = false): Take => takeEach([[key, n]], client, shareOnly, reserved),
     /** The seconds a draw on `key` must still wait for the provider's reset (`background`: a background draw); 0 when none. */
     heldFor: (key: string, background = false): Take => heldFor(key, now(), background),
+    /** When the provider's reset on `key` ends, in ms on the budget's clock, for every draw; 0 when none holds it (card
+     *  helper-crowd-429: a caller waits out a short one, ../rpc/rpc.ts). */
+    heldUntil: (key: string): number => (heldIn(heldUntil, key, now()) > 0 ? heldUntil.get(key)! : 0),
     /** The provider throttled: no draw on `key` until `untilMs`, held to at most RETRY_AFTER_MAX_S from now; with
      *  `background`, it throttled a background read, and only background draws wait. */
     hold(key: string, untilMs: number, background = false): void {

@@ -25,6 +25,9 @@ import {
 } from "../../kit/src/trade/solana/pool-buy.ts";
 import { evmPoolVenues, pinnedBuild, type EvmPoolVenue } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildSimSellUnpinned, pinnedBuildSell } from "../../kit/src/trade/evm/sell-unpinned.ts";
+import { evmPoolBuyQuoteWith, type EvmPoolBuyQuote, type EvmRpc, type EvmRpcCall } from "../../kit/src/checks/evm/quote.ts";
+import { evmQuotedBuy, evmQuotedSell } from "../../kit/src/trade/evm/quoted.ts";
+import { flat, provider as sellModel, req as sellReq, sellQuoteWith } from "../../kit/test/evm-sell-quote-fx.ts";
 import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import { FEE_PAYER, PROGRAM as FX_PROGRAM, W as FX_W, release as fxRelease, setup } from "../../kit/test/solana-pool-buy-fx.ts";
 import {
@@ -447,13 +450,26 @@ const relay = (o: Partial<EvmRelayData> = {}): EvmRelayData => ({ recipient: EVM
 const ctxOf = (r: EvmRelayData, pool = EVM_POOL) => evmPoolContextOf({ processooor: pool, relay: r }, evmPoolScopeOf(pool, BigInt(B.chainId)));
 const proofOf = (r: EvmRelayData, value = 10n ** 16n) => ({ nullifier: 11n, context: ctxOf(r), value });
 const v3 = (tokens: string[]) => ({ venue: "uniswap-v3" as const, tokens, fees: tokens.slice(1).map(() => 500) });
+// The device's own buy quote (card evm-buy-hookdata-fee, review fold 1 M1: the page signs only a build from one):
+// replayed from the answers Base's two pinned providers gave (kit test/fixtures/evm-quote.json, "base-ok": 0.01 ETH of
+// USDC through a v3 pool), at the recording's clock
+type Exchange = { calls: EvmRpcCall[]; answers: unknown[] };
+const QF = (JSON.parse(readFileSync(new URL("../../kit/test/fixtures/evm-quote.json", import.meta.url), "utf8")) as Record<string, { request: Record<string, unknown>; now: number; exchanges: [Exchange[], Exchange[]] }>)["base-ok"]!;
+const replay = (ex: Exchange[]): EvmRpc => async (calls) => structuredClone(ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls))!.answers);
+const buyQuote = (): Promise<EvmPoolBuyQuote> => {
+  const { buys, amountIn, ...rest } = QF.request;
+  return evmPoolBuyQuoteWith({ ...(rest as object), token: buys as string, amountIn: BigInt(amountIn as string) } as never, [replay(QF.exchanges[0]), replay(QF.exchanges[1])], QF.now);
+};
+/** A buy the kit built from the device's quote `q`, through `adapter` on `venues`, at the quote's clock. */
+const quotedBuy = (q: EvmPoolBuyQuote, adapter = A_V3, venues: Parameters<typeof evmQuotedBuy>[0] = VENUES) => evmQuotedBuy(venues, adapter, q, QF.now);
 
-test("EVM buy: the kit's pinned Buy of the request's token, the proof bound to W's relay data on the pinned pool, passes and signs; each bad field is refused", () => {
-  const built = pinnedBuild(VENUES, "base", A_V3, v3([B.weth, X]), 1n, X);
+test("EVM buy: the kit's Buy built from the device's quote of the request's token, the proof bound to W's relay data on the pinned pool, passes and signs; each bad field is refused", async () => {
+  const q = await buyQuote();
+  const built = quotedBuy(q);
   const r = relay();
-  const ask: PoolAsk = { kind: "pool.buy", chain: "base", token: X, amount: 10n ** 16n, slippageBps: 100, decimals: 18 };
-  const proof = proofOf(r);
-  const d = checkEvmBuy(built, EVM_POOL, proof, r, ask, evmCtx(), 1n);
+  const ask: PoolAsk = { kind: "pool.buy", chain: "base", token: q.token, amount: q.amountIn, slippageBps: 100, decimals: 18 };
+  const proof = proofOf(r, q.amountIn);
+  const d = checkEvmBuy(built, EVM_POOL, proof, r, ask, evmCtx(), q.minOut);
   assert.deepEqual([d.to, d.pool, d.feeCap], [EVM_W, EVM_POOL, r.feeCap]);
   const sig = signEvmBuy(EVM_SECRET, evmCtx(), built, EVM_POOL, proof);
   assert.equal(sig.length, 65);
@@ -463,32 +479,37 @@ test("EVM buy: the kit's pinned Buy of the request's token, the proof bound to W
   assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built, "0x2222222222222222222222222222222222222222", proof), refusedAs("unchecked"));
   // a built and a proof each passed by its own check are never signed together
   const r2 = relay({ salt: "0x" + "cd".repeat(16) });
-  const built2 = pinnedBuild(VENUES, "base", A_V3, v3([B.weth, X]), 2n, X);
+  const built2 = quotedBuy(q);
   const proof2 = proofOf(r2, 10n ** 18n);
-  checkEvmBuy(built2, EVM_POOL, proof2, r2, { ...ask, amount: 10n ** 18n }, evmCtx(), 1n);
+  checkEvmBuy(built2, EVM_POOL, proof2, r2, { ...ask, amount: 10n ** 18n }, evmCtx(), q.minOut);
   assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built, EVM_POOL, proof2), refusedAs("unchecked"));
   assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built2, EVM_POOL, proof), refusedAs("unchecked"));
   // only what the check passed: another proof object, a proof changed after, a proof checked as a buy signed as a withdraw
   assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built, EVM_POOL, proofOf(r)), refusedAs("unchecked"));
   assert.throws(() => signEvmWithdraw(EVM_SECRET, evmCtx(), { ...ask, kind: "pool.withdraw" }, EVM_POOL, proof), refusedAs("unchecked"));
-  const moved = proofOf(r);
-  checkEvmBuy(built, EVM_POOL, moved, r, ask, evmCtx(), 1n);
+  const moved = proofOf(r, q.amountIn);
+  checkEvmBuy(built, EVM_POOL, moved, r, ask, evmCtx(), q.minOut);
   moved.context += 1n;
   assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built, EVM_POOL, moved), refusedAs("unchecked"));
   const other = "0x2222222222222222222222222222222222222222";
+  const P = (x: EvmRelayData) => proofOf(x, q.amountIn);
+  const F = q.minOut;
   for (const [f, rule] of [
-    [() => checkEvmBuy(built, other, proofOf(r), r, ask, evmCtx(), 1n), "pool"],
-    [() => checkEvmBuy(pinnedBuild({ base: pin(B, { pool: EVM_POOL, adapters: { v3: other } }) }, "base", other, v3([B.weth, X]), 1n, X), EVM_POOL, proofOf(r), r, ask, evmCtx(), 1n), "adapter"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(r), r, { ...ask, token: other }, evmCtx(), 1n), "token"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(r), r, { ...ask, amount: 1n }, evmCtx(), 1n), "amount"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(r), r, { ...ask, chain: "robinhood" }, evmCtx(), 1n), "chain"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(relay({ recipient: other })), relay({ recipient: other }), ask, evmCtx(), 1n), "recipient"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(relay({ feeRecipient: other })), relay({ feeRecipient: other }), ask, evmCtx(), 1n), "fee_recipient"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(relay({ feeCap: 10n ** 15n + 1n })), relay({ feeCap: 10n ** 15n + 1n }), ask, evmCtx(), 1n), "fee_cap_over_device_cap"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(relay({ deadlineMs: NOW })), relay({ deadlineMs: NOW }), ask, evmCtx(), 1n), "deadline_past"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(relay({ salt: "0x" + "cd".repeat(16) })), r, ask, evmCtx(), 1n), "context"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(r), r, ask, evmCtx({ evm: undefined }), 1n), "evm_not_pinned"],
-    [() => checkEvmBuy(built, EVM_POOL, proofOf(r), r, ask, evmCtx(), 2n), "min_out"],
+    [() => checkEvmBuy(built, other, P(r), r, ask, evmCtx(), F), "pool"],
+    // a quoted build through another venue list's adapter
+    [() => checkEvmBuy(quotedBuy(q, other, { base: pin(B, { pool: EVM_POOL, adapters: { v3: other } }) }), EVM_POOL, P(r), r, ask, evmCtx(), F), "adapter"],
+    [() => checkEvmBuy(built, EVM_POOL, P(r), r, { ...ask, token: other }, evmCtx(), F), "token"],
+    [() => checkEvmBuy(built, EVM_POOL, P(r), r, { ...ask, amount: 1n }, evmCtx(), F), "amount"],
+    [() => checkEvmBuy(built, EVM_POOL, P(r), r, { ...ask, chain: "robinhood" }, evmCtx(), F), "chain"],
+    [() => checkEvmBuy(built, EVM_POOL, P(relay({ recipient: other })), relay({ recipient: other }), ask, evmCtx(), F), "recipient"],
+    [() => checkEvmBuy(built, EVM_POOL, P(relay({ feeRecipient: other })), relay({ feeRecipient: other }), ask, evmCtx(), F), "fee_recipient"],
+    [() => checkEvmBuy(built, EVM_POOL, P(relay({ feeCap: 10n ** 15n + 1n })), relay({ feeCap: 10n ** 15n + 1n }), ask, evmCtx(), F), "fee_cap_over_device_cap"],
+    [() => checkEvmBuy(built, EVM_POOL, P(relay({ deadlineMs: NOW })), relay({ deadlineMs: NOW }), ask, evmCtx(), F), "deadline_past"],
+    [() => checkEvmBuy(built, EVM_POOL, P(relay({ salt: "0x" + "cd".repeat(16) })), r, ask, evmCtx(), F), "context"],
+    [() => checkEvmBuy(built, EVM_POOL, P(r), r, ask, evmCtx({ evm: undefined }), F), "evm_not_pinned"],
+    [() => checkEvmBuy(built, EVM_POOL, P(r), r, ask, evmCtx(), F + 1n), "min_out"],
+    // the kit's unquoted pinned builder, of the same route and min out: not the device's quote
+    [() => checkEvmBuy(pinnedBuild(VENUES, "base", A_V3, q.route, q.minOut, q.token), EVM_POOL, P(r), r, ask, evmCtx(), F), "not_quoted"],
   ] as const) {
     assert.throws(f, refusedAs(rule), rule);
   }
@@ -522,11 +543,14 @@ test("EVM withdraw: Withdraw(nullifier, context, value) on the pinned pool to W 
   }
 });
 
-test("EVM sell and authorization: W's own Sell into the pinned pool and the pinned delegate at W's two-RPC nonce pass and sign; each bad field is refused", () => {
+test("EVM sell and authorization: W's own Sell, built from the device's sell quote, into the pinned pool and the pinned delegate at W's two-RPC nonce pass and sign; each bad field is refused", async () => {
   const t = BigInt(Math.floor(Date.now() / 1000));
-  const req = { w: EVM_W, token: X, amount: 10n ** 18n, target: B.routers[0]!, route: v3([X, B.weth]), minOut: 10n ** 15n, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n };
-  const built = pinnedBuildSell(VENUES, "base", req);
-  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: 10n ** 18n, slippageBps: 100, decimals: 18 };
+  // the device's own sell quote on the kit's modelled chain (kit test/evm-sell-quote-fx.ts), W the page's
+  const q = await sellQuoteWith(sellReq("base", { w: EVM_W }), [sellModel({ price: flat }), sellModel({ price: flat })], Date.now());
+  const req = { amount: q.amountIn, minOut: q.minOut, feeCap: 10n ** 13n, deadline: t + 120n };
+  const built = evmQuotedSell(VENUES, q, { precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }, Date.now());
+  const X = q.token;
+  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: q.amountIn, slippageBps: 100, decimals: 18 };
   const ctx = { ...evmCtx({ nowMs: t * 1000n }), precommitment: 5n };
   const d = checkEvmSell(built, ask, ctx, req.minOut);
   assert.deepEqual([d.pool, d.amount, d.feeCap], [EVM_POOL, req.amount, req.feeCap]);
@@ -543,6 +567,8 @@ test("EVM sell and authorization: W's own Sell into the pinned pool and the pinn
     [() => checkEvmSell(built, ask, ctx, req.minOut + 1n), "min_out"],
     // the proceeds go into the pool under the device's own precommitment only, never another's note
     [() => checkEvmSell(built, ask, { ...ctx, precommitment: 6n }, 1n), "precommitment"],
+    // the kit's unquoted pinned builder, of the same route and min out: not the device's quote
+    [() => checkEvmSell(pinnedBuildSell(VENUES, "base", { w: EVM_W, token: X, amount: q.amountIn, target: q.target, route: q.route, minOut: q.minOut, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }), ask, ctx, 1n), "not_quoted"],
   ] as const) {
     assert.throws(f, refusedAs(rule), rule);
   }
@@ -560,7 +586,7 @@ test("EVM sell and authorization: W's own Sell into the pinned pool and the pinn
   assert.throws(() => checkEvmAuthorization(ask, { ...ctx, evm: { venues: { base: pin(B, { pool: EVM_POOL }) }, feeRecipient: FEE_TO } }, 4n, [4n, 4n]), refusedAs("delegate_not_pinned"));
 });
 
-test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the agreed block's time, that time at most the device's clock; each planted attack is refused", () => {
+test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the agreed block's time, that time at most the device's clock; each planted attack is refused", async () => {
   const t = BigInt(Math.floor(Date.now() / 1000)) - 2n;
   const hops = [{ currency: "0x0000000000000000000000000000000000000000", fee: 3000, tickSpacing: 60, hooks: "0x00000000000000000000000000000000000020cc", hookData: "0x" }];
   const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: 10n ** 18n, slippageBps: 100, decimals: 18 };
@@ -591,10 +617,12 @@ test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the a
   assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, { ...s }), refusedAs("unchecked"));
   // a real sell (the kit's sell builder, into the pinned pool, live for 120 s), even one the sell check passed, is
   // refused by the sim check and by the sim signer
-  const real = pinnedBuildSell(VENUES, "base", { w: EVM_W, token: X, amount: 10n ** 18n, target: B.routers[0]!, route: v3([X, B.weth]), minOut: 10n ** 15n, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n });
-  assert.throws(() => checkEvmSellSim(real as never, t, ask, ctx), refusedAs("sim_pool"));
+  const q = await sellQuoteWith(sellReq("base", { w: EVM_W }), [sellModel({ price: flat }), sellModel({ price: flat })], Date.now());
+  const real = evmQuotedSell(VENUES, q, { precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n }, Date.now());
+  const realAsk: PoolAsk = { ...ask, token: q.token, amount: q.amountIn };
+  assert.throws(() => checkEvmSellSim(real as never, t, realAsk, ctx), refusedAs("sim_pool"));
   assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));
-  checkEvmSell(real, ask, { ...ctx, precommitment: 5n }, 10n ** 15n);
+  checkEvmSell(real, realAsk, { ...ctx, precommitment: 5n }, q.minOut);
   assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));
 });
 
@@ -606,5 +634,8 @@ test("no rule reads a field from a server: the rule file imports no fetch, helpe
   assert.doesNotMatch(code, /\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon/);
   assert.doesNotMatch(code, /helper\/v1|withdraw\/relay|solanaJsonRpc|solanaHelperRpc|readSolana[A-Z]\w*\(|evmAgreed|evmNow|RELEASE_HELPER|TRADE_HELPER/);
   const imports = [...src.matchAll(/from "([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(imports.filter((p) => !/^@noble\/|^@scure\//.test(p!) && !/(checks\/solana\/(message|checks)|trade\/solana\/pool-buy|trade\/evm\/(buy|sell)-unpinned|wallet\/src\/pool\/evm)\.ts$/.test(p!)), []);
+  // trade/evm/quoted.ts: the record of the builds the device's own quotes made (card evm-buy-hookdata-fee); the rules
+  // call only its two predicates, which read no server (the line above holds that the file calls no reader)
+  assert.deepEqual(imports.filter((p) => !/^@noble\/|^@scure\//.test(p!) && !/(checks\/solana\/(message|checks)|trade\/solana\/pool-buy|trade\/evm\/(buy|sell)-unpinned|trade\/evm\/quoted|wallet\/src\/pool\/evm)\.ts$/.test(p!)), []);
+  assert.deepEqual([...code.matchAll(/\b(evmQuoted\w*|evmIsQuoted\w*)\b/g)].map((m) => m[1]).filter((n) => !/^evmIsQuoted(Buy|Sell)$/.test(n!)), [], "the rules call quoted.ts's predicates only, never its builders");
 });

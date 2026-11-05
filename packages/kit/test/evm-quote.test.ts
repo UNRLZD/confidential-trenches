@@ -11,6 +11,8 @@ import * as kit from "../src/index.ts";
 import { EVM_NOOP_HOOK_CODE, evmPoolBuildQuoted, EvmPoolBuyError, evmPoolSignBuy, EvmQuoteError, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
 import { evmPoolBuyQuoteWith, evmProviders, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { evmPoolVenues, pinnedBuild } from "../src/trade/evm/buy-unpinned.ts";
+// the module path as a string: the red run before card evm-buy-hookdata-fee's fold 1 reads it where quoted.ts is not there yet
+const QUOTED_TS: string = "../src/trade/evm/quoted.ts";
 
 type Answer = { result?: string; error?: { code: number; message: string; data?: string } } & Record<string, unknown>;
 type Exchange = { calls: EvmRpcCall[]; answers: Answer[] };
@@ -302,6 +304,16 @@ test("Q7 only a quote the device made builds a buy, and only within 30 s, and W 
   // the kit exports no builder that takes its caller's minOut
   assert.equal("evmPoolBuild" in kit, false);
   assert.equal("evmPoolBuyQuoteWith" in kit, false);
+  // the pins the signing page holds (quoted.ts evmQuotedBuy, card evm-buy-hookdata-fee M1): the device's quote builds
+  // through them at the page's clock, and only that build is a quoted one; the index exports neither
+  const { evmQuotedBuy, evmIsQuotedBuy } = await import(QUOTED_TS);
+  const pins = Object.freeze({ base: Object.freeze({ ...venues.base, pool: "0x00000000000000000000000000000000000000b0", adapters: Object.freeze({ v3: ADAPTER }) }) });
+  const qb = evmQuotedBuy(pins, ADAPTER, q, at);
+  assert.ok(evmIsQuotedBuy(qb) && !evmIsQuotedBuy({ ...qb }) && !evmIsQuotedBuy(Object.create(qb)));
+  assert.equal(evmIsQuotedBuy(pinnedBuild(pins, "base", ADAPTER, q.route, q.minOut, q.token)), false, "an unquoted pinned build is not a quoted one");
+  assert.throws(() => evmQuotedBuy(pins, ADAPTER, { ...q }, at), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
+  assert.throws(() => evmQuotedBuy(pins, ADAPTER, q, at + 31_000), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
+  assert.equal("evmQuotedBuy" in kit || "evmIsQuotedBuy" in kit, false);
 });
 
 test("Q8 a bad request refuses before any read", async () => {
