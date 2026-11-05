@@ -24,6 +24,7 @@
 // With no --deployment it checks every chain's record present (pool-evm-deploy.<chain>.json). --rpc applies to a
 // single record. --record writes every RPC answer read to <file>, for the test's replay. --write-record, on PASS,
 // writes the run record scripts/live-checks/pool-evm-deploy.md (Money path: yes, one Tx line per transaction).
+// Runs: once, a contract deploy's read-back (the EVM pools on two testnets, no admin); no host deploy changes it
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";

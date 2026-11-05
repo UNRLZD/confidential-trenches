@@ -6,8 +6,9 @@
 // two shells per width, 390 x 844 (phone, dpr 2, touch) and 1440 x 900 (desktop, dpr 1):
 //   - refused: the shell refuses pool.withdraw (not_allowed), as SIGN_HOST does until card signpage-pool-withdraw-form
 //     lands its screen: the row draws its HopLine "refused" in place, so the tap never ends in nothing;
-//   - opened: the shell answers { pending: true }, as SIGN_HOST does once it draws its screen: no line, the control
-//     unlocked.
+//   - opened: the shell answers { pending: true }, as SIGN_HOST does before it draws its screen: no line, the control
+//     still locked, since the screen that would take this frame is coming (the stand-in never draws one; card
+//     app-hop-sync-lock: a tap between the answer and that screen sends nothing).
 // In each run: Withdraw is on for Solana and Base and off for the empty Robinhood pool; the Base tap asks the shell for
 // exactly one request, of type pool.withdraw with the keys v, id, type, chain and return_key, chain "base" and
 // return_key "withdraw" (the kit's RETURN_KEYS): no address, no amount, no other field. After the answer every pool row
@@ -81,7 +82,9 @@ export function judge(rec) {
     say(one, `${n}: Base's Withdraw asks the shell ${asked.length === 0 ? "nothing" : asked.map((a) => `${a.type ?? "?"} {${Object.keys(a).sort().join(", ")}}${a.chain ? ` chain ${a.chain}` : ""}`).join("; ")}${one ? "" : `, want one pool.withdraw {${KEYS.join(", ")}} chain base`}`);
     const drawn = r.shell === "refused" ? r.line === "refused" : r.line === null;
     say(r.inside === true, `${n}: ${r.inside === true ? "every pool row inside its panel after the answer" : r.inside === false ? "a pool row outside its panel after the answer" : "no pool rows read"}`);
-    say(drawn && r.unlocked === true, `${n}: the answer drawn ${r.line === null ? "no line" : `line ${r.line}`}, control ${r.unlocked ? "unlocked" : "still locked"}${drawn ? "" : `, want ${r.shell === "refused" ? "the refused line" : "no line"}`}`);
+    // refused: the control is free again at once; opened: held until the shell's screen takes the frame
+    const free = r.shell === "refused";
+    say(drawn && r.unlocked === free, `${n}: the answer drawn ${r.line === null ? "no line" : `line ${r.line}`}, control ${r.unlocked ? "unlocked" : "still locked"}${drawn && r.unlocked === free ? "" : `, want ${r.shell === "refused" ? "the refused line, unlocked" : "no line, still locked"}`}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }

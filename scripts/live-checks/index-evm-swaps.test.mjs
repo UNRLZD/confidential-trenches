@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
+import { HEADER_TIMED, SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
 import { candlesFault, CANDLES_PATH, judge, read, TRADES_PATH, tradesFault, units } from "./index-evm-swaps.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -198,4 +198,57 @@ test("a lists answer that is not a 200 with lists is a BAD line naming the chain
     assert.deepEqual(bad(r), [`BAD GET /v1/market/lists?chain=robinhood answers ${status}${status === 200 ? " with no lists" : ""} (robinhood)`], r.lines.join("\n"));
     assert.deepEqual(asked, ["https://helper.test/v1/market/lists?chain=robinhood"], "nothing read past the lists");
   }
+});
+
+test("card helper-restart-fresh: Robinhood's pool logs are agreed on providers that log their block time: the chain's own RPC, second in SWAP_RPCS since 5f8e5fd, logs blockTimestamp 0x0 (read 2026-11-04 17:4xZ) and never pairs for them (live run 41871356171: 'blocks none to none')", async () => {
+  const rec = A.robinhood_good;
+  const c = rec.chain;
+  const rpcs = SWAP_RPCS.robinhood;
+  assert.ok(HEADER_TIMED.has(rpcs[1]), "the second provider is header-timed");
+  const fetchFn = async (url, init) => {
+    if (!rpcs.includes(url)) {
+      const k = url.endsWith(CANDLES_PATH(rec.coin, "robinhood")) ? "candles" : "trades";
+      return new Response(rec.reads[k].body, { status: rec.reads[k].status, headers: rec.reads[k].headers });
+    }
+    const req = JSON.parse(init.body);
+    const ok = (result) => new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }), { status: 200 });
+    if (req.method === "eth_blockNumber") return ok(hex(c.heads[Math.min(rpcs.indexOf(url), 1)]));
+    if (req.method === "eth_call") return ok(`0x${c.decimals.toString(16).padStart(64, "0")}`);
+    if (req.method === "eth_getTransactionReceipt") return ok(c.receipts[req.params[0]]);
+    if (req.method === "eth_getBlockByNumber") return ok({ timestamp: hex(c.blockTimes[Number.parseInt(req.params[0], 16)]) });
+    if (req.method === "eth_getLogs") {
+      const lo = Number.parseInt(req.params[0].fromBlock, 16);
+      const hi = Number.parseInt(req.params[0].toBlock, 16);
+      const logs = c.poolLogs.logs.filter((l) => Number.parseInt(l.blockNumber, 16) >= lo && Number.parseInt(l.blockNumber, 16) <= hi);
+      return ok(logs.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, blockTimestamp: HEADER_TIMED.has(url) ? "0x0" : hex(l.t) })));
+    }
+    assert.fail(req.method);
+  };
+  const again = await read("https://helper.test", rec.coin, fetchFn, undefined, "robinhood");
+  assert.deepEqual(again.chain.poolLogs, c.poolLogs, "the pool's logs, agreed by two providers that time them");
+  again.readAt = rec.readAt;
+  const r = judge(again);
+  assert.deepEqual(bad(r), []);
+});
+
+// Card helper-robinhood-swaps: robinhood_bad_hooked_buys is the deployed helper at 0f3ce82 on 2026-11-04 20:14Z, the
+// red of live run 41899807434 again on token 0xe23c6618..., whose v4 pool's hook (PonsV2MemeHook) takes 2.75% of a
+// buy's token leg after the PoolManager logs Swap: the tape showed each buy's pool leg, which no Transfer moved, FAIL.
+// robinhood_good_hooked is apps/helper at the card's fix (main merged) run on a Mac against Robinhood's keyless
+// providers on a listed token of the same hook (0xe23c6618... had left the lists), its sample holding buys: every
+// buy's amt is the token its buyer was sent, PASS.
+test("card helper-robinhood-swaps: a hooked v4 pool's buys on the tape as the pool's leg fail; as the trader's leg they pass", () => {
+  const b = judge(A.robinhood_bad_hooked_buys);
+  assert.equal(b.ok, false);
+  assert.equal(A.robinhood_bad_hooked_buys.coin, "0xe23c6618091c137f56d8486d25492311ccf33ab8");
+  assert.deepEqual(bad(b).map((l) => l.replace(/\d+ of 5/, "n of 5").replace(/"[bs]+"/, "")), ["BAD n of 5 sampled trades carry a Transfer of the token for exactly their amt,  against the pool"], b.lines.join("\n"));
+  assert.ok(b.lines.filter((l) => /^-- {2}trade 0x[0-9a-f]{8}: no Transfer of exactly [\d.]+ from the pool/.test(l)).length >= 3);
+  const g = judge(A.robinhood_good_hooked);
+  assert.ok(g.ok, bad(g).join("\n"));
+  // both samples are of a pool whose hook took a cut: its HookFeeCollected logs are in their receipts
+  const HOOK = "0xe5e702641ea86f4ae6cc3cdaed2b886f976be044";
+  for (const rec of [A.robinhood_bad_hooked_buys, A.robinhood_good_hooked]) assert.ok(Object.values(rec.chain.receipts).some((r) => r.logs.some((l) => l.address === HOOK)), rec.coin);
+  const sides = JSON.parse(A.robinhood_good_hooked.reads.trades.body).trades.slice(0, 5).map((t) => t.side);
+  assert.ok(sides.filter((s) => s === "b").length >= 2, `the sample holds buys: ${sides.join("")}`);
+  assert.ok(g.lines.includes(`ok  5 of 5 sampled trades carry a Transfer of the token for exactly their amt, ${JSON.stringify(sides.join(""))} against the pool`), g.lines.join("\n"));
 });

@@ -251,7 +251,7 @@ export const MUTANTS = [
   [QUOTE, "const pick = best(routes.filter((r) => evmSellExits(chain, t, r.route)));", "const pick = best(routes);", R, "P2 "],
   [QUOTE, "  if (bought !== null) {\n    const x = bought.route.venue", "  if (false) {\n    const x = bought.route.venue", R, "P3 "],
   [QUOTE, 'if (lower(evmPoolRouteDataQuoted(chain, bought).token) !== lower(token)) return refuse("token_mismatch", "the bought route buys another token");', "", R, "P3 "],
-  [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono });", "rpcs, scan: undefined, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono });", R, "P1 "],
+  [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", "rpcs, scan: undefined, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", R, "P1 "],
   // the review of edb4dbb: F1 the sell goes further where the buy does; F2 X's markets at the X the token's pool
   // gives; F5 `bought` kept only where the sell builder takes it; F6 minOut off the reference
   [QUOTE, "if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);", "if (markets.has(x) && !a.sell) further.push(x);", R, "PA "],
@@ -310,7 +310,9 @@ export const MUTANTS = [
   [QUOTE, 'if (block.baseFeePerGas === null) return refuse("rpc_error", `block ${block.number} has no base fee: the sale', 'if (false) return refuse("rpc_error", `block ${block.number} has no base fee: the sale', S, "planted: the sender's fee cap"],
   [PF, "const f = 2n * (gas * gasPrice + chainFee);", "const f = gas * gasPrice + chainFee;", S, "planted: the sender's fee cap"],
   [SELLU, "gasPrice: baseFeePerGas + evmPoolSellTip(chain)", "gasPrice: baseFeePerGas", S, "planted: the sender's fee cap"],
-  [SELLU, "{ floor: EVM_POOL_FEE_STEP, gas: EVM_POOL_SELL_GAS,", "{ floor: 0n, gas: EVM_POOL_SELL_GAS,", S, "planted: the sender's fee cap"],
+  // the kit's one floor (fold 3, review fold 2 LOW-A): evmPoolFee applies it, the sell's cap passes none
+  [PF, "return stepped > EVM_POOL_FEE_FLOOR ? stepped : EVM_POOL_FEE_FLOOR;", "return stepped;", S, "planted: the sender's fee cap"],
+  [PF, "export const EVM_POOL_FEE_FLOOR = EVM_POOL_FEE_STEP;", "export const EVM_POOL_FEE_FLOOR = 0n;", S, "planted: the sender's fee cap"],
   [PF, "export const EVM_POOL_FEE_STEP = 10_000_000_000_000n;", "export const EVM_POOL_FEE_STEP = 1_000_000_000_000n;", S, "planted: the sender's fee cap"],
   [QUOTE, "const feeMax = evmPoolSellFeeMax(chain, block.baseFeePerGas, chainFee);", "const feeMax = evmPoolSellFeeMax(chain, 2n * block.baseFeePerGas, chainFee);", S, "planted: the sender's fee cap"],
   // review fold 1 L1: the chain fee, read at the agreed block on both providers, in the one rule (pool-fee.ts)
@@ -326,7 +328,6 @@ export const MUTANTS = [
   [QUOTE, "if (minOut - feeMax < EVM_POOL_MIN_DEPOSIT) return refuse(", "if (minOut - feeMax <= EVM_POOL_MIN_DEPOSIT) return refuse(", S, "L5 "],
   [PF, "export const EVM_POOL_MIN_DEPOSIT = 100_000_000_000_000n;", "export const EVM_POOL_MIN_DEPOSIT = 10_000_000_000_000n;", S, "L5 "],
   [PF, "((f + EVM_POOL_FEE_STEP - 1n) / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP", "(f / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP", S, "planted: the sender's fee cap"],
-  [PF, "return stepped > floor ? stepped : floor;", "return stepped;", S, "planted: the sender's fee cap"],
   [QD, "if (feeCap > feeMax) throw", "if (false) throw", S, "planted: the sender's fee cap"],
   [QD, "if (feeCap > feeMax) throw", "if (feeCap > feeMax + 1n) throw", S, "planted: the sender's fee cap"],
   [QD, "const feeCap = asked === undefined ? feeMax : asked;", "const feeCap = asked === undefined ? feeMax - 1n : asked;", S, "planted: the sender's fee cap"],
@@ -344,12 +345,15 @@ export const MUTANTS = [
   // review fold 1 M2 and L2: one deadline over the reads and the sleeps; the age at the clock after the wait
   [QUOTE, "const heads = minBlock === 0n ? await read : await within(read, left(), late);", "const heads = await read;", R, "M2 "],
   [QUOTE, "const left = () => EVM_MIN_BLOCK_WAIT_MS - (mono() - t0);", "const left = () => EVM_MIN_BLOCK_WAIT_MS;", R, "M2 "],
-  [QUOTE, "const atMs = minBlock === 0n ? nowMs : nowMs + Math.max(0, mono() - t0);", "const atMs = nowMs;", R, "L2 "],
-  [QUOTE, "const atMs = minBlock === 0n ? nowMs : nowMs + Math.max(0, mono() - t0);", "const atMs = nowMs + Math.max(0, mono() - t0);", R, "R6 "],
-  [QUOTE, "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono)", "agreedBlock(rpcs, v.maxLag, a.nowMs)", R, "L5 "],
-  [QUOTE, "sell: true, minBlock: boughtBlock, mono });", "sell: true, mono });", R, "L5 "],
-  [QUOTE, "sell: true, minBlock: boughtBlock, mono });", "sell: true, minBlock: boughtBlock - 1n, mono });", R, "L5 "],
-  [QUOTE, "sell: true, minBlock: boughtBlock, mono });", "sell: true, minBlock: boughtBlock });", R, "M2 "],
+  [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs;", R, "L2 "],
+  // the age from the quote's entry, the scan's time included, on a sell and a buy (review fold 2, LOW-1)
+  [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs + Math.max(0, mono() - t0);", R, "LOW-1 "],
+  [QUOTE, "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start)", "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono)", R, "LOW-1 "],
+  [QUOTE, "    watch,\n    mono,\n    start,\n", "    watch,\n    mono,\n", R, "LOW-1 "],
+  [QUOTE, "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start)", "agreedBlock(rpcs, v.maxLag, a.nowMs)", R, "L5 "],
+  [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, mono, start });", R, "L5 "],
+  [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, minBlock: boughtBlock - 1n, mono, start });", R, "L5 "],
+  [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, minBlock: boughtBlock, start });", R, "M2 "],
   // the hook data rule on any hop, the first included (review fold 1, L3)
   [QUOTE, 'route.hops.some((h) => h.hookData !== "0x")) return refuse(', 'route.hops.slice(-1).some((h) => h.hookData !== "0x")) return refuse(', R, "HD1 "],
   [QUOTE, 'if (fee !== undefined && (typeof fee !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(fee))) return refuse(', "if (false) return refuse(", R, "R11 "],
@@ -378,13 +382,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
     const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
-    for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
+    const named = [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"));
+    const t0 = performance.now();
+    for (const [file, t] of named) {
       const r = run(dir, file, t);
       if (r !== "pass") {
         console.log(`FAIL "${t}" in ${file} ${r === "none" ? "names no test" : `fails on the code as it is:\n${lastFail}`}`);
         bad++;
       }
     }
+    console.log(`the ${named.length} named tests on the code as it is: ${Math.round(performance.now() - t0)} ms`);
     if (bad === 0) {
       MUTANTS.forEach(([file, find, repl, tf, t], i) => {
         const s = src.get(file);
@@ -394,9 +401,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
           return;
         }
         writeFileSync(join(dir, file), s.replace(find, repl));
+        const t0 = performance.now();
         const r = run(dir, tf, t);
+        const ms = Math.round(performance.now() - t0);
         writeFileSync(join(dir, file), s);
-        console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
+        console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"} (${ms} ms)`);
         if (r !== "fail") bad++;
       });
     }

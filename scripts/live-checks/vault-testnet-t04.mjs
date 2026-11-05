@@ -16,6 +16,7 @@
 //   - the refund row: the whole refund note withdrawn to the depositor, fee 0, paid or settled.
 //   node scripts/live-checks/vault-testnet-t04.mjs [--run <file>] [--record <file>]   PASS exit 0, FAIL 1, error 2
 // --record writes every RPC answer the run read to <file>, so the check's test can replay it.
+// Runs: once, a recorded testnet vault run read back on chain; no host deploy changes it
 import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";

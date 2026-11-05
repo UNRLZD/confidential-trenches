@@ -4,8 +4,9 @@
 // not_allowed until then, and no read is made for a refused one).
 // - A sell's amount is in the token's decimals: the device reads the mint (Solana) or decimals() (EVM) on two
 //   providers here and the rule parses both answers (tokenDecimalsOf); the app never names a number of decimals.
-// - Refused on Base and Robinhood whatever the pins, until a rule checks each: a pool.deposit (no EVM deposit check
-//   yet) and a pool.withdraw (its onward send from W to the typed address has no EVM check yet).
+// - Refused on Base and Robinhood whatever the pins, until a rule checks it: a pool.deposit (no EVM deposit check yet).
+//   A pool.withdraw goes to the flow: its onward send from W to the typed address is checked by rules/pool.ts
+//   checkEvmOnwardSend (card signpage-pool-withdraw-form); the page's EVM flows land with signpage-evm-pool-trade.
 // - The flows that build, prove, sign and send each op land with the pools; until a pinned pool has its flow, a
 //   request that passed every check is refused not_allowed too, never half run.
 // - A sell is a trade: answered as one that runs (Running), so the api's queue never waits on its decimals read or
@@ -39,13 +40,13 @@ export type PoolKindsDeps = {
   /** The chain's two providers, or null when the page has none for it. */
   rpcs(chain: PoolChain): readonly [PoolRpc, PoolRpc] | null;
   /** The ops' flow once their pool is pinned (src/pool-testnet.ts testnetPoolFlow); with none a checked request is refused. */
-  flow?: (ask: PoolAsk, ctx: KindContext) => HostRefusal | Running<PoolKind>;
+  flow?: (ask: PoolAsk, ctx: KindContext) => HostRefusal | Running<PoolKind> | HostAnswer<"pool.withdraw">;
 };
-type Answer<K extends PoolKind> = HostRefusal | Deferred<K>;
+type Answer<K extends PoolKind> = HostRefusal | Deferred<K> | HostAnswer<K>;
 type Handler<K extends PoolKind> = (params: Record<string, unknown>, ctx: KindContext) => Answer<K>;
 
 const NO: { error: "not_allowed" } = Object.freeze({ error: "not_allowed" as const });
-const EVM_REFUSED: ReadonlySet<PoolKind> = new Set(["pool.deposit", "pool.withdraw"]);
+const EVM_REFUSED: ReadonlySet<PoolKind> = new Set(["pool.deposit"]);
 
 const checked = (p: PoolRequest, reads?: TokenDecimalsReads): PoolAsk | null => {
   try {
@@ -79,7 +80,7 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         async (reads) => {
           const ask = checked(p, reads);
           const got = ask && deps.flow ? deps.flow(ask, ctx) : NO;
-          if (!("after" in got)) return void (answer = got);
+          if (!("after" in got)) return void (answer = "error" in got ? got : NO); // a sell's flow answers only by running
           // the flow runs: its answer once its own wait settles (the send, or the run's end)
           await got.after.catch(() => {});
           answer = (got.answer() ?? NO) as HostAnswer<K> | HostRefusal;

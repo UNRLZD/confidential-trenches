@@ -24,8 +24,9 @@ const SCREENS: Record<string, { WORDS: Record<string, Word>; DRAFTS: readonly st
 const ROWS = JSON.parse(readFileSync(new URL("./words-final.json", import.meta.url), "utf8")) as Row[];
 const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "owner 3 Nov 09:17Z, keep"];
 // the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name, Discover's list age
-// line (card app-list-age, on the owner's next picks page)
-const STILL_DRAFT: Record<string, string[]> = { deposit: [], discover: ["updated"], portfolio: ["more"], signin: [], token: [], verify: [], withdraw: [] };
+// line (card app-list-age, on the owner's next picks page), Portfolio's export label and wallets heading (card
+// app-export-every-wallet, on the owner's next picks page)
+const STILL_DRAFT: Record<string, string[]> = { deposit: [], discover: ["updated"], portfolio: ["exportKey", "more", "wallets"], signin: [], token: [], verify: [], withdraw: [] };
 
 test("the list: 103 words on these screens, each once, each with a pick", () => {
   assert.equal(ROWS.length, 103);
@@ -62,7 +63,7 @@ test("the trade box's own words stay drafts: none names a pick unless it is Port
     if (shared.has(w)) continue;
     for (const p of PICKS) assert.ok(!w.source.includes(p), `trade.${k}`);
   }
-  assert.deepEqual(Object.entries(trade.WORDS as Record<string, Word>).filter(([, w]) => shared.has(w)).map(([k]) => k), ["sending", "landing"]);
+  assert.deepEqual(Object.entries(trade.WORDS as Record<string, Word>).filter(([, w]) => shared.has(w)).map(([k]) => k), ["sending", "landing", "privateBalance"]);
 });
 
 test("data-draft-copy is drawn only for a word whose draft flag is set, on every listed screen", () => {

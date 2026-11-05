@@ -1,0 +1,205 @@
+{
+ "good": {
+  "check": "app-export-every-wallet",
+  "at": "2026-11-04T21:15:16.800Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
+  "browser": "156.0.8078.79",
+  "runs": [
+   {
+    "width": "desktop",
+    "framed": true,
+    "screen": "portfolio",
+    "state": "S10.3",
+    "taps": [
+     {
+      "from": "position solana:Fixture1Token1111111111111111111111111111111 (menu 1 of 2)",
+      "chain": "solana",
+      "address": "Fixture1Wa11etSo1ana1111111111111111111111",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "solana",
+        "address": "Fixture1Wa11etSo1ana1111111111111111111111",
+        "return_key": "export"
+       }
+      ]
+     },
+     {
+      "from": "position solana:Fixture1Token1111111111111111111111111111111 (menu 2 of 2)",
+      "chain": "solana",
+      "address": "Fixture2Wa11etSo1ana2222222222222222222222",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "solana",
+        "address": "Fixture2Wa11etSo1ana2222222222222222222222",
+        "return_key": "export"
+       }
+      ]
+     },
+     {
+      "from": "position base:0x0000000000000000000000000000000000007e57",
+      "chain": "base",
+      "address": "0x00000000000000000000000000000000000ba5e1",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "base",
+        "address": "0x00000000000000000000000000000000000ba5e1",
+        "return_key": "export"
+       }
+      ]
+     },
+     {
+      "from": "Wallets Fixture3Wa11etSo1ana3333333333333333333333",
+      "chain": "solana",
+      "address": "Fixture3Wa11etSo1ana3333333333333333333333",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "solana",
+        "address": "Fixture3Wa11etSo1ana3333333333333333333333",
+        "return_key": "export"
+       }
+      ]
+     },
+     {
+      "from": "Wallets Fixture4Dep0sitSo1ana444444444444444444444",
+      "chain": "solana",
+      "address": "Fixture4Dep0sitSo1ana444444444444444444444",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "solana",
+        "address": "Fixture4Dep0sitSo1ana444444444444444444444",
+        "return_key": "export"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "screen": "portfolio",
+    "state": "S10.3",
+    "taps": [
+     {
+      "from": "position solana:Fixture1Token1111111111111111111111111111111 (sheet 1 of 2)",
+      "chain": "solana",
+      "address": "Fixture1Wa11etSo1ana1111111111111111111111",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "solana",
+        "address": "Fixture1Wa11etSo1ana1111111111111111111111",
+        "return_key": "export"
+       }
+      ]
+     },
+     {
+      "from": "position solana:Fixture1Token1111111111111111111111111111111 (sheet 2 of 2)",
+      "chain": "solana",
+      "address": "Fixture2Wa11etSo1ana2222222222222222222222",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "solana",
+        "address": "Fixture2Wa11etSo1ana2222222222222222222222",
+        "return_key": "export"
+       }
+      ]
+     },
+     {
+      "from": "position base:0x0000000000000000000000000000000000007e57 (sheet 1 of 1)",
+      "chain": "base",
+      "address": "0x00000000000000000000000000000000000ba5e1",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "base",
+        "address": "0x00000000000000000000000000000000000ba5e1",
+        "return_key": "export"
+       }
+      ]
+     },
+     {
+      "from": "Wallets Fixture3Wa11etSo1ana3333333333333333333333",
+      "chain": "solana",
+      "address": "Fixture3Wa11etSo1ana3333333333333333333333",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "solana",
+        "address": "Fixture3Wa11etSo1ana3333333333333333333333",
+        "return_key": "export"
+       }
+      ]
+     },
+     {
+      "from": "Wallets Fixture4Dep0sitSo1ana444444444444444444444",
+      "chain": "solana",
+      "address": "Fixture4Dep0sitSo1ana444444444444444444444",
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "solana",
+        "address": "Fixture4Dep0sitSo1ana444444444444444444444",
+        "return_key": "export"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-export-every-wallet",
+  "at": "2026-11-04T21:12:58.751Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in; main b07b71a's build, ACCOUNT less deposit_wallets (main's kit refuses the field)",
+  "browser": "156.0.8078.79",
+  "runs": [
+   {
+    "width": "desktop",
+    "framed": true,
+    "screen": "portfolio",
+    "state": "S10.3",
+    "taps": []
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "screen": "portfolio",
+    "state": "S10.3",
+    "taps": [
+     {
+      "from": "position solana:Fixture1Token1111111111111111111111111111111 (sheet 1 of 1)",
+      "chain": null,
+      "address": null,
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "solana",
+        "address": "Fixture1Wa11etSo1ana1111111111111111111111",
+        "return_key": "export"
+       }
+      ]
+     },
+     {
+      "from": "position base:0x0000000000000000000000000000000000007e57 (sheet 1 of 1)",
+      "chain": null,
+      "address": null,
+      "asked": [
+       {
+        "type": "export.open",
+        "chain": "base",
+        "address": "0x00000000000000000000000000000000000ba5e1",
+        "return_key": "export"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

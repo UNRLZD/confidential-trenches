@@ -25,6 +25,15 @@ export const QUERY_MAX = 4_096;
 export const ANSWER_MAX = 4 * 1024 * 1024; // a trending list is ~250 KB (D-S3); a build or quote a few KB
 export const TIMEOUT_MS = 8_000;
 export const WAIT_MAX_MS = 1_000;
+/**
+ * The longest a caller waits for the vendor's budget to have its room (card helper-crowd-429): a draw the share or the
+ * total refuses is tried again every QUEUE_POLL_MS until then, and only past it answers 429 with the seconds to wait.
+ * A vendor's own hold is not waited here (WAIT_MAX_MS above). [design: 3 s: a Jupiter build answered in 223-698 ms
+ * live (solana-jupiter-build, 4 Nov), so the wait and the build stay inside the kit's 5 s SOLANA_BUILD_TIMEOUT_MS
+ * (packages/kit/src/trade/solana/build.ts:52).]
+ */
+export const QUEUE_WAIT_MS = 3_000;
+export const QUEUE_POLL_MS = 250;
 /** A vendor's budget is counted over its own window: every vendor below publishes a per-minute limit. */
 export const VENDOR_WINDOW_MS = 60_000;
 /**
@@ -48,10 +57,10 @@ export const VENDOR_WINDOW_MS = 60_000;
  *   (packages/signpage/src/rules/deposit-quote.ts l.119, packages/wallet/src/deposit/quote.ts l.67), and one again.
  */
 export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
-  jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS, reserve: 34 },
-  relay: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0 },
-  lifi: { total: 100, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0 },
-  oneclick: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0 },
+  jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS, reserve: 34, lend: true },
+  relay: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
+  lifi: { total: 100, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
+  oneclick: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
 };
 /**
  * Requests kept in each vendor's total for the helper's own reads that serve every user, which only those reads may
@@ -140,7 +149,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const keys = readKeys(env);
   const forms = keyForms(keys);
-  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v], { reserve: PROXY_RESERVE[v] }), windowMs: VENDOR_WINDOW_MS, reserve: PROXY_RESERVE[v] }])) as Record<VendorName, BudgetLimits>;
+  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v], { reserve: PROXY_RESERVE[v] }), windowMs: VENDOR_WINDOW_MS, reserve: PROXY_RESERVE[v], lend: true }])) as Record<VendorName, BudgetLimits>;
   const budget = upstreamBudget((v) => limits[v as VendorName], now);
   const cache = new Map<string, Read & { expires: number }>();
   let cacheBytes = 0;
@@ -249,7 +258,24 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     if (rawQuery.length > QUERY_MAX) return source(error(413, "too_large"));
     // a draw on the vendor's budget for every call that may reach it, the helper's own too; a cache hit or a call joining
     // one in flight reaches nothing, so it counts in the caller's share alone
-    const draw = (shareOnly = false): number => budget.take(name, client, 1, shareOnly, reserved);
+    const take = (shareOnly = false): number => budget.take(name, client, 1, shareOnly, reserved);
+    // card helper-crowd-429: a draw the share or the total refuses waits for its room, QUEUE_WAIT_MS at most; a draw that
+    // goes is taken at once, with no await, so a call right behind it still finds it in flight. A cache hit (its share
+    // only, which turns with its window) and a vendor's own hold answer at once, as before.
+    const draw = (shareOnly = false): number | Promise<number> => {
+      const w = take(shareOnly);
+      if (w === 0 || shareOnly || budget.refusedBy().endsWith(" held")) return w;
+      return (async () => {
+        const by = now() + QUEUE_WAIT_MS;
+        let last = w;
+        for (let round = 1; round * QUEUE_POLL_MS <= QUEUE_WAIT_MS && now() + QUEUE_POLL_MS <= by; round++) {
+          await sleep(QUEUE_POLL_MS);
+          last = take(shareOnly);
+          if (last === 0 || budget.refusedBy().endsWith(" held")) return last;
+        }
+        return last;
+      })();
+    };
     const params = new URLSearchParams(rawQuery);
     if (up.cacheMs) params.sort();
     const qs = params.size ? `?${params}` : "";
@@ -258,13 +284,16 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       const id = `${name} ${path}${qs}`;
       const hit = cache.get(id);
       if (hit && hit.expires > now()) {
-        const wait = draw(true);
+        const wait = draw(true) as number;
         if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
         out = hit;
       } else {
         let p = inflight.get(id);
-        const wait = draw(p !== undefined);
+        const first = draw(p !== undefined);
+        const wait = typeof first === "number" ? first : await first;
         if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
+        // a read another call began while this one waited is joined, not sent twice
+        p ??= inflight.get(id);
         if (!p) {
           p = call(name, v, up, path, qs, "", reserved).then((read) => {
             if ("fetchedAt" in read && read.status === 200) remember(id, read, up.cacheMs!);
@@ -276,7 +305,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         out = await p;
       }
     } else {
-      const wait = draw();
+      const wait = await draw();
       if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
       out = await call(name, v, up, path, qs, up.method === "POST" ? body : "", reserved);
     }

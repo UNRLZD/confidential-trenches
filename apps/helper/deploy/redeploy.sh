@@ -102,7 +102,13 @@ swap_helper() {
     # every container of the service that was not running before, a stopped or restarting one included; the old ones
     # are left alone
     new="$(docker compose ps -a -q helper | grep -vxF -f <(printf '%s\n' "$old") || true)"
-    for id in $new; do docker rm -f "$id" >/dev/null || true; done
+    # its last lines before it goes, so the failure names its cause (card helper-ready-without-gt: 18:55-18:58Z a start
+    # that exited at once was removed with its logs); the helper names variables, never their values
+    for id in $new; do
+      echo "redeploy: $id's last lines:" >&2
+      docker logs --tail 30 "$id" 2>&1 | sed 's/^/  /' >&2 || true
+      docker rm -f "$id" >/dev/null || true
+    done
     echo "redeploy: the new helper was not ready within $wait_s s; the old one keeps serving" >&2
     exit 1
   fi

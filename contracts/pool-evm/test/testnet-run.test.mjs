@@ -143,3 +143,44 @@ test("an authorization's r and s go to eth_estimateGas as quantities: no leading
   assert.equal(j.s, "0x" + "c".repeat(63));
   for (const k of ["chainId", "nonce", "yParity", "r", "s"]) assert.match(j[k], /^0x(0|[1-9a-f][0-9a-f]*)$/, k);
 });
+
+// ---- the run's wiring (card evm-buy-hookdata-fee, fold 4) ----
+
+const run = await import("../script/testnet-run.mjs");
+const kitIndex = await import("../../../packages/kit/src/index.ts");
+
+test("--bind-from-s: a bind waits until the pool's time is at least s seconds into its epoch, reading it again after each wait, and binds that epoch", async () => {
+  const E = 1_800_000_000_000n; // an epoch's start (60 s)
+  // the pool's time is its newest block's: 2 s blocks, the newest 2.5 s behind the clock
+  let clock = E + 3_000n;
+  const pool = async () => ((clock - 2_500n) / 2_000n) * 2_000n;
+  const sleeps = [];
+  const r = await run.bindEpoch(25, pool, async (ms) => (sleeps.push(ms), (clock += BigInt(ms))));
+  // 0 s in: a wait of 25 s, then the pool reads 24 s, a wait of 1 s, then 26 s
+  assert.deepEqual(sleeps, [25_000, 1_000]);
+  assert.deepEqual(r, { epochStartMs: E, into: 26_000n });
+  // already past it: no wait, this epoch; at 0 s: at once
+  let t = E + 40_000n;
+  sleeps.length = 0;
+  assert.deepEqual(await run.bindEpoch(25, async () => t, async (ms) => void sleeps.push(ms)), { epochStartMs: E, into: 40_000n });
+  assert.deepEqual(sleeps, []);
+  t = E + 1n;
+  assert.deepEqual(await run.bindEpoch(0, async () => t, async () => assert.fail("no wait at 0 s")), { epochStartMs: E, into: 1n });
+  // an s past an epoch is refused before any read
+  for (const s of ["60", "-1", "2.5", "x"]) {
+    await assert.rejects(run.main(["--chain", "base-sepolia", "--return", "0x00000000000000000000000000000000000a11ce", "--bind-from-s", s], { fetchFn: () => assert.fail("no read") }), /--bind-from-s/);
+  }
+});
+
+test("the fee's state reads go to the kit pin's providers, the sync to the run's pair, and the device takes both (Robinhood's PublicNode keeps 15 s of state)", () => {
+  for (const chain of ["base-sepolia", "robinhood-testnet"]) assert.deepEqual(run.feeProviders(chain, undefined), kitIndex.evmPoolVenues()[chain].providers, chain);
+  assert.notDeepEqual(run.feeProviders("robinhood-testnet", undefined), run.NETS["robinhood-testnet"].rpcs, "not the sync's pair");
+  assert.deepEqual(run.feeProviders("base-sepolia", "http://127.0.0.1:1,http://127.0.0.1:2"), ["http://127.0.0.1:1", "http://127.0.0.1:2"], "a dry run's fork for both");
+  // the device gets the run's fee pair as its feeRpcs: a pair that is not two providers is refused at once
+  const r = (url) => Object.assign(async () => assert.fail("no read"), { url });
+  const pin = { network: "base-sepolia", pool: "0x00000000000000000000000000000000b1f1f001", feeRecipient: "0x000000000000000000000000000000000000fee1", fromBlock: 1n };
+  const rpcs = [r("https://a.example"), r("https://b.example")];
+  assert.ok(run.deviceOf({ pin, rpcs, feeRpcs: [r("https://c.example"), r("https://d.example")], relayFee: async () => null }));
+  assert.throws(() => run.deviceOf({ pin, rpcs, feeRpcs: [r("https://c.example")], relayFee: async () => null }), /rpcs: two/);
+  assert.throws(() => run.deviceOf({ pin, rpcs, feeRpcs: [r("https://c.example"), r("https://c.example")], relayFee: async () => null }), /one provider twice/);
+});

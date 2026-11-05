@@ -18,7 +18,9 @@ export type PortfolioAction =
   | { kind: "withdraw" }
   | { kind: "pool-withdraw"; chain: PoolChain }
   | { kind: "sell"; chain: Chain; token: string; part: "25" | "50" | "100" | "initials" | "box" }
-  | { kind: "exit" | "share" | "export"; chain: Chain; token: string }
+  | { kind: "exit" | "share"; chain: Chain; token: string }
+  /** One wallet's key export, by its chain and address (card app-export-every-wallet). */
+  | { kind: "export"; chain: Chain; address: string }
   | { kind: "view-key"; id: string };
 
 export interface PortfolioSource {

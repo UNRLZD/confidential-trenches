@@ -310,9 +310,10 @@ const RANGE_CAP = /limited to an? [\d,]+ (block )?range|exceed(s|ed)? (the )?max
 const HEAD_LAG = /beyond (the )?current head|invalid block range params|after last accepted block|is ahead of (the )?(head|latest)/i;
 // Read live on 3 Nov 05:35Z, eth_call at a block 20,000 blocks back by hash: rpc.testnet.chain.robinhood.com and
 // robinhood-sepolia-rpc.publicnode.com "-32000: historical state <root> is not available"; geth's own is "missing trie
-// node".
+// node". robinhood.drpc.org, from a backend that has not synced the block's state (2026-11-04, review fold 2 of card
+// evm-buy-hookdata-fee): "Unknown state. First available state is 1"; another backend answers the retry.
 /** A pruning node's answer for state it no longer keeps: a lag, so the retry reads at a newer anchor. */
-const PRUNED = /missing trie node|historical state \S* ?is not available|state \S* ?is not available|state (has been|was) pruned/i;
+const PRUNED = /missing trie node|historical state \S* ?is not available|state \S* ?is not available|state (has been|was) pruned|unknown state/i;
 
 /** One pool view's 32-byte answer, by eth_call at a block hash (EIP-1898). */
 async function view(rpc: EvmRpc, pool: string, data: string, blockHash: string, what: string): Promise<bigint> {
@@ -828,11 +829,12 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
 export type EvmFeeAnswer = { chain: string; network: string; pool: string; fee_recipient: string; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
 
 /**
- * The epoch fee, M356 (4) and M357 (3): the kit's one relay fee rule, evmPoolFee({ floor, gas: evmPoolGas(depth),
- * gasPrice: baseFeePerGas, chainFee }) (kit trade/evm/pool-fee.ts, card evm-buy-hookdata-fee), which the helper imports
- * too (M356 (6)); the caller passes it with the pool's floor. The device reads every input itself: the epoch's first
- * block (both RPCs), the tree depth at it (the leaves both RPCs agree on) and the chain fee at it (the kit's
- * evmPoolChainFeeReads at that block's hash, the same answer on both RPCs).
+ * The epoch fee rule, M356 (4) and M357 (3), a function the caller passes: bind calls it once with the epoch's first
+ * block and its base fee (both RPCs), the pool's tree depth there (from the leaves both RPCs agree on) and the chain fee
+ * there (the kit's evmPoolChainFeeReads at that block's hash, the same answer on both RPCs), every input the device's own
+ * read, and binds only when the helper's GET /v1/pool/fee answer is exactly what it returns. The caller passes the
+ * kit's evmPoolFee({ gas: evmPoolGas(depth), gasPrice: baseFeePerGas, chainFee }), which applies the kit's one floor
+ * (contracts/pool-evm/script/testnet-run.mjs), the function the helper's answer is (apps/helper/src/pool/evm.ts feeOf).
  */
 export type EvmEpochFeeRule = (at: { block: bigint; baseFeePerGas: bigint; depth: number; chainFee: bigint }) => bigint;
 
@@ -841,6 +843,15 @@ export type EvmPoolArgs = {
   pin: EvmPoolPin;
   /** Two RPCs of different operators on the pool's network. */
   rpcs: readonly [EvmRpc, EvmRpc];
+  /**
+   * The two RPCs bind reads the chain fee on, at the epoch's first block's hash, always given (never `rpcs` in their
+   * place: card evm-buy-hookdata-fee, fold 4 LOW-1): each must keep
+   * state that far back (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A), the kit pin's providers (evmPoolVenues,
+   * held to 600 s by live check evm-buy-hookdata-fee). The sync's pair needs wide log pages instead, and on Robinhood
+   * testnet no second free provider gives both (read 2026-11-04 20:09-20:44Z: PublicNode keeps about 15 s of state and
+   * pages 50,000 blocks of logs; dRPC keeps 600 s and more but refuses a 1,000-block page of the pool's old logs).
+   */
+  feeRpcs: readonly [EvmRpc, EvmRpc];
   /** GET /v1/pool/fee?pool=&epoch= on the helper: its answer, refused unless every field is this pool's and its fee
    * the device's own. */
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<EvmFeeAnswer>;
@@ -853,6 +864,12 @@ export type EvmPoolArgs = {
 
 export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
   checkEvmRpcs(a.rpcs);
+  const feeRpcs = a.feeRpcs;
+  try {
+    checkEvmRpcs(feeRpcs);
+  } catch (e) {
+    throw new Error(`feeRpcs: ${(e as Error).message}`);
+  }
   if (typeof a.epochFee !== "function" || typeof a.relayFee !== "function") throw new Error("epochFee and relayFee: functions");
   const pool = lower(a.pin.pool);
   const feeRecipient = lower(a.pin.feeRecipient);
@@ -891,7 +908,7 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
         const block = await evmEpochBlock(a.rpcs, epochStartMs, signal);
         const depth = await sync.depthAt(block.number, signal, block.hash);
         const reads = evmPoolChainFeeReads(a.pin.network, evmPoolGas(depth));
-        const [x, y] = await both(a.rpcs, (rpc, k) => Promise.all(reads.map((r) => view(rpc, r.to, r.data.slice(2), block.hash, `rpc ${k} chain fee`))), signal);
+        const [x, y] = await both(feeRpcs, (rpc, k) => Promise.all(reads.map((r) => view(rpc, r.to, r.data.slice(2), block.hash, `fee rpc ${k} chain fee`))), signal);
         if (x.some((v, i) => v !== y[i])) throw new Error(`the two RPCs differ on the chain fee at block ${block.number} (${block.hash})`);
         return { block, depth, chainFee: evmPoolChainFee(a.pin.network, EVM_POOL_TX_BYTES, x) };
       }, sleep, signal);

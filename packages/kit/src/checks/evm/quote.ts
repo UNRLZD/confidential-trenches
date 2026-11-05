@@ -439,7 +439,7 @@ type Block = { number: bigint; hash: string; timestamp: bigint; baseFeePerGas: b
  *  EVM_QUOTE_MAX_AGE_MS behind the device's clock, with `confirm`, which reads that number's hash and time on the other
  *  provider and must find the same block. One provider alone cannot pick an old block, nor name a block the other does
  *  not hold (review of b17d1fc, R1, R1b). `confirm` runs beside the reads, and nothing read is used before it passes. */
-async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, nowMs: number, minBlock = 0n, mono: () => number = monotonic): Promise<{ block: Block; confirm: () => Promise<void> }> {
+async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, nowMs: number, minBlock = 0n, mono: () => number = monotonic, start: number = mono()): Promise<{ block: Block; confirm: () => Promise<void> }> {
   const call: EvmRpcCall = { method: "eth_getBlockByNumber", params: ["latest", false] };
   let a: Block;
   let b: Block;
@@ -461,9 +461,9 @@ async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, nowM
   }
   if (a.number - b.number > maxLag || b.number - a.number > maxLag) return refuse("rpc_disagree", `the providers' heads ${a.number} and ${b.number} are more than ${maxLag} blocks apart`);
   const [lo, other, who] = a.number <= b.number ? [a, rpcs[1], "provider 2"] : [b, rpcs[0], "provider 1"];
-  // a sell's block's age on the device's clock after the wait for the buy's block, never at the quote's start (review
-  // fold 1, L2); a buy's agreed block waits for nothing, and is judged at the quote's clock
-  const atMs = minBlock === 0n ? nowMs : nowMs + Math.max(0, mono() - t0);
+  // the block's age on the device's clock now: the quote's clock at its entry (`nowMs`, at `start` on `mono`) and the
+  // time since, the scan and the wait for the buy's block included (review fold 1, L2; fold 2, LOW-1)
+  const atMs = nowMs + Math.max(0, mono() - start);
   if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse("stale_quote", `block ${lo.number} is more than 30 s old`);
   const confirm = async () => {
     const back = header((await askAt(other, [{ method: "eth_getBlockByNumber", params: ["0x" + lo.number.toString(16), false] }]))[0], who);
@@ -920,7 +920,8 @@ async function readAgreed(confirm: () => Promise<void>, rpcs: readonly [EvmRpc, 
 
 /** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
  *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
-export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, watch?: EvmHeadWatch): Promise<EvmPoolBuyQuote> {
+export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, watch?: EvmHeadWatch, mono: () => number = monotonic): Promise<EvmPoolBuyQuote> {
+  const start = mono();
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
   const { chain, token, amountIn, slippageBps } = req;
   checkAsk(nowMs, rpcsIn, amountIn, slippageBps);
@@ -965,6 +966,8 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     hints: req.pools,
     sell: false,
     watch,
+    mono,
+    start,
     beforeFound: () => {
       if (v.nativeFirst && wethStart && v.v4 !== undefined && lower(firstOut) !== lower(token)) {
         for (const key of V4_KEYS) {
@@ -1161,8 +1164,10 @@ async function routeSet(a: {
   watch?: EvmHeadWatch | undefined;
   /** the lowest block the set reads at (a sell's buy's block; agreedBlock waits for it); a held head (the buy's) has none */
   minBlock?: bigint;
-  /** tests only: the monotonic clock agreedBlock's wait runs on (performance.now) */
+  /** tests only: the monotonic clock agreedBlock's wait and age run on (performance.now) */
   mono?: (() => number) | undefined;
+  /** `mono` at the quote's entry, where `nowMs` was read: a new agreed block's age counts every ms since */
+  start: number;
   /** the caller's reads after the standard pools' (the buy's first-hop reads, in the order its recorded reads hold) */
   beforeFound?: () => void;
   /** the caller's refusals on the first round's answers, before any later round */
@@ -1226,7 +1231,7 @@ async function routeSet(a: {
   // the agreed block, picked once (the held head while fresh), after the token's scan has its logs; a new one is held
   // to the 30 s rule in agreedBlock, a held one in the watch's reuse bound on both clocks
   let agreed: ReturnType<typeof agreedBlock> | undefined;
-  const agreedOnce = () => (agreed ??= a.watch === undefined ? agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono) : a.watch.head(a.nowMs));
+  const agreedOnce = () => (agreed ??= a.watch === undefined ? agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start) : a.watch.head(a.nowMs));
   const agreedHead = () => agreedOnce().then((x) => x.block);
   const gate = gateOf(v.scan?.parallel ?? 1);
   let headOfScan: Promise<bigint> | undefined;
@@ -1690,7 +1695,8 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
 
 /** evmPoolSellQuote on the providers `rpcs` with the device's clock at `nowMs`, and the scan provider `scan` (`venues`
  *  and `mono`, the monotonic clock of the wait for the buy's block: tests only). Not in the index. */
-export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, venues?: EvmPoolVenueList, mono?: () => number): Promise<EvmPoolSellQuote> {
+export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly [EvmRpc, EvmRpc], nowMs: number, scan?: EvmRpc, venues?: EvmPoolVenueList, mono: () => number = monotonic): Promise<EvmPoolSellQuote> {
+  const start = mono();
   if (typeof req !== "object" || req === null) return refuse("bad_request", "a request is an object");
   if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");
   const { chain, token, w, amountIn, slippageBps } = req;
@@ -1719,7 +1725,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const reads: Read[] = [];
   const factory = v.v3 !== undefined && router !== undefined ? reads.push({ to: v.v3, data: "0x" + SEL_FACTORY }) - 1 : -1;
   const exits = evmSellExits(chain, t, bought) ? bought : undefined;
-  const { block, out, filled } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono });
+  const { block, out, filled } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
   // a route through a hook the venue does not list, priced above the best route the sell builder takes, counts only
   // where W's own sell through it executes at that price (card evm-quote-exec-sim; review of edb4dbb, F4)
   const takes = best(filled.filter((r) => evmSellExits(chain, t, r.route)));

@@ -3,7 +3,7 @@
 // the last YIELD_MS, except urgent reads within the lists' own LIST_FLOOR); a 429 pausing every lane.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_RESERVE, REFRESH_SLOT, throttledUntil, WINDOW_MS } from "./gecko.ts";
+import { AHEAD_PER_WINDOW, COLD_RESERVE, geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_RESERVE, REFRESH_SLOT, throttledUntil, WINDOW_MS } from "./gecko.ts";
 
 test("the measured keyless limit: 5 calls a minute from one address (the published 10 met 429s)", () => assert.equal(GT_LIMIT_PER_MIN, 5));
 
@@ -108,4 +108,42 @@ test("card helper-chart-fresh: the newest data held is a refresh until REFRESH_U
   assert.equal(refreshLane(t - 86_400_000, t), "pages", "handed over a day old");
   // past the bars' own 60 s, so a chart read often still refreshes in its lane; under the live check's 10 min
   assert.ok(urgent > CANDLES_FRESH_MS && urgent < 600_000, `REFRESH_URGENT_MS ${urgent}`);
+});
+
+test("card helper-restart-fresh: a swap reads the old helper's warm file twice (at the start and at the handover); its calls count once, the second file's replacing the first's", () => {
+  let t = 1_800_000_000_000;
+  const b = geckoBudget(() => t);
+  // the file the old helper wrote at its last tick, then the one it wrote at its stop: the same calls and one more
+  b.seed([t - 30_000, t - 20_000]);
+  t += 10_000;
+  b.seed([t - 40_000, t - 30_000, t - 5_000]);
+  assert.deepEqual(b.calls(), [t - 40_000, t - 30_000, t - 5_000], "three calls, not five");
+  assert.equal(b.take("pages"), true);
+  assert.equal(b.take("pages"), true, "a page finds the two calls the old helper left");
+});
+
+test("card helper-restart-fresh: the old helper's lists calls keep their lane across a swap, so the new helper's urgent lists stay within LIST_FLOOR and a cold page still finds its two calls", () => {
+  const t = 1_800_000_000_000;
+  const b = geckoBudget(() => t);
+  b.seed([t - 30_000, t - 20_000], "lists"); // the old helper's lists took their floor in the window
+  assert.deepEqual(b.calls("lists"), [t - 30_000, t - 20_000], "written again as lists calls by this helper's warm file");
+  assert.equal(b.take("lists", true), false, "an urgent list waits: the floor is spent by the old helper's lists");
+  assert.equal(b.take("pages"), true);
+  assert.equal(b.take("pages"), true, "a cold page's top pool and its bars");
+});
+
+test("card helper-restart-fresh fold: the ahead lane takes a call only while COLD_RESERVE stay free, at most AHEAD_PER_WINDOW a window, never makes the lists yield, and leaves a page its PAGE_RESERVE", () => {
+  let t = 1_000_000;
+  const b = geckoBudget(() => t);
+  assert.equal(b.take("ahead"), true);
+  assert.equal(b.take("ahead"), false, "one a window");
+  assert.equal(b.take("lists"), true, "an ahead call is no page call: the lists do not yield to it");
+  assert.equal(b.take("pages"), true);
+  assert.equal(b.take("pages"), true);
+  assert.equal(b.take("pages"), true, "pages keep the rest of the window");
+  t += WINDOW_MS;
+  for (let i = 0; i < GT_LIMIT_PER_MIN - COLD_RESERVE; i++) assert.equal(b.take("pages"), true);
+  assert.equal(b.take("ahead"), false, "COLD_RESERVE free: no ahead call");
+  for (let i = 0; i < PAGE_RESERVE; i++) assert.equal(b.take("pages"), true, "a page still finds its calls");
+  assert.equal(AHEAD_PER_WINDOW, 1);
 });

@@ -43,6 +43,7 @@ import {
   checkSolanaDeposit,
   checkSolanaSell,
   checkSolanaWithdraw,
+  checkSolanaOnwardSend,
   drawPool,
   evmWithdrawDigest,
   signEvmAuthorization,
@@ -174,12 +175,16 @@ test("ATTACK A1: EVM sell whose Sell carries the attacker's precommitment is ref
 });
 
 // A2: the withdraw draws "amount X to <typed address>" while the signed bytes send 1 lamport (or nothing) there
+const ON_BAL = 9_000_000n;
+const ON_FEE = 5_000n;
+const onReads = { blockhash: BLOCKHASH, balance: [ON_BAL, ON_BAL], fee: [ON_FEE, ON_FEE], toExecutable: [false, false], releaseAccounts: relIx().accounts.map((a) => a.key) } as const;
+const onWire = (ixs: ReturnType<typeof send>[], signers = [SOL_W]) => wire(signers[0]!, ixs, signers);
 test("ATTACK A2a: Solana withdraw whose onward send is 1 lamport, drawn as the full amount to the typed address, is refused", () => {
-  refused(() => checkSolanaWithdraw(wdWire([cuLimit, relIx(), send(TO, 1n)]), wdAsk, solCtx(), release, TO, SOL_READS));
+  refused(() => checkSolanaOnwardSend(onWire([send(TO, 1n)]), wdAsk, solCtx(), TO, onReads));
 });
-test("ATTACK A2b: Solana withdraw with no onward send, drawn as going to the typed address, is refused", () => {
+test("ATTACK A2b: Solana withdraw's release is never drawn as going to the typed address: it lands on W", () => {
   let d: ReturnType<typeof checkSolanaWithdraw> | null = null;
-  try { d = checkSolanaWithdraw(wdWire([cuLimit, relIx()]), wdAsk, solCtx(), release, TO, SOL_READS); } catch (e) { if (!(e instanceof PoolRuleRefused)) throw e; }
+  try { d = checkSolanaWithdraw(wdWire([cuLimit, relIx()]), wdAsk, solCtx(), release, SOL_READS); } catch (e) { if (!(e instanceof PoolRuleRefused)) throw e; }
   if (d) assert.notEqual(d.to, TO, `drawn: ${d.amount} to ${d.to}, signed: nothing to ${TO}`);
 });
 
@@ -222,13 +227,14 @@ test("ATTACK A6: the release's state root page made writable is refused", () => 
   const newPage = solanaPoolPage(PROGRAM, 0, 6);
   if (root === newPage) return; // same page: writable is the merge's right answer
   ix.accounts = ix.accounts.map((a) => (a.key === root ? { ...a, writable: true } : a));
-  refused(() => checkSolanaWithdraw(wdWire([cuLimit, ix, send()]), wdAsk, solCtx(), release, TO, SOL_READS));
+  refused(() => checkSolanaWithdraw(wdWire([cuLimit, ix]), wdAsk, solCtx(), release, SOL_READS));
 });
 
-// A7: a second transfer leg, or a transfer from the fee payer, or W's transfer to the fee payer
-test("ATTACK A7: a withdraw with two sends, or a send to the fee payer, is refused", () => {
-  refused(() => checkSolanaWithdraw(wdWire([cuLimit, relIx(), send(TO, 1n), send(TO, 1n)]), wdAsk, solCtx(), release, TO, SOL_READS));
-  refused(() => checkSolanaWithdraw(wdWire([cuLimit, relIx(), send(SOL_FEE_PAYER)]), wdAsk, solCtx(), release, TO, SOL_READS));
+// A7: a transfer leg in the fee payer's release, two onward legs, or W's onward send to the fee payer
+test("ATTACK A7: a release with a send after it, an onward with two sends, or an onward send to the fee payer, is refused", () => {
+  refused(() => checkSolanaWithdraw(wdWire([cuLimit, relIx(), send(TO, 1n)]), wdAsk, solCtx(), release, SOL_READS));
+  refused(() => checkSolanaOnwardSend(onWire([send(TO, ON_BAL - ON_FEE - 1n), send(TO, 1n)]), wdAsk, solCtx(), TO, onReads));
+  refused(() => checkSolanaOnwardSend(onWire([send(SOL_FEE_PAYER, ON_BAL - ON_FEE)]), wdAsk, solCtx(), SOL_FEE_PAYER, onReads));
 });
 
 // A8: compute budget: a price over the cap, a heap frame request, a loaded-data limit, a limit over 1.4M

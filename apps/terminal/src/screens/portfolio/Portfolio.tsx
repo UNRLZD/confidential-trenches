@@ -1,14 +1,15 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
+import { POOL_ASSET_DECIMALS } from "@blindfill/kit";
 import { useReturnHop } from "../../shell/ReturnHop.tsx";
 import { HopLine } from "../signin/HopLine.tsx";
 import { Avatar } from "../market/Avatar.tsx";
 import { ActivityList } from "./Activity.tsx";
 import type { ActUi } from "./Activity.tsx";
 import { ExitIc, Ic } from "./icons.tsx";
-import { activity, amount, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, stats, units, usd } from "./model.ts";
-import type { ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals } from "./model.ts";
+import { activity, amount, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, shortAddress, stats, units, usd, walletRows } from "./model.ts";
+import type { ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals, WalletRow } from "./model.ts";
 import { usePortfolioSource } from "./source.tsx";
 import type { PortfolioAction, PortfolioSource } from "./source.tsx";
 import { W } from "./W.tsx";
@@ -23,6 +24,10 @@ import "./portfolio.css";
 // (a link to the Orders route), Activity and Stats, and a position's action sheet (S10.13). Both forms are in the page
 // and CSS shows one, as the shell does. Every sell, exit plan, share, export and view-key tap goes to the mount
 // (PortfolioAction): those screens are other cards'. `data-states` on the root lists every brief state on screen.
+// Every wallet that holds money has its own export (card app-export-every-wallet): a position row's Export key icon for
+// each wallet that holds it (one wallet: the icon opens it; more: a menu of their addresses), the phone sheet's Export
+// row per wallet, and Wallets under the pools for each wallet the kit's moneyWallets names that holds no position. Each
+// export control carries data-export-chain and data-export-address, the wallet it asks SIGN_HOST to open.
 
 export type Pane = "positions" | "activity" | "stats";
 
@@ -128,7 +133,7 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
                       ))
                     : ui.closed
                       ? closedList.map((c) => <ClosedTr key={c.key} c={c} />)
-                      : list.map((r) => <PosTr key={r.key} r={r} now={now} menu={ui.menu === r.key} setMenu={(m) => setUi({ menu: m ? r.key : null })} act={src.act} />)}
+                      : list.map((r) => <PosTr key={r.key} r={r} now={now} menu={ui.menu === r.key ? "more" : ui.menu === `export:${r.key}` ? "export" : null} setMenu={(m) => setUi({ menu: m === "more" ? r.key : m === "export" ? `export:${r.key}` : null })} act={src.act} />)}
                 </tbody>
               </table>
               {!loading && (ui.closed ? closedList.length === 0 : list.length === 0) && (
@@ -217,6 +222,7 @@ function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadP
           <div className="eqh"><W id="whereItIs" /></div>
           <Where t={t} loading={loading} />
           <PoolRows p={pools} src={src} />
+          <WalletRows src={src} />
         </div>
         <div className="eqch">
           <div className="ctl">
@@ -321,6 +327,39 @@ function PoolWithdraw({ r, on, act }: { r: PoolRow; on: boolean; act: PortfolioS
   return (
     <button type="button" className="plw" data-control={control} aria-label={WORDS.withdraw.text} title={WORDS.withdraw.text} disabled={!on || r.balance === 0n} onClick={() => act({ kind: "pool-withdraw", chain })}>
       <Ic name="arrowUp" size={12} />
+    </button>
+  );
+}
+
+/** Wallets (card app-export-every-wallet): each wallet that holds money and no open position, by chain, its short
+ *  address, what it holds (a deposit wallet's balance in its asset, a trade wallet's size) and its Export key icon. Drawn
+ *  only when there is one, in the pools' grid. */
+function WalletRows({ src, phone }: { src: PortfolioSource; phone?: boolean }) {
+  const rows = walletRows(src.snapshot.state);
+  if (!rows.length) return null;
+  const holds = (w: WalletRow): ReactNode =>
+    w.amount !== null && w.asset !== null ? <>{amount(w.amount, POOL_ASSET_DECIMALS[w.asset])} <span className="t3">{w.asset}</span></> : w.size !== null ? usd(w.size) : DASH;
+  return (
+    <div className={`pools wls${phone ? " ph" : ""}`} data-wallets={rows.length}>
+      <span className="plk"><W id="wallets" /></span>
+      {rows.map((w) => (
+        <div className="plr" key={`${w.chain}:${w.address}`} data-wallet={w.address} data-wallet-chain={w.chain} data-wallet-role={w.role}>
+          <span className="ell">{CHAIN_NAME[w.chain]}</span>
+          <span className="t2 adr" title={w.address}>{shortAddress(w.address)}</span>
+          <span className="num">{holds(w)}</span>
+          <span />
+          <ExportKey chain={w.chain} address={w.address} act={src.act} className="plw" size={12} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** One wallet's Export key icon: asks the mount for that wallet's export.open, by its chain and address. */
+function ExportKey({ chain, address, act, className, size = 14 }: { chain: Row["chain"]; address: string; act: PortfolioSource["act"]; className: string; size?: number }) {
+  return (
+    <button type="button" className={className} data-control="export" data-export-chain={chain} data-export-address={address} aria-label={WORDS.exportKey.text} title={WORDS.exportKey.text} onClick={() => act({ kind: "export", chain, address })}>
+      <Ic name="key" size={size} />
     </button>
   );
 }
@@ -450,8 +489,9 @@ function Selling({ r }: { r: Row }) {
   return r.selling.stage === "sending" ? <W id="sending" /> : <><W id="landing" /> <span className="live num">{(r.selling.ms / 1000).toFixed(1)}s</span></>;
 }
 
-function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: boolean; setMenu(on: boolean): void; act(a: PortfolioAction): void }) {
+function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "more" | "export" | null; setMenu(m: "more" | "export" | null): void; act(a: PortfolioAction): void }) {
   const at = { chain: r.chain, token: r.token };
+  const one = r.addresses.length === 1 ? r.addresses[0]! : null;
   return (
     <tr className={menu || r.selling ? "hov" : ""} data-pos={r.key}>
       <td className="l">
@@ -481,11 +521,22 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: bool
             </span>
           )}
           <button type="button" className="sec sell" data-control="sell" onClick={() => act({ kind: "sell", ...at, part: "box" })}><W id="sell" /></button>
-          <button type="button" className={`ico ${menu ? "on" : ""}`} aria-expanded={menu} aria-label={WORDS.more.text} data-control="more" onClick={() => setMenu(!menu)}><Ic name="more" size={16} stroke={1.6} /></button>
-          {menu && (
+          {one !== null ? (
+            <ExportKey chain={r.chain} address={one} act={act} className="ico" />
+          ) : r.addresses.length > 1 ? (
+            <button type="button" className={`ico ${menu === "export" ? "on" : ""}`} aria-expanded={menu === "export"} aria-label={WORDS.exportKey.text} title={WORDS.exportKey.text} data-control="export-menu" data-export-count={r.addresses.length} onClick={() => setMenu(menu === "export" ? null : "export")}><Ic name="key" size={14} /></button>
+          ) : null}
+          <button type="button" className={`ico ${menu === "more" ? "on" : ""}`} aria-expanded={menu === "more"} aria-label={WORDS.more.text} data-control="more" onClick={() => setMenu(menu === "more" ? null : "more")}><Ic name="more" size={16} stroke={1.6} /></button>
+          {menu === "more" && (
             <div className="menu rmenu">
-              <button type="button" className="mi" data-control="share" onClick={() => (setMenu(false), act({ kind: "share", ...at }))}><Ic name="share" /><W id="share" /></button>
-              <button type="button" className="mi" data-control="export" onClick={() => (setMenu(false), act({ kind: "export", ...at }))}><Ic name="arrowUp" /><W id="export" /></button>
+              <button type="button" className="mi" data-control="share" onClick={() => (setMenu(null), act({ kind: "share", ...at }))}><Ic name="share" /><W id="share" /></button>
+            </div>
+          )}
+          {menu === "export" && (
+            <div className="menu rmenu" data-menu="export">
+              {r.addresses.map((a) => (
+                <button type="button" key={a} className="mi" data-control="export" data-export-chain={r.chain} data-export-address={a} title={a} onClick={() => (setMenu(null), act({ kind: "export", chain: r.chain, address: a }))}><Ic name="key" /><span className="num">{shortAddress(a)}</span></button>
+              ))}
             </div>
           )}
         </div>
@@ -595,6 +646,7 @@ function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: Hea
         <div className="lbl2"><W id="whereItIs" /></div>
         <Where t={t} loading={loading} phone />
         <PoolRows p={pools} src={src} phone />
+        <WalletRows src={src} phone />
       </div>
     </div>
   );
@@ -671,7 +723,9 @@ function Sheet({ r, close, act }: { r: Row; close(): void; act(a: PortfolioActio
           <div className="arows">
             <button type="button" className="arow" data-control="sheet-sell" onClick={() => go({ kind: "sell", ...at, part: "box" })}><span className="tile32 sl"><Ic name="arrowDown" /></span><span className="grow"><W id="sell" /></span><Ic name="chevR" size={13} /></button>
             <button type="button" className="arow" data-control="sheet-exit" onClick={() => go({ kind: "exit", ...at })}><span className="tile32"><ExitIc size={32} /></span><span className="grow"><W id="exitPlan" /></span>{r.exit && <><span className="xt tp num">TP {pct(r.exit.tp_bps).replace(".0", "")}</span><span className="xt sl num">SL {pct(-r.exit.sl_bps).replace(".0", "")}</span></>}<Ic name="chevR" size={13} /></button>
-            <button type="button" className="arow" data-control="sheet-export" onClick={() => go({ kind: "export", ...at })}><span className="tile32"><Ic name="arrowUp" /></span><span className="grow"><W id="export" /></span><Ic name="chevR" size={13} /></button>
+            {r.addresses.map((a) => (
+              <button type="button" key={a} className="arow" data-control="sheet-export" data-export-chain={r.chain} data-export-address={a} onClick={() => go({ kind: "export", chain: r.chain, address: a })}><span className="tile32"><Ic name="key" /></span><span className="grow"><W id="export" /></span>{r.addresses.length > 1 && <span className="t3 num" title={a}>{shortAddress(a)}</span>}<Ic name="chevR" size={13} /></button>
+            ))}
             <button type="button" className="arow" data-control="sheet-share" onClick={() => go({ kind: "share", ...at })}><span className="tile32"><Ic name="share" /></span><span className="grow"><W id="share" /></span><Ic name="chevR" size={13} /></button>
           </div>
         </div>

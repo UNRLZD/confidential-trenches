@@ -280,15 +280,20 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
   assert.match(main, /const withdraw = withdrawSenderFromEnv\(process\.env, fee, statusesOf\(watches\)\);/);
   assert.match(main, /const bind = bindSenderFromEnv\(process\.env, watches\);/);
-  assert.match(main, /for \(const p of pools\.values\(\)\) p\.ready\.catch\(\(e: Error\) => \(console\.error\(`helper: \$\{e\.message\}`\), process\.exit\(2\)\)\);/);
+  // card evm-buy-hookdata-fee, fold 4 MEDIUM-1: both pool kinds' start checks exit 2 on a refusal, and ready waits for them
+  assert.match(main, /const checked = poolsChecked\(pools, evmPools, \(e\) => \(console\.error\(`helper: \$\{e\.message\}`\), process\.exit\(2\)\)\);/);
+  assert.match(main, /const warmed = Promise\.all\(\[warmUntilReady\(\{ lists, evmLists, token \}\), checked\]\)\.then\(\(\) => void \(ready = true\)\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
   assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, \(\) => ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\)\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, \(\) => ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
+  // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
+  assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env\);/);
+  assert.match(main, /const release = releaseOf\(process\.env\);/);
   // card helper-ready-gate: the fee quoter is the senders' (their store handed over), and a replacing helper listens only once ready
   assert.match(main, /const senders = sendersFromEnv\(process\.env\);/);
   assert.match(main, /const fee = senders\.fee;/);
-  assert.match(main, /if \(senders\.peer\) void warmed\.then\(listen\);/);
+  assert.match(main, /if \(senders\.peer\) void warmed\.then\(listen, \(\) => undefined\);/);
   // the EVM lists (src/data/evm/lists.ts): each served chain's lists on GeckoTerminal's one budget, shared with the
   // Solana token page's candles, and warmed at start
   assert.match(main, /const SERVED_EVM: readonly EvmChain\[\] = \["base", "robinhood"\];/);
@@ -492,11 +497,12 @@ test("POST /v1/pool/evm/sell carries the body to the named EVM pool's sender wit
   // a chain whose blocks are 2 s apart up to now, 1 gwei base fee
   const chain = async (m: string, p: readonly unknown[]): Promise<unknown> => {
     if (m === "eth_chainId") return "0x14a34";
+    if (m === "eth_call") return `0x${(2n).toString(16).padStart(64, "0")}`; // the fee's reads at the epoch block: the tree depth and the chain fee oracle
     const n = p[0] === "latest" ? 1000n : BigInt(p[0] as string);
     return { number: `0x${n.toString(16)}`, timestamp: `0x${(BigInt(NOW / 1000) - 2n * (1000n - n)).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" };
   };
   const sellKey = new Uint8Array(createHash("sha256").update("helper-evm-sender/server/EVM_SELL_SENDER").digest());
-  const real = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: key, sellKey, floor: 1n }, [chain, chain], () => NOW);
+  const real = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: key, sellKey }, [chain, chain], () => NOW);
   const seen: [unknown, string | undefined][] = [];
   const pool = { ...real, fee: real.fee, sell: async (body: unknown, client?: string) => (seen.push([body, client]), { status: 200, body: { hash: `0x${"ab".repeat(32)}` } }) } as typeof real;
   const h = own(createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map([[POOL, pool]]), () => NOW)));

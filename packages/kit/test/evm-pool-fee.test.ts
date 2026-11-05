@@ -22,22 +22,24 @@ test("a depth outside 0 to 32 is refused", () => {
 // Card evm-buy-hookdata-fee, review fold 1 L1: the relay fee rule, the kit's one definition, with the chain fee
 const STEP = 10n ** 13n;
 const pf = (await import("../src/index.ts")) as unknown as Record<string, unknown>;
-test("L1 the relay fee is max(floor, ceilStep(2 x (gas x gas price + the chain fee)))", () => {
-  const fee = pf.evmPoolFee as (a: { floor: bigint; gas: bigint; gasPrice: bigint; chainFee: bigint }) => bigint;
+test("L1 the relay fee is max(floor, ceilStep(2 x (gas x gas price + the chain fee))), the floor the kit's one (fold 2 LOW-A)", () => {
+  const fee = pf.evmPoolFee as (a: { gas: bigint; gasPrice: bigint; chainFee: bigint; floor?: bigint }) => bigint;
   assert.equal(pf.EVM_POOL_FEE_STEP, STEP);
+  assert.equal(pf.EVM_POOL_FEE_FLOOR, STEP, "one step");
   assert.equal(pf.EVM_POOL_MIN_DEPOSIT, 10n ** 14n, "PrivacyPool.sol:53, 0.0001 ether");
   // 2 x (1,000,000 x 6,000,000 + 4e12) = 2e13, on the step
-  assert.equal(fee({ floor: STEP, gas: 1_000_000n, gasPrice: 6_000_000n, chainFee: 4n * 10n ** 12n }), 2n * STEP);
+  assert.equal(fee({ gas: 1_000_000n, gasPrice: 6_000_000n, chainFee: 4n * 10n ** 12n }), 2n * STEP);
   // one wei over a step rounds up a step
-  assert.equal(fee({ floor: 0n, gas: 1n, gasPrice: 1n, chainFee: STEP / 2n }), 2n * STEP);
-  assert.equal(fee({ floor: 0n, gas: 1n, gasPrice: 0n, chainFee: STEP / 2n }), STEP);
+  assert.equal(fee({ gas: 1n, gasPrice: 1n, chainFee: STEP / 2n }), 2n * STEP);
+  assert.equal(fee({ gas: 1n, gasPrice: 0n, chainFee: STEP / 2n }), STEP);
   // the chain fee counts twice, as the gas does
-  assert.equal(fee({ floor: 0n, gas: 0n, gasPrice: 0n, chainFee: 5n * STEP }), 10n * STEP);
-  // the floor when gas is cheaper
-  assert.equal(fee({ floor: 7n * STEP, gas: 1n, gasPrice: 1n, chainFee: 0n }), 7n * STEP);
-  assert.equal(fee({ floor: 0n, gas: 0n, gasPrice: 0n, chainFee: 0n }), 0n);
-  for (const bad of [{ floor: -1n }, { gas: -1n }, { gasPrice: 1 as unknown as bigint }, { chainFee: -1n }]) {
-    assert.throws(() => fee({ floor: 0n, gas: 1n, gasPrice: 1n, chainFee: 0n, ...bad }), /bigints/);
+  assert.equal(fee({ gas: 0n, gasPrice: 0n, chainFee: 5n * STEP }), 10n * STEP);
+  // the floor when the fee rounds under it: nothing to pay is still one step, and no caller passes another floor
+  assert.equal(fee({ gas: 0n, gasPrice: 0n, chainFee: 0n }), STEP);
+  assert.equal(fee({ gas: 0n, gasPrice: 0n, chainFee: 0n, floor: 0n }), STEP);
+  assert.equal(fee({ gas: 0n, gasPrice: 0n, chainFee: 0n, floor: 7n * STEP }), STEP);
+  for (const bad of [{ gas: -1n }, { gasPrice: 1 as unknown as bigint }, { chainFee: -1n }]) {
+    assert.throws(() => fee({ gas: 1n, gasPrice: 1n, chainFee: 0n, ...bad }), /bigints/);
   }
 });
 

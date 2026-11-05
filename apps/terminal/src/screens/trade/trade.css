@@ -98,3 +98,53 @@
 .rg-cell[data-tone="bad"] .rg-value { color: var(--sell, #ff5d4d); }
 .rg-cell[data-tone="warn"] .rg-value { color: var(--warn); }
 .rg-cell[data-tone="unknown"] .rg-value { color: var(--text-3); }
+
+/* The buy route strip (card app-buy-route-strip; research repo design/proto at design-lock-r5: assets/private.css .pvt,
+   .pvf, .pvn, .pvg, .pvk, .pvs, .pvl, and the film's .pvck badge). Nothing here waits on a clock of its own: each
+   transition and animation starts at the event that sets the state it draws. */
+.rs { margin-top: 0; padding: 12px 8px 10px; border-radius: 12px; background: radial-gradient(120% 140% at 0% 0%, rgba(91, 140, 255, 0.07), transparent 60%), #0c0c0c; box-shadow: inset 0 0 0 1px rgba(244, 244, 242, 0.06); }
+.rs-flow { display: flex; align-items: flex-start; min-width: 0; }
+.rs-n { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: none; text-align: center; }
+.rs-g { position: relative; display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; box-sizing: border-box; border-radius: 10px; background: #0e0e0e; box-shadow: inset 0 0 0 1px rgba(244, 244, 242, 0.06); }
+.rs-n[data-state="active"] .rs-g { box-shadow: inset 0 0 0 1px rgba(80, 227, 151, 0.55), 0 0 14px rgba(80, 227, 151, 0.18); animation: rs-glow 0.625s ease-in-out infinite; }
+.rs-n[data-state="error"] .rs-g { box-shadow: inset 0 0 0 1px rgba(var(--sell-rgb), 0.7), 0 0 12px rgba(var(--sell-rgb), 0.16); }
+@keyframes rs-glow {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(80, 227, 151, 0.35), 0 0 10px rgba(80, 227, 151, 0.1); }
+  50% { box-shadow: inset 0 0 0 1px rgba(80, 227, 151, 0.75), 0 0 20px rgba(80, 227, 151, 0.28); }
+}
+.rs-ck { position: absolute; top: -5px; right: -5px; width: 15px; height: 15px; border-radius: 50%; background: var(--acc); color: #0a0a0a; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #0c0c0c; animation: rs-pop 0.28s ease-out both; }
+.rs-ck[data-kind="error"] { background: var(--sell); }
+@keyframes rs-pop { 0% { transform: scale(0); } 64% { transform: scale(1.15); } 100% { transform: scale(1); } }
+.rs-k { font: 500 11px/1.22 var(--font-ui); min-height: 2.44em; white-space: nowrap; color: var(--text-2); }
+.rs-v { font: 400 11px/1.3 var(--font-num); font-variant-numeric: tabular-nums; min-height: 14px; min-width: 9ch; color: var(--text-3); opacity: 0; transition: opacity 0.2s ease-out, color 0.2s ease-out; white-space: nowrap; }
+.rs-v[data-on] { opacity: 1; }
+.rs-n[data-state="active"] .rs-v { color: var(--text-1); }
+.rs-n[data-state="done"] .rs-v { color: var(--text-2); }
+.rs-n[data-step="balance"] .rs-v, .rs-n[data-step="token"] .rs-v { min-width: 0; }
+.rs-tk { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--bg-raised); color: var(--text-2); font: 600 13px var(--font-ui); text-transform: uppercase; }
+/* a link: dots that brighten toward the arrow; the green layer fills left to right */
+.rs-l { flex: 1 1 0; min-width: 12px; height: 38px; display: flex; align-items: center; gap: 1px; padding: 0 4px; overflow: hidden; color: rgba(244, 244, 242, 0.7); transition: color 0.15s ease-out; }
+.rs-l[data-full] { color: var(--acc); }
+.rs-l > svg { flex: none; fill: currentColor; }
+.rs-ld { position: relative; flex: 1; min-width: 0; height: 8px; }
+.rs-ld::before, .rs-ld > i { content: ""; position: absolute; left: 0; top: 0; bottom: 0; background: radial-gradient(circle at 3.5px 4px, var(--dot) 2.2px, transparent 2.6px) 0 0 / 7px 8px repeat-x; }
+.rs-ld::before { --dot: #f4f4f2; right: 0; -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.74)); mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.74)); }
+.rs-ld > i { --dot: var(--acc); width: 0; opacity: 0.9; transition: width 0.25s ease-out; }
+.rs-l[data-full] .rs-ld > i { width: 100%; }
+/* the wallet step and its link grow in from nothing at the tap, from the middle; the padding and negative margin keep the glow and badge unclipped */
+.rs-grp { display: flex; align-items: flex-start; flex: 1 1 auto; box-sizing: content-box; max-width: 0; margin: -10px; padding: 10px; overflow: hidden; opacity: 0; transition: max-width 0.3s cubic-bezier(0.65, 0, 0.35, 1), opacity 0.3s cubic-bezier(0.65, 0, 0.35, 1); }
+.rs-grp[data-in] { max-width: 260px; opacity: 1; }
+.rs-grp > .rs-l { flex: 1 1 0; min-width: 12px; }
+/* the fill toast: centred at the top, fades in and slides down 12 px */
+.rs-toast { position: fixed; z-index: 95; left: 50%; top: 68px; width: min(340px, calc(100vw - 32px)); box-sizing: border-box; display: flex; align-items: flex-start; gap: 12px; padding: 14px; border-radius: 12px; background: var(--bg-raised); border: 1px solid var(--border-strong); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); opacity: 0; transform: translateX(-50%) translateY(-12px); transition: opacity 0.3s cubic-bezier(0.65, 0, 0.35, 1), transform 0.3s cubic-bezier(0.65, 0, 0.35, 1); cursor: default; }
+.rs-toast[data-shown] { opacity: 1; transform: translateX(-50%) translateY(0); }
+.rs-toastBody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rs-toastTitle { font-weight: 600; font-size: 14px; color: var(--text-1); }
+.rs-toastLine { font: 12px var(--font-num); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-toastLink { flex: none; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -4px -4px 0 0; color: var(--text-2); }
+.trb .trb-final { margin-left: 8px; padding: 2px 7px; border-radius: 6px; background: rgba(10, 10, 10, 0.16); font-size: 11px; font-weight: 600; line-height: 14px; }
+@media (max-width: 767.98px) { .rs-toastLink { width: 44px; height: 44px; margin: -14px -14px 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .rs-n[data-state="active"] .rs-g, .rs-ck { animation: none; }
+  .rs-ld > i, .rs-grp, .rs-toast, .rs-v, .rs-l { transition: none; }
+}

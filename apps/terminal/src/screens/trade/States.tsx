@@ -35,7 +35,7 @@ export function stateId(p: Phase, now: number, side: "buy" | "sell"): string | n
 export const hasRunLabel = (p: Phase): boolean => p.k !== "ready" && (p.k !== "ended" || showsRetry(p));
 
 /** The main button's label for a running, filled or ended trade; null where the box draws its ready label. */
-export function RunLabel({ phase, now }: { phase: Phase; now: number }) {
+export function RunLabel({ phase, now, final = false }: { phase: Phase; now: number; final?: boolean }) {
   if (phase.k === "sending" || phase.k === "landing") {
     if (isSlow(phase, now)) {
       const t = secs(now - phase.at);
@@ -58,6 +58,11 @@ export function RunLabel({ phase, now }: { phase: Phase; now: number }) {
     return (
       <>
         <Check />&nbsp;<W id="filled" />&nbsp;<span data-time={t}>{t}</span>
+        {final && (
+          <span className="trb-final" data-testid="trade-final">
+            <W id="final" />
+          </span>
+        )}
       </>
     );
   }

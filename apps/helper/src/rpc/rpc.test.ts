@@ -503,10 +503,11 @@ test("provider URLs: from the environment, http(s) only; an error names the vari
 
 // a keyed provider in memory that keeps a per-second limit, as Helius free does (10 requests/s, research
 // scripts/deploy/helius-key.sh:7): past `perSecond` requests sent in any 1 s it answers 429 (Retry-After 1)
+// (its window on the monotonic clock, card helper-crowd-429: the box's wall clock steps back under a test)
 const keepsPerSecond = (perSecond: number) => {
   const p = { calls: 0, throttled: 0, sent: [] as number[] };
   const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
-    const t = Date.now();
+    const t = performance.now();
     const body = JSON.parse(String(init.body)) as { id: unknown } | { id: unknown }[];
     const n = Array.isArray(body) ? body.length : 1;
     p.sent = p.sent.filter((x) => x > t - 1000);
@@ -537,10 +538,10 @@ test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller ov
   const env = { SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: "1000,100" };
   // a plan of 1000 per 10 s is 100 a second: 40 callers at once all go now, none waits
   const r = createRpc(env, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l) });
-  const t0 = Date.now();
+  const t0 = performance.now();
   const all = await Promise.all(Array.from({ length: 40 }, (_, i) => r.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
   assert.equal(all.filter((a) => a.status === 200).length, 40);
-  assert.ok(Date.now() - t0 < 500, "within the plan's second nothing waits");
+  assert.ok(performance.now() - t0 < 500, "within the plan's second nothing waits");
   const tight = createRpc({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, RPC_BUDGET_SOLANA: "100,90" }, { fetch: keepsPerSecond(10).fetch as never, log: (l) => lines.push(l) });
   const many = await Promise.all(Array.from({ length: 40 }, (_, i) => tight.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
   const refused = many.filter((a) => a.status === 429);
@@ -549,8 +550,32 @@ test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller ov
   for (const a of refused) assert.equal(a.why, "solana pace", "named as the pace, not the provider");
   // the public endpoint (no SOLANA_RPC_URL): its limit is per 10 s, so 20 callers at once all go now
   const pub = createRpc({}, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l) });
-  const t1 = Date.now();
+  const t1 = performance.now();
   const open = await Promise.all(Array.from({ length: 20 }, (_, i) => pub.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `192.0.2.${i}`)));
-  assert.deepEqual([open.filter((a) => a.status === 200).length, Date.now() - t1 < 500], [20, true], "not paced");
+  assert.deepEqual([open.filter((a) => a.status === 200).length, performance.now() - t1 < 500], [20, true], "not paced");
   assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), [], "no hold");
+});
+
+test("card helper-rpc-hold-queued: a send waiting for a keyed provider's second is not sent once the provider has asked us to wait in the meantime: it answers 429 with the hold's seconds", async () => {
+  // a keyed Base plan of 100 per 10 s: 10 sends go in a second, the 11th waits for the next; the first answer is a 429
+  // naming 30 s, which arrives while the 11th waits
+  const sent: number[] = [];
+  const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
+    sent.push(performance.now());
+    const body = JSON.parse(String(init.body)) as { id: unknown };
+    if (sent.length === 1) return new Response("{}", { status: 429, headers: { "retry-after": "30" } });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: "0x1" }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const lines: string[] = [];
+  const r = createRpc({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}`, RPC_BUDGET_BASE: "100,16" }, { fetch: fetch as never, log: (l) => lines.push(l), now: () => performance.timeOrigin + performance.now() });
+  const blockNumber = (id: number) => JSON.stringify({ jsonrpc: "2.0", id, method: "eth_blockNumber", params: [] });
+  const t0 = performance.now();
+  const all = await Promise.all(Array.from({ length: 11 }, (_, i) => r.handle("base", JSON_T, blockNumber(i + 1), `198.51.100.${i}`)));
+  assert.ok(performance.now() - t0 >= 1_000, "the 11th waited for the provider's next second");
+  assert.equal(sent.length, 10, `${sent.length} sent: the waiting send went out after the provider's 429`);
+  const last = all[10]!;
+  assert.equal(last.status, 429);
+  assert.equal(last.why, "base held");
+  assert.ok(Number(last.headers?.["Retry-After"]) >= 28, `Retry-After ${last.headers?.["Retry-After"]}: the hold's seconds`);
+  assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), ["rpc hold base caller 30 s"]);
 });

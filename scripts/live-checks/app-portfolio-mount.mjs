@@ -8,8 +8,8 @@
 //     the loading state and not an empty page;
 //   - the visible header's balance equals Portfolio's visible Cash tile, to the cent, and both equal ACCOUNT's cash
 //     (CASH; design-lock-r5 S10.3 shows Cash in the header);
-//   - in dark: Withdraw asks the shell for withdraw.open; Export (the row's menu on desktop, the position's sheet on the
-//     phone) asks for export.open; Deposit (phone) opens the deposit sheet; Sell asks the shell for nothing and opens
+//   - in dark: Withdraw asks the shell for withdraw.open; Export (the row's Export key icon on desktop, the position's
+//     sheet on the phone) asks for export.open; Deposit (phone) opens the deposit sheet; Sell asks the shell for nothing and opens
 //     no sheet (its screen is another card's).
 // A screenshot of each width and scheme is kept.
 //   node scripts/live-checks/app-portfolio-mount.mjs [--shots <dir>] [--record <file>]
@@ -152,8 +152,8 @@ async function runOne(browser, w, scheme, shots, route) {
     const taps = {};
     taps.withdraw = (await tap(page, f, "[data-screen='portfolio'] [data-control='withdraw']"))[0] ?? null;
     if (w.name === "desktop") {
-      await f.locator("[data-screen='portfolio'] [data-control='more']").filter({ visible: true }).first().click({ timeout: 5_000 }).catch(() => {});
-      taps.export = (await tap(page, f, "[data-screen='portfolio'] [data-control='export']"))[0] ?? null;
+      // the row's Export key icon (card app-export-every-wallet), in the row's icon row
+      taps.export = (await tap(page, f, "[data-screen='portfolio'] tr[data-pos] [data-control='export']"))[0] ?? null;
     } else {
       await f.locator("[data-screen='portfolio'] [data-pos]").filter({ visible: true }).first().click({ timeout: 5_000 }).catch(() => {});
       taps.export = (await tap(page, f, "[data-control='sheet-export']"))[0] ?? null;

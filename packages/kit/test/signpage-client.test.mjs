@@ -756,6 +756,94 @@ test("state and progress events from the frame update the state and reach the li
   assert.deepEqual(seen, [["x", "filled"]]);
 });
 
+// Card signpage-buy-route-events: a running pool.buy's route (messages.ts BuyRoute) comes as progress events with no
+// stage, one fact each. A client reads them through onRoute; a client of an earlier kit (an older app) checks progress
+// with exact keys, so it drops them and still reads every stage.
+const W_ADDR = "85FNbDbCeiYFCcxnNrrH9xWCER4BYokxZf6Hyavuu37j";
+const ROUTE = [
+  { v: 1, type: "progress", id: "x", wallet: W_ADDR },
+  { v: 1, type: "progress", id: "x", venue: "pump-curve", pool: W_ADDR },
+  { v: 1, type: "progress", id: "x", out: "1234.5" },
+];
+
+test("route events reach onRoute by the buy's id, in order, never onProgress; a malformed one is dropped", async () => {
+  const { h, c } = await readyClient();
+  const routes = [];
+  const stages = [];
+  c.onRoute((id, r) => routes.push([id, r]));
+  c.onProgress((id, stage) => stages.push([id, stage]));
+  const state = c.snapshot();
+  for (const m of ROUTE) h.post(m);
+  h.post({ v: 1, type: "progress", id: "x", stage: "filled" });
+  assert.deepEqual(routes, [["x", { wallet: W_ADDR }], ["x", { venue: "pump-curve", pool: W_ADDR }], ["x", { out: "1234.5" }]]);
+  assert.deepEqual(stages, [["x", "filled"]]);
+  // a stage and a route field in one event, two shapes in one, half a shape, an amount that is not a decimal, an extra
+  // key, a fact with no id: each dropped, no listener called, the state the same object
+  const d0 = c.dropped().shape;
+  const bad = [
+    { v: 1, type: "progress", id: "x", stage: "filled", out: "1" },
+    { v: 1, type: "progress", id: "x", wallet: W_ADDR, out: "1" },
+    { v: 1, type: "progress", id: "x", venue: "pump-curve" },
+    { v: 1, type: "progress", id: "x", out: "-1" },
+    { v: 1, type: "progress", id: "x", out: "1e9" },
+    { v: 1, type: "progress", id: "x", wallet: W_ADDR, key: "00" },
+    { v: 1, type: "progress", wallet: W_ADDR },
+    { v: 1, type: "progress", id: "x", wallet: "" },
+  ];
+  for (const m of bad) h.post(m);
+  assert.equal(c.dropped().shape, d0 + bad.length);
+  assert.equal(routes.length, 3);
+  assert.equal(stages.length, 1);
+  assert.equal(c.snapshot(), state);
+  // unsubscribed and destroyed: no more calls
+  const off = c.onRoute(() => assert.fail("unsubscribed"));
+  off();
+  h.post(ROUTE[0]);
+  assert.equal(routes.length, 4);
+});
+
+// fold 1 (L3): `out` an amount above 0 with no leading or trailing zero, at most 78 digits each side; W and the pool
+// base58 addresses of 32 bytes; the venue a free string
+test("route events: out, wallet and pool are checked as the kit's own shapes; the venue is a free string", async () => {
+  const at = (x) => S.signpageProgressRouteSchema({ v: 1, type: "progress", id: "x", ...x });
+  for (const out of ["1", "0.5", "1234.5", "10", "1".repeat(78), `0.${"0".repeat(77)}1`, `${"9".repeat(78)}.${"9".repeat(78)}`]) assert.equal(at({ out }), true, out);
+  for (const out of ["0", "00", "01", "0.0", "1.50", "1.", ".5", "-1", "+1", "1e9", " 1", "1 ", "1".repeat(79), `0.${"0".repeat(78)}1`, "", 1, null]) assert.equal(at({ out }), false, String(out));
+  const short = "1".repeat(31);
+  const bytes31 = "2".repeat(43); // base58 that is not 32 bytes
+  for (const wallet of ["W1", short, bytes31, "0".repeat(44), "O".repeat(44), "l".repeat(44), `${W_ADDR}x`, "", 1]) {
+    assert.equal(at({ wallet }), false, String(wallet));
+    assert.equal(at({ venue: "pump-curve", pool: wallet }), false, `pool ${wallet}`);
+  }
+  assert.equal(at({ wallet: W_ADDR }), true);
+  assert.equal(at({ wallet: "11111111111111111111111111111111" }), true, "the system program is 32 zero bytes");
+  for (const venue of ["pump-curve", "pumpswap", "Raydium", "a venue"]) assert.equal(at({ venue, pool: W_ADDR }), true, venue);
+  assert.equal(at({ venue: "", pool: W_ADDR }), false);
+  // the client drops each refused one: no listener called
+  const { h, c } = await readyClient();
+  const seen = [];
+  c.onRoute((id, r) => seen.push(r));
+  h.post({ v: 1, type: "progress", id: "x", out: "0" });
+  h.post({ v: 1, type: "progress", id: "x", wallet: "W1" });
+  h.post({ v: 1, type: "progress", id: "x", venue: "pump-curve", pool: short });
+  assert.deepEqual(seen, []);
+});
+
+test("an app of an earlier kit drops every route event and still reads every stage around them", async () => {
+  // the stage schema is the earlier kit's, exact keys: it refuses each route event and any stage event carrying a route field
+  for (const m of ROUTE) assert.equal(S.signpageProgressSchema(m), false);
+  assert.equal(S.signpageProgressSchema({ v: 1, type: "progress", id: "x", stage: "filled", wallet: W_ADDR }), false);
+  assert.equal(S.signpageProgressSchema({ v: 1, type: "progress", id: "x", stage: "filled" }), true);
+  const { h, c } = await readyClient();
+  const stages = [];
+  c.onProgress((id, stage) => stages.push([id, stage]));
+  const state = c.snapshot();
+  h.post({ v: 1, type: "progress", id: "x", stage: "signed" });
+  for (const m of ROUTE) h.post(m);
+  h.post({ v: 1, type: "progress", id: "x", stage: "filled" });
+  assert.deepEqual(stages, [["x", "signed"], ["x", "filled"]]);
+  assert.equal(c.snapshot(), state);
+});
+
 test("state and progress events before READY are dropped", async () => {
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });

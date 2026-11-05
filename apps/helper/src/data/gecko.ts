@@ -46,6 +46,20 @@ export const LIST_FLOOR = 2;
 /** The newest data held this old is read in the "pages" lane, as the lists' LIST_URGENT_MS (src/data/evm/lists.ts):
  *  four times the bars' 60 s, so a chart is never served more than this behind its last refresh that could run. */
 export const REFRESH_URGENT_MS = 240_000;
+/** The "ahead" lane (card helper-restart-fresh): the helper's own re-read of a chart callers read lately, before its
+ *  bars pass AHEAD_MS (solana/token.ts ahead), so a deploy's swap hands the next helper bars inside GT_SERVE_MS and a
+ *  crowd's first loads after it are served from them while the window the old helper spent refills (live runs
+ *  41899807434 and 41905007564: 0 of 25 candles 200 at 19:44:47Z, PUMP's 1h 429 at 20:16:58Z, both right after a swap).
+ *  It takes a call only while COLD_RESERVE stay free, as a held chart's refresh, at most AHEAD_PER_WINDOW in the window,
+ *  and its calls never make the lists yield: it is the helper's background read, as theirs. */
+export const AHEAD_PER_WINDOW = 1;
+
+/** The newest bars held from GeckoTerminal serve a read it refuses or fails only while this old (their read time is the
+ *  answer's X-Fetched-At): the market routes' freshness bound, the live checks' 10 minutes (scripts/live-checks/
+ *  market-data-solana-token.mjs, market-data-evm.mjs). Older, the read answers its 429 with the wait, or 503: never a 200
+ *  with old bars (card helper-restart-fresh: live run 41871356171 straight after a swap served PUMP's 1h bars 16 min
+ *  old, handed over by the old helper). History before a time never changes and is served from what is held at any age. */
+export const GT_SERVE_MS = 600_000;
 
 /** The lane of a read of the newest data, held since `heldAtMs` (null: nothing held): "pages" for a first read and for
  *  data REFRESH_URGENT_MS old, else "refresh". History before a time never changes and stays a refresh, whatever its age. */
@@ -61,10 +75,15 @@ export type GeckoBudget = {
   /** When a page call can next be taken (now when it can now): the pause's end or the minute's oldest call leaving
    *  the window; what a refused page names as its wait. */
   retryAt(lane: string): number;
-  /** The calls in the window, oldest first: what a restart's next process seeds from (../data/warm.ts). */
-  calls(): number[];
-  /** Calls another process made from our address (a deploy's old helper, read from its warm file): counted as ours. */
-  seed(times: readonly number[]): void;
+  /** The calls in the window, oldest first (those of `lane` when it is named): what a restart's next process seeds from
+   *  (../data/warm.ts). */
+  calls(lane?: string): number[];
+  /** Calls another process made from our address (a deploy's old helper, read from its warm file): counted as ours, in
+   *  `lane` ("lists" for its lists' calls, so the lists' LIST_FLOOR counts them; "seed" for the rest, which no lane's
+   *  yield counts). Each seed of a lane replaces the one before it: the old helper's file is read at the start and again
+   *  at the handover, two snapshots of the same calls (card helper-restart-fresh: counted twice, they filled the window
+   *  and a page read straight after a swap was refused). */
+  seed(times: readonly number[], lane?: "seed" | "lists"): void;
   /** No lane calls until release(): another helper on our address may still be calling (card helper-ready-gate). */
   hold(): void;
   release(): void;
@@ -81,7 +100,7 @@ export function throttledUntil(b: GeckoBudget, retryAfter: string | null, nowMs:
 
 /** A budget of at most `perMin` calls in any WINDOW_MS, the "lists" lane yielding to every other. */
 export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): GeckoBudget {
-  const calls: { at: number; lane: string }[] = [];
+  const calls: { at: number; lane: string; seeded?: true }[] = [];
   let pausedUntil = 0;
   let held = false;
   const prune = (t: number) => {
@@ -93,9 +112,10 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       prune(t);
       if (held || t < pausedUntil || calls.length >= perMin) return false;
       if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
+      if (lane === "ahead" && (calls.length >= perMin - COLD_RESERVE || calls.filter((c) => c.lane === "ahead").length >= AHEAD_PER_WINDOW)) return false;
       if (lane === "lists") {
         const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
-        if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && t - c.at < YIELD_MS))) return false;
+        if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && c.lane !== "ahead" && t - c.at < YIELD_MS))) return false;
       }
       calls.push({ at: t, lane });
       return true;
@@ -111,13 +131,14 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + WINDOW_MS);
       return at;
     },
-    calls() {
+    calls(lane) {
       prune(now());
-      return calls.map((c) => c.at);
+      return calls.filter((c) => lane === undefined || c.lane === lane).map((c) => c.at);
     },
-    seed(times) {
+    seed(times, lane = "seed") {
       const t = now();
-      for (const at of times) if (Number.isFinite(at) && at <= t && t - at < WINDOW_MS) calls.push({ at, lane: "seed" });
+      for (let i = calls.length - 1; i >= 0; i--) if (calls[i]!.seeded === true && calls[i]!.lane === lane) calls.splice(i, 1);
+      for (const at of times) if (Number.isFinite(at) && at <= t && t - at < WINDOW_MS) calls.push({ at, lane, seeded: true });
       calls.sort((a, b) => a.at - b.at);
       prune(t);
     },

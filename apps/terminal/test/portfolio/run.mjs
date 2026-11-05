@@ -202,12 +202,12 @@ try {
       await page.locator('.pfd [data-field="search"]').fill("");
       await page.locator('.pfd [data-control="hide-small"]').click();
       check((await page.locator(".pfd tr[data-pos]").count()) === 10, `@${w.name}: hide small hid a row worth over $1`);
-      await page.locator('.pfd tr[data-pos="near:WTH"] [data-control="more"]').click();
-      await page.locator('.pfd [data-control="export"]').click();
+      await page.locator('.pfd tr[data-pos="near:WTH"]').hover();
+      await page.locator('.pfd tr[data-pos="near:WTH"] [data-control="export"]').click();
       await page.locator('.pfd tr[data-pos="near:WTH"]').hover();
       await page.locator('.pfd tr[data-pos="near:WTH"] [data-control="sell-50"]').click();
       const calls = await page.evaluate(() => window.__calls);
-      check(JSON.stringify(calls) === JSON.stringify([{ kind: "export", chain: "near", token: "WTH" }, { kind: "sell", chain: "near", token: "WTH", part: "50" }]), `@${w.name}: row taps ${JSON.stringify(calls)}`);
+      check(JSON.stringify(calls) === JSON.stringify([{ kind: "export", chain: "near", address: "WTH-w1" }, { kind: "sell", chain: "near", token: "WTH", part: "50" }]), `@${w.name}: row taps ${JSON.stringify(calls)}`);
       await page.locator('.pfd [data-control="pane-activity"]').click();
       check((await states(page)).includes("S14.2"), `@${w.name}: Activity tab`);
       await page.locator('.pfd [data-chip="sell"]').click();

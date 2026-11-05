@@ -120,6 +120,9 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
       nativeFirst: true,
+      // both hold state 600 s back, a proof's life (card evm-buy-hookdata-fee, fold 3; 30 of 30 each at 600 s,
+      // 2026-11-04 20:12Z): Robinhood's own answers 630 s and refuses 660 s, robinhood-rpc.publicnode.com about 15 s
+      // (refused at 20 s), so it is never a pin; live check evm-buy-hookdata-fee reads both at 600 s
       providers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
@@ -196,7 +199,13 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 6,118 bytes, keccak 0xd707b1da…, poolManager() the PoolManager above. No v3 here (M365)
       quoters: bare({ v4: "0x8dc178efb8111bb0973dd9d722ebeff267c98f94" }),
       nativeFirst: true,
-      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"] as const),
+      // dRPC, not PublicNode, beside Robinhood's own (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A): the relay fee
+      // reads state at the epoch's first block, up to a proof's 10-min life old (the helper's POOL_LIFE_MAX_MS), and
+      // robinhood-sepolia-rpc.publicnode.com keeps about 15 s ("historical state ... is not available" at 20 s, 6 of 6;
+      // at 600 s, 6 of 6), where robinhood-testnet.drpc.org answered 6 of 6 at 20, 210, 600 and 700 s and 30 of 30 at
+      // 600 s, and rpc.testnet.chain.robinhood.com 30 of 30 at 600 s (read 2026-11-04 20:09-20:13Z; live check
+      // evm-buy-hookdata-fee holds every pinned provider to 600 s)
+      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
       // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 10 s
       maxLag: 100,
     }),

@@ -24,7 +24,7 @@ export function evmPoolGas(depth: number): bigint {
 
 // The EVM relay fee, the kit's one definition (M356 (4); card evm-buy-hookdata-fee, review fold 1 L1): what a sender
 // (the helper's withdraw, buy and sell senders) may take for one transaction, which every device recomputes from its own
-// reads and refuses above: max(floor, ceilStep(2 x (gas x gas price + the chain fee))). The chain fee is what the chain
+// reads and refuses above: max(EVM_POOL_FEE_FLOOR, ceilStep(2 x (gas x gas price + the chain fee))). The chain fee is what the chain
 // charges beside the gas: on the OP Stack (Base) the L1 data fee and the operator fee, read from the GasPriceOracle
 // predeploy; on Arbitrum chains (Robinhood Chain, an Orbit chain) the L1 poster fee, read from ArbGasInfo. Both are
 // eth_calls the caller makes on both of its providers at one agreed block (they must answer the same), never a
@@ -32,6 +32,11 @@ export function evmPoolGas(depth: number): bigint {
 
 /** The step every EVM relay fee rounds up to, in wei: the helper's EVM_FEE_STEP (apps/helper pool/evm.ts), 1e13. */
 export const EVM_POOL_FEE_STEP = 10_000_000_000_000n;
+/** The least EVM relay fee, wei (M356 (4): floor and step are kit constants; card evm-buy-hookdata-fee, review fold 2
+ *  LOW-A): one step, so a release is never sent for nothing. The one floor: evmPoolFee applies it, so the device, the
+ *  helper's senders and the sell's fee cap cannot price an epoch with another; the helper refuses an env
+ *  POOL_EVM_FEE_<NET> that differs from it. */
+export const EVM_POOL_FEE_FLOOR = EVM_POOL_FEE_STEP;
 /** The pool's least deposit, wei: PrivacyPool.sol:53 `MIN_DEPOSIT = 0.0001 ether`, a constant of the contract (a
  *  deposit under it reverts MinimumDepositAmount, :86). */
 export const EVM_POOL_MIN_DEPOSIT = 100_000_000_000_000n;
@@ -72,11 +77,12 @@ export function evmPoolChainFee(chain: string, txBytes: bigint, answers: readonl
   throw new Error(`${chain}: not the answers its chain fee reads give`);
 }
 
-/** The relay fee rule: max(floor, ceilStep(2 x (gas x gasPrice + chainFee))), every input a bigint at or above 0. */
-export function evmPoolFee(a: { floor: bigint; gas: bigint; gasPrice: bigint; chainFee: bigint }): bigint {
-  const { floor, gas, gasPrice, chainFee } = a;
-  if (![floor, gas, gasPrice, chainFee].every((x) => typeof x === "bigint" && x >= 0n)) throw new Error("the fee's inputs: bigints at or above 0");
+/** The relay fee rule: max(EVM_POOL_FEE_FLOOR, ceilStep(2 x (gas x gasPrice + chainFee))), every input a bigint at or
+ *  above 0. */
+export function evmPoolFee(a: { gas: bigint; gasPrice: bigint; chainFee: bigint }): bigint {
+  const { gas, gasPrice, chainFee } = a;
+  if (![gas, gasPrice, chainFee].every((x) => typeof x === "bigint" && x >= 0n)) throw new Error("the fee's inputs: bigints at or above 0");
   const f = 2n * (gas * gasPrice + chainFee);
   const stepped = ((f + EVM_POOL_FEE_STEP - 1n) / EVM_POOL_FEE_STEP) * EVM_POOL_FEE_STEP;
-  return stepped > floor ? stepped : floor;
+  return stepped > EVM_POOL_FEE_FLOOR ? stepped : EVM_POOL_FEE_FLOOR;
 }

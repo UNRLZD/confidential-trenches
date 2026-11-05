@@ -27,7 +27,7 @@ import { createSolanaLists } from "./data/solana/lists.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
-import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
+import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
@@ -44,7 +44,7 @@ import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_
 import { clientOf, clientWindow, refusalLog, throttled, throttleOf } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
-import { readWarm, writeWarm, type Warm } from "./data/warm.ts";
+import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
 import { TICK_MS } from "./data/evm/lists.ts";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
@@ -523,7 +523,9 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   const holders = env.SOLANA_HOLDERS_RPC_URL;
   // card helper-solana-failover: the holders key's slot has no public fallback (the public endpoint refuses
   // getTokenLargestAccounts, rpc/rpc.ts Deps): fallen back, its reads answer 503 at once and the page serves Jupiter's
-  const holdersRpc = holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false });
+  // card helper-crowd-429: the holders key set to the main one is one provider's second, so it shares the main pacer
+  const holdersRpc =
+    holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false, ...(holders === env.SOLANA_RPC_URL ? { pacer: rpc.pacer } : {}) });
   if (holdersRpc !== undefined) slots?.set("holders", holdersRpc.slot);
   return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc });
 }
@@ -692,12 +694,29 @@ export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promis
   }
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>): Server {
+/**
+ * Every pool's start check (card evm-buy-hookdata-fee, review fold 4 MEDIUM-1): each Solana pool's configured fee at its
+ * first good rent read (pool/solana.ts ready; a failed read is asked again every `everyMs` until one is good) and each
+ * EVM pool's state reads a proof's life back (pool/evm.ts ready). Resolves once all have passed; the first refusal calls
+ * `refuse` (main: exit 2) and rejects, so the helper's ready never turns true over a refused start.
+ */
+export function poolsChecked(pools: ReadonlyMap<string, Pick<SolanaPoolSender, "ready">>, evmPools: ReadonlyMap<string, Pick<EvmPoolSender, "ready">>, refuse: (e: Error) => void, everyMs = READY_EVERY_MS): Promise<void> {
+  const sol = [...pools.values()].map((p) => {
+    const again = setInterval(() => void p.ready, everyMs);
+    again.unref();
+    return p.ready.finally(() => clearInterval(again));
+  });
+  const checks = [...sol, ...[...evmPools.values()].map((p) => p.ready())];
+  for (const c of checks) c.catch(refuse);
+  return Promise.all(checks).then(() => undefined);
+}
+
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools, undefined, undefined, evmLists, evmSwaps, ready, senders, solana),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana),
   );
   server.listen(port);
   // the relayers start once this process holds the senders (sendersFromEnv): a restart resends their open sends and
@@ -772,16 +791,16 @@ if (import.meta.main) {
     // calls from the file it wrote at its stop. With no file, a replaced helper may have spent the window: none for one.
     const warm = readWarm(storeDir, Date.now());
     if (warm !== null) {
-      gecko.seed(warm.gecko);
+      seedGecko(gecko, warm);
       const whole = SERVED_EVM.map((c) => evmLists[c]!.restore(warm.evm[c])).every(Boolean);
       // held only when the file gave every list: a list it lacks is read now, inside the seeded budget
       if (senders.peer && whole) {
         gecko.hold();
-        void senders.held.then(() => (gecko.seed(readWarm(storeDir, Date.now())?.gecko ?? []), gecko.release()));
+        void senders.held.then(() => (seedGecko(gecko, readWarm(storeDir, Date.now())), gecko.release()));
       }
     } else if (senders.peer) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => Date.now()));
     let solanaState = (): unknown => undefined;
-    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState() }));
+    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), geckoLists: gecko.calls("lists"), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState() }));
     // card helper-solana-failover: every Solana slot's state, for /v1/health
     const slots = new Map<SlotName, Slot>([["rpc", rpc.slot]]);
     const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko, slots);
@@ -798,23 +817,38 @@ if (import.meta.main) {
     // a Solana pool whose configured fee is not the kit's for the rent both providers read stops the helper (at the
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
     const pools = solanaPoolSendersFromEnv(process.env);
-    for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
+    // card helper-ready-without-gt: every part read from the environment is read here, at the start, so a value the
+    // helper refuses stops it at once (exit 2, naming the variable). Left to handler()'s defaults they were read only at
+    // listen(), which a peer runs once warm, inside a promise: an unhandled rejection, exit 1 with no line of ours, and
+    // a restart loop until redeploy.sh's bound (18:55-18:58Z: a partial POOL_EVM_*_BASE_SEPOLIA set)
+    const evmPools = evmPoolSendersFromEnv(process.env);
+    const release = releaseOf(process.env);
+    // card evm-buy-hookdata-fee: an EVM pool RPC that cannot answer the fee's state reads 10 min back stops the start;
+    // both pool kinds' start checks run from here, and ready (below) waits for them
+    const checked = poolsChecked(pools, evmPools, (e) => (console.error(`helper: ${e.message}`), process.exit(2)));
     const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();
+    // card helper-restart-fresh: the charts callers read lately are re-read ahead of their next read, one GeckoTerminal
+    // call at most a tick in its "ahead" lane (data/solana/token.ts ahead), so a swap hands over bars inside the bound
+    setInterval(() => void token.ahead().catch(() => undefined), AHEAD_TICK_MS).unref();
     // ready (health.ts): once the lists, a token page and its holders answer 200. A helper that replaces a running one
     // (peer) listens only then, so the proxy, which tries each helper of the service in turn, never reaches it cold
     // (deploy/redeploy.sh waits for it, bounded, before it stops the old one); one that starts alone listens at once.
+    // Every pool's start check is part of it, so a start that refuses (exit 2) is never ready and the old one stays.
     let ready = false;
-    const warmed = warmUntilReady({ lists, evmLists, token }).then(() => void (ready = true));
+    const warmed = Promise.all([warmUntilReady({ lists, evmLists, token }), checked]).then(() => void (ready = true));
     const listen = () => {
-      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()]))); // warms both relayers once the senders are ours
+      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools); // warms both relayers once the senders are ours
       drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready ? "" : ", warming"}`));
     };
-    if (senders.peer) void warmed.then(listen);
-    else listen();
+    if (senders.peer) void warmed.then(listen, () => undefined); // a refusal: poolsChecked's exit 2, never a listen
+    else {
+      listen();
+      void warmed.catch(() => undefined);
+    }
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
     process.exit(2);

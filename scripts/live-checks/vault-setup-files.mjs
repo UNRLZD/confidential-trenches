@@ -10,6 +10,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --base reads one tree from <url> (a local server of a checkout) instead of GitHub; --record writes what the run read
 // to <file>, so the check's test can replay it through judge().
+// Runs: once, the kit freeze: the prover's setup files on GitHub at the freeze tag, pinned by sha256; SIGN_HOST's copies are signpage-prover-host's
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { realpathSync, writeFileSync } from "node:fs";

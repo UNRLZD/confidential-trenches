@@ -29,7 +29,7 @@
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { BLOCK_CLOCK } from "../../apps/helper/src/data/evm/lists.ts";
-import { SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
+import { HEADER_TIMED, SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
 
 const KEY = "index-evm-swaps";
 export const BASE = "https://api.confidential.unrealized.trade";
@@ -314,8 +314,12 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     const topic0 = (run.chain.receipts[tape[0].tx].logs ?? []).find((l) => poolKey(l, net) === pool).topics[0];
     const topics = id === undefined ? [topic0 === TOPIC.curveBuy || topic0 === TOPIC.curveSell ? [TOPIC.curveBuy, TOPIC.curveSell] : topic0] : [TOPIC.swap4, id];
     const all = [];
+    // on Robinhood each log's time is part of what two providers must agree on, so only providers that log it pair:
+    // the chain's own RPC logs blockTimestamp 0x0 (HEADER_TIMED) and, second in SWAP_RPCS, never agreed with the first
+    // on a span with a swap (card helper-restart-fresh: live run 41871356171, "blocks none to none")
+    const logRpcs = net === "base" ? rpcs : rpcs.filter((u) => !HEADER_TIMED.has(u));
     for (let lo = from; lo <= last; lo += SPAN[net]) {
-      const logs = await agreed("eth_getLogs", [{ address, topics, fromBlock: hex(lo), toBlock: hex(Math.min(last, lo + SPAN[net] - 1)) }], fetchFn, rpcs, (ls) => ls.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, logIndex: l.logIndex, ...(net === "base" ? {} : { t: Number.parseInt(l.blockTimestamp, 16) }) })));
+      const logs = await agreed("eth_getLogs", [{ address, topics, fromBlock: hex(lo), toBlock: hex(Math.min(last, lo + SPAN[net] - 1)) }], fetchFn, logRpcs, (ls) => ls.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, logIndex: l.logIndex, ...(net === "base" ? {} : { t: Number.parseInt(l.blockTimestamp, 16) }) })));
       if (!Array.isArray(logs)) {
         all.length = 0;
         all.push(null);

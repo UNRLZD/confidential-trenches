@@ -10,7 +10,7 @@ import { POOL_EVM_ENV, POOL_EVM_SELL_ENV } from "./pool/evm.ts";
 import { POOL_SOLANA_ENV } from "./pool/solana.ts";
 
 // test values only: no key here holds or moves anything
-const EVM = ["0x" + "ab".repeat(20), "0x" + "11".repeat(32), "1000", "0x" + "cd".repeat(20), "https://a.example,https://b.example"];
+const EVM = ["0x" + "ab".repeat(20), "0x" + "11".repeat(32), "10000000000000", "0x" + "cd".repeat(20), "https://a.example,https://b.example"];
 const SOL = ["11111111111111111111111111111111", "not-a-key-test-value", "5000", "https://a.example,https://b.example"];
 const subsets = (n: number) => Array.from({ length: (1 << n) - 1 }, (_, m) => [...Array(n).keys()].filter((i) => (m + 1) & (1 << i)));
 const refusal = (env: Record<string, string>) => {
@@ -22,11 +22,11 @@ const refusal = (env: Record<string, string>) => {
   }
 };
 
-test("an EVM network with only some of its names set is refused, naming one of its variables and no value; the address, key, fee and RPCs together are taken, the fee recipient optional", () => {
+test("an EVM network with only some of its names set is refused, naming one of its variables and no value; the address, key and RPCs together are taken, the fee (unset or the kit's floor) and the fee recipient optional", () => {
   for (const [network, names] of Object.entries(POOL_EVM_ENV)) {
     for (const set of subsets(names.length)) {
       const env = Object.fromEntries(set.map((i) => [names[i]!, EVM[i]!]));
-      const whole = [0, 1, 2, 4].every((i) => set.includes(i));
+      const whole = [0, 1, 4].every((i) => set.includes(i));
       const why = refusal(env);
       if (whole) assert.equal(why, null, `${network} ${set.join(",")}`);
       else {

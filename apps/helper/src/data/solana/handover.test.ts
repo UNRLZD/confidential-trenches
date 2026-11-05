@@ -12,9 +12,9 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { handler } from "../../server.ts";
 import { refusalLog } from "../../limits/limits.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE, REFRESH_SLOT, REFRESH_URGENT_MS } from "../gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, GT_SERVE_MS, PAGE_RESERVE, REFRESH_SLOT, REFRESH_URGENT_MS } from "../gecko.ts";
 import { pumpCurveAddress } from "./lists.ts";
-import { createSolanaToken, TOKEN_2022_PROGRAM } from "./token.ts";
+import { AHEAD_MS, AHEAD_TICK_MS, createSolanaToken, HOT_MS, TOKEN_2022_PROGRAM } from "./token.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
 const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
@@ -210,7 +210,7 @@ test("under a spent budget a held token's refresh yields to a cold token's first
   assert.equal(JSON.parse(held.body).as_of_ms, readAt);
 });
 
-test("the last good bars are handed over across a swap for a day, not an hour", async () => {
+test("the last good bars are handed over across a swap for a day, not an hour: history before their read is served from them on a spent budget", async () => {
   let t = NOW;
   const now = () => t;
   const gt = gecko();
@@ -222,8 +222,69 @@ test("the last good bars are handed over across a swap for a day, not an hour", 
   for (let i = 0; i < GT_LIMIT_PER_MIN; i++) spent.take("pages");
   const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: spent, holdersRpc: chain(() => false) });
   next.restore(st);
-  const a = await next.candles(PUMP, "1m", null, 24);
+  const before = Math.floor(NOW / 1000) - 600; // bars before the old helper's read: history that never changes
+  const a = await next.candles(PUMP, "1m", before, 24);
   assert.deepEqual([a.status, a.asOfMs], [200, NOW], "served from the handover, dated by its read");
+});
+
+test("card helper-restart-fresh: the newest bars kept over a swap past GT_SERVE_MS are never served: on a spent budget the first read answers 429 with its wait (live run 41871356171 at 6832227: PUMP's 1h bars from 16:33:56Z served as a 200 at 16:50:11Z)", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
+  const st = JSON.parse(JSON.stringify(old.state()));
+  t += 16 * 60_000 + 15_000; // the old helper last read PUMP's chart 16 min before the swap (the fixture's bars are minute bars)
+  const spent = geckoBudget(now);
+  for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(spent.take("pages"), true);
+  const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: spent, holdersRpc: chain(() => false) });
+  next.restore(st);
+  const a = await next.candles(PUMP, "1m", null, 24);
+  assert.notEqual(a.status, 200, `never a 200 with bars ${Math.round((t - (a.asOfMs ?? t)) / 60_000)} min old`);
+  assert.equal(a.status, 429, a.body);
+  assert.equal(JSON.parse(a.body).error.code, "rate_limited");
+  assert.ok((a.retryAfterS ?? 0) >= 1, "with the wait to the next call");
+  // inside the bound the kept bars still serve, dated: a swap's first loads 5 min after the old helper's read
+  t = NOW + GT_SERVE_MS - 1_000;
+  const spent2 = geckoBudget(now);
+  for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(spent2.take("pages"), true);
+  const near = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: spent2, holdersRpc: chain(() => false) });
+  near.restore(st);
+  const b = await near.candles(PUMP, "1m", null, 24);
+  assert.deepEqual([b.status, b.asOfMs], [200, NOW], "inside GT_SERVE_MS: the handed-over bars, dated by their read");
+});
+
+test("card helper-restart-fresh: with a call free, the newest bars kept over a swap past GT_SERVE_MS are read again before they are served", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
+  const st = JSON.parse(JSON.stringify(old.state()));
+  t += 16 * 60_000 + 15_000;
+  const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  next.restore(st);
+  const a = await next.candles(PUMP, "1m", null, 24);
+  assert.deepEqual([a.status, a.asOfMs], [200, t], "read now, not the old helper's bars");
+});
+
+test("card helper-restart-fresh: the top pools the old helper would still serve are handed over, so a chart read straight after a swap costs one GeckoTerminal call, not two", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
+  t += 16 * 60_000 + 15_000; // past the pool's 10 minutes: the old helper re-reads it as a refresh and serves it held when refused
+  const st = JSON.parse(JSON.stringify(old.state()));
+  assert.equal(st.pools.length, 1, "PUMP's top pool is handed over");
+  const one = geckoBudget(now);
+  for (let i = 0; i < GT_LIMIT_PER_MIN - 1; i++) assert.equal(one.take("pages"), true); // one call left in the window
+  const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: one, holdersRpc: chain(() => false) });
+  next.restore(st);
+  const n = gt.urls.length;
+  const a = await next.candles(PUMP, "1m", null, 24);
+  assert.deepEqual([a.status, a.asOfMs], [200, t], `read now with the window's last call (${a.body.slice(0, 80)})`);
+  assert.deepEqual(gt.urls.slice(n).map((u) => (u.includes("/ohlcv/") ? "ohlcv" : "pool")), ["ohlcv"], "the bars alone: the pool came over");
 });
 
 test("card helper-chart-fresh: history before a time held past its hour stays a refresh, whatever its age: with the window at the refresh lane's room it is served as held and a cold token's first read finds its calls", async () => {
@@ -247,4 +308,138 @@ test("card helper-chart-fresh: history before a time held past its hour stays a 
   assert.equal(ohlcv(), n, "the history held is not read again past the refresh lane's room");
   const cold = await tok.candles(COLD, "1m", null, 24);
   assert.equal(cold.status, 200, `the cold token's first read is served (${cold.body.slice(0, 80)})`);
+});
+
+/** Card helper-restart-fresh fold: the old helper served PUMP's 15m chart once, then ran `idleMs` with no caller,
+ *  ticking its re-read ahead (token.ts ahead) as the server does every AHEAD_TICK_MS; then the swap: the new helper's
+ *  window full of the old helper's calls, the state through the warm file (JSON), and CROWD_429 first loads at once. */
+const CROWD_429 = 25;
+type Ahead = { ahead?: () => Promise<string | null> };
+async function idleThenSwap(idleMs: number, deps: { listed?: () => Promise<{ status: number; body: string }> } = {}, read = true) {
+  let t = NOW;
+  const now = () => t;
+  const oldGt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: oldGt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false), ...deps });
+  if (read) assert.equal((await old.candles(PUMP, "15m", null, 500)).status, 200);
+  for (const end = t + idleMs; t < end; t += AHEAD_TICK_MS) await (old as Ahead).ahead?.();
+  const file = JSON.parse(JSON.stringify({ solana: old.state() }));
+  t += 20_000;
+  const spent = geckoBudget(now);
+  spent.seed(Array.from({ length: GT_LIMIT_PER_MIN }, (_, i) => t - 5_000 + i * 1_000)); // the old helper's window, full
+  const newGt = gecko();
+  const fresh = createSolanaToken(jupiter(() => true), chain(() => true), { now, fetch: newGt.fetch as never, gecko: spent, holdersRpc: chain(() => true) });
+  fresh.restore(file.solana);
+  const lines: string[] = [];
+  const refusals = refusalLog((l) => lines.push(l));
+  const h = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, fresh as never, undefined, null, new Map(), new Map(), now, {}, {}, () => true, Promise.resolve(), () => ({}), refusals));
+  await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+  const port = (h.address() as AddressInfo).port;
+  try {
+    const answers = await Promise.all(Array.from({ length: CROWD_429 }, (_, i) => get(port, `/v1/market/candles?chain=solana&token=${PUMP}&tf=15m&limit=500`, `198.18.1.${i + 1}`)));
+    refusals.flush();
+    return { answers, lines, t, oldGt: oldGt.urls, newGt: newGt.urls, fresh: fresh as typeof fresh & Ahead };
+  } finally {
+    h.closeAllConnections();
+    await new Promise<void>((r) => h.close(() => r()));
+  }
+}
+
+test(`card helper-restart-fresh fold: a chart a caller read 12 min before a swap, then ${CROWD_429} first loads at once into a window the old helper spent: every candles answer is 200 with bars inside GT_SERVE_MS, never a 429 (live runs 41899807434, 41905007564)`, async () => {
+  const r = await idleThenSwap(12 * 60_000);
+  const statuses = r.answers.map((a) => a.status);
+  assert.deepEqual(statuses, Array(CROWD_429).fill(200), `answers ${JSON.stringify(statuses)}; refused: ${r.lines.join("; ")}`);
+  for (const a of r.answers) {
+    const c = JSON.parse(a.body);
+    assert.ok(c.candles.length > 0, "bars, never an empty chart");
+    assert.ok(r.t - c.as_of_ms <= GT_SERVE_MS, `bars ${Math.round((r.t - c.as_of_ms) / 1000)} s old, inside GT_SERVE_MS`);
+  }
+  assert.deepEqual(r.lines, [], "no caller refused");
+  assert.equal(r.newGt.length, 0, "no GeckoTerminal call into the spent window");
+  assert.ok(r.oldGt.filter((u) => u.includes("/ohlcv/")).length >= 2, "the old helper re-read the chart ahead");
+});
+
+test("card helper-restart-fresh fold: the top Trending token's 15m chart (the one \"/\" draws) is kept fresh with no caller read, so its first crowd after a swap is served", async () => {
+  const listed = async () => ({ status: 200, body: JSON.stringify({ lists: { trending_1h: [{ token: PUMP }] } }) });
+  const r = await idleThenSwap(12 * 60_000, { listed }, false);
+  assert.deepEqual(r.answers.map((a) => a.status), Array(CROWD_429).fill(200), r.lines.join("; "));
+  assert.deepEqual(r.oldGt.slice(0, 2).map((u) => (u.includes("/ohlcv/") ? "ohlcv" : "pool")), ["pool", "ohlcv"], "the pool, then the bars, one call a tick");
+  assert.ok(JSON.parse(r.answers[0]!.body).candles.length > 0);
+});
+
+test("card helper-restart-fresh fold: the ahead lane makes at most AHEAD_PER_WINDOW calls a window, re-reads a chart only once its bars are AHEAD_MS old, drops a chart read more than HOT_MS ago, and hands over a hostile hot set checked entry by entry", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const budget = geckoBudget(now);
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: budget, holdersRpc: chain(() => false) });
+  assert.equal((await tok.candles(PUMP, "15m", null, 500)).status, 200);
+  t += 1_000;
+  assert.equal((await tok.candles(PUMP, "1m", null, 24)).status, 200); // the fixture holds minute bars
+  assert.equal(await tok.ahead(), null, "fresh bars: nothing to re-read");
+  t += AHEAD_MS;
+  assert.equal(await tok.ahead(), `${PUMP}:15m`, "the oldest bars first");
+  const n = gt.urls.length;
+  assert.equal(await tok.ahead(), null, "refused: one ahead call is in the window");
+  assert.equal(gt.urls.length, n);
+  t += 76_000;
+  assert.equal(await tok.ahead(), `${PUMP}:1m`, "the window moved on");
+  t += 76_000;
+  assert.equal(await tok.ahead(), null, "both re-read: neither is AHEAD_MS old");
+  t += HOT_MS;
+  assert.equal(await tok.ahead(), null, "no caller read it within HOT_MS");
+  const other = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  other.restore({ hot: [[`${PUMP}:15m`, t + 1], [`${PUMP}:7m`, t], ["nope:15m", t], [`${PUMP}:15m:1`, t], [`${PUMP}:1h`, t - HOT_MS - 1], [`${PUMP}:1h`, "x"], "junk", [`${PUMP}:4h`, t - 1_000]] });
+  assert.deepEqual(other.state().hot, [[`${PUMP}:4h`, t - 1_000]], "only the good entry");
+});
+
+test("card helper-restart-fresh fold: a hot chart GeckoTerminal answers with no bars, or fails, waits its AHEAD_MS and never holds another hot chart back", async () => {
+  let t = NOW;
+  const now = () => t;
+  let ohlcv = 0;
+  let empty = true;
+  const fetch = async (url: string) => {
+    if (!url.includes("/ohlcv/")) return new Response(JSON.stringify(FX.gt_token), { status: 200 });
+    ohlcv++;
+    // the 4h chart: no bars, then a 500
+    if (url.includes("/ohlcv/hour?aggregate=4")) return empty ? new Response(JSON.stringify({ data: { attributes: { ohlcv_list: [] } } }), { status: 200 }) : new Response("no", { status: 500 });
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  const none = await tok.candles(PUMP, "4h", null, 24);
+  assert.deepEqual([none.status, JSON.parse(none.body).candles.length], [200, 0], "GeckoTerminal holds no bars for it");
+  t += 1_000;
+  assert.equal((await tok.candles(PUMP, "1m", null, 24)).status, 200);
+  t += AHEAD_MS + 76_000;
+  assert.equal(await tok.ahead(), `${PUMP}:4h`, "the chart with nothing held goes first");
+  t += 76_000;
+  assert.equal(await tok.ahead(), `${PUMP}:1m`, "then the other: the empty chart waits its AHEAD_MS");
+  empty = false;
+  t += AHEAD_MS;
+  assert.equal(await tok.ahead(), null, "the 4h read failed (500)");
+  t += 76_000;
+  assert.equal(await tok.ahead(), `${PUMP}:1m`, "and the failure does not hold the 1m chart back");
+  assert.ok(ohlcv >= 4);
+});
+
+test("card helper-restart-fresh fold: the Trending column's third row as Discover orders it (app-token-chart's pick, app live run 41908369953: its 15m candles 429 after four reads) is kept fresh with no caller read, and while the ahead lane holds its call a cold chart's first read still finds its two calls", async () => {
+  const OTHER = "Q1vecEMQEgDyrw1txmBgFwUrkeQurqkEe1bGMzFpump";
+  const row = (token: string, vol: string) => ({ token, vol_1h_usd: vol });
+  // the list's own order is not Discover's: Discover sorts the 1h volume, so PUMP is its third row, not the list's
+  const lists = { lists: { trending_1h: [row(OTHER, "900"), row("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", "0"), row("METAewgxyPbgwsseH8T16a39CQ5VyVxZi9zXiDPY18m", "5000"), row(PUMP, "100"), row("2uxaYT1fVrp6Fg2BrxQcyKSW91hefM6dG9krpbeDiirT", "50")] } };
+  const listed = async () => ({ status: 200, body: JSON.stringify(lists) });
+  const r = await idleThenSwap(12 * 60_000, { listed }, false);
+  assert.deepEqual(r.answers.map((a) => a.status), Array(CROWD_429).fill(200), r.lines.join("; "));
+  assert.ok(r.t - JSON.parse(r.answers[0]!.body).as_of_ms <= GT_SERVE_MS);
+  assert.ok(!r.oldGt.some((u) => u.includes("2uxaYT1")), "the fourth row by volume is not kept");
+  // the ahead lane's call in the window: a chart nobody holds still reads its top pool and its bars at once
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const budget = geckoBudget(now);
+  const tok = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: budget, holdersRpc: chain(() => false), listed });
+  for (let i = 0; i < 2; i++) assert.equal(budget.take("lists"), true);
+  assert.notEqual(await tok.ahead(), null, "the ahead lane takes its call");
+  assert.equal(await tok.ahead(), null);
+  const cold = await tok.candles(PUMP, "1m", null, 24);
+  assert.equal(cold.status, 200, `a cold chart beside the ahead call: ${cold.body.slice(0, 80)}`);
 });

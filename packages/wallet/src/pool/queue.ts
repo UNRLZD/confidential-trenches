@@ -66,6 +66,8 @@ export type ProofQueueArgs<R> = {
   hardwareConcurrency: number | undefined;
   /** Whether the app is in front; by default the page is not hidden. */
   inFront?: () => boolean;
+  /** Notes the queue leaves alone, read each pass: a note a withdraw still owes a send for (its W is the spend's W). */
+  skip?: () => Promise<ReadonlySet<string>>;
 };
 
 /** What one pass did: the notes it proved, the notes whose proof was made again, and each failure. */
@@ -232,8 +234,9 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     }
     const want = readySize - ready.size + again.length;
     if (want <= 0) return out;
+    const skipped = (await a.skip?.()) ?? new Set<string>();
     const open = all
-      .filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) !== null)
+      .filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) !== null && !skipped.has(n.id))
       .sort(byChunkThenLeaf(pool.ladder));
     if (open.length === 0 && again.length === 0) return out;
     const epochTrees = await pool.trees(start, signal);

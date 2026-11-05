@@ -200,6 +200,19 @@ export interface StateEvent {
   state: SignpageState;
 }
 
+/**
+ * What a running pool.buy's page read and bound itself, one fact per event, each once and in this order, at the moment
+ * it is known (card signpage-buy-route-events):
+ * - `wallet`: the one-time wallet W the proof pays and the transaction is signed by, once the device's check passed and
+ *   W derived from the seed is the proof's recipient;
+ * - `venue` and `pool`: the venue the quote was read on (on Solana "pump-curve" or "pumpswap") and its pool's address
+ *   (the bonding curve's account or the AMM pool's), read on two RPCs and checked in the same step;
+ * - `out`: the token amount W received, a decimal string in the token's whole units, read from the transaction itself
+ *   on both RPCs, the two the same and at least the buy's min out. Absent when they differ: never made up.
+ * Addresses and an amount only: never a key, the 12 words or a note.
+ */
+export type BuyRoute = { wallet: string } | { venue: string; pool: string } | { out: string };
+
 /** The stage of a request still running, by its id. */
 export interface ProgressEvent {
   v: 1;
@@ -208,7 +221,15 @@ export interface ProgressEvent {
   stage: Stage;
 }
 
-export type SignpageEvent = ReadyEvent | StateEvent | ProgressEvent;
+/**
+ * One fact of a running buy's route (BuyRoute), by its id: a progress event with no stage. Its own event, never fields
+ * on a stage event: a client of an earlier kit checks a progress event with exact keys and drops any other shape, so it
+ * drops a route event and still reads every stage. A page of an earlier release sends none, and a client reads its
+ * stages as before.
+ */
+export type ProgressRouteEvent = { v: 1; type: "progress"; id: string } & BuyRoute;
+
+export type SignpageEvent = ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent;
 
 /** Anything the page posts to the app. */
 export type SignpageMessage = SignpageAnswer | SignpageEvent;
@@ -290,5 +311,12 @@ export interface SignpageState {
   }[];
   /** Money held under a one-time id or an arming account whose arm has stopped; withdraw.open with the id moves it. */
   held: { id: string; asset: string; amount: string }[];
+  /**
+   * The device's deposit wallets that still hold money (card app-export-every-wallet): a deposit wallet of this seed
+   * with a balance not yet moved into its chain's pool or the vault, a remainder or dust included. `asset` is the
+   * chain's pool asset (POOL_ASSET_DECIMALS), `amount` its balance in whole units of it, as pools' `balance` is.
+   * Addresses and amounts only. Absent from a page of an earlier release; moneyWallets names the ones above 0.
+   */
+  deposit_wallets?: { chain: Chain; address: string; asset: PoolAsset; amount: string }[];
   ops: Operation[];
 }
