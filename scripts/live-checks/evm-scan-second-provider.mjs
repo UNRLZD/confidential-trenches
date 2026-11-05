@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+// Runs: once, it reads no host: the kit at the checkout against each chain's pinned scan providers, run at merge with its recorded answers
 // Live check of card evm-scan-second-provider: an EVM buy's pool scan never stops at one bad scan provider. Through the
 // kit's public entry (evmPoolBuyQuote, on the kit's own pinned providers, as the device runs it), for a Base and a
 // Robinhood buy: quotes as the device runs them (the first scan provider answering) until one ends as the case says,
-// WARMUP at most (a cold scan reads the whole depth on the first and keeps what came back for the next, as on GitHub's
-// runners, where a cold quote can end at the bound: evm-quote-warm-round, 2026-11-05), then HELD quotes with the first
+// none started past WARMUP_MS (a cold scan reads the whole depth on the first and keeps what came back for the next, as
+// on GitHub's runners, where a cold quote can end at the bound: evm-quote-warm-round, 2026-11-05), then HELD quotes with the first
 // scan provider held, 1.5 s apart, each way below in turn:
 //   - "refused": every request to it fails with no connection (a browser's "Failed to fetch");
 //   - "no logs": it answers every getLogs with an error and no logs (-32602 "block range extends beyond current head
@@ -26,7 +27,7 @@ export const APP_ORIGIN = "https://confidential.unrealized.trade";
 export const BOUND_MS = 60_000;
 export const MODES = ["refused", "no logs"];
 export const HELD = 2; // quotes per mode
-export const WARMUP = 3;
+export const WARMUP_MS = 240_000; // the warm-up's time: no quote of it starts past this
 const ZERO = "0x0000000000000000000000000000000000000000";
 const BASE_WETH = "0x4200000000000000000000000000000000000006";
 // the tokens of evm-quote-warm-round (base-hook) and evm-quote-lag-held (robinhood TORCH)
@@ -58,8 +59,10 @@ export function check(run) {
     const allowed = p !== undefined && p.status >= 200 && p.status < 300 && origin(p.allow) && (p.headers === "*" || /(^|,)\s*content-type\s*(,|$)/i.test(p.headers ?? "")) && origin(p.post);
     say(allowed, `${req.chain} second scan provider preflight from ${APP_ORIGIN}: ${p === undefined ? "not read" : `${p.status}, allow-origin ${p.allow ?? "none"}, allow-headers ${p.headers ?? "none"}; POST allow-origin ${p.post ?? "none"}`}`);
     const c = run?.cases?.[name];
-    const warm = Array.isArray(c?.first) ? c.first.slice(0, WARMUP) : [];
-    say(warm.some((q) => q.code === want), `${name}: the first scan provider answering, quotes end ${warm.map((q) => `${q.code} (${q.ms} ms)`).join(", ") || "not run"}; one ${want} wanted within ${WARMUP}`);
+    // the warm-up's quotes, each started within WARMUP_MS of the first
+    const warm = [];
+    for (let i = 0, at = 0; Array.isArray(c?.first) && i < c.first.length && at < WARMUP_MS; at += Number(c.first[i].ms) || 0, i++) warm.push(c.first[i]);
+    say(warm.some((q) => q.code === want), `${name}: the first scan provider answering, quotes end ${warm.map((q) => `${q.code} (${q.ms} ms)`).join(", ") || "not run"}; one ${want} wanted, none started past ${WARMUP_MS} ms`);
     const held = Array.isArray(c?.held) ? c.held : [];
     for (const m of MODES) {
       const qs = held.filter((q) => q.mode === m);
@@ -131,7 +134,8 @@ export async function measure(venues = evmPoolVenues()) {
   for (const [name, req] of CASES) {
     const { first, spare } = scans[req.chain];
     const c = (run.cases[name] = { first: [], held: [] });
-    for (let i = 0; i < WARMUP && !c.first.some((q) => q.code === CASES.find((x) => x[0] === name)[2]); i++) {
+    const t0 = performance.now();
+    for (let i = 0; performance.now() - t0 < WARMUP_MS && !c.first.some((q) => q.code === CASES.find((x) => x[0] === name)[2]); i++) {
       const q = await quote(req, first, spare, null);
       c.first.push(q);
       console.log(`${name} first answering ${i}: ${q.code} ${q.ms} ms${q.message ? `: ${q.message}` : ""}`);

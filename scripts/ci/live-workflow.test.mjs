@@ -118,8 +118,7 @@ test("the signing page's twenty-three checks (signpage-shell runs four ways, sig
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 30, "the app's thirty checks, evm-scan-second-provider the newest");
-  assert.ok(app.include.some((e) => e.key === "evm-scan-second-provider" && e.args === ""), "evm-scan-second-provider runs after every app deploy");
+  assert.equal(app.include.length, 29, "the app's twenty-nine checks, evm-quote-lag-held and app-chart-live the newest");
   assert.ok(app.include.some((e) => e.key === "app-chart-live"), "app-chart-live runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "evm-quote-warm-round" && e.args === ""), "evm-quote-warm-round runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "balances-per-chain" && e.chrome && e.args === ""), "balances-per-chain runs on APP_HOST in Chrome");
