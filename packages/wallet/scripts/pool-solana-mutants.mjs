@@ -85,7 +85,7 @@ const M = [
   [R, " || (y.open && y.bucket < x.bucket)", "", T, "sol-marks-scale: a short bucket speaks"],
   [R, "if (y.slot < x.slot || !(y.bucket === x.bucket || (y.open && y.bucket < x.bucket))) return;", "if (y.slot < x.slot) return;", T, "sol-marks-scale: a pool of 20,000"],
   [R, "const a = (await solanaLagRetry(() => rpc(\"getProgramAccounts\", [program, { commitment: \"finalized\", encoding: \"base64\", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters }]), lagWait, stop.signal))", "const a = (await rpc(\"getProgramAccounts\", [program, { commitment: \"finalized\", encoding: \"base64\", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters }]))", T, "sol-marks-scale: a bucket whose node lags"],
-  // fold 1 (the Opus review): S1 a zeroed record passed over, S2 both RPCs wave by wave with the stopped one's lowest bucket
+  // fold 1 (the review): S1 a zeroed record passed over, S2 both RPCs wave by wave with the stopped one's lowest bucket
   // not full read again at the other's slot and one stop for every read, S3 a counter is one mark's, S4 the settle's
   // spent marks only
   [R, "        if (bytes.subarray(0, 8).every((v) => v === 0)) continue;\n", "", T, "sol-marks-scale fold 1 RV-B1"],

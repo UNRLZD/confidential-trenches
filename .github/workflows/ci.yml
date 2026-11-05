@@ -206,6 +206,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: the wallet package's test script
         run: pnpm --filter @blindfill/wallet run test
+      # the full-count property runs (FULL_RUNS=1) the default test keeps short (card fresh-run-margin)
+      - name: the wallet package's test:mutants script
+        run: pnpm --filter @blindfill/wallet run test:mutants
 
   test-packages:
     if: github.event_name != 'schedule'
@@ -222,6 +225,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: every other workspace package's test script
         run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test
+      # The mutant sweeps, after the tests: each package's test:mutants (card fresh-run-margin). The README's test command
+      # runs a package's test script only, so a reviewer's fresh run ends well inside readme-fresh-run's 15 minutes; no
+      # sweep is lost, as scripts/ci/tests-run.test.mjs reads this line too.
+      - name: every other workspace package's mutant sweeps
+        run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test:mutants
       - name: every workspace package's typecheck
         run: pnpm -r --if-present run typecheck
       - name: the deploy gate's own tests

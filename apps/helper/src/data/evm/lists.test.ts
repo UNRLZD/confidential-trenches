@@ -375,6 +375,20 @@ test("the lists name each listed token's pool as its list's row does (card helpe
   for (const k of Object.keys(s.lists)) for (const x of s.lists[k]!) assert.ok(!Object.hasOwn(x, "pool"));
 });
 
+test("card helper-robinhood-search-ahead: each new answer is told as it is built (the swap reads look for its tokens' pools then), and one held already at once", async () => {
+  const r = recorded();
+  const l = createEvmLists("base", geckoBudget(() => NOW), { fetch: r.fetch, now: () => NOW });
+  let told = 0;
+  l.onAnswer(() => told++);
+  assert.equal(told, 0, "no answer yet: nothing told");
+  await l.tick();
+  assert.equal((await l.get()).status, 200);
+  assert.equal(told, 1, "the first answer built is told");
+  let late = 0;
+  l.onAnswer(() => late++);
+  assert.equal(late, 1, "a listener added after an answer is told it at once");
+});
+
 test("the lists: tagged rows, the tokens not read yet named in unsettled, the lists read once per LIST_MS within the lane's yield; 503 only while GeckoTerminal never answered, a read past STALE_MS served dated by it", async () => {
   let now = NOW;
   const r = recorded();

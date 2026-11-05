@@ -553,7 +553,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       }
       return seen;
     };
-    out[chain] = createSwaps(chain, {
+    const swaps = createSwaps(chain, {
       gecko,
       holds,
       rpcs: url === undefined || url === "" ? SWAP_RPCS[chain] : [url, ...SWAP_RPCS[chain]],
@@ -565,6 +565,10 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
         return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : null;
       },
     });
+    out[chain] = swaps;
+    // the lists' tokens' pools looked for as each answer loads, not at each token's first open (card
+    // helper-robinhood-search-ahead)
+    lists.onAnswer?.(() => void snapshot().then((x) => (x === null ? undefined : swaps.ahead([...x.tokens]))).catch(() => undefined));
   }
   return out;
 }

@@ -467,9 +467,152 @@ test("card helper-v4-hook-liquidity: a hook's transfer that settles the pool's l
   const got = traderLeg(s as { side: "b" | "s"; amt: bigint }, hookTakes(pool, logs, "base").get(`${swap.tx}:${swap.index}`)) ?? (s as { amt: bigint }).amt;
   const toBuyer = BigInt(logs.find((l) => l.index === 741)!.data);
   assert.equal(got, toBuyer, `the buy is the ${toBuyer} the buyer got, not ${got}`);
-  // the same transfer with no ModifyLiquidity before it is a hook's cut as before (a hook paying the swap in)
-  const noCall = logs.filter((l) => l.index !== 721 && l.index !== 717);
+  // the same transfer with no ModifyLiquidity before it, and no move of the swap's sender read, is a hook's cut as
+  // before (a hook paying the swap in)
+  const noCall = logs.filter((l) => l.index !== 721 && l.index !== 717 && l.index !== 737);
   assert.equal(hookTakes(pool, noCall, "base").get(`${swap.tx}:${swap.index}`), -BigInt(logs.find((l) => l.index === 722)!.data));
+});
+
+test("card helper-v4-hook-liquidity: a router's take sent straight to its recipient (v4's take names no sender) is the trader's leg when the swap is the transaction's only one: the one address that moved the token with the PoolManager and is no hook, swap or call sender", () => {
+  const tx = "0x02b8198c518595444576c2e52c9a8a536b179a2341b09aa2d58c732a61b0a2e5";
+  const logs: Log[] = LAUNCH.map(([index, address, topics, data]) => ({ block: 0x330cae8, index, tx, address, topics, data }));
+  const swap = logs.find((l) => l.index === 730)!;
+  const pool: Pool = { venue: "v4", id: swap.topics[1]!, token: logs.find((l) => l.index === 713)!.address, tokenIs0: false, quote: { kind: "eth", decimals: 18 }, hook: "0x5e320ea6278107968c119942e57d876c5f922acc" };
+  const s = decodeSwap(pool, swap, "base") as { side: "b" | "s"; amt: bigint };
+  const out = logs.find((l) => l.index === 737)!;
+  const buyer = logs.find((l) => l.index === 741)!.topics[2]!;
+  // the take sent straight to the buyer, less a part the hook keeps
+  const direct = [...logs.filter((l) => l.index < 737), { ...out, topics: [out.topics[0]!, out.topics[1]!, buyer], data: `0x${(BigInt(out.data) - 5n).toString(16).padStart(64, "0")}` }];
+  assert.equal(traderLeg(s, hookTakes(pool, direct, "base").get(`${tx}:730`)) ?? s.amt, BigInt(out.data) - 5n);
+  // a second recipient of the token from the PoolManager makes it no read: the hook's own moves decide
+  const two = [...direct, { ...out, index: 739, topics: [out.topics[0]!, out.topics[1]!, `0x${"0".repeat(24)}${"7".repeat(40)}`], data: `0x${(5n).toString(16).padStart(64, "0")}` }];
+  assert.equal(traderLeg(s, hookTakes(pool, two, "base").get(`${tx}:730`)) ?? s.amt, s.amt);
+});
+
+// Card helper-v4-hook-liquidity, live run 41990876403 at 04bb10f: Base tx
+// 0xfaaa9cc939fffb787b906da0c1309746e5229d722df371b1a44322b2994c1460 (block 53,537,870, receipt read from
+// base-rpc.publicnode.com and base.gateway.tenderly.co alike, 2026-11-05 09:2xZ). A buy of 0xe2969931... on the pool
+// whose key's hook is 0xbdf93814... (afterSwap with a return delta; the PoolManager's key, v4Key): the buy's Swap (178,
+// sender the router 0xf8cd946a), the cut taken by 0x9982538f, a contract the hook calls (180), that contract's two sells
+// (181, 185) paid in (183, 187), its ModifyLiquidity (189) paid in (192), the hook's move out and back (193, 194), and the
+// buyer's tokens minted to the router as ERC-6909 claims (197: 44,726,051,716,064, no Transfer). The tape showed
+// 51,015,555,490,232 at 04bb10f.
+const OWN_SELLS: [number, string, string[], string][] = [
+  [178, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f","0x894c4d2aac7d50f1a6e4367e2928a0a1bb876a9cb435d43fe024d2fcd76ef173","0x000000000000000000000000f8cd946adb3e56c6c246fd8eaa32c4c94ec889ed"], "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff79d00000000000000000000000000000000000000000000000000002e65fc1021b80000000000000000000000000000000000025c64ad57fb18d558a41852b05664000000000000000000000000000000000000000000000bd1819559a425426917000000000000000000000000000000000000000000000000000000000003a5970000000000000000000000000000000000000000000000000000000000001b58"],
+  [180, "0xe2969931f5f0d2e2d53e8077e6a923b16512eba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb"], "0x000000000000000000000000000000000000000000000000000005b863a365d8"],
+  [181, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f","0x894c4d2aac7d50f1a6e4367e2928a0a1bb876a9cb435d43fe024d2fcd76ef173","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb"], "0x00000000000000000000000000000000000000000000000000000000000000b1fffffffffffffffffffffffffffffffffffffffffffffffffffffc1e4eac8d2e0000000000000000000000000000000000025c64ad57fb1928d68394dd8d79a1000000000000000000000000000000000000000000000bd1819559a425426917000000000000000000000000000000000000000000000000000000000003a5970000000000000000000000000000000000000000000000000000000000001b58"],
+  [183, "0xe2969931f5f0d2e2d53e8077e6a923b16512eba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x000000000000000000000000000000000000000000000000000003e1b15372d2"],
+  [185, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f","0x894c4d2aac7d50f1a6e4367e2928a0a1bb876a9cb435d43fe024d2fcd76ef173","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb"], "0x0000000000000000000000000000000000000000000000000000000000000023ffffffffffffffffffffffffffffffffffffffffffffffffffffff3942ef4f700000000000000000000000000000000000025c64ad57fb19398949e0f941f945000000000000000000000000000000000000000000000bd1819559a425426917000000000000000000000000000000000000000000000000000000000003a5970000000000000000000000000000000000000000000000000000000000001b58"],
+  [187, "0xe2969931f5f0d2e2d53e8077e6a923b16512eba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x000000000000000000000000000000000000000000000000000000c6bd10b090"],
+  [189, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec","0x894c4d2aac7d50f1a6e4367e2928a0a1bb876a9cb435d43fe024d2fcd76ef173","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb"], "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff2766000000000000000000000000000000000000000000000000000000000000d89a0000000000000000000000000000000000000000000000000000000000050455f84d425564d25e000e629db464057c45d862ce4a5dd192c74cfc9ab2250404026"],
+  [192, "0xe2969931f5f0d2e2d53e8077e6a923b16512eba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x000000000000000000000000000000000000000000000000000000bd833d9794"],
+  [193, "0xe2969931f5f0d2e2d53e8077e6a923b16512eba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b","0x000000000000000000000000bdf938149ac6a781f94faa0ed45e6a0e984c6544"], "0x000000000000000000000000000000000000000000000000000005b863a365d8"],
+  [194, "0xe2969931f5f0d2e2d53e8077e6a923b16512eba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000bdf938149ac6a781f94faa0ed45e6a0e984c6544","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x000000000000000000000000000000000000000000000000000005b863a365d8"],
+  [197, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x1b3d7edb2e9c0b0e7c525b20aaaef0f5940d2ed71663c7d39266ecafac728859","0x0000000000000000000000000000000000000000000000000000000000000000","0x000000000000000000000000f8cd946adb3e56c6c246fd8eaa32c4c94ec889ed","0x000000000000000000000000e2969931f5f0d2e2d53e8077e6a923b16512eba3"], "0x000000000000000000000000f8cd946adb3e56c6c246fd8eaa32c4c94ec889ed000000000000000000000000000000000000000000000000000028ad986cbbe0"],
+];
+test("card helper-v4-hook-liquidity: a buy taken as ERC-6909 claims by its router is what the router was minted: Base tx 0xfaaa9cc9's buy is the 44,726,051,716,064 its buyer got", () => {
+  const tx = "0xfaaa9cc939fffb787b906da0c1309746e5229d722df371b1a44322b2994c1460";
+  const logs: Log[] = OWN_SELLS.map(([index, address, topics, data]) => ({ block: 53_537_870, index, tx, address, topics, data }));
+  const swap = logs.find((l) => l.index === 178)!;
+  const coin = "0xe2969931f5f0d2e2d53e8077e6a923b16512eba3";
+  const pool: Pool = { venue: "v4", id: swap.topics[1]!, token: coin, tokenIs0: false, quote: { kind: "eth", decimals: 18 }, hook: "0xbdf938149ac6a781f94faa0ed45e6a0e984c6544" };
+  const s = decodeSwap(pool, swap, "base") as { side: "b" | "s"; amt: bigint };
+  const got = traderLeg(s, hookTakes(pool, logs, "base").get(`${tx}:178`)) ?? s.amt;
+  // the ERC-6909 mint's amount (its data's second word) is what the buyer got
+  const minted = BigInt(`0x${logs.find((l) => l.index === 197)!.data.slice(2 + 64)}`);
+  assert.equal(minted, 44_726_051_716_064n);
+  assert.equal(got, minted, `the buy is the ${minted} the buyer was minted, not ${got}`);
+});
+
+// Card helper-v4-hook-liquidity: Base tx 0x72c376b79a5f6bd08cb1a05d1c79ee55ee3f0e724aa398a928d11e950a5f83b8 (block
+// 53,540,767, receipt agreed by two Base providers in the check's run on the fix at 6e4c723, 2026-11-05 09:4xZ), the
+// same hook 0xbdf93814...: the buy's Swap (342, sender the router 0x10350290), the cut of 123.74 taken by 0x9982538f (344),
+// its two sells (345, 349) paid in (347, 351), its ModifyLiquidity (353) paid in (356), the hook's move out and back (357,
+// 358), and the router's 11,661.28 out (360) and on (362, 363). None of the cut moves between the PoolManager and the
+// hook, so the tape showed the pool's 11,785.03.
+const ROUTER_TAKE: [number, string, string[], string][] = [
+  [342, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f","0xd9a01d7c963aac102aa13b4a59b6eb606d0840ea3f0f519fc4eb682fdc587598","0x000000000000000000000000103502909141f7025a94b7b99a276dcd128e21a8"], "0xffffffffffffffffffffffffffffffffffffffffffffffffffffff8c92ff528000000000000000000000000000000000000000000000027ede177243567d4e930000000000000000000000000000000000025c6477495cfb265dfddc9d3eca26000000000000000000000000000000000000000000000bd1819559a425426917000000000000000000000000000000000000000000000000000000000003a5970000000000000000000000000000000000000000000000000000000000001b58"],
+  [344, "0x9984b642b639b4e9397c0bd0463228f2586e9ba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb"], "0x000000000000000000000000000000000000000000000006b546a56c7ba8fee7"],
+  [345, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f","0xd9a01d7c963aac102aa13b4a59b6eb606d0840ea3f0f519fc4eb682fdc587598","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb"], "0x00000000000000000000000000000000000000000000000000000000cf9987cdfffffffffffffffffffffffffffffffffffffffffffffffb72b4a208ac1677790000000000000000000000000000000000025c6477ab45eda3064c23f98f0538000000000000000000000000000000000000000000000bd1819559a425426917000000000000000000000000000000000000000000000000000000000003a5970000000000000000000000000000000000000000000000000000000000001b58"],
+  [347, "0x9984b642b639b4e9397c0bd0463228f2586e9ba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x0000000000000000000000000000000000000000000000048d4b5df753e98887"],
+  [349, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f","0xd9a01d7c963aac102aa13b4a59b6eb606d0840ea3f0f519fc4eb682fdc587598","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb"], "0x0000000000000000000000000000000000000000000000000000000029aea03cffffffffffffffffffffffffffffffffffffffffffffffff1607de222426e9490000000000000000000000000000000000025c6477beee7fec74170eb1c58ef9000000000000000000000000000000000000000000000bd1819559a425426917000000000000000000000000000000000000000000000000000000000003a5970000000000000000000000000000000000000000000000000000000000001b58"],
+  [351, "0x9984b642b639b4e9397c0bd0463228f2586e9ba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x000000000000000000000000000000000000000000000000e9f821dddbd916b7"],
+  [353, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec","0xd9a01d7c963aac102aa13b4a59b6eb606d0840ea3f0f519fc4eb682fdc587598","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb"], "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff2766000000000000000000000000000000000000000000000000000000000000d89a000000000000000000000000000000000000000000000000000006254863bd9afc59f81f949d75c831c07bda27c1fc3c6d255479e5a451f7be229603b0b7271f7"],
+  [356, "0x9984b642b639b4e9397c0bd0463228f2586e9ba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000009982538f41f2ae29ddb9d3d9307010052984fdbb","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x000000000000000000000000000000000000000000000000e82603b845b71685"],
+  [357, "0x9984b642b639b4e9397c0bd0463228f2586e9ba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b","0x000000000000000000000000bdf938149ac6a781f94faa0ed45e6a0e984c6544"], "0x000000000000000000000000000000000000000000000006b546a56c7ba8fee7"],
+  [358, "0x9984b642b639b4e9397c0bd0463228f2586e9ba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000bdf938149ac6a781f94faa0ed45e6a0e984c6544","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x000000000000000000000000000000000000000000000006b546a56c7ba8fee7"],
+  [360, "0x9984b642b639b4e9397c0bd0463228f2586e9ba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b","0x000000000000000000000000103502909141f7025a94b7b99a276dcd128e21a8"], "0x00000000000000000000000000000000000000000000027828d0ccd6dad44fac"],
+  [362, "0x9984b642b639b4e9397c0bd0463228f2586e9ba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000103502909141f7025a94b7b99a276dcd128e21a8","0x00000000000000000000000000000000009726632680fb29d3f7a9734e3010e2"], "0x00000000000000000000000000000000000000000000027828d0ccd6dad44fab"],
+  [363, "0x9984b642b639b4e9397c0bd0463228f2586e9ba3", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x00000000000000000000000000000000009726632680fb29d3f7a9734e3010e2","0x000000000000000000000000b2322fb6b8a3b9bafeccde9dfc44ba9faf6ce6e7"], "0x00000000000000000000000000000000000000000000027828d0ccd6dad44fab"],
+];
+const routerTake = () => {
+  const tx = "0x72c376b79a5f6bd08cb1a05d1c79ee55ee3f0e724aa398a928d11e950a5f83b8";
+  const logs: Log[] = ROUTER_TAKE.map(([index, address, topics, data]) => ({ block: 53_540_767, index, tx, address, topics, data }));
+  const swap = logs.find((l) => l.index === 342)!;
+  const coin = logs.find((l) => l.index === 344)!.address;
+  const pool: Pool = { venue: "v4", id: swap.topics[1]!, token: coin, tokenIs0: false, quote: { kind: "eth", decimals: 18 }, hook: "0xbdf938149ac6a781f94faa0ed45e6a0e984c6544" };
+  const s = decodeSwap(pool, swap, "base") as { side: "b" | "s"; amt: bigint };
+  return { tx, logs, swap, pool, s, leg: (l: Log[], p: Pool = pool) => traderLeg(s, hookTakes(p, l, "base").get(`${tx}:342`)) ?? s.amt };
+};
+test("card helper-v4-hook-liquidity: a buy is what its router took from the PoolManager, wherever the hook's cut went: Base tx 0x72c376b7's buy is the 11,661.28 its buyer got, not the pool's 11,785.03", () => {
+  const { logs, s, leg } = routerTake();
+  const toRouter = BigInt(logs.find((l) => l.index === 360)!.data);
+  assert.equal(s.amt, 11_785_026_104_461_117_705_875n);
+  assert.equal(leg(logs), toRouter, `the buy is the ${toRouter} the router took, not ${leg(logs)}`);
+});
+test("card helper-v4-hook-liquidity: a sender with a second swap of the token in a sibling pool, or none of the token moved (a route through it, its deltas netted in the PoolManager), is no read: the hook's own moves decide, never a leg of 0", () => {
+  const { tx, logs, swap, pool, s, leg } = routerTake();
+  // a split buy: the same router swaps the token in a sibling pool too, so its one take is both swaps'
+  const sib = `0x${"5".repeat(64)}`;
+  const split = [...logs, { ...swap, index: 343, topics: [swap.topics[0]!, sib, swap.topics[2]!] }];
+  assert.equal(leg(split, { ...pool, siblings: [sib] }), s.amt, "no read: the hook's moves settle its ModifyLiquidity, no cut");
+  assert.notEqual(leg(split, pool), s.amt, "without the sibling read, the router's take is read");
+  // a multi-hop through the token (ETH to the token here, the token on to another coin in a pool not read): the router
+  // takes none of it, so no Transfer or claim of it moves with the PoolManager
+  const hop = logs.filter((l) => l.index !== 360);
+  assert.equal(leg(hop), s.amt, "no read: the pool's amount, not 0");
+  assert.equal(hookTakes(pool, hop, "base").get(`${tx}:342`), undefined);
+  // the sender moved the token out and back (net 0) is no read either
+  const back = [...hop, { ...logs.find((l) => l.index === 360)!, index: 361 }, { ...logs.find((l) => l.index === 360)!, index: 364, topics: [TOPIC.transfer, logs.find((l) => l.index === 360)!.topics[2]!, logs.find((l) => l.index === 360)!.topics[1]!] }];
+  assert.equal(leg(back), s.amt);
+});
+
+// Card helper-v4-hook-liquidity: Base tx 0x655b2818f4ac086365f25052f2628ddfb433b687238b481c0f03b585de09500e (block
+// 53,524,257, receipt read from base-rpc.publicnode.com and base.gateway.tenderly.co alike, 2026-11-05 09:3xZ), one of 4
+// launches of hook 0x5e320ea6... in 20,000 blocks whose buy af04d30 still read wrong: 1e9 minted to the hook (6),
+// Initialize (27), ModifyLiquidity (31) and the hook's 1e9 paid in (32), the buy's Swap (43), the hook's cut taken as
+// ERC-6909 claims of the token the PoolManager minted to its fee recipient 0x5dd237d1 (52: 302,577,162,698,952,813; 44 is
+// a claim of USDC, no cut of the token), and the buyer's 599,102,782,143,926,570,213 out (55). The tape showed the pool's
+// 599,405,359,306,625,523,026.
+const CLAIMS_CUT: [number, string, string[], string][] = [
+  [6, "0x2890717c770b52061408d1a88039eb7f479dcccc", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000000000000000000000000000000000000000000000","0x0000000000000000000000005e320ea6278107968c119942e57d876c5f922acc"], "0x0000000000000000000000000000000000000000033b2e3c9fd0803ce8000000"],
+  [27, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438","0x42094dd1660acd9b7420e62c24726dfc711a247319bbb9e84b009e67799a0e36","0x0000000000000000000000002890717c770b52061408d1a88039eb7f479dcccc","0x000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913"], "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c80000000000000000000000005e320ea6278107968c119942e57d876c5f922acc00000000000000000000000000000000000000000000000883956ab34ccb0338fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9e260"],
+  [31, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec","0x42094dd1660acd9b7420e62c24726dfc711a247319bbb9e84b009e67799a0e36","0x0000000000000000000000005e320ea6278107968c119942e57d876c5f922acc"], "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9e32800000000000000000000000000000000000000000000000000000000000d89a00000000000000000000000000000000000000000000000001bc963f9e7260c830000000000000000000000000000000000000000000000000000000000000000"],
+  [32, "0x2890717c770b52061408d1a88039eb7f479dcccc", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000005e320ea6278107968c119942e57d876c5f922acc","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x0000000000000000000000000000000000000000033b2e3c9fd0803cdcf274c4"],
+  [43, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f","0x42094dd1660acd9b7420e62c24726dfc711a247319bbb9e84b009e67799a0e36","0x000000000000000000000000c3ace43169bbf51752b1603067f91ef60f8a662a"], "0x0000000000000000000000000000000000000000000000207e6b9e80f0cc1d52fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff69d000000000000000000000000000000000000000000000008997d32eb9c288cef0000000000000000000000000000000000000000000000001bc963f9e7260c83fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9e3280000000000000000000000000000000000000000000000000000000000000000"],
+  [44, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x1b3d7edb2e9c0b0e7c525b20aaaef0f5940d2ed71663c7d39266ecafac728859","0x0000000000000000000000000000000000000000000000000000000000000000","0x0000000000000000000000005dd237d1f716c65426ccd2fae82b95109825fa61","0x000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913"], "0x0000000000000000000000005e320ea6278107968c119942e57d876c5f922acc0000000000000000000000000000000000000000000000000000000000000017"],
+  [52, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x1b3d7edb2e9c0b0e7c525b20aaaef0f5940d2ed71663c7d39266ecafac728859","0x0000000000000000000000000000000000000000000000000000000000000000","0x0000000000000000000000005dd237d1f716c65426ccd2fae82b95109825fa61","0x0000000000000000000000002890717c770b52061408d1a88039eb7f479dcccc"], "0x0000000000000000000000005e320ea6278107968c119942e57d876c5f922acc0000000000000000000000000000000000000000000000000432f8538bd1106d"],
+  [55, "0x2890717c770b52061408d1a88039eb7f479dcccc", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b","0x000000000000000000000000c3ace43169bbf51752b1603067f91ef60f8a662a"], "0x0000000000000000000000000000000000000000000000207a38a62d64fb0ce5"],
+];
+test("card helper-v4-hook-liquidity: a hook's cut taken as ERC-6909 claims of the token it has the PoolManager mint is the swap's cut: the launch's buy is the 599,102,782,143,926,570,213 its buyer got", () => {
+  const tx = "0x655b2818f4ac086365f25052f2628ddfb433b687238b481c0f03b585de09500e";
+  const logs: Log[] = CLAIMS_CUT.map(([index, address, topics, data]) => ({ block: 53_524_257, index, tx, address, topics, data }));
+  const swap = logs.find((l) => l.index === 43)!;
+  const coin = logs.find((l) => l.index === 6)!.address;
+  // the token is currency0, USDC currency1 (Initialize's topics)
+  const pool: Pool = { venue: "v4", id: swap.topics[1]!, token: coin, tokenIs0: true, quote: { kind: "usd", decimals: 6 }, hook: "0x5e320ea6278107968c119942e57d876c5f922acc" };
+  const s = decodeSwap(pool, swap, "base") as { side: "b" | "s"; amt: bigint };
+  assert.equal(s.side, "b");
+  const got = traderLeg(s, hookTakes(pool, logs, "base").get(`${tx}:43`)) ?? s.amt;
+  const toBuyer = BigInt(logs.find((l) => l.index === 55)!.data);
+  assert.equal(got, toBuyer, `the buy is the ${toBuyer} the buyer got, not ${got}`);
+  // with no move of the swap's sender read (55 left out), the hook's claims are its cut, never a trader's leg; a claim
+  // another caller had minted, the transaction's only move of the token with the PoolManager, is its recipient's leg
+  const noSender = logs.filter((l) => l.index !== 55);
+  const cut = BigInt(`0x${logs.find((l) => l.index === 52)!.data.slice(66)}`);
+  assert.equal(hookTakes(pool, noSender, "base").get(`${tx}:43`), cut);
+  const other = noSender.map((l) => (l.index === 52 ? { ...l, data: `0x${"0".repeat(24)}${"9".repeat(40)}${l.data.slice(66)}` } : l));
+  assert.equal(traderLeg(s, hookTakes(pool, other, "base").get(`${tx}:43`)), cut);
 });
 
 test("card helper-v4-hook-liquidity: a beforeSwap-only hook's take right after a pool call is the next swap's cut; its paying in there settles the call", () => {

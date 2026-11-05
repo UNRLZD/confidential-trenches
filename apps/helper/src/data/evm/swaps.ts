@@ -76,6 +76,9 @@ export const TOPIC = {
   initialize: topic("Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)"),
   modifyLiquidity: topic("ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)"),
   donate: topic("Donate(bytes32,address,uint256,uint256)"),
+  // the PoolManager's ERC-6909 claims (its own Transfer: caller, indexed from, to and id, amount): a hook may take its
+  // cut as claims minted to a fee recipient, not as the token (card helper-v4-hook-liquidity: hook 0x5e320ea6 on Base)
+  claims: topic("Transfer(address,address,address,uint256,uint256)"),
 } as const;
 /** The PoolManager's events of a pool that are not a swap: a hook's transfer next to one settles it (hookTakes). */
 const POOL_CALLS = [TOPIC.initialize, TOPIC.modifyLiquidity, TOPIC.donate];
@@ -476,6 +479,9 @@ export type Pool = {
   /** A v4 pool's hook when its address carries a return-delta flag (hookOf): the hook may then take from or add to
    *  what the swapper pays or gets, after the `Swap` log is written. */
   hook?: string;
+  /** A hooked v4 pool's: the token's other v4 pools the discovery found, whose swaps are read with this pool's only so
+   *  hookTakes can tell a sender that swapped the token once in the transaction (card helper-v4-hook-liquidity). */
+  siblings?: readonly string[];
 };
 
 /** v4-core Hooks.sol: BEFORE_SWAP_RETURNS_DELTA_FLAG (1 << 3) and AFTER_SWAP_RETURNS_DELTA_FLAG (1 << 2), read in the
@@ -497,19 +503,20 @@ export function hookOf(key: string): string | undefined {
 }
 
 /** The `eth_getLogs` filters for a pool's trades over blocks `from` to `to`: its swaps, and for a pool with a hook
- *  (Pool.hook) the token's transfers between the PoolManager and the hook, which are the hook's cut (hookTakes). A
+ *  (Pool.hook) the token's transfers and the PoolManager's ERC-6909 claims of the token, which show what each swap's
+ *  sender took or paid and the hook's cut (hookTakes). A
  *  hooked pool's swaps filter also takes the pool's other PoolManager calls (POOL_CALLS), whose own transfers are no
  *  cut: each is the PoolManager's event with the pool's id as its first indexed topic, so they are one filter, never a
  *  third read a span (card helper-robinhood-capacity fold 8: the third sent a cold dozen's reads past the wide
  *  providers' paces to drpc's 100-block spans). One address a filter, never a list: api.blockvectra.com refuses an
  *  address list (-32602, 2026-11-04 20:2xZ). */
-export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
+export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook" | "siblings">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
   const swaps = swapFilter(pool, from, to, chain);
   if (pool.venue !== "v4" || pool.hook === undefined) return [swaps];
-  const ends = [VENUES[chain].poolManager, pool.hook].map((a) => `0x${a.slice(2).padStart(64, "0")}`);
   return [
-    { ...swaps, topics: [[TOPIC.swap4, ...POOL_CALLS], pool.id] },
-    { address: pool.token, topics: [TOPIC.transfer, ends, ends], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
+    { ...swaps, topics: [[TOPIC.swap4, ...POOL_CALLS], pool.siblings?.length ? [pool.id, ...pool.siblings] : pool.id] },
+    { address: pool.token, topics: [TOPIC.transfer], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
+    { address: VENUES[chain].poolManager, topics: [TOPIC.claims, null, null, `0x${pool.token.slice(2).padStart(64, "0")}`], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
   ];
 }
 
@@ -569,13 +576,26 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
 }
 
 /**
- * A hooked v4 pool's (Pool.hook) cut of the token in each of its swaps, by the swap log's `tx:index`: what the token's
- * transfers between the PoolManager and the hook moved to the hook (less what they moved back), in the logs read with
- * the swaps (poolFilters). A hook settles its delta inside its own call, so its transfers sit next to the swap's log:
- * an afterSwap hook's after it (before the transaction's next swap of the pool), a beforeSwap-only hook's before it.
- * A swap the hook sends itself is no one's trade through the hook (v4 calls no hook for its own swaps): no cut. A
- * transfer whose nearest PoolManager event of the pool before it is another call (POOL_CALLS: its liquidity added or
- * taken, its start, a donation) settles that call, never a swap: no cut (card helper-v4-hook-liquidity, Base tx
+ * A hooked v4 pool's (Pool.hook) cut of the token in each of its swaps, by the swap log's `tx:index`, from the logs read
+ * with the swaps (poolFilters).
+ *
+ * First the swap's own sender: the PoolManager credits the contract that called swap() (the Swap log's sender) with the
+ * swap's delta after the hook's, and that contract takes or pays exactly it, as the token (a Transfer between it and the
+ * PoolManager) or as ERC-6909 claims of the token (minted to it, burnt from it). So when the sender made only this one
+ * swap of the token in the transaction (in this pool or its siblings read), what it moved with the PoolManager is the
+ * trader's leg; when it moved none (a route through the token whose deltas net out inside the PoolManager), there is no
+ * read and the hook's own moves below decide. A buy gets at most the
+ * pool's amount, a sell pays at least it, and the cut is the difference (card helper-v4-hook-liquidity: Base tx
+ * 0x72c376b7, block 53,540,767, hook 0xbdf93814 whose afterSwap calls 0x9982538f, which takes the cut and sells and adds
+ * liquidity with it, so none of the cut moves between the PoolManager and the hook; the buyer's router took 11,661.28
+ * of the pool's 11,785.03).
+ *
+ * Else the hook's own moves: the token's transfers between the PoolManager and the hook, and the claims of the token
+ * the hook has the PoolManager mint (its take, to whomever it names) or burn. A hook settles its delta inside its own
+ * call, so its moves sit next to the swap's log: an afterSwap hook's after it (before the transaction's next swap of the
+ * pool), a beforeSwap-only hook's before it. A swap the hook sends itself is no one's trade through the hook (v4 calls
+ * no hook for its own swaps): no cut. A move whose nearest PoolManager event of the pool before it is another call
+ * (POOL_CALLS: its liquidity added or taken, its start, a donation) settles that call, never a swap: no cut (Base tx
  * 0x02b8198c...a2e5 at block 53,529,320: Initialize, ModifyLiquidity, the hook's 1e9 tokens in, then the first buy).
  * For a beforeSwap-only hook only its paying in there settles the call: a take there is the next swap's cut.
  */
@@ -585,21 +605,70 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
   const pm = VENUES[chain].poolManager;
   const hook = pool.hook;
   const after = (BigInt(hook) & AFTER_SWAP_DELTA) !== 0n;
-  const byTx = new Map<string, { swaps: Log[]; calls: number[]; moves: { index: number; take: bigint }[] }>();
-  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], calls: [], moves: [] }).get(tx)!;
+  const tokenWord = `0x${pool.token.slice(2).padStart(64, "0")}`;
+  const byTx = new Map<string, { swaps: Log[]; senders: Map<string, number>; calls: number[]; callers: Set<string>; moves: { index: number; take: bigint }[]; net: Map<string, bigint> }>();
+  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], senders: new Map(), calls: [], callers: new Set(), moves: [], net: new Map() }).get(tx)!;
+  // the token an address got from the PoolManager in a transaction, less what it paid in
+  const credit = (tx: string, a: string, v: bigint) => {
+    const n = at(tx).net;
+    n.set(a, (n.get(a) ?? 0n) + v);
+  };
+  const ids = new Set([pool.id, ...(pool.siblings ?? [])]);
   for (const l of logs) {
-    if (l.address === pm && l.topics.length === 3 && l.topics[0] === TOPIC.swap4 && l.topics[1] === pool.id && addrOf(l.topics[2]!.slice(2)) !== hook) at(l.tx).swaps.push(l);
-    else if (l.address === pm && l.topics[1] === pool.id && POOL_CALLS.includes(l.topics[0]!)) at(l.tx).calls.push(l.index);
+    if (l.address === pm && l.topics.length === 3 && l.topics[0] === TOPIC.swap4 && ids.has(l.topics[1]!)) {
+      // every swap of the token's pools read counts toward its sender's; only this pool's are its trades
+      const sender = addrOf(l.topics[2]!.slice(2));
+      const t = at(l.tx);
+      t.senders.set(sender, (t.senders.get(sender) ?? 0) + 1);
+      if (l.topics[1] === pool.id && sender !== hook) t.swaps.push(l);
+    } else if (l.address === pm && l.topics[1] === pool.id && POOL_CALLS.includes(l.topics[0]!)) {
+      at(l.tx).calls.push(l.index);
+      // a ModifyLiquidity's or Donate's sender settles that call, never a trade
+      if (l.topics[0] !== TOPIC.initialize && l.topics.length === 3) at(l.tx).callers.add(addrOf(l.topics[2]!.slice(2)));
+    }
     else if (l.address === pool.token && l.topics.length === 3 && l.topics[0] === TOPIC.transfer && l.data.length === 66) {
       const [from, to] = [addrOf(l.topics[1]!.slice(2)), addrOf(l.topics[2]!.slice(2))];
       const v = BigInt(l.data);
+      if (from === pm && to !== pm) credit(l.tx, to, v);
+      else if (to === pm && from !== pm) credit(l.tx, from, -v);
       if (from === pm && to === hook) at(l.tx).moves.push({ index: l.index, take: v });
       else if (from === hook && to === pm) at(l.tx).moves.push({ index: l.index, take: -v });
+    } else if (l.address === pm && l.topics.length === 4 && l.topics[0] === TOPIC.claims && l.topics[3] === tokenWord && l.data.length === 2 + 128) {
+      const [from, to] = [addrOf(l.topics[1]!.slice(2)), addrOf(l.topics[2]!.slice(2))];
+      const v = BigInt(`0x${l.data.slice(66)}`);
+      const mint = from === ZERO && to !== ZERO;
+      const burn = to === ZERO && from !== ZERO;
+      // claims the hook has minted or burnt are its own moves, never a trader's
+      if (addrOf(l.data.slice(2, 66)) === hook) {
+        if (mint) at(l.tx).moves.push({ index: l.index, take: v });
+        else if (burn) at(l.tx).moves.push({ index: l.index, take: -v });
+      } else if (mint) credit(l.tx, to, v);
+      else if (burn) credit(l.tx, from, -v);
     }
   }
-  for (const { swaps, calls, moves } of byTx.values()) {
+  for (const { swaps, senders, calls, callers, moves, net } of byTx.values()) {
     if (swaps.length === 0) continue;
     swaps.sort((a, b) => a.index - b.index);
+    const alone = [...senders.values()].reduce((a, b) => a + b, 0) === 1;
+    // the sender's own leg, where it settles this one swap alone; or, the transaction's only swap of the token, the one
+    // address it moved with the PoolManager that is no hook, swap sender or call sender (a router's take sent straight
+    // to its recipient, or a payer's settle: v4's take(currency, to, amount) names no sender)
+    const known = new Set<number>();
+    for (const l of swaps) {
+      const sender = addrOf(l.topics[2]!.slice(2));
+      const s = decodeSwap(pool, l, chain);
+      if (s === null || senders.get(sender) !== 1) continue;
+      let n = net.get(sender) || undefined;
+      if (n === undefined && alone) {
+        const to = [...net].filter(([a, v]) => v !== 0n && a !== hook && !senders.has(a) && !callers.has(a));
+        if (to.length === 1) n = to[0]![1];
+      }
+      if (n === undefined) continue;
+      const leg = s.side === "b" ? n : -n;
+      if (leg <= 0n || (s.side === "b" ? leg > s.amt : leg < s.amt)) continue;
+      known.add(l.index);
+      if (leg !== s.amt) takes.set(`${l.tx}:${l.index}`, s.side === "b" ? s.amt - leg : leg - s.amt);
+    }
     for (const m of moves) {
       const call = Math.max(-1, ...calls.filter((i) => i < m.index));
       // settles that call: any move of an afterSwap hook (its cut follows its swap), and a beforeSwap-only hook's paying
@@ -608,6 +677,7 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
       const before = swaps.filter((s) => s.index < m.index).at(-1);
       const next = swaps.find((s) => s.index > m.index);
       const owner = after ? (before ?? next)! : (next ?? before)!;
+      if (known.has(owner.index)) continue;
       const k = `${owner.tx}:${owner.index}`;
       takes.set(k, (takes.get(k) ?? 0n) + m.take);
     }
@@ -1099,23 +1169,31 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const quote = quoteOf(tokenIs0 ? t1 : t0, false);
     return quote === null ? null : { venue: V.v2.includes(f) ? "v2" : "v3", id: a, token, tokenIs0, quote };
   }
+  /** A v2 or v3 candidate of the token from its factory, two tokens and Venues.getPool parameter answers, with what its
+   *  factory's getPool asks. */
+  function pairCand(token: string, a: string, f: string | undefined, t0: string | undefined, t1: string | undefined, param: string | undefined): { pool: Pool; factory: string; t0: string; t1: string; param: string | undefined } | null {
+    const c = pairPool(token, a, f, t0, t1);
+    return c === null ? null : { pool: c, factory: wordAddr(f)!, t0: wordAddr(t0)!, t1: wordAddr(t1)!, param };
+  }
+  /** Each v2 or v3 candidate's getPool call: the factory's getPool(token0, token1, the pool's own Venues.getPool
+   *  parameter), read at the same block as the parameter; null for a factory with no getPool kind of ours or a
+   *  parameter not read. */
+  const confirmCall = (c: { factory: string; t0: string; t1: string; param: string | undefined } | null): { to: string; data: string } | null => {
+    const kind = c === null ? undefined : V.getPool[c.factory];
+    if (c === null || kind === undefined || c.param === undefined || !/^0x[0-9a-f]{64}$/.test(c.param)) return null;
+    return { to: c.factory, data: `${GET_POOL_SEL[kind]}${pad32(c.t0)}${pad32(c.t1)}${c.param.slice(2)}` };
+  };
   /** Each v2 or v3 candidate once its factory names it, else null: the factory's getPool(token0, token1, the pool's
-   *  own Venues.getPool parameter) must answer the pool, both read at block `n` on two agreeing providers. A factory
-   *  with no getPool kind of ours names nothing. */
-  async function confirmed(n: number, cands: ({ pool: Pool; factory: string; t0: string; t1: string } | null)[]): Promise<(Pool | null)[]> {
-    const live = cands.flatMap((c, i) => (c !== null && V.getPool[c.factory] !== undefined ? [i] : []));
-    if (live.length === 0) return cands.map(() => null);
-    const kind = (i: number) => V.getPool[cands[i]!.factory]!;
-    const params = await callsAgreed(n, live.map((i) => ({ to: cands[i]!.pool.id, data: PARAM_SEL[kind(i)] })));
-    const ask = live.flatMap((i, k) => {
-      const v = params[k];
-      if (v === undefined || !/^0x[0-9a-f]{64}$/.test(v)) return [];
-      const c = cands[i]!;
-      return [{ i, call: { to: c.factory, data: `${GET_POOL_SEL[kind(i)]}${pad32(c.t0)}${pad32(c.t1)}${v.slice(2)}` } }];
-    });
-    const named = await callsAgreed(n, ask.map((a) => a.call));
-    const ok = new Set(ask.filter((a, k) => wordAddr(named[k]) === cands[a.i]!.pool.id).map((a) => a.i));
-    return cands.map((c, i) => (c !== null && ok.has(i) ? c.pool : null));
+   *  own Venues.getPool parameter) must answer the pool, both read at block `n` on two agreeing providers (`named`:
+   *  each candidate's getPool answer, from confirmCall). A factory with no getPool kind of ours names nothing. */
+  const confirmed = (cands: ({ pool: Pool } | null)[], named: readonly (string | undefined)[]): (Pool | null)[] => cands.map((c, i) => (c !== null && wordAddr(named[i]) === c.pool.id ? c.pool : null));
+  /** callsAgreed of each call given, undefined where none is. */
+  async function callsSome(n: number, calls: ({ to: string; data: string } | null)[]): Promise<(string | undefined)[]> {
+    const live = calls.flatMap((c, i) => (c === null ? [] : [i]));
+    const got = await callsAgreed(n, live.map((i) => calls[i]!));
+    const out: (string | undefined)[] = calls.map(() => undefined);
+    live.forEach((i, k) => (out[i] = got[k]));
+    return out;
   }
   /** A v4 pool of the token from a pool key that hashes to its id, quoted in USD or ETH, with its hook. */
   function v4Pool(token: string, id: string, k: string | undefined): Pool | null {
@@ -1153,7 +1231,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (head === null) throw new Error("no agreed head");
     const id = /^0x[0-9a-f]{64}$/.test(hint);
     // first the token's decimals with the v4 key or the Pons records (a curve answers no factory, a revert), then, for an
-    // address no record names, its factory and two tokens
+    // address no record names, its factory and two tokens, its getPool parameter, and its factory's getPool
     const first: { to: string; data: string }[] = id ? [{ to: V.positionManager, data: `${SEL.poolKeys}${hint.slice(2, 2 + 50).padEnd(64, "0")}` }] : V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` }));
     const got = await callsAgreed(head.n, [{ to: token, data: SEL.decimals }, ...first]);
     const decimals = decimalsOf(got[0]);
@@ -1161,16 +1239,46 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     let pool = id ? v4Pool(token, hint, got[1]) : (curvePools(token, got.slice(1)).find((c) => c.id === hint) ?? null);
     if (pool === null && !id) {
       const [f, t0, t1] = await callsAgreed(head.n, [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: hint, data })));
-      const c = pairPool(token, hint, f, t0, t1);
-      pool = c === null ? null : (await confirmed(head.n, [{ pool: c, factory: wordAddr(f)!, t0: wordAddr(t0)!, t1: wordAddr(t1)! }]))[0]!;
+      const kind = V.getPool[wordAddr(f) ?? ""];
+      const [param] = pairPool(token, hint, f, t0, t1) === null || kind === undefined ? [undefined] : await callsAgreed(head.n, [{ to: hint, data: PARAM_SEL[kind] }]);
+      const c = pairCand(token, hint, f, t0, t1, param);
+      const call = confirmCall(c);
+      pool = call === null ? null : confirmed([c], await callsAgreed(head.n, [call]))[0]!;
     }
     return pool === null ? null : { pool, decimals };
+  }
+
+  /** The v4 pool ids the PoolManager's Swap logs name in the receipts of the token's latest PoolManager transactions,
+   *  each with its fee and the addresses its transaction logged (one provider's receipts: v4Key and the PositionManager
+   *  check every id against its key's hash). */
+  async function v4Seen(pmTxs: string[]): Promise<Map<string, { fee: number; around: Set<string> }>> {
+    const seen = new Map<string, { fee: number; around: Set<string> }>();
+    for (const u of single(byFree(usable(rpcs)), Math.min(pmTxs.length, V4_TXS))) {
+      const r = await batchTo(u, pmTxs.slice(-V4_TXS).map((t) => ({ method: "eth_getTransactionReceipt", params: [t] })));
+      if (r === null) continue;
+      for (const x of r) {
+        const logs = (Array.isArray(obj(x.ok ? x.result : null).logs) ? (obj((x as { result: unknown }).result).logs as unknown[]) : []).map(parseLog).filter((l): l is Log => l !== null);
+        for (const l of logs) {
+          if (l.address !== V.poolManager || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap4 || l.data.length !== 2 + 64 * 6) continue;
+          const e = seen.get(l.topics[1]!) ?? { fee: Number(BigInt(`0x${l.data.slice(2 + 64 * 5)}`)), around: new Set<string>() };
+          for (const o of logs) e.around.add(o.address);
+          seen.set(l.topics[1]!, e);
+        }
+      }
+      break;
+    }
+    return seen;
   }
 
   async function findPool(token: string): Promise<Found | null> {
     const head = await agreedHead();
     if (head === null) throw new Error("no agreed head");
-    // the token's transfers newest first, a step at a time, until a tape's worth or the cold window [design: twice
+    // each read is asked with every other no answer it waits for names, and no read more (card
+    // helper-robinhood-search-ahead: a lone cold token's discovery took 9 answer times, now 7; asking every address's
+    // getPool parameters with its factory cost more calls than the round saved, and under the paces 12 at once were
+    // slower): the transfers; the factories with the v4 receipts, the token's decimals and the Pons records; a venue
+    // pool's two tokens with its parameter; the getPools with the v4 keys; the swaps with the ETH price.
+    // The token's transfers newest first, a step at a time, until a tape's worth or the cold window [design: twice
     // TRADES_MAX transfers, since a swap through a router moves the token twice, pool to router to trader]
     const tw = await walk(head.with, (lo, hi) => ({ address: token, topics: [TOPIC.transfer], fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }), head.n, 2 * TRADES_MAX, (part) => part.length);
     if (tw == null) throw new Error("transfers not agreed");
@@ -1189,65 +1297,64 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     const top = [...count].filter(([a]) => a !== V.poolManager).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, CANDIDATES_MAX).map(([a]) => a);
     const cands: Pool[] = [];
-    // v2, v3 and Slipstream pools: the factory of each address, then the two tokens of those of a listed venue, read at
-    // the agreed block
-    const factories = await callsAgreed(head.n, top.map((a) => ({ to: a, data: SEL.factory })));
-    const ofVenue = top.filter((_, i) => {
+    // v2, v3 and Slipstream pools: the factory of each address, then the two tokens and the getPool parameter of those
+    // of a listed venue, read at the agreed block. v4 pools: the pool ids the PoolManager's recent swaps in the token's
+    // transactions name, from their receipts, read with the factories
+    // (the token's decimals and the Pons records with them: asked with the transfers' walk, they made its providers look
+    // busy, and drpc, 100 blocks a read, took 45 reads of logs to the wide providers' 100; swaps-pace.test.ts fold 2)
+    const [factories, seen, own] = await Promise.all([
+      callsAgreed(head.n, top.map((a) => ({ to: a, data: SEL.factory }))),
+      pmTxs.length > 0 ? v4Seen(pmTxs) : Promise.resolve(new Map<string, { fee: number; around: Set<string> }>()),
+      callsAgreed(head.n, [{ to: token, data: SEL.decimals }, ...V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` }))]),
+    ]);
+    // a record not read is no answer: never kept as "no pool" (a token with none answers the empty record)
+    const recs = own.slice(1);
+    if (recs.some((r) => r === undefined)) throw new Error("pons records not agreed");
+    const ofVenue = top.flatMap((a, i) => {
       const f = wordAddr(factories[i]);
-      return f !== null && (V.v2.includes(f) || V.v3.includes(f));
+      return f !== null && (V.v2.includes(f) || V.v3.includes(f)) ? [{ a, f: factories[i], kind: V.getPool[f] }] : [];
     });
-    const pairs = await callsAgreed(head.n, ofVenue.flatMap((a) => [SEL.token0, SEL.token1].map((data) => ({ to: a, data }))));
-    const paired = ofVenue.map((a, i) => pairPool(token, a, factories[top.indexOf(a)], pairs[2 * i], pairs[2 * i + 1]));
-    const named = await confirmed(head.n, paired.map((c, i) => (c === null ? null : { pool: c, factory: wordAddr(factories[top.indexOf(ofVenue[i]!)])!, t0: wordAddr(pairs[2 * i])!, t1: wordAddr(pairs[2 * i + 1])! })));
-    for (const c of named) if (c !== null) cands.push(c);
-    // v4 pools: the pool ids the PoolManager's recent swaps in the token's transactions name. A key is the
-    // PositionManager's own record of it when there is one; a pool made without it (Doppler, Zora) has its key worked out
-    // from the swap's own fee and the addresses in its transaction (v4Key). Either way the key must hash to the id.
-    if (pmTxs.length > 0) {
-      const seen = new Map<string, { fee: number; around: Set<string> }>();
-      for (const u of single(byFree(usable(rpcs)), Math.min(pmTxs.length, V4_TXS))) {
-        const r = await batchTo(u, pmTxs.slice(-V4_TXS).map((t) => ({ method: "eth_getTransactionReceipt", params: [t] })));
-        if (r === null) continue;
-        for (const x of r) {
-          const logs = (Array.isArray(obj(x.ok ? x.result : null).logs) ? (obj((x as { result: unknown }).result).logs as unknown[]) : []).map(parseLog).filter((l): l is Log => l !== null);
-          for (const l of logs) {
-            if (l.address !== V.poolManager || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap4 || l.data.length !== 2 + 64 * 6) continue;
-            const e = seen.get(l.topics[1]!) ?? { fee: Number(BigInt(`0x${l.data.slice(2 + 64 * 5)}`)), around: new Set<string>() };
-            for (const o of logs) e.around.add(o.address);
-            seen.set(l.topics[1]!, e);
-          }
-        }
-        break;
-      }
-      const list = [...seen.keys()].slice(0, CANDIDATES_MAX);
-      const keys = await callsAgreed(head.n, list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` })));
-      list.forEach((id, i) => {
-        const e = seen.get(id)!;
-        // the PositionManager's key when it hashes to the id, else one worked out from the swap (it must hash to the id)
-        const c = v4Pool(token, id, keys[i]) ?? v4Pool(token, id, v4Key(id, token, e.fee, [...e.around], chain) ?? undefined);
-        if (c !== null) cands.push(c);
-      });
-    }
+    const per = ofVenue.map((v) => [SEL.token0, SEL.token1, ...(v.kind === undefined ? [] : [PARAM_SEL[v.kind]])].map((data) => ({ to: v.a, data })));
+    const pairs = await callsAgreed(head.n, per.flat());
+    let at = 0;
+    const paired = ofVenue.map((v, i) => {
+      const r = pairs.slice(at, (at += per[i]!.length));
+      return pairCand(token, v.a, v.f, r[0], r[1], r[2]);
+    });
+    // each candidate's factory must name it (confirmed); a v4 pool's key is the PositionManager's own record of it when
+    // there is one, and a pool made without it (Doppler, Zora) has its key worked out from the swap's own fee and the
+    // addresses in its transaction (v4Key). Either way the key must hash to the id. Both read in one round
+    const list = [...seen.keys()].slice(0, CANDIDATES_MAX);
+    const answers = await callsSome(head.n, [...paired.map(confirmCall), ...list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` }))]);
+    for (const c of confirmed(paired, answers.slice(0, paired.length))) if (c !== null) cands.push(c);
+    const keys = answers.slice(paired.length);
+    list.forEach((id, i) => {
+      const e = seen.get(id)!;
+      // the PositionManager's key when it hashes to the id, else one worked out from the swap (it must hash to the id)
+      const c = v4Pool(token, id, keys[i]) ?? v4Pool(token, id, v4Key(id, token, e.fee, [...e.around], chain) ?? undefined);
+      if (c !== null) cands.push(c);
+    });
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
-    if (V.pons.length > 0) {
-      const recs = await callsAgreed(head.n, V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` })));
-      // a record not read is no answer: never kept as "no pool" (a token with none answers the empty record)
-      if (recs.some((r) => r === undefined)) throw new Error("pons records not agreed");
-      cands.push(...curvePools(token, recs));
-    }
+    cands.push(...curvePools(token, recs));
     if (cands.length === 0) return null;
     // the pool with most swaps in the window is the main pool (ties: the lower id); its logs are the book's first read
-    const [swaps, [d], refOk] = await Promise.all([
+    const d = own[0];
+    const [swaps, refOk] = await Promise.all([
       Promise.all(cands.map((c) => agreedRange(head.with, (lo, hi) => poolFilters(c, lo, hi, chain), from, head.n))),
-      callsAgreed(head.n, [{ to: token, data: SEL.decimals }]),
       cands.some((c) => c.quote.kind === "eth") ? readRef(head.with, head.n, from) : Promise.resolve(true),
     ]);
     const score = cands.map((c, i) => (swaps[i] == null ? -1 : swaps[i]!.filter((l) => decodeSwap(c, l, chain) !== null).length));
     if (score.every((x) => x < 0)) throw new Error("swaps not agreed");
     const best = cands.map((c, i) => ({ c, i, n: score[i]! })).sort((x, y) => y.n - x.n || (x.c.id < y.c.id ? -1 : 1))[0]!;
     if (best.n <= 0 && from === head.n - V.cold + 1) return null;
+    // a hooked v4 pool reads the token's other v4 pools' swaps with its own (Pool.siblings), so hookTakes counts a
+    // sender's swaps of the token in all of them; their swaps already read join the first read's logs
+    const siblings = best.c.venue === "v4" && best.c.hook !== undefined ? cands.filter((c) => c.venue === "v4" && c.id !== best.c.id).map((c) => c.id) : [];
+    if (siblings.length > 0) best.c = { ...best.c, siblings };
+    const sib = new Set(siblings);
+    const fromSiblings = cands.flatMap((c, i) => (sib.has(c.id) ? (swaps[i] ?? []).filter((l) => l.topics[0] === TOPIC.swap4 && l.topics[1] === c.id) : []));
     // the main pool's swaps further back, while the tape is short of TRADES_MAX and the cold window not read
-    let logs = swaps[best.i]!;
+    let logs = fromSiblings.length === 0 ? swaps[best.i]! : [...swaps[best.i]!, ...fromSiblings].sort((a, b) => a.block - b.block || a.index - b.index);
     let n = best.n;
     if (n < TRADES_MAX && from > head.n - V.cold + 1) {
       const w = await walk(head.with, (lo, hi) => poolFilters(best.c, lo, hi, chain), from - 1, TRADES_MAX - n, (part) => part.filter((l) => decodeSwap(best.c, l, chain) !== null).length, head.n - V.cold + 1);
@@ -1282,6 +1389,55 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (pools.size >= POOLS_MAX) pools.delete(pools.keys().next().value!);
     pools.set(token, { found: found === null ? null : { pool: found.pool, decimals: found.decimals }, at: now() });
     return found;
+  }
+
+  /** The lists' tokens whose pool is not kept, looked for as the lists load (ahead), AHEAD_AT_ONCE at a time; none
+   *  starts while a first open waits for its pool (`opening`), so a caller's reads find the providers' paces as free as
+   *  before. Each goes through mainPool, so an open meanwhile joins its read, and what it finds is kept as an open's is
+   *  (card helper-robinhood-search-ahead: at 38249ca a listed token whose listed pool the helper cannot read was looked
+   *  for only at its first open, and 4 of 12 such tapes opened at once took 9 to 15.5 s). Nor does one start before two
+   *  providers that batch (single) are free to agree a caller's read: not held, each with AHEAD_ROOM of its bucket or
+   *  more (a provider with no pace counts as full). Without that wait, a fresh helper's search of the lists' ~58 tokens
+   *  spent the buckets the opens drew on: 12 pinned tapes opened 60 s after the lists loaded answered 7 x 503 at 9.6 s,
+   *  and on the next run p50 10.6 s, where opened at once with no search running they took 4.4 s at most (2026-11-05
+   *  08:2xZ, the Mac). [design: 2 at once, so a first open that comes mid-search shares the providers with two searches
+   *  at most; three quarters of a bucket, so the room a search starts with is the callers' quarter (CALLER_ROOM) and
+   *  half a bucket more; read again every AHEAD_WAIT_MS.] */
+  const AHEAD_AT_ONCE = 2;
+  const AHEAD_ROOM = 0.75;
+  const AHEAD_WAIT_MS = 500;
+  const roomy = (): boolean => single(usable(rpcs), 2).filter((u) => holds.room(u) >= AHEAD_ROOM).length >= 2;
+  const aheadQueue = new Set<string>();
+  let aheadRun: Promise<void> | null = null;
+  let opening = 0;
+  const idle: (() => void)[] = [];
+  const known = (t: string): boolean => {
+    const kept = pools.get(t);
+    return kept !== undefined && now() - kept.at < (kept.found === null ? NONE_MS : POOL_KEEP_MS);
+  };
+  function ahead(tokens: readonly string[]): Promise<void> {
+    for (const x of tokens) {
+      const t = evmAddress(x);
+      if (t !== null && !known(t) && !resolving.has(t) && aheadQueue.size < POOLS_MAX) aheadQueue.add(t);
+    }
+    if (aheadRun === null && aheadQueue.size > 0) {
+      const one = async (): Promise<void> => {
+        for (;;) {
+          for (;;) {
+            if (opening > 0) await new Promise<void>((go) => idle.push(go));
+            else if (aheadQueue.size > 0 && !roomy()) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
+            else break;
+          }
+          const t = aheadQueue.values().next().value;
+          if (t === undefined) return;
+          aheadQueue.delete(t);
+          // a read that fails is no answer: the token is looked for again at its first open or the lists' next load
+          if (!known(t)) await mainPool(t).catch(() => undefined);
+        }
+      };
+      aheadRun = Promise.all(Array.from({ length: AHEAD_AT_ONCE }, one)).then(() => undefined).finally(() => (aheadRun = null));
+    }
+    return aheadRun ?? Promise.resolve();
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -1497,13 +1653,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     let e = books.get(token);
     if (e === undefined) {
       let found: Found | null | "unlisted" = null;
-      for (let attempt = 0; attempt < 2 && found === null; attempt++) {
-        try {
-          found = await mainPool(token);
-          break;
-        } catch {
-          if (attempt === 1) return UPSTREAM;
+      // a first open waiting for its pool: the lists' search (ahead) starts no other meanwhile
+      opening++;
+      try {
+        for (let attempt = 0; attempt < 2 && found === null; attempt++) {
+          try {
+            found = await mainPool(token);
+            break;
+          } catch {
+            if (attempt === 1) return UPSTREAM;
+          }
         }
+      } finally {
+        if (--opening === 0) for (const go of idle.splice(0)) go();
       }
       if (found === "unlisted") return NOT_FOUND;
       if (found === null) return "none";
@@ -1719,6 +1881,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   return {
     tick: start,
     stop(): void {
+      aheadQueue.clear();
       if (timer !== null) clearInterval(timer);
       timer = null;
       if (follower !== null) clearInterval(follower);
@@ -1728,6 +1891,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
      *  with none. `follow()` reads it up to the agreed head now (the follower's step; tests call it with tickMs 0). */
     index,
     follow,
+    /** The lists' tokens, looked for ahead of a first open (card helper-robinhood-search-ahead); settles when the search
+     *  it joined is done. The lists call it as each new answer loads (server.ts evmSwapsFromEnv). */
+    ahead,
     /** 06b Candles for a listed Base token: our own bars, and GeckoTerminal's before our first. */
     async candles(token: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       const t = evmAddress(token);

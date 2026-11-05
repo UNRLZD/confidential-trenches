@@ -133,7 +133,7 @@ export const MUTANTS = [
   [V4, "POOL_MANAGER.take(_currency, _recipient, _amount);", "POOL_MANAGER.take(_currency, msg.sender, _amount);", "test_v4OneHopLands"],
   [V4, "amountSpecified: -int256(_amount),", "amountSpecified: -int256(_amount / 2),", "test_v4TwoHopLands"],
   [V4, "WETH.deposit{value: _in}();", "", "test_v4FromWethLands"],
-  // the Opus review's mutants (b61f0f5): EIP-712 strings and encoding, signature parsing, the request's length, what
+  // the review's mutants (b61f0f5): EIP-712 strings and encoding, signature parsing, the request's length, what
   // W gets, the fee cap, v, and the fee recipient's reentry
   [PP, "keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')", "keccak256('EIP712Domain(string name,uint256 chainId,address verifyingContract)')", "test_buyLandsAndWHoldsMinOut"],
   [PP, "VERSION_HASH = keccak256('1');", "VERSION_HASH = keccak256('2');", "test_aWithdrawsSignatureIsRefusedAsABuy"],
@@ -155,7 +155,7 @@ export const MUTANTS = [
   [SELL, "if (_guard()) revert Reentrancy();", "", "test_aTargetCannotReenter"],
   [SELL, "    _setGuard(true);\n", "", "test_aTargetCannotReenter"],
   [SELL, "    _setGuard(false);\n", "", "test_twoSellsInOneTransactionBothLand"],
-  // the Opus review of c2a8da2 (test/HostileSell.t.sol): the guard back at transient slot 0, and the cap paid in
+  // the review of c2a8da2 (test/HostileSell.t.sol): the guard back at transient slot 0, and the cap paid in
   // place of the fee the sender named
   [SELL, "SELL_GUARD = 0x440bd9ccab75449a1500e3c92e1ea82c77befa0047a75538597e7e92c1806400;", "SELL_GUARD = 0x0000000000000000000000000000000000000000000000000000000000000000;", "test_R_aModuleGuardAtSlot0DoesNotCollide"],
   [SELL, "msg.sender.call{value: _fee}('')", "msg.sender.call{value: _sell.feeCap}('')", "test_R_theSenderGetsTheFeeItNamesNotTheCap"],

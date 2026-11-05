@@ -266,11 +266,14 @@ test("P-01 (store part): a kill after every single step, then reopen: no double 
   }
 });
 
-test("P-01 (store part): kills at random steps, several per run, 300 runs", async () => {
+// card fresh-run-margin: the default run takes the seeded sequence's first 30 runs; FULL_RUNS=1 (the package's
+// test:mutants script, CI's test-wallet job) all 300
+const RUNS = process.env.FULL_RUNS === "1" ? 300 : 30;
+test(`P-01 (store part): kills at random steps, several per run, ${RUNS} runs`, async () => {
   let seed = 0x5eed;
   const rnd = (n: number): number => ((seed = (seed * 1103515245 + 12345) >>> 0) >>> 8) % n;
   const big = (): bigint => BigInt(1 + rnd(1_000_000)) * 10n ** BigInt(rnd(25));
-  for (let k = 0; k < 300; k++) {
+  for (let k = 0; k < RUNS; k++) {
     const goals: Goal[] = [];
     for (let g = 0, n = 1 + rnd(3); g < n; g++) {
       const value = big();
