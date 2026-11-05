@@ -76,6 +76,9 @@ export const TOPIC = {
   initialize: topic("Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)"),
   modifyLiquidity: topic("ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)"),
   donate: topic("Donate(bytes32,address,uint256,uint256)"),
+  // the PoolManager's ERC-6909 claims (its own Transfer: caller, indexed from, to and id, amount): a hook may take its
+  // cut as claims minted to a fee recipient, not as the token (card helper-v4-hook-liquidity: hook 0x5e320ea6 on Base)
+  claims: topic("Transfer(address,address,address,uint256,uint256)"),
 } as const;
 /** The PoolManager's events of a pool that are not a swap: a hook's transfer next to one settles it (hookTakes). */
 const POOL_CALLS = [TOPIC.initialize, TOPIC.modifyLiquidity, TOPIC.donate];
@@ -476,6 +479,9 @@ export type Pool = {
   /** A v4 pool's hook when its address carries a return-delta flag (hookOf): the hook may then take from or add to
    *  what the swapper pays or gets, after the `Swap` log is written. */
   hook?: string;
+  /** A hooked v4 pool's: the token's other v4 pools the discovery found, whose swaps are read with this pool's only so
+   *  hookTakes can tell a sender that swapped the token once in the transaction (card helper-v4-hook-liquidity). */
+  siblings?: readonly string[];
 };
 
 /** v4-core Hooks.sol: BEFORE_SWAP_RETURNS_DELTA_FLAG (1 << 3) and AFTER_SWAP_RETURNS_DELTA_FLAG (1 << 2), read in the
@@ -497,19 +503,20 @@ export function hookOf(key: string): string | undefined {
 }
 
 /** The `eth_getLogs` filters for a pool's trades over blocks `from` to `to`: its swaps, and for a pool with a hook
- *  (Pool.hook) the token's transfers between the PoolManager and the hook, which are the hook's cut (hookTakes). A
+ *  (Pool.hook) the token's transfers and the PoolManager's ERC-6909 claims of the token, which show what each swap's
+ *  sender took or paid and the hook's cut (hookTakes). A
  *  hooked pool's swaps filter also takes the pool's other PoolManager calls (POOL_CALLS), whose own transfers are no
  *  cut: each is the PoolManager's event with the pool's id as its first indexed topic, so they are one filter, never a
  *  third read a span (card helper-robinhood-capacity fold 8: the third sent a cold dozen's reads past the wide
  *  providers' paces to drpc's 100-block spans). One address a filter, never a list: api.blockvectra.com refuses an
  *  address list (-32602, 2026-11-04 20:2xZ). */
-export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
+export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook" | "siblings">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
   const swaps = swapFilter(pool, from, to, chain);
   if (pool.venue !== "v4" || pool.hook === undefined) return [swaps];
-  const ends = [VENUES[chain].poolManager, pool.hook].map((a) => `0x${a.slice(2).padStart(64, "0")}`);
   return [
-    { ...swaps, topics: [[TOPIC.swap4, ...POOL_CALLS], pool.id] },
-    { address: pool.token, topics: [TOPIC.transfer, ends, ends], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
+    { ...swaps, topics: [[TOPIC.swap4, ...POOL_CALLS], pool.siblings?.length ? [pool.id, ...pool.siblings] : pool.id] },
+    { address: pool.token, topics: [TOPIC.transfer], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
+    { address: VENUES[chain].poolManager, topics: [TOPIC.claims, null, null, `0x${pool.token.slice(2).padStart(64, "0")}`], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
   ];
 }
 
@@ -569,13 +576,26 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
 }
 
 /**
- * A hooked v4 pool's (Pool.hook) cut of the token in each of its swaps, by the swap log's `tx:index`: what the token's
- * transfers between the PoolManager and the hook moved to the hook (less what they moved back), in the logs read with
- * the swaps (poolFilters). A hook settles its delta inside its own call, so its transfers sit next to the swap's log:
- * an afterSwap hook's after it (before the transaction's next swap of the pool), a beforeSwap-only hook's before it.
- * A swap the hook sends itself is no one's trade through the hook (v4 calls no hook for its own swaps): no cut. A
- * transfer whose nearest PoolManager event of the pool before it is another call (POOL_CALLS: its liquidity added or
- * taken, its start, a donation) settles that call, never a swap: no cut (card helper-v4-hook-liquidity, Base tx
+ * A hooked v4 pool's (Pool.hook) cut of the token in each of its swaps, by the swap log's `tx:index`, from the logs read
+ * with the swaps (poolFilters).
+ *
+ * First the swap's own sender: the PoolManager credits the contract that called swap() (the Swap log's sender) with the
+ * swap's delta after the hook's, and that contract takes or pays exactly it, as the token (a Transfer between it and the
+ * PoolManager) or as ERC-6909 claims of the token (minted to it, burnt from it). So when the sender made only this one
+ * swap of the token in the transaction (in this pool or its siblings read), what it moved with the PoolManager is the
+ * trader's leg; when it moved none (a route through the token whose deltas net out inside the PoolManager), there is no
+ * read and the hook's own moves below decide. A buy gets at most the
+ * pool's amount, a sell pays at least it, and the cut is the difference (card helper-v4-hook-liquidity: Base tx
+ * 0x72c376b7, block 53,540,767, hook 0xbdf93814 whose afterSwap calls 0x9982538f, which takes the cut and sells and adds
+ * liquidity with it, so none of the cut moves between the PoolManager and the hook; the buyer's router took 11,661.28
+ * of the pool's 11,785.03).
+ *
+ * Else the hook's own moves: the token's transfers between the PoolManager and the hook, and the claims of the token
+ * the hook has the PoolManager mint (its take, to whomever it names) or burn. A hook settles its delta inside its own
+ * call, so its moves sit next to the swap's log: an afterSwap hook's after it (before the transaction's next swap of the
+ * pool), a beforeSwap-only hook's before it. A swap the hook sends itself is no one's trade through the hook (v4 calls
+ * no hook for its own swaps): no cut. A move whose nearest PoolManager event of the pool before it is another call
+ * (POOL_CALLS: its liquidity added or taken, its start, a donation) settles that call, never a swap: no cut (Base tx
  * 0x02b8198c...a2e5 at block 53,529,320: Initialize, ModifyLiquidity, the hook's 1e9 tokens in, then the first buy).
  * For a beforeSwap-only hook only its paying in there settles the call: a take there is the next swap's cut.
  */
@@ -585,21 +605,70 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
   const pm = VENUES[chain].poolManager;
   const hook = pool.hook;
   const after = (BigInt(hook) & AFTER_SWAP_DELTA) !== 0n;
-  const byTx = new Map<string, { swaps: Log[]; calls: number[]; moves: { index: number; take: bigint }[] }>();
-  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], calls: [], moves: [] }).get(tx)!;
+  const tokenWord = `0x${pool.token.slice(2).padStart(64, "0")}`;
+  const byTx = new Map<string, { swaps: Log[]; senders: Map<string, number>; calls: number[]; callers: Set<string>; moves: { index: number; take: bigint }[]; net: Map<string, bigint> }>();
+  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], senders: new Map(), calls: [], callers: new Set(), moves: [], net: new Map() }).get(tx)!;
+  // the token an address got from the PoolManager in a transaction, less what it paid in
+  const credit = (tx: string, a: string, v: bigint) => {
+    const n = at(tx).net;
+    n.set(a, (n.get(a) ?? 0n) + v);
+  };
+  const ids = new Set([pool.id, ...(pool.siblings ?? [])]);
   for (const l of logs) {
-    if (l.address === pm && l.topics.length === 3 && l.topics[0] === TOPIC.swap4 && l.topics[1] === pool.id && addrOf(l.topics[2]!.slice(2)) !== hook) at(l.tx).swaps.push(l);
-    else if (l.address === pm && l.topics[1] === pool.id && POOL_CALLS.includes(l.topics[0]!)) at(l.tx).calls.push(l.index);
+    if (l.address === pm && l.topics.length === 3 && l.topics[0] === TOPIC.swap4 && ids.has(l.topics[1]!)) {
+      // every swap of the token's pools read counts toward its sender's; only this pool's are its trades
+      const sender = addrOf(l.topics[2]!.slice(2));
+      const t = at(l.tx);
+      t.senders.set(sender, (t.senders.get(sender) ?? 0) + 1);
+      if (l.topics[1] === pool.id && sender !== hook) t.swaps.push(l);
+    } else if (l.address === pm && l.topics[1] === pool.id && POOL_CALLS.includes(l.topics[0]!)) {
+      at(l.tx).calls.push(l.index);
+      // a ModifyLiquidity's or Donate's sender settles that call, never a trade
+      if (l.topics[0] !== TOPIC.initialize && l.topics.length === 3) at(l.tx).callers.add(addrOf(l.topics[2]!.slice(2)));
+    }
     else if (l.address === pool.token && l.topics.length === 3 && l.topics[0] === TOPIC.transfer && l.data.length === 66) {
       const [from, to] = [addrOf(l.topics[1]!.slice(2)), addrOf(l.topics[2]!.slice(2))];
       const v = BigInt(l.data);
+      if (from === pm && to !== pm) credit(l.tx, to, v);
+      else if (to === pm && from !== pm) credit(l.tx, from, -v);
       if (from === pm && to === hook) at(l.tx).moves.push({ index: l.index, take: v });
       else if (from === hook && to === pm) at(l.tx).moves.push({ index: l.index, take: -v });
+    } else if (l.address === pm && l.topics.length === 4 && l.topics[0] === TOPIC.claims && l.topics[3] === tokenWord && l.data.length === 2 + 128) {
+      const [from, to] = [addrOf(l.topics[1]!.slice(2)), addrOf(l.topics[2]!.slice(2))];
+      const v = BigInt(`0x${l.data.slice(66)}`);
+      const mint = from === ZERO && to !== ZERO;
+      const burn = to === ZERO && from !== ZERO;
+      // claims the hook has minted or burnt are its own moves, never a trader's
+      if (addrOf(l.data.slice(2, 66)) === hook) {
+        if (mint) at(l.tx).moves.push({ index: l.index, take: v });
+        else if (burn) at(l.tx).moves.push({ index: l.index, take: -v });
+      } else if (mint) credit(l.tx, to, v);
+      else if (burn) credit(l.tx, from, -v);
     }
   }
-  for (const { swaps, calls, moves } of byTx.values()) {
+  for (const { swaps, senders, calls, callers, moves, net } of byTx.values()) {
     if (swaps.length === 0) continue;
     swaps.sort((a, b) => a.index - b.index);
+    const alone = [...senders.values()].reduce((a, b) => a + b, 0) === 1;
+    // the sender's own leg, where it settles this one swap alone; or, the transaction's only swap of the token, the one
+    // address it moved with the PoolManager that is no hook, swap sender or call sender (a router's take sent straight
+    // to its recipient, or a payer's settle: v4's take(currency, to, amount) names no sender)
+    const known = new Set<number>();
+    for (const l of swaps) {
+      const sender = addrOf(l.topics[2]!.slice(2));
+      const s = decodeSwap(pool, l, chain);
+      if (s === null || senders.get(sender) !== 1) continue;
+      let n = net.get(sender) || undefined;
+      if (n === undefined && alone) {
+        const to = [...net].filter(([a, v]) => v !== 0n && a !== hook && !senders.has(a) && !callers.has(a));
+        if (to.length === 1) n = to[0]![1];
+      }
+      if (n === undefined) continue;
+      const leg = s.side === "b" ? n : -n;
+      if (leg <= 0n || (s.side === "b" ? leg > s.amt : leg < s.amt)) continue;
+      known.add(l.index);
+      if (leg !== s.amt) takes.set(`${l.tx}:${l.index}`, s.side === "b" ? s.amt - leg : leg - s.amt);
+    }
     for (const m of moves) {
       const call = Math.max(-1, ...calls.filter((i) => i < m.index));
       // settles that call: any move of an afterSwap hook (its cut follows its swap), and a beforeSwap-only hook's paying
@@ -608,6 +677,7 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
       const before = swaps.filter((s) => s.index < m.index).at(-1);
       const next = swaps.find((s) => s.index > m.index);
       const owner = after ? (before ?? next)! : (next ?? before)!;
+      if (known.has(owner.index)) continue;
       const k = `${owner.tx}:${owner.index}`;
       takes.set(k, (takes.get(k) ?? 0n) + m.take);
     }
@@ -1277,8 +1347,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (score.every((x) => x < 0)) throw new Error("swaps not agreed");
     const best = cands.map((c, i) => ({ c, i, n: score[i]! })).sort((x, y) => y.n - x.n || (x.c.id < y.c.id ? -1 : 1))[0]!;
     if (best.n <= 0 && from === head.n - V.cold + 1) return null;
+    // a hooked v4 pool reads the token's other v4 pools' swaps with its own (Pool.siblings), so hookTakes counts a
+    // sender's swaps of the token in all of them; their swaps already read join the first read's logs
+    const siblings = best.c.venue === "v4" && best.c.hook !== undefined ? cands.filter((c) => c.venue === "v4" && c.id !== best.c.id).map((c) => c.id) : [];
+    if (siblings.length > 0) best.c = { ...best.c, siblings };
+    const sib = new Set(siblings);
+    const fromSiblings = cands.flatMap((c, i) => (sib.has(c.id) ? (swaps[i] ?? []).filter((l) => l.topics[0] === TOPIC.swap4 && l.topics[1] === c.id) : []));
     // the main pool's swaps further back, while the tape is short of TRADES_MAX and the cold window not read
-    let logs = swaps[best.i]!;
+    let logs = fromSiblings.length === 0 ? swaps[best.i]! : [...swaps[best.i]!, ...fromSiblings].sort((a, b) => a.block - b.block || a.index - b.index);
     let n = best.n;
     if (n < TRADES_MAX && from > head.n - V.cold + 1) {
       const w = await walk(head.with, (lo, hi) => poolFilters(best.c, lo, hi, chain), from - 1, TRADES_MAX - n, (part) => part.filter((l) => decodeSwap(best.c, l, chain) !== null).length, head.n - V.cold + 1);
