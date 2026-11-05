@@ -6,9 +6,9 @@
 // the code as it is, passes on a mutant, or a mutant's text is not in pool-price.ts exactly once.
 // test/pool-price-mutants.test.mjs runs it in the package's test:mutants.
 //   node packages/signpage/test/pool-price-mutants.mjs
-import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { runSync } from "../../../scripts/group-run.mjs";
 
 const SRC = fileURLToPath(new URL("../src/pool-price.ts", import.meta.url));
 const TEST = fileURLToPath(new URL("./pool-price.test.ts", import.meta.url));
@@ -43,14 +43,13 @@ export const MUTANTS = [
 
 // a child test run must not inherit this process's own node --test context
 const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
+// a run past 5 min is killed, its process group with it, and counts as a fail (scripts/group-run.mjs)
+const RUN_MS = 300_000;
 /** "pass", "fail" or "none" (no test ran) of the tests named NAME in `file`. */
 const run = (file) => {
-  try {
-    const out = execFileSync(process.execPath, ["--test", "--test-timeout=60000", "--test-name-pattern", `^${NAME}`, file], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: CHILD_ENV });
-    return /ℹ pass [1-9]/.test(out) ? "pass" : "none";
-  } catch {
-    return "fail";
-  }
+  const r = runSync(process.execPath, ["--test", "--test-timeout=60000", "--test-name-pattern", `^${NAME}`, file], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: CHILD_ENV, timeoutMs: RUN_MS });
+  if (r.status !== 0) return "fail";
+  return /ℹ pass [1-9]/.test(r.stdout) ? "pass" : "none";
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

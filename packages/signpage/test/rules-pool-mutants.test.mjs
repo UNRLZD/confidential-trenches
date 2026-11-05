@@ -4,13 +4,15 @@
 // sweep changes no tracked file (each mutant is a copy).
 //   node --test test/rules-pool-mutants.test.mjs      (from packages/signpage; a heavy job on this Mac: the box)
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { runSync } from "../../../scripts/group-run.mjs";
+// The sweep runs in a process group of its own (scripts/group-run.mjs): at this test's timeout it gets SIGTERM, ends its
+// own test runs' groups, and its group is killed after it, so nothing it started outlives this test.
 
 test("every pool rule mutant fails its named test, and pool.ts is left as it was", { timeout: 1_200_000 }, (t) => {
   const runner = fileURLToPath(new URL("./rules-pool-mutants.mjs", import.meta.url));
-  const r = spawnSync(process.execPath, [runner], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const r = runSync(process.execPath, [runner], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeoutMs: 1_200_000, killSignal: "SIGTERM" });
   const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
   assert.equal(r.status, 0, out.split("\n").filter((l) => /^(LIVE|BAD)/.test(l)).join("\n") || out.slice(-2000));
   assert.match(out, /^all \d+ mutants killed$/m);

@@ -2,15 +2,16 @@
 // own process (--test-isolation=none), so a timeout's SIGKILL stops the process that runs them: with a file runner per
 // test file, spawnSync's kill reaches only the runner and the file's process, spinning on a mutant that loops, is left
 // behind (ppid 1; card sol-restore-race, 3 Nov 04:20Z). --test-force-exit ends the run once every test has ended, so a
-// mutant whose loop still yields fails at its test's own timeout instead of holding the process to the cap.
-import { spawnSync } from "node:child_process";
+// mutant whose loop still yields fails at its test's own timeout instead of holding the process to the cap. The run is
+// in a process group of its own, killed whole at its end (scripts/group-run.mjs): a process a test started dies too.
+import { runSync } from "../../../scripts/group-run.mjs";
 
 /** Runs `node --test --test-isolation=none ...args` in cwd; hung: it ran past timeoutMs and was killed. fail and cancelled
  * (a test stopped at its own timeout: node prints it apart from fail) are counted apart. */
 export function runTests(args, { cwd, timeoutMs }) {
-  const r = spawnSync(process.execPath, ["--test", "--test-isolation=none", "--test-force-exit", ...args], { cwd, env: ownRun(), encoding: "utf8", timeout: timeoutMs, killSignal: "SIGKILL" });
+  const r = runSync(process.execPath, ["--test", "--test-isolation=none", "--test-force-exit", ...args], { cwd, env: ownRun(), encoding: "utf8", timeoutMs });
   const stdout = r.stdout ?? "";
-  return { hung: r.signal === "SIGKILL" || r.error?.code === "ETIMEDOUT", status: r.status, stdout, fail: count(stdout, "fail"), cancelled: count(stdout, "cancelled"), pass: count(stdout, "pass") };
+  return { hung: r.signal === "SIGKILL" || r.timedOut, status: r.status, stdout, fail: count(stdout, "fail"), cancelled: count(stdout, "cancelled"), pass: count(stdout, "pass") };
 }
 
 /**
