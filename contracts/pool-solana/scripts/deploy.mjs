@@ -301,6 +301,7 @@ export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve 
   }
   // buffer and program closes are retried like the sweep: a program left upgradeable by a deleted key would strand its
   // rent for good
+  const gaveUp = [];
   const retry = async (name, fn) => {
     for (let i = 0; i < tries; i++) {
       try {
@@ -310,20 +311,27 @@ export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve 
         await wait(2000 * (i + 1));
       }
     }
+    gaveUp.push(name);
   };
   await retry("buffer close", () => ops.closeBuffers());
   await retry("program close", async () => {
     if (await ops.upgradeableByFunder()) await ops.closeProgram();
   });
+  // the run's lookup table, still live under the funder (a run stopped between its make and its freeze): frozen with
+  // the list it was made with, never left with an authority whose key is deleted
+  if (ops.freezeTable) await retry("table freeze", () => ops.freezeTable());
+  // a step given up on keeps the reserve in the funder: --sweep-kept pays its fees from it later (the keys are kept)
+  const keep = gaveUp.length ? reserve : 0n;
+  if (keep) problems.push(`kept ${keep} lamports in the funder for --sweep-kept: ${gaveUp.join(", ")} gave up after ${tries} tries`);
   for (let i = 0; i < tries; i++) {
     await settle(); // a sweep of the last pass may land late too
     try {
       const bal = await ops.balance();
-      if (bal <= FEE_PER_SIGNATURE) {
-        return { swept, signatures, after: bal, problems: bal > 0n ? [...problems, `${bal} lamports left: not more than one fee`] : problems };
+      if (bal <= FEE_PER_SIGNATURE + keep) {
+        return { swept, signatures, after: bal, problems: bal > keep ? [...problems, `${bal - keep} lamports left: not more than one fee`] : problems };
       }
-      signatures.push(await ops.transfer(returnTo, bal - FEE_PER_SIGNATURE));
-      swept += bal - FEE_PER_SIGNATURE;
+      signatures.push(await ops.transfer(returnTo, bal - FEE_PER_SIGNATURE - keep));
+      swept += bal - FEE_PER_SIGNATURE - keep;
       return { swept, signatures, after: await ops.balance(), problems };
     } catch (e) {
       problems.push(`sweep try ${i + 1}: ${e.message}`);
@@ -338,7 +346,7 @@ export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve 
  * upgrade authority is read at confirmed, and a read that fails throws: a finalized read of a deploy that landed a
  * moment ago reads nothing, and "nothing" must never be taken for "not upgradeable".
  */
-export function chainOps({ fetchFn, url, second, funder, programId, keyFile, returnTo, resume = false, cli: run0 = cli, wait = sleep, now = Date.now, say = log, journal, afterCli = async () => {}, tableOf = () => null }) {
+export function chainOps({ fetchFn, url, second, funder, programId, keyFile, returnTo, resume = false, cli: run0 = cli, wait = sleep, now = Date.now, say = log, journal, afterCli = async () => {}, tableOf = () => null, priced = (ixs) => ixs }) {
   // each CLI call's own transactions are read from the funder's history after it, and journaled
   const run = (args) => {
     try {
@@ -383,6 +391,23 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
         await wait(2000);
       }
       throw new Error(`${programId} still reads upgradeable by the funder after its close`);
+    },
+    /** The run's lookup table frozen (authority none) when it reads active with the funder as its authority, the
+     * freeze priced as the run's own sends; done once a confirmed read shows no authority. Its signature, or null when
+     * there was nothing to freeze. */
+    freezeTable: async () => {
+      const t = tableOf();
+      if (!t) return null;
+      const live = async () => {
+        const a = await account(fetchFn, url, t, undefined, "confirmed");
+        return !!a && a.owner === ALT_PROGRAM && a.data.length >= TABLE_META && Buffer.from(a.data).readBigUInt64LE(4) === 0xffff_ffff_ffff_ffffn && a.data[21] === 1 && b58encode(a.data.subarray(22, 54)) === funder.id;
+      };
+      if (!(await live())) return null;
+      const sig = await sendAndConfirm(fetchFn, url, priced([tableIxs(funder.id, t, 0n, 0, []).freeze]), funder, [funder], { step: "lookup table: freeze (authority none), in the cleanup", journal, wait, now });
+      for (let i = 0; i < 15 && (await live()); i++) await wait(2000);
+      if (await live()) throw new Error(`lookup table ${t} still has the funder as its authority after its freeze ${sig}`);
+      say(`lookup table ${t} frozen (authority none): ${sig}`);
+      return sig;
     },
     balance: () => balanceOn(url),
     transfer: async (to, lamports) => sendAndConfirm(fetchFn, url, [transferIx(funder.id, to, lamports)], funder, [funder], { step: "sweep (the funder's rest back)", journal, wait, now }),
@@ -621,6 +646,16 @@ export async function returnProblems(fetchFn, url, addr) {
   return null;
 }
 
+/** The command that sweeps a stopped run's kept keys: the owner's paste's own sweep form for its journal (it fetches the
+ * pinned solana CLI the closes need, which the paste removed on exit), deploy.mjs --sweep-kept otherwise. */
+export function sweepCommand(journalFile, url, cluster) {
+  const rel = path.relative(REPO, journalFile);
+  if (cluster === "mainnet" && rel === PASTE_JOURNAL) return "sh contracts/pool-solana/scripts/mainnet-deploy.sh --sweep-kept";
+  return `node contracts/pool-solana/scripts/deploy.mjs --sweep-kept ${rel} --url ${new URL(url).origin}${cluster === "mainnet" ? " --mainnet" : ""}`;
+}
+/** The owner's paste's journal (mainnet-deploy.sh's --out, with .journal.json). */
+export const PASTE_JOURNAL = "contracts/pool-solana/deployments/mainnet.journal.json";
+
 /** A record's journal: the record's path with .journal.json. */
 export const journalOf = (outFile) => outFile.replace(/\.json$/, "") + ".journal.json";
 
@@ -693,6 +728,40 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
     }
     return out;
   };
+  // what the run left under the funder's authority goes first, while the funder still holds the fees (the cleanup keeps
+  // its reserve when it gave one up): a buffer, a program it can still upgrade, a live lookup table. Each failure is
+  // said and kept in the journal's why; the CLI's own transactions are read from the funder's history after each call
+  // (the funder's fee payer only: a transfer into it is a funding, which the sweep below reads as one)
+  const cliTxs = async (step) => {
+    for (const f of (await rpc(fetchFn, url, "getSignaturesForAddress", [funder.id, { commitment: "confirmed" }])).reverse()) {
+      if (known.has(f.signature)) continue;
+      const t = await rpc(fetchFn, url, "getTransaction", [f.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
+      if (t?.transaction.message.accountKeys[0] === funder.id) known.add(f.signature), j.txs.push({ step, signature: f.signature, state: f.err === null ? "landed" : "failed", cli: true });
+    }
+  };
+  const mainnet = j.genesis_hash === MAINNET_GENESIS;
+  const ops = chainOps({
+    fetchFn, url, second, funder, programId: j.program_id, keyFile: path.join(dir, "funder.json"), returnTo: j.return_to, cli: run, wait, now, tableOf: () => j.table ?? null,
+    afterCli: cliTxs, priced: (ixs) => (mainnet ? [priceIx(PRIORITY_MICRO_LAMPORTS), ...ixs] : ixs),
+  });
+  const failed = [];
+  for (const [name, step] of [
+    ["buffer close", () => ops.closeBuffers()],
+    ["program close", async () => {
+      if (await ops.upgradeableByFunder()) await ops.closeProgram();
+    }],
+    ["table freeze", async () => {
+      const sig = await ops.freezeTable();
+      if (sig) known.add(sig), j.txs.push({ step: "lookup table: freeze (authority none), by --sweep-kept", signature: sig, state: "landed" });
+    }],
+  ]) {
+    try {
+      await step();
+    } catch (e) {
+      failed.push(`${name}: ${String(e.message).split("\n")[0]}`);
+      log(`sweep-kept: ${name} failed: ${String(e.message).split("\n")[0]}`);
+    }
+  }
   for (const k of holders) {
     const balance = BigInt((await rpc(fetchFn, url, "getBalance", [k.id, { commitment: "confirmed" }])).value);
     const ins = await incoming(k);
@@ -706,8 +775,7 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
     j.txs.push({ step: `sweep (kept keys, to the funding's source ${dest})`, signature: sig, state: "landed" });
     log(`sweep-kept: ${balance - FEE_PER_SIGNATURE} lamports from ${k.id} to ${dest}: ${sig}`);
   }
-  const ops = chainOps({ fetchFn, url, second, funder, programId: j.program_id, keyFile: path.join(dir, "funder.json"), returnTo: j.return_to, cli: run, wait, now, tableOf: () => j.table ?? null });
-  const left = [];
+  const left = [...failed];
   for (const k of holders) for (const u of [...new Set([url, second])]) {
     const b = BigInt((await rpc(fetchFn, u, "getBalance", [k.id, { commitment: "confirmed" }])).value);
     if (b !== 0n) left.push(`${k.id} holds ${b} lamports on ${u}`);
@@ -878,7 +946,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     so_len: so.length, so_sha256: soSha, build, ci_run: ci?.run ?? null, commit: ci?.commit ?? null, funder: funder.id, return_to: returnTo,
     ...(tableList ? { table: null, table_addresses: tableList } : {}),
   };
-  const keys = { folder: path.basename(dir), state: "in use", why: [], sweep: `node contracts/pool-solana/scripts/deploy.mjs --sweep-kept ${path.relative(REPO, journalFile)} --url ${new URL(url).origin}${cluster === "mainnet" ? " --mainnet" : ""}` };
+  const keys = { folder: path.basename(dir), state: "in use", why: [], sweep: sweepCommand(journalFile, url, cluster) };
   let stop = null;
   let stoppedAt = null;
   const stoppedRecord = () => {
@@ -940,7 +1008,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     const clock = { wait, now };
     const priced = (ixs) => (cluster === "mainnet" ? [priceIx(PRIORITY_MICRO_LAMPORTS), ...ixs] : ixs);
     const send = (step, ixs) => sendAndConfirm(fetchFn, url, priced(ixs), funder, [funder], { step, journal, ...clock });
-    const ops = chainOps({ fetchFn, url, second, funder, programId: program.id, keyFile: funderFile, returnTo, resume: !!resumeId, cli: runCli, journal, afterCli, tableOf: () => fields.table ?? null, ...clock });
+    const ops = chainOps({ fetchFn, url, second, funder, programId: program.id, keyFile: funderFile, returnTo, resume: !!resumeId, cli: runCli, journal, afterCli, tableOf: () => fields.table ?? null, priced, ...clock });
     // funded: the funder held the need and its funding was read; until then a stop keeps the keys (a transfer may land
     // at any time: a paste made after a terminal closed)
     let funded = false;

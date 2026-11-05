@@ -5,6 +5,10 @@
 #   sh contracts/pool-solana/scripts/mainnet-deploy.sh <your Solana address> --program <id>
 #     the resume of a run that stopped after its deploy (the program is final already): it reads the program on both
 #     RPCs as the pinned code with authority none, then makes the pool if missing and the lookup table, as below
+#   sh contracts/pool-solana/scripts/mainnet-deploy.sh --sweep-kept [<address>]
+#     a stopped run whose keys were kept (its last line says so): with the same pinned CLI, closes what is left under
+#     the run's key (a buffer, a program it can still upgrade), freezes its lookup table if live, sends every lamport
+#     of its keys back to the wallet that funded them (<address> names one when several did), then removes the keys
 # 1. The solana CLI: Agave v4.4.0's release for this Mac, fetched from its GitHub release into a new folder that is
 #    removed on exit, refused unless the file's sha256 is the pin below (GitHub's own digest of that asset, uploaded by
 #    anza-team on 28 Oct, read 5 Nov 14:49Z) and its `solana --version` is 4.4.0 (src:9ef63128), the release CI's
@@ -25,13 +29,23 @@
 # folder only until the cleanup reads the funder empty on both RPCs. Ctrl-C or a closed terminal stops the run at its
 # next step and its cleanup sweeps every lamport back; this shell waits for it before removing the CLI.
 set -eu
-if [ $# -ne 1 ] && { [ $# -ne 3 ] || [ "$2" != "--program" ]; }; then
+# the forms: <address>, <address> --program <id>, --sweep-kept [<address>]; an address never starts with "-"
+SWEEP=
+FORM=
+case "${1:-}" in
+  --sweep-kept) case "$#:${2:-}" in 1:|2:[!-]*) FORM=sweep ;; esac ;;
+  -*|"") ;;
+  *) if [ $# -eq 1 ] || { [ $# -eq 3 ] && [ "$2" = "--program" ]; }; then FORM=deploy; fi ;;
+esac
+if [ -z "$FORM" ]; then
   echo "usage: sh contracts/pool-solana/scripts/mainnet-deploy.sh <your Solana address, where the run's leftover SOL goes back> [--program <id>]"
+  echo "   or: sh contracts/pool-solana/scripts/mainnet-deploy.sh --sweep-kept [<address>]"
   exit 1
 fi
-RETURN=$1
-shift
-# the resume's two words, or none
+if [ "$FORM" = sweep ]; then
+  SWEEP=1
+  shift
+fi
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$ROOT"
 CI_RUN=42012187381
@@ -58,6 +72,15 @@ case "$VERSION" in
   "solana-cli 4.4.0 (src:9ef63128;"*) echo "the solana CLI: $VERSION, sha256 $GOT (pinned)" ;;
   *) echo "the solana CLI says \"$VERSION\", not 4.4.0 (src:9ef63128): nothing was sent"; exit 1 ;;
 esac
+if [ -n "$SWEEP" ]; then
+  # the stopped run's journal, its keys swept with the CLI on PATH (the buffer and program closes need it)
+  PATH="$BIN:$PATH" node contracts/pool-solana/scripts/deploy.mjs --mainnet --url https://api.mainnet-beta.solana.com \
+    --sweep-kept contracts/pool-solana/deployments/mainnet.journal.json ${1:+--return "$1"}
+  exit 0
+fi
+RETURN=$1
+shift
+# the resume's two words, or none
 mkdir -p contracts/pool-solana/deployments
 PATH="$BIN:$PATH" node contracts/pool-solana/scripts/deploy.mjs --mainnet --url https://api.mainnet-beta.solana.com \
   --ci-run "$CI_RUN" --return "$RETURN" --out contracts/pool-solana/deployments/mainnet.json "$@"

@@ -589,7 +589,8 @@ function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = (
     let cost = FEE_PER_SIGNATURE;
     let to = null;
     if (ix.program === ALT_PROGRAM) {
-      if (balOf(tx.payer) < cost + 3_000_000n) return { InsufficientFundsForRent: { account_index: 0 } };
+      // the create pays the table's rent; an extend or freeze only its fee
+      if (balOf(tx.payer) < cost + (ix.data[0] === 0 ? 3_000_000n : 0n)) return { InsufficientFundsForRent: { account_index: 0 } };
       c.bal.set(tx.payer, balOf(tx.payer) - cost - (ix.data[0] === 0 ? 3_000_000n : 0n));
       const table = ix.keys[0];
       for (const x of tx.ixs.filter((y) => y.program === ALT_PROGRAM)) {
