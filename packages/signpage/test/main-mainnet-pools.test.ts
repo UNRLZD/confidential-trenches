@@ -125,6 +125,8 @@ new DataView(rentData.buffer).setBigUint64(0, RENT.lamportsPerByte, true);
 new DataView(rentData.buffer).setFloat64(8, 2, true);
 rentData[16] = 50;
 const rentReads: string[] = [];
+/** Every JSON-RPC call the page makes: its URL and method. */
+const calls: { url: string; method: string }[] = [];
 const SELL_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const mintData = new Uint8Array(82);
 mintData[44] = 6;
@@ -135,6 +137,7 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
     body = JSON.parse(String(init?.body ?? "{}"));
   } catch {}
   const id = body.id ?? 1;
+  calls.push({ url: String(url), method: String(body.method) });
   if (body.method === "getAccountInfo" && body.params?.[0] === "SysvarRent111111111111111111111111111111111") {
     rentReads.push(String(url));
     const value = { owner: "Sysvar1111111111111111111111111111111111111", data: [base64.encode(rentData), "base64"], lamports: 1009200, executable: false, rentEpoch: 0, space: 17 };
@@ -145,6 +148,9 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
     const value = { owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data: [base64.encode(mintData), "base64"], lamports: 1461600, executable: false, rentEpoch: 0, space: 82 };
     return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value } }), { status: 200 });
   }
+  // a sell W's holdings: no SOL and no token account, at slot 1 (the sell then answers not_funded)
+  if (body.method === "getBalance") return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: 0 } }), { status: 200 });
+  if (body.method === "getTokenAccountsByOwner") return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: [] } }), { status: 200 });
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "not in this test" } }), { status: 200 });
 };
 
@@ -198,6 +204,14 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
 });
 
 test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw reach the page's pool flow: none is refused not_allowed", async () => {
+  // a note of the pool's scope another device spent: its buy's W is the sell's to read, on the helper's keyed route only
+  const w = await openWalletStore({});
+  const ns = await openNoteStore(w);
+  const p = await ns.planDeposit(SCOPE, () => 2n);
+  await ns.move(p.id, "PLANNED", "INCOMING", { send: { signature: "2".repeat(64), value: CHUNK, last_valid_block_height: 1n } });
+  await ns.move(p.id, "INCOMING", "UNSPENT", { leaf: { value: CHUNK, label: 2n, commitment: noteCommitment(CHUNK, 2n, p.precommitment), leafIndex: 1n } });
+  await ns.move(p.id, "UNSPENT", "SPENT", {});
+  const from = calls.length;
   // each answer is the flow's own (src/pool-testnet.ts): the deposit's reads fail on this test's RPCs, the buy finds no
   // proof it may spend and the sell no W holding the token, and the withdraw opens the page's screen
   for (const [data, want] of [
@@ -228,6 +242,13 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
     const { v: _v, id: _id, ...got } = a as Record<string, unknown>;
     assert.deepEqual(got, want, `${data.type}: the flow's own answer`);
   }
+  // the sell read its W's holdings, and only through the helper's keyed route: never on the public provider, which
+  // would see the user's W asked from the user's own address
+  const holdings = calls.slice(from).filter((c) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner");
+  assert.ok(holdings.length >= 3, `the sell's W holdings were read: ${holdings.length} call(s)`);
+  assert.deepEqual([...new Set(holdings.map((c) => c.url))], ["https://api.confidential.unrealized.trade/v1/rpc/solana"], "the W's holdings on the helper's route only");
+  ns.close();
+  w.close();
 });
 
 test("the mainnet build's pool reads on the network's own pair and fee route: SIGN_HOST's provider A and the helper's keyed route, and GET /v1/pool/fee with cluster=mainnet", async () => {
