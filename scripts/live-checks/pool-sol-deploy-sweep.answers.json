@@ -1,1 +1,518 @@
-{"note":"Recorded 2026-11-05 at 00:47Z: the live check on api.devnet.solana.com and solana-devnet.api.onfinality.io/public, reading the devnet run of contracts/pool-solana/scripts/deploy.mjs (card pool-sol-deploy-sweep) stopped by SIGHUP in its funding wait and funded 0.01 SOL from the team devnet wallet about 25 s after the stop; the deployment is the record deploy.mjs wrote. The bad answers are this recording with one field changed (pool-sol-deploy-sweep.test.mjs).","deployment":{"cluster":"devnet","genesis_hash":"EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG","rpc":"https://api.devnet.solana.com","at":"2026-11-05T00:46:50.941Z","complete":false,"stopped":"SIGHUP","program_id":"9GiAwNMgKRSWEZqsq9FvhkJWt5EiMTu8U1sqGgdUMNFY","programdata":"3MWxxWW3YDamwiZ4DHdtaoGGEByAVNuBdYu11nPzsRVK","funder":"FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL","return_to":"3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx","keys":"pool-sol-deploy-8bKbth (in the OS temp folder)","txs":[{"step":"funding (to the funder)","signature":"2u9PLJniLvFRs6tkf9ghfmiq2NH7GTRYVz91F55Q4H9vcAhMDGGWuPJXDeRWawDr7Y7d6Qo5hx2Q33h9M1Dx1jo","state":"landed"},{"step":"sweep (the funder's rest back)","signature":"38jNYChqyU1eyWo6kHG2g1qBvmxdg8FPdWDyjGcjG28wBav6n2LThPZp2BXa8RiKiULmXe5TVBto1XAhg7NsMHVA","state":"landed"},{"step":"sweep (the funder's rest back)","signature":"2FoxZAgVjJ1NvRAV2B35YGbTCwT54Lb9u89Wt8MNa41zUzMGeuNghuARDaLFtyXm1e2jYrNSB6z5xF3MQHFsCZGG","state":"landed"}]},"rpcs":["https://api.devnet.solana.com","https://solana-devnet.api.onfinality.io/public"],"good":[{"url":"https://api.devnet.solana.com","method":"getGenesisHash","params":[],"status":200,"json":{"jsonrpc":"2.0","result":"EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG","id":1}},{"url":"https://api.devnet.solana.com","method":"getTransaction","params":["2u9PLJniLvFRs6tkf9ghfmiq2NH7GTRYVz91F55Q4H9vcAhMDGGWuPJXDeRWawDr7Y7d6Qo5hx2Q33h9M1Dx1jo",{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}],"status":200,"json":{"jsonrpc":"2.0","result":{"blockTime":1793839532,"meta":{"computeUnitsConsumed":150,"costUnits":1481,"err":null,"fee":5000,"innerInstructions":[],"loadedAddresses":{"readonly":[],"writable":[]},"logMessages":["Program 11111111111111111111111111111111 invoke [1]","Program 11111111111111111111111111111111 success"],"postBalances":[7410380259,10000000,1],"postTokenBalances":[],"preBalances":[7420385259,0,1],"preTokenBalances":[],"rewards":[],"status":{"Ok":null}},"slot":518761618,"transaction":{"message":{"accountKeys":["3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx","FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL","11111111111111111111111111111111"],"header":{"numReadonlySignedAccounts":0,"numReadonlyUnsignedAccounts":1,"numRequiredSignatures":1},"instructions":[{"accounts":[0,1],"data":"3Bxs4NN8M2Yn4TLb","programIdIndex":2,"stackHeight":1}],"recentBlockhash":"3CDrFFkcd6uJRDkyiQPWDWH1ANWizm25B4QM6goX4NSo"},"signatures":["2u9PLJniLvFRs6tkf9ghfmiq2NH7GTRYVz91F55Q4H9vcAhMDGGWuPJXDeRWawDr7Y7d6Qo5hx2Q33h9M1Dx1jo"]},"transactionIndex":14,"version":"legacy"},"id":1}},{"url":"https://api.devnet.solana.com","method":"getTransaction","params":["38jNYChqyU1eyWo6kHG2g1qBvmxdg8FPdWDyjGcjG28wBav6n2LThPZp2BXa8RiKiULmXe5TVBto1XAhg7NsMHVA",{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}],"status":200,"json":{"jsonrpc":"2.0","result":{"blockTime":1793839574,"meta":{"computeUnitsConsumed":150,"costUnits":1481,"err":null,"fee":5000,"innerInstructions":[],"loadedAddresses":{"readonly":[],"writable":[]},"logMessages":["Program 11111111111111111111111111111111 invoke [1]","Program 11111111111111111111111111111111 success"],"postBalances":[1000000,7419375259,1],"postTokenBalances":[],"preBalances":[10000000,7410380259,1],"preTokenBalances":[],"rewards":[],"status":{"Ok":null}},"slot":518761794,"transaction":{"message":{"accountKeys":["FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL","3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx","11111111111111111111111111111111"],"header":{"numReadonlySignedAccounts":0,"numReadonlyUnsignedAccounts":1,"numRequiredSignatures":1},"instructions":[{"accounts":[0,1],"data":"3Bxs4Xg8s1fmUKD9","programIdIndex":2,"stackHeight":1}],"recentBlockhash":"5k7fp1kpUtWXfaGAoPCf5XGyjNhSjig9uKfCh5Ttis9g"},"signatures":["38jNYChqyU1eyWo6kHG2g1qBvmxdg8FPdWDyjGcjG28wBav6n2LThPZp2BXa8RiKiULmXe5TVBto1XAhg7NsMHVA"]},"transactionIndex":12,"version":"legacy"},"id":1}},{"url":"https://api.devnet.solana.com","method":"getTransaction","params":["2FoxZAgVjJ1NvRAV2B35YGbTCwT54Lb9u89Wt8MNa41zUzMGeuNghuARDaLFtyXm1e2jYrNSB6z5xF3MQHFsCZGG",{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}],"status":200,"json":{"jsonrpc":"2.0","result":{"blockTime":1793839605,"meta":{"computeUnitsConsumed":150,"costUnits":1481,"err":null,"fee":5000,"innerInstructions":[],"loadedAddresses":{"readonly":[],"writable":[]},"logMessages":["Program 11111111111111111111111111111111 invoke [1]","Program 11111111111111111111111111111111 success"],"postBalances":[0,7420370259,1],"postTokenBalances":[],"preBalances":[1000000,7419375259,1],"preTokenBalances":[],"rewards":[],"status":{"Ok":null}},"slot":518761927,"transaction":{"message":{"accountKeys":["FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL","3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx","11111111111111111111111111111111"],"header":{"numReadonlySignedAccounts":0,"numReadonlyUnsignedAccounts":1,"numRequiredSignatures":1},"instructions":[{"accounts":[0,1],"data":"3Bxs4XfSFcMw9p3H","programIdIndex":2,"stackHeight":1}],"recentBlockhash":"3nb4vB6bcKmKHdHKVrUeYCLXxewUS18HsrNkRGTdswp7"},"signatures":["2FoxZAgVjJ1NvRAV2B35YGbTCwT54Lb9u89Wt8MNa41zUzMGeuNghuARDaLFtyXm1e2jYrNSB6z5xF3MQHFsCZGG"]},"transactionIndex":5,"version":"legacy"},"id":1}},{"url":"https://api.devnet.solana.com","method":"getBalance","params":["FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL",{"commitment":"finalized"}],"status":200,"json":{"jsonrpc":"2.0","result":{"context":{"apiVersion":"4.4.0-beta.1","slot":518762264},"value":0},"id":1}},{"url":"https://solana-devnet.api.onfinality.io/public","method":"getGenesisHash","params":[],"status":200,"json":{"jsonrpc":"2.0","result":"EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG","id":1}},{"url":"https://solana-devnet.api.onfinality.io/public","method":"getTransaction","params":["2u9PLJniLvFRs6tkf9ghfmiq2NH7GTRYVz91F55Q4H9vcAhMDGGWuPJXDeRWawDr7Y7d6Qo5hx2Q33h9M1Dx1jo",{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}],"status":429,"json":{"jsonrpc":"2.0","error":{"code":-32029,"message":"Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"},"id":1}},{"url":"https://solana-devnet.api.onfinality.io/public","method":"getTransaction","params":["2u9PLJniLvFRs6tkf9ghfmiq2NH7GTRYVz91F55Q4H9vcAhMDGGWuPJXDeRWawDr7Y7d6Qo5hx2Q33h9M1Dx1jo",{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}],"status":200,"json":{"jsonrpc":"2.0","result":{"blockTime":1793839532,"meta":{"computeUnitsConsumed":150,"costUnits":1481,"err":null,"fee":5000,"innerInstructions":[],"loadedAddresses":{"readonly":[],"writable":[]},"logMessages":["Program 11111111111111111111111111111111 invoke [1]","Program 11111111111111111111111111111111 success"],"postBalances":[7410380259,10000000,1],"postTokenBalances":[],"preBalances":[7420385259,0,1],"preTokenBalances":[],"rewards":[],"status":{"Ok":null}},"slot":518761618,"transaction":{"message":{"accountKeys":["3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx","FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL","11111111111111111111111111111111"],"header":{"numReadonlySignedAccounts":0,"numReadonlyUnsignedAccounts":1,"numRequiredSignatures":1},"instructions":[{"accounts":[0,1],"data":"3Bxs4NN8M2Yn4TLb","programIdIndex":2,"stackHeight":1}],"recentBlockhash":"3CDrFFkcd6uJRDkyiQPWDWH1ANWizm25B4QM6goX4NSo"},"signatures":["2u9PLJniLvFRs6tkf9ghfmiq2NH7GTRYVz91F55Q4H9vcAhMDGGWuPJXDeRWawDr7Y7d6Qo5hx2Q33h9M1Dx1jo"]},"transactionIndex":14,"version":"legacy"},"id":1}},{"url":"https://solana-devnet.api.onfinality.io/public","method":"getTransaction","params":["38jNYChqyU1eyWo6kHG2g1qBvmxdg8FPdWDyjGcjG28wBav6n2LThPZp2BXa8RiKiULmXe5TVBto1XAhg7NsMHVA",{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}],"status":429,"json":{"jsonrpc":"2.0","error":{"code":-32029,"message":"Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"},"id":1}},{"url":"https://solana-devnet.api.onfinality.io/public","method":"getTransaction","params":["38jNYChqyU1eyWo6kHG2g1qBvmxdg8FPdWDyjGcjG28wBav6n2LThPZp2BXa8RiKiULmXe5TVBto1XAhg7NsMHVA",{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}],"status":200,"json":{"jsonrpc":"2.0","result":{"blockTime":1793839574,"meta":{"computeUnitsConsumed":150,"costUnits":1481,"err":null,"fee":5000,"innerInstructions":[],"loadedAddresses":{"readonly":[],"writable":[]},"logMessages":["Program 11111111111111111111111111111111 invoke [1]","Program 11111111111111111111111111111111 success"],"postBalances":[1000000,7419375259,1],"postTokenBalances":[],"preBalances":[10000000,7410380259,1],"preTokenBalances":[],"rewards":[],"status":{"Ok":null}},"slot":518761794,"transaction":{"message":{"accountKeys":["FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL","3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx","11111111111111111111111111111111"],"header":{"numReadonlySignedAccounts":0,"numReadonlyUnsignedAccounts":1,"numRequiredSignatures":1},"instructions":[{"accounts":[0,1],"data":"3Bxs4Xg8s1fmUKD9","programIdIndex":2,"stackHeight":1}],"recentBlockhash":"5k7fp1kpUtWXfaGAoPCf5XGyjNhSjig9uKfCh5Ttis9g"},"signatures":["38jNYChqyU1eyWo6kHG2g1qBvmxdg8FPdWDyjGcjG28wBav6n2LThPZp2BXa8RiKiULmXe5TVBto1XAhg7NsMHVA"]},"transactionIndex":12,"version":"legacy"},"id":1}},{"url":"https://solana-devnet.api.onfinality.io/public","method":"getTransaction","params":["2FoxZAgVjJ1NvRAV2B35YGbTCwT54Lb9u89Wt8MNa41zUzMGeuNghuARDaLFtyXm1e2jYrNSB6z5xF3MQHFsCZGG",{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}],"status":429,"json":{"jsonrpc":"2.0","error":{"code":-32029,"message":"Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"},"id":1}},{"url":"https://solana-devnet.api.onfinality.io/public","method":"getTransaction","params":["2FoxZAgVjJ1NvRAV2B35YGbTCwT54Lb9u89Wt8MNa41zUzMGeuNghuARDaLFtyXm1e2jYrNSB6z5xF3MQHFsCZGG",{"encoding":"json","commitment":"finalized","maxSupportedTransactionVersion":0}],"status":200,"json":{"jsonrpc":"2.0","result":{"blockTime":1793839605,"meta":{"computeUnitsConsumed":150,"costUnits":1481,"err":null,"fee":5000,"innerInstructions":[],"loadedAddresses":{"readonly":[],"writable":[]},"logMessages":["Program 11111111111111111111111111111111 invoke [1]","Program 11111111111111111111111111111111 success"],"postBalances":[0,7420370259,1],"postTokenBalances":[],"preBalances":[1000000,7419375259,1],"preTokenBalances":[],"rewards":[],"status":{"Ok":null}},"slot":518761927,"transaction":{"message":{"accountKeys":["FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL","3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx","11111111111111111111111111111111"],"header":{"numReadonlySignedAccounts":0,"numReadonlyUnsignedAccounts":1,"numRequiredSignatures":1},"instructions":[{"accounts":[0,1],"data":"3Bxs4XfSFcMw9p3H","programIdIndex":2,"stackHeight":1}],"recentBlockhash":"3nb4vB6bcKmKHdHKVrUeYCLXxewUS18HsrNkRGTdswp7"},"signatures":["2FoxZAgVjJ1NvRAV2B35YGbTCwT54Lb9u89Wt8MNa41zUzMGeuNghuARDaLFtyXm1e2jYrNSB6z5xF3MQHFsCZGG"]},"transactionIndex":5,"version":"legacy"},"id":1}},{"url":"https://solana-devnet.api.onfinality.io/public","method":"getBalance","params":["FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL",{"commitment":"finalized"}],"status":429,"json":{"jsonrpc":"2.0","error":{"code":-32029,"message":"Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"},"id":1}},{"url":"https://solana-devnet.api.onfinality.io/public","method":"getBalance","params":["FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL",{"commitment":"finalized"}],"status":200,"json":{"jsonrpc":"2.0","result":{"context":{"apiVersion":"4.3.0","slot":518762299},"value":0},"id":1}}]}
+{
+  "note": "Recorded 2026-11-05 at 04:24Z: the live check on api.devnet.solana.com and solana-devnet.api.onfinality.io/public, reading the journal of the devnet run of contracts/pool-solana/scripts/deploy.mjs (card pool-sol-deploy-sweep) stopped by SIGHUP in its funding wait before any funding, which kept its keys; 0.01 SOL from the team devnet wallet landed on the funder about 42 min after the stop, and the journal's --sweep-kept command swept it back to that sender and removed the keys. The deployment is the journal as deploy.mjs and --sweep-kept wrote it. The bad answers are this recording with one field changed (pool-sol-deploy-sweep.test.mjs).",
+  "deployment": {
+    "cluster": "devnet",
+    "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+    "rpc": "api.devnet.solana.com",
+    "program_id": "J7KpQFVgMfjXf8d3geSuAznopjUfy3zVHCQ7RkzCBuk7",
+    "programdata": "7NUxDhwZMSPJA2yCnuAbfSgeKp6dYSPV2nSTs9h2MNca",
+    "pool": "8wi86SMdkDJgjWtH1gKTAbRoDXSRJ2pA2TTC3trPRa7R",
+    "so_len": 77472,
+    "so_sha256": "9539c9d105fc8960d864e4c59ff47fd44258324627a67b01e1d71d40c3a5ba01",
+    "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 41700702945, pool-solana job 126144439173, commit 10e685dd2294a32ebf4d9852efaf32e54b929359",
+    "ci_run": "41700702945",
+    "commit": "10e685dd2294a32ebf4d9852efaf32e54b929359",
+    "funder": "EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR",
+    "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+    "need": "421550680",
+    "need_parts": {
+      "program_account": "833120",
+      "programdata": "394436600",
+      "pool": "11719560",
+      "deposit": "10000000",
+      "deposit_mark": "736600",
+      "deposit_pages": "2194560",
+      "funder_floor": "650240",
+      "fees": "980000"
+    },
+    "at": "2026-11-05T03:42:37.445Z",
+    "complete": false,
+    "stopped": "SIGHUP",
+    "stopped_at": "2026-11-05T03:40:18.756Z",
+    "keys": {
+      "folder": "pool-sol-deploy-yj4LUN",
+      "state": "removed",
+      "why": [
+        "swept by --sweep-kept: every key of the run reads 0 on both RPCs, nothing under the funder's authority"
+      ],
+      "sweep": "node contracts/pool-solana/scripts/deploy.mjs --sweep-kept scripts/live-checks/pool-sol-deploy-sweep.devnet.journal.json --url https://api.devnet.solana.com"
+    },
+    "txs": [
+      {
+        "step": "funding (to the funder)",
+        "signature": "2urmWKB7QqY8QDe9DUozHD5E8A7LBPuvLAZBFmviXxi3KsfFZYpN75WU9vrYTfcASs2TqUs7g8jvhm4UJvoxfP5g",
+        "state": "landed"
+      },
+      {
+        "step": "sweep (kept keys, to the funding's source 3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx)",
+        "signature": "5VLYV6ibcnQ2mmFkrFpYdSmz9P1fk1yTHzEw1uWi1fXe33GbXZDF3US4K7EVPyJRteNLDxzn3K567fi2TFhakYwb",
+        "state": "landed"
+      }
+    ]
+  },
+  "rpcs": [
+    "https://api.devnet.solana.com",
+    "https://solana-devnet.api.onfinality.io/public"
+  ],
+  "good": [
+    {
+      "url": "https://api.devnet.solana.com",
+      "method": "getGenesisHash",
+      "params": [],
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+        "id": 1
+      }
+    },
+    {
+      "url": "https://api.devnet.solana.com",
+      "method": "getTransaction",
+      "params": [
+        "2urmWKB7QqY8QDe9DUozHD5E8A7LBPuvLAZBFmviXxi3KsfFZYpN75WU9vrYTfcASs2TqUs7g8jvhm4UJvoxfP5g",
+        {
+          "encoding": "json",
+          "commitment": "finalized",
+          "maxSupportedTransactionVersion": 0
+        }
+      ],
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": {
+          "blockTime": 1793852533,
+          "meta": {
+            "computeUnitsConsumed": 150,
+            "costUnits": 1481,
+            "err": null,
+            "fee": 5000,
+            "innerInstructions": [],
+            "loadedAddresses": {
+              "readonly": [],
+              "writable": []
+            },
+            "logMessages": [
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success"
+            ],
+            "postBalances": [
+              7410365259,
+              10000000,
+              1
+            ],
+            "postTokenBalances": [],
+            "preBalances": [
+              7420370259,
+              0,
+              1
+            ],
+            "preTokenBalances": [],
+            "rewards": [],
+            "status": {
+              "Ok": null
+            }
+          },
+          "slot": 518816044,
+          "transaction": {
+            "message": {
+              "accountKeys": [
+                "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+                "EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR",
+                "11111111111111111111111111111111"
+              ],
+              "header": {
+                "numReadonlySignedAccounts": 0,
+                "numReadonlyUnsignedAccounts": 1,
+                "numRequiredSignatures": 1
+              },
+              "instructions": [
+                {
+                  "accounts": [
+                    0,
+                    1
+                  ],
+                  "data": "3Bxs4NN8M2Yn4TLb",
+                  "programIdIndex": 2,
+                  "stackHeight": 1
+                }
+              ],
+              "recentBlockhash": "6cBh3ZLrKpDmzLgbp2JKxVPxG7RdjYR3hfvGUxGSGsmh"
+            },
+            "signatures": [
+              "2urmWKB7QqY8QDe9DUozHD5E8A7LBPuvLAZBFmviXxi3KsfFZYpN75WU9vrYTfcASs2TqUs7g8jvhm4UJvoxfP5g"
+            ]
+          },
+          "transactionIndex": 4,
+          "version": "legacy"
+        },
+        "id": 1
+      }
+    },
+    {
+      "url": "https://api.devnet.solana.com",
+      "method": "getTransaction",
+      "params": [
+        "5VLYV6ibcnQ2mmFkrFpYdSmz9P1fk1yTHzEw1uWi1fXe33GbXZDF3US4K7EVPyJRteNLDxzn3K567fi2TFhakYwb",
+        {
+          "encoding": "json",
+          "commitment": "finalized",
+          "maxSupportedTransactionVersion": 0
+        }
+      ],
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": {
+          "blockTime": 1793852642,
+          "meta": {
+            "computeUnitsConsumed": 150,
+            "costUnits": 1481,
+            "err": null,
+            "fee": 5000,
+            "innerInstructions": [],
+            "loadedAddresses": {
+              "readonly": [],
+              "writable": []
+            },
+            "logMessages": [
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success"
+            ],
+            "postBalances": [
+              0,
+              7420360259,
+              1
+            ],
+            "postTokenBalances": [],
+            "preBalances": [
+              10000000,
+              7410365259,
+              1
+            ],
+            "preTokenBalances": [],
+            "rewards": [],
+            "status": {
+              "Ok": null
+            }
+          },
+          "slot": 518816499,
+          "transaction": {
+            "message": {
+              "accountKeys": [
+                "EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR",
+                "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+                "11111111111111111111111111111111"
+              ],
+              "header": {
+                "numReadonlySignedAccounts": 0,
+                "numReadonlyUnsignedAccounts": 1,
+                "numRequiredSignatures": 1
+              },
+              "instructions": [
+                {
+                  "accounts": [
+                    0,
+                    1
+                  ],
+                  "data": "3Bxs4iRX761Sj6Nj",
+                  "programIdIndex": 2,
+                  "stackHeight": 1
+                }
+              ],
+              "recentBlockhash": "HDGhQzMS7ThRuPcnv7neo8Qdgqejdy3iqKiSZMrHjX5V"
+            },
+            "signatures": [
+              "5VLYV6ibcnQ2mmFkrFpYdSmz9P1fk1yTHzEw1uWi1fXe33GbXZDF3US4K7EVPyJRteNLDxzn3K567fi2TFhakYwb"
+            ]
+          },
+          "transactionIndex": 3,
+          "version": "legacy"
+        },
+        "id": 1
+      }
+    },
+    {
+      "url": "https://api.devnet.solana.com",
+      "method": "getBalance",
+      "params": [
+        "EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR",
+        {
+          "commitment": "finalized"
+        }
+      ],
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": {
+          "context": {
+            "apiVersion": "4.4.0-beta.1",
+            "slot": 518816624
+          },
+          "value": 0
+        },
+        "id": 1
+      }
+    },
+    {
+      "url": "https://solana-devnet.api.onfinality.io/public",
+      "method": "getGenesisHash",
+      "params": [],
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+        "id": 1
+      }
+    },
+    {
+      "url": "https://solana-devnet.api.onfinality.io/public",
+      "method": "getTransaction",
+      "params": [
+        "2urmWKB7QqY8QDe9DUozHD5E8A7LBPuvLAZBFmviXxi3KsfFZYpN75WU9vrYTfcASs2TqUs7g8jvhm4UJvoxfP5g",
+        {
+          "encoding": "json",
+          "commitment": "finalized",
+          "maxSupportedTransactionVersion": 0
+        }
+      ],
+      "status": 429,
+      "json": {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32029,
+          "message": "Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"
+        },
+        "id": 1
+      }
+    },
+    {
+      "url": "https://solana-devnet.api.onfinality.io/public",
+      "method": "getTransaction",
+      "params": [
+        "2urmWKB7QqY8QDe9DUozHD5E8A7LBPuvLAZBFmviXxi3KsfFZYpN75WU9vrYTfcASs2TqUs7g8jvhm4UJvoxfP5g",
+        {
+          "encoding": "json",
+          "commitment": "finalized",
+          "maxSupportedTransactionVersion": 0
+        }
+      ],
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": {
+          "blockTime": 1793852533,
+          "meta": {
+            "computeUnitsConsumed": 150,
+            "costUnits": 1481,
+            "err": null,
+            "fee": 5000,
+            "innerInstructions": [],
+            "loadedAddresses": {
+              "readonly": [],
+              "writable": []
+            },
+            "logMessages": [
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success"
+            ],
+            "postBalances": [
+              7410365259,
+              10000000,
+              1
+            ],
+            "postTokenBalances": [],
+            "preBalances": [
+              7420370259,
+              0,
+              1
+            ],
+            "preTokenBalances": [],
+            "rewards": [],
+            "status": {
+              "Ok": null
+            }
+          },
+          "slot": 518816044,
+          "transaction": {
+            "message": {
+              "accountKeys": [
+                "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+                "EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR",
+                "11111111111111111111111111111111"
+              ],
+              "header": {
+                "numReadonlySignedAccounts": 0,
+                "numReadonlyUnsignedAccounts": 1,
+                "numRequiredSignatures": 1
+              },
+              "instructions": [
+                {
+                  "accounts": [
+                    0,
+                    1
+                  ],
+                  "data": "3Bxs4NN8M2Yn4TLb",
+                  "programIdIndex": 2,
+                  "stackHeight": 1
+                }
+              ],
+              "recentBlockhash": "6cBh3ZLrKpDmzLgbp2JKxVPxG7RdjYR3hfvGUxGSGsmh"
+            },
+            "signatures": [
+              "2urmWKB7QqY8QDe9DUozHD5E8A7LBPuvLAZBFmviXxi3KsfFZYpN75WU9vrYTfcASs2TqUs7g8jvhm4UJvoxfP5g"
+            ]
+          },
+          "transactionIndex": 4,
+          "version": "legacy"
+        },
+        "id": 1
+      }
+    },
+    {
+      "url": "https://solana-devnet.api.onfinality.io/public",
+      "method": "getTransaction",
+      "params": [
+        "5VLYV6ibcnQ2mmFkrFpYdSmz9P1fk1yTHzEw1uWi1fXe33GbXZDF3US4K7EVPyJRteNLDxzn3K567fi2TFhakYwb",
+        {
+          "encoding": "json",
+          "commitment": "finalized",
+          "maxSupportedTransactionVersion": 0
+        }
+      ],
+      "status": 429,
+      "json": {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32029,
+          "message": "Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"
+        },
+        "id": 1
+      }
+    },
+    {
+      "url": "https://solana-devnet.api.onfinality.io/public",
+      "method": "getTransaction",
+      "params": [
+        "5VLYV6ibcnQ2mmFkrFpYdSmz9P1fk1yTHzEw1uWi1fXe33GbXZDF3US4K7EVPyJRteNLDxzn3K567fi2TFhakYwb",
+        {
+          "encoding": "json",
+          "commitment": "finalized",
+          "maxSupportedTransactionVersion": 0
+        }
+      ],
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": {
+          "blockTime": 1793852642,
+          "meta": {
+            "computeUnitsConsumed": 150,
+            "costUnits": 1481,
+            "err": null,
+            "fee": 5000,
+            "innerInstructions": [],
+            "loadedAddresses": {
+              "readonly": [],
+              "writable": []
+            },
+            "logMessages": [
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success"
+            ],
+            "postBalances": [
+              0,
+              7420360259,
+              1
+            ],
+            "postTokenBalances": [],
+            "preBalances": [
+              10000000,
+              7410365259,
+              1
+            ],
+            "preTokenBalances": [],
+            "rewards": [],
+            "status": {
+              "Ok": null
+            }
+          },
+          "slot": 518816499,
+          "transaction": {
+            "message": {
+              "accountKeys": [
+                "EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR",
+                "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+                "11111111111111111111111111111111"
+              ],
+              "header": {
+                "numReadonlySignedAccounts": 0,
+                "numReadonlyUnsignedAccounts": 1,
+                "numRequiredSignatures": 1
+              },
+              "instructions": [
+                {
+                  "accounts": [
+                    0,
+                    1
+                  ],
+                  "data": "3Bxs4iRX761Sj6Nj",
+                  "programIdIndex": 2,
+                  "stackHeight": 1
+                }
+              ],
+              "recentBlockhash": "HDGhQzMS7ThRuPcnv7neo8Qdgqejdy3iqKiSZMrHjX5V"
+            },
+            "signatures": [
+              "5VLYV6ibcnQ2mmFkrFpYdSmz9P1fk1yTHzEw1uWi1fXe33GbXZDF3US4K7EVPyJRteNLDxzn3K567fi2TFhakYwb"
+            ]
+          },
+          "transactionIndex": 3,
+          "version": "legacy"
+        },
+        "id": 1
+      }
+    },
+    {
+      "url": "https://solana-devnet.api.onfinality.io/public",
+      "method": "getBalance",
+      "params": [
+        "EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR",
+        {
+          "commitment": "finalized"
+        }
+      ],
+      "status": 429,
+      "json": {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32029,
+          "message": "Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"
+        },
+        "id": 1
+      }
+    },
+    {
+      "url": "https://solana-devnet.api.onfinality.io/public",
+      "method": "getBalance",
+      "params": [
+        "EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR",
+        {
+          "commitment": "finalized"
+        }
+      ],
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": {
+          "context": {
+            "apiVersion": "4.3.0",
+            "slot": 518816648
+          },
+          "value": 0
+        },
+        "id": 1
+      }
+    }
+  ]
+}

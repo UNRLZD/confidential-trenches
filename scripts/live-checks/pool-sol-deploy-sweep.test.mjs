@@ -1,7 +1,9 @@
-// Replays pool-sol-deploy-sweep.answers.json through the live check: the recorded good answer (the devnet stop run,
-// read on two devnet RPCs) passes; the same recording with one thing changed fails: the funder holding a lamport, a
-// sweep landing before the funding, a sweep that failed, a sweep to another address, the last sweep leaving lamports,
-// a transaction of the record left unsettled, a run that was not stopped, and RPCs that are not two devnet operators.
+// Replays pool-sol-deploy-sweep.answers.json through the live check: the recorded good answer (the devnet stop run's
+// journal, read on two devnet RPCs) passes; the same recording with one thing changed fails: the funder holding a
+// lamport, a funding whose block time is before the stop, a sweep landing before the funding, a sweep that failed, a
+// sweep to another address, the last sweep leaving lamports, a transaction of the journal left unsettled, a run that
+// was not stopped, a journal with no stop time, a journal whose keys are kept, and RPCs that are not two devnet
+// operators.
 //   node --test scripts/live-checks/pool-sol-deploy-sweep.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -40,11 +42,21 @@ test("the recorded good answer passes, every line ok on both RPCs", async () => 
   const r = await run(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(funding && sweeps.length >= 1);
-  assert.equal(r.lines.filter((l) => / on https:/.test(l)).length, 2 * (1 + D.txs.length + 1 + 2 * sweeps.length + 1 + 1));
+  assert.equal(r.lines.filter((l) => / on https:/.test(l)).length, 2 * (1 + D.txs.length + 2 + 2 * sweeps.length + 1 + 1));
 });
 
 test("a funder holding a lamport fails", async () => {
   fails(await run(mutate("getBalance", D.funder, (r) => ({ ...r, value: 1 }))), /the funder \S+ holds 1 lamports at finalized/);
+});
+
+test("a funding whose block time is before the stop fails", async () => {
+  const before = Math.floor(Date.parse(D.stopped_at) / 1000) - 1;
+  fails(await run(mutate("getTransaction", funding.signature, (r) => ({ ...r, blockTime: before }))), /landed after the stop: block time \d+ >= \d+/);
+});
+
+test("a journal whose keys are kept, or with no stop time, fails", async () => {
+  fails(await run(A.good, { ...D, keys: { ...D.keys, state: "kept", why: ["the funder holds 5000 lamports"] } }), /the run's keys were removed: kept/);
+  fails(await run(A.good, { ...D, stopped_at: undefined }), /the journal says when the stop came/);
 });
 
 test("a sweep in a slot before the funding's fails", async () => {

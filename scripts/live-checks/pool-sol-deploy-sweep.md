@@ -1,9 +1,8 @@
 CARD pool-sol-deploy-sweep / live: PASS
 Money path: yes
-Tx: solana-devnet 2u9PLJniLvFRs6tkf9ghfmiq2NH7GTRYVz91F55Q4H9vcAhMDGGWuPJXDeRWawDr7Y7d6Qo5hx2Q33h9M1Dx1jo
-Tx: solana-devnet 38jNYChqyU1eyWo6kHG2g1qBvmxdg8FPdWDyjGcjG28wBav6n2LThPZp2BXa8RiKiULmXe5TVBto1XAhg7NsMHVA
-Tx: solana-devnet 2FoxZAgVjJ1NvRAV2B35YGbTCwT54Lb9u89Wt8MNa41zUzMGeuNghuARDaLFtyXm1e2jYrNSB6z5xF3MQHFsCZGG
+Tx: solana-devnet 2urmWKB7QqY8QDe9DUozHD5E8A7LBPuvLAZBFmviXxi3KsfFZYpN75WU9vrYTfcASs2TqUs7g8jvhm4UJvoxfP5g
+Tx: solana-devnet 5VLYV6ibcnQ2mmFkrFpYdSmz9P1fk1yTHzEw1uWi1fXe33GbXZDF3US4K7EVPyJRteNLDxzn3K567fi2TFhakYwb
 
-The run: contracts/pool-solana/scripts/deploy.mjs on Solana devnet, stopped by SIGHUP during its funding wait, record written 2026-11-05T00:46:50.941Z. Its steps, in the order of the Tx lines above: funding (to the funder), sweep (the funder's rest back), sweep (the funder's rest back).
-The funding came after the stop, from the team's devnet wallet 3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx; the run watched the funder's balance for 60 s, swept it back there, and removed its keys only after reading the funder at 0. This live check reads the funder FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL at 0 lamports on https://api.devnet.solana.com and https://solana-devnet.api.onfinality.io/public. Its program id 9GiAwNMgKRSWEZqsq9FvhkJWt5EiMTu8U1sqGgdUMNFY was never deployed.
+The run: contracts/pool-solana/scripts/deploy.mjs on Solana devnet, stopped by SIGHUP at 2026-11-05T03:40:18.756Z during its funding wait, before any funding; it kept its keys. Its steps, in the order of the Tx lines above: funding (to the funder), sweep (kept keys, to the funding's source 3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx).
+The funding came after the run had ended, from the team's devnet wallet; the journal's --sweep-kept command swept it back to the funding's sender and removed the keys once the funder read 0. This live check reads the funder EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR at 0 lamports on https://api.devnet.solana.com and https://solana-devnet.api.onfinality.io/public. Its program id J7KpQFVgMfjXf8d3geSuAznopjUfy3zVHCQ7RkzCBuk7 was never deployed.
 The live check reads each Tx line above finalized with no error on both RPCs, every sweep after the funding's slot.
