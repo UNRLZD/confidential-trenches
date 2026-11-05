@@ -33,6 +33,7 @@ export const CHANGED = [
   "scripts/live-checks/delete-refund-readback.mjs",
   "scripts/live-checks/delete-refund-readback.sweep.mjs",
   "scripts/live-checks/evm-buy-hookdata-fee.mjs",
+  "scripts/live-checks/evm-quote-warm-round.mjs",
   "scripts/live-checks/evm-sell-v4.mjs",
   "scripts/live-checks/evm-venues-pin.mjs",
   "scripts/live-checks/helper-abuse-limits.mjs",

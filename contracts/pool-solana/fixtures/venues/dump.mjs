@@ -32,6 +32,11 @@ const RPCS = process.env.VENUE_RPCS ? process.env.VENUE_RPCS.split(",") : ["http
 // An RPC's error or rate limit is retried 3 times, after 0.5, 1 and 2 s, before the run fails as an RPC failure.
 const RETRIES = 3;
 const BACKOFF_MS = Number(process.env.VENUE_RPC_BACKOFF_MS ?? 500);
+// Each try's deadline, the answer's whole body included: a program's code is up to 10 MB, read whole on a slow public
+// RPC within it; one that stops answering, even mid-body, fails that try (pool-solana's job 126859622621 waited 29
+// minutes on one, until its cancel). The worst read is (RETRIES + 1) tries of RPC_TIMEOUT_MS plus the backoff.
+// VENUE_RPC_TIMEOUT_MS is for dump.test.mjs.
+const RPC_TIMEOUT_MS = Number(process.env.VENUE_RPC_TIMEOUT_MS ?? 60_000);
 const SPEND = 5_000_000n;
 const SLIPPAGE_BPS = 300n;
 const PUMP_SELL = [51, 230, 133, 164, 1, 127, 131, 173];
@@ -53,13 +58,13 @@ async function rpc(url, method, params) {
   for (let i = 0; i <= RETRIES; i++) {
     if (i > 0) await new Promise((x) => setTimeout(x, BACKOFF_MS * 2 ** (i - 1)));
     try {
-      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
       if (!r.ok) { last = `HTTP ${r.status}`; continue; }
       const j = await r.json();
       if (j.error) { last = `error ${JSON.stringify(j.error)}`; continue; }
       return j.result;
     } catch (e) {
-      last = String(e?.cause?.code ?? e?.message ?? e);
+      last = e?.name === "TimeoutError" ? `no answer within ${RPC_TIMEOUT_MS} ms (TimeoutError)` : String(e?.cause?.code ?? e?.message ?? e);
     }
   }
   throw new RpcFailure(`${url} ${method}: ${last}, after ${RETRIES + 1} tries`);

@@ -2,14 +2,20 @@
 // src/trade/evm/buy.ts, and the builder's admission of a device-quoted route's v4 middles in
 // src/trade/evm/buy-unpinned.ts), one at a time, and runs the test named for it in test/evm-quote.test.ts or
 // test/evm-quote-attacks.test.ts: each named test passes on the code as it is and fails on every mutant. The mutants are
-// made in a copy of the kit's sources and tests in a fresh temporary folder inside the kit (so the copy resolves the
+// made in copies of the kit's sources and tests in fresh temporary folders inside the kit (so each copy resolves the
 // same installed modules), removed at the end; the tree's own files are never changed. Exits 1 when a named test passes on its
 // mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly once.
+// The named tests are first run on the code as it is, then the mutants, each run judged the same way (one name alone, by
+// its exit code) and JOBS at once, each in its own copy (each run is mostly a process's start: about 1 s each, 279 one
+// after another took 266 s and the named tests one by one 140 s on GitHub's runner, readme-fresh-run at 47109a7).
+// Each line prints its time.
 //   node packages/kit/test/evm-quote-mutants.mjs     (a heavy job: run it on a machine with spare cores)
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const KIT = fileURLToPath(new URL("..", import.meta.url));
 const QUOTE = "src/checks/evm/quote.ts";
@@ -30,15 +36,15 @@ const E = "test/evm-pool-fee.test.ts";
 // [file, text, replacement, test file, the test that must fail]
 export const MUTANTS = [
   // two providers at one block they both hold, no more than 30 s old
-  [QUOTE, 'const same = a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial;', "const same = true;", Q, "Q2 "],
+  [QUOTE, 'const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial);', "const same = (a: Answer, b: Answer) => true;", Q, "Q2 "],
   [QUOTE, 'b.kind === "out" && a.amountOut === b.amountOut', 'b.kind === "out"', Q, "Q2 "],
   [QUOTE, 'b.kind === "revert" && a.partial === b.partial', 'b.kind === "revert"', Q, "Q2 "],
   [QUOTE, "const at = { blockHash: hash, requireCanonical: true };", "const at = { blockHash: hash };", Q, "Q1 "],
-  [QUOTE, "if (a.number - b.number > maxLag || b.number - a.number > maxLag) return refuse(", "if (false) return refuse(", R, "R5 "],
+  [QUOTE, "const near = (x: Block, y: Block) => x.number - y.number <= maxLag && y.number - x.number <= maxLag;", "const near = (x: Block, y: Block) => true;", R, "R5 "],
   [QUOTE, "if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {", "if (false) {", R, "R1b "],
   [QUOTE, "back.number !== lo.number || back.hash !== lo.hash || back.timestamp", "back.number !== lo.number || back.timestamp", R, "R5 "],
   [QUOTE, " || back.timestamp !== lo.timestamp || back.baseFeePerGas", " || back.baseFeePerGas", R, "R5 "],
-  [QUOTE, '? [a, rpcs[1], "provider 2"] : [b, rpcs[0], "provider 1"]', '? [a, rpcs[0], "provider 2"] : [b, rpcs[1], "provider 1"]', R, "R5 "],
+  [QUOTE, "const [lo, at] = a.number <= b.number ? [a, j] : [b, i];", "const [lo, at] = a.number <= b.number ? [a, i] : [b, j];", R, "R5 "],
   [QUOTE, 'if (confirmed.status === "rejected") throw confirmed.reason;', "", R, "R1b "],
   [QUOTE, "if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse(", "if (false) return refuse(", Q, "Q14 "],
   [QUOTE, "if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse(", "if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS + 1000) return refuse(", R, "R6 "],
@@ -67,7 +73,7 @@ export const MUTANTS = [
   [QUOTE, 'const from = h.from === "native" ? NATIVE : v.weth;', "const from = NATIVE;", R, "R9 "],
   [QUOTE, 'if (reference === null) return refuse("no_reference", "no standard pool and no pinned launchpad pool answers for the token");', "if (reference === null) return refuse(\"no_quote\", \"\");", R, "R4 "],
   // the union (review of 9a8265b, N1): the device's scan, the caller's list and the PoolManager's state of each
-  [QUOTE, ", signal: AbortSignal.timeout(timeoutMs) }", " }", R, "T4 "],
+  [QUOTE, "      const signal = until === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([AbortSignal.timeout(timeoutMs), until]);", "      const signal = until;", R, "T4 "],
   [QUOTE, "  if (r.length !== 2 + 2 * (64 + 32 * n)) return refuse(", "  if (false) return refuse(", R, "T6 "],
   [QUOTE, "const hints = (Array.isArray(a.hints) ?", "const hints = (false ?", R, "N1b "],
   [QUOTE, "if (!fine(rs)) return refuse(", "if (false) return refuse(", R, "N1a "],
@@ -113,7 +119,7 @@ export const MUTANTS = [
   [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "review of a9f1d32, HIGH: 16,000 and 16,381"],
   [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "T1b "],
   [QUOTE, "  const asked: EvmPoolSellQuoteRequest = { ...req };", "  const asked: EvmPoolSellQuoteRequest = req;", S, "the sell quote reads each field"],
-  [QUOTE, "if (rs !== null && fine(rs)) return rs.map(", "if (rs !== null) return rs.map(", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
+  [QUOTE, "if (rs !== null && fine(rs)) return void keep(rs);", "if (rs !== null) return void keep(rs);", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
   [QUOTE, "  if (b - scanHead > maxLag) {", "  if (false) {", R, "card evm-quote-head-watch: a scan that ends more than maxLag"],
   [QUOTE, '  const scanned = await scanOf([lower(token)], "all");', '  void agreedOnce();\n  const scanned = await scanOf([lower(token)], "all");', R, "card evm-quote-head-watch: the agreed block is picked once"],
   // the held head: reused only while read under EVM_HEAD_REUSE_MS ago, and held only once confirmed by number
@@ -147,9 +153,9 @@ export const MUTANTS = [
   [QUOTE, "  if (c0 !== t && c1 !== t) return null;", "  if (![c0, c1].includes(NATIVE) || (c0 !== t && c1 !== t)) return null;", R, "S3 "],
   // every scan of a quote shares one gate and one head; X's scan failing refuses the quote
   // (no mutant gives each scan its own gate: the token's scan and the one scan of every X run one after the other, so
-  // a gate per scan never has more in flight; G1 holds the gate's own limit)
+  // a gate per scan never has more in flight; G1 and TH3 hold the scan gate's own limit, T8b the reads' gate's)
   [QUOTE, "(headOfScan ??= scanHeadOf(scan, gate))", "scanHeadOf(scan, gate)", R, "G3 "],
-  [QUOTE, "if (next === undefined) free++;\n      else next();", "free++;\n      next?.();", R, "G1 "],
+  [QUOTE, "if (next === undefined) free++;\n      else next();", "free++;\n      next?.();", R, "T8b "],
   // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
   // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
   // build; scans as ORs within a provider's span; 429s asked again; each provider at most its limit at once
@@ -160,6 +166,109 @@ export const MUTANTS = [
   // prune's bound reads as giving nothing, so it is never quoted and its hook never replaced; S1c holds that rule)
   [QUOTE, "      if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);\n      continue;", "      return refuse(\"no_reference\", `${x} has no market`);", R, "B1 "],
   [QUOTE, "      if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);\n", "", R, "T3 "],
+  // the warm round (card evm-quote-warm-round): the last quote's later reads asked in the first round within the range,
+  // each counted only where the quote asks it again; its scans started beside the token's; a connect failure asked again
+  [QUOTE, "      const i = kept.get(readKey(r));", "      const i = undefined as number | undefined;", R, "W1 "],
+  [QUOTE, "  if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {", "  if (plan !== undefined) {", R, "W4 "],
+  [QUOTE, "  PLANS.set(planKey, {", "  if (false) PLANS.set(planKey, {", R, "W1 "],
+  [QUOTE, "(!kept.has(readKey(r)) || hit.has(first + j))", "(!kept.has(readKey(r)) || true)", R, "W5 "],
+  [QUOTE, "filter((r, j) => r.override === undefined && (", "filter((r, j) => (", R, "W6 "],
+  [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W1b "],
+  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (false) throw new Unreachable(", R, "T7b "],
+  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (e instanceof Error) throw new Unreachable(", R, "T7b "],
+  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (e instanceof TypeError) throw new Unreachable(", R, "T7b "],
+  [QUOTE, "!(e instanceof RateLimited || e instanceof Unreachable) || i === 3", "!(e instanceof RateLimited || e instanceof Unreachable) || i === 4", R, "T7b "],
+  // the providers (card evm-quote-warm-round): any two that agree decide; a spare is asked when one fails, is slow or
+  // differs; the quote's later rounds ask the two that agreed first; the next quote asks the fastest first
+  [QUOTE, "          const peers = got.filter((x) => same(x.v, v));", "          const peers = got.filter(() => true);", Q, "Q2 "],
+  [QUOTE, "          if (!contested && got.length >= 2) start();", "", R, "V3 "],
+  [QUOTE, "      if (x !== undefined && y !== undefined) {\n        try {", "      if (false) {\n        try {", R, "V2 "],
+  [QUOTE, "          failed ??= { e };\n          if (done) return;\n          start();", "          failed ??= { e };\n          if (done) return;", R, "V1 "],
+  [QUOTE, "timer = setTimeout(() => (done ? undefined : start()), first < 0", "timer = setTimeout(() => undefined, first < 0", R, "V1 "],
+  [QUOTE, "first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));", "EVM_HEDGE_MS);", R, "V5 "],
+  [QUOTE, "first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));", "first < 0 ? 4 * EVM_HEDGE_MS : EVM_HEDGE_MS);", R, "V5 "],
+  [QUOTE, "            first = performance.now() - t0[k]!;\n            arm();", "            first = performance.now() - t0[k]!;", R, "V1 "],
+  [QUOTE, "        order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "V1 "],
+  [QUOTE, "        failed ??= { e };\n        if (n === 0) unsure = true;\n        continue;", "        throw e;", R, "V3 "],
+  [QUOTE, "    return [slow, s?.ms ?? Number.MAX_VALUE, k] as const;", "    return [0, s?.ms ?? Number.MAX_VALUE, k] as const;", R, "V4 "],
+  [QUOTE, "s.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0;", "0;", R, "V4 "],
+  [QUOTE, "s.held > now ? 2 : ", "s.held > now ? 1 : ", R, "V4 "],
+  [QUOTE, "      if (out.some(limited)) s.held = performance.now() + EVM_HOLD_MS;\n      else s.ms", "      s.ms", R, "V4 "],
+  [QUOTE, "      s.held = performance.now() + EVM_HOLD_MS;\n      throw e;", "      throw e;", R, "V4 "],
+  // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the
+  // block's confirmation (M-2); a provider that differs from what the quote used is held; the spare's timer counts
+  // from its own request (L-2); the pinned quote ranks (M14), a spare is asked while none answered (M15)
+  [QUOTE, "          if (vote && peers.length < got.length && !contested) {", "          if (false) {", R, "V6 "],
+  [QUOTE, "  const need = Math.floor(list.length / 2) + 1;\n  return new Promise", "  const need = 2;\n  return new Promise", R, "V6 "],
+  [QUOTE, "          if (contested && peers.length >= need) return win(", "          if (contested && peers.length >= 2) return win(", R, "V6 "],
+  [QUOTE, "      for (const x of got) if (held(x.v, g.v, h.v)) HOLD.get(list[x.k]!)?.();", "", R, "V11 "],
+  [QUOTE, "= (x, a, b) => !same(a, x) && !same(b, x),", "= () => false,", R, "V11 "],
+  [QUOTE, "    if (hold !== undefined) HOLD.set(f as unknown as EvmRpc, hold);", "", R, "V11 "],
+  [QUOTE, "  HOLD.set(f, () => void (speedOf(url).held = performance.now() + EVM_HOLD_MS));", "", R, "V11 "],
+  [QUOTE, "    const enough = () => holds >= (strict() ? need : 2);", "    const enough = () => holds >= 2;", R, "V10 "],
+  [QUOTE, "    if (enough()) return against.forEach((k) => HOLD.get(list[k]!)?.());", "    if (enough()) return;", R, "V7 "],
+  [QUOTE, "        against.push(others[n]!);\n      } else holds++;", "        return refuse(\"rpc_disagree\", \"another block\");\n      } else holds++;", R, "V7 "],
+  [QUOTE, "            first = performance.now() - t0[k]!;", "            first = performance.now() - t0[0]!;", R, "V8 "],
+  [QUOTE, "      if (started >= 2) arm();\n", "", R, "V8 "],
+  [QUOTE, "return evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch),", "return evmPoolBuyQuoteWith(asked, evmProviders(p, fetch),", R, "V9 "],
+  // the re-review of fd9dd16: no confirm from the other head's provider asks a majority (MEDIUM-1); a head is held only
+  // more than maxLag below the pair, and heads are no vote (LOW-1, U6); a contested round out of reach ends at once
+  // (U1), and so does a confirm (U5)
+  [QUOTE, "    const enough = () => holds >= (strict() ? need : 2);", "    const enough = () => holds >= (against.length > 0 ? need : 2);", R, "V12 "],
+  [QUOTE, "        if (n === 0) unsure = true;", "", R, "V12 "],
+  [QUOTE, "    let holds = 1;\n", "    let holds = 2;\n", R, "V12 "],
+  [QUOTE, "    let holds = 1;\n", "    let holds = 0;\n", R, "V3 "],
+  [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => !near(x, a) && !near(x, b),", R, "V13 "],
+  [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    () => false,", R, "V13 "],
+  [QUOTE, "      // a head past maxLag is a missing answer, not a vote\n      false,\n", "", R, "V13 "],
+  [QUOTE, "      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails < need) return lose();\n", "", R, "V14 "],
+  [QUOTE, "      if (strict() && holds + others.length - n < need) break;\n", "", R, "V15 "],
+  // the re-review of 47109a7: the held head's edges (E3, E4) and the confirm's early stop without a vote against (E6)
+  [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => x.number + maxLag <= (a.number <= b.number ? a.number : b.number),", R, "V13 "],
+  [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? b.number : a.number),", R, "V13 "],
+  [QUOTE, "      if (strict() && holds + others.length - n < need) break;", "      if (against.length > 0 && holds + others.length - n < need) break;", R, "V15 "],
+  // the scan's spans: each that came back is kept, also when another failed, never past a head named beyond maxLag;
+  // a throttled span is asked again whole
+  [QUOTE, "  await settle(jobs.map((j) => one(j))).catch((e) => failing(e));", "  await settle(jobs.map((j) => one(j)));", R, "J1 "],
+  [QUOTE, "    if (a > at) out.push([at, a - 1]);", "", R, "J1 "],
+  [QUOTE, "      if (scanHead - b.number <= maxLag) commit();", "      commit();", R, "J3 "],
+  // the review of bc189de: a kept scan started early waits for the quote's pick when it ends (L-3) and when it fails
+  // (M12); a span is kept only for the currencies of the request that came back (M20)
+  [QUOTE, "v.scan, at, v.maxLag, gate,", "v.scan, agreedHead, v.maxLag, gate,", R, "J4 "],
+  [QUOTE, "(headOfScan ??= scanHeadOf(scan, gate)), at);", "(headOfScan ??= scanHeadOf(scan, gate)), agreedHead);", R, "J5 "],
+  [QUOTE, "for (const g of got) if (g.part.includes(e)) e.spans", "for (const g of got) e.spans", R, "J6 "],
+  // fold 5: the scan's gate, per quote: a 429, a named limit or a timeout halves its parallelism (to 1), answers raise
+  // it again; a throttle holds the next requests for its Retry-After or a doubling backoff, spends no try, and past
+  // the quote's bound refuses (re-review of 037627c, MEDIUM-1; GitHub's runner at 7d6ec94: the cold quote's getLogs
+  // timed out at 20 at once)
+  [QUOTE, "          if (e instanceof RateLimited) {\n            throttle(sent, e.afterMs);\n            continue;", "          if (e instanceof RateLimited) {\n            throttle(sent, e.afterMs);\n            if (++i >= tries) throw e;\n            continue;", R, "TH1 "],
+  [QUOTE, "        if (Array.isArray(out) && out.some(limited)) {\n          throttle(sent, null);\n          continue;", "        if (false) {\n          throttle(sent, null);\n          continue;", R, "J2 "],
+  [QUOTE, 'retryAfterMs(res.headers.get("retry-after"))', "null", R, "TH1 "],
+  [QUOTE, "Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1))", "SCAN_BACKOFF_MS", R, "TH2 "],
+  [QUOTE, "SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1)", "SCAN_BACKOFF_MS * 2 ** strikes", R, "TH2 "],
+  [QUOTE, "    limit = sst = Math.max(1, Math.floor(limit / 2));", "    sst = limit;", R, "TH3 "],
+  [QUOTE, "      else if (flying < Math.floor(limit)) {", "      else if (true) {", R, "TH3 "],
+  [QUOTE, "limit = Math.min(parallel, limit < sst ? limit + 1 : limit + 1 / limit);", "limit = Math.min(parallel, limit);", R, "TH3 "],
+  [QUOTE, "      if (resumeAt > untilMs) return refuse(", "      if (false) return refuse(", R, "TH4 "],
+  [QUOTE, '          if ((e as Error | null)?.name === "TimeoutError") congest(sent);', "", R, "TH5 "],
+  [QUOTE, "    if (sent !== cuts) return false;", "", R, "TH6 "],
+  [QUOTE, "      if (now >= untilMs) throw past();", "", R, "TH7 "],
+  [QUOTE, "    const wait = Math.max(afterMs ?? 0, Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1)));", "    const wait = afterMs ?? Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1));", R, "TH8 "],
+  [QUOTE, "          if (e instanceof Unreachable) {", "          if (false) {", R, "TH9 "],
+  // re-review of b282ce0: a request's refusals counted, the fourth in a row refusing it, never its halves (LOW-C); a
+  // browser's fetch failure, a TypeError with no cause, asked again whole too (LOW-B); the bound's race and abort, the
+  // refusals' backoff and the per-round list, each held by a named test (LOW-A)
+  [QUOTE, "            if (++refused >= SCAN_TRIES) throw new ScanRefused(", "            if (false) throw new ScanRefused(", R, "B1r "],
+  [QUOTE, "        if (e instanceof ScanRefused) throw e;\n", "", R, "B1r "],
+  [QUOTE, "            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));", "            await nap(0);", R, "B1r "],
+  [QUOTE, "            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));", "            await nap(0);", R, "B1a "],
+  [QUOTE, 'if (e instanceof TypeError && (cause === undefined || (typeof code === "string" && CONNECT_ERRORS.has(code))))', 'if (e instanceof TypeError && typeof code === "string" && CONNECT_ERRORS.has(code))', R, "B8 "],
+  [QUOTE, "    if (left >= EVM_RPC_TIMEOUT_MS) return rpc(calls);", "    return rpc(calls);", R, "B2a "],
+  [QUOTE, "        stop.abort(e);\n", "", R, "B2a "],
+  [QUOTE, "    list = [...rpcs];\n", "", R, "B6 "],
+  [QUOTE, "    resumeAt = Math.max(resumeAt, performance.now() + wait);", "    resumeAt = performance.now() + wait;", R, "TH10 "],
+  [QUOTE, "        strikes = 0;\n", "", R, "TH11 "],
+  [QUOTE, "  return Number.isFinite(at) && /[a-z]/i.test(t) ? Math.max(0, at - now) : null;", "  return null;", R, "TH12 "],
   [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "X3 "],
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
   [QUOTE, "    return x < y ? x : y;", "    return x;", R, "H2 "],
@@ -168,15 +277,15 @@ export const MUTANTS = [
   [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
   [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1a "],
   [QUOTE, "const fromScan = scanned?.pools.get(lower(token)) ?? [];", "const fromScan: EvmPoolKey[] = [];", R, "N1a "],
-  [QUOTE, "from: cached === undefined || cached.to < floor ? floor : cached.to + 1,", "from: floor,", R, "G4 "],
+  [QUOTE, "gaps: gapsOf(spans, floor, head),", "gaps: [[floor, head]] as Spans,", R, "G4 "],
   [QUOTE, "  return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };", "  commit();\n  return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };", R, "S2b "],
   [QUOTE, "    const sc = await scanOf(cs, \"markets\");", "    const sc = await (scanOf(cs, \"markets\") ?? Promise.resolve(null)).catch(() => null);", R, "G2 "],
   [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]))", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]))", R, "S3c "],
   [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
   [QUOTE, "    if (res.status === 429) throw new RateLimited(", "    if (false) throw new RateLimited(", R, "T7 "],
-  [QUOTE, "      if (!(e instanceof RateLimited) || i === 3) return refuse(", "      if (true) return refuse(", R, "T7 "],
+  [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {", "      if (true) {", R, "T7 "],
   [QUOTE, "      if (i < 3 && Array.isArray(out) && out.some(limited)) throw", "      if (false) throw", R, "T7 "],
-  [QUOTE, "    return (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));", "    return (calls: readonly EvmRpcCall[]) => rpc(calls);", R, "T8 "],
+  [QUOTE, "    const f = (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));", "    const f = (calls: readonly EvmRpcCall[]) => rpc(calls);", R, "T8 "],
   [BUYU, "  if (!(quoted && route.venue === \"uniswap-v4\")) {", "  if (!quoted) {", R, "D1 "],
   [BUYU, "  return routeData(chain, route, true);", "  return routeData(chain, route, false);", R, "D1 "],
   [BUYU, "  const { data, token: buys } = routeData(chain, route, quoted);", "  const { data, token: buys } = routeData(chain, route, false);", R, "D1 "],
@@ -207,14 +316,14 @@ export const MUTANTS = [
   // the request and the providers
   [QUOTE, "amountIn <= 0n || amountIn >= MAX_IN", "amountIn <= 0n", Q, "Q8 "],
   [QUOTE, "(slippageBps as number) < 0 || (slippageBps as number) >= 10000", "(slippageBps as number) < 0", Q, "Q8 "],
-  [QUOTE, "|| rpcsIn[0] === rpcsIn[1]) {", ") {", Q, "Q8 "],
+  [QUOTE, "|| new Set(rpcsIn).size !== rpcsIn.length) {", ") {", Q, "Q8 "],
   [QUOTE, 'if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);', "", Q, "Q8 "],
-  [QUOTE, 'if (hosts[0] === hosts[1]) return refuse("bad_request", "the two providers are on one host");', "", Q, "Q8 "],
+  [QUOTE, 'if (new Set(hosts).size !== hosts.length) return refuse("bad_request", "two providers are on one host");', "", Q, "Q8 "],
   [QUOTE, 'if (typeof url !== "string" || !/^https:\\/\\//.test(url)) return refuse(', "if (false) return refuse(", Q, "Q8 "],
   // a provider's answer
   [QUOTE, "if (!Number.isSafeInteger(o) || o < 0 || o + 32 > len)", "if (!Number.isSafeInteger(o) || o < 0)", Q, "Q9 "],
   [QUOTE, "if (e + 96 + dl > len) return refuse(", "if (false) return refuse(", Q, "Q9 "],
-  [QUOTE, "if (!Array.isArray(out) || out.length !== calls.length)", "if (!Array.isArray(out))", Q, "Q9 "],
+  [QUOTE, "\n  if (!Array.isArray(out) || out.length !== calls.length)", "\n  if (!Array.isArray(out))", Q, "Q9 "],
   // the sell quote: no route from a caller, the device's own pool, minOut, probe and age
   [QUOTE, 'if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");', "", S, "planted: a server's route"],
   [QUOTE, "QUOTED_SELLS.add(quote);", "", S, "planted: a server's route"],
@@ -333,9 +442,9 @@ export const MUTANTS = [
   [QD, "const feeCap = asked === undefined ? feeMax : asked;", "const feeCap = asked === undefined ? feeMax - 1n : asked;", S, "planted: the sender's fee cap"],
   [QUOTE, 'if (typeof boughtBlock !== "bigint" || boughtBlock < 1n) return refuse(', "if (false) return refuse(", S, "planted: a sell quote takes the buy's block"],
   [QUOTE, "boughtBlock < 1n) return refuse(", "boughtBlock < 0n) return refuse(", S, "planted: a sell quote takes the buy's block"],
-  [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "break;", R, "L5 "],
-  [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "if (a.number >= minBlock || b.number >= minBlock) break;", R, "L5 "],
-  [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "if (a.number > minBlock && b.number > minBlock) break;", R, "L5 "],
+  [QUOTE, "if (got.a.number >= minBlock && got.b.number >= minBlock) break;", "break;", R, "L5 "],
+  [QUOTE, "if (got.a.number >= minBlock && got.b.number >= minBlock) break;", "if (got.a.number >= minBlock || got.b.number >= minBlock) break;", R, "L5 "],
+  [QUOTE, "if (got.a.number >= minBlock && got.b.number >= minBlock) break;", "if (got.a.number > minBlock && got.b.number > minBlock) break;", R, "L5 "],
   [QUOTE, "    if (left() <= 0) return late();\n", "", R, "L5b "],
   [QUOTE, "export const EVM_MIN_BLOCK_WAIT_MS = 30_000;", "export const EVM_MIN_BLOCK_WAIT_MS = 3_000;", R, "L5b "],
   [QUOTE, "const EVM_MIN_BLOCK_EVERY_MS = 500;", "const EVM_MIN_BLOCK_EVERY_MS = 1_000;", R, "L5b "],
@@ -343,7 +452,7 @@ export const MUTANTS = [
   [QUOTE, "    await new Promise((r) => setTimeout(r, EVM_MIN_BLOCK_EVERY_MS));\n", "", R, "L5b "],
   [QUOTE, "setTimeout(r, EVM_MIN_BLOCK_EVERY_MS)", "setTimeout(r, 0)", R, "L5b "],
   // review fold 1 M2 and L2: one deadline over the reads and the sleeps; the age at the clock after the wait
-  [QUOTE, "const heads = minBlock === 0n ? await read : await within(read, left(), late);", "const heads = await read;", R, "M2 "],
+  [QUOTE, "    got = minBlock === 0n ? await round : await within(round, left(), late);", "    got = await round;", R, "M2 "],
   [QUOTE, "const left = () => EVM_MIN_BLOCK_WAIT_MS - (mono() - t0);", "const left = () => EVM_MIN_BLOCK_WAIT_MS;", R, "M2 "],
   [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs;", R, "L2 "],
   // the age from the quote's entry, the scan's time included, on a sell and a buy (review fold 2, LOW-1)
@@ -361,57 +470,91 @@ export const MUTANTS = [
   [SELLU, "      word(BigInt(chainId)),", "      word(0n),", S, "planted: the sim signer"],
 ];
 
+const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
+const run$ = promisify(execFile);
+// each test run's own environment: without the node --test runner's NODE_TEST_CONTEXT, which turns a child's report
+// from TAP into the runner's own stream (the runner's test calls these judges from inside node --test)
+const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT"));
+// The longest one test run takes before it is killed and counts as failed: a mutant that leaves a wait with no end
+// (the scan gate's bound removed, a Retry-After of 120 s asked again for ever) never holds up the sweep
+const RUN_MS = 60_000;
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`
 let lastFail = "";
-function run(dir, file, name) {
-  const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, file];
+async function run(dir, file, name) {
   try {
-    // a mutant that hangs its test (a wait with no sleep) is killed by the time limit, never a sweep that hangs
-    const out = execFileSync("node", args, { cwd: dir, stdio: "pipe", encoding: "utf8", timeout: 300_000 });
-    return /^# pass ([1-9]\d*)$/m.test(out) ? "pass" : "none";
+    const { stdout } = await run$("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, env: ENV, encoding: "utf8", maxBuffer: 1 << 26, timeout: RUN_MS });
+    // a test of that name passed: a file that runs no test still reports itself as one that passed
+    const ran = [...stdout.matchAll(/^\s*ok \d+ - (.*?)(?: # .*)?$/gm)].some((m) => m[1].replace(/\\#/g, "#").replace(/\\\\/g, "\\").startsWith(name));
+    return ran ? "pass" : "none";
   } catch (e) {
     lastFail = `${e.stdout ?? ""}${e.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
     return "fail";
   }
 }
+/** Each named test's "pass", "fail" or "none" on the code as it is, judged as the kill phase judges a mutant: each name
+ *  alone, by its run's exit code (`run`), as many at once as there are copies `dirs` (re-review of 037627c, LOW-1: one
+ *  run per file read from its TAP lines passed a test that passed and then threw from a timer, which alone exits 1).
+ *  `byFile` maps a test file to its names. */
+export async function baseline(dirs, byFile) {
+  const jobs = [...byFile].flatMap(([file, names]) => names.map((name) => ({ file, name })));
+  const out = [];
+  let next = 0;
+  await Promise.all(dirs.map(async (dir) => {
+    for (let i = next++; i < jobs.length; i = next++) out[i] = { ...jobs[i], r: await run(dir, jobs[i].file, jobs[i].name) };
+  }));
+  return out;
+}
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  // the copy: the kit's sources, tests and package file, with its installed modules linked
-  const dir = mkdtempSync(join(KIT, ".evm-quote-mutants-"));
+  const JOBS = Math.max(1, Math.min(4, availableParallelism()));
+  const t0 = performance.now();
+  const s = (t) => `${((performance.now() - t) / 1000).toFixed(1)} s`;
+  // the copies: the kit's sources, tests and package file, with its installed modules linked
+  const dirs = [];
   let bad = 0;
   try {
-    for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
-    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
-    const named = [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"));
-    const t0 = performance.now();
-    for (const [file, t] of named) {
-      const r = run(dir, file, t);
+    for (let w = 0; w < JOBS; w++) {
+      const dir = mkdtempSync(join(KIT, ".evm-quote-mutants-"));
+      dirs.push(dir);
+      for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
+    }
+    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
+    const byFile = new Map();
+    for (const m of MUTANTS) byFile.set(m[3], [...new Set([...(byFile.get(m[3]) ?? []), m[4]])]);
+    const tb = performance.now();
+    for (const { file, name: n, r } of await baseline(dirs, byFile)) {
       if (r !== "pass") {
-        console.log(`FAIL "${t}" in ${file} ${r === "none" ? "names no test" : `fails on the code as it is:\n${lastFail}`}`);
+        console.log(`FAIL "${n}" in ${file} ${r === "none" ? "names no test" : "fails on the code as it is"}`);
         bad++;
       }
     }
-    console.log(`the ${named.length} named tests on the code as it is: ${Math.round(performance.now() - t0)} ms`);
+    console.log(`the ${[...byFile.values()].flat().length} named tests on the code as it is: ${s(tb)}`);
     if (bad === 0) {
-      MUTANTS.forEach(([file, find, repl, tf, t], i) => {
-        const s = src.get(file);
-        if (s.split(find).length !== 2) {
-          console.log(`FAIL mutant ${i + 1}: its text is not in ${file} exactly once`);
-          bad++;
-          return;
+      let next = 0;
+      const worker = async (dir) => {
+        for (let i = next++; i < MUTANTS.length; i = next++) {
+          const [file, find, repl, tf, t] = MUTANTS[i];
+          const sf = src.get(file);
+          if (sf.split(find).length !== 2) {
+            console.log(`FAIL mutant ${i + 1}: its text is not in ${file} exactly once`);
+            bad++;
+            continue;
+          }
+          const tm = performance.now();
+          writeFileSync(join(dir, file), sf.replace(find, repl));
+          const r = await run(dir, tf, t);
+          writeFileSync(join(dir, file), sf);
+          console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"} (${s(tm)})`);
+          if (r !== "fail") bad++;
         }
-        writeFileSync(join(dir, file), s.replace(find, repl));
-        const t0 = performance.now();
-        const r = run(dir, tf, t);
-        const ms = Math.round(performance.now() - t0);
-        writeFileSync(join(dir, file), s);
-        console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"} (${ms} ms)`);
-        if (r !== "fail") bad++;
-      });
+      };
+      const tm = performance.now();
+      await Promise.all(dirs.map((d) => worker(d)));
+      console.log(`${MUTANTS.length} mutants, ${JOBS} at once: ${s(tm)}`);
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
-  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test` : `${bad} problem(s)`);
+  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test (${s(t0)})` : `${bad} problem(s)`);
   process.exit(bad === 0 ? 0 : 1);
 }
