@@ -29,8 +29,13 @@ withhold or reorder. W (the fresh wallet) and its signature belong to the user's
 | Info | 7 |
 
 No finding loses or freezes a user's money, spends a note twice, or lets anyone but W choose how a proof is used.
-Neither pool has an admin, owner, setter, pause or upgrade path. No code was changed by this review, so no deploy pin
-moves.
+Neither pool has an admin, owner, setter, pause or upgrade path.
+
+Fixed on this card: L-1 (commit a6ee435c, SellDelegate binds the fee's payee) and I-7 (the same commit names the
+Sell's deadline unix seconds). Neither pool contract changed: only SellDelegate's init code moves (see Builds). L-2
+goes to a kit card (precommit-taken-recover), with standing tests here; I-1 to I-6 need no change. An independent
+scan (pool-scan-3, at a6ee435c) found no High or Medium, reproduced L-2 and judged the L-1 fix sound. The fix round
+also added invariant fuzzing of the EVM pool and a Slither CI job (see the last section).
 
 ## Findings
 
@@ -45,11 +50,15 @@ moves.
 - **Impact:** W never pays more than the `feeCap` it signed, so no user money is lost beyond what W agreed to. The
   helper loses its fee and the gas of the reverted send. Base and Robinhood Chain have no public mempool, so only
   the sequencer can see a pending send.
-- **Fix (not made):** bind the payee. Add `address sender` (or a `feeRecipient`) to `Sell` and its typehash, and pay
-  that address, as the pool's own release binds `feeRecipient` through the context
-  (`contracts/pool-evm/src/PrivacyPool.sol:128`). This changes the signed type, so the kit's
-  `packages/kit/src/trade/evm/sell-unpinned.ts` and its vectors change with it. The delegate holds no money and W
-  can point its EIP-7702 delegation at a new delegate at any time, so this can ship later without a pool redeploy.
+- **Fix (made, a6ee435c):** `Sell` gains `address feeRecipient`, after `feeCap`, in the struct and its typehash; the
+  fee is paid to it and never to `msg.sender`, as the pool's own release pays the `feeRecipient` its context binds
+  (`contracts/pool-evm/src/PrivacyPool.sol:128`); a zero or W fee recipient is refused (`InvalidFeeRecipient`), as
+  `PrivacyPool.sol:177` refuses its payees. The sender is not bound: orders are signed in advance, and a bound sender
+  would void every open order when the helper's sender key changes; with the payee fixed, a front-run gains its
+  sender nothing. The kit builds and signs the new type with the fee recipient a release on that chain binds
+  (the wallet's `EvmPoolPin.feeRecipient`). Tests: `test/Sell.t.sol` `test_aFrontRunWithTheCapPaysItsSenderNothing`
+  (fails at 1c074415, passes after), `test_aZeroOrSelfFeeRecipientIsRefused`, `test_aChangedFeeRecipientBreaksTheSignature`,
+  and the eleventh field in `test_eachChangedFieldIsRefused`.
 
 ### L-2. A deposit's precommitment can be taken first, which blocks that deposit (and so a signed sell)
 
@@ -67,6 +76,11 @@ moves.
   (Privacy Pools' `Entrypoint.sol` `usedPrecommitments`). The fix sits in the kit: on a `PrecommitmentAlreadyUsed`
   revert the device restores the stolen deposit as its own note (the restore finds it by the precommitment) and
   signs the next deposit or sell with the next precommitment.
+- **Held by:** `test_aCopiedPrecommitmentRevertsTheWholeSellAndWKeepsItsTokens` and
+  `test_aCopiedPrecommitmentRefusesTheOwnersDepositAndItKeepsItsEther` (`contracts/pool-evm/test/Sell.t.sol`), the
+  independent pool-scan-3 scanner's reproduction kept as the standing tests: W keeps its tokens and nonce, the owner
+  its ether, and the stranger's note is one only the precommitment's owner can spend. The kit's recovery is card
+  precommit-taken-recover.
 
 ### I-1. A release's fee is the sender's pick up to the cap, not an exact amount (EVM)
 
@@ -114,7 +128,8 @@ The pool's release deadline is in milliseconds (`RelayData.deadlineMs`, `contrac
 `deadline_ms`, `contracts/pool-solana/src/release.rs:184-186`). SellDelegate's is in seconds
 (`contracts/pool-evm/src/SellDelegate.sol:142`). The kit uses seconds for a sell
 (`packages/kit/src/trade/evm/sell-unpinned.ts:25`). A device that put milliseconds in a Sell would sign an order
-valid 1,000 times longer than meant. The Sell's NatSpec should say "unix seconds".
+valid 1,000 times longer than meant. Fixed in a6ee435c: the Sell's NatSpec says unix seconds. The build hashes no
+metadata (`foundry.toml`: `bytecode_hash = 'none'`, `cbor_metadata = false`), so a comment leaves the bytecode alone.
 
 ## Checked, with no finding
 
@@ -201,5 +216,35 @@ valid 1,000 times longer than meant. The Sell's NatSpec should say "unix seconds
 
 ## Builds at the review's sha
 
-Both suites and both builds were run at the sha this file is committed at; the card's report gives the commands,
-their output and the hashes.
+Both suites and both builds were run at the card's final sha; the card's report gives the commands and their
+output.
+
+- Solana: `blindfill_pool_solana.so` 79,088 bytes, sha256
+  `c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162` (cargo-build-sbf 4.4.0), the pinned code: no
+  Solana source changed on this card.
+- EVM init code (forge 1.7.1, solc 0.8.28, no metadata), keccak256:
+  - WithdrawalVerifier 1,975 bytes, `0x381df6043b0354b2ff24f5620391b26cb95612f896a258266f3bf798de21910f` (unchanged)
+  - PrivacyPoolSimple 10,142 bytes, `0x50a3d2fa107766537bc20545d46f052b8a355d0986a1e6a11eb55bfff0c733fb` (unchanged)
+  - UniswapV4Adapter 4,578 bytes, `0xedc0d3a854fc280089da75b2ed4baf8e3495fdb80eed6632ddfe5421ac96b6ef` (unchanged)
+  - UniswapV3Adapter 2,269 bytes, `0x1460db6407c61d6d70d3d423a04a46a512f5df9c00978987cd9f38a267db4f05` (unchanged)
+  - SellDelegate 9,479 bytes, `0x60ae724bd23ec2c11ee8faf40a6027b43e256e7719efe8d85646ed7079fc3132` (was 9,263 bytes,
+    `0x26b4629c9357f1e66d4f8622b2db9f1fcf15d9683d5b066a124a644d7c0b0eeb`: L-1)
+
+## Added in the fix round
+
+- **Invariant fuzzing of the EVM pool** (`contracts/pool-evm/test/Invariant.t.sol`, `[invariant]` in foundry.toml: 256
+  runs of 64 calls). A handler deposits, withdraws, buys and replays spent notes in random orders and amounts, from 3
+  depositors, 3 Ws, 3 fee recipients and 3 relayers, with fees up to twice the cap. The circuit is modelled
+  (`CircuitModel`, put over the real verifier's code after the pool checks its hash): a proof verifies only when it
+  spends a note the way the withdraw circuit allows, so the runs test the pool's own code, not the circuit. The
+  invariants: the pool's ETH equals deposits minus every payout, and equals its live notes; a nullifier spends once
+  (a replayed spent nullifier, in a proof the circuit allows, is refused); no release pays more than its note or other
+  than its value; a fee is at most the cap and only the fee recipient gets it, the relayers nothing; a release within
+  its cap and half its value lands. Each run must release at least once (`afterInvariant`).
+  Against two planted bugs in scratch copies: with `_spend`'s already-spent check removed, the nullifier, ETH and
+  good-release invariants fail on a replay; with withdraw's fee paid to msg.sender, the fee invariant fails. Green on
+  the real code with forge 1.7.1: 5 invariants, 256 runs, 16,384 calls each.
+- **Slither** (CI job `slither`, advisory). slither-analyzer 0.11.6 and its dependencies install from
+  `contracts/pool-evm/slither/requirements.txt` (hash-pinned) on GitHub's runner only; `scripts/ci/slither-gate.mjs`
+  fails on a High or Medium hit `contracts/pool-evm/slither/triage.json` does not list, or a listed entry Slither no
+  longer reports. The triage file is empty until the job's first run, which is its first read.
