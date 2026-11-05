@@ -497,17 +497,19 @@ export function hookOf(key: string): string | undefined {
 }
 
 /** The `eth_getLogs` filters for a pool's trades over blocks `from` to `to`: its swaps, and for a pool with a hook
- *  (Pool.hook) the token's transfers between the PoolManager and the hook, which are the hook's cut (hookTakes), and
- *  the pool's other PoolManager calls (POOL_CALLS), whose own transfers are no cut. One address a filter, never a list:
- *  api.blockvectra.com refuses an address list (-32602, 2026-11-04 20:2xZ). */
+ *  (Pool.hook) the token's transfers between the PoolManager and the hook, which are the hook's cut (hookTakes). A
+ *  hooked pool's swaps filter also takes the pool's other PoolManager calls (POOL_CALLS), whose own transfers are no
+ *  cut: each is the PoolManager's event with the pool's id as its first indexed topic, so they are one filter, never a
+ *  third read a span (card helper-robinhood-capacity fold 8: the third sent a cold dozen's reads past the wide
+ *  providers' paces to drpc's 100-block spans). One address a filter, never a list: api.blockvectra.com refuses an
+ *  address list (-32602, 2026-11-04 20:2xZ). */
 export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
   const swaps = swapFilter(pool, from, to, chain);
   if (pool.venue !== "v4" || pool.hook === undefined) return [swaps];
   const ends = [VENUES[chain].poolManager, pool.hook].map((a) => `0x${a.slice(2).padStart(64, "0")}`);
   return [
-    swaps,
+    { ...swaps, topics: [[TOPIC.swap4, ...POOL_CALLS], pool.id] },
     { address: pool.token, topics: [TOPIC.transfer, ends, ends], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
-    { address: VENUES[chain].poolManager, topics: [POOL_CALLS, pool.id], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
   ];
 }
 
