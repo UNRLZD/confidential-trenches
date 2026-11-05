@@ -14,7 +14,8 @@
 // - A failed read (card signpage-price-read-retry) is due again POOL_PRICE_RETRY_MS after it ends, doubled per failure
 //   in a row up to POOL_PRICE_REFRESH_MS, not POOL_PRICE_REFRESH_MS after its try: one slow provider leaves Bal without
 //   USD and Buy off for about a second, not 15 s (sign live runs 41920575578 and 41924297260, 4 Nov 22:00Z and 22:25Z).
-//   A good read ends the run of failures.
+//   A good read ends the run of failures. A read whose price is past its bound as it ends is a failure. A provider that
+//   answered 429 with Retry-After is not asked again sooner than it said, up to POOL_PRICE_RETRY_AFTER_MAX_MS.
 // - The app hears each new price: a read that ends calls the watchers (the API posts a state event when the state read
 //   then differs), and once its next read is due (POOL_PRICE_REFRESH_MS after it, or the failure's wait) calls them
 //   again, so a state read starts the next read while a pool shows. Signed out, or with no pool, no state names a chain
@@ -25,7 +26,7 @@
 import { POOL_USD_FEEDS, POOL_USD_MAX_AHEAD_S, poolUsdGoodUntilS, poolUsdPrice, type PoolUsdArgs, type PoolUsdChain, type PoolUsdPrice } from "../../kit/src/price/pool-usd.ts";
 import type { Chain } from "../../kit/src/orders/record.ts";
 import type { PoolStatePrice } from "../../kit/src/signpage/messages.ts";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 
 /** A chain's price is read again once its last try is this old: Pyth's SOL/USD (maxAgeS 60) is read at least three
  *  times inside its bound. Its sponsored feed published every 3 to 16 s in four reads on 4 Nov 14:44Z. */
@@ -33,6 +34,8 @@ export const POOL_PRICE_REFRESH_MS = 15_000;
 /** A failed read is due again this long after it ends, doubled per failure in a row up to POOL_PRICE_REFRESH_MS: soon
  *  enough that Buy is back within a second or two of one slow answer, and a provider still failing is asked less often. */
 export const POOL_PRICE_RETRY_MS = 1_000;
+/** A provider's Retry-After is waited up to this: one provider's header never leaves a chain unpriced for longer. */
+export const POOL_PRICE_RETRY_AFTER_MAX_MS = 60_000;
 
 export type PoolPriceDeps = {
   /** The chain's two RPCs of two providers, as the pool kinds read on; null: none, so no price. */
@@ -69,11 +72,13 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
   const tell = (): void => {
     for (const f of watchers) f();
   };
+  const usable = (chain: PoolUsdChain, p: PoolStatePrice): boolean => {
+    const nowS = now() / 1000;
+    return !(nowS > poolUsdGoodUntilS(chain, p.published_s, p.read_ms / 1000) || p.published_s - nowS > POOL_USD_MAX_AHEAD_S);
+  };
   const fresh = (chain: PoolUsdChain): PoolStatePrice | null => {
     const p = held.get(chain);
-    if (!p) return null;
-    const nowS = now() / 1000;
-    return nowS > poolUsdGoodUntilS(chain, p.published_s, p.read_ms / 1000) || p.published_s - nowS > POOL_USD_MAX_AHEAD_S ? null : p;
+    return p && usable(chain, p) ? p : null;
   };
   const start = (chain: PoolUsdChain): void => {
     const rpcs = deps.rpcs(chain);
@@ -81,15 +86,23 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
     const base = chain === "robinhood" ? deps.rpcs("base") : null;
     if (chain === "robinhood" && base === null) return;
     reading.add(chain);
+    /** The provider's Retry-After of a refused read, ms. */
+    let afterMs = 0;
     void Promise.resolve()
       .then(() => read({ chain, rpcs, nowMs: now(), ...(base ? { baseRpcs: base } : {}) }))
       .then((p) => {
         if (p.chain !== chain || p.price <= 0n) return false;
-        held.set(chain, { price: p.price.toString(), expo: p.expo, published_s: p.publishedS, read_ms: now() });
+        const got = { price: p.price.toString(), expo: p.expo, published_s: p.publishedS, read_ms: now() };
+        // a price past its bound as the read ends is a failed read: the last good one stands, and the next read is soon
+        if (!usable(chain, got)) return false;
+        held.set(chain, got);
         return true;
       })
       // refused (stale, disagreeing, unsure, unreachable): the last good read stands until its bound drops it
-      .catch(() => false)
+      .catch((e: unknown) => {
+        if (e instanceof SolanaRpcTransportError && e.afterMs !== null) afterMs = Math.min(e.afterMs, POOL_PRICE_RETRY_AFTER_MAX_MS);
+        return false;
+      })
       .then((ok) => {
         reading.delete(chain);
         let waitMs = POOL_PRICE_REFRESH_MS;
@@ -98,6 +111,8 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
           const n = (failed.get(chain) ?? 0) + 1;
           failed.set(chain, n);
           waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);
+          // a provider that said when to ask again is not asked sooner
+          waitMs = Math.max(waitMs, afterMs);
           due.set(chain, now() + waitMs);
         }
         tell();

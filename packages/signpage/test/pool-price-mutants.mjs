@@ -21,13 +21,24 @@ const NAME = "retry";
 export const MUTANTS = [
   ["export const POOL_PRICE_RETRY_MS = 1_000;", "export const POOL_PRICE_RETRY_MS = 15_000;"],
   ["if (p.chain !== chain || p.price <= 0n) return false;", "if (p.chain !== chain || p.price <= 0n) return true;"],
-  [".catch(() => false)", ".catch(() => true)"],
+  ["POOL_PRICE_RETRY_AFTER_MAX_MS);\n        return false;", "POOL_PRICE_RETRY_AFTER_MAX_MS);\n        return true;"],
   ["if (ok) failed.delete(chain);", "if (ok) {}"],
   ["waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);", "waitMs = POOL_PRICE_RETRY_MS;"],
   ["waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);", "waitMs = POOL_PRICE_RETRY_MS * 2 ** (n - 1);"],
   ["due.set(chain, now() + waitMs);", ""],
   ["after(waitMs, tell);", "after(POOL_PRICE_REFRESH_MS, tell);"],
   ["if (at !== undefined && now() < at) continue;", "if (false) continue;"],
+  // the cap of the backoff, the due time of a good read, a failed read's end told, the last good price kept on a failure,
+  // and a failure's wait counted from its end
+  ["waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);", "waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), 2 * POOL_PRICE_REFRESH_MS);"],
+  ["due.set(chain, now() + POOL_PRICE_REFRESH_MS);", "due.set(chain, now() + POOL_PRICE_RETRY_MS);"],
+  ["        tell();\n        after(waitMs, tell);", "        if (ok) tell();\n        after(waitMs, tell);"],
+  ["POOL_PRICE_RETRY_AFTER_MAX_MS);\n        return false;", "POOL_PRICE_RETRY_AFTER_MAX_MS);\n        held.delete(chain);\n        return false;"],
+  ["due.set(chain, now() + waitMs);", "due.set(chain, (due.get(chain) ?? now()) - POOL_PRICE_REFRESH_MS + waitMs);"],
+  // a price past its bound as the read ends is a failure, and a provider's Retry-After is waited, up to its cap
+  ["if (!usable(chain, got)) return false;", ""],
+  ["waitMs = Math.max(waitMs, afterMs);", ""],
+  ["Math.min(e.afterMs, POOL_PRICE_RETRY_AFTER_MAX_MS)", "e.afterMs"],
 ];
 
 // a child test run must not inherit this process's own node --test context
