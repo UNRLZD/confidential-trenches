@@ -310,8 +310,10 @@ async function spendIn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierH
 /** The entries of W's history one pass reads at most, on each RPC (fold 3, review LOW 4: entries, not pages): a pass
  *  ends, and the next goes on from where it stopped (HistoryPlaces), so a history of any length is read to its end. */
 export const HISTORY_PASS = 2_000;
-/** One RPC's place in W's history between passes, and the spend once found (it never changes once final). */
-type Place = { before?: string; found?: { sig: string; mine: boolean } };
+/** One RPC's place in W's history between passes (the last entry read, moved on after each one, so a pass that fails
+ *  part way keeps what it read: fold 5, review MEDIUM), and the spend's signature once found. A find is only a place:
+ *  each pass reads it again on the RPC asking now, so one RPC's find never stands for another's (fold 5, review LOW). */
+type Place = { before?: string; found?: string };
 /** The places of W's history read so far, kept by the caller across the passes of one owed send (pool-testnet keeps
  *  one per op): by the RPC's index among the page's two, W, the note's nullifier hash and the attempt's context (a
  *  found spend's `mine` is that context's). Never by the RPC function: the page makes new ones on every pass (fold 4,
@@ -327,7 +329,12 @@ const placeOf = (places: HistoryPlaces, at: string): Place => {
  *  the nullifier hash, and whether it is this attempt's; null when this pass found none (the history read to its end,
  *  or this pass's share of it read and the rest left for the next). */
 async function spendOn(rpc: SolanaRpc, place: Place, pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number): Promise<{ sig: string; mine: boolean } | null> {
-  if (place.found) return place.found;
+  if (place.found !== undefined) {
+    const again = await spendIn(rpc, pin, w, nullifierHash, context, place.found);
+    if (typeof again === "object") return again;
+    // not the spend on this RPC (it serves none under that name, or no spend of the note): its history decides
+    delete place.found;
+  }
   let before = place.before;
   let read = 0;
   while (read < HISTORY_PASS) {
@@ -342,16 +349,15 @@ async function spendOn(rpc: SolanaRpc, place: Place, pin: SolanaPoolPin, w: stri
       if (!isObj(e) || typeof e.signature !== "string" || e.signature === before) return stop("read");
       // one the RPC lists but does not serve yet is read again once the history is read to its end
       const got = await spendIn(rpc, pin, w, nullifierHash, context, e.signature);
-      before = e.signature;
+      before = place.before = e.signature;
       read++;
       if (typeof got === "object") {
         delete place.before;
-        place.found = got;
+        place.found = got.sig;
         return got;
       }
     }
   }
-  place.before = before!;
   return null;
 }
 
@@ -777,12 +783,13 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       ...(h.now ? { now: h.now } : {}),
       ...(h.reads !== undefined ? { reads: h.reads } : {}),
       // the release's own signature kept with the owed send, so a finish after a reload reads it back first
-      sent: (s: string) => {
+      // awaited by the send before its read-back (fold 5, review LOW): a failed write never stops the send
+      sent: async (s: string): Promise<void> => {
         signature = s;
         if (owedNow === null || s === "") return;
         owedNow = { ...owedNow, release: s };
         owing(owedNow);
-        void h.keepRelease?.(p.noteId, attempt!, s).catch(() => {});
+        await h.keepRelease?.(p.noteId, attempt!, s).catch(() => {});
       },
       // RESERVED, then the onward send owed, both written before anything leaves the device (review #232b HIGH 1):
       // a crash between the two leaves a RESERVED note with nothing sent, which the reserved pass frees

@@ -930,3 +930,61 @@ for (const where of ["run", "finish"] as const) {
     assert.equal(wd.balance.get(TO), 5_000_000n);
   });
 }
+
+test("a pass that fails part way keeps what it read: a provider that refuses after 1,600 reads in a row, the spend under 3,000 newer entries, the next finish goes on from there; sent (fold 5, review MEDIUM)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  const pad = dust(3_000, 9);
+  wd.plant.history = (s) => [...pad, ...s];
+  // each provider serves 1,600 transaction reads, then refuses one (its rate limit), then serves again
+  const limited = (rpc: SolanaRpc): SolanaRpc => {
+    let n = 0;
+    return (async (m: string, p: readonly unknown[]) => {
+      if (m === "getTransaction" && ++n > 1_600) {
+        n = 0;
+        throw new Error("429");
+      }
+      return rpc(m, p);
+    }) as SolanaRpc;
+  };
+  const { f, n } = await passes({ ...wd.host, rpcs: [limited(wd.host.rpcs[0]), limited(wd.host.rpcs[1])] }, noRelease(a.pending!), 3);
+  assert.equal(f?.stage, "sent");
+  assert.equal(n, 2, `${n} finishes`);
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+});
+
+test("the page's two RPCs in the other order on the next pass: what one found never stands for the other; nothing decided, nothing sent (fold 5, review LOW)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  const release = a.pending!.release!;
+  const [x, y0] = wd.host.rpcs;
+  // Y neither lists the spend in W's history nor serves it by its signature; X does both
+  wd.plant.history = (s, p) => (p === 1 ? [] : s);
+  const y = (async (m: string, p: readonly unknown[]) => (m === "getTransaction" && p[0] === release ? null : y0(m, p))) as SolanaRpc;
+  const places: HistoryPlaces = new Map();
+  const p = noRelease(a.pending!);
+  assert.equal(await finishPoolOnward({ ...wd.host, rpcs: [fresh(x), fresh(y)], places }, p), null, "X found it, Y did not");
+  assert.equal(await finishPoolOnward({ ...wd.host, rpcs: [fresh(y), fresh(x)], places }, p), null, "Y never stands on X's find");
+  assert.equal(wd.onwards().length, 0);
+});
+
+test("the release's signature is written with the owed send before its read-back starts: the send awaits it (fold 5, review LOW)", async () => {
+  const wd = await world([30_000_000n]);
+  let kept = false;
+  let keptAtRead: boolean | undefined;
+  const [r0, r1] = wd.host.rpcs;
+  const watch = (rpc: SolanaRpc): SolanaRpc =>
+    (async (m: string, p: readonly unknown[]) => {
+      if (m === "getTransaction" && keptAtRead === undefined) keptAtRead = kept;
+      return rpc(m, p);
+    }) as SolanaRpc;
+  const keepRelease = async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    kept = true;
+  };
+  const a = await runPoolWithdraw({ ...wd.host, rpcs: [watch(r0), watch(r1)], keepRelease }, ASK, TO, 5_000_000n, COST);
+  assert.equal(a.stage, "sent");
+  assert.equal(keptAtRead, true, "the read-back began before the signature was written");
+});

@@ -70,7 +70,7 @@ export type Plant = {
   /** both RPCs' nodes behind: a balance read with no minContextSlot, or one below FINAL_SLOT, answers 0 (review
    *  #232b LOW 2: a lagging node behind a load balancer) */
   stale?: boolean;
-  /** the release's read-back never answers: the run hangs there, as a tab closed during the send */
+  /** the release's read-back never answers until unhang(): the run hangs there, as a tab closed during the send */
   hangReadBack?: boolean;
   /** W's history as RPC p lists it (newest first): the world's own by default */
   history?: (sigs: string[], p: 0 | 1) => string[];
@@ -135,6 +135,11 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   // older than every transaction W's history holds so far
   const touchOldest = (address: string, sig: string) => history.set(address, [...(history.get(address) ?? []), sig]);
   const keysOf = (wire: Uint8Array) => solanaDecodeMessage(wire.subarray(1 + 64 * wire[0]!));
+  const hung: (() => void)[] = [];
+  const unhang = (): void => {
+    plant.hangReadBack = false;
+    for (const r of hung.splice(0)) r();
+  };
   const rpc = (p: 0 | 1): SolanaRpc =>
     (async (method: string, params: readonly unknown[]) => {
       if (method === "getAccountInfo") {
@@ -193,7 +198,8 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         const on = onwards.get(sig);
         if (on) return { transaction: [base64.encode(on), "base64"], meta: { err: null } };
         const last = releases.at(-1);
-        if (sig === SIG && plant.hangReadBack) return new Promise(() => {});
+        // held until unhang(): then answered as the chain has it, so the run ends and holds nothing after its test
+        if (sig === SIG && plant.hangReadBack) await new Promise<void>((r) => hung.push(r));
         if (sig !== SIG || (plant.readBack ?? "ours") === "none" || !last) return null;
         const tx = last.slice();
         tx.set(base58.decode(SIG), 1);
@@ -295,7 +301,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     touchOldest(m.staticKeys[ix.accounts[1]!]!, id);
     return id;
   };
-  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, pendings, binds, plant, fees, owed, landed, foreign, foreignLand, alias, landOlder };
+  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, pendings, binds, plant, fees, owed, landed, foreign, foreignLand, alias, landOlder, unhang };
 }
 
 /** A wire's signers and instructions, as keys: [signers, [program, accounts, data][]]. */

@@ -178,6 +178,10 @@ export type TestnetOver = {
   locks?: Pick<LockManager, "request" | "query"> | null;
   /** The Solana pool's pin (SOL_POOLS.devnet otherwise): tests run the page's own flow on a fake pool. */
   pin?: SolanaPoolPin;
+  /** The withdraw run's clock and wait (the page's own otherwise): a test's read-back bound passes on its clock, so no
+   *  run outlives its test (fold 5: each held node ~120 s on the wall clock). */
+  now?: () => bigint;
+  wait?: (ms: number) => Promise<void>;
 };
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
@@ -625,13 +629,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const created_ms = Date.now();
     let writes: Promise<unknown> = ops.put("ops", opId, { kind: "withdraw", stage: "proving", txs: [], created_ms }).catch(() => {});
     // the op keeps the onward send still owed (a part on W), for the state reads to finish after a crash; every write
-    // merges into the record (mergeWithdrawOp), so another tab's finish of a part is never written over
+    // merges into the record (mergeWithdrawOp), so another tab's finish of a part is never written over. Only owe()
+    // names the note owed, once its send is stored: a stage write never does, so a run ending in_transit after another
+    // tab settled the op never names a send with none behind it (fold 5, review LOW)
     let owedNote: string | null = null;
     const write = (stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals) => {
       const cleared = pending ? null : owedNote;
       void (writes = writes
         .then(async () => {
-          await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage, txs, arrived, ...(pending ? { owe: pending.noteId } : cleared ? { clear: cleared } : {}) }));
+          await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage, txs, arrived, ...(cleared ? { clear: cleared } : {}) }));
           if (cleared) await dropSend(ops, opId, cleared);
         })
         .catch(() => {}));
@@ -674,6 +680,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             },
             stage: write,
             owe,
+            ...(over.now ? { now: over.now } : {}),
+            ...(over.wait ? { wait: over.wait } : {}),
             keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
           },
