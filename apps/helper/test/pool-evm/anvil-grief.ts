@@ -29,10 +29,20 @@ const PLAIN = "0x0000000000000000000000000000000000000a11";
 const CONTRACT = "0x0000000000000000000000000000000000000a12";
 const DELEGATED = "0x0000000000000000000000000000000000000a13";
 const CODE = [0x61, 0x01, 0x44, 0x35, 0x80, 0x60, 0x66, 0x14, 0x60, 0x1b, 0x57, 0x60, 0x65, 0x14, 0x60, 0x12, 0x57, 0x00, 0x5b, 0x3a, 0x15, 0x60, 0x19, 0x57, 0xfe, 0x5b, 0x00, 0x5b, 0x62, 0x00, 0x9c, 0x40, 0x5b, 0x60, 0x01, 0x90, 0x03, 0x80, 0x60, 0x20, 0x57, 0x00];
-await call("anvil_setCode", [POOL, `0x${Buffer.from(CODE).toString("hex")}`]);
+// a 4-byte call (currentTreeDepth(), the fee's depth read) answers 2: CALLDATASIZE == 4 jumps past CODE, whose PUSH1
+// jump targets move by the 7 bytes put before it
+const DEPTH_FIRST = [0x36, 0x60, 0x04, 0x14, 0x60, 7 + CODE.length, 0x57];
+const MOVED = CODE.map((b, i) => (i > 0 && CODE[i - 1] === 0x60 && (CODE[i + 1] === 0x56 || CODE[i + 1] === 0x57) ? b + DEPTH_FIRST.length : b));
+const DEPTH_TWO = [0x5b, 0x60, 0x02, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3];
+await call("anvil_setCode", [POOL, `0x${Buffer.from([...DEPTH_FIRST, ...MOVED, ...DEPTH_TWO]).toString("hex")}`]);
+// the fee's reads (kit trade/evm/pool-fee.ts) as a real node answers them at the epoch block's hash: Base Sepolia's
+// GasPriceOracle predeploy, here code returning one word, 7,917 wei, for its L1 fee bound and its operator fee alike
+const WORD = (n: bigint) => `0x7f${n.toString(16).padStart(64, "0")}60005260206000f3`; // PUSH32 n, MSTORE, RETURN 32 bytes
+await call("anvil_setCode", ["0x420000000000000000000000000000000000000f", WORD(7_917n)]);
+
 await call("anvil_setCode", [CONTRACT, "0x00"]);
 await call("anvil_setCode", [DELEGATED, `0xef0100${"ab".repeat(20)}`]);
-const s = evmPoolSender({ network: "anvil", pool: POOL, senderKey: KEY, floor: 10n ** 12n, feeRecipient: FEE_TO }, [call, (m, p) => call(m, p)]);
+const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [call, (m, p) => call(m, p)]);
 await call("evm_mine", []);
 const epoch = epochStartOf(Date.now());
 const fee = BigInt((await s.fee(epoch))!.fee);

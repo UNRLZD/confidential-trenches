@@ -6,7 +6,7 @@
 import { mock, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
-import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolSellQuoteRequest, type EvmPoolKey, type EvmRoute, type EvmV4Route } from "../src/index.ts";
+import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolSellQuoteRequest, type EvmPoolKey, type EvmRoute, type EvmV4Route } from "../src/index.ts";
 import { EVM_QUOTE_MAX_KEYS, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolSellQuoteWith, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 // as namespaces: the red run before card evm-route-parity reads them where evmSellRouteOf and evmSellRouteCheck are not
 import * as quoteMod from "../src/checks/evm/quote.ts";
@@ -182,10 +182,12 @@ test("R11 the lower block's base fee is the other provider's too, and well forme
 });
 
 test("R6 a block both providers agree on but more than 30 s behind the device's clock refuses", async () => {
+  // the device's clock stands still here (mono fixed), so the block's age is exactly its distance from NOW
+  const still = (route: EvmRoute, a: EvmRpc, b: EvmRpc) => verdict(evmPoolBuyQuoteWith({ chain: "base", token: TOKEN, amountIn: AMOUNT, slippageBps: 100, route }, [a, b], NOW, undefined, undefined, () => 0));
   const old = "0x" + (NOW / 1000 - 31).toString(16);
-  assert.deepEqual(await buy(v3direct, provider(head("0x100", NEW, old), flat), provider(head("0x100", NEW, old), flat)), { accepted: false, code: "stale_quote" });
+  assert.deepEqual(await still(v3direct, provider(head("0x100", NEW, old), flat), provider(head("0x100", NEW, old), flat)), { accepted: false, code: "stale_quote" });
   const fresh = "0x" + (NOW / 1000 - 30).toString(16);
-  assert.equal((await buy(v3direct, provider(head("0x100", NEW, fresh), flat), provider(head("0x100", NEW, fresh), flat))).accepted, true);
+  assert.equal((await still(v3direct, provider(head("0x100", NEW, fresh), flat), provider(head("0x100", NEW, fresh), flat))).accepted, true);
 });
 
 test("R7 on Robinhood a WETH route whose first hop has a native pool refuses native_first, though no native route reaches the token", async () => {
@@ -331,6 +333,8 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     overridden.has(to.toLowerCase()) && d.length === 192 ? BigInt("0x" + d.slice(128))
     // QuoterV2.factory(): no v3 in the model
     : d.startsWith("c45a0155") ? null
+    // the chain fee oracle (pool-fee.ts evmPoolChainFeeReads): none beside the gas in the model
+    : d.startsWith("f1c7a58b") || d.startsWith("275aedd2") || d.startsWith("f5d6ded7") ? 0n
     // Multicall3.getEthBalance(address): the account's ETH at the block
     : to.toLowerCase() === "0xca11bde05977b3631167028862be2a173976ca11" && d.startsWith("4d2301cc") ? (balances["0x" + d.slice(32, 72)] ?? 0n)
     : to.toLowerCase() === PM || to.toLowerCase() === RH_PM
@@ -1075,7 +1079,7 @@ test("T3 a coin two currencies from the native asset (a Zora content coin: coin/
   assert.equal(v.accepted, false, "a tenth of the price passes: the real price is three pools from the native asset");
 });
 
-test("T4 a provider that never answers is a refusal (rpc_error) once the request's time runs out, never a hang", { timeout: 10_000 }, async () => {
+test("T4 a provider that never answers is a refusal (rpc_error) once the request's time runs out, never a hang", { timeout: 3_000 }, async () => {
   let signal: unknown;
   // a fetch that answers only when its request is aborted, as a hung connection does
   const hung = ((_: string, init?: RequestInit) => {
@@ -1084,7 +1088,8 @@ test("T4 a provider that never answers is a refusal (rpc_error) once the request
   }) as typeof fetch;
   const t = Date.now();
   await assert.rejects(evmJsonRpc("https://a.example", hung, 1 << 20, 50)([{ method: "eth_blockNumber", params: [] }]));
-  assert.ok(Date.now() - t < 5_000);
+  // the request's limit is 50 ms: a request with none would hang to the test's 3 s
+  assert.ok(Date.now() - t < 2_000);
   // and by default each request carries a signal (EVM_RPC_TIMEOUT_MS)
   signal = undefined;
   void evmJsonRpc("https://a.example", hung)([{ method: "eth_blockNumber", params: [] }]).catch(() => {});
@@ -1269,7 +1274,7 @@ const SELL_W = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"; // Hardhat account 
 // `bought` is required (review of edb4dbb, F3): by default the seeded pool's route, the one a server would send, so the
 // sell must still find the token's market from its own set; null leaves it out
 const sellOn = (pools: ModelPool[], token: string, scan?: EvmRpc, bought: EvmRoute | null = seededRoute(token), slippageBps = 100, venues?: builder.EvmPoolVenueList, signSim?: EvmPoolSellQuoteRequest["signSim"]) =>
-  evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps, ...(bought !== null ? { bought } : {}), ...(signSim ? { signSim } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scan, venues);
+  evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps, boughtBlock: 1n, ...(bought !== null ? { bought } : {}), ...(signSim ? { signSim } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scan, venues);
 const sellVerdict = async (p: ReturnType<typeof sellOn>) => {
   try {
     const q = await p;
@@ -1944,7 +1949,7 @@ test("PE7 a sim on a block with no base fee is refused: it cannot be priced as t
       return { ...(r as object), result: h };
     });
   const pools = [market, hooked];
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), signSim } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest;
   const v = await sellVerdict(evmPoolSellQuoteWith(req, [noFee(chain(pools, 0)), noFee(chain(pools, 1))], NOW, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]), DELEGATED));
   assert.deepEqual(v, { accepted: false, code: "rpc_error" });
 });
@@ -1964,7 +1969,7 @@ test("PE6 the sim's eth_call and its nonce read go from the pinned sender, with 
     return rpc(calls);
   };
   const pools = [market, hooked];
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), signSim } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest;
   atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [wrap(chain(pools, 0)), wrap(chain(pools, 1))], NOW, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]), DELEGATED)));
   const k = sellMod as unknown as { EVM_POOL_SELL_GAS?: bigint; evmPoolSellTip?: (c: string) => bigint };
   assert.equal(k.EVM_POOL_SELL_GAS, SALE_GAS);
@@ -1993,7 +1998,7 @@ test("PE8 a sender too low to pay the sale's gas drops the hooked route and free
   // below it
   const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a) => 2n * a };
   const pools = [market, hooked];
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), signSim } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest;
   const logs = scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]);
   const funded = await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, logs, DELEGATED));
   assert.deepEqual(funded, { accepted: false, code: "below_reference" });
@@ -2007,4 +2012,178 @@ test("PE8 a sender too low to pay the sale's gas drops the hooked route and free
   atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, short), chain(pools, 1, 5_000_000, undefined, short)], NOW, logs, DELEGATED)));
   // and one with no ETH at all
   atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, {}), chain(pools, 1, 5_000_000, undefined, {})], NOW, logs, DELEGATED)));
+});
+
+// card evm-buy-hookdata-fee: hook data is the device's own, and the device makes none, on the buy as on the sell (the
+// vault lead's note at evm-sell-device-quote's hand-back: the buy took a helper route's hook data for a listed hook)
+test("HD1 a helper route carrying hook data on any hop is refused bad_request before any read, so before any signature", async () => {
+  let asked = 0;
+  // two providers (one function twice is refused as one), neither of which may be asked anything
+  const none = (): EvmRpc => async () => {
+    asked++;
+    throw new Error("no read may be made");
+  };
+  const clanker = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc"; // Base's pinned Clanker hook, in its own shape
+  const routes: EvmRoute[] = [
+    { venue: "uniswap-v4", currencyIn: WETH, hops: [{ currency: TOKEN, fee: 0x800000, tickSpacing: 200, hooks: clanker, hookData: "0xdeadbeef" }] },
+    { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x00" }] },
+    { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: USDC, fee: 500, tickSpacing: 10, hooks: NATIVE, hookData: "0x" }, { currency: TOKEN, fee: 0x800000, tickSpacing: 200, hooks: clanker, hookData: "0x" + "ab".repeat(32) }] },
+    // on the first hop only (review fold 1, L3)
+    { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: USDC, fee: 500, tickSpacing: 10, hooks: NATIVE, hookData: "0x01" }, { currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] },
+  ];
+  for (const route of routes) assert.deepEqual(await verdict(evmPoolBuyQuoteWith({ chain: "base", token: TOKEN, amountIn: AMOUNT, slippageBps: 100, route }, [none(), none()], NOW)), { accepted: false, code: "bad_request" });
+  assert.equal(asked, 0);
+  // the same providers do answer a route with no hook data: they are asked (and fail), so the refusal above is the
+  // hook data's
+  const plain: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith({ chain: "base", token: TOKEN, amountIn: AMOUNT, slippageBps: 100, route: plain }, [none(), none()], NOW)), { accepted: false, code: "rpc_error" });
+  assert.ok(asked > 0);
+});
+
+// card evm-buy-hookdata-fee (review low L5): a sell asked right after its buy, while one provider's head is still a
+// block behind the buy's, read W's balance at the block before the buy and was refused fee_on_transfer
+const BUY_AT = 5_000_000;
+const blockHash = (n: number) => "0x" + W(0xb10c000000000000n + BigInt(n));
+/** `rpc` with its heads `heads` ("latest" answers each in turn, then the last), every block named by its number, and W
+ *  holding the token only from BUY_AT on: the fee-on-transfer probe at an earlier block reverts. */
+/** The most heads one `landed` provider answers: far past any wait's rounds (61 in 30 s). */
+const LANDED_MAX_HEADS = 10_000;
+function landed(rpc: EvmRpc, heads: number[], asked: { heads: number } = { heads: 0 }, timestamp = T): EvmRpc {
+  let k = 0;
+  return async (calls) => {
+    const out = await rpc(calls);
+    return calls.map((c, id) => {
+      if (c.method === "eth_getBlockByNumber") {
+        const latest = c.params[0] === "latest";
+        // a wait that asks again with no sleep spins without end: refused here, at once, never a test that hangs
+        if (latest && ++asked.heads > LANDED_MAX_HEADS) throw new Error(`asked for the head more than ${LANDED_MAX_HEADS} times`);
+        const n = latest ? heads[Math.min(k++, heads.length - 1)]! : Number(BigInt(c.params[0] as string));
+        return { jsonrpc: "2.0", id, result: head("0x" + n.toString(16), blockHash(n), timestamp) };
+      }
+      const at = Number(BigInt((c.params[1] as { blockHash: string }).blockHash) - 0xb10c000000000000n);
+      const probe = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code === quoteMod.EVM_SELL_PROBE_CODE;
+      return probe && at < BUY_AT ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted" } } : out[id];
+    });
+  };
+}
+const landedSell = (token: string) => {
+  const pool: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 2500, tickSpacing: 50, hooks: NATIVE, hookData: "0x" }] };
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: route, boughtBlock: BigInt(BUY_AT) } as EvmPoolSellQuoteRequest;
+  return { pool, req };
+};
+
+test("L5 a sell at its buy's block, one provider a block behind it: the quote waits and reads at the buy's block, never fee_on_transfer", async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba5ba");
+  // on the mocked clock, so a wait that never ends is refused in mocked time (review fold 2: the sweep's time)
+  const q = await timed((mono) => evmPoolSellQuoteWith(req, [landed(chain([pool], 0), [BUY_AT]), landed(chain([pool], 1), [BUY_AT - 1, BUY_AT])], NOW, undefined, undefined, mono), 400, 100);
+  assert.equal(q.quote?.block.number, BigInt(BUY_AT), JSON.stringify(q.verdict, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  assert.equal(q.quote?.amountOut, AMOUNT);
+  // both providers at the buy's block: no wait, the same quote
+  const r = await timed((mono) => evmPoolSellQuoteWith(req, [landed(chain([pool], 0), [BUY_AT + 1]), landed(chain([pool], 1), [BUY_AT])], NOW, undefined, undefined, mono), 400, 100);
+  assert.equal(r.quote?.block.number, BigInt(BUY_AT));
+  assert.ok(r.ms <= 100, `no wait: ${r.ms} ms`);
+});
+
+/** The sell quote's verdict and the mocked time it took, ms: the clock (Date, the wait's monotonic clock here) and
+ *  every timer mocked, ticked `step` ms at a time until the quote settles (so the time read is up to two steps late). */
+async function timed(run: (mono: () => number) => Promise<unknown>, ticks = 4_000, step = 500) {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  try {
+    let done = false;
+    const raw = run(() => Date.now()) as ReturnType<typeof sellOn>;
+    const p = sellVerdict(raw).finally(() => (done = true));
+    for (let i = 0; i < ticks && !done; i++) {
+      await new Promise((r) => setImmediate(r));
+      mock.timers.tick(step);
+    }
+    await new Promise((r) => setImmediate(r));
+    // a quote still waiting after every tick is the wait's own failure, never a test that hangs
+    if (!done) return { verdict: { accepted: false, code: "still waiting" }, ms: Date.now(), quote: undefined };
+    return { verdict: await p, ms: Date.now(), quote: await raw.catch(() => undefined) };
+  } finally {
+    mock.timers.reset();
+  }
+}
+/** A buy quote on the mocked clock (Date and setTimeout), 100 ms a tick: its verdict. */
+async function timedBuy(run: (mono: () => number) => Promise<unknown>) {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  try {
+    let done = false;
+    const p = verdict(run(() => Date.now()) as Promise<EvmPoolBuyQuote>).finally(() => (done = true));
+    for (let i = 0; i < 8_000 && !done; i++) {
+      await new Promise((r) => setImmediate(r));
+      mock.timers.tick(100);
+    }
+    await new Promise((r) => setImmediate(r));
+    return done ? await p : { accepted: false, code: "still waiting" };
+  } finally {
+    mock.timers.reset();
+  }
+}
+/** `rpc`, each answer `ms` later */
+const slow = (rpc: EvmRpc, ms: number): EvmRpc => async (calls) => {
+  await new Promise((r) => setTimeout(r, ms));
+  return rpc(calls);
+};
+
+test("L5b a buy's block no provider reaches within EVM_MIN_BLOCK_WAIT_MS is refused not_landed, never quoted at an older block", async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba6ba");
+  const asked = { heads: 0 };
+  const r = await timed((mono) => evmPoolSellQuoteWith({ ...req, boughtBlock: BigInt(BUY_AT + 1) }, [landed(chain([pool], 0), [BUY_AT], asked), landed(chain([pool], 1), [BUY_AT + 1], asked)], NOW, undefined, undefined, mono), 400, 100);
+  assert.deepEqual(r.verdict, { accepted: false, code: "not_landed" });
+  // asked every 500 ms for 30 s (EVM_MIN_BLOCK_WAIT_MS, as long as a quote's block may be old), both providers each
+  // time: 61 rounds, and refused only once that time has passed (review fold 1, L3); the clock moves 100 ms a tick, so
+  // a shorter sleep asks more often and fails the count
+  assert.equal(quoteMod.EVM_MIN_BLOCK_WAIT_MS, quoteMod.EVM_QUOTE_MAX_AGE_MS);
+  assert.equal(asked.heads, 2 * 61);
+  assert.ok(r.ms >= quoteMod.EVM_MIN_BLOCK_WAIT_MS, `refused after ${r.ms} ms`);
+});
+
+test("M2 the wait for a buy's block ends at EVM_MIN_BLOCK_WAIT_MS whatever a provider's latency: 400 ms and 10 s an answer", async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba7ba");
+  for (const latency of [400, 10_000]) {
+    // provider 1 at the buy's block at once, provider 2 a block below it and `latency` ms an answer
+    // (within a second of 30 s: the last sleep, 500 ms, may pass the deadline, and the ticks are 100 ms)
+    const r = await timed((mono) => evmPoolSellQuoteWith({ ...req, boughtBlock: BigInt(BUY_AT + 1) }, [landed(chain([pool], 0), [BUY_AT + 1]), slow(landed(chain([pool], 1), [BUY_AT]), latency)], NOW, undefined, undefined, mono), 8_000, 100);
+    assert.deepEqual(r.verdict, { accepted: false, code: "not_landed" }, `at ${latency} ms an answer`);
+    assert.ok(r.ms >= quoteMod.EVM_MIN_BLOCK_WAIT_MS && r.ms <= quoteMod.EVM_MIN_BLOCK_WAIT_MS + 1_000, `at ${latency} ms an answer, not_landed after ${r.ms} ms, not about 30 s`);
+  }
+});
+
+test("L2 a block old enough to be stale once the wait for the buy's block is over is refused stale_quote, judged at the clock then", async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba8ba");
+  // the block is 25 s old when the quote starts (the mocked clock starts at 0, so its time is NOW's)
+  const ts = "0x" + ((NOW - 25_000) / 1000).toString(16);
+  const lagging = (rounds: number) => [...Array(rounds).fill(BUY_AT - 1), BUY_AT];
+  const run = (rounds: number) => (mono: () => number) =>
+    evmPoolSellQuoteWith(req, [landed(chain([pool], 0), [BUY_AT], { heads: 0 }, ts), landed(chain([pool], 1), lagging(rounds), { heads: 0 }, ts)], NOW, undefined, undefined, () => mono());
+  // provider 2 reaches the buy's block after 10 s: the block is 35 s old then
+  assert.deepEqual((await timed(run(21))).verdict, { accepted: false, code: "stale_quote" });
+  // after 4.5 s it is 29.5 s old, and quotes
+  assert.equal(((await timed(run(9))).verdict as { accepted: boolean }).accepted, true);
+  // the edge, to the half second (review fold 2, LOW-2): 30.5 s old after 5.5 s is refused, 30 s after 5 s quotes
+  assert.deepEqual((await timed(run(11))).verdict, { accepted: false, code: "stale_quote" });
+  assert.equal(((await timed(run(10))).verdict as { accepted: boolean }).accepted, true);
+});
+
+test("LOW-1 a block's age counts the time since the quote began: a scan that takes 10 s makes a 25 s-old block stale, on a sell and a buy", async () => {
+  // the block is 25 s old when the quote starts; the scan provider answers each request `wait` ms later, and a new
+  // token's scan asks twice (its head, then the logs), so 5 s an answer is a 10 s scan (a token of its own each run: the
+  // kit keeps a token's scan between quotes)
+  const ts = "0x" + ((NOW - 25_000) / 1000).toString(16);
+  const sell = (wait: number, token: string) => (mono: () => number) => {
+    const { pool, req } = landedSell(token);
+    return evmPoolSellQuoteWith(req, [landed(chain([pool], 0), [BUY_AT], { heads: 0 }, ts), landed(chain([pool], 1), [BUY_AT], { heads: 0 }, ts)], NOW, slow(scanner(BUY_AT, []), wait), undefined, () => mono());
+  };
+  const s10 = await timed(sell(5_000, "0x00000000000000000000000000000000000bb1ba"), 8_000, 100);
+  assert.deepEqual(s10.verdict, { accepted: false, code: "stale_quote" }, `after ${s10.ms} ms`);
+  // a scan of 4 s: 29 s old, and quotes
+  const s4 = await timed(sell(2_000, "0x00000000000000000000000000000000000bb2ba"), 8_000, 100);
+  assert.equal((s4.verdict as { accepted: boolean }).accepted, true, `after ${s4.ms} ms`);
+  const buyAt = (wait: number, token: string) => (mono: () => number) =>
+    evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: { ...v3direct, tokens: [v3direct.tokens[0]!, token] } }, [provider(head("0x100", NEW, ts), flat), provider(head("0x100", NEW, ts), flat)], NOW, slow(scanner(0x100, []), wait), undefined, () => mono());
+  assert.deepEqual(await timedBuy(buyAt(5_000, "0x00000000000000000000000000000000000bb3ba")), { accepted: false, code: "stale_quote" });
+  const b4 = await timedBuy(buyAt(2_000, "0x00000000000000000000000000000000000bb4ba"));
+  assert.equal((b4 as { accepted: boolean }).accepted, true, (b4 as { code?: string }).code);
 });
