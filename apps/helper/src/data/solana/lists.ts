@@ -18,7 +18,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { gzipSync } from "node:zlib";
-import { retryAfterOf, Throttled } from "../../limits/limits.ts";
+import { Throttled } from "../../limits/limits.ts";
 import { createOrigins, hintsOf, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 
 /** fields.ts ROW_FIELDS in its order, then the two added for the Trending column. */
@@ -355,7 +355,7 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
 
   async function read(path: string): Promise<{ rows: Row[]; hints: Map<string, Hint>; at: number } | null> {
     const a = await proxy.handle("jupiter", path, "limit=100", "", undefined, true); // proxy.ts PROXY_RESERVE
-    if (a.status === 429) throw new Throttled(retryAfterOf(a.headers), (a as { why?: string }).why);
+    // card helper-crowd-429 fold 6: Jupiter's limit is not the caller's, so its refusal is not ready (503), never our 429
     if (a.status !== 200) return null;
     const at = Date.parse(a.headers["X-Fetched-At"] ?? "");
     const asOf = Number.isFinite(at) ? at : now();
