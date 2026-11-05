@@ -12,7 +12,7 @@
 //     immutables on both RPCs at the newest block both have.
 //   node scripts/live-checks/pool-evm-deploy-mainnet.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read to <file>, for the test's replay (pool-evm-deploy-mainnet.answers.json).
-// Runs: after the owner's paste on each chain, and after every deploy.
+// Runs: once, a contract deploy's read-back on Base and Robinhood mainnet, after the owner's paste on each chain; no host deploy changes the contracts, and the kit's pins move only with a card that redeploys one
 import "../net-window.mjs";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
