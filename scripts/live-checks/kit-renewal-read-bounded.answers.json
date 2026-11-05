@@ -1,6 +1,6 @@
 {
  "good": {
-  "at": "2026-11-05T12:12:38.511Z",
+  "at": "2026-11-05T13:34:46.100Z",
   "source": "this checkout, packages/signpage",
   "pageStatus": 200,
   "js": [
@@ -11,14 +11,15 @@
      "the age rule",
      "the sign point's timed re-read",
      "the rule before each signer",
-     "the rule when the signer answers"
+     "the rule when the signer answers",
+     "the page names only kept signatures"
     ]
    }
   ],
-  "note": "this card: packages/signpage as committed (index.html, public/app.js rebuilt by build-app.mjs on the fix), read from disk"
+  "note": "this card: packages/signpage as committed (index.html, public/app.js rebuilt by build-app.mjs on the fix and the fold), read from disk"
  },
  "bad": {
-  "at": "2026-11-05T12:12:39.039Z",
+  "at": "2026-11-05T13:34:46.492Z",
   "source": "https://sign.confidential.unrealized.trade/",
   "pageStatus": 200,
   "js": [
@@ -28,6 +29,6 @@
     "found": []
    }
   ],
-  "note": "SIGN_HOST as deployed before this card, read over https"
+  "note": "SIGN_HOST as deployed before this card (its /app.js is main 582c8ac's bundle), read over https"
  }
 }

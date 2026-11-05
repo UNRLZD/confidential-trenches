@@ -351,11 +351,11 @@ export function tradeKind(host: TradeHost): TradeKind {
           throw e;
         });
       }, ctx.id);
+      // the legs' signatures the kit kept, from its onSigned: one it dropped as late (the age rule at a signature, card
+      // kit-renewal-read-bounded) reaches no answer, stage write or txs, and a teardown's frames are never in it
       const signed: TxRef[] = [];
-      let last: SolanaTradeStage | null = null;
       // each stage as it comes: the answer at "sent", the fill stages to the frame at once (before any teardown)
       const onProgress = (stage: SolanaTradeStage): void => {
-        last = stage;
         if (stage === "signed") write({ stage, txs: signed.slice() });
         else if (stage === "sent") {
           write({ stage, txs: signed.slice() });
@@ -372,12 +372,8 @@ export function tradeKind(host: TradeHost): TradeKind {
         const req: SolanaTradeRequest & { wallets: string[] } = { side, token, slippageBps: params.slippage_bps as number, legs, wallets: set.all };
         record = await run(req, {
           ...host.deps,
-          sign: async (wallet, message, tx) => {
-            const sig = await signer.sign(wallet, message, tx);
-            // the legs sign before "signed"; a teardown's frames sign after the fill and are not the trade's txs
-            if (last === null) signed.push({ chain: "solana", hash: base58.encode(sig) });
-            return sig;
-          },
+          sign: (wallet, message, tx) => signer.sign(wallet, message, tx),
+          onSigned: (kept) => { signed.splice(0, signed.length, ...kept.map((k) => ({ chain: "solana" as const, hash: k.signature }))); },
           onProgress,
         });
       } catch (e) {

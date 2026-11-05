@@ -5,10 +5,13 @@
 // point's one re-read (the time taken again just before it; a late answer refuses every leg, unsigned, never read again)
 // and for each leg right before its signer is asked and again when it answers (signedWire), so a slow store read or
 // seed open inside the signer refuses the leg too. The refusal is `checks: ...`, the signing page's quote_check_failed.
+// A signature the kit drops is never named: the kit hands the kept ones to onSigned, and the page's answers, stage
+// writes and txs come from that list alone (packages/signpage/src/trade.ts legsRun).
 // What runs on a device is the signing page's bundle, so this reads what SIGN_HOST serves: the page and the script it
-// names (/app.js) answer 200, and the script holds the four parts of the rule, each a marker robust to the minifier's
-// names. The rule's behaviour is proven by packages/kit/test/solana-flow-replay.test.ts (a 40 s sign-point read refuses
-// all three legs; a 15 s signer after a 10 s old reference refuses the leg); no real trade runs here.
+// names (/app.js) answer 200, and the script holds the four parts of the rule and the page's kept list, each a marker
+// robust to the minifier's names. The behaviour is proven by packages/kit/test/solana-flow-replay.test.ts (a 40 s
+// sign-point read refuses all three legs; a 15 s signer after a 10 s old reference refuses the leg; onSigned holds the
+// kept legs alone) and packages/signpage/test/trade.test.ts (a dropped leg is in no answer); no real trade runs here.
 //   node scripts/live-checks/kit-renewal-read-bounded.mjs [--record <file>]
 //     SIGN_HOST as deployed: https://sign.confidential.unrealized.trade/
 //   node scripts/live-checks/kit-renewal-read-bounded.mjs --local [--record <file>]
@@ -34,6 +37,8 @@ export const MARKERS = {
   "the rule before each signer": new RegExp(`${ID}\\(\\)\\?\\?await ${ID}\\(${ID},${ID}\\.leg\\.wallet,${ID}\\.assembled,${ID}\\)`),
   // signedWire: the rule read when the signer answers, before its signature is checked or put in the wire
   "the rule when the signer answers": new RegExp(`=await ${ID}\\.sign\\(${ID},${ID}\\.message,\\{lastValidBlockHeight:${ID}\\.lastValidBlockHeight\\}\\)\\}let ${ID}=${ID}\\(\\);if\\(${ID}\\)return ${ID};`),
+  // the page (src/trade.ts legsRun): its signer passes straight through, and its txs are the kit's kept signatures alone
+  "the page names only kept signatures": new RegExp(`sign:\\(${ID},${ID},${ID}\\)=>${ID}\\.sign\\(${ID},${ID},${ID}\\),onSigned:${ID}=>\\{${ID}\\.splice\\(0,${ID}\\.length,\\.\\.\\.${ID}\\.map\\(${ID}=>\\(\\{chain:\`solana\`,hash:${ID}\\.signature\\}\\)\\)\\)\\}`),
 };
 
 /** The page's scripts: the `src` of each script tag. */

@@ -929,3 +929,40 @@ test("the signer's store read takes 15 s after a 10 s old reference: the leg is 
   // the same leg with a signer that answers in 5 s is past the age rule: its signature is checked against the wallet
   await assert.rejects(run(5_000), /does not verify/);
 });
+
+test("onSigned is handed exactly the kept legs' signatures, in send order, once, right before signed: a leg refused at its renewal check is not in it", async () => {
+  const clock = slowBuilds(25_000);
+  const req = request(SELL);
+  const w0 = req.legs[0]!.wallet;
+  // the renewal's simulation for w0: the wallet gains nothing from the sell, so its check refuses it
+  const cap = signedOn((at, method, n, x, params) => {
+    const y = freshAfterFirst(at, method, n, x, params);
+    const sim = method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : null;
+    if (sim && sim[0] === w0 && n >= 1) {
+      const pre = fx.rpc.find((q) => q.at === at && q.ask.startsWith('["getMultipleAccounts"') && q.ask.includes(w0))!.answer as { value: ({ lamports: number } | null)[] };
+      (y as { value: { accounts: ({ lamports: number } | null)[] } }).value.accounts[0]!.lamports = pre.value[0]!.lamports;
+    }
+    return y;
+  });
+  const events: string[] = [];
+  const given: { wallet: string; signature: string }[][] = [];
+  const d = deps(SELL, { edit: cap.edit });
+  const r = await runSolanaTrade(req, { ...d, fetch: clock.fetch, now: clock.now, onSigned: (s) => { events.push("onSigned"); given.push([...s]); }, onProgress: (st) => events.push(st) });
+  assert.match(r.legs[0]!.refused ?? "", /^checks: /);
+  assert.equal(given.length, 1, "called once");
+  assert.deepEqual(events.slice(0, 2), ["onSigned", "signed"], "right before signed");
+  const kept = r.legs.filter((l) => l.signature).map((l) => ({ wallet: l.wallet, signature: l.signature! }));
+  assert.equal(kept.length, req.legs.length - 1);
+  assert.deepEqual(given[0], kept, "the kept legs, in send order, and no other");
+  // the signatures it names are the ones signed onto the wires
+  assert.deepEqual(new Set(legWires(cap.signed, r.legs).map((b) => base58.encode(base64.decode(b).subarray(1, 65)))), new Set(kept.map((k) => k.signature)));
+});
+
+test("a set whose every leg is dropped as late never calls onSigned: refused, and nothing named", async () => {
+  const clock = slowBuilds(10_000);
+  const events: string[] = [];
+  const sign: SolanaTradeDeps["sign"] = async () => { clock.advance(15_000); return new Uint8Array(64).fill(1); };
+  const r = await runSolanaTrade(request(BUY), { ...deps(BUY), dry: false, sign, paths: [], fetch: clock.fetch, now: clock.now, onSigned: () => events.push("onSigned"), onProgress: (st) => events.push(st) });
+  assert.match(r.legs[0]!.refused ?? "", LATE);
+  assert.deepEqual(events, ["refused"]);
+});

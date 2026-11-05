@@ -128,6 +128,11 @@ export type SolanaTradeDeps = {
   /** The legs' builds while they wait for the helper's room (card solana-legs-share-wait): the state the app shows
    * during a long trade, called when a leg's build lands or a leg starts or ends a wait. */
   readonly onBuilds?: (p: SolanaBuildsProgress) => void;
+  /** The legs' signatures the kit kept, in send order: only those, each a leg's signature that passed the age rule at
+   * its signature (card kit-renewal-read-bounded) and is about to be sent; a signature the kit dropped as late is never
+   * in it, nor is a teardown frame's. Called once, right before onProgress("signed"), and not at all when no leg is
+   * kept. Optional: a caller that does not pass it sees the trade as before. */
+  readonly onSigned?: (signed: readonly { wallet: string; signature: string }[]) => void;
   /** The wait's sleep, for tests (with `now`, the clock the trade's bound is held on). */
   readonly sleep?: (ms: number) => Promise<void>;
   /** sendSolanaSet's deadline, for tests. */
@@ -806,6 +811,7 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
   const set = signedLegs.map((x) => x.tx);
   if (ready.length === 0) { progress("refused"); return record; }
   ready.forEach((p, i) => { p.rec.signature = base58.encode((set[i] as { wire: Uint8Array }).wire.subarray(1, 65)); });
+  try { deps.onSigned?.(ready.map((p) => ({ wallet: p.leg.wallet, signature: p.rec.signature as string }))); } catch { /* the caller's display never stops a trade */ }
   progress("signed");
   const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}), ...(deps.providerRps ? { providerRps: deps.providerRps } : {}) };
   const tokenProgram = (mint[0] as Acc).owner;

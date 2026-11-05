@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/kit-renewal-read-bounded.test.mjs: the live check's verdict replays recorded answers
 // (kit-renewal-read-bounded.answers.json), each read on 2026-11-05 by kit-renewal-read-bounded.mjs collect():
 //   good: this card's checkout (--local): the signing page's committed bundle holds the age rule at the sign point and at
-//         each leg's signature: PASS;
+//         each leg's signature, and the page names only the kept signatures: PASS;
 //   bad:  SIGN_HOST as deployed before this card (its /app.js is main 582c8ac's bundle), read over https: none: FAIL.
 // Planted from the good answer: one marker lost, a script the host did not answer, a page naming no script, no answer.
 // The markers themselves are run over the bundle's own minified lines, after this card and before it.
@@ -30,7 +30,7 @@ test("recorded good answer: the bundle holds every part of the age rule: PASS", 
 test("recorded bad answer: SIGN_HOST before this card holds none of it: FAIL", () => {
   const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false);
-  assert.ok(bad(r.lines).some((l) => /^BAD sign: the scripts lack the age rule, the sign point's timed re-read, the rule before each signer, the rule when the signer answers$/.test(l)), r.lines.join("\n"));
+  assert.ok(bad(r.lines).some((l) => /^BAD sign: the scripts lack the age rule, the sign point's timed re-read, the rule before each signer, the rule when the signer answers, the page names only kept signatures$/.test(l)), r.lines.join("\n"));
 });
 
 test("planted: each marker lost alone fails, naming it", () => {
@@ -57,14 +57,16 @@ test("the markers match the bundle's own minified lines and not the bundle befor
     "f=await d(l,e.flatMap((e,t)=>o[t]?[t]:[]));if(f.length&&Sp(c,i())){c=i();let e=await s(),t=Sp(c,i());if(t){for(let e of f)e.p.rec.refused=t;return{legs:[],at:c}}f=await d(e,f.map(e=>e.i))}return{legs:f.map(e=>e.p),at:c}}",
     "T=(await Promise.all(ee.map(async e=>{let t=w()??await wp(a,e.leg.wallet,e.assembled,w);return typeof t==`string`?(e.rec.refused=t,null):{p:e,tx:{wire:t}}})))",
     "i=await e.sign(t,n.message,{lastValidBlockHeight:n.lastValidBlockHeight})}let a=r();if(a)return a;if(!e.dry&&(!(i instanceof Uint8Array)||i.length!==64))throw Error(`x`)",
+    "_=await t(n,{...e.deps,sign:(e,t,n)=>p.sign(e,t,n),onSigned:e=>{h.splice(0,h.length,...e.map(e=>({chain:`solana`,hash:e.signature})))},onProgress:g})",
   ].join("");
   for (const [name, re] of Object.entries(MARKERS)) assert.match(after, re, name);
   // before (main 582c8ac's bundle): the sign point re-read without its time, every leg signed in one set, the signature
-  // checked as soon as the signer answers
+  // checked as soon as the signer answers, and the page naming each signature its signer gave
   const before = [
     "f=await d(l,e.flatMap((e,t)=>o[t]?[t]:[]));return f.length&&i()-c>2e4&&(f=await d(await s(),f.map(e=>e.i))),f.map(e=>e.p)}",
     "C.map(e=>({wallet:e.leg.wallet,tx:e.assembled})));C.forEach((e,t)=>{e.rec.signature=R.encode(w",
     "r=await e.sign(t,n.message,{lastValidBlockHeight:n.lastValidBlockHeight}),!(r instanceof Uint8Array)||r.length!==64||!xr.verify(r,n.message,R.deco",
+    "sign:async(e,t,n)=>{let r=await p.sign(e,t,n);return g===null&&h.push({chain:`solana`,hash:R.encode(r)}),r},onProgress:_})",
   ].join("");
   for (const [name, re] of Object.entries(MARKERS)) assert.doesNotMatch(before, re, name);
 });
