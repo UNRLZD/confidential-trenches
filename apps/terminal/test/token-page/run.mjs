@@ -73,13 +73,18 @@ const EDGE_MS = Number(process.env.TOKEN_PAGE_CLOCK_EDGE_MS ?? 0);
 const BOUNDARY_MS = 900_000;
 let skewMs = 0;
 const chartNow = () => Date.now() + skewMs;
+/** The bars' end, read off the chart clock once, at the run's first chart read: every later read, in any state and past
+ *  any bar's boundary, answers the same bars (a clock read per answer gave a new last bar once a run crossed a 15-minute
+ *  boundary, and chart-live and chart-live-503 failed with no fault in the page). */
+let endS = null;
 
-/** CANDLE_COUNT bars of a 15m walk ending at the run's clock, around `p` (a price string), as the helper's answer. */
+/** CANDLE_COUNT bars of a 15m walk ending at the run's one end time, around `p` (a price string), as the helper's answer. */
 const CANDLE_COUNT = 160;
 function candles(p, tf) {
   const step = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 }[tf];
   const base = Number(p) > 0 ? Number(p) : 0.0000273;
-  const end = Math.floor(chartNow() / 1000 / step) * step;
+  endS ??= Math.floor(chartNow() / 1000);
+  const end = Math.floor(endS / step) * step;
   const out = [];
   let c = base;
   for (let i = 0; i < CANDLE_COUNT; i++) {
