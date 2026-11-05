@@ -565,6 +565,8 @@ async function main() {
   const config = JSON.parse(Buffer.from(d.r.status.SuccessValue, "base64").toString("utf8"));
   if (network === "testnet" && (config.asset !== TESTNET_TOKEN || !TESTNET_VERSION.test(config.version))) throw new Error(`deployed, but config() names asset ${config.asset}, version ${config.version}: not the testnet build`);
   if (network === "mainnet" && (config.asset !== MAINNET_USDC || !MAINNET_VERSION.test(config.version))) throw new Error(`deployed ${vault} (tx ${d.hash}), but config() names asset ${config.asset}, version ${config.version}: not the mainnet build`);
+  // the scope the record computed ahead (context.rs scope_for over the account and the token) is the one the vault answers
+  if (network === "mainnet" && record.scope !== undefined && config.scope !== record.scope) throw new Error(`deployed ${vault} (tx ${d.hash}), but config() names scope ${config.scope}, not the record's ${record.scope}`);
   const vaultReceipt = d.r.receipts_outcome.find((x) => x.outcome.executor_id === vault);
   console.log(`deployed: tx ${d.hash}; config() asset ${config.asset}, version ${config.version}; the vault's receipt burnt ${vaultReceipt?.outcome.gas_burnt} gas`);
 
