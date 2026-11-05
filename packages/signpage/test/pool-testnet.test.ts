@@ -255,6 +255,32 @@ test("the testnet build's pool RPCs, every chain and both providers, read throug
   }
 });
 
+test("card pool-buy-send-fast: the testnet build's second Solana provider is the helper's /v1/rpc/solana-devnet, as mainnet's is its /v1/rpc/solana, read with the kit's HELPER_FETCH_INIT; no 1-request-a-second public provider", async () => {
+  // onfinality's public devnet endpoint (x-ratelimit-limit-sec 1, limit-day 1000, read 5 Nov 15:03Z) held the 5 Nov
+  // 13:50:55Z buy 11.2 s in the page's reads: 26 of its answers were 429
+  const HELPER = "https://api.confidential.unrealized.trade";
+  assert.deepEqual([...TESTNET_RPCS.solana], ["https://api.devnet.solana.com", `${HELPER}/v1/rpc/solana-devnet`]);
+  const real = globalThis.fetch;
+  const inits = new Map<string, RequestInit | undefined>();
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    inits.set(String(u), init);
+    const id = (JSON.parse(String(init?.body)) as { id: string }).id;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: 7 }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const [a, b] = testnetPoolDeps().rpcs("solana")! as unknown as ((m: string, p: unknown[]) => Promise<unknown>)[];
+    assert.equal(await a!("getSlot", []), 7);
+    assert.equal(await b!("getSlot", []), 7);
+  } finally {
+    globalThis.fetch = real;
+  }
+  const helper = inits.get(`${HELPER}/v1/rpc/solana-devnet`);
+  assert.ok(helper, "the second read went to the helper's devnet route");
+  assert.equal(helper!.credentials, "omit");
+  assert.equal(helper!.referrerPolicy, "no-referrer");
+  assert.equal(inits.get("https://api.devnet.solana.com")?.credentials, undefined, "the public provider read plainly");
+});
+
 test("the devnet pool's relay fee: GET /v1/pool/fee on the helper for the pool and the epoch; another status or an oversized answer is refused", async () => {
   // GET https://api.confidential.unrealized.trade/v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef, 3 Nov 21:07Z, its
   // shape (apps/helper/src/pool/fee.ts PoolFeeAnswer), here for the pinned pool
