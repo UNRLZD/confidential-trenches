@@ -12,9 +12,9 @@
 //     transaction until pinned pools land there, so today the check holds the pin and the rule for that day.
 // The run itself is proven by packages/signpage/test/pool-buy.test.ts (each path with another device's spend answers
 // not_landed) and test/pool-withdraw.test.ts (spendOwner on the kit's real tag 3).
+// The recorded good and bad answers of the testnet build are facts() over packages/signpage/scripts/build-app.mjs
+// bundle(pkg, { network: "testnet" }) of each tree (this file reaches no package code: the import check holds it).
 //   node scripts/live-checks/signpage-buy-own-spend.mjs [--record <file>] [--answer <file>]
-//   node scripts/live-checks/signpage-buy-own-spend.mjs --local [--network mainnet|testnet] [--record <file>]
-//     the same judgement on this checkout's fresh build (packages/signpage/scripts/build-app.mjs bundle)
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
@@ -55,21 +55,13 @@ export async function read(fetchFn = fetch) {
   return facts(await get("/"), await get("/app.js"));
 }
 
-/** This checkout's fresh build for `network`, read the way SIGN_HOST's is. */
-export async function readLocal(network = "mainnet") {
-  const { bundle } = await import("../../packages/signpage/scripts/build-app.mjs");
-  const b = await bundle(undefined, { network });
-  const js = typeof b.js === "string" ? b.js : new TextDecoder().decode(b.js);
-  return facts(b.html, js);
-}
-
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {
   const arg = (k) => {
     const i = process.argv.indexOf(k);
     return i > 0 ? process.argv[i + 1] : undefined;
   };
   try {
-    const answer = arg("--answer") ? JSON.parse(readFileSync(arg("--answer"), "utf8")) : process.argv.includes("--local") ? await readLocal(arg("--network") ?? "mainnet") : await read();
+    const answer = arg("--answer") ? JSON.parse(readFileSync(arg("--answer"), "utf8")) : await read();
     if (arg("--record")) writeFileSync(arg("--record"), `${JSON.stringify(answer)}\n`);
     const v = judge(answer);
     for (const l of v.lines) console.log(l);
