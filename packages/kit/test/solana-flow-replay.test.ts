@@ -847,13 +847,85 @@ test("the blockhash takes 25 s to agree and the market moves 50% meanwhile: at t
   for (const p of d.providers) assert.equal(p.asks.filter((k) => k.startsWith('["simulateTransaction"') && k.includes('"addresses"') && k.includes(request(SELL).legs[0]!.wallet)).length, 2, "the set's own reads are not run a third time");
 });
 
-test("every reference read takes 25 s: the sign point reads it once more and signs, never a loop", async () => {
+// Card kit-renewal-read-bounded: the price a leg is signed on is a reference read begun no more than
+// SOLANA_BLOCKHASH_REFRESH_MS before the signature, at the sign point's re-read and at each leg's own signature; a leg
+// past it is refused as a price check (`checks: `, the signing page's quote_check_failed), never read again in a loop.
+const LATE = /^checks: the reference is \d+ ms old at the signature, past the 20000 ms limit$/;
+/** The reference read, its n-th call (0 first) taking costs[n] ms of the clock before it answers as recorded. */
+function slowReference(d: SolanaTradeDeps, advance: (ms: number) => void, costs: readonly number[]) {
+  const reads = { n: 0 };
+  const reference: SolanaTradeDeps["reference"] = async (q, p) => {
+    advance(costs[reads.n++] ?? 0);
+    return d.reference(q, p);
+  };
+  return { reference, reads };
+}
+
+test("every reference read takes 25 s: the sign point reads it once more, that read is late, and every leg is refused, never a loop", async () => {
   const clock = slowBuilds(25_000);
   const cap = signedOn(renewalPays(1));
   const d = deps(SELL, { edit: cap.edit });
   const m = marketAt(d, clock.now, Number.MAX_SAFE_INTEGER, 10_000n, 25_000, clock.advance);
   const r = await runSolanaTrade(request(SELL), { ...d, reference: m.reference, fetch: clock.fetch, now: clock.now });
   assert.equal(m.reads.length, 3);
+  for (const l of r.legs) {
+    assert.match(l.refused ?? "", LATE, l.refused);
+    assert.equal(l.signature, undefined);
+    assert.equal(l.dry, undefined);
+  }
+  assert.equal(legWires(cap.signed, r.legs).length, 0);
+});
+
+test("the sign point's reference re-read answers in 40 s: every leg refused with no signature, the reference never read a fourth time", async () => {
+  const clock = slowBuilds(25_000);
+  const cap = signedOn(renewalPays(1));
+  const d = deps(SELL, { edit: cap.edit });
+  const m = slowReference(d, clock.advance, [0, 25_000, 40_000]);
+  const r = await runSolanaTrade(request(SELL), { ...d, reference: m.reference, fetch: clock.fetch, now: clock.now });
+  assert.equal(m.reads.n, 3, "the first read, the renewal's, and one at the sign point");
+  assert.equal(r.legs.length, 3);
+  for (const l of r.legs) {
+    assert.match(l.refused ?? "", LATE, l.refused);
+    assert.equal(l.signature, undefined);
+    assert.equal(l.dry, undefined);
+  }
+  assert.equal(legWires(cap.signed, r.legs).length, 0);
+});
+
+test("the sign point's reference re-read answers in 15 s on an unmoved market: every leg is signed on it", async () => {
+  const clock = slowBuilds(25_000);
+  const cap = signedOn(renewalPays(1));
+  const d = deps(SELL, { edit: cap.edit });
+  const m = slowReference(d, clock.advance, [0, 25_000, 15_000]);
+  const r = await runSolanaTrade(request(SELL), { ...d, reference: m.reference, fetch: clock.fetch, now: clock.now });
+  assert.equal(m.reads.n, 3);
   for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
   assert.equal(legWires(cap.signed, r.legs).length, r.legs.length);
+  for (const b of legWires(cap.signed, r.legs)) assert.equal(signedHash(b), FRESH);
+});
+
+test("the signer's store read takes 15 s after a 10 s old reference: the leg is refused at its signature and nothing is sent; a 5 s one goes on to the signature's check", async () => {
+  const run = async (signerMs: number) => {
+    const clock = slowBuilds(10_000);
+    const asked: string[] = [];
+    const sign: SolanaTradeDeps["sign"] = async (wallet) => {
+      asked.push(wallet);
+      clock.advance(signerMs);
+      // the recording's wallets have no key here: a signature that would be checked next, and fail
+      return new Uint8Array(64).fill(1);
+    };
+    const paths = [{ name: "never", send: async () => { throw new Error("a late leg was sent"); } }];
+    const r = await runSolanaTrade(request(BUY), { ...deps(BUY), dry: false, sign, paths, fetch: clock.fetch, now: clock.now });
+    return { r, asked };
+  };
+  const late = await run(15_000);
+  assert.equal(late.asked.length, 1, "the signer was asked: the reference was 10 s old then");
+  const l = late.r.legs[0]!;
+  assert.equal(l.firstVerdict, undefined, "no renewal: the trade's own reads, 10 s old");
+  assert.equal(l.verdict?.ok, true);
+  assert.match(l.refused ?? "", LATE, l.refused);
+  assert.equal(l.signature, undefined);
+  assert.equal(l.outcome, undefined);
+  // the same leg with a signer that answers in 5 s is past the age rule: its signature is checked against the wallet
+  await assert.rejects(run(5_000), /does not verify/);
 });
