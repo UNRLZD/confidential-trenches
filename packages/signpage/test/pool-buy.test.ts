@@ -780,10 +780,32 @@ for (const [name, plant, stage, txs] of SENT_HOOK) {
     const a = await runPoolBuy({ ...w.host, sent: (s) => void told.push(s), route: (x) => void routes.push(x) }, ASK);
     assert.deepEqual(a, { stage, txs });
     assert.deepEqual(told, [], "no sent hook before both RPCs read this very transaction");
-    // card pool-buy-send-fast: the route's tx is told at the sent hook's point only, so never the helper's word
-    assert.ok(!routes.some((x) => Object.hasOwn(x as object, "tx")), `no tx told: ${JSON.stringify(routes)}`);
+    // card pool-buy-send-fast: the route's tx is only what both RPCs read as this attempt's, never the helper's word: a
+    // filled answer names the spend's own signature as the route's tx too (review M-1: the answer comes past the
+    // client's 10 s and is dropped), once; a sent one names none
+    const tx = routes.filter((x) => Object.hasOwn(x as object, "tx"));
+    assert.deepEqual(tx, stage === "filled" ? [{ tx: SIG }] : [], JSON.stringify(routes));
   });
 }
+
+test("card pool-buy-send-fast (review M-1): the helper's 502, this very buy found in W's history on both RPCs: filled, and the route's tx is the spend's own signature, told once", async () => {
+  const w = await world({ helper: "502", finalHeight: () => 50 });
+  const told: string[] = [];
+  const routes: unknown[] = [];
+  const a = await runPoolBuy({ ...w.host, sent: (s) => void told.push(s), route: (x) => void routes.push(x) }, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.deepEqual(told, [], "no early sent: the helper named nothing");
+  assert.deepEqual(routes.filter((x) => Object.hasOwn(x as object, "tx")), [{ tx: SIG }]);
+});
+
+test("card pool-buy-send-fast (review M-1): another device's spend is never told as this buy's tx", async () => {
+  for (const plant of [{ helper: "502" }, { readBack: "other" }] as const) {
+    const w = await world({ ...plant, otherSpent: true, finalHeight: () => 50 });
+    const routes: unknown[] = [];
+    assert.equal((await runPoolBuy({ ...w.host, route: (x) => void routes.push(x) }, ASK)).stage, "not_landed");
+    assert.ok(!routes.some((x) => Object.hasOwn(x as object, "tx")), JSON.stringify(routes));
+  }
+});
 
 test("card pool-buy-send-fast: the route's tx is this very transaction's signature, told once, at the sent hook, before the amount", async () => {
   const w = await world({ received: [0n, 0n] });
