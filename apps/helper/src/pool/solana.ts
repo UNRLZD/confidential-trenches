@@ -424,8 +424,6 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     for (const m of [epochFees, known]) for (const k of [...m.keys()]) if (k < epoch - POOL_LIFE_MAX_MS) m.delete(k);
     return p;
   };
-  // each ask before the check reads this epoch's rent unless a read of it is under way or done (feeOf keeps it); a failed
-  // read is dropped, so the next ask (server.ts poolsChecked asks every READY_EVERY_MS) reads again
   // a failed start read on stderr, naming the cluster and the error (each URL cut to its host: a key may sit in its
   // path or query); the first, then one a POOL_START_LOG_MS. A mismatch is not one: the helper exits naming it.
   const log = deps.log ?? ((line: string) => console.error(line));
@@ -437,6 +435,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     const why = (e instanceof Error ? e.message : String(e)).replace(/\bhttps?:\/\/[^\s/?#]+[^\s]*/g, (u) => URL.canParse(u) ? new URL(u).host : "<url>");
     log(`helper: the ${cfg.cluster} pool's rent read failed, its start check waits for a good one: ${why}`);
   };
+  // each ask before the check reads this epoch's rent unless a read of it is under way or done (feeOf keeps it); a failed
+  // read is dropped, so the next ask (server.ts poolsChecked asks every READY_EVERY_MS) reads again
   const ready = (): Promise<void> => {
     if (configured === "unchecked") feeOf(epochStartOf((deps.now ?? Date.now)())).catch(startReadFailed);
     return readyP;
