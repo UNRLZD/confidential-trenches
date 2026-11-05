@@ -388,8 +388,9 @@ export function tradeKind(host: TradeHost): TradeKind {
       write({ txs });
     }
 
-    // each wallet's mark goes when its txs' end is known here: none signed, its swap filled (a buy's goes IN_POSITION)
-    // or failed or dead; any other keeps its mark, resolved at a later pick once this trade's lock is free
+    // each wallet's mark goes when its txs' end is known here: none signed, none sent (the kit returned its leg
+    // unsigned), its swap filled (a buy's goes IN_POSITION) or failed or dead; any other keeps its mark, resolved at a
+    // later pick once this trade's lock is free
     async function unmark(store: TradeStore, keys: readonly string[], record: SolanaTradeRecord | null): Promise<void> {
       await Promise.all(
         keys.map(async (key, i) => {
@@ -397,6 +398,9 @@ export function tradeKind(host: TradeHost): TradeKind {
           if (rec?.inflight?.op !== ctx.id) return;
           const leg = record?.legs[i];
           if (rec.inflight.txs.length === 0) return settleArm(store, key, ctx.id);
+          // a leg the kit returned unsigned was never sent: a signature its signer gave and the kit dropped as late (card
+          // kit-renewal-read-bounded) is in the mark only, so the mark goes and no later pick notes it on the op
+          if (record && leg && leg.signature === undefined) return settleArm(store, key, ctx.id);
           if (leg && filled(leg)) return settleArm(store, key, ctx.id, side === "buy" ? { from: "READY", to: "IN_POSITION", token } : undefined);
           if (leg && ended(leg)) return settleArm(store, key, ctx.id);
         }).map((x) => x.catch(() => false)),

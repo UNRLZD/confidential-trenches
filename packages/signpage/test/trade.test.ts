@@ -495,6 +495,26 @@ test("a dead tab's tx that can never land frees its wallet: both providers' fina
   assert.deepEqual(op.txs.map((t) => t.state), ["not_landed"]);
 });
 
+test("a leg the kit returned unsigned frees its wallet at the trade's end: a later pick and a repeated id never name its dropped signature", async () => {
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n), [armKey("sol", L, 1)]: rec(1, 500n), [armKey("sol", L, 2)]: rec(2, 200n), [armKey("sol", L, 3)]: rec(3, 200n) });
+  const dropped: string[] = [];
+  const first = await page(s, { final: "filled", late: [1], dropped }).ask(buy("17"));
+  const late = dropped[0]!;
+  const kept = (first.answer as { result: { txs: { hash: string }[] } }).result.txs.map((t) => t.hash);
+  assert.equal(kept.length, 2);
+  // a later pick in another tab, with the dropped tx's blockhash dead on both providers
+  const later = page(s, { final: "filled" }, [sigStatus(null, LVBH + 1), sigStatus(null, LVBH + 1)]);
+  await later.ask(buy("10"));
+  const op = s.m.ops!.get(first.id) as { stage: string; txs: { hash: string }[] };
+  assert.deepEqual(op.txs.map((t) => t.hash), kept, "the op names the kept signatures alone");
+  // the same id asked again is answered from the op, without the dropped signature
+  const again = await page(s, { final: "filled" }).ask(buy("17"), first.id);
+  const txs = (again.answer as { result: { txs: { hash: string }[] } }).result.txs.map((t) => t.hash);
+  assert.ok(!txs.includes(late), "the repeated id's answer names the dropped signature");
+  assert.deepEqual(txs, kept);
+  assert.equal(mark(s, 1), undefined, "the unsigned leg's wallet holds no mark: its tx was never sent");
+});
+
 test("a store write that never answers refuses the trade within its bound, and sign out's lock is granted", async (c) => {
   let hang = false;
   const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }, { hangPut: (st) => st === "wallets" && hang });
