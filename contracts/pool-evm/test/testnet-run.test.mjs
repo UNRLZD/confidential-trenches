@@ -222,3 +222,12 @@ test("main takes its fee providers, its bind seconds and the device's arguments 
   const body = RUN.split("export async function main(")[1];
   assert.doesNotMatch(body, /\b(feeProviders|bindEpoch|evmPool)\(|bindFromS|--rpc"|--bind-from-s"/, "no second source of the fee's providers, the bind seconds or the device");
 });
+
+test("the run's restore reads each W's Transfers on the wallet's own EVM_TRANSFER_RPCS, never a provider of the run's pool pair (card wallet-restore-transfer-rpcs)", async () => {
+  const { EVM_TRANSFER_RPCS } = await import("../../../packages/wallet/src/pool/evm.ts");
+  const host = (u) => new URL(u).hostname;
+  for (const chain of ["base-sepolia", "robinhood-testnet"]) {
+    assert.equal(run.NETS[chain].walletRpcs, EVM_TRANSFER_RPCS[chain], `${chain}: one source`);
+    for (const u of run.NETS[chain].walletRpcs) assert.ok(!run.NETS[chain].rpcs.map(host).includes(host(u)), `${chain}: ${u} is a pool provider`);
+  }
+});
