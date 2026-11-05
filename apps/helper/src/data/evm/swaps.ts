@@ -994,11 +994,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // read out is waited for (each bounded by TIMEOUT_MS), so its answer still counts
     const reads: Promise<void>[] = [];
     const go = (urls: string[]) => (reads.push(read(urls)), hedged(reads.at(-1)!, urls));
+    // two heads within V.lagMax of each other are in hand
+    const pair = (): boolean => {
+      const ns = [...heads.values()].map((h) => h.n).sort((a, b) => b - a);
+      return ns.some((n, i) => i > 0 && ns[i - 1]! - n <= V.lagMax);
+    };
     await go(ok.slice(0, 2));
-    const first = [...heads.values()];
-    if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await go(ok.slice(2, 3));
+    // the whole ranked list is walked, one more at a time, until a pair is in hand or the list is spent (card
+    // evm-rpc-spare-list: with Base's first two providers down the third answered, the patient round asked the first two
+    // again and the fourth never, so no head was read and every read of the chain stopped)
+    for (let i = 2; i < ok.length && !pair(); i++) await go(ok.slice(i, i + 1));
     if (heads.size < 2) await Promise.all(reads);
-    // no two heads within the pace's wait: the providers not read yet, and those that passed, read patiently
+    // no two heads within the pace's wait, the whole list asked: those that passed a read at their pace's wait read again,
+    // patiently (a provider not yet asked has been, above)
     if (heads.size < 2) await read(ok.filter((u) => !heads.has(u)).slice(0, 2), true);
     const sorted = [...heads].sort((a, b) => b[1].n - a[1].n);
     if (sorted.length < 2) return null;
