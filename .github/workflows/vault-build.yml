@@ -20,6 +20,7 @@ on:
       - "scripts/live-checks/vault-skeleton.mjs"
       - "scripts/live-checks/vault-testnet-t01.mjs"
       - "scripts/ci/near-rpc-operators.mjs"
+      - "scripts/ci/rpc-wait.mjs"
       - "scripts/ci/retry.sh"
   workflow_dispatch:
 
