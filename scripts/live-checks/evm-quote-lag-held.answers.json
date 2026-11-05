@@ -1,127 +1,187 @@
 {
  "good": {
-  "recorded": "2026-11-05T10:03:34.821Z",
+  "recorded": "2026-11-05T21:03:30.521Z",
   "cases": {
    "robinhood-publicnode-100": {
     "cold": {
-     "ms": 52440,
-     "code": "ok",
-     "lagHeads": 2
+     "ms": 60154,
+     "code": "rpc_error",
+     "lagHeads": 19,
+     "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms"
     },
     "quotes": [
      {
-      "ms": 2592,
+      "ms": 3395,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 2084,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 3569,
+      "ms": 1445,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1955,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1719,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1337,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1569,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1369,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 2591,
+      "ms": 1602,
       "code": "ok",
-      "lagHeads": 0
+      "lagHeads": 1
      },
      {
-      "ms": 4788,
+      "ms": 1734,
       "code": "ok",
-      "lagHeads": 0
-     },
-     {
-      "ms": 2165,
-      "code": "ok",
-      "lagHeads": 0
-     },
-     {
-      "ms": 2201,
-      "code": "ok",
-      "lagHeads": 0
-     },
-     {
-      "ms": 2155,
-      "code": "ok",
-      "lagHeads": 0
-     },
-     {
-      "ms": 2273,
-      "code": "ok",
-      "lagHeads": 0
-     },
-     {
-      "ms": 2286,
-      "code": "ok",
-      "lagHeads": 0
-     },
-     {
-      "ms": 2282,
-      "code": "ok",
-      "lagHeads": 0
+      "lagHeads": 2
      }
     ]
    },
    "base-blastapi-5": {
     "cold": {
-     "ms": 9824,
+     "ms": 9135,
      "code": "ok",
      "lagHeads": 2
     },
     "quotes": [
      {
-      "ms": 1157,
+      "ms": 650,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 875,
+      "ms": 718,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 1638,
-      "code": "ok",
-      "lagHeads": 1
-     },
-     {
-      "ms": 1136,
+      "ms": 599,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 1770,
+      "ms": 594,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 1070,
+      "ms": 596,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 3222,
+      "ms": 598,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 1089,
+      "ms": 598,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 1669,
+      "ms": 682,
       "code": "ok",
-      "lagHeads": 1
+      "lagHeads": 0
      },
      {
-      "ms": 1233,
+      "ms": 509,
       "code": "ok",
-      "lagHeads": 1
+      "lagHeads": 0
+     },
+     {
+      "ms": 595,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   },
+   "base-blastapi-50": {
+    "cold": {
+     "ms": 1227,
+     "code": "ok",
+     "lagHeads": 1
+    },
+    "quotes": [
+     {
+      "ms": 581,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 567,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 589,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 546,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 604,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 577,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 616,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 520,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 592,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 598,
+      "code": "ok",
+      "lagHeads": 0
      }
     ]
    }
   },
-  "at": "5607feb, this Mac, the kit as on this card"
+  "at": "f746056f (card base-200ms-blocks, Base maxLag 50) with the 50-block case, this Mac"
  },
  "bad": {
   "recorded": "2026-11-05T10:05:57.776Z",
@@ -256,5 +316,189 @@
    }
   },
   "at": "e031ad4, this Mac, the kit before this card"
+ },
+ "bad_maxlag5": {
+  "recorded": "2026-11-05T21:06:08.220Z",
+  "cases": {
+   "robinhood-publicnode-100": {
+    "cold": {
+     "ms": 60444,
+     "code": "rpc_error",
+     "lagHeads": 21,
+     "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms"
+    },
+    "quotes": [
+     {
+      "ms": 4040,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1664,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1457,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1833,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1611,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1268,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1659,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1437,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1322,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1445,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   },
+   "base-blastapi-5": {
+    "cold": {
+     "ms": 13676,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 1119,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1065,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 913,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 859,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1081,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 863,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 841,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 696,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 527,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 567,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   },
+   "base-blastapi-50": {
+    "cold": {
+     "ms": 864,
+     "code": "ok",
+     "lagHeads": 0
+    },
+    "quotes": [
+     {
+      "ms": 781,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 786,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 929,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 870,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 873,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 572,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 596,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 596,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 598,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 595,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   }
+  },
+  "at": "origin/main 3ad4abf6, the kit before card base-200ms-blocks (Base maxLag 5), with the 50-block case, this Mac: the provider 50 back never pairs"
  }
 }

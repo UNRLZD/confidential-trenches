@@ -39,6 +39,7 @@ export const LIVE_CHECKS = [
   "helper-live-bars-no-503",
   "sol-small-note-buys",
   "evm-rpc-spare-list",
+  "base-200ms-blocks",
   "wallet-restore-transfer-rpcs",
 ];
 

@@ -125,7 +125,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
       feeProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
-      maxLag: 5, // 2 s blocks: 10 s
+      // 10 s of Base's blocks: one every 200 ms since block 53556127 (2026-11-05 18:00:01Z, 2 s before; 10,000 blocks
+      // to block 53603737 took 2,000 s on base-rpc.publicnode.com and base.gateway.tenderly.co, read 2026-11-05 20:38Z),
+      // so 50 blocks (5 at 2 s blocks); live check base-200ms-blocks fails when Base's block time moves again
+      maxLag: 50,
       // Each launchpad factory's recent creations (apps/helper/src/data/evm/lists.ts) and the PoolManager Initialize log in
       // the same transaction, read 2026-11-03 18:49Z on base-rpc.publicnode.com; each hook's code the same on both
       // providers (bytes, keccak prefix): Clanker v4 16,405 b0676099; Zora 24,148 90685df9; Doppler 4,884 317314fa;
@@ -282,8 +285,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       quoters: bare({ v3: "0xc5290058841028f1614f3a6f0f5816cad0df5e27", v4: "0x4a6513c898fe1b2d0e78d3b0e0a4a151589b1cba" }),
       providers: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
       feeProviders: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
-      // 2 s blocks; the two heads were 5 blocks apart in one read (2026-11-04 09:53Z), so 10 blocks, 20 s
-      maxLag: 10,
+      // 20 s of its blocks: the two heads were 5 blocks apart in one read at 2 s blocks (2026-11-04 09:53Z), so 10 then;
+      // one every 200 ms now (10,000 blocks to block 54946277 took 2,000 s on sepolia.base.org and
+      // base-sepolia-rpc.publicnode.com, read 2026-11-05 20:38Z), so 100
+      maxLag: 100,
     }),
     "robinhood-testnet": bare({
       chainId: 46630,
@@ -316,7 +321,8 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // evm-buy-hookdata-fee holds every pinned provider to 600 s)
       providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
       feeProviders: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
-      // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 10 s
+      // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 16 s of its blocks (10,000
+      // to block 149155719 took 1,634 s on both providers, read 2026-11-05 20:38Z)
       maxLag: 100,
     }),
   }));
