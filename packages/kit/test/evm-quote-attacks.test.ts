@@ -3153,41 +3153,71 @@ test("L5 a sell at its buy's block, one provider a block behind it: the quote wa
   assert.ok(r.ms <= 100, `no wait: ${r.ms} ms`);
 });
 
-/** The sell quote's verdict and the mocked time it took, ms: the clock (Date, the wait's monotonic clock here) and
- *  every timer mocked, ticked `step` ms at a time until the quote settles (so the time read is up to two steps late). */
-async function timed(run: (mono: () => number) => Promise<unknown>, ticks = 4_000, step = 500) {
+/** `p` driven on the mocked clock (Date and setTimeout), `step` ms a tick, until it settles or `ticks` run out. A quote
+ *  still waiting after every tick is the wait's own failure, never a test that hangs: it throws, naming where the quote
+ *  is parked (re-review of b282ce0's CI, L5b and L2: 400 ticks ran in 42 ms with the quote not settled). Each timer the
+ *  quote sets is recorded with the line of the kit that set it, so the message names the last stage reached (the last
+ *  timer set and fired) and every timer still pending, or says no timer is pending: then the quote waits on a promise
+ *  the mocked clock does not drive. */
+async function drive<T>(start: () => Promise<T>, ticks: number, step: number): Promise<{ value: T; ms: number }> {
   mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const mocked = { set: globalThis.setTimeout, clear: globalThis.clearTimeout };
+  type Timer = { site: string; ms: number; at: number; fired: boolean; cleared: boolean };
+  const timers = new Map<unknown, Timer>();
+  const t0 = performance.now();
+  let lastFired: Timer | undefined;
+  const siteOf = (stack = "") => stack.split("\n").find((l) => l.includes("/src/"))?.trim().replace(/^at /, "").replace(/\(?file:\/\/[^)]*\/src\//, "src/").replace(/\)$/, "") ?? "outside the kit";
+  globalThis.setTimeout = ((f: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => {
+    const t: Timer = { site: siteOf(new Error().stack), ms: ms ?? 0, at: Date.now(), fired: false, cleared: false };
+    const h = mocked.set((...b: unknown[]) => {
+      t.fired = true;
+      lastFired = t;
+      f(...b);
+    }, ms, ...a);
+    timers.set(h, t);
+    return h;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((h: unknown) => {
+    const t = timers.get(h);
+    if (t !== undefined) t.cleared = true;
+    mocked.clear(h as Parameters<typeof clearTimeout>[0]);
+  }) as typeof clearTimeout;
   try {
     let done = false;
-    const raw = run(() => Date.now()) as ReturnType<typeof sellOn>;
-    const p = sellVerdict(raw).finally(() => (done = true));
-    for (let i = 0; i < ticks && !done; i++) {
+    const p = start().finally(() => (done = true));
+    let i = 0;
+    for (; i < ticks && !done; i++) {
       await new Promise((r) => setImmediate(r));
       mock.timers.tick(step);
     }
     await new Promise((r) => setImmediate(r));
-    // a quote still waiting after every tick is the wait's own failure, never a test that hangs
-    if (!done) return { verdict: { accepted: false, code: "still waiting" }, ms: Date.now(), quote: undefined };
-    return { verdict: await p, ms: Date.now(), quote: await raw.catch(() => undefined) };
+    if (!done) {
+      const now = Date.now();
+      const pending = [...timers.values()].filter((t) => !t.fired && !t.cleared);
+      const at = (t: Timer) => `${t.site} (${t.ms} ms, set at ${t.at} ms)`;
+      assert.fail(
+        `still waiting after ${i} ticks of ${step} ms (${now} ms mocked, ${Math.round(performance.now() - t0)} ms real), ${timers.size} timers set; ` +
+          `last fired: ${lastFired === undefined ? "none" : at(lastFired)}; ` +
+          (pending.length === 0 ? "no timer pending: parked on a promise the mocked clock does not drive" : `pending: ${pending.slice(-4).map(at).join("; ")}`),
+      );
+    }
+    return { value: await p, ms: Date.now() };
   } finally {
+    globalThis.setTimeout = mocked.set;
+    globalThis.clearTimeout = mocked.clear;
     mock.timers.reset();
   }
 }
+/** The sell quote's verdict and the mocked time it took, ms: the clock (Date, the wait's monotonic clock here) and
+ *  every timer mocked, ticked `step` ms at a time until the quote settles (so the time read is up to two steps late). */
+async function timed(run: (mono: () => number) => Promise<unknown>, ticks = 4_000, step = 500) {
+  let raw: ReturnType<typeof sellOn> | undefined;
+  const { value, ms } = await drive(() => sellVerdict((raw = run(() => Date.now()) as ReturnType<typeof sellOn>)), ticks, step);
+  return { verdict: value, ms, quote: await raw!.catch(() => undefined) };
+}
 /** A buy quote on the mocked clock (Date and setTimeout), 100 ms a tick: its verdict. */
 async function timedBuy(run: (mono: () => number) => Promise<unknown>) {
-  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
-  try {
-    let done = false;
-    const p = verdict(run(() => Date.now()) as Promise<EvmPoolBuyQuote>).finally(() => (done = true));
-    for (let i = 0; i < 8_000 && !done; i++) {
-      await new Promise((r) => setImmediate(r));
-      mock.timers.tick(100);
-    }
-    await new Promise((r) => setImmediate(r));
-    return done ? await p : { accepted: false, code: "still waiting" };
-  } finally {
-    mock.timers.reset();
-  }
+  return (await drive(() => verdict(run(() => Date.now()) as Promise<EvmPoolBuyQuote>), 8_000, 100)).value;
 }
 /** `rpc`, its head (eth_blockNumber) answered `ms` later and the rest at once */
 const slowHead = (rpc: EvmRpc, ms: number): EvmRpc => async (calls) => {
