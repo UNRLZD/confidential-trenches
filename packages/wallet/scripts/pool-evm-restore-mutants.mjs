@@ -1,7 +1,7 @@
 // node packages/wallet/scripts/pool-evm-restore-mutants.mjs (card notes-restore-evm): plants one mutant at a time in the card's source, runs the named test, expects it to fail, puts the source back.
 import { readFileSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { runSync } from "../../../scripts/group-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const S = `${W}/src/pool/evm.ts`, R = `${W}/src/pool/evm-restore.ts`;
 const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts";
@@ -82,7 +82,8 @@ for (const [f, find, repl, file, pat] of M) {
   const src = readFileSync(f, "utf8");
   if (src.split(find).length !== 2) { console.log(`NOT ONCE: ${find}`); process.exitCode = 1; continue; }
   writeFileSync(f, src.replace(find, repl));
-  const r = spawnSync("node", ["--test", `--test-name-pattern=${pat}`, file], { cwd: W, encoding: "utf8", timeout: 120_000 });
+  // a run past 120 s is killed, its process group with it (scripts/group-run.mjs)
+  const r = runSync("node", ["--test", `--test-name-pattern=${pat}`, file], { cwd: W, encoding: "utf8", timeoutMs: 120_000 });
   writeFileSync(f, src);
   const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
   const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
