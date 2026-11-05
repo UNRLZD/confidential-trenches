@@ -12,9 +12,10 @@
 // Not read here, and why: the brief's check opens the deployed testnet SIGN_HOST signed in with devnet notes and reads
 // state.pools[].price and ready from the page. No testnet build is deployed anywhere (SIGN_HOST serves the mainnet
 // build, which signpage-pool-flow and signpage-pool-notes hold; the testnet build has no host and no CSP of its own),
-// and mainnet pins no pool yet, so a signed-in SIGN_HOST answers pools []. That read lands with the testnet host or the
-// mainnet pins (the card's report to the CO); until then the page's half is proven by packages/signpage/test/
-// pools-testnet.test.ts and pool-testnet.test.ts.
+// and mainnet pins no pool yet, so a signed-in SIGN_HOST answers pools []. That read on the deployed page is card
+// signpage-pool-mainnet's, on the mainnet page; the testnet half is proven by packages/signpage/test/
+// pools-testnet.test.ts, pool-testnet.test.ts and main-testnet-pools.test.ts, and by the devnet run of
+// packages/signpage/scripts/pool-pins-devnet.mjs (signpage-pool-pins.md).
 //   node scripts/live-checks/signpage-pool-pins.mjs [--harness] [--record <file>]
 //     --harness: this checkout's bundle and public/_headers stand for SIGN_HOST's /app.js and CSP (the pair read is live)
 //     PASS exit 0, FAIL exit 1, error exit 2
