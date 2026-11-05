@@ -55,7 +55,7 @@ import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../g
 import { CALLER_ROOM, evmThrottleS, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
-import { createSwapIndex, traderFrom, type SwapIndex } from "./index.ts";
+import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -1451,7 +1451,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   let refTo: number | null = null;
   let refFrom: number | null = null; // the earliest block the ETH price is read from
   let refLock: Promise<unknown> = Promise.resolve();
-  const traders = new Map<string, string | null>();
+  /** Each transaction's traders (index.ts txTraders), by hash; a swap's is traderAt its log index. */
+  const traders = new Map<string, Traders>();
   /** Agreed `eth_call` results by (to, data, block) (callsAgreed): a call at a mined block never answers otherwise, so
    *  each is read once and shared by every tape and tick (fold 5). */
   const called = new Map<string, string>();
@@ -1816,7 +1817,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // The served answers
   // -------------------------------------------------------------------------------------------------------------
 
-  /** Traders of the txs, the sender of each (06c §4.12). A dozen cold tokens ask about 600 at once (card
+  /** Traders of the txs (06c §4.12): the sender of each, or for a bundle sent to an EntryPoint each user operation's
+   *  account, read from its receipt (index.ts txTraders, card helper-tape-4337-trader). A dozen cold tokens ask about 600 at once (card
    *  helper-robinhood-capacity fold 2), so they are split across the providers not held by free budget (free), each share
    *  read at once, and a share whose read fails asked of the others in turn; a tx whose read fails everywhere stays null
    *  this time and is asked again the next. */
@@ -1851,29 +1853,58 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const k = i === order.length - 1 ? need.length - at : Math.min(need.length - at, Math.round((need.length * (sum > 0 ? f : 1)) / (sum > 0 ? sum : order.length)));
       return { u, part: need.slice(at, (at += k)) };
     });
+    // the transactions read, by hash: one sent to an EntryPoint waits for its receipt (bundles) before it has traders
+    const got = new Map<string, Record<string, unknown>>();
+    const keep = (t: string, x: Traders) => {
+      if (traders.size >= TRADERS_MAX) traders.delete(traders.keys().next().value!);
+      traders.set(t, x);
+    };
     const read = async (u: string, part: string[]): Promise<boolean> => {
       const r = await batchTo(u, part.map((t) => ({ method: "eth_getTransactionByHash", params: [t] })));
       if (r === null) return false;
       part.forEach((t, i) => {
         const x = r[i];
         const tx = x?.ok ? obj(x.result) : null;
-        const from = tx === null ? null : evmAddress(traderFrom(tx));
-        if (tx !== null && typeof tx.hash === "string" && tx.hash.toLowerCase() === t && from !== null) {
-          if (traders.size >= TRADERS_MAX) traders.delete(traders.keys().next().value!);
-          traders.set(t, from);
-        }
+        if (tx === null || typeof tx.hash !== "string" || tx.hash.toLowerCase() !== t) return;
+        const plain = toEntryPoint(tx) ? null : txTraders(tx, null);
+        if (toEntryPoint(tx) || plain !== null) got.set(t, tx);
+        if (plain !== null) keep(t, plain);
       });
       return true;
     };
+    /** A share's bundles' traders from their receipts, which two providers must give alike (card helper-tape-4337-trader):
+     *  one read more for a transaction sent to an EntryPoint, none for any other. */
+    const bundles = async (part: string[]): Promise<void> => {
+      const ask = part.filter((t) => got.has(t) && toEntryPoint(got.get(t)!) && !traders.has(t));
+      if (ask.length === 0) return;
+      const ops = await agreed<Traders>(
+        rpcs,
+        ask.length,
+        async (u, idx, patient) => {
+          const r = await batchTo(u, idx.map((i) => ({ method: "eth_getTransactionReceipt", params: [ask[i]] })), patient);
+          return idx.map((i, k) => {
+            const x = r?.[k];
+            return x?.ok ? txTraders(got.get(ask[i]!)!, obj(x.result)) : null;
+          });
+        },
+        (a, b) => JSON.stringify(a) === JSON.stringify(b),
+        false,
+      );
+      ask.forEach((t, i) => {
+        const x = ops[i];
+        if (x != null) keep(t, x);
+      });
+    };
     await Promise.all(
       shares.filter((x) => x.part.length > 0).map(async ({ u, part }) => {
-        if (await read(u, part)) return;
-        // a share whose read failed: only its hashes still without a trader, of the others in turn
-        for (const v of byFree(usable(rpcs))) {
-          const left = part.filter((t) => !traders.has(t));
-          if (left.length === 0) return;
-          if (v !== u && single([v], 2).length > 0 && (await read(v, left))) return;
-        }
+        if (!(await read(u, part)))
+          // a share whose read failed: only its hashes still not read, of the others in turn
+          for (const v of byFree(usable(rpcs))) {
+            const left = part.filter((t) => !got.has(t));
+            if (left.length === 0) break;
+            if (v !== u && single([v], 2).length > 0 && (await read(v, left))) break;
+          }
+        await bundles(part);
       }),
     );
   }
@@ -1933,7 +1964,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const rows = e.book.tape(limit);
       await tradersOf(rows.map((r) => r.tx));
       const at = e.readAt ?? now();
-      const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(r.tx) ?? null, tx: r.tx }));
+      const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
       return { status: 200, body: JSON.stringify({ trades, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
     },
   };
