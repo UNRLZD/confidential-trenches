@@ -22,7 +22,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RPCS, TESTNET_VERSION, operatorProblems, recorder, wasmProblems } from "./vault-skeleton.mjs";
+import { RPCS, TESTNET_VERSION, operatorProblems, query, recorder, wasmProblems } from "./vault-skeleton.mjs";
+import { wait } from "../ci/rpc-wait.mjs";
 
 const KEY = "vault-testnet-t01";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -68,21 +69,11 @@ export function b58(buf) {
   return s;
 }
 
-export async function query(fetchFn, url, params) {
-  const r = await fetchFn(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: KEY, method: "query", params }),
-  });
-  const json = await r.json();
-  if (json.error) throw new Error(`${json.error.name ?? "error"}: ${json.error.cause?.name ?? json.error.message ?? ""}`);
-  if (json.result?.error) throw new Error(String(json.result.error).split("\n")[0].slice(0, 200));
-  if (!json.result) throw new Error(`HTTP ${r.status}, no result`);
-  return json.result;
-}
+// every read goes through vault-skeleton.mjs's query, which waits out a rate limit as the money gate does
+export { query };
 
-export const view = async (fetchFn, url, account_id, method_name, args) => {
-  const r = await query(fetchFn, url, { request_type: "call_function", account_id, method_name, args_base64: Buffer.from(JSON.stringify(args)).toString("base64"), finality: "final" });
+export const view = async (fetchFn, url, account_id, method_name, args, sleep = wait) => {
+  const r = await query(fetchFn, url, { request_type: "call_function", account_id, method_name, args_base64: Buffer.from(JSON.stringify(args)).toString("base64"), finality: "final" }, sleep);
   return { value: JSON.parse(Buffer.from(r.result).toString("utf8")), block: r.block_height };
 };
 
@@ -90,23 +81,23 @@ export const view = async (fetchFn, url, account_id, method_name, args) => {
 // its code hash (view_account) and its code's sha256 (view_code) are the record's; the code passes wasmProblems and
 // names `token` and no other token id (tokenProblems); config() answers with `token` as its asset and a version
 // matching `version`. vault-mainnet.mjs reads a vault on either network with these same reads.
-export async function readVault({ fetchFn, url, account, deployment, token, version, say }) {
+export async function readVault({ fetchFn, url, account, deployment, token, version, say, sleep = wait }) {
   const at = `on ${url}`;
   try {
-    const k = await query(fetchFn, url, { request_type: "view_access_key_list", account_id: account, finality: "final" });
+    const k = await query(fetchFn, url, { request_type: "view_access_key_list", account_id: account, finality: "final" }, sleep);
     const keys = Array.isArray(k.keys) ? k.keys : null;
     say(keys !== null && keys.length === 0, `${account} key list is [] ${at}: ${keys === null ? "no list" : `${keys.length} key(s)${keys.length ? ` (${keys.map((x) => { const p = x.access_key?.permission; return typeof p === "string" ? p : Object.keys(p ?? {})[0]; }).join(", ")})` : ""}`} at block ${k.block_height}`);
   } catch (e) {
     say(false, `${account} key list ${at}: ${e.message}`);
   }
   try {
-    const a = await query(fetchFn, url, { request_type: "view_account", account_id: account, finality: "final" });
+    const a = await query(fetchFn, url, { request_type: "view_account", account_id: account, finality: "final" }, sleep);
     say(a.code_hash === deployment.code_hash, `${account} code hash ${a.code_hash} equals the record's ${deployment.code_hash} ${at} at block ${a.block_height}`);
   } catch (e) {
     say(false, `${account} code hash ${at}: ${e.message}`);
   }
   try {
-    const c = await query(fetchFn, url, { request_type: "view_code", account_id: account, finality: "final" });
+    const c = await query(fetchFn, url, { request_type: "view_code", account_id: account, finality: "final" }, sleep);
     const code = Buffer.from(c.code_base64, "base64");
     const sha = createHash("sha256").update(code).digest("hex");
     say(sha === deployment.wasm_sha256, `code sha256 ${sha} equals the record's ${deployment.wasm_sha256} ${at} (${code.length} B)`);
@@ -123,7 +114,7 @@ export async function readVault({ fetchFn, url, account, deployment, token, vers
   }
   let cfg = null;
   try {
-    ({ value: cfg } = await view(fetchFn, url, account, "config", {}));
+    ({ value: cfg } = await view(fetchFn, url, account, "config", {}, sleep));
     const good = cfg.asset === token && /^\d+$/.test(cfg.scope) && version.test(cfg.version);
     say(good, `config() answers ${at}: asset ${cfg.asset}, scope ${cfg.scope}, version ${cfg.version}`);
   } catch (e) {
@@ -132,7 +123,7 @@ export async function readVault({ fetchFn, url, account, deployment, token, vers
   return { config: cfg };
 }
 
-export async function check({ deployment, account = deployment.account_id, fetchFn = fetch, rpcs = RPCS }) {
+export async function check({ deployment, account = deployment.account_id, fetchFn = fetch, rpcs = RPCS, sleep = wait }) {
   const lines = [];
   let ok = true;
   const say = (good, text) => {
@@ -146,9 +137,9 @@ export async function check({ deployment, account = deployment.account_id, fetch
   say(deployment.asset === TESTNET_TOKEN, `the record's asset ${deployment.asset} is the testnet token ${TESTNET_TOKEN}`);
   for (const url of rpcs) {
     const at = `on ${url}`;
-    await readVault({ fetchFn, url, account, deployment, token: TESTNET_TOKEN, version: TESTNET_VERSION, say });
+    await readVault({ fetchFn, url, account, deployment, token: TESTNET_TOKEN, version: TESTNET_VERSION, say, sleep });
     try {
-      const { value: bal, block } = await view(fetchFn, url, TESTNET_TOKEN, "storage_balance_of", { account_id: account });
+      const { value: bal, block } = await view(fetchFn, url, TESTNET_TOKEN, "storage_balance_of", { account_id: account }, sleep);
       const good = bal !== null && /^\d+$/.test(bal.total ?? "") && BigInt(bal.total) > 0n;
       say(good, `${account} is registered on the testnet token ${at}: ${bal === null ? "null" : `total ${bal.total}`} at block ${block}`);
     } catch (e) {

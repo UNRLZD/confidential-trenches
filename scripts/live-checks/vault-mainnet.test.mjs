@@ -20,6 +20,8 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { check, pasteLine, freshPrecommitment, isPrecommitment, NETWORKS, NEAR_CLI } from "./vault-mainnet.mjs";
 import { DEPLOYMENT, MAINNET_USDC } from "./vault-testnet-t01.mjs";
+// the reads' waits (a rate limit's, the pacing between asks) recorded as asked, never slept, so replays run at once
+const NOSLEEP = async () => {};
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const load = (f) => JSON.parse(readFileSync(path.join(HERE, f), "utf8"));
@@ -50,7 +52,7 @@ function replay(answers) {
 }
 const bads = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const good = () => load("vault-mainnet.answers.json");
-const run = (answers, o = {}) => check({ network: "testnet", account: VAULT, deployment, fetchFn: replay(answers), write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0, ...o });
+const run = (answers, o = {}) => check({ sleep: NOSLEEP, network: "testnet", account: VAULT, deployment, fetchFn: replay(answers), write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0, ...o });
 // the good answer with every tx read (or only `only`'s) changed by f on a copy
 const withTx = (answers, f, only) => answers.map((a) => (a.method === "tx" && (!only || a.url === only) ? { ...a, json: f(structuredClone(a.json)) } : a));
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64");
@@ -82,7 +84,7 @@ test("recorded good answer: keys [], the build's code hash and imports, config()
 test("recorded bad answer: an ordinary account with one full-access key: FAIL on its key list, and nothing is written", async () => {
   const answers = load("vault-mainnet.bad-key.answers.json");
   const f = replay(answers);
-  const r = await check({ network: "testnet", account: answers[0].params.account_id, deployment, fetchFn: f, write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
+  const r = await check({ sleep: NOSLEEP, network: "testnet", account: answers[0].params.account_id, deployment, fetchFn: f, write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
   assert.equal(r.ok, false);
   assert.equal(bads(r).filter((l) => /^BAD \S+ key list is \[\] on .*: 1 key\(s\) \(FullAccess\)/.test(l)).length, 2, r.lines.join("\n"));
   assert.equal(r.lines.at(-1), "BAD no storage_prepay: a read above failed, so nothing is written to this vault");
@@ -91,7 +93,7 @@ test("recorded bad answer: an ordinary account with one full-access key: FAIL on
 
 test("recorded bad answer: another keyless vault with another code hash: FAIL on the code hash, the keys pass", async () => {
   const answers = load("vault-mainnet.bad-code.answers.json");
-  const r = await check({ network: "testnet", account: "vault.bf-vs-20261101t012200.testnet", deployment, fetchFn: replay(answers), write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
+  const r = await check({ sleep: NOSLEEP, network: "testnet", account: "vault.bf-vs-20261101t012200.testnet", deployment, fetchFn: replay(answers), write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
   assert.equal(r.ok, false);
   assert.equal(r.lines.filter((l) => /^ok  \S+ key list is \[\]/.test(l)).length, 2);
   assert.equal(bads(r).filter((l) => / code hash GGfTdwuLbonERu3vKnpLF828eyWZ4DxS24kpLp67PmSn equals the record's /.test(l)).length, 2, r.lines.join("\n"));
@@ -100,7 +102,7 @@ test("recorded bad answer: another keyless vault with another code hash: FAIL on
 
 test("recorded bad answer: code that imports the add-key and deploy actions: FAIL on the import list", async () => {
   const answers = load("vault-mainnet.bad-import.answers.json");
-  const r = await check({ network: "testnet", account: "testnet", deployment, fetchFn: replay(answers), write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
+  const r = await check({ sleep: NOSLEEP, network: "testnet", account: "testnet", deployment, fetchFn: replay(answers), write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
   assert.equal(r.ok, false);
   const banned = bads(r).filter((l) => l.startsWith("BAD no banned import on "));
   assert.equal(banned.length, 2, r.lines.join("\n"));
@@ -131,7 +133,7 @@ test("planted: the tx attaches 1 NEAR, not the printed minimum (its event says t
 test("planted: --tx without the printed precommitment, or with one that is no canonical decimal below p: FAIL, nothing read", async () => {
   for (const precommitment of [undefined, "0x12", "012", "21888242871839275222246405745257275088548364400416034343698204186575808495617"]) {
     const f = replay(good());
-    const r = await check({ network: "testnet", account: VAULT, deployment, fetchFn: f, write: { signer: SIGNER, tx: GOOD_TX, precommitment }, wait: 0 });
+    const r = await check({ sleep: NOSLEEP, network: "testnet", account: VAULT, deployment, fetchFn: f, write: { signer: SIGNER, tx: GOOD_TX, precommitment }, wait: 0 });
     assert.equal(r.ok, false);
     assert.match(bads(r).at(-1), /^BAD the write's precommitment .* is not one canonical decimal below p: --tx needs the --precommitment printed/);
     assert.ok(!f.asked.includes("tx"), String(precommitment));
@@ -249,12 +251,12 @@ test("planted: the write's tx is unknown on both RPCs (it never landed): FAIL on
 test("planted: the tx read answers an error other than not-yet-known: FAIL at once, read once per RPC; not-yet-known is read again", async () => {
   const refused = { jsonrpc: "2.0", id: "x", error: { name: "REQUEST_VALIDATION_ERROR", cause: { name: "PARSE_ERROR" }, message: "Parse error" } };
   const f = replay(good().map((a) => (a.method === "tx" ? { ...a, json: refused } : a)));
-  const r = await check({ network: "testnet", account: VAULT, deployment, fetchFn: f, write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
+  const r = await check({ sleep: NOSLEEP, network: "testnet", account: VAULT, deployment, fetchFn: f, write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
   onlyBad(r, [`BAD storage_prepay tx ${GOOD_TX} by ${SIGNER} on `]);
   assert.equal(f.asked.filter((m) => m === "tx").length, 2);
   const unknown = { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, message: "Server error" } };
   const u = replay(good().map((a) => (a.method === "tx" ? { ...a, json: unknown } : a)));
-  await check({ network: "testnet", account: VAULT, deployment, fetchFn: u, write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
+  await check({ sleep: NOSLEEP, network: "testnet", account: VAULT, deployment, fetchFn: u, write: { signer: SIGNER, tx: GOOD_TX, precommitment: GOOD_P }, wait: 0 });
   assert.equal(u.asked.filter((m) => m === "tx").length, 2 * 10, "ten reads per RPC before a tx counts as never landed");
 });
 
@@ -262,7 +264,7 @@ test("planted: a full-access key in the vault's key list: FAIL on the key list, 
   const key = { public_key: "ed25519:EhjW27bK6ojYS7oWrNQjTjgKgdv8QwfqVQVzSD2YxR51", access_key: { nonce: 1, permission: "FullAccess" } };
   const answers = good().map((a) => (a.params.request_type === "view_access_key_list" ? { ...a, json: { ...a.json, result: { ...a.json.result, keys: [key] } } } : a));
   const f = replay(answers);
-  const r = await check({ network: "testnet", account: VAULT, deployment, fetchFn: f, write: { signer: SIGNER }, wait: 0 });
+  const r = await check({ sleep: NOSLEEP, network: "testnet", account: VAULT, deployment, fetchFn: f, write: { signer: SIGNER }, wait: 0 });
   assert.equal(r.ok, false);
   assert.equal(bads(r).length, 3, r.lines.join("\n"));
   assert.ok(!f.asked.includes("send_tx") && !f.asked.includes("tx"));
@@ -299,12 +301,12 @@ test("the same answers on one RPC, or on two hosts of one operator: FAIL on the 
 test("recorded mainnet reads: mainnet USDC's account on mainnet's two operators: FAIL on what it read, never on the operators", async () => {
   const answers = load("vault-mainnet.bad-mainnet.answers.json");
   assert.deepEqual([...new Set(answers.map((a) => a.url))], NETWORKS.mainnet.rpcs);
-  const r = await check({ network: "mainnet", account: MAINNET_USDC, deployment: { ...deployment, network: "mainnet" }, fetchFn: replay(answers), write: { signer: "owner.near" }, wait: 0 });
+  const r = await check({ sleep: NOSLEEP, network: "mainnet", account: MAINNET_USDC, deployment: { ...deployment, network: "mainnet" }, fetchFn: replay(answers), write: { signer: "owner.near" }, wait: 0 });
   assert.equal(r.ok, false);
   assert.ok(!r.lines.some((l) => / operator\(s\)/.test(l)), r.lines.join("\n"));
   assert.equal(bads(r).filter((l) => / key list is \[\] on .*1 key\(s\) \(FullAccess\)/.test(l)).length, 2);
   assert.equal(bads(r).filter((l) => l.startsWith("BAD the code names mainnet USDC and no other on ")).length, 2);
-  const t = await check({ network: "mainnet", account: MAINNET_USDC, deployment, fetchFn: async () => { throw new Error("no read"); }, rpcs: NETWORKS.testnet.rpcs, write: {}, wait: 0 });
+  const t = await check({ sleep: NOSLEEP, network: "mainnet", account: MAINNET_USDC, deployment, fetchFn: async () => { throw new Error("no read"); }, rpcs: NETWORKS.testnet.rpcs, write: {}, wait: 0 });
   assert.match(t.lines[0], /^BAD only 0 operator\(s\) in .*not a mainnet host.*want two mainnet operators$/);
 });
 

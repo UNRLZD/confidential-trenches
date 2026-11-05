@@ -830,6 +830,24 @@ test("a 429 with no Retry-After waits 2 s, doubling, and is still no answer afte
   assert.match(r.refusals.join("\n"), new RegExp(`not proven: its tx JSON names hash undefined, not ${NEAR_TX}`));
 });
 
+// dRPC's free endpoint answers a rate limit as JSON-RPC error code 15, with whatever HTTP status (its captured shape:
+// scripts/ci/rpc-wait.mjs isRateLimit): HTTP 200 here, so only its body says it is a rate limit, never a failed read
+test("dRPC answers HTTP 200 with its code-15 rate limit twice before ok: the gate waits it out and passes", async () => {
+  const s = rateLimited(() => null);
+  let n = 0;
+  const fetchFn = async (url, init) => {
+    if (new URL(url).host === DRPC && n++ < 2) {
+      s.log.push(`ask ${DRPC} code 15`);
+      return { ok: true, status: 200, headers: new Headers(), json: async () => ({ id: 1, jsonrpc: "2.0", error: { message: "You reached Public endpoint rate limit, please upgrade to paid plan", code: 15 } }) };
+    }
+    return s.fetchFn(url, init);
+  };
+  const r = await nearTx(fetchFn, s.sleep);
+  assert.deepEqual(r.refusals, []);
+  assert.deepEqual(r.read.map((x) => x.split(" ok on ")[1]), REAL_RPCS.near);
+  assert.deepEqual(s.log.filter((l) => l === `ask ${DRPC} code 15` || /^sleep (2000|4000)$/.test(l)), [`ask ${DRPC} code 15`, "sleep 2000", `ask ${DRPC} code 15`, "sleep 4000"]);
+});
+
 test("a 429 whose Retry-After is past the 600 s cap is no answer at once: refused, never waited", async () => {
   const s = rateLimited(() => ({ "retry-after": "900" }));
   const r = await nearTx(s.fetchFn, s.sleep);

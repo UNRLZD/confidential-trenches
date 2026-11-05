@@ -12,6 +12,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { check, RUN } from "./vault-testnet-t04.mjs";
+// the reads' waits (a rate limit's, the pacing between asks) recorded as asked, never slept, so replays run at once
+const NOSLEEP = async () => {};
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const load = (f) => JSON.parse(readFileSync(path.join(HERE, f), "utf8"));
@@ -35,13 +37,13 @@ const encode = (a, v) => ({ ...a, json: { ...a.json, result: { ...a.json.result,
 const withView = (answers, method, f) => answers.map((a) => (a.params.method_name === method ? encode(a, f(decode(a))) : a));
 
 test("the recorded run passes", async () => {
-  const r = await check({ run, fetchFn: replay(good()) });
+  const r = await check({ sleep: NOSLEEP, run, fetchFn: replay(good()) });
   assert.deepEqual(bads(r), []);
   assert.equal(r.ok, true);
 });
 
 test("the recorded bad run fails: the ragequit nullifier names the bounce's row", async () => {
-  const r = await check({ run: load("vault-testnet-t04.bad-run.json"), fetchFn: replay(load("vault-testnet-t04.bad.answers.json")) });
+  const r = await check({ sleep: NOSLEEP, run: load("vault-testnet-t04.bad-run.json"), fetchFn: replay(load("vault-testnet-t04.bad.answers.json")) });
   assert.equal(r.ok, false);
   assert.ok(bads(r).some((l) => /ragequit row: recipient and payer are the depositor/.test(l)), bads(r).join("\n"));
   assert.ok(bads(r).some((l) => /ragequit row: context 0/.test(l)), bads(r).join("\n"));
@@ -49,34 +51,59 @@ test("the recorded bad run fails: the ragequit nullifier names the bounce's row"
 
 test("a ragequit row with a context fails", async () => {
   const answers = withView(good(), "spends", (rows) => rows.map((s) => (s.nullifier_hash === run.ragequit.nullifier_hash ? { ...s, context: "1" } : s)));
-  const r = await check({ run, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, run, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.ok(bads(r).every((l) => /ragequit row: context 0/.test(l)), bads(r).join("\n"));
 });
 
 test("a refund note one unit off fails", async () => {
   const answers = withView(good(), "spends", (rows) => rows.map((s) => (s.nullifier_hash === run.bounce.nullifier_hash ? { ...s, refund_value: String(BigInt(s.refund_value) + 1n) } : s)));
-  const r = await check({ run, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, run, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.ok(bads(r).some((l) => /holds exactly the returned/.test(l)), bads(r).join("\n"));
 });
 
 test("a refund note written twice fails", async () => {
   const answers = withView(good(), "leaves", (leaves) => (leaves.length ? [...leaves, run.settle.refund_commitment] : leaves));
-  const r = await check({ run, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, run, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.ok(bads(r).every((l) => /settle wrote one note/.test(l)), bads(r).join("\n"));
 });
 
 test("a bounce account registered on the token fails", async () => {
   const answers = withView(good(), "storage_balance_of", () => ({ total: "1250000000000000000000", available: "0" }));
-  const r = await check({ run, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, run, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.ok(bads(r).every((l) => /not registered on the token/.test(l)), bads(r).join("\n"));
 });
 
 test("two hosts of one operator are refused", async () => {
-  const r = await check({ run, fetchFn: replay(good()), rpcs: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"] }); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
+  const r = await check({ sleep: NOSLEEP, run, fetchFn: replay(good()), rpcs: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"] }); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
   assert.equal(r.ok, false);
   assert.equal(bads(r)[0], "BAD only 1 operator(s) in https://test.rpc.fastnear.com (fastnear), https://rpc.testnet.near.org (fastnear); want two testnet operators"); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
+});
+
+// a rate limit is waited out, as the money gate waits it (scripts/ci/rpc-wait.mjs), never read as the vault's lists
+test("recorded good run, every first read rate-limited once (HTTP 429, Retry-After 2): waited out, PASS", async () => {
+  const next = replay(good());
+  const seen = new Set();
+  const asked = [];
+  const fetchFn = async (url, init) => {
+    if (!seen.has(`${url} ${init.body}`)) {
+      seen.add(`${url} ${init.body}`);
+      return { ok: false, status: 429, headers: new Headers({ "retry-after": "2" }), json: async () => null };
+    }
+    return next(url, init);
+  };
+  const r = await check({ run, fetchFn, sleep: async (ms) => void asked.push(ms) });
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(asked.filter((ms) => ms === 2000).length, seen.size);
+});
+
+test("recorded good run, one RPC rate-limited forever: FAIL on lines naming the rate limit and that RPC", async () => {
+  const next = replay(good());
+  const fetchFn = async (url, init) => (url === "https://test.rpc.fastnear.com" ? { ok: false, status: 429, headers: new Headers(), json: async () => null } : next(url, init));
+  const r = await check({ run, fetchFn, sleep: NOSLEEP });
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("BAD") && l.includes("https://test.rpc.fastnear.com") && l.includes("rate limited 6 times in a row")), r.lines.join("\n"));
 });

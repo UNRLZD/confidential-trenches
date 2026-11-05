@@ -21,7 +21,8 @@ import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RPCS, operatorProblems, recorder } from "./vault-skeleton.mjs";
+import { RPCS, operatorProblems, query, recorder } from "./vault-skeleton.mjs";
+import { wait } from "../ci/rpc-wait.mjs";
 
 const KEY = "vault-testnet-t04";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -30,23 +31,16 @@ export const VAULT = "vault.bf-vt-20261102t071444.testnet"; // contracts/vault/d
 export const TOKEN = "bf-usdc-20261101t022248.testnet"; // gitleaks:allow (a public account id)
 const PAGE = 1000; // the vault's PAGE_MAX
 
-async function view(fetchFn, url, account_id, method_name, args) {
-  const r = await fetchFn(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: KEY, method: "query", params: { request_type: "call_function", account_id, method_name, args_base64: Buffer.from(JSON.stringify(args)).toString("base64"), finality: "final" } }),
-  });
-  const json = await r.json();
-  if (json.error) throw new Error(`${json.error.name ?? "error"}: ${json.error.cause?.name ?? json.error.message ?? ""}`);
-  if (json.result?.error) throw new Error(String(json.result.error).split("\n")[0].slice(0, 200));
-  if (!json.result) throw new Error(`HTTP ${r.status}, no result`);
-  return JSON.parse(Buffer.from(json.result.result).toString("utf8"));
+// read through vault-skeleton.mjs's query: a rate limit is waited out as the money gate waits it, never an answer
+async function view(fetchFn, url, account_id, method_name, args, sleep = wait) {
+  const r = await query(fetchFn, url, { request_type: "call_function", account_id, method_name, args_base64: Buffer.from(JSON.stringify(args)).toString("base64"), finality: "final" }, sleep);
+  return JSON.parse(Buffer.from(r.result).toString("utf8"));
 }
 
-async function all(fetchFn, url, method) {
+async function all(fetchFn, url, method, sleep) {
   const rows = [];
   for (;;) {
-    const page = await view(fetchFn, url, VAULT, method, { from: rows.length, limit: PAGE });
+    const page = await view(fetchFn, url, VAULT, method, { from: rows.length, limit: PAGE }, sleep);
     rows.push(...page);
     if (page.length < PAGE) return rows;
   }
@@ -54,7 +48,7 @@ async function all(fetchFn, url, method) {
 
 const count = (list, x) => list.filter((y) => y === x).length;
 
-export async function check({ run, fetchFn = fetch, rpcs = RPCS }) {
+export async function check({ run, fetchFn = fetch, rpcs = RPCS, sleep = wait }) {
   const lines = [];
   let ok = true;
   const say = (good, text) => {
@@ -71,7 +65,7 @@ export async function check({ run, fetchFn = fetch, rpcs = RPCS }) {
   for (const url of rpcs) {
     const at = `on ${url}`;
     try {
-      const [spends, deposits, leaves, labels] = await Promise.all(["spends", "deposits", "leaves", "labels"].map((m) => all(fetchFn, url, m)));
+      const [spends, deposits, leaves, labels] = await Promise.all(["spends", "deposits", "leaves", "labels"].map((m) => all(fetchFn, url, m, sleep)));
       const row = (n) => spends.filter((s) => s.nullifier_hash === n);
       const [rq, ...rq2] = row(run.ragequit.nullifier_hash);
       say(rq && !rq2.length, `one spend row for the ragequit's nullifier ${at}: ${rq ? `#${rq.index}` : "none"}`);
@@ -98,7 +92,7 @@ export async function check({ run, fetchFn = fetch, rpcs = RPCS }) {
         say(count(leaves, want) === 1 && count(labels, bo.refund_label) === 1, `settle wrote one note: the commitment once in ${leaves.length} leaves, the label once in ${labels.length} labels ${at}: ${count(leaves, want)}, ${count(labels, bo.refund_label)}`);
         say(bo.refund_label === run.settle.refund_label && String(bo.refund_leaf_index) === run.settle.refund_leaf_index, `bounce row: refund label and leaf are the record's ${at}`);
       }
-      const reg = await view(fetchFn, url, TOKEN, "storage_balance_of", { account_id: B });
+      const reg = await view(fetchFn, url, TOKEN, "storage_balance_of", { account_id: B }, sleep);
       say(reg === null, `the bounce account is not registered on the token ${at}: ${JSON.stringify(reg)}`);
 
       const [rf, ...rf2] = row(run.refund.nullifier_hash);
