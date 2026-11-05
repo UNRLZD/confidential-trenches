@@ -26,7 +26,7 @@
 //   (pool-sell.ts settlePoolSells), writing its record's stage.
 // main.ts takes these only in the testnet build; SIGN_HOST's build keeps its mainnet deps and carries none of this.
 import { base64 } from "@scure/base";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SOLANA_RPC_RETRY, solanaJsonRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pageRpc } from "./page-rpc.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
@@ -52,12 +52,18 @@ import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPa
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
-/** Each chain's two testnet RPCs, as the app names the chain. */
+/** Each chain's two testnet RPCs, as the app names the chain. Solana's are mainnet's shape (main.ts: a public provider
+ *  and the helper's /v1/rpc/solana): the public devnet endpoint and the helper's /v1/rpc/solana-devnet, whose keyed
+ *  provider is another operator's (card pool-buy-send-fast: the public second provider before it, onfinality, answers 1
+ *  request a second and 1000 a day per IP, and held the 5 Nov 13:50:55Z buy 11.2 s in these reads). */
 export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>> = /* @__PURE__ */ Object.freeze({
-  solana: /* @__PURE__ */ Object.freeze(["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"] as const),
+  solana: /* @__PURE__ */ Object.freeze(["https://api.devnet.solana.com", `${TRADE_HELPER}/v1/rpc/solana-devnet`] as const),
   base: /* @__PURE__ */ Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"] as const),
 });
+/** One testnet RPC as the page reads it: the helper's route with the kit's HELPER_FETCH_INIT (as pageHelperRpc), any
+ *  other directly; both with the page's retry. */
+export const testnetRpc = (url: string): SolanaRpc => (url.startsWith(`${TRADE_HELPER}/`) ? solanaJsonRpc(url, { retry: SOLANA_RPC_RETRY, init: HELPER_FETCH_INIT }) : pageRpc(url));
 const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinhood: "robinhood-testnet" } as const);
 
 /** A withdraw stage's order: a write never moves an op back (review #232b LOW 1). A stale finish's stopped never
@@ -152,7 +158,7 @@ async function moveLegacyPending(w: WalletStore, opId: string, p: PendingOnward)
 export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
   return {
     pinned: (chain) => (chain === "solana" ? SOL_POOLS.devnet !== undefined : EVM_POOLS[EVM_TESTNET[chain]] !== undefined),
-    rpcs: (chain) => TESTNET_RPCS[chain].map((u) => pageRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc],
+    rpcs: (chain) => TESTNET_RPCS[chain].map((u) => testnetRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc],
     ...(flow ? { flow } : {}),
   };
 }
@@ -273,7 +279,7 @@ export type TestnetPool = {
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
 export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetPool {
   const pin = over.pin ?? SOL_POOLS.devnet;
-  const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? [pageRpc(TESTNET_RPCS.solana[0]), pageRpc(TESTNET_RPCS.solana[1])];
+  const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? [testnetRpc(TESTNET_RPCS.solana[0]), testnetRpc(TESTNET_RPCS.solana[1])];
   const prover = over.prover ?? proverHost();
 
   // the notes a withdraw op (any tab's) still owes an onward send for: out of every plan and of the proof queue until

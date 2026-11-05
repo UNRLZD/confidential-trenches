@@ -51,7 +51,8 @@ test("the testnet build pins the devnet pool of the deployment record and the he
 test("the testnet build's providers: two devnet RPCs, and each EVM testnet's two from its pins", () => {
   const deps = testnetPoolDeps();
   const urls = (c: "solana" | "base" | "robinhood") => deps.rpcs(c)!.map((r) => (r as unknown as { url: string }).url);
-  assert.deepEqual(urls("solana"), ["https://api.devnet.solana.com/", "https://solana-devnet.api.onfinality.io/public"]);
+  // card pool-buy-send-fast: the second is the helper's devnet route, as mainnet's second is its /v1/rpc/solana
+  assert.deepEqual(urls("solana"), ["https://api.devnet.solana.com/", "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet"]);
   assert.deepEqual(urls("base"), ["https://sepolia.base.org/", "https://base-sepolia-rpc.publicnode.com/"]);
   assert.deepEqual(urls("robinhood"), ["https://rpc.testnet.chain.robinhood.com/", "https://robinhood-sepolia-rpc.publicnode.com/"]);
   for (const c of ["solana", "base", "robinhood"] as const) assert.notEqual(new URL(TESTNET_RPCS[c][0]).host, new URL(TESTNET_RPCS[c][1]).host, `${c}: two operators`);

@@ -15,7 +15,7 @@ const TESTNET_ONLY = [
   "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb", // the helper's devnet fee payer
   "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy", // the devnet pool's lookup table (src/pool-testnet.ts DEVNET_TABLE)
   "api.devnet.solana.com",
-  "solana-devnet.api.onfinality.io",
+  "/v1/rpc/solana-devnet", // the helper's devnet route, the second devnet provider (card pool-buy-send-fast)
   "sepolia.base.org",
   "base-sepolia-rpc.publicnode.com",
   "rpc.testnet.chain.robinhood.com",
