@@ -1,28 +1,44 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at 4f46f087 (release-40): the pool sell's teardown rule and volume close, and its sweep rule: PASS",
+    "good": "this card's SIGN_HOST build (mainnet) at the review fold: packages/signpage/index.html and public/app.js as build-app.mjs wrote them at eca191d8 (unchanged by the merge of main 3ed8cb1d), release-40",
     "bad": "main 987fae20's build (mainnet): no teardown rule, no sweep rule (the volume close is the kit's direct trade teardown's): FAIL",
-    "liveBefore": "SIGN_HOST read 2026-11-05T20:37Z, before this card's deploy: FAIL"
+    "liveBefore": "SIGN_HOST read 2026-11-05T20:37Z, before this card's deploy: FAIL; its rents and owed facts are facts() of main 987fae20's bundle, the same bytes (its sha384 equals bad's)",
+    "previous": "this card's build at 0068524a, before the review fold: teardown and sweep, but rents by the device's own formula and no rent back owed: FAIL"
   },
   "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-QX5DEbjwW2Gy+BLApt+wQHsQLXpXn/UboqLzjojbC3FRLTS+u1i7boaDcIlmyp63\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-QX5DEbjwW2Gy+BLApt+wQHsQLXpXn/UboqLzjojbC3FRLTS+u1i7boaDcIlmyp63",
+    "teardown": true,
+    "volumeClose": true,
+    "sweep": true,
+    "rents": true,
+    "owed": true
+  },
+  "previous": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-4VzIiW6kVcNfyC9BCbPp7lPagzSiCl0hFxffEqjcktces0VABQOXASHdQZQIDfly\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-4VzIiW6kVcNfyC9BCbPp7lPagzSiCl0hFxffEqjcktces0VABQOXASHdQZQIDfly",
     "teardown": true,
     "volumeClose": true,
-    "sweep": true
+    "sweep": true,
+    "rents": false,
+    "owed": false
   },
   "bad": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
     "teardown": false,
     "volumeClose": true,
-    "sweep": false
+    "sweep": false,
+    "rents": false,
+    "owed": false
   },
   "liveBefore": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
     "teardown": false,
     "volumeClose": true,
-    "sweep": false
+    "sweep": false,
+    "rents": false,
+    "owed": false
   }
 }

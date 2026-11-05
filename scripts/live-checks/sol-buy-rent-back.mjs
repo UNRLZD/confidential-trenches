@@ -6,7 +6,9 @@
 //     sell's rent back reaches, with the kit's volume close (close_user_volume_accumulator's discriminator,
 //     249,69,164,218,150,103,84,138) that buildSolanaTeardown makes;
 //   - the sweep's rule (rules/pool.ts checkSolanaSweep, its refusal `sweep_amount`): every lamport W holds back into the
-//     pool as W's next return note, W at 0.
+//     pool as W's next return note, W at 0;
+//   - the deposit's rents as the program takes them (rules/pool.ts solanaDepositRents, its refusal `deposit_reads`);
+//   - the rent back owed, run again at the next load (pool-sell.ts owedRentBacks, its record meta/owed/rentback-sol).
 // What each does on chain is held by its tests in packages/signpage/test/pool-sell.test.ts (the accounts closed, W at 0,
 // a partial sell closing nothing) and by the card's devnet run (sol-buy-rent-back.md).
 // The recorded answers are facts() over packages/signpage/scripts/build-app.mjs bundle(pkg) of each tree (mainnet, as
@@ -26,13 +28,15 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 const TEARDOWN = /[`"']teardown[`"']/;
 const VOLUME_CLOSE = /\[249,69,164,218,150,103,84,138\]/;
 const SWEEP = /[`"']sweep_amount[`"']/;
+const RENTS = /[`"']deposit_reads[`"']/;
+const OWED = /[`"']owed\/rentback-sol[`"']/;
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), teardown: TEARDOWN.test(js), volumeClose: VOLUME_CLOSE.test(js), sweep: SWEEP.test(js) };
+  return { index, sha384: sha384(js), teardown: TEARDOWN.test(js), volumeClose: VOLUME_CLOSE.test(js), sweep: SWEEP.test(js), rents: RENTS.test(js), owed: OWED.test(js) };
 }
 
-/** The verdict on an answer { index, sha384, teardown, volumeClose, sweep }. */
+/** The verdict on an answer { index, sha384, teardown, volumeClose, sweep, rents, owed }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -41,6 +45,8 @@ export function judge(a) {
   else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
   if (a?.teardown !== true || a?.volumeClose !== true) bad("the bundle's pool sell runs no teardown: W's token and volume accounts keep their rent after a full sell");
   if (a?.sweep !== true) bad("the bundle's pool sell sweeps nothing: what W holds after a full sell stays out of the pool");
+  if (a?.rents !== true) bad("the bundle prices a deposit's rents by its own formula, not as the program takes them: a sweep can leave W short or holding some");
+  if (a?.owed !== true) bad("the bundle owes no rent back: one a closed page or a provider's fault stops never runs again");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 

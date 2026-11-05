@@ -1,5 +1,6 @@
 // node --test scripts/live-checks/sol-buy-rent-back.test.mjs: the live check replays its recorded answers
-// (sol-buy-rent-back.answers.json). good: this card's SIGN_HOST build, its pool sell's teardown and sweep: PASS. bad: main
+// (sol-buy-rent-back.answers.json). good: this card's SIGN_HOST build, its pool sell's teardown, sweep, program-priced
+// rents and owed rent back: PASS. previous: this card's build before the review fold (0068524a): FAIL. bad: main
 // 987fae20's build: FAIL. liveBefore: SIGN_HOST before this card's deploy (the same bundle as main's): FAIL. Planted on
 // the good one: another /app.js, no pin, each mark taken away: each FAIL.
 import assert from "node:assert/strict";
@@ -10,6 +11,8 @@ import { facts, judge } from "./sol-buy-rent-back.mjs";
 const ANSWERS = JSON.parse(readFileSync(new URL("./sol-buy-rent-back.answers.json", import.meta.url), "utf8"));
 const NO_TEARDOWN = "BAD the bundle's pool sell runs no teardown: W's token and volume accounts keep their rent after a full sell";
 const NO_SWEEP = "BAD the bundle's pool sell sweeps nothing: what W holds after a full sell stays out of the pool";
+const NO_RENTS = "BAD the bundle prices a deposit's rents by its own formula, not as the program takes them: a sweep can leave W short or holding some";
+const NO_OWED = "BAD the bundle owes no rent back: one a closed page or a provider's fault stops never runs again";
 
 test("recorded good answer: this card's build tears down and sweeps W after a full sell: PASS", () => {
   const v = judge(ANSWERS.good);
@@ -21,9 +24,15 @@ for (const k of ["bad", "liveBefore"]) {
   test(`recorded bad answer ${k}: FAIL, the teardown and the sweep named`, () => {
     const v = judge(ANSWERS[k]);
     assert.equal(v.ok, false);
-    assert.deepEqual(v.lines, [NO_TEARDOWN, NO_SWEEP]);
+    assert.deepEqual(v.lines, [NO_TEARDOWN, NO_SWEEP, NO_RENTS, NO_OWED]);
   });
 }
+
+test("recorded answer previous (this card before the review fold): FAIL, the rents and the owed rent back named", () => {
+  const v = judge(ANSWERS.previous);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [NO_RENTS, NO_OWED]);
+});
 
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
@@ -32,12 +41,16 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.deepEqual(judge({ ...g, teardown: false }).lines, [NO_TEARDOWN]);
   assert.deepEqual(judge({ ...g, volumeClose: false }).lines, [NO_TEARDOWN]);
   assert.deepEqual(judge({ ...g, sweep: false }).lines, [NO_SWEEP]);
+  assert.deepEqual(judge({ ...g, rents: false }).lines, [NO_RENTS]);
+  assert.deepEqual(judge({ ...g, owed: false }).lines, [NO_OWED]);
   assert.equal(judge(null).ok, false);
 });
 
 test("the facts read from a bundle", () => {
-  const js = "r(`teardown`);x=[249,69,164,218,150,103,84,138];r(`sweep_amount`)";
-  assert.deepEqual(facts("", js), { index: "", sha384: facts("", js).sha384, teardown: true, volumeClose: true, sweep: true });
+  const js = "r(`teardown`);x=[249,69,164,218,150,103,84,138];r(`sweep_amount`);r(`deposit_reads`);k=`owed/rentback-sol`";
+  assert.deepEqual(facts("", js), { index: "", sha384: facts("", js).sha384, teardown: true, volumeClose: true, sweep: true, rents: true, owed: true });
+  assert.equal(facts("", js.replace("`deposit_reads`", "`deposit`")).rents, false);
+  assert.equal(facts("", js.replace("`owed/rentback-sol`", "`owed/rentback`")).owed, false);
   assert.equal(facts("", js.replace("`sweep_amount`", "`sweep`")).sweep, false);
   assert.equal(facts("", js.replace("`teardown`", "`teardowns`")).teardown, false);
   assert.equal(facts("", js.replace("249,69", "249,70")).volumeClose, false);
