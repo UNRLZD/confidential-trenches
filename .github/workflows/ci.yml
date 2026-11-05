@@ -299,7 +299,7 @@ jobs:
       # the Solana pool's deploy script: its cleanup never strands a lamport on the run key, and every committed
       # deployment record's commitment is Poseidon(value, label, precommitment)
       - name: the Solana pool's deploy script's own tests, and its mutation list still names its source and tests
-        run: node --test contracts/pool-solana/scripts/deploy.test.mjs contracts/pool-solana/scripts/mutants.test.mjs
+        run: node --test contracts/pool-solana/scripts/deploy.test.mjs contracts/pool-solana/scripts/mutants.test.mjs contracts/pool-solana/scripts/pin.test.mjs
       # The EVM pool (contracts/pool-evm): forge-std from its submodule (v1.9.7, pinned by commit), Foundry v1.7.1 (the
       # version its tests were first run with, released 2026-05-08) through foundry-toolchain v1.9.1 (908c540, read
       # 2026-11-02 20:12Z), solc 0.8.28 as its foundry.toml pins. The forge tests run the kit's real proofs through the
@@ -604,6 +604,12 @@ jobs:
           echo "pool-solana code: sha256 $(cut -d' ' -f1 blindfill_pool_solana.so.sha256), $(wc -c < blindfill_pool_solana.so) bytes, commit $(git rev-parse HEAD)"
           cargo-build-sbf --version | sed 's/^/pool-solana toolchain: /'
           solana --version | sed 's/^/pool-solana toolchain: /'
+      # The pinned code (the "Program sha256:" line of contracts/pool-review-2.md, scripts/pin.mjs): this build must be
+      # it, byte for byte, as the box's build of the same tree is (pool review round 2: a one-line comment moved seven
+      # panic line numbers in the code). A source change that moves the bytes fails here until its pin is moved by a
+      # build of the deploy sha.
+      - name: the pool program's build is the pinned code
+        run: node contracts/pool-solana/scripts/pin.mjs contracts/pool-solana/out/blindfill_pool_solana.so
       # svm-tests' tag 3 tests: a hostile venue (re-entry, a venue taking pool lamports), and copies of mainnet's pump,
       # PumpSwap and fee programs, whose code is not committed (closed source) and must hash as the fixtures' JSON says:
       # a pump upgrade fails here until the fixtures are re-dumped.

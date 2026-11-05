@@ -238,7 +238,28 @@ found three faults in the tests and the notes, each fixed in `fbf0566`:
 - **LOW:** `state.rs` said the second page "can only be the next page". It can be any account the index's entry may
   go to; `push_entry` checks the page it writes to. The comment now says so.
 
+The fold's sweep ran in full on the program built at `fbf0566`: `64/64 mutants caught`, each new entry among them
+(`tag 3 next page at 8 with no tip: a_tag3_with_no_tip_names_its_next_page_at_8 fails without it, passes with it`).
+
 ## Deploy sha
 
-fbf05664916a8a00eec9ce87574deb0cf9225d12 (the commit of the last fix: the third reading's fold changes the Solana program's source by a comment only,
-`d3edab1` before it; the commit that updates this file changes nothing else).
+fbf05664916a8a00eec9ce87574deb0cf9225d12 (the commit of the last fix; the commits after it change no file of either
+pool's program).
+
+The Solana program built from it, the code a deploy must hold (`scripts/pin.mjs` reads the line below; the deploy
+script refuses a public cluster's code that is not it, and CI's pool-solana job holds its own build to it):
+
+Program sha256: `c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162` (79,088 bytes)
+
+- **Built three times, the same bytes each time:** cargo-build-sbf 4.4.0 with platform-tools v1.57, in the checkout
+  at `0930594` (whose `contracts/pool-solana` is tree `392a518`, the same as `fbf0566`'s), and again from a fresh copy
+  of that tree in another directory with a target directory of its own; and CI's pool-solana job (cargo-build-sbf
+  4.5.0, platform-tools v1.57) printed `pool-solana code: sha256 c86fc7fc…5162, 79088 bytes` for the merge of
+  `0930594` (run 42012187381).
+- **Why it is not the hash F1 names** (`080ae1b8…8517`, built at `d3edab1`): the fold's comment in `state.rs` is one
+  line longer, so every later line moves down one, and the code carries the line of each bounds check it can panic
+  at. The same fresh copy with `d3edab1`'s comment put back builds to `080ae1b8f46296b3d4b84e4fda26c0a727ef7d1c7e3b951e16cd22c2ec6e8517`;
+  the two programs differ in 7 bytes, each the line number of a panic location record (24 bytes apart, offsets
+  2984-3128), each one higher: 293 to 294, 326 to 327, 327 to 328, 328 to 329, 341 to 342, 342 to 343, 343 to 344,
+  the lines of `state.rs`'s slice reads and writes at `fbf0566` (294, 327-329, 342-344). An earlier note here said the
+  comment left the code unchanged; it was carried over without a build, and the pin above is now held by one.

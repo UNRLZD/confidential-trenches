@@ -15,7 +15,9 @@
 //     sha256 and length printed. The keypair cargo-build-sbf writes beside the .so is deleted unread: the program id
 //     is made here, fresh. Devnet takes only CI's build (--ci-run <run id>: the pool-solana job's artifact, refused
 //     unless its sha256 is the one that job's log printed), so anyone can match the program to a public build; the
-//     record names the run, the commit and the toolchain read from the binaries that built it.
+//     record names the run, the commit and the toolchain read from the binaries that built it. A public cluster's code
+//     must also be the pinned code (scripts/pin.mjs: the "Program sha256:" line of contracts/pool-review-2.md, written
+//     from a build), refused before any key otherwise; a local validator (the dry run, the tests) takes any code.
 //  3. Two keys made in memory: the program's and the run's funder. The solana CLI reads keys only from files, so both
 //     go to a 0700 folder under keysBase() ($XDG_STATE_HOME or ~/.local/state, /pool-sol-deploy: never OS temp, a git
 //     repo or ~/.confidential-trenches), files 0600; neither is ever printed. A run refuses before making any key when
@@ -65,6 +67,7 @@ import {
   RPCS as DEVNET_RPCS, account, address, b58decode, b58encode, be32, cat, hex, labelOf, le, pageAddress, poolAddress, preMarkAddress, programDataAddress, rpc,
   scopeOf,
 } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
+import { pinRefusal, readPin } from "./pin.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const POOL_DIR = path.join(HERE, "..");
@@ -681,6 +684,12 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   const so = ci ? ci.so : readFileSync(opt("--so", SO)); // the test passes its own code
   const soSha = createHash("sha256").update(so).digest("hex");
   log(`code ${so.length} bytes, sha256 ${soSha}, built by ${build}`);
+  // the reviewed code only, proven by a build: a public cluster's code is the pinned code (scripts/pin.mjs), before
+  // any key is made
+  if (cluster !== "localnet") {
+    const why = pinRefusal(soSha, io.pin ?? readPin());
+    if (why) throw new Error(`${cluster} refused: ${why}`);
+  }
 
   const second = second0;
   let poolExists = false;
