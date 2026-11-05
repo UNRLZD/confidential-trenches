@@ -76,6 +76,9 @@ export const TOPIC = {
   initialize: topic("Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)"),
   modifyLiquidity: topic("ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)"),
   donate: topic("Donate(bytes32,address,uint256,uint256)"),
+  // the PoolManager's ERC-6909 claims (its own Transfer: caller, indexed from, to and id, amount): a hook may take its
+  // cut as claims minted to a fee recipient, not as the token (card helper-v4-hook-liquidity: hook 0x5e320ea6 on Base)
+  claims: topic("Transfer(address,address,address,uint256,uint256)"),
 } as const;
 /** The PoolManager's events of a pool that are not a swap: a hook's transfer next to one settles it (hookTakes). */
 const POOL_CALLS = [TOPIC.initialize, TOPIC.modifyLiquidity, TOPIC.donate];
@@ -510,6 +513,7 @@ export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook">,
   return [
     { ...swaps, topics: [[TOPIC.swap4, ...POOL_CALLS], pool.id] },
     { address: pool.token, topics: [TOPIC.transfer, ends, ends], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
+    { address: VENUES[chain].poolManager, topics: [TOPIC.claims, null, null, `0x${pool.token.slice(2).padStart(64, "0")}`], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
   ];
 }
 
@@ -603,6 +607,12 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
       const v = BigInt(l.data);
       if (from === pm && to === hook) at(l.tx).moves.push({ index: l.index, take: v });
       else if (from === hook && to === pm) at(l.tx).moves.push({ index: l.index, take: -v });
+    } else if (l.address === pm && l.topics.length === 4 && l.topics[0] === TOPIC.claims && l.data.length === 2 + 128 && addrOf(l.topics[3]!.slice(2)) === pool.token && addrOf(l.data.slice(2, 66)) === hook) {
+      // claims of the token the hook had the PoolManager mint (its take, to whomever it names) or burn (its paying in)
+      const [from, to] = [addrOf(l.topics[1]!.slice(2)), addrOf(l.topics[2]!.slice(2))];
+      const v = BigInt(`0x${l.data.slice(66)}`);
+      if (from === ZERO && to !== ZERO) at(l.tx).moves.push({ index: l.index, take: v });
+      else if (to === ZERO && from !== ZERO) at(l.tx).moves.push({ index: l.index, take: -v });
     }
   }
   for (const { swaps, own, calls, moves } of byTx.values()) {

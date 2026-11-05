@@ -9,11 +9,11 @@
 // launches'. For each of a tape's OLDEST oldest trades it reads the receipt on two Base providers that agree
 // (SWAP_RPCS.base) and the token's decimals. A launch trade is one whose receipt holds a PoolManager Swap of a pool and
 // one of that pool's Initialize, ModifyLiquidity or Donate. It passes only when at least one launch trade is read and
-// every one's amt is exactly a Transfer of the token in its receipt. With no launch trade on any tape read it FAILS with
-// that reason, never passes on nothing.
+// every one's amt is exactly a Transfer of the token in its receipt, or the PoolManager's mint of the token as ERC-6909
+// claims (a trader may take a buy as claims: Base tx 0xfaaa9cc9..., live run 41990876403). With no launch trade on
+// any tape read it FAILS with that reason, never passes on nothing.
 //   node scripts/live-checks/helper-v4-hook-liquidity.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
-// Runs: pending helper-v4-hook-liquidity, it fails on the deployed helper at b208632 and at 04bb10f alike (live run 41990876403 and a run by hand, 5 Nov 08:05Z), each time a launch trade whose amt is no Transfer of the token in its receipt
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { BASE_VENUES, SWAP_RPCS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
@@ -27,6 +27,7 @@ const PM = BASE_VENUES.poolManager;
 const CALLS = [TOPIC.initialize, TOPIC.modifyLiquidity, TOPIC.donate];
 const ADDR = /^0x[0-9a-f]{40}$/;
 const TX = /^0x[0-9a-f]{64}$/;
+const WORD0 = `0x${"0".repeat(64)}`;
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** A tape's decimal amt in the token's units, or null. */
@@ -66,7 +67,10 @@ export function judge(run) {
       launches++;
       const d = run.decimals?.[coin];
       const want = Number.isInteger(d) ? units(t.amt, d) : null;
-      const moved = r.logs.filter((l) => l.address === coin && l.topics?.[0] === TOPIC.transfer && /^0x[0-9a-f]{64}$/.test(l.data ?? "")).map((l) => BigInt(l.data));
+      const moved = [
+        ...r.logs.filter((l) => l.address === coin && l.topics?.[0] === TOPIC.transfer && /^0x[0-9a-f]{64}$/.test(l.data ?? "")).map((l) => BigInt(l.data)),
+        ...r.logs.filter((l) => l.address === PM && l.topics?.length === 4 && l.topics[0] === TOPIC.claims && l.topics[1] === WORD0 && l.topics[3] === `0x${coin.slice(2).padStart(64, "0")}` && /^0x[0-9a-f]{128}$/.test(l.data ?? "")).map((l) => BigInt(`0x${l.data.slice(66)}`)),
+      ];
       if (want === null) bad(`${coin} trade ${t.tx}: amt ${t.amt} is no amount of a token of ${d} decimals`);
       else if (!moved.includes(want)) bad(`${coin} launch trade ${t.tx}: amt ${t.amt} is no Transfer of the token in its receipt (they moved ${moved.map(String).join(", ") || "none"})`);
       else lines.push(`ok  ${coin} launch trade ${t.tx}: amt ${t.amt} is the Transfer the trader got`);
