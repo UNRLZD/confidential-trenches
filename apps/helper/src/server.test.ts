@@ -488,6 +488,46 @@ test("M369 (M1): POST /v1/pool/solana/send hands the pool the caller's address",
   }
 });
 
+// card helper-evm-sender: POST /v1/pool/evm/sell reaches the named EVM pool's sender with the caller's address (its held
+// limit), a pool this helper does not carry is 404 and nothing is carried; GET /v1/pool/fee for an EVM pool names the
+// sender's address, which the kit pins (evmPoolVenues sellSender). Test key only: sha256 of a label.
+test("POST /v1/pool/evm/sell carries the body to the named EVM pool's sender with the caller's address; GET /v1/pool/fee names the sell sender as sell_sender", async (t) => {
+  const { createHash } = await import("node:crypto");
+  const { evmAddressOf, evmPoolSender, POOL_EVM_SELL_BODY_MAX } = await import("./pool/evm.ts");
+  const POOL = "0xb239a38af69b68e6c5c305df64985f283b5d5fe5";
+  const NOW = 1_800_000_000_000;
+  const key = new Uint8Array(createHash("sha256").update("helper-evm-sender/server/EVM_SENDER").digest());
+  // a chain whose blocks are 2 s apart up to now, 1 gwei base fee
+  const chain = async (m: string, p: readonly unknown[]): Promise<unknown> => {
+    if (m === "eth_chainId") return "0x14a34";
+    if (m === "eth_call") return `0x${(2n).toString(16).padStart(64, "0")}`; // the fee's reads at the epoch block: the tree depth and the chain fee oracle
+    const n = p[0] === "latest" ? 1000n : BigInt(p[0] as string);
+    return { number: `0x${n.toString(16)}`, timestamp: `0x${(BigInt(NOW / 1000) - 2n * (1000n - n)).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" };
+  };
+  const sellKey = new Uint8Array(createHash("sha256").update("helper-evm-sender/server/EVM_SELL_SENDER").digest());
+  const real = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: key, sellKey }, [chain, chain], () => NOW);
+  const seen: [unknown, string | undefined][] = [];
+  const pool = { ...real, fee: real.fee, sell: async (body: unknown, client?: string) => (seen.push([body, client]), { status: 200, body: { hash: `0x${"ab".repeat(32)}` } }) } as typeof real;
+  const h = own(createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map([[POOL, pool]]), () => NOW)));
+  t.after(() => closeServer(h));
+  await new Promise<void>((ok) => h.listen(0, "127.0.0.1", () => ok()));
+  const to = (h.address() as AddressInfo).port;
+  const body = { pool: POOL, w: "0x0000000000000000000000000000000000000a11", data: "0x00", authorization: { chainId: "0x14a34", address: "0x00", nonce: "0x0", yParity: "0x0", r: "0x00", s: "0x00" } };
+  const a = await call("POST", "/v1/pool/evm/sell", { ...JSON_H, "x-forwarded-for": "198.51.100.1, 203.0.113.7" }, JSON.stringify(body), to);
+  assert.deepEqual([a.status, JSON.parse(a.body)], [200, { hash: `0x${"ab".repeat(32)}` }]);
+  assert.deepEqual(seen, [[body, "203.0.113.7"]]);
+  const other = await call("POST", "/v1/pool/evm/sell", JSON_H, JSON.stringify({ ...body, pool: "0x000000000000000000000000000000000000beef" }), to);
+  assert.deepEqual([other.status, JSON.parse(other.body).error.code], [404, "not_found"]);
+  assert.equal((await call("GET", "/v1/pool/evm/sell", {}, undefined, to)).status, 405);
+  const big = await call("POST", "/v1/pool/evm/sell", JSON_H, JSON.stringify({ ...body, data: `0x${"00".repeat(POOL_EVM_SELL_BODY_MAX)}` }), to);
+  assert.equal(big.status, 413);
+  assert.equal(seen.length, 1, "nothing else carried");
+  const f = await call("GET", `/v1/pool/fee?pool=${POOL}`, {}, undefined, to);
+  assert.equal(f.status, 200, f.body);
+  assert.equal(JSON.parse(f.body).sell_sender, evmAddressOf(sellKey));
+  assert.equal(Object.hasOwn(JSON.parse(f.body), "sender"), false);
+});
+
 // M362 (3): the helper's own main, as the host runs it, with one devnet Solana pool whose two RPCs are local stubs.
 // A failed rent read takes down only that pool (503 upstream) and the rest answers; a configured fee that is not the
 // kit's for the rent read makes the process exit 2. Test keys only: sha256 of a label.
