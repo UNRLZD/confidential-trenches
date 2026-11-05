@@ -9,7 +9,8 @@
 //    doubling wait: six tries wait 1+2+4+8+16+32 = 63 s, past the 504 that lasted at least 31 s (the sha256 check after
 //    it stays);
 //  - a wget, which carries none of those flags here;
-//  - an apt-get in a run step that sets no Acquire::Retries (apt's own retry, with its doubling wait);
+//  - an apt-get in a run step that sets no Acquire::Retries (apt's own retry, with its doubling wait), as an -o option
+//    (Acquire::Retries=5) or as an apt.conf line the step writes (Acquire::Retries "5");
 //  - a rustup toolchain install (or install, target add, component add), a cargo install or a git submodule update not
 //    run through scripts/ci/retry.sh: rustup retries a component at once with no wait (src/dist/manifestation.rs
 //    l.800 at 1.29.3, FixedInterval 0), git and cargo install not at all.
@@ -28,7 +29,9 @@
 //    alone never fills);
 //  - a `playwright install` or `install-deps` (but --dry-run) with no cache before it in its job that holds
 //    ~/.cache/ms-playwright; and one that installs system packages (--with-deps, install-deps) must keep apt's .debs
-//    (Dir::Cache::Archives in the step) in a second path of that cache, so a hit installs them with no mirror;
+//    (Dir::Cache::Archives in the step) in a second path of that cache, so a hit installs them with no mirror, and
+//    runs under `timeout` on the same command line: a miss still meets the mirror, and live run 42059594658's job
+//    127357435385 crawled 19.5 min on azure.archive.ubuntu.com until the job's limit cancelled it;
 // and scripts/ci/fetch.sh's own curl without curl's retry, as a workflow's.
 import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -111,7 +114,7 @@ export function refusals(yml) {
       for (const seg of cmd.split(/&&|\|\||[;|]/)) {
         if (word("curl").test(seg)) for (const w of curlProblems(seg)) out.push([n, w]);
         if (word("wget").test(seg)) out.push([n, `a wget, with no retry here; use curl ${CURL_WANT}: ${seg.trim()}`]);
-        if (word("apt-get").test(seg) && !/Acquire::Retries=\d/.test(all)) out.push([n, `an apt-get in a step that sets no Acquire::Retries: ${seg.trim()}`]);
+        if (word("apt-get").test(seg) && !/Acquire::Retries(?:=|\s+")\d/.test(all)) out.push([n, `an apt-get in a step that sets no Acquire::Retries: ${seg.trim()}`]);
         const tool = NET_TOOL.exec(seg);
         if (tool && !seg.slice(0, tool.index).includes(RETRY)) out.push([n, `${tool[1].replace(/\s+/g, " ")} not run through ${RETRY}: ${seg.trim()}`]);
       }
@@ -262,6 +265,7 @@ export function cacheRefusals(yml) {
             const c = cacheFor((p) => p.includes(MS_PLAYWRIGHT) && (!deps || p.some(named)), () => true);
             held(c, n, `a playwright ${pw[1]}${deps ? " of system packages" : ""}`);
             if (c && deps && !/Dir::Cache::Archives/i.test(text)) out.push([n, "a playwright install of system packages that does not keep apt's .debs (Dir::Cache::Archives) for its cache"]);
+            if (deps && !/(?:^|[\s;&|({])timeout\s+(?:-\S+\s+(?:\d+[smh]?\s+)?)*\d+[smh]?\s/.test(seg.slice(0, pw.index))) out.push([n, "a playwright install of system packages with no timeout on its command line: a crawling mirror holds it to the job's limit"]);
           }
         }
       }

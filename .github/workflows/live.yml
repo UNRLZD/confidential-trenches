@@ -106,7 +106,8 @@ jobs:
       # The key names the Playwright release, the engines and the runner image (ImageOS, ImageVersion), since the .debs
       # are the ones that image lacked: a hit installs them with dpkg and no request, then `install-deps --dry-run`
       # (apt-get -s on the image's own lists, offline) must find none missing. A miss, or a hit that fails either, runs
-      # Playwright's own install once, apt keeping each .deb it fetches for the save.
+      # Playwright's own install, bounded in time and tried once more on another mirror, apt keeping each .deb it
+      # fetches for the save.
       - name: the cache key of Playwright's engines on this runner image
         id: engines-key
         if: matrix.engines != ''
@@ -143,8 +144,22 @@ jobs:
             sudo rm -rf "$debs"
             mkdir -p "$debs/partial"
             printf 'Dir::Cache::Archives "%s/";\nAPT::Keep-Downloaded-Packages "true";\nAcquire::Retries "5";\n' "$debs" | sudo tee /etc/apt/apt.conf.d/90playwright-debs
+            # Bounded: a normal install takes 15-17 s (run 42059594658's Firefox jobs); 180 s is a crawling mirror, as
+            # job 127357435385's azure.archive.ubuntu.com was (19.5 min to the job's limit). Then once more, on fresh
+            # connections, from Ubuntu's own archive.ubuntu.com and security.ubuntu.com: the image's apt reads its
+            # mirrors from /etc/apt/apt-mirrors.txt (mirror+file, Azure's first; actions/runner-images
+            # configure-apt-sources.sh), and a slow mirror is no failed one, so apt never moves on by itself.
             # shellcheck disable=SC2086
-            pnpm --filter terminal exec playwright install --with-deps $ENGINES
+            deps() { timeout -k 10 180 pnpm --filter terminal exec playwright install --with-deps $ENGINES; }
+            if ! deps; then
+              echo "::warning::Playwright's install did not finish in 180 s: once more, from archive.ubuntu.com and security.ubuntu.com"
+              sudo pkill -TERM -x apt-get || true
+              sleep 2
+              sudo pkill -KILL -x apt-get || true
+              sudo dpkg --configure -a || true
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt
+              deps
+            fi
             sudo rm -f /etc/apt/apt.conf.d/90playwright-debs
             sudo rm -rf "$debs/partial" "$debs/lock"
             sudo chown -R "$(id -u):$(id -g)" "$debs"

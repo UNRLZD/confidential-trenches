@@ -75,6 +75,9 @@ test("wget is refused; apt-get needs Acquire::Retries in its step", () => {
   assert.deepEqual(what(job(run("wget https://x/y"))), ["9: a wget, with no retry here; use curl --retry 6 --retry-all-errors"]);
   assert.deepEqual(what(job(run("sudo apt-get update\nsudo apt-get install -y z"))), ["9: an apt-get in a step that sets no Acquire::Retries", "10: an apt-get in a step that sets no Acquire::Retries"]);
   assert.deepEqual(what(job(run('APT=(-o Acquire::Retries=5)\nsudo apt-get "${APT[@]}" update'))), []);
+  // or an apt.conf line the step writes
+  assert.deepEqual(what(job(run(`printf 'Acquire::Retries "5";\\n' | sudo tee /etc/apt/apt.conf.d/90x\nsudo apt-get update`))), []);
+  assert.deepEqual(what(job(run(`printf 'Acquire::Queue-Mode "host";\\n' | sudo tee /etc/apt/apt.conf.d/90x\nsudo apt-get update`))), ["10: an apt-get in a step that sets no Acquire::Retries"]);
   // the option set in another step does not count
   assert.deepEqual(what(job(run("A=(-o Acquire::Retries=5)") + run("sudo apt-get update"))), ["12: an apt-get in a step that sets no Acquire::Retries"]);
 });
@@ -149,7 +152,7 @@ const cache = (kind, { path = FILE, key = `download-cargo-near-0.22.0-${SUM}`, i
   `      - id: ${id}\n        uses: actions/cache${kind}@${CACHE}\n        with:\n          path: ${path}\n          key: ${key}\n`;
 const FETCHING = run(`bash scripts/ci/fetch.sh ${FILE} ${SUM} \\\n  https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/x.tar.gz\ntar -xzf ${FILE}`);
 const PW_PATHS = "|\n            ~/.cache/ms-playwright\n            ~/.cache/playwright-debs";
-const PW = run(`debs="$HOME/.cache/playwright-debs"\nprintf 'Dir::Cache::Archives "%s/";\\n' "$debs" | sudo tee /etc/apt/apt.conf.d/90x\npnpm exec playwright install --with-deps $ENGINES`);
+const PW = run(`debs="$HOME/.cache/playwright-debs"\nprintf 'Dir::Cache::Archives "%s/";\\n' "$debs" | sudo tee /etc/apt/apt.conf.d/90x\ntimeout -k 10 180 pnpm exec playwright install --with-deps $ENGINES`);
 // each refusal as "line: what", without the command a curl or fetch.sh refusal quotes after its last ": "
 const cached = (yml) => cacheRefusals(yml).map(([line, w]) => `${line}: ${/^a (curl to a file|scripts\/ci\/fetch\.sh without)/.test(w) ? w.split(": ")[0] : w}`);
 
@@ -158,7 +161,7 @@ test("cache: the repo's own workflows hold every pinned file and Playwright inst
   // main's steps before this card, each a download on every run: refused where they stood
   const curl = (name, sum, url) => job(run(`curl -sSfL ${FLAGS} -o "$RUNNER_TEMP/${name}" \\\n  ${url}\necho "${sum}  $RUNNER_TEMP/${name}" | sha256sum -c -`));
   assert.deepEqual(cached(curl("cargo-near.tgz", SUM, "https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/x.tar.gz")), ["9: a curl to a file"]);
-  assert.deepEqual(cached(job(run("pnpm --filter terminal exec playwright install --with-deps $ENGINES"))), ["9: a playwright install of system packages with no cache step before it in its job"]);
+  assert.deepEqual(cached(job(run("pnpm --filter terminal exec playwright install --with-deps $ENGINES"))), ["9: a playwright install of system packages with no cache step before it in its job", "9: a playwright install of system packages with no timeout on its command line: a crawling mirror holds it to the job's limit"]);
 });
 
 test("cache: a fetch.sh needs a cache before it in its job, holding its file, keyed on its sha256, and saved", () => {
@@ -198,7 +201,12 @@ test("cache: a Playwright install needs ms-playwright cached, and one with syste
   assert.deepEqual(cached(job(cache("", { path: "~/.cache/ms-playwright", key: "pw" }) + PW)).length, 1);
   // the cache holds a dir, but the step keeps no .debs in it
   assert.deepEqual(cached(ok.replace(/printf .*\n/, "")), ["17: a playwright install of system packages that does not keep apt's .debs (Dir::Cache::Archives) for its cache"]);
-  assert.deepEqual(cached(job(run("pnpm exec playwright install-deps webkit"))).length, 1);
+  assert.deepEqual(cached(job(run("timeout 180 pnpm exec playwright install-deps webkit"))).length, 1);
+  // unbounded: a miss meets the mirror, and a crawl held live job 127357435385 to its 20 min limit
+  assert.deepEqual(cached(ok.replace("timeout -k 10 180 pnpm", "pnpm")), ["18: a playwright install of system packages with no timeout on its command line: a crawling mirror holds it to the job's limit"]);
+  // a timeout on another command of the line does not bound this one; one in a function around it does
+  assert.deepEqual(cached(ok.replace("timeout -k 10 180 pnpm", "timeout 180 true; pnpm")).length, 1);
+  assert.deepEqual(cached(ok.replace("timeout -k 10 180 pnpm exec playwright install --with-deps $ENGINES", "deps() { timeout 3m pnpm exec playwright install --with-deps $ENGINES; }")), []);
   // the browsers alone need ms-playwright; a dry run fetches nothing
   assert.deepEqual(cached(job(cache("", { path: "~/.cache/ms-playwright", key: "pw" }) + run("pnpm exec playwright install webkit"))), []);
   assert.deepEqual(cached(job(run("pnpm exec playwright install webkit"))).length, 1);
