@@ -1092,3 +1092,23 @@ test("keysOf with two lookup tables: the static keys, then every lookup's writab
   assert.equal(keysOf(message, { err: null }), null, "none");
   assert.deepEqual(keysOf({ ...message, lookups: [] }, { err: null }), [k(1), k(2)], "no lookups: the static keys only");
 });
+
+// Card signpage-sent-read-back: the helper's word for a release's signature is a name to read back, never a fact; the
+// op's txs (its answer and every stage write the app reads) name a release only as both RPCs read it as that release.
+test("the helper answers a well-formed signature that is not the release's, and the release lands: the op names the release's own, never the helper's", async () => {
+  const fake = base58.encode(new Uint8Array(64).fill(7));
+  const wd = await world([30_000_000n], { helperSig: fake });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  assert.equal(a.stage, "sent");
+  const release = [...wd.landed.keys()][0]!;
+  assert.deepEqual(a.txs, [{ chain: "solana", hash: release }, { chain: "solana", hash: base58.encode(wd.onwards()[0]!.subarray(1, 65)) }]);
+  for (const txs of [a.txs, ...wd.stageTxs]) assert.ok(!txs.some((t) => t.hash === fake), "the helper's word is in no txs the app reads");
+});
+
+test("the helper's signature never read back: the op stops with no transaction of it", async () => {
+  const wd = await world([30_000_000n], { readBack: "none", landed: false });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  assert.equal(a.stage, "stopped");
+  assert.deepEqual(a.txs, []);
+  for (const txs of wd.stageTxs) assert.ok(!txs.some((t) => t.hash === SIG), "the helper's word is in no stage write");
+});

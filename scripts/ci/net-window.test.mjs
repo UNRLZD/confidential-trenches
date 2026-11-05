@@ -80,6 +80,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-postmessage.mjs",
   "scripts/live-checks/signpage-prover-host.mjs",
   "scripts/live-checks/signpage-prover-threads.mjs",
+  "scripts/live-checks/signpage-sent-read-back.mjs",
   "scripts/live-checks/signpage-skeleton.mjs",
   "scripts/live-checks/signpage-solana-trade.mjs",
   "scripts/live-checks/signpage-withdraw-form.mjs",
