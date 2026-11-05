@@ -192,8 +192,9 @@ export const HELPER_RPC_METHODS = {
     "getBlockTime",
     "getEpochInfo",
     // a note restore's scan of the pool program (wallet pool/solana-restore.ts, memcmp-filtered). The heaviest read on
-    // the list: bounded on the helper by the caller's share (16 per 10 s), the per-method budget, the provider's pace
-    // and its 4 MB answer (apps/helper/src/rpc/rpc.ts RPC_ANSWER_MAX: an answer over it is refused, never passed on)
+    // the list: the helper forwards it only on its own pinned pool program with a dataSize and a memcmp filter (review
+    // L-2, apps/helper/src/rpc/rpc.ts scanAllowed), within the caller's share (16 per 10 s), the per-method budget, the
+    // provider's pace and its 4 MB answer (RPC_ANSWER_MAX: an answer over it is refused, never passed on)
     "getProgramAccounts",
   ],
   base: [

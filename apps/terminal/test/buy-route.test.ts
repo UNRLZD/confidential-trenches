@@ -202,6 +202,9 @@ test("the route's tx: after a client_timeout and a filled with no transaction, t
   // the answer's transaction is kept; another buy's tx names nothing; an inherited tx is nothing
   assert.equal(routeEvent(fromStage(tap(), "b1", "sent", "ans"), { t: "tx", id: "b1", tx: SIG }).tx, "ans");
   assert.equal(routeEvent(late, { t: "tx", id: "b2", tx: "other" }).tx, SIG);
+  // review: another buy's tx names nothing on a strip with no tx yet, done or running
+  assert.equal(routeEvent(fromStage(tap(), "b1", "filled"), { t: "tx", id: "b2", tx: SIG }).tx, null);
+  assert.equal(routeEvent(tap(), { t: "tx", id: "b2", tx: SIG }).tx, null);
   assert.equal(fromBuyRoute("b1", Object.create({ tx: SIG }) as BuyRoute), null);
 });
 
