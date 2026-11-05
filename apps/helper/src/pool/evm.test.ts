@@ -576,3 +576,30 @@ test("LOW-2 ready(): each throttle code on its list is asked again and a code of
   await assert.rejects(s(other).ready(), /^Error: rpc 2: another block at \d+$/);
   assert.equal(stateReads, 0);
 });
+
+// card evm-quote-warm-round fold 8: every read the sender makes is at a past block, so with no RPCs set it reads the
+// kit's fee pair (feeProviders, each holding state 600 s back), never the quote's providers
+test("fold 8 a sender with no POOL_EVM_RPCS_* reads only the kit's feeProviders for its network, and with neither set it does not start", async () => {
+  const env = {
+    POOL_EVM_ADDRESS_BASE_SEPOLIA: POOL,
+    POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
+  };
+  const kit = evmPoolVenues();
+  const fee = ["https://fee-a.fold8.test", "https://fee-b.fold8.test"] as const;
+  const venues = { ...kit, "base-sepolia": { ...kit["base-sepolia"], providers: ["https://quote-a.fold8.test", "https://quote-b.fold8.test", "https://quote-c.fold8.test"], feeProviders: fee } };
+  const asked: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (u: string | URL) => {
+    asked.push(new URL(String(u)).origin);
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  try {
+    await assert.rejects(evmPoolSendersFromEnv(env, venues).get(POOL)!.ready(async () => {}));
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.ok(asked.length > 0, "no read made");
+  assert.deepEqual([...new Set(asked)].filter((o) => !fee.includes(o as (typeof fee)[number])), [], asked.join(", "));
+  const { feeProviders: _, ...none } = kit["base-sepolia"];
+  assert.throws(() => evmPoolSendersFromEnv(env, { ...kit, "base-sepolia": none }), /POOL_EVM_RPCS_BASE_SEPOLIA must be set: the kit lists no fee providers for base-sepolia/);
+});

@@ -5,8 +5,9 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "node:test";
+import { evmPoolVenues } from "@blindfill/kit";
 import { checkPoolEnv } from "./env-check.ts";
-import { POOL_EVM_ENV, POOL_EVM_SELL_ENV } from "./pool/evm.ts";
+import { evmPoolSendersFromEnv, POOL_EVM_ENV, POOL_EVM_SELL_ENV } from "./pool/evm.ts";
 import { POOL_SOLANA_ENV } from "./pool/solana.ts";
 
 // test values only: no key here holds or moves anything
@@ -22,19 +23,39 @@ const refusal = (env: Record<string, string>) => {
   }
 };
 
-test("an EVM network with only some of its names set is refused, naming one of its variables and no value; the address, key and RPCs together are taken, the fee (unset or the kit's floor) and the fee recipient optional", () => {
+test("an EVM network with only some of its names set is refused, naming one of its variables and no value; the address and key are taken with the RPCs, or with the RPCs unset where the kit lists the network's fee pair (card evm-quote-warm-round fold 8), and refused naming the RPCs where it lists none; the fee (unset or the kit's floor) and the fee recipient optional", () => {
+  const kit = evmPoolVenues();
   for (const [network, names] of Object.entries(POOL_EVM_ENV)) {
-    for (const set of subsets(names.length)) {
-      const env = Object.fromEntries(set.map((i) => [names[i]!, EVM[i]!]));
-      const whole = [0, 1, 4].every((i) => set.includes(i));
-      const why = refusal(env);
-      if (whole) assert.equal(why, null, `${network} ${set.join(",")}`);
-      else {
-        assert.ok(why !== null, `${network}: ${set.map((i) => names[i]).join(", ")} alone was taken`);
-        assert.ok(names.some((n) => why.includes(n)), why);
-        for (const v of EVM) assert.ok(!why.includes(v), `a value in: ${why}`);
+    const v = kit[network as keyof typeof kit];
+    // the same network with no fee pair in the kit: only its RPCs, set, read the past blocks
+    const { feeProviders: _, ...bare } = v!;
+    for (const [venues, paired] of [[kit, v?.feeProviders !== undefined], [{ ...kit, [network]: bare }, false]] as const) {
+      for (const set of subsets(names.length)) {
+        const env = Object.fromEntries(set.map((i) => [names[i]!, EVM[i]!]));
+        const keyed = [0, 1].every((i) => set.includes(i));
+        const whole = keyed && (set.includes(4) || paired);
+        const why = (() => {
+          try {
+            evmPoolSendersFromEnv(env, venues);
+            return null;
+          } catch (e) {
+            return (e as Error).message;
+          }
+        })();
+        if (whole) assert.equal(why, null, `${network} ${set.join(",")}${paired ? " (the kit's fee pair)" : ""}`);
+        else {
+          assert.ok(why !== null, `${network}: ${set.map((i) => names[i]).join(", ")} alone was taken${paired ? "" : " with no fee pair in the kit"}`);
+          // the address and key set, the RPCs not and no fee pair: the refusal names the RPCs
+          if (keyed) assert.ok(why.includes(names[4]), why);
+          else assert.ok(names.some((n) => why.includes(n)), why);
+          for (const x of EVM) assert.ok(!why.includes(x), `a value in: ${why}`);
+        }
       }
     }
+    // every network the senders run on has the kit's fee pair today (packages/kit/src/trade/evm/buy-unpinned.ts), so the
+    // deploy's own check, which reads the kit's list, takes the address and key alone
+    assert.ok(v?.feeProviders !== undefined, `${network}: no fee pair in the kit`);
+    assert.equal(refusal({ [names[0]]: EVM[0]!, [names[1]]: EVM[1]! }), null, `${network}: the address and key alone`);
     assert.ok(refusal({ [POOL_EVM_SELL_ENV[network as keyof typeof POOL_EVM_SELL_ENV]]: "0x" + "22".repeat(32) })?.includes(POOL_EVM_SELL_ENV[network as keyof typeof POOL_EVM_SELL_ENV]), `${network}: a sell key alone`);
   }
 });
