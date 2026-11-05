@@ -55,6 +55,7 @@ import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../g
 import { CALLER_ROOM, evmThrottleS, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
+import { createSwapIndex, traderFrom, type SwapIndex } from "./index.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -225,6 +226,20 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // callers share, is asked whenever its bucket has room for that.
   robinhood: ["https://robinhood.daybreak-rpc.network", "https://rpc-robinhood.blockmachine.io", "https://robinhood.api.pocket.network", "https://robinhood.drpc.org", "https://api.blockvectra.com/v1/robinhood_mainnet/public", "https://rpc.mainnet.chain.robinhood.com"],
 };
+
+/** The providers that answer a chain-wide `eth_getLogs` (by topic, no address) with each log's block time, for the
+ *  chain's swap index (index.ts; read 2026-11-05 01:53Z: pocket and blockvectra refuse a filter with no address, the
+ *  chain's own logs carry no time). drpc's free plan takes 100 blocks a call. */
+export const INDEX_RPCS: Readonly<Partial<Record<EvmChain, readonly string[]>>> = {
+  robinhood: ["https://robinhood.daybreak-rpc.network", "https://rpc-robinhood.blockmachine.io", "https://robinhood.drpc.org"],
+};
+/** The most blocks one chain-wide `eth_getLogs` joins (logsOf): 500 of Robinhood's are about 1,500 logs, 1.4 MB, half
+ *  of ANSWER_MAX with room for a busier minute (1,000 were 3,062 logs, 2.8 MB, 2026-11-05 01:53Z). */
+const INDEX_JOIN_MAX = 500;
+/** How often the index reads the chain's newest blocks when no tape asks (a tape's read catches it up first). */
+const INDEX_FOLLOW_MS = 5_000;
+/** The swap events the index holds: every venue's a tape reads (swapFilter, refFilter). */
+const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell];
 
 /** Providers whose logs carry no block time on a chain timed by them (Robinhood): their logs are timed by their own
  *  `eth_getBlockByNumber` of each log's block, and count for a swap's time only where another provider logged the same. */
@@ -565,7 +580,7 @@ export function traderLeg(s: Pick<Swap, "side" | "amt">, take: bigint | undefine
 type Call = { method: string; params: unknown[] };
 type Reply = { ok: true; result: unknown } | { ok: false; wait: number };
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -818,17 +833,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** The providers to ask, in order (ranked): those of `urls` not held, then any other of ours alike (a provider held
    *  since the head was read, or lags, is made up for by the next); agreed stops at PROVIDERS_MAX that answered. */
-  const askOrder = (urls: readonly string[], wideFirst: boolean, calls = 1): string[] => {
+  const askOrder = (urls: readonly string[], wideFirst: boolean, calls = 1, only = false): string[] => {
     const have = ranked(usable(urls), wideFirst, calls);
-    return [...new Set([...have, ...ranked(usable(rpcs).filter((u) => !have.includes(u)), wideFirst, calls)])];
+    return only ? have : [...new Set([...have, ...ranked(usable(rpcs).filter((u) => !have.includes(u)), wideFirst, calls)])];
   };
 
   /** Asks `urls` the same `n` requests, two at once and then one more at a time while some answer has no two alike.
    *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. Each next one,
    *  of the rest and the wide ones (WIDE_SPAN) of the first two (a read past its pace's or queue's wait or held answers
    *  nothing at once), is ranked when it is asked, by expected answer time with the requests still left (fold 4). */
-  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true): Promise<(A | null)[]> {
-    const order = askOrder(urls, wideFirst, n);
+  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true, only = false): Promise<(A | null)[]> {
+    // `only`: none but `urls` (the index's chain-wide read, which the others refuse)
+    const order = askOrder(urls, wideFirst, n, only);
     const passedBefore = new Map(order.map((u) => [u, paced.get(u) ?? 0]));
     const got: A[][] = Array.from({ length: n }, () => []);
     const by: Set<string>[] = Array.from({ length: n }, () => new Set());
@@ -883,7 +899,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     fs.forEach((f, i) => {
       const [from, to] = at(f);
       const g = groups.at(-1);
-      if (g !== undefined && from >= 0 && to >= from && rest(g.f) === rest(f) && from === g.to + 1 && to - g.from + 1 <= max) (g.to = to), g.of.push(i);
+      if (g !== undefined && from >= 0 && to >= from && rest(g.f) === rest(f) && from === g.to + 1 && to - g.from + 1 <= (f.address === undefined ? Math.min(max, INDEX_JOIN_MAX) : max)) (g.to = to), g.of.push(i);
       else groups.push({ f, from, to, of: [i] });
     });
     const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })), patient);
@@ -900,7 +916,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
 
   /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
-  function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[]): Promise<(Log[] | null)[]> {
+  function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[], only = false): Promise<(Log[] | null)[]> {
     return agreed<Log[]>(
       urls,
       filters.length,
@@ -909,6 +925,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         return clock === null && headerTimed.has(u) ? timedByHeaders(u, got, patient) : got;
       },
       (a, b) => sameLogs(a, b, clock === null),
+      true,
+      only,
     );
   }
 
@@ -928,11 +946,33 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return got.map((g) => (g === null || g.some((l) => !times.has(l.block)) ? null : g.map((l) => ({ ...l, t: times.get(l.block)! }))));
   }
 
-  /** One filter's logs over blocks `from` to `to`, read in spans the providers take: null when any span is not agreed. */
+  /** One filter's logs over blocks `from` to `to`, read in spans the providers take: null when any span is not agreed.
+   *  The filters of the swap events the chain's index holds (index.ts) are answered from it once it holds the range (a
+   *  range ahead of it is read first, chain-wide, once for every caller); the rest, and a range behind it, are read
+   *  for this filter alone (card helper-robinhood-capacity fold 6). */
   async function agreedRange(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number): Promise<Log[] | null> {
+    if (index === null || from > to) return agreedRangeOwn(urls, filter, from, to);
+    const fs = [filter(from, to)].flat();
+    const held = fs.filter((f) => index.indexes(f));
+    if (held.length === 0) return agreedRangeOwn(urls, filter, from, to);
+    if (!index.holds(from, to)) {
+      // ahead of what it holds, or nothing held yet (the boot read in flight): wait on its one read, which every caller
+      // shares; behind it, or that read failing: this filter's own read
+      const r = index.range();
+      if ((r !== null && from < r.from) || !(await index.upTo(to)) || !index.holds(from, to)) return agreedRangeOwn(urls, filter, from, to);
+    }
+    const got = held.flatMap((f) => index.query(f, from, to));
+    if (held.length < fs.length) {
+      const rest = await agreedRangeOwn(urls, (lo, hi) => [filter(lo, hi)].flat().filter((f) => !index.indexes(f)), from, to);
+      if (rest === null) return null;
+      got.push(...rest);
+    }
+    return got.sort((a, b) => a.block - b.block || a.index - b.index);
+  }
+  async function agreedRangeOwn(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number, only = false): Promise<Log[] | null> {
     // each filter's spans one after another, so a wide provider joins them (logsOf); the logs back in block order
     const per = spans(from, to).map(([lo, hi]) => [filter(lo, hi)].flat());
-    const parts = await agreedLogs(urls, per.length === 0 ? [] : per[0]!.flatMap((_, k) => per.map((fs) => fs[k]!)));
+    const parts = await agreedLogs(urls, per.length === 0 ? [] : per[0]!.flatMap((_, k) => per.map((fs) => fs[k]!)), only);
     return parts.some((x) => x == null) ? null : (parts as Log[][]).flat().sort((a, b) => a.block - b.block || a.index - b.index);
   }
 
@@ -1171,6 +1211,30 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Agreed `eth_call` results by (to, data, block) (callsAgreed): a call at a mined block never answers otherwise, so
    *  each is read once and shared by every tape and tick (fold 5). */
   const called = new Map<string, string>();
+  /** The chain's swaps, read chain-wide once for every tape, tick and list (index.ts, fold 6), over the blocks a tape
+   *  and its ETH price read; null on a chain with no two providers that take a filter with no address (INDEX_RPCS). */
+  const index: SwapIndex | null =
+    deps.index === undefined || deps.index.length < 2
+      ? null
+      : createSwapIndex({
+          topics: INDEX_TOPICS,
+          read: (lo, hi) => agreedRangeOwn(deps.index!, (a, b) => ({ topics: [INDEX_TOPICS], fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` }), lo, hi, true),
+          window: V.cold + V.refBack,
+          chunk: 1_000,
+        });
+  /** The index read up to the agreed head: at boot the newest window (readiness does not wait on it), then every
+   *  INDEX_FOLLOW_MS the blocks since, one read for every caller (upTo). */
+  async function follow(): Promise<boolean> {
+    if (index === null) return false;
+    const head = await agreedHead();
+    return head !== null && (await index.upTo(head.n));
+  }
+  let follower: ReturnType<typeof setInterval> | null = null;
+  if (index !== null && deps.tickMs !== 0) {
+    void follow();
+    follower = setInterval(() => void follow(), INDEX_FOLLOW_MS);
+    follower.unref();
+  }
 
   /** Reads the ETH price pool's swaps up to `to`, and back to refBack before `need` (the earliest block a book reads:
    *  a book walked back further than any before has the blocks before what is held read first). One read at a time. */
@@ -1515,7 +1579,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       part.forEach((t, i) => {
         const x = r[i];
         const tx = x?.ok ? obj(x.result) : null;
-        const from = tx === null ? null : evmAddress(tx.from);
+        const from = tx === null ? null : evmAddress(traderFrom(tx));
         if (tx !== null && typeof tx.hash === "string" && tx.hash.toLowerCase() === t && from !== null) {
           if (traders.size >= TRADERS_MAX) traders.delete(traders.keys().next().value!);
           traders.set(t, from);
@@ -1541,7 +1605,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     stop(): void {
       if (timer !== null) clearInterval(timer);
       timer = null;
+      if (follower !== null) clearInterval(follower);
+      follower = null;
     },
+    /** The chain's swap index (index.ts), the one Discover's lists read too (helper-lists-own-index); null on a chain
+     *  with none. `follow()` reads it up to the agreed head now (the follower's step; tests call it with tickMs 0). */
+    index,
+    follow,
     /** 06b Candles for a listed Base token: our own bars, and GeckoTerminal's before our first. */
     async candles(token: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       const t = evmAddress(token);

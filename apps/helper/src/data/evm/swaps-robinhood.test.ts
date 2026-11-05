@@ -92,6 +92,69 @@ const reading = (steps: number) =>
   });
 for (const n of [1, 3, 11]) reading(n);
 
+// card helper-robinhood-capacity fold 6: the chain's swaps read once, chain-wide, for every tape and tick (index.ts)
+const follow = (s: ReturnType<typeof open>) => (s as { follow?: () => Promise<boolean> }).follow?.();
+const tapeOf = (tape: { trades: { tx: string; side: string; usd: string; amt: string; t_ms: number }[] }) => tape.trades.map((t) => [t.tx, t.side, t.usd, t.amt, t.t_ms]);
+const indexed = (steps: number) =>
+  test(`fold 6: with the chain's swap index, a recorded stretch read live ${steps} block${steps === 1 ? "" : "s"} a tick gives the same bars and tape as rebuilt in one go, and no tape, chart or tick reads a token's own swap logs`, async () => {
+    const chain = fakeChain();
+    chain.st.head = START;
+    const s = open(chain, undefined, { index: URLS });
+    await follow(s);
+    await s.candles(CURVE_TOKEN, "1m", null, 500);
+    await s.candles(MAG, "1m", null, 500);
+    let head = START;
+    while (head < REC.lastHead) {
+      head = Math.min(REC.lastHead, head + steps);
+      chain.st.head = head;
+      await follow(s);
+      await s.tick();
+    }
+    s.stop();
+    for (const [token, pool] of [[CURVE_TOKEN, POOL_CURVE], [MAG, POOL_MAG]] as const) {
+      const whole = rebuild(pool, REC.lastHead);
+      for (const tf of TFS.filter((x) => x !== "1s")) assert.deepEqual((await bodyOf(s.candles(token, tf, null, 500))).candles, whole.candles(tf, null, 500), `${token} ${tf}`);
+      const tape = await bodyOf(s.trades(token, 50));
+      assert.ok(tape.trades.length > 5);
+      assert.deepEqual(tapeOf(tape), tapeOf({ trades: whole.tape(50) }), `${token} tape`);
+    }
+    assert.equal(chain.st.own, 0, "no eth_getLogs of one token's swaps");
+    assert.ok(chain.st.wide > 0, "the chain-wide reads served them");
+  });
+for (const n of [1, 11]) indexed(n);
+
+test("fold 6: tapes asked while the index's first read is out wait on that one read, not their own (12 at once: no token's own swap logs read)", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const s = open(chain, undefined, { index: URLS });
+  const tapes = await Promise.all(Array.from({ length: 12 }, (_, i) => s.trades(i % 2 === 0 ? CURVE_TOKEN : MAG, 50)));
+  s.stop();
+  for (const t of tapes) assert.equal(t.status, 200);
+  assert.equal(chain.st.own, 0, "no eth_getLogs of one token's swaps");
+  const c = fakeChain();
+  c.st.head = REC.lastHead;
+  const p = open(c);
+  for (const [i, token] of [CURVE_TOKEN, MAG].entries()) assert.deepEqual(tapeOf(JSON.parse(tapes[i]!.body)), tapeOf(await bodyOf(p.trades(token, 50))), `${token}: the index's tape is the token's own read's`);
+  p.stop();
+});
+
+test("fold 6: with every index provider refusing a filter with no address (as pocket and blockvectra do), a tape falls back to the token's own reads and answers the same", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  for (const u of URLS) chain.st.faults.set(u, { addressOnly: true });
+  const s = open(chain, undefined, { index: URLS });
+  await follow(s);
+  const r = await s.trades(CURVE_TOKEN, 50);
+  s.stop();
+  assert.equal(r.status, 200);
+  assert.ok(chain.st.own > 0, "the token's own reads answered it");
+  const c = fakeChain();
+  c.st.head = REC.lastHead;
+  const p = open(c);
+  assert.deepEqual(tapeOf(JSON.parse(r.body)), tapeOf(await bodyOf(p.trades(CURVE_TOKEN, 50))));
+  p.stop();
+});
+
 test("a Pons token's main pool is its curve, named by the factory's own record (no pool given), and its first read is the discovery's", async () => {
   const chain = fakeChain();
   chain.st.head = REC.lastHead;
