@@ -11,7 +11,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { HEADER_TIMED, SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
+import { HEADER_TIMED, SWAP_RPCS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
+import * as check from "./index-evm-swaps.mjs";
 import { candlesFault, CANDLES_PATH, judge, read, TRADES_PATH, tradesFault, units } from "./index-evm-swaps.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -315,4 +316,52 @@ test("card helper-deploy-reads-fast: read() keeps the lists read and each listed
   assert.equal(got.tried.length, 1);
   assert.deepEqual([got.tried[0].token, got.tried[0].candles.status, got.tried[0].candles.headers["server-timing"]], ["0x00000000000000000000000000000000000000a1", 503, 'evm-open;dur=12000, evm-queue;dur=9100;desc="14 posts: pace 6200 ms, in flight 2900 ms"']);
   assert.ok(Number.isFinite(got.tried[0].candles.ms));
+});
+
+const EP06 = "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789";
+const BUNDLER = A.bundle_base?.bundler ?? "0x4b5c33c3c7a31bd108f5a99b64683b0056a62226";
+const word = (a) => `0x${"0".repeat(24)}${a.slice(2)}`;
+
+test("card helper-deploy-reads-fast fold: the recorded bundle (Base tx 0x672edabc, EntryPoint v0.6): its swaps' sender is the user operation's account, never the bundler", () => {
+  assert.equal(typeof check.swapSenders, "function", "index-evm-swaps.mjs swapSenders");
+  const b = A.bundle_base;
+  const swap = (l) => [TOPIC.swap2, TOPIC.swap3, TOPIC.swap4, TOPIC.curveBuy, TOPIC.curveSell].includes(l.topics?.[0]);
+  const got = check.swapSenders(b.receipt, swap);
+  assert.deepEqual(got, { bundle: true, senders: [b.account] });
+  assert.ok(!got.senders.includes(b.bundler), "the bundler named");
+  // a swap before the EntryPoint's BeforeExecution is validation, in no operation's run
+  const [mark, ...rest] = b.receipt.logs;
+  const swaps = rest.filter(swap);
+  assert.ok(swaps.length > 0 && mark.topics[0].startsWith("0xbb47ee3e"));
+  assert.deepEqual(check.swapSenders({ ...b.receipt, logs: [...swaps, mark, rest.at(-1)] }, swap).senders, []);
+  // a UserOperationEvent logged by another contract marks nothing
+  assert.deepEqual(check.swapSenders({ ...b.receipt, logs: [mark, ...swaps, { ...rest.at(-1), address: "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae" }] }, swap).senders, []);
+  // the same logs sent by an ordinary transaction: its sender
+  assert.deepEqual(check.swapSenders({ ...b.receipt, to: "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae" }, swap), { bundle: false, senders: [b.bundler] });
+});
+
+/** The good run with its first sampled trade's receipt made a bundle to EntryPoint v0.6: the bundler sends it, the
+ *  trade's own logs sit in one user operation's run (BeforeExecution before them, its UserOperationEvent naming the
+ *  trade's trader after), as Base tx 0x672edabc logged them. `trader` names who the tape says traded. */
+const bundled = (trader) =>
+  edit((rec) => {
+    const tape = JSON.parse(rec.reads.trades.body).trades;
+    const t0 = tape[0];
+    const r = rec.chain.receipts[t0.tx];
+    const ev = A.bundle_base.receipt.logs;
+    const before = ev.find((l) => l.topics[0].startsWith("0xbb47ee3e"));
+    const uoe = ev.find((l) => l.topics[0].startsWith("0x49628fd1"));
+    r.logs = [before, ...r.logs, { ...uoe, topics: [uoe.topics[0], uoe.topics[1], word(t0.trader), uoe.topics[3]] }];
+    r.from = BUNDLER;
+    r.to = EP06;
+    body(rec, "trades", (b) => (b.trades[0].trader = trader === "bundler" ? BUNDLER : t0.trader));
+  });
+
+test("card helper-deploy-reads-fast fold: a sampled bundle trade named by its user operation's account passes; named by the bundler (the receipt's from) it fails", () => {
+  const good = run(bundled("account"));
+  assert.deepEqual(bad(good), []);
+  assert.ok(good.lines.some((l) => l.includes("the account of the user operation whose run holds its swap")));
+  const wrong = run(bundled("bundler"));
+  assert.equal(wrong.ok, false);
+  assert.ok(bad(wrong).some((l) => l.includes(`sent by "${BUNDLER}"`)), bad(wrong).join("\n"));
 });
