@@ -81,3 +81,16 @@ test("a dry run's record read on the mainnet RPCs fails: a fork's record is read
   assert.equal(r.ok, false);
   assert.ok(r.lines.includes("FAIL a dry-run record read on a non-loopback RPC"), r.lines.join("\n"));
 });
+
+test("no payer is exempt: a recorded transaction sent by anyone but the run key fails, and so does the run key holding more than DUST", async () => {
+  const hash = A.records.robinhood.txs[0].hash;
+  const answers = structuredClone(A.good);
+  let n = 0;
+  for (const a of answers) if (a.method === "eth_getTransactionReceipt" && a.params[0] === hash) (a.json.result.from = "0x3333333333333333333333333333333333333333"), n++;
+  assert.ok(n > 0);
+  fails(await run({ answers }), new RegExp(`robinhood: deploy FAIL deploy WithdrawalVerifier ${hash} succeeded, from the deployer`));
+  const key = A.records.base.deployer.toLowerCase();
+  const rich = structuredClone(A.good);
+  for (const a of rich) if (a.method === "eth_getBalance" && a.params[0].toLowerCase() === key) a.json.result = "0x" + (10n ** 13n + 1n).toString(16);
+  fails(await run({ answers: rich }), /base: deploy FAIL deployer .* keeps at most 10000000000000 wei/);
+});

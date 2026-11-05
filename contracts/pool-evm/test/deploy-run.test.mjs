@@ -363,7 +363,13 @@ test("mainnet: --return must be a wallet in use, an account with no code holding
   const m3 = room(t);
   const r3 = await run(t, c3, { head: MAIN, io: m3.io, outArg: false, out: m3.out });
   assert.equal(r3.error, null, String(r3.error?.message) + why(c3));
-  assert.ok(c3.logs.some((l) => l === `deploy: send exactly ${c3.fundWei} wei to ${c3.deployer} from ${E}, the address you passed`), why(c3));
+  // the need in wei and, exactly, in the chain's own unit (ETH)
+  const line = c3.logs.find((l) => l.startsWith("deploy: send exactly "));
+  const w = String(line).match(/^deploy: send exactly (\d+) wei \((\d+)(?:\.(\d{1,18}))? ETH\) to (0x[0-9a-f]{40}) from (0x[0-9a-f]{40}), the address you passed$/);
+  assert.ok(w, String(line) + why(c3));
+  assert.equal(BigInt(w[1]), c3.fundWei);
+  assert.equal(BigInt(w[2]) * 10n ** 18n + BigInt((w[3] ?? "").padEnd(18, "0")), c3.fundWei, "the ETH figure is the wei figure exactly");
+  assert.deepEqual([w[4], w[5]], [c3.deployer, E]);
 });
 
 test("mainnet: the run key is kept 0700/0600 until swept, every transaction is journaled before its send, the final reads are on both RPCs, then the key and the journal are removed and no key is left in a log or a file", OPTS, async (t) => {
@@ -425,9 +431,9 @@ test("mainnet: a stopped run whose key still holds ETH keeps it; a new run is re
   assert.equal(j.keys.state, "kept", why(c));
   assert.deepEqual(folders(m.keys), [j.keys.folder]);
   assert.ok(c.logs.some((l) => l.includes("--sweep-kept")), why(c));
-  // a new run is refused while the key is kept
-  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
-  assert.match(String(r2.error?.message), /kept.*--sweep-kept/, why(c));
+  // a new run to another address is refused while the key is kept (the same address resumes, the test below)
+  const r2 = await run(t, c, { head: MAIN, ret: "0x2222222222222222222222222222222222222222", io: m.io, outArg: false, out: m.out });
+  assert.match(String(r2.error?.message), /resumes only to the run's return address/, why(c));
   // --sweep-kept to any other address is refused
   const other = "0x1111111111111111111111111111111111111111";
   const r3 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: other, io: m.io, outArg: false, out: m.out });
@@ -457,4 +463,32 @@ test("mainnet: each contract's init code is pinned in deploy.mjs (forge's out/ i
     const off = code.slice(0, -2) + (code.endsWith("00") ? "01" : "00");
     assert.match(String(initProblems(n, off)), new RegExp(`${n}: init code keccak256 .* not the pinned`), n);
   }
+});
+
+test("mainnet: a run stopped after two deploys keeps its key and writes no record; the same paste resumes with that key, reuses both contracts once read back on both RPCs as the build's, deploys only the rest, and its record lists every transaction", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, onLine: (l) => l.startsWith("deploy: PrivacyPoolSimple ") && process.emit("SIGTERM", "SIGTERM") });
+  assert.match(String(r.error?.message), /stopped by SIGTERM/, why(c));
+  assert.equal(existsSync(m.out), false, "a stopped mainnet run writes no record: the record is the one-deploy guard");
+  const j = JSON.parse(readFileSync(m.journal, "utf8"));
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.ok(c.logs.some((l) => /made 2 of 5 contracts: the same paste resumes with this key/.test(l)), why(c));
+  const made = Object.fromEntries(j.txs.filter((x) => x.contract && x.landed).map((x) => [x.contract, x.address]));
+  assert.deepEqual(Object.keys(made), ["WithdrawalVerifier", "PrivacyPoolSimple"]);
+  const deployer = c.deployer;
+  c.calls.length = 0;
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r2.error, null, String(r2.error?.message) + why(c));
+  settled(c, r2);
+  assert.equal(r2.record.deployer, deployer, "the same key");
+  for (const [n, a] of Object.entries(made)) {
+    assert.equal(r2.record.contracts[n].address, a, `${n} reused`);
+    for (const u of BASE.rpcs) assert.ok(c.calls.some((x) => x.url === u && x.method === "eth_getCode" && x.params[0] === a), `${n} read back on ${u} before its reuse`);
+  }
+  assert.deepEqual(Object.keys(r2.record.contracts), ORDER);
+  for (const n of ORDER) assert.equal(c.created.filter((d) => createdBy(d) === n).length, 1, `${n} made once`);
+  assert.ok(c.logs.some((l) => l.startsWith("deploy: resuming the stopped run with its key: WithdrawalVerifier ") && l.includes("reused")), why(c));
+  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+  assert.equal(existsSync(m.journal), false, "the journal is removed");
 });
