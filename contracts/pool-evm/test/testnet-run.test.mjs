@@ -181,7 +181,7 @@ test("the fee's state reads go to the kit pin's providers, the sync to the run's
   const pin = { network: "base-sepolia", pool: "0x00000000000000000000000000000000b1f1f001", feeRecipient: "0x000000000000000000000000000000000000fee1", fromBlock: 1n };
   const rpcs = [r("https://a.example"), r("https://b.example")];
   assert.ok(run.deviceOf({ pin, rpcs, feeRpcs: [r("https://c.example"), r("https://d.example")], relayFee: async () => null }));
-  assert.throws(() => run.deviceOf({ pin, rpcs, feeRpcs: [r("https://c.example")], relayFee: async () => null }), /rpcs: two/);
+  assert.throws(() => run.deviceOf({ pin, rpcs, feeRpcs: [r("https://c.example")], relayFee: async () => null }), /feeRpcs: two or more/);
   assert.throws(() => run.deviceOf({ pin, rpcs, feeRpcs: [r("https://c.example"), r("https://c.example")], relayFee: async () => null }), /one provider twice/);
 });
 
@@ -223,11 +223,15 @@ test("main takes its fee providers, its bind seconds and the device's arguments 
   assert.doesNotMatch(body, /\b(feeProviders|bindEpoch|evmPool)\(|bindFromS|--rpc"|--bind-from-s"/, "no second source of the fee's providers, the bind seconds or the device");
 });
 
-test("the run's restore reads each W's Transfers on the wallet's own EVM_TRANSFER_RPCS, never a provider of the run's pool pair (card wallet-restore-transfer-rpcs)", async () => {
+test("the run's restore reads each W's Transfers on the wallet's own EVM_TRANSFER_RPCS, never a provider of the run's pool pair: one in both lists is dropped from the W reads, two or more left (cards wallet-restore-transfer-rpcs, evm-transfer-rpc-spares)", async () => {
   const { EVM_TRANSFER_RPCS } = await import("../../../packages/wallet/src/pool/evm.ts");
   const host = (u) => new URL(u).hostname;
+  // Robinhood testnet's own RPC is both the run's pool provider and the Transfer list's third there: it never gets a W
+  const shared = { "base-sepolia": [], "robinhood-testnet": ["rpc.testnet.chain.robinhood.com"] };
   for (const chain of ["base-sepolia", "robinhood-testnet"]) {
     assert.equal(run.NETS[chain].walletRpcs, EVM_TRANSFER_RPCS[chain], `${chain}: one source`);
-    for (const u of run.NETS[chain].walletRpcs) assert.ok(!run.NETS[chain].rpcs.map(host).includes(host(u)), `${chain}: ${u} is a pool provider`);
+    const pool = run.NETS[chain].rpcs.map(host);
+    assert.deepEqual(run.NETS[chain].walletRpcs.map(host).filter((h) => pool.includes(h)), shared[chain], chain);
+    assert.ok(run.NETS[chain].walletRpcs.filter((u) => !pool.includes(host(u))).length >= 2, `${chain}: two W providers left`);
   }
 });
