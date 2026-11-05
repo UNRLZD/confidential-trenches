@@ -1,17 +1,27 @@
 #!/usr/bin/env node
 // Live check of card app-chart-live: the token page's chart is live, its last bar moving as real trades land, with no
-// reload. Node reads the helper's Solana lists (GET /v1/market/lists?chain=solana) and takes the first listed token,
-// column by column (at most PICK_MAX tokens, each read opens it on the helper), whose 15m candles are the helper's own
-// chain reads (own_from_s) and whose tape (GET /v1/market/trades) holds its newest trade from the last ACTIVE_S seconds
-// and five in the last minute, so a next trade is due inside the watch. Headless Chromium opens APP_HOST/token/solana/<mint>
-// at 1440 x 900 and 390 x 844 (dpr 2, touch), finds the terminal's frame inside SIGN_HOST's shell, waits for the chart
-// and reads the library's own last bar (data-last: its time and close) every 250 ms for up to WATCH_MS, while Node reads
-// the helper's newest 15m bars each second. It passes when, at both widths:
-//   - the drawn last bar changed after the chart was ready, with the frame never loaded again (one time origin);
-//   - the page made live reads (limit 2) and at most one full read (limit 500) a minute after its first;
-//   - the drawn last bar is one the helper answered during the watch (its time and close), so a wrong fold fails;
-//   - the tape names a trade after the chart was ready (a real swap landed);
-//   - no console error and no page error in the terminal's frame.
+// reload. Meme coins trade in bursts, so the check never bets on one coin in one window: it judges the page against the
+// helper's own reads.
+//   1. Candidates: on Solana and Base, the first PER_CHAIN listed tokens (GET /v1/market/lists, columns new,
+//      trending_5m, trending_1h, trending).
+//   2. Pick: the candidates' newest 15m bars (the chart's default timeframe; GET /v1/market/candles, limit 2, the
+//      page's own live read) read round after round for PROBE_MS; of the answers that are the helper's own chain reads
+//      (own_from_s: a token the helper opens on its first read has none yet), the token whose last bar changed most
+//      often, at least once.
+//   3. Watch: headless Chromium opens APP_HOST/token/<chain>/<token> at 1440 x 900 and 390 x 844 (dpr 2, touch), finds
+//      the terminal's frame inside SIGN_HOST's shell and reads the library's own last bar (data-last: time and close)
+//      every 250 ms until it changes or WATCH_MAX_MS passes, while Node reads the helper's newest bars each second and
+//      its tape (GET /v1/market/trades, limit 1) every two.
+//   4. Verdict per watch (classify):
+//      - the page drew a change: it must be the newest bar of an answer the helper gave (the page's own candle reads,
+//        each answer's last bar kept, or Node's: a burst moves a bar several times a second, so Node's one read a
+//        second cannot hold every bar the page drew); a wrong fold's price fails;
+//      - the helper's bars moved after the chart was ready and the page drew none: FAIL, the page's;
+//      - the helper's bars did not move but its tape took new trades: FAIL, the helper's (candles behind its tape);
+//      - nothing moved: no verdict on the page, pick again, at most TRIES picks; all silent is a FAIL that names the
+//        helper as silent.
+//      At both widths in a watch with a verdict: no reload (one time origin), live reads (limit 2) made, at most one
+//      full read (limit 500) a minute after the first, no console error and no page error in the terminal's frame.
 // A screenshot of every load is kept.
 //   node scripts/live-checks/app-chart-live.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -28,55 +38,79 @@ import { consoleError, pageError } from "./console-errors.mjs";
 const KEY = "app-chart-live";
 export const APP_HOST = "https://confidential.unrealized.trade";
 export const HELPER_HOST = "https://api.confidential.unrealized.trade";
-export const LISTS_URL = `${HELPER_HOST}/v1/market/lists?chain=solana`;
+export const CHAINS = ["solana", "base"];
 const CANDLES = `${HELPER_HOST}/v1/market/candles?`;
 export const LOADS = [
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 ];
-/** A token is active when its tape's newest trade is this recent and its fifth newest within a minute. */
-export const ACTIVE_S = 20;
-export const PICK_MAX = 12;
-/** How long a load watches for its last bar to move. */
-export const WATCH_MS = 90_000;
+export const PER_CHAIN = 10;
+export const PROBE_MS = 30_000;
+export const WATCH_MAX_MS = 240_000;
+export const TRIES = 3;
 const READY_MS = 25_000;
-/** The page's full reads after its first: one a minute (candles.ts RESYNC_MS) over the watch, and one after a failure. */
+/** The page's full reads: its first, one a minute after (candles.ts RESYNC_MS), and one after a failed read. */
 const fullMax = (watchMs) => 1 + Math.ceil(watchMs / 60_000) + 1;
 
 // ------------------------------------------------------------------------------------------------ the verdict
-const lastOf = (s) => {
-  const m = /^(\d+):([0-9.e-]+)$/.exec(s ?? "");
-  return m ? { t_ms: Number(m[1]), close: Number(m[2]) } : null;
+/** A helper bar [t_s, open, high, low, close, ...] as the page writes its last bar: time in ms and close. */
+const keyOf = (bar) => (Array.isArray(bar) && bar.length >= 5 ? `${bar[0] * 1000}:${Number(bar[4])}` : null);
+const norm = (s) => {
+  const m = /^(\d+):([0-9.e+-]+)$/.exec(s ?? "");
+  return m ? `${Number(m[1])}:${Number(m[2])}` : null;
 };
+
+/** One watch's verdict: "page" (the page is judged: the helper moved or the page drew a change, or the page drew no
+ *  bar at all), "helper" (the tape moved and the candles did not), or "silent" (nothing moved). */
+export function classify(a) {
+  const loads = a.loads ?? [];
+  if (loads.some((l) => norm(l.first) === null || norm(l.final) !== norm(l.first))) return "page";
+  const ready = Math.min(...loads.map((l) => l.readyAt ?? Infinity));
+  const after = (a.helper ?? []).filter((h) => h.status === 200 && h.at_ms >= ready).map((h) => keyOf(h.last));
+  if (after.some((k) => k !== null && loads.some((l) => k !== norm(l.first)))) return "page";
+  const tape = (a.tape ?? []).filter((t) => t.at_ms >= ready && Number.isFinite(t.newest_ms)).map((t) => t.newest_ms);
+  if (tape.length > 1 && Math.max(...tape) > tape[0]) return "helper";
+  return "silent";
+}
 
 /** The check on one recorded run. */
 export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
-  const p = rec.pick ?? null;
-  say(rec.lists?.status === 200 && !!p?.mint && p.own === true && p.tradeAgoS !== null && p.tradeAgoS <= ACTIVE_S, `the helper's lists: ${rec.lists?.status ?? "none"}; the active token ${p?.mint ? `${p.symbol} (${p.column}), own bars ${p.own}, its newest trade ${p.tradeAgoS} s old` : "none"}`);
-  const helperBars = new Set((rec.helper ?? []).filter((h) => h.status === 200 && h.last).map((h) => `${h.last[0] * 1000}:${Number(h.last[1])}`));
-  say(helperBars.size > 0, `the helper's own newest bars read during the watch: ${(rec.helper ?? []).length} reads, ${helperBars.size} distinct last bars`);
-  const loads = rec.loads ?? [];
-  say(loads.length === LOADS.length, `${loads.length} loads of ${LOADS.length} (1440 and 390)`);
-  for (const [i, l] of loads.entries()) {
-    const tag = `${LOADS[i]?.name ?? l.width} /token/solana/<active mint>`;
-    const bad = [];
-    if (p?.mint && l.opened !== `${APP_HOST}/token/solana/${p.mint}`) bad.push(`opened ${l.opened}`);
-    if (l.chart !== "ready") bad.push(`the chart is ${l.chart ?? "not there"}`);
-    const a = lastOf(l.first);
-    const b = lastOf(l.final);
-    if (!a) bad.push(`no last bar drawn (${l.first ?? "none"})`);
-    else if (!b || l.final === l.first) bad.push(`the last bar stayed ${l.first} for ${l.watchedMs} ms`);
-    else if (!helperBars.has(`${b.t_ms}:${b.close}`)) bad.push(`the last bar drawn ${l.final} is none the helper answered during the watch`);
-    if (!(l.origin > 0) || l.originEnd !== l.origin) bad.push(`the frame was loaded again (time origin ${l.origin} -> ${l.originEnd})`);
-    if (!(l.liveReads > 0)) bad.push("no live read (limit 2)");
-    if (!(l.fullReads >= 1 && l.fullReads <= fullMax(l.watchedMs ?? WATCH_MS))) bad.push(`${l.fullReads} full reads (limit 500) in ${l.watchedMs} ms`);
-    // a trade's time is its block's whole-second clock, and it reaches the helper up to ~2 s later (trades.ts header)
-    if (!(rec.tape?.newest_ms > (l.readyAt ?? Infinity) - 3_000)) bad.push(`no trade on the tape after the chart was ready (newest ${rec.tape?.newest_ms ?? "none"})`);
-    if ((l.errors ?? []).length) bad.push(`errors: ${l.errors.join(" | ")}`);
-    if (!l.shot) bad.push("no screenshot");
-    say(bad.length === 0, `${tag}: ${bad.length ? bad.join("; ") : `the last bar moved ${l.first} -> ${l.final} after ${l.changedMs} ms, a bar the helper answered; ${l.liveReads} live reads, ${l.fullReads} full, one load, no error`}`);
+  const attempts = rec.attempts ?? [];
+  say((rec.candidates ?? []).length > 0 && attempts.length > 0, `${(rec.candidates ?? []).length} listed candidates on ${CHAINS.join(" and ")}; ${attempts.length} picks`);
+  for (const [n, a] of attempts.entries()) {
+    const p = a.pick;
+    const kind = classify(a);
+    const tag = p ? `pick ${n + 1} ${p.chain}/<token> (${p.symbol}, ${p.changes} changes in the probe)` : `pick ${n + 1}: no candidate's bars moved in the ${PROBE_MS / 1000} s probe`;
+    if (kind === "silent") {
+      const last = n === attempts.length - 1;
+      say(!last, `${tag}: the helper's own bars and tape did not move in ${Math.round((a.loads?.[0]?.watchedMs ?? 0) / 1000)} s: no verdict on the page${last ? `; the helper was silent in all ${attempts.length} picks` : ", picked again"}`);
+      continue;
+    }
+    if (n !== attempts.length - 1) say(false, `${tag}: a watch with a verdict (${kind}) was followed by another pick`);
+    if (kind === "helper") {
+      say(false, `${tag}: the helper's tape took new trades during the watch but its limit-2 15m candles did not move (the helper's candles lag its tape)`);
+      continue;
+    }
+    for (const [i, l] of (a.loads ?? []).entries()) {
+      const helperBars = new Set([...(a.helper ?? []).filter((h) => h.status === 200).map((h) => keyOf(h.last)), ...(l.answered ?? [])]);
+      const w = `${LOADS[i]?.name ?? l.width}`;
+      const bad = [];
+      if (p?.token && l.opened !== `${APP_HOST}/token/${p.chain}/${p.token}`) bad.push(`opened ${l.opened}`);
+      if (l.chart !== "ready") bad.push(`the chart is ${l.chart ?? "not there"}`);
+      const first = norm(l.first);
+      const final = norm(l.final);
+      if (first === null) bad.push(`no last bar drawn (${l.first ?? "none"})`);
+      else if (final === first) bad.push(`the helper's own bars moved after the chart was ready, the page's last bar stayed ${l.first} for ${l.watchedMs} ms`);
+      else if (!helperBars.has(final)) bad.push(`the last bar drawn ${l.final} is none the helper answered during the watch (the page's ${(l.answered ?? []).length} answers or Node's reads)`);
+      if (!(l.origin > 0) || l.originEnd !== l.origin) bad.push(`the frame was loaded again (time origin ${l.origin} -> ${l.originEnd})`);
+      if (!(l.liveReads > 0)) bad.push("no live read (limit 2)");
+      if (!(l.fullReads >= 1 && l.fullReads <= fullMax(l.watchedMs ?? WATCH_MAX_MS))) bad.push(`${l.fullReads} full reads (limit 500) in ${l.watchedMs} ms`);
+      if ((l.errors ?? []).length) bad.push(`errors: ${l.errors.join(" | ")}`);
+      if (!l.shot) bad.push("no screenshot");
+      say(bad.length === 0, `${tag} ${w}: ${bad.length ? bad.join("; ") : `the last bar moved ${l.first} -> ${l.final} after ${l.changedMs} ms, a bar the helper answered; ${l.liveReads} live reads, ${l.fullReads} full, one load, no error`}`);
+    }
   }
   return { ok: lines.every((x) => x.startsWith("ok ")), lines };
 }
@@ -91,29 +125,43 @@ const getJson = async (url) => {
     return { status: 0, body: null };
   }
 };
-const candlesUrl = (mint, limit) => `${CANDLES}chain=solana&token=${encodeURIComponent(mint)}&tf=15m&limit=${limit}`;
-const tradesUrl = (mint, limit = 5) => `${HELPER_HOST}/v1/market/trades?chain=solana&token=${encodeURIComponent(mint)}&limit=${limit}`;
+const candlesUrl = (chain, token, limit) => `${CANDLES}chain=${chain}&token=${encodeURIComponent(token)}&tf=15m&limit=${limit}`;
+const tradesUrl = (chain, token) => `${HELPER_HOST}/v1/market/trades?chain=${chain}&token=${encodeURIComponent(token)}&limit=1`;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** The busiest of the first PICK_MAX listed tokens, column by column, with the helper's own 15m bars: the most trades
- *  in the last minute (a coin quiet for the watch is no proof either way: 5 Nov 13:25Z a pick with 5 trades a minute
- *  then had none for 90 s), at least five, the newest in the last ACTIVE_S s. */
-async function pickActive(lists) {
-  const seen = new Set();
-  let best = null;
-  for (const column of ["new", "trending_5m", "trending_1h", "trending", "graduating"]) {
-    for (const r of lists?.[column] ?? []) {
-      if (typeof r?.token !== "string" || seen.has(r.token)) continue;
-      if (seen.size >= PICK_MAX) return best;
-      seen.add(r.token);
-      const c = await getJson(candlesUrl(r.token, 2));
-      if (c.status !== 200 || !Number.isSafeInteger(c.body?.own_from_s)) continue;
-      const t = await getJson(tradesUrl(r.token, 50));
-      const ms = (t.body?.trades ?? []).map((x) => x?.t_ms).filter(Number.isFinite);
-      const ago = ms.length ? Math.round((Date.now() - ms[0]) / 1000) : null;
-      const perMin = ms.filter((x) => Date.now() - x <= 60_000).length;
-      if (ago !== null && ago <= ACTIVE_S && perMin >= 5 && perMin > (best?.perMin ?? 0)) best = { mint: r.token, symbol: r.symbol ?? null, column, own: true, tradeAgoS: ago, perMin };
+/** The first PER_CHAIN listed tokens of each chain. */
+async function candidates() {
+  const out = [];
+  for (const chain of CHAINS) {
+    const l = await getJson(`${HELPER_HOST}/v1/market/lists?chain=${chain}`);
+    const seen = new Set();
+    for (const column of ["new", "trending_5m", "trending_1h", "trending"]) {
+      for (const r of l.body?.lists?.[column] ?? []) {
+        if (seen.size >= PER_CHAIN) break;
+        if (typeof r?.token !== "string" || seen.has(r.token)) continue;
+        seen.add(r.token);
+        out.push({ chain, token: r.token, symbol: r.symbol ?? null });
+      }
     }
   }
+  return out;
+}
+
+/** The candidate whose own newest bar changed most often over PROBE_MS, at least once; null when none moved. */
+async function probe(cands) {
+  const last = new Map();
+  const changes = new Map(cands.map((c) => [c, 0]));
+  for (const t0 = Date.now(); Date.now() - t0 < PROBE_MS; await sleep(500)) {
+    for (const c of cands) {
+      const r = await getJson(candlesUrl(c.chain, c.token, 2));
+      const k = r.status === 200 && Number.isSafeInteger(r.body?.own_from_s) ? keyOf(r.body?.candles?.at(-1)) : null;
+      if (k === null) continue;
+      if (last.has(c) && last.get(c) !== k) changes.set(c, changes.get(c) + 1);
+      last.set(c, k);
+    }
+  }
+  let best = null;
+  for (const [c, n] of changes) if (n > 0 && n > (best?.changes ?? 0)) best = { ...c, changes: n };
   return best;
 }
 
@@ -123,19 +171,28 @@ const MEASURE = () => {
   return { route: root?.dataset.route ?? null, chart: c?.getAttribute("data-chart") ?? null, last: c?.querySelector("[data-testid=chart-canvas]")?.getAttribute("data-last") || null };
 };
 
-async function watchLoad(browser, w, i, mint, harness, shots) {
-  const opened = `${APP_HOST}/token/solana/${mint}`;
+async function watchLoad(browser, w, i, pick, harness, shots, n) {
+  const opened = `${APP_HOST}/token/${pick.chain}/${pick.token}`;
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
   if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
   const page = await ctx.newPage();
   const errors = [];
   let liveReads = 0;
   let fullReads = 0;
+  /** The newest bar of every candle answer the page was given, as the page writes its last bar. */
+  const answered = [];
   page.on("request", (r) => {
     if (!r.url().startsWith(CANDLES)) return;
     const limit = new URL(r.url()).searchParams.get("limit");
     if (limit === "2") liveReads++;
     else if (limit === "500") fullReads++;
+  });
+  page.on("response", (r) => {
+    if (!r.url().startsWith(CANDLES) || r.status() !== 200) return;
+    void r.json().then((b) => {
+      const k = keyOf(b?.candles?.at(-1));
+      if (k !== null && !answered.includes(k)) answered.push(k);
+    }, () => undefined);
   });
   page.on("console", (m) => m.type() === "error" && errors.push(consoleError(m)));
   page.on("pageerror", (e) => errors.push(pageError(e)));
@@ -158,8 +215,9 @@ async function watchLoad(browser, w, i, mint, harness, shots) {
   const first = m?.last ?? null;
   let final = first;
   let changedMs = null;
-  if (app && m?.chart === "ready") {
-    for (const t0 = Date.now(); Date.now() - t0 < WATCH_MS; await page.waitForTimeout(250)) {
+  // a page that draws no last bar has nothing to watch
+  if (app && m?.chart === "ready" && first !== null) {
+    for (const t0 = Date.now(); Date.now() - t0 < WATCH_MAX_MS; await page.waitForTimeout(250)) {
       final = (await app.evaluate(MEASURE).catch(() => null))?.last ?? final;
       if (final !== first) {
         changedMs = Date.now() - t0;
@@ -171,18 +229,40 @@ async function watchLoad(browser, w, i, mint, harness, shots) {
     }
   }
   const originEnd = app ? await app.evaluate(() => performance.timeOrigin).catch(() => null) : null;
-  const shot = path.join(shots, `${i}-${w.name}.png`);
+  const shot = path.join(shots, `${n}-${i}-${w.name}.png`);
   await page.screenshot({ path: shot });
   await ctx.close();
-  return { width: w.name, opened, chart: m?.chart ?? null, first, final, changedMs, watchedMs: Date.now() - readyAt, readyAt, origin, originEnd, liveReads, fullReads, errors, shot };
+  return { width: w.name, opened, chart: m?.chart ?? null, first, final, changedMs, watchedMs: Date.now() - readyAt, readyAt, origin, originEnd, liveReads, fullReads, answered, errors, shot };
+}
+
+/** One pick watched at both widths, with the helper's newest bars read each second and its tape every two. */
+async function watch(browser, pick, harness, shots, n) {
+  const a = { pick, helper: [], tape: [], loads: [] };
+  let watching = true;
+  const reads = (async () => {
+    for (let i = 0; watching; i++) {
+      const c = await getJson(candlesUrl(pick.chain, pick.token, 2));
+      a.helper.push({ at_ms: Date.now(), status: c.status, last: c.body?.candles?.at(-1)?.slice(0, 5) ?? null });
+      if (i % 2 === 0) {
+        const t = await getJson(tradesUrl(pick.chain, pick.token));
+        a.tape.push({ at_ms: Date.now(), status: t.status, newest_ms: t.body?.trades?.[0]?.t_ms ?? null });
+      }
+      await sleep(1_000);
+    }
+  })();
+  try {
+    a.loads = await Promise.all(LOADS.map((w, i) => watchLoad(browser, w, i, pick, harness, shots, n)));
+  } finally {
+    watching = false;
+    await reads;
+  }
+  return a;
 }
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
-  const l = await getJson(LISTS_URL);
-  const pick = l.status === 200 ? await pickActive(l.body?.lists) : null;
-  const rec = { source: build ? `harness: the build ${build} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), lists: { url: LISTS_URL, status: l.status }, pick, helper: [], tape: null, loads: [] };
-  if (!pick) return { ...rec, shots };
+  const cands = await candidates();
+  const rec = { source: build ? `harness: the build ${build} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), candidates: cands.map((c) => ({ chain: c.chain, symbol: c.symbol })), attempts: [], shots };
   let harness = null;
   if (build) {
     const { harnessRoute } = await import("./app-in-shell.mjs");
@@ -190,25 +270,22 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
   }
   const browser = await launchBrowser("chromium");
   rec.browser = browser.version();
-  let watching = true;
-  // the helper's own newest bars, read each second while the loads watch: what the page may draw
-  const reads = (async () => {
-    while (watching) {
-      const c = await getJson(candlesUrl(pick.mint, 2));
-      rec.helper.push({ at_ms: Date.now(), status: c.status, last: c.body?.candles?.at(-1)?.slice(0, 5) ?? null });
-      await new Promise((r) => setTimeout(r, 1_000));
-    }
-  })();
   try {
-    rec.loads = await Promise.all(LOADS.map((w, i) => watchLoad(browser, w, i, pick.mint, harness, shots)));
+    const left = [...cands];
+    for (let n = 0; n < TRIES && left.length; n++) {
+      const pick = await probe(left);
+      if (!pick) {
+        rec.attempts.push({ pick: null, helper: [], tape: [], loads: [] });
+        continue;
+      }
+      left.splice(left.findIndex((c) => c.token === pick.token), 1);
+      const a = await watch(browser, pick, harness, shots, n);
+      rec.attempts.push(a);
+      if (classify(a) !== "silent") break;
+    }
   } finally {
-    watching = false;
-    await reads;
     await browser.close();
   }
-  const t = await getJson(tradesUrl(pick.mint));
-  rec.tape = { status: t.status, newest_ms: t.body?.trades?.[0]?.t_ms ?? null };
-  rec.shots = shots;
   return rec;
 }
 

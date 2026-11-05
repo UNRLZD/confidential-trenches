@@ -1,0 +1,451 @@
+{
+ "good": {
+  "source": "harness: the build /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-05T14:25:03.118Z",
+  "candidates": [
+   {
+    "chain": "solana",
+    "symbol": "打狗"
+   },
+   {
+    "chain": "solana",
+    "symbol": "TOLLPAD"
+   },
+   {
+    "chain": "solana",
+    "symbol": "CR7"
+   },
+   {
+    "chain": "solana",
+    "symbol": "SMILEINU"
+   },
+   {
+    "chain": "solana",
+    "symbol": "DOD"
+   },
+   {
+    "chain": "solana",
+    "symbol": "HIGH"
+   },
+   {
+    "chain": "solana",
+    "symbol": "SUIiiiii"
+   },
+   {
+    "chain": "solana",
+    "symbol": "SEEKER"
+   },
+   {
+    "chain": "solana",
+    "symbol": "PHONE"
+   },
+   {
+    "chain": "solana",
+    "symbol": "FBRZ"
+   },
+   {
+    "chain": "base",
+    "symbol": "ANDF"
+   },
+   {
+    "chain": "base",
+    "symbol": "RVYCAN"
+   },
+   {
+    "chain": "base",
+    "symbol": "VETO"
+   },
+   {
+    "chain": "base",
+    "symbol": "fog"
+   },
+   {
+    "chain": "base",
+    "symbol": "SPACEX"
+   },
+   {
+    "chain": "base",
+    "symbol": "monkeys"
+   },
+   {
+    "chain": "base",
+    "symbol": "GAIA"
+   },
+   {
+    "chain": "base",
+    "symbol": "1KTO100M"
+   },
+   {
+    "chain": "base",
+    "symbol": "USEO"
+   },
+   {
+    "chain": "base",
+    "symbol": "AETHER"
+   }
+  ],
+  "attempts": [
+   {
+    "pick": {
+     "chain": "solana",
+     "token": "<token>",
+     "symbol": "DOD",
+     "changes": 1
+    },
+    "helper": [
+     {
+      "at_ms": 1793888738037,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000000469463376705053217312205",
+       "0.00000048610252987274433890553",
+       "0.000000030629752624223248410698",
+       "0.000000042518949535108269736869"
+      ]
+     },
+     {
+      "at_ms": 1793888739437,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000000469463376705053217312205",
+       "0.00000048610252987274433890553",
+       "0.000000030629752624223248410698",
+       "0.000000051467588551617516922394"
+      ]
+     },
+     {
+      "at_ms": 1793888741047,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000000469463376705053217312205",
+       "0.00000048610252987274433890553",
+       "0.000000030629752624223248410698",
+       "0.000000057736487733349302812556"
+      ]
+     },
+     {
+      "at_ms": 1793888742847,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000000469463376705053217312205",
+       "0.00000048610252987274433890553",
+       "0.000000030629752624223248410698",
+       "0.000000053623019332542089465691"
+      ]
+     }
+    ],
+    "tape": [
+     {
+      "at_ms": 1793888738229,
+      "status": 200,
+      "newest_ms": 1793888737000
+     },
+     {
+      "at_ms": 1793888741236,
+      "status": 200,
+      "newest_ms": 1793888740000
+     }
+    ],
+    "loads": [
+     {
+      "width": "desktop",
+      "opened": "https://confidential.unrealized.trade/token/solana/<token>",
+      "chart": "ready",
+      "first": "1793888100000:5.146758855161752e-8",
+      "final": "1793888100000:5.0171242587187026e-8",
+      "changedMs": 1263,
+      "watchedMs": 2812,
+      "readyAt": 1793888739945,
+      "origin": 1793888738316,
+      "originEnd": 1793888738316,
+      "liveReads": 2,
+      "fullReads": 1,
+      "answered": [
+       "1793888100000:5.146758855161752e-8",
+       "1793888100000:5.0171242587187026e-8"
+      ],
+      "errors": [],
+      "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-good5/0-0-desktop.png"
+     },
+     {
+      "width": "phone",
+      "opened": "https://confidential.unrealized.trade/token/solana/<token>",
+      "chart": "ready",
+      "first": "1793888100000:5.146758855161752e-8",
+      "final": "1793888100000:4.502866210757563e-8",
+      "changedMs": 1510,
+      "watchedMs": 3076,
+      "readyAt": 1793888740426,
+      "origin": 1793888738316.6,
+      "originEnd": 1793888738316.6,
+      "liveReads": 2,
+      "fullReads": 1,
+      "answered": [
+       "1793888100000:5.146758855161752e-8",
+       "1793888100000:6.133798468752101e-8",
+       "1793888100000:4.502866210757563e-8"
+      ],
+      "errors": [],
+      "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-good5/0-1-phone.png"
+     }
+    ]
+   }
+  ],
+  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-good5",
+  "browser": "157.0.8103.38"
+ },
+ "bad": {
+  "source": "live",
+  "at": "2026-11-05T14:25:50.813Z",
+  "candidates": [
+   {
+    "chain": "solana",
+    "symbol": "uinhim"
+   },
+   {
+    "chain": "solana",
+    "symbol": "blunt"
+   },
+   {
+    "chain": "solana",
+    "symbol": "PHONE"
+   },
+   {
+    "chain": "solana",
+    "symbol": "LIFE"
+   },
+   {
+    "chain": "solana",
+    "symbol": "LIFE"
+   },
+   {
+    "chain": "solana",
+    "symbol": "Dog Think"
+   },
+   {
+    "chain": "solana",
+    "symbol": "PVE RUNNER"
+   },
+   {
+    "chain": "solana",
+    "symbol": "wApe"
+   },
+   {
+    "chain": "solana",
+    "symbol": "Sol phone"
+   },
+   {
+    "chain": "solana",
+    "symbol": "PHONE"
+   },
+   {
+    "chain": "base",
+    "symbol": "ANDF"
+   },
+   {
+    "chain": "base",
+    "symbol": "RVYCAN"
+   },
+   {
+    "chain": "base",
+    "symbol": "VETO"
+   },
+   {
+    "chain": "base",
+    "symbol": "fog"
+   },
+   {
+    "chain": "base",
+    "symbol": "SPACEX"
+   },
+   {
+    "chain": "base",
+    "symbol": "monkeys"
+   },
+   {
+    "chain": "base",
+    "symbol": "GAIA"
+   },
+   {
+    "chain": "base",
+    "symbol": "1KTO100M"
+   },
+   {
+    "chain": "base",
+    "symbol": "USEO"
+   },
+   {
+    "chain": "base",
+    "symbol": "AETHER"
+   }
+  ],
+  "attempts": [
+   {
+    "pick": {
+     "chain": "solana",
+     "token": "<token>",
+     "symbol": "uinhim",
+     "changes": 3
+    },
+    "helper": [
+     {
+      "at_ms": 1793888784897,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000002659097290914866117307871",
+       "0.000002668062559734337898670586",
+       "0.000001586191968475391907735123",
+       "0.00000235450680299211002533875"
+      ]
+     },
+     {
+      "at_ms": 1793888786687,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000002659097290914866117307871",
+       "0.000002668062559734337898670586",
+       "0.000001586191968475391907735123",
+       "0.00000235450680299211002533875"
+      ]
+     },
+     {
+      "at_ms": 1793888787879,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000002659097290914866117307871",
+       "0.000002668062559734337898670586",
+       "0.000001586191968475391907735123",
+       "0.00000235450680299211002533875"
+      ]
+     },
+     {
+      "at_ms": 1793888789268,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000002659097290914866117307871",
+       "0.000002668062559734337898670586",
+       "0.000001586191968475391907735123",
+       "0.00000235450680299211002533875"
+      ]
+     },
+     {
+      "at_ms": 1793888790466,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000002659097290914866117307871",
+       "0.000002668062559734337898670586",
+       "0.000001586191968475391907735123",
+       "0.00000235450680299211002533875"
+      ]
+     },
+     {
+      "at_ms": 1793888792255,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000002659097290914866117307871",
+       "0.000002668062559734337898670586",
+       "0.000001586191968475391907735123",
+       "0.00000235450680299211002533875"
+      ]
+     },
+     {
+      "at_ms": 1793888793445,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000002659097290914866117307871",
+       "0.000002668062559734337898670586",
+       "0.000001586191968475391907735123",
+       "0.00000235450680299211002533875"
+      ]
+     },
+     {
+      "at_ms": 1793888796430,
+      "status": 200,
+      "last": [
+       1793888100,
+       "0.000002659097290914866117307871",
+       "0.000002668062559734337898670586",
+       "0.000001586191968475391907735123",
+       "0.00000235450680299211002533875"
+      ]
+     }
+    ],
+    "tape": [
+     {
+      "at_ms": 1793888785495,
+      "status": 200,
+      "newest_ms": 1793888771000
+     },
+     {
+      "at_ms": 1793888788077,
+      "status": 200,
+      "newest_ms": 1793888771000
+     },
+     {
+      "at_ms": 1793888791060,
+      "status": 200,
+      "newest_ms": 1793888771000
+     },
+     {
+      "at_ms": 1793888793638,
+      "status": 200,
+      "newest_ms": 1793888771000
+     }
+    ],
+    "loads": [
+     {
+      "width": "desktop",
+      "opened": "https://confidential.unrealized.trade/token/solana/<token>",
+      "chart": "ready",
+      "first": null,
+      "final": null,
+      "changedMs": null,
+      "watchedMs": 33,
+      "readyAt": 1793888794687,
+      "origin": 1793888792129.7,
+      "originEnd": 1793888792129.7,
+      "liveReads": 0,
+      "fullReads": 1,
+      "answered": [
+       "1793888100000:0.00000235450680299211"
+      ],
+      "errors": [],
+      "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-bad5/0-0-desktop.png"
+     },
+     {
+      "width": "phone",
+      "opened": "https://confidential.unrealized.trade/token/solana/<token>",
+      "chart": "ready",
+      "first": null,
+      "final": null,
+      "changedMs": null,
+      "watchedMs": 63,
+      "readyAt": 1793888789991,
+      "origin": 1793888787653.6,
+      "originEnd": 1793888787653.6,
+      "liveReads": 0,
+      "fullReads": 1,
+      "answered": [
+       "1793888100000:0.00000235450680299211"
+      ],
+      "errors": [],
+      "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-bad5/0-1-phone.png"
+     }
+    ]
+   }
+  ],
+  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-bad5",
+  "browser": "157.0.8103.38"
+ }
+}
