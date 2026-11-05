@@ -490,6 +490,14 @@
     "with": "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
    },
    "fails": "the record's table list is the kit's"
+  },
+  {
+   "name": "this run's own funder still holds lamports on the second RPC",
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getBalance",
+   "address": "6br4iBSEyStNcxHXXwNkLf3mD5Ku8pxzV9rbHazShtYs",
+   "value": 1000000,
+   "fails": "funder \\S+ holds 0 lamports on https://solana-rpc\\.publicnode\\.com: 1000000"
   }
  ]
 }

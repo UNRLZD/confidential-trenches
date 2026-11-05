@@ -907,7 +907,7 @@ test("fold 2 A: a run refuses before making any key when its journal exists, nam
   }
 });
 
-test("fold 2 B: a stop before the funding was read keeps the keys and says so; funding landing after the run is swept later by the journal's command, to the funding's source", async () => {
+test("fold 2 B: a stop before the funding was read keeps the keys and says so; funding landing after the run is swept later by the journal's command, to the run's checked return address (re-review 4)", async () => {
   const { w, out, journal } = work();
   const c = cluster({ funderStart: 0n, onRead: stopInWait("SIGHUP") });
   const r = await runAt(c, out);
@@ -925,7 +925,8 @@ test("fold 2 B: a stop before the funding was read keeps the keys and says so; f
     c.bal.set(c.funder, 50_000_000n);
     const s = await runAt(c, out, [], ["--url", "http://127.0.0.1:1", "--sweep-kept", journal]);
     assert.equal(s.error, null, String(s.error?.stack));
-    assert.equal(sweptTo(c, SOURCE), 50_000_000n - FEE_PER_SIGNATURE, "swept to the funding's own source");
+    assert.equal(sweptTo(c, RETURN), 50_000_000n - FEE_PER_SIGNATURE, "swept to the run's return address, never an unchecked sender");
+    assert.equal(sweptTo(c, SOURCE), 0n);
     assert.equal(c.bal.get(c.funder), 0n);
     assert.equal(existsSync(r.dir), false, "the keys are removed once both RPCs read 0");
     const j2 = JSON.parse(readFileSync(journal, "utf8"));
@@ -1636,5 +1637,176 @@ test("review 5c: a fresh run after a stop before any deploy (keys removed, its p
     if (r.dir) rmSync(r.dir, { recursive: true, force: true });
     rmSync(w, { recursive: true, force: true });
     rmSync(soDir, { recursive: true, force: true });
+  }
+});
+
+// ---- the re-review of f328604: each finding a test, red at f328604 ----
+test("re-review 1: --sweep-kept of a run whose program is deployed skips the program id (a loader account, its rent its own) and finishes; a sweep that fails still writes the journal", async () => {
+  const c = cluster();
+  const k = keptRun(c);
+  const program = newKey();
+  writeFileSync(path.join(k.dir, "program.json"), JSON.stringify([...program.secret, ...program.pub]), { mode: 0o600 });
+  writeFileSync(k.journal, JSON.stringify({ ...k.j, program_id: program.id }));
+  c.accounts.set(program.id, { owner: LOADER, executable: true, lamports: 833_120, data: [Buffer.alloc(36).toString("base64"), "base64"] });
+  c.bal.set(program.id, 833_120n);
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], LOCAL_SWEEP(k.journal));
+    assert.equal(s.error, null, String(s.error?.stack));
+    assert.ok(!c.sent.some((x) => x.tx.payer === program.id), "nothing sent from the program id");
+    const j = readJ(k.journal);
+    assert.equal(j.keys.state, "removed", j.keys.why.join("; "));
+    assert.equal(c.bal.get(program.id), 833_120n, "the program keeps its own rent");
+  } finally {
+    k.done();
+  }
+  // a sweep that is refused: the error goes out, and the journal is written with the keys kept and why
+  const c2 = cluster();
+  const k2 = keptRun(c2);
+  wrap(c2, (url, { method }, real) => (method === "sendTransaction" ? errR("Transaction simulation failed: Blockhash not found") : real()));
+  try {
+    const s = await runAt(c2, path.join(k2.w, "x.json"), [], LOCAL_SWEEP(k2.journal));
+    assert.match(String(s.error?.message), /Blockhash not found/);
+    const j = readJ(k2.journal);
+    assert.equal(j.keys.state, "kept");
+    assert.ok(j.keys.why.some((w) => /--sweep-kept stopped: .*Blockhash not found/.test(w)), j.keys.why.join("; "));
+    assert.ok(existsSync(k2.dir), "the keys stay");
+  } finally {
+    k2.done();
+  }
+});
+
+test("re-review 2: on mainnet a record that exists refuses another run before any key, and names the live check to run alone", async () => {
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const { w, out } = work();
+  writeFileSync(out, JSON.stringify({ cluster: "mainnet" }));
+  const f = fakeGh();
+  c.io.gh = f.gh;
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /is deployed: run its live check alone: node scripts\/live-checks\/pool-sol-deploy-mainnet\.mjs --record scripts\/live-checks\/pool-sol-deploy-mainnet\.good\.json --write-record/);
+    assert.equal(r.dir, undefined, "no key folder was made");
+    assert.equal(c.sent.length, 0);
+    assert.equal(f.calls.length, 0, "no CI read");
+  } finally {
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+});
+
+test("re-review 3: a stale balance read right after the sweep (the second RPC lags) is read again for about 20 s before the keys are kept; the run completes", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let swept = false;
+  let stale = 3;
+  wrap(c, (url, { method, params }, real) => {
+    if (method === "sendTransaction" && decodeTx(params[0]).ixs.some((x) => x.program === SYSTEM_ID && x.keys[1] === RETURN)) swept = true;
+    if (method === "getBalance" && swept && url !== MAIN_URL && params[0] === c.funder && stale > 0) return stale--, okR({ context: { slot: 1 }, value: 777 });
+    return real();
+  });
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.stack) + "\n" + r.said.join("\n"));
+    assert.equal(stale, 0, "the stale reads were served");
+    assert.ok(existsSync(out));
+    assert.equal(existsSync(r.dir), false, "the keys were removed");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("re-review 4: --sweep-kept sends to the run's return address, never an unchecked funding source; --return may name a sender or the return address only", async () => {
+  for (const [to, want] of [[null, RETURN], [SOURCE, SOURCE]]) {
+    const c = cluster();
+    Object.assign(c, { fundFrom: SOURCE });
+    const k = keptRun(c);
+    try {
+      const s = await runAt(c, path.join(k.w, "x.json"), [], [...LOCAL_SWEEP(k.journal), ...(to ? ["--return", to] : [])]);
+      assert.equal(s.error, null, String(s.error?.stack));
+      assert.equal(sweptTo(c, want), CLEANUP_RESERVE - FEE_PER_SIGNATURE, `to ${want}`);
+    } finally {
+      k.done();
+    }
+  }
+  const c = cluster();
+  Object.assign(c, { fundFrom: SOURCE });
+  const k = keptRun(c);
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], [...LOCAL_SWEEP(k.journal), "--return", "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]);
+    assert.match(String(s.error?.message), /is neither a sender to \S+ .* nor the run's return address/);
+    assert.equal(c.sent.length, 0);
+  } finally {
+    k.done();
+  }
+});
+
+test("re-review 5: a fresh run is refused when either RPC reads the stopped run's program final (the other lagging)", async () => {
+  const c = cluster();
+  const { w, out, journal } = work();
+  const s = stoppedJournal(c, journal);
+  wrap(c, (url, { method, params }, real) => (method === "getAccountInfo" && url !== "http://127.0.0.1:1" && params[0] === RD.program_id ? okR({ context: { slot: 1 }, value: null }) : real()));
+  const soDir = mkdtempSync(path.join(tmpdir(), "probe-so-"));
+  writeFileSync(path.join(soDir, "code.so"), recordedCode());
+  const r = await runAt(c, out, [], ["--url", "http://127.0.0.1:1", "--no-build", "--so", path.join(soDir, "code.so"), "--return", RETURN, "--out", out]);
+  try {
+    assert.match(String(r.error?.message), new RegExp(`its program ${RD.program_id} is final with this code`));
+    assert.equal(readFileSync(journal, "utf8"), s.text);
+    assert.equal(r.dir, undefined);
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+    rmSync(soDir, { recursive: true, force: true });
+  }
+});
+
+test("re-review 7: the run is done only once both RPCs read the upgrade authority none: a second RPC that keeps the funder fails it", async () => {
+  const f = fakeGh();
+  const code = recordedCode();
+  let ids = null;
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return ok({ value: 1_000_000_000 });
+      case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
+      case "getLatestBlockhash": throw new Error("stop after the deploy's read-back");
+      case "getAccountInfo": {
+        if (!ids) return ok({ value: null });
+        const pdAddr = programDataAddress(ids.program);
+        const acc = (owner, executable, data) => ({ value: { owner, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] } });
+        if (params[0] === ids.program) return ok(acc(LOADER, true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pdAddr))])));
+        if (params[0] === pdAddr) {
+          // the second RPC never shows the SetAuthority
+          const meta = Buffer.alloc(45);
+          meta.writeUInt32LE(3, 0);
+          if (url !== "http://127.0.0.1:1") (meta[12] = 1), Buffer.from(b58decode(ids.funder)).copy(meta, 13);
+          return ok(acc(LOADER, false, Buffer.concat([meta, code])));
+        }
+        return ok({ value: null });
+      }
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  const cli = (args) => {
+    if (args[1] === "deploy") {
+      ids = { program: keyOf(args[args.indexOf("--program-id") + 1]), funder: keyOf(args[args.indexOf("--upgrade-authority") + 1]) };
+      return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, cli, gh: f.gh, keysBase: TEST_KEYS }), /upgrade authority \S+ is set on http:\/\/localhost:1/);
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
   }
 });

@@ -37,6 +37,11 @@ function patched(bad) {
   const out = structuredClone(A.base);
   if (bad.swap) out.deployment = { ...D, table_addresses: D.table_addresses.map((a, i) => (i === bad.swap.index ? bad.swap.with : a)) };
   for (const a of out) {
+    if (bad.method === "getBalance") {
+      // a balance answer: `value` in place of the recorded one
+      if (a.method === "getBalance" && a.params[0] === bad.address && (bad.url === "both" || a.url === bad.url)) a.json.result.value = bad.value;
+      continue;
+    }
     if (a.method !== "getAccountInfo" || a.params[0] !== bad.address || (bad.url !== "both" && a.url !== bad.url)) continue;
     let d = Buffer.from(a.json.result.value.data[0], "base64");
     if (bad.hex) Buffer.from(bad.hex, "hex").copy(d, bad.at);
@@ -127,13 +132,12 @@ test("review 2: the table's list is the kit's own for this pool, the venue's 9 k
   failsOn(await run(A.base, { ...D, table_addresses: [...D.table_addresses, D.pool] }), /the record's table list is the kit's/);
 });
 
-test("review 3: a funder that is not the run's own key and still holds lamports is named as such, the funding sent from another wallet", async () => {
+test("re-review 6: another wallet's balance is an info line, never a FAIL: the live check fails only on this run's own key holding lamports", async () => {
   const OTHER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
   const answers = structuredClone(A.base);
   for (const url of A.rpcs) answers.push({ url, method: "getBalance", params: [OTHER, { commitment: "finalized" }], status: 200, json: { jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: 2_000_000_000 } } });
   const r = await run(answers, { ...D, funders: [...D.funders, OTHER] });
-  failsOn(r, new RegExp(`${OTHER} holds 2000000000 lamports on \\S+: it is not this run's key ${D.funder}: the funding came from a wallet other than the return address ${D.return_to}`));
-  // the run's own key reads 0: its own line passes
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`info fee payer ${OTHER} holds 2000000000 lamports`) && l.includes(`not this run's key ${D.funder}`)), r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith(`ok   funder ${D.funder} holds 0 lamports`)), r.lines.join("\n"));
-  assert.ok(!r.lines.some((l) => l.startsWith(`FAIL funder ${D.funder}`)), r.lines.join("\n"));
 });
