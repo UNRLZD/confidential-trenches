@@ -53,11 +53,14 @@ import {
   assembleSolanaSwap,
   buildSolanaTeardown,
   fetchSolanaJupiterBuild,
+  fetchSolanaJupiterBuildThatFits,
   readSolanaBlockhash,
   simulateSolanaTeardown,
   type SolanaAssembled,
   type SolanaBlockhash,
   type SolanaBuildRequest,
+  type SolanaCapStep,
+  type SolanaJupiterBuild,
 } from "./build.ts";
 import { dryRunSolanaSet, sendSolanaSet, solanaPacedRpc, solanaProviderLimits, solanaSameProvider, type SolanaProviderRps, type SolanaDryTx, type SolanaFetch, type SolanaRpc, type SolanaSendPath, type SolanaTxOutcome } from "./send.ts";
 
@@ -123,9 +126,11 @@ export type SolanaLegRecord = {
   refused?: string;
   /** From the first build call to the assembled, checked bytes. */
   quoteMs?: number;
-  /** The helper's build alone, both calls when the floor asked a second one. */
+  /** The build: the cap search (fetchSolanaJupiterBuildThatFits) with each step's table reads and assembly, and the floor's rebuild when it asked one. */
   buildMs?: number;
   buildCalls?: number;
+  /** The cap search's steps: each cap asked and what the device's assembly made of it. */
+  buildCaps?: SolanaCapStep[];
   /** A sell of the wallet's whole balance, on both providers' pre-state: the teardown follows its fill. */
   sellsAll?: boolean;
   /** Why a provider gave no simulation, when one did not. */
@@ -316,40 +321,60 @@ async function prepareLeg(
   const sideReads = Promise.all([both(rentOf, deps.providers), both((r) => readAccounts(r, watch, "confirmed"), deps.providers)]);
   sideReads.catch(() => undefined); // awaited below; a refused build must not leave it unhandled
   const tb0 = now();
-  let built = await fetchSolanaJupiterBuild(deps.helper, breq, opts);
-  let calls = built.calls.length;
-  let amounts = solanaRouteAmounts(built.build.swap.data);
+  // A build's tables, read on both providers (assembly uses provider A's, S2 holds B's to the same bytes), and the
+  // device's own assembly on them, which refuses (too_large) a tx over 1,232 bytes: the cap search's judge.
+  const feeOpts = mintHasTransferFee(mintA) ? { transferFeeMints: [req.token] } : {};
+  const fitOn = async (b: SolanaJupiterBuild) => {
+    const tableKeys = [...b.tables];
+    const [ta, tb] = tableKeys.length ? await both((r) => readAccounts(r, tableKeys, "confirmed"), deps.providers) : ([[], []] as [(Acc | null)[], (Acc | null)[]]);
+    const tables: Record<string, readonly [SolanaAccountRead | null, SolanaAccountRead | null]> = {};
+    const decoded: Record<string, SolanaLookupTable> = {};
+    tableKeys.forEach((k, i) => {
+      const a = ta[i] ?? null;
+      const bb = tb[i] ?? null;
+      tables[k] = [a, bb];
+      if (a && a.owner === SOLANA_ALT_PROGRAM) {
+        try { decoded[k] = solanaDecodeLookupTable(a.data); } catch { /* S2 refuses */ }
+      }
+    });
+    return { tables, assembled: assembleSolanaSwap(breq, b, { blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight, tables: decoded, tokenProgram }, feeOpts) };
+  };
+  // The cap search: 40, up on no route, down when the assembly is over 1,232 bytes (build.ts, Jupiter's requote). Each
+  // leg searches on its own answers, all at once: no leg waits on another (at most SOLANA_JUPITER_MAX_BUILDS builds and
+  // one floor rebuild a leg, so K legs ask Jupiter K to 4K builds; a one-leg trade at most 4, the helper's share).
+  const found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, opts);
+  rec.buildCaps = found.steps;
+  let calls = found.calls.length;
+  let build = found.build;
+  let fitted = found.fitted;
+  let amounts = solanaRouteAmounts(build.swap.data);
   if (!amounts) { rec.refused = "the build's swap is not a route the device decodes"; return null; }
   if (solanaRouteFloor(amounts) < minOut) {
+    // the floor's rebuild: once, at the cap the search found
     const s = solanaRebuildSlippage(amounts.quotedOut, minOut);
     if (s === null) { rec.refused = `the route quotes ${amounts.quotedOut}, not above the floor ${minOut}`; return null; }
-    built = await fetchSolanaJupiterBuild(deps.helper, { ...breq, slippageBps: s }, opts);
-    calls += built.calls.length;
-    amounts = solanaRouteAmounts(built.build.swap.data);
+    let again: Awaited<ReturnType<typeof fetchSolanaJupiterBuild>>;
+    try {
+      again = await fetchSolanaJupiterBuild(deps.helper, { ...breq, slippageBps: s }, { ...opts, maxAccounts: found.maxAccounts });
+    } catch (e) {
+      // a route exists (the search's); only its rebuild at the floor's slippage found none: the floor is the reason
+      if (e instanceof SolanaBuildError && e.code === "no_route") { rec.buildCalls = calls + 1; rec.refused = `the route quotes ${amounts.quotedOut}, under the floor ${minOut} at its slippage, and its rebuild at ${s} bps found no route at maxAccounts=${found.maxAccounts}`; return null; }
+      throw e;
+    }
+    calls += again.calls.length;
+    build = again.build;
+    amounts = solanaRouteAmounts(build.swap.data);
     if (!amounts || solanaRouteFloor(amounts) < minOut) { rec.refused = `the route's floor stays under ${minOut}`; return null; }
+    fitted = await fitOn(build);
   }
   rec.buildCalls = calls;
   rec.buildMs = now() - tb0;
-  // The tables the build names, read on both providers; assembly uses provider A's, S2 holds B's to the same bytes.
-  const tableKeys = [...built.build.tables];
-  const tableReads = tableKeys.length ? both((r) => readAccounts(r, tableKeys, "confirmed"), deps.providers) : Promise.resolve([[], []] as [(Acc | null)[], (Acc | null)[]]);
-  // While the tables are read and the tx simulated: S11's map grows, in slices, by the keys the build names (its check
-  // adds any key the tx names beyond).
-  const b = built.build;
+  const { tables, assembled } = fitted;
+  // While the tx is simulated: S11's map grows, in slices, by the keys the build names (its check adds any key the tx
+  // names beyond).
+  const b = build;
   const growth = ctx.links.grow([], [...b.setup, b.swap, ...(b.cleanup ? [b.cleanup] : []), ...b.other].flatMap((ix) => [ix.program, ...ix.accounts.map((a) => a.key)]));
   growth.catch(() => undefined); // awaited before the check
-  const [ta, tb] = await tableReads;
-  const tables: Record<string, readonly [SolanaAccountRead | null, SolanaAccountRead | null]> = {};
-  const decoded: Record<string, SolanaLookupTable> = {};
-  tableKeys.forEach((k, i) => {
-    const a = ta[i] ?? null;
-    const b = tb[i] ?? null;
-    tables[k] = [a, b];
-    if (a && a.owner === SOLANA_ALT_PROGRAM) {
-      try { decoded[k] = solanaDecodeLookupTable(a.data); } catch { /* S2 refuses */ }
-    }
-  });
-  const assembled = assembleSolanaSwap(breq, built.build, { blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight, tables: decoded, tokenProgram }, mintHasTransferFee(mintA) ? { transferFeeMints: [req.token] } : {});
   const [rent, pre] = await sideReads;
   // The simulation on both providers, at once, reading back this wallet's own four accounts (a provider may read back
   // at most 4). No other wallet of the user is in it: S11 refuses a tx that names one, so none can change.
