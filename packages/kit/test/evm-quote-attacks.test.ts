@@ -3481,7 +3481,10 @@ test("LH1 the provider ranked first answers its head maxLag back: ten warm quote
   const p = builder.evmPoolVenues().base.providers!;
   const lag = BigInt(builder.evmPoolVenues().base.maxLag!);
   const TS = "0x" + (Math.floor(Date.now() / 1000) - 2).toString(16);
-  const H = 5_000_000;
+  // above any head the chain's watch can hold from the tests before (V9's 5,000,000, or Base's real head, which its
+  // background refresh reads once they restore fetch): a held head is then behind the scan provider's too, and agreed
+  // again on the quote's own list
+  const H = 900_000_000;
   const lagger = hostOf(p[1]!);
   quoteMod.evmSpeedReset();
   const token = freshToken();
@@ -3526,7 +3529,10 @@ test("LH1 the provider ranked first answers its head maxLag back: ten warm quote
       assert.equal((v as { accepted: boolean }).accepted, true, rows.join("; "));
       // read at the up-to-date pair's block, never the lagger's
       assert.equal((v as { block: bigint }).block, BigInt(H), rows.join("; "));
-      assert.equal(hostOf(quoteMod.evmRanked(p).at(-1)!), lagger, `after quote ${q + 1} the lagger is held: ${quoteMod.evmRanked(p).map(hostOf).join(",")}`);
+      // held, read off the hold itself (as V13 reads it): ranked after a provider never measured, which goes after
+      // every measured one not held
+      const ranked = quoteMod.evmRanked([...p, "https://unmeasured.lh1.test/"]).map(hostOf);
+      assert.ok(ranked.indexOf(lagger) > ranked.indexOf("unmeasured.lh1.test"), `after quote ${q + 1} the lagger is held: ${ranked.join(",")}`);
     }
     // the reads go to the pair that agreed, the lagger last: a live lagger holds no block past its head, so a read
     // asked of it first waits out askAt's retries
