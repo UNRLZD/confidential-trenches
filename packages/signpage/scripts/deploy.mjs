@@ -152,6 +152,19 @@ export function checkProver(dir) {
   return p;
 }
 
+/** The highest version a served release can have taken a wallet database to: release-26 is the first to go past 1 (its
+ *  "owed" store, card signpage-withdraw-own-spend). A release that adds a store raises it. */
+export const WALLET_DB_SERVED = 2;
+
+/** Problems with the wallet store a build carries (empty = fine): it opens a database at WALLET_DB_SERVED, so SIGN_HOST
+ *  never goes back to a release that opens a lower version (up to release-25, version 1 exactly), which would stop
+ *  every signing at a VersionError until a newer deploy (fold 2, review MEDIUM 3). */
+export function walletDbProblems(store = join(PKG, "..", "wallet", "src", "store", "index.ts"), version = WALLET_DB_SERVED) {
+  const r = spawnSync(process.execPath, [join(PKG, "scripts", "wallet-db.mjs"), store, String(version)], { encoding: "utf8" });
+  if (r.status === 0) return [];
+  return [`${`${r.stdout ?? ""}${r.stderr ?? ""}`.trim().split("\n").at(-1) || `wallet-db exit ${r.status ?? r.signal}`}: a database a served release made (WALLET_DB_SERVED ${version}) would stop every signing`];
+}
+
 export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
   const dryRun = argv.includes("--dry-run");
   if (argv.some((a) => a !== "--dry-run")) return { code: 2, err: ["usage: node packages/signpage/scripts/deploy.mjs [--dry-run]"] };
@@ -169,7 +182,7 @@ export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
   }
   const dir = build(pkg);
   try {
-    const problems = checkDir(dir);
+    const problems = [...checkDir(dir), ...walletDbProblems()];
     if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
     if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded${dirty ? "; the tree has uncommitted changes: a deploy would refuse it" : ""}`] };
     const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);

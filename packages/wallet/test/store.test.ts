@@ -752,3 +752,56 @@ test("the frame's reader opens a database with no owed store (one from before it
   assert.deepEqual(await reader!.keys("ops"), ["op1"]);
   reader!.close();
 });
+
+// fold 2 (review MEDIUM 3): the store opens the database at its own version and goes one up only for a store it is
+// missing, so a release never meets a version it cannot open (a VersionError locked every signing until a deploy)
+const versionOf = (idb: IDBFactory): Promise<number> =>
+  new Promise((ok, no) => {
+    const r = idb.open("ct-wallet");
+    r.onsuccess = () => {
+      const v = r.result.version;
+      r.result.close();
+      ok(v);
+    };
+    r.onerror = () => no(r.error);
+  });
+test("a database a later release took to a higher version, with a store this one does not know, opens with every record kept", async () => {
+  const idb = new IDBFactory();
+  const s = await openWalletStore({ indexedDB: idb });
+  await s.insertSeed(SEED(true));
+  await s.put("ops", "op1", { kind: "deposit", stage: "waiting", txs: [] });
+  s.close();
+  await new Promise<void>((ok, no) => {
+    const r = idb.open("ct-wallet", 7);
+    r.onupgradeneeded = () => r.result.createObjectStore("later");
+    r.onsuccess = () => (r.result.close(), ok());
+    r.onerror = () => no(r.error);
+  });
+  const again = await openWalletStore({ indexedDB: idb });
+  assert.deepEqual(await again.get("ops", "op1"), { kind: "deposit", stage: "waiting", txs: [] });
+  assert.equal(await versionOf(idb), 7, "opened at its own version, never up");
+  again.close();
+});
+test("a new database holds every store at version 1; one from before owed goes to version 2 once; two tabs opening it at once both open", async () => {
+  const fresh = new IDBFactory();
+  (await openWalletStore({ indexedDB: fresh })).close();
+  assert.equal(await versionOf(fresh), 1);
+  const old = new IDBFactory();
+  await new Promise<void>((ok, no) => {
+    const r = old.open("ct-wallet", 1);
+    r.onupgradeneeded = () => {
+      for (const s of ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta"]) r.result.createObjectStore(s);
+    };
+    r.onsuccess = () => (r.result.close(), ok());
+    r.onerror = () => no(r.error);
+  });
+  const [a, b] = await Promise.all([openWalletStore({ indexedDB: old, locks: null }), openWalletStore({ indexedDB: old, locks: null })]);
+  await a.put("owed", "op1", { n1: { noteId: "n1" } });
+  a.close();
+  b.close();
+  assert.equal(await versionOf(old), 2);
+  const c = await openWalletStore({ indexedDB: old });
+  assert.deepEqual(await c.get("owed", "op1"), { n1: { noteId: "n1" } });
+  c.close();
+  assert.equal(await versionOf(old), 2, "no step up when every store is there");
+});

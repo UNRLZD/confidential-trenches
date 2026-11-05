@@ -41,9 +41,13 @@ export const WALLET_CHANNEL = "ct-wallet"; // 06b:746
 export const WALLET_LANES = 8; // wallet.md:247
 // wallet.md:197-204, the note store table; "owed" (card signpage-withdraw-own-spend): a withdraw op's onward sends still
 // owed, keyed by op id, with the attempt and its context, which the frame never reads (signpage src/state.ts op
-// contract). Database version 2 adds it; the reader opens a version 1 database too, as it never reads "owed".
+// contract). The reader opens a database without it too, as it never reads "owed".
+// The version: the store opens the database at whatever version it is and goes one up only to add a store it is missing
+// (fold 2, review MEDIUM 3), so no release ever meets a version it cannot open. A database made new holds every store
+// at version 1; one made before "owed" goes to version 2. Releases up to release-25 open at version 1 exactly, so
+// SIGN_HOST never goes back to one of them once a newer one served: packages/signpage/scripts/deploy.mjs refuses a build
+// whose store cannot open WALLET_DB_SERVED (packages/signpage/scripts/release-list.mjs).
 export const WALLET_STORES = ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta", "owed"] as const;
-const WALLET_DB_VERSION = 2;
 /** The stores the read-only open needs: every one but "owed", which it never reads. */
 const READER_STORES = WALLET_STORES.filter((s) => s !== "owed");
 export type WalletStoreName = (typeof WALLET_STORES)[number];
@@ -262,12 +266,28 @@ async function unwrapWith(kWrap: CryptoKey, store: WalletStoreName, key: string,
   }
 }
 
-function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
-  const r = idb.open(name, WALLET_DB_VERSION);
+function openAt(idb: IDBFactory, name: string, version?: number): Promise<IDBDatabase> {
+  const r = version === undefined ? idb.open(name) : idb.open(name, version);
   r.onupgradeneeded = () => {
     for (const s of WALLET_STORES) if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s);
   };
   return req(r);
+}
+/** The database at its own version; one version up only when a store is missing. Two tabs racing that step: the one
+ *  that loses meets the version the other made (VersionError) and opens again from the start. */
+async function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
+  for (let tries = 0; ; tries++) {
+    const db = await openAt(idb, name);
+    if (WALLET_STORES.every((s) => db.objectStoreNames.contains(s))) return db;
+    const v = db.version;
+    db.close();
+    try {
+      return await openAt(idb, name, v + 1);
+    } catch (e) {
+      if (tries < 3 && (e as { name?: unknown } | null)?.name === "VersionError") continue;
+      throw e;
+    }
+  }
 }
 
 export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<WalletStore> {

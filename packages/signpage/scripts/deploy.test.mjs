@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, deploy, liveRuns } from "./deploy.mjs";
+import { BRANCH, LIVE_CHECKS, PROJECT, WALLET_DB_SERVED, WRANGLER, build, checkDir, checkHeadersFile, deploy, liveRuns, walletDbProblems } from "./deploy.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -281,5 +281,25 @@ test("a build whose setup files or worker are not the pinned ones is refused", (
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+});
+
+// fold 2 (review MEDIUM 3): a build whose wallet store cannot open the database a served release made is refused, so
+// SIGN_HOST never goes back to one of the releases (up to release-25) that open version 1 exactly
+test("the wallet store the build carries opens a database at the highest version a served release made; one that opens a lower version exactly is refused", () => {
+  assert.deepEqual(walletDbProblems(), []);
+  assert.ok(WALLET_DB_SERVED >= 2);
+  const src = readFileSync(join(PKG, "..", "wallet", "src", "store", "index.ts"), "utf8");
+  const pin = "const r = version === undefined ? idb.open(name) : idb.open(name, version);";
+  assert.ok(src.includes(pin), "the plant's anchor");
+  const d = mkdtempSync(join(tmpdir(), "ct-wallet-db-"));
+  try {
+    // release-25's open: version 1, exactly
+    writeFileSync(join(d, "index.ts"), src.replace(pin, "const r = idb.open(name, 1);"));
+    const p = walletDbProblems(join(d, "index.ts"));
+    assert.equal(p.length, 1);
+    assert.match(p[0], /cannot open a version 2 database \(VersionError\).*WALLET_DB_SERVED 2/);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
   }
 });
