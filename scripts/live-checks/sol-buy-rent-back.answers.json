@@ -1,13 +1,13 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet) at the review fold: packages/signpage/index.html and public/app.js as build-app.mjs wrote them at eca191d8 (unchanged by the merge of main 3ed8cb1d), release-40",
+    "good": "this card's SIGN_HOST build (mainnet) at the second review fold (of eca191d8): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at dadd41cc, release-46",
     "bad": "main 987fae20's build (mainnet): no teardown rule, no sweep rule (the volume close is the kit's direct trade teardown's): FAIL",
     "liveBefore": "SIGN_HOST read 2026-11-05T20:37Z, before this card's deploy: FAIL; its rents and owed facts are facts() of main 987fae20's bundle, the same bytes (its sha384 equals bad's)",
     "previous": "this card's build at 0068524a, before the review fold: teardown and sweep, but rents by the device's own formula and no rent back owed: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-QX5DEbjwW2Gy+BLApt+wQHsQLXpXn/UboqLzjojbC3FRLTS+u1i7boaDcIlmyp63\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-QX5DEbjwW2Gy+BLApt+wQHsQLXpXn/UboqLzjojbC3FRLTS+u1i7boaDcIlmyp63",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-GdW3XWQuyGaK2AtqFbDehfVuw/1XJjLn0NDuQaTi2JEKC9IXCaOdoj12KvRQIhwY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-GdW3XWQuyGaK2AtqFbDehfVuw/1XJjLn0NDuQaTi2JEKC9IXCaOdoj12KvRQIhwY",
     "teardown": true,
     "volumeClose": true,
     "sweep": true,
