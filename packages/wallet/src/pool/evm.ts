@@ -51,9 +51,9 @@
 //   or one RPC's logs a strict prefix of the other's lacking only logs past the finalized anchor (its log index a
 //   moment behind), waits EVM_LAG_WAIT_MS (ended at once by an abort) and reads again, at most EVM_LAG_TRIES times.
 //   Two RPCs that answer differently at one hash are refused at once. A throttle or no answer in time on one read that
-//   is not a page (a block, a view, a chain id, on the pool's pair or the fee pair) is the same read again,
-//   EVM_POOL_READ_TRIES tries in all, a bound from the life; then the op fails by the read's name (EvmUnansweredError,
-//   card evm-pool-reads-throttle). Each two-RPC read runs under one
+//   is not a page (a block, a view, a chain id, on the pool's pair or the fee pair) is the same read again, within
+//   EVM_POOL_READ_BOUND_MS, a bound from the life; then the op fails by the read's name (EvmUnansweredError, card
+//   evm-pool-reads-throttle). Each two-RPC read runs under one
 //   AbortController: when one side fails the other stops, and both settle before the read fails.
 // - Time (M373 (2)): now() is the newest block both RPCs agree on (evmAgreedBlock), never one RPC's word; bind's
 //   send-margin check takes the higher of the two RPCs' latest times (evmLatestHigh), so a lie can only refuse. The
@@ -118,22 +118,19 @@ export const EVM_LOG_THROTTLE_WAIT_MAX_MS = 30_000;
  * SOLANA_RPC_RETRY, the signing page's pageRpc). */
 export const EVM_READ_TRY_MS = BigInt(SOLANA_RPC_RETRY.deadlineMs);
 /** A pool read (card evm-pool-reads-throttle): one block, view or chain id of a buy's or a withdraw's reads, on the
- * pool's pair or the fee pair. A throttle or no answer in time is the same read again after evmAnswered's wait (1 s
- * doubled per try), this many tries in all, then the op's failure by the read's name. The bound comes from the life
- * L: a pass that starts at its epoch's last moment (start + E) makes a proof that take() hands out only until start +
- * L - M - 2 TAKE_SLACK_MS (= start + 2E: past it the proof is from before the previous epoch; L - M - S is later), so
- * that pass's reads and its proof have L - M - 2S - E = 60 s. One read takes at most half of it, so the pass's other
- * reads and its proof keep the rest: n tries take at most n x EVM_READ_TRY_MS plus waits of 1 + 2 + .. + 2^(n-2) s,
- * 4 tries 21 s, 5 tries 32.5 s (past 30 s). The restore's EVM_LOG_THROTTLE_TRIES (61 s of waits) outlasts a
- * provider's one-minute window, which no op of this life can wait out: there the op fails by name and the next pass
- * reads again. evmPoolReadBoundMs is that worst case; the tests hold it at or under half the window. */
+ * pool's pair or the fee pair. A throttle or no answer in time is the same read again after evmAnswered's wait (the
+ * provider's Retry-After, else 1 s doubled per try), at most EVM_POOL_READ_TRIES tries and EVM_POOL_READ_WAIT_MS of
+ * waits in all (a wait that would pass it is not begun), then the op's failure by the read's name. The bound comes
+ * from the life L: a pass that starts at its epoch's last moment (start + E) makes a proof that take() hands out only
+ * until start + L - M - 2 TAKE_SLACK_MS (= start + 2E: past it the proof is from before the previous epoch; L - M - S
+ * is later), so that pass's reads and its proof have L - M - 2S - E = 60 s. One read takes at most half of it,
+ * EVM_POOL_READ_BOUND_MS = 30 s, so the pass's other reads and its proof keep the rest. Its tries: 4, each at most
+ * EVM_READ_TRY_MS (14 s), with waits of 1, 2 and 4 s inside the 16 s left; a fifth try (17.5 s and 15 s of waits)
+ * would pass 30 s. The restore's EVM_LOG_THROTTLE_TRIES (61 s of waits) outlasts a provider's one-minute window, which
+ * no op of this life can wait out: there the op fails by name and the next pass reads again. */
+export const EVM_POOL_READ_BOUND_MS = (EVM_LIFE_MS - EVM_SEND_MARGIN_MS - 2n * TAKE_SLACK_MS - EVM_EPOCH_MS) / 2n;
 export const EVM_POOL_READ_TRIES = 4;
-/** The worst time of `tries` tries of one read: every try its whole EVM_READ_TRY_MS, every wait evmAnswered's. */
-export function evmPoolReadBoundMs(tries: number = EVM_POOL_READ_TRIES): bigint {
-  let ms = 0n;
-  for (let t = 1; t <= tries; t++) ms += EVM_READ_TRY_MS + (t < tries ? BigInt(throttleWaitMs(t, null)) : 0n);
-  return ms;
-}
+export const EVM_POOL_READ_WAIT_MS = EVM_POOL_READ_BOUND_MS - BigInt(EVM_POOL_READ_TRIES) * EVM_READ_TRY_MS;
 export const EVM_LAG_TRIES = 5;
 export const EVM_LAG_WAIT_MS = 2_000;
 
@@ -362,12 +359,16 @@ export class EvmUnansweredError extends Error {
   }
 }
 
+/** A read's bound: its tries, the waits it may begin in all (ms), and its name for its failure. */
+export type EvmReadBound = { tries: number; waitMs: bigint; what: string };
+
 /** One read that is not a page (a chain id, a block, a view): a throttle or no answer in time (throttled) is the same
- * read again after the wait readLogs takes, at most `tries` tries (EVM_LOG_THROTTLE_TRIES unless given), then its
- * failure: with `what`, an EvmUnansweredError naming the read. Any other error at once. On 5 Nov 13:58Z one
- * eth_getBlockByNumber with no answer in 3.5 s (base-testnet.api.pocket.network, and robinhood.daybreak-rpc.network)
- * was a whole pair's failure. */
-export async function evmAnswered<T>(f: () => Promise<T>, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, tries: number = EVM_LOG_THROTTLE_TRIES, what?: string): Promise<T> {
+ * read again after the wait readLogs takes, at most EVM_LOG_THROTTLE_TRIES tries, then its failure. With `bound`, at
+ * most its tries and its waits (a wait that would pass them is not begun), then an EvmUnansweredError naming the read.
+ * Any other error at once. On 5 Nov 13:58Z one eth_getBlockByNumber with no answer in 3.5 s
+ * (base-testnet.api.pocket.network, and robinhood.daybreak-rpc.network) was a whole pair's failure. */
+export async function evmAnswered<T>(f: () => Promise<T>, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, bound?: EvmReadBound): Promise<T> {
+  let waited = 0n;
   for (let n = 1; ; n++) {
     try {
       return await f();
@@ -375,18 +376,22 @@ export async function evmAnswered<T>(f: () => Promise<T>, signal?: AbortSignal, 
       signal?.throwIfAborted();
       const t = throttled(e);
       if (t === null) throw e;
-      if (n >= tries) {
-        if (what === undefined) throw e;
-        throw new EvmUnansweredError(`${what}: no answer in ${n} tries (${String((e as Error)?.message ?? e)})`, e);
+      const ms = throttleWaitMs(n, t.afterMs);
+      if (bound === undefined) {
+        if (n >= EVM_LOG_THROTTLE_TRIES) throw e;
+      } else if (n >= bound.tries || waited + BigInt(ms) > bound.waitMs) {
+        throw new EvmUnansweredError(`${bound.what}: no answer in ${n} ${n === 1 ? "try" : "tries"} (${String((e as Error)?.message ?? e)})`, e);
       }
-      await sleep(throttleWaitMs(n, t.afterMs), signal);
+      waited += BigInt(ms);
+      await sleep(ms, signal);
     }
   }
 }
 
 type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
-/** A pool read (EVM_POOL_READ_TRIES): f again after a throttle or no answer in time, then its failure named `what`. */
-const poolRead = <T>(what: string, f: () => Promise<T>, signal: AbortSignal | undefined, sleep: Sleep): Promise<T> => evmAnswered(f, signal, sleep, EVM_POOL_READ_TRIES, what);
+/** A pool read (EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS): f again after a throttle or no answer in time, then its
+ * failure named `what`. */
+const poolRead = <T>(what: string, f: () => Promise<T>, signal: AbortSignal | undefined, sleep: Sleep): Promise<T> => evmAnswered(f, signal, sleep, { tries: EVM_POOL_READ_TRIES, waitMs: EVM_POOL_READ_WAIT_MS, what });
 /** A block of the pool's reads, by tag or number, as a pool read. */
 const readBlock = (rpc: EvmRpc, at: string, what: string, signal: AbortSignal | undefined, sleep: Sleep): Promise<EvmBlock | null> => poolRead(what, () => getBlock(rpc, at, what), signal, sleep);
 

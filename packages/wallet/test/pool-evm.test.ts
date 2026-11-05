@@ -17,8 +17,8 @@ import { evmAddress } from "../src/derive/index.ts";
 import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
 import { SOL_LADDER } from "../src/pool/solana.ts";
 import {
-  EvmLagError, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_TRIES, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS,
-  EvmUnansweredError, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmNow, evmPool, evmPoolContextOf, evmPoolReadBoundMs, evmPoolScopeOf, evmTreeSync,
+  EvmLagError, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS,
+  EvmUnansweredError, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmNow, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc,
 } from "../src/pool/evm.ts";
 
@@ -1146,17 +1146,44 @@ const READS: Read[] = [
 const FEE_READ = { hit: viewCall("getL1FeeUpperBound(uint256)", "0x420000000000000000000000000000000000000f"), what: /^fee rpc 1 chain fee: / };
 const chainOf = (rd: Read): Chain => (rd.name.startsWith("bind") ? cb : c3);
 
-test("EVM_POOL_READ_TRIES comes from the life: its worst case is at most half of what a pass at its epoch's end has before take() refuses its proof, and one more try is past it", () => {
+test("the pool read bound comes from the life: half of what a pass at its epoch's end has before take() refuses its proof; 4 tries and their waits fit, a fifth does not", () => {
   // take() hands a proof of epoch e out until start + 2E (then it is from before the previous epoch) and while
   // deadline - now >= M + TAKE_SLACK_MS (start + L - M - S): the earlier is start + L - M - 2S
   assert.equal(EVM_LIFE_MS - EVM_SEND_MARGIN_MS - 2n * TAKE_SLACK_MS, 2n * EVM_EPOCH_MS);
   const window = EVM_LIFE_MS - EVM_SEND_MARGIN_MS - 2n * TAKE_SLACK_MS - EVM_EPOCH_MS; // a pass begun at start + E
   assert.equal(window, 60_000n);
+  assert.equal(EVM_POOL_READ_BOUND_MS, window / 2n);
   assert.equal(EVM_READ_TRY_MS, BigInt(SOLANA_RPC_RETRY.deadlineMs));
-  assert.equal(evmPoolReadBoundMs(), 4n * 3_500n + 1_000n + 2_000n + 4_000n);
-  assert.ok(evmPoolReadBoundMs() <= window / 2n, `${evmPoolReadBoundMs()} ms`);
-  assert.ok(evmPoolReadBoundMs(EVM_POOL_READ_TRIES + 1) > window / 2n, `${evmPoolReadBoundMs(EVM_POOL_READ_TRIES + 1)} ms`);
+  assert.equal(EVM_POOL_READ_WAIT_MS, 30_000n - 4n * 3_500n);
+  // the tries' own waits with no Retry-After (1 s doubled) fit the waits left; one more try and its wait do not
+  const waits = (n: number) => BigInt([...Array(n - 1).keys()].reduce((x, i) => x + 1_000 * 2 ** i, 0));
+  assert.ok(BigInt(EVM_POOL_READ_TRIES) * EVM_READ_TRY_MS + waits(EVM_POOL_READ_TRIES) <= EVM_POOL_READ_BOUND_MS);
+  assert.ok(BigInt(EVM_POOL_READ_TRIES + 1) * EVM_READ_TRY_MS + waits(EVM_POOL_READ_TRIES + 1) > EVM_POOL_READ_BOUND_MS);
   assert.ok(EVM_POOL_READ_TRIES < EVM_LOG_THROTTLE_TRIES);
+});
+
+test("a pool read's Retry-After is waited when it fits the bound; one that would pass it fails by name at once, never a wait past the life", async () => {
+  const after = (ms: number) => (): Error => new SolanaRpcTransportError("http_429", "HTTP 429", 4, "b.example", ms);
+  // thirdweb's Retry-After of up to 9 s (the review of card wallet-restore-transfer-rpcs, 5 Nov): one is waited, then the answer
+  let rpcs = pair(c3, c3);
+  rpcs[1] = flaky(rpcs[1], byNumber("latest"), [after(9_000)]);
+  let waits: number[] = [];
+  assert.equal(await evmNow(rpcs, undefined, async (ms) => void waits.push(ms)), await evmNow(pair(c3, c3)));
+  assert.deepEqual(waits, [9_000]);
+  // 9 s again: 18 s of waits would pass the 16 s left, so the read ends by name after the first wait
+  rpcs = pair(c3, c3);
+  const f = flaky(rpcs[1], byNumber("latest"), Array(100).fill(after(9_000)));
+  rpcs[1] = f;
+  waits = [];
+  await assert.rejects(evmNow(rpcs, undefined, async (ms) => void waits.push(ms)), /^EvmUnansweredError: rpc 1 latest block: no answer in 2 tries \(HTTP 429/);
+  assert.deepEqual(waits, [9_000]);
+  assert.equal(f.hits, 2);
+  // a Retry-After past the whole bound (60 s): no wait at all
+  rpcs = pair(c3, c3);
+  rpcs[1] = flaky(rpcs[1], byNumber("latest"), Array(100).fill(after(60_000)));
+  waits = [];
+  await assert.rejects(evmNow(rpcs, undefined, async (ms) => void waits.push(ms)), /^EvmUnansweredError: rpc 1 latest block: no answer in 1 try \(HTTP 429/);
+  assert.deepEqual(waits, []);
 });
 
 for (const rd of READS) {
@@ -1182,7 +1209,7 @@ for (const rd of READS) {
     assert.match(e.message, /no answer in 4 tries \(HTTP 429 \(http_429, 4 tries at b\.example\)\)$/);
     assert.equal(f.hits, EVM_POOL_READ_TRIES);
     assert.deepEqual(waits, [1_000, 2_000, 4_000]);
-    assert.ok(BigInt(f.hits) * EVM_READ_TRY_MS + BigInt(waits.reduce((x, y) => x + y, 0)) <= evmPoolReadBoundMs());
+    assert.ok(BigInt(f.hits) * EVM_READ_TRY_MS + BigInt(waits.reduce((x, y) => x + y, 0)) <= EVM_POOL_READ_BOUND_MS);
   });
 }
 
