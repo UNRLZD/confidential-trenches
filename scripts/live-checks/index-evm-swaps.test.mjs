@@ -272,3 +272,47 @@ test("card helper-robinhood-swaps: a hooked v4 pool's buys on the tape as the po
   assert.ok(sides.filter((s) => s === "b").length >= 2, `the sample holds buys: ${sides.join("")}`);
   assert.ok(g.lines.includes(`ok  5 of 5 sampled trades carry a Transfer of the token for exactly their amt, ${JSON.stringify(sides.join(""))} against the pool`), g.lines.join("\n"));
 });
+
+test("card helper-deploy-reads-fast: a FAIL names each read the helper answered, its status, time and Server-Timing; a PASS prints none (made from the good answer in the shape of live run 42122733397 attempt 1: the judged token's candles 23 s after the read, two listed tokens tried before it)", () => {
+  const late = edit((rec) => {
+    const at = Date.parse(rec.reads.candles.headers["x-fetched-at"]);
+    rec.readAt = new Date(at - 22_967).toISOString();
+    rec.listsRead = { status: 200, ms: 160, headers: { "server-timing": "total;dur=1" } };
+    rec.tried = [
+      { token: "0x00000000000000000000000000000000000000a1", candles: { status: 503, ms: 12_004, headers: { "server-timing": 'evm-open;dur=12000, evm-queue;dur=9100;desc="14 posts: pace 6200 ms, in flight 2900 ms", total;dur=12001' } } },
+      { token: "0x00000000000000000000000000000000000000a2", candles: { status: 200, ms: 5_610, headers: { "server-timing": 'evm-open;dur=5600, evm-queue;dur=4100;desc="6 posts: pace 4100 ms, in flight 0 ms", total;dur=5602' } }, trades: { status: 200, ms: 150, headers: {} } },
+    ];
+    rec.reads.candles.ms = 2_201;
+    rec.reads.candles.headers["server-timing"] = 'evm-open;dur=2190, evm-queue;dur=1500;desc="3 posts: pace 1500 ms, in flight 0 ms", total;dur=2191';
+  });
+  const r = run(late);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.includes("candles X-Fetched-At")), bad(r).join("\n"));
+  const reads = r.lines.filter((l) => l.startsWith("--  read:"));
+  assert.deepEqual(reads, [
+    '--  read: lists 200 in 160 ms, Server-Timing "total;dur=1"',
+    '--  read: 0x00000000000000000000000000000000000000a1 before it: candles 503 in 12004 ms, Server-Timing "evm-open;dur=12000, evm-queue;dur=9100;desc=\\"14 posts: pace 6200 ms, in flight 2900 ms\\", total;dur=12001"',
+    '--  read: 0x00000000000000000000000000000000000000a2 before it: candles 200 in 5610 ms, Server-Timing "evm-open;dur=5600, evm-queue;dur=4100;desc=\\"6 posts: pace 4100 ms, in flight 0 ms\\", total;dur=5602"; trades 200 in 150 ms, Server-Timing none',
+    `--  read: ${late.coin} candles 200 in 2201 ms, Server-Timing "evm-open;dur=2190, evm-queue;dur=1500;desc=\\"3 posts: pace 1500 ms, in flight 0 ms\\", total;dur=2191"`,
+    `--  read: ${late.coin} trades 200 in 1 ms, Server-Timing "total;dur=0"`,
+  ]);
+  // the same run on time passes, and prints no read lines
+  const onTime = run({ ...late, readAt: A.good.readAt });
+  assert.equal(onTime.ok, true, bad(onTime).join("\n"));
+  assert.equal(onTime.lines.filter((l) => l.startsWith("--  read:")).length, 0);
+});
+
+test("card helper-deploy-reads-fast: read() keeps the lists read and each listed token tried before the judged one, with status, time and Server-Timing", async () => {
+  const list = { lists: { new: [{ token: "0x00000000000000000000000000000000000000a1" }, { token: A.good.coin }] } };
+  const fetchFn = async (url, init) => {
+    if (url.endsWith("/v1/market/lists?chain=base")) return new Response(JSON.stringify(list), { status: 200, headers: { "server-timing": "total;dur=1" } });
+    if (url.includes("0x00000000000000000000000000000000000000a1")) return new Response('{"error":{"code":"upstream"}}', { status: 503, headers: { "server-timing": 'evm-open;dur=12000, evm-queue;dur=9100;desc="14 posts: pace 6200 ms, in flight 2900 ms"' } });
+    return replay(A.good)(url, init);
+  };
+  const got = await read("https://api.confidential.unrealized.trade", undefined, fetchFn);
+  assert.equal(got.coin, A.good.coin);
+  assert.deepEqual([got.listsRead.status, got.listsRead.headers["server-timing"]], [200, "total;dur=1"]);
+  assert.equal(got.tried.length, 1);
+  assert.deepEqual([got.tried[0].token, got.tried[0].candles.status, got.tried[0].candles.headers["server-timing"]], ["0x00000000000000000000000000000000000000a1", 503, 'evm-open;dur=12000, evm-queue;dur=9100;desc="14 posts: pace 6200 ms, in flight 2900 ms"']);
+  assert.ok(Number.isFinite(got.tried[0].candles.ms));
+});

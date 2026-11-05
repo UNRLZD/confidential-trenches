@@ -24,6 +24,11 @@
 // include the Pons v2 curve's CurveBuy and CurveSell, and its pool's logs are read in the 100-block spans its keyless
 // providers take.
 // With no --chain it checks both chains and passes only when both pass (the deployed helper's run).
+// On FAIL it names each read the helper answered (card helper-deploy-reads-fast): the lists read and every listed token
+// it tried before the one judged, each with its status, its time and the helper's Server-Timing (an EVM read names its
+// open and its wait for the providers' paces and in-flight queues, evm-open and evm-queue), so a late read names its
+// cause (live run 42122733397 attempt 1: the judged token's candles came 23 s after the read, the reads before it named
+// nowhere).
 //   node scripts/live-checks/index-evm-swaps.mjs [--chain base|robinhood] [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (every answer read).
 import "../net-window.mjs";
@@ -119,7 +124,7 @@ export function judge(run) {
   // the lists the token is picked from did not answer: nothing else to judge
   if (run.lists !== undefined) {
     say(false, `GET ${run.lists.path ?? `/v1/market/lists?chain=${net}`} answers ${run.lists.status}${run.lists.status === 200 ? " with no lists" : ""} (${net})`);
-    return { ok: false, lines };
+    return withReads(run, lines);
   }
   const readAt = Date.parse(run.readAt);
   const parsed = {};
@@ -147,7 +152,7 @@ export function judge(run) {
     if (f === null) parsed[k] = b;
   }
   const { candles, trades } = parsed;
-  if (candles === undefined || trades === undefined) return { ok: false, lines };
+  if (candles === undefined || trades === undefined) return withReads(run, lines);
 
   const c = run.chain ?? {};
   const heads = Array.isArray(c.heads) ? c.heads : [];
@@ -207,7 +212,19 @@ export function judge(run) {
     // the tape is full (50) when it covers fewer than 50 swaps on the window: a full tape's oldest rows are cut, not missing
     say(missing.length === 0, `${due.length} swap transaction${due.length === 1 ? "" : "s"} of the pool in blocks ${from} to ${last}${net === "base" ? "" : ` after the oldest trade's time`}, ${missing.length} missing from the tape${missing.length ? `: ${missing.slice(0, 3).join(", ")}` : ""}`);
   }
-  return { ok: lines.every((l) => l.startsWith("ok ") || l.startsWith("-- ")), lines };
+  return withReads(run, lines);
+}
+
+/** The verdict, and on FAIL a line for each read the helper answered: status, time, Server-Timing. */
+function withReads(run, lines) {
+  const ok = lines.every((l) => l.startsWith("ok ") || l.startsWith("-- "));
+  if (!ok) {
+    const st = (r) => `${r?.status ?? "none"} in ${r?.ms ?? "?"} ms, Server-Timing ${show(r?.headers?.["server-timing"])}`;
+    if (run.listsRead !== undefined) lines.push(`--  read: lists ${st(run.listsRead)}`);
+    for (const t of run.tried ?? []) lines.push(`--  read: ${t.token} before it: candles ${st(t.candles)}${t.trades === undefined ? "" : `; trades ${st(t.trades)}`}`);
+    for (const k of ["candles", "trades"]) if (run.reads?.[k] !== undefined) lines.push(`--  read: ${run.coin} ${k} ${st(run.reads[k])}`);
+  }
+  return { ok, lines };
 }
 
 async function get(base, path, fetchFn) {
@@ -250,8 +267,13 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   rpcs ??= SWAP_RPCS[net];
   const readAt = new Date().toISOString();
   let candidates = token === undefined ? [] : [token];
+  /** Each read the helper answered before the judged token's, for the FAIL lines (withReads). */
+  let listsRead;
+  const tried = [];
+  const seen = (r) => ({ status: r.status, ms: r.ms, headers: { "server-timing": r.headers["server-timing"] } });
   if (token === undefined) {
     const l = await get(base, LISTS_PATH(net), fetchFn);
+    listsRead = seen(l);
     let snap;
     try {
       snap = JSON.parse(l.body);
@@ -259,7 +281,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     // a lists answer that is not a 200 with lists (card app-console-429: robinhood's 503 at 11:03:50Z crashed the check
     // with exit 2) is the run's answer, which judge() names as a BAD line with the chain and the status
     if (l.status !== 200 || !isObj(snap) || !isObj(snap.lists) || !Object.values(snap.lists).every(Array.isArray)) {
-      return { base, ...(net === "base" ? {} : { net }), coin: null, readAt, lists: { path: LISTS_PATH(net), status: l.status, body: l.body.slice(0, 500) }, reads: {}, chain: {} };
+      return { base, ...(net === "base" ? {} : { net }), coin: null, readAt, lists: { path: LISTS_PATH(net), status: l.status, body: l.body.slice(0, 500) }, listsRead, reads: {}, chain: {} };
     }
     candidates = [...new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r?.token)).filter((t) => typeof t === "string"))];
   }
@@ -269,7 +291,10 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   let quiet;
   for (const t of candidates.slice(0, 12)) {
     const candles = await get(base, CANDLES_PATH(t, net), fetchFn);
-    if (candles.status !== 200) continue;
+    if (candles.status !== 200) {
+      tried.push({ token: t, candles: seen(candles) });
+      continue;
+    }
     const r = { token: t, candles, trades: await get(base, TRADES_PATH(t, net), fetchFn) };
     let n = 0;
     try {
@@ -279,10 +304,13 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
       reads = r;
       break;
     }
+    tried.push({ token: t, candles: seen(r.candles), trades: seen(r.trades) });
     quiet ??= r;
   }
   reads ??= quiet;
-  const at = net === "base" ? {} : { net };
+  // the reads before the judged one (the quiet token judged is not one of them)
+  const before = tried.filter((x) => x.token !== reads?.token);
+  const at = { ...(net === "base" ? {} : { net }), ...(listsRead === undefined ? {} : { listsRead }), ...(before.length === 0 ? {} : { tried: before }) };
   if (reads === undefined) {
     // the first candidate's answers, so a run that found none shows why
     const t0 = candidates[0];
