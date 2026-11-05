@@ -67,10 +67,13 @@ export type EvmPoolVenue = {
   readonly hookedPools?: readonly EvmHookedPool[];
   /** Uniswap v4's PoolManager (the V4Quoter's poolManager()), whose state the device reads for each pool it found, and
    *  the provider it scans for the PoolManager's Initialize logs: `span` blocks a request, `depth` blocks back, at most
-   *  `parallel` requests at once. */
+   *  `parallel` requests at once; and the second provider (`spare`, of another operator) the scan goes on at where the
+   *  first refuses, does not answer within its share of the quote's bound, or answers no logs (checks/evm/quote.ts
+   *  scanPools, card evm-scan-second-provider), with its own span and requests at once over the same depth. */
   readonly poolManager?: string;
-  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number }>;
+  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number; spare?: EvmScanSpare }>;
 };
+export type EvmScanSpare = Readonly<{ url: string; span: number; parallel: number; orSpan?: number }>;
 export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "weth"; readonly fee: number; readonly tickSpacing: number; readonly hooks: string };
 
 /** The chains the EVM pool runs on and their venues (the venue list). The builder's checks and the signer's chain id
@@ -144,7 +147,19 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // the quotes 8.6 s and 7.6 s (2026-11-04 21:31-21:34Z). publicnode limits each address's getLogs work: about two
       // cold scans back to back, at either span, then 429 for most requests for under a minute (21:26-21:27Z).
       poolManager: "0x498581fF718922c3f8e6A244956aF099B2652b2b",
-      scan: bare({ url: "https://base-rpc.publicnode.com", span: 10_000, depth: 1_000_000, parallel: 20 }),
+      // The second: Tenderly's public gateway (base.gateway.tenderly.co; card evm-scan-second-provider, 2026-11-05
+      // 18:08-18:09Z from this Mac). The browser's preflight from the app's origin answers 204, allow-origin *, and its
+      // POST allow-origin *; its getLogs spans up to 1,000 blocks without a key ("Block range too large" at 2,500); 8
+      // requests of 1,000 blocks at the head at once each answered, 449-552 ms; a range past its head answers -32602
+      // "block range extends beyond current head block", never []. A warm scan (scanPools `fast`) fits in its one round
+      // of 8,000 blocks; a cold one stays on the first. bloXroute (base.rpc.blxrbdn.com), the second at 22e29c9, answered
+      // every request 503 "No server is available to handle this request" at 18:07-18:09Z, so the live check's held
+      // Base quotes ended rpc_error. Passed over: Blast (10 blocks a getLogs), dRPC ("ranges over 10000 blocks are not
+      // supported on free plan" on 2,500-block spans, 18:08Z), BlockPI ("Apikey not found", 18:08Z), mainnet.base.org
+      // (-32011 "request limit reached" on its first getLogs, 18:08Z), 1rpc (50 blocks), meowrpc (no eth_getLogs), ankr
+      // (a key), llamarpc (525, 18:08Z), omniatech (521), lava (410). No keyless one carries a cold 1M-block scan within
+      // the bound alone: it carries what the first left, and a warm scan whole.
+      scan: bare({ url: "https://base-rpc.publicnode.com", span: 10_000, depth: 1_000_000, parallel: 20, spare: bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 8 }) }),
     }),
     robinhood: bare({
       chainId: 4663,
@@ -189,7 +204,28 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // (it answers 429 to 4 at once, 2026-11-03 20:27Z); a request with more than one value in a topic position spans
       // at most 100,000 blocks ("query spans 1000000 blocks …, but only 100000 are allowed for this request; narrow the
       // block range, or send one value per position", 2026-11-04 06:55Z): `orSpan`
-      scan: bare({ url: "https://rpc.mainnet.chain.robinhood.com", span: 1_000_000, depth: 10_000_000, parallel: 2, orSpan: 100_000 }),
+      // The second: daybreak (robinhood.daybreak-rpc.network; card evm-scan-second-provider, 2026-11-05 17:18-17:4xZ from
+      // this Mac). Its preflight from the app's origin answers 204, access-control-allow-origin *; its getLogs span at
+      // most 2,000 blocks (-32602 "query exceeds max block range 2000"), the scan's own batch (both topic positions and
+      // the head block) p50 373-396 ms at 100 to 2,000 blocks, 100,000 back too, 4 at once all answered (p50 251-450 ms,
+      // three rounds), an OR of topics too; the Initialize logs of 2,000 blocks 4,000 and 300,000 back the same as
+      // Robinhood's own, log for log (14 and 6). The live check's quotes with the first held (refused, no logs) all ended
+      // ok. It carries a warm scan whole: one round of its requests, 4 x 2,000 blocks, about 13.6 minutes of Robinhood's
+      // blocks (scanPools `fast`); a cold one stays on the first. Passed over: Globalstake (9.4 s and 10 s timeouts on
+      // 70-block requests: 3 of 4 held quotes ended at the 60 s bound, 16:57-17:03Z), robinhood.api.pocket.network
+      // (5,000 blocks in about 210 ms, but a batch of one call answered as a bare object, not a batch, so the device
+      // refuses its head read: 2 of 2 refused held quotes ended rpc_error), rpc-robinhood.blockmachine.io (429 after six
+      // batches, "limit":60 compute units, retry after 25 s; the newest 5,000 blocks only), publicnode ("Archive requests
+      // require a personal token" for the newest 100 blocks), dRPC (1,000-block spans refused on its free plan), bloXroute
+      // (no eth_getLogs).
+      scan: bare({
+        url: "https://rpc.mainnet.chain.robinhood.com",
+        span: 1_000_000,
+        depth: 10_000_000,
+        parallel: 2,
+        orSpan: 100_000,
+        spare: bare({ url: "https://robinhood.daybreak-rpc.network", span: 2_000, parallel: 4 }),
+      }),
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
     // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build
