@@ -4,7 +4,7 @@
 // imports it, both removed after, so pool-price.ts itself is never changed and a test run beside the sweep never reads a
 // mutant (as test/rules-pool-mutants.mjs does for src/rules/pool.ts). Exits 1 when the test fails or runs nothing on
 // the code as it is, passes on a mutant, or a mutant's text is not in pool-price.ts exactly once.
-// test/pool-price-mutants.test.mjs runs it in the package's tests.
+// test/pool-price-mutants.test.mjs runs it in the package's test:mutants.
 //   node packages/signpage/test/pool-price-mutants.mjs
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
