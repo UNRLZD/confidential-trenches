@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { cleanup, compileMessage, newKey, needOf, signTx, transferIx, CLEANUP_RESERVE, DEPOSIT, FEE_PER_SIGNATURE } from "./deploy.mjs";
+import { cleanup, compileMessage, newKey, needOf, signTx, transferIx, tableProblems, ALT_PROGRAM, COMPUTE_BUDGET, CLEANUP_RESERVE, DEPOSIT, FEE_PER_SIGNATURE, PRIORITY_CU_BOUND, PRIORITY_MICRO_LAMPORTS } from "./deploy.mjs";
 import { b58decode, labelOf, scopeOf, poolAddress, programDataAddress } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -566,8 +566,10 @@ function decodeTx(b64) {
     const program = keys[b[o++]];
     const ks = [...b.subarray(o + 1, o + 1 + b[o])].map((j) => keys[j]);
     o += 1 + b[o];
-    const data = b.subarray(o + 1, o + 1 + b[o]);
-    o += 1 + b[o];
+    // the data's length is a compact-u16 (two bytes past 127: the lookup table's extend)
+    const n = b[o] < 0x80 ? [b[o], 1] : [(b[o] & 0x7f) | (b[o + 1] << 7), 2];
+    const data = b.subarray(o + n[1], o + n[1] + n[0]);
+    o += n[1] + n[0];
     ixs.push({ program, keys: ks, data });
   }
   return { signature, payer: keys[0], ixs };
@@ -576,12 +578,30 @@ const SYSTEM_ID = "11111111111111111111111111111111";
 const FUND_SIG = "5".repeat(87);
 function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = () => {}, poolMissing = false, onRead = () => {} } = {}) {
   // `funding`: whether the funder's incoming transfer (FUND_SIG) has landed; a funder that starts funded has it
-  const c = { t: 0, bal: new Map(), txs: new Map(), sent: [], funder: null, credit: [], funding: funderStart > 0n, said: [], accounts: new Map() };
+  const c = { t: 0, bal: new Map(), txs: new Map(), sent: [], funder: null, credit: [], funding: funderStart > 0n, said: [], accounts: new Map(), tables: new Map() };
   const balOf = (a) => c.bal.get(a) ?? 0n;
   const apply = (tx) => {
-    const ix = tx.ixs[0];
+    // a compute unit price instruction (mainnet's own sends) costs nothing here; the lookup table's are the table
+    // program's: create and extend make the table (its authority the signer), freeze sets its authority to none
+    const ix = tx.ixs.find((x) => x.program !== COMPUTE_BUDGET);
     let cost = FEE_PER_SIGNATURE;
     let to = null;
+    if (ix.program === ALT_PROGRAM) {
+      if (balOf(tx.payer) < cost + 3_000_000n) return { InsufficientFundsForRent: { account_index: 0 } };
+      c.bal.set(tx.payer, balOf(tx.payer) - cost - (ix.data[0] === 0 ? 3_000_000n : 0n));
+      const table = ix.keys[0];
+      for (const x of tx.ixs.filter((y) => y.program === ALT_PROGRAM)) {
+        if (x.data[0] === 0) c.tables.set(table, { authority: x.keys[1], list: [] });
+        else if (x.data[0] === 2) for (let i = 12; i < x.data.length; i += 32) c.tables.get(table).list.push(b58(x.data.subarray(i, i + 32)));
+        else if (x.data[0] === 1) c.tables.get(table).authority = null;
+        const t = c.tables.get(table);
+        const meta = Buffer.alloc(56);
+        meta.writeUInt32LE(1, 0), meta.writeBigUInt64LE(0xffff_ffff_ffff_ffffn, 4);
+        if (t.authority) (meta[21] = 1), Buffer.from(b58decode(t.authority)).copy(meta, 22);
+        c.accounts.set(table, { owner: ALT_PROGRAM, executable: false, lamports: 3_000_000, data: [Buffer.concat([meta, ...t.list.map((a) => Buffer.from(b58decode(a)))]).toString("base64"), "base64"] });
+      }
+      return null;
+    }
     if (ix.program === SYSTEM_ID) (cost += ix.data.readBigUInt64LE(4)), (to = ix.keys[1]);
     else if (ix.data[0] === 0) cost += 3_000_000n; // init: the pool's rent
     else cost += DEPOSIT + 2_000_000n; // the deposit and its mark and page rents
@@ -621,6 +641,7 @@ function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = (
         return ok(params[0] === c.funder && c.funding ? [...mine.reverse(), { signature: FUND_SIG, err: null }] : mine.reverse());
       }
       case "getProgramAccounts": return ok([]);
+      case "getSlot": return ok(400_000_000);
       case "getLatestBlockhash": return ok({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: height() + 150 } });
       case "getBlockHeight": return ok(height());
       case "sendTransaction": {
@@ -678,8 +699,9 @@ function depositAccounts(c, ix) {
     c.accounts.set(addr, acc(d));
   }
 }
-const isDeposit = (tx) => tx.ixs[0].program !== SYSTEM_ID && tx.ixs[0].data[0] === 1;
-const isInit = (tx) => tx.ixs[0].program !== SYSTEM_ID && tx.ixs[0].data[0] === 0;
+const own = (tx) => tx.ixs.find((x) => x.program !== COMPUTE_BUDGET);
+const isDeposit = (tx) => own(tx).program !== SYSTEM_ID && own(tx).program !== ALT_PROGRAM && own(tx).data[0] === 1;
+const isInit = (tx) => own(tx).program !== SYSTEM_ID && own(tx).program !== ALT_PROGRAM && own(tx).data[0] === 0;
 /** Runs main() (a resume of the recorded program, so no CLI deploy) on `c`; returns its error, log, record and key dir. */
 async function runOn(c, extra = []) {
   const work = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
@@ -1092,4 +1114,181 @@ test("fold 2 4: a run's key folder is durable: under XDG_STATE_HOME or ~/.local/
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+// ---- card pool-sol-deploy-mainnet: the owner's mainnet run ----
+const MAINNET = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+const MAIN_URL = "https://api.mainnet-beta.solana.com";
+// pump Global as two mainnet providers answered it (the kit's recorded buy reads, packages/kit/test/fixtures)
+const PUMP_FX = JSON.parse(readFileSync(path.join(REPO, "packages/kit/test/fixtures/solana-pool-buy.json"), "utf8")).pump;
+const PUMP_KEY = Object.keys(PUMP_FX.reads[0]).find((k) => JSON.parse(k).length === 3);
+const PUMP_GLOBAL = JSON.parse(PUMP_KEY)[2];
+const PUMP_GLOBAL_ANSWER = { context: PUMP_FX.reads[0][PUMP_KEY].context, value: [PUMP_FX.reads[0][PUMP_KEY].value[2]] };
+/** `c` answering as mainnet: its genesis on every URL, and pump Global at finalized. */
+const asMainnet = (c, genesis2 = MAINNET) => {
+  // CI's build of the recorded code, pinned for the test: never the real gh
+  const f = fakeGh();
+  Object.assign(c.io, { gh: f.gh, pin: f.sha });
+  return asMainnetReads(c, genesis2);
+};
+const asMainnetReads = (c, genesis2) => wrap(c, (url, { method, params }, real) => {
+  if (method === "getGenesisHash") return okR(url === MAIN_URL ? MAINNET : genesis2);
+  if (method === "getMultipleAccounts") {
+    assert.deepEqual(params[0], [PUMP_GLOBAL]);
+    assert.equal(params[1].commitment, "finalized");
+    return okR(structuredClone(PUMP_GLOBAL_ANSWER));
+  }
+  return real();
+});
+const mainArgs = (out, extra = []) => ["--mainnet", "--url", MAIN_URL, "--ci-run", "41677243428", "--return", RETURN, "--out", out, ...extra];
+
+test("mainnet: refused before any key without --mainnet, with --mainnet on another cluster, on another URL, when the second RPC is not mainnet, or for code that is not the pin", async () => {
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const { w, out } = work();
+  const realLog = console.log;
+  console.log = () => {};
+  const noCall = (label) => async () => { throw new Error(`${label}: no call after the refusal`); };
+  try {
+    const f = fakeGh();
+    const genesisOnly = (g1, g2 = g1) => async (url, init) => {
+      if (JSON.parse(init.body).method === "getGenesisHash") return okR(url === MAIN_URL ? g1 : g2);
+      return noCall("read")();
+    };
+    const io = { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, pin: f.sha };
+    await assert.rejects(main(mainArgs(out).filter((a) => a !== "--mainnet"), genesisOnly(MAINNET), io), /mainnet refused: its deploy is the owner's.*passes --mainnet/);
+    await assert.rejects(main(mainArgs(out), genesisOnly("EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"), io), /--mainnet refused: genesis EtWTRAB\S+ at https:\/\/api.mainnet-beta.solana.com is not mainnet's/);
+    await assert.rejects(main(mainArgs(out).map((a) => (a === MAIN_URL ? "https://solana-rpc.publicnode.com" : a)), genesisOnly(MAINNET, MAINNET), io), /mainnet refused: --url https:\/\/solana-rpc.publicnode.com is not https:\/\/api.mainnet-beta.solana.com/);
+    await assert.rejects(main(mainArgs(out), genesisOnly(MAINNET, "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"), io), /mainnet refused: https:\/\/solana-rpc.publicnode.com answers genesis EtWTRAB\S+, not mainnet's/);
+    assert.equal(f.calls.length, 0, "no CI read before both RPCs answer mainnet");
+    await assert.rejects(main(mainArgs(out), genesisOnly(MAINNET), { ...io, pin: "0".repeat(64) }), /mainnet refused: the code's sha256 [0-9a-f]{64} is not the pinned 0{64}/);
+    // the findings file's own pin (c86fc7fc..., 79,088 B) refuses the recorded older build
+    await assert.rejects(main(mainArgs(out), genesisOnly(MAINNET), { gh: fakeGh().gh, keysBase: TEST_KEYS, wait: async () => {} }), /mainnet refused: the code's sha256 [0-9a-f]{64} is not the pinned c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162/);
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+  }
+  const made = ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x));
+  for (const k of made) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  assert.deepEqual(made, [], "no key was made");
+});
+
+test("mainnet: the need is the program, the pool, the frozen table, the funder's rent(0), the fees and each priced transaction's bound; no test deposit", async () => {
+  const rent = async (n) => BigInt((n + 128) * 6960);
+  const soLen = 79_088;
+  const writes = BigInt(Math.ceil(soLen / 900));
+  const { parts, total } = await needOf(rent, soLen, { mainnet: true, tableLen: 25 });
+  assert.deepEqual(Object.keys(parts), ["program_account", "programdata", "pool", "lookup_table", "funder_floor", "fees", "priority"]);
+  assert.equal(parts.programdata, BigInt((45 + soLen + 128) * 6960));
+  assert.equal(parts.lookup_table, BigInt((56 + 32 * 25 + 128) * 6960));
+  assert.equal(parts.fees, FEE_PER_SIGNATURE * (2n + writes + 2n + 1n + 2n + 1n + 2n + 100n));
+  assert.equal(parts.priority, (2n + writes + 2n + 100n + 1n + 2n) * (PRIORITY_CU_BOUND * PRIORITY_MICRO_LAMPORTS / 1_000_000n));
+  assert.equal(total, Object.values(parts).reduce((a, b) => a + b, 0n));
+  // a resume whose pool exists: the table, the floor, its fees and priority only
+  const r = await needOf(rent, soLen, { mainnet: true, tableLen: 25, resume: true, poolExists: true });
+  assert.deepEqual(Object.keys(r.parts), ["lookup_table", "funder_floor", "fees", "priority"]);
+});
+
+test("mainnet: the CLI deploys with mainnet's compute unit price", async () => {
+  const f = fakeGh();
+  let args = null;
+  const c = asMainnet(cluster());
+  c.io.cli = (a) => {
+    if (a[1] === "deploy") (args = a), (() => { throw new Error("stop after the deploy call"); })();
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out));
+  try {
+    assert.match(String(r.error?.message), /stop after the deploy call/);
+    assert.ok(args, "the CLI was asked to deploy");
+    assert.deepEqual(args.slice(args.indexOf("--with-compute-unit-price"), args.indexOf("--with-compute-unit-price") + 2), ["--with-compute-unit-price", String(PRIORITY_MICRO_LAMPORTS)]);
+    assert.ok(args.includes("--final"));
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+  void f;
+});
+
+test("mainnet: init, then the table made from the kit's list, read back, frozen and read back; no deposit; every own send priced; the keys removed once the table is frozen", async () => {
+  const f = fakeGh();
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.stack) + "\n" + r.said.join("\n"));
+    const rec = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(rec.cluster, "mainnet");
+    assert.equal(rec.deposit, undefined, "no test deposit on mainnet");
+    assert.equal(c.sent.filter((x) => isDeposit(x.tx)).length, 0);
+    // the list: the kit's solanaPoolBuyTableAccounts for this pool, pump Global's fee accounts, pages to entry 2,047
+    const kit = await import(pathToFileURL(path.join(REPO, "packages/kit/src/trade/solana/pool-buy.ts")).href);
+    const venue = await kit.readSolanaPoolBuyVenue([0, 1].map((p) => async (m, params) => structuredClone(PUMP_FX.reads[p][JSON.stringify(params[0])])), "pump-curve", PUMP_FX.mint, () => 0);
+    const want = [...new Set(kit.solanaPoolBuyTableAccounts({ program: RD.program_id, pool: RD.pool }, venue, kit.solanaPoolPages(RD.program_id, 1024, 1024)))];
+    assert.deepEqual(rec.table_addresses, want);
+    assert.equal(want.length, 25);
+    const t = c.tables.get(rec.table);
+    assert.ok(t, "the record's table is the one made");
+    assert.equal(t.authority, null, "frozen");
+    assert.deepEqual(t.list, want);
+    assert.deepEqual(tableProblems({ owner: ALT_PROGRAM, data: Buffer.from(c.accounts.get(rec.table).data[0], "base64") }, want, null), []);
+    // the order: init, create and extend, freeze, then the sweeps; each own send but the sweeps carries the price
+    const steps = rec.txs.map((x) => x.step);
+    assert.deepEqual(steps.filter((s) => !/funding|sweep/.test(s)), ["init (tag 0)", "lookup table: create and extend with 25 addresses", "lookup table: freeze (authority none)"]);
+    for (const x of c.sent) {
+      const priced = x.tx.ixs[0].program === COMPUTE_BUDGET;
+      assert.equal(priced, x.tx.ixs[0].program !== SYSTEM_ID || x.tx.ixs.length > 1, `${x.tx.ixs.map((i) => i.program).join(",")}`);
+      if (priced) assert.equal(Buffer.from(x.tx.ixs[0].data).readBigUInt64LE(1), PRIORITY_MICRO_LAMPORTS);
+    }
+    assert.ok(c.sent.some((x) => x.tx.ixs[0].program === COMPUTE_BUDGET && x.tx.ixs[1].program === ALT_PROGRAM));
+    assert.equal(r.journal, undefined);
+    assert.equal(existsSync(r.dir), false, "the keys were removed: the funder at 0 and the table frozen");
+    assert.match(r.said.join("\n"), /lookup table \S+ is frozen \(authority none\) and holds exactly the list on both RPCs at finalized/);
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+  void f;
+});
+
+test("mainnet: a table the funder still holds authority over keeps the keys, and the journal says why", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  // the freeze never lands: the RPC refuses it at preflight each time
+  const cc = wrap(c, (url, { method, params }, real) => {
+    if (method === "sendTransaction") {
+      const tx = decodeTx(params[0]);
+      if (tx.ixs.some((x) => x.program === ALT_PROGRAM && x.data[0] === 1)) return errR("Transaction simulation failed: Blockhash not found");
+    }
+    return real();
+  });
+  const { w, out, journal } = work();
+  const r = await runAt(cc, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /Blockhash not found/);
+    const j = JSON.parse(readFileSync(journal, "utf8"));
+    assert.equal(j.complete, false);
+    assert.equal(j.keys.state, "kept");
+    assert.ok(j.keys.why.some((x) => /lookup table \S+ still has the funder as its authority/.test(x)), j.keys.why.join("; "));
+    assert.match(j.keys.sweep, / --mainnet$/);
+    assert.ok(existsSync(r.dir), "the keys stay");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("a transaction over 1,232 bytes is refused before it is journaled or sent", async () => {
+  const k = newKey();
+  const big = { program: SYSTEM_ID, keys: [{ id: k.id, signer: true, writable: true }], data: new Uint8Array(1200) };
+  let sent = 0;
+  const journal = { signed: () => assert.fail("journaled"), settled: () => {}, pending: () => [] };
+  const fetchFn = async (u, init) => {
+    const { method } = JSON.parse(init.body);
+    if (method === "getLatestBlockhash") return okR({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: 10 } });
+    sent++;
+    return okR(null);
+  };
+  const { sendAndConfirm } = await import("./deploy.mjs");
+  await assert.rejects(sendAndConfirm(fetchFn, "http://x", [big], k, [k], { step: "big", journal }), /big: \d+ bytes, over 1232: not signed for sending/);
+  assert.equal(sent, 0);
 });

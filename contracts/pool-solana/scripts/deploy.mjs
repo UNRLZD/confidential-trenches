@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 // Deploys the Blindfill pool program to Solana devnet (or a local validator, the dry run), immutable, then makes its
-// SOL pool and one test deposit. Every key lives only in this run.
+// SOL pool and one test deposit. Every key lives only in this run. With --mainnet (the owner's paste,
+// scripts/mainnet-deploy.sh; card pool-sol-deploy-mainnet) it deploys to mainnet instead: no test deposit, and the pool
+// buy's address lookup table made and frozen (step 6m).
 //
+//   node contracts/pool-solana/scripts/deploy.mjs --mainnet --url https://api.mainnet-beta.solana.com --ci-run <id>
+//     --return <address> --out contracts/pool-solana/deployments/mainnet.json
 //   node contracts/pool-solana/scripts/deploy.mjs --return <address> [--url <rpc>] [--ci-run <id> | --no-build] [--out <file>]
 //     [--program <id> [--prior <sig>,...]]     a resume: the program is final already, init (if missing) and deposit only
 //   node contracts/pool-solana/scripts/deploy.mjs --rebuild-record <deployment.json> [--url <rpc>]
@@ -10,7 +14,8 @@
 //
 // Steps:
 //  1. The cluster from its genesis hash: devnet, or a local validator on a loopback URL. Mainnet is refused (its
-//     deploy is the owner's, on a program id of its own: M351).
+//     deploy is the owner's, on a program id of its own: M351) unless --mainnet is passed, and then only when the URL
+//     is one of the live check's two mainnet RPCs and both answer mainnet's genesis hash, before any other read.
 //  2. The build: cargo-build-sbf --sbf-out-dir out -- --locked (CI's command, refused when a stack frame overflows), its
 //     sha256 and length printed. The keypair cargo-build-sbf writes beside the .so is deleted unread: the program id
 //     is made here, fresh. Devnet takes only CI's build (--ci-run <run id>: the pool-solana job's artifact, refused
@@ -51,6 +56,16 @@
 //     sweep's signature is printed. A run that stops leaves its journal (complete: false, stopped_at, every
 //     transaction's state, the keys kept or removed and why) and the record path as it was; a run that completes
 //     writes the record and removes the journal.
+// 6m. Mainnet only, after init and instead of the deposit (a test deposit's note is thrown away, so its SOL would stay
+//     in the pool for good): the pool buy's address lookup table. Its list is the kit's solanaPoolBuyTableAccounts for
+//     the pump curve venue (pump Global's fee and buyback recipients, read at finalized on both RPCs, the same bytes)
+//     and the pages up to entry 2,047 of each tree, as the devnet table holds; read before any key, so its rent is in
+//     the need. One transaction creates and extends it (the funder its authority and payer), it is read back at
+//     finalized on both RPCs, the same bytes, active, the funder its authority and exactly the list; then a second
+//     transaction freezes it (authority none, so nobody can deactivate or close it) and the read-back must show
+//     authority none. A table the funder still holds authority over keeps the run's keys. Every own send on mainnet
+//     carries a compute unit price (PRIORITY_MICRO_LAMPORTS), and so do the CLI's deploy transactions; the need counts
+//     each at PRIORITY_CU_BOUND units. The sweeps and the closes carry none, so the cleanup's arithmetic stays exact.
 //  8. Waits for every transaction to be finalized, writes the deployment record (scripts/live-checks/pool-sol-deploy.
 //     <cluster>.json) with every transaction on the programdata (the deploy and its SetAuthority) and every funder
 //     (the fee payers that are not --return), and prints the live check to run next.
@@ -63,7 +78,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  DEVNET_GENESIS, MAINNET_GENESIS, LOADER_V3, SYSTEM, POOL_LEN, PRE_MARK_LEN, P,
+  DEVNET_GENESIS, MAINNET_GENESIS, LOADER_V3, SYSTEM, POOL_LEN, PRE_MARK_LEN, P, MAINNET_RPCS, pda,
   RPCS as DEVNET_RPCS, account, address, b58decode, b58encode, be32, cat, hex, labelOf, le, pageAddress, poolAddress, preMarkAddress, programDataAddress, rpc,
   scopeOf,
 } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
@@ -82,6 +97,20 @@ export const FEE_PER_SIGNATURE = 5_000n;
 export const WRITE_CHUNK = 900;
 export const RETRY_SIGNATURES = 100n; // the CLI writes about 1,000 bytes a transaction; fewer here counts more fees
 const SO = path.join(POOL_DIR, "out/blindfill_pool_solana.so");
+/** Mainnet's compute unit price, micro-lamports: on the run's own sends (init, the table's two) and the CLI's deploy
+ * transactions. The need counts each such transaction at PRIORITY_CU_BOUND units (the most one may ask), so at most
+ * 140,000 lamports each; what is not spent is swept back. */
+export const PRIORITY_MICRO_LAMPORTS = 100_000n;
+export const PRIORITY_CU_BOUND = 1_400_000n;
+export const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
+export const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
+/** A lookup table's 56-byte meta: u32 type 1, u64 deactivation slot (u64 max while active), u64 last extended slot, u8
+ * its start index, Option<Pubkey> authority (tag at 21, key at 22), u16 padding; then the addresses. */
+export const TABLE_META = 56;
+/** The most bytes one transaction may have on the wire (PACKET_DATA_SIZE). */
+export const TX_MAX = 1232;
+/** ComputeBudget's SetComputeUnitPrice. */
+export const priceIx = (microLamports) => ({ program: COMPUTE_BUDGET, keys: [], data: cat(Uint8Array.of(3), le(microLamports, 8)) });
 const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\/?$/;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (s) => console.log(`deploy: ${s}`);
@@ -158,6 +187,8 @@ const LANDED = ["confirmed", "finalized"];
 export async function sendAndConfirm(fetchFn, url, ixs, payer, keys, { step = "a transaction", journal, wait = sleep, now = Date.now } = {}) {
   const { value } = await rpc(fetchFn, url, "getLatestBlockhash", [{ commitment: "confirmed" }]);
   const tx = signTx(compileMessage(payer.id, ixs, value.blockhash), keys);
+  const size = Buffer.from(tx.base64, "base64").length;
+  if (size > TX_MAX) throw new Error(`${step}: ${size} bytes, over ${TX_MAX}: not signed for sending`);
   journal?.signed(step, tx, value.lastValidBlockHeight);
   const until = now() + WAITS.confirm;
   const seen = (s) => {
@@ -195,8 +226,22 @@ function cli(args, { allowFail = false } = {}) {
 
 // ---- the need ----
 /** The funder's need: each part in lamports, and their sum. `rent(n)` is the cluster's rent-exempt minimum. */
-export async function needOf(rent, soLen, { resume = false, poolExists = false } = {}) {
+export async function needOf(rent, soLen, { resume = false, poolExists = false, mainnet = false, tableLen = 0 } = {}) {
   const writes = BigInt(Math.ceil(soLen / WRITE_CHUNK));
+  if (mainnet) {
+    // no test deposit; the lookup table (its meta and addresses); each own or CLI deploy transaction's priority bound
+    const signatures = (resume ? 0n : 2n + writes + 2n) + (poolExists ? 0n : 1n) + 2n + 1n + 2n + RETRY_SIGNATURES;
+    const priced = (resume ? 0n : 2n + writes + 2n + RETRY_SIGNATURES) + (poolExists ? 0n : 1n) + 2n;
+    const parts = {
+      ...(resume ? {} : { program_account: await rent(36), programdata: await rent(45 + soLen) }),
+      ...(poolExists ? {} : { pool: await rent(POOL_LEN) }),
+      lookup_table: await rent(TABLE_META + 32 * tableLen),
+      funder_floor: await rent(0),
+      fees: FEE_PER_SIGNATURE * signatures,
+      priority: priced * ((PRIORITY_CU_BOUND * PRIORITY_MICRO_LAMPORTS + 999_999n) / 1_000_000n),
+    };
+    return { parts, total: Object.values(parts).reduce((a, b) => a + b, 0n) };
+  }
   // a resume (--program) deploys nothing: no program account, programdata, buffer, writes or deploy signatures
   const deployParts = resume ? {} : { program_account: await rent(36), programdata: await rent(45 + soLen) };
   const parts = {
@@ -291,7 +336,7 @@ export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve 
  * upgrade authority is read at confirmed, and a read that fails throws: a finalized read of a deploy that landed a
  * moment ago reads nothing, and "nothing" must never be taken for "not upgradeable".
  */
-export function chainOps({ fetchFn, url, second, funder, programId, keyFile, returnTo, resume = false, cli: run0 = cli, wait = sleep, now = Date.now, say = log, journal, afterCli = async () => {} }) {
+export function chainOps({ fetchFn, url, second, funder, programId, keyFile, returnTo, resume = false, cli: run0 = cli, wait = sleep, now = Date.now, say = log, journal, afterCli = async () => {}, tableOf = () => null }) {
   // each CLI call's own transactions are read from the funder's history after it, and journaled
   const run = (args) => {
     try {
@@ -371,6 +416,12 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
         if (b !== 0n) out.push(`the funder holds ${b} lamports on ${u}`);
         const pa = await account(fetchFn, u, programId, undefined, "confirmed");
         if (pa && BigInt(pa.lamports) > 0n && !(pa.executable && pa.owner === LOADER_V3)) out.push(`the program id ${programId} holds ${pa.lamports} lamports on ${u} and is not a deployed program`);
+        // the run's lookup table (mainnet): a live authority is the funder's key, so the keys stay until it is frozen
+        const t = tableOf();
+        if (t) {
+          const ta = await account(fetchFn, u, t, undefined, "confirmed");
+          if (ta && ta.owner === ALT_PROGRAM && ta.data[21] === 1 && b58encode(ta.data.subarray(22, 54)) === funder.id) out.push(`lookup table ${t} still has the funder as its authority on ${u}`);
+        }
       }
       for (const [tag, at, what] of [[1, 4, "buffer"], [3, 12, "upgradeable program's data"]]) {
         const found = await rpc(fetchFn, url, "getProgramAccounts", [LOADER_V3, {
@@ -382,6 +433,46 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
       return out;
     },
   };
+}
+
+// ---- the pool buy's lookup table (mainnet) ----
+/** The table's three instructions (the address lookup table program's bincode: u32 tag, then its fields): create at
+ * `slot` (the table the PDA [authority, slot] with `bump`), extend with `list`, freeze. The authority pays. */
+export function tableIxs(authority, table, slot, bump, list) {
+  const keys = [{ id: table, signer: false, writable: true }, { id: authority, signer: true, writable: false }, { id: authority, signer: true, writable: true }, { id: SYSTEM, signer: false, writable: false }];
+  return {
+    create: { program: ALT_PROGRAM, keys, data: cat(le(0, 4), le(slot, 8), Uint8Array.of(bump)) },
+    extend: { program: ALT_PROGRAM, keys, data: cat(le(2, 4), le(list.length, 8), ...list.map(address)) },
+    freeze: { program: ALT_PROGRAM, keys: keys.slice(0, 2), data: le(1, 4) },
+  };
+}
+/** What keeps `acc` from being a lookup table that is active, holds exactly `list` in order, and has `authority` (null:
+ * frozen, nobody can deactivate or close it): [] when it is. */
+export function tableProblems(acc, list, authority) {
+  if (!acc || acc.owner !== ALT_PROGRAM) return [`not a lookup table (${acc ? `owner ${acc.owner}` : "missing"})`];
+  const d = Buffer.from(acc.data);
+  if (d.length < TABLE_META || (d.length - TABLE_META) % 32 !== 0) return [`${d.length} bytes, not a lookup table's`];
+  const out = [];
+  if (d.readUInt32LE(0) !== 1) out.push(`type ${d.readUInt32LE(0)}, not 1`);
+  if (d.readBigUInt64LE(4) !== 0xffff_ffff_ffff_ffffn) out.push(`deactivated at slot ${d.readBigUInt64LE(4)}`);
+  const auth = d[21] === 0 ? null : d[21] === 1 ? b58encode(d.subarray(22, 54)) : `tag ${d[21]}`;
+  if (auth !== authority) out.push(`authority ${auth ?? "none"}, not ${authority ?? "none"}`);
+  const got = [];
+  for (let i = TABLE_META; i < d.length; i += 32) got.push(b58encode(d.subarray(i, i + 32)));
+  if (got.length !== list.length || got.some((a, i) => a !== list[i])) out.push(`holds ${got.length} addresses, not exactly the list of ${list.length}`);
+  return out;
+}
+/** The table read at finalized on each of `urls`, waiting up to 90 s: done once every read is the same bytes and
+ * tableProblems is []; throws with what is wrong after. */
+async function tableReadBack(fetchFn, urls, table, list, authority, { wait = sleep, now = Date.now } = {}) {
+  let why = [];
+  for (const until = now() + 90_000; ; await wait(2000)) {
+    const reads = await Promise.all(urls.map((u) => account(fetchFn, u, table)));
+    const same = reads.every((r) => r && reads[0] && r.owner === reads[0].owner && Buffer.from(r.data).equals(Buffer.from(reads[0].data)));
+    why = [...(same ? [] : [`the reads on ${urls.join(" and ")} are not the same bytes`]), ...tableProblems(reads[0], list, authority)];
+    if (!why.length) return reads[0];
+    if (now() > until) throw new Error(`lookup table ${table}: ${why.join("; ")}`);
+  }
 }
 
 // ---- the record from chain reads ----
@@ -599,7 +690,7 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
     j.txs.push({ step: `sweep (kept keys, to the funding's source ${dest})`, signature: sig, state: "landed" });
     log(`sweep-kept: ${balance - FEE_PER_SIGNATURE} lamports from ${k.id} to ${dest}: ${sig}`);
   }
-  const ops = chainOps({ fetchFn, url, second, funder, programId: j.program_id, keyFile: path.join(dir, "funder.json"), returnTo: j.return_to, cli: run, wait, now });
+  const ops = chainOps({ fetchFn, url, second, funder, programId: j.program_id, keyFile: path.join(dir, "funder.json"), returnTo: j.return_to, cli: run, wait, now, tableOf: () => j.table ?? null });
   const left = [];
   for (const k of holders) for (const u of [...new Set([url, second])]) {
     const b = BigInt((await rpc(fetchFn, u, "getBalance", [k.id, { commitment: "confirmed" }])).value);
@@ -624,9 +715,18 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   const url = opt("--url", "https://api.devnet.solana.com");
   const genesis = await rpc(fetchFn, url, "getGenesisHash", []);
   const cluster = genesis === DEVNET_GENESIS ? "devnet" : genesis === MAINNET_GENESIS ? "mainnet" : LOOPBACK.test(url) ? "localnet" : null;
-  if (cluster === "mainnet") throw new Error("mainnet refused: its deploy is the owner's, with a program id of its own (M351)");
+  const mainnetArg = argv.includes("--mainnet");
+  if (cluster === "mainnet" && !mainnetArg) throw new Error("mainnet refused: its deploy is the owner's, with a program id of its own (M351): the owner's paste passes --mainnet");
+  if (mainnetArg && cluster !== "mainnet") throw new Error(`--mainnet refused: genesis ${genesis} at ${url} is not mainnet's`);
   if (!cluster) throw new Error(`genesis ${genesis} at ${url} is neither devnet nor a loopback validator`);
-  const second0 = cluster === "devnet" ? DEVNET_RPCS.find((u) => u !== url) ?? DEVNET_RPCS[1] : url.replace("127.0.0.1", "localhost");
+  const second0 = cluster === "devnet" ? DEVNET_RPCS.find((u) => u !== url) ?? DEVNET_RPCS[1] : cluster === "mainnet" ? MAINNET_RPCS[1] : url.replace("127.0.0.1", "localhost");
+  if (cluster === "mainnet") {
+    // the live check's two mainnet RPCs, the first (the only one of the two that answers getProgramAccounts) as --url;
+    // the second must answer mainnet's genesis too, before any other read
+    if (url !== MAINNET_RPCS[0]) throw new Error(`mainnet refused: --url ${url} is not ${MAINNET_RPCS[0]}`);
+    const g2 = await rpc(fetchFn, second0, "getGenesisHash", []);
+    if (g2 !== MAINNET_GENESIS) throw new Error(`mainnet refused: ${second0} answers genesis ${g2}, not mainnet's`);
+  }
   const kept = opt("--sweep-kept");
   if (kept) return sweepKept(fetchFn, url, second0, kept, { base: io.keysBase ?? keysBase(), to: opt("--return") ? (address(opt("--return")), opt("--return")) : null, wait, now, cli: io.cli ?? cli });
   const rebuild = opt("--rebuild-record");
@@ -690,6 +790,10 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     const why = pinRefusal(soSha, io.pin ?? readPin());
     if (why) throw new Error(`${cluster} refused: ${why}`);
   }
+  // mainnet: the pool buy's lookup table venue (pump Global's fee accounts), read on both RPCs before any key (step 6m)
+  const kitBuy = cluster === "mainnet" ? await import(pathToFileURL(path.join(REPO, "packages/kit/src/trade/solana/pool-buy.ts")).href) : null;
+  const tableVenue = kitBuy ? await kitBuy.readSolanaPumpCurveTableVenue([url, second0].map((u) => (m, p) => rpc(fetchFn, u, m, p))) : null;
+  if (tableVenue) log(`the table's venue: pump Global's fee recipient ${tableVenue.feeRecipient} and ${tableVenue.buybackFeeRecipients.length} buyback recipients, the same on ${url} and ${second0}`);
 
   const second = second0;
   let poolExists = false;
@@ -717,6 +821,10 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   log(`the run's keys are in ${dir} until the cleanup reads the funder empty`);
   const program = resumeId ? { id: resumeId } : newKey();
   const funder = newKey();
+  // the table's list: the kit's own, for this program's pool and its pages up to entry 2,047 of each tree
+  const tableList = tableVenue
+    ? [...new Set(kitBuy.solanaPoolBuyTableAccounts({ program: program.id, pool: poolAddress(program.id).address }, tableVenue, kitBuy.solanaPoolPages(program.id, 1024, 1024)))]
+    : null;
   const fileOf = (k, name) => {
     const f = path.join(dir, name);
     writeFileSync(f, JSON.stringify([...k.secret, ...k.pub]), { mode: 0o600 });
@@ -741,8 +849,9 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   const fields = {
     cluster, genesis_hash: genesis, rpc: new URL(url).host, program_id: program.id, programdata: programDataAddress(program.id), pool: poolAddress(program.id).address,
     so_len: so.length, so_sha256: soSha, build, ci_run: ci?.run ?? null, commit: ci?.commit ?? null, funder: funder.id, return_to: returnTo,
+    ...(tableList ? { table: null, table_addresses: tableList } : {}),
   };
-  const keys = { folder: path.basename(dir), state: "in use", why: [], sweep: `node contracts/pool-solana/scripts/deploy.mjs --sweep-kept ${path.relative(REPO, journalFile)} --url ${new URL(url).origin}` };
+  const keys = { folder: path.basename(dir), state: "in use", why: [], sweep: `node contracts/pool-solana/scripts/deploy.mjs --sweep-kept ${path.relative(REPO, journalFile)} --url ${new URL(url).origin}${cluster === "mainnet" ? " --mainnet" : ""}` };
   let stop = null;
   let stoppedAt = null;
   const stoppedRecord = () => {
@@ -802,15 +911,16 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       if (failAfter === step) throw new Error(`planted failure after ${step} (--fail-after)`);
     };
     const clock = { wait, now };
-    const send = (step, ixs) => sendAndConfirm(fetchFn, url, ixs, funder, [funder], { step, journal, ...clock });
-    const ops = chainOps({ fetchFn, url, second, funder, programId: program.id, keyFile: funderFile, returnTo, resume: !!resumeId, cli: runCli, journal, afterCli, ...clock });
+    const priced = (ixs) => (cluster === "mainnet" ? [priceIx(PRIORITY_MICRO_LAMPORTS), ...ixs] : ixs);
+    const send = (step, ixs) => sendAndConfirm(fetchFn, url, priced(ixs), funder, [funder], { step, journal, ...clock });
+    const ops = chainOps({ fetchFn, url, second, funder, programId: program.id, keyFile: funderFile, returnTo, resume: !!resumeId, cli: runCli, journal, afterCli, tableOf: () => fields.table ?? null, ...clock });
     // funded: the funder held the need and its funding was read; until then a stop keeps the keys (a transfer may land
     // at any time: a paste made after a terminal closed)
     let funded = false;
     stoppedRecord();
     try {
       const rent = async (n) => BigInt(await rpc(fetchFn, url, "getMinimumBalanceForRentExemption", [n]));
-      const need = await needOf(rent, so.length, { resume: !!resumeId, poolExists });
+      const need = await needOf(rent, so.length, { resume: !!resumeId, poolExists, mainnet: cluster === "mainnet", tableLen: tableList?.length ?? 0 });
       Object.assign(fields, { need: String(need.total), need_parts: Object.fromEntries(Object.entries(need.parts).map(([k, v]) => [k, String(v)])) });
       log(`program id ${program.id}`);
       log(`funder ${funder.id} needs ${need.total} lamports (${Object.entries(need.parts).map(([k, v]) => `${k} ${v}`).join(", ")}); the rest is swept back to ${returnTo}`);
@@ -836,7 +946,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
         let dep;
         try {
           dep = runCli(["program", "deploy", codeFile, "--program-id", programFile, "--upgrade-authority", funderFile, "--max-len", String(so.length),
-            "--final", "--use-rpc", "--output", "json", ...common]);
+            "--final", "--use-rpc", ...(cluster === "mainnet" ? ["--with-compute-unit-price", String(PRIORITY_MICRO_LAMPORTS)] : []), "--output", "json", ...common]);
         } finally {
           await afterCli("the solana CLI: program deploy (buffer, writes, deploy, SetAuthority)").catch((e) => log(`the CLI's transactions not read: ${e.message}`));
         }
@@ -862,6 +972,24 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       }
       check("init");
 
+      if (cluster === "mainnet") {
+        // step 6m: the pool buy's lookup table, made, read back, frozen, read back; no test deposit
+        const slot = BigInt(await rpc(fetchFn, url, "getSlot", [{ commitment: "finalized" }]));
+        const t = pda([funder.pub, le(slot, 8)], ALT_PROGRAM);
+        fields.table = t.address;
+        stoppedRecord();
+        const ix = tableIxs(funder.id, t.address, slot, t.bump, tableList);
+        await send(`lookup table: create and extend with ${tableList.length} addresses`, [ix.create, ix.extend]);
+        await tableReadBack(fetchFn, [url, second], t.address, tableList, funder.id, clock);
+        log(`lookup table ${t.address} holds the ${tableList.length} addresses on both RPCs; freezing it`);
+        check("table");
+        await send("lookup table: freeze (authority none)", [ix.freeze]);
+        await tableReadBack(fetchFn, [url, second], t.address, tableList, null, clock);
+        log(`lookup table ${t.address} is frozen (authority none) and holds exactly the list on both RPCs at finalized`);
+        stoppedRecord();
+        check("freeze");
+        result = { ...fields, at: new Date().toISOString() };
+      } else {
       // a fresh note: its nullifier and secret live only in this block
       const before = await settled(fetchFn, url, pool.address, undefined, clock);
       const size = Buffer.from(before.data.subarray(49, 57)).readBigUInt64LE();
@@ -901,6 +1029,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       stoppedRecord();
       check("deposit");
       result = { ...fields, at: new Date().toISOString() };
+      }
     } finally {
       // stopped (or failed) before the funding was read: sweep what is there at once (a KILL may follow a TERM in
       // 10 s), watch the balance WAITS.lateFunding for a transfer in flight, then sweep again; the keys are kept either
@@ -955,7 +1084,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     rmSync(journalFile, { force: true });
     log(`every transaction finalized; wrote ${path.relative(process.cwd(), outFile)} and removed its journal`);
     for (const t of result.txs) log(`tx ${t.step}: ${t.signature}`);
-    const rpcArg = cluster === "localnet" ? ` --rpc ${url},${url.replace("127.0.0.1", "localhost")} --deployment ${path.relative(process.cwd(), outFile)}` : "";
+    const rpcArg = cluster === "localnet" ? ` --rpc ${url},${url.replace("127.0.0.1", "localhost")} --deployment ${path.relative(process.cwd(), outFile)}` : cluster === "mainnet" ? ` --deployment ${path.relative(process.cwd(), outFile)}` : "";
     log(`next: node scripts/live-checks/pool-sol-deploy.mjs${rpcArg}${cluster === "devnet" ? " --record /tmp/pool-sol-deploy.devnet-answers.json --write-record" : ""}`);
     return result;
   } finally {

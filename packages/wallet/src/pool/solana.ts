@@ -196,6 +196,13 @@ export const SOL_POOLS: Readonly<Partial<Record<"devnet" | "mainnet", SolanaPool
   POOL_TESTNET ? { devnet: Object.freeze({ program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" }) } : {},
 );
 
+/** The mainnet deploy (card pool-sol-deploy-mainnet): the program id and the pool buy's lookup table, frozen (authority
+ *  none), each written here from contracts/pool-solana/deployments/mainnet.json, which the owner's paste
+ *  (contracts/pool-solana/scripts/mainnet-deploy.sh) writes once both RPCs read them back; null until then.
+ *  test/pool-sol-mainnet-pin.test.ts fails while the record is missing or this differs from it. SOL_POOLS.mainnet also
+ *  needs the relayer's mainnet fee payer, which every proof binds, so it stays unset until that is pinned beside this. */
+export const SOL_MAINNET_DEPLOY: { readonly program: string; readonly table: string } | null = null;
+
 export type SolanaPoolArgs = {
   /** The cluster's pin (SOL_POOLS[cluster]): the program id and the fee payer, never the helper's word. */
   pin: SolanaPoolPin;

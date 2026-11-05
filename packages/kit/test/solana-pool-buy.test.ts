@@ -19,7 +19,10 @@ import {
   buildSolanaPoolBuy,
   checkSolanaPoolBuy,
   readSolanaPoolBuyVenue,
+  readSolanaPumpCurveTableVenue,
   readSolanaReference,
+  solanaPoolBuyTableAccounts,
+  solanaPoolPages,
   solanaCompressPoolProof,
   solanaDecodePoolRelease,
   solanaEncodePoolRelease,
@@ -193,6 +196,40 @@ test("the venue is read on both providers at confirmed, and refused when they di
   await readSolanaPoolBuyVenue([spy(0), spy(1)], "pump-curve", fx.pump.mint, () => 2);
   await readSolanaReference([spy(0), spy(1)], { side: "buy", token: fx.pump.mint, amount: SPEND });
   assert.ok(seen.length >= 4 && seen.every((c) => c === "confirmed"), JSON.stringify(seen));
+});
+
+// card pool-sol-deploy-mainnet: the mainnet table is made before any buy names a mint, from pump Global alone, read at
+// finalized on two providers; it must hold exactly what a buy's full venue read puts in the table.
+test("the pump curve table venue, read from Global alone at finalized, gives the same table as a buy's venue", async () => {
+  const venue = await readSolanaPoolBuyVenue(providers("pump"), "pump-curve", fx.pump.mint, () => 2);
+  const seen: unknown[] = [];
+  // Global as each provider recorded it in the buy's read of [mint, curve, Global]
+  const listKey = (p: 0 | 1) => Object.keys(fx.pump.reads[p]).find((k) => JSON.parse(k).length === 3)!;
+  const GLOBAL = JSON.parse(listKey(0))[2] as string;
+  const globalOnly = (p: 0 | 1, edit?: (d: Buffer) => void): SolanaRpc => (async (m: string, params: readonly unknown[]) => {
+    assert.equal(m, "getMultipleAccounts");
+    assert.deepEqual(params[0], [GLOBAL]);
+    seen.push((params[1] as { commitment?: string }).commitment);
+    const full = structuredClone(fx.pump.reads[p][listKey(p)]);
+    const g = full.value[2];
+    if (edit) {
+      const d = Buffer.from(g.data[0], "base64");
+      edit(d);
+      g.data[0] = d.toString("base64");
+    }
+    return { context: full.context, value: [g] };
+  }) as SolanaRpc;
+  const tv = await readSolanaPumpCurveTableVenue([globalOnly(0), globalOnly(1)]);
+  assert.deepEqual(seen, ["finalized", "finalized"]);
+  const pages = solanaPoolPages(PROGRAM, 1024, 1024);
+  assert.deepEqual(solanaPoolBuyTableAccounts(cfg, tv, pages), solanaPoolBuyTableAccounts(cfg, venue, pages));
+  // the providers disagreeing on one byte, a fee recipient unset, a buyback recipient unset: refused
+  await assert.rejects(readSolanaPumpCurveTableVenue([globalOnly(0), globalOnly(1, (d) => void (d[100] ^= 1))]), /disagree on pump Global/);
+  const both = (edit: (d: Buffer) => void) => readSolanaPumpCurveTableVenue([globalOnly(0, edit), globalOnly(1, edit)]);
+  await assert.rejects(both((d) => void d.fill(0, 41, 73)), /no fee recipient/);
+  await assert.rejects(both((d) => void d.fill(0, 741 + 32 * 3, 741 + 32 * 4)), /buyback recipient is unset/);
+  const one = globalOnly(0);
+  await assert.rejects(readSolanaPumpCurveTableVenue([one, one]), /two different providers/);
 });
 
 // The eight buyback recipients pump's Global (at 741) and PumpSwap's GlobalConfig (at 643) both list, read on two
