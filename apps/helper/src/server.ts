@@ -441,6 +441,7 @@ export function handler(
         const mint = one("token");
         const swaps = chain !== null && Object.hasOwn(evmSwaps, chain) ? evmSwaps[chain as EvmChain | "solana"] : undefined;
         if (mint === null || (path === MARKET_TRADES ? swaps === undefined : path === MARKET_CANDLES ? chain !== "solana" && swaps === undefined : chain !== "solana")) return send(404, { error: { code: "not_found" } }, cors(req));
+        const began = performance.now();
         let read: Promise<DataAnswer>;
         if (path === MARKET_TRADES) {
           const limit = most("limit");
@@ -459,7 +460,10 @@ export function handler(
           .then((a) => {
             if (a.status === 429) return reply(throttled(a.retryAfterS ?? 1, undefined, a.why));
             if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
-            const h: Headers = { [HELPER_SOURCE_HEADER]: a.src ?? "", [HELPER_FETCHED_AT_HEADER]: new Date(a.asOfMs).toISOString() };
+            // card helper-ready-page-warm: the standard Server-Timing header, each upstream the read waited on and the
+            // helper's whole time, so a slow answer names its wait (a hold, a pace, a fallback, the search's turn)
+            const timing = `${a.timing === undefined ? "" : `${a.timing}, `}total;dur=${Math.round(performance.now() - began)}`;
+            const h: Headers = { [HELPER_SOURCE_HEADER]: a.src ?? "", [HELPER_FETCHED_AT_HEADER]: new Date(a.asOfMs).toISOString(), "Server-Timing": timing };
             reply({ status: 200, headers: h, body: a.body }); // node sends no body on a HEAD
           })
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
