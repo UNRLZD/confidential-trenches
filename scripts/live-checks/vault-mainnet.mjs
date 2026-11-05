@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { RPCS as TESTNET_RPCS, operatorProblems } from "./vault-skeleton.mjs";
 import { recorder } from "./delete-refund-readback.mjs";
 import { DEPLOYMENT as TESTNET_DEPLOYMENT, MAINNET_USDC, TESTNET_TOKEN, b58, readVault } from "./vault-testnet-t01.mjs";
+import { rpc as rpcWait, wait as pause } from "../ci/rpc-wait.mjs";
 
 const KEY = "vault-mainnet";
 // FastNEAR and dRPC on mainnet: two operators (near-rpc-operators.mjs), as contracts/vault/scripts/testnet-usdc.mjs
@@ -69,15 +70,11 @@ const isDecimal = (s) => typeof s === "string" && /^(0|[1-9]\d*)$/.test(s);
 /** A precommitment the vault takes: one canonical decimal below p. */
 export const isPrecommitment = (s) => isDecimal(s) && BigInt(s) < P;
 
-async function rpc(fetchFn, url, method, params) {
-  const r = await fetchFn(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: KEY, method, params }),
-  });
-  const json = await r.json();
+// read through scripts/ci/rpc-wait.mjs as the money gate reads: a rate limit is waited out, bounded, never an answer
+async function rpc(fetchFn, url, method, params, sleep = pause) {
+  const json = await rpcWait(fetchFn, url, method, params, sleep);
   if (json.error) throw Object.assign(new Error(`${json.error.name ?? "error"}: ${json.error.cause?.name ?? json.error.message ?? ""}`), { cause: json.error.cause?.name });
-  if (!json.result) throw new Error(`HTTP ${r.status}, no result`);
+  if (!json.result) throw new Error("no result");
   return json.result;
 }
 
@@ -101,16 +98,16 @@ const succeeded = (status) => status !== null && typeof status === "object" && (
 
 /** The storage_prepay tx `hash` by `signer` read back on `url`, each fact told to `say`: it must be exactly the write
  * printed, one storage_prepay of `precommitment` with `deposit` attached, from `signer` to `account`. */
-export async function readPrepay({ fetchFn, url, hash, signer, account, precommitment, deposit, say, tries = 10, wait = 3000 }) {
+export async function readPrepay({ fetchFn, url, hash, signer, account, precommitment, deposit, say, tries = 10, wait = 3000, sleep = pause }) {
   const at = `on ${url}`;
   let r;
   for (let i = 1; ; i++) {
     try {
-      r = await rpc(fetchFn, url, "tx", { tx_hash: hash, sender_account_id: signer, wait_until: "FINAL" });
+      r = await rpc(fetchFn, url, "tx", { tx_hash: hash, sender_account_id: signer, wait_until: "FINAL" }, sleep);
       break;
     } catch (e) {
       if (i >= tries || !/UNKNOWN_TRANSACTION|TIMEOUT/.test(e.message)) return say(false, `storage_prepay tx ${hash} by ${signer} ${at}: ${e.message}`);
-      await new Promise((ok) => setTimeout(ok, wait));
+      await sleep(wait);
     }
   }
   say(r.final_execution_status === "FINAL", `storage_prepay tx ${hash} by ${signer} is final ${at}: ${r.final_execution_status ?? "no status"}`);
@@ -137,7 +134,7 @@ export async function readPrepay({ fetchFn, url, hash, signer, account, precommi
   say(logged, `${account} logged one storage_prepaid ${JSON.stringify(want)} ${at}: ${events.length ? events.map((e) => JSON.stringify(e.data)).join(", ") : "no storage_prepaid event"}`);
 }
 
-export async function check({ network, account, deployment, fetchFn = fetch, rpcs = NETWORKS[network]?.rpcs, write = {}, wait = 3000 }) {
+export async function check({ network, account, deployment, fetchFn = fetch, rpcs = NETWORKS[network]?.rpcs, write = {}, wait = 3000, sleep = pause }) {
   const lines = [];
   let ok = true;
   const say = (good, text) => {
@@ -156,7 +153,7 @@ export async function check({ network, account, deployment, fetchFn = fetch, rpc
   say(deployment.account_id === account, `the record is ${account}'s: ${deployment.account_id}`);
   say(deployment.asset === net.token, `the record's asset is the ${network} token ${net.token}: ${deployment.asset}`);
   const configs = [];
-  for (const url of rpcs) configs.push((await readVault({ fetchFn, url, account, deployment, token: net.token, version: net.version, say })).config);
+  for (const url of rpcs) configs.push((await readVault({ fetchFn, url, account, deployment, token: net.token, version: net.version, say, sleep })).config);
 
   // the write, only on a vault whose every read passed
   const bytes = configs[0]?.deposit_storage_bytes;
@@ -183,7 +180,7 @@ export async function check({ network, account, deployment, fetchFn = fetch, rpc
     say(false, `the write's precommitment ${write.precommitment ?? "(none)"} is not one canonical decimal below p: --tx needs the --precommitment printed with the write`);
     return { ok, lines };
   }
-  for (const url of rpcs) await readPrepay({ fetchFn, url, hash, signer, account, precommitment: write.precommitment, deposit, say, wait });
+  for (const url of rpcs) await readPrepay({ fetchFn, url, hash, signer, account, precommitment: write.precommitment, deposit, say, wait, sleep });
   return { ok, lines, tx: hash };
 }
 

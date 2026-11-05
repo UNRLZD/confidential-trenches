@@ -1,0 +1,260 @@
+{
+ "good": {
+  "recorded": "2026-11-05T10:03:34.821Z",
+  "cases": {
+   "robinhood-publicnode-100": {
+    "cold": {
+     "ms": 52440,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 2592,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 3569,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2591,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 4788,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2165,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2201,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2155,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2273,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2286,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2282,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   },
+   "base-blastapi-5": {
+    "cold": {
+     "ms": 9824,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 1157,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 875,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1638,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1136,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1770,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1070,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 3222,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1089,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1669,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1233,
+      "code": "ok",
+      "lagHeads": 1
+     }
+    ]
+   }
+  },
+  "at": "5607feb, this Mac, the kit as on this card"
+ },
+ "bad": {
+  "recorded": "2026-11-05T10:05:57.776Z",
+  "cases": {
+   "robinhood-publicnode-100": {
+    "cold": {
+     "ms": 39453,
+     "code": "rpc_error",
+     "lagHeads": 6,
+     "message": "rpc_error: provider 1 answered the multicall with an error: historical state b9f0eecbc5e64d6bb80dabb67f1837714f9957c9b2896a1ec58ff5ba99c166fa is not available"
+    },
+    "quotes": [
+     {
+      "ms": 29191,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 2449,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 4253,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2324,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 2155,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 6489,
+      "code": "rpc_error",
+      "lagHeads": 4,
+      "message": "rpc_error: provider 1 answered the multicall with an error: historical state 825ad1bd1c89c16735abd486718898648dd29e6f696a44e0b6884f30ced68c7d is not available"
+     },
+     {
+      "ms": 2196,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2526,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2352,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 2600,
+      "code": "ok",
+      "lagHeads": 1
+     }
+    ]
+   },
+   "base-blastapi-5": {
+    "cold": {
+     "ms": 8036,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 598,
+      "code": "rpc_disagree",
+      "lagHeads": 0,
+      "message": "rpc_disagree: the scan provider's head 53541965 is more than 5 blocks past the agreed block 53541959"
+     },
+     {
+      "ms": 615,
+      "code": "rpc_disagree",
+      "lagHeads": 1,
+      "message": "rpc_disagree: the scan provider's head 53541966 is more than 5 blocks past the agreed block 53541960"
+     },
+     {
+      "ms": 578,
+      "code": "rpc_disagree",
+      "lagHeads": 1,
+      "message": "rpc_disagree: the scan provider's head 53541967 is more than 5 blocks past the agreed block 53541961"
+     },
+     {
+      "ms": 596,
+      "code": "rpc_disagree",
+      "lagHeads": 1,
+      "message": "rpc_disagree: the scan provider's head 53541968 is more than 5 blocks past the agreed block 53541962"
+     },
+     {
+      "ms": 2217,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 545,
+      "code": "rpc_disagree",
+      "lagHeads": 0,
+      "message": "rpc_disagree: the scan provider's head 53541971 is more than 5 blocks past the agreed block 53541965"
+     },
+     {
+      "ms": 703,
+      "code": "rpc_disagree",
+      "lagHeads": 1,
+      "message": "rpc_disagree: the scan provider's head 53541972 is more than 5 blocks past the agreed block 53541966"
+     },
+     {
+      "ms": 562,
+      "code": "rpc_disagree",
+      "lagHeads": 1,
+      "message": "rpc_disagree: the scan provider's head 53541973 is more than 5 blocks past the agreed block 53541967"
+     },
+     {
+      "ms": 1063,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 578,
+      "code": "rpc_disagree",
+      "lagHeads": 0,
+      "message": "rpc_disagree: the scan provider's head 53541976 is more than 5 blocks past the agreed block 53541970"
+     }
+    ]
+   }
+  },
+  "at": "e031ad4, this Mac, the kit before this card"
+ }
+}

@@ -13,7 +13,7 @@
 // nothing), Retry reads the lists again, and on the phone the bottom bar sits above the tab bar and the last tile
 // scrolls clear of it and the tile row scrolls sideways inside itself with every tile in reach (the page never does). Requests to any other host are
 // refused and listed. Draft words drawn are listed.
-//   node apps/terminal/test/token-page/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
+//   node apps/terminal/test/token-page/run.mjs [--shots <dir>] [--only <id,id>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -30,6 +30,8 @@ const args = process.argv.slice(2);
 const shotsAt = args.indexOf("--shots");
 const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : null;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
+const onlyAt = args.indexOf("--only");
+const ONLY = onlyAt >= 0 ? new Set(args[onlyAt + 1].split(",")) : null;
 
 const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
@@ -55,7 +57,13 @@ const STATES = [
   { id: "chart-empty", top: "pool", state: "ready", curve: false, candles: "empty" },
   { id: "chart-error", top: "pool", state: "ready", curve: false, candles: 503 },
   { id: "chart-loading", top: "pool", state: "ready", curve: false, candles: "hang" },
+  // the chart is live (card app-chart-live): the helper's own bars (own_from_s), read again every LIVE_MS; a planted
+  // trade moves the last bar within one tick, with no reload; and the same live reads answered 503 keep the bars drawn
+  { id: "chart-live", top: "pool", state: "ready", curve: false, candles: "live" },
+  { id: "chart-live-503", top: "pool", state: "ready", curve: false, candles: "live503" },
 ];
+/** The page's live read interval (src/screens/token/candles.ts LIVE_MS). */
+const LIVE_MS = 1_000;
 
 /** CANDLE_COUNT bars of a 15m walk ending at the run's clock, around `p` (a price string), as the helper's answer. */
 const CANDLE_COUNT = 160;
@@ -107,8 +115,20 @@ function helperAnswer(s, url, calls) {
     const row = live(s.top);
     if (url.searchParams.get("token") !== row.token) return json(404, { error: { code: "not_found" } });
     const tf = url.searchParams.get("tf");
-    const src = s.candles === "chain" ? "chain" : "geckoterminal";
-    const a = json(200, { tf, candles: s.candles === "empty" ? [] : candles(row.price_usd, tf), src, as_of_ms: Date.now() });
+    const own = s.candles === "live" || s.candles === "live503";
+    const src = s.candles === "chain" || own ? "chain" : "geckoterminal";
+    let bars = s.candles === "empty" ? [] : candles(row.price_usd, tf);
+    if (own && url.searchParams.get("limit") !== "500") {
+      // a live read: the newest bars, the last one moved by the planted trade once there is one
+      calls.live++;
+      if (s.candles === "live503") return json(503, { error: { code: "upstream" } });
+      bars = bars.slice(-Number(url.searchParams.get("limit")));
+      if (calls.plant !== null) {
+        const [t, o, h, l] = bars.at(-1);
+        bars[bars.length - 1] = [t, o, String(Math.max(Number(h), Number(calls.plant))), l, calls.plant, "999999"];
+      }
+    }
+    const a = json(200, { tf, candles: bars, src, ...(own && bars.length ? { own_from_s: bars[0][0] } : {}), as_of_ms: Date.now() });
     a.headers["x-helper-source"] = src;
     a.headers["access-control-expose-headers"] = "X-Helper-Source";
     return a;
@@ -148,6 +168,8 @@ async function openAt(browser, route, w, s, calls) {
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
+  const consoles = [];
+  page.on("console", (m) => m.type() === "error" && consoles.push(`${m.text()} (${m.location()?.url?.split("?")[0] ?? ""})`));
   await page.goto(`${APP_HOST}/${s.query ?? ""}`, { waitUntil: "load" });
   let f = null;
   for (const until = Date.now() + 8_000; !f && Date.now() < until; ) {
@@ -156,7 +178,7 @@ async function openAt(browser, route, w, s, calls) {
   }
   if (!f) throw new Error(`${w.name} ${s.id}: no APP_HOST frame inside the shell (top at ${page.url()})`);
   await f.waitForSelector(`main[data-route="token"] [data-token-page="${s.state}"]`, { timeout: 10_000 }).catch(() => {});
-  return { ctx, page, f, errors };
+  return { ctx, page, f, errors, consoles };
 }
 
 const dir = await build();
@@ -167,10 +189,11 @@ try {
   for (const w of WIDTHS) {
     const phone = w.name === "390";
     for (const s of STATES) {
+      if (ONLY && !ONLY.has(s.id)) continue;
       n++;
       const tag = `${s.id} @${w.name}`;
-      const calls = { lists: 0 };
-      const { ctx, page, f, errors } = await openAt(browser, route, w, s, calls);
+      const calls = { lists: 0, live: 0, plant: null };
+      const { ctx, page, f, errors, consoles } = await openAt(browser, route, w, s, calls);
       const sel = `main[data-route="token"] [data-token-page="${s.state}"]`;
       const drawn = await f.locator(sel).first().isVisible().catch(() => false);
       check(drawn, `${tag}: ${sel} not drawn at the route`);
@@ -236,7 +259,7 @@ try {
         }
         // the chart: its state, every fixture bar drawn, CoinGecko's label only over GeckoTerminal's bars, and the plot
         // the same size in every state (CLS 0)
-        const want = s.candles === undefined || s.candles === "chain" ? "ready" : s.candles === "empty" ? "empty" : s.candles === "hang" ? "loading" : "error";
+        const want = s.candles === undefined || s.candles === "chain" || s.candles === "live" || s.candles === "live503" ? "ready" : s.candles === "empty" ? "empty" : s.candles === "hang" ? "loading" : "error";
         await f.waitForSelector(`${box} [data-chart="${want}"]`, { timeout: 8_000 }).catch(() => {});
         const ch = await f.evaluate((box) => {
           const c = document.querySelector(`${box} [data-chart]`);
@@ -248,7 +271,45 @@ try {
           check(ch.bars === String(CANDLE_COUNT), `${tag}: the chart drew ${ch.bars} bars, want ${CANDLE_COUNT}`);
           check(ch.canvases > 0, `${tag}: no canvas in the chart`);
         }
-        check(ch.vendor === (want === "ready" && s.candles !== "chain"), `${tag}: CoinGecko's label ${ch.vendor ? "shown" : "not shown"}`);
+        check(ch.vendor === (want === "ready" && !["chain", "live", "live503"].includes(s.candles)), `${tag}: CoinGecko's label ${ch.vendor ? "shown" : "not shown"}`);
+        if (s.candles === "live" || s.candles === "live503") {
+          const read = () => f.evaluate((box) => {
+            const c = document.querySelector(`${box} [data-testid=chart-canvas]`);
+            return { bars: c?.getAttribute("data-bars"), last: c?.getAttribute("data-last") ?? "", close: document.querySelector(`${box} [data-k="lgC"] [data-dir]`)?.textContent ?? "" };
+          }, box);
+          const before = await read();
+          if (s.candles === "live") {
+            // a planted trade: the last bar's close 5% up; the chart's own last bar must show it within one tick
+            const [, c0] = before.last.split(":");
+            calls.plant = (Number(c0) * 1.05).toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
+            const t0 = Date.now();
+            let after = before;
+            while (Date.now() - t0 < 3 * LIVE_MS && !after.last.endsWith(`:${Number(calls.plant)}`)) {
+              await f.waitForTimeout(50);
+              after = await read();
+            }
+            const ms = Date.now() - t0;
+            check(after.last.endsWith(`:${Number(calls.plant)}`) && ms <= LIVE_MS + 1_000, `${tag}: the planted trade (close ${calls.plant}) reached the last bar in ${ms} ms (${after.last}), want within one tick (${LIVE_MS} ms and the read)`);
+            check(after.bars === before.bars && after.last.split(":")[0] === before.last.split(":")[0], `${tag}: the live read redrew the chart: ${before.bars} bars at ${before.last} -> ${after.bars} at ${after.last}`);
+            check(after.close !== before.close, `${tag}: the legend's close stayed ${before.close}`);
+            console.log(`${tag}: planted close ${calls.plant} drawn on the last bar in ${ms} ms; legend close ${before.close} -> ${after.close}; ${calls.live} live reads`);
+          } else {
+            await f.waitForTimeout(4 * LIVE_MS);
+            const after = await read();
+            check(after.last === before.last && after.bars === before.bars, `${tag}: a 503 moved the bars: ${before.last} -> ${after.last}`);
+            // reads at 1 s, then 2 s and 4 s later (the wait doubles): 2 in the first 4 s
+            check(calls.live >= 1 && calls.live <= 3, `${tag}: ${calls.live} live reads in ${4 * LIVE_MS} ms of 503s`);
+            console.log(`${tag}: ${calls.live} live reads answered 503 in ${4 * LIVE_MS} ms; bars kept at ${after.last}`);
+          }
+          check(errors.length === 0, `${tag}: page errors after the live reads: ${errors.join(" | ")}`);
+          // the page itself logs nothing; Chrome writes its own line for every response that is not a 2xx, which no page
+          // code can stop (the card's hand-back names the helper change that would): held to one per failed live read
+          const net = consoles.filter((c) => /^Failed to load resource: the server responded with a status of 503 .*\(https:\/\/api\.confidential\.unrealized\.trade\/v1\/market\/candles\)$/.test(c));
+          const own = consoles.filter((c) => !net.includes(c));
+          check(own.length === 0, `${tag}: console errors: ${own.join(" | ")}`);
+          check(net.length === (s.candles === "live503" ? calls.live : 0), `${tag}: ${net.length} browser network lines for ${calls.live} live reads`);
+          if (net.length) console.log(`${tag}: the browser's own network line, once per 503 live read: ${net.length}`);
+        }
         check(ch.h >= (phone ? 299 : 300) && ch.w > 300, `${tag}: the plot is ${Math.round(ch.w)}x${Math.round(ch.h)}`);
         if (s.top === "pool") plots.set(w.name, [...(plots.get(w.name) ?? []), `${s.id}:${Math.round(ch.w)}x${Math.round(ch.h)}`]);
         if (phone) {

@@ -21,6 +21,7 @@ import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
+import { rpc, wait } from "../ci/rpc-wait.mjs";
 
 const KEY = "vault-skeleton";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -186,20 +187,19 @@ export function wasmProblems(buf) {
   };
 }
 
-async function query(fetchFn, url, params) {
-  const r = await fetchFn(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: KEY, method: "query", params }),
-  });
-  const json = await r.json();
+// One view query on `url` at the final block, read through scripts/ci/rpc-wait.mjs as the money gate reads: a rate limit
+// (HTTP 429 with its Retry-After, or an RPC's rate-limit error) is waited out, bounded, and asked again, never read as the
+// vault's state; past the bound it throws "rate limited ...", which the check says as a BAD line naming the RPC. vault-
+// testnet-t01.mjs and vault-mainnet.mjs read through this one too.
+export async function query(fetchFn, url, params, sleep = wait) {
+  const json = await rpc(fetchFn, url, "query", params, sleep);
   if (json.error) throw new Error(`${json.error.name ?? "error"}: ${json.error.cause?.name ?? json.error.message ?? ""}`);
   if (json.result?.error) throw new Error(String(json.result.error).split("\n")[0].slice(0, 200));
-  if (!json.result) throw new Error(`HTTP ${r.status}, no result`);
+  if (!json.result) throw new Error("no result");
   return json.result;
 }
 
-export async function check({ deployment, account = deployment.account_id, fetchFn = fetch, rpcs = RPCS }) {
+export async function check({ deployment, account = deployment.account_id, fetchFn = fetch, rpcs = RPCS, sleep = wait }) {
   const lines = [];
   let ok = true;
   const say = (good, text) => {
@@ -211,14 +211,14 @@ export async function check({ deployment, account = deployment.account_id, fetch
   for (const url of rpcs) {
     const at = `on ${url}`;
     try {
-      const k = await query(fetchFn, url, { request_type: "view_access_key_list", account_id: account, finality: "final" });
+      const k = await query(fetchFn, url, { request_type: "view_access_key_list", account_id: account, finality: "final" }, sleep);
       const keys = Array.isArray(k.keys) ? k.keys : null;
       say(keys !== null && keys.length === 0, `${account} key list is [] ${at}: ${keys === null ? "no list" : `${keys.length} key(s)${keys.length ? ` (${keys.map((x) => { const p = x.access_key?.permission; return typeof p === "string" ? p : Object.keys(p ?? {})[0]; }).join(", ")})` : ""}`} at block ${k.block_height}`);
     } catch (e) {
       say(false, `${account} key list ${at}: ${e.message}`);
     }
     try {
-      const c = await query(fetchFn, url, { request_type: "view_code", account_id: account, finality: "final" });
+      const c = await query(fetchFn, url, { request_type: "view_code", account_id: account, finality: "final" }, sleep);
       const code = Buffer.from(c.code_base64, "base64");
       const sha = createHash("sha256").update(code).digest("hex");
       say(sha === deployment.wasm_sha256, `code sha256 ${sha} equals the deployment's ${deployment.wasm_sha256} ${at} (${code.length} B)`);
@@ -232,7 +232,7 @@ export async function check({ deployment, account = deployment.account_id, fetch
       say(false, `code ${at}: ${e.message}`);
     }
     try {
-      const r = await query(fetchFn, url, { request_type: "call_function", account_id: account, method_name: "config", args_base64: "e30=", finality: "final" });
+      const r = await query(fetchFn, url, { request_type: "call_function", account_id: account, method_name: "config", args_base64: "e30=", finality: "final" }, sleep);
       const cfg = JSON.parse(Buffer.from(r.result).toString("utf8"));
       const good = cfg.asset === TESTNET_USDC && deployment.asset === TESTNET_USDC && /^\d+$/.test(cfg.scope) && TESTNET_VERSION.test(cfg.version);
       say(good, `config() answers ${at}: asset ${cfg.asset}, scope ${cfg.scope}, version ${cfg.version}`);
@@ -241,7 +241,7 @@ export async function check({ deployment, account = deployment.account_id, fetch
     }
     try {
       const args = Buffer.from(JSON.stringify({ account_id: account })).toString("base64");
-      const r = await query(fetchFn, url, { request_type: "call_function", account_id: TESTNET_USDC, method_name: "storage_balance_of", args_base64: args, finality: "final" });
+      const r = await query(fetchFn, url, { request_type: "call_function", account_id: TESTNET_USDC, method_name: "storage_balance_of", args_base64: args, finality: "final" }, sleep);
       const bal = JSON.parse(Buffer.from(r.result).toString("utf8"));
       const good = bal !== null && /^\d+$/.test(bal.total ?? "") && BigInt(bal.total) > 0n;
       say(good, `${account} is registered on Circle's testnet USDC ${at}: ${bal === null ? "null" : `total ${bal.total}`} at block ${r.block_height}`);
@@ -258,9 +258,10 @@ export function recorder(fetchFn = fetch) {
   const wrapped = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
     const r = await fetchFn(url, init);
-    const json = await r.json();
+    // a 429 may carry no JSON: kept as null, with its headers (a Retry-After) handed on to the reader
+    const json = r.status === 429 ? null : await r.json();
     answers.push({ url, method, params, status: r.status, json });
-    return { ok: r.ok, status: r.status, json: async () => json };
+    return { ok: r.ok, status: r.status, headers: r.headers, json: async () => json };
   };
   return { answers, fetchFn: wrapped };
 }

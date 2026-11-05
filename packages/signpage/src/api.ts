@@ -45,6 +45,14 @@ export const REMEMBERED_IDS = 1024;
  * request again runs again (card signpage-deposit-quote-wire); every other answer is kept and given again.
  */
 export const RETRY_CODES: ReadonlySet<ErrorCode> = new Set(["busy", "down"]);
+/** The trade kinds, answered by running (Running): their answer may come past the kit client's window for them (10 s,
+ *  packages/kit/src/signpage/client.ts SIGNPAGE_TIMEOUT_MS), which the client drops, and the app then ends the trade on
+ *  its progress stages alone (apps/terminal/src/screens/trade/model.ts progress). So each one's end also goes out as a
+ *  progress stage after its answer: a refusal as "refused" (but id_reused: that id runs elsewhere), a result's end stage
+ *  as itself; never twice (card signpage-error-after-timeout). */
+export const ENDS_AS_PROGRESS: ReadonlySet<SignpageKind> = new Set(["buy", "pool.buy", "pool.sell", "pool.deposit"]);
+/** The stages that end a trade in the app (model.ts progress, route.ts fromStage). */
+const END_STAGES: ReadonlySet<Stage> = new Set(["filled", "part_filled", "not_landed", "refused"]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATE: SignpageKind = "state";
@@ -275,7 +283,8 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     const got = hostAnswer(host, m, { id, sha, progress, route });
     if (got && "running" in got) {
       answered.set(id, { sha, answer: null });
-      void got.after.catch(() => {}).then(() => give(id, sha, got.answer(), progress));
+      const ends = ENDS_AS_PROGRESS.has(m.type as SignpageKind);
+      void got.after.catch(() => {}).then(() => give(id, sha, got.answer(), progress, ends));
       return;
     }
     let own: HostAnswer<SignpageKind> | HostRefusal | null;
@@ -285,8 +294,9 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     } else own = got;
     give(id, sha, own, progress);
   };
-  // posts a host kind's answer (null: not_allowed), keeps it for a retry, then the id's progress events held for it
-  const give = (id: string, sha: string, own: HostAnswer<SignpageKind> | HostRefusal | null, progress: (stage: Stage) => void): void => {
+  // posts a host kind's answer (null: not_allowed), keeps it for a retry, then the id's progress events held for it,
+  // then, for a trade kind (`ends`), its end as a progress stage unless one of those was it
+  const give = (id: string, sha: string, own: HostAnswer<SignpageKind> | HostRefusal | null, progress: (stage: Stage) => void, ends = false): void => {
     const ok = own !== null && "result" in own ? own : null;
     const code: ErrorCode = own !== null && "error" in own && typeof own.error === "string" ? own.error : "not_allowed";
     const answer: SignpageAnswer = ok ? { v: 1, id, ok: true, result: ok.result } : { v: 1, id, ok: false, error: { code } };
@@ -300,6 +310,10 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     const stages = held.get(id) ?? [];
     held.delete(id);
     for (const stage of stages) progress(stage);
+    if (ends) {
+      const end = ok ? (ok.result as { stage?: unknown }).stage : code === "id_reused" ? null : "refused";
+      if (typeof end === "string" && END_STAGES.has(end as Stage) && !stages.includes(end as Stage)) progress(end as Stage);
+    }
     if (own && "then" in own) own.then?.();
   };
 

@@ -36,6 +36,7 @@ export const LIVE_CHECKS = [
   "helper-robinhood-search-ahead",
   "evm-buy-hookdata-fee",
   "helper-tape-4337-trader",
+  "helper-live-bars-no-503",
 ];
 
 // `{commit}` is the deployed commit

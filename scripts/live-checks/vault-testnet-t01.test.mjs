@@ -15,6 +15,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { check, networkProblems, DEPLOYMENT, TESTNET_TOKEN, MAINNET_USDC, CIRCLE_TESTNET_USDC } from "./vault-testnet-t01.mjs";
+// the reads' waits (a rate limit's, the pacing between asks) recorded as asked, never slept, so replays run at once
+const NOSLEEP = async () => {};
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const load = (f) => JSON.parse(readFileSync(path.join(HERE, f), "utf8"));
@@ -53,7 +55,7 @@ test("recorded good answer: the deployed vault, keys [] on two RPCs, its code, c
   const answers = good();
   assert.equal(accountOf(answers), deployment.account_id);
   assert.equal(new Set(answers.map((a) => a.url)).size, 2);
-  const r = await check({ deployment, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.lines.length, 24);
   assert.equal(r.lines.filter((l) => /^ok  not the out-of-gas test build on .*: no test mark$/.test(l)).length, 2);
@@ -69,7 +71,7 @@ test("recorded good answer: the deployed vault, keys [] on two RPCs, its code, c
 
 test("recorded bad answer: an ordinary account with one full-access key: FAIL on its key list", async () => {
   const answers = load("vault-testnet-t01.bad-key.answers.json");
-  const r = await check({ deployment, account: accountOf(answers), fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, account: accountOf(answers), fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(bads(r).filter((l) => /^BAD \S+ key list is \[\] on .*: 1 key\(s\) \(FullAccess\)/.test(l)).length, 2, r.lines.join("\n"));
 });
@@ -77,7 +79,7 @@ test("recorded bad answer: an ordinary account with one full-access key: FAIL on
 test("recorded bad answer: another keyless vault with another code hash: FAIL on its code hash", async () => {
   const answers = load("vault-testnet-t01.bad-code.answers.json");
   assert.equal(accountOf(answers), "vault.bf-vs-20261101t012200.testnet");
-  const r = await check({ deployment, account: accountOf(answers), fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, account: accountOf(answers), fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(r.lines.filter((l) => /^ok  \S+ key list is \[\]/.test(l)).length, 2, "keyless, so only the code and what follows from it fail");
   assert.equal(bads(r).filter((l) => / code hash GGfTdwuLbonERu3vKnpLF828eyWZ4DxS24kpLp67PmSn equals the record's /.test(l)).length, 2, r.lines.join("\n"));
@@ -88,7 +90,7 @@ test("recorded bad answer: another keyless vault with another code hash: FAIL on
 test("bad answer: a full-access key in the vault's key list, all else the good answer: FAIL on the key list only", async () => {
   const key = { public_key: "ed25519:EhjW27bK6ojYS7oWrNQjTjgKgdv8QwfqVQVzSD2YxR51", access_key: { nonce: 1, permission: "FullAccess" } };
   const answers = good().map((a) => (a.params.request_type === "view_access_key_list" ? { ...a, json: { ...a.json, result: { ...a.json.result, keys: [key] } } } : a));
-  const r = await check({ deployment, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(bads(r).length, 2, r.lines.join("\n"));
   for (const l of bads(r)) assert.match(l, /key list is \[\] on .*: 1 key\(s\) \(FullAccess\)/);
@@ -96,18 +98,18 @@ test("bad answer: a full-access key in the vault's key list, all else the good a
 
 test("bad answer: config() names another asset (Circle's testnet USDC), all else the good answer: FAIL on config() only", async () => {
   const answers = withView(good(), "config", (c) => ({ ...c, asset: CIRCLE_TESTNET_USDC }));
-  const r = await check({ deployment, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(bads(r).length, 2, r.lines.join("\n"));
   for (const l of bads(r)) assert.ok(l.startsWith("BAD config() answers on ") && l.includes(`asset ${CIRCLE_TESTNET_USDC}`), l);
   // and a record that copied that asset fails too: the asset is pinned in the check
-  const r2 = await check({ deployment: { ...deployment, asset: CIRCLE_TESTNET_USDC }, fetchFn: replay(answers) });
+  const r2 = await check({ sleep: NOSLEEP, deployment: { ...deployment, asset: CIRCLE_TESTNET_USDC }, fetchFn: replay(answers) });
   assert.ok(bads(r2).some((l) => l.startsWith("BAD the record's asset ")));
 });
 
 test("bad answer: storage_balance_of(vault) answers null (no registration), all else the good answer: FAIL on the registration only", async () => {
   const answers = withView(good(), "storage_balance_of", () => null);
-  const r = await check({ deployment, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(bads(r).length, 2, r.lines.join("\n"));
   for (const l of bads(r)) assert.match(l, /is registered on the testnet token on .*: null at block/);
@@ -115,11 +117,11 @@ test("bad answer: storage_balance_of(vault) answers null (no registration), all 
 
 test("bad record: another code hash or sha256 in the record: FAIL", async () => {
   const other = "e2e280869bdff90ad54f7be2bc1181dcef6e229eaa8f17b99f2e8bc33a422037";
-  const r = await check({ deployment: { ...deployment, wasm_sha256: other }, fetchFn: replay(good()) });
+  const r = await check({ sleep: NOSLEEP, deployment: { ...deployment, wasm_sha256: other }, fetchFn: replay(good()) });
   assert.equal(r.ok, false);
   assert.ok(bads(r).some((l) => l.startsWith("BAD the record's code_hash ")));
   assert.equal(bads(r).filter((l) => l.startsWith("BAD code sha256 ")).length, 2);
-  const r2 = await check({ deployment: { ...deployment, code_hash: "GGfTdwuLbonERu3vKnpLF828eyWZ4DxS24kpLp67PmSn" }, fetchFn: replay(good()) });
+  const r2 = await check({ sleep: NOSLEEP, deployment: { ...deployment, code_hash: "GGfTdwuLbonERu3vKnpLF828eyWZ4DxS24kpLp67PmSn" }, fetchFn: replay(good()) });
   assert.equal(r2.ok, false);
   assert.equal(bads(r2).filter((l) => / code hash CXer\S+ equals the record's GGfTdwuL/.test(l)).length, 2, r2.lines.join("\n"));
 });
@@ -127,7 +129,7 @@ test("bad record: another code hash or sha256 in the record: FAIL", async () => 
 test("the same answers with one RPC: FAIL (two RPCs are required)", async () => {
   const answers = good();
   const one = [...new Set(answers.map((a) => a.url))].slice(0, 1);
-  const r = await check({ deployment, fetchFn: replay(answers), rpcs: one });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers), rpcs: one });
   assert.equal(r.ok, false);
   assert.match(r.lines[0], /^BAD only 1 RPC\(s\): https:\/\/test\.rpc\.fastnear\.com \(fastnear\); want two of two operators$/);
   assert.equal(bads(r).length, 1, r.lines.join("\n"));
@@ -137,7 +139,7 @@ test("the same answers with one RPC: FAIL (two RPCs are required)", async () => 
 test("the same answers from two hosts of one operator (FastNEAR twice): FAIL on the operators only", async () => {
   const NEAR_ORG = "https://rpc.testnet.near.org";
   const answers = good().map((a) => (a.url === "https://near-testnet.drpc.org" ? { ...a, url: NEAR_ORG } : a));
-  const r = await check({ deployment, fetchFn: replay(answers), rpcs: ["https://test.rpc.fastnear.com", NEAR_ORG] });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers), rpcs: ["https://test.rpc.fastnear.com", NEAR_ORG] });
   assert.equal(r.ok, false);
   assert.deepEqual(bads(r), ["BAD only 1 operator(s) in https://test.rpc.fastnear.com (fastnear), https://rpc.testnet.near.org (fastnear); want two testnet operators"], r.lines.join("\n")); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
   assert.equal(r.lines.filter((l) => l.startsWith("ok ")).length, 24);

@@ -10,7 +10,7 @@
  *  Charts, Copyright (c) 2019 TradingView, Inc. https://www.tradingview.com */
 import { dispose, init } from "klinecharts";
 import type { Chart, DeepPartial, KLineData, PeriodType, Styles } from "klinecharts";
-import { priceText, volumeText } from "./candles.ts";
+import { priceText, sameBar, volumeText } from "./candles.ts";
 import type { Bar, ChartTf } from "./candles.ts";
 
 const PERIOD: Record<ChartTf, { type: PeriodType; span: number }> = {
@@ -78,24 +78,54 @@ export function mountChart(el: HTMLElement, phone: boolean, onBar: (b: KLineData
     const k = (d as { kLineData?: KLineData } | undefined)?.kLineData;
     if (k) onBar(k);
   });
-  // one loader for the chart's life: it hands over the bars `drawBars` set, all at once, with no older page to ask for
-  const drawn: Drawn = { chart, bars: [] };
-  chart.setDataLoader({ getBars: ({ callback }) => callback(drawn.bars.map((b) => ({ ...b })), false) });
+  // one loader for the chart's life: it hands over the bars `drawBars` set, all at once, with no older page to ask for,
+  // and keeps the library's live feed (subscribeBar, called after each full load) for liveBars
+  const drawn: Drawn = { chart, bars: [], key: null, push: null };
+  chart.setDataLoader({
+    getBars: ({ callback }) => callback(drawn.bars.map((b) => ({ ...b })), false),
+    subscribeBar: ({ callback }) => {
+      drawn.push = callback;
+    },
+    unsubscribeBar: () => {
+      drawn.push = null;
+    },
+  });
   return drawn;
 }
 
-/** A mounted chart and the bars it draws. */
+/** A mounted chart, the bars it draws and what they were drawn for; `push` is the library's live feed while it holds
+ *  a full load (a bar of the newest's time replaces it, a newer one is appended). */
 export interface Drawn {
   chart: Chart;
   bars: readonly Bar[];
+  key: string | null;
+  push: ((k: KLineData) => void) | null;
 }
 
 /** Replaces the chart's bars with `bars` at `tf`: the period first (a new timeframe reloads), then the symbol, whose
  *  change always reloads, so the chart reads the new bars once more with the right precision. */
 export function drawBars(d: Drawn, ticker: string, tf: ChartTf, bars: readonly Bar[], precision: number): void {
   d.bars = bars;
+  d.key = `${ticker}|${tf}|${precision}`;
   d.chart.setPeriod(PERIOD[tf]);
   d.chart.setSymbol({ ticker, pricePrecision: precision, volumePrecision: 0 });
+}
+
+/** Draws `bars` (card app-chart-live): when the chart already draws this ticker, timeframe and precision and the bars
+ *  differ only from its newest bar on (the fold's usual change: the last bar updated, new bars after it), each of
+ *  those goes through the library's live feed, so the last candle and the price mark move and the view keeps its
+ *  scroll and zoom; any other change draws them all again (drawBars). Returns whether it drew them all again. */
+export function liveBars(d: Drawn, ticker: string, tf: ChartTf, bars: readonly Bar[], precision: number): boolean {
+  const old = d.bars;
+  const k = old.length - 1;
+  const tail = d.key === `${ticker}|${tf}|${precision}` && d.push !== null && k >= 0 && bars.length >= old.length && bars[k]!.timestamp === old[k]!.timestamp && old.slice(0, k).every((b, i) => b === bars[i] || sameBar(b, bars[i]!));
+  if (!tail) {
+    drawBars(d, ticker, tf, bars, precision);
+    return true;
+  }
+  d.bars = bars;
+  for (const b of bars.slice(k)) d.push!({ ...b });
+  return false;
 }
 
 export const unmountChart = (el: HTMLElement): void => dispose(el);
