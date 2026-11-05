@@ -489,7 +489,7 @@ test("dry: the set is simulated on both providers and no path is called", async 
   }
 });
 
-// ---- the Opus review of 694ecb9 (R1-R3 ported from its repros)
+// ---- the review of 694ecb9 (R1-R3 ported from its repros)
 
 test("High (R1): a tx that landed at 1 s and left the status cache is read with searchTransactionHistory and ends filled, never expired", async (t) => {
   t.after(() => resetTimers(mock.timers));
@@ -659,7 +659,7 @@ test("a provider that once read the tx landed never calls it dead, even when a l
   assert.equal((await h.done).txs[0]!.state, "unknown");
 });
 
-// ---- the Opus re-check of 8bdcb6c (N1 ported from its repro2)
+// ---- the re-check of 8bdcb6c (N1 ported from its repro2)
 
 test("Medium (N1): a false isBlockhashValid from a provider that never read the hash as valid is not expiry", async (t) => {
   t.after(() => resetTimers(mock.timers));
@@ -803,7 +803,7 @@ test("a later valid read clears an earlier expired one: a provider that reads th
   assert.equal((await h.done).txs[0]!.state, "unknown");
 });
 
-// ---- the Opus round 3 review of 2dc2cc2 (L-a ported from its repro3 and repro3c)
+// ---- the round 3 review of 2dc2cc2 (L-a ported from its repro3 and repro3c)
 
 function laProvider(refuseValid: boolean): SolanaRpc {
   // Both status caches have dropped the landing (a phone suspended for over 64 s); the history has it.
