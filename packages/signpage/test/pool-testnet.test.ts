@@ -193,6 +193,45 @@ test("the next buy's proof: a landed deposit starts one proof, a second deposit 
   assert.deepEqual((await states(ns)).sort(), ["UNSPENT", "UNSPENT"]);
 });
 
+test("card signpage-pool-pins: a page that loads with the pool's notes landed opens the queue on a state read; its proofs reach ready() and the watchers hear the pass", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const prover = signalsProver();
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()] });
+  let heard = 0;
+  t.watch(() => heard++);
+  const proves = () => prover.log.filter((x) => x.startsWith("prove")).length;
+  // no note of the pool: a state read opens no queue
+  await t.stateRead();
+  assert.equal(await t.ready(), undefined, "no queue open: no ready list, so state.pools has no ready");
+  assert.equal(proves(), 0);
+  // a note landed before this page loaded (UNSPENT, no landing hook here): the state read opens the queue and proves it
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs(); // passes run one after another: this one waits for the state read's
+  assert.equal(proves(), 1);
+  const ready = await t.ready();
+  assert.equal(ready?.length, 1);
+  assert.equal(ready![0]!.poolId, pool.id);
+  assert.equal(heard, 1, "the pass that made the proof is heard; the empty pass after it is not");
+  // what state.pools then carries for it (src/pools.ts): the chunk ready
+  const { withPools } = await import("../src/pools.ts");
+  const { solanaBalancePool } = await import("../../wallet/src/pool/balances.ts");
+  const { stateOf } = await import("../src/state.ts");
+  const out = await withPools(stateOf(true, { source: "code", code_saved: true }, []), async () => ns.list(), [solanaBalancePool(pool.id, SCOPE)], ready);
+  assert.deepEqual(out.pools, [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01" }]);
+  // a state read while the queue is open runs a pass (the epoch's proofs made again when due), one at a time
+  const a = t.stateRead();
+  await a;
+  await t.proofs();
+  assert.equal(proves(), 1, "nothing new to prove in the same epoch");
+  await t.signedOut();
+  assert.equal(await t.ready(), undefined, "signed out: no queue, no ready list");
+});
+
 test("the devnet pool's relay fee: GET /v1/pool/fee on the helper for the pool and the epoch; another status or an oversized answer is refused", async () => {
   // GET https://api.confidential.unrealized.trade/v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef, 3 Nov 21:07Z, its
   // shape (apps/helper/src/pool/fee.ts PoolFeeAnswer), here for the pinned pool
