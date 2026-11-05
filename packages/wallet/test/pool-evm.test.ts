@@ -1073,7 +1073,7 @@ test("the pool's sync pages under a cap in words never read before (Tenderly's '
   }
 });
 
-test("EVM_TRANSFER_RPCS: every network two keyless https providers of two operators, none an operator of the kit's Base and Robinhood providers, and no dRPC on Base Sepolia (code 19 at 10 to 101 blocks, 5 Nov)", () => {
+test("EVM_TRANSFER_RPCS: every network two keyless https providers of two operators, none an operator of the kit's providers but the two named exceptions, no Pocket on Robinhood and no dRPC on Base Sepolia (5 Nov)", () => {
   // an operator: the host's last two labels (tenderly.co, pocket.network, thirdweb.com, daybreak-rpc.network, drpc.org)
   const operator = (u: string) => new URL(u).hostname.split(".").slice(-2).join(".");
   assert.deepEqual(Object.keys(EVM_TRANSFER_RPCS).sort(), Object.keys(EVM_CHAIN_IDS).sort());
@@ -1085,8 +1085,14 @@ test("EVM_TRANSFER_RPCS: every network two keyless https providers of two operat
     const rpcOf = (url: string): EvmRpc => Object.assign(async () => null, { url });
     assert.equal(solanaSameProvider(rpcOf(urls[0]!), rpcOf(urls[1]!)), false, `${net}: two providers to the kit`);
   }
-  for (const chain of ["base", "robinhood"] as const) {
-    for (const u of EVM_TRANSFER_RPCS[chain]) for (const p of evmPoolVenues()[chain].providers ?? assert.fail(`${chain}: the kit pins no providers`)) assert.notEqual(operator(u), operator(p), `${chain}: ${u} is an operator of the kit's ${p}`);
+  // the two exceptions, each the doc comment's: Robinhood's own on Robinhood (no keyless third operator answers every
+  // read there: Pocket's backends refuse a filter with no address) and dRPC on Robinhood testnet (no keyless third)
+  const shared: Record<string, string[]> = { base: [], robinhood: ["robinhood.com"], "base-sepolia": [], "robinhood-testnet": ["drpc.org"] };
+  for (const chain of Object.keys(EVM_TRANSFER_RPCS) as (keyof typeof EVM_TRANSFER_RPCS)[]) {
+    const kit = evmPoolVenues()[chain].providers ?? assert.fail(`${chain}: the kit pins no providers`);
+    const both = EVM_TRANSFER_RPCS[chain].map(operator).filter((o) => kit.some((p) => operator(p) === o));
+    assert.deepEqual(both, shared[chain], `${chain}: the operators the Transfer pair shares with the kit's providers`);
   }
   assert.ok(!EVM_TRANSFER_RPCS["base-sepolia"].some((u) => operator(u) === "drpc.org"), "base-sepolia.drpc.org fails a W's read");
+  assert.ok(!EVM_TRANSFER_RPCS.robinhood.some((u) => operator(u) === "pocket.network"), "robinhood.api.pocket.network's backends refuse a filter with no address");
 });

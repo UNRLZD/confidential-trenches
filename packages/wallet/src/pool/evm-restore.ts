@@ -249,7 +249,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
       continue;
     }
     try {
-      const tokens = await evmRetryLag(() => evmTokensSentTo(a.walletRpcs, s.w, s.block, r, page, a.signal), sleep, a.signal);
+      const tokens = await evmRetryLag(() => evmTokensSentTo(a.walletRpcs, s.w, s.block, r, page, a.signal, sleep), sleep, a.signal);
       wallets[k]!.tokens = s.token === null || tokens.includes(s.token) ? tokens : [...tokens, s.token].sort();
     } catch (e) {
       a.signal?.throwIfAborted();

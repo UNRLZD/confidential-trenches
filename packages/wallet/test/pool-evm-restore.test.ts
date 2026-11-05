@@ -10,7 +10,7 @@ import { solanaJsonRpc, VaultTree, vaultLabelOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { refKey } from "../src/notes/store.ts";
-import { EVM_LAG_TRIES, EVM_POOL_EVENTS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
+import { EVM_LAG_TRIES, EVM_LOG_PAGE_BLOCKS, EVM_LOG_THROTTLE_TRIES, EVM_LOG_THROTTLE_WAIT_MAX_MS, EVM_POOL_EVENTS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmTokensSentTo, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
 import { evmRestore, evmRestoreNotes } from "../src/pool/evm-restore.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -684,6 +684,10 @@ const UNKNOWN_CAPS: [string, number, Record<string, unknown>][] = [
   ["base.api.pocket.network over 500 blocks", 200, { code: -32602, message: "invalid argument 0: block range exceeds maximum 500" }],
   ["rpc-robinhood.blockmachine.io over 10,000 blocks", 200, { code: -32602, message: "block range exceeds maximum allowed (max=10000, requested=100000)" }],
   ["1rpc.io/base over 50 blocks", 200, { code: -32602, message: "eth_getLogs is limited to 0 - 50 blocks range" }],
+  // a -32005 that names its cap stays a cap, never a throttle (./evm.ts throttled): the exact words read, so a
+  // provider's new wording shows here as a test diff
+  ["8453.rpc.thirdweb.com over 1,000 blocks (5 Nov 13:3xZ)", 200, { code: -32005, message: "Log response size exceeded. Maximum allowed number of requested blocks is 1000" }],
+  ["a results cap (the team's data run, 2 Nov)", 200, { code: -32005, message: "query exceeds max results 20000, retry with the range 52898562-52899295" }],
 ];
 
 test("R1 a provider's cap in words never read before (Tenderly, Robinhood's own, Pocket, blockmachine, 1RPC; read live 5 Nov) is paged under: every W's tokens read, every block of each W read", async () => {
@@ -722,4 +726,114 @@ test("R2 a provider that refuses every page, one block too, in any words, is tha
   assert.ok(sizes.every((n) => n >= 1) && sizes.includes(1), `pages: ${sizes}`);
   assert.deepEqual(r.wallets.find((w) => w.w === W1)!.tokens, [TY]);
   assert.equal(r.notes.length, 10);
+});
+
+// ---- the review of card wallet-restore-transfer-rpcs, MEDIUM: a throttle is no range cap ----
+
+/** The kit's client with its retry (the signing page's pageRpc is solanaJsonRpc with SOLANA_RPC_RETRY): here a 1 ms
+ *  deadline, so a throttle ends the call at once as the client's SolanaRpcTransportError, its Retry-After kept. */
+const viaRetryClient = (url: string, mock: EvmRpc, bad: (b: Body) => Response | undefined): EvmRpc =>
+  solanaJsonRpc(url, {
+    retry: { deadlineMs: 1, backoffMs: 1 },
+    fetch: async (_u, init) => {
+      const b = JSON.parse(init.body as string) as Body;
+      return bad(b) ?? new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: await mock(b.method, b.params) }));
+    },
+  });
+/** Real throttles of an eth_getLogs, each as the provider answers it: thirdweb's HTTP 429 with Retry-After and its
+ *  "-32005" (the review's reads, 5 Nov), a throttle code of the kit's (-32029), and an answer that never comes. */
+const THROTTLES: [string, (b: Body) => Response | Promise<Response>][] = [
+  ["HTTP 429, Retry-After 9", () => new Response("rate limited", { status: 429, headers: { "retry-after": "9" } })],
+  ["thirdweb's -32005 \"Rate limit exceeded\" in a 200", (b) => new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32005, message: "Rate limit exceeded" } }))],
+  ["thirdweb's HTTP 429 \"Rate limit exceeded\"", () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32005, message: "Rate limit exceeded" } }), { status: 429, headers: { "retry-after": "9" } })],
+  ["-32029 in a 200", (b) => new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32029, message: "rate limit" } }))],
+  ["no answer in time", () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"))],
+];
+
+test("T1 a throttle (429 with Retry-After, -32005, a kit throttle code, a timeout; through the kit's client with and without its retry) keeps the page: the same page again after the wait, every W's tokens and every block read", async () => {
+  const { world, W0, W1 } = seeded();
+  const want = await restore(pair(world, world), wpair(world));
+  for (const [name, throttle] of THROTTLES) {
+    for (const [client, via] of [["plain", viaKitClient], ["retry", viaRetryClient]] as const) {
+      const sizes: number[] = [], pages: { w: string; from: number; to: number }[] = [], waits: number[] = [];
+      let n = 0;
+      // every other Transfer call throttled: the first try of each page, the second answered
+      const bad = (b: Body) => {
+        if (b.method !== "eth_getLogs" || (b.params[0] as { address?: string }).address !== undefined) return undefined;
+        const { from, to } = span(b);
+        sizes.push(to - from + 1);
+        return n++ % 2 === 0 ? (throttle(b) as Response) : undefined;
+      };
+      const label = `${name} (${client})`;
+      const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), via("https://d.example", answered(rpc(world), pages, "https://m.example"), bad)], { sleep: async (ms) => void waits.push(ms) });
+      assert.deepEqual(r.wallets, want.wallets, label);
+      // each W's one page (W1's 40..100, W0's 20..100) throttled once, then the same page answered: never a smaller one
+      assert.ok(sizes.length >= 4 && sizes.every((x, i) => i % 2 === 0 ? x === sizes[i + 1] : true) && sizes.every((x) => x === 61 || x === 81), `${label}: never a smaller page: ${sizes}`);
+      tiles(pages, W0, 20, 100);
+      tiles(pages, W1, 40, 100);
+      assert.ok(waits.length >= 2 && waits.every((ms) => ms >= 1_000 && ms <= EVM_LOG_THROTTLE_WAIT_MAX_MS), `${label}: waits ${waits}`);
+      if (name.startsWith("HTTP 429") && client === "retry") assert.ok(waits.includes(9_000), `${label}: the provider's Retry-After waited: ${waits}`);
+    }
+  }
+});
+
+test("T2 throttles past the bound end that W unread, never an empty list: EVM_LOG_THROTTLE_TRIES tries of one page at its size, each wait bounded, every other W and note read", async () => {
+  for (const [name, throttle] of THROTTLES) {
+    const { world, W0, W1 } = seeded();
+    const sizes: number[] = [], waits: number[] = [];
+    const always = (b: Body) => {
+      if (!namesW(b, W0)) return undefined;
+      const { from, to } = span(b);
+      sizes.push(to - from + 1);
+      return throttle(b) as Response;
+    };
+    const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), always)], { sleep: async (ms) => void waits.push(ms) });
+    const w0 = r.wallets.find((w) => w.w === W0)!;
+    assert.equal(w0.tokens, null, name);
+    assert.ok(w0.error, name);
+    assert.equal(sizes.length, EVM_LOG_THROTTLE_TRIES, `${name}: ${sizes}`);
+    assert.ok(sizes.every((x) => x === sizes[0]), `${name}: never a smaller page: ${sizes}`);
+    assert.ok(waits.filter((ms) => ms >= 1_000).length === EVM_LOG_THROTTLE_TRIES - 1 && waits.every((ms) => ms <= EVM_LOG_THROTTLE_WAIT_MAX_MS), `${name}: waits ${waits}`);
+    assert.deepEqual(r.wallets.find((w) => w.w === W1)!.tokens, [TY], name);
+    assert.equal(r.notes.length, 10, name);
+  }
+});
+
+// ---- the review of card wallet-restore-transfer-rpcs, LOW: the abort guard ----
+
+test("T3 RPC 0 fails at once and RPC 1's call rejects after the abort with cap words: RPC 1's page stays 10,000, the next W's first page on it 10,000 blocks", async () => {
+  const B = (n: bigint) => ({ number: n, hash: `0x${n.toString(16).padStart(64, "0")}`, timestamp: n, baseFeePerGas: null });
+  const anchors = { fin: B(40_000n), anchor: B(50_000n) };
+  const firsts: number[] = [];
+  let fail0 = true;
+  let failed!: () => void;
+  const zeroFailed = new Promise<void>((r) => (failed = r));
+  const rpc0: EvmRpc = Object.assign(async (m: string) => {
+    if (m !== "eth_getLogs") throw new Error(m);
+    if (fail0) {
+      setTimeout(failed, 0);
+      throw new Error("RPC error -32000: the node is down");
+    }
+    return [];
+  }, { url: "https://c.example" });
+  let seen = 0;
+  const rpc1: EvmRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m !== "eth_getLogs") throw new Error(m);
+    const f = p[0] as { fromBlock: string; toBlock: string };
+    if (seen++ === 0) {
+      // answered only after RPC 0 failed and the read was stopped: words a cap would give
+      await zeroFailed;
+      await new Promise((r) => setTimeout(r, 5));
+      throw new Error("RPC error -32602: query exceeds max block range 2000");
+    }
+    firsts.push(Number(BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n));
+    return [];
+  }, { url: "https://d.example" });
+  const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
+  await assert.rejects(evmTokensSentTo([rpc0, rpc1], `0x${"11".repeat(20)}`, 1n, anchors, page), /node is down/);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(page[1], 10_000n, "the stopped read never shrank RPC 1's page");
+  fail0 = false;
+  assert.deepEqual(await evmTokensSentTo([rpc0, rpc1], `0x${"22".repeat(20)}`, 1n, anchors, page), []);
+  assert.equal(firsts[0], 10_000, "the next W's first page on RPC 1");
 });

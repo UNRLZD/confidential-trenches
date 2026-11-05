@@ -104,6 +104,10 @@ export const EVM_POOL_TAG = "finalized";
 export const EVM_NEWEST_TAG = "latest";
 /** The first eth_getLogs page, in blocks; a range-cap error halves it for that RPC. */
 export const EVM_LOG_PAGE_BLOCKS = 10_000n;
+/** A throttled page (EVM_LOG_THROTTLE): tried this many times in all at its own size, then the read's failure. */
+export const EVM_LOG_THROTTLE_TRIES = 5;
+/** The wait before a throttled page's next try: the provider's Retry-After, else 1 s doubled per try; at most this. */
+export const EVM_LOG_THROTTLE_WAIT_MAX_MS = 10_000;
 export const EVM_LAG_TRIES = 5;
 export const EVM_LAG_WAIT_MS = 2_000;
 
@@ -224,23 +228,31 @@ export type EvmNetwork = "base" | "robinhood" | "base-sepolia" | "robinhood-test
 export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze({ base: 8453n, robinhood: 4663n, "base-sepolia": 84532n, "robinhood-testnet": 46630n });
 /**
  * Each network's two Transfer RPCs, the restore's walletRpcs (./evm-restore.ts evmRestoreNotes): keyless, two operators,
- * neither one of the testnet run's pool pair (contracts/pool-evm/script/testnet-run.mjs NETS, which takes these) nor one
- * of the kit's Base and Robinhood providers (evmPoolVenues), each answering a W's Transfer read (eth_getLogs, Transfer's
- * topic, topic 2 = the W, no address) at the chain's head and 2,000,000 blocks back. Read live 5 Nov 12:20-12:28Z at
- * 1,000, 10,000 and 100,000 blocks: base-sepolia.gateway.tenderly.co every size (250,000 too); base-testnet.api.pocket.network
- * every size (another backend capped 10,001); base.gateway.tenderly.co 1,000 ("invalid params" above); 8453.rpc.thirdweb.com
- * 1,000; robinhood.api.pocket.network 10,000 (10,001 the cap); robinhood.daybreak-rpc.network 1,000 (2,000 the cap);
- * 46630.rpc.thirdweb.com 1,000; robinhood-testnet.drpc.org 101 (code 35 above). Not taken: base-sepolia.drpc.org (code
- * 19 "Temporary internal error" at 10 to 101 blocks, 35 above: two of three Ws unread in the evm-buy-hookdata-fee run,
- * 4 Nov), publicnode on every chain ("Please specify an address": no read without one), the chains' own RPCs and
- * sepolia.base.org (the pool pairs), mainnet.base.org (-32011 "request limit reached"), nodies (50 blocks), blastapi (10),
+ * neither one of the testnet run's pool pair (contracts/pool-evm/script/testnet-run.mjs NETS, which takes these), each
+ * answering a W's Transfer read (eth_getLogs, Transfer's topic, topic 2 = the W, no address) at the chain's head and
+ * 2,000,000 blocks back. None is an operator of the kit's providers (evmPoolVenues) but two, each named by the
+ * independence test: Robinhood's own rpc.mainnet.chain.robinhood.com, the kit's too, since no keyless third operator
+ * answers every read on Robinhood (below); and robinhood-testnet.drpc.org, the kit's testnet pair's, since Robinhood
+ * testnet has none either. Robinhood's own is also the money gate's Robinhood pair (scripts/ci/rpc-operators.mjs): a
+ * Robinhood pool pinned with it would be refused as walletRpcs' provider by evmRestoreNotes, so its pool pair is chosen
+ * without it. Read live 5 Nov 12:20-12:28Z at 1,000, 10,000 and 100,000 blocks: base-sepolia.gateway.tenderly.co every
+ * size (250,000 too); base-testnet.api.pocket.network every size (another backend capped 10,001);
+ * base.gateway.tenderly.co 1,000 ("invalid params" above); 8453.rpc.thirdweb.com 1,000 (HTTP 429 and -32005 after
+ * about 4 calls, Retry-After up to 9 s: a throttle, waited out, never a cap); robinhood.daybreak-rpc.network 1,000
+ * (-32602 "query exceeds max block range 2000"); 46630.rpc.thirdweb.com 1,000; robinhood-testnet.drpc.org 101 (code 35
+ * above); and 13:32Z rpc.mainnet.chain.robinhood.com 30,000 (-32602 "only 30000 are allowed" at 100,000). Not taken:
+ * robinhood.api.pocket.network (review, 5 Nov: -32602 "missing required field 'address' for log filter" from 20 to 30%
+ * of its backends at every page size, one block too, so a day-old W's read fails), base-sepolia.drpc.org (code 19
+ * "Temporary internal error" at 10 to 101 blocks, 35 above: two of three Ws unread in the evm-buy-hookdata-fee run,
+ * 4 Nov), publicnode on every chain ("Please specify an address": no read without one), the chains' own RPCs but
+ * Robinhood mainnet's, and sepolia.base.org (the pool pairs), mainnet.base.org (-32011 "request limit reached"), nodies (50 blocks), blastapi (10),
  * 1rpc (50), blockreq and blockmachine (recent blocks only), zan, onfinality and routeme (keys or rate limits),
  * blockvectra (refused), tatum (100), blxrbdn and therpc (403), llamarpc and omniatech (down). Robinhood testnet has no
  * keyless third: chainid.network and chainlist list only these two besides the pool pair and blockvectra.
  */
 export const EVM_TRANSFER_RPCS: Readonly<Record<EvmNetwork, readonly [string, string]>> = Object.freeze({
   base: Object.freeze(["https://base.gateway.tenderly.co", "https://8453.rpc.thirdweb.com"] as const),
-  robinhood: Object.freeze(["https://robinhood.api.pocket.network", "https://robinhood.daybreak-rpc.network"] as const),
+  robinhood: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network"] as const),
   "base-sepolia": Object.freeze(["https://base-sepolia.gateway.tenderly.co", "https://base-testnet.api.pocket.network"] as const),
   "robinhood-testnet": Object.freeze(["https://46630.rpc.thirdweb.com", "https://robinhood-testnet.drpc.org"] as const),
 });
@@ -329,6 +341,25 @@ const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such bl
 //   limited to 0 - 50 blocks range"; base-mainnet.public.blastapi.io "up to a 10 block range"; thirdweb "-32005: Log
 //   response size exceeded. Maximum allowed number of requested blocks is 1000"; base-sepolia.drpc.org HTTP 500 code 19
 //   "Temporary internal error. Please retry" at 10 to 101 blocks, code 35 above.
+/** A provider throttling or timing out, never its range cap: the page is tried again at its size. The rule: HTTP 429
+ *  and the kit's throttle codes (-32029, -32429, -429, dRPC's 15) in any client's words; -32005 unless its words name
+ *  a cap (results, range, blocks, logs matched, response size); an answer that never came; or the kit client's
+ *  transport fault (SolanaRpcTransportError: 429, 5xx, a throttle code, a timeout, no connection, after its own
+ *  retry). -32005 is EIP-1474's "limit exceeded", which providers use for both. The reads behind it: the review of card
+ *  wallet-restore-transfer-rpcs (5 Nov) read 8453.rpc.thirdweb.com answering HTTP 429 and -32005 "Rate limit
+ *  exceeded" after about 4 calls, Retry-After up to 9 s, and daybreak timing out; this card's live check (5 Nov
+ *  13:36Z) read thirdweb's own cap as -32005 "Log response size exceeded. Maximum allowed number of requested blocks
+ *  is 1000" on Base and Robinhood testnet; the team's data run (2 Nov) read -32005 "query exceeds max results 20000". */
+const THROTTLE_WORDS = /HTTP 429\b|(RPC error |"code":\s*)(-32029|-32429|-429|15)\b|no answer in \d+ ms|\btimed? ?out\b|TimeoutError|ETIMEDOUT/i;
+const LIMIT_32005 = /(RPC error |"code":\s*)-32005\b/;
+const CAP_WORDS = /\b(results?|range|blocks?|logs? matched|response size)\b/i;
+const throttled = (e: unknown): { afterMs: number | null } | null => {
+  const t = e as { name?: unknown; afterMs?: unknown; message?: unknown } | null;
+  if (t?.name === "SolanaRpcTransportError") return { afterMs: typeof t.afterMs === "number" ? t.afterMs : null };
+  const m = String(t?.message ?? e);
+  if ((e as Error)?.name === "TimeoutError" || THROTTLE_WORDS.test(m) || (LIMIT_32005.test(m) && !CAP_WORDS.test(m))) return { afterMs: null };
+  return null;
+};
 /** A page past the provider's own head (its log index behind its block headers): a lag, never a smaller page. */
 const HEAD_LAG = /beyond (the )?current head|invalid block range params|after last accepted block|is ahead of (the )?(head|latest)/i;
 // Read live on 3 Nov 05:35Z, eth_call at a block 20,000 blocks back by hash: rpc.testnet.chain.robinhood.com and
@@ -436,15 +467,18 @@ export type EvmLogFilter = { address?: string; topics: readonly (string | readon
 export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to: bigint, what: string) => E;
 
 /**
- * One RPC's logs of a filter over from..to, in pages that end at or below `to`. Any refusal of a page over one block
- * (a provider's cap, in whatever words) halves its page; after a full page reads, the page doubles again, up to
- * EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read, so a cap lifted or a page shrunk long ago comes
- * back. A page past the provider's head (HEAD_LAG) is a lag. A page of one block refused is the read's failure, with
- * the provider's own error.
+ * One RPC's logs of a filter over from..to, in pages that end at or below `to`. A throttle (`throttled`: a rate limit
+ * or a timeout) is no cap: the same page again after the provider's Retry-After (else 1 s doubled per try, at most
+ * EVM_LOG_THROTTLE_WAIT_MAX_MS), at most EVM_LOG_THROTTLE_TRIES tries, then the read's failure (unread, never an empty
+ * list). Any other refusal of a page over one block (a provider's cap, in whatever words) halves its page; after a
+ * full page reads, the page doubles again, up to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read,
+ * so a cap lifted or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG) is a lag. A page of
+ * one block refused is the read's failure, with the provider's own error.
  */
-async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal): Promise<E[]> {
+async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<E[]> {
   const out: E[] = [];
   let refused: bigint | null = null;
+  let tries = 0;
   for (let at = from; at <= to; ) {
     signal?.throwIfAborted();
     const size = page[k]!;
@@ -457,6 +491,13 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       signal?.throwIfAborted();
       const m = String((e as Error)?.message ?? e);
       if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
+      const t = throttled(e);
+      if (t !== null) {
+        if (++tries >= EVM_LOG_THROTTLE_TRIES) throw e;
+        const ms = Math.min(EVM_LOG_THROTTLE_WAIT_MAX_MS, Math.max(t.afterMs ?? 0, 1_000 * 2 ** (tries - 1)));
+        await sleep(ms, signal);
+        continue;
+      }
       if (end > at) {
         refused = end - at + 1n;
         page[k] = refused / 2n;
@@ -464,6 +505,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       }
       throw e;
     }
+    tries = 0;
     if (!Array.isArray(got)) throw new Error(`rpc ${k}: eth_getLogs ${at}..${end}: not a list`);
     out.push(...got.map((g, i) => decode(g, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
     if (end - at + 1n === size && size * 2n <= EVM_LOG_PAGE_BLOCKS && (refused === null || size * 2n < refused)) page[k] = size * 2n;
@@ -487,13 +529,13 @@ export type EvmAnchors = { fin: EvmBlock; anchor: EvmBlock };
  * index a moment behind its headers: a retry. Whose logs they are never matters: any other difference is refused,
  * for every device alike. `at0` numbers the logs in the refusal (the pool's leaves held before `from`).
  */
-export async function evmAgreedLogs<E extends EvmLogRow>(rpcs: Rpcs, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, { fin, anchor }: EvmAnchors, page: bigint[], at0: number, signal?: AbortSignal): Promise<E[]> {
+export async function evmAgreedLogs<E extends EvmLogRow>(rpcs: Rpcs, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, { fin, anchor }: EvmAnchors, page: bigint[], at0: number, signal?: AbortSignal, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>): Promise<E[]> {
   const refuse = async (why: string): Promise<never> => {
     const now = await both(rpcs, (rpc, k) => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), signal);
     if (now.some((b) => b === null || b.hash !== anchor.hash)) return lag(`block ${anchor.number} moved under the read (a reorg)`);
     throw new Error(why);
   };
-  const [x, y] = await both(rpcs, (rpc, k, sig) => readLogs(rpc, k, filter, decode, from, anchor.number, page, sig), signal);
+  const [x, y] = await both(rpcs, (rpc, k, sig) => readLogs(rpc, k, filter, decode, from, anchor.number, page, sig, sleep), signal);
   for (const e of [...x, ...y]) {
     if (e.block === fin.number && e.blockHash !== fin.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${fin.hash}`);
     if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(`a log of block ${e.block} is not of the anchor ${anchor.hash}`);
@@ -543,12 +585,12 @@ function decodeTransfer(raw: unknown, w: string, from: bigint, to: bigint, what:
  * across Ws), the same on both byte for byte (evmAgreedLogs). Each call names this one W and nothing else of the
  * user's. A token bought outside any list is found: the read names no token. Lowercase, sorted.
  */
-export async function evmTokensSentTo(rpcs: readonly [EvmRpc, EvmRpc], w: string, from: bigint, anchors: EvmAnchors, page: bigint[], signal?: AbortSignal): Promise<string[]> {
+export async function evmTokensSentTo(rpcs: readonly [EvmRpc, EvmRpc], w: string, from: bigint, anchors: EvmAnchors, page: bigint[], signal?: AbortSignal, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>): Promise<string[]> {
   checkEvmRpcs(rpcs);
   addr20(w, "W");
   const to = lower(w);
   if (typeof from !== "bigint" || from < 0n) throw new Error("from: a block number");
-  const logs = from > anchors.anchor.number ? [] : await evmAgreedLogs(rpcs, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, "0")}`] }, (raw, f, t, what) => decodeTransfer(raw, to, f, t, what), from, anchors, page, 0, signal);
+  const logs = from > anchors.anchor.number ? [] : await evmAgreedLogs(rpcs, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, "0")}`] }, (raw, f, t, what) => decodeTransfer(raw, to, f, t, what), from, anchors, page, 0, signal, sleep);
   return [...new Set(logs.map((l) => l.token))].sort();
 }
 
@@ -716,7 +758,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       if (now.some((b) => b === null || b.hash !== anchor.hash)) return lag(`block ${anchor.number} moved under the read (a reorg)`);
       throw new Error(why);
     };
-    const fresh = anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, page, held.length, signal) : [];
+    const fresh = anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, page, held.length, signal, sleep) : [];
     const events = [...held, ...fresh];
     const stateTree = new VaultTree(events.map((e) => e.state));
     const labels = events.flatMap((e) => (e.label === null ? [] : [e.label]));
