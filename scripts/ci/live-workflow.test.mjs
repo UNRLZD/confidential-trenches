@@ -110,9 +110,10 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's eighteen checks (signpage-shell runs four ways, signpage-withdraw-own-spend the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's nineteen checks (signpage-shell runs four ways, kit-renewal-read-bounded the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 18);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 19);
+  assert.ok(sign.include.some((e) => e.key === "kit-renewal-read-bounded" && e.args === ""), "kit-renewal-read-bounded runs after every sign deploy");
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
