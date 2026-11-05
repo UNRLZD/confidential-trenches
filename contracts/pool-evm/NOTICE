@@ -116,7 +116,7 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      at the ERC-7201 transient slot of "blindfill.sell.guard" (as OpenZeppelin's ReentrancyGuardTransient keeps its
      own, so a smart account that runs this code as a module and guards itself at transient slot 0 never meets it),
      refuses a target, a token hook or a sender that calls back into W. Its own address has no key, so a call to it,
-     not through W, moves nothing. test/HostileSell.t.sol holds the Opus review's hostile cases (review of c2a8da2).
+     not through W, moves nothing. test/HostileSell.t.sol holds the review's hostile cases (review of c2a8da2).
      Gas. Forge counts none of the 25,000 that EIP-7702 charges for each authorization of an empty account, and forge
      1.8.6 reports gas before refunds while 1.7.1 reports it after. So the gas limit to plan for is the 1.8.6 figure
      plus 25,000, and the L2 execution gas paid is at most the 1.7.1 figure plus 25,000; Robinhood's gasUsed adds its

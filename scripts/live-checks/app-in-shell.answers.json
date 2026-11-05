@@ -48,7 +48,7 @@
           "doc": 0.36740380366507963,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone.png",
+        "shot": "chromium-phone.png",
         "moved": {
           "top": "https://sign.confidential.unrealized.trade/portfolio",
           "frame": "https://confidential.unrealized.trade/portfolio"
@@ -94,7 +94,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone-late.png"
+        "shot": "chromium-phone-late.png"
       },
       {
         "engine": "chromium",
@@ -138,7 +138,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone-silent.png"
+        "shot": "chromium-phone-silent.png"
       },
       {
         "engine": "chromium",
@@ -180,7 +180,7 @@
           "doc": 0.21857098962629318,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone-tap.png"
+        "shot": "chromium-phone-tap.png"
       },
       {
         "engine": "chromium",
@@ -221,7 +221,7 @@
           "doc": 0.25045819811681935,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone-update.png"
+        "shot": "chromium-phone-update.png"
       },
       {
         "engine": "chromium",
@@ -255,7 +255,7 @@
           "doc": 0.5185119120462317,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop.png",
+        "shot": "chromium-desktop.png",
         "moved": {
           "top": "https://sign.confidential.unrealized.trade/portfolio",
           "frame": "https://confidential.unrealized.trade/portfolio"
@@ -301,7 +301,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop-late.png"
+        "shot": "chromium-desktop-late.png"
       },
       {
         "engine": "chromium",
@@ -345,7 +345,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop-silent.png"
+        "shot": "chromium-desktop-silent.png"
       },
       {
         "engine": "chromium",
@@ -387,7 +387,7 @@
           "doc": 0.08482966478959686,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop-tap.png"
+        "shot": "chromium-desktop-tap.png"
       },
       {
         "engine": "chromium",
@@ -428,7 +428,7 @@
           "doc": 0.3333895847416758,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop-update.png"
+        "shot": "chromium-desktop-update.png"
       },
       {
         "engine": "firefox",
@@ -462,7 +462,7 @@
           "doc": 0.15071863943992447,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone.png",
+        "shot": "firefox-phone.png",
         "moved": {
           "top": "https://sign.confidential.unrealized.trade/portfolio",
           "frame": "https://confidential.unrealized.trade/portfolio"
@@ -508,7 +508,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone-late.png"
+        "shot": "firefox-phone-late.png"
       },
       {
         "engine": "firefox",
@@ -552,7 +552,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone-silent.png"
+        "shot": "firefox-phone-silent.png"
       },
       {
         "engine": "firefox",
@@ -590,7 +590,7 @@
           "doc": 0.09953799360761117,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone-tap.png"
+        "shot": "firefox-phone-tap.png"
       },
       {
         "engine": "firefox",
@@ -631,7 +631,7 @@
           "doc": 0.32792386508273474,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone-update.png"
+        "shot": "firefox-phone-update.png"
       },
       {
         "engine": "firefox",
@@ -665,7 +665,7 @@
           "doc": 0.371335863669936,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop.png",
+        "shot": "firefox-desktop.png",
         "moved": {
           "top": "https://sign.confidential.unrealized.trade/portfolio",
           "frame": "https://confidential.unrealized.trade/portfolio"
@@ -707,7 +707,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop-late.png"
+        "shot": "firefox-desktop-late.png"
       },
       {
         "engine": "firefox",
@@ -751,7 +751,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop-silent.png"
+        "shot": "firefox-desktop-silent.png"
       },
       {
         "engine": "firefox",
@@ -793,7 +793,7 @@
           "doc": 0.4899112687587337,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop-tap.png"
+        "shot": "firefox-desktop-tap.png"
       },
       {
         "engine": "firefox",
@@ -834,7 +834,7 @@
           "doc": 0.8132944475067272,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop-update.png"
+        "shot": "firefox-desktop-update.png"
       },
       {
         "engine": "webkit",
@@ -864,7 +864,7 @@
           "doc": 0.7034418824774952,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone.png",
+        "shot": "webkit-phone.png",
         "moved": {
           "top": "https://sign.confidential.unrealized.trade/portfolio",
           "frame": "https://confidential.unrealized.trade/portfolio"
@@ -906,7 +906,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone-late.png"
+        "shot": "webkit-phone-late.png"
       },
       {
         "engine": "webkit",
@@ -957,7 +957,7 @@
           ]
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone-silent.png"
+        "shot": "webkit-phone-silent.png"
       },
       {
         "engine": "webkit",
@@ -995,7 +995,7 @@
           "doc": 0.4053264158673071,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone-tap.png"
+        "shot": "webkit-phone-tap.png"
       },
       {
         "engine": "webkit",
@@ -1036,7 +1036,7 @@
           "doc": 0.49912477752097684,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone-update.png"
+        "shot": "webkit-phone-update.png"
       },
       {
         "engine": "webkit",
@@ -1066,7 +1066,7 @@
           "doc": 0.21694089453122534,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop.png",
+        "shot": "webkit-desktop.png",
         "moved": {
           "top": "https://sign.confidential.unrealized.trade/portfolio",
           "frame": "https://confidential.unrealized.trade/portfolio"
@@ -1108,7 +1108,7 @@
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop-late.png"
+        "shot": "webkit-desktop-late.png"
       },
       {
         "engine": "webkit",
@@ -1159,7 +1159,7 @@
           ]
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop-silent.png"
+        "shot": "webkit-desktop-silent.png"
       },
       {
         "engine": "webkit",
@@ -1197,7 +1197,7 @@
           "doc": 0.6907454516278774,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop-tap.png"
+        "shot": "webkit-desktop-tap.png"
       },
       {
         "engine": "webkit",
@@ -1238,7 +1238,7 @@
           "doc": 0.9334757911660424,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop-update.png"
+        "shot": "webkit-desktop-update.png"
       }
     ]
   },
@@ -1281,7 +1281,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone.png"
+        "shot": "chromium-phone.png"
       },
       {
         "engine": "chromium",
@@ -1305,7 +1305,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone-late.png"
+        "shot": "chromium-phone-late.png"
       },
       {
         "engine": "chromium",
@@ -1329,7 +1329,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone-silent.png"
+        "shot": "chromium-phone-silent.png"
       },
       {
         "engine": "chromium",
@@ -1353,7 +1353,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone-tap.png"
+        "shot": "chromium-phone-tap.png"
       },
       {
         "engine": "chromium",
@@ -1377,7 +1377,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone-update.png"
+        "shot": "chromium-phone-update.png"
       },
       {
         "engine": "chromium",
@@ -1401,7 +1401,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop.png"
+        "shot": "chromium-desktop.png"
       },
       {
         "engine": "chromium",
@@ -1425,7 +1425,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop-late.png"
+        "shot": "chromium-desktop-late.png"
       },
       {
         "engine": "chromium",
@@ -1449,7 +1449,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop-silent.png"
+        "shot": "chromium-desktop-silent.png"
       },
       {
         "engine": "chromium",
@@ -1473,7 +1473,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop-tap.png"
+        "shot": "chromium-desktop-tap.png"
       },
       {
         "engine": "chromium",
@@ -1497,7 +1497,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop-update.png"
+        "shot": "chromium-desktop-update.png"
       },
       {
         "engine": "firefox",
@@ -1521,7 +1521,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone.png"
+        "shot": "firefox-phone.png"
       },
       {
         "engine": "firefox",
@@ -1545,7 +1545,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone-late.png"
+        "shot": "firefox-phone-late.png"
       },
       {
         "engine": "firefox",
@@ -1569,7 +1569,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone-silent.png"
+        "shot": "firefox-phone-silent.png"
       },
       {
         "engine": "firefox",
@@ -1593,7 +1593,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone-tap.png"
+        "shot": "firefox-phone-tap.png"
       },
       {
         "engine": "firefox",
@@ -1617,7 +1617,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone-update.png"
+        "shot": "firefox-phone-update.png"
       },
       {
         "engine": "firefox",
@@ -1641,7 +1641,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop.png"
+        "shot": "firefox-desktop.png"
       },
       {
         "engine": "firefox",
@@ -1665,7 +1665,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop-late.png"
+        "shot": "firefox-desktop-late.png"
       },
       {
         "engine": "firefox",
@@ -1689,7 +1689,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop-silent.png"
+        "shot": "firefox-desktop-silent.png"
       },
       {
         "engine": "firefox",
@@ -1713,7 +1713,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop-tap.png"
+        "shot": "firefox-desktop-tap.png"
       },
       {
         "engine": "firefox",
@@ -1737,7 +1737,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop-update.png"
+        "shot": "firefox-desktop-update.png"
       },
       {
         "engine": "webkit",
@@ -1761,7 +1761,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone.png"
+        "shot": "webkit-phone.png"
       },
       {
         "engine": "webkit",
@@ -1785,7 +1785,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone-late.png"
+        "shot": "webkit-phone-late.png"
       },
       {
         "engine": "webkit",
@@ -1809,7 +1809,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone-silent.png"
+        "shot": "webkit-phone-silent.png"
       },
       {
         "engine": "webkit",
@@ -1833,7 +1833,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone-tap.png"
+        "shot": "webkit-phone-tap.png"
       },
       {
         "engine": "webkit",
@@ -1857,7 +1857,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone-update.png"
+        "shot": "webkit-phone-update.png"
       },
       {
         "engine": "webkit",
@@ -1881,7 +1881,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop.png"
+        "shot": "webkit-desktop.png"
       },
       {
         "engine": "webkit",
@@ -1905,7 +1905,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop-late.png"
+        "shot": "webkit-desktop-late.png"
       },
       {
         "engine": "webkit",
@@ -1929,7 +1929,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop-silent.png"
+        "shot": "webkit-desktop-silent.png"
       },
       {
         "engine": "webkit",
@@ -1953,7 +1953,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop-tap.png"
+        "shot": "webkit-desktop-tap.png"
       },
       {
         "engine": "webkit",
@@ -1977,7 +1977,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop-update.png"
+        "shot": "webkit-desktop-update.png"
       }
     ]
   }

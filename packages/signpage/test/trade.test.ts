@@ -386,7 +386,7 @@ test("a running trade's wallets are not picked by a second trade; one whose tx i
   assert.equal(mark(s, 0)!.txs.length, 1, "the mark names the tx");
 });
 
-// the review's F1-F5 (Opus review of 974d724): each failed before the fold, as the reviewer's own test showed the fault
+// the review's F1-F5 (review of 974d724): each failed before the fold, as the reviewer's own test showed the fault
 /**
  * A provider for a dead tab's tx (06c A4's reads): one status for every signature (null: none), its finalized bank's
  * height (slot 50), the blockhash's verdict at processed (slot 52) and the status read's bank (slot 53).

@@ -1823,8 +1823,11 @@ function rvPool(nPre: number, nSpent: number, r = rvPrng(1)): Chain {
   return { accounts: new Map(), slot: 700, time: () => 0n, marks };
 }
 
-test("sol-marks-scale fold 1 RV-A (F4a, memcmp applied): the marks of 5,000 / 20,000 / 50,000 deposits through the kit's client and its 1 MiB cap", async () => {
-  for (const [nPre, nSpent] of [[5_000, 3_000], [20_000, 6_000], [50_000, 20_000]] as const) {
+// card fresh-run-margin: the default run reads the first pool, of 5,000 deposits; FULL_RUNS=1 (the package's
+// test:mutants script, CI's test-wallet job) all three, to 50,000
+const RV_A_POOLS = ([[5_000, 3_000], [20_000, 6_000], [50_000, 20_000]] as const).slice(0, process.env.FULL_RUNS === "1" ? 3 : 1);
+test(`sol-marks-scale fold 1 RV-A (F4a, memcmp applied): the marks of ${RV_A_POOLS.map(([n]) => n.toLocaleString("en-US")).join(" / ")} deposits through the kit's client and its 1 MiB cap`, async () => {
+  for (const [nPre, nSpent] of RV_A_POOLS) {
     const c = rvPool(nPre, nSpent);
     const sa = rvStat(), sb = rvStat();
     let got: { pre: number; spent: number } | undefined;

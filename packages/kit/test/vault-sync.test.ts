@@ -262,7 +262,7 @@ test("RPCs behind the cursor's height, a cursor for another vault or a malformed
   await stopped(vaultSync({ vault: VAULT, rpcs: pair(one()), cursor: vaultSyncStart(VAULT), lists: ["deposits", "nullifiers" as "deposits"] }), "input");
 });
 
-// ---------- the review's attacks (independent Opus review of 6e81df1: PROBE and WANT ids kept) ----------
+// ---------- the review's attacks (independent review of 6e81df1: PROBE and WANT ids kept) ----------
 const P_NEW = "424242424242424242424242424242";
 // The vault at H+50: one more deposit (precommitment P_NEW), its leaf and its label.
 const landed: Snap = {

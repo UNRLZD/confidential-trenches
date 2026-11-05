@@ -38,7 +38,7 @@ const STEPS = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
 
 function run(bin, args, dir) {
   try {
-    return { rc: 0, out: execFileSync(bin, args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) };
+    return { rc: 0, out: execFileSync(bin, args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 28 }) };
   } catch (e) {
     return { rc: e.status, out: `${e.stdout}${e.stderr}` };
   }

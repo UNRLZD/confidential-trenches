@@ -1,4 +1,4 @@
-// The key solanaArmedSigner signs with is zeroed once its signature is made (card signpage-solana-trade, the Opus
+// The key solanaArmedSigner signs with is zeroed once its signature is made (card signpage-solana-trade, the
 // review's plant R5). ed25519.sign is wrapped before records.ts loads, so the test sees the very key it was handed.
 //   node --test test/arm-key-zero.test.ts   (from packages/wallet)
 import assert from "node:assert/strict";

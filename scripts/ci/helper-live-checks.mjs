@@ -32,6 +32,7 @@ export const LIVE_CHECKS = [
   "wallet-per-buy",
   "helper-v4-hook-liquidity",
   "helper-robinhood-capacity",
+  "helper-robinhood-search-ahead",
   "evm-buy-hookdata-fee",
 ];
 
