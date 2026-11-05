@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { SolanaBuildError, SolanaBuildRoom, fetchSolanaJupiterBuildThatFits } from "@blindfill/kit";
 import { createProxy } from "./proxy.ts";
 
-const GOOD = JSON.parse(readFileSync(new URL("../../../../packages/kit/test/fixtures/solana-builds.json", import.meta.url), "utf8")).good as { mint: string; wallet: string; shapes: { body: string }[] };
+const GOOD = JSON.parse(readFileSync(new URL("../../test/fixtures/jupiter-build.json", import.meta.url), "utf8")) as { mint: string; wallet: string; body: string };
 const ENV = { JUPITER_API_KEY: "fake-jupiter-key-" + "j".repeat(16), RELAY_API_KEY: "fake-relay-key-" + "r".repeat(16), LIFI_API_KEY: "fake-lifi-key-" + "l".repeat(16), ONECLICK_JWT: "fake.oneclick.jwt-" + "o".repeat(16) };
 const BOUND_MS = 10 * 60_000; // flow.ts SOLANA_TRADE_BUILD_WAIT_MS
 
@@ -47,7 +47,7 @@ async function trade(legs: number) {
     fetch: async (url: string) => {
       const cap = Number(new URL(url).searchParams.get("maxAccounts"));
       vendorCalls.push(cap);
-      return cap < 48 ? new Response('{"error":"No routes found"}', { status: 400, headers: { "content-type": "application/json" } }) : new Response(GOOD.shapes[0]!.body, { status: 200, headers: { "content-type": "application/json" } });
+      return cap < 48 ? new Response('{"error":"No routes found"}', { status: 400, headers: { "content-type": "application/json" } }) : new Response(GOOD.body, { status: 200, headers: { "content-type": "application/json" } });
     },
   });
   const answers: number[] = [];
