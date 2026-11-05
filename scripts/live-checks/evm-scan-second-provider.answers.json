@@ -1,0 +1,227 @@
+{
+ "good": {
+  "note": "a real run of the check at 7c3cecb from this Mac: Base second bloXroute, Robinhood second daybreak; every held quote ended ok",
+  "recorded": "2026-11-05T17:27:23.078Z",
+  "scans": {
+   "base": {
+    "first": "https://base-rpc.publicnode.com",
+    "spare": "https://base.rpc.blxrbdn.com"
+   },
+   "robinhood": {
+    "first": "https://rpc.mainnet.chain.robinhood.com",
+    "spare": "https://robinhood.daybreak-rpc.network"
+   }
+  },
+  "preflight": {
+   "https://base.rpc.blxrbdn.com": {
+    "status": 204,
+    "allow": "*",
+    "headers": "Content-Type, Authorization, User-Agent",
+    "post": "*"
+   },
+   "https://robinhood.daybreak-rpc.network": {
+    "status": 204,
+    "allow": "*",
+    "headers": "Content-Type",
+    "post": "*"
+   }
+  },
+  "cases": {
+   "base-hook": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 11239
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 1635,
+      "firstAsked": 13,
+      "spareLogs": 1
+     },
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 854,
+      "firstAsked": 1,
+      "spareLogs": 1
+     },
+     {
+      "mode": "no logs",
+      "code": "ok",
+      "ms": 1807,
+      "firstAsked": 8,
+      "spareLogs": 1
+     },
+     {
+      "mode": "no logs",
+      "code": "ok",
+      "ms": 869,
+      "firstAsked": 2,
+      "spareLogs": 1
+     }
+    ]
+   },
+   "robinhood-torch": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 51474
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 4372,
+      "firstAsked": 25,
+      "spareLogs": 4
+     },
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 2183,
+      "firstAsked": 1,
+      "spareLogs": 4
+     },
+     {
+      "mode": "no logs",
+      "code": "ok",
+      "ms": 2619,
+      "firstAsked": 5,
+      "spareLogs": 4
+     },
+     {
+      "mode": "no logs",
+      "code": "ok",
+      "ms": 2007,
+      "firstAsked": 5,
+      "spareLogs": 4
+     }
+    ]
+   }
+  }
+ },
+ "bad": {
+  "note": "a real run of the check at 0273ca1 from this Mac: Robinhood second Globalstake, 3 of 4 held quotes rpc_error at the 60 s bound",
+  "recorded": "2026-11-05T16:59:16.567Z",
+  "scans": {
+   "base": {
+    "first": "https://base-rpc.publicnode.com",
+    "spare": "https://base.rpc.blxrbdn.com"
+   },
+   "robinhood": {
+    "first": "https://rpc.mainnet.chain.robinhood.com",
+    "spare": "https://rpc-robinhood.globalstake.io"
+   }
+  },
+  "preflight": {
+   "https://base.rpc.blxrbdn.com": {
+    "status": 204,
+    "allow": "*",
+    "headers": "Content-Type, Authorization, User-Agent",
+    "post": "*"
+   },
+   "https://rpc-robinhood.globalstake.io": {
+    "status": 200,
+    "allow": "*",
+    "headers": "Content-Type",
+    "post": "*"
+   }
+  },
+  "cases": {
+   "base-hook": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 14796
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 3202,
+      "firstAsked": 19,
+      "spareLogs": 1
+     },
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 2769,
+      "firstAsked": 13,
+      "spareLogs": 1
+     },
+     {
+      "mode": "no logs",
+      "code": "ok",
+      "ms": 2331,
+      "firstAsked": 6,
+      "spareLogs": 1
+     },
+     {
+      "mode": "no logs",
+      "code": "ok",
+      "ms": 1238,
+      "firstAsked": 4,
+      "spareLogs": 1
+     }
+    ]
+   },
+   "robinhood-torch": {
+    "first": [
+     {
+      "code": "rpc_error",
+      "message": "rpc_error: provider 1 answered the multicall with an error: historical state 6be8bc2daa25e787f218c1147d3ae3ec45b4fac8b9eb91feb735cd9850d113cf is not available",
+      "ms": 36754
+     },
+     {
+      "code": "rpc_error",
+      "message": "rpc_error: provider 1 answered the multicall with an error: historical state 71ce1b86c641c6505eda4cc234d74eeeb58a05c4b79ce27635284f1c967264cc is not available",
+      "ms": 26992
+     },
+     {
+      "code": "ok",
+      "ms": 4479
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms",
+      "ms": 60005,
+      "firstAsked": 5,
+      "spareLogs": 16
+     },
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms",
+      "ms": 60884,
+      "firstAsked": 2,
+      "spareLogs": 12
+     },
+     {
+      "mode": "no logs",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms",
+      "ms": 60005,
+      "firstAsked": 153,
+      "spareLogs": 15
+     },
+     {
+      "mode": "no logs",
+      "code": "ok",
+      "ms": 13311,
+      "firstAsked": 75,
+      "spareLogs": 4
+     }
+    ]
+   }
+  }
+ }
+}
