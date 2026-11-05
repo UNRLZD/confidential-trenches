@@ -14,6 +14,7 @@
 #   bash contracts/pool-evm/script/mainnet-rehearsal.sh   (anvil, forge, cast on PATH; the workspace installed)
 # Outputs go to contracts/pool-evm/out/mainnet-rehearsal/ (ignored by git), or $REHEARSAL_OUT.
 set -euo pipefail
+fail() { echo "rehearsal [$1]: FAIL: $2"; exit 1; }
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 OUT="${REHEARSAL_OUT:-$ROOT/contracts/pool-evm/out/mainnet-rehearsal}"
 rm -rf "$OUT" && mkdir -p "$OUT"
@@ -61,21 +62,27 @@ for chain in base robinhood; do
   # a second run: refused before any key, its record exists
   rc2=0; node "$ROOT/contracts/pool-evm/script/deploy.mjs" --mainnet --chain "$chain" --return "$STANDIN" --rpc "$url" --out "$OUT/$chain.json" --no-build >"$OUT/$chain-again.log" 2>&1 || rc2=$?
   cat "$OUT/$chain-again.log"
-  grep -q "exists: the pool is deployed on $chain: run its live check alone" "$OUT/$chain-again.log" && [ "$rc2" != 0 ] && [ "$(folders)" = "$before_keys" ]
+  { grep -q "exists: the pool is deployed on $chain: run its live check alone" "$OUT/$chain-again.log" && [ "$rc2" != 0 ] && [ "$(folders)" = "$before_keys" ]; } || fail "$chain" "a second run was not refused before any key (exit $rc2)"
   echo "rehearsal [$chain]: a second run is refused before any key (exit $rc2)"
   # a run stopped (SIGTERM) once the pool is made, then the same command again: it resumes with the kept key, reuses
   # the verifier and the pool, deploys the rest, and its record passes the live check
+  # The fork mines by hand here (automine off), one block at a time until the pool is made: each deploy waits for its
+  # receipt, so nothing after the pool can land before the stop, however fast the fork or loaded the machine (rehearsal
+  # 6's robinhood run finished all five before its SIGTERM). Automine is back on once the stop is sent.
   rlog="$OUT/$chain-stopped.log"
+  cast rpc evm_setAutomine false --rpc-url "$url" >/dev/null
   node "$ROOT/contracts/pool-evm/script/deploy.mjs" --mainnet --chain "$chain" --return "$STANDIN" --rpc "$url" --out "$OUT/$chain-resume.json" --no-build >"$rlog" 2>&1 &
   pid=$!
   for _ in $(seq 1200); do grep -q "^deploy: waiting for" "$rlog" && break; kill -0 $pid 2>/dev/null || break; sleep 0.5; done
   line=$(grep "^deploy: waiting for" "$rlog")
-  cast send --unlocked --from "$STANDIN" "$(awk '{print $9}' <<<"$line")" --value "$(awk '{print $4}' <<<"$line")" --rpc-url "$url" >/dev/null
-  for _ in $(seq 1200); do grep -q "^deploy: PrivacyPoolSimple " "$rlog" && break; kill -0 $pid 2>/dev/null || break; sleep 0.1; done
+  cast send --async --unlocked --from "$STANDIN" "$(awk '{print $9}' <<<"$line")" --value "$(awk '{print $4}' <<<"$line")" --rpc-url "$url" >/dev/null
+  for _ in $(seq 3000); do grep -q "^deploy: PrivacyPoolSimple " "$rlog" && break; kill -0 $pid 2>/dev/null || break; cast rpc anvil_mine 1 --rpc-url "$url" >/dev/null; sleep 0.2; done
   kill -TERM $pid
+  cast rpc evm_setAutomine true --rpc-url "$url" >/dev/null
+  cast rpc anvil_mine 1 --rpc-url "$url" >/dev/null
   rc=0; wait $pid || rc=$?
   cat "$rlog"
-  [ "$rc" != 0 ] && [ ! -e "$OUT/$chain-resume.json" ] && grep -q "the same paste resumes with this key" "$rlog"
+  { [ "$rc" != 0 ] && [ ! -e "$OUT/$chain-resume.json" ] && grep -q "the same paste resumes with this key" "$rlog"; } || fail "$chain" "the stopped run did not keep its key for a resume (exit $rc)"
   echo "rehearsal [$chain]: stopped once the pool was made (exit $rc): no record, the key kept"
   rlog2="$OUT/$chain-resumed.log"
   node "$ROOT/contracts/pool-evm/script/deploy.mjs" --mainnet --chain "$chain" --return "$STANDIN" --rpc "$url" --out "$OUT/$chain-resume.json" --no-build >"$rlog2" 2>&1 &
@@ -85,9 +92,9 @@ for chain in base robinhood; do
   cast send --unlocked --from "$STANDIN" "$(awk '{print $9}' <<<"$line")" --value "$(awk '{print $4}' <<<"$line")" --rpc-url "$url" >/dev/null
   rc=0; wait $pid || rc=$?
   cat "$rlog2"
-  [ "$rc" = 0 ] && grep -q "^deploy: resuming the stopped run with its key: WithdrawalVerifier 0x[0-9a-f]*, PrivacyPoolSimple 0x[0-9a-f]*.* read back on both RPCs as the build.s: reused" "$rlog2"
-  [ "$(folders)" = "$before_keys" ] && [ ! -e "$OUT/$chain-resume.journal.json" ]
-  node "$ROOT/scripts/live-checks/pool-evm-deploy.mjs" --deployment "$OUT/$chain-resume.json" --rpc "$url,http://localhost:$port" | tail -1 | grep -q ": PASS$"
+  { [ "$rc" = 0 ] && grep -q "^deploy: resuming the stopped run with its key: WithdrawalVerifier 0x[0-9a-f]*, PrivacyPoolSimple 0x[0-9a-f]*.* read back on both RPCs as the build.s: reused" "$rlog2"; } || fail "$chain" "the resume did not reuse the verifier and the pool (exit $rc)"
+  { [ "$(folders)" = "$before_keys" ] && [ ! -e "$OUT/$chain-resume.journal.json" ]; } || fail "$chain" "the resume left a key folder or its journal"
+  node "$ROOT/scripts/live-checks/pool-evm-deploy.mjs" --deployment "$OUT/$chain-resume.json" --rpc "$url,http://localhost:$port" | tail -1 | grep -q ": PASS$" || fail "$chain" "the resumed record fails the live check"
   echo "rehearsal [$chain]: the same command resumed with the kept key, reused the verifier and the pool, and its record passes the live check"
 done
 # the card's live check on both forks at once, recorded: each record, and the kit's venue with the record's contracts

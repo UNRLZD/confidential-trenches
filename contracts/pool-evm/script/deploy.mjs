@@ -597,7 +597,19 @@ export async function main(args, io = {}) {
       // 4. the funding
       console.log(`deploy: waiting for ${need} wei (${eth(need)}) at ${deployer} on ${chainName}`);
       if (mainnet) console.log(`deploy: send exactly ${need} wei (${ethExact(need)}) to ${deployer} from ${ret}, the address you passed`);
-      while ((go(), big(await call("eth_getBalance", [deployer, "latest"]))) < need) await sleep(WAITS.poll);
+      // a read that fails (its five tries all rate-limited or reset) is read again at the next poll: a run that ended
+      // here would leave the owner's transfer to a run that is gone (the Solana devnet rehearsal's run, 5 Nov 18:47Z)
+      for (;;) {
+        go();
+        let held = -1n;
+        try {
+          held = big(await call("eth_getBalance", [deployer, "latest"]));
+        } catch (e) {
+          console.log(`deploy: the run key's balance not read (${e.message}): reading it again in ${WAITS.poll / 1000} s`);
+        }
+        if (held >= need) break;
+        await sleep(WAITS.poll);
+      }
       funded = true;
       console.log("deploy: funded");
 
