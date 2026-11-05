@@ -160,6 +160,20 @@ const extAt = (d: Uint8Array, type: number): number => {
   for (let o = 166; o + 4 <= d.length; o += 4 + (d[o + 2]! | (d[o + 3]! << 8))) if ((d[o]! | (d[o + 1]! << 8)) === type) return o + 4;
   throw new Error(`no extension ${type}`);
 };
+// The fee mint with each fee slot set: older_transfer_fee at body+72, newer at body+90, each { epoch u64, maximum_fee
+// u64, bps u16 } (spl-token-2022 interface/src/extension/transfer_fee/mod.rs:34-42, 135-149).
+const feeSlots = (older: [bigint, number], newer: [bigint, number]): SolanaAccountRead =>
+  changed(mintOf("transferFee")[0]!, (d) => {
+    const v = new DataView(d.buffer, d.byteOffset, d.byteLength);
+    const b = extAt(d, 1);
+    for (const [at, [max, bps]] of [[b + 72, older], [b + 90, newer]] as const) { v.setBigUint64(at + 8, max, true); v.setUint16(at + 16, bps, true); }
+  });
+// The hook mint with its authority and program id set to these bytes (TransferHook: authority, program_id; transfer_hook/mod.rs:30-37).
+const hookOf = (authority: number, program: number): SolanaAccountRead =>
+  changed(mintOf("transferHook")[0]!, (d) => { const b = extAt(d, 14); d.fill(authority, b, b + 32); d.fill(program, b + 32, b + 64); });
+// An extension's length field set to `len` (the bytes after it unchanged).
+const extLen = (m: SolanaAccountRead, type: number, len: number): SolanaAccountRead =>
+  changed(m, (d) => { const b = extAt(d, type); d[b - 2] = len & 0xff; d[b - 1] = len >> 8; });
 const T22_CASES = CASES.filter((c) => c.tp === T22);
 const REAL = T22_CASES.filter((c) => swapOf(c).accounts[t22At(c)]!.pubkey === authorityAta(c));
 const BUYS = T22_CASES.filter((c) => c.side === "buy");
@@ -209,6 +223,23 @@ test("S6 destination refused: the recorded transfer-fee mints' own buys (8RNU) t
   }
 });
 
+test("S6 destination: a fee config that charges nothing or a hook with no program passes through Jupiter's authority's ATA", () => {
+  const M = 1_000_000_000_000_000n;
+  const cases: [string, SolanaAccountRead][] = [
+    ["both fee slots at 0 bps", feeSlots([M, 0], [M, 0])],
+    ["both fee slots with a 0 maximum", feeSlots([0n, 300], [0n, 300])],
+    ["the older slot at 0 bps, the newer with a 0 maximum", feeSlots([M, 0], [0n, 300])],
+    ["a hook with no authority and no program", hookOf(0, 0)],
+  ];
+  for (const c of BUYS) {
+    for (const [what, m] of cases) {
+      const v = check(c, viaAuthority(c), undefined, both(m));
+      assert.equal(s6(v).ok, true, `${c.name}, ${what}: ${s6(v).detail}`);
+      assert.equal(result(v, "S10").ok, true, `${c.name}, ${what}: S10 ${result(v, "S10").detail}`);
+    }
+  }
+});
+
 // Each refusal on a buy whose destination goes through Jupiter's authority's ATA: the mint reads in place of the
 // recorded ones, and S6's words.
 const DEST_REFUSALS: { what: string; detail: RegExp; mint: () => MintPair; s10?: boolean }[] = [
@@ -220,6 +251,11 @@ const DEST_REFUSALS: { what: string; detail: RegExp; mint: () => MintPair; s10?:
     mint: () => both(changed(mintOf("transferHook")[0]!, (d) => { d.fill(0, extAt(d, 14), extAt(d, 14) + 32); })),
     s10: true,
   },
+  { what: "a fee in the older slot only", detail: /: the mint charges a transfer fee \(TransferFeeConfig\)$/, mint: () => both(feeSlots([1_000n, 1], [0n, 0])), s10: true },
+  { what: "a fee in the newer slot only", detail: /: the mint charges a transfer fee \(TransferFeeConfig\)$/, mint: () => both(feeSlots([0n, 0], [1_000n, 1])), s10: true },
+  { what: "a hook program with no hook authority", detail: /: the mint runs a transfer hook \(TransferHook\)$/, mint: () => both(hookOf(0, 7)), s10: true },
+  { what: "a fee config of 107 bytes", detail: /: the mint's transfer fee config is 107 bytes$/, mint: () => both(extLen(feeSlots([0n, 0], [0n, 0]), 1, 107)) },
+  { what: "a transfer hook of 63 bytes", detail: /: the mint's transfer hook is 63 bytes$/, mint: () => both(extLen(hookOf(0, 0), 14, 63)) },
   { what: "the providers disagree: B reads a transfer-fee mint", detail: /: the providers disagree on the mint$/, mint: () => [CLEAN, mintOf("transferFee")[0]] },
   { what: "the providers disagree on the owner", detail: /: the providers disagree on the mint$/, mint: () => [CLEAN, { owner: SOLANA_TOKEN_PROGRAM, data: CLEAN.data }] },
   { what: "the mint not read on provider B", detail: /: the mint is not read on both providers$/, mint: () => [CLEAN, null] },

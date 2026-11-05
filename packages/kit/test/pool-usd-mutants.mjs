@@ -82,8 +82,16 @@ export const MUTANTS = [
   [S6, "  if (d.length === 82) return null;\n", "", "S6 destination: every", S6_TEST],
   [S6, "if (d.length < 166 || d[165] !== 1) return `the mint of", "if (d.length < 166) return `the mint of", "S6 destination refused: no mint account type", S6_TEST],
   [S6, "if (o + 4 + len > d.length) return `the mint's extension", "if (false) return `the mint's extension", "S6 destination refused: an extension that runs past", S6_TEST],
-  [S6, "if (type === EXT_TRANSFER_FEE_CONFIG) return", "if (false) return", "S6 destination refused: a transfer-fee mint", S6_TEST],
-  [S6, "if (type === EXT_TRANSFER_HOOK) return \"the mint", "if (false) return \"the mint", "S6 destination refused: a transfer-hook mint", S6_TEST],
+  [S6, "if (type === EXT_TRANSFER_FEE_CONFIG) {", "if (false) {", "S6 destination refused: a transfer-fee mint", S6_TEST],
+  [S6, "if (type === EXT_TRANSFER_HOOK) {", "if (false) {", "S6 destination refused: a transfer-hook mint", S6_TEST],
+  [S6, "u16(d, slot + 16) !== 0 && u64(d, slot + 8) !== 0n", "true", "S6 destination: a fee config", S6_TEST],
+  [S6, " && u64(d, slot + 8) !== 0n", "", "S6 destination: a fee config", S6_TEST],
+  [S6, "u16(d, slot + 16) !== 0 && ", "", "S6 destination: a fee config", S6_TEST],
+  [S6, "feeCharged(d, body + 72) || ", "", "S6 destination refused: a fee in the older slot only", S6_TEST],
+  [S6, " || feeCharged(d, body + 90)", "", "S6 destination refused: a fee in the newer slot only", S6_TEST],
+  [S6, "if (len !== 108) return", "if (false) return", "S6 destination refused: a fee config of 107 bytes", S6_TEST],
+  [S6, "if (len !== 64) return", "if (false) return", "S6 destination refused: a transfer hook of 63 bytes", S6_TEST],
+  [S6, "d.subarray(body + 32, body + 64).some((x) => x !== 0)", "d.subarray(body, body + 32).some((x) => x !== 0)", "S6 destination refused: a hook program with no hook authority", S6_TEST],
   [S6, "if (o !== d.length && d.subarray(o).some((x) => x !== 0)) return \"the mint has bytes", "if (false) return \"the mint has bytes", "S6 destination refused: bytes after", S6_TEST],
 ];
 

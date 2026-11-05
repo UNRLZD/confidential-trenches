@@ -520,9 +520,18 @@ function s13(c: Ctx, wk: Walk): SolanaQuoteResult {
 }
 
 // Why a second move of the token, out of Jupiter's authority's account into the wallet's, could change the amount, or
-// null when it cannot: the token's mint, read equal on both providers, whose extensions (walked as S10 walks them) hold
-// no TransferFeeConfig and no TransferHook. Called only on a Token-2022 destination: that is the token (the output of
-// a buy), and its token program is the mint's owner on provider A (checkSolanaQuote), so the read is a Token-2022 mint.
+// null when it cannot: the token's mint, read equal on both providers, whose extensions (walked as S10 walks them)
+// charge no fee and run no hook. Called only on a Token-2022 destination: that is the token (the output of a buy), and
+// its token program is the mint's owner on provider A (checkSolanaQuote), so the read is a Token-2022 mint.
+// From solana-program/token-2022 @ a2ef578 (read 2026-11-05 01:05Z): TransferFeeConfig is two 32-byte authorities, a
+// u64 withheld amount, then older_transfer_fee and newer_transfer_fee, each TransferFee { epoch u64, maximum_fee u64,
+// transfer_fee_basis_points u16 } (interface/src/extension/transfer_fee/mod.rs:34-42, 135-149: 108 bytes); a transfer
+// charges the fee of one of those two slots, by the epoch (get_epoch_fee, :152-158; process_transfer,
+// program/src/processor.rs:416-422), which is 0 when its basis points are 0 and never above its maximum_fee
+// (calculate_fee, :58-70). So a mint whose slots each have 0 bps or a 0 maximum charges nothing in any epoch. TransferHook
+// is authority then program_id, 32 bytes each (transfer_hook/mod.rs:30-37), and a transfer runs a hook only when the
+// program id is set (get_program_id, :60-67; processor.rs:432, 611): an all-zero program id runs none.
+const feeCharged = (d: Uint8Array, slot: number): boolean => u16(d, slot + 16) !== 0 && u64(d, slot + 8) !== 0n;
 function secondMove(c: Ctx): string | null {
   const [a, b] = c.reads.mint;
   if (!a || !b) return "the mint is not read on both providers";
@@ -536,8 +545,15 @@ function secondMove(c: Ctx): string | null {
     const len = u16(d, o + 2);
     if (type === 0) break;
     if (o + 4 + len > d.length) return `the mint's extension ${type} runs past it`;
-    if (type === EXT_TRANSFER_FEE_CONFIG) return "the mint charges a transfer fee (TransferFeeConfig)";
-    if (type === EXT_TRANSFER_HOOK) return "the mint runs a transfer hook (TransferHook)";
+    const body = o + 4;
+    if (type === EXT_TRANSFER_FEE_CONFIG) {
+      if (len !== 108) return `the mint's transfer fee config is ${len} bytes`;
+      if (feeCharged(d, body + 72) || feeCharged(d, body + 90)) return "the mint charges a transfer fee (TransferFeeConfig)";
+    }
+    if (type === EXT_TRANSFER_HOOK) {
+      if (len !== 64) return `the mint's transfer hook is ${len} bytes`;
+      if (d.subarray(body + 32, body + 64).some((x) => x !== 0)) return "the mint runs a transfer hook (TransferHook)";
+    }
     o += 4 + len;
   }
   if (o !== d.length && d.subarray(o).some((x) => x !== 0)) return "the mint has bytes after its last extension";
@@ -550,9 +566,9 @@ function secondMove(c: Ctx): string | null {
 // The source side through the authority's ATA moves exactly in_amount out of the wallet once; the floor is checked on
 // the output, so a fee charged on the way in cannot take the wallet below minOut. The destination side through the
 // authority's ATA moves the output a second time, after the legs, into the wallet: on a Token-2022 mint that move
-// passes only when the token's mint, read equal on both providers, has no TransferFeeConfig (a fee on that move could
-// leave the wallet below minOut) and no TransferHook (a hook program runs on it). Every other extension S10 lets through
-// changes no amount moved inside one transaction. The old rule, every Token-2022 side through the wallet's own account,
+// passes only when the token's mint, read equal on both providers, charges no transfer fee in either of its fee slots (a
+// fee on that move could leave the wallet below minOut) and names no transfer hook program (a hook program runs on it);
+// see secondMove. Every other extension S10 lets through changes no amount moved inside one transaction. The old rule, every Token-2022 side through the wallet's own account,
 // was disproved by real builds (see SHARED_ROUTE_V2 above).
 function s6(c: Ctx): SolanaQuoteResult {
   const e = needRoute("S6", c);
@@ -569,7 +585,7 @@ function s6(c: Ctx): SolanaQuoteResult {
     const pa = jupiterAuthority(r.shared.id);
     if (r.shared.authority.key !== pa) wrong.push(`program authority ${r.shared.authority.key} is not Jupiter's authority ${r.shared.id} (${pa})`);
     // Each side's account of the program: the wallet's own or the authority's ATA, and on a Token-2022 destination the
-    // authority's ATA only for a mint without a transfer fee or hook (null: the side's token program is unknown, so
+    // authority's ATA only for a mint that charges no fee and runs no hook (null: the side's token program is unknown, so
     // nothing passes).
     const side = (what: string, key: string, mint: string, tp: string | null): void => {
       if (!isToken(tp)) { wrong.push(`program ${what} account ${key}: token program ${tp} unknown`); return; }
