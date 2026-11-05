@@ -1810,3 +1810,87 @@ test("re-review 7: the run is done only once both RPCs read the upgrade authorit
     for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
   }
 });
+
+// ---- paste 1 (5 Nov 18:01-18:16Z): the CLI's writes over the public RPC failed "Max retries exceeded" mid-upload ----
+test("paste 1: a CLI deploy that fails mid-upload is retried in the same run from the run's own buffer: no close, no second funding, both tries' transactions journaled; writes go to the leaders (no --use-rpc) with more sign attempts", async () => {
+  const f = fakeGh();
+  const code = recordedCode();
+  let ids = null;
+  const hist = []; // the funder's history, newest last
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return ok({ value: 1_000_000_000 });
+      case "getProgramAccounts": return ok([]);
+      case "getSignaturesForAddress": return ok([...hist].reverse().map((signature) => ({ signature, err: null })));
+      case "getTransaction": return ok({ transaction: { message: { accountKeys: [ids?.funder ?? hist.funder] } }, meta: { err: null } });
+      case "getLatestBlockhash": throw new Error("stop after the deploy's read-back");
+      case "getAccountInfo": {
+        if (!ids?.program) return ok({ value: null });
+        const pdAddr = programDataAddress(ids.program);
+        const acc = (owner, executable, data) => ({ value: { owner, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] } });
+        if (params[0] === ids.program) return ok(acc(LOADER, true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pdAddr))])));
+        if (params[0] === pdAddr) {
+          const meta = Buffer.alloc(45);
+          meta.writeUInt32LE(3, 0);
+          return ok(acc(LOADER, false, Buffer.concat([meta, code])));
+        }
+        return ok({ value: null });
+      }
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  const calls = [];
+  const cli = (args) => {
+    calls.push(args);
+    if (args[1] === "deploy") {
+      hist.funder = keyOf(args[args.indexOf("--upgrade-authority") + 1]);
+      const n = calls.filter((a) => a[1] === "deploy").length;
+      if (n === 1) {
+        hist.push("A".repeat(87), "a".repeat(87)); // the buffer and some writes landed
+        return { status: 1, stdout: "", stderr: "Error: Data writes to account failed: Custom error: Max retries exceeded" };
+      }
+      hist.push("B".repeat(87));
+      ids = { program: keyOf(args[args.indexOf("--program-id") + 1]), funder: hist.funder };
+      return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const out = path.join(w, "record.json");
+  const realLog = console.log;
+  const said = [];
+  console.log = (s) => said.push(String(s));
+  let journal = null;
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", out], fetchFn, { wait: async () => {}, cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy's read-back/);
+    journal = JSON.parse(readFileSync(out.replace(/\.json$/, ".journal.json"), "utf8"));
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+  const deploys = calls.filter((a) => a[1] === "deploy");
+  assert.equal(deploys.length, 2, "the failed deploy is tried again in the same run");
+  const firstClose = calls.findIndex((a) => a[1] === "close");
+  assert.ok(firstClose === -1 || firstClose > calls.indexOf(deploys[1]), "nothing is closed before the retry");
+  const buf = (a) => a[a.indexOf("--buffer") + 1];
+  assert.ok(deploys.every((a) => a.includes("--buffer")), "the run's own buffer keypair");
+  assert.equal(buf(deploys[0]), buf(deploys[1]), "the retry writes into the same buffer");
+  assert.equal(path.basename(buf(deploys[0])), "buffer.json");
+  for (const a of deploys) {
+    assert.ok(!a.includes("--use-rpc"), "writes go to the leaders, not the public RPC");
+    assert.equal(a[a.indexOf("--max-sign-attempts") + 1], String(DEPLOY_SIGN_ATTEMPTS));
+  }
+  assert.ok(DEPLOY_SIGN_ATTEMPTS >= 20);
+  assert.equal(said.filter((l) => /waiting for \S+ to hold/.test(l)).length, 1, "one funding wait");
+  const sigs = journal.txs.map((t) => t.signature);
+  for (const s of ["A".repeat(87), "a".repeat(87), "B".repeat(87)]) assert.ok(sigs.includes(s), `${s.slice(0, 4)}... journaled`);
+  assert.ok(said.some((l) => /deploy try 1 of 3 failed: .*Max retries exceeded.*: trying again from the run's buffer/.test(l)), said.join("\n"));
+});
+import { DEPLOY_SIGN_ATTEMPTS } from "./deploy.mjs";
