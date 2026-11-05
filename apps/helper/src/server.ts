@@ -521,7 +521,9 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   const holders = env.SOLANA_HOLDERS_RPC_URL;
   // card helper-solana-failover: the holders key's slot has no public fallback (the public endpoint refuses
   // getTokenLargestAccounts, rpc/rpc.ts Deps): fallen back, its reads answer 503 at once and the page serves Jupiter's
-  const holdersRpc = holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false });
+  // card helper-crowd-429: the holders key set to the main one is one provider's second, so it shares the main pacer
+  const holdersRpc =
+    holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false, ...(holders === env.SOLANA_RPC_URL ? { pacer: rpc.pacer } : {}) });
   if (holdersRpc !== undefined) slots?.set("holders", holdersRpc.slot);
   return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc });
 }
