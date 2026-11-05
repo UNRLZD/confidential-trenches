@@ -6,7 +6,7 @@
 // anything). The script's own KR10 public key is not that key's, so the run that must reach npx is a copy of the
 // script whose KR10_PUBLIC_KEY is the zero seed's and whose deploy.mjs is this checkout's.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createPrivateKey, createPublicKey } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,7 +38,9 @@ function world(account = "confidential.unrlzd.near") {
   writeFileSync(
     path.join(bin, "npx"),
     `#!/bin/sh\nprintf '%s\\n' "$TMPDIR" >> "${calls}.tmpdir"\nprintf '%s\\n' "$*" >> "${calls}.args"\n` +
-      `printf '%s\\n' "near account create-account ... sign-with-seed-phrase '${SEED_WORDS}'" > "$TMPDIR/near-cli-rs-final-command.log"\nexit "\${STUB_EXIT:-0}"\n`,
+      `printf '%s\\n' "near account create-account ... sign-with-seed-phrase '${SEED_WORDS}'" > "$TMPDIR/near-cli-rs-final-command.log"\n` +
+      // STUB_HOLD: the phrase is typed and near-cli-rs waits at its prompt, until a signal stops it
+      `if [ -n "\${STUB_HOLD:-}" ]; then : > "\$STUB_HOLD"; while :; do sleep 1; done; fi\nexit "\${STUB_EXIT:-0}"\n`,
   );
   chmodSync(path.join(bin, "npx"), 0o755);
   return { d, home, userTmp, bin, calls, pub: `ed25519:${b58encode(pub)}` };
@@ -102,3 +104,33 @@ for (const exit of [0, 1]) {
     assert.match(r.stdout, /Press Cmd-K now to clear this window: its prompt showed the seed phrase\.\n$/);
   });
 }
+
+// Ctrl-C at near-cli-rs's prompt reaches the whole foreground group: near-cli-rs stops, then the script's INT trap
+// runs. It must remove the private TMPDIR and still print the Cmd-K line, since the phrase may already be on screen.
+test("paste 1 stopped by Ctrl-C at near-cli-rs's prompt: its private TMPDIR is gone and it prints the Cmd-K line", async () => {
+  const w = world();
+  const hold = path.join(w.d, "held");
+  const child = spawn("/bin/sh", [copyWithKey(w.d, w.pub)], {
+    detached: true,
+    env: { PATH: `${w.bin}${path.delimiter}${process.env.PATH}`, HOME: w.home, TMPDIR: w.userTmp, STUB_HOLD: hold },
+  });
+  let out = "";
+  let err = "";
+  child.stdout.on("data", (b) => (out += b));
+  child.stderr.on("data", (b) => (err += b));
+  const done = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
+  const t0 = Date.now();
+  while (!existsSync(hold)) {
+    assert.ok(Date.now() - t0 < 20_000, `near-cli-rs never reached its prompt: ${out}${err}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  process.kill(-child.pid, "SIGINT");
+  const r = await Promise.race([done, new Promise((r) => setTimeout(() => r(null), 20_000))]);
+  if (r === null) process.kill(-child.pid, "SIGKILL");
+  assert.ok(r, "the script did not stop on INT");
+  assert.equal(r.code, 130, `${out}${err}`);
+  const [priv] = lines(`${w.calls}.tmpdir`);
+  assert.equal(existsSync(priv), false, `the private TMPDIR ${priv} is left`);
+  assert.deepEqual(readdirSync(w.userTmp).filter((f) => f.includes("near-cli-rs")), [], "a command log is in the user temp dir");
+  assert.match(out, /Press Cmd-K now to clear this window: its prompt showed the seed phrase\.\n$/);
+});

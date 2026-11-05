@@ -41,8 +41,9 @@ P1_DEPLOY="$DEPLOY" P1_KEY="$KEY" P1_WANT="$KR10_PUBLIC_KEY" node --input-type=m
 PRIV=$(mktemp -d)
 chmod 700 "$PRIV"
 trap 'rm -rf "$PRIV"' EXIT
-trap 'rm -rf "$PRIV"; exit 130' INT
-trap 'rm -rf "$PRIV"; exit 143' TERM
+CMDK="Press Cmd-K now to clear this window: its prompt showed the seed phrase."
+trap 'rm -rf "$PRIV"; echo "paste 1: stopped. $CMDK"; exit 130' INT
+trap 'rm -rf "$PRIV"; echo "paste 1: stopped. $CMDK"; exit 143' TERM
 trap 'rm -rf "$PRIV"; exit 129' HUP
 set +e
 TMPDIR="$PRIV" npx --yes near-cli-rs@0.30.1 --quiet account create-account fund-myself confidential.unrlzd.near '0.1 NEAR' \
@@ -51,5 +52,5 @@ TMPDIR="$PRIV" npx --yes near-cli-rs@0.30.1 --quiet account create-account fund-
 RC=$?
 set -e
 rm -rf "$PRIV"
-echo "paste 1: near-cli-rs exited $RC. Press Cmd-K now to clear this window: its prompt showed the seed phrase."
+echo "paste 1: near-cli-rs exited $RC. $CMDK"
 exit "$RC"
