@@ -66,6 +66,8 @@
 //     authority none. A table the funder still holds authority over keeps the run's keys. Every own send on mainnet
 //     carries a compute unit price (PRIORITY_MICRO_LAMPORTS), and so do the CLI's deploy transactions; the need counts
 //     each at PRIORITY_CU_BOUND units. The sweeps and the closes carry none, so the cleanup's arithmetic stays exact.
+//     --table (a local validator only) rehearses this step there, on a validator holding a clone of mainnet's pump
+//     Global, with mainnet's need shape.
 //  8. Waits for every transaction to be finalized, writes the deployment record (scripts/live-checks/pool-sol-deploy.
 //     <cluster>.json) with every transaction on the programdata (the deploy and its SetAuthority) and every funder
 //     (the fee payers that are not --return), and prints the live check to run next.
@@ -751,7 +753,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   if (!returnTo) throw new Error("--return <address> is required: the funder's rest goes back there");
   address(returnTo);
   const failAfter = opt("--fail-after");
-  if ((failAfter || argv.includes("--flaky")) && cluster !== "localnet") throw new Error("--fail-after and --flaky are for the local dry run only");
+  if ((failAfter || argv.includes("--flaky") || argv.includes("--table")) && cluster !== "localnet") throw new Error("--fail-after, --flaky and --table are for the local dry run only");
   if (argv.includes("--flaky")) {
     // the dry run's planted transient failures: every third call throws as a reset connection does
     const real = fetchFn;
@@ -791,7 +793,9 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     if (why) throw new Error(`${cluster} refused: ${why}`);
   }
   // mainnet: the pool buy's lookup table venue (pump Global's fee accounts), read on both RPCs before any key (step 6m)
-  const kitBuy = cluster === "mainnet" ? await import(pathToFileURL(path.join(REPO, "packages/kit/src/trade/solana/pool-buy.ts")).href) : null;
+  // --table: the same step on a local validator that holds a clone of pump Global (its rehearsal)
+  const withTable = cluster === "mainnet" || argv.includes("--table");
+  const kitBuy = withTable ? await import(pathToFileURL(path.join(REPO, "packages/kit/src/trade/solana/pool-buy.ts")).href) : null;
   const tableVenue = kitBuy ? await kitBuy.readSolanaPumpCurveTableVenue([url, second0].map((u) => (m, p) => rpc(fetchFn, u, m, p))) : null;
   if (tableVenue) log(`the table's venue: pump Global's fee recipient ${tableVenue.feeRecipient} and ${tableVenue.buybackFeeRecipients.length} buyback recipients, the same on ${url} and ${second0}`);
 
@@ -920,7 +924,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     stoppedRecord();
     try {
       const rent = async (n) => BigInt(await rpc(fetchFn, url, "getMinimumBalanceForRentExemption", [n]));
-      const need = await needOf(rent, so.length, { resume: !!resumeId, poolExists, mainnet: cluster === "mainnet", tableLen: tableList?.length ?? 0 });
+      const need = await needOf(rent, so.length, { resume: !!resumeId, poolExists, mainnet: withTable, tableLen: tableList?.length ?? 0 });
       Object.assign(fields, { need: String(need.total), need_parts: Object.fromEntries(Object.entries(need.parts).map(([k, v]) => [k, String(v)])) });
       log(`program id ${program.id}`);
       log(`funder ${funder.id} needs ${need.total} lamports (${Object.entries(need.parts).map(([k, v]) => `${k} ${v}`).join(", ")}); the rest is swept back to ${returnTo}`);
@@ -957,7 +961,13 @@ export async function main(argv, fetchFn = fetch, io = {}) {
         else txs.push({ step: "deploy with the upgradeable loader, --final", signature: out.signature, state: "landed" });
         stoppedRecord();
         await settled(fetchFn, url, programDataAddress(program.id), undefined, clock);
-        const problems = await programProblems(fetchFn, url, program.id, so);
+        // --final's SetAuthority is the CLI's second transaction: a finalized read right after the deploy can still show
+        // the funder as authority (the table rehearsal on a local validator, 5 Nov), so the read is retried up to 90 s
+        let problems;
+        for (const until = clock.now() + 90_000; ; await clock.wait(2000)) {
+          problems = await programProblems(fetchFn, url, program.id, so);
+          if (!problems.length || clock.now() > until) break;
+        }
         if (problems.length) throw new Error(problems.join("; "));
         log(`deployed ${program.id}, upgrade authority none, code sha256 ${soSha}`);
         check("deploy");
@@ -972,7 +982,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       }
       check("init");
 
-      if (cluster === "mainnet") {
+      if (withTable) {
         // step 6m: the pool buy's lookup table, made, read back, frozen, read back; no test deposit
         const slot = BigInt(await rpc(fetchFn, url, "getSlot", [{ commitment: "finalized" }]));
         const t = pda([funder.pub, le(slot, 8)], ALT_PROGRAM);

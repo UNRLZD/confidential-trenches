@@ -1172,6 +1172,14 @@ test("mainnet: refused before any key without --mainnet, with --mainnet on anoth
   assert.deepEqual(made, [], "no key was made");
 });
 
+test("--table is the local dry run's only: refused on devnet before any key", async () => {
+  const devnet = async (u, init) => {
+    if (JSON.parse(init.body).method === "getGenesisHash") return okR("EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG");
+    throw new Error("no other call");
+  };
+  await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--return", RETURN, "--table"], devnet, { keysBase: TEST_KEYS }), /--fail-after, --flaky and --table are for the local dry run only/);
+});
+
 test("mainnet: the need is the program, the pool, the frozen table, the funder's rent(0), the fees and each priced transaction's bound; no test deposit", async () => {
   const rent = async (n) => BigInt((n + 128) * 6960);
   const soLen = 79_088;
@@ -1291,4 +1299,61 @@ test("a transaction over 1,232 bytes is refused before it is journaled or sent",
   const { sendAndConfirm } = await import("./deploy.mjs");
   await assert.rejects(sendAndConfirm(fetchFn, "http://x", [big], k, [k], { step: "big", journal }), /big: \d+ bytes, over 1232: not signed for sending/);
   assert.equal(sent, 0);
+});
+
+const LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
+test("--final's SetAuthority finalized a moment after the deploy: the run waits for authority none at finalized instead of failing a final program (rehearsal 5 Nov)", async () => {
+  const f = fakeGh();
+  const code = recordedCode();
+  let ids = null;
+  let pdReads = 0;
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return ok({ value: 1_000_000_000 });
+      case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
+      case "getLatestBlockhash": throw new Error("stop after the deploy's read-back");
+      case "getAccountInfo": {
+        if (!ids) return ok({ value: null });
+        const pdAddr = programDataAddress(ids.program);
+        const acc = (owner, executable, data) => ({ value: { owner, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] } });
+        if (params[0] === ids.program) return ok(acc(LOADER, true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pdAddr))])));
+        if (params[0] === pdAddr) {
+          // the finalized reads show the funder as authority twice, then none: --final's second transaction finalizing
+          const finalized = params[1]?.commitment === undefined || params[1].commitment === "finalized";
+          const meta = Buffer.alloc(45);
+          meta.writeUInt32LE(3, 0);
+          if (finalized && pdReads++ < 2) (meta[12] = 1), Buffer.from(b58decode(ids.funder)).copy(meta, 13);
+          return ok(acc(LOADER, false, Buffer.concat([meta, code])));
+        }
+        return ok({ value: null });
+      }
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  const cli = (args) => {
+    if (args[1] === "deploy") {
+      ids = { program: keyOf(args[args.indexOf("--program-id") + 1]), funder: keyOf(args[args.indexOf("--upgrade-authority") + 1]) };
+      return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const realLog = console.log;
+  const said = [];
+  console.log = (s) => said.push(String(s));
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy's read-back/);
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+  assert.ok(said.some((l) => /deployed \S+, upgrade authority none/.test(l)), said.join("\n"));
+  assert.ok(pdReads >= 3);
 });

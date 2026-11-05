@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # The owner's mainnet paste of the Solana pool program (card pool-sol-deploy-mainnet), one line from the repository:
 #   sh contracts/pool-solana/scripts/mainnet-deploy.sh <your Solana address: where the run's leftover SOL goes back>
+#   sh contracts/pool-solana/scripts/mainnet-deploy.sh <your Solana address> --program <id>
+#     the resume of a run that stopped after its deploy (the program is final already): it reads the program on both
+#     RPCs as the pinned code with authority none, then makes the pool if missing and the lookup table, as below
 # 1. The solana CLI: Agave v4.4.0's release for this Mac, fetched from its GitHub release into a new folder that is
 #    removed on exit, refused unless the file's sha256 is the pin below (GitHub's own digest of that asset, uploaded by
 #    anza-team on 28 Oct, read 5 Nov 14:49Z) and its `solana --version` is 4.4.0 (src:9ef63128), the release CI's
@@ -22,11 +25,13 @@
 # folder only until the cleanup reads the funder empty on both RPCs. Ctrl-C or a closed terminal stops the run at its
 # next step and its cleanup sweeps every lamport back; this shell waits for it before removing the CLI.
 set -eu
-if [ $# -ne 1 ]; then
-  echo "usage: sh contracts/pool-solana/scripts/mainnet-deploy.sh <your Solana address, where the run's leftover SOL goes back>"
+if [ $# -ne 1 ] && { [ $# -ne 3 ] || [ "$2" != "--program" ]; }; then
+  echo "usage: sh contracts/pool-solana/scripts/mainnet-deploy.sh <your Solana address, where the run's leftover SOL goes back> [--program <id>]"
   exit 1
 fi
 RETURN=$1
+shift
+# the resume's two words, or none
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$ROOT"
 CI_RUN=42012187381
@@ -55,5 +60,5 @@ case "$VERSION" in
 esac
 mkdir -p contracts/pool-solana/deployments
 PATH="$BIN:$PATH" node contracts/pool-solana/scripts/deploy.mjs --mainnet --url https://api.mainnet-beta.solana.com \
-  --ci-run "$CI_RUN" --return "$RETURN" --out contracts/pool-solana/deployments/mainnet.json
+  --ci-run "$CI_RUN" --return "$RETURN" --out contracts/pool-solana/deployments/mainnet.json "$@"
 node scripts/live-checks/pool-sol-deploy-mainnet.mjs --record scripts/live-checks/pool-sol-deploy-mainnet.good.json --write-record

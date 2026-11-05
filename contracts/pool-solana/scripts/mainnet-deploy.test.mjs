@@ -38,7 +38,7 @@ function runPaste(args, { system = "Darwin", machine = "arm64" } = {}) {
 }
 
 test("no return address: the usage line, nothing fetched or run", () => {
-  for (const args of [[], [RETURN, "extra"]]) {
+  for (const args of [[], [RETURN, "extra"], [RETURN, "--other", "x"], [RETURN, "--program", "x", "y"]]) {
     const r = runPaste(args);
     assert.equal(r.status, 1);
     assert.match(r.out, /^usage: sh contracts\/pool-solana\/scripts\/mainnet-deploy.sh <your Solana address/);
@@ -68,7 +68,9 @@ test("a CLI download that is not the pinned bytes is refused before deploy.mjs r
 test("the paste runs deploy.mjs on mainnet with CI run 42012187381's build into deployments/mainnet.json, then records the live check; it reads no secret", () => {
   const sh = readFileSync(PASTE, "utf8");
   const code = sh.split("\n").filter((l) => !l.startsWith("#")).join("\n");
-  assert.match(code, /node contracts\/pool-solana\/scripts\/deploy.mjs --mainnet --url https:\/\/api.mainnet-beta.solana.com \\\n {2}--ci-run "\$CI_RUN" --return "\$RETURN" --out contracts\/pool-solana\/deployments\/mainnet.json/);
+  assert.match(code, /node contracts\/pool-solana\/scripts\/deploy.mjs --mainnet --url https:\/\/api.mainnet-beta.solana.com \\\n {2}--ci-run "\$CI_RUN" --return "\$RETURN" --out contracts\/pool-solana\/deployments\/mainnet.json "\$@"$/m);
+  // after the address, only a resume's --program <id> passes through
+  assert.match(code, /^if \[ \$# -ne 1 \] && \{ \[ \$# -ne 3 \] \|\| \[ "\$2" != "--program" \]; \}; then$/m);
   assert.match(code, /^CI_RUN=42012187381$/m);
   assert.match(code, /node scripts\/live-checks\/pool-sol-deploy-mainnet.mjs --record scripts\/live-checks\/pool-sol-deploy-mainnet.good.json --write-record/);
   // no prompt: neither the paste nor the deploy script reads a terminal or stdin

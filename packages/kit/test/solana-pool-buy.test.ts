@@ -224,7 +224,7 @@ test("the pump curve table venue, read from Global alone at finalized, gives the
   const pages = solanaPoolPages(PROGRAM, 1024, 1024);
   assert.deepEqual(solanaPoolBuyTableAccounts(cfg, tv, pages), solanaPoolBuyTableAccounts(cfg, venue, pages));
   // the providers disagreeing on one byte, a fee recipient unset, a buyback recipient unset: refused
-  await assert.rejects(readSolanaPumpCurveTableVenue([globalOnly(0), globalOnly(1, (d) => void (d[100] ^= 1))]), /disagree on pump Global/);
+  await assert.rejects(readSolanaPumpCurveTableVenue([globalOnly(0), globalOnly(1, (d) => void (d[100] = d[100]! ^ 1))]), /disagree on pump Global/);
   const both = (edit: (d: Buffer) => void) => readSolanaPumpCurveTableVenue([globalOnly(0, edit), globalOnly(1, edit)]);
   await assert.rejects(both((d) => void d.fill(0, 41, 73)), /no fee recipient/);
   await assert.rejects(both((d) => void d.fill(0, 741 + 32 * 3, 741 + 32 * 4)), /buyback recipient is unset/);
