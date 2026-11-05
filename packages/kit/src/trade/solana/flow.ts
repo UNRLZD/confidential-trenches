@@ -50,6 +50,7 @@ import {
 import { SOLANA_ALT_PROGRAM, solanaAta, solanaDecodeLookupTable, type SolanaLookupTable } from "../../checks/solana/message.ts";
 import {
   SolanaBuildError,
+  type SolanaBuildFitted,
   assembleSolanaSwap,
   buildSolanaTeardown,
   fetchSolanaJupiterBuild,
@@ -287,12 +288,20 @@ export async function settleSolanaSet(providers: readonly [SolanaRpc, SolanaRpc]
 }
 
 type Prepared = { leg: SolanaTradeLeg; rec: SolanaLegRecord; assembled: SolanaAssembled };
+/**
+ * A trade's one cap search (card solana-uncapped-fits fold 3): the first leg to build runs the search; every other leg
+ * waits for the cap it found and builds there once, searching on from it only when that build does not fit. So the
+ * search's steps are asked once a trade, not once a leg: a K-leg trade asks Jupiter K builds plus the first leg's
+ * steps past 40 (at most SOLANA_JUPITER_MAX_BUILDS - 1) and the floor rebuilds, inside the helper's lend
+ * (apps/helper/src/proxy/proxy.ts PROXY_BUDGETS.jupiter). `cap` is the found cap, or the search's refusal.
+ */
+type CapLead = { cap?: Promise<number | SolanaBuildError | null> };
 
 async function prepareLeg(
   req: SolanaTradeRequest,
   leg: SolanaTradeLeg,
   rec: SolanaLegRecord,
-  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[] },
+  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[]; lead: CapLead },
 ): Promise<Prepared | null> {
   const { deps, blockhash } = ctx;
   const [pa, pb] = deps.providers;
@@ -339,8 +348,18 @@ async function prepareLeg(
     });
     return { tables, assembled: assembleSolanaSwap(breq, b, { blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight, tables: decoded, tokenProgram }, feeOpts) };
   };
-  // The cap search: 40, up on no route, down when the assembly is over 1,232 bytes (build.ts, Jupiter's requote).
-  const found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, opts);
+  // The cap search: 40, up on no route, down when the assembly is over 1,232 bytes (build.ts, Jupiter's requote), run
+  // once a trade (CapLead): a later leg starts at the cap the first found, and a "no route" anywhere is every leg's.
+  let found: SolanaBuildFitted<Awaited<ReturnType<typeof fitOn>>>;
+  if (ctx.lead.cap === undefined) {
+    const search = fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, opts);
+    ctx.lead.cap = search.then((f) => f.maxAccounts, (e) => (e instanceof SolanaBuildError ? e : null));
+    found = await search;
+  } else {
+    const led = await ctx.lead.cap;
+    if (led instanceof SolanaBuildError && led.code === "no_route") throw led;
+    found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, { ...opts, ...(typeof led === "number" ? { startAt: led } : {}) });
+  }
   rec.buildCaps = found.steps;
   let calls = found.calls.length;
   let build = found.build;
@@ -351,7 +370,14 @@ async function prepareLeg(
     // the floor's rebuild: once, at the cap the search found
     const s = solanaRebuildSlippage(amounts.quotedOut, minOut);
     if (s === null) { rec.refused = `the route quotes ${amounts.quotedOut}, not above the floor ${minOut}`; return null; }
-    const again = await fetchSolanaJupiterBuild(deps.helper, { ...breq, slippageBps: s }, { ...opts, maxAccounts: found.maxAccounts });
+    let again: Awaited<ReturnType<typeof fetchSolanaJupiterBuild>>;
+    try {
+      again = await fetchSolanaJupiterBuild(deps.helper, { ...breq, slippageBps: s }, { ...opts, maxAccounts: found.maxAccounts });
+    } catch (e) {
+      // a route exists (the search's); only its rebuild at the floor's slippage found none: the floor is the reason
+      if (e instanceof SolanaBuildError && e.code === "no_route") { rec.buildCalls = calls + 1; rec.refused = `the route quotes ${amounts.quotedOut}, under the floor ${minOut} at its slippage, and its rebuild at ${s} bps found no route at maxAccounts=${found.maxAccounts}`; return null; }
+      throw e;
+    }
     calls += again.calls.length;
     build = again.build;
     amounts = solanaRouteAmounts(build.swap.data);
@@ -558,13 +584,14 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
     r.legExpectedOut = (ref.expectedOuts as readonly bigint[])[j] as bigint;
     if ((r.minOut as bigint) <= 0n) r.refused = "the floor rounds to 0";
   });
+  const lead: CapLead = {};
   const prepared = (
     await Promise.all(
       live.map(async (i) => {
         const rec = recs[i] as SolanaLegRecord;
         if (rec.refused) return null;
         try {
-          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints });
+          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints, lead });
         } catch (err) {
           rec.refused = err instanceof SolanaBuildError ? `build ${err.code}: ${err.message.slice(0, 160)}` : `error: ${String((err as Error)?.message ?? err).slice(0, 200)}`;
           return null;

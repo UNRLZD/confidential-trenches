@@ -7,14 +7,17 @@
 //   helper's Solana Discover lists (GET /v1/market/lists?chain=solana, the read a device makes; Trending 1h first)
 //   with at least $50k of liquidity, or --token;
 //   S-1 buy and S-2 sell of a token with no route at 40: the first token of the New, then Graduating, list whose buy
-//   at maxAccounts=40 Jupiter answers "No routes found" and at 64 (Jupiter's most) a route (at most PROBES asked), or
+//   and sell at maxAccounts=40 Jupiter both answer "No routes found" and both have a route the device assembles within
+//   1,232 bytes inside the cap search's reach (its steps past 40 in 3 builds; at most PROBES tokens asked), or
 //   --no-route-token.
 // Every shape is built as the device builds a trade (card solana-uncapped-fits): the kit's fetchSolanaJupiterBuildThatFits,
 // the cap search judged on the device's own assembly (40, up on no route, down when over 1,232 bytes, at most 3
 // builds), live and on replay. So the check asks only paths a device takes: the second token's shapes must start with
 // "No routes found" at 40 and end in a build that fits, the first token's go as its route goes.
 // The check's Jupiter calls are a device's builds and its probes, each at least PACE_MS after the last, so one runner
-// stays within a device's share of 4 a 10 s window (apps/helper/src/proxy/proxy.ts; card helper-crowd-429). The taker
+// asks at most JUPITER_PER_MINUTE in any counted minute, what the helper lends a client on the total alone
+// (apps/helper/src/limits/limits.ts LEND_FREE_SHARES x the share), so no other device's use can make it a 429. Each
+// call's send time is recorded and the judge holds the run to it. The taker
 // is a random address nobody holds a key for, made per run (so no wallet is linked to the check).
 // The device's reads come from two public RPCs: both mints and every lookup table any build names (processed), and the
 // blockhash from getLatestBlockhash at finalized on the first (never the build's blockhashWithMetadata).
@@ -33,12 +36,13 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import {
   SOLANA_BUILD_TIMEOUT_MS,
+  SOLANA_JUPITER_CAP_UP,
+  SOLANA_JUPITER_MAX_BUILDS,
   SOLANA_MAX_TX_BYTES,
   SOLANA_SOL_MINT,
   assembleSolanaSwap,
   checkSolanaQuote,
   SolanaBuildError,
-  fetchSolanaJupiterBuild,
   fetchSolanaJupiterBuildThatFits,
   readSolanaBlockhash,
   solanaDecodeLookupTable,
@@ -51,11 +55,28 @@ export const BASE = "https://api.confidential.unrealized.trade";
 export const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 export const BUY_LAMPORTS = 10_000_000n; // 0.01 SOL
 export const SLIPPAGE_BPS = 1000;
+/** A probe's sell size, in the token's base units (a pump.fun token's 6 decimals: 1 token); the shapes sell what the
+ * buy quoted out. */
+export const PROBE_SELL_UNITS = 1_000_000n;
 /** Tokens asked at 40 to find one with no route there; 7 of 40 listed tokens had none on 2026-11-05 03:30Z. */
-export const PROBES = 16;
-/** A device's Jupiter share is 4 a 10 s window: one call every 3 s stays inside it, at most 20 a minute of the 26 the
- * helper leaves devices on Jupiter's Free plan (PROXY_RESERVE). */
-export const PACE_MS = 3_000;
+export const PROBES = 12;
+/** What the helper lends one client of Jupiter's a counted minute on the total alone, before it lends only while room
+ * stays for others: LEND_FREE_SHARES 2 x the share 4 (apps/helper/src/limits/limits.ts, proxy.ts PROXY_BUDGETS). */
+export const JUPITER_PER_MINUTE = 8;
+/** The helper counts a draw to the end of its second plus the minute, so a counted minute spans up to 61 s. */
+export const COUNTED_MINUTE_MS = 61_000;
+/** One Jupiter call every 8 s: at most 8 in any 61 s (0, 8, ..., 56; the ninth at 64). */
+export const PACE_MS = 8_000;
+/** The most of `times` (ms) in any span of `span` ms. */
+export function mostIn(times, span = COUNTED_MINUTE_MS) {
+  const t = [...times].sort((a, b) => a - b);
+  let most = 0;
+  for (let i = 0, j = 0; i < t.length; i++) {
+    while (t[i] - t[j] >= span) j++;
+    most = Math.max(most, i - j + 1);
+  }
+  return most;
+}
 export const SHAPES = [
   { name: "S-1 buy, a listed token", side: "buy", token: "listed" },
   { name: "S-1 buy, a token with no route at 40", side: "buy", token: "noRoute" },
@@ -119,6 +140,9 @@ export async function judge(r) {
     const [ma, mb] = r.reads?.accounts?.[mint] ?? [null, null];
     say(!!ma && !!mb && ma.owner === mb.owner && ma.data === mb.data, `${kind === "listed" ? "listed" : "no-route"} mint ${mint} read equal on both providers, owner ${ma?.owner}`);
   }
+  const sent = [...(r.probes ?? []).flatMap((p) => p.sentAt ?? []), ...(r.shapes ?? []).flatMap((s) => (s.calls ?? []).map((c) => c.sentAt))];
+  const most = mostIn(sent.filter(Number.isFinite));
+  say(sent.length > 0 && sent.every(Number.isFinite) && most <= JUPITER_PER_MINUTE, `the run's ${sent.length} Jupiter calls, at most ${most} in a counted minute (the helper lends ${JUPITER_PER_MINUTE} on the total alone)${sent.every(Number.isFinite) ? "" : ", some with no send time"}`);
   const bh = r.blockhash;
   say(!!bh && typeof bh.blockhash === "string" && Number.isSafeInteger(bh.lastValidBlockHeight), `the device's blockhash at finalized: ${bh?.blockhash} valid to height ${bh?.lastValidBlockHeight}`);
   for (const [i, s] of (r.shapes ?? []).entries()) {
@@ -187,40 +211,19 @@ export async function read({ base = BASE, token, noRouteToken } = {}) {
   const wallet = base58(globalThis.crypto.getRandomValues(new Uint8Array(32)));
   // every Jupiter call of the run, paced; the kit's own calls, this fetch only keeps what each answered
   let last = 0;
+  const t0 = Date.now();
   const paced = async (url, init) => {
     const wait = last + PACE_MS - Date.now();
     if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
     last = Date.now();
+    const sentAt = last - t0;
     const t = performance.now();
     // the kit's own timeout, started after the pace's wait (the kit's signal was started before it)
     const res = await fetch(url, { ...init, signal: AbortSignal.timeout(SOLANA_BUILD_TIMEOUT_MS) });
     const body = await res.text();
-    return { url, status: res.status, body, ms: performance.now() - t, res };
+    return { url, status: res.status, body, ms: performance.now() - t, res, sentAt };
   };
-  const probes = [];
-  if (!noRouteToken) {
-    const seen = new Set([token]);
-    for (const t of rows(["new", "graduating"])) {
-      if (seen.has(t.token) || probes.length >= PROBES) continue;
-      seen.add(t.token);
-      const req = { side: "buy", wallet, token: t.token, amount: BUY_LAMPORTS, slippageBps: SLIPPAGE_BPS };
-      // at 40, and when it has no route there, at 64, Jupiter's most: a token with no route at any cap is not the retry
-      // path (it cannot be bought anywhere), so it is passed over
-      const at = async (maxAccounts) => {
-        let status = 0;
-        return fetchSolanaJupiterBuild(base, req, { maxAccounts, fetch: async (url, init) => { const c = await paced(url, init); status = c.status; return new Response(c.body, { status: c.status }); } })
-          .then(() => "route", (e) => (e instanceof SolanaBuildError && e.code === "no_route" ? "no route" : `HTTP ${status}`));
-      };
-      const p = { mint: t.token, at40: await at(40) };
-      if (p.at40 === "no route") p.at64 = await at(64);
-      probes.push(p);
-      if (p.at40 === "no route" && p.at64 === "route") { noRouteToken = t.token; break; }
-    }
-    if (!noRouteToken) throw new Error(`no token with no route at 40 and a route at 64 among ${probes.length} probed (${probes.map((p) => `${p.mint.slice(0, 8)} ${p.at40}${p.at64 ? `, ${p.at64} at 64` : ""}`).join("; ")})`);
-  }
-  const mints = { listed: token, noRoute: noRouteToken };
-  const amounts = { listed: { buy: BUY_LAMPORTS.toString(), sell: "" }, noRoute: { buy: BUY_LAMPORTS.toString(), sell: "" } };
-  // the reads the judge needs, made after the builds: both mints, every table any build names, the blockhash
+  // the device's reads: the blockhash first, both mints and every table any build names as each build needs them
   const rpcAgain = (rpc) => Object.assign(async (m, p) => {
     // public RPCs answer 429 or time out under load: up to 4 tries each, 1, 2 and 4 s apart (a read, never a judgement)
     for (let i = 0; ; i++) {
@@ -229,6 +232,50 @@ export async function read({ base = BASE, token, noRouteToken } = {}) {
   }, { url: rpc.url });
   const rpcs = RPCS.map((u) => rpcAgain(solanaJsonRpc(u)));
   const blockhash = await readSolanaBlockhash(rpcs[0]);
+  // the device's cap search's judge: the assembly on reads made now (the judge assembles again on the record's)
+  const live = { reads: { accounts: {} }, blockhash };
+  const fitFor = (req) => async (build) => {
+    const keys = [req.token, ...build.tables].filter((k) => !live.reads.accounts[k]);
+    if (keys.length) Object.assign(live.reads.accounts, await readAccounts(rpcs, keys));
+    return assembler(live, req)(build);
+  };
+  const probes = [];
+  if (!noRouteToken) {
+    const seen = new Set([token]);
+    for (const t of rows(["new", "graduating"])) {
+      if (seen.has(t.token) || probes.length >= PROBES) continue;
+      seen.add(t.token);
+      // each side at 40, and when both have no route there, each within the cap search's reach (its steps past 40, on
+      // the device's assembly): a token with no fitting route the search reaches is not the retry path, so it is passed over
+      const p = { mint: t.token, sentAt: [] };
+      const ask = (side) => {
+        const req = { side, wallet, token: t.token, amount: side === "buy" ? BUY_LAMPORTS : PROBE_SELL_UNITS, slippageBps: SLIPPAGE_BPS };
+        const fetch = async (url, init) => {
+          const c = await paced(url, init).catch((e) => { p.sentAt.push(last - t0); throw e; });
+          p.sentAt.push(c.sentAt);
+          return new Response(c.body, { status: c.status });
+        };
+        const said = (e) => (e instanceof SolanaBuildError && e.code === "no_route" ? "no route" : e instanceof SolanaBuildError ? e.code : "no answer");
+        return {
+          at40: () => fetchSolanaJupiterBuildThatFits(base, req, () => true, { fetch, maxBuilds: 1 }).then(() => "route", said),
+          // the search's own steps past 40, judged on the device's assembly as the shape is: a route over 1,232 bytes
+          // at every cap the search reaches is a token the device refuses (too_large), not the retry path either
+          reach: () => fetchSolanaJupiterBuildThatFits(base, req, fitFor(req), { fetch, startAt: SOLANA_JUPITER_CAP_UP[40], maxBuilds: SOLANA_JUPITER_MAX_BUILDS - 1 }).then((f) => `fits at ${f.maxAccounts}`, said),
+        };
+      };
+      const buy = ask("buy");
+      const sell = ask("sell");
+      p.buy = { at40: await buy.at40() };
+      if (p.buy.at40 === "no route") p.sell = { at40: await sell.at40() };
+      if (p.sell?.at40 === "no route") p.buy.reach = await buy.reach();
+      if (p.buy.reach?.startsWith("fits")) p.sell.reach = await sell.reach();
+      probes.push(p);
+      if (p.sell?.reach?.startsWith("fits")) { noRouteToken = t.token; break; }
+    }
+    if (!noRouteToken) throw new Error(`no token with no route at 40 and a fitting one within the search's reach, buy and sell, among ${probes.length} probed (${probes.map((p) => `${p.mint.slice(0, 8)} ${JSON.stringify({ buy: p.buy, sell: p.sell })}`).join("; ")})`);
+  }
+  const mints = { listed: token, noRoute: noRouteToken };
+  const amounts = { listed: { buy: BUY_LAMPORTS.toString(), sell: "" }, noRoute: { buy: BUY_LAMPORTS.toString(), sell: "" } };
   const shapes = [];
   for (const s of SHAPES) {
     const mint = mints[s.token];
@@ -246,20 +293,13 @@ export async function read({ base = BASE, token, noRouteToken } = {}) {
         c = await paced(url, init);
       } catch (e) {
         // a call the helper did not answer (the kit's 5 s timeout, a dropped connection) is kept too, as status 0
-        calls.push({ url, status: 0, body: "", ms: 0, error: String(e?.message ?? e).slice(0, 120) });
+        calls.push({ url, status: 0, body: "", ms: 0, sentAt: last - t0, error: String(e?.message ?? e).slice(0, 120) });
         throw e;
       }
-      calls.push({ url: c.url, status: c.status, body: c.body, ms: c.ms });
+      calls.push({ url: c.url, status: c.status, body: c.body, ms: c.ms, sentAt: c.sentAt });
       return new Response(c.body, { status: c.status, headers: { "content-type": c.res.headers.get("content-type") ?? "" } });
     };
-    // the device's cap search, its judge the assembly on reads made now (the judge assembles again on the record's)
-    const live = { reads: { accounts: {} }, blockhash };
-    const fit = async (build) => {
-      const keys = [mint, ...build.tables].filter((k) => !live.reads.accounts[k]);
-      if (keys.length) Object.assign(live.reads.accounts, await readAccounts(rpcs, keys));
-      return assembler(live, req)(build);
-    };
-    await fetchSolanaJupiterBuildThatFits(base, req, fit, { fetch: keep }).catch(() => {}); // judged on replay
+    await fetchSolanaJupiterBuildThatFits(base, req, fitFor(req), { fetch: keep }).catch(() => {}); // judged on replay
     shapes.push({ name: s.name, calls });
   }
   const names = new Set([mints.listed, mints.noRoute]);

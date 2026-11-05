@@ -1,7 +1,7 @@
 /// <reference types="node" />
 // Card solana-uncapped-fits, fold 2: the trade's build is a cap search judged on the device's own assembly (Jupiter's
 // requote with lower max accounts, developers.jup.ag/docs/swap/requote-with-lower-max-accounts): 40 first, up on
-// "No routes found" (40, 48, 60, 64), down when the assembly is over 1,232 bytes (40 to 32, any other cap by 4, never
+// "No routes found" (40, 48, 60: the reach of 3 builds), down when the assembly is over 1,232 bytes (40 to 32, any other cap by 4, never
 // to a cap known to have no route), at most SOLANA_JUPITER_MAX_BUILDS builds. The builds here are one recorded build
 // (test/fixtures/solana-builds.json `good`) answered at every cap; `fit` stands in for the device's assembly and says,
 // per cap, whether it is over 1,232 bytes.
@@ -45,13 +45,16 @@ const run = (by: Record<number, "none" | "big" | "fit" | "503">) => {
   return { w, p: fetchSolanaJupiterBuildThatFits(ORIGIN, R, w.fit, { fetch: w.f }) };
 };
 
-test("the steps: up 40, 48, 60, 64 on no route; down 40 to 32 and by 4 on too large; never onto a cap known bad", () => {
-  assert.deepEqual(SOLANA_JUPITER_CAP_UP, { 40: 48, 48: 60, 60: 64 });
+test("the steps: up 40, 48, 60 on no route; down 40 to 32 and by 4 on too large; never onto a cap known bad", () => {
+  // fold 3: the steps and the bound agree, every step up is one the 3 builds from 40 reach (60 is the third)
+  assert.deepEqual(SOLANA_JUPITER_CAP_UP, { 40: 48, 48: 60 });
   assert.equal(SOLANA_JUPITER_MAX_BUILDS, 3);
   assert.equal(solanaNextCap(40, "no_route", 40, 65), 48);
   assert.equal(solanaNextCap(48, "no_route", 48, 65), 60);
-  assert.equal(solanaNextCap(60, "no_route", 60, 65), 64);
+  assert.equal(solanaNextCap(60, "no_route", 60, 65), null);
   assert.equal(solanaNextCap(64, "no_route", 64, 65), null);
+  // no route below a cap known too large still goes half way between them
+  assert.equal(solanaNextCap(32, "no_route", 32, 40), 36);
   assert.equal(solanaNextCap(40, "too_large", 0, 40), 32);
   assert.equal(solanaNextCap(48, "too_large", 40, 48), 44);
   assert.equal(solanaNextCap(60, "too_large", 48, 60), 56);
@@ -80,6 +83,26 @@ test("no route at 40 or 48, one at 60: three builds (B8gv9RJk…pump, measured)"
   const { w, p } = run({ 60: "fit", 64: "fit" });
   assert.equal((await p).maxAccounts, 60);
   assert.deepEqual(w.asked, [40, 48, 60]);
+});
+
+test("40 too large, then 32 no route: the next ask is between them (36), never 48, which is above a cap known too large", async () => {
+  const { w, p } = run({ 40: "big", 32: "none", 36: "fit", 48: "fit" });
+  assert.equal((await p).maxAccounts, 36);
+  assert.deepEqual(w.asked, [40, 32, 36]);
+});
+
+test("startAt: a trade's later leg asks the cap its first leg found, and searches on from there only when it does not fit", async () => {
+  const one = world({ 48: "fit" });
+  const got = await fetchSolanaJupiterBuildThatFits(ORIGIN, R, one.fit, { fetch: one.f, startAt: 48 });
+  assert.equal(got.maxAccounts, 48);
+  assert.deepEqual(one.asked, [48]);
+  const on = world({ 48: "big", 44: "fit" });
+  assert.equal((await fetchSolanaJupiterBuildThatFits(ORIGIN, R, on.fit, { fetch: on.f, startAt: 48 })).maxAccounts, 44);
+  assert.deepEqual(on.asked, [48, 44]);
+  const top = world({});
+  await assert.rejects(fetchSolanaJupiterBuildThatFits(ORIGIN, R, top.fit, { fetch: top.f, startAt: 60 }), (e: unknown) => e instanceof SolanaBuildError && e.code === "no_route");
+  assert.deepEqual(top.asked, [60]);
+  for (const bad of [0, 65, 40.5]) await assert.rejects(fetchSolanaJupiterBuildThatFits(ORIGIN, R, top.fit, { fetch: top.f, startAt: bad }), /startAt must be 1 to 64/);
 });
 
 test("40's route over 1,232 bytes: asked again at 32", async () => {
