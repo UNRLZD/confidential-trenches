@@ -4,8 +4,22 @@
 // checks passed. The flow's own runs over recorded answers are in solana-flow-replay.test.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
-import { solanaCompileV0, solanaDecodeMessage, solanaSignOnlyChecked, solanaWithBlockhash, type SolanaAssembled, type SolanaLegRecord } from "../src/index.ts";
+import {
+  assembleSolanaSwap,
+  checkSolanaQuote,
+  parseSolanaJupiterBuild,
+  readSolanaBlockhashValid,
+  solanaCompileV0,
+  solanaDecodeLookupTable,
+  solanaDecodeMessage,
+  solanaSignOnlyChecked,
+  solanaWithBlockhash,
+  type SolanaAssembled,
+  type SolanaLegRecord,
+  type SolanaRpc,
+} from "../src/index.ts";
 
 const key = (n: number): string => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 1 + (n % 250) : i === 1 ? Math.floor(n / 250) + 1 : 9)));
 const OLD = key(900);
@@ -68,4 +82,59 @@ test("planted: a leg whose bytes change between the check and the sign is refuse
   assert.deepEqual(out, [same]);
   assert.equal(same.rec.refused, undefined);
   for (const x of [changed, flipped, shorter]) assert.equal(x.rec.refused, "the bytes to sign are not the bytes the checks passed");
+});
+
+// Recorded builds whose message loads keys from two lookup tables (test/fixtures/solana-builds.json `twoTable`): the
+// lookups sit after the instructions, so a fresh blockhash must leave them, and every check's verdict, as they were.
+type Acc = { owner: string; data: string } | null;
+const TWO = (JSON.parse(readFileSync(new URL("./fixtures/solana-builds.json", import.meta.url), "utf8")) as { twoTable: { side: "buy" | "sell"; wallet: string; mint: string; amount: string; body: string; accounts: Record<string, [Acc, Acc]>; blockhash: { blockhash: string; lastValidBlockHeight: number } }[] }).twoTable;
+const accOf = (a: Acc) => (a ? { owner: a.owner, data: Uint8Array.from(Buffer.from(a.data, "base64")) } : null);
+
+test("recorded two-table builds: a fresh blockhash changes only its own 32 bytes, the lookups stay, every check reads the same", () => {
+  assert.equal(TWO.length, 2);
+  for (const c of TWO) {
+    const build = parseSolanaJupiterBuild(JSON.parse(c.body));
+    const tables = Object.fromEntries(build.tables.flatMap((t) => (c.accounts[t]?.[0] ? [[t, solanaDecodeLookupTable(accOf(c.accounts[t][0])!.data)]] : [])));
+    const req = { side: c.side, wallet: c.wallet, token: c.mint, amount: BigInt(c.amount), slippageBps: 1000 };
+    const a = assembleSolanaSwap(req, build, { blockhash: c.blockhash.blockhash, lastValidBlockHeight: c.blockhash.lastValidBlockHeight, tables, tokenProgram: c.accounts[c.mint]![0]!.owner }, { pick: () => 0 });
+    assert.equal(a.tablesUsed.length, 2);
+    const b = solanaWithBlockhash(a, { blockhash: NEW, lastValidBlockHeight: 999 });
+    const m0 = solanaDecodeMessage(a.message);
+    const m1 = solanaDecodeMessage(b.message);
+    assert.equal(m1.blockhash, NEW);
+    assert.equal(m1.lookups.length, 2);
+    assert.deepEqual({ ...m1, blockhash: "" }, { ...m0, blockhash: "" });
+    const diff = [...b.wire.keys()].filter((i) => b.wire[i] !== a.wire[i]);
+    assert.ok(diff.length > 0 && diff.at(-1)! - diff[0]! < 32);
+    const reads = {
+      tables: Object.fromEntries(build.tables.map((t) => [t, [accOf(c.accounts[t]![0]), accOf(c.accounts[t]![1])] as const])),
+      mint: [accOf(c.accounts[c.mint]![0]), accOf(c.accounts[c.mint]![1])] as const,
+      rent: { tokenAccount: [0n, 0n] as const, pumpVolumeAccumulator: [0n, 0n] as const },
+      simulations: [null, null] as const,
+      reference: null,
+    };
+    const q = { ...req, spendable: req.amount, minOut: 1n, otherWallets: [] };
+    const v0 = checkSolanaQuote(a.wire, q, reads).results.map((r) => [r.id, r.ok, r.detail]);
+    const v1 = checkSolanaQuote(b.wire, q, reads).results.map((r) => [r.id, r.ok, r.detail]);
+    assert.deepEqual(v1, v0);
+    assert.equal(v0.find((r) => r[0] === "S2")?.[1], true, "S2 reads both tables");
+  }
+});
+
+test("the validity read counts only `value: true` on both providers: an error, a string, 1, no value or null never count", async () => {
+  const bh = key(902);
+  const rpc = (valid: (n: number) => unknown): SolanaRpc => {
+    let n = 0;
+    return (async (method: string) => {
+      if (method === "getLatestBlockhash") return { context: { slot: 10 }, value: { blockhash: bh, lastValidBlockHeight: 100 } };
+      if (method === "isBlockhashValid") { const v = valid(n++); if (v instanceof Error) throw v; return v; }
+      throw new Error(method);
+    }) as SolanaRpc;
+  };
+  const good = () => rpc(() => ({ context: { slot: 1 }, value: true }));
+  for (const odd of [() => new Error("timeout"), () => ({ value: "true" }), () => ({ value: 1 }), () => ({}), () => null, () => ({ value: [true] })]) {
+    await assert.rejects(readSolanaBlockhashValid([good(), rpc(odd)]), /no blockhash both providers hold/);
+    await assert.rejects(readSolanaBlockhashValid([rpc(odd), good()]), /no blockhash both providers hold/);
+  }
+  assert.equal((await readSolanaBlockhashValid([good(), rpc((n) => ({ value: n > 0 }))])).blockhash, bh, "invalid once on B, valid on the read after: goes");
 });
