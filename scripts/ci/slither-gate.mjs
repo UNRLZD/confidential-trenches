@@ -3,6 +3,9 @@
 //  - a High or Medium hit the triage file does not list (each printed as the entry to add, with Slither's own words);
 //  - a triage entry that matches no hit in the report (the file lists what Slither reports, nothing gone);
 //  - a triage entry with no reason, or an impact that is not the hit's;
+//  - a triage entry whose count is not the number of hits with its key, or two entries with one key: one entry covers
+//    hits that share a detector, file and element (three reentrancy paths in one function), and a new hit of that kind
+//    there raises the number, so it is never covered by an old reason;
 //  - a report that is not a finished run (success false, or no results).
 // A hit is keyed by its detector, the file of its first element and that element's name (with its function for a node),
 // so a line moving does not unlist it and a new hit in the same function under another detector is new.
@@ -34,15 +37,19 @@ export function gate(report, triage) {
   const hits = (report.results.detectors ?? []).map((d) => ({ ...hitKey(d), impact: d.impact, confidence: d.confidence, description: (d.description ?? "").trim() }));
   const entries = triage?.findings;
   if (!Array.isArray(entries)) return { refusals: ["the triage file has no findings list"], hits };
-  for (const t of entries) {
+  entries.forEach((t, i) => {
+    const name = `${t.check} ${t.file} ${t.element}`;
     if (typeof t.reason !== "string" || t.reason.trim().length < 10) out.push(`triage entry ${JSON.stringify(t)} has no reason`);
-    const h = hits.find((x) => same(x, t));
-    if (!h) out.push(`triage entry ${t.check} ${t.file} ${t.element} matches no hit in the report: remove it`);
-    else if (t.impact !== h.impact) out.push(`triage entry ${t.check} ${t.file} ${t.element} says ${t.impact}, Slither says ${h.impact}`);
-  }
+    if (entries.findIndex((u) => same(u, t)) !== i) out.push(`triage entry ${name} is listed twice: one entry per key, with its count`);
+    const mine = hits.filter((x) => same(x, t));
+    if (!mine.length) out.push(`triage entry ${name} matches no hit in the report: remove it`);
+    else if (mine.some((h) => h.impact !== t.impact)) out.push(`triage entry ${name} says ${t.impact}, Slither says ${mine.map((h) => h.impact).join(", ")}`);
+    else if (t.count !== mine.length) out.push(`triage entry ${name} has count ${t.count}, Slither reports ${mine.length}: read each and set the count`);
+  });
   for (const h of hits) {
     if (!GATED.has(h.impact) || entries.some((t) => same(h, t))) continue;
-    const entry = { check: h.check, impact: h.impact, file: h.file, element: h.element, reason: "<why it is accepted, or the fix>" };
+    const n = hits.filter((x) => same(x, h)).length;
+    const entry = { check: h.check, impact: h.impact, file: h.file, element: h.element, count: n, reason: "<why it is accepted, or the fix>" };
     out.push(`untriaged ${h.impact} hit (${h.confidence} confidence): ${h.description.split("\n")[0]}\n  add to triage.json once read: ${JSON.stringify(entry)}`);
   }
   return { refusals: out, hits };

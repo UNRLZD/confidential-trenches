@@ -29,7 +29,7 @@ const node = (check, impact, file, fnName, expr) => ({
 });
 const report = (...detectors) => ({ success: true, error: null, results: { detectors } });
 const SEND = fn("arbitrary-send-eth", "High", "src/PrivacyPoolSimple.sol", "_push(address,uint256)");
-const SEND_T = { check: "arbitrary-send-eth", impact: "High", file: "src/PrivacyPoolSimple.sol", element: "_push(address,uint256)", reason: "the payee is the one W signs for; the pool pays only a proven note" };
+const SEND_T = { check: "arbitrary-send-eth", impact: "High", file: "src/PrivacyPoolSimple.sol", element: "_push(address,uint256)", count: 1, reason: "the payee is the one W signs for; the pool pays only a proven note" };
 const PLANTED = node("reentrancy-no-eth", "Medium", "src/SellDelegate.sol", "sell(SellDelegate.Sell,uint256,bytes)", "_sell.target.call(_sell.data)");
 const LOW = fn("missing-zero-check", "Low", "src/adapters/UniswapV3Adapter.sol", "constructor(address)");
 
@@ -59,6 +59,20 @@ test("a triage entry that matches no hit, has no reason or names another impact 
   assert.match(gate(report(SEND), { findings: [{ ...SEND_T, impact: "Medium" }] }).refusals[0], /says Medium, Slither says High/);
 });
 
+test("one entry covers its count of hits: a planted third hit under a count of 2 is refused, as are a wrong count and a twice-listed key", () => {
+  const re = (expr) => node("reentrancy-balance", "High", "src/SellDelegate.sol", "sell", expr);
+  const two = [re("POOL_MANAGER.unlock(_payload)"), re("POOL_MANAGER.unlock(_payload)")];
+  const T = { check: "reentrancy-balance", impact: "High", file: "src/SellDelegate.sol", element: "sell: POOL_MANAGER.unlock(_payload)", count: 2, reason: "the balance is read before the call on purpose" };
+  assert.deepEqual(gate(report(...two), { findings: [T] }).refusals, []);
+  const r = gate(report(...two, re("POOL_MANAGER.unlock(_payload)")), { findings: [T] }).refusals;
+  assert.equal(r.length, 1, r.join("\n"));
+  assert.match(r[0], /has count 2, Slither reports 3/);
+  assert.match(gate(report(...two), { findings: [{ ...T, count: undefined }] }).refusals[0], /has count undefined, Slither reports 2/);
+  assert.match(gate(report(...two), { findings: [T, T] }).refusals[0], /is listed twice/);
+  // the entry the gate prints for an untriaged key carries its count
+  assert.ok(gate(report(...two), { findings: [] }).refusals[0].includes('"count":2'));
+});
+
 test("a run that did not finish is refused, and a clean run passes", () => {
   assert.match(gate({ success: false, error: "forge build failed", results: {} }, { findings: [] }).refusals[0], /not a finished Slither run/);
   assert.match(gate({}, { findings: [] }).refusals[0], /not a finished Slither run/);
@@ -75,7 +89,7 @@ test("the CLI exits 1 on the planted hit and 0 once it is triaged", () => {
     const red = spawnSync(process.execPath, [GATE, rp, tp], { encoding: "utf8" });
     assert.equal(red.status, 1, red.stderr);
     assert.match(red.stderr, /REFUSED: untriaged Medium hit/);
-    const planted = { check: "reentrancy-no-eth", impact: "Medium", file: "src/SellDelegate.sol", element: "sell(SellDelegate.Sell,uint256,bytes): _sell.target.call(_sell.data)", reason: "the planted hit, triaged" };
+    const planted = { check: "reentrancy-no-eth", impact: "Medium", file: "src/SellDelegate.sol", element: "sell(SellDelegate.Sell,uint256,bytes): _sell.target.call(_sell.data)", count: 1, reason: "the planted hit, triaged" };
     writeFileSync(tp, JSON.stringify({ findings: [SEND_T, planted] }));
     const green = spawnSync(process.execPath, [GATE, rp, tp], { encoding: "utf8" });
     assert.equal(green.status, 0, green.stderr);
