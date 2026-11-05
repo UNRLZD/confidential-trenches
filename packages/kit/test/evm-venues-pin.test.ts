@@ -110,7 +110,7 @@ test("a sell pays only into the chain's pinned pool, and W's authorization names
     const r = record(chain);
     const req = {
       w: W, token: X, amount: 10n ** 18n, target: routers[0] ?? "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4", route: { venue: "uniswap-v3" as const, tokens: [X, v.weth], fees: [500] },
-      minOut: 10n ** 15n, precommitment: 0x5e11n, feeCap: 10n ** 14n, deadline: BigInt(NOW + 300), nonce: 0n,
+      minOut: 10n ** 15n, precommitment: 0x5e11n, feeCap: 10n ** 14n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(NOW + 300), nonce: 0n,
     };
     if (routers.length > 0) {
       // a pool the caller sneaks in is not read: the pin is the pool

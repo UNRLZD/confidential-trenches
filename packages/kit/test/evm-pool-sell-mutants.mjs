@@ -38,6 +38,9 @@ const PINPOOL = "M370 a pinned sell";
 const PINAUTH = "M370 W's authorization";
 const V4CAST = "a v4 sell's data is SellDelegate's PathKey[]";
 const V4 = "planted: a v4 sell";
+const FEETO = "pool-review-3 L-1: the fee recipient is";
+const FEETOSIG = "pool-review-3 L-1: W's Sell signature binds";
+const CALL = "pool-review-3 L-1: SellDelegate.sell's calldata";
 
 // [file, text, replacement, the test that must fail]
 export const MUTANTS = [
@@ -78,6 +81,17 @@ export const MUTANTS = [
   // the fee cap, the amounts, the addresses, the chain
   [SELL, "feeCap === 0n || feeCap >= minOut", "feeCap >= minOut", FEE],
   [SELL, "feeCap === 0n || feeCap >= minOut", "feeCap === 0n || feeCap > minOut", FEE],
+  // the fee recipient (card pool-review-3, L-1): an address, not zero, not W, not the pool; signed and sent
+  [SELL, "if (!isWallet(feeRecipient) || lower(feeRecipient) === lower(w) || lower(feeRecipient) === lower(pool)) return refuse(", "if (false) return refuse(", FEETO],
+  [SELL, "if (!isWallet(feeRecipient) ||", "if (!isAddress(feeRecipient) ||", FEETO],
+  [SELL, "|| lower(feeRecipient) === lower(w) ||", "||", FEETO],
+  [SELL, "|| lower(feeRecipient) === lower(pool)) return refuse(", ") return refuse(", FEETO],
+  [SELL, "      word(built.feeCap),\n      addressWord(built.feeRecipient),\n", "      word(built.feeCap),\n", FEETOSIG],
+  [SELL, "      word(built.feeCap),\n      addressWord(built.feeRecipient),\n", "      word(built.feeCap),\n      addressWord(built.pool),\n", FEETOSIG],
+  [SELL, "uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)\"),\n  );", "uint256 feeCap,uint256 deadline,uint256 nonce)\"),\n  );", CAST],
+  [SELL, "addressWord(s.feeRecipient), word(s.deadline)", "word(s.deadline)", CALL],
+  [SELL, "addressWord(s.target), word(0x160n)", "addressWord(s.target), word(0x140n)", CALL],
+  [SELL, 'utf8("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)")', 'utf8("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)")', CALL],
   [SELL, 'if (!isUint(amount, U256) || amount === 0n)', "if (!isUint(amount, U256))", RANGE],
   [SELL, 'if (!isUint(minOut, U256) || minOut === 0n)', "if (!isUint(minOut, U256))", RANGE],
   [SELL, "if (!isUint(precommitment, FIELD_P))", "if (!isUint(precommitment, U256))", RANGE],
@@ -88,16 +102,16 @@ export const MUTANTS = [
   // W's Sell signature
   [SELL, "if (!BUILT.has(built) || built.chain !== chain)", "if (built.chain !== chain)", SIGNER],
   [SELL, "if (!BUILT.has(built) || built.chain !== chain)", "if (!BUILT.has(built))", SIGNER],
-  [SELL, "Object.freeze({ chain, w, token, amount, target, data, minOut, pool, precommitment, feeCap, deadline, nonce })", "({ chain, w, token, amount, target, data, minOut, pool, precommitment, feeCap, deadline, nonce })", SIGNER],
+  [SELL, "Object.freeze({ chain, w, token, amount, target, data, minOut, pool, precommitment, feeCap, feeRecipient, deadline, nonce })", "({ chain, w, token, amount, target, data, minOut, pool, precommitment, feeCap, feeRecipient, deadline, nonce })", SIGNER],
   [SELL, 'if (addressOf(secretKey) !== lower(built.w)) return refuse("bad_key", "the key is not W\'s");', "", SIGNER],
   [SELL, "      word(BigInt(chainId)),\n      addressWord(built.w),", "      word(BigInt(chainId)),\n      addressWord(built.pool),", CAST],
   [SELL, "const chainId = venueOf(built.chain).chainId;", "const chainId = 8453;", CAST],
-  [SELL, 'uint256 feeCap,uint256 deadline,uint256 nonce)"),', 'uint256 feeCap,uint256 nonce,uint256 deadline)"),', CAST],
+  [SELL, 'uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"),', 'uint256 feeCap,address feeRecipient,uint256 nonce,uint256 deadline)"),', CAST],
   [SELL, "      word(built.deadline),\n      word(built.nonce),", "      word(built.nonce),\n      word(built.deadline),", CAST],
   [SELL, "keccak_256(fromHex(built.data))", "keccak_256(utf8(built.data))", CAST],
   [SELL, "out[64] = 27 + rec[0]!;", "out[64] = rec[0]!;", SIGS],
   [SELL, '{ prehash: false, lowS: true, format: "recovered" });\n  // noble', '{ prehash: false, lowS: false, format: "recovered" });\n  // noble', SIGS],
-  [SELL, "const { w, token, amount, target, route, minOut, pool, precommitment, feeCap, deadline, nonce } = req;", "const { w, token, amount, route, minOut, pool, precommitment, feeCap, deadline, nonce } = req;\n  const target = req.target;\n  void req.target;", ONCE],
+  [SELL, "const { w, token, amount, target, route, minOut, pool, precommitment, feeCap, feeRecipient, deadline, nonce } = req;", "const { w, token, amount, route, minOut, pool, precommitment, feeCap, feeRecipient, deadline, nonce } = req;\n  const target = req.target;\n  void req.target;", ONCE],
   // W's authorization
   [SELL, "const items = concat(rlpUint(BigInt(chainId)),", "const items = concat(rlpUint(0n),", AUTH],
   [SELL, "keccak_256(concat(Uint8Array.of(0x05, 0xc0 + items.length), items))", "keccak_256(concat(Uint8Array.of(0x04, 0xc0 + items.length), items))", AUTH],
