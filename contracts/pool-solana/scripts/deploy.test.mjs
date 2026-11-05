@@ -1997,7 +1997,7 @@ test("review a763 1: --sweep-kept whose buffer close fails (exit 0, 'Failed to c
 
 /** A run of main() on a local fake whose program state the planted CLI sets: `onDeploy(n, ids, state)` answers the n-th
  * deploy, `onCli(args, ids, state)` any other CLI call. Ends at the first send after the read-back. */
-async function deployRun({ onDeploy, onCli = () => ({ status: 0, stdout: "", stderr: "" }), limitGsfa = 0, balanceAfter = null, dropSetAuthority = 0 }) {
+async function deployRun({ onDeploy, onCli = () => ({ status: 0, stdout: "", stderr: "" }), limitGsfa = 0, balanceAfter = null, dropSetAuthority = 0, pdResets = 0 }) {
   const f = fakeGh();
   const code = recordedCode();
   const state = { program: false, authority: null }; // authority: null none, else the funder's id
@@ -2039,6 +2039,8 @@ async function deployRun({ onDeploy, onCli = () => ({ status: 0, stdout: "", std
         const acc = (owner, executable, data) => ({ value: { owner, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] } });
         if (params[0] === ids.program) return ok(acc(LOADER, true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pdAddr))])));
         if (params[0] === pdAddr) {
+          // a socket reset while the ~103 KB body is read: a 200 whose JSON never arrives
+          if (pdResets > 0) return pdResets--, { ok: true, status: 200, json: async () => { throw new TypeError("terminated"); } };
           const meta = Buffer.alloc(45);
           meta.writeUInt32LE(3, 0);
           if (state.authority) (meta[12] = 1), Buffer.from(b58decode(state.authority)).copy(meta, 13);
@@ -2337,4 +2339,153 @@ test("review 89a6 M2 (every path): the record's finalized reads (the statuses an
     if (r.dir) rmSync(r.dir, { recursive: true, force: true });
     rmSync(w, { recursive: true, force: true });
   }
+});
+
+// ---- the re-review of 89a6d6f3..7a219b67: each finding a test, red at c07be769 ----
+import { rpc as liveRpc } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
+
+test("review 7a21 M-a: a 200 whose body is cut (no JSON) is a transient failure, tried again; a deploy whose programdata read is reset once still finishes", async () => {
+  let n = 0;
+  const cut = async () => (n++ < 2 ? { ok: true, status: 200, json: async () => { throw new TypeError("terminated"); } } : okR(7));
+  assert.equal(await liveRpc(cut, "u", "getSlot", [], async () => {}), 7);
+  const e = await liveRpc(async () => ({ ok: true, status: 200, json: async () => { throw new TypeError("terminated"); } }), "u", "getSlot", [], async () => {}).catch((x) => x);
+  assert.equal(e.transient, true, "past its tries it is still transient, so readAgain reads again");
+  // a non-2xx with no JSON stays the node's word
+  const e2 = await liveRpc(async () => ({ ok: false, status: 403, json: async () => { throw new SyntaxError("x"); } }), "u", "getSlot", [], async () => {}).catch((x) => x);
+  assert.notEqual(e2.transient, true);
+  const r = await deployRun({ pdResets: 1, onDeploy: (k, ids, state) => ((state.program = true), (state.authority = ids.funder), { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" }) });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.equal(setAuthorities(r).length, 1);
+  assert.ok(deployed(r.said), r.said.join("\n"));
+});
+
+test("review 7a21 M-b: a transaction not yet found at finalized while the record is read is read again: the mainnet run writes its record", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let misses = 3;
+  wrap(c, (url, { method, params }, real) => (method === "getTransaction" && params[1]?.commitment === "finalized" && misses-- > 0 ? okR(null) : real()));
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(misses < 0 && existsSync(out));
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 7a21 M-b: a record that cannot be read in 90 s prints the --rebuild-record line for its journal", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  wrap(c, (url, { method, params }, real) => (method === "getTransaction" && params[1]?.commitment === "finalized" ? okR(null) : real()));
+  const { w, out, journal } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /not found at finalized/);
+    assert.ok(r.said.some((l) => l.includes(`--rebuild-record ${journal} --url ${MAIN_URL} --mainnet`)), r.said.join("\n"));
+    assert.ok(existsSync(journal), "the journal stays for the rebuild");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 7a21 L-1: the settle's reads and the final leftovers read that fail past rpc()'s tries are read again", async () => {
+  const funder = newKey();
+  let heightFails = 7;
+  const pendingSig = "3".repeat(87);
+  const settledAs = [];
+  const journal = { pending: () => (settledAs.length ? [] : [{ step: "x", signature: pendingSig, lastValid: 5 }]), settled: (sig, st) => settledAs.push(st) };
+  const fetchFn = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    if (method === "getBlockHeight") return heightFails-- > 0 ? { ok: false, status: 429, json: async () => ({}) } : okR(9);
+    if (method === "getSignatureStatuses") return okR({ value: [{ confirmationStatus: "confirmed", err: null }] });
+    throw new Error(`unexpected ${method}`);
+  };
+  let t = 0;
+  const ops = chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async (ms) => void (t += ms), now: () => t, say: () => {}, journal });
+  assert.equal(await ops.settle(), true);
+  assert.deepEqual(settledAs, ["landed"]);
+  // a mainnet run whose leftovers read of the programdata filter is rate-limited past its tries still removes its keys
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let gpaFails = 7;
+  wrap(c, (url, { method, params }, real) => (method === "getProgramAccounts" && params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(3, 0, 0, 0)) && gpaFails-- > 0 ? { ok: false, status: 429, json: async () => ({}) } : real()));
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(gpaFails < 0);
+    assert.equal(existsSync(r.dir), false, "the keys are removed");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 7a21 L-2: a send answered 'Blockhash not found' (-32002) or 'node is behind' (-32005) is sent again, the same bytes", async () => {
+  const k = newKey();
+  const { sendAndConfirm } = await import("./deploy.mjs");
+  for (const error of [{ code: -32002, message: "Transaction simulation failed: Blockhash not found" }, { code: -32005, message: "Node is behind by 42 slots" }]) {
+    const sent = [];
+    let t = 0;
+    const fetchFn = async (u, init) => {
+      const { method, params } = JSON.parse(init.body);
+      if (method === "getLatestBlockhash") return okR({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: 10 } });
+      if (method === "sendTransaction") return sent.push(params[0]), sent.length < 3 ? { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error }) } : okR(decodeTx(params[0]).signature);
+      if (method === "getSignatureStatuses") return okR({ value: [sent.length >= 3 ? { confirmationStatus: "confirmed", err: null } : null] });
+      throw new Error(`unexpected ${method}`);
+    };
+    await sendAndConfirm(fetchFn, "http://x", [transferIx(k.id, RETURN, 1n)], k, [k], { step: "a transfer", wait: async (ms) => void (t += ms), now: () => t });
+    assert.equal(sent.length, 3, error.message);
+    assert.equal(new Set(sent).size, 1, "the same signed bytes each time");
+  }
+});
+
+test("review 7a21 L-3: a --program resume whose stopped run's table reads frozen with exactly the list on both RPCs reuses it: no second table", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const kit = await import(pathToFileURL(path.join(REPO, "packages/kit/src/trade/solana/pool-buy.ts")).href);
+  const venue = await kit.readSolanaPoolBuyVenue([0, 1].map((p) => async (m, params) => structuredClone(PUMP_FX.reads[p][JSON.stringify(params[0])])), "pump-curve", PUMP_FX.mint, () => 0);
+  const want = [...new Set(kit.solanaPoolBuyTableAccounts({ program: RD.program_id, pool: RD.pool }, venue, kit.solanaPoolPages(RD.program_id, 1024, 1024)))];
+  const T = newKey().id;
+  const meta = Buffer.alloc(56);
+  meta.writeUInt32LE(1, 0), meta.writeBigUInt64LE(0xffff_ffff_ffff_ffffn, 4);
+  c.accounts.set(T, { owner: ALT_PROGRAM, executable: false, lamports: 3_000_000, data: [Buffer.concat([meta, ...want.map((a) => Buffer.from(b58decode(a)))]).toString("base64"), "base64"] });
+  const { w, out, journal } = work();
+  writeFileSync(journal, JSON.stringify({ cluster: "mainnet", genesis_hash: MAINNET, program_id: RD.program_id, table: T, table_addresses: want, complete: false, stopped_at: "2026-11-06T00:00:00.000Z", keys: { state: "removed", why: [] }, txs: [] }));
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    const rec = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(rec.table, T, "the first run's table");
+    assert.equal(c.sent.filter((x) => x.tx.ixs.some((i) => i.program === ALT_PROGRAM)).length, 0, "no table made or frozen");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 7a21 L-4: a funding is read from its transaction (a System transfer into the run's payer), never its label: a shared funding wallet's own programdata transaction is left out", async () => {
+  const sysTransfer = (lamports) => { const d = Buffer.alloc(12); d.writeUInt32LE(2, 0), d.writeBigUInt64LE(lamports, 4); return b58(d); };
+  const tx = (slot, keys, instructions) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: keys, instructions } } });
+  const SYS = "11111111111111111111111111111111";
+  const chainTx = {
+    fund: tx(1, ["X0", "F1", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: sysTransfer(5n) }]), // the exchange pays the funder
+    sweep: tx(5, ["F1", "R0", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: sysTransfer(4n) }]),
+    dep: tx(2, ["F1", LOADER], [{ programIdIndex: 1, data: "3" }]),
+    stranger: tx(3, ["X0", LOADER], [{ programIdIndex: 1, data: "3" }]),
+  };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR([{ signature: "stranger", err: null }, { signature: "dep", err: null }]);
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  // a rebuild: --prior's labels, and an old record's funders that carry the funding's payer
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "F2", funders: ["X0", "F1"], txs: [{ step: "first run (--prior)", signature: "fund" }, { step: "first run (--prior)", signature: "sweep" }] });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "dep", "sweep"]);
+});
+
+test("review 7a21 info: the loader's SetAuthority label names no --final", () => {
+  const src = readFileSync(path.join(HERE, "deploy.mjs"), "utf8");
+  const line = src.split("\n").find((l) => l.startsWith("const LOADER_STEPS"));
+  assert.ok(!line.includes("--final"), line);
 });
