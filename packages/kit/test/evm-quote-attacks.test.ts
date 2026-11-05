@@ -4032,3 +4032,80 @@ test("SP9 a lone scan provider whose logs backend lags its own head and answers 
   assert.deepEqual(await lone(scanner(5_000_610, realAt(token, 5_000_250), asked), 5_000_610), below);
   assert.ok(asked.some(([a, b]) => a <= 5_000_250 && b >= 5_000_250), `block 5,000,250 was not asked again: ${JSON.stringify(asked)}`);
 });
+
+// ------------------------------------------------------------------ the ordered spare list (card evm-rpc-spare-list)
+// 5 Nov 17:59-18:09Z: Base's first and second scan providers were both down about 10 minutes (bloXroute 503, and
+// mainnet.base.org -32011 "request limit reached" on every eth_getLogs) and quotes stopped. Each case holds the first two
+// down and the third, the venue's scan.spares[1], finds the token's real pool, which holds the seeded route.
+const refusing = (host: string) =>
+  evmJsonRpc(`https://${host}`, (async () => {
+    throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+  }) as unknown as typeof fetch);
+const answering503 = (host: string) => evmJsonRpc(`https://${host}`, (async () => new Response("No server is available to handle this request", { status: 503 })) as unknown as typeof fetch);
+const triQuote = async (token: string, scans: EvmRpc[], chainName: "base" | "robinhood" = "base", headNo = 5_000_000) => {
+  const pools = [seeded(token), real(token)];
+  return verdict(evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scans));
+};
+
+test("SL1 the first two scan providers down (no connection, or HTTP 503, head reads too): the third carries the scan, on Base and Robinhood", { timeout: 60_000 }, async () => {
+  let k = 0;
+  for (const c of ["base", "robinhood"] as const) {
+    for (const down of [refusing, answering503]) {
+      const t = performance.now();
+      const token = "0x00000000000000000000000000000000005c46" + (++k).toString(16).padStart(2, "0");
+      const asked: [number, number][] = [];
+      const v = await triQuote(token, [down("one.sl1.test"), down("two.sl1.test"), scanner(5_000_000, realAt(token, 4_999_000), asked)], c);
+      assert.deepEqual(v, below, `${c} ${down.name}`);
+      // the third reads in its own spans: Pocket's 500 blocks on Base, 2,000 on Robinhood
+      const span = c === "base" ? 500 : 2_000;
+      assert.ok(asked.length > 0 && asked.every(([a, b]) => b - a + 1 <= span), `${c} ${down.name}: ${asked.length} getLogs on the third, a span over ${span}`);
+      console.log(`SL1 ${c} ${down.name}: ${asked.length} getLogs on the third, ${Math.round(performance.now() - t)} ms`);
+    }
+  }
+});
+
+test("SL2 a warm scan with the first two down: the third has its blocks at once, never at the bound", { timeout: 60_000 }, async () => {
+  const token = "0x00000000000000000000000000000000005c4610";
+  await triQuote(token, [scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
+  const asked: [number, number][] = [];
+  const t = performance.now();
+  const v = await triQuote(token, [refusing("one.sl2.test"), refusing("two.sl2.test"), scanner(5_000_010, realAt(token, 5_000_005), asked)], "base", 5_000_010);
+  assert.deepEqual(v, below);
+  assert.ok(performance.now() - t < 5_000, `the warm quote took ${Math.round(performance.now() - t)} ms`);
+  assert.ok(asked.some(([a, b]) => a <= 5_000_005 && b >= 5_000_005), `block 5,000,005 not asked of the third: ${JSON.stringify(asked)}`);
+});
+
+test("SL3 a lone scan provider one block behind its own head: the newest request is asked again whole, never as halves (re-review of 156ece1 LOW-2)", { timeout: 60_000 }, async () => {
+  const token = "0x00000000000000000000000000000000005c4611";
+  const pools = [seeded(token), real(token)];
+  const lone = (scan: EvmRpc, headNo: number) => verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan));
+  await lone(scanner(5_000_000, []), 5_000_000);
+  // its head read names 5,000,010; the first batch's backend holds 5,000,009, the next the head
+  const asked: [number, number][] = [];
+  const front = scanner(5_000_010, realAt(token, 5_000_005), asked);
+  const behind = scanner(5_000_009, realAt(token, 5_000_005));
+  let batches = 0;
+  const lag: EvmRpc = (calls, signal) => (calls.some((c) => c.method === "eth_getLogs") && batches++ === 0 ? behind(calls, signal) : front(calls, signal));
+  // the same quote with no lag, for the scan batches it sends
+  const token2 = "0x00000000000000000000000000000000005c4612";
+  const pools2 = [seeded(token2), real(token2)];
+  const lone2 = (scan: EvmRpc, headNo: number) => verdict(evmPoolBuyQuoteWith({ chain: "base", token: token2, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token2) } as EvmPoolBuyQuoteRequest, [chain(pools2, 0, headNo), chain(pools2, 1, headNo)], NOW, scan));
+  await lone2(scanner(5_000_000, []), 5_000_000);
+  let plain = 0;
+  const inner = scanner(5_000_010, realAt(token2, 5_000_005));
+  assert.deepEqual(await lone2((calls, signal) => (calls.some((c) => c.method === "eth_getLogs") && plain++, inner(calls, signal)), 5_000_010), below);
+  assert.deepEqual(await lone(lag, 5_000_010), below);
+  assert.equal(batches, plain + 1, `${batches} scan batches where ${plain + 1} do`);
+  assert.ok(asked.every(([a, b]) => a === 5_000_001 && b === 5_000_010), `a request was halved: ${JSON.stringify(asked)}`);
+});
+
+test("SL4 a one-call batch answered as a bare object (Pocket's way) is that call's answer, with its id; any other answer that is not a batch is refused", async () => {
+  const bare = (body: unknown) => evmJsonRpc("https://bare.sl4.test", (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch);
+  const one = [{ method: "eth_blockNumber", params: [] }];
+  assert.deepEqual(await bare({ jsonrpc: "2.0", id: 0, result: "0x660a02b" })(one), [{ jsonrpc: "2.0", id: 0, result: "0x660a02b" }]);
+  // another id is no answer to it
+  assert.deepEqual(await bare({ jsonrpc: "2.0", id: 7, result: "0x1" })(one), [null]);
+  // a bare object to a batch of two, and a bare string, are refused
+  await assert.rejects(bare({ jsonrpc: "2.0", id: 0, result: "0x1" })([...one, ...one]), /not a batch/);
+  await assert.rejects(bare("0x1")(one), /not a batch/);
+});

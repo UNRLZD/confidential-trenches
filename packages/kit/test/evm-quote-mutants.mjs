@@ -142,21 +142,28 @@ export const MUTANTS = [
   [QUOTE, "if (scanHead - b > maxLag) return refuse(", "if (false) return refuse(", R, "S2 "],
   // card evm-scan-second-provider: a request the first scan provider fails goes to the second; the first passes on at
   // once a refused connection and a throttle held past 2 s; the newest request asks its head block in its batch
-  [QUOTE, "      if (spare === undefined || j.on === spare) throw e;", "      throw e;", R, "SP1 "],
+  [QUOTE, "      if (next === undefined) throw e;", "      throw e;", R, "SP1 "],
   [QUOTE, "            if (spareNext) throw new ScanRefused(", "            if (false) throw new ScanRefused(", R, "SP1 "],
   [QUOTE, "      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw", "      if (false) throw", R, "SP4 "],
   [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
-  [QUOTE, "  const fast = spare !== undefined && jobs.reduce(", "  const fast = spare !== undefined && 0 * jobs.reduce(", R, "SP2 "],
+  [QUOTE, "  const fast = second !== undefined && jobs.reduce(", "  const fast = second !== undefined && 0 * jobs.reduce(", R, "SP2 "],
   [QUOTE, "    const top = p === null;", "    const top = false;", R, "SP3 "],
   // review of 22e29c9, B2: the block check on the request up to the head alone (SP7 on the second, SP9 on a lone first)
   [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SP7 "],
   [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SP9 "],
   // review of 22e29c9, B1: a head read on the second sent the scan's requests there too
-  [QUOTE, "return { head: await scanHeadOf(spareOn.rpc, spareOn.gate), first: f, spare: spareOn };", "return { head: await scanHeadOf(spareOn.rpc, spareOn.gate), first: spareOn };", R, "SP6 "],
+  [QUOTE, "headFrom(f).then((head) => ({ head, first: f })));", "headFrom(f).then((head) => ({ head, first: f.next ?? f })));", R, "SP6 "],
   // review of 22e29c9, N4: the 2 s hold where no second follows (the head read), and a not-yet block as an answer
   [QUOTE, "      fast &&= spareNext;", "", R, "SP8 "],
-  [QUOTE, 'throw spare !== undefined && on !== spare ? new ScanRefused("rpc_error", m) : new Error(m);', "return out;", R, "SP3 "],
-  [QUOTE, "      if (fast && on !== spare) throw new ScanRefused(", "      if (false) throw new ScanRefused(", R, "SP5 "],
+  [QUOTE, 'throw on.next !== undefined ? new ScanRefused("rpc_error", m) : new NotHeldYet("rpc_error", m);', "return out;", R, "SP3 "],
+  [QUOTE, "      if (fast && on.next !== undefined) throw new ScanRefused(", "      if (false) throw new ScanRefused(", R, "SP5 "],
+  // card evm-rpc-spare-list: a request the second fails goes to the third, the head too; a 5xx passes on at once; a
+  // not-yet block is asked again whole; a one-call batch's bare answer is read
+  [QUOTE, "      await settle(rest.map(run));", "      await settle(rest.map((r) => one(r)));", R, "SL1 "],
+  [QUOTE, "(o.next === undefined ? Promise.reject(e) : headFrom(o.next))", "(o.next === undefined || o !== firstOn ? Promise.reject(e) : headFrom(o.next))", R, "SL1 "],
+  [QUOTE, "          if (spareNext && /^the provider answered HTTP 5", "          if (false && /^the provider answered HTTP 5", R, "SL1 "],
+  [QUOTE, "      if (notYet) {", "      if (false) {", R, "SL3 "],
+  [QUOTE, "calls.length === 1 && typeof parsed === \"object\" && parsed !== null ? [parsed] : parsed;", "false ? [parsed] : parsed;", R, "SL4 "],
   [QUOTE, "  scanned?.commit();", "", R, "N1a "],
   // review of 5452011: no override for a pool the PoolManager does not hold, one hook per override, never an address
   // the reads call; the route's own pools are not R; pools of other currencies priced through them, bounded
@@ -172,7 +179,7 @@ export const MUTANTS = [
   // every scan of a quote shares one gate and one head; X's scan failing refuses the quote
   // (no mutant gives each scan its own gate: the token's scan and the one scan of every X run one after the other, so
   // a gate per scan never has more in flight; G1 and TH3 hold the scan gate's own limit, T8b the reads' gate's)
-  [QUOTE, "(scanFrom ??= scanHeadOf(f.rpc, f.gate).then(", "(scanFrom = scanHeadOf(f.rpc, f.gate).then(", R, "G3 "],
+  [QUOTE, "(scanFrom ??= headFrom(f).then(", "(scanFrom = headFrom(f).then(", R, "G3 "],
   [QUOTE, "if (next === undefined) free++;\n      else next();", "free++;\n      next?.();", R, "T8b "],
   // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
   // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
