@@ -2427,14 +2427,25 @@ const liarCase = (token: string) => {
 // providers from model chains behind a fake fetch, each host answering after its own delay, through the kit's own
 // evmProviders (timed: measured, held)
 const hosted = (models: Record<string, { rpc: EvmRpc; ms: number }>) => {
+  let flying = 0;
   const f = (async (u: string, init: RequestInit) => {
-    const h = new URL(u).hostname;
-    const calls = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
-    await pause(models[h]!.ms);
-    const out = await models[h]!.rpc(calls.map((c) => ({ method: c.method, params: c.params })));
-    return new Response(JSON.stringify(out.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+    flying++;
+    try {
+      const h = new URL(u).hostname;
+      const calls = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
+      await pause(models[h]!.ms);
+      const out = await models[h]!.rpc(calls.map((c) => ({ method: c.method, params: c.params })));
+      return new Response(JSON.stringify(out.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+    } finally {
+      flying--;
+    }
   }) as unknown as typeof fetch;
-  return { f, urls: Object.keys(models).map((h) => "https://" + h) };
+  // once every request a quote left out has been answered and timed (the timing lands a few ticks after the answer)
+  const idle = async () => {
+    while (flying > 0) await pause(5);
+    await pause(20);
+  };
+  return { f, urls: Object.keys(models).map((h) => "https://" + h), idle };
 };
 const hostOf = (u: string) => new URL(u).hostname;
 
@@ -2674,7 +2685,7 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   // ended (EVM_HOLD_MS on); one held moves up (re-review of 59a69e2, LOW-4: "not ranked last" rode on the measured
   // speed, and failed 2 of 30 beside CPU burners)
   const placeOf = (urls: readonly string[], host: string, at?: number) => quoteMod.evmRanked(urls, at).map(hostOf).indexOf(host);
-  // (after every request still out has landed: one out past EVM_HEDGE_MS also moves down)
+  // (after every request still out has landed, `idle`: one out past EVM_HEDGE_MS also moves down)
   const unheld = (urls: readonly string[], host: string) => placeOf(urls, host) === placeOf(urls, host, performance.now() + EVM_HOLD_MS! + 1);
   quoteMod.evmSpeedReset();
   const token = freshToken();
@@ -2683,7 +2694,7 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   // answered as that number's block (every model block carries the hash NEW)
   const byNum = (rpc: EvmRpc): EvmRpc => async (calls) =>
     calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest") ? calls.map((c, id) => ({ jsonrpc: "2.0", id, result: head(c.params[0] as string) })) : rpc(calls);
-  const { f, urls } = hosted({
+  const { f, urls, idle } = hosted({
     "l1.v13.test": { rpc: byNum(chain(pools, 0, 4_999_990)), ms: 1 },
     "h1.v13.test": { rpc: byNum(chain(pools, 0, 5_000_000)), ms: 5 },
     "h2.v13.test": { rpc: byNum(chain(pools, 1, 4_999_992)), ms: 5 },
@@ -2693,7 +2704,7 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(urls, f), NOW));
   // the heads are no vote: the first two near ones (l1, h2) pick the block, the lower
   assert.equal((v as { block?: bigint }).block, 4_999_990n, big(v));
-  await pause(60);
+  await idle();
   assert.ok(unheld(urls, "h1.v13.test"), `h1 is not held: ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
   // a head more than maxLag below is held
   quoteMod.evmSpeedReset();
@@ -2704,7 +2715,7 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   });
   assert.equal((await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(low.urls, low.f), NOW))).accepted, true);
   assert.equal(hostOf(quoteMod.evmRanked(low.urls).at(-1)!), "b.v13.test");
-  await pause(60);
+  await low.idle();
   assert.ok(!unheld(low.urls, "b.v13.test"), "b is held: it moves up once the hold ends");
   // the edges (re-review of 47109a7, LOW-1): the first head, then one 6 or 10 blocks below it (not near), then the spare
   // the two pair on; the head between is exactly maxLag below the lower of the pair, or one below a pair that spans
@@ -2721,7 +2732,7 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
     });
     const w = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(edge.urls, edge.f), NOW));
     assert.equal((w as { block?: bigint }).block, BigInt(lo), big(w));
-    await pause(60);
+    await edge.idle();
     assert.ok(unheld(edge.urls, "x.e.v13.test"), `${mid} under ${hi}/${lo} is not held: ${quoteMod.evmRanked(edge.urls).map(hostOf).join(",")}`);
   }
 });
@@ -2771,7 +2782,7 @@ const { evmScanBound } = quoteMod as unknown as { evmScanBound?: (ms?: number) =
  *  `retryAfter` as its Retry-After header (none when null), each 429 after `burstMs`; `seen` gets each request's
  *  in-flight count on arrival and each answer as it is sent: "cut" for a 429 that is a new congestion event (its
  *  request arrived after the last cut was answered), "429" for one of a burst already cut, "200". */
-function throttlingScan(logs: { key: EvmPoolKey; at: number }[], throttled: () => boolean, retryAfter: string | null, seen: (string | number)[] = [], at: number[] = [], burstMs = 0): EvmRpc {
+function throttlingScan(logs: { key: EvmPoolKey; at: number }[], throttled: (getLogs: boolean) => boolean, retryAfter: string | null, seen: (string | number)[] = [], at: number[] = [], burstMs = 0, narrow: number[] = []): EvmRpc {
   const inner = scanner(5_000_000, logs);
   let [flying, arrived, boundary] = [0, 0, 0];
   return evmJsonRpc("https://scan.throttle.test", (async (_u: string, init: RequestInit) => {
@@ -2779,7 +2790,15 @@ function throttlingScan(logs: { key: EvmPoolKey; at: number }[], throttled: () =
     seen.push(flying);
     const me = arrived++;
     try {
-      if (throttled()) {
+      // a getLogs narrower than Base's 10,000-block span below the head: a half of a span the scan split
+      let getLogs = false;
+      for (const c of JSON.parse(init.body as string) as { method: string; params: { fromBlock: string; toBlock: string }[] }[]) {
+        if (c.method !== "eth_getLogs") continue;
+        getLogs = true;
+        const [a, b] = [Number(c.params[0]!.fromBlock), Number(c.params[0]!.toBlock)];
+        if (b - a + 1 < 10_000 && b < 5_000_000) narrow.push(b - a + 1);
+      }
+      if (throttled(getLogs)) {
         if (burstMs > 0) await pause(burstMs);
         if (me >= boundary) {
           seen.push("cut");
@@ -2803,11 +2822,18 @@ for (const [name, header] of [["TH1 ", "1"], ["TH2 ", null]] as const) {
   test(`${name}a cold quote whose scan provider answers 429${header === null ? " with no Retry-After" : ", Retry-After: 1,"} for its first 4 s ends as it would unthrottled, never rpc_error`, { timeout: 30_000 }, async () => {
     const token = freshToken();
     const { pools, logs } = warmCase(token, xAt(0x3e00 + (header === null ? 16 : 0)));
-    const t0 = performance.now();
+    // the scan's getLogs are throttled for 4 s from the first
+    let t0: number | undefined;
     const at: number[] = [];
-    const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, throttlingScan(logs, () => performance.now() - t0 < 4_000, header, [], at)));
-    // the waits between throttled requests: the longer of the Retry-After's 1 s and the backoff's 0.5, 1 and 2 s
-    const gaps = at.slice(1).map((t, i) => t - at[i]!);
+    const narrow: number[] = [];
+    const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, throttlingScan(logs, (g) => g && performance.now() - (t0 ??= performance.now()) < 4_000, header, [], at, 0, narrow)));
+    // a throttled request is asked again whole: it spends no try, so no span is split
+    assert.ok(at.length > 20, `${at.length} throttled`);
+    assert.equal(narrow.length, 0, `${narrow.length} split getLogs`);
+    // the waits between throttle events (each the requests in flight together): the longer of the Retry-After's 1 s
+    // and the backoff's 0.5, 1 and 2 s
+    const events = at.filter((t, i) => i === 0 || t - at[i - 1]! > 100);
+    const gaps = events.slice(1).map((t, i) => t - events[i]!);
     const want = header === null ? [500, 1_000, 2_000] : [1_000, 1_000];
     assert.ok(gaps.length >= want.length && want.every((w, i) => gaps[i]! >= w - 50), `waits ${gaps.map(Math.round).join(", ")} ms, at least ${want.join(", ")}`);
     const t2 = freshToken();

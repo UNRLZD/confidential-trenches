@@ -934,10 +934,11 @@ function scanGateOf(parallel: number, untilMs: number): ScanGate {
     limit = sst = Math.max(1, Math.floor(limit / 2));
     return true;
   };
-  // the backoff of the event this throttle is part of; a new event is a strike more
+  // the backoff of the event this throttle is part of: a new event is a strike more, and the other 429s of its burst
+  // wait that event's backoff, not the next one's (twenty 429s at once wait 0.5 s, not 1)
   const throttle = (sent: number, afterMs: number | null) => {
-    const wait = Math.max(afterMs ?? 0, Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** strikes));
     if (congest(sent)) strikes++;
+    const wait = Math.max(afterMs ?? 0, Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1)));
     resumeAt = Math.max(resumeAt, performance.now() + wait);
   };
   // the request, ended at the quote's bound where that comes before its own deadline
