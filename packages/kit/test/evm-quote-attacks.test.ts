@@ -3471,3 +3471,87 @@ test("B6 a sell's wait for its buy's block, the list reordered by round 1: round
   assert.equal((v as { accepted?: boolean }).accepted, true, JSON.stringify(v, (_, x) => (typeof x === "bigint" ? String(x) : x)));
   assert.ok(byNum.length > 0 && byNum.every((n) => n === "p0"), `by-number reads asked of ${byNum.join(",")}`);
 });
+
+// ------------------------------------------------------------------ a lagging provider of the pair (card evm-quote-lag-held)
+// Review of b282ce0, MEDIUM-A: publicnode answering its latest block 100 back refused 9 of 10 Robinhood warm quotes in
+// about 0.5 s, and Base's blastapi 5 back 2 of 5. Its head paired with an up-to-date one (within maxLag), so the agreed
+// block was its own, more than maxLag below the scan provider's head, a block ahead of the pair's (Robinhood's own RPC
+// leads the others); the scan refused rpc_disagree, and nothing held the lagger, which stayed ranked first.
+test("LH1 the provider ranked first answers its head maxLag back: ten warm quotes on the pinned providers all end ok, the lagger held from the first", { timeout: 30_000 }, async () => {
+  const p = builder.evmPoolVenues().base.providers!;
+  const lag = BigInt(builder.evmPoolVenues().base.maxLag!);
+  const TS = "0x" + (Math.floor(Date.now() / 1000) - 2).toString(16);
+  const H = 5_000_000;
+  const lagger = hostOf(p[1]!);
+  quoteMod.evmSpeedReset();
+  const token = freshToken();
+  const pools = [best(token)];
+  const model = chain(pools, 0, H);
+  // the scan provider's head a block past the pair's
+  const scan = scanner(H + 1, []);
+  const top = (host: string) => (host === lagger ? H - Number(lag) : H);
+  let laggerHeads = 0;
+  const net = mock.method(globalThis, "fetch", async (u: string, init: RequestInit) => {
+    const calls = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
+    const asked = calls.map((c) => ({ method: c.method, params: c.params }));
+    const h = hostOf(u);
+    // the lagger answers first: every other provider a little later
+    await pause(h === lagger ? 1 : 15);
+    const out: unknown[] =
+      calls.some((c) => c.method === "eth_getLogs" || c.method === "eth_blockNumber") ? await scan(asked)
+      : calls.some((c) => c.method === "eth_getBlockByNumber") ? asked.map((c) => {
+          if (c.params[0] === "latest" && h === lagger) laggerHeads++;
+          const n = c.params[0] === "latest" ? top(h) : Number(c.params[0]);
+          return { jsonrpc: "2.0", result: n <= top(h) ? head("0x" + n.toString(16)) : null };
+        })
+      : await model(asked);
+    const dated = out.map((a) => {
+      const r = (a as { result?: { timestamp?: string } }).result;
+      return r !== null && typeof r === "object" && typeof r.timestamp === "string" ? { ...(a as object), result: { ...r, timestamp: TS } } : a;
+    });
+    return new Response(JSON.stringify(dated.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+  });
+  try {
+    // measured: the lagger is the fastest, so ranked first
+    await Promise.all(quoteMod.evmProviders(p, fetch).map((r) => r([{ method: "eth_getBlockByNumber", params: ["latest", false] }])));
+    laggerHeads = 0;
+    assert.equal(hostOf(quoteMod.evmRanked(p)[0]!), lagger, "the lagger is ranked first");
+    const rows: string[] = [];
+    for (let q = 0; q < 10; q++) {
+      const before = laggerHeads;
+      const v = await verdict(evmPoolBuyQuote(warmReq(token)));
+      rows.push(`${q + 1}: ${(v as { accepted: boolean }).accepted ? `ok at ${(v as { block: bigint }).block}` : (v as { code: string }).code} (lagger heads ${laggerHeads - before})`);
+      assert.equal((v as { accepted: boolean }).accepted, true, rows.join("; "));
+      // read at the up-to-date pair's block, never the lagger's
+      assert.equal((v as { block: bigint }).block, BigInt(H), rows.join("; "));
+      assert.equal(hostOf(quoteMod.evmRanked(p).at(-1)!), lagger, `after quote ${q + 1} the lagger is held: ${quoteMod.evmRanked(p).map(hostOf).join(",")}`);
+    }
+  } finally {
+    net.mock.restore();
+  }
+});
+
+test("LH2 a provider that answers fast with a 200 carrying a state error ranks behind the others, held, never first by its speed", async () => {
+  quoteMod.evmSpeedReset();
+  const token = freshToken();
+  const pools = [best(token)];
+  // past its state cut: its heads answer, every read at a block names state it no longer holds
+  const pruned = (rpc: EvmRpc): EvmRpc => async (calls) =>
+    calls.some((c) => c.method === "eth_call") ? calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: -32000, message: "historical state 0x5f2c… is not available" } })) : rpc(calls);
+  const { f, urls, idle } = hosted({
+    "cut.lh2.test": { rpc: pruned(chain(pools, 0)), ms: 1 },
+    "a.lh2.test": { rpc: chain(pools, 0), ms: 15 },
+    "b.lh2.test": { rpc: chain(pools, 0), ms: 15 },
+  });
+  for (let i = 0; i < 3; i++) await Promise.all(quoteMod.evmProviders(urls, f).map((r) => r([{ method: "eth_getBlockByNumber", params: ["latest", false] }])));
+  assert.equal(hostOf(quoteMod.evmRanked(urls)[0]!), "cut.lh2.test", "it is the fastest");
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(quoteMod.evmRanked(urls), f), NOW));
+  assert.equal((v as { accepted: boolean }).accepted, true, big(v));
+  await idle();
+  assert.equal(hostOf(quoteMod.evmRanked(urls).at(-1)!), "cut.lh2.test", `ranked ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
+  // and one answer of the kind alone holds it, whatever its speed
+  quoteMod.evmSpeedReset();
+  const [cut] = quoteMod.evmProviders(urls, f);
+  await cut!([{ method: "eth_call", params: [{ to: NATIVE, data: "0x" }, "latest"] }]);
+  assert.equal(hostOf(quoteMod.evmRanked(urls).at(-1)!), "cut.lh2.test");
+});

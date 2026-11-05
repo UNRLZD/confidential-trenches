@@ -559,7 +559,7 @@ type Block = { number: bigint; hash: string; timestamp: bigint; baseFeePerGas: b
  *  EVM_QUOTE_MAX_AGE_MS behind the device's clock, with `confirm`, which reads that number's hash and time on the other
  *  provider and must find the same block. One provider alone cannot pick an old block, nor name a block the other does
  *  not hold (review of b17d1fc, R1, R1b). `confirm` runs beside the reads, and nothing read is used before it passes. */
-async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: number, minBlock = 0n, mono: () => number = monotonic, start: number = mono()): Promise<{ block: Block; confirm: () => Promise<void> }> {
+async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: number, minBlock = 0n, mono: () => number = monotonic, start: number = mono()): Promise<{ block: Block; confirm: () => Promise<void>; low: EvmRpc }> {
   const call: EvmRpcCall = { method: "eth_getBlockByNumber", params: ["latest", false] };
   const near = (x: Block, y: Block) => x.number - y.number <= maxLag && y.number - x.number <= maxLag;
   // the order agreeing indexes, taken as each round starts, as agreeing takes its own (it reorders `rpcs`, the quote's
@@ -595,7 +595,7 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
     await new Promise((r) => setTimeout(r, EVM_MIN_BLOCK_EVERY_MS));
   }
   const { a, b, i, j } = got;
-  const [lo, at] = a.number <= b.number ? [a, j] : [b, i];
+  const [lo, at, own] = a.number <= b.number ? [a, j, i] : [b, i, j];
   // the block's age on the device's clock now: the quote's clock at its entry (`nowMs`, at `start` on `mono`) and the
   // time since, the scan and the wait for the buy's block included (review fold 1, L2; fold 2, LOW-1)
   const atMs = nowMs + Math.max(0, mono() - start);
@@ -636,7 +636,8 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
     if (against.length > 0) return refuse("rpc_disagree", `the providers hold different blocks at ${lo.number}`);
     throw failed?.e;
   };
-  return { block: lo, confirm };
+  // `low`: the lower head's own provider (card evm-quote-lag-held: held where that head lags the scan provider's)
+  return { block: lo, confirm, low: list[own]! };
 }
 /** The oldest block a quote reads, and the oldest quote a buy is built from, behind the device's clock. */
 export const EVM_QUOTE_MAX_AGE_MS = 30_000;
@@ -1265,7 +1266,10 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
     s.out.push(t);
     try {
       const out = await rpc(calls);
-      if (out.some(limited)) s.held = performance.now() + EVM_HOLD_MS;
+      // an answer that names a rate limit or a state the provider does not hold is held, never measured: such an error
+      // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
+      // evm-quote-lag-held)
+      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;
       else s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
       return out;
     } catch (e) {
@@ -1655,17 +1659,47 @@ async function routeSet(a: {
   // user's own amount
   // the agreed block, picked once (the held head while fresh), after the token's scan has its logs; a new one is held
   // to the 30 s rule in agreedBlock, a held one in the watch's reuse bound on both clocks
-  let agreed: ReturnType<typeof agreedBlock> | undefined;
+  let agreed: Promise<{ block: Block; confirm: () => Promise<void> }> | undefined;
   // `picked`: the agreed block once the quote picks it, never sooner (a kept scan that fails keeps its spans then)
   let pick: (b: Promise<Block>) => void = () => {};
   const picked = new Promise<Block>((r) => (pick = r));
   picked.catch(() => {});
   const agreedOnce = () => {
     if (agreed === undefined) {
-      agreed = a.watch === undefined ? agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start) : a.watch.head(a.nowMs);
+      agreed = agreedAt();
       pick(agreed.then((x) => x.block));
     }
     return agreed;
+  };
+  const fresh = (on: readonly EvmRpc[]) => agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start);
+  // the block more than maxLag below the scan provider's head, which the scan would refuse (scanPools)
+  const behind = async (b: Block) => {
+    const h = headOfScan === undefined ? null : await headOfScan.catch(() => null);
+    return h !== null && h - b.number > v.maxLag;
+  };
+  // A lower head more than maxLag below the scan provider's head never ends the quote (card evm-quote-lag-held: a
+  // provider of the pair whose head lagged near maxLag held it there, and the quote refused rpc_disagree; publicnode 100
+  // blocks back refused 9 of 10 Robinhood warm quotes in about 0.5 s, as it stayed ranked first). Its provider is held
+  // and the block is agreed once more without it, on two other providers that agree and a confirm by one of the rest,
+  // as any block is: a hold only drops a provider from the pair, never lets one decide alone. A held head from the
+  // watch names no provider, so it is agreed again on the quote's own list first. A lower head still that far behind
+  // holds its provider too, and the scan refuses as before.
+  const agreedAt = async (): Promise<{ block: Block; confirm: () => Promise<void> }> => {
+    let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
+    if (!(await behind(got.block))) return got;
+    if (got.low === undefined) {
+      got = await fresh(rpcs);
+      if (!(await behind(got.block))) return got;
+    }
+    const low = got.low!;
+    HOLD.get(low)?.();
+    const rest = rpcs.filter((r) => r !== low);
+    if (rest.length < 2) return got;
+    const again = await fresh(rest);
+    // the quote's later rounds ask the new pair first and the held provider last
+    if (!Object.isFrozen(rpcs)) [...rest, low].forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));
+    if (await behind(again.block)) HOLD.get(again.low)?.();
+    return again;
   };
   const agreedHead = () => agreedOnce().then((x) => x.block);
   const gate = scanGateOf(v.scan?.parallel ?? 1, performance.now() + scanBoundMs);
@@ -2293,6 +2327,13 @@ function retryAfterMs(h: string | null, now = Date.now()): number | null {
  *  out of time (TimeoutError) is not one: it may have been served. A browser's fetch names no cause for any failure with
  *  no response (re-review of b282ce0, LOW-B), so there every one is one: each call is a read, safe to send again. */
 class Unreachable extends Error {}
+/** A call's error naming a state the provider does not hold: past its state cut ("historical state ... is not
+ *  available": robinhood-rpc.publicnode.com, bloXroute and Globalstake, 2026-11-05 01:15Z; "missing trie node", geth),
+ *  or not yet ("block not found", "header not found", "Unknown state. First available …": askAt). */
+const stateless = (a: unknown) => {
+  const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
+  return typeof m === "string" && /(block|header).*not found|unknown block|unknown state|historical state|missing trie node/i.test(m);
+};
 const limited = (a: unknown) => {
   const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
   return typeof m === "string" && /request limit|rate limit|too many requests/i.test(m);
