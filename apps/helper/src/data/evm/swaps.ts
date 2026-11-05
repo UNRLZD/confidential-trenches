@@ -1378,7 +1378,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
       // a held pool's re-read is a refresh: refused, the pool held serves
-      if (gecko.take(p === undefined ? "pages" : "refresh")) {
+      if (gecko.take(p === undefined ? "pages" : "refresh", false, false, `${chain} pool`)) {
         try {
           const r = await doFetch(`${GT_BASE}/networks/${chain}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
           if (r.status === 429) throttledUntil(gecko, r.headers.get("retry-after"), now());
@@ -1433,8 +1433,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // served (card app-console-429); the newest range is a page read once its kept bars are REFRESH_URGENT_MS old, so
     // the lists' calls never leave it served the same bars for good (refreshLane, card helper-chart-fresh); history
     // before a time stays a refresh
-    const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : "pages";
-    if (!gecko.take(lane)) return fallback(wait(lane === "refresh" ? "geckoterminal refresh" : undefined));
+    // the history before a book of ours (not `alone`) is an optional seed, the answer our chain bars without it: a stale
+    // read, so it never takes the call a chart with nothing to serve needs (card helper-crowd-429)
+    const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : alone ? "pages" : "stale";
+    if (!gecko.take(lane, false, false, `${chain} bars`)) return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
       const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;

@@ -10,12 +10,14 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { VaultTree } from "@blindfill/kit";
+import { createHash } from "node:crypto";
+import { evmPoolFee, evmPoolGas, VaultTree } from "@blindfill/kit";
+import { evmPoolSender } from "../../../apps/helper/src/pool/evm.ts";
 import { evmAddress } from "../src/derive/index.ts";
 import { checkPool } from "../src/pool/pool.ts";
 import { SOL_LADDER } from "../src/pool/solana.ts";
 import {
-  EvmLagError, EVM_LADDER, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_POOL_EVENTS, evmContextPreimage, evmEpochBlock, evmNow, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
+  EvmLagError, EVM_CHAIN_IDS, EVM_LADDER, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_POOL_EVENTS, evmContextPreimage, evmEpochBlock, evmNow, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc,
 } from "../src/pool/evm.ts";
 
@@ -99,6 +101,10 @@ type Over = {
   getLogs?: (p: { from: number; to: number }) => void | number;
   /** before an eth_call is answered, by its data: may throw */
   call?: (data: string) => void;
+  /** the chain fee oracle's answer (Base's GasPriceOracle, kit pool-fee.ts) by selector, at block n: 7,917 wei of L1
+   *  fee (Base Sepolia's for 2,600 bytes, 4 Nov) and no operator fee unless given */
+  /** The chain fee contract's answer to selector `sel` at block `n`; `arg` is the call's word (getOperatorFee's gas). */
+  chainFee?: (sel: string, n: number, arg: bigint) => bigint;
   /** the RPC's own `latest` answer, in place of the chain's */
   latestBlock?: () => Record<string, unknown> | null;
   baseFee?: (n: number) => bigint | null;
@@ -146,10 +152,15 @@ function rpc(c: Chain, o: Over = {}): EvmRpc {
       }
       case "eth_call": {
         const [{ to, data }, { blockHash }] = params as [{ to: string; data: string }, { blockHash: string }];
-        assert.equal(to, POOL.toLowerCase());
-        o.call?.(data);
         let n = -1;
         for (let k = 0; k <= c.head; k++) if (hashOf(k) === blockHash) n = k;
+        if (to === "0x420000000000000000000000000000000000000f" || to === "0x000000000000000000000000000000000000006c") {
+          if (n < 0) throw new Error("RPC error -32000: header not found");
+          const s = data.slice(2, 10);
+          return `0x${w64(o.chainFee ? o.chainFee(s, n, data.length > 10 ? BigInt(`0x${data.slice(10)}`) : 0n) : s === "f1c7a58b" ? 7_917n : 0n)}`;
+        }
+        assert.equal(to, POOL.toLowerCase());
+        o.call?.(data);
         if (n < 0) throw new Error("RPC error -32000: header not found");
         const v = viewsAt(c, n);
         const s = data.slice(2, 10), arg = data.length > 10 ? BigInt(`0x${data.slice(10)}`) : 0n;
@@ -157,6 +168,7 @@ function rpc(c: Chain, o: Over = {}): EvmRpc {
           s === sel("SCOPE()") ? ["SCOPE", o.scope ?? evmPoolScopeOf(POOL, o.chainId ?? 8453n)]
           : s === sel("currentRoot()") ? ["currentRoot", v.root]
           : s === sel("currentTreeSize()") ? ["currentTreeSize", v.size]
+          : s === sel("currentTreeDepth()") ? ["currentTreeDepth", BigInt(Math.ceil(Math.log2(Math.max(1, Number(v.size)))))]
           : s === sel("currentLabelRoot()") ? ["currentLabelRoot", v.labelRoot]
           : s === sel("currentLabelTreeSize()") ? ["currentLabelTreeSize", v.labelSize]
           : s === sel("stateRootTimes(uint256)") ? ["stateRootTimes", v.stateTimes.get(arg) ?? 0n]
@@ -172,6 +184,8 @@ function rpc(c: Chain, o: Over = {}): EvmRpc {
 const pair = (a: Chain, b: Chain, oa: Over = {}, ob: Over = {}): [EvmRpc, EvmRpc] => [rpc(a, { url: "https://a.example", ...oa }), rpc(b, { url: "https://b.example", ...ob })];
 const PIN: EvmPoolPin = { network: "base", pool: POOL, feeRecipient: FEE_TO, fromBlock: 1n };
 const noWait = { sleep: async () => {} };
+/** A pool's sync pair and its fee pair (evmPool takes both, card evm-buy-hookdata-fee fold 4 LOW-1): here one pair. */
+const pairs = (rpcs: readonly [EvmRpc, EvmRpc]) => ({ rpcs, feeRpcs: rpcs });
 const sync = (rpcs: [EvmRpc, EvmRpc], sleep: () => Promise<void> = async () => {}) => evmTreeSync({ rpcs, pin: PIN, sleep });
 /** ms just past block n's time: the cut that keeps every leaf up to block n */
 const after = (n: number): bigint => (T0 + 2n * BigInt(n)) * 1000n + 1n;
@@ -386,13 +400,13 @@ test("the epoch's first block is the first at or after its start, the same on bo
 // ---- bind ----
 
 const EPOCH = 1_800_000_060_000n; // block 30's time is T0 + 60 s: the epoch's first block
-const feeRule = (seen: unknown[]) => (at: { block: bigint; baseFeePerGas: bigint; depth: number }) => (seen.push(at), 10n ** 13n * BigInt(at.depth + 1));
+const feeRule = (seen: unknown[]) => (at: { block: bigint; baseFeePerGas: bigint; depth: number; chainFee: bigint }) => (seen.push(at), 10n ** 13n * BigInt(at.depth + 1));
 const answer = (over: Partial<EvmFeeAnswer> = {}): EvmFeeAnswer => ({ chain: "evm", network: "base", pool: POOL, fee_recipient: FEE_TO, epoch_ms: 60_000, epoch_start_ms: Number(EPOCH), block: "0x1e", fee: "30000000000000", step: "10000000000000", ...over });
 // the epoch's first block is 30, above the finalized 20 (a finalized block lags past a life): with its own leaf the tree there holds 3 leaves (depth 2); without it 2 (depth 1);
 // with the five later leaves 8 (depth 3)
 const CB = () => chain([...deps(PP, [10, 12, 30]), { block: 31, kind: "wd", leaf: 999n }, { block: 32, kind: "wd", leaf: 998n }, { block: 33, kind: "wd", leaf: 997n }, { block: 34, kind: "wd", leaf: 996n }, { block: 35, kind: "wd", leaf: 995n }], 40, 20);
 const poolOf = (c: Chain, ans: (e: bigint) => EvmFeeAnswer = () => answer(), seen: unknown[] = []) =>
-  evmPool({ pin: PIN, rpcs: pair(c, c), relayFee: async (e) => ans(e), epochFee: feeRule(seen), salt: () => Uint8Array.from(Buffer.from(PP.relayed.request.salt.slice(2), "hex")), ...noWait });
+  evmPool({ pin: PIN, ...pairs(pair(c, c)), relayFee: async (e) => ans(e), epochFee: feeRule(seen), salt: () => Uint8Array.from(Buffer.from(PP.relayed.request.salt.slice(2), "hex")), ...noWait });
 const bindArgs = (over: Record<string, unknown> = {}) => ({ chunk: 4n * 10n ** 17n, wallet: { address: W, publicKey: W_PUB }, refundPrecommitment: 5n, epochStartMs: EPOCH, deadlineMs: EPOCH + EVM_LIFE_MS, ...over });
 
 test("bind: the pool's context of W's request, its fee the device's own from the epoch's first block and depth", async () => {
@@ -401,10 +415,122 @@ test("bind: the pool's context of W's request, its fee the device's own from the
   checkPool(p);
   assert.equal(p.scope, evmPoolScopeOf(POOL, 8453n));
   const b = await p.bind(bindArgs());
-  assert.deepEqual(seen, [{ block: 30n, baseFeePerGas: 1_000_030n, depth: 2 }]);
+  // the chain fee too: Base's L1 fee bound and operator fee at block 30, the same on both RPCs (card evm-buy-hookdata-fee)
+  assert.deepEqual(seen, [{ block: 30n, baseFeePerGas: 1_000_030n, depth: 2, chainFee: 7_917n }]);
   assert.equal(b.feeCap, 3n * 10n ** 13n);
   assert.deepEqual(b.request, { processooor: POOL, relay: { recipient: W, feeRecipient: FEE_TO, feeCap: 3n * 10n ** 13n, deadlineMs: EPOCH + EVM_LIFE_MS, refundPrecommitment: 5n, salt: PP.relayed.request.salt } });
   assert.equal(b.context, evmPoolContextOf(b.request, p.scope));
+});
+
+test("L1 bind's fee takes the chain fee read at the epoch's first block's hash on both RPCs: the L1 fee bound and the operator fee of G(depth), refused when the RPCs differ", async () => {
+  const c = CB();
+  const log: string[] = [];
+  const fees = (sel: string) => (sel === "f1c7a58b" ? 5n * 10n ** 12n : 10n ** 12n);
+  const seen: unknown[] = [];
+  const mk = (ob: Over) => evmPool({ pin: PIN, ...pairs(pair(c, c, { chainFee: fees, log }, ob)), relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), ...noWait });
+  await mk({ chainFee: fees }).bind(bindArgs());
+  assert.equal((seen[0] as { chainFee: bigint }).chainFee, 6n * 10n ** 12n);
+  const calls = log.filter((l) => l.includes("0x420000000000000000000000000000000000000f"));
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every((l) => l.includes(c.hashOf(30))), "at the epoch's first block's hash");
+  assert.ok(calls.some((l) => l.includes("0xf1c7a58b" + w64(2_600n))), "the L1 fee bound of 2,600 bytes");
+  assert.ok(calls.some((l) => l.includes("0x275aedd2" + w64(evmPoolGas(2)))), "the operator fee of G at the depth there");
+  // one RPC's other answer is no fee
+  await assert.rejects(mk({ chainFee: () => 1n }).bind(bindArgs()), /differ on the chain fee/);
+});
+
+// ---- the helper's answer is the device's fee (card evm-buy-hookdata-fee, review fold 2 MEDIUM-1) ----
+
+/** The device's rule as its caller passes it (contracts/pool-evm/script/testnet-run.mjs): the kit's evmPoolFee. */
+const kitRule = () => (at: { baseFeePerGas: bigint; depth: number; chainFee: bigint }) => evmPoolFee({ gas: evmPoolGas(at.depth), gasPrice: at.baseFeePerGas, chainFee: at.chainFee });
+/** The helper's EVM sender (apps/helper/src/pool/evm.ts) on the same chain, its key a test key, never money. */
+const helperOn = (network: string, rpcs: [EvmRpc, EvmRpc]) =>
+  evmPoolSender({ network, pool: POOL, senderKey: createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest(), feeRecipient: FEE_TO }, rpcs, () => Number(EPOCH) + 20_000);
+/** `n` leaves before the epoch's first block (30): one deposit at 10, the rest withdrawals at 20. */
+const leaves = (n: number) => chain([...deps(PP, [10]), ...Array.from({ length: n - 1 }, (_, i): Ev => ({ block: 20, kind: "wd", leaf: 5_000n + BigInt(i) }))], 40, 20);
+
+test("MEDIUM-1 the device binds the helper's GET /v1/pool/fee answer: the kit's evmPoolFee at the epoch's first block, its depth and chain fee, on Base and Robinhood", async () => {
+  const gwei = { baseFee: () => 10n ** 9n };
+  // Base: an L1 fee bound and an operator fee of the gas the call names (Isthmus getOperatorFee(gasUsed): fold 2
+  // LOW-B, so a read of another gas prices another fee); Robinhood: an L1 base fee estimate (16 a byte of 2,600)
+  const opFee = (gas: bigint) => gas * 10_000_000n;
+  const nets = [
+    { network: "base" as const, chainFee: (sel: string, _n?: number, arg = 0n) => (sel === "f1c7a58b" ? 5n * 10n ** 12n : opFee(arg)) },
+    { network: "robinhood" as const, chainFee: () => 10n ** 8n },
+  ];
+  for (const { network, chainFee } of nets) {
+    // the tree's depth at block 30, 0 to 8, from that many leaves (LeanIMT's ceil(log2(size)))
+    for (const [n, depth] of [[1, 0], [2, 1], [3, 2], [5, 3], [9, 4], [17, 5], [33, 6], [65, 7], [129, 8]] as const) {
+      const c = leaves(n);
+      const o: Over = { chainId: EVM_CHAIN_IDS[network], chainFee, ...gwei };
+      const rpcs = pair(c, c, o, o);
+      const helper = helperOn(network, rpcs);
+      const seen: { depth: number; chainFee: bigint; baseFeePerGas: bigint }[] = [];
+      const rule = kitRule();
+      const device = evmPool({ pin: { ...PIN, network }, ...pairs(rpcs), relayFee: async (e) => (await helper.fee(Number(e))) as EvmFeeAnswer, epochFee: (at) => (seen.push(at), rule(at)), salt: () => new Uint8Array(16), ...noWait });
+      const b = await device.bind(bindArgs());
+      assert.equal(seen[0]!.depth, depth, `${network} ${n} leaves`);
+      assert.ok(seen[0]!.chainFee > 0n, `${network}: a chain fee above 0`);
+      assert.equal(b.feeCap.toString(), (await helper.fee(Number(EPOCH)))!.fee, `${network} depth ${depth}`);
+    }
+  }
+  // every depth the pool takes, 0 to 32: the helper prices the depth the pool's view names there as the device's
+  // rule does at that depth (the device reads its depth from the leaves it syncs, so a tree of 2^31 leaves is the
+  // view's here)
+  for (const { network, chainFee } of nets) {
+    const c = CB();
+    for (let depth = 0; depth <= 32; depth++) {
+      const o: Over = { chainId: EVM_CHAIN_IDS[network], chainFee, ...gwei, view: (name, v) => (name === "currentTreeDepth" ? BigInt(depth) : v) };
+      const reads = network === "base" ? 5n * 10n ** 12n + opFee(evmPoolGas(depth)) : 16n * 2_600n * 10n ** 8n;
+      const want = kitRule()({ baseFeePerGas: 10n ** 9n, depth, chainFee: reads });
+      assert.equal((await helperOn(network, pair(c, c, o, o)).fee(Number(EPOCH)))!.fee, want.toString(), `${network} depth ${depth}`);
+    }
+  }
+  // the two providers on another depth or chain fee at that block: no answer
+  const c = CB();
+  const one = { chainId: 8453n, ...gwei };
+  await assert.rejects(helperOn("base", pair(c, c, one, { ...one, view: (n, v) => (n === "currentTreeDepth" ? v + 1n : v) })).fee(Number(EPOCH)), /differ/);
+  await assert.rejects(helperOn("base", pair(c, c, one, { ...one, chainFee: () => 1n })).fee(Number(EPOCH)), /differ/);
+  // a network the kit has no chain fee rule for starts no sender
+  assert.throws(() => helperOn("anvil", pair(c, c)), /no chain fee rule/);
+  // fold 2 LOW-A: a fee that rounds under the floor (no base fee, no chain fee) is the kit's one floor on both sides,
+  // above the rounded fee (0), so neither side can price it with another floor
+  const EVM_POOL_FEE_FLOOR = 10n ** 13n; // the kit's floor, one step (packages/kit/test/evm-pool-fee.test.ts holds it)
+  for (const network of ["base", "robinhood"] as const) {
+    const free: Over = { chainId: EVM_CHAIN_IDS[network], baseFee: () => 0n, chainFee: () => 0n };
+    const rpcs = pair(c, c, free, free);
+    const helper = helperOn(network, rpcs);
+    const device = evmPool({ pin: { ...PIN, network }, ...pairs(rpcs), relayFee: async (e) => (await helper.fee(Number(e))) as EvmFeeAnswer, epochFee: kitRule(), salt: () => new Uint8Array(16), ...noWait });
+    assert.equal((await device.bind(bindArgs())).feeCap, EVM_POOL_FEE_FLOOR, `${network}: the floor`);
+    assert.equal((await helper.fee(Number(EPOCH)))!.fee, EVM_POOL_FEE_FLOOR.toString());
+    assert.ok(EVM_POOL_FEE_FLOOR > 0n);
+  }
+});
+
+// fold 3 (review fold 2 MEDIUM-A): the sync's pair pages logs, and on Robinhood testnet its second provider (PublicNode)
+// keeps about 15 s of state; bind reads the chain fee at the epoch's first block on feeRpcs, the kit pin's pair
+test("MEDIUM-A bind reads the chain fee on feeRpcs, never on the sync's pair, which may have pruned that block's state", async () => {
+  const c = CB();
+  const log: string[] = [];
+  const pruned: Over = { chainFee: () => { throw new Error("RPC error -32000: historical state 4c6aae67e883f4eb4d80c73ed82272e6c9a8e2744ba is not available"); } };
+  const seen: unknown[] = [];
+  const waits: number[] = [];
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c, pruned, pruned), feeRpcs: pair(c, c, { log }, {}), relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async (ms) => void waits.push(ms) });
+  await p.bind(bindArgs());
+  assert.equal((seen[0] as { chainFee: bigint }).chainFee, 7_917n);
+  assert.deepEqual(waits, [], "no retry: the fee pair holds the state");
+  const calls = log.filter((l) => l.includes("0x420000000000000000000000000000000000000f"));
+  assert.equal(calls.length, 2, "both chain fee reads on the fee pair's first RPC");
+  assert.ok(calls.every((l) => l.includes(c.hashOf(30))), "at the epoch's first block's hash");
+  // a fee pair that has pruned it: a retry, then the lag
+  const q = evmPool({ pin: PIN, ...pairs(pair(c, c, pruned, pruned)), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+  await assert.rejects(q.bind(bindArgs()), /no longer keeps the state/);
+  // fold 4 LOW-1: no fee pair is refused at once, never the sync's pair in its place (a caller that forgets it would
+  // bind on a pair that may keep 15 s of state)
+  for (const feeRpcs of [undefined, [], [pair(c, c)[0]]])
+    assert.throws(() => evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs, relayFee: async () => answer(), epochFee: feeRule([]) } as unknown as Parameters<typeof evmPool>[0]), /^Error: feeRpcs: rpcs: two$/, String(feeRpcs));
+  // a fee pair of one provider twice is one read
+  assert.throws(() => evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: [pair(c, c)[0], pair(c, c)[0]] as unknown as [EvmRpc, EvmRpc], relayFee: async () => answer(), epochFee: feeRule([]) }), /one provider twice/);
 });
 
 test("bind refuses the helper's fee unless it is the device's, for this pool and epoch, and a W, chunk or deadline the pool would not take", async () => {
@@ -605,11 +731,11 @@ test("F2a now is the newest block both RPCs agree on, never a time one RPC alone
 
 test("F2b bind refuses a deadline the chain has passed, whatever one RPC says the time is", async () => {
   const late = chain([...deps(PP, [10, 12, 30]), { block: 31, kind: "wd", leaf: 999n }], 400, 350);
-  const p = evmPool({ pin: PIN, rpcs: pair(late, late, {}, { latestBlock: fakeLatest(400, T0 + 61n) }), relayFee: async () => answer(), epochFee: () => 3n * 10n ** 13n, salt: () => new Uint8Array(16), ...noWait });
+  const p = evmPool({ pin: PIN, ...pairs(pair(late, late, {}, { latestBlock: fakeLatest(400, T0 + 61n) })), relayFee: async () => answer(), epochFee: () => 3n * 10n ** 13n, salt: () => new Uint8Array(16), ...noWait });
   await assert.rejects(p.bind(bindArgs()), /too close to send/);
   // an honest RPC behind the other (its latest block 100, T0 + 200 s): the agreed time is block 100's, but the send
   // margin is checked at the higher latest time (block 400's), so the deadline the chain has passed is refused
-  const p2 = evmPool({ pin: PIN, rpcs: pair(late, late, {}, { latest: () => 100 }), relayFee: async () => answer(), epochFee: () => 3n * 10n ** 13n, salt: () => new Uint8Array(16), ...noWait });
+  const p2 = evmPool({ pin: PIN, ...pairs(pair(late, late, {}, { latest: () => 100 })), relayFee: async () => answer(), epochFee: () => 3n * 10n ** 13n, salt: () => new Uint8Array(16), ...noWait });
   await assert.rejects(p2.bind(bindArgs()), /too close to send/);
 });
 
@@ -676,7 +802,7 @@ test("F4 one RPC's logs past the finalized block a moment behind the other's is 
 });
 
 test("F5 a pruned state at a view (the Robinhood RPCs' own words) is a retry at a newer anchor", async () => {
-  for (const text of ["RPC error -32000: historical state 17babde33c1cae4d846be258743d8cbdc4fcdb030fed59adf0440d388fc8e9e9 is not available", "missing trie node 0xabc (path ) state 0xdef is not available"]) {
+  for (const text of ["RPC error -32000: historical state 17babde33c1cae4d846be258743d8cbdc4fcdb030fed59adf0440d388fc8e9e9 is not available", "missing trie node 0xabc (path ) state 0xdef is not available", "RPC error -32000: Unknown state. First available state is 1"]) {
     const c = C3();
     let pruned = 1;
     const pruning = { call: (data: string) => { if (data.length > 10 && pruned-- > 0) throw new Error(text); } };
@@ -732,7 +858,7 @@ test("depthAt on the epoch block's own chain: a block no longer at its height is
   let reads = 0;
   const flip = { logs: (l: Record<string, unknown>[]) => (reads++ === 0 ? ((c2.hashOf = (n) => (n >= 30 ? h32(`fork ${n}`) : old(n))), rawLogs(c2)) : l) };
   const waits: number[] = [];
-  const p = evmPool({ pin: PIN, rpcs: pair(c2, c2, flip, flip), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async (ms) => void waits.push(ms) });
+  const p = evmPool({ pin: PIN, ...pairs(pair(c2, c2, flip, flip)), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async (ms) => void waits.push(ms) });
   assert.equal((await p.bind(bindArgs())).feeCap, 3n * 10n ** 13n);
   assert.ok(waits.length >= 1);
 });
@@ -822,7 +948,7 @@ test("X13 a cut with a state leaf but no label is refused (no leaf before)", asy
 
 test("X15, X20, X21 bind refuses W as the fee recipient, a chunk of 2^128, a salt not of 16 bytes", async () => {
   const c = CB();
-  const mk = (pin: EvmPoolPin, salt = () => new Uint8Array(16)) => evmPool({ pin, rpcs: pair(c, c), relayFee: async () => answer({ fee_recipient: pin.feeRecipient }), epochFee: feeRule([]), salt, ...noWait });
+  const mk = (pin: EvmPoolPin, salt = () => new Uint8Array(16)) => evmPool({ pin, ...pairs(pair(c, c)), relayFee: async () => answer({ fee_recipient: pin.feeRecipient }), epochFee: feeRule([]), salt, ...noWait });
   await assert.rejects(mk({ ...PIN, feeRecipient: W }).bind(bindArgs()), /fee recipient/);
   await assert.rejects(mk(PIN).bind(bindArgs({ chunk: 1n << 128n })), /chunk/);
   await assert.rejects(mk(PIN, () => new Uint8Array(15)).bind(bindArgs()), /salt/);
@@ -867,7 +993,7 @@ test("R2 the pool's now() retries a moment's fork at the newest height like ever
   let calls = 0;
   const fork = { hashOf: (n: number) => (n === 100 && calls++ < 2 ? h32("other 100") : c.hashOf(n)) };
   const waits: number[] = [];
-  const p = evmPool({ pin: PIN, rpcs: pair(c, c, {}, fork), relayFee: async () => answer(), epochFee: () => 0n, sleep: async (ms) => void waits.push(ms) });
+  const p = evmPool({ pin: PIN, ...pairs(pair(c, c, {}, fork)), relayFee: async () => answer(), epochFee: () => 0n, sleep: async (ms) => void waits.push(ms) });
   assert.equal(await p.now(), (T0 + 200n) * 1000n);
   assert.deepEqual(waits, [2000]);
 });
@@ -929,7 +1055,7 @@ test("hex in either case: bind on an upper-case RPC and the helper's block \"0x1
   const [a, b] = pair(c, c);
   const salt = () => Uint8Array.from(Buffer.from(PP.relayed.request.salt.slice(2), "hex"));
   const want = await poolOf(c).bind(bindArgs());
-  const p = (block: string) => evmPool({ pin: PIN, rpcs: [drpc(a), b], relayFee: async () => answer({ block }), epochFee: feeRule([]), salt, ...noWait });
+  const p = (block: string) => evmPool({ pin: PIN, ...pairs([drpc(a), b]), relayFee: async () => answer({ block }), epochFee: feeRule([]), salt, ...noWait });
   const got = await p("0x1E").bind(bindArgs());
   assert.deepEqual([got.context, got.feeCap, got.request], [want.context, want.feeCap, want.request]);
   await assert.rejects(p("0x1F").bind(bindArgs()), /not its first block/);

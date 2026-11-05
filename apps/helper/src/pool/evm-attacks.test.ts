@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import * as evm from "./evm.ts";
-import { EVM_FEE_STEP, evmEpochFee, evmPoolSender, POOL_LIFE_MAX_MS, WITHDRAW_SELECTOR, type EvmRpc } from "./evm.ts";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { evmPoolFee, evmPoolGas } from "@blindfill/kit";
+import { EVM_FEE_STEP, evmPoolSender, POOL_LIFE_MAX_MS, WITHDRAW_SELECTOR, type EvmRpc } from "./evm.ts";
 import { oncePerNullifier } from "./once.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
@@ -18,8 +20,12 @@ const NOW = DEADLINE - 100_000;
 const EPOCH = 1_999_999_860_000;
 const T0 = 1_999_999_000n;
 const GWEI = 1_000_000_000n;
-const FLOOR = 10n ** 12n;
-const FEE = evmEpochFee(FLOOR, GWEI);
+const FEE = evmPoolFee({ gas: evmPoolGas(2), gasPrice: GWEI, chainFee: 7_917n });
+/** The fee's reads at a block's hash (EIP-1898): the pool's tree depth, 2, and the chain fee oracle, Base Sepolia's L1
+ *  fee for 2,600 bytes (7,917 wei, 4 Nov) and no operator fee, as the kit's evmPoolChainFeeReads ask. */
+const feeRead = (to: string, data: string): string => `0x${(to === "0x420000000000000000000000000000000000000f" ? (data.startsWith("0xf1c7a58b") ? 7_917n : 0n) : data === DEPTH_DATA ? 2n : 0n).toString(16).padStart(64, "0")}`;
+const DEPTH_DATA = `0x${Buffer.from(keccak_256(new TextEncoder().encode("currentTreeDepth()"))).subarray(0, 4).toString("hex")}`;
+
 const PROOF = Array.from({ length: 16 }, (_, i) => BigInt(1000 + i));
 
 const w32 = (n: bigint) => n.toString(16).padStart(64, "0");
@@ -39,6 +45,7 @@ type Opts = {
   code?: (tag: string) => string;
   /** eth_call reverts when the call carries fee fields (a GASPRICE-dependent revert). */
   revertWithFee?: boolean;
+  /** a method's error; "eth_call" is the simulation's (at pending), "fee read" an eth_call of the fee at a block hash */
   fail?: Partial<Record<string, string>>;
   hang?: string;
 };
@@ -48,11 +55,18 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
   return async (method, params) => {
     calls.push({ method, params });
     if (o.hang === method) return new Promise(() => {});
-    if (o.fail?.[method]) throw new Error(o.fail[method]);
+    const feeRead_ = method === "eth_call" && typeof params[1] === "object" && params[1] !== null;
+    const key = feeRead_ ? "fee read" : method;
+    if (o.fail?.[key]) throw new Error(o.fail[key]);
     switch (method) {
       case "eth_chainId": return "0x7a69";
       case "eth_getCode": return o.code ? o.code(params[1] as string) : "0x";
-      case "eth_call": if (o.revertWithFee && (params[0] as { maxFeePerGas?: string }).maxFeePerGas !== undefined) throw new Error("RPC error 3: execution reverted"); return "0x";
+      case "eth_call": {
+        const [{ to, data }, at] = params as [{ to: string; data: string }, unknown];
+        if (typeof at === "object" && at !== null && "blockHash" in at) return feeRead(to, data);
+        if (o.revertWithFee && (params[0] as { maxFeePerGas?: string }).maxFeePerGas !== undefined) throw new Error("RPC error 3: execution reverted");
+        return "0x";
+      }
       case "eth_estimateGas": return `0x${(611_391n).toString(16)}`;
       case "eth_getBlockByNumber": {
         if (params[0] === "latest") return { ...block(latest), ...(o.spike ? { baseFeePerGas: `0x${o.spike.toString(16)}` } : {}) };
@@ -68,7 +82,7 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
   };
 }
 const make = (a: Calls, o: Opts = {}, b: Calls = [], now: number | (() => number) = NOW, ob: Opts = o) =>
-  evmPoolSender({ network: "anvil", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [rpc(a, o), rpc(b, ob)], typeof now === "number" ? () => now : now);
+  evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [rpc(a, o), rpc(b, ob)], typeof now === "number" ? () => now : now);
 // read through the namespace, so a missing constant fails its own test, not the file's import
 const MARGIN = 60_000;
 const QUEUE_MAX = 64;
@@ -168,7 +182,7 @@ test("the simulation is eth_call at pending with the real from, gas and fee fiel
   assert.equal(sends(a).length, 0);
   const ok: Calls = [];
   assert.equal(code(await make(ok).carry(req())), "ok");
-  const call = ok.find((x) => x.method === "eth_call")!;
+  const call = ok.find((x) => x.method === "eth_call" && x.params[1] === "pending")!;
   assert.equal(call.params[1], "pending");
   const f = call.params[0] as Record<string, string>;
   assert.deepEqual(Object.keys(f).sort(), ["data", "from", "gas", "maxFeePerGas", "maxPriorityFeePerGas", "to", "value"]);
@@ -198,7 +212,7 @@ test("B3 a fee cap (fee / gas limit) under the current base fee is refused fee_s
   assert.equal(code(await s.carry(req())), "fee_stale");
   assert.equal(code(await s.carry(req(calldata({ nullifier: 77n })))), "fee_stale");
   assert.equal(sends(a).length, 0, "nothing signed or sent");
-  assert.equal(a.filter((x) => x.method === "eth_call").length, 0, "refused before the simulation");
+  assert.equal(a.filter((x) => x.method === "eth_call" && x.params[1] === "pending").length, 0, "refused before the simulation");
 });
 
 test("B1 an epoch outside [now - life, now] or a past deadline is refused before any block read; fee() outside it is null with no read", async () => {
@@ -255,6 +269,10 @@ test("a provider's transport error is 503 upstream; its HTTP 429 or rate-limit e
     ["eth_estimateGas", "RPC error -32000: insufficient funds for gas * price + value", "simulation_failed"],
     ["eth_call", "RPC error -32003: EVM error InvalidFEOpcode", "simulation_failed"], // anvil 1.8.6's halt
     ["eth_call", "RPC error -32603: internal error", "upstream"],
+    // a fee read (the pool's depth, the chain fee) that fails is never the request's: no fee, so no send
+    ["fee read", "RPC error 3: execution reverted", "upstream"],
+    ["fee read", "fetch failed", "upstream"],
+    ["fee read", "HTTP 429", "rate_limited"],
   ] as const) {
     const a: Calls = [];
     const x = await make(a, { fail: { [method]: msg } }).carry(req());

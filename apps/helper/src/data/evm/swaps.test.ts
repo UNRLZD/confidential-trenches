@@ -420,3 +420,25 @@ test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later
   assert.deepEqual([none.src, JSON.parse(none.body).candles], ["chain", []], "our own bars alone: none yet");
   s.stop();
 });
+
+test("card helper-crowd-429: GeckoTerminal's bars before a book of ours are an optional seed, a stale read: with one call left in the window it is not taken, the chart answers our own bars, and the call stays for a chart with nothing to serve", async () => {
+  const { geckoBudget, GT_LIMIT_PER_MIN } = await import("../gecko.ts");
+  const chain = fakeChain();
+  const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
+  const gt: string[] = [];
+  const fetchFn = (async (url: string, init: RequestInit) => {
+    if (!url.includes("geckoterminal")) return chain.fetch(url, init);
+    gt.push(url);
+    return new Response(JSON.stringify({ data: { attributes: { ohlcv_list: [] } } }), { status: 200 });
+  }) as typeof chain.fetch;
+  const budget = geckoBudget(() => clock.t);
+  budget.seed(Array.from({ length: GT_LIMIT_PER_MIN - 1 }, () => clock.t - 1_000)); // the old helper's calls at a swap
+  const s = open(chain, clock, { fetch: fetchFn, gecko: budget });
+  chain.st.head = REC.firstHead + 200;
+  const got = await bodyOf(s.candles(ICNT, "1m", null, 500));
+  s.stop();
+  assert.ok(got.own_from_s !== undefined && got.candles.length > 0, "bars of ours");
+  assert.equal(got.src, "chain");
+  assert.deepEqual(gt, [], "no GeckoTerminal call for the seed");
+  assert.equal(budget.take("pages"), true, "the window's last call is still there for a cold chart");
+});

@@ -30,6 +30,7 @@ export const LIVE_CHECKS = [
   "solana-jupiter-build",
   "wallet-per-buy",
   "helper-robinhood-capacity",
+  "evm-buy-hookdata-fee",
 ];
 
 // `{commit}` is the deployed commit
