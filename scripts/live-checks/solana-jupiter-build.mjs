@@ -3,8 +3,9 @@
 // kit builds the paper's Solana swap shapes through HELPER_HOST's Jupiter proxy and assembles each on the device, at
 // most 1,232 bytes, signing nothing. The shapes are the self-mode frames of T2.1 (06c S-1 buy and S-2 sell; P4's float
 // shapes are gone in Plan 1, the fresh wallet pays and signs alone), each built twice: at maxAccounts=40, the first
-// build, and uncapped, the one retry the paper allows when the cap finds no route (P4S run 3, Fail 3). So four:
-//   S-1 buy at maxAccounts=40, S-1 buy uncapped, S-2 sell at maxAccounts=40, S-2 sell uncapped.
+// build, and at the retry's cap (SOLANA_JUPITER_RETRY_MAX_ACCOUNTS), the one retry the kit makes when 40 finds no route
+// (P4S run 3, Fail 3; card solana-uncapped-fits: never uncapped, which overran 1,232 bytes). So four:
+//   S-1 buy at maxAccounts=40, S-1 buy at the retry's cap, S-2 sell at maxAccounts=40, S-2 sell at the retry's cap.
 // Every build goes through the kit's fetchSolanaJupiterBuild (its query, its one retry, its parse), live and on replay.
 // One live token: the first pump.fun token (the lane's subject, M1's end state) on the helper's Solana Discover lists
 // (GET /v1/market/lists?chain=solana, the read a device makes; Trending 1h first) with at least $50k of liquidity, or
@@ -27,6 +28,7 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import {
   SOLANA_JUPITER_MAX_ACCOUNTS,
+  SOLANA_JUPITER_RETRY_MAX_ACCOUNTS,
   SOLANA_MAX_TX_BYTES,
   SOLANA_SOL_MINT,
   assembleSolanaSwap,
@@ -46,9 +48,9 @@ export const BUY_LAMPORTS = 10_000_000n; // 0.01 SOL
 export const SLIPPAGE_BPS = 1000;
 export const SHAPES = [
   { name: "S-1 buy, maxAccounts=40", side: "buy", maxAccounts: SOLANA_JUPITER_MAX_ACCOUNTS },
-  { name: "S-1 buy, uncapped", side: "buy", maxAccounts: null },
+  { name: `S-1 buy, retry at maxAccounts=${SOLANA_JUPITER_RETRY_MAX_ACCOUNTS}`, side: "buy", maxAccounts: SOLANA_JUPITER_RETRY_MAX_ACCOUNTS },
   { name: "S-2 sell, maxAccounts=40", side: "sell", maxAccounts: SOLANA_JUPITER_MAX_ACCOUNTS },
-  { name: "S-2 sell, uncapped", side: "sell", maxAccounts: null },
+  { name: `S-2 sell, retry at maxAccounts=${SOLANA_JUPITER_RETRY_MAX_ACCOUNTS}`, side: "sell", maxAccounts: SOLANA_JUPITER_RETRY_MAX_ACCOUNTS },
 ];
 // The checks a build is judged by here; S11 and S12 need the buy flow's simulation and reference pool.
 export const JUDGED = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S13"];
@@ -98,13 +100,13 @@ export async function judge(r) {
     let build;
     let retried;
     try {
-      ({ build, uncapped: retried } = await fetchSolanaJupiterBuild(r.base, req, { fetch: replay(s.calls ?? []), uncapped: want.maxAccounts === null }));
+      ({ build, retried } = await fetchSolanaJupiterBuild(r.base, req, { fetch: replay(s.calls ?? []), atRetryCap: want.maxAccounts === SOLANA_JUPITER_RETRY_MAX_ACCOUNTS }));
     } catch (e) {
       const last = (s.calls ?? []).at(-1);
       say(false, `${at} ${e instanceof SolanaBuildError ? e.message : `replay: ${e.message}`}${last ? ` (HTTP ${last.status} ${String(last.body).slice(0, 80)})` : ""}`);
       continue;
     }
-    if (s.calls.length !== (want.maxAccounts !== null && retried ? 2 : 1)) { say(false, `${at} ${s.calls.length} recorded calls, the kit made fewer`); continue; }
+    if (s.calls.length !== (want.maxAccounts === SOLANA_JUPITER_MAX_ACCOUNTS && retried ? 2 : 1)) { say(false, `${at} ${s.calls.length} recorded calls, the kit made fewer`); continue; }
     const ms = s.calls.reduce((n, c) => n + c.ms, 0);
     const tables = {};
     const pairs = {};
@@ -140,7 +142,7 @@ export async function judge(r) {
     });
     const off = v.results.filter((x) => JUDGED.includes(x.id) && !x.ok).map((x) => `${x.id} ${x.detail}`);
     const ok = tx.size <= SOLANA_MAX_TX_BYTES && sameHash && off.length === 0;
-    say(ok, `${at} ${tx.size} bytes (limit ${SOLANA_MAX_TX_BYTES}), route ${build.route.join(" + ")} by ${kind}, ${dec.message.instructions.length} instructions, ${tx.tablesUsed.length} table(s), CU limit ${tx.cuLimit}, build ${Math.round(ms)} ms${want.maxAccounts !== null && retried ? " (no route at 40, retried uncapped)" : ""}${sameHash ? "" : `, blockhash ${dec.message.blockhash} is not the device's`}${off.length ? `; refused: ${off.join("; ")}` : `; ${JUDGED.join(",")} pass`}`);
+    say(ok, `${at} ${tx.size} bytes (limit ${SOLANA_MAX_TX_BYTES}), route ${build.route.join(" + ")} by ${kind}, ${dec.message.instructions.length} instructions, ${tx.tablesUsed.length} table(s), CU limit ${tx.cuLimit}, build ${Math.round(ms)} ms${want.maxAccounts === SOLANA_JUPITER_MAX_ACCOUNTS && retried ? ` (no route at 40, retried at ${SOLANA_JUPITER_RETRY_MAX_ACCOUNTS})` : ""}${sameHash ? "" : `, blockhash ${dec.message.blockhash} is not the device's`}${off.length ? `; refused: ${off.join("; ")}` : `; ${JUDGED.join(",")} pass`}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -189,7 +191,7 @@ export async function read({ base = BASE, token } = {}) {
       calls.push({ url, status: res.status, body, ms: performance.now() - t });
       return new Response(body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "" } });
     };
-    await fetchSolanaJupiterBuild(base, req, { fetch: keep, uncapped: s.maxAccounts === null }).catch(() => {}); // judged on replay
+    await fetchSolanaJupiterBuild(base, req, { fetch: keep, atRetryCap: s.maxAccounts === SOLANA_JUPITER_RETRY_MAX_ACCOUNTS }).catch(() => {}); // judged on replay
     shapes.push({ name: s.name, calls });
   }
   const names = new Set([token]);

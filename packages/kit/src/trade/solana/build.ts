@@ -4,8 +4,14 @@
 // is signed: the answer only proposes instructions, and checkSolanaQuote (T2.2, S1-S13) judges the assembled bytes.
 //
 // - Query: inputMint, outputMint, amount = a_k, slippageBps, computeUnitPricePercentile=veryHigh, maxAccounts=40,
-//   taker = W_k. When the cap finds no route (Jupiter answers 400 "No routes found"), one retry runs without
-//   maxAccounts (P4S run 3, Fail 3); any other answer is never retried here.
+//   taker = W_k. When the cap finds no route (Jupiter answers 400 "No routes found"), one retry runs at
+//   maxAccounts=SOLANA_JUPITER_RETRY_MAX_ACCOUNTS (P4S run 3, Fail 3), never without the cap; any other answer is never
+//   retried here. Jupiter: maxAccounts "only applies to the total number of accounts of the inner swaps in the swap
+//   instruction and not any of the setup, cleanup or other instructions"; "only reduce maxAccounts if you exceed the
+//   transaction size limit" (developers.jup.ag/docs/swap/get-quote and /docs/swap/requote-with-lower-max-accounts, read
+//   2026-11-05 03:10Z). Uncapped, a route may take Jupiter's 64 and rides over 1,232 bytes once the device's frame is on
+//   it (BZFYNPeQ…B96W's 4-hop buy, 1,244 bytes, helper live run 41956857743); see SOLANA_JUPITER_RETRY_MAX_ACCOUNTS
+//   for the measured budget.
 // - Blockhash: the device's own getLatestBlockhash at `finalized`, never the build's blockhashWithMetadata (the
 //   solana-set-send review), so the lastValidBlockHeight the send judges expiry by is one the device read itself.
 // - Lookup tables: the build names them; their contents come only from the device's own reads (S2), passed in.
@@ -46,6 +52,25 @@ import type { SolanaFetch, SolanaRpc } from "./send.ts";
 export const SOLANA_JUPITER_BUILD_PROXY_PATH = `${HELPER_V1_PREFIX}/proxy/jupiter/swap/v2/build`;
 /** The first build's account cap (P4S run 1, Fail 1: an uncapped route overran 1,232 bytes once our instructions rode on top). */
 export const SOLANA_JUPITER_MAX_ACCOUNTS = 40;
+/**
+ * The one retry's cap, from a measured byte budget. The device's own part rides on Jupiter's: the two compute-budget
+ * instructions, the two tips with their accounts and programs, a buy's output account, the closes. Assembled on the
+ * device's own table reads, it measured 150 to 188 bytes over Jupiter's own instructions alone (188 with a close the
+ * device adds; every build of the live check's recorded runs of 2026-11-02 to 2026-11-05), so Jupiter's setup, route,
+ * cleanup and tables must fit in 1,232 - 188 = 1,044 bytes of their own. A route spends that by
+ * how many of its keys no lookup table holds (32 bytes each, against 1 for a table index), not by its account count,
+ * so the cap is read off real /swap/v2/build answers through the helper, each assembled on the device's own table
+ * reads (2026-11-05 03:12-03:38Z; 0.01 SOL buys and the bought amount's sells):
+ *   - 12 listed tokens that route at 40, buy and sell: at 40, 44 and 48 no build passed 1,232 bytes (n = 24 each, the
+ *     largest 1,152, 1,065 and 1,185); at 52, 56, 60, 64 and uncapped 3, 1, 5, 3 and 3 did (the largest 1,393).
+ *   - 7 listed tokens with no route at 40 (new pump.fun curves), buy and sell, n = 14 a cap: 44 routed none; 48 routed
+ *     10, all within 1,232 (the largest 1,219); 52 routed 12 (1,215); 56, 60, 64 and uncapped routed 9, 8, 8 and 8 that
+ *     fit and 2, 5, 6 and 6 over 1,232 (uncapped is the retry this replaces: 6 of 14 refused too_large).
+ * 48 is the largest cap at which no measured build passed 1,232 bytes, in either set. It is a bound on accounts, not on
+ * bytes: a later read at 48 (ExxzYBTt…pump's buy, 03:43Z) came back a 4-hop route of 1,276 bytes, so S9 still refuses
+ * any build over 1,232 (assembleSolanaSwap), whatever cap asked for it.
+ */
+export const SOLANA_JUPITER_RETRY_MAX_ACCOUNTS = 48;
 /** Jupiter's answer when no route fits (P4S run 3, Fail 3; read through the helper 2026-11-02 04:58Z: 400 {"error":"No routes found"}). */
 export const SOLANA_JUPITER_NO_ROUTE = "No routes found";
 /** One build call is given up after this. */
@@ -97,8 +122,9 @@ export type SolanaJupiterBuild = {
   /** Venue labels from routePlan, for display only. */
   readonly route: readonly string[];
 };
-export type SolanaBuildCall = { maxAccounts: number | null; status: number; ms: number };
-export type SolanaBuildFetched = { build: SolanaJupiterBuild; uncapped: boolean; calls: SolanaBuildCall[] };
+export type SolanaBuildCall = { maxAccounts: number; status: number; ms: number };
+/** `retried`: the build is the retry's, at SOLANA_JUPITER_RETRY_MAX_ACCOUNTS. */
+export type SolanaBuildFetched = { build: SolanaJupiterBuild; retried: boolean; calls: SolanaBuildCall[] };
 
 const isKey = (v: unknown): v is string => {
   if (typeof v !== "string" || v.length < 32 || v.length > 44) return false;
@@ -155,15 +181,16 @@ export function parseSolanaJupiterBuild(answer: unknown): SolanaJupiterBuild {
   return { cuPrice: p < SOLANA_CU_PRICE_MAX ? p : SOLANA_CU_PRICE_MAX, setup, swap, cleanup, other, tables, route };
 }
 
-/** The /swap/v2/build query for one wallet, in a fixed order; maxAccounts is left out when null (the retry). */
-export function solanaJupiterBuildQuery(req: SolanaBuildRequest, maxAccounts: number | null = SOLANA_JUPITER_MAX_ACCOUNTS): string {
+/** The /swap/v2/build query for one wallet, in a fixed order; maxAccounts is always asked (1 to 64, Jupiter's range). */
+export function solanaJupiterBuildQuery(req: SolanaBuildRequest, maxAccounts: number = SOLANA_JUPITER_MAX_ACCOUNTS): string {
+  if (!Number.isInteger(maxAccounts) || maxAccounts < 1 || maxAccounts > 64) throw new Error("maxAccounts must be 1 to 64");
   if (!isKey(req.wallet) || !isKey(req.token)) throw new Error("the wallet and the token must be addresses");
   if (req.token === SOLANA_SOL_MINT) throw new Error("the token cannot be native SOL");
   if (typeof req.amount !== "bigint" || req.amount <= 0n || req.amount > 0xffff_ffff_ffff_ffffn) throw new Error("the amount must be a u64 above 0");
   if (!Number.isInteger(req.slippageBps) || req.slippageBps < 0 || req.slippageBps > 10_000) throw new Error("slippageBps must be 0 to 10,000");
   const [inputMint, outputMint] = req.side === "buy" ? [SOLANA_SOL_MINT, req.token] : [req.token, SOLANA_SOL_MINT];
   const q = new URLSearchParams({ inputMint, outputMint, amount: req.amount.toString(), slippageBps: String(req.slippageBps), computeUnitPricePercentile: "veryHigh" });
-  if (maxAccounts !== null) q.set("maxAccounts", String(maxAccounts));
+  q.set("maxAccounts", String(maxAccounts));
   q.set("taker", req.wallet);
   return q.toString();
 }
@@ -200,20 +227,21 @@ function helperOrigin(origin: string): string {
 }
 
 /**
- * Asks the helper's proxy for Jupiter's build: maxAccounts=40 first, and one uncapped retry only when that answer is
- * Jupiter's 400 "No routes found". The retry's own "No routes found" is SolanaBuildError("no_route"); any other
- * non-200 answer (the helper's 503 upstream included) is "upstream" and is never retried here.
+ * Asks the helper's proxy for Jupiter's build: maxAccounts=40 first, and one retry at SOLANA_JUPITER_RETRY_MAX_ACCOUNTS
+ * only when that answer is Jupiter's 400 "No routes found". The retry's own "No routes found" is
+ * SolanaBuildError("no_route"); any other non-200 answer (the helper's 503 upstream included) is "upstream" and is
+ * never retried here. No call is ever made without maxAccounts.
  */
 export async function fetchSolanaJupiterBuild(
   origin: string,
   req: SolanaBuildRequest,
-  opts: { fetch?: SolanaFetch; timeoutMs?: number; now?: () => number; uncapped?: boolean } = {},
+  opts: { fetch?: SolanaFetch; timeoutMs?: number; now?: () => number; atRetryCap?: boolean } = {},
 ): Promise<SolanaBuildFetched> {
   const base = helperOrigin(origin);
   const doFetch: SolanaFetch = opts.fetch ?? ((u, i) => fetch(u, i));
   const now = opts.now ?? (() => performance.now());
   const calls: SolanaBuildCall[] = [];
-  const once = async (maxAccounts: number | null): Promise<{ status: number; body: unknown }> => {
+  const once = async (maxAccounts: number): Promise<{ status: number; body: unknown }> => {
     const url = `${base}${SOLANA_JUPITER_BUILD_PROXY_PATH}?${solanaJupiterBuildQuery(req, maxAccounts)}`;
     const t = now();
     let r: Response;
@@ -237,20 +265,21 @@ export async function fetchSolanaJupiterBuild(
   };
   const noRoute = (a: { status: number; body: unknown }) =>
     a.status === 400 && typeof a.body === "object" && a.body !== null && (a.body as { error?: unknown }).error === SOLANA_JUPITER_NO_ROUTE;
-  // `uncapped`: the build asked without the cap from the start (the live check's uncapped shapes), with no retry.
-  let uncapped = opts.uncapped === true;
-  let a = await once(uncapped ? null : SOLANA_JUPITER_MAX_ACCOUNTS);
-  if (uncapped && noRoute(a)) throw new SolanaBuildError("no_route", "no route uncapped");
-  if (!uncapped && noRoute(a)) {
-    uncapped = true;
-    a = await once(null);
-    if (noRoute(a)) throw new SolanaBuildError("no_route", `no route at maxAccounts=${SOLANA_JUPITER_MAX_ACCOUNTS} or uncapped`);
+  // `atRetryCap`: the build asked at the retry's cap from the start (the live check's retry shapes), with no retry.
+  const start = opts.atRetryCap === true;
+  let retried = start;
+  let a = await once(start ? SOLANA_JUPITER_RETRY_MAX_ACCOUNTS : SOLANA_JUPITER_MAX_ACCOUNTS);
+  if (start && noRoute(a)) throw new SolanaBuildError("no_route", `no route at maxAccounts=${SOLANA_JUPITER_RETRY_MAX_ACCOUNTS}`);
+  if (!start && noRoute(a)) {
+    retried = true;
+    a = await once(SOLANA_JUPITER_RETRY_MAX_ACCOUNTS);
+    if (noRoute(a)) throw new SolanaBuildError("no_route", `no route at maxAccounts=${SOLANA_JUPITER_MAX_ACCOUNTS} or ${SOLANA_JUPITER_RETRY_MAX_ACCOUNTS}`);
   }
   if (a.status !== 200) {
     const code = (a.body as { error?: unknown; errorCode?: unknown } | null)?.error;
     throw new SolanaBuildError("upstream", `HTTP ${a.status}${typeof code === "string" ? ` ${code.slice(0, 80)}` : ""}`);
   }
-  return { build: parseSolanaJupiterBuild(a.body), uncapped, calls };
+  return { build: parseSolanaJupiterBuild(a.body), retried, calls };
 }
 
 export type SolanaBlockhash = { blockhash: string; lastValidBlockHeight: number; slot: number };
