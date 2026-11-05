@@ -554,6 +554,7 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
  * transfer whose nearest PoolManager event of the pool before it is another call (POOL_CALLS: its liquidity added or
  * taken, its start, a donation) settles that call, never a swap: no cut (card helper-v4-hook-liquidity, Base tx
  * 0x02b8198c...a2e5 at block 53,529,320: Initialize, ModifyLiquidity, the hook's 1e9 tokens in, then the first buy).
+ * For a beforeSwap-only hook only its paying in there settles the call: a take there is the next swap's cut.
  */
 export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "base"): Map<string, bigint> {
   const takes = new Map<string, bigint>();
@@ -578,7 +579,9 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
     swaps.sort((a, b) => a.index - b.index);
     for (const m of moves) {
       const call = Math.max(-1, ...calls.filter((i) => i < m.index));
-      if (call >= 0 && !swaps.some((s) => s.index > call && s.index < m.index)) continue; // settles that call
+      // settles that call: any move of an afterSwap hook (its cut follows its swap), and a beforeSwap-only hook's paying
+      // in (hook to PoolManager), never its take, which is the next swap's beforeSwap cut
+      if (call >= 0 && !swaps.some((s) => s.index > call && s.index < m.index) && (after || m.take < 0n)) continue;
       const before = swaps.filter((s) => s.index < m.index).at(-1);
       const next = swaps.find((s) => s.index > m.index);
       const owner = after ? (before ?? next)! : (next ?? before)!;

@@ -471,3 +471,28 @@ test("card helper-v4-hook-liquidity: a hook's transfer that settles the pool's l
   const noCall = logs.filter((l) => l.index !== 721 && l.index !== 717);
   assert.equal(hookTakes(pool, noCall, "base").get(`${swap.tx}:${swap.index}`), -BigInt(logs.find((l) => l.index === 722)!.data));
 });
+
+test("card helper-v4-hook-liquidity: a beforeSwap-only hook's take right after a pool call is the next swap's cut; its paying in there settles the call", () => {
+  const pm = BASE_VENUES.poolManager;
+  const coin = `0x${"c1".repeat(20)}`;
+  const hook = `0x${"1".repeat(36)}0008`; // beforeSwap's return delta, no afterSwap
+  const id = `0x${"ab".repeat(32)}`;
+  const tx = `0x${"0e".repeat(32)}`;
+  const w = (a: string) => `0x${a.slice(2).padStart(64, "0")}`;
+  const amt = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
+  const at = (index: number, address: string, topics: string[], data = "0x"): Log => ({ block: 9, index, tx, address, topics, data });
+  const logs: Log[] = [
+    at(1, pm, [TOPIC.initialize, id, w(`0x${"0".repeat(40)}`), w(coin)]),
+    at(2, pm, [TOPIC.modifyLiquidity, id, w(hook)]),
+    at(3, coin, [TOPIC.transfer, w(hook), w(pm)], amt(1_000n)), // the liquidity paid in
+    at(4, coin, [TOPIC.transfer, w(pm), w(hook)], amt(30n)), // beforeSwap's fee taken
+    at(5, pm, [TOPIC.swap4, id, w(`0x${"7".repeat(40)}`)], "0x"),
+  ];
+  const pool: Pool = { venue: "v4", id, token: coin, tokenIs0: false, quote: { kind: "eth", decimals: 18 }, hook };
+  assert.equal(hookTakes(pool, logs, "base").get(`${tx}:5`), 30n, "the fee is the swap's cut, the liquidity is not");
+  assert.equal(traderLeg({ side: "b", amt: 1_030n }, 30n), 1_000n);
+  // the same moves for an afterSwap hook before its swap settle the call, as the launch's (today's rule)
+  const afterHook = `0x${"1".repeat(36)}000c`;
+  const relabel = (l: Log) => ({ ...l, topics: l.topics.map((t) => (t === w(hook) ? w(afterHook) : t)) });
+  assert.equal(hookTakes({ ...pool, hook: afterHook }, logs.map(relabel), "base").get(`${tx}:5`), undefined);
+});
