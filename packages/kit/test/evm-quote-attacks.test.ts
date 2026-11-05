@@ -3926,3 +3926,20 @@ test("SP4 a first scan provider whose rate limit would hold a warm scan's reques
   assert.deepEqual(v, below);
   assert.ok(ms < 1_500 && throttled > 0 && asked.length > 0, `${Math.round(ms)} ms, ${throttled} throttled, ${asked.length} on the second`);
 });
+
+test("SP5 a first scan provider that answers a warm scan with no logs: the request goes to the second whole, never asked of the first as halves", { timeout: 30_000 }, async () => {
+  // Robinhood's first answering no logs held a warm quote 9.5 to 11 s: 61 halves through its 2 at once (live check
+  // evm-scan-second-provider, 2026-11-05 17:3xZ)
+  const token = "0x00000000000000000000000000000000005c4509";
+  const inner = scanner(5_000_010, []);
+  const ranges: [number, number][] = [];
+  const noLogs: EvmRpc = async (calls) => {
+    for (const f of getLogsOf(calls)) ranges.push([Number(f.fromBlock), Number(f.toBlock)]);
+    const out = await inner(calls);
+    return out.map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32602, message: "block range extends beyond current head block" } } : o));
+  };
+  const { v, asked } = await warmPair(token, noLogs, "robinhood");
+  assert.deepEqual(v, below);
+  assert.ok(ranges.every(([a, b]) => a === 5_000_001 && b === 5_000_010), `the first was asked ${JSON.stringify(ranges)}`);
+  assert.deepEqual(asked, [[5_000_001, 5_000_010], [5_000_001, 5_000_010]]);
+});

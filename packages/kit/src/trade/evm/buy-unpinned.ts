@@ -204,21 +204,27 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // (it answers 429 to 4 at once, 2026-11-03 20:27Z); a request with more than one value in a topic position spans
       // at most 100,000 blocks ("query spans 1000000 blocks …, but only 100000 are allowed for this request; narrow the
       // block range, or send one value per position", 2026-11-04 06:55Z): `orSpan`
-      // The second: Globalstake (rpc-robinhood.globalstake.io; card evm-scan-second-provider, 2026-11-05 16:21-16:27Z
-      // from this Mac), the one keyless provider of the five that serves getLogs at depth: publicnode answers "Archive
-      // requests require a personal token" for the newest 100 blocks, dRPC refuses 1,000-block spans on its free plan,
-      // bloXroute "Method not available on this endpoint". Its preflight answers 200, access-control-allow-origin *; the
-      // 289 Initialize logs of 100,000 blocks 3M back the same as Robinhood's own, log for log; 4 requests of 100,000
-      // blocks at once all answered, p50 3.5-4.1 s, an OR of topics too (2.7 s); 1M blocks took 11.4 s, past the 10 s
-      // timeout, and 100,000 blocks 9.95M back "request timed out" at 30 s, so it carries what the first left of the
-      // newest blocks, and a warm scan whole.
+      // The second: daybreak (robinhood.daybreak-rpc.network; card evm-scan-second-provider, 2026-11-05 17:18-17:4xZ from
+      // this Mac). Its preflight from the app's origin answers 204, access-control-allow-origin *; its getLogs span at
+      // most 2,000 blocks (-32602 "query exceeds max block range 2000"), the scan's own batch (both topic positions and
+      // the head block) p50 373-396 ms at 100 to 2,000 blocks, 100,000 back too, 4 at once all answered (p50 251-450 ms,
+      // three rounds), an OR of topics too; the Initialize logs of 2,000 blocks 4,000 and 300,000 back the same as
+      // Robinhood's own, log for log (14 and 6). The live check's quotes with the first held (refused, no logs) all ended
+      // ok. It carries a warm scan whole: one round of its requests, 4 x 2,000 blocks, about 13.6 minutes of Robinhood's
+      // blocks (scanPools `fast`); a cold one stays on the first. Passed over: Globalstake (9.4 s and 10 s timeouts on
+      // 70-block requests: 3 of 4 held quotes ended at the 60 s bound, 16:57-17:03Z), robinhood.api.pocket.network
+      // (5,000 blocks in about 210 ms, but a batch of one call answered as a bare object, not a batch, so the device
+      // refuses its head read: 2 of 2 refused held quotes ended rpc_error), rpc-robinhood.blockmachine.io (429 after six
+      // batches, "limit":60 compute units, retry after 25 s; the newest 5,000 blocks only), publicnode ("Archive requests
+      // require a personal token" for the newest 100 blocks), dRPC (1,000-block spans refused on its free plan), bloXroute
+      // (no eth_getLogs).
       scan: bare({
         url: "https://rpc.mainnet.chain.robinhood.com",
         span: 1_000_000,
         depth: 10_000_000,
         parallel: 2,
         orSpan: 100_000,
-        spare: bare({ url: "https://rpc-robinhood.globalstake.io", span: 100_000, parallel: 4 }),
+        spare: bare({ url: "https://robinhood.daybreak-rpc.network", span: 2_000, parallel: 4 }),
       }),
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed

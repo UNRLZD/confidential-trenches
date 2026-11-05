@@ -148,6 +148,7 @@ export const MUTANTS = [
   [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
   [QUOTE, "  const fast = spare !== undefined && jobs.reduce(", "  const fast = spare !== undefined && 0 * jobs.reduce(", R, "SP2 "],
   [QUOTE, "    const top = p === null && b === head;", "    const top = false;", R, "SP3 "],
+  [QUOTE, "      if (fast && on !== spare) throw new ScanRefused(", "      if (false) throw new ScanRefused(", R, "SP5 "],
   [QUOTE, "  scanned?.commit();", "", R, "N1a "],
   // review of 5452011: no override for a pool the PoolManager does not hold, one hook per override, never an address
   // the reads call; the route's own pools are not R; pools of other currencies priced through them, bounded

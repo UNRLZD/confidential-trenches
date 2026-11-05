@@ -1196,6 +1196,10 @@ async function scanPools(
         return null;
       });
       if (rs !== null && fine(rs)) return void keep(rs);
+      // a warm scan's request the first failed goes to the second whole: halves help a span too long for its time or
+      // its logs, never a warm one (card evm-scan-second-provider: Robinhood's first answering no logs held a warm quote
+      // 9.5 to 11 s, 61 halves through its 2 at once, 2026-11-05 17:3xZ)
+      if (fast && on !== spare) throw new ScanRefused("rpc_error", "the scan provider answered no logs");
       const mid = a + Math.floor((b - a) / 2);
       return settle([one({ part, a, b: mid, on }, splits - 1), one({ part, a: mid + 1, b, on }, splits - 1)]);
     }
