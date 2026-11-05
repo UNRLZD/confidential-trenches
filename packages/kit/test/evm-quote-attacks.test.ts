@@ -491,14 +491,15 @@ test("card evm-quote-head-watch: a scan provider that fails a full span (a timeo
   };
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), slow), below);
   assert.ok(asked.length > 0 && asked.every(([a, b]) => b - a + 1 <= 2_500), "every answered request is a quarter or an eighth of a span");
-  // a span answered with more logs than SCAN_MAX_LOGS is asked by halves too
+  // a span answered with more logs than SCAN_MAX_LOGS is asked by halves too (its getLogs answers only: the block each
+  // request asks for beside them is answered as it is, so the cap alone sends the request to its halves)
   const token2 = "0x00000000000000000000000000000000000e72e7";
   const pools2 = [seeded(token2), real(token2)];
   const inner2 = scanner(5_000_000, [{ key: real(token2).key, at: 4_500_000 }]);
   const full: EvmRpc = async (calls) => {
     const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
     const out = await inner2(calls);
-    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 5_000 ? out.map((o) => ({ ...(o as object), result: new Array(10_001).fill(null) })) : out;
+    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 5_000 ? out.map((o, i) => (calls[i]!.method === "eth_getLogs" ? { ...(o as object), result: new Array(10_001).fill(null) } : o)) : out;
   };
   assert.deepEqual(await quoteOn(pools2, token2, seededRoute(token2), full), below);
 });
@@ -586,7 +587,7 @@ test("review of 4830f1f, L: a scan head more than a span behind the agreed block
   const capped: EvmRpc = async (calls) => {
     const f = calls[0]!.params[0] as { fromBlock?: string; toBlock?: string };
     const out = await inner(calls);
-    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 5_000 ? out.map((o) => ({ ...(o as object), result: new Array(10_000).fill(null) })) : out;
+    return calls[0]!.method === "eth_getLogs" && Number(f.toBlock) - Number(f.fromBlock) + 1 > 5_000 ? out.map((o, i) => (calls[i]!.method === "eth_getLogs" ? { ...(o as object), result: new Array(10_000).fill(null) } : o)) : out;
   };
   assert.deepEqual(await quoteOn(pools2, token2, seededRoute(token2), capped), below);
 });
