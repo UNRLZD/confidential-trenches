@@ -24,7 +24,7 @@ interface VmEvm {
 abstract contract SellBase is Signing {
   uint256 internal constant N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
   bytes32 internal constant SELL_TYPEHASH = keccak256(
-    'Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)'
+    'Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)'
   );
 
   SellDelegate internal delegate;
@@ -58,6 +58,7 @@ abstract contract SellBase is Signing {
         _s.pool,
         _s.precommitment,
         _s.feeCap,
+        _s.feeRecipient,
         _s.deadline,
         _s.nonce
       )
@@ -245,6 +246,7 @@ contract SellTest is SellBase {
       pool: address(pool),
       precommitment: PRE + _nonce,
       feeCap: FEE,
+      feeRecipient: SENDER,
       deadline: block.timestamp + 60,
       nonce: _nonce
     });
@@ -282,6 +284,41 @@ contract SellTest is SellBase {
     assertEq(weth.balanceOf(W), 0, 'nor WETH');
     assertEq(_w().nonce(), 1);
     assertEq(uint256(vm.load(W, _nonceSlot())), 1, 'the nonce is at the ERC-7201 slot of W');
+  }
+
+  /// Review round 3, L-1: anyone who sees W's signed sell before it lands sends it first with the whole fee cap. The
+  /// fee is paid to the payee W signed, never to whoever sends it, so a front-run gains its sender nothing
+  function test_aFrontRunWithTheCapPaysItsSenderNothing() public {
+    SellDelegate.Sell memory _s = _good();
+    address _front = address(0xF00D);
+    vm.prank(_front);
+    _w().sell(_s, FEE, _signed(_s));
+    assertEq(_front.balance, 0, 'the front-runner is paid nothing');
+    assertEq(SENDER.balance, FEE, 'the fee goes to the recipient W signed');
+  }
+
+  /// A Sell whose fee recipient is the zero address or W itself is refused before anything runs
+  function test_aZeroOrSelfFeeRecipientIsRefused() public {
+    SellDelegate.Sell memory _s = _good();
+    _s.feeRecipient = address(0);
+    bytes memory _sig = _signed(_s);
+    vm.expectRevert(SellDelegate.InvalidFeeRecipient.selector);
+    _send(_s, FEE, _sig);
+    _s.feeRecipient = W;
+    _sig = _signed(_s);
+    vm.expectRevert(SellDelegate.InvalidFeeRecipient.selector);
+    _send(_s, FEE, _sig);
+    assertEq(_w().nonce(), 0, 'nothing ran');
+    assertEq(token.balanceOf(W), AMOUNT * 10);
+  }
+
+  /// The signature binds the fee recipient: W's signature of one recipient does not pay another
+  function test_aChangedFeeRecipientBreaksTheSignature() public {
+    SellDelegate.Sell memory _s = _good();
+    bytes memory _sig = _signed(_s);
+    _s.feeRecipient = address(0xF00D);
+    vm.expectRevert(SellDelegate.InvalidSignature.selector);
+    _send(_s, FEE, _sig);
   }
 
   /// A router that pays W in ETH (an unwrap to W) lands the same way
@@ -346,7 +383,7 @@ contract SellTest is SellBase {
   function test_eachChangedFieldIsRefused() public {
     SellDelegate.Sell memory _s = _good();
     bytes memory _sig = _signed(_s);
-    for (uint256 _i; _i < 10; ++_i) {
+    for (uint256 _i; _i < 11; ++_i) {
       SellDelegate.Sell memory _c = _good();
       if (_i == 0) _c.token = address(weth);
       if (_i == 1) _c.amount = AMOUNT - 1;
@@ -358,6 +395,7 @@ contract SellTest is SellBase {
       if (_i == 7) _c.feeCap = FEE * 2;
       if (_i == 8) _c.deadline = _s.deadline + 1;
       if (_i == 9) _c.nonce = 1;
+      if (_i == 10) _c.feeRecipient = address(0xF00D);
       vm.expectRevert(SellDelegate.InvalidSignature.selector);
       _send(_c, FEE, _sig);
     }
@@ -465,10 +503,11 @@ contract SellTest is SellBase {
     assertEq(_w().nonce(), 2);
   }
 
-  function test_aSenderThatRefusesEtherRevertsTheSell() public {
-    SellDelegate.Sell memory _s = _good();
-    bytes memory _sig = _signed(_s);
+  function test_aFeeRecipientThatRefusesEtherRevertsTheSell() public {
     RefusingSender _r = new RefusingSender();
+    SellDelegate.Sell memory _s = _good();
+    _s.feeRecipient = address(_r);
+    bytes memory _sig = _signed(_s);
     vm.expectRevert(SellDelegate.FailedToSendNativeAsset.selector);
     _r.send(_w(), _s, FEE, _sig);
     // with a fee of 0 nothing is sent to it, and the sell lands
@@ -611,6 +650,54 @@ contract SellTest is SellBase {
     assertEq(token.allowance(W, address(router)), 0);
     assertEq(_w().nonce(), 0);
     assertEq(address(pool).balance, 0);
+  }
+
+  /*///////////////////////////////////////////////////////////////
+      REVIEW ROUND 3, L-2: A COPIED PRECOMMITMENT (today's behaviour, held)
+  //////////////////////////////////////////////////////////////*/
+
+  // A stranger who deposits a signed Sell's precommitment first, at MIN_DEPOSIT, makes the whole sell revert: W keeps its
+  // tokens and its nonce, and signs again with a fresh precommitment (the kit's recovery: card precommit-taken-recover).
+  // Reproduced by the pool-scan-3 scanner (its Scan3.t.sol), kept here as L-2's standing test.
+  function test_aCopiedPrecommitmentRevertsTheWholeSellAndWKeepsItsTokens() public {
+    SellDelegate.Sell memory _s = _good();
+    bytes memory _sig = _signed(_s);
+    address _griefer = address(0xBAD0);
+    vm.deal(_griefer, 1 ether);
+    vm.prank(_griefer);
+    pool.deposit{value: 0.0001 ether}(0.0001 ether, _s.precommitment);
+    uint256 _tokens = token.balanceOf(W);
+    vm.prank(SENDER);
+    vm.expectRevert(IPrivacyPool.PrecommitmentAlreadyUsed.selector);
+    _w().sell(_s, FEE, _sig);
+    assertEq(token.balanceOf(W), _tokens, 'W still holds the tokens');
+    assertEq(_w().nonce(), 0, 'the nonce is not used: W signs a new Sell');
+    assertEq(_griefer.balance, 1 ether - 0.0001 ether, 'the grief costs the stranger MIN_DEPOSIT');
+  }
+
+  // The same for a plain deposit: the stranger's note is Poseidon(value, label, the copied precommitment), which only
+  // the precommitment's owner can spend, and the owner's own deposit is refused with its ether kept.
+  function test_aCopiedPrecommitmentRefusesTheOwnersDepositAndItKeepsItsEther() public {
+    uint256 _pre = 0xABCD;
+    address _owner = address(0x71C7);
+    address _griefer = address(0xBAD0);
+    vm.deal(_owner, 1 ether);
+    vm.deal(_griefer, 1 ether);
+    vm.recordLogs();
+    vm.prank(_griefer);
+    uint256 _c = pool.deposit{value: 0.0001 ether}(0.0001 ether, _pre);
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    uint256 _label;
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      if (_logs[_i].topics[0] == IPrivacyPool.Deposited.selector) {
+        (, _label,,) = abi.decode(_logs[_i].data, (uint256, uint256, uint256, uint256));
+      }
+    }
+    assertEq(_c, PoseidonT4.hash([uint256(0.0001 ether), _label, _pre]), 'the note only the precommitment owner spends');
+    vm.prank(_owner);
+    vm.expectRevert(IPrivacyPool.PrecommitmentAlreadyUsed.selector);
+    pool.deposit{value: 0.5 ether}(0.5 ether, _pre);
+    assertEq(_owner.balance, 1 ether, 'the owner keeps its ether; its deposit did not land');
   }
 }
 

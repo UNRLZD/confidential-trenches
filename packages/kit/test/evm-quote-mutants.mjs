@@ -494,6 +494,9 @@ export const MUTANTS = [
   [QD, "if (feeCap > feeMax) throw", "if (false) throw", S, "planted: the sender's fee cap"],
   [QD, "if (feeCap > feeMax) throw", "if (feeCap > feeMax + 1n) throw", S, "planted: the sender's fee cap"],
   [QD, "const feeCap = asked === undefined ? feeMax : asked;", "const feeCap = asked === undefined ? feeMax - 1n : asked;", S, "planted: the sender's fee cap"],
+  // the fee recipient is the caller's, the one its pin names (card pool-review-3, L-1), never another
+  [QD, "precommitment, feeCap, feeRecipient, deadline, nonce });", 'precommitment, feeCap, feeRecipient: "0x000000000000000000000000000000000000beef", deadline, nonce });', S, "planted: the sender's fee cap"],
+  [SELLU, "feeCap: 0n, feeRecipient: EVM_SELL_SIM,", "feeCap: 0n, feeRecipient: lower(w),", S, "planted: the sim signer"],
   [QUOTE, 'if (typeof boughtBlock !== "bigint" || boughtBlock < 1n) return refuse(', "if (false) return refuse(", S, "planted: a sell quote takes the buy's block"],
   [QUOTE, "boughtBlock < 1n) return refuse(", "boughtBlock < 0n) return refuse(", S, "planted: a sell quote takes the buy's block"],
   [QUOTE, "if (got.a.number >= minBlock && got.b.number >= minBlock) break;", "break;", R, "L5 "],

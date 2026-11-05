@@ -1,15 +1,16 @@
 // Replays evm-sell-v4.answers.json through the live check: the recorded good answers (until the real redeploy, the dry
 // run on anvil forks of Base Sepolia and Robinhood testnet, each read on two loopback URLs; its note gives the
-// re-record command) pass; the same recording with one thing changed fails: the v1 delegate's code, POOL_MANAGER()
-// or WETH() answering another address, an immutable holding another PoolManager, an EIP-1967 slot set, an owner()
-// that answers, a PoolManager with other code, a failed deploy or one that made another address, a run key that kept
-// money or sent one more transaction, another chain id, and a record naming more than the delegate.
+// re-record command) pass; the same recording with one thing changed fails: the v1 delegate's code, the current
+// build's code at the frozen delegate's address, POOL_MANAGER() or WETH() answering another address, an immutable
+// holding another PoolManager, an EIP-1967 slot set, an owner() that answers, a PoolManager with other code, a
+// failed deploy or one that made another address, a run key that kept money or sent one more transaction, another
+// chain id, and a record naming more than the delegate.
 //   node --test scripts/live-checks/evm-sell-v4.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { check, runRecord } from "./evm-sell-v4.mjs";
-import { BUILD, CHAINS, DUST, EIP1967, runtimeOf, selector } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, DUST, EIP1967, pinnedBuild, runtimeOf, selector } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-sell-v4.answers.json", import.meta.url), "utf8"));
 const CHAIN_NAMES = Object.keys(CHAINS);
@@ -70,6 +71,19 @@ test("the v1 delegate's code fails: this check takes only the build pinned to th
   for (const chain of CHAIN_NAMES) fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = v1))), /SellDelegate \S+ code is the build pinned to it: 4119 bytes/);
 });
 
+test("the current build's code at the frozen evm-sell-v4 delegate's address fails: that address holds only its own build", async () => {
+  // the current build as deploy.mjs's dry run deployed it (pool-evm-deploy.answers.json), served for the frozen delegate
+  const P = JSON.parse(readFileSync(new URL("./pool-evm-deploy.answers.json", import.meta.url), "utf8"));
+  const cur = BUILD.contracts.SellDelegate;
+  for (const chain of CHAIN_NAMES) {
+    const at = P.deployments[chain].contracts.SellDelegate.address;
+    const code = P.good[chain].find(isCode(at)).json.result;
+    assert.equal(runtimeOf(code, cur.immutables).masked, cur.masked, `${chain}: the recorded code is the current build`);
+    assert.notEqual(pinnedBuild(chain, "SellDelegate", del(chain)), cur, `${chain}: the delegate's address is frozen to an older build`);
+    fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = code))), new RegExp(`SellDelegate \\S+ code is the build pinned to it: ${(code.length - 2) / 2} bytes`));
+  }
+});
+
 test("POOL_MANAGER() or WETH() answering another address fails", async () => {
   for (const chain of CHAIN_NAMES) {
     fails(await run(chain, mutate(chain, isCall(del(chain), "POOL_MANAGER()"), (j) => (j.result = OTHER))), /SellDelegate.POOL_MANAGER\(\) returns/);
@@ -80,7 +94,9 @@ test("POOL_MANAGER() or WETH() answering another address fails", async () => {
 test("the build's code with its PoolManager immutable set to another address fails, though the zeroed code agrees", async () => {
   const chain = "base-sepolia";
   const pm = CHAINS[chain].poolManager.address.slice(2);
-  const starts = BUILD.contracts.SellDelegate.immutables.find((g) => A.good[chain].find(isCode(del(chain))).json.result.slice(2 + 2 * g[0], 2 + 2 * g[0] + 64).endsWith(pm));
+  // the offsets of the build pinned to the recorded delegate's address (the frozen evm-sell-v4 build), not the current
+  // build's: they differ since the current build moved on (card pool-review-3: L-1's feeRecipient)
+  const starts = pinnedBuild(chain, "SellDelegate", del(chain)).immutables.find((g) => A.good[chain].find(isCode(del(chain))).json.result.slice(2 + 2 * g[0], 2 + 2 * g[0] + 64).endsWith(pm));
   assert.ok(starts, "the PoolManager's immutable");
   const swapped = mutate(chain, isCode(del(chain)), (j) => {
     for (const s of starts) j.result = j.result.slice(0, 2 + 2 * s) + OTHER.slice(2) + j.result.slice(2 + 2 * s + 64);
