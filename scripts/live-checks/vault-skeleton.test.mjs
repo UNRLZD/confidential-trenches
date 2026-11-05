@@ -18,6 +18,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { check, wasmProblems, networkProblems, operatorProblems, DEPLOYMENT, RPCS, TESTNET_USDC, TEST_BUILD_MARK } from "./vault-skeleton.mjs";
+// the reads' waits (a rate limit's, the pacing between asks) recorded as asked, never slept, so replays run at once
+const NOSLEEP = async () => {};
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const load = (f) => JSON.parse(readFileSync(path.join(HERE, f), "utf8"));
@@ -39,7 +41,7 @@ test("recorded good answer: the deployed skeleton, keys [] on two RPCs, its code
   const answers = load("vault-skeleton.answers.json");
   assert.equal(accountOf(answers), deployment.account_id);
   assert.equal(new Set(answers.map((a) => a.url)).size, 2);
-  const r = await check({ deployment, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.lines.length, 18);
   assert.equal(r.lines.filter((l) => /key list is \[\] on .*: 0 key\(s\)/.test(l) && l.startsWith("ok ")).length, 2);
@@ -58,7 +60,7 @@ test("bad answer: storage_balance_of(vault) answers null on both RPCs, all else 
   const answers = load("vault-skeleton.answers.json").map((a) =>
     a.params.method_name === "storage_balance_of" ? { ...a, json: { ...a.json, result: { ...a.json.result, result: [...Buffer.from("null")] } } } : a,
   );
-  const r = await check({ deployment, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   const bad = r.lines.filter((l) => l.startsWith("BAD"));
   assert.equal(bad.length, 2, r.lines.join("\n"));
@@ -67,7 +69,7 @@ test("bad answer: storage_balance_of(vault) answers null on both RPCs, all else 
 
 test("recorded bad answer: an ordinary account with one full-access key: FAIL on its key list", async () => {
   const answers = load("vault-skeleton.bad-key.answers.json");
-  const r = await check({ deployment, account: accountOf(answers), fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, account: accountOf(answers), fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(r.lines.filter((l) => /^BAD \S+ key list is \[\] on .*: 1 key\(s\) \(FullAccess\)/.test(l)).length, 2, r.lines.join("\n"));
   // a real read too: the parent is not registered on the token
@@ -76,7 +78,7 @@ test("recorded bad answer: an ordinary account with one full-access key: FAIL on
 
 test("recorded bad answer: a wasm importing promise_batch_action_add_key_with_full_access: FAIL on its imports", async () => {
   const answers = load("vault-skeleton.bad-import.answers.json");
-  const r = await check({ deployment, account: accountOf(answers), fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, account: accountOf(answers), fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   const bad = r.lines.filter((l) => l.startsWith("BAD no banned import on ") && l.includes("promise_batch_action_add_key_with_full_access"));
   assert.equal(bad.length, 2, r.lines.join("\n"));
@@ -96,7 +98,7 @@ test("recorded bad answer: a mainnet build's config() (mainnet USDC), with a rec
   const cfgs = answers.filter((a) => a.params.method_name === "config").map((a) => JSON.parse(Buffer.from(a.json.result.result).toString("utf8")));
   assert.equal(cfgs.length, 2);
   for (const c of cfgs) assert.equal(c.asset, MAINNET_USDC);
-  const r = await check({ deployment: { ...deployment, asset: MAINNET_USDC }, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment: { ...deployment, asset: MAINNET_USDC }, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(r.lines.filter((l) => l.startsWith("BAD config() answers on ") && l.includes(`asset ${MAINNET_USDC}`)).length, 2, r.lines.join("\n"));
 });
@@ -114,7 +116,7 @@ function withAsset(answers, asset) {
 
 test("bad answer: config() names mainnet USDC with the testnet version, the record is the real one: FAIL on config()", async () => {
   const answers = withAsset(load("vault-skeleton.answers.json"), MAINNET_USDC);
-  const r = await check({ deployment, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   const bad = r.lines.filter((l) => l.startsWith("BAD config() answers on ") && l.includes(`asset ${MAINNET_USDC}`) && / testnet$/.test(l));
   assert.equal(bad.length, 2, r.lines.join("\n"));
@@ -145,7 +147,7 @@ test("the network rule reads the TOKEN ids only: the deployed testnet wasm passe
 test("the same answers with a third of the RPCs gone: FAIL (two RPCs are required)", async () => {
   const answers = load("vault-skeleton.answers.json");
   const one = [...new Set(answers.map((a) => a.url))].slice(0, 1);
-  const r = await check({ deployment, fetchFn: replay(answers), rpcs: one });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers), rpcs: one });
   assert.equal(r.ok, false);
   assert.match(r.lines[0], /^BAD only 1 RPC\(s\): .*; want two of two operators$/);
   assert.equal(r.lines.filter((l) => l.startsWith("BAD")).length, 1, r.lines.join("\n"));
@@ -155,7 +157,7 @@ test("the same answers with a third of the RPCs gone: FAIL (two RPCs are require
 test("the same answers from two hosts of one operator (FastNEAR twice): FAIL on the operators only", async () => {
   const NEAR_ORG = "https://rpc.testnet.near.org";
   const answers = load("vault-skeleton.answers.json").map((a) => (a.url === "https://near-testnet.drpc.org" ? { ...a, url: NEAR_ORG } : a));
-  const r = await check({ deployment, fetchFn: replay(answers), rpcs: ["https://test.rpc.fastnear.com", NEAR_ORG] });
+  const r = await check({ sleep: NOSLEEP, deployment, fetchFn: replay(answers), rpcs: ["https://test.rpc.fastnear.com", NEAR_ORG] });
   assert.equal(r.ok, false);
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), ["BAD only 1 operator(s) in https://test.rpc.fastnear.com (fastnear), https://rpc.testnet.near.org (fastnear); want two testnet operators"]); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
 });
@@ -227,7 +229,7 @@ test("the live check FAILs a deployed wasm exporting withdraw without on_payout"
   const answers = load("vault-skeleton.answers.json").map((a) =>
     a.params?.request_type === "view_code" ? { ...a, json: { ...a.json, result: { ...a.json.result, code_base64: wasm.toString("base64") } } } : a,
   );
-  const r = await check({ deployment: { ...deployment, wasm_sha256: sha }, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment: { ...deployment, wasm_sha256: sha }, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   const bad = r.lines.filter((l) => l.startsWith("BAD "));
   assert.ok(bad.length > 0 && bad.every((l) => /withdraw is exported only with on_payout on .*: withdraw without on_payout/.test(l)), bad.join("\n"));
@@ -262,7 +264,7 @@ test("the live check FAILs a deployed wasm holding the out-of-gas test build's m
   const answers = load("vault-skeleton.answers.json").map((a) =>
     a.params?.request_type === "view_code" ? { ...a, json: { ...a.json, result: { ...a.json.result, code_base64: wasm.toString("base64") } } } : a,
   );
-  const r = await check({ deployment: { ...deployment, wasm_sha256: sha }, fetchFn: replay(answers) });
+  const r = await check({ sleep: NOSLEEP, deployment: { ...deployment, wasm_sha256: sha }, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   const bad = r.lines.filter((l) => l.startsWith("BAD "));
   assert.ok(bad.length === 2 && bad.every((l) => /^BAD not the out-of-gas test build on .*: holds "blindfill-vault test build: on_payout runs out of gas"$/.test(l)), bad.join("\n"));
