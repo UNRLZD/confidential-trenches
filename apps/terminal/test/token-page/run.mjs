@@ -65,12 +65,21 @@ const STATES = [
 /** The page's live read interval (src/screens/token/candles.ts LIVE_MS). */
 const LIVE_MS = 1_000;
 
+// The fake helper's chart clock: the run's own, or for the planted run (TOKEN_PAGE_CLOCK_EDGE_MS=<ms>, card
+// chart-test-clock-pin) set at each state's first chart read to that many ms before the next 15-minute bar opens, so the
+// state's later reads land past the boundary:
+//   TOKEN_PAGE_CLOCK_EDGE_MS=2000 node apps/terminal/test/token-page/run.mjs --only chart-live-503,chart-live
+const EDGE_MS = Number(process.env.TOKEN_PAGE_CLOCK_EDGE_MS ?? 0);
+const BOUNDARY_MS = 900_000;
+let skewMs = 0;
+const chartNow = () => Date.now() + skewMs;
+
 /** CANDLE_COUNT bars of a 15m walk ending at the run's clock, around `p` (a price string), as the helper's answer. */
 const CANDLE_COUNT = 160;
 function candles(p, tf) {
   const step = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 }[tf];
   const base = Number(p) > 0 ? Number(p) : 0.0000273;
-  const end = Math.floor(Date.now() / 1000 / step) * step;
+  const end = Math.floor(chartNow() / 1000 / step) * step;
   const out = [];
   let c = base;
   for (let i = 0; i < CANDLE_COUNT; i++) {
@@ -110,6 +119,11 @@ function helperAnswer(s, url, calls) {
     return json(200, { row, decimals: 6, pool: null, risk: {}, route: "ok" });
   }
   if (url.pathname === "/v1/market/candles") {
+    if (EDGE_MS && !calls.edged) {
+      calls.edged = true;
+      const t = Date.now();
+      skewMs = Math.ceil((t + EDGE_MS) / BOUNDARY_MS) * BOUNDARY_MS - EDGE_MS - t;
+    }
     if (s.candles === "hang") return "hang";
     if (typeof s.candles === "number") return json(s.candles, { error: "unavailable" });
     const row = live(s.top);
@@ -192,7 +206,7 @@ try {
       if (ONLY && !ONLY.has(s.id)) continue;
       n++;
       const tag = `${s.id} @${w.name}`;
-      const calls = { lists: 0, live: 0, plant: null };
+      const calls = { lists: 0, live: 0, plant: null, edged: false };
       const { ctx, page, f, errors, consoles } = await openAt(browser, route, w, s, calls);
       const sel = `main[data-route="token"] [data-token-page="${s.state}"]`;
       const drawn = await f.locator(sel).first().isVisible().catch(() => false);
