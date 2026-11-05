@@ -8,7 +8,9 @@
 // already hashes to the id, so no search can find another.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fakeChain, open, REC, timeAt } from "../../../test/evm-swaps/robinhood.ts";
+import { fakeChain, open, REC, timeAt, URLS } from "../../../test/evm-swaps/robinhood.ts";
+import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
+import { providerHolds } from "../../limits/limits.ts";
 import { ROBINHOOD_VENUES, TOPIC } from "./swaps.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
@@ -122,3 +124,29 @@ for (const hopKnown of [true, false]) {
     assert.ok(stallMs <= STALL_MAX_MS, `the event loop stalled ${Math.round(stallMs)} ms`);
   });
 }
+
+// A discovery's receipts (v4Seen) are one provider's read: at 6509fd7 the provider with the most free budget, which on
+// Robinhood is robinhood.api.pocket.network (a 200-call burst), and the slowest: its three receipts took 3.4 s, 3.7 s
+// and 1.1 s while every other provider answered in 0.3 s (the Mac, 2026-11-05 16:4xZ, four cold opens at once).
+test("card robinhood-cold-open-fast: a discovery asks its receipts of the provider expected to answer first, not of the one with the most free budget that answers 2 s late (red at 6509fd7: every receipt read went to it)", async () => {
+  const r = rig(true);
+  const SLOW = URLS[0]!;
+  const receipts = new Map<string, number>();
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const body = String(init.body);
+    if (body.includes("eth_getTransactionReceipt")) receipts.set(url, (receipts.get(url) ?? 0) + 1);
+    await new Promise((go) => setTimeout(go, url === SLOW ? 2_000 : 50));
+    return r.fetch(url, init);
+  };
+  const { value: a } = await onVirtualTime(9_000_000, async () => {
+    // the slow one's bucket is the biggest: 1,000 calls (pocket's is 200, every other's 25 or less)
+    const holds = providerHolds(() => Date.now(), { [SLOW]: { perS: 100, burst: 1_000, unit: "call" } });
+    const s = open(r.chain, { get t() { return Date.now(); } }, { pools: new Map(), fetch: fetch as never, holds });
+    const got = await s.trades(TOKEN, 50);
+    s.stop();
+    return got;
+  });
+  assert.equal(a.status, 200, a.body);
+  assert.equal((JSON.parse(a.body) as { trades: unknown[] }).trades.length, SWAPS);
+  assert.equal(receipts.get(SLOW) ?? 0, 0, `receipts asked of the slow provider: ${JSON.stringify([...receipts])}`);
+});
