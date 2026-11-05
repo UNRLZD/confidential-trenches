@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { APP_ORIGIN, RELEASE, signedOutState, type IncomingMessage } from "../src/api.ts";
 import { appSrc, FRAME_LEAVE_MS, FRAME_SANDBOX, mountShell, navUrl, SERVED_FILES, wireShell } from "../src/shell.ts";
 // @ts-expect-error: the deploy script is plain JavaScript, with no types
@@ -237,7 +238,7 @@ test("nav: the top window's address becomes APP_HOST's path and query, by replac
 
 test("open: the frame is out of the document within 100 ms, whatever FRAME_LEAVE_MS says, since inert alone keeps no focus thief out", () => {
   assert.ok(FRAME_LEAVE_MS > 0 && FRAME_LEAVE_MS <= 100, `FRAME_LEAVE_MS ${FRAME_LEAVE_MS}`);
-  mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
     const d = fakeDom();
     const sh = mountShell(d.doc, { state: () => signedOutState() });
@@ -246,7 +247,7 @@ test("open: the frame is out of the document within 100 ms, whatever FRAME_LEAVE
     mock.timers.tick(100);
     assert.equal(d.frames().length, 0, "the frame is gone 100 ms after open");
   } finally {
-    mock.timers.reset();
+    resetTimers(mock.timers);
   }
 });
 

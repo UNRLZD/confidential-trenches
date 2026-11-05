@@ -16,6 +16,9 @@
 //   part when its plan costs more.
 // - The notes and the fee are read when the screen opens and again at the press; the press checks both fields again
 //   and hands over only an answer equal to the one drawn.
+// - A send owed whose network fee rose past the Max fee drawn (card signpage-withdraw-own-spend): the screen shows the
+//   fee it needs now and one button that draws the Max fee again at exactly that fee (owedFees, redraw); the press hands
+//   over the fee shown, never one read after.
 // - Every word is a draft until the owner picks it (data-draft-copy names its key in POOL_WITHDRAW_WORDS).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -38,6 +41,9 @@ export const POOL_WITHDRAW_WORDS = {
   // an amount no plan sends exactly: the nearest that can be, "Try 0.5 or 0.6 SOL" (one side alone: "Try 0.5 SOL")
   try: "Try ",
   or: " or ",
+  // a send owed whose fee rose past the Max fee drawn: "Network fee rose. New max fee: 0.000015 SOL." and its button
+  "fee-rose": "Network fee rose. New max fee: ",
+  "fee-redraw": "Send at new fee",
 } as const;
 
 /** Each chain's pool asset, as the screen names it. */
@@ -146,6 +152,10 @@ export interface PoolWithdrawFormDeps {
   funds(): Promise<PoolFunds>;
   /** The withdraw run; absent while the chain has no flow on this page. */
   handoff?: (r: PoolReady) => void | Promise<void>;
+  /** The sends owed whose network fee rose past the Max fee drawn: each op id with the fee it now needs (lamports). */
+  owedFees?: () => Promise<readonly { opId: string; need: bigint }[]>;
+  /** Draws the Max fee again for that op at `need` (the fee shown): its owed send goes on with that ceiling. */
+  redraw?: (opId: string, need: bigint) => Promise<void>;
 }
 
 type Button = (action: string, label: string, onClick: () => void) => HTMLButtonElement;
@@ -186,7 +196,46 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   const go = button("withdraw", POOL_WITHDRAW_WORDS.withdraw, () => run(withdraw));
   go.dataset.draftCopy = "withdraw";
   if (!deps.handoff) go.dataset.pending = "pool-withdraw";
-  form.append(to.label, to.line, amount.label, amount.line, shown, go);
+  // a send owed whose fee rose: its line and its button, above the fields, once read
+  const rose = doc.createElement("div");
+  rose.dataset.lines = "fee-rose";
+  rose.hidden = true;
+  form.append(rose, to.label, to.line, amount.label, amount.line, shown, go);
+  if (deps.owedFees && deps.redraw) {
+    const redraw = deps.redraw;
+    const owedFees = deps.owedFees;
+    // the line drawn from a fresh read; the press reads again first (fold 2, review LOW 4): a fee that changed since
+    // is drawn anew for the next press, a send no longer owed takes the line away, and only the fee shown is handed over
+    const draw = (list: readonly { opId: string; need: bigint }[]): void => {
+      const first = list[0];
+      if (!first) {
+        rose.replaceChildren();
+        rose.hidden = true;
+        return;
+      }
+      const p = doc.createElement("p");
+      p.textContent = `${POOL_WITHDRAW_WORDS["fee-rose"]}${formatUnits(first.need, decimals)} ${symbol}.`;
+      p.dataset.draftCopy = "fee-rose";
+      const again = button("fee-redraw", POOL_WITHDRAW_WORDS["fee-redraw"], () => {
+        if (again.disabled) return;
+        again.disabled = true;
+        run(async () => {
+          try {
+            const now = (await owedFees()).find((x) => x.opId === first.opId);
+            if (now?.need !== first.need) return draw(await owedFees());
+            await redraw(first.opId, first.need);
+            draw(await owedFees());
+          } catch {
+            again.disabled = false;
+          }
+        });
+      });
+      again.dataset.draftCopy = "fee-redraw";
+      rose.replaceChildren(p, again);
+      rose.hidden = false;
+    };
+    void owedFees().then(draw, () => {});
+  }
 
   let funds: PoolFunds | null = null;
   const load = (): Promise<void> => deps.funds().then((f) => void (funds = f), () => void (funds = null));

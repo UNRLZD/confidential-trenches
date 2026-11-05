@@ -1,14 +1,14 @@
 // node --test scripts/live-checks/helper-robinhood-capacity.test.mjs: the live check's verdict replays recorded runs
 // (helper-robinhood-capacity.answers.json):
-//   good:         the branch helper at 95730cb on the Mac, read by helper-robinhood-capacity.mjs --base <local> --record:
-//                 12 of 12 tapes 200 within 15 s: PASS;
-//   bad_pre_card: the deployed helper at 6832227 (19:07Z): 7 of 12 503 after 52-57 s, 3 timeouts, 2 late 200s: FAIL.
+//   good:         the branch helper at 38249ca on the Mac, read by helper-robinhood-capacity.mjs --base <local> --record:
+//                 12 of 12 tapes 200: PASS;
+//   bad_pre_card: the deployed helper at 6832227 (19:07Z): 6 of 12 503 after 52-57 s and 3 timeouts at 60 s: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ANSWER_MS, judge, read, TOKENS, TOKENS_MIN, tokensOf } from "./helper-robinhood-capacity.mjs";
+import { judge, read, TOKENS, TOKENS_MIN, tokensOf } from "./helper-robinhood-capacity.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-robinhood-capacity.answers.json"), "utf8"));
@@ -19,26 +19,30 @@ const edit = (f) => {
   return judge(run);
 };
 
-test("the recorded good answer passes: 12 listed Robinhood tokens, every tape 200 from the chain within ANSWER_MS", () => {
+test("the recorded good answer passes: 12 listed Robinhood tokens at once, every tape 200 from the chain, each tape's time printed", () => {
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(A.good.answers.length, TOKENS);
-  assert.match(r.lines.at(-1), /12 of 12 tapes 200 within 15000 ms/);
+  assert.match(r.lines.at(-1), /12 of 12 tapes 200 at once \(p50 \d+ ms, max \d+ ms\)/);
+  assert.ok(r.lines.filter((l) => l.startsWith("ok  trades ")).every((l) => / 200 tape in \d+ ms$/.test(l)), r.lines.join("\n"));
 });
 
 test("the recorded bad answer (the deployed helper before this card) fails, each tape named by its status and time", () => {
   const r = judge(A.bad_pre_card);
   assert.equal(r.ok, false);
-  assert.equal(bad(r).length, 12, r.lines.join("\n"));
-  assert.ok(bad(r).some((l) => / 503 .* in \d+ ms \(past 15000 ms\)/.test(l)), bad(r).join("\n"));
-  assert.ok(bad(r).some((l) => / 0 .*aborted due to timeout/.test(l)), bad(r).join("\n"));
-  assert.match(r.lines.at(-1), /0 of 12 tapes/);
+  assert.equal(bad(r).length, 9, r.lines.join("\n"));
+  assert.equal(bad(r).filter((l) => / 503 .* in \d+ ms$/.test(l)).length, 6, bad(r).join("\n"));
+  assert.equal(bad(r).filter((l) => / 0 .*aborted due to timeout/.test(l)).length, 3, bad(r).join("\n"));
+  assert.match(r.lines.at(-1), /3 of 12 tapes 200 at once/);
 });
 
-test("planted on the good answer: one late tape, one 429, a tape not from the chain, too few tokens and failed lists each fail", () => {
-  let r = edit((run) => (run.answers[3].ms = ANSWER_MS + 1));
-  assert.deepEqual(bad(r).length, 1);
-  assert.match(bad(r)[0], /past 15000 ms/);
+test("planted on the good answer: one 429, one 503, a tape not from the chain, too few tokens and failed lists each fail; a slow 200 tape passes with its time printed", () => {
+  let r = edit((run) => (run.answers[3].ms = 40_000));
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => / 200 tape in 40000 ms$/.test(l)));
+  r = edit((run) => Object.assign(run.answers[2], { status: 503, retryAfter: null, shape: null, body: '{"error":{"code":"upstream"}}' }));
+  assert.equal(bad(r).length, 1);
+  assert.match(bad(r)[0], / 503 \{"error":\{"code":"upstream"\}\} in \d+ ms$/);
   r = edit((run) => Object.assign(run.answers[0], { status: 429, retryAfter: "30", shape: null, body: "{}" }));
   assert.match(bad(r)[0], /429 Retry-After 30/);
   r = edit((run) => (run.answers[5].shape = 'src "gecko"'));

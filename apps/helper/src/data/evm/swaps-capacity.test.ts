@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CURVE_TOKEN, fakeChain, open, REC } from "../../../test/evm-swaps/robinhood.ts";
 import { PROVIDER_PACE, providerHolds } from "../../limits/limits.ts";
+import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { HEADER_TIMED, INFLIGHT_MAX, SWAP_RPCS } from "./swaps.ts";
 
 const CHAIN_RPC = "https://rpc.mainnet.chain.robinhood.com";
@@ -20,11 +21,13 @@ const POCKET = "https://robinhood.api.pocket.network";
 const WIDE = ["https://robinhood.daybreak-rpc.network", "https://rpc-robinhood.blockmachine.io", POCKET, CHAIN_RPC];
 const http429 = (s = 30) => new Response("{}", { status: 429, headers: { "retry-after": String(s) } });
 /** Eleven tokens no recorded pool has (each walks the whole cold window and answers 200 empty) and the recorded curve. */
+/** Real ms each fake answer costs the machine (HRC_LOAD_MS; 0 by default): the race CI met, forced. */
+const LOAD_MS = Number(process.env.HRC_LOAD_MS ?? 0);
 const TOKENS = [...Array.from({ length: 11 }, (_, i) => `0x${(0xabc00 + i).toString(16).padStart(40, "0")}`), CURVE_TOKEN];
 
 /** The fake chain behind the real Robinhood provider list: the wide providers take 1,000 blocks; `refusing` answer 429
  *  every time. Counts each provider's `eth_getLogs` calls (a batch counts each) and every request sent. */
-function rig(refusing: string[]) {
+function rig(refusing: string[], loadMs = 0) {
   const chain = fakeChain();
   chain.st.head = REC.lastHead;
   for (const u of WIDE) chain.st.faults.set(u, { span: 1_000 });
@@ -37,6 +40,8 @@ function rig(refusing: string[]) {
     const reqs = JSON.parse(String(init.body)) as { method: string }[];
     calls.set(url, (calls.get(url) ?? 0) + reqs.length);
     logs.set(url, (logs.get(url) ?? 0) + reqs.filter((r) => r.method === "eth_getLogs").length);
+    // a loaded runner: each answer costs the machine `loadMs` of real time, which no clock of the run sees
+    for (const end = process.hrtime.bigint() + BigInt(loadMs) * 1_000_000n; process.hrtime.bigint() < end; );
     await new Promise((r) => setTimeout(r, 1));
     return chain.fetch(url, init);
   };
@@ -44,16 +49,19 @@ function rig(refusing: string[]) {
 }
 
 test("card helper-robinhood-capacity: 12 cold tokens at once, the chain's own RPC, blockvectra and pocket refusing every read: all 12 answer 200, each refusing provider sent no more than were out at once before its first refusal, and each provider left is asked within its pace", async () => {
-  const r = rig([CHAIN_RPC, BLOCKVECTRA, POCKET]);
-  // the helper's clock runs with real time, so the providers' paces (limits.ts PROVIDER_PACE) refill
-  const t0 = performance.now();
-  const clock = { get t() { return 9_000_000 + Math.round(performance.now() - t0); } };
-  const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
-  const got = await Promise.all(TOKENS.map((t) => s.trades(t, 50)));
-  s.stop();
+  const r = rig([CHAIN_RPC, BLOCKVECTRA, POCKET], LOAD_MS);
+  // the helper's clock and its waits run on virtual time (onVirtualTime), so the providers' paces (limits.ts
+  // PROVIDER_PACE) refill as the run's own time passes, never as fast as the machine is
+  const clock = { get t() { return Date.now(); } };
+  const { value: got, ms } = await onVirtualTime(9_000_000, async () => {
+    const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
+    const got = await Promise.all(TOKENS.map((t) => s.trades(t, 50)));
+    s.stop();
+    return got;
+  });
   assert.deepEqual(got.map((a) => a.status), TOKENS.map(() => 200), got.map((a) => a.body.slice(0, 60)).join("\n"));
   assert.ok(JSON.parse(got.at(-1)!.body).trades.length > 0, "the recorded curve's tape is read");
-  const s_ = (performance.now() - t0) / 1000;
+  const s_ = ms / 1000;
   for (const u of [CHAIN_RPC, BLOCKVECTRA, POCKET]) assert.ok((r.sends.get(u) ?? 0) <= INFLIGHT_MAX, `${u}: ${r.sends.get(u)} sends, more than INFLIGHT_MAX out before its first 429`);
   // each provider left within its pace: a bucket's burst and its refill over the run
   for (const [u, p] of Object.entries(PROVIDER_PACE)) {

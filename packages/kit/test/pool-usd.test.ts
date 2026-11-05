@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test, type TestContext } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { base64 } from "@scure/base";
 import {
   POOL_USD_BLOCK_MAX_AGE_S,
@@ -200,7 +201,7 @@ test("agreement: a disagreement re-reads both at the newer slot, and two answers
 /** `run` on the mocked clock, 10 ms a step, until it ends or `maxMs` pass (then the test fails): its outcome and the ms
  *  it took. */
 async function onClock<T>(t: TestContext, run: () => Promise<T>, maxMs = 60_000): Promise<{ ok: boolean; v?: T; e?: unknown; ms: number }> {
-  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "Date"], now: NOW });
   let out: { ok: boolean; v?: T; e?: unknown; ms: number } | undefined;
   run().then(
     (v) => (out = { ok: true, v, ms: Date.now() - NOW }),
@@ -267,13 +268,13 @@ test("retry: a provider still behind or slow fails the read inside its bound, th
   const at = behind.asks.map((x) => x.ms);
   assert.deepEqual(at.slice(1).map((x, i) => x - at[i]!), [250, 500, 1000, 2000, 4000], "the wait doubles per try");
   assert.ok(r.ms <= POOL_USD_READ_DEADLINE_MS, `ended ${r.ms} ms in`);
-  t.mock.timers.reset();
+  resetTimers(t.mock.timers);
   const hang = turns("https://a.example", [HANG]);
   r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [hang.rpc, other.rpc], nowMs: NOW }));
   assert.equal(r.ok, false);
   assert.match(String(r.e), /rpc 0 getMultipleAccounts: no answer in \d+ ms \(3 tries/);
   assert.equal(r.ms, POOL_USD_READ_DEADLINE_MS, "the last try is cut to the read's bound");
-  t.mock.timers.reset();
+  resetTimers(t.mock.timers);
   for (const [name, answer] of [
     ["an RPC error other than -32016", () => Promise.reject(new Error("RPC error -32602: Invalid params"))],
     ["a throttle the provider's client already retried", TRANSPORT("http_429")],
@@ -286,7 +287,7 @@ test("retry: a provider still behind or slow fails the read inside its bound, th
     assert.equal(r.ok, false, name);
     assert.equal(once.asks.length, 1, `${name}: one try`);
     assert.equal(r.ms, 0, `${name}: at once`);
-    t.mock.timers.reset();
+    resetTimers(t.mock.timers);
   }
 });
 
@@ -345,7 +346,7 @@ test("retry: a read that has failed asks no provider again: one provider's refus
   assert.match(String(r.e), /HTTP 403/);
   await idle(t, 30_000);
   assert.deepEqual(b.asks, [0], "b: asked once in 30 s");
-  t.mock.timers.reset();
+  resetTimers(t.mock.timers);
   // a refuses 100 ms in, while b waits out its backoff after -32016: b is not asked again when the wait ends
   const late = () => new Promise((_, rej) => setTimeout(() => rej(new Error("HTTP 403")), 100));
   const behind = turns("https://b.example", [BEHIND]);
@@ -436,7 +437,7 @@ test("agreement: hex in upper case on one RPC is the same answer (as the wallet'
 // ------------------------------------------------------------------------------------------------ staleness
 test("staleness: the read's block is used within 60 s of the device's clock, either way; past that it is refused", async (t) => {
   // the age is told as the read returns: a clock that does not move, so the bound is met exactly
-  t.mock.timers.enable({ apis: ["Date"], now: NOW });
+  enableTimers(t.mock.timers, { apis: ["Date"], now: NOW });
   assert.equal(POOL_USD_BLOCK_MAX_AGE_S, 60);
   for (const chain of ["base", "robinhood"] as const) {
     const t = Number(BigInt((FX[chain].calls.find((c) => c.method === "eth_getBlockByNumber")!.result as { timestamp: string }).timestamp));
@@ -459,7 +460,7 @@ test("staleness: Robinhood's read holds Base's at the device's own clock, as giv
 
 test("staleness: a Pyth price older than 60 s is refused; at 60 s it is used; one ahead of the clock is refused", async (t) => {
   // the age is told as the read returns: a clock that does not move, so the bound is met exactly
-  t.mock.timers.enable({ apis: ["Date"], now: NOW });
+  enableTimers(t.mock.timers, { apis: ["Date"], now: NOW });
   const f = POOL_USD_FEEDS.solana;
   assert.equal(f.maxAgeS, 60);
   assert.ok(await solana(undefined, (SOL_PUBLISH_S + 60) * 1000));
@@ -471,7 +472,7 @@ test("staleness: a Pyth price older than 60 s is refused; at 60 s it is used; on
 
 test("staleness: a Chainlink price older than its chain's bound is refused; at the bound it is used", async (t) => {
   // the age is told as the read returns: a clock that does not move, so the bound is met exactly
-  t.mock.timers.enable({ apis: ["Date"], now: NOW });
+  enableTimers(t.mock.timers, { apis: ["Date"], now: NOW });
   assert.equal(POOL_USD_FEEDS.base.maxAgeS, 1_500);
   assert.equal(POOL_USD_FEEDS.robinhood.maxAgeS, 86_700);
   for (const chain of ["base", "robinhood"] as const) {
@@ -490,12 +491,12 @@ test("staleness: a price's age is told as the read returns: inside its bound at 
   const aged = () => solEdit(setI64(AT.publish, BigInt(startS - 55)))("getMultipleAccounts", [], GOOD());
   let r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [turns("https://a.example", [aged]).rpc, turns("https://b.example", [aged]).rpc], nowMs: NOW }));
   assert.equal(r.ok, true, String(r.e));
-  t.mock.timers.reset();
+  resetTimers(t.mock.timers);
   r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [turns("https://a.example", [HANG, aged]).rpc, turns("https://b.example", [aged]).rpc], nowMs: NOW }));
   assert.equal(r.ok, false);
   assert.equal(r.ms, POOL_USD_CALL_TIMEOUT_MS + POOL_USD_RETRY_BACKOFF_MS);
   assert.match(String(r.e), /older than 60 s/);
-  t.mock.timers.reset();
+  resetTimers(t.mock.timers);
   // Chainlink on Base: 1495 s old at the start (its bound 1500 s), the same slow provider
   const max = POOL_USD_FEEDS.base.maxAgeS;
   const edit = then(wordEdit(LRD, 3, BigInt(startS - (max - 5))), blockAt(NOW));
@@ -506,7 +507,7 @@ test("staleness: a price's age is told as the read returns: inside its bound at 
   };
   r = await onClock(t, () => poolUsdPrice({ chain: "base", rpcs: [once(0, false), once(1, false)], nowMs: NOW }));
   assert.equal(r.ok, true, String(r.e));
-  t.mock.timers.reset();
+  resetTimers(t.mock.timers);
   r = await onClock(t, () => poolUsdPrice({ chain: "base", rpcs: [once(0, true), once(1, false)], nowMs: NOW }));
   assert.equal(r.ok, false);
   assert.match(String(r.e), new RegExp(`older than ${max} s`));

@@ -246,6 +246,9 @@ export const SELL_GAS = 1_000_000n;
 export async function checkSells(runs, transportOf, senders) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  // the networks with a sell the helper sent whose run and own reads were all ok on both RPCs (a record lists only the
+  // rows that landed, testnet-run.mjs, so its rows carry no landed field: landing is what these reads show)
+  const readBack = new Set();
   for (const run of runs) {
     const rec = run.record;
     const n = rec.chain;
@@ -255,6 +258,7 @@ export async function checkSells(runs, transportOf, senders) {
     for (const l of r.lines) say(r.ok, `[${n} run] ${l}`);
     if (!r.ok) continue;
     for (const t of rec.txs.filter((x) => x.kind === "sell" && x.via === "helper")) {
+      const before = lines.length;
       // the fields read here, equal on both RPCs (one Robinhood RPC adds blockTimestamp to a transaction, the other not)
       const both = async (method, params, fields) => {
         const rs = await Promise.all(urls.map((u) => transport(u, method, params)));
@@ -282,11 +286,11 @@ export async function checkSells(runs, transportOf, senders) {
       } catch (e) {
         say(false, `[${n} sell ${t.hash}] ${e.message}`);
       }
+      if (lines.slice(before).every((l) => l.startsWith("ok "))) readBack.add(n);
     }
   }
   for (const n of NETWORKS) {
-    const sold = runs.some((x) => x.record.chain === n && x.record.txs.some((t) => t.kind === "sell" && t.via === "helper" && t.landed));
-    say(sold, `[${n}] a sell the helper sent, read back (${path.basename(sellRunFile(n))})`);
+    say(readBack.has(n), `[${n}] a sell the helper sent, read back (${path.basename(sellRunFile(n))})`);
   }
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
