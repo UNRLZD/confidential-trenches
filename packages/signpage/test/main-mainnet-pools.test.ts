@@ -4,7 +4,7 @@
 // (src/pool-testnet.ts) run here. The shell's state lists the pinned pool with the queue's ready proof as `ready`, the
 // page's own price and tap_max from the Rent read on the page's mainnet pair; pool.deposit, pool.buy, pool.sell and
 // pool.withdraw reach that flow, never refused not_allowed. Stand-ins as test/main-testnet-pools.test.ts: testnetPool's
-// ready() answers a planted ready proof, poolPrices reads a planted price, and every RPC is a fetch that answers the
+// readyWith answers a planted ready proof, poolPrices reads a planted price, and every RPC is a fetch that answers the
 // Rent sysvar's account read and refuses anything else. With no pin, every pool kind is refused not_allowed with no
 // read: test/main-wiring.test.ts.
 //   node --test test/main-mainnet-pools.test.ts      (from packages/signpage)
@@ -30,7 +30,7 @@ registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
-      return { ...r, source: wrap(String(r.source).replace(TABLE_LINE, 'export const MAINNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";'), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), ready: async () => globalThis.__ctReady }; }") };
+      return { ...r, source: wrap(String(r.source).replace(TABLE_LINE, 'export const MAINNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";'), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
     if (url.endsWith("/wallet/src/pool/solana.ts")) {
       const src = String(r.source);
       if (!src.includes(SOL_LINE)) throw new Error("solana.ts: SOL_POOLS's line moved; update this test's hook");
