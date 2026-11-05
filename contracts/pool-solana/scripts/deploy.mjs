@@ -178,7 +178,8 @@ export async function sendAndConfirm(fetchFn, url, ixs, payer, keys, { step = "a
 // ---- the solana CLI ----
 function cli(args, { allowFail = false } = {}) {
   const r = spawnSync("solana", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (r.status !== 0 && !allowFail) throw new Error(`solana ${args[0]} ${args[1]}: exit ${r.status}: ${(r.stderr || r.stdout).trim().split("\n").slice(-3).join(" | ")}`);
+  // a CLI that did not start (not on PATH) has no output, only its spawn error
+  if (r.status !== 0 && !allowFail) throw new Error(`solana ${args[0]} ${args[1]}: exit ${r.status}: ${(r.stderr || r.stdout || r.error?.message || "").trim().split("\n").slice(-3).join(" | ")}`);
   return r;
 }
 
