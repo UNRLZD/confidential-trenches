@@ -60,7 +60,7 @@ const REPO = path.join(HERE, "../../..");
 const imp = (p) => import(pathToFileURL(path.join(REPO, p)).href);
 const kit = await imp("packages/kit/src/index.ts");
 const { evmPoolBuyQuoteWith, evmPoolSellQuoteWith } = await imp("packages/kit/src/checks/evm/quote.ts");
-const { evmPool, evmTreeSync, evmNow: evmNowOnce, evmRelayDataBytes, evmPoolScopeOf, evmEpochBlock: evmEpochBlockOnce, evmRetryLag, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_CHAIN_IDS } = await imp("packages/wallet/src/pool/evm.ts");
+const { evmPool, evmTreeSync, evmNow: evmNowOnce, evmRelayDataBytes, evmPoolScopeOf, evmEpochBlock: evmEpochBlockOnce, evmRetryLag, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_CHAIN_IDS, EVM_TRANSFER_RPCS } = await imp("packages/wallet/src/pool/evm.ts");
 // The run's own reads of the pool's time and the epoch's block, as the device's evmPool makes them: again while an RPC
 // has not caught up (EvmLagError, evmRetryLag). Read once, Robinhood testnet's own RPC answering null for a block the
 // other held stopped a run after its deposit (4 Nov 08:45Z, "rpc 0 does not know block 148245096 yet").
@@ -87,8 +87,9 @@ const lower = (a) => a.toLowerCase();
 export const NETS = Object.freeze({
   "base-sepolia": Object.freeze({
     rpcs: ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
-    // the restore's Transfer reads go to two other providers (evmRestoreNotes refuses a pool provider)
-    walletRpcs: ["https://base-sepolia.drpc.org", "https://base-sepolia.gateway.tenderly.co"],
+    // the restore's Transfer reads go to two other providers (evmRestoreNotes refuses a pool provider): the wallet's
+    // own list, one source for the device and the run (card wallet-restore-transfer-rpcs)
+    walletRpcs: EVM_TRANSFER_RPCS["base-sepolia"],
     op: true,
     coin: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", // the token bought: USDC
     v4: { fee: 100, tickSpacing: 1, hooks: ZERO, quoter: "0x4a6513c898fe1b2d0e78d3b0e0a4a151589b1cba" },
@@ -100,13 +101,13 @@ export const NETS = Object.freeze({
   // pool (fee 10000, tick spacing 200, no hook, id 0x601b493e...) is the deepest hookless one the PoolManager's
   // Initialize logs name. No v3 and no router there (M365), so the run buys and sells through v4 only, the sell through
   // the pinned PoolManager (card evm-sell-v4-kit). The Transfer reads
-  // go to thirdweb's and dRPC's public gateways (chainid.network, chain 46630), neither a pool provider. The sync's
+  // go to the wallet's EVM_TRANSFER_RPCS (thirdweb's and dRPC's public gateways), neither a pool provider. The sync's
   // pair pages the pool's logs (PublicNode 50,000 blocks a page); the relay fee's state reads at the epoch's first
   // block go to the kit pin's providers instead (Robinhood's own and dRPC, which keep state 600 s back; PublicNode
   // keeps about 15 s: card evm-buy-hookdata-fee, fold 3), as feeRpcs below.
   "robinhood-testnet": Object.freeze({
     rpcs: ["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"],
-    walletRpcs: ["https://46630.rpc.thirdweb.com", "https://robinhood-testnet.drpc.org"],
+    walletRpcs: EVM_TRANSFER_RPCS["robinhood-testnet"],
     op: false,
     coin: "0x10e626a1d0857174b9a5bdb7a1397068811fbbbc", // the token bought: tSPILL
     v4: { fee: 10000, tickSpacing: 200, hooks: ZERO, quoter: "0x8dc178efb8111bb0973dd9d722ebeff267c98f94" },

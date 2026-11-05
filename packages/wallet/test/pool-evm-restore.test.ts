@@ -672,3 +672,54 @@ test("D2 a range no page can read is never counted as read: that W is unread, ne
   assert.deepEqual(r.wallets.find((w) => w.w === W1)!.tokens, [TY]);
   assert.equal(r.notes.length, 10);
 });
+
+// ---- card wallet-restore-transfer-rpcs: a provider's cap in words the pager never read ----
+
+/** Real refusals of an eth_getLogs (Transfer, topic 2 = a W, no address) past each provider's cap, read live 5 Nov
+ * 12:20-12:28Z, each as its provider answers it (HTTP status and body). None names its cap in words the pager knew
+ * before this card: Tenderly puts its cap in `data`, which the kit's client never reads. */
+const UNKNOWN_CAPS: [string, number, Record<string, unknown>][] = [
+  ["base.gateway.tenderly.co over 1,000 blocks", 200, { code: -32602, message: "invalid params", data: "Block range too large: maximum 1000 blocks without an access key. Try [0x33104e2, 0x33108ca], or use an access key for larger ranges." }],
+  ["rpc.mainnet.chain.robinhood.com over 30,000 blocks", 200, { code: -32602, message: "query spans 39984 blocks (106696878 to 106736861), but only 30000 are allowed for this request; narrow the block range, or add an address filter" }],
+  ["base.api.pocket.network over 500 blocks", 200, { code: -32602, message: "invalid argument 0: block range exceeds maximum 500" }],
+  ["rpc-robinhood.blockmachine.io over 10,000 blocks", 200, { code: -32602, message: "block range exceeds maximum allowed (max=10000, requested=100000)" }],
+  ["1rpc.io/base over 50 blocks", 200, { code: -32602, message: "eth_getLogs is limited to 0 - 50 blocks range" }],
+];
+
+test("R1 a provider's cap in words never read before (Tenderly, Robinhood's own, Pocket, blockmachine, 1RPC; read live 5 Nov) is paged under: every W's tokens read, every block of each W read", async () => {
+  const { world, W0, W1 } = seeded();
+  const want = await restore(pair(world, world), wpair(world));
+  for (const [name, status, error] of UNKNOWN_CAPS) {
+    const refused: number[] = [], pages: { w: string; from: number; to: number }[] = [];
+    const capped = (b: Body) => {
+      if (b.method !== "eth_getLogs") return undefined;
+      const { from, to } = span(b);
+      if (to - from + 1 <= 7) return undefined;
+      refused.push(to - from + 1);
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error }), { status });
+    };
+    const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", answered(rpc(world), pages, "https://m.example"), capped)]);
+    assert.deepEqual(r.wallets, want.wallets, name);
+    assert.ok(refused.length > 0, `${name}: the first page is past the cap`);
+    tiles(pages, W0, 20, 100);
+    tiles(pages, W1, 40, 100);
+  }
+});
+
+test("R2 a provider that refuses every page, one block too, in any words, is that W's true failure: its code kept, every other W and note read", async () => {
+  const { world, W0, W1 } = seeded();
+  const sizes: number[] = [];
+  const always = (b: Body) => {
+    if (!namesW(b, W0)) return undefined;
+    const { from, to } = span(b);
+    sizes.push(to - from + 1);
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: UNKNOWN_CAPS[0]![2] }));
+  };
+  const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), always)]);
+  const w0 = r.wallets.find((w) => w.w === W0)!;
+  assert.equal(w0.tokens, null);
+  assert.equal(w0.error, "rpc error -32602");
+  assert.ok(sizes.every((n) => n >= 1) && sizes.includes(1), `pages: ${sizes}`);
+  assert.deepEqual(r.wallets.find((w) => w.w === W1)!.tokens, [TY]);
+  assert.equal(r.notes.length, 10);
+});

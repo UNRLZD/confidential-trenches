@@ -68,10 +68,11 @@ const M = [
   [S, "(l.topics.length !== 3 && l.topics.length !== 4)", "(l.topics.length !== 3)", T, "restore of a seeded chain"],
   [S, "{ topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, \"0\")}`] }", "{ topics: [EVM_TRANSFER_TOPIC, null, null] }", T, "restore of a seeded chain"],
   // the one pager and the one two-RPC compare, now shared by the pool's events and W's Transfers
-  [S, "if (RANGE_CAP.test(m) && end > at) {", "if (false) {", T, "paging past"],
-  // dRPC's refusal (HTTP 400, its words after the status through the kit's client) is a cap, paged under
-  [S, "ranges over [\\d,]+ blocks are not supported|", "", T, "^D1 "],
-  [S, "exceeds max(imum)? results [\\d,]+|", "", T, "paging past"],
+  // any refusal of a page over one block halves it, in whatever words: dRPC's (HTTP 400 through the kit's client), a
+  // results cap, and the caps read live 5 Nov in words never read before (card wallet-restore-transfer-rpcs)
+  [S, "      if (end > at) {\n        refused = end - at + 1n;", "      if (false) {\n        refused = end - at + 1n;", T, "paging past|^D1 |^R1 |^R2 "],
+  // a head lag is a lag before it is a smaller page
+  [S, "      if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs", "      if (false) lag(`rpc ${k}: its logs", TE, "F3a "],
   [S, "if (at === short.length && long.slice(at).every((e) => e.block > fin.number)) lag(", "if (false) lag(", T, "a lagging Transfer RPC"],
   [S, "  if (at >= 0) {\n    const [short, long]", "  if (false) {\n    const [short, long]", T, "a lying Transfer RPC"],
   [S, "if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(", "if (false) await refuse(", T, "a lying Transfer RPC"],

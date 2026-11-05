@@ -26,9 +26,10 @@
 //   eth_getLogs takes a block range, not a hash (EIP-234's blockHash filter is one block a call, so a pool of N blocks
 //   would need N calls), so every page is a range that ends at or below the newest anchor; a log in either anchor's
 //   block must carry that anchor's hash, and both RPCs' lists must agree byte for byte (every field
-//   the device reads). Each RPC pages on its own: only a provider's range cap (RANGE_CAP, its words read live) halves
-//   that RPC's page and tries again, down to one block, and a full page read doubles it again, so no provider's cap
-//   (200 blocks on sepolia.base.org, 50,000 on publicnode, read 3 Nov 05:35Z) is a limit on the pool. A log in the
+//   the device reads). Each RPC pages on its own: any refusal of a page over one block but a head lag halves that
+//   RPC's page and tries again, down to one block, and a full page read doubles it again, so no provider's cap, in any
+//   words (200 blocks on sepolia.base.org, 50,000 on publicnode, read 3 Nov 05:35Z; Tenderly's 1,000 as "invalid
+//   params", 5 Nov), is a limit on the pool. A page of one block refused is that provider's true failure. A log in the
 //   finalized anchor's block must carry its hash; one in the newest anchor's block that names another hash goes to the
 //   reorg-or-lie test below.
 // - The pool's state at the newest anchor, read with eth_call at its hash (EIP-1898) on both RPCs, first, before the
@@ -221,6 +222,28 @@ export function evmPoolContextOf(req: EvmPoolRequest, scope: bigint): bigint {
 export type EvmNetwork = "base" | "robinhood" | "base-sepolia" | "robinhood-testnet";
 /** Each network's chain id (eth_chainId), as the money gate pins them (scripts/ci/money-gate.mjs CHAIN_ID). */
 export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze({ base: 8453n, robinhood: 4663n, "base-sepolia": 84532n, "robinhood-testnet": 46630n });
+/**
+ * Each network's two Transfer RPCs, the restore's walletRpcs (./evm-restore.ts evmRestoreNotes): keyless, two operators,
+ * neither one of the testnet run's pool pair (contracts/pool-evm/script/testnet-run.mjs NETS, which takes these) nor one
+ * of the kit's Base and Robinhood providers (evmPoolVenues), each answering a W's Transfer read (eth_getLogs, Transfer's
+ * topic, topic 2 = the W, no address) at the chain's head and 2,000,000 blocks back. Read live 5 Nov 12:20-12:28Z at
+ * 1,000, 10,000 and 100,000 blocks: base-sepolia.gateway.tenderly.co every size (250,000 too); base-testnet.api.pocket.network
+ * every size (another backend capped 10,001); base.gateway.tenderly.co 1,000 ("invalid params" above); 8453.rpc.thirdweb.com
+ * 1,000; robinhood.api.pocket.network 10,000 (10,001 the cap); robinhood.daybreak-rpc.network 1,000 (2,000 the cap);
+ * 46630.rpc.thirdweb.com 1,000; robinhood-testnet.drpc.org 101 (code 35 above). Not taken: base-sepolia.drpc.org (code
+ * 19 "Temporary internal error" at 10 to 101 blocks, 35 above: two of three Ws unread in the evm-buy-hookdata-fee run,
+ * 4 Nov), publicnode on every chain ("Please specify an address": no read without one), the chains' own RPCs and
+ * sepolia.base.org (the pool pairs), mainnet.base.org (-32011 "request limit reached"), nodies (50 blocks), blastapi (10),
+ * 1rpc (50), blockreq and blockmachine (recent blocks only), zan, onfinality and routeme (keys or rate limits),
+ * blockvectra (refused), tatum (100), blxrbdn and therpc (403), llamarpc and omniatech (down). Robinhood testnet has no
+ * keyless third: chainid.network and chainlist list only these two besides the pool pair and blockvectra.
+ */
+export const EVM_TRANSFER_RPCS: Readonly<Record<EvmNetwork, readonly [string, string]>> = Object.freeze({
+  base: Object.freeze(["https://base.gateway.tenderly.co", "https://8453.rpc.thirdweb.com"] as const),
+  robinhood: Object.freeze(["https://robinhood.api.pocket.network", "https://robinhood.daybreak-rpc.network"] as const),
+  "base-sepolia": Object.freeze(["https://base-sepolia.gateway.tenderly.co", "https://base-testnet.api.pocket.network"] as const),
+  "robinhood-testnet": Object.freeze(["https://46630.rpc.thirdweb.com", "https://robinhood-testnet.drpc.org"] as const),
+});
 
 /** A network's pool, pinned on the device: the pool, the relayer's fee recipient every proof binds, and the pool's
  * deploy block (the sync's first block). */
@@ -290,22 +313,22 @@ const getBlock = async (rpc: EvmRpc, at: string, what: string): Promise<EvmBlock
 
 /** A JSON-RPC error that says the node does not know the block yet (a lag, not a lie). */
 const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such block/i;
-/** A JSON-RPC error that is a provider's cap on one eth_getLogs call's range or size (read 3 Nov 04:21Z: "eth_getLogs is
- * limited to a 200 range", "exceed maximum block range: 50000", "query exceeds max results 20000"). */
-// The texts read live on 3 Nov 05:35Z (eth_getLogs over 1,000,000 and 100,000 blocks, then to 50 blocks past the
-// head): sepolia.base.org "-32614: eth_getLogs is limited to a 200 range" and, past its head, "-32602: block range
-// extends beyond current head block: requested 53811322, head 53811277"; base-sepolia-rpc.publicnode.com and
-// robinhood-sepolia-rpc.publicnode.com "-32701: exceed maximum block range: 50000", and past the head "-32602: block
-// range extends beyond current head block: ..." and "-32000: invalid block range params"; rpc.testnet.chain.robinhood.com
-// answered every range (no cap). A cap on the number of logs one call returns is a cap too, recorded live in the
-// team's data run of 2 Nov (a busy token's Transfer logs): Base "query exceeds max results 20000, retry with the range
-// ..." and Robinhood "logs matched by query exceeds limit of 10000". base.drpc.org (the money gate's second Base
-// mainnet RPC), read live 3 Nov 07:05Z: every eth_getLogs of 501 to 1,000,001 blocks answers code 35 "ranges over 10000
-// blocks are not supported on free plan" (101 and 11 blocks answer). Other providers' wording, as their docs give it:
-// "limited to a 10,000 range" (thousands separators), "query returned more than 10000 results", "Log response size
-// exceeded".
-/** A provider's cap on one eth_getLogs page: only this shrinks the page. */
-const RANGE_CAP = /limited to an? [\d,]+ (block )?range|exceed(s|ed)? (the )?max(imum)? block range|max(imum)? block range (is|of)? ?[\d,]+|range (is )?too (large|wide)|ranges over [\d,]+ blocks are not supported|exceeds max(imum)? results [\d,]+|exceeds (the )?limit of [\d,]+|returned more than [\d,]+ results|more than [\d,]+ (results|logs)|response size (exceeded|is larger)|too many (results|logs|blocks)/i;
+// A provider's cap on one eth_getLogs call (its range, its number of results or its answer's size) has no standard
+// code or words, so the pager reads none of them: any refusal of a page over one block but a head lag (HEAD_LAG) halves
+// that RPC's page (readLogs). The caps' words read live, each one a refusal the pager meets this way:
+// - 3 Nov 04:21-07:05Z: sepolia.base.org "-32614: eth_getLogs is limited to a 200 range"; base-sepolia-rpc.publicnode.com
+//   and robinhood-sepolia-rpc.publicnode.com "-32701: exceed maximum block range: 50000"; base.drpc.org code 35 "ranges
+//   over 10000 blocks are not supported on free plan" for every range of 501 to 1,000,001 blocks (101 and 11 answer);
+//   results caps from the team's data run of 2 Nov: Base "query exceeds max results 20000, retry with the range ...",
+//   Robinhood "logs matched by query exceeds limit of 10000".
+// - 5 Nov 12:20-12:28Z (card wallet-restore-transfer-rpcs; Transfer, topic 2 = a W, no address): base.gateway.tenderly.co
+//   "-32602: invalid params" over 1,000 blocks, its cap only in the error's `data`, which the kit's client never reads;
+//   rpc.mainnet.chain.robinhood.com and rpc.testnet.chain.robinhood.com "-32602: query spans 99993 blocks (...), but only
+//   30000 are allowed"; base.api.pocket.network "invalid argument 0: block range exceeds maximum 500" (another backend
+//   answered 10,000); rpc-robinhood.blockmachine.io "block range exceeds maximum allowed (max=10000, ...)"; 1rpc.io "is
+//   limited to 0 - 50 blocks range"; base-mainnet.public.blastapi.io "up to a 10 block range"; thirdweb "-32005: Log
+//   response size exceeded. Maximum allowed number of requested blocks is 1000"; base-sepolia.drpc.org HTTP 500 code 19
+//   "Temporary internal error. Please retry" at 10 to 101 blocks, code 35 above.
 /** A page past the provider's own head (its log index behind its block headers): a lag, never a smaller page. */
 const HEAD_LAG = /beyond (the )?current head|invalid block range params|after last accepted block|is ahead of (the )?(head|latest)/i;
 // Read live on 3 Nov 05:35Z, eth_call at a block 20,000 blocks back by hash: rpc.testnet.chain.robinhood.com and
@@ -413,10 +436,11 @@ export type EvmLogFilter = { address?: string; topics: readonly (string | readon
 export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to: bigint, what: string) => E;
 
 /**
- * One RPC's logs of a filter over from..to, in pages that end at or below `to`. Only a provider's cap (RANGE_CAP: on a
- * call's block range or on its number of results) halves its page; after a full page reads, the page doubles again, up
- * to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read, so a cap lifted or a page shrunk long ago
- * comes back. A page past the provider's head (HEAD_LAG) is a lag.
+ * One RPC's logs of a filter over from..to, in pages that end at or below `to`. Any refusal of a page over one block
+ * (a provider's cap, in whatever words) halves its page; after a full page reads, the page doubles again, up to
+ * EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read, so a cap lifted or a page shrunk long ago comes
+ * back. A page past the provider's head (HEAD_LAG) is a lag. A page of one block refused is the read's failure, with
+ * the provider's own error.
  */
 async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal): Promise<E[]> {
   const out: E[] = [];
@@ -430,12 +454,12 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       got = await rpc("eth_getLogs", [{ ...filter, fromBlock: tag(at), toBlock: tag(end) }]);
     } catch (e) {
       const m = String((e as Error)?.message ?? e);
-      if (RANGE_CAP.test(m) && end > at) {
+      if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
+      if (end > at) {
         refused = end - at + 1n;
         page[k] = refused / 2n;
         continue;
       }
-      if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
       throw e;
     }
     if (!Array.isArray(got)) throw new Error(`rpc ${k}: eth_getLogs ${at}..${end}: not a list`);
