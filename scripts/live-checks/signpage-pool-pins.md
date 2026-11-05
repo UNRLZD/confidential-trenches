@@ -1,4 +1,4 @@
-CARD signpage-pool-pins / devnet run: PASS
+CARD signpage-pool-pins / live: PASS
 Money path: yes
 Tx: solana-devnet 2J3ShzTeDiuKrQKzyKQ2piF6iUVFF8fw12uwSBJqNNtVE7FuhkTncXqUuQVpMTdLXTJ3FMnWK4nwjMFUZ5vGkPYZ
 Tx: solana-devnet b72jFbgKkivW1GbNcHSPi51mdgrtR9JniCT6VYhJZEJqtfCysJWQ5aiUT5fgWTZ3qjywUGX955cJYSApdP6cpnv
