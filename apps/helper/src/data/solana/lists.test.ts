@@ -281,8 +281,12 @@ test("fold 6 (R5b, R5d): Discover's Jupiter lists and curve reads draw on the he
   const t = AS_OF;
   const jup: string[] = [];
   const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
+  // the clock stands at AS_OF, so a wait the proxy takes (a caller's turn, a poll for room) reads the same now() after
+  // it: the wait is a turn of the event loop, never real seconds (162 s of real sleep in a fresh run, card
+  // fresh-run-margin), as crowd.test.ts's still clock does
   const proxy = createProxy({}, {
     now: () => t,
+    sleep: async () => {},
     fetch: (async (url: string) => {
       const path = new URL(url).pathname;
       jup.push(path);

@@ -1,4 +1,4 @@
-// node packages/wallet/scripts/pool-solana-review-mutants.mjs (card notes-per-pool-sol): the Opus review's 40 mutants of
+// node packages/wallet/scripts/pool-solana-review-mutants.mjs (card notes-per-pool-sol): the review's 40 mutants of
 // bd8dea0, find strings mapped to fold 3's code; each runs the whole pool-solana.test.ts (any failing test kills it).
 import { readFileSync, writeFileSync } from "node:fs";
 import { runMutant } from "./mutant-run.mjs";

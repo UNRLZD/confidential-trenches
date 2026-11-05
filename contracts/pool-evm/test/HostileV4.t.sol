@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity 0.8.28;
 
-// Hostile hooks and routes against the v4 adapter, from the Opus review of 756ee51 (card evm-adapters). Base's v4
+// Hostile hooks and routes against the v4 adapter, from the review of 756ee51 (card evm-adapters). Base's v4
 // PoolManager runtime, read with eth_getCode on https://mainnet.base.org at block 53,438,800 (the answer recorded in
 // test/fixtures/fork-rpc.json, keccak256 pinned below, the hash BuyV4Fork.t.sol pins), is etched at its own address,
 // so NoDelegateCall's immutable matches; Base's WETH9 from the v3 fixture; mock tokens and planted pools; the real

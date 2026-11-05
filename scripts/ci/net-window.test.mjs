@@ -43,6 +43,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-pool-senders.mjs",
   "scripts/live-checks/helper-proxy.mjs",
   "scripts/live-checks/helper-robinhood-capacity.mjs",
+  "scripts/live-checks/helper-robinhood-search-ahead.mjs",
   "scripts/live-checks/helper-v4-hook-liquidity.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",
   "scripts/live-checks/helper-solana-failover.mjs",

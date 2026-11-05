@@ -5,6 +5,7 @@
 // and one of 12 cold tapes answered 503 at 19.4 s (#248's CI, run 41967652884), and drpc's share of the reads moved
 // with the load (#266's CI, run 41968997025).
 import { mock } from "node:test";
+import { enableTimers, resetTimers } from "../mock-timers.ts";
 
 /** The event loop turns a run is given between two ticks of the clock: every fake answer here is settled in a few. */
 const DRAIN = 8;
@@ -14,7 +15,7 @@ const DRAIN = 8;
 export async function onVirtualTime<T>(start: number, work: () => Promise<T>): Promise<{ value: T; ms: number }> {
   const immediate = globalThis.setImmediate;
   const perf = Object.getOwnPropertyDescriptor(performance, "now");
-  mock.timers.enable({ apis: ["setTimeout", "Date"], now: start });
+  enableTimers(mock.timers, { apis: ["setTimeout", "Date"], now: start });
   Object.defineProperty(performance, "now", { configurable: true, value: () => Date.now() - start });
   let done = false;
   let value: T | undefined;
@@ -32,7 +33,7 @@ export async function onVirtualTime<T>(start: number, work: () => Promise<T>): P
     }
     ms = Date.now() - start;
   } finally {
-    mock.timers.reset();
+    resetTimers(mock.timers);
     if (perf === undefined) delete (performance as { now?: unknown }).now;
     else Object.defineProperty(performance, "now", perf);
   }
