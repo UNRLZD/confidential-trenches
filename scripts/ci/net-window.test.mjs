@@ -36,6 +36,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-buy-hookdata-fee.mjs",
   "scripts/live-checks/evm-quote-lag-held.mjs",
   "scripts/live-checks/evm-quote-warm-round.mjs",
+  "scripts/live-checks/evm-scan-second-provider.mjs",
   "scripts/live-checks/evm-sell-v4.mjs",
   "scripts/live-checks/evm-venues-pin.mjs",
   "scripts/live-checks/helper-abuse-limits.mjs",
