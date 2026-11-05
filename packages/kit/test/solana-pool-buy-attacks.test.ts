@@ -1,4 +1,4 @@
-// Card sol-pool-buy-tx: the Opus review's attacks on checkSolanaPoolBuy (A1 to A9, A7b), ported to tag 3, plus the
+// Card sol-pool-buy-tx: the review's attacks on checkSolanaPoolBuy (A1 to A9, A7b), ported to tag 3, plus the
 // attacks tag 3 opens (an inner instruction changed, added, reordered or pointed at the fee payer). Each builds a
 // message a broken-in helper could hand the device and asserts the check refuses it, naming the check that must fail.
 //   node --test test/solana-pool-buy-attacks.test.ts

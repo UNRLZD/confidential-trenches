@@ -84,7 +84,7 @@ contract LP {
 /// The buy through the real SwapRouter02 and Uniswap v3 pool code (Base, block 53,434,000:
 /// test/fixtures/uniswap-v3-base.json) on a local chain with no RPC, over pools whose liquidity the test sets, so a
 /// thin pool shows what a partial fill does. The pool code sits at its own CREATE2 address (the router's callback
-/// check passes); USDC's address holds a mock ERC-20. From the Opus review of b61f0f5 (ReviewV3Test).
+/// check passes); USDC's address holds a mock ERC-20. From the review of b61f0f5 (ReviewV3Test).
 contract BuyV3Test is BuyBase {
   uint256 internal constant NOW = 1_900_000_000;
   address internal constant ROUTER = 0x2626664c2603336E57B271c5C0b26F421741e481;

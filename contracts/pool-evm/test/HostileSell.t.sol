@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity 0.8.28;
 
-// Hostile tokens, routers, senders and delegates against the sell delegate, from the Opus review of c2a8da2 (card
+// Hostile tokens, routers, senders and delegates against the sell delegate, from the review of c2a8da2 (card
 // pool-evm-sell): selling WETH, a fee over the gain, a target that gives tokens back, a token hook and a sender that
 // call back into W, fee on transfer, a fee under the cap, a burnt precommitment, a pool revert, a caught revert, the
 // nonce across delegations, an arbitrary signed call, and a module that guards with transient slot 0. Mock tokens and

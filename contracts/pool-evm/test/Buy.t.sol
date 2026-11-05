@@ -551,7 +551,7 @@ contract BuyTest is BuyBase {
   }
 
   /*///////////////////////////////////////////////////////////////
-                    THE OPUS REVIEW'S TESTS (b61f0f5)
+                      THE REVIEW'S TESTS (b61f0f5)
   //////////////////////////////////////////////////////////////*/
 
   /// The pool's digests equal ethers 6.13.5's (TypedDataEncoder.hash) for the fixture's Buy and Withdraw: a third

@@ -670,7 +670,7 @@ test("M5: page load reads an open note once and never waits on it, so an ask beh
   assert.equal(waits, 0, "the ask did not wait on the earlier note");
 });
 
-// Opus round 3 of d2d442a (card signpage-pool-notes-2): the heights are read before the mark; an ask whose U is unfunded
+// Review round 3 of d2d442a (card signpage-pool-notes-2): the heights are read before the mark; an ask whose U is unfunded
 // behind a pending earlier note answers not_funded with the top-up; one TAKEN stops the move for that run.
 
 test("R3: the heights are read before the mark, so a send that finalizes between the two reads lands and is never sent again", async () => {

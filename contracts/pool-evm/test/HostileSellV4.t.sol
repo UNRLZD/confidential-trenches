@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity 0.8.28;
 
-// Hostile cases against the v4 sell, from the Opus review of e9f6ff9 (card evm-sell-v4): a PoolManager that calls back
+// Hostile cases against the v4 sell, from the review of e9f6ff9 (card evm-sell-v4): a PoolManager that calls back
 // with another payload or twice, a sender that tampers with the signed route, an input-taking hook on a thin pool, and
 // the reviewer's probes. Runs on the local chain of test/SellV4.t.sol (Base's PoolManager code etched, no RPC).
 
