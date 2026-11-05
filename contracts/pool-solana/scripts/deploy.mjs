@@ -1086,7 +1086,15 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       log(`waiting for ${funder.id} to hold ${need.total} lamports: send from ${returnTo}, the return address`);
       for (;;) {
         if (stop) throw new Error(`stopped by ${stop}`);
-        if ((await ops.balance()) >= need.total) break;
+        // a read that fails (its five tries all rate-limited or reset, as api.devnet answered on 5 Nov 18:47Z) is read
+        // again at the next poll: a run that ended here would leave the owner's transfer to a run that is gone
+        let held = -1n;
+        try {
+          held = await ops.balance();
+        } catch (e) {
+          log(`the funder's balance not read (${e.message}): reading it again in ${WAITS.poll / 1000} s`);
+        }
+        if (held >= need.total) break;
         await wait(WAITS.poll);
       }
       const funding = await history();
