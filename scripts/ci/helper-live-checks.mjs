@@ -37,6 +37,7 @@ export const LIVE_CHECKS = [
   "evm-buy-hookdata-fee",
   "helper-tape-4337-trader",
   "helper-live-bars-no-503",
+  "sol-small-note-buys",
 ];
 
 // `{commit}` is the deployed commit
