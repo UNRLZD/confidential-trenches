@@ -222,6 +222,23 @@ the code at f30c9be and found every one in place:
 | entrypoint_upgrade_audit_oxorio: nullifier reuse in precommitment tracking | Applies: F9 |
 | entrypoint_upgrade_audit_oxorio: check order for gas | n/a: no Entrypoint |
 
+## A third reading of the two fixes
+
+A reader who wrote neither fix read `65b1ed9` and `d3edab1` and found no fault in the program or in SellDelegate. It
+found three faults in the tests and the notes, each fixed in `fbf0566`:
+
+- **MEDIUM:** `scripts/mutants.mjs` still named five source lines that `d3edab1` rewrote (the flags check and the four
+  `is_pool_account` calls), so the sweep stopped at its first entry. The entries now name the new lines, and ten more
+  remove each part of the fix: `page_for`'s choice (both ways), the two page checks it reads, the release's ninth
+  account, the deposit's two, the next page's key in `is_pool_account`, tag 3's next-page index (at 8 and at 9) and
+  flag bit 1. `scripts/mutants.test.mjs` (Solana) and `test/mutants-list.test.mjs` (EVM), both run by CI, fail when a
+  mutant's text is not exactly once in its file or its test is not a real test, so a stale list now fails CI.
+- **MEDIUM:** tag 3's next page with no tip, at account 8, had no test: the only tag 3 test had a tip, so a mutant
+  pinning the index to 9 passed. `a_tag3_with_no_tip_names_its_next_page_at_8` holds it.
+- **LOW:** `state.rs` said the second page "can only be the next page". It can be any account the index's entry may
+  go to; `push_entry` checks the page it writes to. The comment now says so.
+
 ## Deploy sha
 
-d3edab1a4b325fd43d0479c8474162428a9bb331 (the commit of the last fix; the commit that adds this file changes nothing else).
+fbf05664916a8a00eec9ce87574deb0cf9225d12 (the commit of the last fix: the third reading's fold changes the Solana program's source by a comment only,
+`d3edab1` before it; the commit that updates this file changes nothing else).
