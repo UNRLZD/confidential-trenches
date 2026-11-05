@@ -116,7 +116,8 @@ test("the signing page's eighteen checks (signpage-shell runs four ways, signpag
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 26, "the app's twenty-six checks, app-export-every-wallet the newest (card app-export-every-wallet)");
+  assert.equal(app.include.length, 27, "the app's twenty-seven checks, app-export-every-wallet and evm-quote-warm-round the newest");
+  assert.ok(app.include.some((e) => e.key === "evm-quote-warm-round" && e.args === ""), "evm-quote-warm-round runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "balances-per-chain" && e.chrome && e.args === ""), "balances-per-chain runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "app-export-every-wallet" && e.chrome && e.args === ""), "app-export-every-wallet runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "app-verify-mount" && e.args === "--network mainnet"));

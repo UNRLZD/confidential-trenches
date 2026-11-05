@@ -1355,10 +1355,16 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     // one floor (card evm-buy-hookdata-fee, review fold 2 LOW-A): the kit's, which the device's rule applies too; an env
     // value that differs would refuse every bind whose fee is under it, or do nothing, so it is refused
     if (fee !== "" && fee !== EVM_POOL_FEE_FLOOR.toString()) throw new Error(`${names[2]} must be unset or the kit's floor, ${EVM_POOL_FEE_FLOOR} wei (EVM_POOL_FEE_FLOOR)`);
-    const urls = rpcs!.split(",");
+    // every read the sender makes is at a past block (feeOf, viewAt and ready() at an epoch's first block, up to
+    // POOL_LIFE_MAX_MS back): unset, the kit's fee pair for the network (evmPoolVenues feeProviders, card
+    // evm-quote-warm-round fold 8), never the quote's providers, some of which keep no state that far back; set, two
+    // URLs of the host's own, which ready() holds to the same 600 s before the sender serves
+    const v = Object.hasOwn(venues, network) ? venues[network] : undefined;
+    const pair = v !== undefined && Object.hasOwn(v, "feeProviders") ? v.feeProviders : undefined;
+    if (rpcs === "" && pair === undefined) throw new Error(`${names[4]} must be set: the kit lists no fee providers for ${network}`);
+    const urls = rpcs === "" ? [...pair!] : rpcs!.split(",");
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[4]} must be two different RPC URLs`);
     const providers = urls.map((u) => solanaJsonRpc(u)) as unknown as [EvmRpc, EvmRpc]; // a plain JSON-RPC client
-    const v = Object.hasOwn(venues, network) ? venues[network] : undefined;
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
     // sales go only from the pin: a chain with none starts with sales off, never with an unpinned key
     const sells = sellKey !== "" && pin !== undefined;

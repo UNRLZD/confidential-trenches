@@ -81,6 +81,7 @@ test("with retry, a Retry-After that ends past the deadline is not waited: the c
   const e = await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getSlot", []).catch((x: unknown) => x);
   assert.ok(e instanceof SolanaRpcTransportError);
   assert.equal(e.fault, "http_429");
+  assert.equal(e.afterMs, 30_000, "the provider's Retry-After goes with the fault, for the caller's next ask");
   assert.equal(p.tries(), 1);
   assert.ok(Date.now() - t0 < 200, `took ${Date.now() - t0} ms`);
 });

@@ -105,9 +105,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // mainnet.base.org takes 25 calls a second and one quote is about 18: one case every 2 s
       await new Promise((r) => setTimeout(r, 2000));
       const logs: [Exchange[], Exchange[]] = [[], []];
-      const urls = PROVIDERS[req.chain as "base" | "robinhood"];
+      // a recording keeps two providers' answers: the first two of the chain's list
+      const urls = PROVIDERS[req.chain as "base" | "robinhood"].slice(0, 2);
       const [p1, p2] = evmProviders(urls, fetch);
-      const rpcs = [recording(p1, logs[0]), recording(p2, logs[1])] as const;
+      const rpcs = [recording(p1!, logs[0]), recording(p2!, logs[1])] as const;
       const now = Date.now();
       const r = await outcome(() => evmPoolBuyQuoteWith(req, rpcs, now));
       // the best standard pool moves between blocks: an "ok" case is recorded on the device's own best route
