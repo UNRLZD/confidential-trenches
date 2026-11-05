@@ -84,7 +84,7 @@ test("the pace: a bucket per provider, background reads leaving CALLER_ROOM of i
   assert.equal(h.room("https://unpaced.test"), 1);
 });
 
-test("card helper-robinhood-capacity fold 2: 12 cold tokens at once, hooked v4 pools among them, against providers that refuse past their read limits: all 12 answer 200 and no provider refuses once; the wide providers carry most of the logs (drpc, 100 blocks a read, is asked when its expected wait is the shorter: fold 4)", async () => {
+test("card helper-robinhood-capacity fold 2: 12 cold tokens at once, hooked v4 pools among them, against providers that refuse past their read limits: all 12 answer 200 and no provider refuses once; drpc (100 blocks a read) is the last resort", async () => {
   const r = rig();
   const clock = realClock();
   // five hooked v4 pools (two eth_getLogs a span: swaps and the hook's transfers), the curve, six tokens with no pool
@@ -103,7 +103,7 @@ test("card helper-robinhood-capacity fold 2: 12 cold tokens at once, hooked v4 p
   assert.equal(r.refused.size, 0, `refused: ${show(r.refused)} (eth_getLogs ${show(r.logs)})`);
   const drpc = r.logs.get(DRPC) ?? 0;
   const wide = WIDE.reduce((n, u) => n + (r.logs.get(u) ?? 0), 0);
-  assert.ok(drpc <= wide / 2, `drpc ${drpc} eth_getLogs, the wide providers ${wide} (${show(r.logs)})`);
+  assert.ok(drpc <= wide / 4, `drpc ${drpc} eth_getLogs, the wide providers ${wide} (${show(r.logs)})`);
   assert.ok(ms < 15_000, `${Math.round(ms)} ms`);
 });
 

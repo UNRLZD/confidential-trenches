@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CURVE_TOKEN, fakeChain, open, REC } from "../../../test/evm-swaps/robinhood.ts";
-import { PROVIDER_PACE } from "../../limits/limits.ts";
+import { PROVIDER_PACE, providerHolds } from "../../limits/limits.ts";
 import { HEADER_TIMED, INFLIGHT_MAX, SWAP_RPCS } from "./swaps.ts";
 
 const CHAIN_RPC = "https://rpc.mainnet.chain.robinhood.com";
@@ -66,12 +66,15 @@ test("card helper-robinhood-capacity: 12 cold tokens at once, the chain's own RP
 test("card helper-robinhood-capacity: a block range limit is no refusal: the provider that answered it is asked again at once (before the card its 'limit exceeded' held it)", async () => {
   const r = rig([]);
   let ranged = 0;
-  // pocket, asked in the first pair (swaps.ts ranked by expected wait: daybreak takes one request a post)
+  // pocket, asked in the first pair: the provider is incidental to the rule, and by expected wait (fold 4) daybreak, one
+  // request a post, is asked a cold window's spans after the batching ones, which agree first
   r.chain.st.faults.set(POCKET, { span: 1_000, refuse: () => (ranged++ === 0 ? Response.json([{ jsonrpc: "2.0", id: 0, error: { code: -32000, message: "block range limit exceeded" } }]) : null) });
   const clock = { t: 7_000_000 };
-  const s = open(r.chain, clock, { pools: new Map(), rpcs: WIDE.slice(0, 3), fetch: r.fetch as never });
+  const holds = providerHolds(() => clock.t);
+  const s = open(r.chain, clock, { pools: new Map(), rpcs: WIDE.slice(0, 3), fetch: r.fetch as never, holds });
   assert.equal((await s.trades(CURVE_TOKEN, 50)).status, 200);
   s.stop();
   assert.equal(ranged > 0, true);
+  assert.equal(holds.heldFor(POCKET), 0, "held after a range error");
   assert.ok((r.sends.get(POCKET) ?? 0) > 1, `asked ${r.sends.get(POCKET)} times: held after a range error`);
 });
