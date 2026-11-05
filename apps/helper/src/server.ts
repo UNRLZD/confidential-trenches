@@ -459,6 +459,8 @@ export function handler(
         void read
           .then((a) => {
             if (a.status === 429) return reply(throttled(a.retryAfterS ?? 1, undefined, a.why));
+            // card helper-ready-page-warm: a not-ready answer that names its cause is counted in the refusal log
+            if (a.status === 503 && a.why !== undefined) refusals.count(route, a.why);
             if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
             // card helper-ready-page-warm: the standard Server-Timing header, each upstream the read waited on and the
             // helper's whole time, so a slow answer names its wait (a hold, a pace, a fallback, the search's turn)
