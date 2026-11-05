@@ -36,7 +36,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RECORD = path.join(HERE, "pool-evm-deploy.md");
 export const BUILD_FILE = path.join(HERE, "pool-evm-deploy.build.json");
 export const BUILD = JSON.parse(readFileSync(BUILD_FILE, "utf8"));
-export const deploymentFile = (chain) => path.join(HERE, `pool-evm-deploy.${chain}.json`);
+// a testnet's record sits here; a mainnet's in contracts/pool-evm/deployments/ (card pool-evm-deploy-mainnet)
+export const deploymentFile = (chain) =>
+  Object.hasOwn(MAINNETS, chain) ? path.join(HERE, "../../contracts/pool-evm/deployments", `${chain}.json`) : path.join(HERE, `pool-evm-deploy.${chain}.json`);
 /** The one build the code of `name` at `address` on `chain` must be: the frozen older build when the build file pins
  * that exact address to it (a contract deployed before the build moved on, e.g. the v1 SellDelegate), else the current
  * build. Never either one: each address has exactly one build. */
@@ -99,8 +101,41 @@ export const CHAINS = Object.freeze({
     },
   },
 });
-// The mainnets: the deploy script refuses them (their deploy is the owner's).
-export const MAINNET_IDS = Object.freeze({ "0x2105": "base", "0x1237": "robinhood" });
+// The mainnets (card pool-evm-deploy-mainnet): kept apart from CHAINS, the testnets the testnet runs and their checks
+// loop over. Their deploy is the owner's paste (deploy.mjs refuses one without --mainnet). Read on 2026-11-05 between
+// 17:00:14 and 17:22:19Z, the same on both RPCs of each chain (eth_getCode hashed, eth_call symbol() and name(),
+// eth_getStorageAt): the PoolManager, SwapRouter02 and WETH the kit's venue list names (packages/kit/src/trade/evm/
+// buy-unpinned.ts). Mainnet keeps both adapters (M365): Robinhood's SwapRouter02 reads on both. Robinhood's WETH (aeWETH)
+// is an upgradeable proxy: its implementation is pinned too. mainnet.base.org is Base's own public RPC (docs.base.org),
+// rpc.mainnet.chain.robinhood.com Robinhood's (docs.robinhood.com/chain/connecting), the others PublicNode's.
+export const MAINNETS = Object.freeze({
+  base: {
+    chainId: "0x2105",
+    op: true,
+    rpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
+    operators: { "mainnet.base.org": "base", "base-rpc.publicnode.com": "publicnode" },
+    contracts: ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate"],
+    poolManager: { address: "0x498581ff718922c3f8e6a244956af099b2652b2b", codehash: "0x83b2af6e9f3158defc2811cbcb0db71ecf8b2ba2abea39c39e370ac5c6f43eb6" },
+    router: { address: "0x2626664c2603336e57b271c5c0b26f421741e481", codehash: "0x38bd640f47df62b2fd5a6755a63f4976ad847dc9b946ae0d145d21d16bb124e4" },
+    weth: { address: "0x4200000000000000000000000000000000000006", codehash: "0x8a3a1f6a9f9dce633117adee5b458245835a8645a8c8726a26382a4622508b1c", symbol: "WETH", name: "Wrapped Ether" },
+  },
+  robinhood: {
+    chainId: "0x1237",
+    op: false,
+    rpcs: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"],
+    operators: { "rpc.mainnet.chain.robinhood.com": "robinhood", "robinhood-rpc.publicnode.com": "publicnode" },
+    contracts: ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate"],
+    poolManager: { address: "0x8366a39cc670b4001a1121b8f6a443a643e40951", codehash: "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626" },
+    router: { address: "0xcaf681a66d020601342297493863e78c959e5cb2", codehash: "0x6f36c378e272c6324c48f045182bcb54bd8ad654cf9ebd42e8893d52c4cb25dc" },
+    weth: {
+      address: "0x0bd7d308f8e1639fab988df18a8011f41eacad73", codehash: "0x5706be52f64875fee65a2cec0d80e47a23d8793cbe85d214b48445e2d05f5353", symbol: "WETH", name: "WETH",
+      implementation: { address: "0xc6b81b429797e0f555440b70cd99e032d7ae947e", codehash: "0xbe1295f37be34ffe03ad779bda0ef278907e1856b51a3be2f35ee541d75d4650" },
+    },
+  },
+});
+export const MAINNET_IDS = Object.freeze(Object.fromEntries(Object.entries(MAINNETS).map(([n, c]) => [c.chainId, n])));
+/** A chain by name, a testnet of CHAINS or a mainnet of MAINNETS; undefined for any other (own keys only). */
+export const chainOf = (name) => (Object.hasOwn(CHAINS, name) ? CHAINS[name] : Object.hasOwn(MAINNETS, name) ? MAINNETS[name] : undefined);
 
 export const hex = (b) => "0x" + Buffer.from(b).toString("hex");
 export const bytes = (h) => Uint8Array.from(Buffer.from(h.replace(/^0x/, ""), "hex"));
@@ -174,14 +209,14 @@ export function operatorProblems(rpcs, d) {
   const two = rpcs.slice(0, 2);
   if (two.length < 2) return [`only ${two.length} RPC(s); want two of two operators`];
   if (d.dryRun) return two.every((u) => LOOPBACK.has(hostOf(u))) ? [] : ["a dry-run record read on a non-loopback RPC"];
-  const ops = new Set(two.map((u) => CHAINS[d.chain]?.operators[hostOf(u)]).filter(Boolean));
+  const ops = new Set(two.map((u) => chainOf(d.chain)?.operators[hostOf(u)]).filter(Boolean));
   return ops.size < 2 ? [`only ${ops.size} known ${d.chain} operator(s) in ${two.join(", ")}; want two`] : [];
 }
 
 /** Each contract's getters on the record's chain: [signature, the word it must return]; the words its immutables hold
  * (also scripts/live-checks/evm-venues-pin.mjs's) */
 export function gettersOf(d) {
-  const chain = CHAINS[d.chain];
+  const chain = chainOf(d.chain);
   const at = (name) => String(d.contracts?.[name]?.address ?? "").toLowerCase();
   return {
     WithdrawalVerifier: [],
@@ -205,9 +240,9 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep = slee
     ok &&= pass;
     lines.push(`${pass ? "ok  " : "FAIL"} ${text}`);
   };
-  const chain = CHAINS[d.chain];
+  const chain = chainOf(d.chain);
   if (!chain) {
-    say(false, `the record's chain is one of ${Object.keys(CHAINS).join(", ")}: ${d.chain}`);
+    say(false, `the record's chain is one of ${[...Object.keys(CHAINS), ...Object.keys(MAINNETS)].join(", ")}: ${d.chain}`);
     return { ok, lines };
   }
   rpcs ??= chain.rpcs;
@@ -294,15 +329,15 @@ export function recorder(fetchFn = fetch) {
 
 /** The run record's text from the deployment records, after a PASS: every transaction of each run, testnet, money path */
 export function runRecord(ds) {
-  for (const d of ds) if (d.dryRun || !CHAINS[d.chain]) throw new Error(`no run record for ${d.dryRun ? "a dry run" : d.chain}`);
+  for (const d of ds) if (d.dryRun || !chainOf(d.chain)) throw new Error(`no run record for ${d.dryRun ? "a dry run" : d.chain}`);
   return [
     `CARD ${KEY} / live: PASS`,
     "Money path: yes",
     ...ds.flatMap((d) => d.txs.map((t) => `Tx: ${d.chain} ${t.hash}`)),
     "",
     ...ds.flatMap((d) => [
-      `${d.chain} (chain id ${BigInt(CHAINS[d.chain].chainId)}), contracts/pool-evm/script/deploy.mjs at ${d.at}. Its steps, in the order of its Tx lines above: ${d.txs.map((t) => t.step).join(", ")}.`,
-      `${CHAINS[d.chain].contracts.map((n) => `${n} ${d.contracts[n].address}`).join(", ")}; each one's code is the build's (${d.build}), read by this live check on ${CHAINS[d.chain].rpcs.join(" and ")}. No contract has an owner, an admin or an upgrade path.`,
+      `${d.chain} (chain id ${BigInt(chainOf(d.chain).chainId)}), contracts/pool-evm/script/deploy.mjs at ${d.at}. Its steps, in the order of its Tx lines above: ${d.txs.map((t) => t.step).join(", ")}.`,
+      `${chainOf(d.chain).contracts.map((n) => `${n} ${d.contracts[n].address}`).join(", ")}; each one's code is the build's (${d.build}), read by this live check on ${chainOf(d.chain).rpcs.join(" and ")}. No contract has an owner, an admin or an upgrade path.`,
       `Deployer ${d.deployer}, a run key that lived only in the run, funded with ${d.need} wei (the printed need) and swept back to ${d.return} at the run's end.`,
       "",
     ]),
@@ -315,7 +350,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const args = process.argv.slice(2);
   const opt = (n, dflt) => (args.includes(n) ? args[args.indexOf(n) + 1] : dflt);
   try {
-    const files = opt("--deployment") ? opt("--deployment").split(",") : Object.keys(CHAINS).map(deploymentFile).filter(existsSync);
+    const files = opt("--deployment") ? opt("--deployment").split(",") : [...Object.keys(CHAINS), ...Object.keys(MAINNETS)].map(deploymentFile).filter(existsSync);
     if (files.length === 0) throw new Error("no deployment record (pool-evm-deploy.<chain>.json) to check");
     const ds = files.map((f) => JSON.parse(readFileSync(f, "utf8")));
     const rec = recorder();
