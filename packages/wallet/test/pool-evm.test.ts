@@ -1074,13 +1074,13 @@ test("the pool's sync pages under a cap in words never read before (Tenderly's '
   }
 });
 
-test("EVM_TRANSFER_RPCS: every network a pinned list of three keyless https providers of three operators, none an operator of the kit's providers but the three named exceptions, no Pocket on Robinhood and no dRPC on Base Sepolia (card evm-transfer-rpc-spares)", () => {
+test("EVM_TRANSFER_RPCS: every network a pinned list of three or more keyless https providers of as many operators (four on Base and Robinhood), thirdweb never a seat, none an operator of the kit's providers but the four named exceptions, no Pocket on Robinhood and no dRPC on Base Sepolia (card evm-transfer-rpc-spares)", () => {
   // an operator: the host's last two labels (tenderly.co, pocket.network, thirdweb.com, daybreak-rpc.network, drpc.org)
   const operator = (u: string) => new URL(u).hostname.split(".").slice(-2).join(".");
   assert.deepEqual(Object.keys(EVM_TRANSFER_RPCS).sort(), Object.keys(EVM_CHAIN_IDS).sort());
   for (const [net, urls] of Object.entries(EVM_TRANSFER_RPCS)) {
     assert.ok(Object.isFrozen(urls), net);
-    assert.ok(urls.length >= 3, `${net}: a pair and a spare`);
+    assert.ok(urls.length >= (net === "base" || net === "robinhood" ? 4 : 3), `${net}: a pair and its spares`);
     for (const u of urls) assert.match(u, /^https:\/\/[a-z0-9.-]+$/, `${net}: ${u} is a keyless https URL`);
     assert.equal(new Set(urls.map(operator)).size, urls.length, `${net}: every provider another operator`);
     const rpcOf = (url: string): EvmRpc => Object.assign(async () => null, { url });
@@ -1088,10 +1088,9 @@ test("EVM_TRANSFER_RPCS: every network a pinned list of three keyless https prov
     // thirdweb's keyless quota runs out for the day on every chain at once (5 Nov 16:28Z): a spare, never a seat
     assert.ok(urls.slice(0, 2).every((u) => operator(u) !== "thirdweb.com"), `${net}: thirdweb seated`);
   }
-  // the exceptions, each the doc comment's: Robinhood's own on Robinhood and Robinhood testnet, and dRPC on Robinhood
-  // testnet (no other keyless operator answers every read there: Pocket's backends refuse a filter with no address,
+  // the exceptions, each the doc comment's: Robinhood's own and dRPC on Robinhood and Robinhood testnet (no other keyless operator answers every read there: Pocket's backends refuse a filter with no address,
   // PublicNode every one)
-  const shared: Record<string, string[]> = { base: [], robinhood: ["robinhood.com"], "base-sepolia": [], "robinhood-testnet": ["drpc.org", "robinhood.com"] };
+  const shared: Record<string, string[]> = { base: [], robinhood: ["robinhood.com", "drpc.org"], "base-sepolia": [], "robinhood-testnet": ["drpc.org", "robinhood.com"] };
   for (const chain of Object.keys(EVM_TRANSFER_RPCS) as (keyof typeof EVM_TRANSFER_RPCS)[]) {
     const kit = evmPoolVenues()[chain].providers ?? assert.fail(`${chain}: the kit pins no providers`);
     const both = EVM_TRANSFER_RPCS[chain].map(operator).filter((o) => kit.some((p) => operator(p) === o));

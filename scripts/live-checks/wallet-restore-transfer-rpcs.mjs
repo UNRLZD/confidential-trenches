@@ -116,23 +116,27 @@ function runCheck(job, transport, wait) {
 
 const host = (u) => new URL(u).host;
 
-/** The check: { ok, lines }. `transport(network, url, method, params)`; each network's URLs are the wallet's own. */
-export async function check(transport, { wait = true } = {}) {
+/** The check: { ok, lines, reports } (a job's report, or null when it failed). `transport(network, url, method,
+ * params)`; each network's URLs are the wallet's own. `jobs`: JOBS, or others of their shape. */
+export async function check(transport, { wait = true, jobs = JOBS } = {}) {
   const lines = [];
+  const reports = [];
   let ok = true;
-  for (const job of JOBS) {
+  for (const job of jobs) {
     try {
       const r = await runCheck(job, (url, method, params) => transport(job.network, url, method, params), wait);
+      reports.push(r);
       const urls = r.urls;
       const swapped = (r.asked ?? []).filter((u) => !urls.includes(u));
       if (job.want !== undefined && !r.tokens.includes(job.want)) throw new Error(`W ${job.w} lists ${r.tokens.length ? r.tokens.join(", ") : "no token"}, not ${job.want}`);
       lines.push(`${job.network}: ${urls.map(host).join(" and ")} read W ${job.w} from block ${r.from} to ${r.anchor.number} alike: ${r.tokens.length ? r.tokens.join(", ") : "no token"} (last pages ${r.page.join(" and ")} blocks)${swapped.length ? `; swapped out ${swapped.map(host).join(" and ")}` : ""}`);
     } catch (e) {
       ok = false;
+      reports.push(null);
       lines.push(`${job.network}: ${e?.message ?? e}`);
     }
   }
-  return { ok, lines };
+  return { ok, lines, reports };
 }
 
 /** The bad run kept beside a good one: every Transfer log of the Base Sepolia W taken out of both providers' answers. */

@@ -251,21 +251,27 @@ export type EvmNetwork = "base" | "robinhood" | "base-sepolia" | "robinhood-test
 export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze({ base: 8453n, robinhood: 4663n, "base-sepolia": 84532n, "robinhood-testnet": 46630n });
 /**
  * Each network's Transfer RPCs, the restore's walletRpcs (./evm-restore.ts evmRestoreNotes): a pinned list of keyless
- * providers of three operators, read as a pair with a spare (evmPair, card evm-transfer-rpc-spares): the first two are
- * the seats, the third takes the place of one that throttles or is out, so the pair always reads on two operators.
+ * providers of three operators or more, read as a pair with spares (evmPair, card evm-transfer-rpc-spares): the first
+ * two are the seats, the rest take the place of one that throttles or is out, so the pair reads on two operators while
+ * any one is out. thirdweb is the last spare everywhere: its keyless quota runs out for the day on every chain at once
+ * (below), so Base and Robinhood carry dRPC as well; Base Sepolia and Robinhood testnet have no fourth keyless operator
+ * that answers a W's read from the browser (below), so there a second provider out leaves one.
  * Each answers a W's Transfer read (eth_getLogs, Transfer's topic, topic 2 = the W, no address) at the chain's head and
  * 2,000,000 blocks back, and a CORS preflight from https://sign.confidential.unrealized.trade (POST, content-type)
  * with 204 or 200 and that origin or *. testnet-run takes these too; evmRestoreNotes never names a W to a provider of
  * the pool's own list, so one that is (Robinhood testnet's own, below) is dropped from the W reads there. None is an
- * operator of the kit's providers (evmPoolVenues) but three, each named by the independence test: Robinhood's own
- * rpc.mainnet.chain.robinhood.com and rpc.testnet.chain.robinhood.com, and robinhood-testnet.drpc.org, since no keyless
- * third operator answers every read on Robinhood or Robinhood testnet (below).
+ * operator of the kit's providers (evmPoolVenues) but four, each named by the independence test: Robinhood's own
+ * rpc.mainnet.chain.robinhood.com and rpc.testnet.chain.robinhood.com, robinhood.drpc.org and robinhood-testnet.drpc.org,
+ * since no other keyless operator answers every read on Robinhood or Robinhood testnet (below).
  * The reads, 5 Nov 17:29-17:33Z (W 0x809286a1…078e; 1,000 blocks at the head and 2,000,000 back, then 20 pages):
  * - base: base.gateway.tenderly.co 1,000 blocks 313 and 390 ms, 20 x 1,000 p50 347 ms, CORS 204 *; base.api.pocket.network
  *   1,000 blocks 250 and 316 ms, 20 x 500 p50 280 ms all answered, CORS 204 the origin (another backend caps 500 blocks,
  *   5 Nov 12:20Z: paged under).
  * - robinhood: rpc.mainnet.chain.robinhood.com 1,000 blocks 273 and 308 ms, CORS 204 *; robinhood.daybreak-rpc.network
- *   1,000 blocks 235 and 256 ms, CORS 204 *.
+ *   1,000 blocks 235 and 256 ms, CORS 204 *; robinhood.drpc.org (17:48Z) code 35 at 1,000 blocks, 10 x 100 p50 295 ms
+ *   all answered, 100 blocks at the head and 2,000,000 back 339 and 230 ms, CORS 204 the origin.
+ * - base, 17:48Z: base.drpc.org code 35 at 500 blocks, 10 x 100 p50 446 ms all answered, 100 blocks at the head and
+ *   2,000,000 back 416 and 518 ms, CORS 204 the origin.
  * - base-sepolia: base-sepolia.gateway.tenderly.co 1,000 blocks 338 and 447 ms, CORS 204 *;
  *   base-testnet.api.pocket.network 1,000 blocks 190 and 288 ms, 20 x 1,000 p50 213 ms all answered, CORS 204 the origin.
  * - robinhood-testnet: robinhood-testnet.drpc.org code 35 at 1,000 blocks, 20 x 100 p50 311 ms all answered (101 is its
@@ -280,19 +286,22 @@ export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze
  * Robinhood testnet has no other keyless operator. On Robinhood rpc-robinhood.blockmachine.io (-32002 "keyless requests
  * are served for the most recent 5000 blocks only"), robinhood.blockpi.network ("Apikey not found"),
  * robinhood.gateway.tenderly.co (HTTP 404), robinhood.api.pocket.network (-32602 "missing required field 'address'"
- * from 20 to 30% of its backends, 5 Nov), robinhood.drpc.org and robinhood-rpc.publicnode.com (the kit's). On Base and
- * Base Sepolia: base-public.nodies.app and base-sepolia-public.nodies.app and 1rpc.io (50 blocks), base-mainnet.gateway.tatum.io
- * (100), base.drpc.org (code 35 over 500), base-sepolia.drpc.org (code 19 "Temporary internal error" at 10 to 101
+ * from 20 to 30% of its backends, 5 Nov), robinhood-rpc.publicnode.com (the kit's). On Base and Base Sepolia:
+ * base-sepolia-public.nodies.app (10 x 50 blocks p50 336 ms, 17:48Z, but its CORS preflight answers no
+ * Access-Control-Allow-Origin, so no browser reads it), base-public.nodies.app and 1rpc.io (50 blocks), base-mainnet.gateway.tatum.io
+ * (100), base-sepolia.drpc.org (code 19 "Temporary internal error" at 10 to 101
  * blocks, 4 Nov), base-sepolia.api.onfinality.io (-32029 at once), base.api.onfinality.io (no block), base.meowrpc.com
  * (no block), base.lava.build (HTTP 410), rpc.ankr.com (a key), base-sepolia.public.blastapi.io (HTTP 403, closed),
  * base.llamarpc.com (HTTP 525), mainnet.base.org (-32011 "request limit reached"), sepolia.base.org (the pool's,
  * 200 blocks), publicnode ("Please specify an address"), and the kit's providers' operators.
  */
-export const EVM_TRANSFER_RPCS: Readonly<Record<EvmNetwork, readonly string[]>> = Object.freeze({
-  base: Object.freeze(["https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://8453.rpc.thirdweb.com"]),
-  robinhood: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network", "https://4663.rpc.thirdweb.com"]),
-  "base-sepolia": Object.freeze(["https://base-sepolia.gateway.tenderly.co", "https://base-testnet.api.pocket.network", "https://84532.rpc.thirdweb.com"]),
-  "robinhood-testnet": Object.freeze(["https://robinhood-testnet.drpc.org", "https://rpc.testnet.chain.robinhood.com", "https://46630.rpc.thirdweb.com"]),
+// The freezes are marked pure, so SIGN_HOST's build, which reads none of these yet, drops them whole
+// (packages/signpage/scripts/build-network.test.mjs refuses a testnet provider in it).
+export const EVM_TRANSFER_RPCS: Readonly<Record<EvmNetwork, readonly string[]>> = /* @__PURE__ */ Object.freeze({
+  base: /* @__PURE__ */ Object.freeze(["https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://base.drpc.org", "https://8453.rpc.thirdweb.com"]),
+  robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network", "https://robinhood.drpc.org", "https://4663.rpc.thirdweb.com"]),
+  "base-sepolia": /* @__PURE__ */ Object.freeze(["https://base-sepolia.gateway.tenderly.co", "https://base-testnet.api.pocket.network", "https://84532.rpc.thirdweb.com"]),
+  "robinhood-testnet": /* @__PURE__ */ Object.freeze(["https://robinhood-testnet.drpc.org", "https://rpc.testnet.chain.robinhood.com", "https://46630.rpc.thirdweb.com"]),
 });
 
 /** A network's pool, pinned on the device: the pool, the relayer's fee recipient every proof binds, and the pool's

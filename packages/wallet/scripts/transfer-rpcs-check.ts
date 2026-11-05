@@ -13,8 +13,8 @@
 // What it runs, on both RPCs, as evmRestoreNotes does for each W: the finalized and the newest agreed anchors
 // (evmAgreedBlock), evmHoldsAnchor (the network's chain id on both, the anchor's hash held on both), then
 // evmTokensSentTo (the W's Transfer logs from `from` to the newest anchor, paged under each provider's own cap, the
-// same on both byte for byte), each a retry on a lag (evmRetryLag). The report: the two seats' URLs at the end, every
-// URL asked, the anchor, the tokens and each seat's last page size.
+// same on both byte for byte), each a retry on a lag (evmRetryLag). The report: the network's list, the two seats' URLs
+// at the end, every URL asked, the anchor, the tokens and each seat's last page size.
 import { createInterface } from "node:readline";
 import { EVM_CHAIN_IDS, EVM_LOG_PAGE_BLOCKS, EVM_NEWEST_TAG, EVM_POOL_TAG, EVM_TRANSFER_RPCS, evmAgreedBlock, evmAnswered, evmHoldsAnchor, evmPair, evmRetryLag, evmTokensSentTo, type EvmNetwork, type EvmRpc } from "../src/pool/evm.ts";
 
@@ -62,7 +62,7 @@ try {
     return { anchor, from, tokens: await evmTokensSentTo(rpcs, a.w, from, { fin, anchor }, page, undefined, sleep) };
   };
   const r = await evmRetryLag(read, sleep);
-  out({ done: { urls: rpcs.map((r) => r.url), asked: urls.filter((u) => asked.has(u)), chainId: chainId.toString(), anchor: { number: r.anchor.number.toString(), hash: r.anchor.hash }, from: r.from.toString(), tokens: r.tokens, page: page.map(String) } });
+  out({ done: { list: urls, urls: rpcs.map((r) => r.url), asked: urls.filter((u) => asked.has(u)), chainId: chainId.toString(), anchor: { number: r.anchor.number.toString(), hash: r.anchor.hash }, from: r.from.toString(), tokens: r.tokens, page: page.map(String) } });
   process.exit(0);
 } catch (e) {
   out({ fail: String((e as Error)?.message ?? e) });
