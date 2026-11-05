@@ -14,7 +14,7 @@
 //     written at run time to a temp dir outside both checkouts and removed afterwards. It never funds anything.
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createPrivateKey, createPublicKey } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import http from "node:http";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -167,13 +167,14 @@ test("a key file whose public_key does not match its private key is refused", ()
 
 // ---- the network ----
 
-test("--network mainnet is refused before any build or send", () => {
+// card vault-mainnet-test: mainnet deploys the pinned wasm only, so a mainnet run that would build is refused
+test("--network mainnet without the pinned wasm is refused before any build or send", () => {
   const dir = fresh();
   const k = keyFile(dir);
   const buildDir = path.join(dir, "build");
   const r = run(dir, ["--network", "mainnet", "--parent", "bf-test.near", "--key-file", k.file, "--build-dir", buildDir], stubs(dir, wasm()));
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, /no mainnet: a mainnet vault deploy is the owner's/);
+  assert.match(r.stderr, /--network mainnet takes --wasm, --deployment, --vault and --out/);
   neverSent(r);
   assert.equal(existsSync(buildDir), false, "a build ran");
 });
@@ -184,7 +185,8 @@ test("the next line names testnet's live check for a testnet deploy, and no live
   assert.ok(existsSync(path.join(fileURLToPath(new URL("../../..", import.meta.url)), LIVE_CHECK)), `${LIVE_CHECK} is not in the repo`);
   // vault-testnet-t01.mjs reads public testnet RPCs only, so it can never check a sandbox deploy
   assert.equal(nextLine("sandbox", "x/record.json"), "next: no live check (a sandbox deploy lives on this machine only; tests/s20.rs checks its end state)");
-  assert.throws(() => nextLine("mainnet", rec), /no network mainnet/);
+  assert.equal(nextLine("mainnet", "contracts/vault/deployments/mainnet-test.json", { account: "vault-test.p.near", signer: "p.near" }), "next: node scripts/live-checks/vault-mainnet.mjs --network mainnet --account vault-test.p.near --signer p.near --deployment contracts/vault/deployments/mainnet-test.json");
+  assert.throws(() => nextLine("devnet", rec), /no network devnet/);
 });
 
 // ---- the wasm ----
@@ -464,4 +466,139 @@ test("an RPC answer is never taken from a redirect: a 307 from the sandbox --rpc
     target.close();
     redirect.close();
   }
+});
+
+// ---- mainnet (card vault-mainnet-test): the owner's paste deploys the pinned wasm, or nothing ----
+// Each refusal is read from the CLI's own run (or, for the batch, from deploy.mjs's own check of the encoded tx); the
+// new exports are imported at run time, so on a deploy.mjs without them the file still loads and each test fails alone.
+
+const MAINNET_PARENT = "bf-test.near";
+const MAINNET_VAULT = `vault-test.${MAINNET_PARENT}`;
+const ALL_EXPORTS = ["config", "contract_source_metadata", "deposits", "ft_on_transfer", "is_known_label_root", "is_known_state_root", "label_tree", "labels", "leaves", "on_payout", "ragequit", "settle", "spends", "state_tree", "storage_prepay", "totals", "withdraw"];
+const sha256hex = (b) => createHash("sha256").update(b).digest("hex");
+
+// the mainnet wasm `w` on disk and a pre-deploy record pinning `pin` (the wasm's own sha256 unless a test plants another)
+function mainnetFiles(dir, w, pin = sha256hex(w)) {
+  const file = path.join(dir, "mainnet.wasm");
+  writeFileSync(file, w);
+  const record = path.join(dir, "mainnet-test.json");
+  writeFileSync(record, JSON.stringify({ network: "mainnet", account_id: MAINNET_VAULT, parent: MAINNET_PARENT, wasm_sha256: pin, wasm_builds_sha256: [pin, pin], code_hash: b58encode(Buffer.from(pin, "hex")), build: "test" }));
+  return { file, record };
+}
+const mainnetArgs = (dir, key, f) => ["--network", "mainnet", "--parent", MAINNET_PARENT, "--vault", MAINNET_VAULT, "--key-file", key, "--wasm", f.file, "--deployment", f.record, "--out", path.join(dir, "out.json")];
+
+// a fetch module answering a mainnet parent's reads: chain_id mainnet on both RPCs, the parent's full key, no vault yet,
+// the parent's balance `amount`, a final block; every other method (send_tx above all) is blocked and logged
+function mainnetNet(dir, amount) {
+  const f = path.join(dir, "mainnet-net.mjs");
+  const log = path.join(dir, "methods.log");
+  writeFileSync(
+    f,
+    `import { appendFileSync } from "node:fs";\n` +
+      `const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: "deploy", result }) });\n` +
+      `globalThis.fetch = async (url, init) => { const { method, params } = JSON.parse(init.body); appendFileSync(${JSON.stringify(log)}, method + " " + (params?.request_type ?? "") + " " + url + "\\n");\n` +
+      `  if (method === "status") return ok({ chain_id: "mainnet" });\n` +
+      `  if (method === "query" && params.request_type === "view_access_key") return ok({ permission: "FullAccess", nonce: 7 });\n` +
+      `  if (method === "query" && params.request_type === "view_account" && params.account_id === ${JSON.stringify(MAINNET_VAULT)}) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: "deploy", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } }) };\n` +
+      `  if (method === "query" && params.request_type === "view_account" && params.account_id === ${JSON.stringify(MAINNET_PARENT)}) return ok({ amount: ${JSON.stringify(String(amount))}, locked: "0" });\n` +
+      `  if (method === "block") return ok({ header: { hash: "11111111111111111111111111111111" } });\n` +
+      "  throw new Error(`network blocked by the test: ${method} ${url}`); };\n",
+  );
+  return f;
+}
+const runMainnet = (dir, args, amount) => spawnSync(process.execPath, ["--import", pathToFileURL(mainnetNet(dir, amount)).href, SCRIPT, ...args], { encoding: "utf8", timeout: 30_000 });
+const mainnetWasm = (exports = ALL_EXPORTS) => wasm({ strings: [MAINNET_USDC], exports });
+
+test("mainnet (a): a wasm whose sha256 is not the record's pin is refused before any send", () => {
+  const dir = fresh();
+  const k = keyFile(dir, MAINNET_PARENT);
+  const f = mainnetFiles(dir, mainnetWasm(), "ab".repeat(32));
+  const r = run(dir, mainnetArgs(dir, k.file, f));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /refused before any send: .*the wasm's sha256 [0-9a-f]{64} is not the pin abab/);
+  neverSent(r);
+});
+
+test("mainnet (a): a record whose builds disagree, or that is another vault's or another network's, is refused before any send", async () => {
+  const { pinProblems } = await import(SCRIPT);
+  const w = mainnetWasm();
+  const pin = sha256hex(w);
+  const good = { network: "mainnet", account_id: MAINNET_VAULT, wasm_sha256: pin, wasm_builds_sha256: [pin, pin], code_hash: b58encode(Buffer.from(pin, "hex")) };
+  assert.deepEqual(pinProblems(w, good, MAINNET_VAULT), []);
+  assert.match(pinProblems(w, { ...good, wasm_builds_sha256: [pin] }, MAINNET_VAULT).join(";"), /builds do not all agree/);
+  assert.match(pinProblems(w, { ...good, wasm_builds_sha256: [pin, "cd".repeat(32)] }, MAINNET_VAULT).join(";"), /builds do not all agree/);
+  assert.match(pinProblems(w, { ...good, code_hash: "x" }, MAINNET_VAULT).join(";"), /code_hash x is not the base58/);
+  assert.match(pinProblems(w, { ...good, network: "testnet" }, MAINNET_VAULT).join(";"), /a testnet record, not mainnet/);
+  assert.match(pinProblems(w, good, `vault.${MAINNET_PARENT}`).join(";"), /not vault\.bf-test\.near's/);
+  assert.match(pinProblems(w, { ...good, wasm_sha256: undefined }, MAINNET_VAULT).join(";"), /pins no wasm_sha256/);
+});
+
+test("mainnet (b): a pinned wasm missing a required export (settle) is refused before any send", () => {
+  const dir = fresh();
+  const k = keyFile(dir, MAINNET_PARENT);
+  const f = mainnetFiles(dir, mainnetWasm(ALL_EXPORTS.filter((e) => e !== "settle")));
+  const r = run(dir, mainnetArgs(dir, k.file, f));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /refused before any send: missing exports \(vault\.md 2\.5\.7\): settle/);
+  neverSent(r);
+});
+
+test("mainnet (b): each of the seven required exports is required, and a testnet build or a test token is refused", async () => {
+  const { REQUIRED_EXPORTS } = await import(SCRIPT);
+  assert.deepEqual([...REQUIRED_EXPORTS].sort(), ["config", "ft_on_transfer", "on_payout", "ragequit", "settle", "storage_prepay", "withdraw"]);
+  for (const e of REQUIRED_EXPORTS) {
+    // withdraw without on_payout also trips withdrawWithoutPayout; the missing line names the export either way
+    const p = deployProblems(mainnetWasm(ALL_EXPORTS.filter((x) => x !== e)), "mainnet");
+    assert.ok(p.some((x) => x === `missing exports (vault.md 2.5.7): ${e}`), `${e}: ${p.join("; ")}`);
+  }
+  assert.deepEqual(deployProblems(mainnetWasm(), "mainnet"), []);
+  assert.match(deployProblems(wasm({ strings: [TESTNET_TOKEN], exports: ALL_EXPORTS }), "mainnet").join(";"), /not a mainnet build: does not hold mainnet USDC.*holds the testnet token/);
+  // testnet's rules are as they were: no required exports there
+  assert.deepEqual(deployProblems(wasm(), "testnet"), []);
+});
+
+test("mainnet (c): a parent too poor for the code storage, the registration and the gas is refused before any send", () => {
+  const dir = fresh();
+  const k = keyFile(dir, MAINNET_PARENT);
+  const w = mainnetWasm();
+  const f = mainnetFiles(dir, w);
+  const need = BigInt(w.length + 100) * 10n ** 19n + 10n ** 22n + 10n ** 22n + 5n * 10n ** 22n;
+  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), need - 1n);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, new RegExp(`refused before any send: the parent holds ${need - 1n} yocto, short of ${need}`));
+  assert.ok(!methods(dir).some((m) => m.startsWith("send_tx")), methods(dir).join("\n"));
+  // both mainnet operators were asked for the chain id before anything else
+  assert.deepEqual(methods(dir).slice(0, 2), ["status  https://rpc.mainnet.fastnear.com", "status  https://near.drpc.org"]);
+});
+
+test("mainnet (c): a parent holding exactly enough gets to the send, and only then", () => {
+  const dir = fresh();
+  const k = keyFile(dir, MAINNET_PARENT);
+  const w = mainnetWasm();
+  const f = mainnetFiles(dir, w);
+  const need = BigInt(w.length + 100) * 10n ** 19n + 10n ** 22n + 10n ** 22n + 5n * 10n ** 22n;
+  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), need);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /network blocked by the test: send_tx https:\/\/rpc\.mainnet\.fastnear\.com/);
+  assert.match(r.stdout, /no AddKey/);
+});
+
+test("mainnet (d): a batch that would leave a key on the vault (an AddKey, or any action past the four) is refused", async () => {
+  const { recipeProblems, txActionTags } = await import(SCRIPT);
+  const { recipeTx, Borsh } = await import("./near-tx.mjs");
+  const args = { signer: MAINNET_PARENT, publicKey: Buffer.alloc(32, 1), nonce: 8n, receiver: MAINNET_VAULT, blockHash: Buffer.alloc(32, 2), wasm: mainnetWasm(), transfer: 5n, configGas: 10n ** 14n };
+  const tx = recipeTx(args);
+  assert.deepEqual(txActionTags(tx), [0, 3, 1, 2]);
+  assert.deepEqual(recipeProblems(tx), []);
+  // the same four actions with an AddKey (tag 5, a full-access key) after them: the action count says 5
+  const head = Buffer.from(recipeTx({ ...args }));
+  const count = 4 + MAINNET_PARENT.length + 1 + 32 + 8 + 4 + MAINNET_VAULT.length + 32;
+  const withKey = Buffer.concat([head.subarray(0, count), Buffer.from([5, 0, 0, 0]), head.subarray(count + 4), new Borsh().u8(5).u8(0).fixed(Buffer.alloc(32, 3)).u64(0).u8(1).done()]);
+  assert.deepEqual(txActionTags(withKey), [0, 3, 1, 2, 5]);
+  assert.match(recipeProblems(withKey).join(";"), /want exactly \[0, 3, 1, 2\].*no AddKey/);
+  // an AddKey in place of the config call
+  const swapped = Buffer.from(tx);
+  swapped[swapped.length - (1 + 4 + 6 + 4 + 2 + 8 + 16)] = 5;
+  assert.deepEqual(txActionTags(swapped)[3], 5);
+  assert.ok(recipeProblems(swapped).length, "an AddKey in the fourth place passed");
 });

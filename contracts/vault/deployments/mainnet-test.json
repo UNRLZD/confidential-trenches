@@ -1,0 +1,36 @@
+{
+  "network": "mainnet",
+  "account_id": "vault-test.confidential.unrlzd.near",
+  "parent": "confidential.unrlzd.near",
+  "asset": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "scope": "8086271268364488307551911707115823685859436809391798291511922449751894623475",
+  "init": {
+    "method": "config",
+    "args": "{}",
+    "deposit_yocto": "0",
+    "gas": "100000000000000"
+  },
+  "tx_actions": [
+    "CreateAccount",
+    "Transfer",
+    "DeployContract",
+    "FunctionCall(config)"
+  ],
+  "wasm_sha256": "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a",
+  "wasm_builds_sha256": [
+    "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a",
+    "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a"
+  ],
+  "code_hash": "6stBz3WromsLyyeD3FZD133ThTt9XvW6eqVHCA64c5Ff",
+  "build": "cargo +1.96.0 near build non-reproducible-wasm --no-embed-abi --locked --env RUSTFLAGS=-C link-arg=-s --remap-path-prefix=<CARGO_HOME>=/cargo (cargo-near-near 0.22.0, rustc 1.96.0, linux x64), at main 1656ae5a5a521b74467055d8ba6b9beada27f199",
+  "sources": {
+    "account_id": "vault.md 2.8 and M304 D-13: vault-test under confidential.unrlzd.near; deploy.mjs vaultIdProblems: a direct sub-account of the parent",
+    "parent": "owner-decisions vaultname: confidential.unrlzd.near; M200: its one key, KR10",
+    "asset": "contracts/vault/src/constants.rs TOKEN (not feature testnet); config().asset; vault-testnet-t01.mjs MAINNET_USDC",
+    "scope": "contracts/vault/src/context.rs scope_for(current_account_id, TOKEN): keccak256(borsh((\"blindfill-vault-v1\", account_id, asset))) mod p, computed at no init; the same formula gives testnet-v1.json's scope for its account",
+    "init": "the vault has no init method (vault.md 2.5.7; vault-skeleton.mjs EXPORTS_ALLOWED holds none); the recipe's last action is near-tx.mjs recipeTx FunctionCall(config, {}, CONFIG_GAS, 0), deploy.mjs CONFIG_GAS 100 Tgas",
+    "wasm_sha256": "the pin: two clean builds on the team's Linux x64 box at 1656ae5 (deploy.mjs --build-only --flavor mainnet, 5 Nov 11:11Z, both 57535ae7...ca6a, 229,864 B); .github/workflows/vault-build.yml rebuilds it twice on ubuntu-24.04 on every vault change and fails unless it is this pin; deploy.mjs pinProblems refuses any other wasm on mainnet"
+  },
+  "wasm_bytes": 229864,
+  "largest_function_body": 14026
+}
