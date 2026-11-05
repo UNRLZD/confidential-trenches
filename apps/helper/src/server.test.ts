@@ -282,14 +282,14 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const bind = bindSenderFromEnv\(process\.env, watches\);/);
   // card evm-buy-hookdata-fee, fold 4 MEDIUM-1: both pool kinds' start checks exit 2 on a refusal, and ready waits for them
   assert.match(main, /const checked = poolsChecked\(pools, evmPools, \(e\) => \(console\.error\(`helper: \$\{e\.message\}`\), process\.exit\(2\)\)\);/);
-  assert.match(main, /const warmed = Promise\.all\(\[warmUntilReady\(\{ lists, evmLists, token \}\), checked\]\)\.then\(\(\) => void \(ready = true\)\);/);
+  assert.match(main, /const \{ ready, warmed \} = readyGate\(warmUntilReady\(\{ lists, evmLists, token \}\), checked\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
   assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
   // card helper-robinhood-capacity: one hold per provider, the same one handed to /v1/rpc, the EVM lists and the swap reads
   assert.equal(main.match(/const holds = providerHolds\(\);/g)?.length, 1);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, \(\) => ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
   assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env\);/);
   assert.match(main, /const release = releaseOf\(process\.env\);/);

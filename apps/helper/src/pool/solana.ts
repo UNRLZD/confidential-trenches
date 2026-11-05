@@ -343,7 +343,12 @@ export type SolanaPoolSenderDeps = {
   /** The bundle-only sender a mainnet tag 3 goes through (./jito.ts); default the block engines on mainnet, none on
    * any other cluster. null: none (every send plain). */
   jito?: JitoSender | null;
+  /** Where a failed start read is told (POOL_START_LOG_MS apart at most once); default stderr. */
+  log?: (line: string) => void;
 };
+
+/** A failed start rent read is logged the first time, then at most once per this long while the reads keep failing. */
+export const POOL_START_LOG_MS = 60_000;
 
 export type SolanaPoolSender = {
   readonly cluster: string;
@@ -352,7 +357,9 @@ export type SolanaPoolSender = {
   readonly feePayer: string;
   /** Asks this epoch's rent (the first read, at start); settles at the first good read: resolves when the configured
    * fee is the kit's for it, rejects when it is not, and the helper exits (server.ts). A failed read never rejects it:
-   * the pool answers 503 upstream until a read succeeds, and the rest of the helper serves on (M362 (3)). */
+   * the pool answers 503 upstream until a read succeeds, and the rest of the helper serves on (M362 (3)). The helper's
+   * ready waits for it (server.ts readyGate): a deploy beside a running helper stays not ready while the reads fail,
+   * each failure on stderr naming the cluster (the first, then one each POOL_START_LOG_MS). */
   readonly ready: Promise<void>;
   /** GET /v1/pool/fee: the kit's fee for the epoch holding `atMs`, from the rent read in that epoch; the same for every caller. */
   fee(atMs: number): Promise<PoolFeeAnswer>;
@@ -419,8 +426,19 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   };
   // each ask before the check reads this epoch's rent unless a read of it is under way or done (feeOf keeps it); a failed
   // read is dropped, so the next ask (server.ts poolsChecked asks every READY_EVERY_MS) reads again
+  // a failed start read on stderr, naming the cluster and the error (each URL cut to its host: a key may sit in its
+  // path or query); the first, then one a POOL_START_LOG_MS. A mismatch is not one: the helper exits naming it.
+  const log = deps.log ?? ((line: string) => console.error(line));
+  let loggedAt = -Infinity;
+  const startReadFailed = (e: unknown) => {
+    const at = (deps.now ?? Date.now)();
+    if (configured !== "unchecked" || at - loggedAt < POOL_START_LOG_MS) return;
+    loggedAt = at;
+    const why = (e instanceof Error ? e.message : String(e)).replace(/\bhttps?:\/\/[^\s/?#]+[^\s]*/g, (u) => URL.canParse(u) ? new URL(u).host : "<url>");
+    log(`helper: the ${cfg.cluster} pool's rent read failed, its start check waits for a good one: ${why}`);
+  };
   const ready = (): Promise<void> => {
-    if (configured === "unchecked") feeOf(epochStartOf((deps.now ?? Date.now)())).catch(() => {});
+    if (configured === "unchecked") feeOf(epochStartOf((deps.now ?? Date.now)())).catch(startReadFailed);
     return readyP;
   };
   const send = deps.send ?? sendSolanaSet;

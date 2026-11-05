@@ -443,6 +443,70 @@ test("MEDIUM-1 poolsChecked: resolves once every Solana and EVM pool's start che
   assert.deepEqual(refused, []);
 });
 
+test("the helper is never ready before every pool's start check: with the warm-up ready (its lists 200), a Solana pool whose rent reads fail, a Solana fee refused or an EVM check refused keeps /v1/health at ready: false", async (t) => {
+  assert.equal(typeof S.readyGate, "function", "server.ts readyGate");
+  const { ed25519 } = await import("@noble/curves/ed25519.js");
+  const { base58 } = await import("./bind/checks.ts");
+  const { solanaPoolSender } = await import("./pool/solana.ts");
+  const { solanaPoolFee } = await import("@blindfill/kit");
+  const seed = new Uint8Array(Buffer.from(createHashOf("helper-pool-senders/server/FP"), "hex"));
+  const feePayerSecret = base58(Uint8Array.from([...seed, ...ed25519.getPublicKey(seed)]));
+  const program = base58(ed25519.getPublicKey(new Uint8Array(Buffer.from(createHashOf("helper-pool-senders/server/PROGRAM"), "hex"))));
+  const RENT = { lamportsPerByte: 5_080n, factor: 1n as const }; // devnet's and mainnet's: fee 1,300,000
+  const fee = String(solanaPoolFee(RENT));
+  const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // the warm-up's reads all answer 200: warmUntilReady resolves at its first ask
+  const parts = { lists: { get: async () => ok({ lists: { new: [{ token: MINT }] } }) }, evmLists: { base: { get: async () => ok({}) } }, token: { page: async () => ok({}), holders: async () => ok({}) } };
+  const health = async (ready: () => boolean) => {
+    const h = server.start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ...([ready] as never[]));
+    t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));
+    await new Promise<void>((done) => h.on("listening", () => done()));
+    const port = (h.address() as AddressInfo).port;
+    return async () => (JSON.parse((await get(port, "GET", "/v1/health")).body) as { ready: unknown }).ready;
+  };
+  const gateOf = (pools: Map<string, unknown>, evmPools: Map<string, unknown>, refused: string[]) => {
+    const warm = S.warmUntilReady(parts, 10) as Promise<void>;
+    const g = S.readyGate(warm, S.poolsChecked(pools, evmPools, (e: Error) => refused.push(e.message), 10)) as { ready: () => boolean; warmed: Promise<void> };
+    let settled = "pending";
+    g.warmed.then(() => (settled = "ok"), () => (settled = "rejected"));
+    return { warm, g, settled: () => settled };
+  };
+  // 1. the Solana pool's rent reads fail: the check never settles, and the helper is not ready until a read is good
+  let down = true;
+  let reads = 0;
+  const pool = solanaPoolSender({ cluster: "devnet", program, feePayerSecret, fee }, { providers: [(async () => null) as never, (async () => null) as never], log: () => {}, readRent: async () => { reads++; if (down) throw new Error("HTTP 503"); return RENT; } });
+  const refused: string[] = [];
+  const a = gateOf(new Map([["s", pool]]), new Map(), refused);
+  const readyOf = await health(a.g.ready);
+  await a.warm;
+  for (let i = 0; i < 6; i++) {
+    assert.equal(await readyOf(), false, `the warm-up is ready, the rent check is not (${reads} reads)`);
+    await tick(15);
+  }
+  assert.ok(reads >= 3, `asked again while it waits: ${reads}`);
+  assert.equal(a.settled(), "pending");
+  down = false;
+  await a.g.warmed;
+  assert.equal(await readyOf(), true, "ready once the rent check passed");
+  assert.deepEqual(refused, []);
+  // 2. a fee off the kit's for the rent: refused, never ready
+  const off = solanaPoolSender({ cluster: "devnet", program, feePayerSecret, fee: "1400000" }, { providers: [(async () => null) as never, (async () => null) as never], log: () => {}, readRent: async () => RENT });
+  const refused2: string[] = [];
+  const b = gateOf(new Map([["s", off]]), new Map(), refused2);
+  const readyOf2 = await health(b.g.ready);
+  await b.warm;
+  await tick(30);
+  assert.deepEqual([await readyOf2(), b.settled(), refused2.length], [false, "rejected", 1]);
+  assert.match(refused2[0]!, /the devnet pool fee must be the kit's fee for this rent, 1300000 lamports/);
+  // 3. an EVM pool's check refused, the same way
+  const refused3: string[] = [];
+  const c = gateOf(new Map(), new Map([["e", { ready: () => Promise.reject(new Error("POOL_EVM_RPCS_BASE_SEPOLIA: 127.0.0.1:1: no answer")) }]]), refused3);
+  const readyOf3 = await health(c.g.ready);
+  await c.warm;
+  await tick(30);
+  assert.deepEqual([await readyOf3(), c.settled(), refused3], [false, "rejected", ["POOL_EVM_RPCS_BASE_SEPOLIA: 127.0.0.1:1: no answer"]]);
+});
+
 /** The helper's own main on `env` (test keys only), /v1/health read every 50 ms until it exits or `boundMs` passes:
  *  its exit code (or "still running"), its stderr, and every health answer's `ready`. */
 async function startOnce(env: Record<string, string>, boundMs: number): Promise<{ code: number | string; err: string; readies: unknown[] }> {

@@ -192,7 +192,7 @@ function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
     { url: `https://stub.invalid/${Math.random()}` },
   );
 }
-function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number; rent?: SolanaRent; readRent?: (epoch: number) => Promise<SolanaRent> } = {}) {
+function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number; rent?: SolanaRent; readRent?: (epoch: number) => Promise<SolanaRent>; log?: (line: string) => void } = {}) {
   return solanaPoolSender(
     { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(o.fee ?? FEE) },
     {
@@ -200,6 +200,7 @@ function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = 
       ...(o.memory ? { memory: o.memory } : {}),
       now: o.now ?? (() => NOW),
       readRent: o.readRent ?? (async () => o.rent ?? TEST_RENT),
+      log: o.log ?? (() => {}),
       send: (set) => {
         sent.push(set[0]!.wire);
         const sig = base58(set[0]!.wire.subarray(1, 65));
@@ -289,6 +290,55 @@ test("M362 (3): a failed rent read never rejects ready: the pool answers 503 ups
   fail = false;
   assert.equal(code(await t.carry(body(build()))), "upstream");
   await assert.rejects(r, /the kit's fee for this rent, 2000000/);
+});
+
+test("a failed start rent read is one stderr line naming the cluster and the error: the first, then one a minute while they fail; none once checked", async () => {
+  const tick = () => new Promise((r) => setImmediate(r));
+  let now = NOW;
+  let why = "HTTP 503";
+  let fail = true;
+  const lines: string[] = [];
+  const s = sender(null, [], [], { now: () => now, log: (l) => lines.push(l), readRent: async () => { if (fail) throw new Error(why); return TEST_RENT; } });
+  const ask = async (atMs: number) => ((now = atMs), void s.ready, await tick());
+  await ask(NOW);
+  assert.deepEqual(lines, ["helper: the devnet pool's rent read failed, its start check waits for a good one: HTTP 503"], "the first failure, at once");
+  for (const at of [NOW + 2_000, NOW + 30_000, NOW + 59_999]) await ask(at);
+  assert.equal(lines.length, 1, "none again within the minute");
+  // a URL in the error is cut to its host: a key in its path or query is never printed
+  why = "Failed to parse URL from https://rpc.example.com/k3y-in-path/?api-key=s3cret-in-query";
+  await ask(NOW + 60_000);
+  assert.equal(lines.length, 2, "one a minute while they fail");
+  assert.equal(lines[1], "helper: the devnet pool's rent read failed, its start check waits for a good one: Failed to parse URL from rpc.example.com");
+  await ask(NOW + 119_999);
+  assert.equal(lines.length, 2);
+  fail = false;
+  await ask(NOW + 300_000);
+  await s.ready;
+  fail = true;
+  for (const at of [NOW + 400_000, NOW + 500_000]) await ask(at);
+  assert.equal(lines.length, 2, "none once the check has passed");
+  // a refused fee is not a failed read: the helper exits naming it (server.ts), with no rent read line
+  const refusedLines: string[] = [];
+  const m = sender(null, [], [], { fee: 1_300_000n, log: (l) => refusedLines.push(l) });
+  await assert.rejects(m.ready, /the kit's fee for this rent/);
+  void m.ready;
+  await tick();
+  assert.deepEqual(refusedLines, []);
+});
+
+test("ready reads the rent only until the start check settles: an ask after it, in a later epoch, reads nothing", async () => {
+  for (const fee of [FEE, 1_300_000n]) {
+    let now = NOW;
+    let reads = 0;
+    const s = sender(null, [], [], { fee, now: () => now, readRent: async () => (reads++, TEST_RENT) });
+    await s.ready.catch(() => undefined);
+    assert.equal(reads, 1);
+    for (let i = 1; i <= 3; i++) {
+      now = NOW + i * POOL_EPOCH_MS;
+      await s.ready.catch(() => undefined);
+    }
+    assert.equal(reads, 1, `fee ${fee}: no read after the check ${fee === FEE ? "passed" : "refused"}`);
+  }
 });
 
 test("the fee payer's key: 64 bytes whose public half is its seed's", () => {

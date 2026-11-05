@@ -187,7 +187,10 @@ export async function bindEpoch(fromS, nowOf, sleep) {
   }
 }
 
-export async function main(args, io = {}) {
+/** The run's wiring from its arguments, the one place main takes it from: the options, the sync's pair `rpcs`, the fee's
+ *  providers `feeUrls` and `feeRpcs`, the device's arguments (`deviceArgs`) and each bind's epoch at --bind-from-s
+ *  (`bind`). Throws on an argument the run refuses. */
+export function wiringOf(args, io = {}) {
   const fetchFn = io.fetchFn ?? ((u, i) => globalThis.fetch(u, i));
   const sleep = io.sleep ?? realSleep;
   const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
@@ -206,13 +209,25 @@ export async function main(args, io = {}) {
   const sellHelper = opt("--sell-helper");
   if (args.includes("--sell-helper") && !/^https?:\/\/[^/\s]+$/.test(sellHelper ?? "")) throw new Error("--sell-helper: a helper's base URL, no path");
   if (!out) throw new Error("a dry run (loopback RPCs) needs --out, so it never writes the real record");
-  const call = (method, params, u = urls[0]) => rpc(fetchFn, u, method, params, sleep);
   const evmRpc = (u) => Object.assign((method, params) => rpc(fetchFn, u, method, params, sleep), { url: u });
   const rpcs = [evmRpc(urls[0]), evmRpc(urls[1])];
   // the fee's state reads at the epoch's first block (the device's bind and the relayer's answer): the kit pin's two
   // providers, which keep state a proof's life back (live check evm-buy-hookdata-fee); the dry run's fork for both
   const feeUrls = feeProviders(chain, opt("--rpc"));
   const feeRpcs = [evmRpc(feeUrls[0]), evmRpc(feeUrls[1])];
+  return {
+    fetchFn, sleep, chain, net, ret, venues, urls, dryRun, bindFromS, out, sellHelper, evmRpc, rpcs, feeUrls, feeRpcs,
+    /** The device's pool's arguments (deviceOf): the sync on the run's pair, the fee's state reads on the fee's. */
+    deviceArgs: (pin, relayFee) => ({ pin, rpcs, feeRpcs, relayFee }),
+    /** A bind's epoch: once the pool's time (`nowOf`) is at least --bind-from-s into it (bindEpoch). */
+    bind: (nowOf) => bindEpoch(bindFromS, nowOf, sleep),
+  };
+}
+
+export async function main(args, io = {}) {
+  const w = wiringOf(args, io);
+  const { fetchFn, sleep, chain, net, ret, venues, urls, dryRun, out, sellHelper, evmRpc, rpcs, feeRpcs } = w;
+  const call = (method, params, u = urls[0]) => rpc(fetchFn, u, method, params, sleep);
   // the device's quotes: a real run's on the chain's pinned providers (the kit's index); the dry run's on the fork
   const batchRpc = (u) => async (calls) => {
     const res = await fetchFn(u, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params }))) });
@@ -286,7 +301,7 @@ export async function main(args, io = {}) {
     const fee = epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas, depth, chainFee: kit.evmPoolChainFee(chain, kit.EVM_POOL_TX_BYTES, answers) });
     return { chain: "evm", network: chain, pool, fee_recipient: relayer, epoch_ms: Number(EVM_EPOCH_MS), epoch_start_ms: Number(epochStartMs), block: `0x${block.number.toString(16)}`, fee: fee.toString(), step: FEE_STEP.toString() };
   };
-  const device = deviceOf({ pin, rpcs, feeRpcs, relayFee });
+  const device = deviceOf(w.deviceArgs(pin, relayFee));
   // The device's one sync is evmPool's own (its trees and bind's depthAt share one cache); the relayer's is the
   // relaySync above. A cold sync reads every block from the pool's deploy block: on sepolia.base.org, whose eth_getLogs
   // takes 200 blocks a call (read 4 Nov 22:00Z), that is one call per ~156 blocks at ~0.36 s, ~12 min for the 305,000
@@ -376,7 +391,7 @@ export async function main(args, io = {}) {
     const trees = await treesAfter(note.block);
     // the epoch from the pool's time after the trees, at least --bind-from-s into it: bind refuses a deadline within
     // the send margin of now
-    const { epochStartMs, into } = await bindEpoch(bindFromS, () => evmNow(rpcs), sleep);
+    const { epochStartMs, into } = await w.bind(() => evmNow(rpcs));
     console.log(`run: bind ${Number(into / 1000n)} s into epoch ${new Date(Number(epochStartMs)).toISOString()}`);
     const l = note.label, j = jOf(note.ref);
     const W = freshWallet(seed64, "evm", l, j);

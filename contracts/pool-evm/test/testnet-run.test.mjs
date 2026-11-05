@@ -184,3 +184,41 @@ test("the fee's state reads go to the kit pin's providers, the sync to the run's
   assert.throws(() => run.deviceOf({ pin, rpcs, feeRpcs: [r("https://c.example")], relayFee: async () => null }), /rpcs: two/);
   assert.throws(() => run.deviceOf({ pin, rpcs, feeRpcs: [r("https://c.example"), r("https://c.example")], relayFee: async () => null }), /one provider twice/);
 });
+
+test("main takes its fee providers, its bind seconds and the device's arguments from wiringOf: the fee's reads on the kit pin's pair, the sync on the run's, each bind at --bind-from-s", async () => {
+  assert.equal(typeof run.wiringOf, "function", "testnet-run.mjs wiringOf");
+  const chain = "robinhood-testnet";
+  const pinned = kitIndex.evmPoolVenues()[chain].providers;
+  const asked = [];
+  const fetchFn = async (u, init) => (asked.push([u, JSON.parse(init.body).method]), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0xb626" })));
+  let clock = 1_800_000_000_000n + 3_000n; // 3 s into an epoch
+  const sleeps = [];
+  const sleep = async (ms) => (sleeps.push(ms), (clock += BigInt(ms)));
+  const w = run.wiringOf(["--chain", chain, "--return", "0x00000000000000000000000000000000000a11ce", "--bind-from-s", "25"], { fetchFn, sleep });
+  const urlsOf = (rs) => rs.map((r) => r.url);
+  assert.deepEqual(w.feeUrls, pinned, "the fee's providers: the kit pin's");
+  assert.deepEqual(urlsOf(w.feeRpcs), pinned);
+  assert.deepEqual(urlsOf(w.rpcs), run.NETS[chain].rpcs, "the sync: the run's pair");
+  assert.notDeepEqual(urlsOf(w.feeRpcs), urlsOf(w.rpcs));
+  // each fee RPC reads through the run's fetch, at its own URL
+  assert.equal(await w.feeRpcs[1]("eth_chainId", []), "0xb626");
+  assert.deepEqual(asked, [[pinned[1], "eth_chainId"]]);
+  // the device's arguments: the run's pair for the sync, the fee pair for the fee's reads, the pin and relayFee as given
+  const pin = { network: chain, pool: "0x00000000000000000000000000000000b1f1f001", feeRecipient: "0x000000000000000000000000000000000000fee1", fromBlock: 1n };
+  const relayFee = async () => null;
+  const a = w.deviceArgs(pin, relayFee);
+  assert.deepEqual([a.pin, a.relayFee, urlsOf(a.rpcs), urlsOf(a.feeRpcs)], [pin, relayFee, run.NETS[chain].rpcs, pinned]);
+  assert.ok(run.deviceOf(a));
+  // a bind at --bind-from-s 25: 3 s in, it waits 22 s and binds that epoch
+  assert.deepEqual(await w.bind(async () => clock), { epochStartMs: 1_800_000_000_000n, into: 25_000n });
+  assert.deepEqual(sleeps, [22_000]);
+  // a dry run's fork for both pairs
+  const d = run.wiringOf(["--chain", "base-sepolia", "--return", "0x00000000000000000000000000000000000a11ce", "--rpc", "http://127.0.0.1:1,http://localhost:2", "--out", "/dev/null"], { fetchFn, sleep });
+  assert.deepEqual([urlsOf(d.rpcs), d.feeUrls, d.dryRun, d.bindFromS], [["http://127.0.0.1:1", "http://localhost:2"], ["http://127.0.0.1:1", "http://localhost:2"], true, 0]);
+  // and main builds its device and binds through it, never with its own wiring
+  assert.match(RUN, /export async function main\(args, io = \{\}\) \{\n  const w = wiringOf\(args, io\);\n/);
+  assert.match(RUN, /const device = deviceOf\(w\.deviceArgs\(pin, relayFee\)\);/);
+  assert.match(RUN, /await w\.bind\(\(\) => evmNow\(rpcs\)\);/);
+  const body = RUN.split("export async function main(")[1];
+  assert.doesNotMatch(body, /\b(feeProviders|bindEpoch|evmPool)\(|bindFromS|--rpc"|--bind-from-s"/, "no second source of the fee's providers, the bind seconds or the device");
+});
