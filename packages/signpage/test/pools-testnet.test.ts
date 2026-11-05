@@ -39,7 +39,7 @@ const EVM_PIN: EvmPoolPin = {
   fromBlock: 1n,
 };
 const evmKind = (pin: EvmPoolPin) => evmPool({ pin, rpcs: RPCS, feeRpcs: [async () => null, async () => 1] as const, relayFee: never, epochFee: () => 0n });
-// the Rent sysvar as Solana has it: 3,480 lamports per byte-year, exempt at 2 years
+// a Rent sysvar at the older rate: 3,480 lamports per byte-year, exempt at 2 years (the live check read mainnet 5 Nov 16:29Z: 5,080 per byte, factor 1)
 const RENT = { lamportsPerByte: 3480n, factor: 2n } as const;
 const CHUNK = 50_000_000n; // 0.05 SOL
 // the epoch fee the device computes at that rent (1,700,000 lamports), each proof's fee cap
