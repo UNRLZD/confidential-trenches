@@ -1,7 +1,8 @@
 // Replays pool-sol-deploy-mainnet.answers.json through the mainnet live check. The base (the dry run's answers moved to
 // mainnet's URLs and genesis, the programdata holding the pinned code, the frozen table) passes; each recorded bad answer
 // (an upgrade authority set, another hash, two RPCs that differ, a table with a live authority, deactivated, short one
-// address, or differing between the RPCs) fails on its own line. Once the owner's paste has written
+// address, differing between the RPCs, or a table and its record that agree but hold another address at a fixed venue
+// entry, which only the kit's own list catches) fails on its own line. Once the owner's paste has written
 // contracts/pool-solana/deployments/mainnet.json, its own recording on mainnet (pool-sol-deploy-mainnet.good.json) is
 // the good answer and passes.
 //   node --test scripts/live-checks/pool-sol-deploy-mainnet.test.mjs
