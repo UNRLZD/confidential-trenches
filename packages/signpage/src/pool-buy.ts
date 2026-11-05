@@ -38,13 +38,16 @@
 //   or none read back: the signed transaction may still land, so the answer is not_landed only once both RPCs'
 //   finalized height is past the blockhash's last valid one (the higher of RPC 0's word and RPC 1's height + 151) and
 //   the note's settle still finds no spend; past the reads it is "sent".
+// - What the app is told (card signpage-sent-read-back): the helper's signature is a name to read back, never a fact.
+//   The kind answers "sent" with it, and an answer's txs name it, only once each RPC read this very transaction's
+//   bytes under it. Before that the app has no answer and no transaction id; one read as another transaction, or on
+//   one RPC only, is never named (a broken-in helper's word, or another device's).
 // - Whose spend (card signpage-buy-own-spend): a spend the settle finds is filled only once both RPCs read, at
 //   finalized, that it is this attempt's (pool-spend.ts spendOwner: this transaction by the helper's signature, else
-//   W's history, its context this proof's), and filled names that spend's own signature; no answer names the helper's
-//   signature once an RPC read another transaction under it (another device's, say). Another device signed in with the same 12 words spends the same note to the
-//   same W from its own note store, so the spent mark alone never says the tokens are this buy's: another's spend is
-//   not_landed (this transaction can never land on a spent note), and one not read yet is never filled. The settle
-//   writes the change either way.
+//   W's history, its context this proof's), and filled names that spend's own signature. Another device signed in
+//   with the same 12 words spends the same note to the same W from its own note store, so the spent mark alone never
+//   says the tokens are this buy's: another's spend is not_landed (this transaction can never land on a spent note),
+//   and one not read yet is never filled. The settle writes the change either way.
 // - Spent: only then is the note settled through the wallet's one place for it (solanaSettleSpent: the spent mark and
 //   the change leaf read on two RPCs, the change written UNSPENT naming the note, which goes SPENT). That SPENT note is
 //   W's record: the buy wallets list (../../wallet/src/pool/buy-wallets.ts spentNotesOf) finds W and reads its holdings.
@@ -115,7 +118,11 @@ export type PoolBuyHost = {
   /** Read-back reads and the wait between them. */
   reads?: number;
   wait?(ms: number): Promise<void>;
-  /** The transaction was sent: its signature (the helper's word until it reads back). */
+  /** The helper's word for the transaction's signature, before any read-back: only a name to read back first (a pool
+   *  withdraw keeps it with the owed send), never shown and never an answer's. */
+  named?(signature: string): void | Promise<void>;
+  /** Both RPCs read this very transaction's bytes under that signature: its signature, told once. Never before, so
+   *  nothing the app is told names a transaction the chain did not read as this one. */
   sent?(signature: string): void | Promise<void>;
   /** The buy's route as the run binds and reads it (messages.ts BuyRoute): W and the venue with its pool once the check
    *  passed and W derived to the proof's recipient, then the amount W received once the transaction read back on both
@@ -337,8 +344,10 @@ export async function readBack(rpc: SolanaRpc, signature: string, signed: Uint8A
   return (await readBackMeta(rpc, signature, signed)).got;
 }
 
-/** readBack, with the transaction's meta when it is this very transaction (the token balances the fill is read from). */
-async function readBackMeta(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<{ got: "none" | "ok" | "failed" | "other"; meta?: Record<string, unknown> }> {
+/** readBack, with the transaction's meta when it is this very transaction (the token balances the fill is read from),
+ *  and `mine`: the RPC answered this very transaction's bytes under the signature (ok, failed, or a meta that says
+ *  nothing), the read that lets an answer name it. */
+async function readBackMeta(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<{ got: "none" | "ok" | "failed" | "other"; mine?: true; meta?: Record<string, unknown> }> {
   const r = (await rpc("getTransaction", [signature, { encoding: "base64", commitment: "confirmed", maxSupportedTransactionVersion: 0 }])) as { transaction?: unknown; meta?: { err?: unknown } } | null;
   if (r === null) return { got: "none" };
   const t = r?.transaction;
@@ -350,8 +359,8 @@ async function readBackMeta(rpc: SolanaRpc, signature: string, signed: Uint8Arra
   // this very transaction, its meta unreadable (absent, not an object, no `err`): it proves nothing either way, so the
   // reads go on and the answer keeps the transaction's ref
   const meta = r.meta as unknown;
-  if (typeof meta !== "object" || meta === null || Array.isArray(meta) || !Object.hasOwn(meta, "err") || (meta as { err: unknown }).err === undefined) return { got: "none" };
-  return { got: (meta as { err: unknown }).err === null ? "ok" : "failed", meta: meta as Record<string, unknown> };
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta) || !Object.hasOwn(meta, "err") || (meta as { err: unknown }).err === undefined) return { got: "none", mine: true };
+  return { got: (meta as { err: unknown }).err === null ? "ok" : "failed", mine: true, meta: meta as Record<string, unknown> };
 }
 
 /** What `owner` received of `mint` in one transaction, from its meta's token balances (post less pre, summed over the
@@ -498,7 +507,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
  *  fill: the buy's route, told as the run goes (W and the venue with its pool once the take holds the note, the amount
  *  out once the transaction reads back); none for a pool withdraw, whose release tells no buy route. */
 export async function sendAndSettle(
-  h: Pick<PoolBuyHost, "rpcs" | "take" | "send" | "settle" | "now" | "reads" | "sent">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
+  h: Pick<PoolBuyHost, "rpcs" | "take" | "send" | "settle" | "now" | "reads" | "named" | "sent">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
   fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[] },
 ): Promise<PoolBuyAnswer> {
   // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD
@@ -541,7 +550,7 @@ export async function sendAndSettle(
   // finds no spend (the kit's rule: never not_landed while the transaction may still land,
   // packages/kit/src/trade/solana/flow.ts finishSolanaSet); until then the reads go on, and past them the answer is
   // "sent", the note RESERVED (or SPENT with its change, whose spend not read yet) for the state reads' pass. `txs`
-  // names the helper's signature only while no RPC read it as another transaction.
+  // names the helper's signature only once both RPCs read this very transaction under it.
   const unlanded = async (txs: TxRef[], hint?: string): Promise<PoolBuyAnswer> => {
     for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
       if (i > 0) await wait(POOL_BUY_WAIT_MS);
@@ -570,23 +579,31 @@ export async function sendAndSettle(
   }
   const signature = (answer as { signature?: unknown } | null)?.signature;
   if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature) || base58.decode(signature).length !== 64) return unlanded([]);
-  await h.sent?.(signature);
+  // the helper's word: a name to read back, kept by a withdraw's owed send, never told or answered before it reads back
+  await h.named?.(signature);
+  // the answers that name it: only once each RPC read this very transaction's bytes under it (`seen`), then told as
+  // sent once; one read as another transaction, or on one RPC only, is never named
   const txs: TxRef[] = [{ chain: "solana", hash: signature }];
+  const seen = [false, false];
+  let ours = false;
   let landed = false;
-  // an RPC read another transaction under the helper's signature: no answer names it (it may be another device's)
-  let foreign = false;
   for (let i = 0; i < reads && !landed && (i === 0 || inTime()); i++) {
     if (i > 0) await wait(POOL_BUY_WAIT_MS);
     type Read = Awaited<ReturnType<typeof readBackMeta>>;
     const metas: readonly Read[] = await both(h, (rpc) => readBackMeta(rpc, signature, signed)).catch((): Read[] => [{ got: "none" }, { got: "none" }]);
     const got: readonly Got[] = metas.map((m) => m.got);
-    if (got.includes("other")) foreign = true;
+    metas.forEach((m, p) => void (seen[p] ||= m.mine === true));
     // another transaction under that name on both RPCs: the helper's signature is not this one's
     if (got[0] === "other" && got[1] === "other") return unlanded([], signature);
     // this very transaction failed on chain, on both RPCs: it spent nothing, and it can never land again; a spend the
     // settle finds is another's, so not_landed at once
     if (got[0] === "failed" && got[1] === "failed") return (await spent()) ? { stage: "not_landed", txs } : { stage: "refused", txs };
     landed = got[0] === "ok" && got[1] === "ok";
+    // read back on both RPCs as this very transaction: only now is it told as sent, by its signature
+    if (!ours && seen[0] && seen[1]) {
+      ours = true;
+      await h.sent?.(signature);
+    }
     if (landed && fill) {
       // the amount W received, from this very transaction on both RPCs: the two the same and at least the min out the
       // device asked, else not shown
@@ -597,7 +614,7 @@ export async function sendAndSettle(
       if (out !== null && SIGNPAGE_ROUTE_OUT.test(out)) fill.tell({ out });
     }
   }
-  if (!landed) return unlanded(foreign ? [] : txs, signature);
+  if (!landed) return unlanded(ours ? txs : [], signature);
   // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized), then filled
   // only once both RPCs read the spend as this attempt's
   for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
@@ -611,8 +628,9 @@ export async function sendAndSettle(
 
 type Locks = Pick<LockManager, "request">;
 
-/** The pool.buy kind: one run per tap under the seed's shared lock (sign out waits for it), answered at the send (its
- *  signature) or at the run's end, then its stage as it comes. */
+/** The pool.buy kind: one run per tap under the seed's shared lock (sign out waits for it), answered "sent" with its
+ *  signature once that reads back on both RPCs as this very transaction (sendAndSettle's sent), or at the run's end
+ *  with the run's own answer, then its stage as it comes. */
 export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
