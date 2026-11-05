@@ -6,7 +6,7 @@
 // says it is the token's, on two agreeing providers; a pool the chain does not confirm is discovered as before.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CURVE_TOKEN, fakeChain, open, REC } from "../../../test/evm-swaps/robinhood.ts";
+import { CURVE_TOKEN, fakeChain, MAG, open, POOL_MAG, REC } from "../../../test/evm-swaps/robinhood.ts";
 import { toRows } from "./lists.ts";
 import { TOPIC } from "./swaps.ts";
 
@@ -90,4 +90,39 @@ test("card helper-robinhood-capacity fold 5: an eth_call at a mined block is ask
   s.stop();
   assert.equal(a.status, 200, a.body);
   assert.equal(decimals, 2, `the token's decimals asked ${decimals} times`);
+});
+
+test("card helper-robinhood-capacity fold 9: a listed v4 pool id the PositionManager holds no key for, with swaps: its key is worked out from its newest swap's receipt (v4Key, hashed to the id) and its tape is read at once: the tape of the known pool, no Transfer walk", async () => {
+  const run = async (known: boolean) => {
+    const chain = fakeChain();
+    chain.st.head = REC.lastHead;
+    let transfers = 0;
+    let receipts = 0;
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+      const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+      for (const r of reqs) {
+        const q = r.params[0] as { address?: string; topics?: unknown[] };
+        if (r.method === "eth_getLogs" && q?.address === MAG && q.topics?.[0] === TOPIC.transfer) transfers++;
+      }
+      // the transaction's receipt, as a provider answers it: its recorded logs (the fake chain answers none)
+      if (reqs.length === 1 && reqs[0]!.method === "eth_getTransactionReceipt") {
+        receipts++;
+        const tx = reqs[0]!.params[0];
+        const logs = REC.logs.v4.filter((l) => l.tx === tx).map((l) => ({ address: l.a, topics: l.t, data: l.d, blockNumber: `0x${l.b.toString(16)}`, logIndex: `0x${l.i.toString(16)}`, transactionHash: l.tx, removed: false }));
+        return Response.json([{ jsonrpc: "2.0", id: reqs[0]!.id, result: { status: "0x1", transactionHash: tx, logs } }]);
+      }
+      return chain.fetch(url, init);
+    };
+    const s = open(chain, { t: 1_000_000 }, { pools: known ? new Map([[MAG, { pool: POOL_MAG, decimals: 18 }]]) : new Map(), fetch: fetch as never, hint: async () => REC.v4id });
+    const a = await s.trades(MAG, 50);
+    s.stop();
+    return { a, transfers, receipts };
+  };
+  const known = await run(true);
+  const hinted = await run(false);
+  assert.equal(hinted.a.status, 200, hinted.a.body);
+  assert.ok(JSON.parse(known.a.body).trades.length > 0, "the known pool's tape has trades");
+  assert.equal(hinted.a.body.replace(/"as_of_ms":\d+/, ""), known.a.body.replace(/"as_of_ms":\d+/, ""), "the tape of the known pool");
+  assert.equal(hinted.transfers, 0, "no Transfer walk");
+  assert.ok(hinted.receipts > 0, "the newest swap's receipt was read");
 });

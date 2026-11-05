@@ -1139,12 +1139,38 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const decimals = decimalsOf(got[0]);
     if (decimals === null) throw new Error("decimals not agreed");
     let pool = id ? v4Pool(token, hint, got[1]) : (curvePools(token, got.slice(1)).find((c) => c.id === hint) ?? null);
+    if (pool === null && id) pool = await v4FromSwap(token, hint, head);
     if (pool === null && !id) {
       const [f, t0, t1] = await callsAgreed(head.n, [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: hint, data })));
       const c = pairPool(token, hint, f, t0, t1);
       pool = c === null ? null : (await confirmed(head.n, [{ pool: c, factory: wordAddr(f)!, t0: wordAddr(t0)!, t1: wordAddr(t1)! }]))[0]!;
     }
     return pool === null ? null : { pool, decimals };
+  }
+
+  /**
+   * A listed v4 pool id the PositionManager holds no key for (a pool made without it, as Doppler's and Zora's are): its
+   * key worked out from its newest swap, as the discovery does (v4Key: the key must hash to the id and hold the token),
+   * the swap read as a tape's (agreedRange: from the chain's index on Robinhood) and its transaction's receipt for the
+   * addresses a hook may be among. Null when the pool has no swap in the cold window or no key hashes to it: the token is
+   * then discovered as before. Before (card helper-robinhood-capacity fold 9), such a token always took the discovery's
+   * transfer walk: 5.9 to 20.4 s of 12 cold tapes at once (SCHIFFY, WORM, 0x98096d, 0xc80333; 06:05-06:08Z), the
+   * only tapes past 15 s.
+   */
+  async function v4FromSwap(token: string, id: string, head: { n: number; with: string[] }): Promise<Pool | null> {
+    const w = await walk(head.with, (lo, hi) => swapFilter({ venue: "v4", id }, lo, hi, chain), head.n, 1, (part) => part.length);
+    const l = w?.logs.filter((x) => x.address === V.poolManager && x.topics.length === 3 && x.topics[0] === TOPIC.swap4 && x.topics[1] === id && x.data.length === 2 + 64 * 6).at(-1);
+    if (l === undefined) return null;
+    const fee = Number(BigInt(`0x${l.data.slice(2 + 64 * 5)}`));
+    for (const u of single(byFree(usable(rpcs)), 1).slice(0, 2)) {
+      const r = await batchTo(u, [{ method: "eth_getTransactionReceipt", params: [l.tx] }]);
+      const x = r?.[0];
+      const raw = x?.ok ? obj((x as { result: unknown }).result).logs : undefined;
+      if (!Array.isArray(raw)) continue;
+      const around = [...new Set(raw.map(parseLog).flatMap((o) => (o === null ? [] : [o.address])))];
+      return v4Pool(token, id, v4Key(id, token, fee, around, chain) ?? undefined);
+    }
+    return null;
   }
 
   async function findPool(token: string): Promise<Found | null> {
