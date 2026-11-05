@@ -132,6 +132,7 @@ contract HostileSellV4Test is SellV4Base {
       pool: address(pool),
       precommitment: PRE,
       feeCap: FEE,
+      feeRecipient: SENDER,
       deadline: block.timestamp + 60,
       nonce: 0
     });

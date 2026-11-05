@@ -25,6 +25,9 @@
 //   notes: the deposit landed when its note is UNSPENT, the buy filled when that note is SPENT and no stage but sent or
 //   filled was told, the sell filled when a return note is UNSPENT with a leaf and no stage but sent or filled was told.
 //   The sell's amount is all W holds of the coin, as W's token account reads at finalized (W: the buy tx's second key).
+// - After the full sell, the rent back runs (card sol-buy-rent-back: the teardown frames, then W's sweep into the pool):
+//   W's token account, both volume accounts and W's own lamports are read at finalized (null: no account), and every
+//   transaction the page sent is listed by its signature, in order.
 // - It writes the answers, the stages, the notes and every tx to <out.json>; exit 0 only when both landed.
 // - The run's seed is written, before U is asked for, to ~/.ct-devnet-runs/run-<time>.seed (the folder 0700, the file
 //   0600, the 16 bytes in hex; outside the repo, so no commit can carry it; its path is logged, never its bytes), and
@@ -68,6 +71,17 @@ const BURST = process.env.FLOW_BURST === "1";
 const RPC_HOSTS = new Set(Object.values(TESTNET_RPCS).flat().map((u) => new URL(u).host));
 const injected = { rpc: 0, send: 0 };
 const asked = new Map();
+// every transaction the page sends on a devnet RPC, by its first signature, in order (card sol-buy-rent-back: the sell,
+// then its rent back, the teardown frames and the sweep); public bytes only
+const sentTxs = [];
+const sentOf = (init) => {
+  try {
+    const b = JSON.parse(String(init?.body ?? ""));
+    if (b?.method !== "sendTransaction") return;
+    const sig = base58.encode(Buffer.from(String(b.params?.[0]), "base64").subarray(1, 65));
+    if (!sentTxs.includes(sig)) sentTxs.push(sig);
+  } catch {}
+};
 // every devnet RPC answer of 429 or 5xx is logged (the page retries it); FLOW_BURST injects the bursts above
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (u, init) => {
@@ -75,6 +89,7 @@ globalThis.fetch = async (u, init) => {
   if (!RPC_HOSTS.has(host)) return realFetch(u, init);
   const n = (asked.get(host) ?? 0) + 1;
   asked.set(host, n);
+  sentOf(init);
   if (BURST && n % 15 <= 2 && n % 15 >= 1) {
     injected.rpc++;
     log(`rpc ${host}: 429 injected (request ${n})`);
@@ -262,6 +277,7 @@ if (landed) {
   log(`buy ${JSON.stringify(buy)}`);
 }
 let sell = null;
+let rentBack = null;
 const bought = buy?.notes?.some((n) => n.state === "SPENT");
 if (bought) {
   const sig = buy.answer.result.txs[0].hash;
@@ -277,13 +293,28 @@ if (bought) {
   log(`pool.sell of ${amount} of ${MINT} from W ${W}`);
   sell = await run("pool.sell", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
   log(`sell ${JSON.stringify(sell)}`);
+  // the rent back (card sol-buy-rent-back): after the full sell, W's token account and volume accounts at finalized,
+  // and W's own lamports: each closed (null) and W at 0 when it all came back; read once every transaction the page
+  // sent is finalized (90 s at most), since the page reads its rent back at confirmed
+  for (let i = 0; i < 45; i++) {
+    const st = (await rpcs[0]("getSignatureStatuses", [sentTxs])).value;
+    if (st.every((s) => s?.confirmationStatus === "finalized")) break;
+    await sleep(2_000);
+  }
+  const info =async (a) => (await rpcs[0]("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value;
+  const program = (await info(MINT)).owner;
+  const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
+  const { solanaVolumeAccumulator, SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
+  const left = async (a) => (await info(a))?.lamports ?? null;
+  rentBack = { W, tokenAccount: await left(solanaAta(W, MINT, program)), pumpVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_PROGRAM)), ammVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_AMM_PROGRAM)), w: await left(W) };
+  log(`after the rent back ${JSON.stringify(rentBack)}`);
 }
 const notes = await noteList();
 log(`notes ${JSON.stringify(notes)}`);
 const told = (kind) => !stages.some((x) => x.kind === kind && x.stage !== "sent" && x.stage !== "filled");
 const filled = landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
 seed64.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, U, need: String(NEED), deposit, buy, buyTimeline: timeline, sell, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, U, need: String(NEED), deposit, buy, buyTimeline: timeline, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

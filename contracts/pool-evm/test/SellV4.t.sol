@@ -220,6 +220,7 @@ abstract contract SellV4Base is SellBase {
       pool: address(pool),
       precommitment: PRE,
       feeCap: FEE,
+      feeRecipient: SENDER,
       deadline: block.timestamp + 60,
       nonce: _nonce
     });

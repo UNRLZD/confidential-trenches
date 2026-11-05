@@ -20,7 +20,7 @@ test("each call's data is cast calldata's, byte for byte", () => {
   assert.equal(depositData(5n, 6n), V.deposit);
   assert.equal(withdrawData(A, "0xaabbcc", PROOF, 17n, `0x${"ab".repeat(65)}`), V.withdraw);
   assert.equal(buyData(A, "0xaabbcc", PROOF, 17n, { adapter: B, data: "0x0102", minOut: 18n, token: A }, `0x${"cd".repeat(65)}`), V.buy);
-  assert.equal(sellData({ token: A, amount: 1n, target: B, data: "0x0a0b0c", minOut: 2n, pool: A, precommitment: 3n, feeCap: 4n, deadline: 5n, nonce: 6n }, 7n, `0x${"ef".repeat(65)}`), V.sell);
+  assert.equal(sellData({ token: A, amount: 1n, target: B, data: "0x0a0b0c", minOut: 2n, pool: A, precommitment: 3n, feeCap: 4n, feeRecipient: B, deadline: 5n, nonce: 6n }, 7n, `0x${"ef".repeat(65)}`), V.sell);
   assert.equal(v4QuoteData({ currency0: Z, currency1: A, fee: 100, tickSpacing: 1, hooks: Z }, true, 1000n), V.v4Quote);
   assert.equal(v3QuoteData(A, B, 1000n, 3000), V.v3Quote);
   // a changed value changes the data (the encoder reads every field)

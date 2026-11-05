@@ -466,12 +466,14 @@ export async function main(args, io = {}) {
       }
       if (amount !== BigInt(b.out)) throw new Error(`W ${W.address} holds ${amount} of the token, not the ${b.out} its buy paid, after 60 s`);
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
+      const sellFeeTo = sellHelper ? lower((await (await fetchFn(`${sellHelper}/v1/pool/fee?pool=${pool}`)).json()).fee_recipient) : relayer;
       const { q, built } = await fresh(
         // `bought` and `boughtBlock`: the route of the buy that paid W the token and the block it landed in, which the
         // sell quote requires (it reads at that block or a later one)
         () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block }),
-        // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole
-        (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
+        // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole, paid to the fee
+        // recipient W signs (pool review round 3, L-1): the helper's own, as its GET /v1/pool/fee names it, or the run key
+        (q) => kit.evmPoolBuildSell(q, { feeRecipient: sellFeeTo, precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
       );
       const fee = built.feeCap;
       const sv = q.route.venue === "uniswap-v4" ? "v4" : "v3";

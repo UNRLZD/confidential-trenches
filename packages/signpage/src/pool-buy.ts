@@ -345,6 +345,13 @@ export async function readBack(rpc: SolanaRpc, signature: string, signed: Uint8A
   return (await readBackMeta(rpc, signature, signed)).got;
 }
 
+/** readBack, with this very transaction's on-chain error when both say it failed (card sol-buy-rent-back, review L2: a
+ *  deposit that meets a page another insert filled first fails WrongAccount, and is built again from new reads). */
+export async function readBackFailure(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<{ got: "none" | "ok" | "failed" | "other"; err?: unknown }> {
+  const r = await readBackMeta(rpc, signature, signed);
+  return r.got === "failed" ? { got: r.got, err: r.meta?.err } : { got: r.got };
+}
+
 /** readBack, with the transaction's meta when it is this very transaction (the token balances the fill is read from),
  *  and `mine`: the RPC answered this very transaction's bytes under the signature (ok, failed, or a meta that says
  *  nothing), the read that lets an answer name it. */
