@@ -61,15 +61,25 @@ export const AHEAD_PER_WINDOW = 1;
  *  old, handed over by the old helper). History before a time never changes and is served from what is held at any age. */
 export const GT_SERVE_MS = 600_000;
 
+/** Calls a "stale" read leaves free: one read of a chart nobody can be served (card helper-crowd-429). */
+export const STALE_RESERVE = 1;
+
 /** The lane of a read of the newest data, held since `heldAtMs` (null: nothing held): "pages" for a first read and for
- *  data REFRESH_URGENT_MS old, else "refresh". History before a time never changes and stays a refresh, whatever its age. */
-export function refreshLane(heldAtMs: number | null, nowMs: number): "pages" | "refresh" {
-  return heldAtMs === null || nowMs - heldAtMs >= REFRESH_URGENT_MS ? "pages" : "refresh";
+ *  data past GT_SERVE_MS (nothing a caller may be served), "stale" for data REFRESH_URGENT_MS old that is still servable,
+ *  else "refresh". A "stale" read takes a call while STALE_RESERVE stay free, so a chart its holder can still serve
+ *  never takes the call a chart with nothing to serve needs (card helper-crowd-429: live run 41935321432 right after the
+ *  23:38Z swap, Trending's 15m chart, held and servable, waited for and took the window's last call at 23:39:03Z and
+ *  PUMP's 1h, with nothing servable, answered 429 0.1 s later); refused, its holder serves what it has, dated. History
+ *  before a time never changes and stays a refresh, whatever its age. */
+export function refreshLane(heldAtMs: number | null, nowMs: number): "pages" | "stale" | "refresh" {
+  if (heldAtMs === null || nowMs - heldAtMs >= GT_SERVE_MS) return "pages";
+  return nowMs - heldAtMs >= REFRESH_URGENT_MS ? "stale" : "refresh";
 }
 
 export type GeckoBudget = {
-  /** One call now in `lane`, or false when the minute, a 429 pause or (for "lists") the yield says no. */
-  take(lane: string, urgent?: boolean, first?: boolean): boolean;
+  /** One call now in `lane`, or false when the minute, a 429 pause or (for "lists") the yield says no. `what` names the
+   *  read for the minute's count line (minute()). */
+  take(lane: string, urgent?: boolean, first?: boolean, what?: string): boolean;
   /** A 429: no lane calls until `untilMs`. */
   pause(untilMs: number): void;
   /** When a page call can next be taken (now when it can now): the pause's end or the minute's oldest call leaving
@@ -87,6 +97,10 @@ export type GeckoBudget = {
   /** No lane calls until release(): another helper on our address may still be calling (card helper-ready-gate). */
   hold(): void;
   release(): void;
+  /** The count line since the last one (card helper-crowd-429): the calls taken per lane and read, the draws refused
+   *  per lane, GeckoTerminal's 429s, the calls seeded from another process and the window as it stands; null when
+   *  nothing was taken, refused or seeded. The server logs it once a minute, so a refused read is named from the log. */
+  minute(): string | null;
 };
 
 /** GeckoTerminal answered 429: pause every lane for its Retry-After (at most 300 s), or WINDOW_MS when it names none or
@@ -103,24 +117,40 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
   const calls: { at: number; lane: string; seeded?: true }[] = [];
   let pausedUntil = 0;
   let held = false;
+  // the minute's counts (minute()): `lane what` taken, lanes refused, 429s, calls seeded
+  const took = new Map<string, number>();
+  const refused = new Map<string, number>();
+  let throttled = 0;
+  let seeded = 0;
+  const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+  const allowed = (lane: string, urgent: boolean, first: boolean, t: number): boolean => {
+    if (held || t < pausedUntil || calls.length >= perMin) return false;
+    if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
+    if (lane === "stale" && calls.length >= perMin - STALE_RESERVE) return false;
+    if (lane === "ahead" && (calls.length >= perMin - COLD_RESERVE || calls.filter((c) => c.lane === "ahead").length >= AHEAD_PER_WINDOW)) return false;
+    if (lane === "lists") {
+      const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
+      if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && c.lane !== "ahead" && t - c.at < YIELD_MS))) return false;
+    }
+    return true;
+  };
   const prune = (t: number) => {
     while (calls.length > 0 && t - calls[0]!.at >= WINDOW_MS) calls.shift();
   };
   return {
-    take(lane, urgent = false, first = false) {
+    take(lane, urgent = false, first = false, what = "") {
       const t = now();
       prune(t);
-      if (held || t < pausedUntil || calls.length >= perMin) return false;
-      if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
-      if (lane === "ahead" && (calls.length >= perMin - COLD_RESERVE || calls.filter((c) => c.lane === "ahead").length >= AHEAD_PER_WINDOW)) return false;
-      if (lane === "lists") {
-        const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
-        if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && c.lane !== "ahead" && t - c.at < YIELD_MS))) return false;
+      if (!allowed(lane, urgent, first, t)) {
+        bump(refused, lane);
+        return false;
       }
       calls.push({ at: t, lane });
+      bump(took, what === "" ? lane : `${lane} ${what}`);
       return true;
     },
     pause(untilMs) {
+      if (untilMs > now()) throttled++;
       pausedUntil = Math.max(pausedUntil, untilMs);
     },
     retryAt() {
@@ -138,7 +168,7 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     seed(times, lane = "seed") {
       const t = now();
       for (let i = calls.length - 1; i >= 0; i--) if (calls[i]!.seeded === true && calls[i]!.lane === lane) calls.splice(i, 1);
-      for (const at of times) if (Number.isFinite(at) && at <= t && t - at < WINDOW_MS) calls.push({ at, lane, seeded: true });
+      for (const at of times) if (Number.isFinite(at) && at <= t && t - at < WINDOW_MS) calls.push({ at, lane, seeded: true }), seeded++;
       calls.sort((a, b) => a.at - b.at);
       prune(t);
     },
@@ -147,6 +177,17 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     },
     release() {
       held = false;
+    },
+    minute() {
+      prune(now());
+      if (took.size === 0 && refused.size === 0 && throttled === 0 && seeded === 0) return null;
+      const list = (m: Map<string, number>) => (m.size === 0 ? "none" : [...m].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, n]) => `${k} ${n}`).join(", "));
+      const line = `geckoterminal calls: ${list(took)}; refused: ${list(refused)}; 429 ${throttled}; seeded ${seeded}; window ${calls.length} of ${perMin}`;
+      took.clear();
+      refused.clear();
+      throttled = 0;
+      seeded = 0;
+      return line;
     },
   };
 }
