@@ -93,3 +93,22 @@ test("card helper-ready-page-warm: GET /v1/market/token sends the read's entries
   assert.deepEqual(entries(st), ["rpc", "total"], st);
   assert.ok(dur(st, "total") >= 25, st);
 });
+
+test("card helper-ready-page-warm slice 2: Jupiter's search names the proxy's part of its time: the budget's wait, Jupiter's hold or turn, each 429 it answered and the send (helper live run 42087160851: jup;dur=3618 on a search, and a cold connection from the helper box is 75 ms, so the 3.5 s was inside the proxy, unnamed)", async () => {
+  let calls = 0;
+  const fetch = async (url: string) => {
+    calls++;
+    if (calls === 1) return new Response("{}", { status: 429, headers: { "retry-after": "1" } });
+    const mints = new URL(url).searchParams.get("query")!.split(",");
+    return new Response(JSON.stringify(mints.map(rowOf)), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const proxy = (await import("../../proxy/proxy.ts")).createProxy({ PROXY_BUDGET_JUPITER: "120,30", PROXY_BUDGET_RELAY: "120,30", PROXY_BUDGET_LIFI: "120,30", PROXY_BUDGET_ONECLICK: "120,30" }, { fetch: fetch as never });
+  const tok = T.createSolanaToken(proxy as never, rpc as never);
+  const a = await tok.page(mint(3));
+  assert.equal(a.status, 200, (a as { body: string }).body);
+  const h = (a as { timing?: string }).timing ?? "";
+  assert.deepEqual(entries(h), ["lists", "rpc-wait", "rpc", "jup-wait", "jup-budget", "jup-turn", "jup-429", "jup-send", "jup", "launch", "read"], h);
+  assert.ok(dur(h, "jup-turn") >= 900, `Jupiter's 1 s hold waited out: ${h}`);
+  assert.match(h, /jup-429;desc="1"/);
+  assert.ok(dur(h, "jup") >= dur(h, "jup-turn") + dur(h, "jup-send"), h);
+});

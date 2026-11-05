@@ -140,6 +140,18 @@ test("Base's block clock: the block a pool time falls in; the maker read covers 
   assert.equal(blockAt("robinhood", 1793705255), null);
 });
 
+test("Base's block clock at 200 ms blocks (from block 53556127, 2026-11-05 18:00:01Z): the maker read covers the block a pool time falls in, within 10 blocks", () => {
+  // read on base-rpc.publicnode.com 2026-11-05 19:0xZ: block 53556126 at 1793901599, 53556127 to 53556131 at 1793901601
+  // (timestampMs 1793901601000 to 1793901601800), 53574700 at 1793905315 (timestampMs 1793905315600)
+  assert.equal(blockAt("base", 1793901600), 53556126);
+  assert.equal(blockAt("base", 1793901601), 53556131);
+  assert.equal(blockAt("base", 1793905315), 53574701);
+  const r = blockRange("base", 1793905315)!;
+  assert.deepEqual(r, [53574696, 53574701]);
+  assert.ok(r[0] <= 53574700 && 53574700 <= r[1] && r[1] - r[0] + 1 <= 10, "the pool's block, in one filter base-mainnet.public.blastapi.io takes");
+  assert.deepEqual(blockRange("base", 1793901601), [53556126, 53556131], "the second the clock changed: its blocks and the one before");
+});
+
 test("every table row is well formed: a pad id, a lowercase-able address, a 32-byte topic0, a place for the token", () => {
   for (const chain of ["base", "robinhood"] as const)
     for (const f of FACTORIES[chain]) {

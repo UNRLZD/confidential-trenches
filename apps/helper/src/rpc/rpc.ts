@@ -40,7 +40,7 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { budgetFromEnv, evmThrottleS, LIMIT_WINDOW_MS, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
+import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, LIMIT_WINDOW_MS, LOGS_REFUSED, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
@@ -176,6 +176,23 @@ function evmLimited(chain: RpcChain, answer: unknown): number {
     if (e !== undefined) wait = Math.max(wait, evmThrottleS(e));
   }
   return wait;
+}
+/** An EVM provider's error saying it cannot serve this request's shape (card evm-rpc-spare-list; the words the wallet's
+ *  pool reader holds, packages/wallet/src/pool/evm.ts OUT_WORDS): PublicNode's -32701 "Please specify an address" for a
+ *  topics-only eth_getLogs, Pocket's "missing required field 'address'", and -32601 "method not available". Another
+ *  provider may serve the request, and this one still serves the others. Never a range cap (the device pages on those)
+ *  or a revert (the call's own answer). */
+const SHAPE_CODES: ReadonlySet<unknown> = new Set([-32701, -32601]);
+const SHAPE_WORDS = /specify an address|missing required field 'address'/i;
+function evmShapeRefused(chain: RpcChain, answer: unknown): boolean {
+  if (!EVM_CHAINS.has(chain)) return false;
+  return (Array.isArray(answer) ? answer : [answer]).some((a) => {
+    const e = (a as { error?: unknown } | null)?.error as { code?: unknown; message?: unknown } | null | undefined;
+    if (e === undefined || e === null || typeof e !== "object") return false;
+    const m = String(e.message ?? "");
+    if (EVM_RANGE_MESSAGE.test(m) || e.code === 3 || /revert/i.test(m)) return false;
+    return SHAPE_CODES.has(e.code) || SHAPE_WORDS.test(m);
+  });
 }
 /** The environment variable naming a chain's budget, "<total>,<per client>[,<per method>]" per 10 s; the share at
  * least RPC_BATCH_MAX, so a full batch can be served, and a method's at least that and at most the total. */
@@ -426,11 +443,14 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (!(await holdOver(c, deadline))) return throttled(budget.heldFor(c), undefined, `${c} held`);
     const wait = budget.takeEach(drawsOf(c, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
-    const list = [...new Set([upstreams[c].url, ...(deps.pinned?.[c] ?? [])])];
+    // a log read is never sent to a provider that refuses every one (LOGS_REFUSED): its 429 would hold it for the reads
+    // it does answer
+    const list = [...new Set([upstreams[c].url, ...(deps.pinned?.[c] ?? [])])].filter((u) => !(methods.includes("eth_getLogs") && LOGS_REFUSED.has(u)));
     for (let tries = 0; ; tries++) {
       let soonestMs = Infinity;
       let down = false;
       let sent = false;
+      let shaped: { status: number; body: string; secretForms: Buffer[] } | undefined;
       for (const url of list) {
         const secretForms = url === upstreams[c].url ? upstreams[c].forms : [];
         const h = holds.heldMs(url);
@@ -479,6 +499,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           soonestMs = Math.min(soonestMs, holds.heldMs(url));
           continue;
         }
+        // a provider that cannot serve this request's shape is out for it alone (no hold: its other requests still go to
+        // it); the next is asked, and the last such answer is the caller's when every provider refuses it so
+        if (evmShapeRefused(c, answer)) {
+          shaped = { status: r.status, body: text, secretForms };
+          continue;
+        }
         if (secretForms.some((f) => Buffer.from(text, "utf8").includes(f))) return UPSTREAM();
         return { status: r.status, body: text };
       }
@@ -492,6 +518,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         if (again === 0) continue;
         return throttled(again, undefined, budget.refusedBy());
       }
+      // a provider still held may serve it: the caller's wait below, never the refusal (the device would take it as
+      // the read's answer)
+      if (shaped !== undefined && soonestMs === Infinity) return shaped.secretForms.some((f) => Buffer.from(shaped!.body, "utf8").includes(f)) ? UPSTREAM() : { status: shaped.status, body: shaped.body };
       // every provider failed (none held or out of room): upstream, so the device reads its own; else the soonest wait
       return down && soonestMs === Infinity ? UPSTREAM() : throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.max(1, Math.ceil(soonestMs / 1000)), undefined, `${c} every provider held`);
     }

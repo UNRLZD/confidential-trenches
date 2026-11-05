@@ -91,10 +91,21 @@ export const MAKER_RPCS: Readonly<Record<EvmChain, readonly [string, string, str
  *  post, three posts out at once (limits.ts PROVIDER_PACE). */
 export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3, "https://robinhood.daybreak-rpc.network": 1 };
 
-/** Base makes a block every 2 s from genesis at 1686789347 (eth_getBlockByNumber latest on mainnet.base.org and
- *  base.drpc.org, 2026-11-03 11:28Z: block 53457954 at 1793705255, 1793705255 - 2 x 53457954 = 1686789347). */
-export const BLOCK_CLOCK: Readonly<Record<EvmChain, { genesisS: number; blockS: number } | null>> = {
-  base: { genesisS: 1686789347, blockS: 2 },
+/** One stretch of a chain's fixed block clock: from block `fromBlock`, made at `atMs`, a block every `blockMs`. */
+export type ClockEra = { fromBlock: number; atMs: number; blockMs: number };
+/** Base's block clock, era by era, read on chain. It made a block every 2 s from genesis at 1686789347
+ *  (eth_getBlockByNumber on mainnet.base.org and base.drpc.org, 2026-11-03 11:28Z: block 53457954 at 1793705255,
+ *  1793705255 - 2 x 53457954 = 1686789347), and one every 200 ms from block 53556127 at 2026-11-05 18:00:01Z (read on
+ *  base-rpc.publicnode.com 2026-11-05 19:0xZ: block 53556126 at 1793901599, 53556127 at 1793901601 with timestampMs
+ *  1793901601000, 53556128 at 1793901601200, ..., 53574700 at 1793905315600; card helper-ready-page-warm: at the old
+ *  2 s clock alone every Base head read off the clock and the candles and trades answered 503). Only the lists' maker
+ *  read (blockRange) takes a block from a time; the swaps are timed by the block times their providers log (swaps.ts).
+ *  Robinhood has none: its makers come from the launchpads' records. */
+export const BLOCK_CLOCK: Readonly<Record<EvmChain, readonly ClockEra[] | null>> = {
+  base: [
+    { fromBlock: 0, atMs: 1686789347_000, blockMs: 2_000 },
+    { fromBlock: 53556127, atMs: 1793901601_000, blockMs: 200 },
+  ],
   robinhood: null,
 };
 
@@ -327,11 +338,14 @@ export function toRows(chain: EvmChain, answer: unknown, asOfMs: number): { rows
 // The maker read
 // ---------------------------------------------------------------------------------------------------------------
 
-/** The block a time falls in on a chain with a fixed clock, or null. */
+/** The newest block whose time (whole seconds, as a header's `timestamp`) is at or before unix second `s`, on a chain
+ *  with a fixed clock; null before its first block or on a chain with none. */
 export function blockAt(chain: EvmChain, s: number): number | null {
-  const c = BLOCK_CLOCK[chain];
-  if (c === null || !Number.isSafeInteger(s) || s < c.genesisS) return null;
-  return Math.floor((s - c.genesisS) / c.blockS);
+  const eras = BLOCK_CLOCK[chain];
+  if (eras === null || !Number.isSafeInteger(s) || s * 1000 < eras[0]!.atMs) return null;
+  const endMs = (s + 1) * 1000 - 1;
+  const era = eras.findLast((e) => e.atMs <= endMs)!;
+  return era.fromBlock + Math.floor((endMs - era.atMs) / era.blockMs);
 }
 
 /** Factory addresses per `eth_getLogs` filter: base-rpc.publicnode.com answers more with "A maximum of 10 addresses is
@@ -358,12 +372,14 @@ export function makerFilters(chain: EvmChain, from: number, to: number): Record<
 /** The logs of several filters' answers as one, or undefined when any is not a list. */
 export const joinLogs = (answers: readonly unknown[]): unknown[] | undefined => (answers.every(Array.isArray) ? (answers as unknown[][]).flat() : undefined);
 
-/** The blocks a pool made at unix second `s` can be in on a chain with a fixed clock: its block and the one before; null
- *  on a chain without one (its makers come from RECORDS). A wrong range finds no creation event, so it can only leave a
- *  row untagged, never tag it. */
+/** The blocks a pool made at unix second `s` can be in on a chain with a fixed clock: the second's blocks and the one
+ *  before them (at 2 s blocks its block and the one before; at 200 ms 6 blocks, within the 10 a filter takes on
+ *  base-mainnet.public.blastapi.io, MAKER_RPCS, read 2026-11-05 19:1xZ: 11 refused with -32600); null on a chain without
+ *  one (its makers come from RECORDS). A wrong range finds no creation event, so it can only leave a row untagged,
+ *  never tag it. */
 export function blockRange(chain: EvmChain, s: number): [number, number] | null {
-  const b = blockAt(chain, s);
-  return b === null ? null : [b - 1, b];
+  const [lo, hi] = [blockAt(chain, s - 1), blockAt(chain, s)];
+  return lo === null || hi === null ? null : [Math.min(lo, hi - 1), hi];
 }
 
 const tokenWord = (token: string) => `000000000000000000000000${token.slice(2).toLowerCase()}`;
@@ -804,7 +820,10 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   }
 
   /** A previous process's state (hostile input, as a vendor's): each list read, however old, is parsed again by
-   *  toRows; a maker is kept only as an address and one of this chain's pads or null. Reads held already are kept.
+   *  toRows; a maker is kept only as an address and one of this chain's pads. A none (null) is read again: it may have
+   *  been settled on a wrong block range (card helper-ready-page-warm: from 18:00Z on 2026-11-05 Base's old 2 s clock put
+   *  every new token's pool hours before its code, and each was settled as none and carried over in the warm file), and
+   *  a read is a few calls, never a GeckoTerminal one. Reads held already are kept.
    *  True when every list is held after it, so the lists answer without a GeckoTerminal call. */
   function restore(st: unknown): boolean {
     const t = now();
@@ -823,7 +842,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     const pads = new Set(FACTORIES[chain].map((f) => f.pad));
     if (Array.isArray(o.makers))
       for (const m of o.makers.slice(0, MAKER_MAX)) {
-        if (!Array.isArray(m) || m.length !== 2 || typeof m[0] !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(m[0]) || !(m[1] === null || (typeof m[1] === "string" && pads.has(m[1])))) continue;
+        if (!Array.isArray(m) || m.length !== 2 || typeof m[0] !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(m[0]) || typeof m[1] !== "string" || !pads.has(m[1])) continue;
         if (!makers.has(m[0])) makers.set(m[0], m[1]);
       }
     build();
