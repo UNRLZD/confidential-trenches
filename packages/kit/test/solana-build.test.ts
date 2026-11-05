@@ -366,7 +366,7 @@ test("the assembly refuses a blockhash or token program the device did not read"
   assert.throws(() => assembleSolanaSwap(reqOf(0), build, { ...chainOf(build), tokenProgram: SOLANA_ATA_PROGRAM }));
 });
 
-// ---- the compiler against @solana/web3.js, the pump curve caps, Token-2022 (Opus review of 4c4991e)
+// ---- the compiler against @solana/web3.js, the pump curve caps, Token-2022 (review of 4c4991e)
 
 type TwoTable = { name: string; side: "buy" | "sell"; wallet: string; mint: string; amount: string; body: string; accounts: Record<string, [Acc, Acc]>; blockhash: { blockhash: string; lastValidBlockHeight: number }; web3js: { version: string; message: string; flags: [string, boolean, boolean][] } };
 type Run = { wallet: string; mint: string; amount: string; body: string; accounts: Record<string, [Acc, Acc]>; blockhash: { blockhash: string; lastValidBlockHeight: number } };
