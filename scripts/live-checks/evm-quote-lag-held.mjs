@@ -13,7 +13,6 @@
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (each quote's time, outcome and the lagger's head
 // asks) to <file>, for the test's replay (evm-quote-lag-held.answers.json).
 // Reads only: no key, no transaction, no money moves.
-// Runs: pending evm-quote-lag-held, it fails on the kit at e031ad4 (the bad answer, 2 of 10 Base warm quotes ok); it joins the app's list, beside evm-quote-warm-round, when this card ships
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { EvmQuoteError, evmPoolBuyQuote } from "../../packages/kit/src/index.ts";
