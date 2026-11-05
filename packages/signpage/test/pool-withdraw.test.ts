@@ -626,13 +626,18 @@ test("a failed transaction of the note in W's history is no spend: another devic
   assert.equal(wd.balance.get(W), 7_000_000n);
 });
 
-test("a release of another note to W (anyone may send one there) before this attempt's never decides whose spend it was", async () => {
-  const wd = await world([30_000_000n], { settleUnspent: true });
-  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
-  wd.landOlder(wd.releases[0]!, { nullifier: true });
-  const f = await finishPoolOnward(wd.host, a.pending!);
-  assert.equal(f?.stage, "sent");
-  assert.equal(wd.balance.get(TO), 5_000_000n);
+test("a release of another note to W (anyone may send one there), before or after this attempt's, never decides whose spend it was", async () => {
+  for (const newer of [false, true]) {
+    const wd = await world([30_000_000n], { settleUnspent: true });
+    const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+    const other = wd.landOlder(wd.releases[0]!, { nullifier: true });
+    // W's history read newest first: the other note's release read before this attempt's when it is the newer
+    if (newer) wd.plant.history = (s) => [other, ...s.filter((x) => x !== other)];
+    // its own signature not kept: W's history alone decides
+    const f = await finishPoolOnward(wd.host, noRelease(a.pending!));
+    assert.equal(f?.stage, "sent", newer ? "newer" : "older");
+    assert.equal(wd.balance.get(TO), 5_000_000n);
+  }
 });
 
 test("the run: the release read back not this attempt's, and an RPC that lists no spend for the part, decides nothing: in_transit, nothing sent from W, the part owed", async () => {
@@ -845,3 +850,29 @@ for (const compressed of [false, true]) {
     assert.equal(wd.onwards().length, 0);
   });
 }
+
+test("this device's release read back by its own signature on one RPC only decides nothing by itself: the other RPC must read it too (fold 3)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  const release = a.pending!.release!;
+  // the second RPC neither serves the release by its signature nor lists it in W's history
+  wd.plant.history = (s, p) => (p === 1 ? [] : s);
+  const [r0, r1] = wd.host.rpcs;
+  const blind = (async (m: string, p: readonly unknown[]) => (m === "getTransaction" && p[0] === release ? null : r1(m, p))) as SolanaRpc;
+  assert.equal(await finishPoolOnward({ ...wd.host, rpcs: [r0, blind] }, a.pending!), null);
+  assert.equal(wd.onwards().length, 0);
+});
+
+test("the two RPCs reach the spend in different passes: each keeps what it found, so the finish decides once both have (fold 3)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  // the release 3,000 entries deep on the first RPC, 4,500 on the second: found in passes two and three
+  const pad0 = dust(3_000, 9);
+  const pad1 = dust(4_500, 10);
+  wd.plant.history = (s, p) => [...(p === 0 ? pad0 : pad1), ...s];
+  const { f } = await passes(wd.host, noRelease(a.pending!), 5);
+  assert.equal(f?.stage, "sent");
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+});
