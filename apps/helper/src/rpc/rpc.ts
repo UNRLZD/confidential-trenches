@@ -298,8 +298,37 @@ function parse(text: string): unknown {
 
 const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
 
-/** One checked request, rebuilt from its four fields only, or undefined. */
-function check(chain: RpcChain, r: unknown): Record<string, unknown> | undefined {
+/** The pool program each Solana route may scan with getProgramAccounts: the helper's own pinned pool program for that
+ *  cluster (apps/helper/src/pool/solana.ts POOL_SOLANA_ENV), none when unset. */
+export const RPC_SCAN_PROGRAM_ENV: Readonly<Partial<Record<RpcChain, string>>> = { solana: "POOL_SOLANA_PROGRAM_MAINNET", "solana-devnet": "POOL_SOLANA_PROGRAM_DEVNET" };
+/** A filter of a pool scan: { dataSize } or { memcmp: { offset, bytes } } (base58, at most 128 characters). */
+const scanFilter = (f: unknown): "size" | "cmp" | null => {
+  if (!isPlain(f) || Object.keys(f).length !== 1) return null;
+  if (Object.hasOwn(f, "dataSize")) return Number.isSafeInteger(f.dataSize) && (f.dataSize as number) > 0 && (f.dataSize as number) <= 10_240 ? "size" : null;
+  const m = f.memcmp;
+  if (!isPlain(m) || Object.keys(m).some((k) => k !== "offset" && k !== "bytes" && k !== "encoding")) return null;
+  if (!Number.isSafeInteger(m.offset) || (m.offset as number) < 0 || (m.offset as number) > 10_240) return null;
+  if (Object.hasOwn(m, "encoding") && m.encoding !== "base58") return null;
+  return typeof m.bytes === "string" && /^[1-9A-HJ-NP-Za-km-z]{1,128}$/.test(m.bytes) ? "cmp" : null;
+};
+/**
+ * getProgramAccounts only as the wallet's note restore asks it (packages/wallet/src/pool/solana-restore.ts): on the
+ * route's own pinned pool program, with a dataSize and at least one memcmp filter (one bucket of one mark size), at
+ * most four filters (review L-2: an unbounded scan of any program would spend the keyed provider's quota for every
+ * caller). Anything else is refused before any call.
+ */
+function scanAllowed(r: Record<string, unknown>, program: string | undefined): boolean {
+  if (program === undefined || program === "") return false;
+  const p = r.params;
+  if (!Array.isArray(p) || p.length !== 2 || p[0] !== program || !isPlain(p[1])) return false;
+  const filters = p[1].filters;
+  if (!Array.isArray(filters) || filters.length < 2 || filters.length > 4) return false;
+  const kinds = filters.map(scanFilter);
+  return !kinds.includes(null) && kinds.includes("size") && kinds.includes("cmp");
+}
+
+/** One checked request, rebuilt from its four fields only, or undefined. `scan`: the route's pinned pool program. */
+function check(chain: RpcChain, r: unknown, scan?: string): Record<string, unknown> | undefined {
   if (!isPlain(r)) return undefined;
   for (const k of Object.keys(r)) if (k !== "jsonrpc" && k !== "id" && k !== "method" && k !== "params") return undefined;
   if (r.jsonrpc !== "2.0") return undefined;
@@ -307,6 +336,7 @@ function check(chain: RpcChain, r: unknown): Record<string, unknown> | undefined
   if (!((typeof id === "number" && Number.isSafeInteger(id)) || (typeof id === "string" && id.length <= ID_MAX))) return undefined;
   if (typeof r.method !== "string" || !RPC_METHODS[chain].includes(r.method)) return undefined;
   if (Object.hasOwn(r, "params") && !isPlain(r.params) && !Array.isArray(r.params)) return undefined;
+  if (r.method === "getProgramAccounts" && !scanAllowed(r, scan)) return undefined;
   const out: Record<string, unknown> = { jsonrpc: "2.0", id, method: r.method };
   if (Object.hasOwn(r, "params")) out.params = r.params;
   return out;
@@ -319,6 +349,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
+  const scanPrograms: Partial<Record<RpcChain, string>> = Object.fromEntries(Object.entries(RPC_SCAN_PROGRAM_ENV).map(([c, name]) => [c, env[name]]));
   // a keyed Solana provider's slot: its fallback is the public endpoint, on a budget of its own
   const keyed = upstreams.solana.url !== SOLANA_PUBLIC;
   const slot: Slot = createSlot(deps.slot ?? "rpc", keyed, { now, log });
@@ -416,11 +447,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (Array.isArray(parsed)) {
       if (parsed.length > RPC_BATCH_MAX) return error(413, "too_large");
       if (parsed.length === 0) return REFUSED();
-      const checked = parsed.map((r) => check(c, r));
+      const checked = parsed.map((r) => check(c, r, scanPrograms[c]));
       if (checked.some((r) => r === undefined)) return REFUSED();
       out = checked;
     } else {
-      out = check(c, parsed);
+      out = check(c, parsed, scanPrograms[c]);
       if (out === undefined) return REFUSED();
     }
     let forward: string;

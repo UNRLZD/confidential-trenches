@@ -84,7 +84,7 @@ test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded t
   const DEV = "fake-devnet-key-0123456789abcdef";
   const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet?api-key=${DEV}` });
   // the reads a pool buy makes (packages/signpage/src/pool-buy.ts), each to the devnet URL, never the mainnet one
-  for (const method of ["getAccountInfo", "getMultipleAccounts", "getLatestBlockhash", "isBlockhashValid", "getBlockHeight", "getTransaction", "getSlot", "getSignaturesForAddress", "getFeeForMessage", "getBlockTime", "getEpochInfo", "getProgramAccounts"]) {
+  for (const method of ["getAccountInfo", "getMultipleAccounts", "getLatestBlockhash", "isBlockhashValid", "getBlockHeight", "getTransaction", "getSlot", "getSignaturesForAddress", "getFeeForMessage", "getBlockTime", "getEpochInfo"]) {
     seen.length = 0;
     const a = await call(r, "solana-devnet", { jsonrpc: "2.0", id: 3, method, params: [] });
     assert.equal(a.status, 200, method);
@@ -100,6 +100,52 @@ test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded t
   assert.deepEqual([(await call(r, "solana-devnet", { jsonrpc: "2.0", id: 1, method: "getSlot" })).status], [503]);
   // its own budget variable, a name a shell can set
   assert.equal(rpcModule.rpcBudgetEnv("solana-devnet"), "RPC_BUDGET_SOLANA_DEVNET");
+});
+
+// review L-2: getProgramAccounts only as the note restore asks it (packages/wallet/src/pool/solana-restore.ts), on the
+// route's own pinned pool program; an unbounded scan of any program would spend the keyed provider's quota
+const DEV_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
+const MAIN_PROGRAM = "11111111111111111111111111111111";
+const restoreScan = (program: string, filters: unknown = [{ dataSize: 49 }, { memcmp: { offset: 9, bytes: "3" } }]) => ({
+  jsonrpc: "2.0",
+  id: 5,
+  method: "getProgramAccounts",
+  params: [program, { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters }],
+});
+test("getProgramAccounts (review L-2): forwarded only on the route's own pinned pool program with a dataSize and a memcmp filter; any other scan refused 400 before any call", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const env = { SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_DEVNET: DEV_PROGRAM, POOL_SOLANA_PROGRAM_MAINNET: MAIN_PROGRAM };
+  const r = createRpc(env);
+  for (const [chain, program] of [["solana-devnet", DEV_PROGRAM], ["solana", MAIN_PROGRAM]] as const) {
+    seen.length = 0;
+    assert.equal((await call(r, chain, restoreScan(program))).status, 200, chain);
+    assert.equal((await call(r, chain, [restoreScan(program)])).status, 200, `${chain} in a batch`);
+    assert.equal(seen.length, 2, chain);
+  }
+  const refused: [string, unknown][] = [
+    ["solana", restoreScan(DEV_PROGRAM)], // another cluster's program
+    ["solana-devnet", restoreScan(MAIN_PROGRAM)],
+    ["solana", restoreScan("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")], // any other program
+    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49 }])], // no memcmp: the whole size
+    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ memcmp: { offset: 9, bytes: "3" } }])], // no dataSize
+    ["solana-devnet", restoreScan(DEV_PROGRAM, [])],
+    ["solana-devnet", restoreScan(DEV_PROGRAM, "x")],
+    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49 }, { memcmp: { offset: 9, bytes: "3" } }, { dataSize: 1 }, { dataSize: 2 }, { dataSize: 3 }])],
+    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49 }, { memcmp: { offset: 9, bytes: "0OIl" } }])],
+    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49 }, { memcmp: { offset: 9, bytes: "3", encoding: "base64" } }])],
+    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49, memcmp: { offset: 9, bytes: "3" } }])],
+    ["solana-devnet", { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [DEV_PROGRAM] }],
+    ["solana-devnet", { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [] }],
+    ["solana-devnet", { jsonrpc: "2.0", id: 1, method: "getProgramAccounts" }],
+    ["solana-devnet", [{ jsonrpc: "2.0", id: 1, method: "getSlot" }, restoreScan(DEV_PROGRAM, [{ dataSize: 49 }])]],
+  ];
+  seen.length = 0;
+  for (const [chain, body] of refused) assert.deepEqual([(await call(r, chain, body)).status, code(await call(r, chain, body))], [400, "method_not_allowed"], JSON.stringify(body));
+  assert.equal(seen.length, 0, "nothing reached a provider");
+  // no pinned program on the host: every scan refused
+  const unpinned = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
+  for (const chain of ["solana", "solana-devnet"]) assert.equal((await call(unpinned, chain, restoreScan(DEV_PROGRAM))).status, 400, chain);
+  assert.equal(seen.length, 0);
 });
 
 test("solana-devnet with no SOLANA_DEVNET_RPC_URL (review L-1): 503 upstream for every call and nothing sent, never the page's own first provider (api.devnet.solana.com) behind the helper's name", async () => {
