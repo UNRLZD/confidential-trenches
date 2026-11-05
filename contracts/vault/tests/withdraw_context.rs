@@ -17,12 +17,17 @@
 //!    processor the proof was made for. Each is refused with `ContextMismatch`, the unchanged request passes rows 1-3,
 //!    and the vault's raw state is the same bytes before and after (nothing spent: `spent` has no row). A recipient or
 //!    fee recipient that is the vault or intents.near, with its own context, is refused with `InvalidRecipient`.
-//! 2. `vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes`: the probe contract sends `withdraw` calls
-//!    whose `deadline_ms` is the probe's own block time plus an offset; each lands in a later block, whose time the
-//!    vault reads. Offset 0 is a deadline one block before the block it lands in: refused with `DeadlineExpired`. Then
-//!    rounds of offsets around the measured block interval until one lands in a block whose time in ms equals its
-//!    deadline: it passes. Every call in every round is checked against the rule `block ms <= deadline_ms`, with the
-//!    landing block's time read from RPC (`timestamp_nanosec` / 1,000,000, rounded down: what the vault reads).
+//! 2. `vt_s18_one_block_after_the_deadline_is_refused_and_before_it_passes`: the probe contract sends `withdraw`
+//!    calls whose `deadline_ms` is the probe's own block time plus an offset; each lands in a later block, whose time
+//!    the vault reads. Every run has one certain refusal and one certain pass: offset 0 is a deadline one block before
+//!    the block it lands in, refused with `DeadlineExpired`, and offset 600,000 (10 minutes) lands before its
+//!    deadline and passes. Then 3 rounds of offsets around the measured block interval; a call that lands in a block
+//!    whose time in ms equals its deadline must pass, and one 1 ms after must be refused, but no run needs one to:
+//!    no transaction can choose the block time it lands at, so an exact landing is chance (it gave up on PR #248's
+//!    run when none came in 12 rounds). The equal-ms pass is proven every run, with the block time set, by the unit
+//!    test `vt_s18_at_the_deadline_passes_and_one_ms_after_is_refused` in src/withdraw.rs. Every call in every round
+//!    is checked against the rule `block ms <= deadline_ms`, with the landing block's time read from RPC
+//!    (`timestamp_nanosec` / 1,000,000, rounded down: what the vault reads).
 //!
 //! 3. `extra_top_level_arguments_are_refused_at_parse`: a fourth top-level key is refused when the input is read.
 //!
@@ -217,7 +222,7 @@ async fn probe_round(h: &Harness, probe: &Account, w: &Value, sc: &str, offsets:
 }
 
 #[tokio::test]
-async fn vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes() -> R<()> {
+async fn vt_s18_one_block_after_the_deadline_is_refused_and_before_it_passes() -> R<()> {
     let h = Harness::start().await?;
     let _ = h.deploy_vault().await?;
     let probe = h.account("probe", 30).await?;
@@ -237,13 +242,23 @@ async fn vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes() -> R<
     assert_eq!(vault_state(&h).await?, before, "a refused late request changed a state byte");
     println!("one block after: deadline {deadline} ms, landed {landed} ms (+{} ms): refused (DeadlineExpired)", landed - deadline);
 
-    // at the deadline: rounds of offsets around the block intervals seen so far, until one lands at its deadline
-    let mut gaps = vec![landed - deadline];
+    // before the deadline: 10 minutes ahead, far past any block interval, passes rows 1-3 (the probe's 10 Tgas stops it
+    // at the gas pre-check)
+    let (sent, got) = probe_round(&h, &probe, &w, &sc, &[600_000]).await?;
+    let (deadline, landed, f) = &got[0];
+    assert_eq!(*deadline, sent + 600_000);
+    assert!(landed <= deadline, "the call landed at {landed} ms, after its deadline {deadline}");
+    assert!(f.contains("InsufficientGas"), "before the deadline: {f}");
+    println!("before the deadline: deadline {deadline} ms, landed {landed} ms (-{} ms): passed rows 1-3 (InsufficientGas)", deadline - landed);
+    let mut gap = landed - sent;
+
+    // around the deadline: rounds of offsets around the last probe-to-landing interval; each call is checked against
+    // the rule, and an exact-ms landing, when one comes, against its own case (its proof is the unit test, see the
+    // header). The window follows the last interval: PR #248's run centred it on the mean of the smallest and largest
+    // seen, and a first interval of 66 ms held it at 88..=102 while every later one was 123-124 ms.
     let (mut at, mut one_ms_late) = (None, None);
-    for round in 1..=12 {
-        let (lo, hi) = (*gaps.iter().min().unwrap(), *gaps.iter().max().unwrap());
-        let mid = (lo + hi) / 2;
-        let offsets: Vec<u64> = (mid.saturating_sub(7)..=mid + 7).collect();
+    for round in 1..=3 {
+        let offsets: Vec<u64> = (gap.saturating_sub(7)..=gap + 7).collect();
         let (sent, got) = probe_round(&h, &probe, &w, &sc, &offsets).await?;
         for (deadline, landed, f) in &got {
             // the probe's 10 Tgas: a request past rows 1-3 stops at the gas pre-check
@@ -255,7 +270,7 @@ async fn vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes() -> R<
             if *landed == deadline + 1 {
                 one_ms_late = Some((*deadline, f.clone()));
             }
-            gaps.push(landed - sent);
+            gap = landed - sent;
         }
         let landed: Vec<u64> = got.iter().map(|g| g.1).collect();
         println!("round {round}: probe block {sent} ms, offsets {}..={}, landed {:?} ms", offsets[0], offsets[offsets.len() - 1], landed);
@@ -263,9 +278,13 @@ async fn vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes() -> R<
             break;
         }
     }
-    let (d, f) = at.ok_or("no call landed in a block whose time equals its deadline in 12 rounds")?;
-    assert!(f.contains("InsufficientGas"), "at the deadline: {f}");
-    println!("at the deadline: deadline {d} ms = the landing block's ms: passed rows 1-3 (InsufficientGas, the probe's 10 Tgas)");
+    match at {
+        Some((d, f)) => {
+            assert!(f.contains("InsufficientGas"), "at the deadline: {f}");
+            println!("at the deadline: deadline {d} ms = the landing block's ms: passed rows 1-3 (InsufficientGas, the probe's 10 Tgas)");
+        }
+        None => println!("at the deadline: no call landed on its deadline's ms in 3 rounds (chance; the unit test proves it)"),
+    }
     if let Some((d, f)) = one_ms_late {
         assert!(f.contains("DeadlineExpired"), "1 ms after: {f}");
         println!("1 ms after the deadline: deadline {d} ms, landed {} ms: refused (DeadlineExpired)", d + 1);
