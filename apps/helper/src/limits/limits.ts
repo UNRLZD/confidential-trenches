@@ -196,6 +196,12 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
  *  2026-11-03 and again 2026-11-05 18:5x-19:0xZ), and eth_blockNumber and eth_getTransactionByHash 200; a caller's log
  *  read sent there held it 1 s about every 3 s on the box (the helper's log, 5 Nov 18:5xZ: 231 holds in 8 min). */
 export const LOGS_REFUSED: ReadonlySet<string> = new Set(["https://mainnet.base.org"]);
+/** How long a caller's draw on a paced provider keeps its refill from background reads (card helper-deploy-reads-fast):
+ *  a caller's read is several posts one after another (the head, then its spans, then the traders), and background
+ *  that drew the refill between them left each post waiting for the bucket from its floor (a planted run: 39 open
+ *  books' ticks held a cold candles read 7.7 s on the paces, at 600 ms an answer). [design: 1 s, about one post's answer
+ *  and the next post's start; background goes again once no caller drew for that long.] */
+export const CALLER_HOLD_MS = 1_000;
 /** The share of a paced provider's burst background reads leave for callers' reads. [design: a quarter, so a caller's
  *  read finds room at once on the provider it asks first while the walks run at three quarters of its pace.] */
 export const CALLER_ROOM = 0.25;
@@ -205,6 +211,12 @@ export const CALLER_ROOM = 0.25;
 export function providerHolds(now: () => number = () => performance.timeOrigin + performance.now(), pace: Readonly<Record<string, Pace>> = PROVIDER_PACE): ProviderHolds {
   const until = new Map<string, number>();
   const buckets = new Map<string, { tokens: number; at: number }>();
+  /** Per provider: until when a caller's read that found no room waits for it (card helper-deploy-reads-fast). Background
+   *  draws none of the bucket meanwhile, so the refill it waits for is its own: a background post of fewer units would
+   *  win every refill race against a caller's larger batch (a planted run: 39 open books' ticks held a cold candles read
+   *  6.4 s on the paces alone). Cleared by the caller's draw; a caller that asks another provider instead leaves it to
+   *  end on its own, at most the wait it was named. */
+  const callerWaits = new Map<string, number>();
   const fill = (url: string, p: Pace) => {
     const t = now();
     const b = buckets.get(url) ?? { tokens: p.burst, at: t };
@@ -218,14 +230,22 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       const p = pace[url];
       if (p === undefined) return 0;
       const b = fill(url, p);
+      const t = now();
+      const waiting = (callerWaits.get(url) ?? 0) - t;
+      if (background && waiting > 0) return Math.max(1, Math.ceil(waiting));
       const floor = background ? p.burst * CALLER_ROOM : 0;
       // a post larger than the bucket waits for a full one
       const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
+      // a caller's draw, or its wait, keeps the bucket's refill for callers CALLER_HOLD_MS on (or until its wait ends)
+      const keep = (ms: number) => callerWaits.set(url, Math.max(callerWaits.get(url) ?? 0, t + ms));
       if (b.tokens - units >= floor) {
         b.tokens -= units;
+        if (!background) keep(CALLER_HOLD_MS);
         return 0;
       }
-      return Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
+      const w = Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
+      if (!background) keep(Math.max(w, CALLER_HOLD_MS));
+      return w;
     },
     room(url) {
       const p = pace[url];
