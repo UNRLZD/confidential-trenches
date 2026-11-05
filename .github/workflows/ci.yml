@@ -298,8 +298,8 @@ jobs:
         run: pnpm run test:vault-scripts
       # the Solana pool's deploy script: its cleanup never strands a lamport on the run key, and every committed
       # deployment record's commitment is Poseidon(value, label, precommitment)
-      - name: the Solana pool's deploy script's own tests
-        run: node --test contracts/pool-solana/scripts/deploy.test.mjs
+      - name: the Solana pool's deploy script's own tests, and its mutation list still names its source and tests
+        run: node --test contracts/pool-solana/scripts/deploy.test.mjs contracts/pool-solana/scripts/mutants.test.mjs
       # The EVM pool (contracts/pool-evm): forge-std from its submodule (v1.9.7, pinned by commit), Foundry v1.7.1 (the
       # version its tests were first run with, released 2026-05-08) through foundry-toolchain v1.9.1 (908c540, read
       # 2026-11-02 20:12Z), solc 0.8.28 as its foundry.toml pins. The forge tests run the kit's real proofs through the

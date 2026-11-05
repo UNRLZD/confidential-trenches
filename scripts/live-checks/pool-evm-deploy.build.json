@@ -1,6 +1,6 @@
 {
   "notes": [
-    "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04, and again for card evm-selldelegate-exact-debit (W's balance of the token falls by exactly the amount) with forge 1.7.1 on 2026-11-04."
+    "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04, and again for card evm-selldelegate-exact-debit (W's balance of the token falls by exactly the amount) with forge 1.7.1 on 2026-11-04, and for pool review round 2 (R-3: WETH is read only for a route that can pay in it) on 2026-11-05."
   ],
   "contracts": {
     "WithdrawalVerifier": {
@@ -64,15 +64,16 @@
       ]
     },
     "SellDelegate": {
-      "length": 8368,
-      "masked": "0x63aa1c09eb919724feb88d836411ccb18cda768eedbc59a3364a4e88c1b2e6e2",
+      "length": 8985,
+      "masked": "0xbfcef8ed247ef02e8ecfd2815bb039bca5f3810106c35009e959c875b1bb505d",
       "immutables": [
         [
           256,
           805,
-          2715,
-          4118,
-          4288
+          2736,
+          4145,
+          4315,
+          6269
         ],
         [
           119,
@@ -82,8 +83,9 @@
           1788,
           1827,
           2050,
-          3024,
-          3244
+          3045,
+          3265,
+          6143
         ]
       ]
     }
@@ -134,6 +136,36 @@
       "at": {
         "base-sepolia": "0xfa1442419b6984b8e3aa8933c690f80f063b6adf",
         "robinhood-testnet": "0xaafb86fed9b651933773a0750d5dba22ca8b8a02"
+      }
+    },
+    "SellDelegate.exact-debit": {
+      "contract": "SellDelegate",
+      "note": "The evm-selldelegate-exact-debit sell delegate (constructor(IWETH, IPoolManager), with the exact-debit check), as this file pinned it before pool review round 2 (R-3: WETH read only for a route that can pay in it). Deployed with no upgrade path, so its code stays this build; it is checked only at the addresses in `at`, the evm-selldelegate-exact-debit redeploys (scripts/live-checks/evm-selldelegate-exact-debit.<chain>.json), which the kit pins until a later card moves the pins. deploy.mjs --write-build keeps this map as it is.",
+      "length": 8368,
+      "masked": "0x63aa1c09eb919724feb88d836411ccb18cda768eedbc59a3364a4e88c1b2e6e2",
+      "immutables": [
+        [
+          256,
+          805,
+          2715,
+          4118,
+          4288
+        ],
+        [
+          119,
+          408,
+          1037,
+          1695,
+          1788,
+          1827,
+          2050,
+          3024,
+          3244
+        ]
+      ],
+      "at": {
+        "base-sepolia": "0xe39f1b9934810792c090d8ab8f555b9955527260",
+        "robinhood-testnet": "0x9909a660c8a55829335dd4d894c8375bfcfcd65b"
       }
     }
   }
