@@ -3043,13 +3043,13 @@ test("TH9 a refused connection in a span that would split is asked again whole a
 });
 
 test("TH10 a later, shorter wait never shortens one already set: a Retry-After: 2 holds the scan even when the burst's other 429s name none", { timeout: 30_000 }, async () => {
-  // the first getLogs answers Retry-After: 2, the rest of the first burst 429 with no header, after it
-  let first = true;
-  const t0 = performance.now();
+  // the first getLogs answers Retry-After: 2, the rest of the first burst (the scan's first 20, its parallel) 429 with
+  // no header, after it: counted, never timed, so a loaded machine that sends the burst slowly still sends it all
+  let n = 0;
   const { rpc, st } = faultScan([], () => {
-    if (performance.now() - t0 > 50) return "ok";
-    if (first) return (first = false), "429:2";
-    return "429:none";
+    n++;
+    if (n > 20) return "ok";
+    return n === 1 ? "429:2" : "429:none";
   });
   const r = await coldQuote(rpc, 0x3f40);
   assert.notEqual(r.code, "rpc_error", r.message);
