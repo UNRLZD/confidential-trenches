@@ -1319,9 +1319,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  starts while a first open waits for its pool (`opening`), so a caller's reads find the providers' paces as free as
    *  before. Each goes through mainPool, so an open meanwhile joins its read, and what it finds is kept as an open's is
    *  (card helper-robinhood-search-ahead: at 38249ca a listed token whose listed pool the helper cannot read was looked
-   *  for only at its first open, and 4 of 12 such tapes opened at once took 9 to 15.5 s). [design: 2 at once, so a
-   *  first open that comes mid-search shares the providers with two searches at most.] */
+   *  for only at its first open, and 4 of 12 such tapes opened at once took 9 to 15.5 s). Nor does one start before two
+   *  providers that batch (single) are free to agree a caller's read: not held, each with AHEAD_ROOM of its bucket or
+   *  more (a provider with no pace counts as full). Without that wait, a fresh helper's search of the lists' ~58 tokens
+   *  spent the buckets the opens drew on: 12 pinned tapes opened 60 s after the lists loaded answered 7 x 503 at 9.6 s,
+   *  and on the next run p50 10.6 s, where opened at once with no search running they took 4.4 s at most (2026-11-05
+   *  08:2xZ, the Mac). [design: 2 at once, so a first open that comes mid-search shares the providers with two searches
+   *  at most; three quarters of a bucket, so the room a search starts with is the callers' quarter (CALLER_ROOM) and
+   *  half a bucket more; read again every AHEAD_WAIT_MS.] */
   const AHEAD_AT_ONCE = 2;
+  const AHEAD_ROOM = 0.75;
+  const AHEAD_WAIT_MS = 500;
+  const roomy = (): boolean => single(usable(rpcs), 2).filter((u) => holds.room(u) >= AHEAD_ROOM).length >= 2;
   const aheadQueue = new Set<string>();
   let aheadRun: Promise<void> | null = null;
   let opening = 0;
@@ -1338,7 +1347,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (aheadRun === null && aheadQueue.size > 0) {
       const one = async (): Promise<void> => {
         for (;;) {
-          while (opening > 0) await new Promise<void>((go) => idle.push(go));
+          for (;;) {
+            if (opening > 0) await new Promise<void>((go) => idle.push(go));
+            else if (aheadQueue.size > 0 && !roomy()) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
+            else break;
+          }
           const t = aheadQueue.values().next().value;
           if (t === undefined) return;
           aheadQueue.delete(t);
@@ -1792,6 +1805,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   return {
     tick: start,
     stop(): void {
+      aheadQueue.clear();
       if (timer !== null) clearInterval(timer);
       timer = null;
       if (follower !== null) clearInterval(follower);

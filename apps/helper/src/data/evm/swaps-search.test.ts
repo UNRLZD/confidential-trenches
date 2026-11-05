@@ -10,8 +10,9 @@
 // the bound is held by looking ahead, and the 12 opens after it read no transfers.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fakeChain, open, REC, timeAt } from "../../../test/evm-swaps/robinhood.ts";
+import { fakeChain, open, REC, timeAt, URLS } from "../../../test/evm-swaps/robinhood.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
+import { providerHolds } from "../../limits/limits.ts";
 import { HEADER_TIMED, ROBINHOOD_VENUES, SWAP_RPCS, TOPIC } from "./swaps.ts";
 
 const CHAIN_RPC = "https://rpc.mainnet.chain.robinhood.com";
@@ -142,4 +143,24 @@ test("card helper-robinhood-search-ahead: a lone cold token's discovery asks eac
   assert.equal(got.status, 200);
   assert.equal((JSON.parse(got.body) as { trades: unknown[] }).trades.length, SWAPS);
   assert.ok(ms <= 7 * LATE_MS, `${(ms / LATE_MS).toFixed(1)} answer times (${ms} ms)`);
+});
+
+test("card helper-robinhood-search-ahead: the search ahead starts none while two batching providers lack three quarters of their bucket (a fresh helper's search spent the buckets 12 opens drew on: 7 x 503), and starts once they refill", async () => {
+  const r = rig([]);
+  // a.test and b.test paced 10 calls a burst, 1 a second, both spent by callers; c.test held
+  const pace = { [URLS[0]!]: { perS: 1, burst: 10, unit: "call" as const }, [URLS[1]!]: { perS: 1, burst: 10, unit: "call" as const } };
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const holds = providerHolds(() => Date.now(), pace);
+    for (const u of URLS.slice(0, 2)) while (holds.take(u, 1, false) === 0);
+    holds.hold(URLS[2]!, 60);
+    const s = open(r.chain, clock, { pools: new Map(), rpcs: URLS, fetch: r.fetch as never, holds });
+    const done = s.ahead([TOKENS[0]!.token]);
+    await new Promise((go) => setTimeout(go, 5_000));
+    const early = r.reads.get(TOKENS[0]!.token) ?? 0;
+    await done;
+    s.stop();
+    return { early, late: r.reads.get(TOKENS[0]!.token) ?? 0 };
+  });
+  assert.equal(value.early, 0, "a search started while the buckets were spent");
+  assert.ok(value.late > 0, "the search never started once they refilled");
 });
