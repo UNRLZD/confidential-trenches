@@ -2,9 +2,11 @@
 # builds by contracts/vault/scripts/deploy.mjs --build-only (pinned rustc and cargo-near, each build in its own new
 # target dir, their sha256 compared, then every deploy refusal for a mainnet build: the banned imports, the promise
 # and export lists, the function body limit, the required exports and mainnet USDC as the only token). Then the wasm
-# and its sha256 are uploaded as the artifact vault-mainnet-wasm, which the owner's deploy paste downloads
-# (gh run download <id> -n vault-mainnet-wasm), and the build is compared with the pin of
-# contracts/vault/deployments/mainnet-test.json; deploy.mjs refuses any other wasm on mainnet.
+# is compared with the pin of contracts/vault/deployments/mainnet-test.json and deploy.mjs MAINNET_PINS, and only a
+# build that is the pin is uploaded, with its sha256, as the artifact vault-mainnet-wasm, which the owner's deploy paste
+# downloads by this run's id (gh run download <id> -n vault-mainnet-wasm); deploy.mjs refuses any other wasm on mainnet.
+# The paths are every file the build and pin steps read: contracts/vault/ and deploy.mjs's imports
+# (contracts/vault/scripts/deploy.test.mjs holds the list against them), and scripts/ci/retry.sh.
 # No secret and no token beyond the read-only one GitHub gives every run. Actions pinned by commit sha as ci.yml has
 # them (actions/checkout v7.0.1, actions/setup-node v7.1.0, actions/upload-artifact v7.0.2).
 name: vault-build
@@ -14,6 +16,11 @@ on:
     paths:
       - "contracts/vault/**"
       - ".github/workflows/vault-build.yml"
+      - "scripts/net-window.mjs"
+      - "scripts/live-checks/vault-skeleton.mjs"
+      - "scripts/live-checks/vault-testnet-t01.mjs"
+      - "scripts/ci/near-rpc-operators.mjs"
+      - "scripts/ci/retry.sh"
   workflow_dispatch:
 
 permissions:
@@ -53,14 +60,8 @@ jobs:
           cd "$RUNNER_TEMP/vault-mainnet"
           sha256sum blindfill_vault.wasm | tee blindfill_vault.wasm.sha256
           cp "$RUNNER_TEMP/build.log" build.log
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: vault-mainnet-wasm
-          path: ${{ runner.temp }}/vault-mainnet
-          if-no-files-found: error
-          retention-days: 90
-      # deploy.mjs pinProblems: the build's sha256 is mainnet-test.json's pin, the record's builds agree, its code_hash
-      # is the pin's base58 and it is a mainnet record
+      # deploy.mjs pinProblems: the build's sha256 is mainnet-test.json's pin and MAINNET_PINS', the record's builds
+      # agree, its code_hash is the pin's base58 and it is a mainnet record; before the upload, so no other wasm is one
       - name: the build is the pin of mainnet-test.json
         run: |
           node --input-type=module -e '
@@ -71,3 +72,9 @@ jobs:
             if (p.length) { console.error(`not the pin: ${p.join("; ")}`); process.exit(1); }
             console.log("the build is the pin of contracts/vault/deployments/mainnet-test.json");
           ' "$RUNNER_TEMP/vault-mainnet/blindfill_vault.wasm"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vault-mainnet-wasm
+          path: ${{ runner.temp }}/vault-mainnet
+          if-no-files-found: error
+          retention-days: 90

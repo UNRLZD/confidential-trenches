@@ -488,13 +488,22 @@ function mainnetFiles(dir, w, pin = sha256hex(w)) {
 const mainnetArgs = (dir, key, f) => ["--network", "mainnet", "--parent", MAINNET_PARENT, "--vault", MAINNET_VAULT, "--key-file", key, "--wasm", f.file, "--deployment", f.record, "--out", path.join(dir, "out.json")];
 
 // a fetch module answering a mainnet parent's reads: chain_id mainnet on both RPCs, the parent's full key, no vault yet,
-// the parent's balance `amount`, a final block; every other method (send_tx above all) is blocked and logged
-function mainnetNet(dir, amount) {
+// the parent's balance `amount`, a final block; every other method (send_tx above all) is blocked and logged, and a
+// send_tx's signed_tx_base64 is kept in <dir>/sent.txt. With `pins`, a load hook gives deploy.mjs those MAINNET_PINS (the
+// test vault's own wasm, which the real pin cannot be); with `mutateRecipe`, near-tx.mjs's recipeTx appends an AddKey.
+function mainnetNet(dir, amount, { pins, mutateRecipe = false } = {}) {
   const f = path.join(dir, "mainnet-net.mjs");
   const log = path.join(dir, "methods.log");
+  const hook =
+    `import { registerHooks } from "node:module";\n` +
+    `registerHooks({ load(url, context, next) { const r = next(url, context);\n` +
+    (pins ? `  if (url.endsWith("/contracts/vault/scripts/deploy.mjs")) { const src = String(r.source); const out = src.replace(/^export const MAINNET_PINS = \\{.*\\};$/m, ${JSON.stringify(`export const MAINNET_PINS = ${JSON.stringify(pins)};`)}); if (out === src) throw new Error("the test found no MAINNET_PINS line"); r.source = out; }\n` : "") +
+    (mutateRecipe ? `  if (url.endsWith("/contracts/vault/scripts/near-tx.mjs")) { const src = String(r.source); const out = src.replace("export function recipeTx(", "function recipeTx0(") + "\\nexport function recipeTx(a) { const t = recipeTx0(a); const at = 4 + Buffer.byteLength(a.signer) + 1 + 32 + 8 + 4 + Buffer.byteLength(a.receiver) + 32; const c = Buffer.from(t); c.writeUInt32LE(5, at); return Buffer.concat([c, new Borsh().u8(5).u8(0).fixed(Buffer.alloc(32, 3)).u64(0).u8(1).done()]); }\\n"; if (out === src) throw new Error("the test found no recipeTx"); r.source = out; }\n` : "") +
+    `  return r; } });\n`;
   writeFileSync(
     f,
-    `import { appendFileSync } from "node:fs";\n` +
+    hook +
+      `import { appendFileSync, writeFileSync } from "node:fs";\n` +
       `const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: "deploy", result }) });\n` +
       `globalThis.fetch = async (url, init) => { const { method, params } = JSON.parse(init.body); appendFileSync(${JSON.stringify(log)}, method + " " + (params?.request_type ?? "") + " " + url + "\\n");\n` +
       `  if (method === "status") return ok({ chain_id: "mainnet" });\n` +
@@ -502,11 +511,12 @@ function mainnetNet(dir, amount) {
       `  if (method === "query" && params.request_type === "view_account" && params.account_id === ${JSON.stringify(MAINNET_VAULT)}) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: "deploy", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } }) };\n` +
       `  if (method === "query" && params.request_type === "view_account" && params.account_id === ${JSON.stringify(MAINNET_PARENT)}) return ok({ amount: ${JSON.stringify(String(amount))}, locked: "0" });\n` +
       `  if (method === "block") return ok({ header: { hash: "11111111111111111111111111111111" } });\n` +
+      `  if (method === "send_tx") writeFileSync(${JSON.stringify(path.join(dir, "sent.txt"))}, params.signed_tx_base64);\n` +
       "  throw new Error(`network blocked by the test: ${method} ${url}`); };\n",
   );
   return f;
 }
-const runMainnet = (dir, args, amount) => spawnSync(process.execPath, ["--import", pathToFileURL(mainnetNet(dir, amount)).href, SCRIPT, ...args], { encoding: "utf8", timeout: 30_000 });
+const runMainnet = (dir, args, amount, o) => spawnSync(process.execPath, ["--import", pathToFileURL(mainnetNet(dir, amount, o)).href, SCRIPT, ...args], { encoding: "utf8", timeout: 30_000 });
 const mainnetWasm = (exports = ALL_EXPORTS) => wasm({ strings: [MAINNET_USDC], exports });
 
 test("mainnet (a): a wasm whose sha256 is not the record's pin is refused before any send", () => {
@@ -524,13 +534,14 @@ test("mainnet (a): a record whose builds disagree, or that is another vault's or
   const w = mainnetWasm();
   const pin = sha256hex(w);
   const good = { network: "mainnet", account_id: MAINNET_VAULT, wasm_sha256: pin, wasm_builds_sha256: [pin, pin], code_hash: b58encode(Buffer.from(pin, "hex")) };
-  assert.deepEqual(pinProblems(w, good, MAINNET_VAULT), []);
-  assert.match(pinProblems(w, { ...good, wasm_builds_sha256: [pin] }, MAINNET_VAULT).join(";"), /builds do not all agree/);
-  assert.match(pinProblems(w, { ...good, wasm_builds_sha256: [pin, "cd".repeat(32)] }, MAINNET_VAULT).join(";"), /builds do not all agree/);
-  assert.match(pinProblems(w, { ...good, code_hash: "x" }, MAINNET_VAULT).join(";"), /code_hash x is not the base58/);
-  assert.match(pinProblems(w, { ...good, network: "testnet" }, MAINNET_VAULT).join(";"), /a testnet record, not mainnet/);
-  assert.match(pinProblems(w, good, `vault.${MAINNET_PARENT}`).join(";"), /not vault\.bf-test\.near's/);
-  assert.match(pinProblems(w, { ...good, wasm_sha256: undefined }, MAINNET_VAULT).join(";"), /pins no wasm_sha256/);
+  const pins = { [MAINNET_VAULT]: pin };
+  assert.deepEqual(pinProblems(w, good, MAINNET_VAULT, pins), []);
+  assert.match(pinProblems(w, { ...good, wasm_builds_sha256: [pin] }, MAINNET_VAULT, pins).join(";"), /builds do not all agree/);
+  assert.match(pinProblems(w, { ...good, wasm_builds_sha256: [pin, "cd".repeat(32)] }, MAINNET_VAULT, pins).join(";"), /builds do not all agree/);
+  assert.match(pinProblems(w, { ...good, code_hash: "x" }, MAINNET_VAULT, pins).join(";"), /code_hash x is not the base58/);
+  assert.match(pinProblems(w, { ...good, network: "testnet" }, MAINNET_VAULT, pins).join(";"), /a testnet record, not mainnet/);
+  assert.match(pinProblems(w, good, `vault.${MAINNET_PARENT}`, { ...pins, [`vault.${MAINNET_PARENT}`]: pin }).join(";"), /not vault\.bf-test\.near's/);
+  assert.match(pinProblems(w, { ...good, wasm_sha256: undefined }, MAINNET_VAULT, pins).join(";"), /pins no wasm_sha256/);
 });
 
 test("mainnet (b): a pinned wasm missing a required export (settle) is refused before any send", () => {
@@ -563,7 +574,7 @@ test("mainnet (c): a parent too poor for the code storage, the registration and 
   const w = mainnetWasm();
   const f = mainnetFiles(dir, w);
   const need = BigInt(w.length + 100) * 10n ** 19n + 10n ** 22n + 10n ** 22n + 5n * 10n ** 22n;
-  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), need - 1n);
+  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), need - 1n, { pins: { [MAINNET_VAULT]: sha256hex(w) } });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, new RegExp(`refused before any send: the parent holds ${need - 1n} yocto, short of ${need}`));
   assert.ok(!methods(dir).some((m) => m.startsWith("send_tx")), methods(dir).join("\n"));
@@ -571,16 +582,64 @@ test("mainnet (c): a parent too poor for the code storage, the registration and 
   assert.deepEqual(methods(dir).slice(0, 2), ["status  https://rpc.mainnet.fastnear.com", "status  https://near.drpc.org"]);
 });
 
-test("mainnet (c): a parent holding exactly enough gets to the send, and only then", () => {
+test("mainnet (c): a parent holding exactly enough gets to the send, and only then", async () => {
   const dir = fresh();
   const k = keyFile(dir, MAINNET_PARENT);
   const w = mainnetWasm();
   const f = mainnetFiles(dir, w);
   const need = BigInt(w.length + 100) * 10n ** 19n + 10n ** 22n + 10n ** 22n + 5n * 10n ** 22n;
-  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), need);
+  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), need, { pins: { [MAINNET_VAULT]: sha256hex(w) } });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /network blocked by the test: send_tx https:\/\/rpc\.mainnet\.fastnear\.com/);
-  assert.match(r.stdout, /no AddKey/);
+  // review LOW 2: the bytes sent are exactly the four actions, to the vault, with the code storage attached; LOW 5:
+  // their hash was printed before the send
+  const { txActionTags } = await import(SCRIPT);
+  const signed = Buffer.from(readFileSync(path.join(dir, "sent.txt"), "utf8"), "base64");
+  const tx = signed.subarray(0, signed.length - 65);
+  assert.equal(signed[signed.length - 65], 0, "not an ed25519 signature");
+  assert.deepEqual(txActionTags(tx), [0, 3, 1, 2]);
+  assert.ok(tx.includes(Buffer.from(MAINNET_VAULT)), "the receiver is not the vault");
+  assert.ok(tx.includes(w), "the wasm sent is not the pinned one");
+  const hash = b58encode(createHash("sha256").update(tx).digest());
+  assert.match(r.stdout, new RegExp(`sending tx ${hash}: \\[CreateAccount, Transfer\\(${BigInt(w.length + 100) * 10n ** 19n + 10n ** 22n}\\), DeployContract\\(${w.length} B\\), FunctionCall\\(config, 100 Tgas, 0\\)\\] from ${MAINNET_PARENT} to ${MAINNET_VAULT}, no AddKey`));
+});
+
+test("mainnet (d): a recipe that would carry an AddKey is refused before send_tx, in the CLI's own run", () => {
+  const dir = fresh();
+  const k = keyFile(dir, MAINNET_PARENT);
+  const w = mainnetWasm();
+  const f = mainnetFiles(dir, w);
+  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), 10n ** 25n, { pins: { [MAINNET_VAULT]: sha256hex(w) }, mutateRecipe: true });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /refused before any send: the batch's actions are \[0, 3, 1, 2, 5\]/);
+  assert.ok(!methods(dir).some((m) => m.startsWith("send_tx")), methods(dir).join("\n"));
+  assert.equal(existsSync(path.join(dir, "sent.txt")), false, "a tx was sent");
+});
+
+// review MED-1: the pin lives in deploy.mjs too, so a record edited to match another wasm cannot move it
+test("mainnet MED-1: a record pinning a changed wasm for the real vault is refused before any RPC, by MAINNET_PINS", () => {
+  const dir = fresh();
+  const k = keyFile(dir, "confidential.unrlzd.near");
+  const w = mainnetWasm();
+  const file = path.join(dir, "changed.wasm");
+  writeFileSync(file, w);
+  const pin = sha256hex(w);
+  const record = path.join(dir, "edited-record.json");
+  writeFileSync(record, JSON.stringify({ network: "mainnet", account_id: "vault-test.confidential.unrlzd.near", parent: "confidential.unrlzd.near", wasm_sha256: pin, wasm_builds_sha256: [pin, pin], code_hash: b58encode(Buffer.from(pin, "hex")) }));
+  const r = run(dir, ["--network", "mainnet", "--parent", "confidential.unrlzd.near", "--vault", "vault-test.confidential.unrlzd.near", "--key-file", k.file, "--wasm", file, "--deployment", record, "--out", path.join(dir, "out.json")]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /refused before any send: .*the wasm's sha256 [0-9a-f]{64} is not MAINNET_PINS' pin 57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a for vault-test\.confidential\.unrlzd\.near/);
+  assert.match(r.stderr, /the record's pin [0-9a-f]{64} is not MAINNET_PINS' pin 57535ae7/);
+  neverSent(r);
+});
+
+test("mainnet MED-1: MAINNET_PINS names the test vault's pin, the one mainnet-test.json holds", async () => {
+  const { MAINNET_PINS, pinProblems } = await import(SCRIPT);
+  const rec = JSON.parse(readFileSync(path.join(HERE, "..", "deployments", "mainnet-test.json"), "utf8"));
+  assert.deepEqual(MAINNET_PINS, { [rec.account_id]: rec.wasm_sha256 });
+  // another vault has no pin at all
+  const w = mainnetWasm();
+  assert.match(pinProblems(w, { ...rec, account_id: "vault.confidential.unrlzd.near" }, "vault.confidential.unrlzd.near").join(";"), /MAINNET_PINS holds no pin for vault\.confidential\.unrlzd\.near/);
 });
 
 test("mainnet (d): a batch that would leave a key on the vault (an AddKey, or any action past the four) is refused", async () => {
@@ -607,4 +666,21 @@ test("mainnet: deploy.mjs sends to the two RPCs the mainnet read-back reads (vau
   const { MAINNET_RPCS } = await import(SCRIPT);
   const { MAINNET_RPCS: READ } = await import("../../../scripts/live-checks/vault-mainnet.mjs");
   assert.deepEqual(MAINNET_RPCS, READ);
+});
+
+// review LOW 4: the vault-build workflow runs on a change to any file its build and pin steps read, deploy.mjs's own
+// imports included (a static `import ... from "./x"` of a repository file, followed through each file it reaches)
+test("vault-build.yml's paths hold contracts/vault/ and every repository file deploy.mjs imports", () => {
+  const root = path.resolve(HERE, "../../..");
+  const seen = new Set();
+  const walk = (f) => {
+    if (seen.has(f)) return;
+    seen.add(f);
+    for (const m of readFileSync(f, "utf8").matchAll(/^\s*import\s+(?:[^"']*?from\s+)?["']([^"']+)["']/gm)) if (m[1].startsWith(".")) walk(path.resolve(path.dirname(f), m[1]));
+  };
+  walk(SCRIPT);
+  const outside = [...seen].map((f) => path.relative(root, f)).filter((f) => !f.startsWith("contracts/vault/")).sort();
+  assert.deepEqual(outside, ["scripts/ci/near-rpc-operators.mjs", "scripts/live-checks/vault-skeleton.mjs", "scripts/live-checks/vault-testnet-t01.mjs", "scripts/net-window.mjs"]);
+  const yml = readFileSync(path.join(root, ".github/workflows/vault-build.yml"), "utf8");
+  for (const f of ["contracts/vault/**", ...outside, "scripts/ci/retry.sh"]) assert.ok(yml.includes(`      - "${f}"\n`), `vault-build.yml's paths miss ${f}`);
 });
