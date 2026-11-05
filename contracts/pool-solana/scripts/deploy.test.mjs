@@ -2316,3 +2316,25 @@ test("review 89a6 I3: the record lists only the programdata's transactions whose
   assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "dep", "auth", "init"]);
   assert.deepEqual(r.funders, ["F1"]);
 });
+
+test("review 89a6 M2 (every path): the record's finalized reads (the statuses and each transaction) that fail past rpc()'s five tries are read again: the mainnet run writes its record", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let statusFails = 7;
+  let txFails = 7;
+  const limited = { ok: false, status: 429, json: async () => ({ code: 429, message: "Too many requests" }) };
+  wrap(c, (url, { method, params }, real) => {
+    if (method === "getSignatureStatuses" && params[0].length >= 4 && statusFails-- > 0) return limited;
+    if (method === "getTransaction" && params[1]?.commitment === "finalized" && txFails-- > 0) return limited;
+    return real();
+  });
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(statusFails < 0 && txFails < 0);
+    assert.ok(existsSync(out), "the record is written");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});

@@ -178,7 +178,8 @@ const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 /** One JSON-RPC call, five tries at most: a transient failure (the fetch throws, as on a reset or "fetch failed"; a
  * 429 or a 5xx; a -32029 / -32429 rate answer) is retried with backoff (the devnet run of 90522c4 stopped on one).
  * A JSON-RPC error answer is never retried: it is the node's word. Re-sending a signed transaction is safe, since it
- * keeps its signature. */
+ * keeps its signature. The error thrown after five transient failures has `transient: true`, so a caller can read
+ * again later and still stop at once on the node's word. */
 export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries = 5) {
   for (let i = 1; ; i++) {
     let r, j, transient;
@@ -190,7 +191,7 @@ export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries =
       transient = new Error(`${method}: ${e?.cause?.code ?? e?.message ?? e}`);
     }
     if (transient) {
-      if (i >= tries) throw transient;
+      if (i >= tries) throw Object.assign(transient, { transient: true });
       await sleep(1500 * i);
       continue;
     }

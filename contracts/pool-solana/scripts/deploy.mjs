@@ -35,11 +35,15 @@
 //     rent(0) (it must stay rent-exempt between steps), and a fee bound for
 //     every signature (the CLI's write chunks counted at 900 B, fewer than it writes). Then it waits until the
 //     funder holds that much, and records the funding transactions.
-//  5. solana program deploy --final (the upgradeable loader). --final is two transactions: the deploy, then a
-//     SetAuthority to none (on devnet 3H2Vatu... then 2Wii4A6vy... 10 s later), so a stop between them leaves a program
-//     the funder can upgrade; the cleanup closes it. The authority is read back. The writes go to the leaders (no
-//     --use-rpc), re-signed up to DEPLOY_SIGN_ATTEMPTS times, into the run's own --buffer; a failed try is tried again
-//     from that buffer up to DEPLOY_TRIES times (only the chunks that differ are written again) before the cleanup.
+//  5. solana program deploy (the upgradeable loader), then the run's own SetAuthority to none: two transactions (on
+//     devnet 3H2Vatu... then 2Wii4A6vy... 10 s later, when the CLI's --final sent both), so a stop between them leaves
+//     a program the funder can upgrade; the cleanup closes it. The SetAuthority is the script's send, priced, journaled
+//     before it is sent and sent again for 90 s, tried up to AUTHORITY_TRIES times, none of them a deploy try: the
+//     CLI's --final and set-upgrade-authority send it with no compute unit price (agave v4.4.0 cli/src/program.rs
+//     1496-1508). The authority is read back. The writes go to the leaders (no --use-rpc), re-signed up to
+//     DEPLOY_SIGN_ATTEMPTS times, into the run's own --buffer; a failed try is tried again from that buffer up to
+//     DEPLOY_TRIES times (only the chunks that differ are written again), each only while the funder holds one more
+//     try's bound and the rest of the run, before the cleanup.
 //  6. Tag 0 init, then a 0.01 SOL deposit from the funder with a fresh note (nullifier and secret random in this run,
 //     never printed or kept; the precommitment is public). The mark and both page leaves are read back and checked:
 //     the label leaf against keccak256(scope, nonce) mod p, the state leaf against Poseidon(value, label,
@@ -118,9 +122,13 @@ export const PRIORITY_MICRO_LAMPORTS = 100_000n;
 // short try, not the whole run (review a763a51d).
 export const DEPLOY_SIGN_ATTEMPTS = 10;
 export const DEPLOY_TRIES = 6;
+/** The SetAuthority to none's tries, each sent again for WAITS.confirm (a congested mainnet can drop one). */
+export const AUTHORITY_TRIES = 6;
 export const PRIORITY_CU_BOUND = 1_400_000n;
 export const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
 export const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
+/** The most one priced transaction's compute unit price can cost, lamports. */
+const PRIORITY_PER_TX = (PRIORITY_CU_BOUND * PRIORITY_MICRO_LAMPORTS + 999_999n) / 1_000_000n;
 /** A lookup table's 56-byte meta: u32 type 1, u64 deactivation slot (u64 max while active), u64 last extended slot, u8
  * its start index, Option<Pubkey> authority (tag at 21, key at 22), u16 padding; then the addresses. */
 export const TABLE_META = 56;
@@ -202,7 +210,10 @@ const LANDED = ["confirmed", "finalized"];
  * the cleanup's settle reads it back. `wait` and `now` are the clock (a test's is virtual).
  */
 export async function sendAndConfirm(fetchFn, url, ixs, payer, keys, { step = "a transaction", journal, wait = sleep, now = Date.now } = {}) {
-  const { value } = await rpc(fetchFn, url, "getLatestBlockhash", [{ commitment: "confirmed" }]);
+  // a read that fails past rpc()'s five tries (rate-limited or reset) is read again: a run that ended on one after its
+  // funding would cost the owner one more paste. A JSON-RPC error answer is the node's word and ends the step
+  const call = (method, params) => rpc(fetchFn, url, method, params, wait);
+  const { value } = await readAgain(() => call("getLatestBlockhash", [{ commitment: "confirmed" }]), `${step}: the blockhash`, { wait, now });
   const tx = signTx(compileMessage(payer.id, ixs, value.blockhash), keys);
   const size = Buffer.from(tx.base64, "base64").length;
   if (size > TX_MAX) throw new Error(`${step}: ${size} bytes, over ${TX_MAX}: not signed for sending`);
@@ -216,18 +227,27 @@ export async function sendAndConfirm(fetchFn, url, ixs, payer, keys, { step = "a
     if (s && LANDED.includes(s.confirmationStatus)) return journal?.settled(tx.signature, "landed"), true;
     return false;
   };
-  const status = async () => (await rpc(fetchFn, url, "getSignatureStatuses", [[tx.signature], { searchTransactionHistory: true }])).value[0];
+  // a status read that fails past its tries is "not seen yet", read again until the deadline
+  const status = async (history) => {
+    try {
+      return (await call("getSignatureStatuses", [[tx.signature], ...(history ? [{ searchTransactionHistory: true }] : [])])).value[0];
+    } catch (e) {
+      if (!e.transient) throw e;
+      return null;
+    }
+  };
   while (now() < until) {
     try {
-      await rpc(fetchFn, url, "sendTransaction", [tx.base64, { encoding: "base64", preflightCommitment: "confirmed" }]);
+      await call("sendTransaction", [tx.base64, { encoding: "base64", preflightCommitment: "confirmed" }]);
     } catch (e) {
-      // a resend of a transaction that already landed ("already been processed") is not a failure: its status says
-      if (seen(await status())) return tx.signature;
-      if (!/already been processed/i.test(e.message)) throw e;
+      // a resend of a transaction that already landed ("already been processed") is not a failure: its status says;
+      // a send that failed past its tries is sent again at the next pass (the same bytes, the same signature)
+      if (seen(await status(true))) return tx.signature;
+      if (!e.transient && !/already been processed/i.test(e.message)) throw e;
     }
     for (let i = 0; i < 4; i++) {
       await wait(500);
-      if (seen((await rpc(fetchFn, url, "getSignatureStatuses", [[tx.signature]])).value[0])) return tx.signature;
+      if (seen(await status(false))) return tx.signature;
     }
   }
   throw new Error(`${tx.signature} not confirmed in ${WAITS.confirm / 1000} s`);
@@ -335,9 +355,19 @@ export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve 
   // the run's lookup table, still live under the funder (a run stopped between its make and its freeze): frozen with
   // the list it was made with, never left with an authority whose key is deleted
   if (ops.freezeTable) await retry("table freeze", () => ops.freezeTable());
-  // a step given up on keeps the reserve in the funder: --sweep-kept pays its fees from it later (the keys are kept)
-  const keep = gaveUp.length ? reserve : 0n;
-  if (keep) problems.push(`kept ${keep} lamports in the funder for --sweep-kept: ${gaveUp.join(", ")} gave up after ${tries} tries`);
+  // a step given up on, or anything leftovers() still reads under the funder (a buffer, an upgradeable program, a live
+  // table, a program id holding lamports) or a read of it that fails, keeps the reserve in the funder: the keys are
+  // kept, and --sweep-kept pays its fees from it later. The funder's own balance is what the sweep is for
+  const why = gaveUp.map((n) => `${n} gave up after ${tries} tries`);
+  if (!why.length && ops.leftovers) {
+    try {
+      why.push(...(await ops.leftovers()).filter((l) => !l.startsWith("the funder holds ")));
+    } catch (e) {
+      why.push(`what is left not read: ${e.message}`);
+    }
+  }
+  const keep = why.length ? reserve : 0n;
+  if (keep) problems.push(`kept ${keep} lamports in the funder for --sweep-kept: ${why.join("; ")}`);
   for (let i = 0; i < tries; i++) {
     await settle(); // a sweep of the last pass may land late too
     try {
@@ -388,7 +418,7 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
     const pd = await account(fetchFn, url, pdAddr, undefined, "confirmed");
     return !!pd && pd.owner === LOADER_V3 && pd.data[0] === 3 && pd.data[12] === 1 && b58encode(pd.data.subarray(13, 45)) === funder.id;
   };
-  const balanceOn = async (u) => BigInt((await rpc(fetchFn, u, "getBalance", [funder.id, { commitment: "confirmed" }])).value);
+  const balanceOn = async (u) => BigInt((await rpc(fetchFn, u, "getBalance", [funder.id, { commitment: "confirmed" }], wait)).value);
   return {
     closeBuffers: async () => {
       let r;
@@ -400,11 +430,12 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
       const said = `${r.stdout}${r.stderr}`.trim().split("\n").filter(Boolean).slice(-1)[0] ?? "";
       say(`buffers closed: ${said}`);
       // agave v4.4.0 prints "Failed to close buffer ..." and still exits 0 (cli/src/program.rs, the --buffers loop): the
-      // close is done only once both RPCs read no buffer under the funder, read again for about 30 s
+      // close is done only once --url reads no buffer under the funder, read again for about 30 s. --url only, as
+      // leftovers() reads it: mainnet's second RPC (PublicNode) refuses getProgramAccounts (403 -32602 "Indexed
+      // requests require a personal token"), and --url is the one the run checks answers it
       let left = [];
       for (let i = 0; i < 15; i++) {
-        left = [];
-        for (const u of [...new Set([url, second ?? url])]) for (const a of await rpc(fetchFn, u, "getProgramAccounts", [LOADER_V3, buffersOf(funder)])) left.push(`${a.pubkey} on ${u}`);
+        left = (await rpc(fetchFn, url, "getProgramAccounts", [LOADER_V3, buffersOf(funder)])).map((a) => `${a.pubkey} on ${url}`);
         if (!left.length) return;
         await wait(2000);
       }
@@ -529,6 +560,7 @@ async function tableReadBack(fetchFn, urls, table, list, authority, { wait = sle
       reads = await Promise.all(urls.map((u) => account(fetchFn, u, table)));
     } catch (e) {
       // a read that fails (its tries all rate-limited) is read again, until the deadline
+      if (!e.transient) throw e;
       why = [`not read: ${e.message}`];
       if (now() > until) throw new Error(`lookup table ${table}: ${why.join("; ")}`);
       continue;
@@ -543,23 +575,36 @@ async function tableReadBack(fetchFn, urls, table, list, authority, { wait = sle
 // ---- the record from chain reads ----
 const LOADER_STEPS = { 0: "buffer made", 1: "buffer write", 2: "deploy with the upgradeable loader (DeployWithMaxDataLen)", 3: "upgrade", 4: "SetAuthority (--final: to none)", 5: "close" };
 /**
- * A deployment record's transactions and funders from chain reads alone: its transactions plus every one on its
- * programdata (the deploy and the SetAuthority --final sends after it; immutable after, so the list ends there), each
- * read at finalized with no error, in slot order; and `funders`, every fee payer among them that is not `return_to`.
+ * A deployment record's transactions and funders from chain reads alone: its transactions plus each of the run's own
+ * on its programdata (the deploy and the SetAuthority to none after it; immutable after, so the list ends there): one
+ * whose fee payer is the run's (its funder or funders, or a payer of its own transactions other than a funding). Anyone
+ * can send a transaction naming the programdata, so a stranger's is left out. Each read at finalized with no error,
+ * in slot order; and `funders`, every fee payer among them that is not `return_to`.
  */
-export async function chainRecord(fetchFn, url, d) {
+export async function chainRecord(fetchFn, url, d, { wait } = {}) {
   const steps = new Map(d.txs.map((t) => [t.signature, t.step]));
-  for (const h of await rpc(fetchFn, url, "getSignaturesForAddress", [d.programdata, { commitment: "finalized" }])) {
-    if (h.err === null && !steps.has(h.signature)) steps.set(h.signature, null);
+  const history = [];
+  for (const h of await rpc(fetchFn, url, "getSignaturesForAddress", [d.programdata, { commitment: "finalized" }], wait)) {
+    if (h.err === null && !steps.has(h.signature)) history.push(h.signature);
   }
+  const read = async (signature) => {
+    const t = await rpc(fetchFn, url, "getTransaction", [signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }], wait);
+    if (!t) throw new Error(`${signature}: not found at finalized on ${url}`);
+    return t;
+  };
   const rows = [];
-  for (const [signature, known] of steps) {
-    const t = await rpc(fetchFn, url, "getTransaction", [signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
-    if (!t || t.meta?.err !== null) throw new Error(`${signature}: ${t ? `failed: ${JSON.stringify(t.meta?.err)}` : "not found at finalized"} on ${url}`);
+  const add = (signature, t, known) => {
+    if (t.meta?.err !== null) throw new Error(`${signature}: failed: ${JSON.stringify(t.meta?.err)} on ${url}`);
     const keys = t.transaction.message.accountKeys;
     const ix = t.transaction.message.instructions.find((i) => keys[i.programIdIndex] === LOADER_V3);
     const step = known ?? (ix ? `the upgradeable loader: ${LOADER_STEPS[b58decode(ix.data)[0]] ?? "another instruction"}` : "on the programdata");
     rows.push({ step, signature, slot: t.slot, payer: keys[0] });
+  };
+  for (const [signature, known] of steps) add(signature, await read(signature), known);
+  const ours = new Set([d.funder, ...(d.funders ?? []), ...rows.filter((r) => !/funding/.test(r.step)).map((r) => r.payer)].filter((p) => p && p !== d.return_to));
+  for (const signature of history) {
+    const t = await read(signature);
+    if (ours.has(t.transaction.message.accountKeys[0])) add(signature, t, null);
   }
   rows.sort((a, b) => a.slot - b.slot);
   return { ...d, txs: rows.map(({ step, signature }) => ({ step, signature })), funders: [...new Set(rows.map((r) => r.payer).filter((p) => p !== d.return_to))] };
@@ -577,6 +622,7 @@ async function settled(fetchFn, url, addr, ready = () => true, { wait = sleep, n
       a = await account(fetchFn, url, addr);
       failed = null;
     } catch (e) {
+      if (!e.transient) throw e;
       failed = e;
     }
     if (a && ready(a)) return a;
@@ -585,12 +631,14 @@ async function settled(fetchFn, url, addr, ready = () => true, { wait = sleep, n
   }
 }
 
-/** `read()`'s answer, read again 2 s apart for up to 90 s while it throws (its tries all rate-limited or reset). */
+/** `read()`'s answer, read again 2 s apart for up to 90 s while it fails past rpc()'s tries (rate-limited or reset:
+ * `transient`). A JSON-RPC error answer is the node's word: thrown at once. */
 async function readAgain(read, what, { wait = sleep, now = Date.now } = {}) {
   for (const until = now() + 90_000; ; ) {
     try {
       return await read();
     } catch (e) {
+      if (!e.transient) throw e;
       if (now() > until) throw new Error(`${what} not read in 90 s: ${e.message}`);
       log(`${what} not read (${e.message}): reading it again in 2 s`);
       await wait(2000);
@@ -599,7 +647,7 @@ async function readAgain(read, what, { wait = sleep, now = Date.now } = {}) {
 }
 
 /** What a deploy try left, read at confirmed on `url`: "final" (this code, upgrade authority none), "upgradeable" (this
- * code, the funder its upgrade authority: the deploy landed and --final's SetAuthority did not), or "absent" (no
+ * code, the funder its upgrade authority: the deploy landed and its SetAuthority to none did not), or "absent" (no
  * program, or not this code: deployed again from the buffer). */
 export async function deployedState(fetchFn, url, programId, so, funderId) {
   const p = await programProblems(fetchFn, url, programId, so, "confirmed");
@@ -638,8 +686,14 @@ export function poolState(acc, programId) {
 async function waitFinalized(fetchFn, url, sigs, { wait = sleep, now = Date.now } = {}) {
   const until = now() + 120_000;
   while (now() < until) {
-    const v = (await rpc(fetchFn, url, "getSignatureStatuses", [sigs, { searchTransactionHistory: true }])).value;
-    if (v.every((s) => s?.confirmationStatus === "finalized" && s.err === null)) return;
+    // a read that fails past rpc()'s tries is "not finalized yet", read again until the deadline
+    let v = null;
+    try {
+      v = (await rpc(fetchFn, url, "getSignatureStatuses", [sigs, { searchTransactionHistory: true }], wait)).value;
+    } catch (e) {
+      if (!e.transient) throw e;
+    }
+    if (v?.every((s) => s?.confirmationStatus === "finalized" && s.err === null)) return;
     await wait(2000);
   }
   throw new Error("not every transaction finalized in 120 s");
@@ -1049,7 +1103,8 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   };
   const programFile = resumeId ? null : fileOf(program, "program.json");
   // the deploy's buffer, a key of the run's own, so a failed try is resumed into the same buffer
-  const bufferFile = resumeId ? null : fileOf(newKey(), "buffer.json");
+  const bufferKey = resumeId ? null : newKey();
+  const bufferFile = bufferKey ? fileOf(bufferKey, "buffer.json") : null;
   // the CLI deploys from a file: the very bytes hashed above, written into the run's own folder
   const codeFile = path.join(dir, "code.so");
   writeFileSync(codeFile, so, { mode: 0o600 });
@@ -1092,7 +1147,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   // what came in to the funder, and what the CLI sent: the funder's history read on chain, each signature not yet in
   // the journal read for its fee payer (the funder: the CLI's; another: a funding)
   const history = async (cliStep) => {
-    const sigs = (await rpc(fetchFn, url, "getSignaturesForAddress", [funder.id, { commitment: "confirmed" }])).reverse();
+    const sigs = (await rpc(fetchFn, url, "getSignaturesForAddress", [funder.id, { commitment: "confirmed" }], wait)).reverse();
     const found = [];
     for (const f of sigs) {
       if (txs.some((t) => t.signature === f.signature)) continue;
@@ -1184,45 +1239,48 @@ export async function main(argv, fetchFn = fetch, io = {}) {
         log(`resume: ${priorTxs.length + prior.length} prior transaction(s) kept for the record`);
       } else {
         // each try is a new CLI process (a fresh leader socket: v4.4.0 reads leaders from one websocket that never
-        // reconnects). Before a retry, what the last try left is read at confirmed: final with this code is done; this
-        // code with the funder as its authority (the deploy landed, --final's SetAuthority did not) is made final with
-        // set-upgrade-authority, never deployed again (the CLI's upgrade path refuses it and the cleanup would close it);
-        // anything else is deployed again from the run's buffer
-        let dep = null;
-        const failedTry = (attempt, what, r) => {
-          const why = (r.stderr || r.stdout || r.error?.message || "").trim().split("\n").slice(-3).join(" | ");
-          if (attempt >= DEPLOY_TRIES) throw new Error(`solana program ${what}: exit ${r.status}: ${why} (try ${attempt} of ${DEPLOY_TRIES})`);
-          log(`deploy try ${attempt} of ${DEPLOY_TRIES} failed: ${why}: trying again from the run's buffer in ${WAITS.poll / 1000} s`);
+        // reconnects), with no --final: the CLI sends its SetAuthority with no compute unit price (agave v4.4.0
+        // cli/src/program.rs 1496-1508, process_set_authority) and its failure would cost a whole try; the run sends its
+        // own below. Before a retry, what the last try left is read at confirmed: this code (the funder its authority,
+        // or final) is deployed, never deployed again (the CLI's upgrade path refuses it and the cleanup would close
+        // it); anything else is deployed again from the run's buffer, while the funder holds one more try's bound and
+        // the rest of the run, so the cleanup can always pay to close the buffer
+        const writes = BigInt(Math.ceil(so.length / WRITE_CHUNK));
+        const prio = cluster === "mainnet" ? PRIORITY_PER_TX : 0n;
+        // the rest of the run after the deploy (a resume's need), and the SetAuthority
+        const afterDeploy = (await needOf(rent, so.length, { resume: true, poolExists, mainnet: withTable, tableLen: tableList?.length ?? 0 })).total + FEE_PER_SIGNATURE + prio;
+        // one try at most: the program account, the programdata less what the run's buffer holds (the deploy drains the
+        // buffer to the payer), the buffer's make (2 signatures), every write, the deploy (2), each priced on mainnet
+        const oneTry = async () => {
+          const buf = await readAgain(() => account(fetchFn, url, bufferKey.id, undefined, "confirmed"), "the run's buffer", clock);
+          const held = BigInt(buf?.lamports ?? 0);
+          return need.parts.program_account + (need.parts.programdata > held ? need.parts.programdata - held : 0n) + FEE_PER_SIGNATURE * (2n + writes + 2n) + prio * (1n + writes + 1n);
         };
+        const deployedNow = () => readAgain(() => deployedState(fetchFn, url, program.id, so, funder.id), "the program", clock);
+        let dep = null;
         for (let attempt = 1; ; attempt++) {
           if (stop) throw new Error(`stopped by ${stop}`);
-          const left = attempt === 1 ? "absent" : await readAgain(() => deployedState(fetchFn, url, program.id, so, funder.id), "the program", clock);
-          if (left === "final") {
-            log(`the last try left ${program.id} final with this code`);
+          const left = attempt === 1 ? "absent" : await deployedNow();
+          if (left !== "absent") {
+            log(`deploy try ${attempt - 1} of ${DEPLOY_TRIES} left ${program.id} deployed with this code (${left === "final" ? "final" : "the funder its authority"})`);
             break;
           }
-          if (left === "upgradeable") {
-            log(`deploy try ${attempt} of ${DEPLOY_TRIES}: the last try's deploy landed with the funder as its authority: set-upgrade-authority --final`);
-            let fin;
-            try {
-              fin = runCli(["program", "set-upgrade-authority", program.id, "--final", "--upgrade-authority", funderFile, ...common], { allowFail: true });
-            } finally {
-              await afterCli("the solana CLI: program set-upgrade-authority --final").catch((e) => log(`the CLI's transactions not read: ${e.message}`));
-            }
-            if (fin.status === 0) break;
-            failedTry(attempt, "set-upgrade-authority --final", fin);
-            await wait(WAITS.poll);
-            continue;
+          if (attempt > 1) {
+            const held = await readAgain(() => ops.balance(), "the funder's balance", clock);
+            const want = afterDeploy + (await oneTry());
+            if (held < want) throw new Error(`deploy try ${attempt} of ${DEPLOY_TRIES} not started: the funder holds ${held} lamports, below the ${want} one more try and the rest of the run need (the cleanup closes the run's buffer)`);
           }
           log(`deploy try ${attempt} of ${DEPLOY_TRIES}: at most about ${DEPLOY_SIGN_ATTEMPTS} min (${DEPLOY_SIGN_ATTEMPTS} sign attempts, a blockhash's ~60 s each)`);
           try {
             dep = runCli(["program", "deploy", codeFile, "--program-id", programFile, "--upgrade-authority", funderFile, "--buffer", bufferFile, "--max-len", String(so.length),
-              "--final", "--max-sign-attempts", String(DEPLOY_SIGN_ATTEMPTS), ...(cluster === "mainnet" ? ["--with-compute-unit-price", String(PRIORITY_MICRO_LAMPORTS)] : []), "--output", "json", ...common], { allowFail: true });
+              "--max-sign-attempts", String(DEPLOY_SIGN_ATTEMPTS), ...(cluster === "mainnet" ? ["--with-compute-unit-price", String(PRIORITY_MICRO_LAMPORTS)] : []), "--output", "json", ...common], { allowFail: true });
           } finally {
-            await afterCli(`the solana CLI: program deploy${attempt > 1 ? ` (try ${attempt})` : ""} (buffer, writes, deploy, SetAuthority)`).catch((e) => log(`the CLI's transactions not read: ${e.message}`));
+            await afterCli(`the solana CLI: program deploy${attempt > 1 ? ` (try ${attempt})` : ""} (buffer, writes, deploy)`).catch((e) => log(`the CLI's transactions not read: ${e.message}`));
           }
           if (dep.status === 0) break;
-          failedTry(attempt, "deploy", dep);
+          const why = (dep.stderr || dep.stdout || dep.error?.message || "").trim().split("\n").slice(-3).join(" | ");
+          if (attempt >= DEPLOY_TRIES) throw new Error(`solana program deploy: exit ${dep.status}: ${why} (try ${attempt} of ${DEPLOY_TRIES})`);
+          log(`deploy try ${attempt} of ${DEPLOY_TRIES} failed: ${why}: trying again from the run's buffer in ${WAITS.poll / 1000} s`);
           dep = null;
           await wait(WAITS.poll);
         }
@@ -1230,12 +1288,41 @@ export async function main(argv, fetchFn = fetch, io = {}) {
           const out = JSON.parse(dep.stdout.slice(dep.stdout.indexOf("{")));
           if (out.programId !== program.id) throw new Error(`deployed ${out.programId}, not ${program.id}`);
           const t = txs.find((x) => x.signature === out.signature);
-          if (t) Object.assign(t, { step: "deploy with the upgradeable loader, --final", cli: false });
-          else txs.push({ step: "deploy with the upgradeable loader, --final", signature: out.signature, state: "landed" });
+          if (t) Object.assign(t, { step: "deploy with the upgradeable loader", cli: false });
+          else txs.push({ step: "deploy with the upgradeable loader", signature: out.signature, state: "landed" });
+        }
+        stoppedRecord();
+        // the SetAuthority to none, the run's own send: the upgradeable loader's instruction 4 (SetAuthority, its bincode
+        // u32 LE) on [programdata (writable), the current authority (signer)] with no new authority, which makes the
+        // program final (solana-loader-v3-interface instruction.rs set_upgrade_authority). Priced on mainnet, journaled
+        // before its send and sent again for WAITS.confirm (sendAndConfirm); one that does not land is tried again from a
+        // fresh read, up to AUTHORITY_TRIES times. A deploy the CLI said landed that this node does not read yet is
+        // read again for 90 s
+        const setAuthority = { program: LOADER_V3, keys: [{ id: programDataAddress(program.id), signer: false, writable: true }, { id: funder.id, signer: true, writable: false }], data: le(4, 4) };
+        let lastTry = null;
+        for (let n = 1, until = clock.now() + 90_000; ; ) {
+          if (stop) throw new Error(`stopped by ${stop}`);
+          const left = await deployedNow();
+          if (left === "final") break;
+          if (left === "absent") {
+            if (clock.now() > until) throw new Error(`${program.id} is not read deployed with this code at confirmed on ${url} 90 s after its deploy`);
+            await wait(2000);
+            continue;
+          }
+          if (n > AUTHORITY_TRIES) throw new Error(`the SetAuthority to none did not land in ${AUTHORITY_TRIES} tries: ${lastTry}`);
+          log(`the upgradeable loader: SetAuthority (to none) try ${n} of ${AUTHORITY_TRIES}`);
+          try {
+            log(`SetAuthority (to none) landed: ${await send("the upgradeable loader: SetAuthority (to none)", [setAuthority])}`);
+          } catch (e) {
+            lastTry = e.message;
+            log(`SetAuthority (to none) try ${n} of ${AUTHORITY_TRIES} failed: ${e.message}: reading the program again in ${WAITS.poll / 1000} s`);
+            await wait(WAITS.poll);
+          }
+          n++;
         }
         stoppedRecord();
         await settled(fetchFn, url, programDataAddress(program.id), undefined, clock);
-        // --final's SetAuthority is the CLI's second transaction: a finalized read right after the deploy can still show
+        // the SetAuthority is the deploy's second transaction: a finalized read right after it can still show
         // the funder as authority (the table rehearsal on a local validator, 5 Nov), so the read is retried up to 90 s
         // on both RPCs: the run is done only once each reads the program final with this code. A read that fails is a
         // problem of that pass, read again
@@ -1244,6 +1331,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
           try {
             problems = [...(await programProblems(fetchFn, url, program.id, so)), ...(await programProblems(fetchFn, second, program.id, so))];
           } catch (e) {
+            if (!e.transient) throw e;
             problems = [`not read: ${e.message}`];
           }
           if (!problems.length || clock.now() > until) break;
@@ -1264,7 +1352,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
 
       if (withTable) {
         // step 6m: the pool buy's lookup table, made, read back, frozen, read back; no test deposit
-        const slot = BigInt(await rpc(fetchFn, url, "getSlot", [{ commitment: "finalized" }]));
+        const slot = BigInt(await readAgain(() => rpc(fetchFn, url, "getSlot", [{ commitment: "finalized" }], wait), "the slot", clock));
         const t = pda([funder.pub, le(slot, 8)], ALT_PROGRAM);
         fields.table = t.address;
         stoppedRecord();
@@ -1376,7 +1464,8 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     const seen = new Set();
     result.txs = txs.filter((t) => t.state === "landed" && !t.cli && !seen.has(t.signature) && seen.add(t.signature)).map(({ step, signature }) => ({ step, signature }));
     await waitFinalized(fetchFn, url, result.txs.map((t) => t.signature), clock);
-    result = await chainRecord(fetchFn, url, result);
+    const done = result;
+    result = await readAgain(() => chainRecord(fetchFn, url, done, clock), "the record's transactions", clock);
     writeFileSync(outFile, JSON.stringify(result, null, 2) + "\n");
     rmSync(journalFile, { force: true });
     log(`every transaction finalized; wrote ${path.relative(process.cwd(), outFile)} and removed its journal`);
