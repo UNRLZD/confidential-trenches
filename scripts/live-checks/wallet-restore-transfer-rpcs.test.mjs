@@ -4,7 +4,7 @@
 // base-testnet.api.pocket.network alike, the newest 100,000 blocks of Robinhood read on the helper's route
 // (POST https://api.confidential.unrealized.trade/v1/rpc/robinhood, one reader) and the newest 10,000 of Robinhood
 // testnet on its list, each provider's refusals past its cap among the answers, every call through the device's own
-// client; Base listed pending card helper-base-transfer-logs) and the same answers with every Transfer log of the Base
+// client; Base listed pending card evm-rpc-spare-list) and the same answers with every Transfer log of the Base
 // Sepolia W taken out (bad). The wallet's own read runs on the replay: good passes, bad fails, its USDC not listed.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -25,7 +25,7 @@ test("the recorded good run passes: each testnet's pair reads its W alike, Robin
   assert.equal(r.lines.length, JOBS.length);
   assert.match(r.lines[0], new RegExp(`^base-sepolia: base-sepolia\\.gateway\\.tenderly\\.co and base-testnet\\.api\\.pocket\\.network read W 0x809286a1bf1585b1eeeefcc7a7f3508158fd078e from block 54553944 to \\d+ alike: .*${USDC}`));
   // each network read over at least the review's span: Base 50,000 blocks, Robinhood 100,000, Robinhood testnet 10,000
-  assert.match(r.lines[1], /^base: pending helper-base-transfer-logs: /);
+  assert.match(r.lines[1], /^base: pending evm-rpc-spare-list: /);
   for (const [i, [n, span]] of [["robinhood", 100_000], ["robinhood-testnet", 10_000]].entries()) {
     const m = new RegExp(`^${n}: .* from block (\\d+) to (\\d+)`).exec(r.lines[i + 2]);
     assert.ok(m && Number(m[2]) - Number(m[1]) >= span, r.lines[i + 2]);
