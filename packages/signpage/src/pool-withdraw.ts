@@ -54,7 +54,9 @@ import { checkBinding, type Pool, type ReadyProof } from "../../wallet/src/pool/
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { blockhashOf, pastOnBoth, readBack, releaseOf, rootIndex, sendAndSettle, treeSizes, type PoolBuyHost } from "./pool-buy.ts";
-import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana, SOLANA_RESERVED_KEYS, type PoolAsk } from "./rules/pool.ts";
+import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana, SOLANA_RESERVED_KEYS, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk, type WithdrawCosts } from "./rules/pool.ts";
+// moved to rules/pool.ts (card sol-buy-rent-back: the sweep's floor is the withdraw's note floor); named here still
+export { solanaWithdrawMinPart, withdrawNoteFloor, type WithdrawCosts } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 // moved to pool-spend.ts (card signpage-buy-own-spend: pool-buy.ts reads them too, with no import cycle); named here still
 export { HISTORY_PAGE, HISTORY_PASS, spendOwner, type HistoryPlaces } from "./pool-spend.ts";
@@ -62,26 +64,14 @@ export { HISTORY_PAGE, HISTORY_PASS, spendOwner, type HistoryPlaces } from "./po
 /** The release's compute limit: the pool program's own tests send a release at 400,000 (svm-tests/tests/release.rs). */
 export const POOL_WITHDRAW_CU = 400_000;
 
-/** A part's smallest arrival: rent(0), so To (when new) and W after its release (part + W's fee on it) are both
- *  rent-exempt; and at least the relay fee less W's fee, so the chunk (part + fee + W's fee) meets the program's
- *  backstop of 2 x fee. A withdraw binds tipCap 0 (its tag 2 pays no tip), so no tip cap counts here. */
-export const solanaWithdrawMinPart = (rent: SolanaRent, fee: bigint, wFee: bigint): bigint => {
-  const r = solanaRentMin(rent, 0);
-  return fee - wFee > r ? fee - wFee : r;
-};
 
 /** A note the plan may draw on: landed, of the pool's scope, UNSPENT or HELD by this page's proof queue. */
 export type WithdrawSource = { id: string; value: bigint };
 /** One part: the note it spends, what arrives at To from it, and what the release withdraws (part + fee + W's fee). */
 export type WithdrawPart = { noteId: string; part: bigint; chunk: bigint };
-/** What every part costs: the epoch's relay fee, W's own fee for its send onward, and the smallest part. */
-export type WithdrawCosts = { fee: bigint; wFee: bigint; minPart: bigint };
 
 /** The most `n` can send to To: its value less the relay fee and W's fee. */
 const capOf = (n: WithdrawSource, c: WithdrawCosts): bigint => n.value - c.fee - c.wFee;
-/** The smallest note one part can withdraw: a change under it (and above 0) could never leave the pool, so no part
- *  leaves one (review #232 HIGH 2). */
-export const withdrawNoteFloor = (c: WithdrawCosts): bigint => c.fee + c.wFee + c.minPart;
 /** The plan reads at most this many notes, largest first: a withdraw's search stays bounded (3 choices a note). */
 export const WITHDRAW_PLAN_NOTES = 16;
 
