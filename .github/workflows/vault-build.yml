@@ -36,7 +36,7 @@ jobs:
           node-version: 24
       # rustc 1.96.0 with the wasm target (rustup is on the image, as ci.yml's test-vault job reads it)
       - name: rust 1.96.0
-        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+        run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
       # cargo-near 0.22.0, the release binary checked against the sha256 ci.yml checks it by
       - name: install cargo-near
         run: |
