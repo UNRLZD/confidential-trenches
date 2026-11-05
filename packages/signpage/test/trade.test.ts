@@ -6,6 +6,7 @@
 // "page" (a tab, or the page after a reload). Each page gets its own view of Node's Web Locks, whose locks go when the
 // page dies (die()), as a closed or reloaded tab's do.
 import assert from "node:assert/strict";
+import { throughApi } from "./api-ends.ts";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { base58 } from "@scure/base";
@@ -149,7 +150,7 @@ function page(s: ReturnType<typeof store>, script: Script, providers: readonly [
     await Promise.race([handler.idle(), new Promise((r) => setTimeout(r, 200))]);
     return { id, answer };
   };
-  return { ask, calls, progress, opened: () => opened, die: tab.die, idle: () => handler.idle() };
+  return { ask, calls, progress, opened: () => opened, die: tab.die, idle: () => handler.idle(), handler };
 }
 const mark = (s: ReturnType<typeof store>, j: number) => (s.m.wallets!.get(armKey("sol", L, j)) as ArmRecord).inflight;
 const buy = (amount: string) => ({ chain: "solana", token: MINT, side: "buy", amount, slippage_bps: 500 });
@@ -640,4 +641,16 @@ test("a read that fails before the answer refuses the trade as failed, and the o
   const { id, answer } = await p.ask(sell("1"));
   assert.deepEqual(answer, { error: "failed" });
   assert.deepEqual(s.m.ops!.get(id), { kind: "sell", sha: shaOf(sell("1")), stage: "refused", txs: [], code: "failed", created_ms: 1_700_000_000_000 });
+});
+
+// Card signpage-error-after-timeout: a trade refused after the client's 10 s window (its answer dropped by the kit's
+// client) still ends the app's button and strip: the page posts its end as progress after the answer.
+test("a buy refused (no ready set) reaches the app as progress refused after its answer; a run's own refusal too", async () => {
+  const none = await throughApi("buy", page(store(), {}).handler, buy("10"));
+  assert.deepEqual((none.answer as { error: unknown }).error, { code: "no_ready_set" });
+  assert.deepEqual(none.stages, ["refused"]);
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) });
+  const run = await throughApi("buy", page(s, { refuse: "checks: S12 the simulated out is under the bar" }).handler, buy("10"));
+  assert.deepEqual((run.answer as { error: unknown }).error, { code: "quote_check_failed" });
+  assert.deepEqual(run.stages, ["refused"]);
 });

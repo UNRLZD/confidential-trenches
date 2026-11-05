@@ -3,6 +3,7 @@
 // never from the app; a request that passed is handed to its flow, and with no flow it is refused.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { throughApi } from "./api-ends.ts";
 import { ERC20_DECIMALS, poolKinds, readTokenDecimals, type PoolKindsDeps, type PoolRpc } from "../src/pool-kinds.ts";
 import { SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import type { PoolAsk, PoolChain } from "../src/rules/pool.ts";
@@ -146,4 +147,24 @@ test("card signpage-pool-sell: a sell's flow that runs (a trade) is answered wit
   // a refusal before any run is still a refusal, answered the same way
   const no = poolKinds({ pinned: () => true, rpcs: () => sol.pair, flow: () => ({ error: "busy" }) })["pool.sell"]({ chain: "solana", token: SOL_TOKEN, amount: "1", slippage_bps: 100 }, ctx);
   assert.deepEqual(await settle(no), { error: "busy" });
+});
+
+// Card signpage-error-after-timeout: a sell whose decimals read fails is refused only once the reads end, which may be
+// past the client's 10 s window: the app's button still ends on progress refused. A pool.withdraw is an open, answered
+// pending at once (its run's stages go to its op record): nothing of it waits past the window, and no end is posted.
+test("a pool.sell refused after its decimals reads (both providers down) reaches the app as progress refused after its answer", async () => {
+  const down: PoolRpc = async () => {
+    throw new Error("down");
+  };
+  const k = poolKinds({ pinned: () => true, rpcs: () => [down, down], flow: () => ({ error: "busy" }) });
+  const r = await throughApi("pool.sell", k["pool.sell"] as never, { chain: "solana", token: SOL_TOKEN, amount: "1", slippage_bps: 100 });
+  assert.deepEqual((r.answer as { error: unknown }).error, { code: "not_allowed" });
+  assert.deepEqual(r.stages, ["refused"]);
+});
+
+test("a pool.withdraw is an open: answered pending at once, with no progress after it", async () => {
+  const k = poolKinds({ pinned: () => true, rpcs: () => null, flow: (ask) => (ask.kind === "pool.withdraw" ? { result: { pending: true } } : { error: "not_allowed" }) as never });
+  const r = await throughApi("pool.withdraw", k["pool.withdraw"] as never, { return_key: "portfolio", chain: "solana" });
+  assert.deepEqual((r.answer as { result: unknown }).result, { pending: true });
+  assert.deepEqual(r.stages, []);
 });
