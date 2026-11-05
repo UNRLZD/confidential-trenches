@@ -12,9 +12,12 @@
 // PROXY_BUDGET_<VENDOR>) requests in any minute, and no caller more than its share of them a 10 s window (a cache hit
 // or a call joining one in flight counts in the caller's share only, as it reaches no vendor); a draw past either
 // answers 429 rate_limited with the seconds until it would go ahead. A vendor's own 429 holds that vendor until the reset it named (at most a
-// minute): the helper is its one client, so every caller drawing on it, the helper's own reads included, answers 429
-// with the seconds left and nothing reaches the vendor. A reset of at most WAIT_MAX_MS is waited out once by the
-// request that met it.
+// minute): the helper is its one client, so nothing reaches the vendor until then. Card helper-crowd-429 (fold 6): a
+// vendor's hold, or its 429, is never the caller's 429 (a 429 of ours says the caller is past its own limit): a call
+// waits out the hold, one shared end for every caller, when it ends inside the call's wait (QUEUE_WAIT_MS, or what the
+// helper's own read names), then reads; past it the answer is 503 upstream, the not-ready form the device falls back
+// on (H2.3). The calls that waited go to a PACED vendor one per its second's share, so the end of a hold is no burst. Identical GETs
+// in flight share one call.
 import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER, HELPER_V1_PATHS, type HelperV1Path } from "@blindfill/kit";
 import { budgetFromEnv, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
 import { VENDOR_NAMES, VENDORS, type Upstream, type Vendor, type VendorName } from "./vendors.ts";
@@ -27,12 +30,22 @@ export const TIMEOUT_MS = 8_000;
 export const WAIT_MAX_MS = 1_000;
 /**
  * The longest a caller waits for the vendor's budget to have its room (card helper-crowd-429): a draw the share or the
- * total refuses is tried again every QUEUE_POLL_MS until then, and only past it answers 429 with the seconds to wait.
- * A vendor's own hold is not waited here (WAIT_MAX_MS above). [design: 3 s: a Jupiter build answered in 223-698 ms
+ * total refuses is tried again every QUEUE_POLL_MS until then; past it a caller past its own share answers 429 with the
+ * seconds to wait, and the vendor's room or hold answers 503 upstream (fold 6).
+ * A vendor's own hold is waited out the same way when it ends by then (fold 6). [design: 3 s: a Jupiter build answered in 223-698 ms
  * live (solana-jupiter-build, 4 Nov), so the wait and the build stay inside the kit's 5 s SOLANA_BUILD_TIMEOUT_MS
  * (packages/kit/src/trade/solana/build.ts:52).]
  */
 export const QUEUE_WAIT_MS = 3_000;
+/**
+ * The vendors whose plan also names a second (card helper-crowd-429, fold 6): the calls that wait out a hold go one per
+ * VENDOR_WINDOW_MS / total, in turn, so its end is no burst; a call with nothing to wait for goes at once. Jupiter's Free plan is "Free | 1 | 60", one request a second and 60 a minute, on a
+ * 60-second sliding window (developers.jup.ag/docs/api-rate-limit, read 2026-11-05 01:10Z): 1000 ms at the 60 of
+ * PROXY_BUDGETS, and a plan's own pace when PROXY_BUDGET_JUPITER names it. Helper live run 41943005189 (5 Nov 00:40Z):
+ * Jupiter answered 429 with the minute's budget not spent ("refused /v1/market/token jupiter provider 429"), then
+ * "jupiter held" for /v1/proxy and /v1/market/token. The others publish a minute only.
+ */
+export const PACED: ReadonlySet<VendorName> = new Set(["jupiter"]);
 export const QUEUE_POLL_MS = 250;
 /** A vendor's budget is counted over its own window: every vendor below publishes a per-minute limit. */
 export const VENDOR_WINDOW_MS = 60_000;
@@ -99,6 +112,9 @@ type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise
 
 const error = (status: number, code: string): ProxyAnswer => ({ status, headers: {}, body: JSON.stringify({ error: { code } }) });
 const UPSTREAM = () => error(503, "upstream");
+/** The not-ready form (503 upstream, the device's fallback, H2.3) for a vendor's hold or room: `why` names it for the
+ *  refusal log, never sent. */
+const notReady = (why: string): ProxyAnswer => ({ ...UPSTREAM(), why });
 
 /** The keys this host holds, from its environment. A key of the wrong shape stops the start; the message names the variable, never the value. */
 export function readKeys(env: Record<string, string | undefined>): Partial<Record<VendorName, string>> {
@@ -154,6 +170,25 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const cache = new Map<string, Read & { expires: number }>();
   let cacheBytes = 0;
   const inflight = new Map<string, Promise<Read | ProxyAnswer>>();
+  /** Per paced vendor (PACED), the earliest a next call may go: each call takes the next turn. */
+  const nextAt = new Map<VendorName, number>();
+  /** Takes this call's turn at the vendor, after its hold's end and the turn before (PACED), and waits for it; false
+   *  when it comes past `by` (nothing taken). Every caller waits for the one hold end and the turns go one at a time, so
+   *  no burst. One reservation and one wait, then a look at a hold set meanwhile, so a clock that does not move still
+   *  ends it. */
+  async function turn(name: VendorName, by: number): Promise<boolean> {
+    for (let round = 0; round < 3; round++) {
+      const t = now();
+      const at = Math.max(t, budget.heldUntil(name), nextAt.get(name) ?? 0);
+      if (at > by) return false;
+      // a call that waits (a hold, or the turns draining one) goes in turn, one per second's share of the plan; a call
+      // with no wait goes at once, as the minute's budget allows
+      if (PACED.has(name) && at > t) nextAt.set(name, at + Math.ceil(VENDOR_WINDOW_MS / limits[name].total));
+      if (at > t) await sleep(at - t);
+      if (budget.heldUntil(name) <= now()) return true;
+    }
+    return false;
+  }
 
   const holdsKey = (text: string) => {
     const b = Buffer.from(text, "utf8");
@@ -189,11 +224,14 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     return Buffer.concat(chunks).toString("utf8");
   }
 
-  async function call(name: VendorName, v: Vendor, up: Upstream, path: string, query: string, body: string, reserved: boolean): Promise<Read | ProxyAnswer> {
+  async function call(name: VendorName, v: Vendor, up: Upstream, path: string, query: string, body: string, reserved: boolean, by: number): Promise<Read | ProxyAnswer> {
     for (let attempt = 0; ; attempt++) {
-      // the vendor's reset holds every call to it
-      const held = budget.heldFor(name);
-      if (held > 0) return throttled(held, undefined, `${name} held`);
+      // the vendor's reset holds every call to it: waited out when it ends by `by`, else not ready (never our 429)
+      if (!(await turn(name, by))) return notReady(`${name} held`);
+      if (attempt > 0) {
+        // the retry reaches the vendor again, so it draws from the total too
+        if (budget.take(name, undefined, 1, false, reserved) > 0) return notReady(budget.refusedBy());
+      }
       const headers: Record<string, string> = { accept: "application/json" };
       const key = keys[name];
       if (key) headers[v.header] = key;
@@ -210,18 +248,12 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         });
         if (r.status === 429) {
           await r.body?.cancel();
-          // the vendor is held until its reset; a short one is waited out once by this request, a longer one (or a
-          // second 429) is every caller's wait
+          // the vendor is held until its reset, for every caller; this call reads again once it ends, if that is by
+          // `by` (turn), once: a second 429 is not ready
           const wait = Math.max(resetMs(r.headers, now()), 0);
           budget.hold(name, now() + (wait <= WAIT_MAX_MS ? wait : upstreamRetryAfterS(r.headers, now()) * 1000));
-          if (attempt === 0 && wait <= WAIT_MAX_MS) {
-            await sleep(wait);
-            // the retry reaches the vendor again, so it draws from the total too
-            const again = budget.take(name, undefined, 1, false, reserved);
-            if (again > 0) return throttled(again, undefined, budget.refusedBy());
-            continue;
-          }
-          return throttled(Math.max(budget.heldFor(name), 1), undefined, `${name} provider 429`);
+          if (attempt === 0) continue;
+          return notReady(`${name} provider 429`);
         }
         text = await readBody(r);
       } catch {
@@ -247,7 +279,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
    * lists, the token page) pass none: they draw from the vendor's total, never a caller's share; `reserved` marks the
    * ones PROXY_RESERVE holds room for, which alone may draw it.
    */
-  async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false): Promise<ProxyAnswer> {
+  async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false, waitMs = QUEUE_WAIT_MS): Promise<ProxyAnswer> {
+    const by = now() + waitMs;
     if (!Object.hasOwn(VENDORS, vendor)) return error(404, "not_found");
     const name = vendor as VendorName;
     const v = VENDORS[name];
@@ -259,30 +292,43 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     // a draw on the vendor's budget for every call that may reach it, the helper's own too; a cache hit or a call joining
     // one in flight reaches nothing, so it counts in the caller's share alone
     const take = (shareOnly = false): number => budget.take(name, client, 1, shareOnly, reserved);
-    // card helper-crowd-429: a draw the share or the total refuses waits for its room, QUEUE_WAIT_MS at most; a draw that
-    // goes is taken at once, with no await, so a call right behind it still finds it in flight. A cache hit (its share
-    // only, which turns with its window) and a vendor's own hold answer at once, as before.
+    // card helper-crowd-429: a draw the share or the total refuses waits for its room, until `by` at most, and a draw the
+    // vendor's hold refuses waits for the hold's end when it comes by then; a draw that goes is taken at once, with no
+    // await, so a call right behind it still finds it in flight. A cache hit (its share only, which turns with its
+    // window) answers at once, as before.
     const draw = (shareOnly = false): number | Promise<number> => {
       const w = take(shareOnly);
-      if (w === 0 || shareOnly || budget.refusedBy().endsWith(" held")) return w;
+      if (w === 0 || shareOnly) return w;
       return (async () => {
-        const by = now() + QUEUE_WAIT_MS;
         let last = w;
-        for (let round = 1; round * QUEUE_POLL_MS <= QUEUE_WAIT_MS && now() + QUEUE_POLL_MS <= by; round++) {
-          await sleep(QUEUE_POLL_MS);
+        // bounded by rounds as well as by the clock, so a clock that does not move still ends it
+        for (let round = 0; last > 0 && round * QUEUE_POLL_MS < waitMs; round++) {
+          const held = budget.refusedBy().endsWith(" held");
+          const at = held ? budget.heldUntil(name) : now() + QUEUE_POLL_MS;
+          if (at > by || now() >= by) return last;
+          await sleep(Math.max(at - now(), 1));
           last = take(shareOnly);
-          if (last === 0 || budget.refusedBy().endsWith(" held")) return last;
         }
         return last;
       })();
+    };
+    // a refusal past the wait: the caller's own share is its 429; the vendor's hold or room is not ready, never our 429
+    const refused = (wait: number): ProxyAnswer => {
+      const why = budget.refusedBy();
+      return why.endsWith(" share") ? throttled(wait, undefined, why) : notReady(why);
     };
     const params = new URLSearchParams(rawQuery);
     if (up.cacheMs) params.sort();
     const qs = params.size ? `?${params}` : "";
     let out: Read | ProxyAnswer;
-    if (up.cacheMs) {
-      const id = `${name} ${path}${qs}`;
-      const hit = cache.get(id);
+    if (up.method === "GET") {
+      // a GET is a read: identical ones in flight share one call (card helper-crowd-429, fold 6), and a public list is
+      // also kept cacheMs
+      // the same read whatever its parameters' order: keyed sorted, sent as the caller wrote it (a list's sorted, as before)
+      const key = new URLSearchParams(params);
+      key.sort();
+      const id = `${name} ${path}${key.size ? `?${key}` : ""}`;
+      const hit = up.cacheMs ? cache.get(id) : undefined;
       if (hit && hit.expires > now()) {
         const wait = draw(true) as number;
         if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
@@ -291,12 +337,12 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         let p = inflight.get(id);
         const first = draw(p !== undefined);
         const wait = typeof first === "number" ? first : await first;
-        if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
+        if (wait > 0) return source(refused(wait));
         // a read another call began while this one waited is joined, not sent twice
         p ??= inflight.get(id);
         if (!p) {
-          p = call(name, v, up, path, qs, "", reserved).then((read) => {
-            if ("fetchedAt" in read && read.status === 200) remember(id, read, up.cacheMs!);
+          p = call(name, v, up, path, qs, "", reserved, by).then((read) => {
+            if (up.cacheMs && "fetchedAt" in read && read.status === 200) remember(id, read, up.cacheMs);
             return read;
           });
           p.finally(() => inflight.delete(id)).catch(() => {});
@@ -306,8 +352,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       }
     } else {
       const wait = await draw();
-      if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
-      out = await call(name, v, up, path, qs, up.method === "POST" ? body : "", reserved);
+      if (wait > 0) return source(refused(wait));
+      out = await call(name, v, up, path, qs, up.method === "POST" ? body : "", reserved, by);
     }
     if (!("fetchedAt" in out)) return source(out);
     return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body });

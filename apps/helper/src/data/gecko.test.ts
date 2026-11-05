@@ -97,14 +97,16 @@ test("card app-console-429: a refresh (a re-read of data held) takes a call only
   assert.equal(b.take("pages"), false);
 });
 
-test("card helper-chart-fresh: the newest data held is a refresh until REFRESH_URGENT_MS old, then a page read; nothing held is a page read", async () => {
-  const { refreshLane, REFRESH_URGENT_MS: urgent } = await import("./gecko.ts");
+test("card helper-chart-fresh, helper-crowd-429: the newest data held is a refresh until REFRESH_URGENT_MS old, then a stale read while it is servable (GT_SERVE_MS), then a page read; nothing held is a page read", async () => {
+  const { refreshLane, REFRESH_URGENT_MS: urgent, GT_SERVE_MS: serve } = await import("./gecko.ts");
   const { CANDLES_FRESH_MS } = await import("./solana/token.ts");
   const t = 1_800_000_000_000;
   assert.equal(refreshLane(null, t), "pages", "nothing held: a first read");
   assert.equal(refreshLane(t, t), "refresh", "just read");
   assert.equal(refreshLane(t - urgent + 1, t), "refresh", "a millisecond short of the bound");
-  assert.equal(refreshLane(t - urgent, t), "pages", "at the bound");
+  assert.equal(refreshLane(t - urgent, t), "stale", "at the bound, still servable");
+  assert.equal(refreshLane(t - serve + 1, t), "stale", "a millisecond short of the serving bound");
+  assert.equal(refreshLane(t - serve, t), "pages", "past the serving bound: nothing a caller may be served");
   assert.equal(refreshLane(t - 86_400_000, t), "pages", "handed over a day old");
   // past the bars' own 60 s, so a chart read often still refreshes in its lane; under the live check's 10 min
   assert.ok(urgent > CANDLES_FRESH_MS && urgent < 600_000, `REFRESH_URGENT_MS ${urgent}`);
@@ -146,4 +148,34 @@ test("card helper-restart-fresh fold: the ahead lane takes a call only while COL
   assert.equal(b.take("ahead"), false, "COLD_RESERVE free: no ahead call");
   for (let i = 0; i < PAGE_RESERVE; i++) assert.equal(b.take("pages"), true, "a page still finds its calls");
   assert.equal(AHEAD_PER_WINDOW, 1);
+});
+
+test("card helper-crowd-429: a stale read takes a call only while STALE_RESERVE stay free for a chart with nothing to serve, and the lists yield to it", async () => {
+  const { STALE_RESERVE } = await import("./gecko.ts");
+  let t = 1_800_000_000_000;
+  const b = geckoBudget(() => t, 5);
+  for (let i = 0; i < 5 - STALE_RESERVE - 1; i++) assert.equal(b.take("pages"), true);
+  assert.equal(b.take("stale"), true, "room past the reserve: the stale read takes it");
+  assert.equal(b.take("stale"), false, "only the reserve left: the stale read yields");
+  assert.equal(b.take("pages"), true, "which a cold read finds");
+  t += 1_000;
+  assert.equal(b.take("lists"), false, "the lists yield to a stale read as to a page");
+});
+
+test("card helper-crowd-429: the minute's count line names each lane and read taken, the lanes refused, the 429s, the calls seeded and the window, then starts again", () => {
+  let t = 1_800_000_000_000;
+  const b = geckoBudget(() => t, 5);
+  assert.equal(b.minute(), null, "nothing happened: no line");
+  b.seed([t - 30_000, t - 20_000]);
+  assert.equal(b.take("pages", false, false, "sol bars"), true);
+  assert.equal(b.take("stale", false, false, "base bars"), true);
+  assert.equal(b.take("lists", true, false), true);
+  assert.equal(b.take("pages", false, false, "sol pool"), false);
+  assert.equal(b.take("stale"), false);
+  throttledUntil(b, "30", t);
+  assert.equal(b.minute(), "geckoterminal calls: lists 1, pages sol bars 1, stale base bars 1; refused: pages 1, stale 1; 429 1; seeded 2; window 5 of 5");
+  assert.equal(b.minute(), null, "counted once");
+  t += WINDOW_MS;
+  assert.equal(b.take("pages", false, false, "sol bars"), true);
+  assert.equal(b.minute(), "geckoterminal calls: pages sol bars 1; refused: none; 429 0; seeded 0; window 1 of 5");
 });

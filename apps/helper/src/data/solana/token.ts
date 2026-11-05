@@ -52,6 +52,11 @@ export const CANDLES_FRESH_MS = 60_000;
  * Retry-After (THROTTLE_RETRIES 2); the live checks wait on the answer with no timeout of their own.]
  */
 export const GT_PAGE_WAIT_MS = 4_000;
+/** The longest a caller's cold chart read waits in all, its top pool's call and its bars' (card helper-crowd-429): a
+ *  chart whose top pool is held waits up to this for its one call, inside the app's 10 s request with GeckoTerminal's
+ *  answer. [design: two GT_PAGE_WAIT_MS; live run 41935321432: PUMP's 1h, its pool held, answered 429 with the next
+ *  free call more than 4 s away.] */
+export const GT_CHART_WAIT_MS = 2 * GT_PAGE_WAIT_MS;
 /** History before a given time (a read with `to`: the bars before our own first bar, or a range scrolled back) never
  *  changes: kept an hour, as the EVM chains keep theirs (../evm/swaps.ts GT_FRESH_MS) (card app-console-429). */
 export const HISTORY_FRESH_MS = 3_600_000;
@@ -74,9 +79,15 @@ export const SEARCH_PER_SPAN = 16;
  *  once; such a mint goes as soon as there is room, carrying every refresh due (card helper-token-page-cold). */
 export const JUP_GAP_MS = 4_000;
 export const COLD_ROOM = 4;
-/** A search whose room is further off than this answers its waiting callers 429 with the wait instead of holding them
- *  (never longer than the old batch gap); the mint stays in the next search, so the retry finds its row. */
+/** A search whose room, or Jupiter's hold, is further off than this answers its waiting callers not ready (503 upstream)
+ *  instead of holding them (never longer than the old batch gap), never our 429; the mint stays in the next search, so
+ *  the retry finds its row. */
 export const SEARCH_WAIT_MAX_MS = 4_000;
+/** The longest a search waits out Jupiter's hold (its 429's reset) before it reads again (card helper-crowd-429 fold 6):
+ *  past it the waiting pages answer not ready. [design: the app's 10 s page request (apps/terminal/src/screens/token/
+ *  source.ts TIMEOUT_MS) less SEARCH_WAIT_MAX_MS and 1 s for the search's answer and the page's chain reads; Jupiter's
+ *  resets in live run 41943005189 were 1 and 4 s.] */
+export const SEARCH_HOLD_WAIT_MS = 5_000;
 /** Tokens held per cache; the oldest goes first. */
 export const CACHE_MAX = 2_000;
 export const HOLDERS_MAX = 20;
@@ -293,7 +304,7 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 // ---------------------------------------------------------------------------------------------------------------
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
-type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean): Promise<Answer> };
+type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number): Promise<Answer> };
 type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string; why?: string }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
@@ -497,7 +508,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     const at = Math.max(lastFailed + JUP_GAP_MS, cold ? roomAt(SEARCH_PER_SPAN, t) : Math.max(lastSearch + JUP_GAP_MS, roomAt(SEARCH_PER_SPAN - COLD_ROOM, t)));
     if (at - t > SEARCH_WAIT_MAX_MS) {
       // too far off to hold a caller: each answers 429 with the wait; the mints stay for that search
-      for (const w of waiting.values()) for (const f of w.ws.splice(0)) f.fail(new Throttled(secondsUntil(at, t), "jupiter search"));
+      // card helper-crowd-429 (fold 6): the search's room is Jupiter's, not the caller's limit: not ready, never our 429
+      for (const w of waiting.values()) for (const f of w.ws.splice(0)) f.fail(new Upstream());
     }
     if (timer !== null && timerAt <= at) return;
     if (timer !== null) clearTimeout(timer);
@@ -530,11 +542,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     sent.push(lastSearch);
     let rows: unknown = null;
     let at = now();
-    let wait = 0;
-    let why: string | undefined;
     try {
-      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true); // proxy.ts PROXY_RESERVE
-      if (a.status === 429) (wait = retryAfterOf(a.headers)), (why = (a as { why?: string }).why);
+      // proxy.ts PROXY_RESERVE; a hold of Jupiter's is waited out within SEARCH_HOLD_WAIT_MS (proxy.ts turn)
+      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
@@ -548,7 +558,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const ws = waiting.get(mint)?.ws ?? [];
       waiting.delete(mint);
       if (!Array.isArray(rows)) {
-        for (const w of ws) w.fail(wait > 0 ? new Throttled(wait, why) : new Upstream());
+        // Jupiter's refusal is not the caller's limit: not ready, the page reads again (card helper-crowd-429, fold 6)
+        for (const w of ws) w.fail(new Upstream());
         continue;
       }
       const r: JupRow = { row: searchRow(rows, mint), at };
@@ -719,13 +730,14 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // budget (../gecko.ts) when it passes one, where the lists yield to it; a 429 pauses it. A refused call is a throttle
   // naming the wait to the budget's next free call or the pause's end (card helper-abuse-limits)
   const gt = deps.gecko ?? geckoBudget(now, GT_PER_MIN);
-  async function gecko(path: string, lane: "pages" | "refresh" | "ahead" = "pages"): Promise<unknown> {
+  async function gecko(path: string, lane: "pages" | "stale" | "refresh" | "ahead", what: string, untilMs = now() + GT_PAGE_WAIT_MS): Promise<unknown> {
     // card helper-crowd-429: a caller's cold read (the pages lane) waits for the budget's next free call when it comes
-    // within GT_PAGE_WAIT_MS, instead of a 429 (market-data-solana-token at 22:12Z: PUMP 1h answered 429 "geckoterminal
-    // budget"); a refresh or an ahead read never waits (the bars held are served meanwhile)
-    for (let round = 0; !gt.take(lane); round++) {
+    // by `untilMs` (GT_PAGE_WAIT_MS a call, GT_CHART_WAIT_MS a chart), instead of a 429 (market-data-solana-token at
+    // 22:12Z and 23:39Z: PUMP 1h answered 429 "geckoterminal budget"); a stale, refresh or ahead read never waits (the
+    // bars held are served meanwhile)
+    for (let round = 0; !gt.take(lane, false, false, what); round++) {
       const at = gt.retryAt("pages");
-      if (lane !== "pages" || round >= 3 || at - now() > GT_PAGE_WAIT_MS) throw new Throttled(secondsUntil(at, now()), lane === "pages" ? "geckoterminal budget" : `geckoterminal ${lane}`);
+      if (lane !== "pages" || round >= 8 || at > untilMs) throw new Throttled(secondsUntil(at, now()), lane === "pages" ? "geckoterminal budget" : `geckoterminal ${lane}`);
       await new Promise((ok) => setTimeout(ok, Math.max(at - now(), 0) + 5));
     }
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
@@ -744,7 +756,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     POOL_FRESH_MS,
     now,
     async (mint, _client, held) => {
-      const a = await gecko(`/networks/solana/tokens/${mint}`, held === true ? "refresh" : "pages");
+      const a = await gecko(`/networks/solana/tokens/${mint}`, held === true ? "refresh" : "pages", "sol pool");
       const pool = a === null ? null : topPool(a);
       return pool === null ? NOT_FOUND : { status: 200, body: pool, asOfMs: now() };
     },
@@ -763,6 +775,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   const bars = cached((key) => (key.endsWith(":") ? CANDLES_FRESH_MS : HISTORY_FRESH_MS), now, async (key, _client, held) => {
     const [mint, tf, to] = key.split(":") as [string, Tf, string];
     const lane = to === "" ? refreshLane(kept.get(`${mint}:${tf}`)?.at ?? null, now()) : held === true ? "refresh" : "pages";
+    const until = now() + GT_CHART_WAIT_MS;
     const p = await pools.get(mint);
     if (p.status !== 200) {
       if (p.status === 404) return NOT_FOUND;
@@ -771,7 +784,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
     const { period, aggregate } = TF[tf];
     const before = to === "" ? "" : `&before_timestamp=${to}`;
-    const a = await gecko(`/networks/solana/pools/${p.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`, lane);
+    const a = await gecko(`/networks/solana/pools/${p.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`, lane, "sol bars", until);
     const candles = a === null ? [] : toCandles(a, tf, 1_000, now());
     if (candles === null) throw new Upstream();
     const at = now();
@@ -835,13 +848,13 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         const pool = pools.peek(mint);
         try {
           if (pool === undefined) {
-            const a = await gecko(`/networks/solana/tokens/${mint}`, "ahead");
+            const a = await gecko(`/networks/solana/tokens/${mint}`, "ahead", "sol pool");
             const p = a === null ? null : topPool(a);
             pools.put(mint, p === null ? NOT_FOUND : { status: 200, body: p, asOfMs: now() });
             return k;
           }
           const { period, aggregate } = TF[tf];
-          const a = await gecko(`/networks/solana/pools/${pool.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}`, "ahead");
+          const a = await gecko(`/networks/solana/pools/${pool.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}`, "ahead", "sol bars");
           tried.set(k, now());
           const got = a === null ? [] : toCandles(a, tf, 1_000, now());
           if (got !== null) keep(k, got, now());
@@ -919,6 +932,16 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const k = `${mint}:${tf}`;
       // a caller's read of the newest range: the chart is kept fresh ahead of its next read (ahead)
       if (to === null) hot.set(k, now());
+      // card helper-crowd-429: bars before a time never change once closed, so a range before `to` that the bars held
+      // (a swap's handover included) cover is served from them with no GeckoTerminal call: every bar before `to` was
+      // closed at their read when `to` is not after it, and they cover the range when they hold `limit` bars before it or
+      // all GeckoTerminal had (fewer than the 1000 a read asks for)
+      const have = to === null ? undefined : kept.get(k);
+      const held = have === undefined || to! * 1000 > have.at ? [] : have.bars.filter((c) => c[0] < to!);
+      if (held.length >= limit || (held.length > 0 && have!.bars.length < 1_000)) {
+        const body: Candles = { tf: tf as Tf, candles: held.slice(-limit), src: "geckoterminal", as_of_ms: have!.at };
+        return { status: 200, body: JSON.stringify(body), src: "geckoterminal", asOfMs: have!.at };
+      }
       let a = await bars.get(`${mint}:${tf}:${to ?? ""}`);
       if (a.status === 200) {
         // the last good bars of this mint and tf (the newest range read), whatever range was asked

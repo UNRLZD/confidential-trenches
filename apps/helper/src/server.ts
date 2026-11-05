@@ -234,7 +234,8 @@ export function handler(
     };
     let route = "other";
     const reply = (a: { status: number; headers?: Headers; body: string; why?: string }) => {
-      if (a.status === 429) refusals.count(route, a.why ?? "unnamed");
+      // a 429, and a 503 a vendor's hold or room answered (card helper-crowd-429: proxy.ts notReady), both named
+      if (a.status === 429 || (a.status === 503 && a.why !== undefined)) refusals.count(route, a.why ?? "unnamed");
       const h: Headers = { ...base, ...cors(req), ...a.headers, "Content-Type": "application/json; charset=utf-8", "Content-Length": String(Buffer.byteLength(a.body)) };
       if (a.status === 413) h.Connection = "close";
       res.writeHead(a.status, h);
@@ -831,6 +832,8 @@ if (import.meta.main) {
     // card helper-restart-fresh: the charts callers read lately are re-read ahead of their next read, one GeckoTerminal
     // call at most a tick in its "ahead" lane (data/solana/token.ts ahead), so a swap hands over bars inside the bound
     setInterval(() => void token.ahead().catch(() => undefined), AHEAD_TICK_MS).unref();
+    // card helper-crowd-429: GeckoTerminal's calls a minute by lane and read, so a refused chart is named from the log
+    setInterval(() => void ((l) => l !== null && console.log(`helper: ${l}`))(gecko.minute()), 60_000).unref();
     // ready (health.ts): once the lists, a token page and its holders answer 200. A helper that replaces a running one
     // (peer) listens only then, so the proxy, which tries each helper of the service in turn, never reaches it cold
     // (deploy/redeploy.sh waits for it, bounded, before it stops the old one); one that starts alone listens at once.
