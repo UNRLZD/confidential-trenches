@@ -10,7 +10,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { readFileSync } from "node:fs";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
-import { EVM_LANE_RETRY_S, EVM_LANE_SENT_RETRY_S, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
+import { EVM_LANE_RETRY_S, EVM_LANE_SENT_RETRY_S, EVM_LANE_SENT_WINDOW_BLOCKS, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
 import * as evmModule from "./evm.ts";
 
 // read by name, so a build without the ceiling fails only the tests that use it
@@ -1272,10 +1272,10 @@ test("a stuck replacement whose maxFeePerGas still covers 2 x base + tip but who
  *  each nonce from `c` that a send holds; a send at `c` and those after it mine `blockMs` after they were sent (by
  *  `clock`), unless `drop` (every send vanishes: no count, no tx; `dropAt`: only those at that nonce) or `halt` (sends
  *  held unmined: counted at pending, returned by hash). `refuse`: both providers refuse every send (`refuseAt`: those at
- *  that nonce). `lagB` freezes
+ *  that nonce). `countErr`: provider a throws it on each read of the sell sender's count. `lagB` freezes
  *  provider b's latest count at 7, and it returns no receipt. A W's own count stays at 7. */
 const chainOf = (clock: () => number = () => 0, blockMs = 0) => {
-  const st = { c: 7n, drop: false, halt: false, lagB: false, refuse: false, dropAt: -1n, refuseAt: -1n };
+  const st = { c: 7n, drop: false, halt: false, lagB: false, refuse: false, dropAt: -1n, refuseAt: -1n, countErr: "" };
   const held = new Map<bigint, { h: string; at: number }>();
   const mined = new Map<string, unknown>();
   const mine = () => {
@@ -1293,6 +1293,7 @@ const chainOf = (clock: () => number = () => 0, blockMs = 0) => {
       tx: (h) => (mined.has(h) || [...held.values()].some((x) => x.h === h) ? { hash: h } : null),
       count: (t, who) => {
         if (who !== SENDER) return 7n;
+        if (!b && st.countErr !== "") throw new Error(st.countErr);
         mine();
         if (t === "latest") return b && st.lagB ? 7n : st.c;
         let n = st.c;
@@ -1623,6 +1624,75 @@ test("callers obeying Retry-After through a heal between tends see the first 200
   const by = t0 + EVM_LANE_RETRY_S * 1000 + 2_000 + 250;
   assert.equal(went.length, 8, "all eight went");
   assert.ok(Math.max(...went) <= by, `200s at t0 + ${went.map((x) => (x - t0) / 1000).join(", ")} s`);
+});
+
+test("callers obeying Retry-After go within one retry of the receipt when the held send mines a block or more late: 3, 6 and 9 s after it, all eight by then plus one block", async () => {
+  for (const mineMs of [3_000, 6_000, 9_000]) {
+    const { t, ch, ask } = await heldLane(mineMs);
+    const t0 = t.clock;
+    const next = Array.from({ length: 8 }, (_, i) => t0 + 5_000 * i);
+    const went: number[] = [];
+    for (let k = 0; t.clock <= t0 + 200_000 && went.length < next.length; k++, t.clock += 250) {
+      if (t.clock >= t0 + 20_000) ch.st.drop = false;
+      for (let i = 0; i < next.length; i++) {
+        if (t.clock < next[i]!) continue;
+        const a = await ask(`W-late-${mineMs}-${i}-${k}`);
+        if (a.status === 200) {
+          went.push(t.clock);
+          next[i] = Infinity;
+          continue;
+        }
+        assert.equal(a.status, 503, JSON.stringify(a.body));
+        next[i] = t.clock + a.retryAfterS! * 1000;
+      }
+      await tick();
+    }
+    // the next allowed tend sends at t0 + EVM_LANE_RETRY_S; it mines mineMs after; each caller retries a block later
+    const by = t0 + EVM_LANE_RETRY_S * 1000 + mineMs + EVM_LANE_SENT_RETRY_S * 1000 + 250;
+    assert.equal(went.length, 8, `${mineMs}: all eight went`);
+    assert.ok(Math.max(...went) <= by, `${mineMs}: 200s at t0 + ${went.map((x) => (x - t0) / 1000).join(", ")} s`);
+  }
+});
+
+test("a held answer's Retry-After: one block for EVM_LANE_SENT_WINDOW_BLOCKS blocks after the lane's last held send, then the seconds to the next allowed tend, rounded up", async () => {
+  const { t, ask } = await heldLane();
+  const t0 = t.clock;
+  const at = async (ms: number) => {
+    t.clock = t0 + ms;
+    return (await ask(`W-ra-at-${ms}`)).retryAfterS;
+  };
+  assert.equal(await at(0), EVM_LANE_SENT_RETRY_S, "its tend sent 7 again");
+  const window = EVM_LANE_SENT_WINDOW_BLOCKS * EVM_LANE_SENT_RETRY_S * 1000;
+  assert.equal(await at(window - 1), EVM_LANE_SENT_RETRY_S, "within the window: one block");
+  assert.equal(await at(window), EVM_LANE_RETRY_S - window / 1000, "the window's end: the next allowed tend");
+  assert.equal(await at(EVM_LANE_RETRY_S * 1000 - 1_500), 2, "1.5 s to the next tend: 2, never 1");
+  assert.equal(await at(EVM_LANE_RETRY_S * 1000 - 500), 1, "0.5 s to the next tend: 1, never 0");
+});
+
+test("a hold read that fails answers its whole block from that failure: 100 held callers on a provider answering 429 cost one count read in all, and the next block reads again", async () => {
+  const { t, ch, ask } = await heldLane();
+  assert.equal((await ask("W-fail-0")).status, 503); // it tends; the next allowed tend is EVM_LANE_RETRY_S on
+  await settle(() => false, 20);
+  t.clock += EVM_LANE_SENT_RETRY_S * 1000 + 1_000;
+  ch.st.countErr = "HTTP 429 Too Many Requests";
+  const counts = () => ch.x.filter((c) => c.method === "eth_getTransactionCount" && c.params[0] === SENDER).length;
+  const c0 = counts();
+  const all: { status: number; retryAfterS?: number }[] = [];
+  for (let i = 1; i <= 100; i++) all.push(await ask(`W-fail-${i}`));
+  assert.ok(all.every((a) => a.status === 429 && a.retryAfterS! >= 1), [...new Set(all.map((a) => `${a.status} RA ${a.retryAfterS}`))].join(" | "));
+  assert.ok(counts() - c0 <= 2, `one count read: ${counts() - c0} count calls on provider a`);
+  t.clock += EVM_LANE_SENT_RETRY_S * 1000;
+  ch.st.countErr = "socket hang up"; // a failure with no wait of its own: Retry-After the rest of the block
+  const c1 = counts();
+  const hung = await ask("W-fail-next");
+  assert.ok(counts() - c1 > 0 && counts() - c1 <= 2, "the next block reads again, once");
+  assert.deepEqual([hung.status, hung.retryAfterS], [503, EVM_LANE_SENT_RETRY_S], JSON.stringify(hung));
+  t.clock += 500;
+  const half = await ask("W-fail-half");
+  assert.deepEqual([half.status, half.retryAfterS], [503, 2], "1.5 s of the block left: 2, never 1");
+  t.clock += 1_000;
+  const later = await ask("W-fail-later");
+  assert.deepEqual([later.status, later.retryAfterS], [503, 1], "the block's last half second: 1");
 });
 
 test("held answers share one hold read per block: 100 held callers inside one block cost one count read and one usedAt read in all", async () => {

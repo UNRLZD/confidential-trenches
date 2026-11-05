@@ -204,7 +204,7 @@ export const MUTANTS = [
   // receipt on either provider is mined; a nonce's bound is kept by its resends; one provider's count never releases it)
   [EVM, "    if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {", "    if (false) {", T, "a lane held behind a nonce the chain dropped"],
   [EVM, "    if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {", "    if (low !== undefined && lane.key !== undefined) {", T, "a lane held behind a nonce the chain dropped"],
-  [EVM, "      low = await read();", "", T, "a lane held behind a nonce the chain dropped"],
+  [EVM, "      r = read();", "      r = { at: r.at, low: Promise.resolve(low) };", T, "a lane held behind a nonce the chain dropped"],
   [EVM, "      if (!(await usedAt(low[1]))) return low;", "      return low;", T, "a lane held while the chain halts"],
   [EVM, "    return rc.some((y) => y.status === \"fulfilled\" && y.value !== null && typeof y.value === \"object\");", "    return rc.every((y) => y.status === \"fulfilled\" && y.value !== null && typeof y.value === \"object\");", T, "a lane held while the chain halts"],
   [EVM, "    prune(lane, lower(c.la, c.lb));", "    prune(lane, higher(c.la, c.lb));", T, "a lane's watch ends at its bound"],
@@ -260,15 +260,24 @@ export const MUTANTS = [
   [EVM, "    behindOf(withdrawLane, qty(ln), qty(lm));", "", T, "a provider whose latest count stays below"],
   [EVM, "    behindOf(lane, la!, lb!);", "", T, "a held answer whose tend sent something"],
   // fold 7: a held answer's wait, one hold read per block, the prior hashes kept, a provider ahead
-  [EVM, "    const mined = lane.heldSentAt + block > now() ? lane.heldSentAt + block : Infinity;", "    const mined = Infinity;", T, "callers obeying Retry-After through a heal"],
+  [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_BLOCKS * block > now() ? now() + block : Infinity;", "    const mined = Infinity;", T, "callers obeying Retry-After through a heal"],
   [EVM, "      if (sent > 0) lane.heldSentAt = now();", "", T, "callers obeying Retry-After through a heal"],
-  [EVM, "    let low = await (lane.heldRead !== null && now() - lane.heldRead.at < block ? lane.heldRead.low : read());", "    let low = await read();", T, "held answers share one hold read per block"],
+  [EVM, "    let r = lane.heldRead !== null && now() - lane.heldRead.at < block ? lane.heldRead : read();", "    let r = read();", T, "held answers share one hold read per block"],
   [EVM, "        lane.failSaid = true;\n        return made.n;", "        lane.failSaid = true;\n        return 0;", T, "a held answer whose tend sent something before it failed"],
   [EVM, "    const prior = old === undefined ? [] : [...old.prior, ...(old.hash === hash ? [] : [old.hash])]", "    const prior = old === undefined ? [] : [...old.prior, old.hash]", T, "more sends of the same replacement than EVM_LANE_PRIOR_MAX"],
   [EVM, ".slice(-EVM_LANE_PRIOR_MAX);", ".slice(0, EVM_LANE_PRIOR_MAX);", T, "a nonce's record keeps its newest EVM_LANE_PRIOR_MAX"],
   [EVM, "      if (x === null && l < lane.nextNonce) x = {", "      if (x === null && l <= lane.nextNonce) x = {", T, "an idle lane is never named behind"],
   [EVM, "      if (lane.nextNonce >= 0n && l > lane.nextNonce && !lane.ahead[i]) {", "      if (false) {", T, "a provider whose latest count is past"],
   [EVM, "        lane.ahead[i] = true;", "", T, "a provider whose latest count is past"],
+  // fold 8: a held send's window of one-block retries, the wait's rounding, a failed hold read shared for its block
+  [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_BLOCKS * block > now() ? now() + block : Infinity;", "    const mined = lane.heldSentAt + 4 * block > now() ? now() + block : Infinity;", T, "callers obeying Retry-After go within one retry"],
+  [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_BLOCKS * block > now() ? now() + block : Infinity;", "    const mined = lane.heldSentAt + 6 * block > now() ? now() + block : Infinity;", T, "a held answer's Retry-After"],
+  [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_BLOCKS * block > now() ? now() + block : Infinity;", "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_BLOCKS * block >= now() ? now() + block : Infinity;", T, "a held answer's Retry-After"],
+  [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_BLOCKS * block > now() ? now() + block : Infinity;", "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_BLOCKS * block > now() ? lane.heldSentAt + block : Infinity;", T, "a held answer's Retry-After"],
+  [EVM, "Math.max(1, Math.ceil((Math.min(nextTend, mined) - now()) / 1000))", "Math.max(1, Math.floor((Math.min(nextTend, mined) - now()) / 1000))", T, "a held answer's Retry-After"],
+  [EVM, "      r.low.catch(() => {}); // a failed read is shared too: its whole block answers from it", "      r.low.catch(() => {\n        if (lane.heldRead === r) lane.heldRead = null;\n      });", T, "a hold read that fails"],
+  [EVM, "      return { ...u, retryAfterS: Math.max(u.retryAfterS ?? 0, Math.max(1, Math.ceil((r.at + block - now()) / 1000))) };", "      return u;", T, "a hold read that fails"],
+  [EVM, "Math.max(1, Math.ceil((r.at + block - now()) / 1000))", "Math.max(1, Math.floor((r.at + block - now()) / 1000))", T, "a hold read that fails"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a

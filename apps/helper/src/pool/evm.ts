@@ -118,8 +118,8 @@
 // nonce's watch ends at its bound (EVM_LANE_WATCH_MS) with one log line; while the lane's lowest unmined send is past
 // it, new sends answer 503 with Retry-After, and each such answer, at most once per EVM_LANE_RETRY_S, tends the lane and
 // reads again, so the lane goes on once the chain does: Retry-After is one block (EVM_LANE_SENT_RETRY_S) when that tend
-// sent something, else the seconds to the next allowed tend or that send's block; held answers share one hold read
-// per block. A tend reads each stuck send's receipts and tx at most once per
+// sent something, else one block within EVM_LANE_SENT_WINDOW_BLOCKS of that send, or the seconds to the next allowed
+// tend; held answers share one hold read per block, a failed one included. A tend reads each stuck send's receipts and tx at most once per
 // EVM_SELL_DROP_MARGIN_MS. A provider whose latest count stays below a nonce the lane sent for EVM_LANE_WATCH_MS is
 // logged once, naming the provider and the nonce; one whose latest count is past the lane's next nonce, once as ahead.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -367,6 +367,9 @@ export const EVM_LANE_RETRY_S = 60;
 /** The Retry-After of a held answer whose tend sent something: one Base block, so the next try reads its receipt (a
  *  Robinhood block is shorter, so one wait serves both) [design: the chain's own pace, never an artificial wait]. */
 export const EVM_LANE_SENT_RETRY_S = 2;
+/** How many blocks after a held answer's tend sent something the other held answers retry each block: a receipt can land
+ *  a block or more late, and a late read or a slow provider adds more, so the wait for it is never a whole tend cycle. */
+export const EVM_LANE_SENT_WINDOW_BLOCKS = 5;
 /** The most earlier hashes a nonce's record keeps (each send the lane made at it before the one it holds now). */
 const EVM_LANE_PRIOR_MAX = 8;
 /** A 0-value transfer's gas: 21,000 (OP Stack, Base); on Arbitrum (Robinhood) the L1 poster's gas is added to it. */
@@ -950,33 +953,49 @@ export function evmPoolSender(
    *  bound, and at most once per block: a held answer within EVM_LANE_SENT_RETRY_S of the last read answers from it);
    *  else null. A held answer first tends the lane, at most once per EVM_LANE_RETRY_S (a send neither provider holds goes
    *  again, so the lane recovers once the chain does), and reads again after it. Its Retry-After is EVM_LANE_SENT_RETRY_S
-   *  when that tend sent something, else the seconds to the sooner of the next allowed tend and one block after the
-   *  lane's last held send (while that is ahead), at least 1. */
+   *  when that tend sent something, else one block while the lane's last held send is within
+   *  EVM_LANE_SENT_WINDOW_BLOCKS blocks, or the seconds to the next allowed tend if sooner, at least 1. A read that fails
+   *  answers every held answer in its block alike, Retry-After at least the rest of the block. */
   async function laneHeld(lane: Lane): Promise<PoolEvmAnswer | null> {
     if (![...lane.sent.values()].some((x) => now() > x.bound)) return null;
     const block = EVM_LANE_SENT_RETRY_S * 1000;
-    const read = (): Promise<[bigint, Sent] | undefined> => {
+    const read = (): HeldRead => {
       const r: HeldRead = { at: now(), low: heldLow(lane) };
       lane.heldRead = r;
-      r.low.catch(() => {
-        if (lane.heldRead === r) lane.heldRead = null; // a failed read is not shared
-      });
-      return r.low;
+      r.low.catch(() => {}); // a failed read is shared too: its whole block answers from it
+      return r;
+    };
+    // a failed read: the provider's refusal, Retry-After at least the rest of its block
+    const failed = (r: HeldRead, e: unknown): PoolEvmAnswer => {
+      const u = unread(e);
+      return { ...u, retryAfterS: Math.max(u.retryAfterS ?? 0, Math.max(1, Math.ceil((r.at + block - now()) / 1000))) };
     };
     // one hold read per block, shared by every held answer in it
-    let low = await (lane.heldRead !== null && now() - lane.heldRead.at < block ? lane.heldRead.low : read());
+    let r = lane.heldRead !== null && now() - lane.heldRead.at < block ? lane.heldRead : read();
+    let low: [bigint, Sent] | undefined;
+    try {
+      low = await r.low;
+    } catch (e) {
+      return failed(r, e);
+    }
     let sent = 0;
     if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {
       lane.heldTendAt = now();
       sent = await tendOnce(lane);
       if (sent > 0) lane.heldSentAt = now();
-      low = await read();
+      r = read();
+      try {
+        low = await r.low;
+      } catch (e) {
+        return failed(r, e);
+      }
     }
     if (low === undefined) return null;
-    // a tend that sent something: try again in a block, when its receipt can be read; else at the sooner of the next
-    // allowed tend and one block after the lane's last held send, while that is still ahead
+    // a tend that sent something: try again in a block, when its receipt can be read; else, while the lane's last held
+    // send is within EVM_LANE_SENT_WINDOW_BLOCKS blocks, in a block too (its receipt may land late), and otherwise at the
+    // next allowed tend
     const nextTend = lane.heldTendAt + EVM_LANE_RETRY_S * 1000;
-    const mined = lane.heldSentAt + block > now() ? lane.heldSentAt + block : Infinity;
+    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_BLOCKS * block > now() ? now() + block : Infinity;
     const wait = sent > 0 ? EVM_LANE_SENT_RETRY_S : Math.max(1, Math.ceil((Math.min(nextTend, mined) - now()) / 1000));
     return { ...no(503, "upstream", `the sender's nonce ${low[0]} is unmined past its watch`), retryAfterS: wait };
   }
