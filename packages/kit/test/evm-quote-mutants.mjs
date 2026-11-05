@@ -474,9 +474,9 @@ export const MUTANTS = [
   [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs;", R, "L2 "],
   // the age from the quote's entry, the scan's time included, on a sell and a buy (review fold 2, LOW-1)
   [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs + Math.max(0, mono() - t0);", R, "LOW-1 "],
-  [QUOTE, "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start)", "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono)", R, "LOW-1 "],
+  [QUOTE, "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start,", "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, undefined,", R, "LOW-1 "],
   [QUOTE, "    watch,\n    mono,\n    start,\n", "    watch,\n    mono,\n", R, "LOW-1 "],
-  [QUOTE, "agreedBlock(rpcs, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start)", "agreedBlock(rpcs, v.maxLag, a.nowMs)", R, "L5 "],
+  [QUOTE, "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start,", "agreedBlock(on, v.maxLag, a.nowMs, undefined, undefined, undefined,", R, "L5 "],
   [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, mono, start });", R, "L5 "],
   [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, minBlock: boughtBlock - 1n, mono, start });", R, "L5 "],
   [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, minBlock: boughtBlock, start });", R, "M2 "],

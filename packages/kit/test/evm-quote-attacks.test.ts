@@ -3650,8 +3650,9 @@ test("LH3 robinhood-rpc.publicnode.com's own answer past its state cut (HTTP 403
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(urls, f), NOW));
   assert.equal((v as { accepted: boolean }).accepted, true, big(v));
   assert.ok(isHeld(urls, "cut.lh3.test"), quoteMod.evmRanked(urls).map(hostOf).join(","));
-  // the same answer under a 200 holds it too, and so does any other status outside 2xx
-  for (const [status, b] of [[200, errs(1, -32602, "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode")], [500, "{}"], [403, ""]] as const) {
+  // the same answer under a 200 holds it too, and so does any other status outside 2xx, a well-formed answer inside it
+  // included
+  for (const [status, b] of [[200, errs(1, -32602, "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode")], [500, "{}"], [403, ""], [403, '[{"jsonrpc":"2.0","id":0,"result":"0x01"}]']] as const) {
     const urls2 = [`https://s${status}${b.length}.lh3.test`];
     const g = answering(new URL(urls2[0]!).hostname, status, b, {});
     await quoteMod.evmProviders([...urls2, "https://x.lh3.test"], g)[0]!([{ method: "eth_call", params: [{ to: NATIVE, data: "0x" }, "latest"] }]).catch(() => {});
@@ -3666,6 +3667,8 @@ test("LH2b a revert never holds a provider, whatever its string, nor an answer f
     ["r1", 3, "execution reverted: header not found", false],
     ["r2", 3, "execution reverted: historical state 0x5f2c is not available", false],
     ["r3", -32000, "execution reverted: historical state 0x5f2c is not available", false],
+    // code 3 is the execution error's own code, whatever its message says
+    ["r4", 3, "historical state 0x5f2c is not available", false],
     // not yet, which askAt asks again: Base's (-32001, base-rpc.publicnode.com 2026-11-03 19:09Z) and a lagging backend's
     ["n1", -32001, "block not found: canonical hash 0x1111111111111111111111111111111111111111111111111111111111111111", false],
     ["n2", -32000, "header not found", false],
