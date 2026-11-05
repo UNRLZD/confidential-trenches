@@ -31,6 +31,7 @@ export const LIVE_CHECKS = [
   "solana-jupiter-build",
   "wallet-per-buy",
   "helper-robinhood-capacity",
+  "helper-robinhood-search-ahead",
   "evm-buy-hookdata-fee",
 ];
 
