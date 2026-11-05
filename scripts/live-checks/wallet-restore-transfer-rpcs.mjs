@@ -12,10 +12,10 @@
 //   - Base Sepolia: that run's v3 buy's W 0x809286a1…078e from its buy's block 54553944 to the newest agreed block,
 //     which must list the USDC it bought (0x036cbd53…3dcf7e), read on both providers alike;
 //   - Base and Robinhood: a W's Transfer read over the newest 50,000 and 100,000 blocks on the helper's route, which
-//     must answer (its provider's cap met by the pager). Base is pending card evm-rpc-spare-list, and listed as
-//     pending, never passed: the helper's Base provider answers a Transfer filter with no address for one block only
-//     (-32701 "Please specify an address" at 2 to 10,000 blocks, [] at 1, 5 Nov 18:47-18:58Z), so the pager reads one
-//     block a call, about 1 a second at the holdings pace, and a W's span never ends;
+//     must answer (its provider's cap met by the pager). On 5 Nov 18:47-18:58Z the helper's Base provider answered a
+//     Transfer filter with no address for one block only (-32701 "Please specify an address" at 2 to 10,000 blocks,
+//     [] at 1), so a W's span never ended; since card evm-rpc-spare-list's helper deploy (3ed8cb1d) it answers 1,000
+//     blocks (21:28Z: [] at 1 and 1,000 blocks, -32602 "maximum 1000 blocks" at 10,000);
 //   - Robinhood testnet: a W's Transfer read over the newest 10,000 blocks, which must answer on both providers alike
 //     (its dRPC caps at 101).
 // Every call goes through the device's own client: on a list the signing page's pageRpc (the kit's solanaJsonRpc with
@@ -26,7 +26,6 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of wallet-restore-transfer-rpcs.answers.json, and its bad run: the
 // same answers with every Transfer log of the Base Sepolia W taken out on both providers (a read that finds no USDC).
-// Runs: pending evm-rpc-spare-list, it reads the helper's route, and its Base read cannot end on the helper's provider today
 import "../net-window.mjs";
 import { HELPER_FETCH_INIT, solanaJsonRpc, SOLANA_RPC_RETRY } from "../../packages/kit/src/index.ts";
 import { spawn } from "node:child_process";
@@ -44,7 +43,7 @@ export const USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
 export const HELPER = "https://api.confidential.unrealized.trade";
 export const JOBS = Object.freeze([
   { network: "base-sepolia", w: W, from: "54553944", want: USDC },
-  { network: "base", w: W, back: "50000", helper: HELPER, pending: "evm-rpc-spare-list" },
+  { network: "base", w: W, back: "50000", helper: HELPER },
   { network: "robinhood", w: W, back: "100000", helper: HELPER },
   // evm-buy-hookdata-fee.robinhood-testnet.json's first W
   { network: "robinhood-testnet", w: "0x764c5ac2e39fec9d25af6d3eaf9400f91d82a531", back: "10000" },
@@ -95,7 +94,7 @@ export function replayer(log) {
  * throws its refusal. */
 function runCheck(job, transport, wait) {
   return new Promise((resolve, reject) => {
-    const { want, pending, ...args } = job;
+    const { want, ...args } = job;
     const child = spawn(process.execPath, [CHECK, JSON.stringify({ ...args, wait })], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
     let buf = "", err = "", settled = false;
     child.stdin.on("error", () => {}); // an answer after the check has exited
@@ -131,11 +130,6 @@ export async function check(transport, { wait = true, jobs = JOBS } = {}) {
   const reports = [];
   let ok = true;
   for (const job of jobs) {
-    if (job.pending) {
-      reports.push(null);
-      lines.push(`${job.network}: pending ${job.pending}: the helper's ${job.network} provider answers a Transfer filter with no address for one block only`);
-      continue;
-    }
     try {
       const r = await runCheck(job, (url, method, params) => transport(job.network, url, method, params), wait);
       reports.push(r);

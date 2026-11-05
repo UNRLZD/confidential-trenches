@@ -39,6 +39,7 @@ export const LIVE_CHECKS = [
   "helper-live-bars-no-503",
   "sol-small-note-buys",
   "evm-rpc-spare-list",
+  "wallet-restore-transfer-rpcs",
 ];
 
 // `{commit}` is the deployed commit
