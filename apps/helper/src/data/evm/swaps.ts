@@ -253,6 +253,8 @@ export const INFLIGHT_MAX = 4;
  *  [design: 500 ms, about a wide 1,000-block read's (WIDE_SPAN: 0.6 to 1.9 s; heads and calls under 0.3 s), and 0.3, so
  *  three slow answers in a row move the rank.] */
 const LATENCY_START_MS = 1_000;
+/** A post slot gave back from a provider's queue (its requests unanswered there). */
+const GAVE_UP = Symbol("gave up");
 const LATENCY_WEIGHT = 0.3;
 /** Expected waits within this of each other rank alike, and free budget orders them (ranked). [design: 100 ms, under
  *  one answer time, so the rank follows free budget until a queue or a pace wait is a real one.] */
@@ -586,7 +588,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
     const got = await Promise.all(parts.map((part) => slot(url, part.length, patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS, () => one(url, part, patient))));
-    return got.some((g) => g === null) ? null : got.flat() as Reply[];
+    // a part given back from the queue (slot) is no answer for its requests alone: the parts answered are kept, and only
+    // its requests are asked of the next provider
+    if (got.every((g) => g === GAVE_UP)) return null;
+    return got.some((g) => g === null) ? null : got.flatMap((g, k) => (g === GAVE_UP ? parts[k]!.map((): Reply => ({ ok: false, wait: 0 })) : (g as Reply[])));
   }
 
   // at most INFLIGHT_MAX requests out to a provider at once, the rest queued in order: a first read's walk sent 246 at
@@ -595,10 +600,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // (`calls`: the calls out or queued to it, by which free counts its budget; `queue`: each queued post's calls, by
   // which waitOf counts the units it will take)
   const inflight = new Map<string, { n: number; calls: number; queue: { go: () => void; calls: number }[] }>();
-  // a post queued past `maxWaitMs` is another provider's, as a read past its pace's wait is (one): null, counted in
+  // a post queued past `maxWaitMs` is another provider's, as a read past its pace's wait is (one): GAVE_UP, counted in
   // `paced` so agreed's patient round may ask it again (fold 4: at c780282 a cold dozen's reads waited 68.7 s in all in
   // daybreak's queue, and the slowest tape took 16.7 s)
-  async function slot<T>(url: string, calls: number, maxWaitMs: number, run: () => Promise<T>): Promise<T | null> {
+  async function slot<T>(url: string, calls: number, maxWaitMs: number, run: () => Promise<T>): Promise<T | typeof GAVE_UP> {
     const q = inflight.get(url) ?? { n: 0, calls: 0, queue: [] };
     inflight.set(url, q);
     q.calls += calls;
@@ -616,7 +621,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         }, maxWaitMs);
       });
       clearTimeout(timer);
-      if (!sent) return (q.calls -= calls), paced.set(url, (paced.get(url) ?? 0) + 1), null;
+      if (!sent) return (q.calls -= calls), paced.set(url, (paced.get(url) ?? 0) + 1), GAVE_UP;
     } else q.n++;
     try {
       return await run();
@@ -748,8 +753,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a read of a block range is `calls` reads of V.span blocks: a wide provider joins them up to its span (logsOf)
       const span = wideFirst ? Math.max(WIDE_SPAN[u] ?? V.span, V.span) : V.span;
       return [
-        -Math.round(waitOf(u, Math.ceil(calls / Math.floor(span / V.span)), wideFirst && clock === null && headerTimed.has(u)) / WAIT_GRAIN_MS),
         wideFirst && span > V.span ? 1 : 0,
+        -Math.round(waitOf(u, Math.ceil(calls / Math.floor(span / V.span)), wideFirst && clock === null && headerTimed.has(u)) / WAIT_GRAIN_MS),
         Math.round(free(u)),
         -((i - (t % n) + n) % n),
       ];
