@@ -923,13 +923,14 @@ let scanBoundMs = EVM_SCAN_BOUND_MS;
 export const evmScanBound = (ms = EVM_SCAN_BOUND_MS) => void (scanBoundMs = ms);
 /** The wait after a throttle that named no Retry-After: 0.5 s, doubled for each throttle since an answer, to 8 s. */
 const SCAN_BACKOFF_MS = 500;
-/** Where the chain pins a second scan provider (the venue's `scan.spare`, card evm-scan-second-provider), the first's
- *  share of the scan's bound: half, so the second has the other half for the blocks the first left. And the longest
- *  the first's throttle may hold a request before it goes to the second: rpc.mainnet.chain.robinhood.com held warm
- *  Robinhood quotes 56 to 60 s on its rate limit, each ending rpc_error (live run 42059239410, evm-quote-lag-held,
- *  2026-11-05 15:53-15:56Z), where publicnode's one burst of 429s on Base clears in the first 0.5 s backoff (card
- *  evm-quote-warm-round, fold 5). */
-const SCAN_SHARE = 0.5;
+/** Where the chain pins a second scan provider (the venue's `scan.spare`, card evm-scan-second-provider) and the scan is
+ *  one the second carries whole (its blocks within one round of the second's requests: a warm scan), the first's share
+ *  of each request: it answers within EVM_SCAN_HOLD_MS and its throttle holds it no longer, or the request goes to the
+ *  second. rpc.mainnet.chain.robinhood.com held warm Robinhood quotes 56 to 60 s on its rate limit, each ending
+ *  rpc_error (live run 42059239410, evm-quote-lag-held, 2026-11-05 15:53-15:56Z); a warm getLogs of a few blocks
+ *  answered in 93 to 773 ms on every pinned scan provider (2026-11-05 16:14-16:23Z). A cold scan keeps the whole
+ *  bound on the first, as before: neither second carries Base's 1M or Robinhood's 10M blocks within it (the venue's
+ *  notes), so a cut would end cold quotes the first alone finishes. */
 export const EVM_SCAN_HOLD_MS = 2_000;
 /** A scan request's tries at its smallest span: a timeout or a failure other than a throttle spends one. */
 const SCAN_TRIES = 4;
@@ -949,11 +950,11 @@ const SCAN_BACKOFF_MAX_MS = 8_000;
  *  - Nothing is sent once the quote's bound has passed, and no request runs past it (re-review of 59a69e2, MEDIUM-1: a
  *    provider that timed out every request was asked one at a time, about 10.8 hours at the 10 s deadline).
  *  One gate per quote, so a request that never returns holds up that quote alone. */
-type ScanGate = { ask: (rpc: EvmRpc, calls: readonly EvmRpcCall[], tries: number) => Promise<readonly unknown[]> };
+type ScanGate = { ask: (rpc: EvmRpc, calls: readonly EvmRpcCall[], tries: number, fast?: boolean) => Promise<readonly unknown[]> };
 /** A scan request whose connection was refused SCAN_TRIES times in a row: the scan refuses, never asks its halves,
  *  which go to the same provider. Where a second provider follows (`spareNext`), the first's gate refuses this way, at
- *  once, a request whose connection was refused, one its throttle would hold past EVM_SCAN_HOLD_MS, and one past its
- *  share of the bound: the scan asks the second for those blocks (scanPools). */
+ *  once, a request whose connection was refused, and a `fast` request (a warm scan's) that its throttle would hold, or
+ *  that does not answer, past EVM_SCAN_HOLD_MS: the scan asks the second for those blocks (scanPools). */
 class ScanRefused extends EvmQuoteError {}
 function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanGate {
   let limit = parallel;
@@ -967,20 +968,17 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanG
   const waiting: (() => void)[] = [];
   // a wait between tries, never past the bound (the next send then refuses)
   const nap = (ms: number) => new Promise((r) => setTimeout(r, Math.max(0, Math.min(ms, untilMs - performance.now()))));
-  const past = () =>
-    spareNext ? new ScanRefused("rpc_error", `the scan provider did not answer within its share of the quote's bound of ${scanBoundMs} ms`) : new EvmQuoteError("rpc_error", `the scan provider did not answer within the quote's bound of ${scanBoundMs} ms`);
+  const past = () => new EvmQuoteError("rpc_error", `the scan provider did not answer within the quote's bound of ${scanBoundMs} ms`);
+  const slow = () => new ScanRefused("rpc_error", `the scan provider did not answer within ${EVM_SCAN_HOLD_MS} ms`);
   // every request waiting looks again: one sent, an answer back, a wait ended
   const wake = () => waiting.splice(0).forEach((r) => r());
   // a slot, once the provider's wait is over
-  const take = async () => {
+  const take = async (fast: boolean) => {
     for (;;) {
       const now = performance.now();
       if (now >= untilMs) throw past();
-      if (resumeAt > untilMs) {
-        if (spareNext) throw new ScanRefused("rpc_error", `the scan provider limited its rate past its share of the quote's bound of ${scanBoundMs} ms`);
-        return refuse("rpc_error", `the scan provider limited its rate past the quote's bound of ${scanBoundMs} ms`);
-      }
-      if (spareNext && resumeAt - now > EVM_SCAN_HOLD_MS) throw new ScanRefused("rpc_error", `the scan provider limited its rate for ${Math.round(resumeAt - now)} ms`);
+      if (resumeAt > untilMs) return refuse("rpc_error", `the scan provider limited its rate past the quote's bound of ${scanBoundMs} ms`);
+      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw new ScanRefused("rpc_error", `the scan provider limited its rate for ${Math.round(resumeAt - now)} ms`);
       if (now < resumeAt) await new Promise((r) => setTimeout(r, resumeAt - now));
       else if (flying < Math.floor(limit)) {
         flying++;
@@ -1007,15 +1005,17 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanG
     const wait = Math.max(afterMs ?? 0, Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1)));
     resumeAt = Math.max(resumeAt, performance.now() + wait);
   };
-  // the request, ended at the quote's bound where that comes before its own deadline
-  const send = async (rpc: EvmRpc, calls: readonly EvmRpcCall[]) => {
-    const left = untilMs - performance.now();
+  // the request, ended at the quote's bound where that comes before its own deadline, and a fast one at
+  // EVM_SCAN_HOLD_MS
+  const send = async (rpc: EvmRpc, calls: readonly EvmRpcCall[], fast: boolean) => {
+    const toBound = untilMs - performance.now();
+    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;
     if (left >= EVM_RPC_TIMEOUT_MS) return rpc(calls);
     const stop = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const bound = new Promise<never>((_, no) => {
       timer = setTimeout(() => {
-        const e = past();
+        const e = fast && left < toBound ? slow() : past();
         stop.abort(e);
         no(e);
       }, Math.max(0, left));
@@ -1027,14 +1027,15 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanG
     }
   };
   return {
-    async ask(rpc, calls, tries) {
+    async ask(rpc, calls, tries, fast = false) {
+      fast &&= spareNext;
       let refused = 0;
       for (let i = 0; ; ) {
-        await take();
+        await take(fast);
         const sent = cuts;
         let out: unknown;
         try {
-          out = await send(rpc, calls);
+          out = await send(rpc, calls, fast);
         } catch (e) {
           done();
           if (e instanceof RateLimited) {
@@ -1075,7 +1076,8 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanG
  *  gate behind others is held to the same head as the first (a head read per scan, seconds later, was past maxLag on
  *  Robinhood, 2026-11-03 21:30Z). */
 async function scanHeadOf(rpc: EvmRpc, gate: ScanGate): Promise<bigint> {
-  const h = (await gate.ask(rpc, [{ method: "eth_blockNumber", params: [] }], SCAN_TRIES))[0] as { result?: unknown } | null;
+  // fast where a second follows: one call, answered in about 100 ms (2026-11-05 16:13-16:21Z)
+  const h = (await gate.ask(rpc, [{ method: "eth_blockNumber", params: [] }], SCAN_TRIES, true))[0] as { result?: unknown } | null;
   if (typeof h?.result !== "string" || !/^0x[0-9a-fA-F]{1,16}$/.test(h.result)) return refuse("rpc_error", "the scan provider answered no block number");
   const scanHead = BigInt(h.result);
   if (scanHead > BigInt(Number.MAX_SAFE_INTEGER)) return refuse("rpc_disagree", "the scan provider's head is past any block");
@@ -1083,7 +1085,7 @@ async function scanHeadOf(rpc: EvmRpc, gate: ScanGate): Promise<bigint> {
 }
 /** A scan provider as one scan asks it: its rpc, its gate and its span a request (`orSpan` where a topic position
  *  holds more than one value). */
-type ScanOn = { rpc: EvmRpc; gate: ScanGate; span: number; orSpan?: number | undefined };
+type ScanOn = { rpc: EvmRpc; gate: ScanGate; span: number; parallel: number; orSpan?: number | undefined };
 /** The quote's scan providers: the head every scan reads up to, the provider asked first, and the second, which
  *  asks again the blocks of any request the first failed (card evm-scan-second-provider). A first that answered no
  *  head is passed over: the head is the second's, and the second is asked first. */
@@ -1141,6 +1143,9 @@ async function scanPools(
     }
   };
   for (const g of groups.values()) for (const [a, b] of g[0]!.gaps) jobsOf(g, a, b);
+  // a scan the second carries whole, in one round of its requests (a warm one): the first has EVM_SCAN_HOLD_MS a
+  // request before the second takes it (scanGateOf)
+  const fast = spare !== undefined && jobs.reduce((n, j) => n + Math.ceil((j.b - j.a + 1) / spare.span), 0) <= spare.parallel;
   // each request's logs as it comes back
   const got: { part: Each[]; a: number; b: number; logs: unknown[] }[] = [];
   const one = async ({ part, a, b, on }: Job, splits = SCAN_SPLITS): Promise<void> => {
@@ -1160,13 +1165,14 @@ async function scanPools(
     // backend behind the head another answered would read as blocks with no pools, kept as read (2026-11-05 16:14-16:22Z)
     const top = p === null && b === head;
     const calls = p === null && !top ? filters.map(f) : [...filters.map(f), { method: "eth_getBlockByNumber", params: ["0x" + (p === null ? b : p.number).toString(16), false] }];
-    // a provider that does not hold the head yet is asked again, as a failure: its next try may reach a backend that
-    // does; a first with a second behind it passes the request to the second at once
+    // a provider whose answer holds no block at the head (null: not yet) is asked again, as a failure: its next try may
+    // reach a backend that does; a first with a second behind it passes the request to the second at once
     const rpc: EvmRpc = !top
       ? on.rpc
       : async (cs, signal) => {
           const out = await on.rpc(cs, signal);
-          if (Array.isArray(out) && (out[filters.length] as { result?: unknown } | null)?.result === null && !out.some(limited)) {
+          const h = (out[filters.length] as { result?: { hash?: unknown } | null } | null)?.result;
+          if (Array.isArray(out) && typeof h?.hash !== "string" && !out.some(limited)) {
             const m = `the scan provider does not hold block ${b} yet`;
             throw spare !== undefined && on !== spare ? new ScanRefused("rpc_error", m) : new Error(m);
           }
@@ -1174,17 +1180,17 @@ async function scanPools(
         };
     // the logs' answers, and where pinned, a refusal unless the batch's provider holds the agreed block
     const logsOf = (out: readonly unknown[]) => {
-      const h = (out[filters.length] as { result?: { hash?: unknown } | null } | null)?.result;
       if (p !== null) {
+        const h = (out[filters.length] as { result?: { hash?: unknown } | null } | null)?.result;
         if (typeof h?.hash !== "string" || lower(h.hash) !== p.hash) return refuse("rpc_disagree", `the scan provider's logs are not read at the agreed block ${p.number}`);
-      } else if (top && typeof h?.hash !== "string") return refuse("rpc_error", `the scan provider does not hold block ${b}`);
+      }
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
     const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[] })));
     if (splits > 0 && b > a) {
       // one try: a request that ran out of time, failed or answered too many logs is asked as its two halves (a
       // throttled one is asked again whole by the gate; past the scan's bound each half refuses before it is sent)
-      const rs = await on.gate.ask(rpc, calls, 1).then(logsOf, (e) => {
+      const rs = await on.gate.ask(rpc, calls, 1, fast).then(logsOf, (e) => {
         if (e instanceof ScanRefused) throw e;
         return null;
       });
@@ -1192,7 +1198,7 @@ async function scanPools(
       const mid = a + Math.floor((b - a) / 2);
       return settle([one({ part, a, b: mid, on }, splits - 1), one({ part, a: mid + 1, b, on }, splits - 1)]);
     }
-    const rs = logsOf(await on.gate.ask(rpc, calls, SCAN_TRIES));
+    const rs = logsOf(await on.gate.ask(rpc, calls, SCAN_TRIES, fast));
     if (!fine(rs)) return refuse("rpc_error", "the scan provider answered no logs");
     keep(rs);
   };
@@ -1201,8 +1207,8 @@ async function scanPools(
     const failed = (await Promise.allSettled(ps)).find((r) => r.status === "rejected");
     if (failed !== undefined) throw (failed as PromiseRejectedResult).reason;
   };
-  // A request the first provider failed in any way (a refusal, no answer within its share of the bound, a throttle
-  // held past EVM_SCAN_HOLD_MS, an answer with no logs, or one that does not hold the head) is asked of the second for
+  // A request the first provider failed in any way (a refused connection; in a warm scan, no answer or a throttle's
+  // hold past EVM_SCAN_HOLD_MS; its tries spent; an answer with no logs, or one with no block at the head) is asked of the second for
   // the blocks that did not come back, in the second's own spans; the quote refuses only where the second fails them
   // too (card evm-scan-second-provider). Both read the same blocks of the same PoolManager: a scan only adds pools,
   // each read on both quote providers like any candidate.
@@ -1778,11 +1784,11 @@ async function routeSet(a: {
   const [scan1, scan2] = scan === undefined ? [] : typeof scan === "function" ? [scan] : scan;
   const t0 = performance.now();
   const spareOn: ScanOn | undefined =
-    scan2 === undefined || v.scan?.spare === undefined ? undefined : { rpc: scan2, gate: scanGateOf(v.scan.spare.parallel, t0 + scanBoundMs), span: v.scan.spare.span, orSpan: v.scan.spare.orSpan };
+    scan2 === undefined || v.scan?.spare === undefined ? undefined : { rpc: scan2, gate: scanGateOf(v.scan.spare.parallel, t0 + scanBoundMs), span: v.scan.spare.span, parallel: v.scan.spare.parallel, orSpan: v.scan.spare.orSpan };
   const firstOn: ScanOn | undefined =
     scan1 === undefined || v.scan === undefined
       ? undefined
-      : { rpc: scan1, gate: scanGateOf(v.scan.parallel, t0 + (spareOn === undefined ? scanBoundMs : scanBoundMs * SCAN_SHARE), spareOn !== undefined), span: v.scan.span, orSpan: v.scan.orSpan };
+      : { rpc: scan1, gate: scanGateOf(v.scan.parallel, t0 + scanBoundMs, spareOn !== undefined), span: v.scan.span, parallel: v.scan.parallel, orSpan: v.scan.orSpan };
   let scanFrom: Promise<ScanFrom> | undefined;
   // the head, read once per quote on the first; a first that answers none leaves the scan to the second alone
   const scanFromOf = (f: ScanOn) =>

@@ -532,9 +532,10 @@ test("card evm-quote-head-watch: a scan that ends more than maxLag blocks behind
   // the scan provider's head 4,999,990, ten blocks behind the agreed 5,000,000 (Base's maxLag 5); the real pool at 4,999,995
   const late = scanner(4_999_990, [{ key: real(token).key, at: 4_999_995 }], asked);
   const caught = scanner(5_000_000, [{ key: real(token).key, at: 4_999_995 }], asked);
-  // the catch-up's requests, each with the agreed block by number in its batch, reach a backend that holds it
+  // the catch-up's requests, each with the agreed block by number in its batch, reach a backend that holds it (the
+  // scan's newest request asks its own head, 4,999,990, in its batch: card evm-scan-second-provider)
   let pinned = 0;
-  const both: EvmRpc = (calls) => (calls.some((c) => c.method === "eth_getBlockByNumber") && ++pinned > 0 ? caught(calls) : late(calls));
+  const both: EvmRpc = (calls) => (calls.some((c) => c.method === "eth_getBlockByNumber" && Number(c.params[0]) === 5_000_000) && ++pinned > 0 ? caught(calls) : late(calls));
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), both), below);
   assert.equal(pinned, 1, "the catch-up request carries the agreed block");
   assert.deepEqual(asked.slice(-2), [[4_999_991, 5_000_000], [4_999_991, 5_000_000]]);
@@ -3814,10 +3815,10 @@ test("LQ5 a call's error naming the provider's compute units per second holds it
 // scan provider did not answer within the quote's bound"), a warm one in 193 ms ("the scan provider answered no logs"),
 // and Robinhood warm quotes at 56-60 s on its scan provider's rate limit. Each case below holds the first scan provider
 // and the second (the venue's scan.spare) finds the token's real pool, which holds the seeded route: below_reference.
-const pairQuote = async (token: string, first: EvmRpc, second: EvmRpc, chainName: "base" | "robinhood" = "base") => {
+const pairQuote = async (token: string, first: EvmRpc, second: EvmRpc, chainName: "base" | "robinhood" = "base", headNo = 5_000_000) => {
   const pools = [seeded(token), real(token)];
   const t = performance.now();
-  const v = await verdict(evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, [first, second]));
+  const v = await verdict(evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, [first, second]));
   return { v, ms: performance.now() - t };
 };
 const realAt = (token: string, at: number) => [{ key: real(token).key, at }];
@@ -3843,22 +3844,37 @@ test("SP1 a first scan provider that refuses connections: the scan goes on at th
   assert.deepEqual((await pairQuote(token, down, scanner(5_000_000, realAt(token, 4_500_000)))).v, below);
 });
 
-test("SP2 a first scan provider that does not answer: the second has the blocks the first left at its share of the bound (half)", { timeout: 30_000 }, async () => {
-  evmScanBound?.(2_000);
-  try {
-    const token = "0x00000000000000000000000000000000005c4504";
-    // the first answers the older half of the depth and hangs on every newer request until aborted; the real pool is in
-    // the newer half
-    const { rpc } = faultScan(realAt(token, 4_800_000), (a) => (a <= 4_500_000 ? "ok" : "timeout"));
-    const asked: [number, number][] = [];
-    const { v, ms } = await pairQuote(token, rpc, scanner(5_000_000, realAt(token, 4_800_000), asked));
-    assert.deepEqual(v, below);
-    assert.ok(ms >= 1_000 && ms < 2_000 + 500, `${Math.round(ms)} ms`);
-    // the second is asked only the blocks the first did not answer
-    assert.ok(asked.length > 0 && asked.every(([a]) => a > 4_500_000), `the second read ${JSON.stringify(asked.filter(([a]) => a <= 4_500_000).slice(0, 3))}`);
-  } finally {
-    evmScanBound?.();
-  }
+/** A warm quote: the token's scan read up to 5,000,000 by a quote before, the chain's head now 5,000,010, the real pool
+ *  made at 5,000,005, so only the second's answer for those ten blocks finds it. */
+const warmPair = async (token: string, first: EvmRpc, chainName: "base" | "robinhood" = "base") => {
+  await pairQuote(token, scanner(5_000_000, []), scanner(5_000_000, []), chainName);
+  const asked: [number, number][] = [];
+  const r = await pairQuote(token, first, scanner(5_000_010, realAt(token, 5_000_005), asked), chainName, 5_000_010);
+  return { ...r, asked };
+};
+
+test("SP2 a first scan provider that does not answer a warm scan: the second has its blocks after 2 s, a cold scan keeps the whole bound on the first", { timeout: 30_000 }, async () => {
+  const token = "0x00000000000000000000000000000000005c4504";
+  const head = scanner(5_000_010, []);
+  // the first answers its head and never a getLogs, until aborted
+  const hangs: EvmRpc = (calls, signal) => (calls.some((c) => c.method === "eth_getLogs") ? new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason))) : head(calls));
+  const { v, ms, asked } = await warmPair(token, hangs);
+  assert.deepEqual(v, below);
+  assert.ok(ms >= 2_000 && ms < 3_000, `${Math.round(ms)} ms`);
+  assert.deepEqual(asked, [[5_000_001, 5_000_010], [5_000_001, 5_000_010]]);
+  // a cold scan the second cannot carry in one round stays on the first while it answers: its newest request, answered
+  // after 2.5 s, is waited for, never passed over at 2 s
+  const token2 = "0x00000000000000000000000000000000005c4508";
+  const inner = scanner(5_000_000, realAt(token2, 4_999_000));
+  const late: EvmRpc = async (calls) => {
+    if (calls.some((c) => c.method === "eth_getLogs" && Number((c.params[0] as { toBlock: string }).toBlock) === 5_000_000)) await pause(2_500);
+    return inner(calls);
+  };
+  const second: [number, number][] = [];
+  const cold = await pairQuote(token2, late, scanner(5_000_000, [], second));
+  assert.deepEqual(cold.v, below);
+  assert.ok(cold.ms >= 2_500, `${Math.round(cold.ms)} ms`);
+  assert.equal(second.length, 0, "the second read a cold scan's blocks");
 });
 
 test("SP3 a first scan provider that answers no logs, or no logs from behind the head: the second's answer counts", { timeout: 30_000 }, async () => {
@@ -3892,11 +3908,21 @@ test("SP3 a first scan provider that answers no logs, or no logs from behind the
   assert.ok(ms < 1_500, `${Math.round(ms)} ms`);
 });
 
-test("SP4 a first scan provider whose rate limit would hold a request past 2 s: the request goes to the second, never waits to the bound", { timeout: 30_000 }, async () => {
+test("SP4 a first scan provider whose rate limit would hold a warm scan's request past 2 s: the request goes to the second, never waits to the bound", { timeout: 30_000 }, async () => {
   // rpc.mainnet.chain.robinhood.com held warm Robinhood quotes 56-60 s on its rate limit (run 42059239410, evm-quote-lag-held)
   const token = "0x00000000000000000000000000000000005c4507";
-  const { rpc, st } = faultScan([], () => "429:30");
-  const { v, ms } = await pairQuote(token, rpc, scanner(5_000_000, realAt(token, 4_500_000)), "robinhood");
+  const inner = scanner(5_000_010, []);
+  let throttled = 0;
+  // a Retry-After of 5 s: inside the quote's bound, past the 2 s hold
+  const first = evmJsonRpc("https://throttles.sp4.test", (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    if (calls.some((c) => c.method === "eth_getLogs")) {
+      throttled++;
+      return new Response("", { status: 429, headers: { "retry-after": "5" } });
+    }
+    return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+  }) as unknown as typeof fetch);
+  const { v, ms, asked } = await warmPair(token, first, "robinhood");
   assert.deepEqual(v, below);
-  assert.ok(ms < 1_500, `${Math.round(ms)} ms, ${st.throttled.length} throttled`);
+  assert.ok(ms < 1_500 && throttled > 0 && asked.length > 0, `${Math.round(ms)} ms, ${throttled} throttled, ${asked.length} on the second`);
 });
