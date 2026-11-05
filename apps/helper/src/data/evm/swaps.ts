@@ -415,6 +415,11 @@ const DYNAMIC_FEE = 0x800000;
  * id proves the key; nothing else is accepted.
  */
 export function v4Key(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base"): string | null {
+  for (const k of v4Tries(token, swapFee, around, chain)) if (keccakHex(k) === id) return k;
+  return null;
+}
+/** The keys v4Key tries, in its order. */
+function* v4Tries(token: string, swapFee: number, around: readonly string[], chain: EvmChain): Generator<string> {
   const V = VENUES[chain];
   const w = (n: bigint): string => n.toString(16).padStart(64, "0");
   const a = (x: string): string => x.slice(2).padStart(64, "0");
@@ -423,10 +428,20 @@ export function v4Key(id: string, token: string, swapFee: number, around: readon
   const spacings = [...TICK_SPACINGS, ...Array.from({ length: TICK_SPACING_MAX }, (_, i) => i + 1).filter((t) => !TICK_SPACINGS.includes(t))];
   for (const other of [ZERO, V.weth, V.usd]) {
     const [c0, c1] = token < other ? [token, other] : [other, token];
-    for (const ts of spacings) for (const h of hooks) for (const f of fees) {
-      const k = `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
-      if (keccakHex(k) === id) return k;
-    }
+    for (const ts of spacings) for (const h of hooks) for (const f of fees) yield `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
+  }
+}
+/** Keys v4KeySliced hashes between two turns of the event loop. [design: 1,000, about 60 ms on the Mac (a miss of
+ *  92,000 tries, ten hook candidates, took 5.4 s there, 2026-11-05 16:3xZ), so a box twice as slow stays well under the
+ *  second swaps-v4key.test.ts allows.] */
+const V4_KEY_SLICE = 1_000;
+/** v4Key, the event loop let run every V4_KEY_SLICE tries: a search that misses takes seconds of hashing, and in one go it
+ *  held every other read of the helper (card robinhood-cold-open-fast: four cold opens' posts all aborted at 14 s). */
+export async function v4KeySliced(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base"): Promise<string | null> {
+  let n = 0;
+  for (const k of v4Tries(token, swapFee, around, chain)) {
+    if (keccakHex(k) === id) return k;
+    if (++n % V4_KEY_SLICE === 0) await new Promise((go) => setImmediate(go));
   }
   return null;
 }
@@ -887,8 +902,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  more than one post to it: it takes single-post reads only (card helper-robinhood-capacity fold 5: at fa4b98d a
    *  cold dozen sent daybreak 94 eth_getLogs posts, each wide read 3 to 6 of them in its 3 slots). */
   const single = (urls: readonly string[], calls: number): string[] => urls.filter((u) => (BATCH_SIZE[u] ?? 10) > 1 || calls <= 1);
-  /** Providers by free budget, the most first. */
-  const byFree = (urls: readonly string[]) => urls.map((u) => ({ u, f: free(u) })).sort((a, b) => b.f - a.f).map((x) => x.u);
   /** A provider's free budget, in calls: what its pace lets background reads send within the next second (the free
    *  units above CALLER_ROOM and a second's refill, times the calls a post carries where it counts posts), less the calls
    *  already out or queued to it (slot), so a dozen walks starting at once see each other's reads. A provider with no
@@ -1298,10 +1311,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** The v4 pool ids the PoolManager's Swap logs name in the receipts of the token's latest PoolManager transactions,
    *  each with its fee and the addresses its transaction logged (one provider's receipts: v4Key and the PositionManager
-   *  check every id against its key's hash). */
+   *  check every id against its key's hash). Asked of the provider expected to answer first (ranked: its answer time,
+   *  queue and pace), never by free budget alone (card robinhood-cold-open-fast: pocket, the biggest bucket, took 3.4 s
+   *  and 3.7 s for three receipts while the others answered in 0.3 s). */
   async function v4Seen(pmTxs: string[]): Promise<Map<string, { fee: number; around: Set<string> }>> {
     const seen = new Map<string, { fee: number; around: Set<string> }>();
-    for (const u of single(byFree(usable(rpcs)), Math.min(pmTxs.length, V4_TXS))) {
+    const n = Math.min(pmTxs.length, V4_TXS);
+    for (const u of single(ranked(usable(rpcs), false, n), n)) {
       const r = await batchTo(u, pmTxs.slice(-V4_TXS).map((t) => ({ method: "eth_getTransactionReceipt", params: [t] })));
       if (r === null) continue;
       for (const x of r) {
@@ -1376,12 +1392,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const answers = await callsSome(head.n, [...paired.map(confirmCall), ...list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` }))]);
     for (const c of confirmed(paired, answers.slice(0, paired.length))) if (c !== null) cands.push(c);
     const keys = answers.slice(paired.length);
-    list.forEach((id, i) => {
+    for (const [i, id] of list.entries()) {
       const e = seen.get(id)!;
-      // the PositionManager's key when it hashes to the id, else one worked out from the swap (it must hash to the id)
-      const c = v4Pool(token, id, keys[i]) ?? v4Pool(token, id, v4Key(id, token, e.fee, [...e.around], chain) ?? undefined);
+      // the PositionManager's key when it hashes to the id: that is the pool, whatever it pairs (a route's other hop, or
+      // the token against a quote of no venue of ours), and no search finds another (card robinhood-cold-open-fast: those
+      // misses searched seconds each); else one worked out from the swap (it must hash to the id), the event loop let run
+      const k = keys[i];
+      const c = k !== undefined && /^0x[0-9a-f]{320}$/.test(k) && keccakHex(k) === id ? v4Pool(token, id, k) : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain)) ?? undefined);
       if (c !== null) cands.push(c);
-    });
+    }
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
     cands.push(...curvePools(token, recs));
     if (cands.length === 0) return null;
@@ -1868,7 +1887,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** Traders of the txs (06c §4.12): the sender of each, or for a bundle sent to an EntryPoint each user operation's
    *  account, read from its receipt (index.ts txTraders, card helper-tape-4337-trader). A dozen cold tokens ask about 600 at once (card
-   *  helper-robinhood-capacity fold 2), so they are split across the providers not held by free budget (free), each share
+   *  helper-robinhood-capacity fold 2), so they are split across the providers not held by expected answer time (waitOf), each share
    *  read at once, and a share whose read fails asked of the others in turn; a tx whose read fails everywhere stays null
    *  this time and is asked again the next. */
   /** The lookups out now, by transaction: a tape asks a hash in flight once (card helper-robinhood-capacity fold 8). */
@@ -1895,13 +1914,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
   async function lookTraders(need: string[]): Promise<void> {
     // per-swap lookups go in batches: a provider that takes one request a post is asked none of them (fold 5)
-    const order = single(usable(rpcs), 2).map((u) => ({ u, f: Math.max(free(u), 0) })).sort((x, y) => y.f - x.f);
-    const sum = order.reduce((n, x) => n + x.f, 0);
-    let at = 0;
-    const shares = order.map(({ u, f }, i) => {
-      const k = i === order.length - 1 ? need.length - at : Math.min(need.length - at, Math.round((need.length * (sum > 0 ? f : 1)) / (sum > 0 ? sum : order.length)));
-      return { u, part: need.slice(at, (at += k)) };
-    });
+    // each hash to the provider whose share would be answered first (waitOf: its answer time, queue and pace, with the
+    // hashes already its), never by free budget alone (card robinhood-cold-open-fast: pocket, the biggest bucket, took
+    // 1 to 3 s a post while the others answered in 0.3 s, and the tape waited on its share)
+    const order = single(usable(rpcs), 2);
+    if (order.length === 0) return;
+    const share = new Map<string, string[]>(order.map((u) => [u, []]));
+    for (const t of need) {
+      const u = order.reduce((best, v) => (waitOf(v, share.get(v)!.length + 1, false) < waitOf(best, share.get(best)!.length + 1, false) ? v : best));
+      share.get(u)!.push(t);
+    }
+    const shares = [...share].map(([u, part]) => ({ u, part }));
     // the transactions read, by hash: one sent to an EntryPoint waits for its receipt (bundles) before it has traders
     const got = new Map<string, Record<string, unknown>>();
     const keep = (t: string, x: Traders) => {
@@ -1948,7 +1971,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       shares.filter((x) => x.part.length > 0).map(async ({ u, part }) => {
         if (!(await read(u, part)))
           // a share whose read failed: only its hashes still not read, of the others in turn
-          for (const v of byFree(usable(rpcs))) {
+          for (const v of ranked(usable(rpcs), false, part.length)) {
             const left = part.filter((t) => !got.has(t));
             if (left.length === 0) break;
             if (v !== u && single([v], 2).length > 0 && (await read(v, left))) break;
