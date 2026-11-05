@@ -90,6 +90,7 @@ function chain(on = {}) {
     c.mine();
     const { method, params } = JSON.parse(init.body);
     c.calls.push({ url, method, params });
+    if (on.limited?.(method, params, c)) return { ok: false, status: 429, json: async () => ({ code: 429, message: "Connection rate limits exceeded" }) };
     switch (method) {
       case "eth_chainId": return ok(c.id);
       case "eth_getBlockByNumber": return ok({ baseFeePerGas: "0x" + c.base.toString(16) });
@@ -210,6 +211,17 @@ test("an L1 fee that triples while the run waits for funding does not strand the
   const r = await run(t, c, { onLine: (l, ch) => l.startsWith("deploy: waiting for") && (ch.l1Scale *= 3n) });
   assert.equal(r.error, null, String(r.error?.message) + why(c));
   settled(c, r);
+});
+
+test("a funding wait whose balance read meets a burst of 429s keeps waiting: the run is funded, deploys and sweeps (the Solana devnet rehearsal's run ended on one, 5 Nov 18:47Z)", OPTS, async (t) => {
+  let waiting = false;
+  let limited = 0;
+  const c = chain({ limited: (m, p, ch) => waiting && m === "eth_getBalance" && p[0].toLowerCase() === ch.deployer && limited < 5 && ++limited });
+  const r = await run(t, c, { onLine: (l) => l.startsWith("deploy: waiting for") && (waiting = true) });
+  assert.equal(limited, 5, "five tries of one read were rate-limited" + why(c));
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  assert.ok(c.logs.some((l) => /^deploy: the run key's balance not read \(eth_getBalance: HTTP 429.*\): reading it again/.test(l)), why(c));
 });
 
 test("--return is refused when zero, the run key, of a bad EIP-55 checksum or an account with code; nothing is sent", OPTS, async (t) => {
