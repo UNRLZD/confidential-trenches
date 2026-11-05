@@ -70,7 +70,7 @@ const STAGE_RANK: Readonly<Record<WithdrawStage, number>> = { proving: 0, submit
  *  cleared by `clear` only while it is still that note's (a later part's, another tab's, stays), and its fee_needed
  *  with it. A stage written with `clear` is that note's verdict: it applies only while the op owes that note's send or
  *  none, never over a later part still owed (round-3 review probe3-merge). The owed send itself (its attempt, context,
- *  To and fee ceiling) is in the "owed" store, keyed by op id, which the frame never reads (src/state.ts op contract);
+ *  To and fee ceiling) is in meta under owed/<op id>, which the frame never reads (src/state.ts op contract);
  *  the op names only the note's random id. */
 export function mergeWithdrawOp(
   v: unknown,
@@ -90,19 +90,22 @@ export function mergeWithdrawOp(
     delete r.owed;
     delete r.fee_needed;
   }
-  // a record from before the "owed" store holds its send in `pending`: cleared the same way
+  // a record from before meta/owed/<op id> holds its send in `pending`: cleared the same way
   if (w.clear !== undefined && (r.pending as PendingOnward | undefined)?.noteId === w.clear) delete r.pending;
   return r;
 }
 
-/** The "owed" store's record for one op: each note's owed onward send by note id. */
+/** meta/owed/<op id>, the wallet store's record of one op's owed onward sends, each note's by note id: in meta, which
+ *  the frame's reader neither reads nor lists (packages/wallet/src/store WALLET_OWED_PREFIX). */
+const owedKey = (opId: string): `owed/${string}` => `owed/${opId}`;
+/** One op's owed onward sends: each note's by note id. */
 export type OwedSends = Record<string, PendingOnward>;
 /** The op's owed send for `noteId` written (awaited before its release leaves); the record's others kept. */
 export const oweSend = (w: WalletStore, opId: string, p: PendingOnward): Promise<unknown> =>
-  w.update("owed", opId, (v) => ({ ...((v as OwedSends | undefined) ?? {}), [p.noteId]: p }));
+  w.update("meta", owedKey(opId), (v) => ({ ...((v as OwedSends | undefined) ?? {}), [p.noteId]: p }));
 /** The op's owed send for `noteId` dropped, once the op no longer owes it; a later part's stays (one compare-and-set). */
 export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<unknown> =>
-  w.update("owed", opId, (v) => {
+  w.update("meta", owedKey(opId), (v) => {
     const r = v as OwedSends | undefined;
     if (r === undefined || !Object.hasOwn(r, noteId)) return undefined;
     const { [noteId]: _gone, ...rest } = r;
@@ -110,7 +113,7 @@ export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<
   });
 /** The op's owed send for `noteId`, or none. */
 export async function owedSendOf(w: WalletStore, opId: string, noteId: string): Promise<PendingOnward | undefined> {
-  const r = (await w.get("owed", opId)) as OwedSends | undefined;
+  const r = (await w.get("meta", owedKey(opId))) as OwedSends | undefined;
   return r !== undefined && Object.hasOwn(r, noteId) ? r[noteId] : undefined;
 }
 /** The reserved pass freed these notes (no release of theirs landed by their deadline): each withdraw op owing one's
@@ -124,7 +127,7 @@ export async function settleFreedOps(ops: WalletStore, freed: readonly string[])
     await dropSend(ops, k, owed);
   }
 }
-/** An op record from before the "owed" store (its pending in the op, which the frame reads): moved there. */
+/** An op record from before meta/owed/<op id> (its pending in the op, which the frame reads): moved there. */
 async function moveLegacyPending(w: WalletStore, opId: string, p: PendingOnward): Promise<void> {
   await oweSend(w, opId, p);
   await w.update("ops", opId, (v) => {
@@ -499,7 +502,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (rec.pending) await moveLegacyPending(ops, k, rec.pending);
       const id = rec.pending?.noteId ?? rec.owed;
       // any stage: `owed` names the note whose send the op owes (a tab closed during the release leaves "proving");
-      // its send is the "owed" store's record (none yet: written but not marked, or the other way: read again later)
+      // its send is meta/owed/<op id>'s record (none yet: written but not marked, or the other way: read again later)
       const p = typeof id === "string" ? await owedSendOf(ops, k, id) : undefined;
       if (p) owed.push([k, p]);
       else if (typeof id === "string") owedScan = true;
@@ -614,7 +617,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         })
         .catch(() => {}));
     };
-    // written before the part's release leaves, and awaited: a failed write sends nothing; the send in the "owed"
+    // written before the part's release leaves, and awaited: a failed write sends nothing; the send in the meta/owed/<op id>
     // store first, then the op's in_transit naming its note, so the stage is never "proving" while a release is out
     // (review #232b HIGH 1) and the op never names a send the store does not hold
     const owe = async (pending: PendingOnward): Promise<void> => {
@@ -684,13 +687,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return out.sort((a, b) => a.t - b.t).map(({ opId, need }) => ({ opId, need }));
   };
   // the Max fee drawn again at `need`, the fee the screen showed: only while the op still owes that send at that fee;
-  // its ceiling raised to it in the "owed" store, fee_needed cleared, and the finish tried again at once
+  // its ceiling raised to it in meta/owed/<op id>, fee_needed cleared, and the finish tried again at once
   const redraw = async (opId: string, need: bigint): Promise<void> => {
     const ops = await page.store();
     const rec = (await ops.get("ops", opId)) as { owed?: unknown; fee_needed?: unknown } | undefined;
     const noteId = rec?.owed;
     if (typeof noteId !== "string" || rec?.fee_needed !== need.toString()) throw new Error("the fee shown is no longer the one owed");
-    const raised = await ops.update("owed", opId, (v) => {
+    const raised = await ops.update("meta", owedKey(opId), (v) => {
       const r = v as OwedSends | undefined;
       const p = r !== undefined && Object.hasOwn(r, noteId) ? r[noteId]! : undefined;
       return p === undefined ? undefined : { ...r, [noteId]: { ...p, feeCap: need.toString() } };

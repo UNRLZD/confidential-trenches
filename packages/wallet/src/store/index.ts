@@ -39,21 +39,18 @@ export const WALLET_LOCK = "ct-wallet/counters"; // the store's own; 06b:743 nam
 export const WALLET_SEED_LOCK = "ct-wallet/seed"; // the store's own: sign out and every seed write
 export const WALLET_CHANNEL = "ct-wallet"; // 06b:746
 export const WALLET_LANES = 8; // wallet.md:247
-// wallet.md:197-204, the note store table; "owed" (card signpage-withdraw-own-spend): a withdraw op's onward sends still
-// owed, keyed by op id, with the attempt and its context, which the frame never reads (signpage src/state.ts op
-// contract). The reader opens a database without it too, as it never reads "owed".
-// The version: the store opens the database at whatever version it is and goes one up only to add a store it is missing
-// (fold 2, review MEDIUM 3), so no release ever meets a version it cannot open. A database made new holds every store
-// at version 1; one made before "owed" goes to version 2. Releases up to release-25 open at version 1 exactly, so
-// SIGN_HOST never goes back to one of them once a newer one served: packages/signpage/scripts/deploy.mjs refuses a build
-// whose store cannot open WALLET_DB_SERVED (packages/signpage/scripts/release-list.mjs).
-export const WALLET_STORES = ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta", "owed"] as const;
-/** The stores the read-only open needs: every one but "owed", which it never reads. */
-const READER_STORES = WALLET_STORES.filter((s) => s !== "owed");
+// wallet.md:197-204, the note store table.
+export const WALLET_STORES = ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta"] as const;
 export type WalletStoreName = (typeof WALLET_STORES)[number];
 // The meta keys a caller may write: the seed record and the settings (wallet.md:204, 06b:585-634). K_wrap and the lane
 // are the store's own.
-export type WalletMetaKey = "seed" | "settings";
+export type WalletMetaKey = "seed" | "settings" | `owed/${string}`;
+/** meta/owed/<op id> (card signpage-withdraw-own-spend): a withdraw op's onward sends still owed, with the attempt and its
+ *  context, which the frame never reads: the reader's get refuses every meta key but status and deposit/<scope>, and its
+ *  keys leaves these out. In meta, not a store of their own, so the database stays at version 1 (a version bump locks
+ *  every wallet when SIGN_HOST rolls back to a release that opens version 1 exactly). */
+export const WALLET_OWED_PREFIX = "owed/";
+const OWED_KEY = /^owed\/[^/]{1,200}$/;
 // "closed": this store's own connection was closed by another tab's delete or upgrade (versionchange); open it again
 export type WalletEvent = { kind: "changed"; stores: WalletStoreName[] } | { kind: "signout" } | { kind: "closed" };
 
@@ -193,7 +190,7 @@ function checkKey(store: WalletStoreName, key: string): void {
 function checkCallerKey(store: WalletStoreName, key: string): void {
   checkKey(store, key);
   if (store === "counters") throw new Error("counters only grow, through reserveDepositIndex");
-  if (store === "meta" && key !== "seed" && key !== "settings") throw new Error(`meta key ${key} is the store's own`);
+  if (store === "meta" && key !== "seed" && key !== "settings" && !OWED_KEY.test(key)) throw new Error(`meta key ${key} is the store's own`);
   // the seed record holds the only copy of a no-PRF account's 12 words: it is written by insertSeed only, changed by
   // setCodeSaved only, and goes only with signOut
   if (store === "meta" && key === "seed") throw new Error("the seed record is written by insertSeed and setCodeSaved only");
@@ -266,28 +263,15 @@ async function unwrapWith(kWrap: CryptoKey, store: WalletStoreName, key: string,
   }
 }
 
-function openAt(idb: IDBFactory, name: string, version?: number): Promise<IDBDatabase> {
-  const r = version === undefined ? idb.open(name) : idb.open(name, version);
+function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
+  // version 1, always: a release that opens a higher one makes every release before it fail to open the database
+  // (VersionError) and lock the wallet when SIGN_HOST rolls back to it, unless a release that opens any version ships
+  // and serves first (card signpage-withdraw-own-spend fold 3; the owed sends went into meta for this)
+  const r = idb.open(name, 1);
   r.onupgradeneeded = () => {
     for (const s of WALLET_STORES) if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s);
   };
   return req(r);
-}
-/** The database at its own version; one version up only when a store is missing. Two tabs racing that step: the one
- *  that loses meets the version the other made (VersionError) and opens again from the start. */
-async function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
-  for (let tries = 0; ; tries++) {
-    const db = await openAt(idb, name);
-    if (WALLET_STORES.every((s) => db.objectStoreNames.contains(s))) return db;
-    const v = db.version;
-    db.close();
-    try {
-      return await openAt(idb, name, v + 1);
-    } catch (e) {
-      if (tries < 3 && (e as { name?: unknown } | null)?.name === "VersionError") continue;
-      throw e;
-    }
-  }
 }
 
 export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<WalletStore> {
@@ -622,7 +606,7 @@ export async function openWalletStoreReader(
   };
   const getRaw = async (store: WalletStoreName, key: string): Promise<unknown> =>
     req(live().transaction(store, "readonly").objectStore(store).get(key));
-  if (!READER_STORES.every((n) => opened.objectStoreNames.contains(n))) return (shut(), null);
+  if (!WALLET_STORES.every((n) => opened.objectStoreNames.contains(n))) return (shut(), null);
   const k = (await getRaw("meta", K_WRAP).catch(() => undefined)) as CryptoKey | undefined;
   if (!(k instanceof CryptoKey) || k.extractable || k.algorithm.name !== "AES-GCM") return (shut(), null);
   return {
@@ -637,7 +621,7 @@ export async function openWalletStoreReader(
     async keys(store) {
       checkKey(store, "x");
       const all = await req(live().transaction(store, "readonly").objectStore(store).getAllKeys());
-      return all.map(String).filter((x) => !(store === "meta" && (x === K_WRAP || x === LANE)));
+      return all.map(String).filter((x) => !(store === "meta" && (x === K_WRAP || x === LANE || x.startsWith(WALLET_OWED_PREFIX))));
     },
     close: shut,
   };

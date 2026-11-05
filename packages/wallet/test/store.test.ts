@@ -711,129 +711,45 @@ test("nameDeposit: the record is written only by a compare on the seed record: a
   assert.deepEqual(await s.get("meta", "seed"), SEED(true), "the aborted compare left the seed as it was");
 });
 
-// card signpage-withdraw-own-spend: a withdraw's owed sends (attempt, context) live in "owed", which the frame's reader
-// never opens; a database from before it (version 1) is upgraded at the next top-level open
-test("the owed store: a version 1 database gets it at the next open, and the frame's reader refuses to read it", async () => {
+// card signpage-withdraw-own-spend: a withdraw's owed sends (attempt, context) live in meta under owed/<op id>, which the
+// frame's reader never reads nor lists; the database stays at version 1
+test("an owed send is kept in meta under owed/<op id>: the frame's reader neither reads nor lists it", async () => {
   const idb = new IDBFactory();
-  await new Promise<void>((ok, no) => {
-    const r = idb.open("ct-wallet", 1);
-    r.onupgradeneeded = () => {
-      for (const s of ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta"]) r.result.createObjectStore(s);
-    };
-    r.onsuccess = () => (r.result.close(), ok());
-    r.onerror = () => no(r.error);
-  });
   const s = await openWalletStore({ indexedDB: idb });
   await s.insertSeed(SEED(true));
-  await s.put("owed", "op1", { n1: { noteId: "n1", context: "7" } });
-  assert.deepEqual(await s.get("owed", "op1"), { n1: { noteId: "n1", context: "7" } });
+  await s.put("meta", "owed/op1", { n1: { noteId: "n1", context: "7" } });
+  assert.deepEqual(await s.get("meta", "owed/op1"), { n1: { noteId: "n1", context: "7" } });
+  assert.ok((await s.keys("meta")).includes("owed/op1"));
+  for (const k of ["owed/", "owed/a/b", "owedop1", "lane"]) await assert.rejects(s.put("meta", k, {}), /is the store's own/, k);
   const reader = (await openWalletStoreReader({ indexedDB: idb }))!;
-  assert.ok(reader, "the reader opens the upgraded database");
-  await assert.rejects(reader.get("owed", "op1"), /reader opens meta\/status, meta\/deposit\/<scope> and ops only/);
+  assert.ok(reader);
+  await assert.rejects(reader.get("meta", "owed/op1"), /reader opens meta\/status, meta\/deposit\/<scope> and ops only/);
+  assert.ok(!(await reader.keys("meta")).some((k) => k.startsWith("owed/")), "the reader lists no owed key");
+  assert.ok((await reader.keys("meta")).includes("seed"));
   reader.close();
+  await s.delete("meta", "owed/op1");
+  assert.equal(await s.get("meta", "owed/op1"), undefined);
   s.close();
 });
 
-test("the frame's reader opens a database with no owed store (one from before it): it never needs it", async () => {
+// The database's version is pinned at 1. A release that opens a higher version makes every earlier release (they open
+// version 1 exactly) fail with VersionError on that database, so a SIGN_HOST rollback locks every wallet. Bump it only
+// after a release that opens any version has shipped and served.
+test("the wallet database is version 1, and stays 1 after every record kind is written", async () => {
   const idb = new IDBFactory();
   const s = await openWalletStore({ indexedDB: idb });
   await s.insertSeed(SEED(true));
-  await s.put("ops", "op1", { kind: "deposit", stage: "waiting", txs: [] });
+  await s.put("meta", "owed/op1", { n1: { noteId: "n1" } });
+  await s.put("ops", "op1", { kind: "withdraw", stage: "in_transit", owed: "n1" });
   s.close();
-  // the same database with its owed store taken away, as a version 1 database lacks it
-  await new Promise<void>((ok, no) => {
-    const r = idb.open("ct-wallet", 3);
-    r.onupgradeneeded = () => r.result.deleteObjectStore("owed");
-    r.onsuccess = () => (r.result.close(), ok());
-    r.onerror = () => no(r.error);
-  });
-  const reader = await openWalletStoreReader({ indexedDB: idb });
-  assert.ok(reader, "the reader still opens it");
-  assert.deepEqual(await reader!.keys("ops"), ["op1"]);
-  reader!.close();
-});
-
-// fold 2 (review MEDIUM 3): the store opens the database at its own version and goes one up only for a store it is
-// missing, so a release never meets a version it cannot open (a VersionError locked every signing until a deploy)
-const versionOf = (idb: IDBFactory): Promise<number> =>
-  new Promise((ok, no) => {
+  const v = await new Promise<number>((ok, no) => {
     const r = idb.open("ct-wallet");
     r.onsuccess = () => {
-      const v = r.result.version;
+      const n = r.result.version;
       r.result.close();
-      ok(v);
+      ok(n);
     };
     r.onerror = () => no(r.error);
   });
-test("a database a later release took to a higher version, with a store this one does not know, opens with every record kept", async () => {
-  const idb = new IDBFactory();
-  const s = await openWalletStore({ indexedDB: idb });
-  await s.insertSeed(SEED(true));
-  await s.put("ops", "op1", { kind: "deposit", stage: "waiting", txs: [] });
-  s.close();
-  await new Promise<void>((ok, no) => {
-    const r = idb.open("ct-wallet", 7);
-    r.onupgradeneeded = () => r.result.createObjectStore("later");
-    r.onsuccess = () => (r.result.close(), ok());
-    r.onerror = () => no(r.error);
-  });
-  const again = await openWalletStore({ indexedDB: idb });
-  assert.deepEqual(await again.get("ops", "op1"), { kind: "deposit", stage: "waiting", txs: [] });
-  assert.equal(await versionOf(idb), 7, "opened at its own version, never up");
-  again.close();
-});
-test("a new database holds every store at version 1; one from before owed goes to version 2 once; two tabs opening it at once both open", async () => {
-  const fresh = new IDBFactory();
-  (await openWalletStore({ indexedDB: fresh })).close();
-  assert.equal(await versionOf(fresh), 1);
-  const old = new IDBFactory();
-  await new Promise<void>((ok, no) => {
-    const r = old.open("ct-wallet", 1);
-    r.onupgradeneeded = () => {
-      for (const s of ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta"]) r.result.createObjectStore(s);
-    };
-    r.onsuccess = () => (r.result.close(), ok());
-    r.onerror = () => no(r.error);
-  });
-  const [a, b] = await Promise.all([openWalletStore({ indexedDB: old, locks: null }), openWalletStore({ indexedDB: old, locks: null })]);
-  await a.put("owed", "op1", { n1: { noteId: "n1" } });
-  a.close();
-  b.close();
-  assert.equal(await versionOf(old), 2);
-  const c = await openWalletStore({ indexedDB: old });
-  assert.deepEqual(await c.get("owed", "op1"), { n1: { noteId: "n1" } });
-  c.close();
-  assert.equal(await versionOf(old), 2, "no step up when every store is there");
-});
-test("another tab takes the database a version further between this open's read and its step up: the step up meets VersionError and the open starts again, at that tab's version", async () => {
-  const real = new IDBFactory();
-  await new Promise<void>((ok, no) => {
-    const r = real.open("ct-wallet", 1);
-    r.onupgradeneeded = () => {
-      for (const s of ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta"]) r.result.createObjectStore(s);
-    };
-    r.onsuccess = () => (r.result.close(), ok());
-    r.onerror = () => no(r.error);
-  });
-  let raced = false;
-  const idb = {
-    open(name: string, version?: number) {
-      if (version === 2 && !raced) {
-        raced = true;
-        // the other tab's open, queued first: version 3, adding "owed" and a store of its own
-        const other = real.open(name, 3);
-        other.onupgradeneeded = () => {
-          for (const s of ["owed", "later"]) if (!other.result.objectStoreNames.contains(s)) other.result.createObjectStore(s);
-        };
-        other.onsuccess = () => other.result.close();
-      }
-      return version === undefined ? real.open(name) : real.open(name, version);
-    },
-    deleteDatabase: (name: string) => real.deleteDatabase(name),
-  } as unknown as IDBFactory;
-  const s = await openWalletStore({ indexedDB: idb, locks: null });
-  assert.ok(raced, "the step up ran");
-  await s.put("owed", "op1", { n1: { noteId: "n1" } });
-  s.close();
-  assert.equal(await versionOf(real), 3);
+  assert.equal(v, 1);
 });

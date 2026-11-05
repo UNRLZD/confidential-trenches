@@ -551,11 +551,11 @@ test("a note the reserved pass freed settles the op owing its send as stopped, t
   const op1 = (await w.get("ops", "op1")) as Record<string, unknown>;
   assert.equal(op1.stage, "stopped");
   assert.equal(op1.owed, undefined);
-  assert.deepEqual(await w.get("owed", "op1"), {});
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
   const op2 = (await w.get("ops", "op2")) as Record<string, unknown>;
   assert.equal(op2.stage, "in_transit");
   assert.equal(op2.owed, "n2");
-  assert.deepEqual(Object.keys((await w.get("owed", "op2")) as object), ["n2"]);
+  assert.deepEqual(Object.keys((await w.get("meta", "owed/op2")) as object), ["n2"]);
   const op3 = (await w.get("ops", "op3")) as Record<string, unknown>;
   assert.equal(op3.stage, "stopped");
   assert.equal(op3.pending, undefined);
@@ -587,7 +587,7 @@ test("a send owed whose fee rose past the Max fee: the screen reads the fee it n
   const { world, TO, COST, W_FEE } = WORLD;
   let rose = false;
   const wd = await world([30_000_000n], { feeFor: () => (rose ? 2n * W_FEE : W_FEE), afterRelease: () => void (rose = true) });
-  // the part's run (the world's own settle), its op written as the page's run writes it: the send owed in "owed"
+  // the part's run (the world's own settle), its op written as the page's run writes it: the send owed in meta/owed/<op id>
   const { runPoolWithdraw } = await import("../src/pool-withdraw.ts");
   const ran = await runPoolWithdraw(wd.host, { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 }, TO, 5_000_000n, COST);
   assert.equal(ran.stage, "in_transit");
@@ -631,10 +631,10 @@ test("a withdraw whose tab closed during the release's read-back: the reopened p
   const rec = (await wd.w.get("ops", "op-w")) as { stage: string; owed?: unknown };
   assert.equal(rec.stage, "in_transit", "never proving while a release is out");
   // card signpage-withdraw-own-spend (2): the op (which the frame reads) names only the note; the send owed, with its
-  // attempt and context, is in the "owed" store, keyed by the op id, which the frame never reads
+  // attempt and context, is in meta under owed/<op id>, which the frame never reads
   const held = (await wd.ns.get(wd.ids[0]!))!;
   assert.equal(rec.owed, wd.ids[0], "the send owed, by its note's id");
-  const owedRec = (await wd.w.get("owed", "op-w")) as Record<string, { attempt: string; context: string }>;
+  const owedRec = (await wd.w.get("meta", "owed/op-w")) as Record<string, { attempt: string; context: string }>;
   assert.deepEqual(Object.keys(owedRec), [wd.ids[0]]);
   assert.equal(owedRec[wd.ids[0]!]!.context, held.contexts!.at(-1)!.context);
   const text = JSON.stringify(rec);
@@ -648,6 +648,6 @@ test("a withdraw whose tab closed during the release's read-back: the reopened p
   const after = (await wd.w.get("ops", "op-w")) as { stage: string; owed?: unknown; txs: { hash: string }[] };
   assert.equal(after.stage, "sent");
   assert.equal(after.owed, undefined);
-  assert.deepEqual(await wd.w.get("owed", "op-w"), {}, "the send owed dropped once sent");
+  assert.deepEqual(await wd.w.get("meta", "owed/op-w"), {}, "the send owed dropped once sent");
   assert.equal(after.txs.length, 1, "the onward send's tx");
 });
