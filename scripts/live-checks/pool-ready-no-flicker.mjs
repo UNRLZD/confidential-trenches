@@ -3,7 +3,9 @@
 // remakes its proof at an epoch boundary. The fix is the proof queue's readyWith (packages/wallet/src/pool/queue.ts),
 // through which the signing page's state reads the ready list with the notes (packages/signpage/src/main.ts). It reads:
 //   1. SIGN_HOST's /app.js has the sha384 of this checkout's signing page bundle (packages/signpage/public/app.js), so
-//      the deployed page carries the fix;
+//      the deployed page carries the fix; and that bundle carries the readyWith state path itself, read in its text: two
+//      readyWith definitions (the queue's and the testnet pool's) and two calls (the testnet pool's into the queue and
+//      the page's state read), so a build whose state read is back on the old ready list fails even if both sides match;
 //   2. the devnet run's record (pool-ready-no-flicker.devnet.json, packages/signpage/scripts/pool-ready-devnet.mjs):
 //      after the first read with ready above 0, every state read (one every few seconds, each starting the queue's pass
 //      as main.ts does) gave that same ready, over at least READ_EPOCHS epochs with a remake at each boundary. The
@@ -27,6 +29,9 @@ const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");
 const RUN = path.join(REPO, "scripts/live-checks/pool-ready-no-flicker.devnet.json");
 const sha384 = (b) => `sha384-${createHash("sha384").update(b).digest("base64")}`;
 const EPOCH_MS = 60_000;
+// the readyWith state path in a minified bundle: property names survive minifying, so a definition reads "readyWith:"
+// and a call ".readyWith("
+export const readyPath = (text) => ({ defs: text.split("readyWith:").length - 1, calls: text.split(".readyWith(").length - 1 });
 
 // ------------------------------------------------------------------------------------------------ the verdict
 export function judge(rec) {
@@ -35,6 +40,8 @@ export function judge(rec) {
   const b = rec.signBundle ?? {};
   say(b.status === 200 && typeof rec.treeBundle === "string" && b.sha384 === rec.treeBundle,
     `SIGN_HOST's /app.js is this checkout's signing page bundle: ${b.status !== 200 ? `HTTP ${b.status ?? "none"}` : b.sha384 === rec.treeBundle ? b.sha384 : `served ${b.sha384}, the checkout's ${rec.treeBundle}`}`);
+  const p = b.readyWith ?? {};
+  say(p.defs >= 2 && p.calls >= 2, `the served bundle carries the readyWith state path: ${p.defs ?? 0} definitions and ${p.calls ?? 0} calls, want at least 2 of each`);
   const run = rec.run ?? {};
   const states = Array.isArray(run.states) ? run.states : [];
   const k = states.findIndex((x) => typeof x?.ready === "string" && /[1-9]/.test(x.ready));
@@ -57,10 +64,11 @@ export async function collect({ harness = false } = {}) {
   const tree = readFileSync(TREE_BUNDLE);
   const treeBundle = sha384(tree);
   let signBundle;
-  if (harness) signBundle = { status: 200, sha384: treeBundle };
+  if (harness) signBundle = { status: 200, sha384: treeBundle, readyWith: readyPath(tree.toString("utf8")) };
   else {
     const res = await fetch(`${SIGN_HOST}/app.js`, { signal: AbortSignal.timeout(15_000) });
-    signBundle = { status: res.status, sha384: sha384(new Uint8Array(await res.arrayBuffer())) };
+    const body = new Uint8Array(await res.arrayBuffer());
+    signBundle = { status: res.status, sha384: sha384(body), readyWith: readyPath(new TextDecoder().decode(body)) };
   }
   const r = JSON.parse(readFileSync(RUN, "utf8"));
   const run = { cluster: r.cluster, states: r.states.map((x) => ({ at: x.at, ready: x.ready, attempts: x.attempts })) };

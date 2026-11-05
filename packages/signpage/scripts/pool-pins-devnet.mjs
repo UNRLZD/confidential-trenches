@@ -134,7 +134,9 @@ const signedIn = stateOf(true, { source: "code", code_saved: true }, []);
 const stateRead = async () => {
   await t.stateRead();
   const rr = rentRead.get();
-  const out = await withPools(signedIn, () => readNotes(w), rr === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, rr), await t.ready(), prices.get);
+  // the ready list and the notes in one turn of the queue, as main.ts reads them
+  const both = await t.readyWith(() => readNotes(w));
+  const out = await withPools(signedIn, async () => both.value, rr === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, rr), both.ready, prices.get);
   prices.refresh((out.pools ?? []).map((p) => p.chain));
   return out.pools ?? null;
 };

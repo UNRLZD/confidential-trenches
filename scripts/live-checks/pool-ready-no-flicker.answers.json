@@ -1,12 +1,16 @@
 {
  "good": {
   "check": "pool-ready-no-flicker",
-  "at": "2026-11-05T18:18:19.070Z",
+  "at": "2026-11-05T18:33:57.767Z",
   "source": "harness: this checkout's bundle as SIGN_HOST's",
-  "treeBundle": "sha384-EiEcJjSNHcQqn3i7OF/+rqCPzknsA9wnGoSmDocvwSVK4js3ZhomvtpQeqzjeXRU",
+  "treeBundle": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
   "signBundle": {
    "status": 200,
-   "sha384": "sha384-EiEcJjSNHcQqn3i7OF/+rqCPzknsA9wnGoSmDocvwSVK4js3ZhomvtpQeqzjeXRU"
+   "sha384": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
+   "readyWith": {
+    "defs": 2,
+    "calls": 2
+   }
   },
   "run": {
    "cluster": "devnet",
@@ -534,12 +538,16 @@
  },
  "bad": {
   "check": "pool-ready-no-flicker",
-  "at": "2026-11-05T18:18:20.165Z",
+  "at": "2026-11-05T18:33:58.107Z",
   "source": "live https://sign.confidential.unrealized.trade",
-  "treeBundle": "sha384-EiEcJjSNHcQqn3i7OF/+rqCPzknsA9wnGoSmDocvwSVK4js3ZhomvtpQeqzjeXRU",
+  "treeBundle": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
   "signBundle": {
    "status": 200,
-   "sha384": "sha384-vvJiAOJf6qepCaslFXZ+Dw24jPKyjF5xkHU6lwS8HXYB1+uX5LgKrjsgu6z0E2A4"
+   "sha384": "sha384-vvJiAOJf6qepCaslFXZ+Dw24jPKyjF5xkHU6lwS8HXYB1+uX5LgKrjsgu6z0E2A4",
+   "readyWith": {
+    "defs": 0,
+    "calls": 0
+   }
   },
   "run": {
    "cluster": "devnet",

@@ -29,7 +29,9 @@
 //   remake's swap run one at a time per note, so a tap never meets a half-made swap. A reader that pairs the ready list
 //   with the notes (the signing page's state: a proof counts while its note is HELD by its attempt, ./balances.ts) reads
 //   both through readyWith, in the view's turn, which a swap's write and its ready list update also take: so the read
-//   sees both before the swap or both after, never the note's new attempt with the old proof (card pool-ready-no-flicker). A proof that fails frees its
+//   sees both before the swap or both after, never the note's new attempt with the old proof (card pool-ready-no-flicker).
+//   The cost: a take, drop or close that waits on a swap's note turn also waits behind a state read, at most one
+//   notes read long. A proof that fails frees its
 //   note; a free whose write fails is tried again at the next pass. A page that dies leaves HELD notes the store frees
 //   on its next open (the dead tab's lock).
 // - Only while the app is in front: a pass in the background does nothing, so a hidden page spends no battery.

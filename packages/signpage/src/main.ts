@@ -171,9 +171,11 @@ else {
         if (s.signed_in) void testnet?.stateRead();
         const r = s.signed_in && hasSolana ? rent.get() : null;
         // the ready list and the notes in one turn of the queue (card pool-ready-no-flicker): a remake's swap never
-        // falls between them, so a note that stays ready never reads as ready "0"
-        const both = s.signed_in && testnet && PAGE_POOLS.length > 0 ? await testnet.readyWith(pageNotes) : null;
-        const out = await withPools(s, both ? async () => both.value : pageNotes, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
+        // falls between them, so a note that stays ready never reads as ready "0". A failed notes read is kept and
+        // thrown inside withPools, whose own catch answers the state without pools, as before: state never throws
+        const both = s.signed_in && testnet && PAGE_POOLS.length > 0 ? await testnet.readyWith(notesOrError).catch(() => null) : null;
+        const notes = both ? async () => ("e" in both.value ? Promise.reject(both.value.e) : both.value.v) : pageNotes;
+        const out = await withPools(s, notes, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
         prices.refresh((out.pools ?? []).map((p) => p.chain));
         return out;
       }),
@@ -542,6 +544,9 @@ const namer = depositNamer({
 async function pageNotes(): Promise<NoteRecord[]> {
   return readNotes(await open());
 }
+// pageNotes for the queue's readyWith: its failure kept as a value, so the turn ends and the state's withPools throws it
+// in its own catch
+const notesOrError = (): Promise<{ v: NoteRecord[] } | { e: unknown }> => pageNotes().then((v) => ({ v }), (e: unknown) => ({ e }));
 // a change to the notes, heard on the shell's channel (this document's store and other tabs'): name again
 function notesMoved(e: WalletEvent): void {
   if (!shell || pageScope() === null || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;

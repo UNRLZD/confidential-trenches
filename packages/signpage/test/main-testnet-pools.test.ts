@@ -2,7 +2,7 @@
 // devnet pool PAGE_POOLS pins, the proof queue's ready proof as `ready`, the page's own price as `price` and, once the
 // Rent sysvar is read on the page's devnet pair, `tap_max`: what turns the trade box's Buy on. The wallet's real store
 // (fake-indexeddb) holds a landed note HELD by a proof; three load hooks stand in for what this process cannot run:
-//   - src/pool-testnet.ts: testnetPool's ready() answers the planted ready proof (a proof needs the prover's worker);
+//   - src/pool-testnet.ts: testnetPool's readyWith answers the planted ready proof with the page's notes read (a proof needs the prover's worker);
 //   - src/pool-price.ts: poolPrices reads the price from a planted read (the real poolPrices around it), its timers unref'd;
 //   - every RPC is a fetch that answers the Rent sysvar's account read (3,480 lamports per byte, factor 2) and refuses
 //     anything else with a JSON-RPC error, so the queue's own pass fails and the planted proof is the only one.
@@ -27,7 +27,7 @@ registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
-      return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), ready: async () => { throw new Error(\"the state reads the ready list only with its notes, through readyWith\"); }, readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
+      return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
     if (url.endsWith("/signpage/src/pool-price.ts"))
       return { ...r, source: wrap(String(r.source), "poolPrices", "export function poolPrices(deps) { return poolPrices__real({ ...deps, read: globalThis.__ctPriceRead, after: (ms, fn) => void setTimeout(fn, ms).unref() }); }") };
     return r;
@@ -176,6 +176,17 @@ test("the testnet build's state: the devnet pool with the queue's ready proof as
   assert.deepEqual([pool?.price?.price, pool?.price?.expo], [PRICE.price.toString(), PRICE.expo], "the page's own price");
   assert.equal(pool?.tap_max, want, "tap_max from the Rent sysvar read on the page's pair");
   assert.ok(rentReads.length >= 2 && new Set(rentReads.map((u) => new URL(u).host)).size === 2, `the Rent read on two hosts: ${rentReads.join(", ")}`);
+
+  // a notes read that fails (a record the store refuses) still answers the state, signed in and without pools,
+  // as withPools answers any failed read: the read inside the queue's readyWith never throws past it
+  await w.put("notes", "bad", { id: "bad" });
+  let after: Awaited<ReturnType<typeof askState>> | string;
+  try {
+    after = await askState();
+  } catch (e) {
+    after = (e as Error).message;
+  }
+  assert.deepEqual(typeof after === "string" ? after : { signed_in: after.signed_in, pools: after.pools ?? null }, { signed_in: true, pools: null }, "a failed notes read: the state without pools");
   ns.close();
   w.close();
 });

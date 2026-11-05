@@ -287,8 +287,6 @@ export type TestnetPool = {
   stateRead(): Promise<void>;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
-  /** The open proof queue's ready proofs; undefined while no queue is open. */
-  ready(): Promise<readonly ReadyProof[] | undefined>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
    * a remake's swap never falls between the two (card pool-ready-no-flicker); `ready` undefined while no queue is open.
    * `read` waits for nothing of the queue's. */
@@ -804,10 +802,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     settle,
     stateRead,
     proofs,
-    ready: async () => {
-      const p = open;
-      return p ? (await p.catch(() => null))?.queue.ready() : undefined;
-    },
     readyWith: async (read) => {
       const q = open ? (await open.catch(() => null))?.queue : undefined;
       return q ? q.readyWith(read) : { ready: undefined, value: await read() };

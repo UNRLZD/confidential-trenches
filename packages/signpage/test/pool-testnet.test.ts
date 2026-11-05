@@ -206,14 +206,14 @@ test("card signpage-pool-pins: a page that loads with the pool's notes landed op
   const proves = () => prover.log.filter((x) => x.startsWith("prove")).length;
   // no note of the pool: a state read opens no queue
   await t.stateRead();
-  assert.equal(await t.ready(), undefined, "no queue open: no ready list, so state.pools has no ready");
+  assert.equal((await t.readyWith(async () => null)).ready, undefined, "no queue open: no ready list, so state.pools has no ready");
   assert.equal(proves(), 0);
   // a note landed before this page loaded (UNSPENT, no landing hook here): the state read opens the queue and proves it
   await land(ns, await incoming(ns, null, 9));
   await t.stateRead();
   await t.proofs(); // passes run one after another: this one waits for the state read's
   assert.equal(proves(), 1);
-  const ready = await t.ready();
+  const { ready } = await t.readyWith(async () => null);
   assert.equal(ready?.length, 1);
   assert.equal(ready![0]!.poolId, pool.id);
   assert.equal(heard, 1, "the pass that made the proof is heard; the empty pass after it is not");
@@ -229,7 +229,7 @@ test("card signpage-pool-pins: a page that loads with the pool's notes landed op
   await t.proofs();
   assert.equal(proves(), 1, "nothing new to prove in the same epoch");
   await t.signedOut();
-  assert.equal(await t.ready(), undefined, "signed out: no queue, no ready list");
+  assert.equal((await t.readyWith(async () => null)).ready, undefined, "signed out: no queue, no ready list");
 });
 
 test("the testnet build's pool RPCs, every chain and both providers, read through a 429 once", async () => {

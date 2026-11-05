@@ -139,7 +139,7 @@ const stateRead = async () => {
   const rr = rentRead.get();
   const table = rr === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, rr);
   // for comparison only: the earlier read, the ready list copied before the notes are read
-  const early = await t.ready();
+  const early = (await t.readyWith(async () => null)).ready;
   const earlyOut = await withPools(signedIn, () => readNotes(w), table, early, prices.get);
   const both = await t.readyWith(() => readNotes(w));
   const out = await withPools(signedIn, async () => both.value, table, both.ready, prices.get);
