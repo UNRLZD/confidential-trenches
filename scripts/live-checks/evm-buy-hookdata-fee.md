@@ -27,7 +27,7 @@ robinhood-testnet (chain id 46630), contracts/pool-evm/script/testnet-run.mjs at
 The run key 0x02eecfc29bb1d27fdbfa07b96cbbb979dc376b18 lived only in the run, sent every transaction but the Ws' own sweeps as the relayer, was funded with 2119800000000000 wei (the printed need) and swept back to 0x49f2425b7f33f3a10912de8add6839226ce663a2. The run's 12 words lived only in the run; every note came from them.
 The restore from the words (packages/wallet evmRestoreNotes) at block 148612194: 5 notes, 3 spends, the Ws 0x764c5ac2e39fec9d25af6d3eaf9400f91d82a531 (0x10e626a1d0857174b9a5bdb7a1397068811fbbbc), 0x27b6df0477705be4d138f1dc29cd2a2c86a19755 (no token), 0x648865bbcafb8df0f92bac90826abf60b9aa7d98 (no token).
 
-Each bind waited until the pool's time was at least 25 s into its epoch (testnet-run --bind-from-s 25), so the device read the epoch's fee at its first block 25 s or more back on the kit pin's providers, and the helper's fee matched it:
+Each bind waited until the pool's time was at least 25 s into its epoch (testnet-run --bind-from-s 25), so the device read the epoch's fee at its first block 25 s or more back on the kit pin's providers, and the run's relayer fee (testnet-run's relayFee) matched it, since no helper ran in these runs:
 base-sepolia: bind 58 s into epoch 2026-11-04T22:49:00.000Z; bind 25 s into epoch 2026-11-04T22:51:00.000Z; bind 28 s into epoch 2026-11-04T22:52:00.000Z.
 robinhood-testnet: bind 29 s into epoch 2026-11-04T22:01:00.000Z; bind 59 s into epoch 2026-11-04T22:01:00.000Z; bind 25 s into epoch 2026-11-04T22:02:00.000Z.
 node scripts/live-checks/pool-evm-testnet-run.mjs --record-file scripts/live-checks/evm-buy-hookdata-fee.<chain>.json passed on each record.
