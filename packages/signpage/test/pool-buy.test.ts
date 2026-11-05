@@ -6,6 +6,7 @@
 // pool fixture's real release proof); the pool's own account and pages are planted around that release. The seed is the
 // published all-zero entropy vector (packages/wallet/test/vectors/a8.json).
 import assert from "node:assert/strict";
+import { throughApi } from "./api-ends.ts";
 import { test } from "node:test";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
@@ -830,4 +831,20 @@ test("this device's own buy with no signature from the helper is found in W's hi
   const w = await world({ helper: "502", finalHeight: () => 50 });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] }, "named by the spend's own signature");
   assert.ok(w.log.includes("0:getSignaturesForAddress") && w.log.includes("1:getSignaturesForAddress"));
+});
+
+// Card signpage-error-after-timeout: a pool.buy refused after the client's 10 s window (its answer dropped by the kit's
+// client) still ends the app's button and strip: the page posts refused as progress after the answer.
+test("a pool.buy refused (not_funded) reaches the app as progress refused after its answer", async () => {
+  const w = await world();
+  const r = await throughApi("pool.buy", (_p, ctx) => poolBuyKind(() => w.host, LOCKS)({ ...ASK, amount: SPEND * 1_000n }, ctx), { chain: "solana", token: fx.pump.mint, amount: "5", slippage_bps: 300 });
+  assert.deepEqual((r.answer as { error: unknown }).error, { code: "not_funded" });
+  assert.deepEqual(r.stages, ["refused"]);
+});
+
+test("a pool.buy whose end is its answer (dropped tx: not_landed) posts that stage once as progress", async () => {
+  const w = await world({ readBack: "none", landsAtSettle: "never" });
+  const r = await throughApi("pool.buy", (_p, ctx) => poolBuyKind(() => w.host, LOCKS)(ASK, ctx), { chain: "solana", token: fx.pump.mint, amount: "5", slippage_bps: 300 });
+  assert.deepEqual((r.answer as { result: { stage: string } }).result.stage, "not_landed");
+  assert.deepEqual(r.stages, ["not_landed"]);
 });

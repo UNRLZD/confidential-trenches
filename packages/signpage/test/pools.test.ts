@@ -10,7 +10,7 @@ import type { BalancePool } from "../../wallet/src/pool/balances.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
 import { signedOutState } from "../src/api.ts";
-import { PAGE_POOLS, withPools } from "../src/pools.ts";
+import { PAGE_POOLS, pagePoolsOf, withPools } from "../src/pools.ts";
 import { ANSWER_ROOM, pickOps, stateOf } from "../src/state.ts";
 import { vaultScope } from "../src/withdraw/checks.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../kit/src/near/networks.ts";
@@ -125,11 +125,15 @@ test("the page's pool table never holds the vault's scope: the vault's USDC is v
   assert.equal(PAGE_POOLS.some((p) => p.chain === "near"), false, "PAGE_POOLS holds a NEAR pool beside the vault");
 });
 
-test("the page's pool table is empty while no pool is pinned on mainnet: a mainnet pin must be added to it", () => {
-  // the pool pin tables: SOL_POOLS (wallet/src/pool/solana.ts) and EVM_POOLS (wallet/src/pool/evm.ts)
-  assert.equal(SOL_POOLS.mainnet, undefined, "a Solana pool is pinned on mainnet: add it to PAGE_POOLS and this test");
-  assert.equal(EVM_POOLS.base, undefined, "an EVM pool is pinned on Base: add it to PAGE_POOLS and this test");
-  assert.equal(EVM_POOLS.robinhood, undefined, "an EVM pool is pinned on Robinhood: add it to PAGE_POOLS and this test");
-  assert.deepEqual(PAGE_POOLS, []);
+test("SIGN_HOST's pool table is mainnet's pins, one entry per pinned pool, and none of the testnet build's", () => {
+  // the pool pin tables: SOL_POOLS (wallet/src/pool/solana.ts) and EVM_POOLS (wallet/src/pool/evm.ts); a mainnet pin
+  // that lands is in the table with no change here (card signpage-pool-pins; the testnet build: test/pools-testnet.test.ts)
+  assert.deepEqual(PAGE_POOLS, pagePoolsOf("mainnet"));
+  assert.deepEqual(PAGE_POOLS.map((p) => p.chain), [
+    ...(SOL_POOLS.mainnet ? ["solana"] : []),
+    ...(EVM_POOLS.base ? ["base"] : []),
+    ...(EVM_POOLS.robinhood ? ["robinhood"] : []),
+  ]);
+  assert.equal(SOL_POOLS.devnet, undefined, "the mainnet build pins no devnet pool");
   assert.ok(Object.isFrozen(PAGE_POOLS));
 });

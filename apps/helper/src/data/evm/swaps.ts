@@ -39,7 +39,7 @@
 // A provider that lags (more than VENUES[chain].lagMax blocks behind the other) is passed over for the third; one that refuses (429,
 // -32005, a limit message) is held for the wait it names (the helper's RPC rules, ../../rpc/rpc.ts); an answer over
 // ANSWER_MAX bytes or not JSON is a failure. A tick that cannot agree changes nothing; the book keeps serving what it
-// holds until STALE_MS, then the routes answer 503.
+// holds, dated by its last read, and a read asked of a book STALE_MS old starts one (card helper-live-bars-no-503).
 //
 // Block times on Base come from its fixed clock (BLOCK_CLOCK, lists.ts): checked against each tick's newest block on both
 // providers, and a tick whose block disagrees with the clock reads nothing. Robinhood has no fixed clock (it put 10 or
@@ -352,7 +352,7 @@ export const TICK_MS = 1_000;
 /** An agreed head read within this is every reader's (agreedHead). [design: a tick's period, so a tick reads at most one
  *  head of its own and a dozen first reads at once read one.] */
 export const HEAD_SHARE_MS = TICK_MS;
-/** A book not read for this long answers 503 rather than a stale chart. */
+/** A book not read for this long starts a read when asked; it is served as held meanwhile, dated by its last read. */
 export const STALE_MS = 60_000;
 export const OPEN_MAX = 40;
 /** Books read at once in a tick. */
@@ -360,6 +360,27 @@ const READ_PARALLEL = 8;
 const POOLS_MAX = 5_000;
 const ANSWER_MAX = 4 * 1024 * 1024;
 const TIMEOUT_MS = 8_000;
+/** A provider whose post has been out this long, sent and not answered, is left to answer while the next is asked
+ *  (hedged: agreed, agreedHead), so one that hangs costs a read this, never TIMEOUT_MS (card
+ *  helper-robinhood-trades-hang: daybreak timed out at 8 s on about one post in five, 2026-11-05 15:2xZ, and each round
+ *  of a first open waited for it; on swaps-hang.test.ts's fake a cold tape took 82 s). A read waiting in our own queue
+ *  or pace (slot, one) has no post out and asks no one more (swaps-pace.test.ts fold 2: drpc stays the last resort).
+ *  [design: 2 s, the slowest 1,000-block read every wide provider answered (WIDE_SPAN).] */
+export const HEDGE_MS = 2_000;
+/** The longest a read waits for the chain's swap index's read in flight before it reads its own blocks (agreedRange):
+ *  the index is shared, never anyone's wait (the same card: its first read never landed for 135 s and every cold tape
+ *  waited on it). [design: one hedge, the time a healthy index chunk is agreed in.] */
+export const INDEX_WAIT_MS = HEDGE_MS;
+/** A first open's answer bound: past it the tape or chart answers 503 and its read goes on, so the next ask finds it
+ *  (the same card: requests held 60 s and more). [design: 12 s, under the 15 s the live checks give an answer
+ *  (helper-robinhood-search-ahead ANSWER_MS) with room for the way to the page.] */
+export const OPEN_BOUND_MS = 12_000;
+/** `p`'s value, or LATE once `ms` have passed (`p` goes on). */
+const LATE = Symbol("late");
+function within<T>(p: Promise<T>, ms: number): Promise<T | typeof LATE> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([p, new Promise<typeof LATE>((go) => (timer = setTimeout(() => go(LATE), ms)))]).finally(() => clearTimeout(timer));
+}
 const LOGS_MAX = 20_000;
 const TRADERS_MAX = 5_000;
 /** Agreed eth_call results kept (callsAgreed), oldest out first. */
@@ -394,6 +415,11 @@ const DYNAMIC_FEE = 0x800000;
  * id proves the key; nothing else is accepted.
  */
 export function v4Key(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base"): string | null {
+  for (const k of v4Tries(token, swapFee, around, chain)) if (keccakHex(k) === id) return k;
+  return null;
+}
+/** The keys v4Key tries, in its order. */
+function* v4Tries(token: string, swapFee: number, around: readonly string[], chain: EvmChain): Generator<string> {
   const V = VENUES[chain];
   const w = (n: bigint): string => n.toString(16).padStart(64, "0");
   const a = (x: string): string => x.slice(2).padStart(64, "0");
@@ -402,10 +428,20 @@ export function v4Key(id: string, token: string, swapFee: number, around: readon
   const spacings = [...TICK_SPACINGS, ...Array.from({ length: TICK_SPACING_MAX }, (_, i) => i + 1).filter((t) => !TICK_SPACINGS.includes(t))];
   for (const other of [ZERO, V.weth, V.usd]) {
     const [c0, c1] = token < other ? [token, other] : [other, token];
-    for (const ts of spacings) for (const h of hooks) for (const f of fees) {
-      const k = `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
-      if (keccakHex(k) === id) return k;
-    }
+    for (const ts of spacings) for (const h of hooks) for (const f of fees) yield `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
+  }
+}
+/** Keys v4KeySliced hashes between two turns of the event loop. [design: 1,000, about 60 ms on the Mac (a miss of
+ *  92,000 tries, ten hook candidates, took 5.4 s there, 2026-11-05 16:3xZ), so a box twice as slow stays well under the
+ *  second swaps-v4key.test.ts allows.] */
+const V4_KEY_SLICE = 1_000;
+/** v4Key, the event loop let run every V4_KEY_SLICE tries: a search that misses takes seconds of hashing, and in one go it
+ *  held every other read of the helper (card robinhood-cold-open-fast: four cold opens' posts all aborted at 14 s). */
+export async function v4KeySliced(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base"): Promise<string | null> {
+  let n = 0;
+  for (const k of v4Tries(token, swapFee, around, chain)) {
+    if (keccakHex(k) === id) return k;
+    if (++n % V4_KEY_SLICE === 0) await new Promise((go) => setImmediate(go));
   }
   return null;
 }
@@ -851,13 +887,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       o.delete(sent);
     }
   }
+  /** Waits for `p` until it settles or one of `urls` has a post out (sent, unanswered) HEDGE_MS or longer. */
+  async function hedged(p: Promise<unknown>, urls: readonly string[]): Promise<void> {
+    for (;;) {
+      const at = performance.now();
+      const ages = urls.flatMap((u) => [...(out.get(u) ?? [])].map((sent) => at - sent));
+      if (ages.some((a) => a >= HEDGE_MS)) return;
+      // the next look: when the oldest post out would reach HEDGE_MS, or HEDGE_MS on when none is out yet
+      if ((await within(p, Math.max(1, HEDGE_MS - Math.max(0, ...ages)))) !== LATE) return;
+    }
+  }
   const usable = (urls: readonly string[]) => urls.filter((u) => holds.heldFor(u) === 0);
   /** `urls` less a provider that takes one request a post (BATCH_SIZE 1: daybreak, blockvectra) when `calls` would be
    *  more than one post to it: it takes single-post reads only (card helper-robinhood-capacity fold 5: at fa4b98d a
    *  cold dozen sent daybreak 94 eth_getLogs posts, each wide read 3 to 6 of them in its 3 slots). */
   const single = (urls: readonly string[], calls: number): string[] => urls.filter((u) => (BATCH_SIZE[u] ?? 10) > 1 || calls <= 1);
-  /** Providers by free budget, the most first. */
-  const byFree = (urls: readonly string[]) => urls.map((u) => ({ u, f: free(u) })).sort((a, b) => b.f - a.f).map((x) => x.u);
   /** A provider's free budget, in calls: what its pace lets background reads send within the next second (the free
    *  units above CALLER_ROOM and a second's refill, times the calls a post carries where it counts posts), less the calls
    *  already out or queued to it (slot), so a dozen walks starting at once see each other's reads. A provider with no
@@ -946,9 +990,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       );
     };
     const ok = ranked(usable(rpcs));
-    await read(ok.slice(0, 2));
+    // a provider still out after HEDGE_MS is left to answer while the next is asked; before the patient round every
+    // read out is waited for (each bounded by TIMEOUT_MS), so its answer still counts
+    const reads: Promise<void>[] = [];
+    const go = (urls: string[]) => (reads.push(read(urls)), hedged(reads.at(-1)!, urls));
+    await go(ok.slice(0, 2));
     const first = [...heads.values()];
-    if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await read(ok.slice(2, 3));
+    if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await go(ok.slice(2, 3));
+    if (heads.size < 2) await Promise.all(reads);
     // no two heads within the pace's wait: the providers not read yet, and those that passed, read patiently
     if (heads.size < 2) await read(ok.filter((u) => !heads.has(u)).slice(0, 2), true);
     const sorted = [...heads].sort((a, b) => b[1].n - a[1].n);
@@ -993,7 +1042,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return null;
     };
     const all = Array.from({ length: n }, (_, i) => i);
-    await Promise.all(order.slice(0, 2).map((u) => run(u, all)));
+    // the reads out: one still out after HEDGE_MS is left to answer while the next provider is asked (a provider that
+    // hangs costs a read HEDGE_MS, never TIMEOUT_MS); before the patient round every read out is waited for (each
+    // bounded by TIMEOUT_MS), so its answer still counts
+    const reads = new Set<Promise<void>>();
+    const launch = (u: string, idx: number[]): Promise<void> => {
+      const p: Promise<void> = run(u, idx).finally(() => reads.delete(p));
+      reads.add(p);
+      return p;
+    };
+    await hedged(Promise.all(order.slice(0, 2).map((u) => launch(u, all))), order.slice(0, 2));
     const wide = (u: string) => (WIDE_SPAN[u] ?? 0) > V.span;
     const rest = order.slice(2);
     // the next one is ranked when it is asked, not when the read began: a dozen tapes ranked at once saw no queue yet,
@@ -1004,8 +1062,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const u = ranked(tier, wideFirst, want.length)[0]!;
       tier.splice(tier.indexOf(u), 1);
       const left = want.filter((i) => !by[i]!.has(u));
-      if (left.length > 0) await run(u, left);
+      if (left.length > 0) await hedged(launch(u, left), [u]);
     }
+    if (!all.every((i) => pick(i) !== null)) await Promise.all(reads);
     // a request still without two alike answers: asked again, patiently, of each provider (not held) that passed a read
     // at its pace's wait meanwhile, so a read fails on a refusal or a disagreement, never on the pace alone (card
     // helper-robinhood-capacity fold 3: on the loaded box every bucket spent at once left 1 or 2 of 12 cold tokens no
@@ -1087,7 +1146,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const fs = [filter(from, to)].flat();
     const held = fs.filter((f) => index.indexes(f));
     if (held.length === 0) return agreedRangeOwn(urls, filter, from, to);
-    if (index.range() === null) await index.upTo(to);
+    // nothing held yet: the index's read in flight (or one started now) is waited for INDEX_WAIT_MS at most, then the
+    // blocks are this read's own
+    if (index.range() === null) await within(index.upTo(to), INDEX_WAIT_MS);
     const r = index.range();
     if (r === null || from < r.from || r.to < from) return agreedRangeOwn(urls, filter, from, to);
     const top = Math.min(to, r.to);
@@ -1250,10 +1311,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** The v4 pool ids the PoolManager's Swap logs name in the receipts of the token's latest PoolManager transactions,
    *  each with its fee and the addresses its transaction logged (one provider's receipts: v4Key and the PositionManager
-   *  check every id against its key's hash). */
+   *  check every id against its key's hash). Asked of the provider expected to answer first (ranked: its answer time,
+   *  queue and pace), never by free budget alone (card robinhood-cold-open-fast: pocket, the biggest bucket, took 3.4 s
+   *  and 3.7 s for three receipts while the others answered in 0.3 s). */
   async function v4Seen(pmTxs: string[]): Promise<Map<string, { fee: number; around: Set<string> }>> {
     const seen = new Map<string, { fee: number; around: Set<string> }>();
-    for (const u of single(byFree(usable(rpcs)), Math.min(pmTxs.length, V4_TXS))) {
+    const n = Math.min(pmTxs.length, V4_TXS);
+    for (const u of single(ranked(usable(rpcs), false, n), n)) {
       const r = await batchTo(u, pmTxs.slice(-V4_TXS).map((t) => ({ method: "eth_getTransactionReceipt", params: [t] })));
       if (r === null) continue;
       for (const x of r) {
@@ -1328,12 +1392,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const answers = await callsSome(head.n, [...paired.map(confirmCall), ...list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` }))]);
     for (const c of confirmed(paired, answers.slice(0, paired.length))) if (c !== null) cands.push(c);
     const keys = answers.slice(paired.length);
-    list.forEach((id, i) => {
+    for (const [i, id] of list.entries()) {
       const e = seen.get(id)!;
-      // the PositionManager's key when it hashes to the id, else one worked out from the swap (it must hash to the id)
-      const c = v4Pool(token, id, keys[i]) ?? v4Pool(token, id, v4Key(id, token, e.fee, [...e.around], chain) ?? undefined);
+      // the PositionManager's key when it hashes to the id: that is the pool, whatever it pairs (a route's other hop, or
+      // the token against a quote of no venue of ours), and no search finds another (card robinhood-cold-open-fast: those
+      // misses searched seconds each); else one worked out from the swap (it must hash to the id), the event loop let run
+      const k = keys[i];
+      const c = k !== undefined && /^0x[0-9a-f]{320}$/.test(k) && keccakHex(k) === id ? v4Pool(token, id, k) : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain)) ?? undefined);
       if (c !== null) cands.push(c);
-    });
+    }
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
     cands.push(...curvePools(token, recs));
     if (cands.length === 0) return null;
@@ -1608,8 +1675,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const head = await agreedHead(true);
     if (head === null) return;
     // the chain's index read to the tick's head first, one read for every book (fold 6): a tick is no one's wait, so it
-    // waits on the index rather than read each book's new blocks itself
-    if (index !== null) await index.upTo(head.n);
+    // waits on the index rather than read each book's new blocks itself, for INDEX_WAIT_MS at most: an index read that
+    // hangs leaves the books their own reads, never stale (card helper-robinhood-trades-hang)
+    if (index !== null) await within(index.upTo(head.n), INDEX_WAIT_MS);
     // the ETH price and the books are read at once; an ETH-quoted book is folded in only once the ETH price is read to
     // the same block, so no swap is priced by an older price (a tick of three rounds one after another outlasted 1 s)
     const needRef = [...books.values()].some((e) => e.pool.quote.kind === "eth");
@@ -1688,10 +1756,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (e.readAt === null) await firstRead(e);
     for (let attempt = 0; e.readAt === null && attempt < 2; attempt++) await start();
     if (e.readAt === null) return UPSTREAM;
-    if (now() - e.readAt > STALE_MS) {
-      void start();
-      return UPSTREAM;
-    }
+    // a book not read for STALE_MS starts a read and is served as held, dated by its last read (readAt, the answer's
+    // as_of_ms and X-Fetched-At), never a 503: the page prints a failed load for every non-2xx answer (card
+    // helper-live-bars-no-503: 6 of 100 Base live reads 503 at 12:00Z); 503 is for a token with nothing held
+    if (now() - e.readAt > STALE_MS) void start();
     return e;
   }
 
@@ -1819,7 +1887,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** Traders of the txs (06c §4.12): the sender of each, or for a bundle sent to an EntryPoint each user operation's
    *  account, read from its receipt (index.ts txTraders, card helper-tape-4337-trader). A dozen cold tokens ask about 600 at once (card
-   *  helper-robinhood-capacity fold 2), so they are split across the providers not held by free budget (free), each share
+   *  helper-robinhood-capacity fold 2), so they are split across the providers not held by expected answer time (waitOf), each share
    *  read at once, and a share whose read fails asked of the others in turn; a tx whose read fails everywhere stays null
    *  this time and is asked again the next. */
   /** The lookups out now, by transaction: a tape asks a hash in flight once (card helper-robinhood-capacity fold 8). */
@@ -1846,13 +1914,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
   async function lookTraders(need: string[]): Promise<void> {
     // per-swap lookups go in batches: a provider that takes one request a post is asked none of them (fold 5)
-    const order = single(usable(rpcs), 2).map((u) => ({ u, f: Math.max(free(u), 0) })).sort((x, y) => y.f - x.f);
-    const sum = order.reduce((n, x) => n + x.f, 0);
-    let at = 0;
-    const shares = order.map(({ u, f }, i) => {
-      const k = i === order.length - 1 ? need.length - at : Math.min(need.length - at, Math.round((need.length * (sum > 0 ? f : 1)) / (sum > 0 ? sum : order.length)));
-      return { u, part: need.slice(at, (at += k)) };
-    });
+    // each hash to the provider whose share would be answered first (waitOf: its answer time, queue and pace, with the
+    // hashes already its), never by free budget alone (card robinhood-cold-open-fast: pocket, the biggest bucket, took
+    // 1 to 3 s a post while the others answered in 0.3 s, and the tape waited on its share)
+    const order = single(usable(rpcs), 2);
+    if (order.length === 0) return;
+    const share = new Map<string, string[]>(order.map((u) => [u, []]));
+    for (const t of need) {
+      const u = order.reduce((best, v) => (waitOf(v, share.get(v)!.length + 1, false) < waitOf(best, share.get(best)!.length + 1, false) ? v : best));
+      share.get(u)!.push(t);
+    }
+    const shares = [...share].map(([u, part]) => ({ u, part }));
     // the transactions read, by hash: one sent to an EntryPoint waits for its receipt (bundles) before it has traders
     const got = new Map<string, Record<string, unknown>>();
     const keep = (t: string, x: Traders) => {
@@ -1899,7 +1971,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       shares.filter((x) => x.part.length > 0).map(async ({ u, part }) => {
         if (!(await read(u, part)))
           // a share whose read failed: only its hashes still not read, of the others in turn
-          for (const v of byFree(usable(rpcs))) {
+          for (const v of ranked(usable(rpcs), false, part.length)) {
             const left = part.filter((t) => !got.has(t));
             if (left.length === 0) break;
             if (v !== u && single([v], 2).length > 0 && (await read(v, left))) break;
@@ -1929,7 +2001,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     async candles(token: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null || !(TFS as readonly string[]).includes(tf) || tf === "1s" || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
-      const e = await open(t);
+      // a first open past its bound answers 503 and its read goes on (OPEN_BOUND_MS)
+      const e = await within(open(t), OPEN_BOUND_MS);
+      if (e === LATE) return UPSTREAM;
       if (e === "none") return noneCandles(t, tf as Tf, to, limit);
       if (!("book" in e)) return e;
       const own = e.book.candles(tf as Tf, to, limit);
@@ -1958,11 +2032,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     async trades(token: string, limit: number): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null || !Number.isSafeInteger(limit) || limit < 1 || limit > TRADES_MAX) return NOT_FOUND;
-      const e = await open(t);
+      // a first open past its bound answers 503 and its read goes on (OPEN_BOUND_MS); the traders are looked up within
+      // what is left of it, and one not read by then is null this time, asked again the next
+      const until = performance.now() + OPEN_BOUND_MS;
+      const e = await within(open(t), OPEN_BOUND_MS);
+      if (e === LATE) return UPSTREAM;
       if (e === "none") return empty({ trades: [] });
       if (!("book" in e)) return e;
       const rows = e.book.tape(limit);
-      await tradersOf(rows.map((r) => r.tx));
+      await within(tradersOf(rows.map((r) => r.tx)), Math.max(0, until - performance.now()));
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
       return { status: 200, body: JSON.stringify({ trades, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };

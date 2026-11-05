@@ -216,7 +216,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
   const r = await evmRetryLag(async () => {
     const r = await sync.events(a.signal, true);
-    const high = await evmLatestHigh(a.rpcs, a.signal);
+    const high = await evmLatestHigh(a.rpcs, a.signal, sleep);
     if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw new EvmLagError(`the newest agreed block ${r.anchor.number} is more than an epoch behind an RPC's latest block`);
     return r;
   }, sleep, a.signal);
@@ -229,13 +229,13 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   }
   const wallets: EvmRestoredWallet[] = spends.map((s) => ({ note: s.note, w: s.w, tokens: null }));
   // a W read that fails while the pool pair no longer holds the anchor: a reorg under the restore, the pool pair's lag
-  const poolHolds = () => evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal);
+  const poolHolds = () => evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal, sleep);
   // the Transfer RPCs on the pool's chain and at the restore's block before any W is named to them; a pair that fails
   // leaves every W unread with its error, never the notes
   let pairError: string | null = null;
   if (order.length > 0) {
     try {
-      await evmRetryLag(() => evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal), sleep, a.signal);
+      await evmRetryLag(() => evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal, sleep), sleep, a.signal);
     } catch (e) {
       a.signal?.throwIfAborted();
       await poolHolds();
@@ -249,7 +249,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
       continue;
     }
     try {
-      const tokens = await evmRetryLag(() => evmTokensSentTo(a.walletRpcs, s.w, s.block, r, page, a.signal), sleep, a.signal);
+      const tokens = await evmRetryLag(() => evmTokensSentTo(a.walletRpcs, s.w, s.block, r, page, a.signal, sleep), sleep, a.signal);
       wallets[k]!.tokens = s.token === null || tokens.includes(s.token) ? tokens : [...tokens, s.token].sort();
     } catch (e) {
       a.signal?.throwIfAborted();

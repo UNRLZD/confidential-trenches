@@ -11,6 +11,7 @@
 // (packages/wallet/test/vectors/a8.json).
 //   node --test test/pool-sell.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
+import { throughApi } from "./api-ends.ts";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { base58, base64 } from "@scure/base";
@@ -1032,4 +1033,12 @@ test("this very transaction with an unreadable meta on both RPCs proves nothing:
   assert.equal("stage" in a && a.stage, "sent");
   assert.equal((a as { txs: unknown[] }).txs.length, 1);
   assert.equal(w.c.log.filter((x) => x === "0:getTransaction").length, 3, "read back each round");
+});
+
+// Card signpage-error-after-timeout: a sell refused after the client's 10 s window still ends the app's sell button.
+test("a pool.sell refused (W cannot pay its fee: not_funded) reaches the app as progress refused after its answer", async () => {
+  const w = await world({ venue: "pump", lamports: 0 });
+  const r = await throughApi("pool.sell", (_p, ctx) => poolSellKind(kindHost(w), fakeLocks())({ ...ASK, token: VF.pump.mint }, ctx), { chain: "solana", token: VF.pump.mint, amount: "1", slippage_bps: 100 });
+  assert.deepEqual((r.answer as { error: unknown }).error, { code: "not_funded" });
+  assert.deepEqual(r.stages, ["refused"]);
 });

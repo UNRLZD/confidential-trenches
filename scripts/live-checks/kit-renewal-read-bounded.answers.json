@@ -1,0 +1,36 @@
+{
+ "good": {
+  "at": "2026-11-05T14:03:05.203Z",
+  "source": "this checkout, packages/signpage",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/app.js",
+    "status": 200,
+    "found": [
+     "the age rule",
+     "the signing margin",
+     "the sign point's timed re-read, with a fresh blockhash",
+     "the rule before each signer",
+     "the rule when the signer answers",
+     "the page names only kept signatures",
+     "the page frees an unsigned leg"
+    ]
+   }
+  ],
+  "note": "this card: packages/signpage as committed (index.html, public/app.js rebuilt by build-app.mjs on the fix, the fold and the review fold), read from disk"
+ },
+ "bad": {
+  "at": "2026-11-05T14:03:05.762Z",
+  "source": "https://sign.confidential.unrealized.trade/",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/app.js",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "note": "SIGN_HOST as deployed before this card (its /app.js is main 582c8ac's bundle), read over https"
+ }
+}

@@ -416,3 +416,70 @@ test("card app-console-429: while Discover's lists have no answer (a cold start)
   assert.equal((await t.trades(mint, 10)).status, 404);
   t.stop();
 });
+
+test("card helper-live-bars-no-503: a held token's tape and live candles (limit 2) answer 200 with what is held, dated by its last read, while the stream is down and its walk fails, past a minute and 30 minutes on; once the stream is back the next read is fresh", async () => {
+  // the Base live reads that answered 503 for a held token (6 of 100 at 12:00Z) had a Solana twin: a book not folded for
+  // STALE_MS answered 503 though it held every trade; the page prints a failed load for every non-2xx answer
+  let ms = TS * 1000;
+  let rpcUp = true;
+  let on: SourceEvents | null = null;
+  const up = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  const t = createSolanaTrades({
+    fetch: (async (u: string, init: RequestInit) => (rpcUp ? up(u, init) : new Response("down", { status: 503 }))) as never,
+    now: () => ms,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+  });
+  assert.equal((await t.trades(MINT, 50)).status, 200);
+  await settle();
+  on!.note(MINT, { sig: BUY.signature, slot: 465_000_000, err: false, logs: BUY.result.meta.logMessages });
+  await settle();
+  t.tick();
+  const tape0 = await t.trades(MINT, 50);
+  const bars0 = await t.candles(MINT, "1m", null, 2);
+  assert.equal(JSON.parse(tape0.body).trades.length, 1);
+  assert.equal(JSON.parse(bars0.body).candles.length, 1);
+  const readAt = tape0.asOfMs!;
+
+  rpcUp = false;
+  on!.down();
+  on!.up(); // the gap's walk fails on the RPC, and again every 2 s
+  await settle();
+  for (const step of [61_000, 25 * 60_000]) {
+    ms += step; // the page's reads keep the token open (IDLE_MS); no fold runs while the stream's gap is unread
+    const a = await t.trades(MINT, 50);
+    assert.equal(a.status, 200, `${ms - readAt} ms after the last read: ${a.status} ${a.body}`);
+    assert.equal(a.body, tape0.body, "the held tape, as_of_ms its last read");
+    assert.equal(a.asOfMs, readAt);
+    const c = await t.candles(MINT, "1m", null, 2);
+    assert.equal(c.status, 200, c.body);
+    assert.equal(c.body, bars0.body, "the held bars, as_of_ms their last read");
+  }
+
+  rpcUp = true;
+  on!.down();
+  on!.up();
+  await settle();
+  t.tick();
+  const fresh = await t.trades(MINT, 50);
+  t.stop();
+  assert.equal(fresh.status, 200, fresh.body);
+  assert.equal(fresh.asOfMs, ms, "read again once the stream and its walk are back");
+});
+
+test("card helper-live-bars-no-503, control: a listed Solana token the helper holds nothing for answers 503 upstream when its first read fails, so the page reads again", async () => {
+  const t = createSolanaTrades({
+    fetch: (async () => new Response("down", { status: 503 })) as never,
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+  });
+  const a = await t.trades(MINT, 50);
+  t.stop();
+  assert.equal(a.status, 503);
+  assert.deepEqual(JSON.parse(a.body), { error: { code: "upstream" } });
+});

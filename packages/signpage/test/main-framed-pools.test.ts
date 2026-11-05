@@ -23,7 +23,7 @@ const spy = (src: string, name: string, anchor: string): string => {
 export async function ${name}(...a) { globalThis.__ctPoolCalls.push("${name}"); return ${name}__spied(...a); }
 `;
 };
-const TABLE = "export const PAGE_POOLS: readonly BalancePool[] = Object.freeze([]);";
+const TABLE = 'export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POOL_TESTNET ? "testnet" : "mainnet");';
 registerHooks({
   load(url, context, next) {
     const r = next(url, context);

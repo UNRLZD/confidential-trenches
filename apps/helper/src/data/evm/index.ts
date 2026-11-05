@@ -172,20 +172,20 @@ export function createSwapIndex(deps: { topics: readonly string[]; read: (lo: nu
   const sorted = (a: Log[]) => a.sort((x, y) => x.block - y.block || x.index - y.index);
 
   async function readTo(n: number): Promise<void> {
-    // a gap past the window, or nothing held: the newest `window` blocks again
+    // a gap past the window, or nothing held: the newest `window` blocks again, each chunk held as it is agreed, so a
+    // chunk that fails costs that chunk and the next read goes on from it (card helper-robinhood-trades-hang: all or
+    // nothing over five chunks, the first read never landed in 135 s while one provider timed out on one post in five)
     if (to < 0 || n - to > deps.window) {
       reset();
       const lo = Math.max(0, n - deps.window + 1);
-      const parts: Log[] = [];
       for (let a = lo; a <= n; a += deps.chunk) {
         const b = Math.min(n, a + deps.chunk - 1);
         const got = await deps.read(a, b);
         if (got === null || got.some((l) => l.block < a || l.block > b)) return;
-        parts.push(...got);
+        add(sorted(got));
+        from = lo;
+        to = b;
       }
-      add(sorted(parts));
-      from = lo;
-      to = n;
       return;
     }
     for (let a = to + 1; a <= n; a += deps.chunk) {

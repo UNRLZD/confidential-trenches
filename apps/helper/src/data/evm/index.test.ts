@@ -73,6 +73,19 @@ test("a read that fails is no answer, and the next ask reads again; a read with 
   assert.equal(first.index.range(), null);
 });
 
+test("card helper-robinhood-trades-hang: a first read whose later chunk fails keeps the chunks agreed before it, and the next ask reads on from them", async () => {
+  let failAt: number | null = 981;
+  const { reads, index } = fake((lo, hi) => (lo === failAt ? null : chainLogs(lo, hi)));
+  assert.equal(await index.upTo(1_000), false);
+  assert.deepEqual(index.range(), { from: 901, to: 980 }, "the two chunks agreed are held");
+  assert.equal(index.query({ address: POOL, topics: [SWAP] }, 901, 980).length, 80);
+  failAt = null;
+  reads.length = 0;
+  assert.equal(await index.upTo(1_000), true);
+  assert.deepEqual(reads, [[981, 1_000]], "only the chunk not held is read again");
+  assert.deepEqual(index.range(), { from: 901, to: 1_000 });
+});
+
 test("a filter is answered from it only for its topics with an address: a v4 pool by its id, a pool by its address, in block order", async () => {
   const { index } = fake();
   await index.upTo(1_000);

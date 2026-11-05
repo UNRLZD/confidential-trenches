@@ -26,7 +26,12 @@
 //   proof out, so nothing leaves before the store has it, and refuses a proof made before the previous epoch (on
 //   resume the queue makes them again first), a newest-root proof past its grace, and one with less than the send
 //   margin + TAKE_SLACK_MS left. drop() and close() free the note (HELD -> UNSPENT). take, drop, close and a
-//   remake's swap run one at a time per note, so a tap never meets a half-made swap. A proof that fails frees its
+//   remake's swap run one at a time per note, so a tap never meets a half-made swap. A reader that pairs the ready list
+//   with the notes (the signing page's state: a proof counts while its note is HELD by its attempt, ./balances.ts) reads
+//   both through readyWith, in the view's turn, which a swap's write and its ready list update also take: so the read
+//   sees both before the swap or both after, never the note's new attempt with the old proof (card pool-ready-no-flicker).
+//   The cost: a take, drop or close that waits on a swap's note turn also waits behind a state read, at most one
+//   notes read long. A proof that fails frees its
 //   note; a free whose write fails is tried again at the next pass. A page that dies leaves HELD notes the store frees
 //   on its next open (the dead tab's lock).
 // - Only while the app is in front: a pass in the background does nothing, so a hidden page spends no battery.
@@ -80,6 +85,9 @@ export interface ProofQueue<R> {
   refresh(signal?: AbortSignal): Promise<QueuePass>;
   /** The proofs ready now, in leaf order. */
   ready(): ReadyProof<R>[];
+  /** The proofs ready now with `read`'s answer (the caller's read of the notes), both in one turn that no swap's write
+   * and ready list update falls inside: the list and the notes agree on each note's attempt. */
+  readyWith<T>(read: () => Promise<T>): Promise<{ ready: ReadyProof<R>[]; value: T }>;
   /** At the tap: refused (and its note freed) for a proof made before the previous epoch, a newest-root proof past the
    * next boundary + NEWEST_GRACE_MS, or one with less than sendMarginMs + TAKE_SLACK_MS left; else HELD -> RESERVED,
    * then it is handed out. With `attempt` (the ready proof the caller built its transaction on), refused in the note's
@@ -123,6 +131,12 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
   const noteTurns = new Map<string, Promise<unknown>>(); // take, drop, close and a remake's swap: one at a time per note
   let closed = false;
   let passes: Promise<unknown> = Promise.resolve();
+  let view: Promise<unknown> = Promise.resolve(); // readyWith's reads and the swaps' writes: one at a time
+  const inView = <T>(f: () => Promise<T>): Promise<T> => {
+    const run = view.then(f);
+    view = run.catch(() => undefined);
+    return run;
+  };
 
   const onNote = <T>(id: string, f: () => Promise<T>): Promise<T> => {
     const run = (noteTurns.get(id) ?? Promise.resolve()).then(f);
@@ -206,8 +220,11 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       // replaces prev's attempt and context with this one's, the note HELD throughout
       await onNote(n.id, async () => {
         if (closed || flight.dropped || ready.get(n.id) !== prev) throw new Error("taken or dropped while it was made again: this proof is never sent");
-        const held = await notes.move(n.id, "HELD", "HELD", { attempt: prev!.attempt, deadlineMs, context: binding.context.toString() });
-        ready.set(n.id, made(held.attempt!));
+        // the new attempt's write and the ready list's update in one turn of the view: no readyWith read between them
+        await inView(async () => {
+          const held = await notes.move(n.id, "HELD", "HELD", { attempt: prev!.attempt, deadlineMs, context: binding.context.toString() });
+          ready.set(n.id, made(held.attempt!));
+        });
       });
     } catch (e) {
       if (attempt !== undefined) await free(n.id, attempt);
@@ -274,13 +291,15 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     return out;
   }
 
+  const sorted = (): ReadyProof<R>[] => [...ready.values()].sort((x, y) => (order.get(x.noteId)! < order.get(y.noteId)! ? -1 : 1));
   return {
     refresh(signal) {
       const run = passes.then(() => pass(signal));
       passes = run.catch(() => undefined);
       return run;
     },
-    ready: () => [...ready.values()].sort((x, y) => (order.get(x.noteId)! < order.get(y.noteId)! ? -1 : 1)),
+    ready: () => sorted(),
+    readyWith: (read) => inView(async () => ({ ready: sorted(), value: await read() })),
     take(noteId, attempt) {
       live();
       return onNote(noteId, async () => {

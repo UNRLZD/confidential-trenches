@@ -110,13 +110,18 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's twenty checks (signpage-shell runs four ways, signpage-sent-read-back the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's twenty-five checks (signpage-shell runs four ways, pool-ready-no-flicker the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 20);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 25);
+  assert.ok(sign.include.some((e) => e.key === "pool-ready-no-flicker" && !e.chrome && e.args === ""), "pool-ready-no-flicker runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "signpage-pool-mainnet" && e.chrome && e.args === ""), "signpage-pool-mainnet runs after every sign deploy, in Chrome");
+  assert.ok(sign.include.some((e) => e.key === "signpage-pool-pins" && !e.chrome && e.args === ""), "signpage-pool-pins runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "kit-renewal-read-bounded" && e.args === ""), "kit-renewal-read-bounded runs after every sign deploy");
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 28, "the app's twenty-eight checks, evm-quote-warm-round and evm-quote-lag-held the newest");
+  assert.equal(app.include.length, 29, "the app's twenty-nine checks, evm-quote-lag-held and app-chart-live the newest");
+  assert.ok(app.include.some((e) => e.key === "app-chart-live"), "app-chart-live runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "evm-quote-warm-round" && e.args === ""), "evm-quote-warm-round runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "balances-per-chain" && e.chrome && e.args === ""), "balances-per-chain runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "app-export-every-wallet" && e.chrome && e.args === ""), "app-export-every-wallet runs on APP_HOST in Chrome");
@@ -152,7 +157,7 @@ test("a job gets Chrome when its check reaches the launcher, and Firefox or WebK
   assert.deepEqual(enginesFor(""), []);
   const sign = await planFor("sign", { commit: COMMIT });
   assert.ok(sign.include.filter((e) => e.chrome).length >= 6);
-  assert.ok(sign.include.filter((e) => ["signpage-skeleton", "signpage-release", "signpage-withdraw-form", "signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "app-harness-signin-e2e"].includes(e.key)).every((e) => !e.chrome));
+  assert.ok(sign.include.filter((e) => ["signpage-skeleton", "signpage-release", "signpage-withdraw-form", "signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "signpage-error-after-timeout", "app-harness-signin-e2e"].includes(e.key)).every((e) => !e.chrome));
 });
 
 test("a plan refuses a commit that is not 40 hex, an unknown host, a network that is neither, an argument a job would split wrongly", async () => {

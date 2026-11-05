@@ -27,7 +27,7 @@ import { SOL_USDC } from "./oneclick-mock.ts";
 
 const SCOPE = 4242n;
 const ANCHOR = "export function vaultScope(network: NearNetwork): bigint | null {";
-const TABLE = "export const PAGE_POOLS: readonly BalancePool[] = Object.freeze([]);";
+const TABLE = 'export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POOL_TESTNET ? "testnet" : "mainnet");';
 // each call of the note store's openNoteStore and readNotes, with the stack it was called from
 const calls: { name: string; stack: string }[] = ((globalThis as { __ctNoteCalls?: unknown }).__ctNoteCalls = []) as never;
 const record = (src: string, name: string): string => {
@@ -262,12 +262,20 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
 });
 
 test("main.ts wires the pool kinds: on the page's mainnet no pool is pinned, so each is refused not_allowed and nothing is fetched", async () => {
-  for (const data of [
+  const cases = [
     { type: "pool.deposit", chain: "solana", amount: "1" },
     { type: "pool.buy", chain: "base", token: "0xF111111111111111111111111111111111111111", amount: "1", slippage_bps: 100 },
     { type: "pool.sell", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "1", slippage_bps: 100 },
-    { type: "pool.withdraw", chain: "robinhood" },
-  ]) {
+    // Solana's buy and withdraw: refused by the missing pin itself (src/pool-kinds.ts deps.pinned and the flow's own
+    // pin), so a pinned pool would answer them otherwise
+    { type: "pool.buy", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "0.001", slippage_bps: 100 },
+    { type: "pool.withdraw", chain: "solana", return_key: "portfolio" },
+    // a Robinhood withdraw is refused whatever the pins: the flow runs Solana only until its EVM card
+    { type: "pool.withdraw", chain: "robinhood", return_key: "portfolio" },
+  ] as const;
+  const want = cases.map((c) => `${c.type} ${c.chain}: not_allowed, 0 fetch(es)`);
+  const got: string[] = [];
+  for (const data of cases) {
     const id = crypto.randomUUID();
     const from = asked.length;
     const e = new Event("message");
@@ -278,9 +286,10 @@ test("main.ts wires the pool kinds: on the page's mainnet no pool is pinned, so 
       a = posted.find((m) => m.id === id) as typeof a;
       if (!a) await new Promise((ok) => setTimeout(ok, 10));
     }
-    assert.deepEqual([data.type, a?.ok, a?.error?.code], [data.type, false, "not_allowed"]);
-    assert.equal(asked.length, from, `${data.type} fetched nothing`);
+    got.push(`${data.type} ${data.chain}: ${a?.ok === false ? a.error?.code : a?.ok ? "ok" : "no answer"}, ${asked.length - from} fetch(es)`);
   }
+  // every case at once, so a change names each kind it lets through
+  assert.deepEqual(got, want);
 });
 
 // fold 5 (review LOW): the page's seed re-read on another tab's write is walletSeedMoved's call, which skips an owed

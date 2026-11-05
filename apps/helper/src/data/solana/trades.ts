@@ -70,7 +70,6 @@ export const SILENT_MS = 30_000;
 export const REF_MS = 5_000;
 export const REF_STALE_S = 120;
 export const IDLE_MS = 60_000;
-export const STALE_MS = 60_000;
 export const OPEN_MAX = 40;
 export const TRADES_MAX = 50;
 export const CANDLES_MAX = 500;
@@ -469,7 +468,7 @@ export function createSolanaTrades(deps: {
   /** Refolds the entry's held events into its book, settling those SETTLE_SLOTS behind its coverage. */
   function fold(e: Entry): void {
     // a token with no priced trade yet has an empty tape that is as current as the stream: its read time moves on too,
-    // or a quiet token answers 503 a minute after it opened
+    // or a quiet token's answers stay dated by its open
     if (e.book === null) {
       e.readAt = now();
       return;
@@ -680,7 +679,10 @@ export function createSolanaTrades(deps: {
       timer = setInterval(tick, deps.tickMs ?? 1_000);
       timer.unref?.();
     }
-    if (e.readAt === null || now() - e.readAt > STALE_MS) return UPSTREAM;
+    // a token held is served as held, dated by its last fold (readAt, the answer's as_of_ms and X-Fetched-At), however
+    // long the stream or its walk is down, never a 503: the page prints a failed load for every non-2xx answer (card
+    // helper-live-bars-no-503); 503 is for a token with nothing held
+    if (e.readAt === null) return UPSTREAM;
     return e;
   }
 

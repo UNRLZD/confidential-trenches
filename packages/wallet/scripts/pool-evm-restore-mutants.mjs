@@ -54,7 +54,7 @@ const M = [
   [R, "pairError = `the Transfer RPCs: ${cutError(e)}`;", "pairError = `the Transfer RPCs: ${String(e)}`;", T, "a Transfer pair's failed check"],
   [R, "      a.signal?.throwIfAborted();\n      await poolHolds();\n      pairError", "      a.signal?.throwIfAborted();\n      pairError", T, "reorgs between the pool read"],
   [R, "      a.signal?.throwIfAborted();\n      await poolHolds();\n      wallets[k]!.error", "      a.signal?.throwIfAborted();\n      wallets[k]!.error", T, "reorgs while a W's"],
-  [R, "evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal);", "evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal);", T, "another chain, or one that never holds"],
+  [R, "evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal, sleep);", "evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal, sleep);", T, "another chain, or one that never holds"],
   [S, "if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);\n  const bs", "const bs", T, "another chain, or one that never holds"],
   [S, "if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(", "if (false) lag(", T, "another chain, or one that never holds"],
   [R, "for (const w of a.walletRpcs) for (const p of a.rpcs) if (solanaSameProvider(w, p)) throw", "if (false) throw", T, "their own pair"],
@@ -68,10 +68,24 @@ const M = [
   [S, "(l.topics.length !== 3 && l.topics.length !== 4)", "(l.topics.length !== 3)", T, "restore of a seeded chain"],
   [S, "{ topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, \"0\")}`] }", "{ topics: [EVM_TRANSFER_TOPIC, null, null] }", T, "restore of a seeded chain"],
   // the one pager and the one two-RPC compare, now shared by the pool's events and W's Transfers
-  [S, "if (RANGE_CAP.test(m) && end > at) {", "if (false) {", T, "paging past"],
-  // dRPC's refusal (HTTP 400, its words after the status through the kit's client) is a cap, paged under
-  [S, "ranges over [\\d,]+ blocks are not supported|", "", T, "^D1 "],
-  [S, "exceeds max(imum)? results [\\d,]+|", "", T, "paging past"],
+  // any refusal of a page over one block halves it, in whatever words: dRPC's (HTTP 400 through the kit's client), a
+  // results cap, and the caps read live 5 Nov in words never read before (card wallet-restore-transfer-rpcs)
+  [S, "      if (end > at) {\n        refused = end - at + 1n;", "      if (false) {\n        refused = end - at + 1n;", T, "paging past|^D1 |^R1 |^R2 "],
+  // a throttle is no cap: the same page again, bounded (the review of card wallet-restore-transfer-rpcs, MEDIUM); a
+  // -32005 naming a cap halves; the read the other RPC stopped never shrinks this one's page (LOW)
+  [S, "      if (t !== null && (t.kind === \"throttle\" || end === at)) {", "      if (false) {", T, "^T1 |^T2 "],
+  // no answer in time halves a page over one block (Pocket's under the device's 3.5 s client)
+  [S, "      if (t !== null && (t.kind === \"throttle\" || end === at)) {", "      if (t !== null) {", T, "^T4 "],
+  [S, "      if (t === null) throw e;\n      const ms = throttleWaitMs(n, t.afterMs);", "      throw e;\n      const ms = throttleWaitMs(n, t.afterMs);", T, "^T6 "],
+  // card evm-pool-reads-throttle: a pool read is tried again within its bound, and its failure is never tried again around it
+  [S, "evmAnswered(f, signal, sleep, { tries: EVM_POOL_READ_TRIES, waitMs: EVM_POOL_READ_WAIT_MS, what })", "f()", TE, "a 429 with no Retry-After"],
+  [S, "|| waited + BigInt(ms) > bound.waitMs)", ")", TE, "Retry-After is waited when it fits"],
+  [S, "  if (t?.name === \"EvmUnansweredError\") return null;\n", "", TE, "never tried again by a read around it"],
+  [S, "(LIMIT_32005.test(m) && !CAP_WORDS.test(m))", "LIMIT_32005.test(m)", T, "^R1 "],
+  [S, "(LIMIT_32005.test(m) && !CAP_WORDS.test(m))", "false", T, "^T1 |^T2 "],
+  [S, "      // the other RPC failed and this read was stopped: never a smaller page for the next W\n      signal?.throwIfAborted();\n", "", T, "^T3 "],
+  // a head lag is a lag before it is a smaller page
+  [S, "      if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs", "      if (false) lag(`rpc ${k}: its logs", TE, "F3a "],
   [S, "if (at === short.length && long.slice(at).every((e) => e.block > fin.number)) lag(", "if (false) lag(", T, "a lagging Transfer RPC"],
   [S, "  if (at >= 0) {\n    const [short, long]", "  if (false) {\n    const [short, long]", T, "a lying Transfer RPC"],
   [S, "if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(", "if (false) await refuse(", T, "a lying Transfer RPC"],
