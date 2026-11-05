@@ -138,6 +138,27 @@ test("fold 6: tapes asked while the index's first read is out wait on that one r
   p.stop();
 });
 
+test("fold 6: a tape whose head is past the index's newest block answers from the index up to it and reads only the blocks after it itself, never waiting on the index's next read", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead - 40;
+  const clock = { t: 1_000_000 };
+  const s = open(chain, clock, { index: URLS });
+  assert.equal(await follow(s), true);
+  const wide = chain.st.wide;
+  chain.st.head = REC.lastHead;
+  clock.t += 5_000; // the follower's next read not yet due; the tape reads the newest head
+  const r = await s.trades(MAG, 50);
+  s.stop();
+  assert.equal(r.status, 200);
+  assert.equal(chain.st.wide, wide, "no index read waited on");
+  assert.ok(chain.st.own > 0 && chain.st.ownFrom.every((b) => b > REC.lastHead - 40), `own reads only past the index's newest: ${chain.st.ownFrom.join(",")}`);
+  const c = fakeChain();
+  c.st.head = REC.lastHead;
+  const p = open(c);
+  assert.deepEqual(tapeOf(JSON.parse(r.body)), tapeOf(await bodyOf(p.trades(MAG, 50))), "the same tape as the token's own read");
+  p.stop();
+});
+
 test("fold 6: with every index provider refusing a filter with no address (as pocket and blockvectra do), a tape falls back to the token's own reads and answers the same", async () => {
   const chain = fakeChain();
   chain.st.head = REC.lastHead;

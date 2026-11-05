@@ -236,8 +236,11 @@ export const INDEX_RPCS: Readonly<Partial<Record<EvmChain, readonly string[]>>> 
 /** The most blocks one chain-wide `eth_getLogs` joins (logsOf): 500 of Robinhood's are about 1,500 logs, 1.4 MB, half
  *  of ANSWER_MAX with room for a busier minute (1,000 were 3,062 logs, 2.8 MB, 2026-11-05 01:53Z). */
 const INDEX_JOIN_MAX = 500;
-/** How often the index reads the chain's newest blocks when no tape asks (a tape's read catches it up first). */
+/** How often the index reads the chain's newest blocks; a tape reads the blocks after its newest itself (agreedRange). */
 const INDEX_FOLLOW_MS = 5_000;
+/** Blocks the index keeps past a tape's cold window and its ETH price's, so a caller whose head is behind the index's
+ *  newest still finds its oldest block held (a 15-block miss at 02:36Z: the ETH price read its first blocks itself). */
+const INDEX_SLACK = 1_000;
 /** The swap events the index holds: every venue's a tape reads (swapFilter, refFilter). */
 const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell];
 
@@ -947,27 +950,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
 
   /** One filter's logs over blocks `from` to `to`, read in spans the providers take: null when any span is not agreed.
-   *  The filters of the swap events the chain's index holds (index.ts) are answered from it once it holds the range (a
-   *  range ahead of it is read first, chain-wide, once for every caller); the rest, and a range behind it, are read
-   *  for this filter alone (card helper-robinhood-capacity fold 6). */
+   *  The filters of the swap events the chain's index holds (index.ts) are answered from it up to its newest block, and
+   *  only the blocks after that are read for this filter alone, never waiting on the index's next read (a tape's head
+   *  is newer than the index's by up to INDEX_FOLLOW_MS, and the index's catch-up under a crowd took 2 s a read,
+   *  2026-11-05 02:36Z); the index's first read, when nothing is held yet, is every caller's. The other filters (a hook's
+   *  transfers), and a range behind the index, are read for this filter alone (card helper-robinhood-capacity fold 6). */
   async function agreedRange(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number): Promise<Log[] | null> {
     if (index === null || from > to) return agreedRangeOwn(urls, filter, from, to);
     const fs = [filter(from, to)].flat();
     const held = fs.filter((f) => index.indexes(f));
     if (held.length === 0) return agreedRangeOwn(urls, filter, from, to);
-    if (!index.holds(from, to)) {
-      // ahead of what it holds, or nothing held yet (the boot read in flight): wait on its one read, which every caller
-      // shares; behind it, or that read failing: this filter's own read
-      const r = index.range();
-      if ((r !== null && from < r.from) || !(await index.upTo(to)) || !index.holds(from, to)) return agreedRangeOwn(urls, filter, from, to);
-    }
-    const got = held.flatMap((f) => index.query(f, from, to));
-    if (held.length < fs.length) {
-      const rest = await agreedRangeOwn(urls, (lo, hi) => [filter(lo, hi)].flat().filter((f) => !index.indexes(f)), from, to);
-      if (rest === null) return null;
-      got.push(...rest);
-    }
-    return got.sort((a, b) => a.block - b.block || a.index - b.index);
+    if (index.range() === null) await index.upTo(to);
+    const r = index.range();
+    if (r === null || from < r.from || r.to < from) return agreedRangeOwn(urls, filter, from, to);
+    const top = Math.min(to, r.to);
+    const got = held.flatMap((f) => index.query(f, from, top));
+    const [ahead, rest] = await Promise.all([
+      top < to ? agreedRangeOwn(urls, (lo, hi) => [filter(lo, hi)].flat().filter((f) => index.indexes(f)), top + 1, to) : [],
+      held.length < fs.length ? agreedRangeOwn(urls, (lo, hi) => [filter(lo, hi)].flat().filter((f) => !index.indexes(f)), from, to) : [],
+    ]);
+    if (ahead === null || rest === null) return null;
+    return [...got, ...ahead, ...rest].sort((a, b) => a.block - b.block || a.index - b.index);
   }
   async function agreedRangeOwn(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number, only = false): Promise<Log[] | null> {
     // each filter's spans one after another, so a wide provider joins them (logsOf); the logs back in block order
@@ -1219,14 +1222,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       : createSwapIndex({
           topics: INDEX_TOPICS,
           read: (lo, hi) => agreedRangeOwn(deps.index!, (a, b) => ({ topics: [INDEX_TOPICS], fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` }), lo, hi, true),
-          window: V.cold + V.refBack,
+          window: V.cold + V.refBack + INDEX_SLACK,
           chunk: 1_000,
         });
   /** The index read up to the agreed head: at boot the newest window (readiness does not wait on it), then every
    *  INDEX_FOLLOW_MS the blocks since, one read for every caller (upTo). */
   async function follow(): Promise<boolean> {
     if (index === null) return false;
-    const head = await agreedHead();
+    const head = await agreedHead(true); // the newest, left for the tapes as a tick's is
     return head !== null && (await index.upTo(head.n));
   }
   let follower: ReturnType<typeof setInterval> | null = null;
@@ -1360,6 +1363,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (books.size === 0) return;
     const head = await agreedHead(true);
     if (head === null) return;
+    // the chain's index read to the tick's head first, one read for every book (fold 6): a tick is no one's wait, so it
+    // waits on the index rather than read each book's new blocks itself
+    if (index !== null) await index.upTo(head.n);
     // the ETH price and the books are read at once; an ETH-quoted book is folded in only once the ETH price is read to
     // the same block, so no swap is priced by an older price (a tick of three rounds one after another outlasted 1 s)
     const needRef = [...books.values()].some((e) => e.pool.quote.kind === "eth");
