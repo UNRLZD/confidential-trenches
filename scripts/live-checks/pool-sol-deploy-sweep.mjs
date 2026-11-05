@@ -98,7 +98,7 @@ export function runRecord(d, rpcs) {
     "Money path: yes",
     ...landed.map((t) => `Tx: solana-devnet ${t.signature}`),
     "",
-    `The run: contracts/pool-solana/scripts/deploy.mjs on Solana devnet, stopped by ${d.stopped} at ${d.stopped_at} during its funding wait, before any funding; it kept its keys. Its steps, in the order of the Tx lines above: ${landed.map((t) => t.step).join(", ")}.`,
+    `The run: contracts/pool-solana/scripts/deploy.mjs on Solana devnet, stopped by ${d.stopped} at ${d.stopped_at} during its funding wait, before any funding; it kept its keys. Its steps, in the order of the Tx lines above: ${landed.map((t) => t.step.replace(/ [1-9A-HJ-NP-Za-km-z]{32,44}/g, "")).join(", ")}.`,
     `The funding came after the run had ended, from the team's devnet wallet; the journal's --sweep-kept command swept it back to the funding's sender and removed the keys once the funder read 0. This live check reads the funder ${d.funder} at 0 lamports on ${rpcs.join(" and ")}. Its program id ${d.program_id} was never deployed.`,
     "The live check reads each Tx line above finalized with no error on both RPCs, every sweep after the funding's slot.",
     "",
