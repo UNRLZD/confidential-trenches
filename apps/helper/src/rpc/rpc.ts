@@ -301,30 +301,53 @@ const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "obje
 /** The pool program each Solana route may scan with getProgramAccounts: the helper's own pinned pool program for that
  *  cluster (apps/helper/src/pool/solana.ts POOL_SOLANA_ENV), none when unset. */
 export const RPC_SCAN_PROGRAM_ENV: Readonly<Partial<Record<RpcChain, string>>> = { solana: "POOL_SOLANA_PROGRAM_MAINNET", "solana-devnet": "POOL_SOLANA_PROGRAM_DEVNET" };
-/** A filter of a pool scan: { dataSize } or { memcmp: { offset, bytes } } (base58, at most 128 characters). */
-const scanFilter = (f: unknown): "size" | "cmp" | null => {
-  if (!isPlain(f) || Object.keys(f).length !== 1) return null;
-  if (Object.hasOwn(f, "dataSize")) return Number.isSafeInteger(f.dataSize) && (f.dataSize as number) > 0 && (f.dataSize as number) <= 10_240 ? "size" : null;
-  const m = f.memcmp;
-  if (!isPlain(m) || Object.keys(m).some((k) => k !== "offset" && k !== "bytes" && k !== "encoding")) return null;
-  if (!Number.isSafeInteger(m.offset) || (m.offset as number) < 0 || (m.offset as number) > 10_240) return null;
-  if (Object.hasOwn(m, "encoding") && m.encoding !== "base58") return null;
-  return typeof m.bytes === "string" && /^[1-9A-HJ-NP-Za-km-z]{1,128}$/.test(m.bytes) ? "cmp" : null;
-};
+/** The note restore's scan (packages/wallet/src/pool/solana-restore.ts solanaMarks, the bucket read; the settle's
+ *  solanaSettleSpent reads through the same call): each mark size (13 a spent mark, 17 a pre-mark) and the memcmp at 9,
+ *  past the counter's low byte, of size - 9 bytes whose last is the program's mark tag (SOL_MARK_TAG 1). */
+const SCAN_SIZES: ReadonlySet<unknown> = new Set([13, 17]);
+const SCAN_AT = 9;
+const SCAN_TAG = 1;
+const SCAN_CONFIG: ReadonlySet<string> = new Set(["commitment", "encoding", "withContext", "minContextSlot", "filters"]);
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/** Base58 to bytes (each leading "1" a zero byte), or null for a character off the alphabet. */
+function base58Bytes(s: string): Uint8Array | null {
+  let n = 0n;
+  for (const c of s) {
+    const v = B58.indexOf(c);
+    if (v < 0) return null;
+    n = n * 58n + BigInt(v);
+  }
+  const out: number[] = [];
+  for (; n > 0n; n >>= 8n) out.unshift(Number(n & 0xffn));
+  for (let i = 0; i < s.length && s[i] === "1"; i++) out.unshift(0);
+  return Uint8Array.from(out);
+}
+const exactKeys = (o: Record<string, unknown>, keys: readonly string[]): boolean => Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
 /**
- * getProgramAccounts only as the wallet's note restore asks it (packages/wallet/src/pool/solana-restore.ts): on the
- * route's own pinned pool program, with a dataSize and at least one memcmp filter (one bucket of one mark size), at
- * most four filters (review L-2: an unbounded scan of any program would spend the keyed provider's quota for every
- * caller). Anything else is refused before any call.
+ * getProgramAccounts only in the note restore's exact shape (review L-2 and its re-review): on the route's own pinned
+ * pool program; config { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot? (a positive
+ * whole number), filters } and no other key; filters exactly [{ dataSize: 13 | 17 }, { memcmp: { offset: 9, bytes } }],
+ * the bytes base58 of exactly size - 9 bytes ending in the mark tag: one bucket of one mark size. An open scan of any
+ * program, or a wider one of the pool's (the tag alone, a large size, a compressed encoding, a slice, a sort, a
+ * changed-since read), would spend the keyed provider's quota for every caller. Anything else is refused before any call.
  */
 function scanAllowed(r: Record<string, unknown>, program: string | undefined): boolean {
   if (program === undefined || program === "") return false;
   const p = r.params;
   if (!Array.isArray(p) || p.length !== 2 || p[0] !== program || !isPlain(p[1])) return false;
-  const filters = p[1].filters;
-  if (!Array.isArray(filters) || filters.length < 2 || filters.length > 4) return false;
-  const kinds = filters.map(scanFilter);
-  return !kinds.includes(null) && kinds.includes("size") && kinds.includes("cmp");
+  const c = p[1];
+  if (Object.keys(c).some((k) => !SCAN_CONFIG.has(k))) return false;
+  if (c.commitment !== "finalized" || c.encoding !== "base64" || c.withContext !== true) return false;
+  if (Object.hasOwn(c, "minContextSlot") && !(Number.isSafeInteger(c.minContextSlot) && (c.minContextSlot as number) > 0)) return false;
+  const f = c.filters;
+  if (!Array.isArray(f) || f.length !== 2) return false;
+  const [size, cmp] = f as unknown[];
+  if (!isPlain(size) || !exactKeys(size, ["dataSize"]) || !SCAN_SIZES.has(size.dataSize)) return false;
+  if (!isPlain(cmp) || !exactKeys(cmp, ["memcmp"]) || !isPlain(cmp.memcmp)) return false;
+  const m = cmp.memcmp;
+  if (!exactKeys(m, ["offset", "bytes"]) || m.offset !== SCAN_AT || typeof m.bytes !== "string" || m.bytes.length > 24) return false;
+  const bytes = base58Bytes(m.bytes);
+  return bytes !== null && bytes.length === (size.dataSize as number) - SCAN_AT && bytes[bytes.length - 1] === SCAN_TAG;
 }
 
 /** One checked request, rebuilt from its four fields only, or undefined. `scan`: the route's pinned pool program. */

@@ -102,49 +102,78 @@ test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded t
   assert.equal(rpcModule.rpcBudgetEnv("solana-devnet"), "RPC_BUDGET_SOLANA_DEVNET");
 });
 
-// review L-2: getProgramAccounts only as the note restore asks it (packages/wallet/src/pool/solana-restore.ts), on the
-// route's own pinned pool program; an unbounded scan of any program would spend the keyed provider's quota
+// review L-2 and its re-review: getProgramAccounts only in the note restore's exact shape, on the route's own pinned
+// pool program; an open or wider scan would spend the keyed provider's quota. SPENT and PRE are the two requests the
+// wallet's solanaMarks sends (packages/wallet/src/pool/solana-restore.ts, captured from it on 5 Nov 23:33Z for bucket 0
+// with minContextSlot 7): a 13-byte spent mark and a 17-byte pre-mark, memcmp at 9 on size - 9 bytes ending in tag 1.
 const DEV_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
 const MAIN_PROGRAM = "11111111111111111111111111111111";
-const restoreScan = (program: string, filters: unknown = [{ dataSize: 49 }, { memcmp: { offset: 9, bytes: "3" } }]) => ({
-  jsonrpc: "2.0",
-  id: 5,
-  method: "getProgramAccounts",
-  params: [program, { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters }],
-});
-test("getProgramAccounts (review L-2): forwarded only on the route's own pinned pool program with a dataSize and a memcmp filter; any other scan refused 400 before any call", async () => {
+type ScanConfig = Record<string, unknown>;
+const SPENT: ScanConfig = { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] };
+const PRE: ScanConfig = { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters: [{ dataSize: 17 }, { memcmp: { offset: 9, bytes: "11111112" } }] };
+const scan = (program: string, config: unknown = SPENT, id = 5) => ({ jsonrpc: "2.0", id, method: "getProgramAccounts", params: [program, config] });
+const withFilters = (filters: unknown, from: ScanConfig = SPENT): ScanConfig => ({ ...from, filters });
+test("getProgramAccounts (review L-2): the restore's two exact shapes on the route's own pinned pool program are forwarded, alone or in a batch, with or without minContextSlot", async () => {
   next = { status: 200, type: JSON_T, body: echo };
-  const env = { SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_DEVNET: DEV_PROGRAM, POOL_SOLANA_PROGRAM_MAINNET: MAIN_PROGRAM };
-  const r = createRpc(env);
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_DEVNET: DEV_PROGRAM, POOL_SOLANA_PROGRAM_MAINNET: MAIN_PROGRAM });
+  const { minContextSlot: _m, ...noMin } = SPENT;
   for (const [chain, program] of [["solana-devnet", DEV_PROGRAM], ["solana", MAIN_PROGRAM]] as const) {
     seen.length = 0;
-    assert.equal((await call(r, chain, restoreScan(program))).status, 200, chain);
-    assert.equal((await call(r, chain, [restoreScan(program)])).status, 200, `${chain} in a batch`);
-    assert.equal(seen.length, 2, chain);
+    // and a higher bucket: the counter's bytes 05 01 00 past its low byte, then the tag ("8RGtg", @scure/base)
+    for (const config of [SPENT, PRE, noMin, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "8RGtg" } }])]) {
+      assert.equal((await call(r, chain, scan(program, config))).status, 200, `${chain} ${JSON.stringify(config)}`);
+    }
+    assert.equal((await call(r, chain, [scan(program, PRE)])).status, 200, `${chain} in a batch`);
+    assert.equal(seen.length, 5, chain);
   }
-  const refused: [string, unknown][] = [
-    ["solana", restoreScan(DEV_PROGRAM)], // another cluster's program
-    ["solana-devnet", restoreScan(MAIN_PROGRAM)],
-    ["solana", restoreScan("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")], // any other program
-    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49 }])], // no memcmp: the whole size
-    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ memcmp: { offset: 9, bytes: "3" } }])], // no dataSize
-    ["solana-devnet", restoreScan(DEV_PROGRAM, [])],
-    ["solana-devnet", restoreScan(DEV_PROGRAM, "x")],
-    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49 }, { memcmp: { offset: 9, bytes: "3" } }, { dataSize: 1 }, { dataSize: 2 }, { dataSize: 3 }])],
-    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49 }, { memcmp: { offset: 9, bytes: "0OIl" } }])],
-    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49 }, { memcmp: { offset: 9, bytes: "3", encoding: "base64" } }])],
-    ["solana-devnet", restoreScan(DEV_PROGRAM, [{ dataSize: 49, memcmp: { offset: 9, bytes: "3" } }])],
-    ["solana-devnet", { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [DEV_PROGRAM] }],
-    ["solana-devnet", { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [] }],
-    ["solana-devnet", { jsonrpc: "2.0", id: 1, method: "getProgramAccounts" }],
-    ["solana-devnet", [{ jsonrpc: "2.0", id: 1, method: "getSlot" }, restoreScan(DEV_PROGRAM, [{ dataSize: 49 }])]],
-  ];
+});
+// each case differs from SPENT (or PRE) in one thing only, so removing the one rule that refuses it lets it through
+const ONE_OFF: readonly [string, string, unknown][] = [
+  ["another cluster's program", MAIN_PROGRAM, SPENT],
+  ["any other program", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", SPENT],
+  ["two dataSize filters", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { dataSize: 13 }])],
+  ["the tag byte alone at 12 (every spent mark at once)", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 12, bytes: "2" } }])],
+  ["the tag byte alone at 9 (one byte, not 4)", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "2" } }])],
+  ["a wrong offset", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 8, bytes: "1112" } }])],
+  ["a wrong length: a spent mark's 4 bytes on the pre-mark's size", DEV_PROGRAM, withFilters([{ dataSize: 17 }, { memcmp: { offset: 9, bytes: "1112" } }])],
+  ["a last byte that is not the tag", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1113" } }])],
+  ["a large dataSize", DEV_PROGRAM, withFilters([{ dataSize: 10240 }, { memcmp: { offset: 9, bytes: "1112" } }])],
+  ["another dataSize", DEV_PROGRAM, withFilters([{ dataSize: 12 }, { memcmp: { offset: 9, bytes: "112" } }])],
+  ["the filters swapped", DEV_PROGRAM, withFilters([{ memcmp: { offset: 9, bytes: "1112" } }, { dataSize: 13 }])],
+  ["a third filter", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }, { dataSize: 13 }])],
+  ["the size filter alone", DEV_PROGRAM, withFilters([{ dataSize: 13 }])],
+  ["no filters", DEV_PROGRAM, withFilters([])],
+  ["a memcmp encoding key", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112", encoding: "base58" } }])],
+  ["a size filter with a memcmp key too", DEV_PROGRAM, withFilters([{ dataSize: 13, memcmp: { offset: 9, bytes: "1112" } }, { memcmp: { offset: 9, bytes: "1112" } }])],
+  ["a memcmp filter with a dataSize key too", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" }, dataSize: 13 }])],
+  ["bytes off the base58 alphabet", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "0OIl" } }])],
+  ["encoding base64+zstd", DEV_PROGRAM, { ...SPENT, encoding: "base64+zstd" }],
+  ["encoding jsonParsed", DEV_PROGRAM, { ...SPENT, encoding: "jsonParsed" }],
+  ["a dataSlice", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 0 } }],
+  ["sortResults", DEV_PROGRAM, { ...SPENT, sortResults: true }],
+  ["changedSinceSlot", DEV_PROGRAM, { ...SPENT, changedSinceSlot: 1 }],
+  ["commitment processed", DEV_PROGRAM, { ...SPENT, commitment: "processed" }],
+  ["withContext false", DEV_PROGRAM, { ...SPENT, withContext: false }],
+  ["minContextSlot not a whole number", DEV_PROGRAM, { ...SPENT, minContextSlot: "7" }],
+  ["minContextSlot 0", DEV_PROGRAM, { ...SPENT, minContextSlot: 0 }],
+  ["no config", DEV_PROGRAM, undefined],
+];
+for (const [name, program, config] of ONE_OFF)
+  test(`getProgramAccounts (review L-2) refused 400 before any call: ${name}`, async () => {
+    next = { status: 200, type: JSON_T, body: echo };
+    const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_DEVNET: DEV_PROGRAM, POOL_SOLANA_PROGRAM_MAINNET: MAIN_PROGRAM });
+    seen.length = 0;
+    const body = config === undefined ? { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [program] } : scan(program, config);
+    for (const b of [body, [{ jsonrpc: "2.0", id: 2, method: "getSlot" }, body]]) {
+      const a = await call(r, "solana-devnet", b);
+      assert.deepEqual([a.status, code(a)], [400, "method_not_allowed"], JSON.stringify(b));
+    }
+    assert.equal(seen.length, 0, "nothing reached a provider");
+  });
+test("getProgramAccounts (review L-2): a host with no pinned pool program refuses every scan", async () => {
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
   seen.length = 0;
-  for (const [chain, body] of refused) assert.deepEqual([(await call(r, chain, body)).status, code(await call(r, chain, body))], [400, "method_not_allowed"], JSON.stringify(body));
-  assert.equal(seen.length, 0, "nothing reached a provider");
-  // no pinned program on the host: every scan refused
-  const unpinned = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
-  for (const chain of ["solana", "solana-devnet"]) assert.equal((await call(unpinned, chain, restoreScan(DEV_PROGRAM))).status, 400, chain);
+  for (const chain of ["solana", "solana-devnet"]) assert.equal((await call(r, chain, scan(DEV_PROGRAM))).status, 400, chain);
   assert.equal(seen.length, 0);
 });
 
