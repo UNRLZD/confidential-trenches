@@ -216,7 +216,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
   const r = await evmRetryLag(async () => {
     const r = await sync.events(a.signal, true);
-    const high = await evmLatestHigh(a.rpcs, a.signal);
+    const high = await evmLatestHigh(a.rpcs, a.signal, sleep);
     if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw new EvmLagError(`the newest agreed block ${r.anchor.number} is more than an epoch behind an RPC's latest block`);
     return r;
   }, sleep, a.signal);
