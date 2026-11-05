@@ -26,10 +26,12 @@ import {
 import * as kit from "../src/index.ts";
 
 // The queue times calls on performance.now(), which mock.timers does not move: here it follows Date, so the tests that
-// tick a mocked clock drive the queue too. The clock-step test reads the real one.
+// tick a mocked clock drive the queue too. The clock-step tests read the real one, on the wall clock's origin (ms since
+// 1970, as Date's): the queue keeps its turns between tests, and a turn booked on one origin and waited on the other is
+// a wait of 1.79e12 ms, which a timer cannot hold (it fires at 1 ms, again and again).
 let realPerf = false;
 const perfNow = performance.now.bind(performance);
-mock.method(performance, "now", () => (realPerf ? perfNow() : Date.now()));
+mock.method(performance, "now", () => (realPerf ? performance.timeOrigin + perfNow() : Date.now()));
 
 // ---- a signed-looking v0 tx: 1 signature slot, a message with one signer and the system program (test only)
 function tx(seed: number, lvbh = 1_000, firstIxData: number[] = []): SolanaSignedTx {

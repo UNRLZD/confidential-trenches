@@ -2692,13 +2692,15 @@ test("V12 the pair's honest provider gives no confirm (it fails, or holds no suc
 });
 
 test("V13 a head is held only when more than maxLag below the lower of the two used: a liar's old head and a lagging honest one never hold the up-to-date provider", async () => {
-  // held or not, read off the hold itself: a provider not held keeps its place in the ranking once every hold has
-  // ended (EVM_HOLD_MS on); one held moves up (re-review of 59a69e2, LOW-4: "not ranked last" rode on the measured
-  // speed, and failed 2 of 30 beside CPU burners)
-  const placeOf = (urls: readonly string[], host: string, at?: number) => quoteMod.evmRanked(urls, at).map(hostOf).indexOf(host);
-  // (after every request still out has landed, `idle`: one out past EVM_HEDGE_MS also moves down)
-  const unheld = (urls: readonly string[], host: string) => placeOf(urls, host) === placeOf(urls, host, performance.now() + EVM_HOLD_MS! + 1);
-
+  // held or not, read off the hold itself, never off the measured speed (re-review of 59a69e2, LOW-4: "not ranked
+  // last" rode on it and failed 2 of 30 beside CPU burners; "moves up once the hold ends" rode on it too, and failed in
+  // CI when b's 1 ms answers measured slower than c's 5 ms ones): a provider the ranking has never measured goes after
+  // every measured one that is not held and before every held one, so it splits the two whatever the speeds
+  // (after every request still out has landed, `idle`: one out past EVM_HEDGE_MS also goes after it)
+  const unheld = (urls: readonly string[], host: string) => {
+    const ranked = quoteMod.evmRanked([...urls, "https://unmeasured.v13.test/"]).map(hostOf);
+    return ranked.indexOf(host) < ranked.indexOf("unmeasured.v13.test");
+  };
   quoteMod.evmSpeedReset();
   const token = freshToken();
   const pools = [best(token)];
@@ -3213,6 +3215,10 @@ async function drive<T>(start: () => Promise<T>, ticks: number, step: number): P
     }
     return { value: await p, ms: Date.now() };
   } finally {
+    // every timer still set is cleared here, never left to the reset: the mocked clock's reset drops them but leaves each
+    // its place in its queue, and work that outlives this drive, clearing one during a later drive, would take out the
+    // later drive's timer at that place (a wait that then never ends)
+    for (const [h, t] of timers) if (!t.fired && !t.cleared) mocked.clear(h as Parameters<typeof clearTimeout>[0]);
     globalThis.setTimeout = mocked.set;
     globalThis.clearTimeout = mocked.clear;
     mock.timers.reset();
