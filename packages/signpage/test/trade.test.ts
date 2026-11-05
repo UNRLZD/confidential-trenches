@@ -215,6 +215,12 @@ test("a price check refusal is quote_check_failed (Price check failed); other re
   assert.equal(refusalCode(leg("the wallet was not armed by this device's own withdrawal")), "not_armed");
   assert.equal(refusalCode(leg("build no_route: No routes found")), "no_route");
   assert.equal(refusalCode(leg("error: boom")), "failed");
+  // the kit's renewal before signing (card solana-legs-share-wait): its reference refusals are a price check, its read
+  // errors and blockhash refusals are not
+  assert.equal(refusalCode(leg("renewal: no reference pool")), "quote_check_failed");
+  assert.equal(refusalCode(leg("renewal: no reference for the leg")), "quote_check_failed");
+  assert.equal(refusalCode(leg("renewal: error: timeout")), "failed");
+  assert.equal(refusalCode(leg("renewal: no blockhash both providers hold (x: valid on A true, on B false)")), "failed");
   assert.deepEqual((await page(store(), {}).ask(buy("10"))).answer, { error: "no_ready_set" }, "no arm record at all");
   assert.deepEqual((await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), {}).ask(buy("3"))).answer, { error: "no_ready_set" }, "$3 is no ladder sum");
 });

@@ -11,7 +11,10 @@
 //   refuses a wallet this device did not arm is the wallet's signer on the signing page ("Buy from fresh wallets"),
 //   which holds the arm records and signs nothing else; the kit never takes the caller's word as that refusal.
 // - Blockhash: getLatestBlockhash at `finalized` on both providers; the read from the lower slot is used, so both
-//   providers already hold it, with that read's own lastValidBlockHeight.
+//   providers already hold it, with that read's own lastValidBlockHeight. A trade not signed within
+//   SOLANA_BLOCKHASH_REFRESH_MS of that read (its builds waited for the helper's room) reads every leg's pre-state and
+//   simulation again, then last, together, the set's reference and a blockhash both providers answer valid, and checks
+//   each leg's tx on it again, its minOut held to the fresh E, before signing (renewSet).
 // - Floors (T1.3): E(A) is the device's own pool read for the whole size A = Σ a_k (the caller's `reference`, never
 //   the helper or the route); each wallet's floor is minOut_k = ⌊E_k × (1 − s)⌋ with E_k = ⌊E(A) × a_k / A⌋, while
 //   S12 holds its simulated out to E(a_k), its own exact input priced from the same read (no extra read). The build is asked at the user's s; if the route's decoded floor is under minOut_k, it is asked once
@@ -50,12 +53,14 @@ import {
 import { SOLANA_ALT_PROGRAM, solanaAta, solanaDecodeLookupTable, type SolanaLookupTable } from "../../checks/solana/message.ts";
 import {
   SolanaBuildError,
+  SolanaBuildRoom,
   assembleSolanaSwap,
   buildSolanaTeardown,
   fetchSolanaJupiterBuild,
   fetchSolanaJupiterBuildThatFits,
   readSolanaBlockhash,
   simulateSolanaTeardown,
+  solanaWithBlockhash,
   type SolanaAssembled,
   type SolanaBlockhash,
   type SolanaBuildRequest,
@@ -85,6 +90,23 @@ export type SolanaTradeRequest = {
   readonly heldMints?: readonly string[];
 };
 export type SolanaTradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed";
+/** `built`: legs whose build is done (fitted or refused); `waiting`: legs waiting for the helper's room now; `total`:
+ * the legs being built. */
+export type SolanaBuildsProgress = { built: number; waiting: number; total: number };
+/**
+ * The longest a trade's builds wait for the helper's room (card solana-legs-share-wait): a 64-leg trade on Jupiter's
+ * Free plan, one device lent about 14 builds a minute (apps/helper/src/limits/limits.ts: the callers' 26 less
+ * LEND_NEW_SHARES 3 x the share 4), asks 64 builds plus a floor rebuild for some legs, 64 to 128: 4.6 to 9.1 minutes;
+ * 10 minutes is that and a margin. A wait that would end past it refuses its leg.
+ */
+export const SOLANA_TRADE_BUILD_WAIT_MS = 10 * 60_000;
+/**
+ * The oldest the trade's blockhash may be when its legs are signed. A finalized blockhash is about 32 slots old when
+ * read and a tx on it lands for 150 slots, about 47 s after the read at 400 ms a slot; past 20 s the send would have
+ * under half of that, so a trade whose builds waited longer reads its pre-states and simulations again, then its
+ * reference and a fresh blockhash, and checks every leg again on them before any is signed (renewSet). A trade signed within 20 s reads nothing more.
+ */
+export const SOLANA_BLOCKHASH_REFRESH_MS = 20_000;
 export type SolanaTradeDeps = {
   /** The helper's origin, for the Jupiter build proxy. */
   readonly helper: string;
@@ -103,6 +125,11 @@ export type SolanaTradeDeps = {
   readonly fetch?: SolanaFetch;
   readonly now?: () => number;
   readonly onProgress?: (stage: SolanaTradeStage) => void;
+  /** The legs' builds while they wait for the helper's room (card solana-legs-share-wait): the state the app shows
+   * during a long trade, called when a leg's build lands or a leg starts or ends a wait. */
+  readonly onBuilds?: (p: SolanaBuildsProgress) => void;
+  /** The wait's sleep, for tests (with `now`, the clock the trade's bound is held on). */
+  readonly sleep?: (ms: number) => Promise<void>;
   /** sendSolanaSet's deadline, for tests. */
   readonly deadlineMs?: number;
   readonly pollMs?: number;
@@ -136,7 +163,14 @@ export type SolanaLegRecord = {
   /** Why a provider gave no simulation, when one did not. */
   simulationErrors?: string[];
   size?: number;
+  /** The checks on the bytes signed, or about to be: after a renewal, the renewal's own, or none when the renewal refused
+   * the leg before its check. */
   verdict?: SolanaQuoteVerdict;
+  /** A renewed leg's first check, on the trade's first blockhash and reads. */
+  firstVerdict?: SolanaQuoteVerdict;
+  /** A renewed leg's reference, read again at the renewal for the same set: E_k and E(a_k) now (expectedOut and
+   * legExpectedOut keep the first read, which set minOut). */
+  renewedReference?: { expectedOut: bigint; legExpectedOut: bigint };
   signature?: string;
   outcome?: SolanaTxOutcome;
   dry?: SolanaDryTx;
@@ -144,7 +178,10 @@ export type SolanaLegRecord = {
   reread?: { state: "filled" | "failed" | "unknown"; reads: readonly [unknown, unknown] };
   teardown?: { verdict: SolanaTeardownVerdict; frames: number; outcomes?: SolanaTxOutcome[]; dry?: SolanaDryTx[]; refused?: string };
 };
-export type SolanaTradeRecord = { side: "buy" | "sell"; token: string; reference: bigint | null; blockhash: SolanaBlockhash | null; legs: SolanaLegRecord[] };
+/** `blockhash` is the one the legs are signed on; `firstBlockhash` the trade's first read, when that one grew old before
+ * the signatures and a fresh one replaced it (SOLANA_BLOCKHASH_REFRESH_MS); `renewedReference` E(A) read again then
+ * (`reference` stays the first read, which set every leg's minOut). */
+export type SolanaTradeRecord = { side: "buy" | "sell"; token: string; reference: bigint | null; blockhash: SolanaBlockhash | null; firstBlockhash?: SolanaBlockhash; renewedReference?: bigint; legs: SolanaLegRecord[] };
 
 const isKey = (v: unknown): v is string => {
   if (typeof v !== "string" || v.length < 32 || v.length > 44) return false;
@@ -229,6 +266,36 @@ export async function readSolanaBlockhashBoth(providers: readonly [SolanaRpc, So
   return { ...(a.slot <= b.slot ? a : b), lastValidBlockHeight: Math.max(a.lastValidBlockHeight, b.lastValidBlockHeight) };
 }
 
+/** A blockhash both providers answer valid (isBlockhashValid at confirmed, both true): readSolanaBlockhashBoth's read,
+ * and when the two do not both say so, one read more; then it refuses. */
+export async function readSolanaBlockhashValid(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaBlockhash> {
+  const valid = async (rpc: SolanaRpc, hash: string): Promise<boolean> => {
+    try {
+      return obj(await rpc("isBlockhashValid", [hash, { commitment: "confirmed" }]), "isBlockhashValid").value === true;
+    } catch {
+      return false;
+    }
+  };
+  let last = "";
+  for (let i = 0; i < 2; i++) {
+    const bh = await readSolanaBlockhashBoth(providers);
+    const [a, b] = await both((r) => valid(r, bh.blockhash), providers);
+    if (a && b) return bh;
+    last = `${bh.blockhash}: valid on A ${a}, on B ${b}`;
+  }
+  throw new Error(`no blockhash both providers hold (${last})`);
+}
+
+/** Only legs whose bytes to sign equal, byte for byte, the copy their checks passed; any other is refused, unsigned. */
+export function solanaSignOnlyChecked<T extends { rec: SolanaLegRecord; assembled: { readonly wire: Uint8Array }; checked: Uint8Array }>(legs: readonly T[]): T[] {
+  return legs.filter((p) => {
+    const w = p.assembled.wire;
+    if (w.length === p.checked.length && w.every((x, i) => x === p.checked[i])) return true;
+    p.rec.refused = "the bytes to sign are not the bytes the checks passed";
+    return false;
+  });
+}
+
 /** A signature read again on both providers with searchTransactionHistory: filled or failed only when both agree. */
 export async function rereadSolanaSignature(providers: readonly [SolanaRpc, SolanaRpc], signature: string): Promise<{ state: "filled" | "failed" | "unknown"; reads: readonly [unknown, unknown] }> {
   const one = async (rpc: SolanaRpc) => {
@@ -286,13 +353,17 @@ export async function settleSolanaSet(providers: readonly [SolanaRpc, SolanaRpc]
   return out;
 }
 
-type Prepared = { leg: SolanaTradeLeg; rec: SolanaLegRecord; assembled: SolanaAssembled };
+/** S12's reference for one leg: E(a_k), the bar for its simulated out, and E_k, the base of its floor. */
+type LegReference = { legExpectedOut: bigint; expectedOut: bigint };
+/** A leg checked and ready to sign: `checked` is the copy of the bytes the checks passed, `renew` checks it again on
+ * fresh reads, a fresh reference and a fresh blockhash. */
+type Prepared = { leg: SolanaTradeLeg; rec: SolanaLegRecord; assembled: SolanaAssembled; checked: Uint8Array; renew: () => Promise<((bh: SolanaBlockhash, ref: LegReference) => Promise<Prepared | null>) | null> };
 
 async function prepareLeg(
   req: SolanaTradeRequest,
   leg: SolanaTradeLeg,
   rec: SolanaLegRecord,
-  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[] },
+  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[]; room: SolanaBuildRoom },
 ): Promise<Prepared | null> {
   const { deps, blockhash } = ctx;
   const [pa, pb] = deps.providers;
@@ -307,7 +378,9 @@ async function prepareLeg(
   const minOut = rec.minOut as bigint;
   const t0 = now();
   const breq: SolanaBuildRequest = { side: req.side, wallet: w, token: req.token, amount: leg.amount, slippageBps: req.slippageBps };
-  const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}) };
+  const room = ctx.room;
+  // past the helper's share or room, a build waits the Retry-After inside the trade's bound (SolanaBuildRoom)
+  const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}), wait: room.wait };
   // The build, and with it on both providers the reads that do not depend on it: the rents in play (the wallet's
   // token account, its size from the mint, and the pump volume account) and the pre-state the simulation is held to
   // (the wallet, its token account, its two volume accounts: this wallet's only), which also gives spendable.
@@ -344,6 +417,7 @@ async function prepareLeg(
   // one floor rebuild a leg, so K legs ask Jupiter K to 4K builds; a one-leg trade at most 4, the helper's share).
   const found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, opts);
   rec.buildCaps = found.steps;
+  room.fitted(found.maxAccounts);
   let calls = found.calls.length;
   let build = found.build;
   let fitted = found.fitted;
@@ -377,57 +451,79 @@ async function prepareLeg(
   growth.catch(() => undefined); // awaited before the check
   const [rent, pre] = await sideReads;
   // The simulation on both providers, at once, reading back this wallet's own four accounts (a provider may read back
-  // at most 4). No other wallet of the user is in it: S11 refuses a tx that names one, so none can change.
-  const b64 = btoa(String.fromCharCode(...assembled.wire));
-  const simErrors: string[] = [];
-  const simOne = async (rpc: SolanaRpc, at: "A" | "B", before: (Acc | null)[]): Promise<SolanaSimulation | null> => {
-    try {
-      const run = async (group: string[]) => {
-        const r = obj(await rpc("simulateTransaction", [b64, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed", accounts: { addresses: group, encoding: "base64" } }]), "simulateTransaction");
-        const v = obj(r.value, "simulateTransaction.value");
-        const accs = Array.isArray(v.accounts) && v.accounts.length === group.length ? v.accounts.map((x, j) => account(x, group[j] as string)) : null;
-        return { err: v.err ?? null, accs };
-      };
-      const main = await run(watch);
-      if (main.err !== null) return { err: main.err, walletLamports: { pre: 0n, post: 0n }, tokenAccount: { pre: 0n, post: 0n }, tokenAccountLamports: { pre: 0n, post: 0n }, pumpVolumeAccumulator: { pre: 0n, post: 0n }, pumpSwapVolumeAccumulator: { pre: 0n, post: 0n } };
-      if (!main.accs || !main.accs[0]) { simErrors.push(`${at}: no wallet read back`); return null; }
-      const m = main.accs;
-      return {
-        err: null,
-        walletLamports: { pre: before[0]?.lamports ?? 0n, post: (m[0] as Acc).lamports },
-        tokenAccount: { pre: tokenAmount(before[1] ?? null), post: tokenAmount(m[1] ?? null) },
-        tokenAccountLamports: { pre: before[1]?.lamports ?? 0n, post: m[1]?.lamports ?? 0n },
-        pumpVolumeAccumulator: { pre: before[2]?.lamports ?? 0n, post: m[2]?.lamports ?? 0n },
-        pumpSwapVolumeAccumulator: { pre: before[3]?.lamports ?? 0n, post: m[3]?.lamports ?? 0n },
-      };
-    } catch (e) {
-      simErrors.push(`${at}: ${String((e as Error)?.message ?? e).slice(0, 160)}`);
-      return null;
-    }
+  // at most 4). No other wallet of the user is in it: S11 refuses a tx that names one, so none can change. It runs with
+  // replaceRecentBlockhash, so it holds for this tx on any blockhash (solanaWithBlockhash changes no other byte).
+  const stateOn = async (wire: Uint8Array, before: readonly [(Acc | null)[], (Acc | null)[]]): Promise<{ simulations: [SolanaSimulation | null, SolanaSimulation | null]; spendable: bigint } | null> => {
+    const b64 = btoa(String.fromCharCode(...wire));
+    const simErrors: string[] = [];
+    const simOne = async (rpc: SolanaRpc, at: "A" | "B", was: (Acc | null)[]): Promise<SolanaSimulation | null> => {
+      try {
+        const run = async (group: string[]) => {
+          const r = obj(await rpc("simulateTransaction", [b64, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed", accounts: { addresses: group, encoding: "base64" } }]), "simulateTransaction");
+          const v = obj(r.value, "simulateTransaction.value");
+          const accs = Array.isArray(v.accounts) && v.accounts.length === group.length ? v.accounts.map((x, j) => account(x, group[j] as string)) : null;
+          return { err: v.err ?? null, accs };
+        };
+        const main = await run(watch);
+        if (main.err !== null) return { err: main.err, walletLamports: { pre: 0n, post: 0n }, tokenAccount: { pre: 0n, post: 0n }, tokenAccountLamports: { pre: 0n, post: 0n }, pumpVolumeAccumulator: { pre: 0n, post: 0n }, pumpSwapVolumeAccumulator: { pre: 0n, post: 0n } };
+        if (!main.accs || !main.accs[0]) { simErrors.push(`${at}: no wallet read back`); return null; }
+        const m = main.accs;
+        return {
+          err: null,
+          walletLamports: { pre: was[0]?.lamports ?? 0n, post: (m[0] as Acc).lamports },
+          tokenAccount: { pre: tokenAmount(was[1] ?? null), post: tokenAmount(m[1] ?? null) },
+          tokenAccountLamports: { pre: was[1]?.lamports ?? 0n, post: m[1]?.lamports ?? 0n },
+          pumpVolumeAccumulator: { pre: was[2]?.lamports ?? 0n, post: m[2]?.lamports ?? 0n },
+          pumpSwapVolumeAccumulator: { pre: was[3]?.lamports ?? 0n, post: m[3]?.lamports ?? 0n },
+        };
+      } catch (e) {
+        simErrors.push(`${at}: ${String((e as Error)?.message ?? e).slice(0, 160)}`);
+        return null;
+      }
+    };
+    const simulations: [SolanaSimulation | null, SolanaSimulation | null] = await Promise.all([simOne(pa, "A", before[0]), simOne(pb, "B", before[1])]);
+    if (simErrors.length) rec.simulationErrors = simErrors;
+    else delete rec.simulationErrors;
+    // The pre-state read again on both providers after the simulations: the bounds S11 draws from it hold only if
+    // nothing moved this wallet's accounts meanwhile, so any change refuses the leg.
+    const again = await both((r) => readAccounts(r, watch, "confirmed"), deps.providers);
+    if (!sameAccounts(before[0], again[0]) || !sameAccounts(before[1], again[1])) { rec.refused = "the wallet's accounts changed while the trade was checked"; return null; }
+    // Spendable, the lower of the two providers' pre-state: lamports on a buy, the token account's balance on a sell.
+    const spend = (x: (Acc | null)[]) => (req.side === "buy" ? (x[0]?.lamports ?? 0n) : tokenAmount(x[1] ?? null));
+    const spendable = spend(before[0]) < spend(before[1]) ? spend(before[0]) : spend(before[1]);
+    rec.sellsAll = req.side === "sell" && leg.amount === spendable;
+    return { simulations, spendable };
   };
-  const simulations = await Promise.all([simOne(pa, "A", pre[0]), simOne(pb, "B", pre[1])]);
-  if (simErrors.length) rec.simulationErrors = simErrors;
-  // The pre-state read again on both providers after the simulations: the bounds S11 draws from it hold only if nothing
-  // moved this wallet's accounts meanwhile, so any change refuses the leg.
-  const again = await both((r) => readAccounts(r, watch, "confirmed"), deps.providers);
-  if (!sameAccounts(pre[0], again[0]) || !sameAccounts(pre[1], again[1])) { rec.refused = "the wallet's accounts changed while the trade was checked"; return null; }
-  // Spendable, the lower of the two providers' pre-state: lamports on a buy, the token account's balance on a sell.
-  const spend = (x: (Acc | null)[]) => (req.side === "buy" ? (x[0]?.lamports ?? 0n) : tokenAmount(x[1] ?? null));
-  const spendable = spend(pre[0]) < spend(pre[1]) ? spend(pre[0]) : spend(pre[1]);
-  rec.sellsAll = req.side === "sell" && leg.amount === spendable;
-  await growth;
-  const verdict = checkSolanaQuote(assembled.wire, { side: req.side, wallet: w, token: req.token, amount: leg.amount, spendable, minOut, otherWallets: ctx.otherWallets, links: ctx.links, heldMints: ctx.heldMints }, {
-    tables,
-    mint: [ctx.mint[0], ctx.mint[1]],
-    rent: { tokenAccount: [rent[0][0], rent[1][0]], pumpVolumeAccumulator: [rent[0][1], rent[1][1]] },
-    simulations,
-    reference: { expectedOut: rec.legExpectedOut as bigint, minOutBase: rec.expectedOut as bigint, slippageBps: req.slippageBps },
-  });
+  // The checks on the very bytes to be signed: a copy is checked and kept, and only bytes equal to it are signed
+  // (solanaSignOnlyChecked). minOut is the leg's own on every check; the reference is the first read's, or at a renewal
+  // the one read again then, so a floor the market has since left behind is refused.
+  const verdictOn = async (a: SolanaAssembled, st: { simulations: [SolanaSimulation | null, SolanaSimulation | null]; spendable: bigint }, ref: LegReference): Promise<Prepared | null> => {
+    await growth;
+    const checked = Uint8Array.from(a.wire);
+    const verdict = checkSolanaQuote(checked, { side: req.side, wallet: w, token: req.token, amount: leg.amount, spendable: st.spendable, minOut, otherWallets: ctx.otherWallets, links: ctx.links, heldMints: ctx.heldMints }, {
+      tables,
+      mint: [ctx.mint[0], ctx.mint[1]],
+      rent: { tokenAccount: [rent[0][0], rent[1][0]], pumpVolumeAccumulator: [rent[0][1], rent[1][1]] },
+      simulations: st.simulations,
+      reference: { expectedOut: ref.legExpectedOut, minOutBase: ref.expectedOut, slippageBps: req.slippageBps },
+    });
+    rec.size = a.size;
+    rec.verdict = verdict;
+    if (!verdict.ok) { rec.refused = `checks: ${verdict.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join("; ").slice(0, 400)}`; return null; }
+    return { leg, rec, assembled: a, checked, renew };
+  };
+  // A trade whose blockhash grew old while its legs were built (runSolanaTrade): the pre-state and the simulation read
+  // again now, then, once a fresh reference and blockhash are in, this tx on it checked again on those reads.
+  const renew = async (): Promise<((bh: SolanaBlockhash, ref: LegReference) => Promise<Prepared | null>) | null> => {
+    const before = await both((r) => readAccounts(r, watch, "confirmed"), deps.providers);
+    const st = await stateOn(assembled.wire, before);
+    return st ? (bh, ref) => verdictOn(solanaWithBlockhash(assembled, bh), st, ref) : null;
+  };
+  const st = await stateOn(assembled.wire, pre);
+  if (!st) return null;
+  const out = await verdictOn(assembled, st, { legExpectedOut: rec.legExpectedOut as bigint, expectedOut: rec.expectedOut as bigint });
   rec.quoteMs = now() - t0;
-  rec.size = assembled.size;
-  rec.verdict = verdict;
-  if (!verdict.ok) { rec.refused = `checks: ${verdict.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join("; ").slice(0, 400)}`; return null; }
-  return { leg, rec, assembled };
+  return out;
 }
 
 /** Each tx signed, and sent with the very height its signer was handed: one path for the trade and its teardowns. */
@@ -510,6 +606,69 @@ function pacedDeps(deps: SolanaTradeDeps): SolanaTradeDeps {
   return { ...deps, providers: [solanaPacedRpc(p[0], limits[0]), solanaPacedRpc(p[1], limits[1])] };
 }
 
+/** The set on a fresh blockhash. First every leg's pre-state and simulation read again, at once (on keyless providers
+ * this can take tens of seconds for a large set); then, last and together, the set's reference and one blockhash both
+ * providers answer valid; then each leg's tx on that blockhash checked again on those reads: its own minOut held to the
+ * fresh E_k less s, its simulated out to the fresh E(a_k). At the sign point, a reference older than the limit (the
+ * blockhash read was slow) is read once more, the reference only, and the legs checked again on it: one read, so a large
+ * set never loops. A leg that fails any of it is refused and keeps its money; a set with no fresh reference or blockhash
+ * signs nothing. A leg's first check moves to firstVerdict, so `verdict` is only ever the check of the bytes about to be
+ * signed. */
+async function renewSet(prepared: readonly Prepared[], deps: SolanaTradeDeps, record: SolanaTradeRecord, rereference: () => Promise<Map<SolanaLegRecord, LegReference> | null>, clock: () => number): Promise<Prepared[]> {
+  const why = (err: unknown) => String((err as Error)?.message ?? err).slice(0, 200);
+  for (const p of prepared) {
+    if (p.rec.verdict) p.rec.firstVerdict = p.rec.verdict;
+    delete p.rec.verdict;
+  }
+  const next = await Promise.all(prepared.map(async (p) => {
+    try {
+      return await p.renew();
+    } catch (err) {
+      p.rec.refused = `renewal: error: ${why(err)}`;
+      return null;
+    }
+  }));
+  if (!next.some((f) => f)) return [];
+  const readReference = () => rereference().catch((err: unknown) => `renewal: error: ${why(err)}`);
+  const refAt = clock();
+  const [refs, fresh] = await Promise.all([readReference(), readSolanaBlockhashValid(deps.providers).catch((err: unknown) => new Error(`renewal: ${why(err)}`))]);
+  if (fresh instanceof Error) {
+    prepared.forEach((p, i) => { if (next[i]) p.rec.refused = fresh.message; });
+    return [];
+  }
+  if (record.blockhash) record.firstBlockhash = record.blockhash;
+  record.blockhash = fresh;
+  // each leg's renewed tx on the fresh blockhash, checked on reference `r`: the legs that pass, by their index in the set
+  const checkOn = async (r: Map<SolanaLegRecord, LegReference> | string | null, legs: readonly number[]): Promise<{ i: number; p: Prepared }[]> => {
+    if (r === null || typeof r === "string") {
+      for (const i of legs) (prepared[i] as Prepared).rec.refused = r ?? "renewal: no reference pool";
+      return [];
+    }
+    const ok = await Promise.all(legs.map(async (i) => {
+      const p = prepared[i] as Prepared;
+      const f = next[i];
+      const ref = r.get(p.rec);
+      if (!f) return null;
+      if (!ref) { p.rec.refused = "renewal: no reference for the leg"; return null; }
+      p.rec.renewedReference = ref;
+      try {
+        const renewed = await f(fresh, ref);
+        return renewed ? { i, p: renewed } : null;
+      } catch (err) {
+        p.rec.refused = `renewal: error: ${why(err)}`;
+        return null;
+      }
+    }));
+    return ok.filter((x): x is { i: number; p: Prepared } => x !== null);
+  };
+  let passed = await checkOn(refs, prepared.flatMap((_, i) => (next[i] ? [i] : [])));
+  // the sign point: nothing slow runs between here and the signatures
+  if (passed.length && clock() - refAt > SOLANA_BLOCKHASH_REFRESH_MS) {
+    passed = await checkOn(await readReference(), passed.map((x) => x.i));
+  }
+  return passed.map((x) => x.p);
+}
+
 export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTradeDeps): Promise<SolanaTradeRecord> {
   if (req.side !== "buy" && req.side !== "sell") throw new Error("side must be buy or sell");
   if (!isKey(req.token)) throw new Error("the token must be an address");
@@ -541,6 +700,8 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
   if (live.length === 0) { progress("refused"); return record; }
   const total = live.reduce((n, i) => n + (req.legs[i] as SolanaTradeLeg).amount, 0n);
   const amounts = live.map((i) => (req.legs[i] as SolanaTradeLeg).amount);
+  const clock = deps.now ?? (() => performance.now());
+  const blockhashAt = clock();
   const first = Promise.all([
     deps.reference({ side: req.side, token: req.token, amount: total, amounts }, deps.providers),
     readSolanaBlockhashBoth(deps.providers),
@@ -567,37 +728,57 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
     r.legExpectedOut = (ref.expectedOuts as readonly bigint[])[j] as bigint;
     if ((r.minOut as bigint) <= 0n) r.refused = "the floor rounds to 0";
   });
+  const room = new SolanaBuildRoom({
+    total: live.filter((i) => !(recs[i] as SolanaLegRecord).refused).length,
+    boundMs: SOLANA_TRADE_BUILD_WAIT_MS,
+    ...(deps.now ? { clock: deps.now } : {}),
+    ...(deps.sleep ? { sleep: deps.sleep } : {}),
+    ...(deps.onBuilds ? { onProgress: deps.onBuilds } : {}),
+  });
   const prepared = (
     await Promise.all(
       live.map(async (i) => {
         const rec = recs[i] as SolanaLegRecord;
         if (rec.refused) return null;
         try {
-          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints });
+          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints, room });
         } catch (err) {
           rec.refused = err instanceof SolanaBuildError ? `build ${err.code}: ${err.message.slice(0, 160)}` : `error: ${String((err as Error)?.message ?? err).slice(0, 200)}`;
           return null;
+        } finally {
+          room.done();
         }
       }),
     )
   ).filter((x): x is Prepared => x !== null);
-  if (prepared.length === 0) { progress("refused"); return record; }
-  const set = await signSet(deps, prepared.map((p) => ({ wallet: p.leg.wallet, tx: p.assembled })));
-  prepared.forEach((p, i) => { p.rec.signature = base58.encode((set[i] as { wire: Uint8Array }).wire.subarray(1, 65)); });
+  // The renewal's reference: E read again for the same set A, its floors drawn as the first read's were (T1.3).
+  const rereference = async (): Promise<Map<SolanaLegRecord, LegReference> | null> => {
+    const again = await deps.reference({ side: req.side, token: req.token, amount: total, amounts }, deps.providers);
+    const e2 = again?.expectedOut ?? null;
+    const outs = again?.expectedOuts;
+    if (e2 === null || e2 <= 0n || !outs || outs.length !== live.length || outs.some((x) => x <= 0n)) return null;
+    const floors2 = solanaSetFloors(e2, amounts, req.slippageBps);
+    record.renewedReference = e2;
+    return new Map(live.map((i, j) => [recs[i] as SolanaLegRecord, { legExpectedOut: outs[j] as bigint, expectedOut: (floors2[j] as { expectedOut: bigint }).expectedOut }]));
+  };
+  const ready = solanaSignOnlyChecked(clock() - blockhashAt > SOLANA_BLOCKHASH_REFRESH_MS ? await renewSet(prepared, deps, record, rereference, clock) : prepared);
+  if (ready.length === 0) { progress("refused"); return record; }
+  const set = await signSet(deps, ready.map((p) => ({ wallet: p.leg.wallet, tx: p.assembled })));
+  ready.forEach((p, i) => { p.rec.signature = base58.encode((set[i] as { wire: Uint8Array }).wire.subarray(1, 65)); });
   progress("signed");
   const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}), ...(deps.providerRps ? { providerRps: deps.providerRps } : {}) };
   const tokenProgram = (mint[0] as Acc).owner;
   if (deps.dry) {
     const d = await dryRunSolanaSet(set, sendOpts);
-    prepared.forEach((p, i) => { const x = d.txs[i]; if (x) p.rec.dry = x; });
+    ready.forEach((p, i) => { const x = d.txs[i]; if (x) p.rec.dry = x; });
     // Dry: nothing landed, so the teardown is planned and simulated on today's accounts, after each sell-all.
-    if (req.side === "sell") await Promise.all(prepared.map(async (p) => { if (p.rec.sellsAll) p.rec.teardown = await teardown(req, p.rec, deps, tokenProgram, false); }));
+    if (req.side === "sell") await Promise.all(ready.map(async (p) => { if (p.rec.sellsAll) p.rec.teardown = await teardown(req, p.rec, deps, tokenProgram, false); }));
     return record;
   }
   const h = sendSolanaSet(set, sendOpts);
   progress("sent");
   const done = await h.done;
-  await finishSolanaSet(req, prepared.map((p) => p.rec), done.txs, deps, tokenProgram, progress);
+  await finishSolanaSet(req, ready.map((p) => p.rec), done.txs, deps, tokenProgram, progress);
   return record;
 }
 

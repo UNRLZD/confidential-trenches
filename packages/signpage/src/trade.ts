@@ -176,7 +176,7 @@ export async function heldOnBoth(providers: readonly [SolanaRpc, SolanaRpc], min
 /** The code a trade that ended before "sent" is refused with, from its record (the trade box draws quote_check_failed as Price check failed, any other as Failed). */
 export function refusalCode(record: SolanaTradeRecord): ErrorCode {
   const why = record.legs.map((l) => l.refused ?? "");
-  if (why.some((w) => /^checks: |^no reference pool|^the route quotes |^the route's floor |^the floor rounds/.test(w))) return "quote_check_failed";
+  if (why.some((w) => /^checks: |^(renewal: )?no reference pool|^renewal: no reference for the leg|^the route quotes |^the route's floor |^the floor rounds/.test(w))) return "quote_check_failed";
   if (why.length > 0 && why.every((w) => w.startsWith("the wallet was not armed"))) return "not_armed";
   if (why.some((w) => w.startsWith("build no_route"))) return "no_route";
   return "failed";

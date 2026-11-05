@@ -204,12 +204,13 @@ test("429: the vendor is held until its reset (at most a minute); a reset inside
   const g = vendor(() => (throttle ? json({ e: "slow down, key fake" }, 429, { "x-ratelimit-reset": "30" }) : json({ ok: 1 })));
   const q = createProxy(ENV, { fetch: g.fetch, now: c2.now, sleep: c2.sleep });
   const t = await q.handle("lifi", "/v1/status", "", "", "heavy");
-  assert.deepEqual([t.status, t.headers["Retry-After"], JSON.parse(t.body)], [503, undefined, { error: { code: "upstream" } }], "the code only: no vendor text, never our 429");
+  // card solana-legs-share-wait: with the seconds to the vendor's reset, so a device waits it out and asks again
+  assert.deepEqual([t.status, t.headers["Retry-After"], JSON.parse(t.body)], [503, "30", { error: { code: "upstream" } }], "the code only: no vendor text, never our 429");
   assert.equal(g.seen.length, 1, "a long reset is not waited by the request");
   throttle = false;
   c2.add(10_000);
   const h = await q.handle("lifi", "/v1/quote", "", "", "honest");
-  assert.deepEqual([h.status, h.headers["Retry-After"]], [503, undefined], "another caller meets the vendor's reset as not ready too");
+  assert.deepEqual([h.status, h.headers["Retry-After"]], [503, "20"], "another caller meets the vendor's reset as not ready too, 20 s from its end");
   assert.equal((await q.handle("lifi", "/v1/status", "", "")).status, 503, "and so does the helper's own read");
   assert.equal(g.seen.length, 1, "nothing reached the vendor inside its reset");
   assert.equal((await q.handle("relay", "/quote/v2", "", "{}", "honest")).status, 200, "another vendor is not held");
@@ -497,4 +498,23 @@ test("card helper-crowd-429 fold 6: identical GETs in flight share one vendor ca
   assert.equal(f.seen.length, 2, "one call for the two identical builds, one for the other");
   assert.equal((await p.handle("jupiter", "/swap/v2/build", "taker=A&amount=1", "", "198.51.100.1")).status, 200);
   assert.equal(f.seen.length, 3, "a build is never cached: the next one is read again");
+});
+
+// Card solana-legs-share-wait: a caller inside its share whom the vendor's total has no room for is answered the
+// not-ready 503 upstream, as before, and now with the seconds until the total has its room (Retry-After), so a device
+// waits it out and asks again instead of refusing a leg.
+test("a caller inside its share meets a vendor's total with no room: 503 upstream with a Retry-After of the seconds to its room", async () => {
+  const c = clock();
+  const f = vendor(() => json({ ok: 1 }));
+  const p = createProxy({ ...ENV, PROXY_BUDGET_JUPITER: "40,4" }, { fetch: f.fetch, now: c.now, sleep: async (ms: number) => c.add(ms) });
+  // the callers' part is 40 - 34 = 6: three callers draw two each, inside their shares
+  for (const who of ["a", "b", "c"]) for (let i = 0; i < 2; i++) assert.equal((await p.handle("jupiter", "/swap/v2/build", `n=${who}${i}`, "", who)).status, 200, `${who} ${i}`);
+  const d = await p.handle("jupiter", "/swap/v2/build", "n=d", "", "d");
+  assert.deepEqual([d.status, JSON.parse(d.body)], [503, { error: { code: "upstream" } }], "the not-ready form, never our 429");
+  const wait = Number(d.headers["Retry-After"]);
+  assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= 61, `Retry-After ${d.headers["Retry-After"]}: the seconds to the total's room`);
+  assert.equal(f.seen.length, 6, "the refused draw reached no vendor");
+  // at that time the total has its room again
+  c.add(wait * 1000);
+  assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=d2", "", "d")).status, 200, "asked again after Retry-After, it goes");
 });
