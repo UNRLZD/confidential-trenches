@@ -1,15 +1,19 @@
 {
-  "_note": "good: this branch build (packages/signpage public/app.js and index.html at the card commit), what the SIGN_HOST deploy of release-26 serves; bad: SIGN_HOST read live on 2026-11-04 22:46Z, before the deploy (the paper seven stores only)",
-  "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0fMPi4aC8YWIRhfiP9Gxwj9bf1tsW6cYc5W5ySNTFciWN//YjoY+823ZGxklxxXD\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-0fMPi4aC8YWIRhfiP9Gxwj9bf1tsW6cYc5W5ySNTFciWN//YjoY+823ZGxklxxXD",
-    "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`,`owed`]",
-    "readerSkipsOwed": true
-  },
-  "bad": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9LPkjHnbcayzEfq/Ls2ycnapgFuSizURn+aIlrgExeU80aQ5qP4HdKeCXwsHccvQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-9LPkjHnbcayzEfq/Ls2ycnapgFuSizURn+aIlrgExeU80aQ5qP4HdKeCXwsHccvQ",
-    "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`]",
-    "readerSkipsOwed": false
-  }
+ "_note": "good: this card's build (packages/signpage/index.html and public/app.js after fold 3: seven stores, version 1, owed/<op id> in meta, the reader hiding it). bad: SIGN_HOST read live 5 Nov 03:03Z (release-26 of main 7dcc60a): no owed key rule, a reader that lists every meta key.",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-JJDXuUP00m5/EebbANFDfB5WYGh5BVFaF2l/ULR7azXs3TjRa8L8tr0vLdtna2mS\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-JJDXuUP00m5/EebbANFDfB5WYGh5BVFaF2l/ULR7azXs3TjRa8L8tr0vLdtna2mS",
+  "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`]",
+  "opensV1": true,
+  "owedKey": true,
+  "readerHidesOwed": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-/dHJM+JCeBsYkN8tKZWRq7zfIf5LfsmKXkDfnF9wCDixxq9CgYfPyEb1oDid5WXy\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-/dHJM+JCeBsYkN8tKZWRq7zfIf5LfsmKXkDfnF9wCDixxq9CgYfPyEb1oDid5WXy",
+  "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`]",
+  "opensV1": true,
+  "owedKey": false,
+  "readerHidesOwed": false
+ }
 }
