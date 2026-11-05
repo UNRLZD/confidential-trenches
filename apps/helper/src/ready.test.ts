@@ -3,6 +3,7 @@
 // the senders (their store and keys) only once the old one has let them go, and its sends wait for that; GeckoTerminal's
 // one address is never asked twice for one window by two helpers: the next one takes the old one's calls and lists.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { Agent, createServer, request, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -16,6 +17,7 @@ import { createEvmLists } from "./data/evm/lists.ts";
 import { openDurableDir } from "./store/durable.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
+const createHashOf = (label: string) => createHash("sha256").update(label).digest("hex");
 // read off the modules, so this file loads at a base without them and each test fails on the behaviour (red runs)
 const S = server as unknown as Record<string, any>;
 const G = gk as unknown as Record<string, any>;
@@ -385,4 +387,155 @@ test("card helper-ready-without-gt: a new helper whose GeckoTerminal window is f
   const p = { lists: { get: ok200({ lists: { new: [{ token: PUMP }] } }) }, evmLists: lists, token: { page: ok200({}), holders: ok200({}) } };
   assert.equal(await (S.isReady as (p: unknown) => Promise<boolean>)(p), true, "ready with the window full and held");
   assert.equal(gtCalls, calls, "no GeckoTerminal call");
+});
+
+// card evm-buy-hookdata-fee, review fold 4 MEDIUM-1: /v1/health says ready only once every pool's start check has
+// passed, so a start that refuses (exit 2) never turns ready and redeploy.sh keeps the old helper serving
+test("MEDIUM-1 poolsChecked: resolves once every Solana and EVM pool's start check has passed, asks a Solana pool again until its check settles, and a refusal calls refuse and rejects", async () => {
+  assert.equal(typeof S.poolsChecked, "function", "server.ts poolsChecked");
+  const later = () => {
+    let ok!: () => void, no!: (e: Error) => void;
+    const p = new Promise<void>((a, b) => ((ok = a), (no = b)));
+    p.catch(() => {});
+    return { p, ok, no };
+  };
+  const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+  const state = (p: Promise<void>) => {
+    const s = { v: "pending" };
+    p.then(() => (s.v = "ok"), () => (s.v = "rejected"));
+    return s;
+  };
+  // a Solana check still waiting holds it; each ask is a getter read (pool/solana.ts ready reads the rent again)
+  const sol = later();
+  let asks = 0;
+  const solPool = { get ready() { return (asks++, sol.p); } };
+  const evm = later();
+  const refused: string[] = [];
+  const all = state(S.poolsChecked(new Map([["s", solPool]]), new Map([["e", { ready: () => evm.p }]]), (e: Error) => refused.push(e.message), 10) as Promise<void>);
+  evm.ok();
+  await tick(55);
+  assert.equal(all.v, "pending", "the Solana check has not passed");
+  assert.ok(asks >= 4, `asked again every 10 ms while it waits: ${asks}`);
+  sol.ok();
+  await tick();
+  assert.equal(all.v, "ok");
+  const after = asks;
+  await tick(40);
+  assert.equal(asks, after, "no ask once the check has settled");
+  // an EVM refusal: refuse once with its message, and the gate rejects, while the Solana check still waits
+  const sol2 = later();
+  const evm2 = later();
+  const refused2: string[] = [];
+  const all2 = state(S.poolsChecked(new Map([["s", { ready: sol2.p }]]), new Map([["e", { ready: () => evm2.p }]]), (e: Error) => refused2.push(e.message), 10) as Promise<void>);
+  evm2.no(new Error("POOL_EVM_RPCS_BASE_SEPOLIA: 127.0.0.1:1: no answer"));
+  await tick();
+  assert.deepEqual([all2.v, refused2], ["rejected", ["POOL_EVM_RPCS_BASE_SEPOLIA: 127.0.0.1:1: no answer"]]);
+  sol2.ok();
+  // a Solana refusal the same way
+  const sol3 = later();
+  const refused3: string[] = [];
+  const all3 = state(S.poolsChecked(new Map([["s", { ready: sol3.p }]]), new Map(), (e: Error) => refused3.push(e.message), 10) as Promise<void>);
+  sol3.no(new Error("the devnet pool fee must be the kit's fee for this rent, 1300000 lamports"));
+  await tick();
+  assert.deepEqual([all3.v, refused3.length], ["rejected", 1]);
+  // no pools: passed at once
+  assert.equal(await S.poolsChecked(new Map(), new Map(), () => assert.fail("no refusal")), undefined);
+  assert.deepEqual(refused, []);
+});
+
+/** The helper's own main on `env` (test keys only), /v1/health read every 50 ms until it exits or `boundMs` passes:
+ *  its exit code (or "still running"), its stderr, and every health answer's `ready`. */
+async function startOnce(env: Record<string, string>, boundMs: number): Promise<{ code: number | string; err: string; readies: unknown[] }> {
+  const { spawn } = await import("node:child_process");
+  const free = createServer().listen(0, "127.0.0.1");
+  await new Promise((ok) => free.on("listening", ok));
+  const port = (free.address() as AddressInfo).port;
+  await new Promise((ok) => free.close(ok));
+  const dir = mkdtempSync(join(tmpdir(), "pools-checked-"));
+  const c = spawn(process.execPath, [join(import.meta.dirname, "server.ts")], {
+    env: { PATH: process.env.PATH!, HELPER_COMMIT: COMMIT, PORT: String(port), HELPER_STORE_DIR: dir, JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001", ...env },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let err = "";
+  c.stderr.on("data", (d) => (err += d));
+  const readies: unknown[] = [];
+  let exited = false;
+  const code = new Promise<number | string>((done) => {
+    const timer = setTimeout(() => (c.kill("SIGKILL"), done("still running")), boundMs);
+    c.on("exit", (n) => ((exited = true), clearTimeout(timer), done(n ?? "signal")));
+  });
+  void (async () => {
+    while (!exited) {
+      const h = await get(port, "GET", "/v1/health").catch(() => null);
+      if (h?.status === 200) readies.push((JSON.parse(h.body) as { ready: unknown }).ready);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  })();
+  const out = { code: await code, err: err.replace(/\(node:\d+\) ExperimentalWarning[^\n]*\n(\(Use[^\n]*\n)?/g, ""), readies };
+  rmSync(dir, { recursive: true, force: true });
+  return out;
+}
+
+test("MEDIUM-1 an EVM pool whose second RPC keeps 15 s of state stops the start with exit 2 naming that host, and /v1/health never says ready before it", async (t) => {
+  // two JSON-RPC nodes on loopback, a block every 2 s up to now; the second answers state reads only for the last
+  // 15 s, and each a second late, so the helper is up and answering its health while the check runs
+  const g = BigInt(Math.floor(Date.now() / 1000)) - 2_000n;
+  const nodes = [0, 15].map((keepS) =>
+    createServer((q, r) => {
+      let body = "";
+      q.on("data", (d) => (body += d)).on("end", () => {
+        const { id, method, params } = JSON.parse(body) as { id: number; method: string; params: unknown[] };
+        const latest = (BigInt(Math.floor(Date.now() / 1000)) - g) / 2n;
+        const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(g + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
+        const answer = (out: object) => r.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id, ...out }));
+        if (method === "eth_getBlockByNumber") return answer({ result: block(params[0] === "latest" ? latest : BigInt(params[0] as string)) });
+        if (method !== "eth_call") return answer({ error: { code: -32601, message: "no" } });
+        const at = BigInt((params[1] as { blockHash: string }).blockHash);
+        if (keepS === 0) return answer({ result: `0x${"0".repeat(63)}2` });
+        setTimeout(() => answer(g + 2n * at < BigInt(Math.floor(Date.now() / 1000)) - 15n ? { error: { code: -32000, message: `historical state ${"ab".repeat(32)} is not available` } } : { result: `0x${"0".repeat(63)}2` }), 1_000);
+      });
+    }).listen(0, "127.0.0.1"),
+  );
+  t.after(() => nodes.forEach((s) => (s.closeAllConnections(), s.close())));
+  await Promise.all(nodes.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
+  const urls = nodes.map((s) => `http://127.0.0.1:${(s.address() as AddressInfo).port}`);
+  const key = `0x${createHashOf("helper-pool-senders/test-key/EVM_SENDER")}`; // pool/evm.test.ts's test key
+  const r = await startOnce({ POOL_EVM_ADDRESS_BASE_SEPOLIA: "0x00000000000000000000000000000000b1f1f001", POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key, POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(",") }, 15_000);
+  assert.equal(r.code, 2, `exit ${r.code}; stderr: ${r.err}`);
+  assert.match(r.err, new RegExp(`helper: POOL_EVM_RPCS_BASE_SEPOLIA: ${new URL(urls[1]!).host.replace(/\./g, "\\.")}: no answer to 0x[0-9a-f]{8} .*historical state`));
+  assert.ok(!r.err.includes(new URL(urls[0]!).host), "the first provider answered");
+  assert.ok(!r.err.includes(key.slice(2)), "the key is never printed");
+  assert.ok(r.readies.length > 0, "the helper answered its health while the check ran");
+  assert.ok(r.readies.every((x) => x === false), `never ready before the exit: ${JSON.stringify(r.readies)}`);
+});
+
+test("MEDIUM-1 a Solana pool whose configured fee is not the kit's stops the start with exit 2 even when its first rent read fails and no caller asks, and /v1/health never says ready before it", async (t) => {
+  const { ed25519 } = await import("@noble/curves/ed25519.js");
+  const { base58 } = await import("./bind/checks.ts");
+  const seed = new Uint8Array(Buffer.from(createHashOf("helper-pool-senders/server/FP"), "hex"));
+  const feePayer = base58(Uint8Array.from([...seed, ...ed25519.getPublicKey(seed)]));
+  const program = base58(ed25519.getPublicKey(new Uint8Array(Buffer.from(createHashOf("helper-pool-senders/server/PROGRAM"), "hex"))));
+  const RENT = "2BMAAAAAAAAAAAAAAADwPzI="; // the Rent sysvar devnet and mainnet answer: fee 1,300,000
+  // the RPCs are down for the helper's first 3 s (its start read fails), then answer the rent
+  const upAt = Date.now() + 3_000;
+  let reads = 0;
+  const stubs = [0, 1].map(() =>
+    createServer((q, r) => {
+      let b = "";
+      q.on("data", (d) => (b += d)).on("end", () => {
+        reads++;
+        if (Date.now() < upAt) return void r.writeHead(500).end();
+        const { id } = JSON.parse(b) as { id: number };
+        r.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: { owner: "Sysvar1111111111111111111111111111111111111", data: [RENT, "base64"], lamports: 1, executable: false } } }));
+      });
+    }).listen(0, "127.0.0.1"),
+  );
+  t.after(() => stubs.forEach((s) => (s.closeAllConnections(), s.close())));
+  await Promise.all(stubs.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
+  const urls = stubs.map((s) => `http://127.0.0.1:${(s.address() as AddressInfo).port}`).join(",");
+  const r = await startOnce({ POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: "1400000", POOL_SOLANA_RPCS_DEVNET: urls }, 15_000);
+  assert.equal(r.code, 2, `exit ${r.code} after ${reads} rent reads; stderr: ${r.err}`);
+  assert.match(r.err, /helper: the devnet pool fee must be the kit's fee for this rent, 1300000 lamports/);
+  assert.ok(r.readies.length > 0, "the helper answered its health while the check waited");
+  assert.ok(r.readies.every((x) => x === false), `never ready before the exit: ${JSON.stringify(r.readies)}`);
 });

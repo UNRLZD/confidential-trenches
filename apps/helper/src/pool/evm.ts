@@ -15,8 +15,9 @@
 //   deadline_near    the deadline is under now + EVM_POOL_SEND_MARGIN_MS (these first checks make no RPC call);
 //   reverted         this nullifier's send in this epoch reverted on chain: it is never sent again in this epoch
 //                    (M356 (1)); a new proof in a later epoch is its own send;
-//   fee_off          the fee is not the fee this helper publishes for that epoch (M352 (2): max(the floor,
-//                    2 x EVM_WITHDRAW_GAS x the base fee of the epoch's first block), on its step);
+//   fee_off          the fee is not the fee this helper publishes for that epoch: the kit's evmPoolFee (trade/evm/
+//                    pool-fee.ts, the device's own rule) at the epoch's first block, with G at the pool's tree depth
+//                    there and the chain fee there, each read at that block's hash on both providers;
 //   fee_over_cap     the fee is over the request's feeCap (the pool refuses it too: FeeOverCap);
 //   recipient_code   the recipient holds code on either provider at pending or latest (an EIP-7702 delegation,
 //                    0xef0100..., too): a contract could revert the pool's push after the simulation;
@@ -39,7 +40,7 @@
 // decoder, and the same fee, recipient, simulation and send rules apply.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { evmPoolVenues, solanaJsonRpc, type EvmPoolVenue } from "@blindfill/kit";
+import { EVM_POOL_FEE_FLOOR, EVM_POOL_FEE_STEP, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolVenues, solanaJsonRpc, type EvmPoolVenue } from "@blindfill/kit";
 import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
 import { heldPerClient, throttleOf } from "../limits/limits.ts";
@@ -116,13 +117,10 @@ export function evmAddressOf(key: Uint8Array): string {
 
 // ---- The epoch fee (M352 (2)) ----
 
-/**
- * The withdraw's gas the fee is priced on: Privacy Pools' withdrawal, 611,391, measured twice (M349). A
- * constant, never a reading, so every caller and every restart prices an epoch the same.
- */
-export const EVM_WITHDRAW_GAS = 611_391n;
-/** The coarse step every EVM fee is rounded up to, in wei: 0.00001 ETH [design]. */
-export const EVM_FEE_STEP = 10n ** 13n;
+/** The step every EVM fee is rounded up to, in wei: the kit's EVM_POOL_FEE_STEP, 0.00001 ETH, named in each answer. */
+export const EVM_FEE_STEP = EVM_POOL_FEE_STEP;
+/** The pool's tree depth view (State.sol currentTreeDepth), the depth G is priced at. */
+const TREE_DEPTH_DATA = `0x${selectorOf("currentTreeDepth()")}`;
 /** The longest a proof lives, ms: the device's cap on deadline_ms (wallet withdraw/request.ts WITHDRAW_DEADLINE_MAX_MS). */
 export const POOL_LIFE_MAX_MS = 600_000;
 /** How many epochs' fees each sender remembers [design: well past one proof life of 10 epochs]. */
@@ -177,12 +175,6 @@ export async function evmFirstBlockAtOrAfter(rpc: EvmRpc, seconds: bigint): Prom
   return hi;
 }
 
-/** The epoch's fee: max(floor, 2 x EVM_WITHDRAW_GAS x the base fee of the epoch's first block), rounded up to the step. */
-export function evmEpochFee(floor: bigint, baseFeePerGas: bigint): bigint {
-  const gas = 2n * EVM_WITHDRAW_GAS * baseFeePerGas;
-  const stepped = ((gas + EVM_FEE_STEP - 1n) / EVM_FEE_STEP) * EVM_FEE_STEP;
-  return stepped > floor ? stepped : floor;
-}
 
 // ---- The sender ----
 
@@ -199,6 +191,15 @@ export type EvmPoolSender = {
   readonly sender: string;
   /** GET /v1/pool/fee: the epoch's fee (the epoch holding `atMs`), in wei; null while the chain has no block in it yet. */
   fee(atMs: number): Promise<EvmFeeAnswer | null>;
+  /**
+   * The start's check (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A): each provider answers every state read the
+   * fee makes (the pool's tree depth, the chain fee) at the block POOL_LIFE_MAX_MS old, the oldest epoch a proof's fee
+   * is read at, so a pruning provider (robinhood-sepolia-rpc.publicnode.com keeps about 15 s) is refused at the start,
+   * never at a user's send. Rejects naming the provider (rpc 1 or 2) and its answer; server.ts exits 2 on it. A call
+   * answered with a throttle or a timeout is asked again, EVM_READY_TRIES times at most, EVM_READY_WAIT_MS then twice
+   * that apart (`sleep` is the wait, a test's own); any other answer, a missing state among them, refuses at once.
+   */
+  ready(sleep?: (ms: number) => Promise<void>): Promise<void>;
   /** POST /v1/pool/evm/send for a parsed body, from `client` (server.ts's clientOf: the caller's address). */
   carry(body: unknown, client?: string): Promise<PoolEvmAnswer>;
 };
@@ -232,16 +233,19 @@ const failedInExecution = (e: unknown): boolean => {
 };
 
 /**
- * One pool's sender. `floor` is the least fee, in wei (the pool's asset is the chain's native coin, PrivacyPoolSimple);
- * `feeRecipient` is where the release takes it. Sends one at a time, so each takes the next nonce; one per nullifier.
+ * One pool's sender; its least fee is the kit's EVM_POOL_FEE_FLOOR, which evmPoolFee applies (wei: the pool's asset is
+ * the chain's native coin, PrivacyPoolSimple). `feeRecipient` is where the release takes it. Sends one at a time, so
+ * each takes the next nonce; one per nullifier.
  */
 export function evmPoolSender(
-  cfg: { network: string; pool: string; senderKey: Uint8Array; floor: bigint; feeRecipient?: string; memory?: number },
+  cfg: { network: string; pool: string; senderKey: Uint8Array; feeRecipient?: string; memory?: number },
   providers: readonly [EvmRpc, EvmRpc],
   now: () => number = Date.now,
 ): EvmPoolSender {
   const pool = cfg.pool.toLowerCase();
   if (!ADDRESS.test(pool)) throw new Error("the pool must be an address");
+  // the fee rule reads the network's chain fee: a network the kit has no chain fee rule for starts no sender
+  evmPoolChainFeeReads(cfg.network, 1n);
   const sender = evmAddressOf(cfg.senderKey);
   const feeRecipient = (cfg.feeRecipient ?? sender).toLowerCase();
   if (!ADDRESS.test(feeRecipient)) throw new Error("the fee recipient must be an address");
@@ -274,7 +278,21 @@ export function evmPoolSender(
       throw e;
     });
   };
-  /** The epoch's first block, on provider A and the same hash on B, and its fee; cached once both agree. */
+  /** One eth_call at block `hash` (EIP-1898) on both providers: its first word, the same on both, else a throw. */
+  const viewAt = async (to: string, data: string, hash: string): Promise<bigint> => {
+    const words = (await Promise.all([a, b].map((rpc) => rpc("eth_call", [{ to, data }, { blockHash: hash }])))).map((v) => {
+      const h = firstWord(v);
+      if (h === null) throw new Error(`not a word from ${to} at ${hash}`);
+      return BigInt(h);
+    });
+    if (words[0] !== words[1]) throw new Error(`the providers differ on ${data.slice(0, 10)} at ${to}, block ${hash}`);
+    return words[0]!;
+  };
+  /**
+   * The epoch's first block, on provider A and the same hash on B, and its fee, cached once both agree: the kit's
+   * evmPoolFee({ gas: evmPoolGas(the pool's tree depth there), gasPrice: its base fee, chainFee: the chain fee
+   * there }), every input read at that block's hash on both providers, as the device reads them before it binds.
+   */
   const feeOf = (epochStartMs: number): Promise<{ block: EvmBlock; fee: bigint } | null> => {
     const known = fees.get(epochStartMs);
     if (known) return known;
@@ -283,7 +301,12 @@ export function evmPoolSender(
       if (block === null) return null;
       const same = blockOf(await b("eth_getBlockByNumber", [tag(block.number), false]));
       if (same.hash !== block.hash) throw new Error("the providers hold different blocks");
-      return { block, fee: evmEpochFee(cfg.floor, block.baseFeePerGas) };
+      const d = await viewAt(pool, TREE_DEPTH_DATA, block.hash);
+      const gas = evmPoolGas(Number(d)); // a depth past the pool's 32 throws
+      const answers = [];
+      for (const r of evmPoolChainFeeReads(cfg.network, gas)) answers.push(await viewAt(r.to, r.data, block.hash));
+      const chainFee = evmPoolChainFee(cfg.network, EVM_POOL_TX_BYTES, answers);
+      return { block, fee: evmPoolFee({ gas, gasPrice: block.baseFeePerGas, chainFee }) };
     })();
     fees.set(epochStartMs, p);
     p.then((v) => v === null && fees.delete(epochStartMs), () => fees.delete(epochStartMs));
@@ -418,10 +441,58 @@ export function evmPoolSender(
       return { chain: "evm", network: cfg.network, pool, fee_recipient: feeRecipient, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: epoch, block: tag(f.block.number), fee: f.fee.toString(), step: EVM_FEE_STEP.toString() };
     },
     carry,
+    async ready(sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))) {
+      // each call asked again only on a throttle or a timeout, at most EVM_READY_TRIES times
+      const patient = (rpc: EvmRpc): EvmRpc => async (method, params) => {
+        for (let t = 1; ; t++) {
+          try {
+            return await rpc(method, params);
+          } catch (e) {
+            if (t >= EVM_READY_TRIES || !askAgain(e)) throw e;
+            await sleep(EVM_READY_WAIT_MS * 2 ** (t - 1));
+          }
+        }
+      };
+      const [pa, pb] = [patient(a), patient(b)];
+      const on = <T>(k: 1 | 2, p: Promise<T>): Promise<T> => p.catch((e: Error) => Promise.reject(new Error(`rpc ${k}: ${e.message}`)));
+      const block = await on(1, evmFirstBlockAtOrAfter(pa, BigInt(Math.ceil((now() - POOL_LIFE_MAX_MS) / 1000))));
+      if (block === null) throw new Error(`rpc 1: no block in the last ${POOL_LIFE_MAX_MS / 1000} s`);
+      const same = await on(2, pb("eth_getBlockByNumber", [tag(block.number), false]).then(blockOf));
+      if (same.hash !== block.hash) throw new Error(`rpc 2: another block at ${block.number}`);
+      // the reads feeOf makes, each on each provider alone, so the refusal names the one that cannot answer
+      const reads = [{ to: pool, data: TREE_DEPTH_DATA }, ...evmPoolChainFeeReads(cfg.network, evmPoolGas(0))];
+      for (const [k, rpc] of [pa, pb].entries()) {
+        for (const r of reads) {
+          try {
+            if (firstWord(await rpc("eth_call", [{ to: r.to, data: r.data }, { blockHash: block.hash }])) === null) throw new Error("not a word");
+          } catch (e) {
+            throw new Error(`rpc ${k + 1}: no answer to ${r.data.slice(0, 10)} at ${r.to} at block ${block.number}, ${Math.round(now() / 1000) - Number(block.timestamp)} s old (a proof's fee is read up to ${POOL_LIFE_MAX_MS / 1000} s back): ${(e as Error).message}`);
+          }
+        }
+      }
+    },
   };
 }
 
-/** Per network: the pool, the sender's key (0x + 64 hex, gas only), the fee's floor (wei), its recipient, two RPC URLs. */
+/** An eth_call answer's first 32-byte word (0x and 64 hex), or null: feeOf's viewAt and ready() take the same answers. */
+const firstWord = (v: unknown): string | null => {
+  const h = evmRpcHex(v);
+  return h === null || h.length < 66 ? null : h.slice(0, 66);
+};
+/** How many times ready() asks one call that a provider throttled or let time out, and the first wait between: a 429 at
+ *  a deploy's start is a moment's limit, not a refusal. A refusal exits 2 before the helper is ready (server.ts
+ *  poolsChecked), so redeploy.sh keeps the old helper serving and the deploy needs a rerun. */
+const EVM_READY_TRIES = 3;
+const EVM_READY_WAIT_MS = 1_000;
+/** A throttle (limits.ts throttleOf: HTTP 429, a rate-limit message, EIP-1474's -32005; the kit client's other
+ *  throttle codes) or a timeout: the provider's moment, which ready() asks again. A missing state is neither. */
+const askAgain = (e: unknown): boolean => {
+  const m = String((e as Error | undefined)?.message ?? e);
+  return throttleOf(e, true) > 0 || /^RPC error (-32029|-32429|-429|15):/.test(m) || (e as Error | undefined)?.name === "TimeoutError" || /no answer in \d+ ms|aborted due to timeout|timed? ?out/i.test(m);
+};
+
+/** Per network: the pool, the sender's key (0x + 64 hex, gas only), the fee's floor (unset, or the kit's
+ *  EVM_POOL_FEE_FLOOR), its recipient, two RPC URLs. */
 export const POOL_EVM_ENV = {
   base: ["POOL_EVM_ADDRESS_BASE", "POOL_EVM_SENDER_KEY_BASE", "POOL_EVM_FEE_BASE", "POOL_EVM_FEE_RECIPIENT_BASE", "POOL_EVM_RPCS_BASE"],
   robinhood: ["POOL_EVM_ADDRESS_ROBINHOOD", "POOL_EVM_SENDER_KEY_ROBINHOOD", "POOL_EVM_FEE_ROBINHOOD", "POOL_EVM_FEE_RECIPIENT_ROBINHOOD", "POOL_EVM_RPCS_ROBINHOOD"],
@@ -441,11 +512,16 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     if (pool === "" && key === "" && fee === "" && feeTo === "" && rpcs === "") continue;
     if (!/^0x[0-9a-fA-F]{40}$/.test(pool!)) throw new Error(`${names[0]} must be an address`);
     if (!/^0x[0-9a-f]{64}$/.test(key!)) throw new Error(`${names[1]} must be 0x and 64 lowercase hex`);
-    if (!/^[1-9][0-9]{0,37}$/.test(fee!)) throw new Error(`${names[2]} must be a whole number of wei`);
+    // one floor (card evm-buy-hookdata-fee, review fold 2 LOW-A): the kit's, which the device's rule applies too; an env
+    // value that differs would refuse every bind whose fee is under it, or do nothing, so it is refused
+    if (fee !== "" && fee !== EVM_POOL_FEE_FLOOR.toString()) throw new Error(`${names[2]} must be unset or the kit's floor, ${EVM_POOL_FEE_FLOOR} wei (EVM_POOL_FEE_FLOOR)`);
     const urls = rpcs!.split(",");
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[4]} must be two different RPC URLs`);
     const providers = urls.map((u) => solanaJsonRpc(u)) as unknown as [EvmRpc, EvmRpc]; // a plain JSON-RPC client
-    const s = evmPoolSender({ network, pool: pool!, senderKey: unhex(key!.slice(2)), floor: BigInt(fee!), ...(feeTo === "" ? {} : { feeRecipient: feeTo! }) }, providers);
+    const s0 = evmPoolSender({ network, pool: pool!, senderKey: unhex(key!.slice(2)), ...(feeTo === "" ? {} : { feeRecipient: feeTo! }) }, providers);
+    // the start's refusal names the variable and the host whose provider cannot answer the fee's reads: the host only,
+    // since a provider's URL may carry its key in the path or the query (Alchemy's /v2/<key>, Infura's /v3/<key>)
+    const s: EvmPoolSender = { ...s0, ready: (sleep) => s0.ready(sleep).catch((e: Error) => Promise.reject(new Error(`${names[4]}: ${e.message.replace(/^rpc ([12]):/, (_, k: string) => `${new URL(urls[Number(k) - 1]!).host}:`)}`))) };
     const v = Object.hasOwn(venues, network) ? venues[network] : undefined;
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
     if (pin !== undefined && pin.toLowerCase() !== s.sender) throw new Error(`${names[1]} is not the key of the kit's pinned sell sender for ${network} (${pin})`);

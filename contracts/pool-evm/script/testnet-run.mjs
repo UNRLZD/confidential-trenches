@@ -6,7 +6,9 @@
 // run's notes from its 12 words. The run key sends every transaction, as the relayer does.
 //
 //   node contracts/pool-evm/script/testnet-run.mjs --chain base-sepolia --return <address> [--venues v4,v3]
-//     [--rpc <url>,<url>] [--out <file>]
+//     [--rpc <url>,<url>] [--out <file>] [--bind-from-s <s>]
+//   --bind-from-s: each bind waits until the pool's time is at least s seconds into its epoch, and binds that epoch
+//   ("run: bind <s> s into epoch <iso>"), so its fee reads at the epoch's first block run that long after it
 //
 // What runs, and whose code:
 //  - The pins: the kit's evmPoolVenues() (the pool, the adapters, the sell delegate, the router, the v4 PoolManager,
@@ -91,7 +93,10 @@ export const NETS = Object.freeze({
   // pool (fee 10000, tick spacing 200, no hook, id 0x601b493e...) is the deepest hookless one the PoolManager's
   // Initialize logs name. No v3 and no router there (M365), so the run buys and sells through v4 only, the sell through
   // the pinned PoolManager (card evm-sell-v4-kit). The Transfer reads
-  // go to thirdweb's and dRPC's public gateways (chainid.network, chain 46630), neither a pool provider.
+  // go to thirdweb's and dRPC's public gateways (chainid.network, chain 46630), neither a pool provider. The sync's
+  // pair pages the pool's logs (PublicNode 50,000 blocks a page); the relay fee's state reads at the epoch's first
+  // block go to the kit pin's providers instead (Robinhood's own and dRPC, which keep state 600 s back; PublicNode
+  // keeps about 15 s: card evm-buy-hookdata-fee, fold 3), as feeRpcs below.
   "robinhood-testnet": Object.freeze({
     rpcs: ["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"],
     walletRpcs: ["https://46630.rpc.thirdweb.com", "https://robinhood-testnet.drpc.org"],
@@ -107,13 +112,10 @@ export const GAS = Object.freeze({ deposit: 300_000n, buy: 1_600_000n, sell: 1_0
 const TX_BYTES = 2_600n;
 /** The chunk each release takes: the wallet's ladder's smallest (EVM_LADDER.min, 0.001 ETH). */
 export const CHUNK = 1_000_000_000_000_000n;
-/** The epoch fee the run's relayer asks and the device recomputes (M356 (4), before the L1 fee): 2 x G(depth) x the
- *  epoch block's base fee, rounded up to the helper's step of 1e13 wei. */
-export const FEE_STEP = 10_000_000_000_000n;
-export const epochFee = ({ baseFeePerGas, depth }) => {
-  const f = 2n * kit.evmPoolGas(depth) * baseFeePerGas;
-  return ((f + FEE_STEP - 1n) / FEE_STEP) * FEE_STEP;
-};
+/** The epoch fee the run's relayer asks and the device recomputes: the kit's one relay fee rule (pool-fee.ts evmPoolFee,
+ *  M356 (4)) with G(depth) at the epoch block's base fee and its chain fee, the kit's floor, on the helper's step of 1e13 wei. */
+export const FEE_STEP = kit.EVM_POOL_FEE_STEP;
+export const epochFee = ({ baseFeePerGas, depth, chainFee }) => kit.evmPoolFee({ gas: kit.evmPoolGas(depth), gasPrice: baseFeePerGas, chainFee });
 /** The pool's events (contracts/pool-evm/src/interfaces/IPrivacyPool.sol:65, 78, 253) */
 export const EVENTS = Object.freeze({
   Deposited: "Deposited(address,uint256,uint256,uint256,uint256)",
@@ -161,6 +163,23 @@ function nodeProver() {
   };
 }
 
+/** The kit pin's two providers for the fee's state reads at the epoch's first block (they keep state a proof's life
+ *  back), or the --rpc pair of a dry run (its fork for both). */
+export const feeProviders = (chain, rpcArg) => rpcArg?.split(",") ?? kit.evmPoolVenues()[chain].providers;
+/** The device's pool: the sync on `rpcs`, the fee's state reads on `feeRpcs`. */
+export const deviceOf = ({ pin, rpcs, feeRpcs, relayFee }) => evmPool({ pin, rpcs, feeRpcs, relayFee, epochFee });
+/** The epoch a bind binds: once the pool's time (`nowOf`, ms) is at least `fromS` seconds into its epoch, waiting
+ *  (`sleep`) and reading it again until it is, that epoch's start and how far into it the time is, ms. */
+export async function bindEpoch(fromS, nowOf, sleep) {
+  const at = BigInt(fromS) * 1000n;
+  for (;;) {
+    const now = await nowOf();
+    const into = now % EVM_EPOCH_MS;
+    if (into >= at) return { epochStartMs: now - into, into };
+    await sleep(Number(at - into));
+  }
+}
+
 export async function main(args, io = {}) {
   const fetchFn = io.fetchFn ?? ((u, i) => globalThis.fetch(u, i));
   const sleep = io.sleep ?? realSleep;
@@ -174,11 +193,17 @@ export async function main(args, io = {}) {
   const urls = opt("--rpc")?.split(",") ?? net.rpcs;
   if (urls.length !== 2) throw new Error("--rpc: two URLs");
   const dryRun = urls.every((u) => ["127.0.0.1", "localhost"].includes(new URL(u).hostname));
+  const bindFromS = Number(opt("--bind-from-s") ?? "0");
+  if (!Number.isSafeInteger(bindFromS) || bindFromS < 0 || bindFromS * 1000 >= Number(EVM_EPOCH_MS)) throw new Error("--bind-from-s: whole seconds within an epoch");
   const out = opt("--out") ?? (dryRun ? null : recordFile(chain));
   if (!out) throw new Error("a dry run (loopback RPCs) needs --out, so it never writes the real record");
   const call = (method, params, u = urls[0]) => rpc(fetchFn, u, method, params, sleep);
   const evmRpc = (u) => Object.assign((method, params) => rpc(fetchFn, u, method, params, sleep), { url: u });
   const rpcs = [evmRpc(urls[0]), evmRpc(urls[1])];
+  // the fee's state reads at the epoch's first block (the device's bind and the relayer's answer): the kit pin's two
+  // providers, which keep state a proof's life back (live check evm-buy-hookdata-fee); the dry run's fork for both
+  const feeUrls = feeProviders(chain, opt("--rpc"));
+  const feeRpcs = [evmRpc(feeUrls[0]), evmRpc(feeUrls[1])];
   // the device's quotes: a real run's on the chain's pinned providers (the kit's index); the dry run's on the fork
   const batchRpc = (u) => async (calls) => {
     const res = await fetchFn(u, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params }))) });
@@ -246,10 +271,13 @@ export async function main(args, io = {}) {
   const relayFee = async (epochStartMs) => {
     const block = await evmEpochBlock(rpcs, epochStartMs);
     const depth = await relaySync.depthAt(block.number);
-    const fee = epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas, depth });
+    // the chain fee at that block, as the device reads it (wallet pool/evm.ts bind), here on the first fee RPC
+    const reads = kit.evmPoolChainFeeReads(chain, kit.evmPoolGas(depth));
+    const answers = await Promise.all(reads.map(async (r) => BigInt(await feeRpcs[0]("eth_call", [{ to: r.to, data: r.data }, { blockHash: block.hash }]))));
+    const fee = epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas, depth, chainFee: kit.evmPoolChainFee(chain, kit.EVM_POOL_TX_BYTES, answers) });
     return { chain: "evm", network: chain, pool, fee_recipient: relayer, epoch_ms: Number(EVM_EPOCH_MS), epoch_start_ms: Number(epochStartMs), block: `0x${block.number.toString(16)}`, fee: fee.toString(), step: FEE_STEP.toString() };
   };
-  const device = evmPool({ pin, rpcs, relayFee, epochFee });
+  const device = deviceOf({ pin, rpcs, feeRpcs, relayFee });
   // The device's one sync is evmPool's own (its trees and bind's depthAt share one cache); the relayer's is the
   // relaySync above. A cold sync reads every block from the pool's deploy block: on sepolia.base.org, whose eth_getLogs
   // takes 200 blocks a call (read 4 Nov 22:00Z), that is one call per ~156 blocks at ~0.36 s, ~12 min for the 305,000
@@ -320,12 +348,13 @@ export async function main(args, io = {}) {
   /** One release of `withdrawn` from `note` to W_{evm, l, jOf(ref)}: a buy through `v`, or a withdraw (v null). */
   const release = async (note, withdrawn, v) => {
     const trees = await treesAfter(note.block);
-    // the epoch from the pool's time after the trees: bind refuses a deadline within the send margin of now
-    const now = await evmNow(rpcs);
+    // the epoch from the pool's time after the trees, at least --bind-from-s into it: bind refuses a deadline within
+    // the send margin of now
+    const { epochStartMs, into } = await bindEpoch(bindFromS, () => evmNow(rpcs), sleep);
+    console.log(`run: bind ${Number(into / 1000n)} s into epoch ${new Date(Number(epochStartMs)).toISOString()}`);
     const l = note.label, j = jOf(note.ref);
     const W = freshWallet(seed64, "evm", l, j);
     try {
-      const epochStartMs = now - (now % EVM_EPOCH_MS);
       const s = noteSecrets(seed64, note.ref);
       const cref = { kind: "change", l, j };
       const c = noteSecrets(seed64, cref);
@@ -359,7 +388,7 @@ export async function main(args, io = {}) {
         const ev = poolLog(r, T.Bought);
         if (!ev) throw new Error(`${step}: no Bought event`);
         const d = words(ev.data);
-        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref, v, route: q.route });
+        bought.push({ l, j, w: lower(W.address), out: d[6], ref: note.ref, v, route: q.route, block: BigInt(r.blockNumber) });
         Object.assign(steps.at(-1), { out: String(d[6]), newCommitment: String(d[4]), value: String(withdrawn), fee: String(fee) });
       } else {
         const sig = sign65(withdrawDigest(chainId, pool, nullifier, b.context, withdrawn), W.secretKey);
@@ -393,15 +422,15 @@ export async function main(args, io = {}) {
         await sleep(2000);
       }
       if (amount !== BigInt(b.out)) throw new Error(`W ${W.address} holds ${amount} of the token, not the ${b.out} its buy paid, after 60 s`);
-      // the sender's fee for a sell: the fee step at least (the kit refuses a fee cap of 0)
-      const f0 = epochFee({ baseFeePerGas: BigInt((await call("eth_getBlockByNumber", ["latest", false])).baseFeePerGas), depth: 0 });
-      const fee = f0 > FEE_STEP ? f0 : FEE_STEP;
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
       const { q, built } = await fresh(
-        // `bought`: the route of the buy that paid W the token, which the sell quote requires
-        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route }),
-        (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, feeCap: fee, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
+        // `bought` and `boughtBlock`: the route of the buy that paid W the token and the block it landed in, which the
+        // sell quote requires (it reads at that block or a later one)
+        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block }),
+        // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole
+        (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
       );
+      const fee = built.feeCap;
       const sv = q.route.venue === "uniswap-v4" ? "v4" : "v3";
       const sig = kit.evmPoolSignSell(W.secretKey, chain, built);
       const auth = kit.evmPoolSignSellAuthorization(W.secretKey, chain, BigInt(await call("eth_getTransactionCount", [W.address, "latest"])));

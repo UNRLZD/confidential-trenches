@@ -3,8 +3,11 @@
 // back past a short wait answers 429 with its reset, one that answers anything but JSON answers 503 upstream; only public lists are cached, never a quote.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { LEND_NEW_SHARES } from "../limits/limits.ts";
 import * as proxyModule from "./proxy.ts";
 import { ANSWER_MAX, createProxy, PROXY_BODY_MAX, readKeys, resetMs, WAIT_MAX_MS } from "./proxy.ts";
+// read off the module, so this file still loads at a base without it
+const QUEUE_POLL_MS = (proxyModule as unknown as { QUEUE_POLL_MS?: number }).QUEUE_POLL_MS ?? 250;
 // read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
 const { checkVendorPlans } = proxyModule as unknown as { checkVendorPlans: (env: Record<string, string | undefined>) => void };
 const { PROXY_BUDGETS, proxyBudgetEnv } = proxyModule as unknown as { PROXY_BUDGETS: Record<string, { total: number; perClient: number; reserve?: number }>; proxyBudgetEnv: (v: string) => string };
@@ -214,17 +217,21 @@ test("429: the vendor is held until its reset (at most a minute); a short reset 
   assert.ok(WAIT_MAX_MS < 30_000);
 });
 
-test("each vendor is one budget callers draw from fairly: a heavy caller is throttled at its share while an honest one still goes; a cache hit counts in the caller's share only", async () => {
+test("each vendor is one budget callers draw from fairly: a heavy caller is lent past its share while a share stays free, then throttled while an honest one still goes; a cache hit counts in the caller's share only", async () => {
   const c = clock();
   const f = vendor(() => json({ ok: 1 }));
-  const p = createProxy({ ...ENV, ...WIDE }, { fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: c.sleep });
-  for (let i = 0; i < PROXY_CLIENT_MAX; i++) assert.equal((await p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "heavy")).status, 200);
+  // a refused caller's wait (card helper-crowd-429) passes no time here
+  const p = createProxy({ ...ENV, ...WIDE }, { fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: async () => {} });
+  // past its share the heavy caller is lent from the idle total (lend) while a share stays free for the next caller
+  const part = PROXY_VENDOR_MAX - PROXY_BUDGETS.jupiter!.reserve!;
+  const lent = part - LEND_NEW_SHARES * PROXY_CLIENT_MAX; // fold 4: three shares stay free for callers not seen yet
+  for (let i = 0; i < lent; i++) assert.equal((await p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "heavy")).status, 200, `build ${i}`);
   const h = await p.handle("jupiter", "/swap/v2/build", "n=x", "", "heavy");
   assert.equal(h.status, 429);
   assert.deepEqual(JSON.parse(h.body), { error: { code: "rate_limited" } });
   const wait = Number(h.headers["Retry-After"]);
-  assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= 10, `Retry-After ${wait}`);
-  assert.equal(f.seen.length, PROXY_CLIENT_MAX, "the throttled draw never reached the vendor");
+  assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= 61, `Retry-After ${wait}: the vendor's minute, as the total turns`);
+  assert.equal(f.seen.length, lent, "the throttled draw never reached the vendor");
   assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=y", "", "honest")).status, 200, "an honest caller in the same window");
   assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "heavy")).status, 200, "another vendor is its own budget");
   // a cached list: the first read draws; a hit reaches no vendor but counts in the reader's share, so a heavy reader
@@ -255,27 +262,28 @@ test("review F-C2: one address reading a cached proxy list 1000 times in one win
 
 test("each vendor's budget is PROXY_BUDGET_<VENDOR> when set (\"<total>,<per client>\"), else its published limit's; a bad value stops the start naming the variable", async () => {
   const M = 60_000; // every vendor's limit is a minute's
-  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 60, perClient: 4, windowMs: M, reserve: 34 }, relay: { total: 50, perClient: 2, windowMs: M, reserve: 0 }, lifi: { total: 100, perClient: 2, windowMs: M, reserve: 0 }, oneclick: { total: 50, perClient: 2, windowMs: M, reserve: 0 } });
+  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 60, perClient: 4, windowMs: M, reserve: 34, lend: true }, relay: { total: 50, perClient: 2, windowMs: M, reserve: 0, lend: true }, lifi: { total: 100, perClient: 2, windowMs: M, reserve: 0, lend: true }, oneclick: { total: 50, perClient: 2, windowMs: M, reserve: 0, lend: true } });
   for (const v of VENDOR_NAMES) assert.ok(PROXY_BUDGETS[v]!.perClient < PROXY_BUDGETS[v]!.total, v);
   assert.equal(proxyBudgetEnv("oneclick"), "PROXY_BUDGET_ONECLICK");
   assert.throws(() => createProxy({ PROXY_BUDGET_RELAY: "8,8" }), /^Error: PROXY_BUDGET_RELAY must be/);
   assert.throws(() => createProxy({ PROXY_BUDGET_LIFI: "secret-ish" }), (e: Error) => !e.message.includes("secret-ish"));
   let t = 1_800_000_000_000;
   const f = vendor(() => json({ ok: 1 }));
-  const p = createProxy({ PROXY_BUDGET_RELAY: "3,2" }, { fetch: f.fetch, now: () => (t += 1) });
+  const p = createProxy({ PROXY_BUDGET_RELAY: "3,2" }, { fetch: f.fetch, now: () => (t += 1), sleep: async () => {} });
   for (let i = 0; i < 3; i++) await p.handle("relay", "/quote/v2", "", "{}", "a");
   assert.equal(f.seen.length, 2, "the share from the environment");
   for (let i = 0; i < 3; i++) await p.handle("relay", "/quote/v2", "", "{}", "b");
   assert.equal(f.seen.length, 3, "the total from the environment");
+  // card helper-crowd-429: past its share of Jupiter's default, "a" is lent from the idle total (lend)
   for (let i = 0; i < 5; i++) await p.handle("jupiter", "/swap/v2/build", "", "", "a");
-  assert.equal(f.seen.length, 3 + PROXY_BUDGETS.jupiter!.perClient, "another vendor keeps its default");
+  assert.equal(f.seen.length, 3 + 5, "another vendor keeps its default, its share lent while the total sits idle");
 });
 
 // review F-D on the proxy: a vendor that keeps its published per-minute limit on a 60-second sliding window (the
 // helper's own Jupiter reads drawn too), and addresses at their full share until an honest first-time caller is
 // refused. At 06a656f's design budget (300 a window, 60 a caller) one or two addresses make the vendor throttle, which
 // holds the vendor for everyone; at the published defaults the vendor never throttles and it takes total / share.
-test("review F-D (proxy): at each vendor's published limit, no set of callers can make the vendor throttle; more addresses than today are needed to refuse an honest caller", async () => {
+test("review F-D (proxy): at each vendor's published limit, no set of callers can make the vendor throttle; the callers' part is served in full and at least two addresses are needed to refuse an honest caller", async () => {
   const PER_MIN = { jupiter: 60, relay: 50, lifi: 100, oneclick: 50 } as const;
   const run = async (v: keyof typeof PER_MIN, env: Record<string, string>) => {
     let t = 1_800_000_000_000;
@@ -294,22 +302,26 @@ test("review F-D (proxy): at each vendor's published limit, no set of callers ca
     const own = v === "jupiter" ? 5 : 0;
     for (let i = 0; i < own; i++) await p.handle(v, "/tokens/v2/search", `query=${i}`, "", undefined, true);
     let n = 0;
+    let served = 0;
     for (; n < 50; n++) {
-      for (let i = 0; i < 200; i++) if ((await p.handle(v, path, `a=${i}`, body, `198.51.100.${n}`)).status !== 200) break;
+      for (let i = 0; i < 200; i++) if ((await p.handle(v, path, `a=${i}`, body, `198.51.100.${n}`)).status !== 200) break; else served++;
       if ((await p.handle(v, path, "h=1", body, `192.0.2.${n}`)).status !== 200) break; // a first-time caller each round
+      served++;
     }
-    return { addresses: n + 1, throttledByVendor, own };
+    return { addresses: n + 1, throttledByVendor, own, served };
   };
   for (const v of VENDOR_NAMES) {
     const today = await run(v, { [proxyBudgetEnv(v)]: "300,60" });
     const now = await run(v, {});
     assert.ok(today.throttledByVendor > 0, `${v} at 06a656f's budget: the vendor throttled, so it was held for everyone`);
     assert.equal(now.throttledByVendor, 0, `${v}: the vendor never throttled`);
-    // each round an address takes its share and the honest caller one: refused once the rounds pass the total less the
-    // helper's own reserve (its own reads draw that, never the callers' part)
-    assert.equal(now.addresses, Math.floor((PROXY_BUDGETS[v]!.total - (PROXY_BUDGETS[v]!.reserve ?? 0)) / (PROXY_BUDGETS[v]!.perClient + 1)) + 1, v);
+    // card helper-crowd-429 (lend): the first address is lent past its share while a share stays free, the next takes
+    // its share and the honest caller one; the honest caller is refused only once the whole callers' part (the total
+    // less the helper's own reserve) is served, never by the vendor, and never by fewer than two addresses
+    const part = PROXY_BUDGETS[v]!.total - (PROXY_BUDGETS[v]!.reserve ?? 0);
+    assert.equal(now.served, part, `${v}: the callers' part served in full, never past it`);
     console.log(`  [F-D proxy] ${v}: ${now.addresses} addresses at the published default, ${today.addresses} at 06a656f's budget`);
-    assert.ok(now.addresses > today.addresses, `${v}: ${now.addresses} addresses, today ${today.addresses}`);
+    assert.ok(now.addresses >= 2, `${v}: ${now.addresses} addresses`);
   }
 });
 
@@ -390,7 +402,8 @@ test("re-check F-D: a call joining one in flight reaches no vendor, so it draws 
 test("fold 6 (R5h): a reserved own read's retry after a vendor's short reset still draws on the reserve, with the callers' part full", async () => {
   const c = clock();
   const f = vendor((_c, n) => (n === 27 ? json({ e: "slow" }, 429, { "retry-after": "0" }) : json({ ok: 1 })));
-  const p = createProxy({}, { fetch: f.fetch, now: c.now, sleep: c.sleep });
+  // a refused caller's wait (card helper-crowd-429) passes no time here, so the callers' part stays full
+  const p = createProxy({}, { fetch: f.fetch, now: c.now, sleep: async (ms) => (ms === QUEUE_POLL_MS ? undefined : c.sleep(ms)) });
   let callers = 0;
   for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) if ((await p.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
   assert.equal(callers, 60 - 34, "the callers' part is full");
