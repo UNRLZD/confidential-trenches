@@ -31,6 +31,7 @@ export const CHANGED = [
   "scripts/live-checks/app-shell.mjs",
   "scripts/live-checks/app-token-chart.mjs",
   "scripts/live-checks/app-token-route.mjs",
+  "scripts/live-checks/base-200ms-blocks.mjs",
   "scripts/live-checks/delete-refund-readback.mjs",
   "scripts/live-checks/delete-refund-readback.sweep.mjs",
   "scripts/live-checks/evm-buy-hookdata-fee.mjs",

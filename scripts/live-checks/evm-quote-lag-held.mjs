@@ -30,10 +30,12 @@ const CLANKER_HOOK = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc";
 const v4 = (currencyIn, currency, fee, tickSpacing, hooks = ZERO) => ({ venue: "uniswap-v4", currencyIn, hops: [{ currency, fee, tickSpacing, hooks, hookData: "0x" }] });
 // [name, request, the lagging provider's host, how many blocks back, the outcome every quote must end in]: each
 // lagger is the venue's first or second provider, so the first quote, with nothing measured, asks it in the pair; each
-// lag is the venue's maxLag (Robinhood 100, Base 5), so its head pairs with an up-to-date one
+// lag is the venue's maxLag (Robinhood 100, Base 50: 10 s of its 200 ms blocks, card base-200ms-blocks), so its head
+// pairs with an up-to-date one; Base's 5 too (its maxLag at 2 s blocks, the same 1 s of lag now)
 export const CASES = [
   ["robinhood-publicnode-100", { chain: "robinhood", token: TORCH, amountIn: 10n ** 15n, slippageBps: 300, route: v4(ZERO, TORCH, 3000, 60) }, "robinhood-rpc.publicnode.com", 100, "ok"],
   ["base-blastapi-5", { chain: "base", token: CLANKER_COIN, amountIn: 10n ** 15n, slippageBps: 300, route: v4(BASE_WETH, CLANKER_COIN, 0x800000, 200, CLANKER_HOOK) }, "base-mainnet.public.blastapi.io", 5, "ok"],
+  ["base-blastapi-50", { chain: "base", token: CLANKER_COIN, amountIn: 10n ** 15n, slippageBps: 300, route: v4(BASE_WETH, CLANKER_COIN, 0x800000, 200, CLANKER_HOOK) }, "base-mainnet.public.blastapi.io", 50, "ok"],
 ];
 
 const pct = (xs, p) => {

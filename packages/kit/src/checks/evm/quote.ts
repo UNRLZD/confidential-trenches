@@ -37,7 +37,9 @@
 //   refusal: anyone can seed a token with more pools that could beat its route than a quote reads, and its buy is then
 //   refused, never bought through a seeded pool. A
 //   held pool that no route from the native asset reaches adds nothing. What is left: a pool of the token created
-//   before the scan's depth (about 23 days on Base, 12 days on Robinhood), of a shape the device has not pinned, that
+//   before the scan's depth (Base's 1M blocks: about 23 days of its 2 s blocks, 2.3 days of the 200 ms blocks it makes
+//   since block 53556127, 2026-11-05 18:00:01Z, once they fill the depth on 2026-11-08 01:33Z; Robinhood's 10M blocks,
+//   about 12 days), of a shape the device has not pinned, that
 //   the helper leaves off its list while it routes the buy into a standard pool it seeded;
 // - for a route with a hooked v4 hop, the same route with each hook's code replaced by a hook that does nothing
 //   (eth_call's state override): the hookless output H. The hook's take H - Q is shown as a fee before the buy,
@@ -666,7 +668,7 @@ async function within<T>(p: Promise<T>, ms: number, onLate: () => never): Promis
 // The held head (card evm-quote-head-watch): the last block both providers agreed on and confirmed by number (same hash
 // and time), kept between quotes so a tap runs only the read round. A quote reads at it only while it was read at most
 // EVM_HEAD_REUSE_MS ago on the device's clock (a block's own time trails the clock by its interval and the providers'
-// lag: Base's 2 s blocks read 1.1 to 1.4 s behind this Mac's clock, 2026-11-04 10:58Z, so an age by block time held a
+// lag: Base's blocks, 2 s apart then, read 1.1 to 1.4 s behind this Mac's clock, 2026-11-04 10:58Z, so an age by block time held a
 // head one refresh in three), and its block under the 30 s rule, well inside the state the pinned providers keep
 // (Robinhood's about 13 s: 2 of 11 USDG quotes refused when their reads landed past it, 2026-11-04, card
 // evm-pool-buy-quote fold 8); past it the quote agrees on a new block as before. While quotes are asked the head is read
