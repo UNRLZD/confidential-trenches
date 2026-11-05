@@ -40,7 +40,7 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { budgetFromEnv, evmThrottleS, LIMIT_WINDOW_MS, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
+import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, LIMIT_WINDOW_MS, LOGS_REFUSED, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
@@ -180,6 +180,23 @@ function evmLimited(chain: RpcChain, answer: unknown): number {
   }
   return wait;
 }
+/** An EVM provider's error saying it cannot serve this request's shape (card evm-rpc-spare-list; the words the wallet's
+ *  pool reader holds, packages/wallet/src/pool/evm.ts OUT_WORDS): PublicNode's -32701 "Please specify an address" for a
+ *  topics-only eth_getLogs, Pocket's "missing required field 'address'", and -32601 "method not available". Another
+ *  provider may serve the request, and this one still serves the others. Never a range cap (the device pages on those)
+ *  or a revert (the call's own answer). */
+const SHAPE_CODES: ReadonlySet<unknown> = new Set([-32701, -32601]);
+const SHAPE_WORDS = /specify an address|missing required field 'address'/i;
+function evmShapeRefused(chain: RpcChain, answer: unknown): boolean {
+  if (!EVM_CHAINS.has(chain)) return false;
+  return (Array.isArray(answer) ? answer : [answer]).some((a) => {
+    const e = (a as { error?: unknown } | null)?.error as { code?: unknown; message?: unknown } | null | undefined;
+    if (e === undefined || e === null || typeof e !== "object") return false;
+    const m = String(e.message ?? "");
+    if (EVM_RANGE_MESSAGE.test(m) || e.code === 3 || /revert/i.test(m)) return false;
+    return SHAPE_CODES.has(e.code) || SHAPE_WORDS.test(m);
+  });
+}
 /** The environment variable naming a chain's budget, "<total>,<per client>[,<per method>]" per 10 s; the share at
  * least RPC_BATCH_MAX, so a full batch can be served, and a method's at least that and at most the total. */
 export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase().replace(/-/g, "_")}`;
@@ -220,7 +237,9 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `pacer`: another client's, when this one sends to the same keyed URL (card helper-crowd-429); else its own. */
 type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
-type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string };
+/** `timing` (card helper-ready-page-warm): this read's Server-Timing entries, the wait before its send (a hold or the
+ *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint. */
+type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timing?: string[] };
 type Upstream = { url: string; forms: Buffer[] };
 
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
@@ -430,11 +449,14 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (!(await holdOver(c, deadline))) return throttled(budget.heldFor(c), undefined, `${c} held`);
     const wait = budget.takeEach(drawsOf(c, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
-    const list = [...new Set([upstreams[c].url, ...(deps.pinned?.[c] ?? [])])];
+    // a log read is never sent to a provider that refuses every one (LOGS_REFUSED): its 429 would hold it for the reads
+    // it does answer
+    const list = [...new Set([upstreams[c].url, ...(deps.pinned?.[c] ?? [])])].filter((u) => !(methods.includes("eth_getLogs") && LOGS_REFUSED.has(u)));
     for (let tries = 0; ; tries++) {
       let soonestMs = Infinity;
       let down = false;
       let sent = false;
+      let shaped: { status: number; body: string; secretForms: Buffer[] } | undefined;
       for (const url of list) {
         const secretForms = url === upstreams[c].url ? upstreams[c].forms : [];
         const h = holds.heldMs(url);
@@ -483,6 +505,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           soonestMs = Math.min(soonestMs, holds.heldMs(url));
           continue;
         }
+        // a provider that cannot serve this request's shape is out for it alone (no hold: its other requests still go to
+        // it); the next is asked, and the last such answer is the caller's when every provider refuses it so
+        if (evmShapeRefused(c, answer)) {
+          shaped = { status: r.status, body: text, secretForms };
+          continue;
+        }
         if (secretForms.some((f) => Buffer.from(text, "utf8").includes(f))) return UPSTREAM();
         return { status: r.status, body: text };
       }
@@ -496,6 +524,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         if (again === 0) continue;
         return throttled(again, undefined, budget.refusedBy());
       }
+      // a provider still held may serve it: the caller's wait below, never the refusal (the device would take it as
+      // the read's answer)
+      if (shaped !== undefined && soonestMs === Infinity) return shaped.secretForms.some((f) => Buffer.from(shaped!.body, "utf8").includes(f)) ? UPSTREAM() : { status: shaped.status, body: shaped.body };
       // every provider failed (none held or out of room): upstream, so the device reads its own; else the soonest wait
       return down && soonestMs === Infinity ? UPSTREAM() : throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.max(1, Math.ceil(soonestMs / 1000)), undefined, `${c} every provider held`);
     }
@@ -511,8 +542,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   async function call(key: string, url: string, secretForms: Buffer[], forward: string, methods: string[], client: string | undefined, reserved: boolean): Promise<Answer> {
     const c = (key === PUBLIC_KEY ? "solana" : key) as RpcChain;
     const viaSlot = c === "solana" && keyed && key !== PUBLIC_KEY;
+    const begun = now();
     /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). */
-    const fellBack = (): Promise<Answer> => (publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : Promise.resolve(UPSTREAM()));
+    const fellBack = (): Promise<Answer> =>
+      publicFallback
+        ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved).then((a) => ({ ...a, timing: [`rpc-keyed;dur=${Math.round(now() - begun)};desc="fell back"`, ...(a.timing ?? [])] }))
+        : Promise.resolve(UPSTREAM());
     // card helper-crowd-429: a hold that ends within HOLD_WAIT_MS is waited out and the send paced from its end, and a
     // send the provider throttles is sent once more after its short hold, all by `deadline`; a longer hold is the
     // caller's 429 with its seconds. An EVM chain's provider is held for every path of the helper that reads it (Deps
@@ -602,7 +637,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const b = Buffer.from(text, "utf8");
     if (secretForms.some((f) => b.includes(f))) return UPSTREAM();
     if (viaSlot) slot.ok();
-    return { status: r.status, body: text };
+    const waited = Math.round(sent - begun);
+    return { status: r.status, body: text, timing: [...(waited > 0 ? [`rpc-wait;dur=${waited}`] : []), `rpc;dur=${Math.round(now() - sent)};desc="${key === PUBLIC_KEY ? "public" : key}"`] };
   }
 
   /**

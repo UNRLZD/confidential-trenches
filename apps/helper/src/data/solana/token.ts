@@ -303,13 +303,15 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 // The served answers
 // ---------------------------------------------------------------------------------------------------------------
 
-type Answer = { status: number; headers: Record<string, string>; body: string };
+type Answer = { status: number; headers: Record<string, string>; body: string; timing?: string[] };
 type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number): Promise<Answer> };
-type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string; why?: string }> };
+type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string; why?: string; timing?: string[] }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
-export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number; why?: string };
+/** `timing` (card helper-ready-page-warm): the Server-Timing entries of the read that made this answer, one per upstream
+ *  it waited on; "cache" when it was served from what was held. */
+export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number; why?: string; timing?: string };
 
 const err = (status: number, code: string): DataAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 export const NOT_FOUND = err(404, "not_found");
@@ -436,7 +438,7 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
     },
     get(key: string, client?: string): Promise<DataAnswer> {
       const hit = last.get(key);
-      if (hit !== undefined && now() - hit.at < (typeof freshMs === "number" ? freshMs : freshMs(key))) return Promise.resolve(view(key, hit.a));
+      if (hit !== undefined && now() - hit.at < (typeof freshMs === "number" ? freshMs : freshMs(key))) return Promise.resolve(held(view(key, hit.a)));
       const usable = opts.revalidate === true && hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS;
       let p = running.get(key);
       if (p === undefined) {
@@ -450,12 +452,15 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
           .finally(() => running.delete(key));
         running.set(key, p);
       }
-      return usable ? Promise.resolve(view(key, hit.a)) : p.then((a) => view(key, a));
+      return usable ? Promise.resolve(held(view(key, hit.a))) : p.then((a) => view(key, a));
     },
   };
 }
 
 class Upstream extends Error {}
+
+/** An answer served from what was held: its read's timing is not this request's (card helper-ready-page-warm). */
+const held = (a: DataAnswer): DataAnswer => ({ ...a, timing: "cache" });
 
 const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
 
@@ -467,13 +472,13 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
 
-  async function call(method: string, params: unknown[], via: Rpc = rpc, client?: string): Promise<{ result: Record<string, unknown> }> {
+  async function call(method: string, params: unknown[], via: Rpc = rpc, client?: string): Promise<{ result: Record<string, unknown>; timing: string[] }> {
     const a = await via.handle("solana", "application/json", rpcBody(method, params), client);
     if (a.status === 429) throw new Throttled(retryAfterOf(a.headers), a.why);
     if (a.status !== 200) throw new Upstream();
     const j = obj(JSON.parse(a.body));
     if (!Object.hasOwn(j, "result")) throw new Upstream();
-    return { result: obj(j.result) };
+    return { result: obj(j.result), timing: a.timing ?? [] };
   }
 
   // Jupiter's search (D-S6, card helper-token-page-cold): every mint asked while a search is out joins the next one, of
@@ -481,9 +486,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // waits for one of its mints (`cold`) and the counted minute has room; with only refreshes waiting, JUP_GAP_MS after
   // the last search and while COLD_ROOM stay free; after a search that failed, JUP_GAP_MS after it either way. A mint's
   // row is kept JUP_FRESH_MS from our own read.
-  type JupRow = { row: Record<string, unknown> | null; at: number };
+  /** `timing`: the search's Server-Timing entries for the caller it answered: its wait to be sent (a search out, the
+   *  counted minute's room, the gap after a failure) and the search itself (card helper-ready-page-warm). */
+  type JupRow = { row: Record<string, unknown> | null; at: number; timing?: string[] };
   const jrows = bounded<JupRow & { readAt: number }>(CACHE_MAX);
-  const waiting = new Map<string, { cold: boolean; ws: { ok: (r: JupRow) => void; fail: (e: Error) => void }[] }>();
+  const waiting = new Map<string, { cold: boolean; since: number; ws: { ok: (r: JupRow) => void; fail: (e: Error) => void }[] }>();
   /** When each search in the proxy's counted minute went, oldest first. */
   const sent: number[] = [];
   const SPAN_S = VENDOR_WINDOW_MS / 1000;
@@ -538,13 +545,17 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       size += 1 + m.length;
     }
     searching = true;
+    const sentAt = performance.now();
     lastSearch = now();
     sent.push(lastSearch);
     let rows: unknown = null;
     let at = now();
+    // the proxy's part of the search (its budget wait, Jupiter's hold or turn, each 429 and the send), as jup-<entry>
+    let parts: string[] = [];
     try {
       // proxy.ts PROXY_RESERVE; a hold of Jupiter's is waited out within SEARCH_HOLD_WAIT_MS (proxy.ts turn)
       const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS);
+      parts = (a.timing ?? []).map((e) => `jup-${e}`);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
@@ -555,6 +566,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
     if (!Array.isArray(rows)) lastFailed = lastSearch;
     for (const mint of batch) {
+      const since = waiting.get(mint)?.since ?? sentAt;
       const ws = waiting.get(mint)?.ws ?? [];
       waiting.delete(mint);
       if (!Array.isArray(rows)) {
@@ -564,7 +576,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       }
       const r: JupRow = { row: searchRow(rows, mint), at };
       jrows.set(mint, { ...r, readAt: now() });
-      for (const w of ws) w.ok(r);
+      const timing = [`jup-wait;dur=${Math.round(sentAt - since)}`, ...parts, `jup;dur=${Math.round(performance.now() - sentAt)}`];
+      for (const w of ws) w.ok({ ...r, timing });
     }
     searching = false;
     schedule();
@@ -573,11 +586,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   /** `cold`: a caller waits for this row (nothing held is served meanwhile); else a held page's refresh. */
   function jupiter(mint: string, cold: boolean): Promise<JupRow> {
     const hit = jrows.get(mint);
-    if (hit !== undefined && now() - hit.readAt < JUP_FRESH_MS) return Promise.resolve(hit);
+    if (hit !== undefined && now() - hit.readAt < JUP_FRESH_MS) return Promise.resolve({ row: hit.row, at: hit.at, timing: ["jup;desc=held"] });
     return new Promise((ok, fail) => {
       const w = waiting.get(mint);
       if (w !== undefined) (w.ws.push({ ok, fail }), (w.cold ||= cold));
-      else waiting.set(mint, { cold, ws: [{ ok, fail }] });
+      else waiting.set(mint, { cold, since: performance.now(), ws: [{ ok, fail }] });
       schedule();
     });
   }
@@ -597,11 +610,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   }
   async function readMint(mint: string, client?: string) {
     const keys = [mint];
-    const { result } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }], rpc, client);
+    const { result, timing } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }], rpc, client);
     const value = result.value;
     const slot = obj(result.context).slot;
     if (!Array.isArray(value) || value.length !== keys.length || !Number.isSafeInteger(slot)) throw new Upstream();
-    return { mint: toMint(value[0], slot as number), at: now() };
+    return { mint: toMint(value[0], slot as number), at: now(), timing };
   }
 
   // Discover's rows (D-S6 reads Jupiter only for tokens off the lists): indexed once per snapshot
@@ -663,7 +676,10 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt)), src: "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
 
   const page = cached(PAGE_FRESH_MS, now, async (mint, client, _held, waits) => {
+    // card helper-ready-page-warm: one Server-Timing entry per upstream this read waited on
+    const t0 = performance.now();
     const listed = await listedRow(mint);
+    const listsMs = Math.round(performance.now() - t0);
     // a Discover row's launch is the lists'; this read finds its pool (the config Jupiter names is not in a row)
     const early = listed === null ? null : launch(mint, { tag: listed.row.launchpad as string | null, config: null, graduated: null }, listed.row.created_s, client);
     const [m, j] = await Promise.all([mintAt(mint, client), listed === null ? jupiter(mint, waits === true) : null]);
@@ -678,9 +694,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       pool = jupiterPool(j.row);
     }
     if (base === null || base.token !== mint) return NOT_FOUND;
+    const t1 = performance.now();
     const origin = await settled(mint, early ?? launch(mint, hintsOf([j!.row]).get(mint), base.created_s, client));
+    const timing = [`lists;dur=${listsMs}`, ...m.timing, ...(j?.timing ?? []), `launch;dur=${Math.round(performance.now() - t1)}`, `read;dur=${Math.round(performance.now() - t0)}`];
     const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin };
-    b.answer = pageOf(b);
+    b.answer = { ...pageOf(b), timing: timing.join(", ") };
     built.set(mint, b);
     return b.answer;
   }, {

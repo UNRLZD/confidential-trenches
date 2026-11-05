@@ -37,6 +37,9 @@ export const LIVE_CHECKS = [
   "evm-buy-hookdata-fee",
   "helper-tape-4337-trader",
   "helper-live-bars-no-503",
+  "sol-small-note-buys",
+  "evm-rpc-spare-list",
+  "base-200ms-blocks",
   "pool-buy-send-fast",
 ];
 

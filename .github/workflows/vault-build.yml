@@ -6,9 +6,10 @@
 # build that is the pin is uploaded, with its sha256, as the artifact vault-mainnet-wasm, which the owner's deploy paste
 # downloads by this run's id (gh run download <id> -n vault-mainnet-wasm); deploy.mjs refuses any other wasm on mainnet.
 # The paths are every file the build and pin steps read: contracts/vault/ and deploy.mjs's imports
-# (contracts/vault/scripts/deploy.test.mjs holds the list against them), and scripts/ci/retry.sh.
+# (contracts/vault/scripts/deploy.test.mjs holds the list against them), scripts/ci/retry.sh and scripts/ci/fetch.sh.
 # No secret and no token beyond the read-only one GitHub gives every run. Actions pinned by commit sha as ci.yml has
-# them (actions/checkout v7.0.1, actions/setup-node v7.1.0, actions/upload-artifact v7.0.2).
+# them (actions/checkout v7.0.1, actions/setup-node v7.1.0, actions/upload-artifact v7.0.2, actions/cache/restore and
+# actions/cache/save v6.1.0).
 name: vault-build
 
 on:
@@ -22,6 +23,7 @@ on:
       - "scripts/ci/near-rpc-operators.mjs"
       - "scripts/ci/rpc-wait.mjs"
       - "scripts/ci/retry.sh"
+      - "scripts/ci/fetch.sh"
   workflow_dispatch:
 
 permissions:
@@ -46,14 +48,23 @@ jobs:
       - name: rust 1.96.0
         run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
       # cargo-near 0.22.0, the release binary checked against the sha256 ci.yml checks it by
+      - id: cargo-near-tgz
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
       - name: install cargo-near
         run: |
-          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/cargo-near.tgz" \
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/cargo-near-0.22.0.tgz 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a \
             https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
-          echo "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
+          tar -xzf ~/.cache/ci-downloads/cargo-near-0.22.0.tgz -C "$RUNNER_TEMP"
           install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
           cargo +1.96.0 near --version
+      - if: steps.cargo-near-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
       - name: two clean mainnet builds that must agree
         run: |
           node contracts/vault/scripts/deploy.mjs --build-only --flavor mainnet --build-dir "$RUNNER_TEMP/vault-mainnet" 2>&1 | tee "$RUNNER_TEMP/build.log"

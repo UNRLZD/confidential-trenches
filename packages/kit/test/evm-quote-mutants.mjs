@@ -75,7 +75,9 @@ export const MUTANTS = [
   [QUOTE, "      const signal = until === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([AbortSignal.timeout(timeoutMs), until]);", "      const signal = until;", R, "T4 "],
   [QUOTE, "  if (r.length !== 2 + 2 * (64 + 32 * n)) return refuse(", "  if (false) return refuse(", R, "T6 "],
   [QUOTE, "const hints = (Array.isArray(a.hints) ?", "const hints = (false ?", R, "N1b "],
-  [QUOTE, "if (!fine(rs)) return refuse(", "if (false) return refuse(", R, "N1a "],
+  // (SP3, not N1a: N1a's provider answers its newest request's head block with an error too, refused there since card
+  // evm-scan-second-provider)
+  [QUOTE, "if (!fine(rs)) return refuse(", "if (false) return refuse(", R, "SP3 "],
   // card evm-quote-head-watch: a scan request that fails or overflows is asked by halves; one ending past maxLag behind
   // the agreed block is scanned on to it
   [QUOTE, "rs.every((r) => Array.isArray(r) && r.length < SCAN_MAX_LOGS)", "rs.every((r) => Array.isArray(r))", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
@@ -138,6 +140,31 @@ export const MUTANTS = [
   [QUOTE, "=> k.hooks !== NATIVE && !evmHookListed(chain, k.hooks, k.fee, k.tickSpacing);", "=> k.hooks !== NATIVE && !v.hookedPools.some((h) => lower(h.hooks) === k.hooks);", R, "P5 "],
   // the scan reads Initialize's currencies (topics 2 and 3), up to the agreed block, kept once the block is confirmed
   [QUOTE, "if (scanHead - b > maxLag) return refuse(", "if (false) return refuse(", R, "S2 "],
+  // card evm-scan-second-provider: a request the first scan provider fails goes to the second; the first passes on at
+  // once a refused connection and a throttle held past 2 s; the newest request asks its head block in its batch
+  [QUOTE, "      if (next === undefined) throw e;", "      throw e;", R, "SP1 "],
+  [QUOTE, "            if (spareNext) throw new ScanRefused(", "            if (false) throw new ScanRefused(", R, "SP1 "],
+  [QUOTE, "      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw", "      if (false) throw", R, "SP4 "],
+  [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
+  [QUOTE, "  const fast = second !== undefined && jobs.reduce(", "  const fast = second !== undefined && 0 * jobs.reduce(", R, "SP2 "],
+  [QUOTE, "    const top = p === null;", "    const top = false;", R, "SP3 "],
+  // review of 22e29c9, B2: the block check on the request up to the head alone; since card evm-rpc-spare-list a not-yet
+  // newest request is asked again whole, never as halves (SL3), so SP7 and SP9 send no request below the head and pass
+  // on this mutant: SL5 holds it, a lag over one span, so the lower request ends past the backend too
+  [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SL5 "],
+  // review of 22e29c9, B1: a head read on the second sent the scan's requests there too
+  [QUOTE, "headFrom(f).then((head) => ({ head, first: f })));", "headFrom(f).then((head) => ({ head, first: f.next ?? f })));", R, "SP6 "],
+  // review of 22e29c9, N4: the 2 s hold where no second follows (the head read), and a not-yet block as an answer
+  [QUOTE, "      fast &&= spareNext;", "", R, "SP8 "],
+  [QUOTE, 'throw on.next !== undefined ? new ScanRefused("rpc_error", m) : new NotHeldYet("rpc_error", m);', "return out;", R, "SP3 "],
+  [QUOTE, "      if (fast && on.next !== undefined) throw new ScanRefused(", "      if (false) throw new ScanRefused(", R, "SP5 "],
+  // card evm-rpc-spare-list: a request the second fails goes to the third, the head too; a 5xx passes on at once; a
+  // not-yet block is asked again whole; a one-call batch's bare answer is read
+  [QUOTE, "      await settle(rest.map(run));", "      await settle(rest.map((r) => one(r)));", R, "SL1 "],
+  [QUOTE, "(o.next === undefined ? Promise.reject(e) : headFrom(o.next))", "(o.next === undefined || o !== firstOn ? Promise.reject(e) : headFrom(o.next))", R, "SL1 "],
+  [QUOTE, "          if (spareNext && /^the provider answered HTTP 5", "          if (false && /^the provider answered HTTP 5", R, "SL1 "],
+  [QUOTE, "      if (notYet) {", "      if (false) {", R, "SL3 "],
+  [QUOTE, "calls.length === 1 && typeof parsed === \"object\" && parsed !== null ? [parsed] : parsed;", "false ? [parsed] : parsed;", R, "SL4 "],
   [QUOTE, "  scanned?.commit();", "", R, "N1a "],
   // review of 5452011: no override for a pool the PoolManager does not hold, one hook per override, never an address
   // the reads call; the route's own pools are not R; pools of other currencies priced through them, bounded
@@ -153,7 +180,7 @@ export const MUTANTS = [
   // every scan of a quote shares one gate and one head; X's scan failing refuses the quote
   // (no mutant gives each scan its own gate: the token's scan and the one scan of every X run one after the other, so
   // a gate per scan never has more in flight; G1 and TH3 hold the scan gate's own limit, T8b the reads' gate's)
-  [QUOTE, "(headOfScan ??= scanHeadOf(scan, gate))", "scanHeadOf(scan, gate)", R, "G3 "],
+  [QUOTE, "(scanFrom ??= headFrom(f).then(", "(scanFrom = headFrom(f).then(", R, "G3 "],
   [QUOTE, "if (next === undefined) free++;\n      else next();", "free++;\n      next?.();", R, "T8b "],
   // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
   // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
@@ -256,13 +283,13 @@ export const MUTANTS = [
   [QUOTE, "      if (strict() && holds + others.length - n < need) break;", "      if (against.length > 0 && holds + others.length - n < need) break;", R, "V15 "],
   // the scan's spans: each that came back is kept, also when another failed, never past a head named beyond maxLag;
   // a throttled span is asked again whole
-  [QUOTE, "  await settle(jobs.map((j) => one(j))).catch((e) => failing(e));", "  await settle(jobs.map((j) => one(j)));", R, "J1 "],
+  [QUOTE, "  await settle(jobs.map(run)).catch((e) => failing(e));", "  await settle(jobs.map(run));", R, "J1 "],
   [QUOTE, "    if (a > at) out.push([at, a - 1]);", "", R, "J1 "],
   [QUOTE, "      if (scanHead - b.number <= maxLag) commit();", "      commit();", R, "J3 "],
   // the review of bc189de: a kept scan started early waits for the quote's pick when it ends (L-3) and when it fails
   // (M12); a span is kept only for the currencies of the request that came back (M20)
-  [QUOTE, "v.scan, at, v.maxLag, gate,", "v.scan, agreedHead, v.maxLag, gate,", R, "J4 "],
-  [QUOTE, "(headOfScan ??= scanHeadOf(scan, gate)), at);", "(headOfScan ??= scanHeadOf(scan, gate)), agreedHead);", R, "J5 "],
+  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at);", "v.scan, agreedHead, v.maxLag, scanFromOf(firstOn), at);", R, "J4 "],
+  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at);", "v.scan, at, v.maxLag, scanFromOf(firstOn), agreedHead);", R, "J5 "],
   [QUOTE, "for (const g of got) if (g.part.includes(e)) e.spans", "for (const g of got) e.spans", R, "J6 "],
   // fold 5: the scan's gate, per quote: a 429, a named limit or a timeout halves its parallelism (to 1), answers raise
   // it again; a throttle holds the next requests for its Retry-After or a doubling backoff, spends no try, and past
@@ -299,7 +326,7 @@ export const MUTANTS = [
   [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "X3 "],
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
   [QUOTE, "    return x < y ? x : y;", "    return x;", R, "H2 "],
-  [QUOTE, "      const span = part.length === 1 ? s.span : Math.min(s.span, s.orSpan ?? s.span);", "      const span = s.span;", R, "B1 "],
+  [QUOTE, "      const span = part.length === 1 ? on.span : Math.min(on.span, on.orSpan ?? on.span);", "      const span = on.span;", R, "B1 "],
   [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X4 "],
   [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
   [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1a "],

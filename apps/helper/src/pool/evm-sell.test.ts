@@ -10,7 +10,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { readFileSync } from "node:fs";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
-import { EVM_LANE_RETRY_S, EVM_LANE_SENT_RETRY_S, EVM_LANE_SENT_WINDOW_BLOCKS, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
+import { EVM_LANE_RETRY_S, EVM_LANE_SENT_RETRY_S, EVM_LANE_SENT_WINDOW_MS, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
 import * as evmModule from "./evm.ts";
 
 // read by name, so a build without the ceiling fails only the tests that use it
@@ -1105,7 +1105,7 @@ test("a lane's watch ends at its bound with one log line; while the lowest unmin
   await r.step({ atMs: deadlineMs + 60_000 + 700_000 });
   assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, "the watch has ended");
   const held = await r.s.sell(freshBody("W-behind", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
-  assert.deepEqual([held.status, code(held), held.retryAfterS], [503, "upstream", 2], `its tend sent: one block: ${JSON.stringify(held.body)}`);
+  assert.deepEqual([held.status, code(held), held.retryAfterS], [503, "upstream", EVM_LANE_SENT_RETRY_S], `its tend sent: one block: ${JSON.stringify(held.body)}`);
   assert.deepEqual(sends(r.x).map((t) => fieldsOf(t).nonce), [7n, 7n], "nothing sent behind it; the held answer's tend replaced 7 once the base fee fell");
   await r.step({ atMs: r.at() + 1_000 });
   assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, "the held tend's replacement, its watch started past the bound, ends with no second line");
@@ -1333,7 +1333,7 @@ test("a lane held behind a nonce the chain dropped recovers once the chain does:
   const later = (label: string) => s.sell(freshBody(label, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
   const before = sends(ch.x).length;
   const h1 = await later("W-held-1");
-  assert.deepEqual([h1.status, code(h1), h1.retryAfterS], [503, "upstream", 2], `its tend sent 7 again: one block: ${JSON.stringify(h1.body)}`);
+  assert.deepEqual([h1.status, code(h1), h1.retryAfterS], [503, "upstream", EVM_LANE_SENT_RETRY_S], `its tend sent 7 again: one block: ${JSON.stringify(h1.body)}`);
   assert.equal(sends(ch.x).length, before + 1, "the held answer sent 7 again");
   clock += 30_000;
   assert.equal((await later("W-held-2")).status, 503);
@@ -1380,7 +1380,7 @@ test("a lane held while the chain halts recovers when it resumes, though provide
 
 test("a held answer whose tend sent something answers Retry-After EVM_LANE_SENT_RETRY_S (one block), and the try after it goes once the block mines it; a rebroadcast both providers refuse fails the tend, logged, and its answer waits EVM_LANE_RETRY_S", async () => {
   let clock = NOW;
-  const ch = chainOf(() => clock, 2_000);
+  const ch = chainOf(() => clock, 200); // Base Sepolia's 200 ms blocks (read 2026-11-05 20:38Z)
   ch.st.drop = true;
   const lines: string[] = [];
   const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, receiptPollMs: 1, log: (l: string) => lines.push(l) }, ch.providers, () => clock);
@@ -1600,7 +1600,7 @@ const heldLane = async (blockMs = 0) => {
 };
 
 test("callers obeying Retry-After through a heal between tends see the first 200 within the time to the next allowed tend plus one block: a held answer whose tend sent nothing waits for the next tend, or for the block of the lane's last held send", async () => {
-  const { t, ch, ask } = await heldLane(2_000);
+  const { t, ch, ask } = await heldLane(200); // Base Sepolia's 200 ms blocks
   const t0 = t.clock;
   const next = Array.from({ length: 8 }, (_, i) => t0 + 5_000 * i);
   const went: number[] = [];
@@ -1619,9 +1619,9 @@ test("callers obeying Retry-After through a heal between tends see the first 200
     }
     await tick();
   }
-  // the next allowed tend is EVM_LANE_RETRY_S after the first; its send mines one block (2 s) after it, and every caller
-  // held behind it goes then too
-  const by = t0 + EVM_LANE_RETRY_S * 1000 + 2_000 + 250;
+  // the next allowed tend is EVM_LANE_RETRY_S after the first; its send mines one block (200 ms) after it, and every
+  // caller held behind it goes within its next retry (EVM_LANE_SENT_RETRY_S)
+  const by = t0 + EVM_LANE_RETRY_S * 1000 + 200 + EVM_LANE_SENT_RETRY_S * 1000 + 250;
   assert.equal(went.length, 8, "all eight went");
   assert.ok(Math.max(...went) <= by, `200s at t0 + ${went.map((x) => (x - t0) / 1000).join(", ")} s`);
 });
@@ -1654,7 +1654,7 @@ test("callers obeying Retry-After go within one retry of the receipt when the he
   }
 });
 
-test("a held answer's Retry-After: one block for EVM_LANE_SENT_WINDOW_BLOCKS blocks after the lane's last held send, then the seconds to the next allowed tend, rounded up", async () => {
+test("a held answer's Retry-After: one block for EVM_LANE_SENT_WINDOW_MS after the lane's last held send, then the seconds to the next allowed tend, rounded up", async () => {
   const { t, ask } = await heldLane();
   const t0 = t.clock;
   const at = async (ms: number) => {
@@ -1662,7 +1662,7 @@ test("a held answer's Retry-After: one block for EVM_LANE_SENT_WINDOW_BLOCKS blo
     return (await ask(`W-ra-at-${ms}`)).retryAfterS;
   };
   assert.equal(await at(0), EVM_LANE_SENT_RETRY_S, "its tend sent 7 again");
-  const window = EVM_LANE_SENT_WINDOW_BLOCKS * EVM_LANE_SENT_RETRY_S * 1000;
+  const window = EVM_LANE_SENT_WINDOW_MS;
   assert.equal(await at(window - 1), EVM_LANE_SENT_RETRY_S, "within the window: one block");
   assert.equal(await at(window), EVM_LANE_RETRY_S - window / 1000, "the window's end: the next allowed tend");
   assert.equal(await at(EVM_LANE_RETRY_S * 1000 - 1_500), 2, "1.5 s to the next tend: 2, never 1");
@@ -1689,10 +1689,10 @@ test("a hold read that fails answers its whole block from that failure: 100 held
   assert.deepEqual([hung.status, hung.retryAfterS], [503, EVM_LANE_SENT_RETRY_S], JSON.stringify(hung));
   t.clock += 500;
   const half = await ask("W-fail-half");
-  assert.deepEqual([half.status, half.retryAfterS], [503, 2], "1.5 s of the block left: 2, never 1");
-  t.clock += 1_000;
+  assert.deepEqual([half.status, half.retryAfterS], [503, 1], "0.5 s of the block left: 1, never 0");
+  t.clock += 400;
   const later = await ask("W-fail-later");
-  assert.deepEqual([later.status, later.retryAfterS], [503, 1], "the block's last half second: 1");
+  assert.deepEqual([later.status, later.retryAfterS], [503, 1], "the block's last tenth of a second: 1, never 0");
 });
 
 test("held answers share one hold read per block: 100 held callers inside one block cost one count read and one usedAt read in all", async () => {

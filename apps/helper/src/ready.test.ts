@@ -14,7 +14,7 @@ import { enableTimers, resetTimers } from "../test/mock-timers.ts";
 import * as nodeFs from "node:fs";
 import * as server from "./server.ts";
 import * as gk from "./data/gecko.ts";
-import { createEvmLists } from "./data/evm/lists.ts";
+import { createEvmLists, FACTORIES } from "./data/evm/lists.ts";
 import { openDurableDir } from "./store/durable.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -162,6 +162,15 @@ test("the EVM lists a helper read come back whole in the next one, parsed again,
   const m = fresh();
   m.restore({ ...st, makers: [["0x" + "b".repeat(40), "not-a-pad"], ["not an address", null]] });
   assert.ok(JSON.parse((await m.get()).body).unsettled.length > 0, "a maker with no pad of this chain or no address is not taken");
+  // a none is read again, a pad kept (card helper-ready-page-warm: from 18:00Z on 2026-11-05 Base's old 2 s clock
+  // settled every new token as none, and the warm file carried each into the next helper)
+  const toks: string[] = JSON.parse(before.body).lists.new.map((r: { token: string }) => r.token);
+  const pad = FACTORIES.base[0]!.pad;
+  const n = fresh();
+  n.restore({ ...st, makers: [[toks[0], null], [toks[1], pad]] });
+  const left: string[] = JSON.parse((await n.get()).body).unsettled;
+  assert.ok(left.includes(toks[0]!), "a none restored is read again");
+  assert.ok(!left.includes(toks[1]!), "a pad restored is kept");
 });
 
 /** Real time for the loopback's I/O while setTimeout may be mocked (setImmediate never is). */

@@ -10,7 +10,7 @@ import { HELPER_RPC_BATCH_MAX, HELPER_RPC_METHODS, HELPER_V1_PATHS } from "../..
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS } from "./methods.ts";
 import * as rpcModule from "./rpc.ts";
 import { createRpc, readUpstreams, RPC_ANSWER_MAX, RPC_UPSTREAMS } from "./rpc.ts";
-import { RETRY_AFTER_MAX_S } from "../limits/limits.ts";
+import { providerHolds, RETRY_AFTER_MAX_S } from "../limits/limits.ts";
 // read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
 const { RPC_CHAIN_MAX, RPC_CLIENT_MAX } = rpcModule as unknown as { RPC_CHAIN_MAX: number; RPC_CLIENT_MAX: number };
 
@@ -603,4 +603,128 @@ test("card helper-rpc-hold-queued: a send waiting for a keyed provider's second 
   assert.equal(last.why, "base held");
   assert.ok(Number(last.headers?.["Retry-After"]) >= 28, `Retry-After ${last.headers?.["Retry-After"]}: the hold's seconds`);
   assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), ["rpc hold base caller 30 s"]);
+});
+
+// -- card evm-rpc-spare-list: a caller's read on an EVM chain reaches any listed provider that answers ----------------
+
+/** What each listed provider answers a caller's read, by how it is down; the last answers. */
+const SPARE_DOWN: [string, (url: string) => Promise<Response>][] = [
+  ["HTTP 503", async () => new Response("down", { status: 503 })],
+  ["a thrown connection error", async () => { throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) }); }],
+  ["a JSON-RPC limit error (-32011 request limit reached, mainnet.base.org's answer to every eth_getLogs on 5 Nov)", async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32011, message: "request limit reached" } }), { status: 200, headers: { "content-type": "application/json" } })],
+];
+for (const [what, down] of SPARE_DOWN) {
+  test(`card evm-rpc-spare-list: with the configured provider and the first pinned one down (${what}), the second pinned one's answer reaches the caller`, async () => {
+    const asked: string[] = [];
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+      asked.push(url);
+      if (url === "https://cfg.test/" || url === "https://p1.test") return down(url);
+      const b = JSON.parse(String(init.body)) as { id: unknown };
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: "0x2a" }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const t = { v: performance.timeOrigin + performance.now() };
+    const r = createRpc({ BASE_RPC_URL: "https://cfg.test/" }, { fetch: fetch as never, holds: providerHolds(() => t.v), pinned: { base: ["https://p1.test", "https://p2.test", "https://p3.test"] }, now: () => t.v });
+    const a = await call(r, "base", { jsonrpc: "2.0", id: 7, method: "eth_blockNumber", params: [] }, JSON_T);
+    assert.equal(a.status, 200, a.body);
+    assert.equal(JSON.parse(a.body).result, "0x2a");
+    assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test", "https://p2.test"], "each down provider asked once, then the one that answers; the last is not needed");
+  });
+}
+
+// -- card evm-rpc-spare-list, task C: a provider that cannot serve a request's shape is out for that request only ------
+
+const SHAPE_ERR = { jsonrpc: "2.0", id: 1, error: { code: -32701, message: "Please specify an address in your request or, to remove restrictions, order a dedicated full node here: https://www.allnodes.com/base/host" } };
+const jsonOk = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+/** An address-less Transfer filter over 1,000 blocks. */
+const TRANSFERS = (id = 1) => ({ jsonrpc: "2.0", id, method: "eth_getLogs", params: [{ fromBlock: "0x100", toBlock: "0x4e7", topics: ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"] }] });
+
+function shapeRig(answers: Record<string, (body: { id: unknown; method: string }) => Response>) {
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    asked.push(url);
+    const b = JSON.parse(String(init.body)) as { id: unknown; method: string };
+    return answers[url]!(b);
+  };
+  const t = { v: performance.timeOrigin + performance.now() };
+  const holds = providerHolds(() => t.v);
+  const r = createRpc({ BASE_RPC_URL: "https://cfg.test/" }, { fetch: fetch as never, holds, pinned: { base: ["https://p1.test", "https://p2.test", "https://p3.test"] }, now: () => t.v });
+  return { r, asked, holds };
+}
+
+test("card evm-rpc-spare-list: a provider that answers an address-less eth_getLogs -32701 is out for that read only: the next provider's array reaches the caller, and the first is not held", async () => {
+  const logs = [{ address: "0x" + "ab".repeat(20), topics: [], data: "0x", blockNumber: "0x200", logIndex: "0x0", transactionHash: "0x" + "cd".repeat(32), removed: false }];
+  const { r, asked, holds } = shapeRig({
+    "https://cfg.test/": (b) => (b.method === "eth_getLogs" ? jsonOk(SHAPE_ERR) : jsonOk({ jsonrpc: "2.0", id: b.id, result: "0x1" })),
+    "https://p1.test": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, result: b.method === "eth_getLogs" ? logs : "0x2" }),
+    "https://p2.test": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, result: "0x3" }),
+    "https://p3.test": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, result: "0x4" }),
+  });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).result, logs);
+  assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test"]);
+  assert.equal(holds.heldMs("https://cfg.test/"), 0, "no hold");
+  const b = await call(r, "base", { jsonrpc: "2.0", id: 2, method: "eth_blockNumber", params: [] }, JSON_T);
+  assert.equal(JSON.parse(b.body).result, "0x1", "a plain read still goes to it first");
+  assert.equal(asked.at(-1), "https://cfg.test/");
+});
+
+test("card evm-rpc-spare-list: the shape words are -32701, 'specify an address', Pocket's \"missing required field 'address'\" and -32601; one entry of a batch is enough", async () => {
+  for (const error of [
+    { code: -32701, message: "x" },
+    { code: -32000, message: "Please specify an address in your request" },
+    { code: -32602, message: "missing required field 'address' in filter" },
+    { code: -32601, message: "method not available" },
+  ]) {
+    const { r, asked } = shapeRig({
+      "https://cfg.test/": (b) => jsonOk([{ jsonrpc: "2.0", id: 0, result: "0x1" }, { jsonrpc: "2.0", id: 1, error }].map((x) => ({ ...x, id: x.id === 0 ? b.id : x.id }))),
+      "https://p1.test": (b) => jsonOk([{ jsonrpc: "2.0", id: 1, result: "0x9" }]),
+      "https://p2.test": () => jsonOk({}),
+      "https://p3.test": () => jsonOk({}),
+    });
+    const a = await call(r, "base", [TRANSFERS(1), TRANSFERS(2)], JSON_T);
+    assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test"], JSON.stringify(error));
+    assert.equal(a.status, 200);
+  }
+});
+
+test("card evm-rpc-spare-list: when every provider answers -32701 the caller gets the last such answer, 200 with the error", async () => {
+  const same = () => jsonOk(SHAPE_ERR);
+  const { r, asked } = shapeRig({ "https://cfg.test/": same, "https://p1.test": same, "https://p2.test": same, "https://p3.test": same });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.equal(a.status, 200, a.body);
+  assert.equal(JSON.parse(a.body).error.code, -32701);
+  assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test", "https://p2.test", "https://p3.test"]);
+});
+
+test("card evm-rpc-spare-list: a range cap and a revert are the device's to read: answered as they are, the next provider not asked", async () => {
+  for (const error of [
+    { code: -32602, message: "block range limit exceeded" },
+    { code: -32000, message: "query exceeds max block range 2000" },
+    { code: 3, message: "execution reverted", data: "0x" },
+  ]) {
+    const { r, asked } = shapeRig({
+      "https://cfg.test/": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error }),
+      "https://p1.test": () => jsonOk({ jsonrpc: "2.0", id: 1, result: [] }),
+      "https://p2.test": () => jsonOk({}),
+      "https://p3.test": () => jsonOk({}),
+    });
+    const a = await call(r, "base", TRANSFERS(), JSON_T);
+    assert.deepEqual(JSON.parse(a.body).error, error);
+    assert.deepEqual(asked, ["https://cfg.test/"], JSON.stringify(error));
+  }
+});
+
+test("card evm-rpc-spare-list: with the rest held for longer than the wait, a -32701 is never the caller's answer: a 429 with the hold's seconds, so the device asks again", async () => {
+  const { r, asked, holds } = shapeRig({
+    "https://cfg.test/": () => jsonOk(SHAPE_ERR),
+    "https://p1.test": () => jsonOk(SHAPE_ERR),
+    "https://p2.test": () => jsonOk({}),
+    "https://p3.test": () => jsonOk({}),
+  });
+  holds.hold("https://p2.test", 30);
+  holds.hold("https://p3.test", 30);
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.equal(a.status, 429, a.body);
+  assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test"]);
 });

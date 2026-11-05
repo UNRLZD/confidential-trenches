@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageRpc } from "../src/page-rpc.ts";
-import { TESTNET_RPCS, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
@@ -29,14 +29,15 @@ async function withThrottledOnce(run: (seen: Map<string, number>) => Promise<voi
   }
 }
 
-test("the testnet build's pool RPCs, every chain and both providers, read through a 429 once", async () => {
+// the testnet build's pool RPCs read through a 429 once in test/pool-testnet.test.ts, which runs as that build
+test("the mainnet build's pool RPCs (src/pool-testnet.ts on SIGN_HOST's build): Solana's pair, provider A and the helper's route, reads through a 429 once; Base and Robinhood have no pair yet", async () => {
   await withThrottledOnce(async (seen) => {
     const deps = testnetPoolDeps();
-    for (const chain of ["solana", "base", "robinhood"] as const) {
-      const rpcs = deps.rpcs(chain)!;
-      for (const r of rpcs) assert.equal(await (r as unknown as (m: string, p: unknown[]) => Promise<unknown>)("getSlot", []), 42);
-      for (const u of TESTNET_RPCS[chain]) assert.equal(seen.get(u), 2, u);
-    }
+    for (const r of deps.rpcs("solana")!) assert.equal(await (r as unknown as (m: string, p: unknown[]) => Promise<unknown>)("getSlot", []), 42);
+    assert.equal(seen.get(SOLANA_PROVIDER_A), 2);
+    assert.equal(seen.get(`${TRADE_HELPER}/v1/rpc/solana`), 2);
+    assert.equal(deps.rpcs("base"), null);
+    assert.equal(deps.rpcs("robinhood"), null);
   });
 });
 
