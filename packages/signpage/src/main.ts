@@ -63,9 +63,10 @@ import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { depositQuoteHost } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
-import { PAGE_POOLS, withPools } from "./pools.ts";
+import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { readNotes, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
@@ -148,6 +149,20 @@ else {
           rpcs: (chain: PoolChain) => (chain === "solana" ? ([pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)] as const) : null),
         };
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
+  // the Solana pool's tap spend (state.pools' tap_max, src/pools.ts withSolanaRent): the Rent sysvar, read once on the
+  // pool kinds' own pair, and only while the table holds a Solana pool; its landing reads the state again
+  const told = new Set<() => void>();
+  const rent = rentOnce(
+    () => {
+      const pair = poolDeps.rpcs("solana");
+      if (pair === null) throw new Error("no Solana pair");
+      return readSolanaRent(pair as unknown as readonly [SolanaRpc, SolanaRpc]);
+    },
+    () => {
+      for (const f of told) f();
+    },
+  );
+  const hasSolana = PAGE_POOLS.some((p) => p.chain === "solana");
   // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
   const trades = tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() });
   shell = mountShell(document, {
@@ -157,17 +172,24 @@ else {
     // the testnet build: a state read while a deposit note is still landing settles it again (src/pool-testnet.ts)
     // each pool's USD price, read by this page on the pool kinds' own RPC pair (src/pool-price.ts); each state read
     // starts the next read of a chain it names that is due one
+    // card signpage-pool-pins: the table is the network's pins (src/pools.ts PAGE_POOLS); `ready` is the proof queue's
+    // ready proofs (the testnet build's src/pool-testnet.ts; none while no queue is open, and none on SIGN_HOST's build,
+    // which runs no queue yet); the Solana entry's tap_max once the Rent sysvar is read
     state: () =>
       fs.state().then(async (s) => {
         if (POOL_TESTNET && s.signed_in) void testnet?.stateRead();
-        const out = await withPools(s, pageNotes, PAGE_POOLS, undefined, prices.get);
+        const r = s.signed_in && hasSolana ? rent.get() : null;
+        const ready = POOL_TESTNET && s.signed_in ? await testnet?.ready() : undefined;
+        const out = await withPools(s, pageNotes, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), ready, prices.get);
         prices.refresh((out.pools ?? []).map((p) => p.chain));
         return out;
       }),
-    // a store change, and a new price read (or its next one due)
+    // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {
       fs.watch(fn);
       prices.watch(fn);
+      told.add(fn);
+      testnet?.watch(fn);
     },
     kinds: {
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the

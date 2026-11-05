@@ -1,7 +1,8 @@
 # CI needs no secret and no token beyond the read-only one GitHub gives every run.
 # Every action is pinned by commit sha, each read from its own repo on 2026-10-26 at 11:24Z:
 #   actions/checkout v7.0.1, actions/setup-node v7.1.0, pnpm/action-setup v6.1.0;
-#   actions/cache v6.1.0 read from its repo on 2026-11-02 at 12:40Z;
+#   actions/cache v6.1.0 read from its repo on 2026-11-02 at 12:40Z, its restore/ and save/ actions (the same commit)
+#   on 2026-11-05 at 15:05Z;
 #   foundry-rs/foundry-toolchain v1.9.1 read from its repo on 2026-11-02 at 20:12Z;
 #   Swatinem/rust-cache v2.9.3 (d1527c8, released 2026-10-20) and actions/download-artifact v8.0.2 (9000827, released
 #   2026-10-07) read from their repos on 2026-11-04 at 07:20Z.
@@ -37,13 +38,23 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # gitleaks 8.30.1, the binary checked against the sha256 in its release's checksums file (read 2026-10-26 11:25Z)
+      # gitleaks 8.30.1, the binary checked against the sha256 in its release's checksums file (read 2026-10-26 11:25Z),
+      # from the cache when it holds it (scripts/ci/fetch.sh checks the sha256 after the restore and after a fetch)
+      - id: gitleaks-tgz
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/gitleaks-8.30.1.tgz
+          key: download-gitleaks-8.30.1-551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
       - name: install gitleaks
         run: |
-          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/gitleaks.tgz" \
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/gitleaks-8.30.1.tgz 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb \
             https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
-          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          tar -xzf ~/.cache/ci-downloads/gitleaks-8.30.1.tgz -C "$RUNNER_TEMP" gitleaks
+      - if: steps.gitleaks-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/gitleaks-8.30.1.tgz
+          key: download-gitleaks-8.30.1-551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
       # Main's rules judge every run: .gitleaks.toml and .gitleaksignore come from origin/main (the checkout above
       # fetches every branch), never the checkout's own copies, so no pull request can pass its own secret. gitleaks
       # also reads the scanned folder's own .gitleaksignore whatever -i names, so main's copy is written over it.
@@ -454,15 +465,25 @@ jobs:
       - name: rust 1.96.0
         run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
       # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
+      - id: cargo-near-tgz
+        if: steps.wasm.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
       - name: install cargo-near
         if: steps.wasm.outputs.cache-hit != 'true'
         run: |
-          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/cargo-near.tgz" \
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/cargo-near-0.22.0.tgz 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a \
             https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
-          echo "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
+          tar -xzf ~/.cache/ci-downloads/cargo-near-0.22.0.tgz -C "$RUNNER_TEMP"
           install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
           cargo +1.96.0 near --version
+      - if: steps.wasm.outputs.cache-hit != 'true' && steps.cargo-near-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
       - id: deps
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -518,14 +539,23 @@ jobs:
       - name: rust 1.96.0
         run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
       # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
+      - id: cargo-near-tgz
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
       - name: install cargo-near
         run: |
-          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/cargo-near.tgz" \
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/cargo-near-0.22.0.tgz 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a \
             https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
-          echo "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
+          tar -xzf ~/.cache/ci-downloads/cargo-near-0.22.0.tgz -C "$RUNNER_TEMP"
           install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
           cargo +1.96.0 near --version
+      - if: steps.cargo-near-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
       # vault-sandbox-build's cache, read only
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -582,13 +612,23 @@ jobs:
           persist-credentials: false
       - name: rust 1.96.0 and 1.97.1
         run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 1.97.1 --profile minimal
+      # from the cache when it holds it (scripts/ci/fetch.sh checks the sha256 after the restore and after a fetch)
+      - id: agave-tar
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/agave-4.4.0.tar.bz2
+          key: download-agave-4.4.0-3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574
       - name: install the Solana build tools (agave v4.4.0)
         run: |
-          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/agave.tar.bz2" \
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/agave-4.4.0.tar.bz2 3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574 \
             https://github.com/anza-xyz/agave/releases/download/v4.4.0/solana-release-x86_64-unknown-linux-gnu.tar.bz2
-          echo "3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574  $RUNNER_TEMP/agave.tar.bz2" | sha256sum -c -
-          tar -xjf "$RUNNER_TEMP/agave.tar.bz2" -C "$RUNNER_TEMP"
+          tar -xjf ~/.cache/ci-downloads/agave-4.4.0.tar.bz2 -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/solana-release/bin" >> "$GITHUB_PATH"
+      - if: steps.agave-tar.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/agave-4.4.0.tar.bz2
+          key: download-agave-4.4.0-3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |

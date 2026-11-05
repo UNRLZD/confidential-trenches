@@ -54,7 +54,7 @@ const M = [
   [R, "pairError = `the Transfer RPCs: ${cutError(e)}`;", "pairError = `the Transfer RPCs: ${String(e)}`;", T, "a Transfer pair's failed check"],
   [R, "      a.signal?.throwIfAborted();\n      await poolHolds();\n      pairError", "      a.signal?.throwIfAborted();\n      pairError", T, "reorgs between the pool read"],
   [R, "      a.signal?.throwIfAborted();\n      await poolHolds();\n      wallets[k]!.error", "      a.signal?.throwIfAborted();\n      wallets[k]!.error", T, "reorgs while a W's"],
-  [R, "evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal);", "evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal);", T, "another chain, or one that never holds"],
+  [R, "evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal, sleep);", "evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal, sleep);", T, "another chain, or one that never holds"],
   [S, "if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);\n  const bs", "const bs", T, "another chain, or one that never holds"],
   [S, "if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(", "if (false) lag(", T, "another chain, or one that never holds"],
   [R, "for (const w of a.walletRpcs) for (const p of a.rpcs) if (solanaSameProvider(w, p)) throw", "if (false) throw", T, "their own pair"],
@@ -76,7 +76,11 @@ const M = [
   [S, "      if (t !== null && (t.kind === \"throttle\" || end === at)) {", "      if (false) {", T, "^T1 |^T2 "],
   // no answer in time halves a page over one block (Pocket's under the device's 3.5 s client)
   [S, "      if (t !== null && (t.kind === \"throttle\" || end === at)) {", "      if (t !== null) {", T, "^T4 "],
-  [S, "      if (t === null || tries >= EVM_LOG_THROTTLE_TRIES) throw e;", "      throw e;", T, "^T6 "],
+  [S, "      if (t === null) throw e;\n      const ms = throttleWaitMs(n, t.afterMs);", "      throw e;\n      const ms = throttleWaitMs(n, t.afterMs);", T, "^T6 "],
+  // card evm-pool-reads-throttle: a pool read is tried again within its bound, and its failure is never tried again around it
+  [S, "evmAnswered(f, signal, sleep, { tries: EVM_POOL_READ_TRIES, waitMs: EVM_POOL_READ_WAIT_MS, what })", "f()", TE, "a 429 with no Retry-After"],
+  [S, "|| waited + BigInt(ms) > bound.waitMs)", ")", TE, "Retry-After is waited when it fits"],
+  [S, "  if (t?.name === \"EvmUnansweredError\") return null;\n", "", TE, "never tried again by a read around it"],
   [S, "(LIMIT_32005.test(m) && !CAP_WORDS.test(m))", "LIMIT_32005.test(m)", T, "^R1 "],
   [S, "(LIMIT_32005.test(m) && !CAP_WORDS.test(m))", "false", T, "^T1 |^T2 "],
   [S, "      // the other RPC failed and this read was stopped: never a smaller page for the next W\n      signal?.throwIfAborted();\n", "", T, "^T3 "],
