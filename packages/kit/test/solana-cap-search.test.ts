@@ -91,7 +91,7 @@ test("40 too large, then 32 no route: the next ask is between them (36), never 4
   assert.deepEqual(w.asked, [40, 32, 36]);
 });
 
-test("startAt: a trade's later leg asks the cap its first leg found, and searches on from there only when it does not fit", async () => {
+test("startAt: the search asks that cap first (the live check's probe asks the steps past 40 with it) and steps on from there when it does not fit", async () => {
   const one = world({ 48: "fit" });
   const got = await fetchSolanaJupiterBuildThatFits(ORIGIN, R, one.fit, { fetch: one.f, startAt: 48 });
   assert.equal(got.maxAccounts, 48);
