@@ -40,6 +40,9 @@ test("a deploy: deploy.mjs --mainnet with the chain and the return address, then
       `contracts/pool-evm/script/deploy.mjs --mainnet --chain ${chain} --return ${A}`,
       `scripts/live-checks/pool-evm-deploy.mjs --deployment contracts/pool-evm/deployments/${chain}.json`,
     ]);
+    // the record is the one-deploy guard: the paste names its folder, says to commit it now and to paste only there
+    const root = path.resolve(HERE, "../../..");
+    assert.ok(r.out.includes(`mainnet-deploy: the record contracts/pool-evm/deployments/${chain}.json in ${root} is the one-deploy guard: commit it now, and run every later paste for ${chain} in ${root}`), r.out);
   }
 });
 
