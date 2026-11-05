@@ -40,6 +40,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-launchpad-origin.mjs",
   "scripts/live-checks/helper-pool-senders.mjs",
   "scripts/live-checks/helper-proxy.mjs",
+  "scripts/live-checks/helper-robinhood-capacity.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",
   "scripts/live-checks/helper-solana-failover.mjs",
   "scripts/live-checks/helper-token-page-cold.mjs",
