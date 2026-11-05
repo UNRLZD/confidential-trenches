@@ -105,14 +105,16 @@ const SWEEP_TX_BYTES = 200n; // an EIP-1559 transfer signed is about 110 bytes
 // constructor changed, or code from another commit, is refused before a key is made. Read from forge build --root
 // contracts/pool-evm (forge 1.8.6 on a Linux build host, 2026-11-05 17:27Z); the verifier's, the pool's and both
 // adapters' are also the init code of the 3 Nov testnet deploys built on the Mac (their transactions' input, read
-// 2026-11-05 17:39Z); the sell delegate was rebuilt since (pool review round 2). test/deploy-run.test.mjs fails when
-// forge's out/ differs (CI builds with forge 1.7.1).
+// 2026-11-05 17:39Z). The sell delegate's is pool review round 3's (it pays the fee to the fee recipient W signs),
+// read from forge build --force --root contracts/pool-evm at the merge of main 7dfb6336 (forge 1.7.1 on the Mac,
+// 2026-11-05 23:38Z), where the other four read as above. test/deploy-run.test.mjs fails when forge's out/ differs
+// (CI builds with forge 1.7.1).
 export const MAINNET_INIT = Object.freeze({
   WithdrawalVerifier: { length: 1975, keccak: "0x381df6043b0354b2ff24f5620391b26cb95612f896a258266f3bf798de21910f" },
   PrivacyPoolSimple: { length: 10142, keccak: "0x50a3d2fa107766537bc20545d46f052b8a355d0986a1e6a11eb55bfff0c733fb" },
   UniswapV4Adapter: { length: 4578, keccak: "0xedc0d3a854fc280089da75b2ed4baf8e3495fdb80eed6632ddfe5421ac96b6ef" },
   UniswapV3Adapter: { length: 2269, keccak: "0x1460db6407c61d6d70d3d423a04a46a512f5df9c00978987cd9f38a267db4f05" },
-  SellDelegate: { length: 9263, keccak: "0x26b4629c9357f1e66d4f8622b2db9f1fcf15d9683d5b066a124a644d7c0b0eeb" },
+  SellDelegate: { length: 9479, keccak: "0x60ae724bd23ec2c11ee8faf40a6027b43e256e7719efe8d85646ed7079fc3132" },
 });
 /** Why `code` is not `name`'s pinned init code, or null when it is */
 export function initProblems(name, code) {
