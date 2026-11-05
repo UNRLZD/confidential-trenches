@@ -2,8 +2,10 @@
 //! `release` (tag 2): a note's chunk to W, the fee to the fee payer, the change note into the state tree.
 //!
 //! Accounts: `[pool (w), W (w, signer), fee payer (w, signer), spent mark (w), state root page, label root page, state
-//! page (w), system program]`. The two root pages hold the roots the proof was made against; the state page is the
-//! one the change note's entry goes into (often the same account as the state root page).
+//! page (w), system program]`, optionally followed by the next state page (w). The two root pages hold the roots the
+//! proof was made against; the state page is the one the change note's entry goes into (often the same account as the
+//! state root page), or the next state page when inserts that landed after the sender read the tree's size carried the
+//! change note's index there (review 2, R-1; `state::page_for`).
 //!
 //! Data (`RELEASE_LEN` bytes): `proof (256) ‖ newCommitmentHash (32) ‖ existingNullifierHash (32) ‖ withdrawnValue
 //! u64 ‖ stateRootIndex u32 ‖ stateTreeDepth u8 ‖ labelRootIndex u32 ‖ labelTreeDepth u8 ‖ relay_fee u64 ‖
@@ -150,11 +152,11 @@ pub fn fee_within_backstop(relay_fee: u64, withdrawn: u64) -> bool {
 }
 
 pub fn release(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    if accounts.len() != 8 {
+    if accounts.len() != 8 && accounts.len() != 9 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     let r = Release::parse(data)?;
-    settle(program_id, accounts, &r, 0, None)
+    settle(program_id, accounts, &r, 0, None, accounts.get(8))
 }
 
 /// Rows 1 to 13 for tag 2 (`tip` 0, no tip account) and tag 3. `accounts` holds at least tag 2's eight; only those
@@ -166,6 +168,7 @@ pub(crate) fn settle<'a>(
     r: &Release,
     tip: u64,
     tip_to: Option<&AccountInfo<'a>>,
+    next_page: Option<&AccountInfo<'a>>,
 ) -> ProgramResult {
     let [pool_acc, recipient, fee_payer, spent_mark, state_root_page, label_root_page, state_page, system, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -266,7 +269,7 @@ pub(crate) fn settle<'a>(
         m[12] = MARK_TAG;
     }
     // row 12
-    push(program_id, fee_payer, state_page, system, TREE_STATE, &mut pool.state, &r.new_commitment)?;
+    push(program_id, fee_payer, state_page, next_page, system, TREE_STATE, &mut pool.state, &r.new_commitment)?;
     // row 13: the pool owns its account, so it moves lamports out directly; row 9 keeps its rent untouched
     pool.spent = pool.spent.checked_add(r.withdrawn as u128).ok_or(PoolError::Overflow)?;
     pool.store(pool_acc)?;

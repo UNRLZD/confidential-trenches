@@ -25,7 +25,7 @@ Integers are little-endian. Field elements are 32 bytes, big-endian, below p, as
 | Offset (raw / compressed proof) | Bytes | Field |
 |---|---|---|
 | 0 | 1 | tag = 3 |
-| 1 | 1 | flags: bit 0 set = compressed proof; every other bit must be 0 |
+| 1 | 1 | flags: bit 0 set = compressed proof; bit 1 set = the next state page follows the tip account (review 2, R-1); every other bit must be 0 |
 | 2 | 256 / 128 | proof: A, B (Fq2 imaginary part first), C. Compressed: the alt_bn128 compressed forms of A (32), B (64), C (32) |
 | 258 / 130 | 32 | newCommitmentHash |
 | 290 / 162 | 32 | existingNullifierHash |
@@ -52,7 +52,8 @@ instruction.
 |---|---|---|
 | 0 to 7 | tag 2's: pool (w); W (w, signer); fee payer (w, signer); spent mark `["spent", nullifier]` (w); state root page; label root page; current state page (w); system program | as tag 2 |
 | 8 | the tip account, present only when tip > 0 | w |
-| 8 or 9 onward | every account the inner instructions name, each once, including each inner instruction's program | the union of what the inner instructions ask |
+| next | the next state page, present only when flag bit 1 is set: the change note's entry goes there when inserts that landed after the sender read the tree's size carried its index onto that page (`state::page_for`) | w |
+| after those | every account the inner instructions name, each once, including each inner instruction's program | the union of what the inner instructions ask |
 
 An inner instruction's account is given to the callee with this instruction's flags for it: signer only if it is W,
 and writable as the outer account is.
@@ -67,11 +68,12 @@ and writable as the outer account is.
    - `tip > tip_cap` refuses with `TipOverCap`.
    - `relay_fee + tip > withdrawnValue` refuses with `InvalidWithdrawalAmount`. The backstop already keeps `relay_fee`
      at most half of `withdrawnValue`.
-   - Flags with any bit other than bit 0 set, an inner count of 0 or more than 8, or an index past the accounts refuse
+   - Flags with any bit other than bits 0 and 1 set, an inner count of 0 or more than 8, or an index past the accounts refuse
      with `InvalidInstructionData`.
    - An inner program that is this program refuses with `InnerInvokesPool`, so the pool never re-enters itself.
    - An inner account, or the tip account, that is the pool, its spent mark or a page this release reads or writes
-     (by key: the keys of accounts 0, 3, 4, 5 and 6, at whatever index they appear again), or any account this
+     (by key: the keys of accounts 0, 3, 4, 5 and 6, and of the next state page when given, at whatever index they
+     appear again), or any account this
      program owns (by owner), refuses with `InnerNamesPoolAccount`.
    - An inner account that signed this instruction and is not W (by key) refuses with `InnerSignerNotW`. The fee
      payer's signature never reaches a venue, so a venue cannot debit the relayer.

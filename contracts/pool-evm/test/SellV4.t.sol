@@ -296,6 +296,18 @@ contract SellV4Test is SellV4Base {
     _lands(T, _deep(T, WETH, address(0)), 'sell, v4 one hop to WETH, depth 0');
   }
 
+  /// A v4 route to the native asset trusts no WETH contract (review 2, R-3): Robinhood Chain's WETH is an
+  /// upgradeable proxy, and a WETH that reverts on every call still leaves such a sell landing
+  function test_v4SellToTheNativeAssetTrustsNoWeth() public {
+    PathKey[] memory _p = _deep(T, address(0), address(0));
+    uint256 _quoted = _quote(T, _p);
+    vm.etch(WETH, hex'60006000fd'); // PUSH1 0, PUSH1 0, REVERT
+    uint256 _poolBefore = address(pool).balance;
+    _send(_v4Sell(T, _p, _quoted * 99 / 100, 0));
+    assertEq(address(pool).balance, _poolBefore + _quoted - FEE, 'the leaf holds the proceeds less the fee');
+    assertEq(SellDelegate(payable(W)).nonce(), 1);
+  }
+
   /// T to Y, then Y to the native asset: the middle token nets to zero in the PoolManager
   function test_v4TwoHopSellLands() public {
     PathKey[] memory _p = new PathKey[](2);
