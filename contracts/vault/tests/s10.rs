@@ -289,20 +289,18 @@ async fn tree(h: &Harness, which: &str) -> R<(u64, u64)> {
     Ok((t["size"].as_u64().ok_or("size")?, t["depth"].as_u64().ok_or("depth")?))
 }
 
-async fn patch(h: &Harness, key: &[u8], value: &[u8]) -> R<()> {
-    h.worker.patch_state(&h.vault, key, value).await?;
-    Ok(())
-}
-
 /// Seeds `root` into a root set (StateRoots = 5, LabelRoots = 6: src/lib.rs `Key`); a set's record has no value.
+/// Returns once the record reads back at final.
 async fn seed_root(h: &Harness, prefix: u8, root: &str) -> R<()> {
     let mut k = vec![prefix];
     k.extend_from_slice(&be(root));
-    patch(h, &k, &[]).await
+    h.patch_data(&h.vault, &[(k, vec![])]).await
 }
 
 /// Both trees at size 2^32 - 1 and depth 32 with a side node at every level, so the next insert into either hashes
-/// all 32 levels. Only STATE's two sizes and depths and the side nodes are patched.
+/// all 32 levels. Only STATE's two sizes and depths and the side nodes are patched: one patch, the side nodes first and
+/// STATE last, read back at final key by key before the next call (a state whose depth is 32 before its side nodes
+/// are there is one no real insert makes, and the vault refuses it with SideNodeMissing).
 async fn seed_depth32(h: &Harness) -> R<()> {
     let mut s = state_record(h).await?.ok_or("no state record to patch")?;
     // the prefixes Borsh writes for the state tree, state_leaf_index and the label tree (src/lib.rs `Key`)
@@ -313,22 +311,18 @@ async fn seed_depth32(h: &Harness) -> R<()> {
         s[at..at + 8].copy_from_slice(&FULL.to_le_bytes());
         s[at + 8] = 32;
     }
-    patch(h, b"STATE", &s).await?;
+    let mut records = vec![];
     for side in [0u8, 3] {
         for level in 0..=32u8 {
-            let mut v = [0u8; 32];
+            let mut v = vec![0u8; 32];
             v[31] = level + 1;
-            patch(h, &[side, level], &v).await?;
+            records.push((vec![side, level], v));
         }
     }
-    for _ in 0..50 {
-        if tree(h, "state_tree").await? == (FULL, 32) && tree(h, "label_tree").await? == (FULL, 32) {
-            h.wait_final(&h.vault).await?;
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    }
-    Err("the depth-32 patch did not show in the views".into())
+    records.push((b"STATE".to_vec(), s));
+    h.patch_data(&h.vault, &records).await?;
+    assert_eq!((tree(h, "state_tree").await?, tree(h, "label_tree").await?), ((FULL, 32), (FULL, 32)), "the views after the depth-32 patch");
+    Ok(())
 }
 
 struct Small {
@@ -514,4 +508,24 @@ async fn vt_s10_mock() -> R<()> {
 #[tokio::test]
 async fn vt_s10_usdc() -> R<()> {
     vt_s10(TokenKind::Usdc).await
+}
+
+/// A patch the sandbox loses is sent again: the first send here is dropped on purpose, and `patch_landed` returns only
+/// once the record reads back at final, after its second send.
+#[tokio::test]
+async fn vt_s10_lost_patch_is_sent_again() -> R<()> {
+    let h = Harness::with_vault_and(TokenKind::Mock).await?;
+    let mut key = vec![5u8];
+    key.extend_from_slice(&be(&signal("fee_bounces", 3)));
+    let sends = std::sync::atomic::AtomicU32::new(0);
+    let send = async || -> R<()> {
+        if sends.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            h.worker.patch(&h.vault).state(&key, &[]).transact().await?;
+        }
+        Ok(())
+    };
+    let landed = async || -> R<bool> { Ok(h.data_final(&h.vault, &key).await? == Some(vec![])) };
+    h.patch_landed("a root record whose first send is lost", send, landed).await?;
+    assert_eq!(sends.load(std::sync::atomic::Ordering::SeqCst), 2, "landed on the second send");
+    Ok(())
 }
