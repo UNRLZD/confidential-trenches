@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { BUILD, CHAINS, DUST, EIP1967, check, gettersOf, operatorProblems, pinnedBuild, runRecord, runtimeOf, selector } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, DUST, EIP1967, MAINNETS, MAINNET_IDS, chainOf, check, deploymentFile, gettersOf, operatorProblems, pinnedBuild, runRecord, runtimeOf, selector } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-evm-deploy.answers.json", import.meta.url), "utf8"));
 
@@ -142,4 +142,28 @@ test("the frozen v1 sell delegate is the build only at the addresses the build f
   assert.equal(runtimeOf(v1, f.immutables).masked, f.masked, "the recorded code is the frozen v1 build");
   const del = A.deployments["base-sepolia"].contracts.SellDelegate.address;
   fails(await run("base-sepolia", mutate("base-sepolia", isCode(del), (j) => (j.result = v1))), /SellDelegate \S+ code is the build's: 4119 bytes/);
+});
+
+test("the mainnets (card pool-evm-deploy-mainnet): Base and Robinhood, both adapters and the sell delegate, each dependency's code hash as read on two operators, records in contracts/pool-evm/deployments/", () => {
+  assert.deepEqual(Object.keys(MAINNETS), ["base", "robinhood"]);
+  assert.deepEqual(MAINNET_IDS, { "0x2105": "base", "0x1237": "robinhood" });
+  const all = ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate"];
+  for (const n of ["base", "robinhood"]) {
+    assert.deepEqual(MAINNETS[n].contracts, all, `${n}: mainnet keeps both adapters (M365)`);
+    assert.deepEqual(operatorProblems(MAINNETS[n].rpcs, { chain: n }), [], n);
+    assert.ok(deploymentFile(n).endsWith(`contracts/pool-evm/deployments/${n}.json`), deploymentFile(n));
+    assert.equal(chainOf(n), MAINNETS[n]);
+  }
+  const b = MAINNETS.base, h = MAINNETS.robinhood;
+  assert.deepEqual([b.poolManager.address, b.poolManager.codehash], ["0x498581ff718922c3f8e6a244956af099b2652b2b", "0x83b2af6e9f3158defc2811cbcb0db71ecf8b2ba2abea39c39e370ac5c6f43eb6"]);
+  assert.deepEqual([b.router.address, b.router.codehash], ["0x2626664c2603336e57b271c5c0b26f421741e481", "0x38bd640f47df62b2fd5a6755a63f4976ad847dc9b946ae0d145d21d16bb124e4"]);
+  assert.deepEqual([b.weth.address, b.weth.codehash, b.weth.symbol, b.weth.name, b.weth.implementation], ["0x4200000000000000000000000000000000000006", "0x8a3a1f6a9f9dce633117adee5b458245835a8645a8c8726a26382a4622508b1c", "WETH", "Wrapped Ether", undefined]);
+  assert.deepEqual([h.poolManager.address, h.poolManager.codehash], ["0x8366a39cc670b4001a1121b8f6a443a643e40951", "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"]);
+  assert.deepEqual([h.router.address, h.router.codehash], ["0xcaf681a66d020601342297493863e78c959e5cb2", "0x6f36c378e272c6324c48f045182bcb54bd8ad654cf9ebd42e8893d52c4cb25dc"]);
+  assert.deepEqual([h.weth.address, h.weth.codehash, h.weth.symbol, h.weth.name], ["0x0bd7d308f8e1639fab988df18a8011f41eacad73", "0x5706be52f64875fee65a2cec0d80e47a23d8793cbe85d214b48445e2d05f5353", "WETH", "WETH"]);
+  assert.deepEqual(h.weth.implementation, { address: "0xc6b81b429797e0f555440b70cd99e032d7ae947e", codehash: "0xbe1295f37be34ffe03ad779bda0ef278907e1856b51a3be2f35ee541d75d4650" });
+  // the testnets stay CHAINS' own; no other name resolves (a prototype key included)
+  assert.equal(chainOf("base-sepolia"), CHAINS["base-sepolia"]);
+  for (const n of ["ethereum", "__proto__", "constructor"]) assert.equal(chainOf(n), undefined, n);
+  assert.ok(!Object.hasOwn(CHAINS, "base"), "the testnet loops never meet a mainnet");
 });
