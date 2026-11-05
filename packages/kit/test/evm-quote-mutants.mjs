@@ -201,6 +201,16 @@ export const MUTANTS = [
   [QUOTE, "    if (!Object.isFrozen(rpcs)) [...rest, low].forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "LH1 "],
   [QUOTE, "return { block: lo, confirm, low: list[own]! };", "return { block: lo, confirm, low: list[at]! };", R, "LH1 "],
   [QUOTE, "if (out.some(limited) || out.some(stateless)) s.held", "if (out.some(limited)) s.held", R, "LH2 "],
+  // the review of the lag hold: each no-longer answer, never a revert, a non-2xx answer, the whole list's majority, the
+  // two-provider list, one wait
+  [QUOTE, "/historical state \\S+ is not available|archive requests require a personal token/i", "/archive requests require a personal token/i", R, "LH2b "],
+  [QUOTE, "/historical state \\S+ is not available|archive requests require a personal token/i", "/historical state \\S+ is not available/i", R, "LH2b "],
+  [QUOTE, "e?.code !== 3 && !/^execution reverted/i.test(m) && ", "!/^execution reverted/i.test(m) && ", R, "LH2b "],
+  [QUOTE, "e?.code !== 3 && !/^execution reverted/i.test(m) && ", "e?.code !== 3 && ", R, "LH2b "],
+  [QUOTE, "    if (!res.ok) throw new Error(`the provider answered HTTP ${res.status}`);", "", R, "LH3 "],
+  [QUOTE, "const need = Math.floor(Math.max(of, list.length) / 2) + 1;", "const need = Math.floor(list.length / 2) + 1;", R, "LM2 "],
+  [QUOTE, "    if (rest.length < 2) return got;", "", R, "LL4 "],
+  [QUOTE, "(waitFrom ??= (a.mono ?? monotonic)())", "(a.mono ?? monotonic)()", R, "LW "],
   [QUOTE, "      s.held = performance.now() + EVM_HOLD_MS;\n      throw e;", "      throw e;", R, "V4 "],
   // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the
   // block's confirmation (M-2); a provider that differs from what the quote used is held; the spare's timer counts

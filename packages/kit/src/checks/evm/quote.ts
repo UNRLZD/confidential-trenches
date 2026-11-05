@@ -559,7 +559,11 @@ type Block = { number: bigint; hash: string; timestamp: bigint; baseFeePerGas: b
  *  EVM_QUOTE_MAX_AGE_MS behind the device's clock, with `confirm`, which reads that number's hash and time on the other
  *  provider and must find the same block. One provider alone cannot pick an old block, nor name a block the other does
  *  not hold (review of b17d1fc, R1, R1b). `confirm` runs beside the reads, and nothing read is used before it passes. */
-async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: number, minBlock = 0n, mono: () => number = monotonic, start: number = mono()): Promise<{ block: Block; confirm: () => Promise<void>; low: EvmRpc }> {
+// `t0`: when the wait for `minBlock` began (a retry of the same quote shares the first one's deadline); `of`: how many
+// providers the quote lists, which a contested confirm needs more than half of, however many are asked here (card
+// evm-quote-lag-held review, MED-2: a retry without one held provider counted it over the list left, 2 of 3 where the
+// quote's 4 need 3, and two colluders confirmed their block)
+async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: number, minBlock = 0n, mono: () => number = monotonic, start: number = mono(), t0: number = mono(), of: number = rpcs.length): Promise<{ block: Block; confirm: () => Promise<void>; low: EvmRpc }> {
   const call: EvmRpcCall = { method: "eth_getBlockByNumber", params: ["latest", false] };
   const near = (x: Block, y: Block) => x.number - y.number <= maxLag && y.number - x.number <= maxLag;
   // the order agreeing indexes, taken as each round starts, as agreeing takes its own (it reorders `rpcs`, the quote's
@@ -572,7 +576,6 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
   // EVM_MIN_BLOCK_WAIT_MS: a sell asked right after its buy is quoted at a block that holds the buy, never read as
   // fee_on_transfer at one before it. One deadline on the monotonic clock covers the sleeps and the reads, each round
   // of heads cut off at the time left, so a slow or rate-limited provider holds the quote no longer (review fold 1, M2)
-  const t0 = mono();
   const left = () => EVM_MIN_BLOCK_WAIT_MS - (mono() - t0);
   const late = () => refuse("not_landed", `the providers' heads did not reach block ${minBlock}, the buy's, within ${EVM_MIN_BLOCK_WAIT_MS} ms`);
   let got: { a: Block; b: Block; i: number; j: number };
@@ -605,7 +608,7 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
   // is a vote against it, as in agreeing: the next of the rest is asked, and the block is read at only once more than
   // half the providers hold it, the lower head's own provider one of them (review of bc189de, M-2)
   const others = [at, ...list.map((_, k) => k).filter((k) => k !== i && k !== j)];
-  const need = Math.floor(list.length / 2) + 1;
+  const need = Math.floor(Math.max(of, list.length) / 2) + 1;
   const confirm = async () => {
     const by = { method: "eth_getBlockByNumber", params: ["0x" + lo.number.toString(16), false] };
     let holds = 1;
@@ -1671,7 +1674,10 @@ async function routeSet(a: {
     }
     return agreed;
   };
-  const fresh = (on: readonly EvmRpc[]) => agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start);
+  // every agreement of the quote counts its majority over the quote's whole list and waits for the buy's block to one
+  // deadline, the first's (review LOW-5: a retry's own wait reached about twice EVM_MIN_BLOCK_WAIT_MS)
+  let waitFrom: number | undefined;
+  const fresh = (on: readonly EvmRpc[]) => agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start, (waitFrom ??= (a.mono ?? monotonic)()), rpcs.length);
   // the block more than maxLag below the scan provider's head, which the scan would refuse (scanPools)
   const behind = async (b: Block) => {
     const h = headOfScan === undefined ? null : await headOfScan.catch(() => null);
@@ -1681,9 +1687,10 @@ async function routeSet(a: {
   // provider of the pair whose head lagged near maxLag held it there, and the quote refused rpc_disagree; publicnode 100
   // blocks back refused 9 of 10 Robinhood warm quotes in about 0.5 s, as it stayed ranked first). Its provider is held
   // and the block is agreed once more without it, on two other providers that agree and a confirm by one of the rest,
-  // as any block is: a hold only drops a provider from the pair, never lets one decide alone. A held head from the
-  // watch names no provider, so it is agreed again on the quote's own list first. A lower head still that far behind
-  // holds its provider too, and the scan refuses as before.
+  // as any block is, a contested one by more than half the quote's whole list: a hold only drops a provider from the
+  // pair, never lets one decide alone, nor lowers the majority. A held head from the watch names no provider, so it is
+  // agreed again on the quote's own list first. One provider at most is held a quote (review LOW-1): a lower head still
+  // that far behind leaves the scan to refuse as before.
   const agreedAt = async (): Promise<{ block: Block; confirm: () => Promise<void> }> => {
     let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
     if (!(await behind(got.block))) return got;
@@ -1698,7 +1705,6 @@ async function routeSet(a: {
     const again = await fresh(rest);
     // the quote's later rounds ask the new pair first and the held provider last
     if (!Object.isFrozen(rpcs)) [...rest, low].forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));
-    if (await behind(again.block)) HOLD.get(again.low)?.();
     return again;
   };
   const agreedHead = () => agreedOnce().then((x) => x.block);
@@ -2327,12 +2333,18 @@ function retryAfterMs(h: string | null, now = Date.now()): number | null {
  *  out of time (TimeoutError) is not one: it may have been served. A browser's fetch names no cause for any failure with
  *  no response (re-review of b282ce0, LOW-B), so there every one is one: each call is a read, safe to send again. */
 class Unreachable extends Error {}
-/** A call's error naming a state the provider does not hold: past its state cut ("historical state ... is not
- *  available": robinhood-rpc.publicnode.com, bloXroute and Globalstake, 2026-11-05 01:15Z; "missing trie node", geth),
- *  or not yet ("block not found", "header not found", "Unknown state. First available …": askAt). */
+/** A call's error naming state the provider no longer keeps (its state cut), read from the pinned providers:
+ *  - "historical state <root> is not available": a Robinhood provider of the quote's list answering a TORCH quote's
+ *    reads at its agreed block, 2026-11-05 10:00Z and 10:03Z (card evm-quote-lag-held's live runs);
+ *  - "Archive requests require a personal token…": robinhood-rpc.publicnode.com, -32602, to a state read 100 and 130
+ *    blocks back, 6 of 6, 2026-11-05 11:01Z (its HTTP status 403, which evmJsonRpc refuses before any call is read).
+ *  Never a revert (code 3, "execution reverted…"): a call may revert with any string, "header not found" among them
+ *  (every pinned Base provider passed it through, 10:54Z). Never an answer for a block a provider does not hold yet
+ *  ("block not found: canonical hash", "header not found", "Unknown state"): askAt asks those again. */
 const stateless = (a: unknown) => {
-  const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
-  return typeof m === "string" && /(block|header).*not found|unknown block|unknown state|historical state|missing trie node/i.test(m);
+  const e = (a as { error?: { code?: unknown; message?: unknown } } | null)?.error;
+  const m = e?.message;
+  return typeof m === "string" && e?.code !== 3 && !/^execution reverted/i.test(m) && /historical state \S+ is not available|archive requests require a personal token/i.test(m);
 };
 const limited = (a: unknown) => {
   const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
@@ -2363,6 +2375,9 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       throw e;
     }
     if (res.status === 429) throw new RateLimited("the provider answered 429 Too Many Requests", retryAfterMs(res.headers.get("retry-after")));
+    // any other status outside 2xx is a failure, never an answer to read (review MED-1: robinhood-rpc.publicnode.com
+    // answers a read past its state cut 403 with a JSON-RPC error inside, which was timed as a fast answer)
+    if (!res.ok) throw new Error(`the provider answered HTTP ${res.status}`);
     const text = await res.text();
     if (text.length > maxBytes) throw new Error("the answer is too long");
     const arr: unknown = JSON.parse(text);
