@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { CURVE_TOKEN, fakeChain, open, REC } from "../../../test/evm-swaps/robinhood.ts";
 import { PROVIDER_PACE, providerHolds } from "../../limits/limits.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
-import { HEADER_TIMED, INFLIGHT_MAX, SWAP_RPCS } from "./swaps.ts";
+import { HEADER_TIMED, INFLIGHT_MAX, OPEN_BOUND_MS, SWAP_RPCS } from "./swaps.ts";
 
 const CHAIN_RPC = "https://rpc.mainnet.chain.robinhood.com";
 const BLOCKVECTRA = "https://api.blockvectra.com/v1/robinhood_mainnet/public";
@@ -48,17 +48,25 @@ function rig(refusing: string[], loadMs = 0) {
   return { chain, logs, sends, calls, fetch };
 }
 
-test("card helper-robinhood-capacity: 12 cold tokens at once, the chain's own RPC, blockvectra and pocket refusing every read: all 12 answer 200, each refusing provider sent no more than were out at once before its first refusal, and each provider left is asked within its pace", async () => {
+test("card helper-robinhood-capacity: 12 cold tokens at once, the chain's own RPC, blockvectra and pocket refusing every read: each first ask answers within the open's bound, 200 or 503 with its read going on, and asked again all 12 answer 200; each refusing provider sent no more than were out at once before its first refusal, and each provider left is asked within its pace", async () => {
   const r = rig([CHAIN_RPC, BLOCKVECTRA, POCKET], LOAD_MS);
   // the helper's clock and its waits run on virtual time (onVirtualTime), so the providers' paces (limits.ts
   // PROVIDER_PACE) refill as the run's own time passes, never as fast as the machine is
   const clock = { get t() { return Date.now(); } };
-  const { value: got, ms } = await onVirtualTime(9_000_000, async () => {
+  // half the providers refusing every read: at c48a98f the slowest of the 12 took 20.8 s; a first open now answers
+  // within OPEN_BOUND_MS (card helper-robinhood-trades-hang), 503 past it, and its read goes on, so the page's next ask
+  // has the tape
+  const { value: { first, firstMs, got }, ms } = await onVirtualTime(9_000_000, async () => {
     const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
-    const got = await Promise.all(TOKENS.map((t) => s.trades(t, 50)));
+    const t0 = Date.now();
+    const first = await Promise.all(TOKENS.map((t) => s.trades(t, 50)));
+    const firstMs = Date.now() - t0;
+    const got = await Promise.all(first.map((a, i) => (a.status === 503 ? s.trades(TOKENS[i]!, 50) : a)));
     s.stop();
-    return got;
+    return { first, firstMs, got };
   });
+  assert.ok(first.every((a) => a.status === 200 || a.status === 503), first.map((a) => a.body.slice(0, 60)).join("\n"));
+  assert.ok(firstMs <= OPEN_BOUND_MS, `first asks answered in ${firstMs} ms, past ${OPEN_BOUND_MS} ms`);
   assert.deepEqual(got.map((a) => a.status), TOKENS.map(() => 200), got.map((a) => a.body.slice(0, 60)).join("\n"));
   assert.ok(JSON.parse(got.at(-1)!.body).trades.length > 0, "the recorded curve's tape is read");
   const s_ = ms / 1000;
