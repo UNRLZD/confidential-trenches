@@ -246,8 +246,11 @@ const INDEX_JOIN_MAX = 500;
 /** How often the index reads the chain's newest blocks; a tape reads the blocks after its newest itself (agreedRange). */
 const INDEX_FOLLOW_MS = 5_000;
 /** Blocks the index keeps past a tape's cold window and its ETH price's, so a caller whose head is behind the index's
- *  newest still finds its oldest block held (a 15-block miss at 02:36Z: the ETH price read its first blocks itself). */
-const INDEX_SLACK = 1_000;
+ *  newest still finds its oldest block held (a 15-block miss at 02:36Z: the ETH price read its first blocks itself).
+ *  [design: 500, 50 s of Robinhood's blocks, ten follower reads; the whole window stays under 5,000 blocks, the most
+ *  rpc-robinhood.blockmachine.io serves without a key (-32002 "served for the most recent 5000 blocks only", read
+ *  2026-11-05 03:3xZ)] */
+const INDEX_SLACK = 500;
 /** The swap events the index holds: every venue's a tape reads (swapFilter, refFilter). */
 const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell, ...POOL_CALLS];
 
