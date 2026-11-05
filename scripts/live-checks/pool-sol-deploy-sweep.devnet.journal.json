@@ -1,0 +1,50 @@
+{
+  "cluster": "devnet",
+  "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "rpc": "api.devnet.solana.com",
+  "program_id": "J7KpQFVgMfjXf8d3geSuAznopjUfy3zVHCQ7RkzCBuk7",
+  "programdata": "7NUxDhwZMSPJA2yCnuAbfSgeKp6dYSPV2nSTs9h2MNca",
+  "pool": "8wi86SMdkDJgjWtH1gKTAbRoDXSRJ2pA2TTC3trPRa7R",
+  "so_len": 77472,
+  "so_sha256": "9539c9d105fc8960d864e4c59ff47fd44258324627a67b01e1d71d40c3a5ba01",
+  "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 41700702945, pool-solana job 126144439173, commit 10e685dd2294a32ebf4d9852efaf32e54b929359",
+  "ci_run": "41700702945",
+  "commit": "10e685dd2294a32ebf4d9852efaf32e54b929359",
+  "funder": "EhhkfuoyW4usuACYWcZKHbX48Ud3zf3V5ZyE9BoKEWkR",
+  "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+  "need": "421550680",
+  "need_parts": {
+    "program_account": "833120",
+    "programdata": "394436600",
+    "pool": "11719560",
+    "deposit": "10000000",
+    "deposit_mark": "736600",
+    "deposit_pages": "2194560",
+    "funder_floor": "650240",
+    "fees": "980000"
+  },
+  "at": "2026-11-05T03:42:37.445Z",
+  "complete": false,
+  "stopped": "SIGHUP",
+  "stopped_at": "2026-11-05T03:40:18.756Z",
+  "keys": {
+    "folder": "pool-sol-deploy-yj4LUN",
+    "state": "removed",
+    "why": [
+      "swept by --sweep-kept: every key of the run reads 0 on both RPCs, nothing under the funder's authority"
+    ],
+    "sweep": "node contracts/pool-solana/scripts/deploy.mjs --sweep-kept scripts/live-checks/pool-sol-deploy-sweep.devnet.journal.json --url https://api.devnet.solana.com"
+  },
+  "txs": [
+    {
+      "step": "funding (to the funder)",
+      "signature": "2urmWKB7QqY8QDe9DUozHD5E8A7LBPuvLAZBFmviXxi3KsfFZYpN75WU9vrYTfcASs2TqUs7g8jvhm4UJvoxfP5g",
+      "state": "landed"
+    },
+    {
+      "step": "sweep (kept keys, to the funding's source 3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx)",
+      "signature": "5VLYV6ibcnQ2mmFkrFpYdSmz9P1fk1yTHzEw1uWi1fXe33GbXZDF3US4K7EVPyJRteNLDxzn3K567fi2TFhakYwb",
+      "state": "landed"
+    }
+  ]
+}

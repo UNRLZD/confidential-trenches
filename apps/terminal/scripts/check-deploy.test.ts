@@ -307,7 +307,7 @@ test("deploy.mjs's live runs name every live check that reads APP_HOST, and its 
   writeFileSync(join(t, "_headers"), headersFor("testnet", readFileSync(join(BUILD, "_headers"), "utf8")));
   assert.deepEqual([networkOfBuild(BUILD), networkOfBuild(t)], ["mainnet", "testnet"]);
   const { LIVE_CHECKS } = await import("./deploy.mjs");
-  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash", "signpage-pool-price", "signpage-buy-route-events", "balances-per-chain"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool, trade-box-bal-cash, signpage-pool-price, signpage-buy-route-events and balances-per-chain");
+  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash", "signpage-pool-price", "signpage-buy-route-events", "balances-per-chain", "evm-quote-warm-round"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool, trade-box-bal-cash, signpage-pool-price, signpage-buy-route-events, balances-per-chain and evm-quote-warm-round (the kit's EVM quote the app's bundle runs)");
 });
 
 // A build like BUILD with `edit` applied to a fresh copy; its problems from checkDir.

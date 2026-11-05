@@ -40,7 +40,7 @@ import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./w
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
-import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
+import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
 import { clientOf, clientWindow, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
@@ -61,9 +61,9 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES] = MOUNTED.proxy;
-const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND] = MOUNTED.relay;
+const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
@@ -251,7 +251,7 @@ export function handler(
       }
       route = routeOf(path);
       // every route but the pool, RPC and proxy routes (which have their own windows below) counts in the client's window
-      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_EVM_SEND) {
+      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL) {
         const wait = apiRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
       }
@@ -332,12 +332,14 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
-      if (path === POOL_EVM_SEND) {
+      if (path === POOL_EVM_SEND || path === POOL_EVM_SELL) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         const wait = poolRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
-        // pool/evm.ts: { pool, data }, the pool one this helper carries (else 404 not_found)
-        void readBody(req, POOL_EVM_BODY_MAX)
+        // pool/evm.ts: a withdraw { pool, data, epoch } or a sell { pool, w, data, authorization }, the pool one this
+        // helper carries (else 404 not_found); both draw on the pool's one queue and its held limit per client
+        const sell = path === POOL_EVM_SELL;
+        void readBody(req, sell ? POOL_EVM_SELL_BODY_MAX : POOL_EVM_BODY_MAX)
           .then(async (text) => {
             if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
             let body: unknown;
@@ -350,7 +352,7 @@ export function handler(
             const pool = typeof name === "string" ? evmPools.get(name) : undefined;
             if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
             if (!(await heldWithin(senders))) return SENDERS_LATE;
-            const a = await pool.carry(body, clientOf(req));
+            const a = await (sell ? pool.sell(body, clientOf(req)) : pool.carry(body, clientOf(req)));
             return { status: a.status, headers: (a.retryAfterS === undefined ? {} : { "Retry-After": String(a.retryAfterS) }) as Headers, body: JSON.stringify(a.body) };
           })
           .then(reply)
