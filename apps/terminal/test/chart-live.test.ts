@@ -247,19 +247,25 @@ test("the follow: a page out of sight reads nothing, and its first read back is 
   assert.deepEqual(limits, [String(CANDLES_LIMIT)], "301 s away: a full read");
 });
 
-test("the follow: an answer with none of the helper's own bars ends it (GeckoTerminal's bars are never polled)", async () => {
+test("the follow: an answer with none of the helper's own bars (a helper restarted, its book not read yet) waits RESYNC_MS, reads in full, and follows again once its own bars are back", async () => {
   const c = clock();
-  let reads = 0;
-  const fetchFn = (async () => {
-    reads++;
-    return answer(200, { tf: "1m", candles: [row(2, "1.3")], src: "chain,geckoterminal", as_of_ms: 1 }, { "X-Helper-Source": "chain,geckoterminal" });
+  const limits: string[] = [];
+  const gecko = { tf: "1m", candles: [row(2, "1.3")], src: "chain,geckoterminal", as_of_ms: 1 };
+  const answers = [answer(200, own([row(2, "1.2")])), answer(200, gecko, { "X-Helper-Source": "chain,geckoterminal" }), answer(200, own([row(2, "1.3"), row(3, "1.4")])), answer(200, own([row(3, "1.5")]))];
+  const fetchFn = (async (u: string) => {
+    limits.push(new URL(u).searchParams.get("limit")!);
+    return answers.shift()!;
   }) as typeof fetch;
   const got: ReadyCandles[] = [];
   followCandles("solana", "Mint1", start, (r) => got.push(r), { fetchFn, now: c.now, later: c.later, hidden: () => false });
-  await c.tick();
-  assert.equal(await c.tick(), null);
-  assert.equal(reads, 1);
-  assert.equal(got[0]!.gecko, true, "CoinGecko's label once a drawn bar is theirs");
+  const waits = [];
+  for (let i = 0; i < 4; i++) waits.push(await c.tick());
+  assert.deepEqual(waits, [LIVE_MS, LIVE_MS, RESYNC_MS, LIVE_MS], "no own bars: the next read a minute later");
+  assert.deepEqual(limits, ["2", "2", String(CANDLES_LIMIT), "2"], "the read after the gap is a full one");
+  assert.equal(got.at(-1)!.bars.at(-1)!.close, 1.5, "the bars after the gap are drawn");
+  assert.equal(got.at(-1)!.bars.length, 3);
+  assert.equal(got[1]!.gecko, true, "CoinGecko's label once a drawn bar is theirs");
+  assert.notEqual(await c.tick(), null, "still following");
 });
 
 test("the follow: a throw is a failed read, never an error out of the loop", async () => {

@@ -135,8 +135,9 @@ export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf
 // (apps/helper/src/data/candles.ts) and keeps its bars in memory from its own chain reads (Solana:
 // apps/helper/src/data/solana/trades.ts, folded every second; Base and Robinhood: apps/helper/src/data/evm/swaps.ts,
 // read every second), so the page never prices a trade itself and a read of the newest bars costs the helper no call to
-// anyone. Only an answer that names `own_from_s` (the helper's own bars) is followed: GeckoTerminal's bars alone are
-// drawn once and never read again, since its 5 calls per 75 s are shared by every page.
+// anyone. Only a chart whose first answer names `own_from_s` (the helper's own bars) is followed: GeckoTerminal's bars
+// alone are drawn once and never read again, since its 5 calls per 75 s are shared by every page; a followed chart
+// whose helper loses its own bars for a while (a restart) is read once a minute until they are back.
 
 /** The page's read interval: the helper's own tick (TICK_MS in apps/helper/src/data/evm/swaps.ts; createSolanaTrades
  *  tickMs, 1 s), so no read waits on bars the helper does not hold yet. */
@@ -216,8 +217,10 @@ const laterReal = (fn: () => void, ms: number): (() => void) => {
  * changed, with the precision of the bars now drawn and CoinGecko's label kept while any drawn bar is GeckoTerminal's.
  * One read at a time; a hidden page reads nothing, and its first read back is a full one once RESYNC_MS passed. A
  * failed or refused read keeps the bars drawn and waits longer each time (doubling from LIVE_MS, a 429's Retry-After,
- * at most LIVE_BACKOFF_MAX_MS). An answer with none of the helper's own bars ends the follow (its newest bars would be
- * GeckoTerminal's). Returns the stop.
+ * at most LIVE_BACKOFF_MAX_MS). An answer with none of the helper's own bars (a helper just restarted or deployed has
+ * not read the token's book yet; its newest bars would be GeckoTerminal's) is folded like any other and the next read
+ * is a full one RESYNC_MS later, so GeckoTerminal is read at most once a minute, and live reads resume once the
+ * helper's own bars are back. Returns the stop.
  */
 export function followCandles(chain: MarketChain, token: string, ready: ReadyCandles, onBars: (r: ReadyCandles) => void, deps: FollowDeps = {}): () => void {
   const now = deps.now ?? Date.now;
@@ -225,6 +228,8 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
   const hidden = deps.hidden ?? (() => typeof document !== "undefined" && document.hidden);
   let cur = ready;
   let lastFull = now();
+  /** The last answer had none of the helper's own bars: the next read is a full one. */
+  let away = false;
   let fails = 0;
   let stopped = false;
   let cancel: () => void = () => undefined;
@@ -239,7 +244,7 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
     if (stopped) return;
     if (hidden()) return next(LIVE_MS);
     const sent = now();
-    const full = fails > 0 || sent - lastFull >= RESYNC_MS;
+    const full = fails > 0 || away || sent - lastFull >= RESYNC_MS;
     const got = await readNewest(chain, token, cur.tf, full ? CANDLES_LIMIT : LIVE_LIMIT, deps.fetchFn);
     if (stopped) return;
     if ("failed" in got) return failed(got.waitMs);
@@ -251,8 +256,8 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
       cur = { ...cur, bars, gecko: cur.gecko || got.gecko, precision: pricePrecision(bars) };
       onBars(cur);
     }
-    if (!got.own) return;
-    next(LIVE_MS);
+    away = !got.own;
+    next(away ? RESYNC_MS : LIVE_MS);
   }
   next(LIVE_MS);
   return () => {
