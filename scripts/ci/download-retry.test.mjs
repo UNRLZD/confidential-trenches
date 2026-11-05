@@ -1,7 +1,9 @@
 // The download-retry gate (download-retry.mjs) on planted workflows: a curl without curl's own retry, a wget, an apt-get
 // with no Acquire::Retries, a rustup, cargo or git install outside scripts/ci/retry.sh, and a foundry-toolchain step with
 // no second run are each refused by file and line; the repo's own workflows pass. And retry.sh itself: three tries, a
-// pause between them, the last try's exit code.
+// pause between them, the last try's exit code. Card ci-cargo-near-cached: a curl to a file, a fetch.sh or a Playwright
+// install with no cache in front of it are refused, and fetch.sh itself uses a matching cached file with no request,
+// refuses a bad one and fails on bad bytes.
 //   node --test scripts/ci/download-retry.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -10,11 +12,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync 
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { downloadRetry, refusals, withoutHeldRetries } from "./download-retry.mjs";
+import { downloadRetry, refusals, cacheRefusals, fetchScriptRefusals, withoutHeldRetries } from "./download-retry.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const GATE = join(ROOT, "scripts/ci/download-retry.mjs");
 const RETRY = join(ROOT, "scripts/ci/retry.sh");
+const FETCH = join(ROOT, "scripts/ci/fetch.sh");
 const FLAGS = "--retry 6 --retry-all-errors";
 const SHA = "908c540300062bd5a7e473851cdb4282204cee09";
 
@@ -29,8 +32,10 @@ test("the repo's own workflows and actions pass, and their downloads are the one
   assert.deepEqual(r.refusals, []);
   assert.ok(r.read >= 4, `${r.read} files read`);
   const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
-  // not dead rules: the curls, the rustup installs and the foundry pair are there, and each is held
-  assert.ok(ci.split(`curl -sSfL ${FLAGS}`).length - 1 >= 4);
+  // not dead rules: the pinned files (each through fetch.sh, whose curl carries the flags), the rustup installs and
+  // the foundry pair are there, and each is held
+  assert.ok(ci.split("bash scripts/ci/fetch.sh ~/.cache/ci-downloads/").length - 1 >= 4);
+  assert.ok(readFileSync(FETCH, "utf8").includes(`curl -sSfL ${FLAGS} -o`));
   assert.ok(ci.split("bash scripts/ci/retry.sh rustup toolchain install").length - 1 >= 4);
   assert.match(ci, /- id: foundry\n\s+continue-on-error: true\n\s+uses: foundry-rs\/foundry-toolchain@/);
   assert.match(readFileSync(join(ROOT, ".github/actions/chrome/action.yml"), "utf8"), /Acquire::Retries=5/);
@@ -43,7 +48,8 @@ test("main's workflows before this card: every download without its retry is ref
     .replaceAll("bash scripts/ci/retry.sh ", "")
     .replace(/- id: foundry\n\s+continue-on-error: true\n(\s+)uses:/, "- uses:");
   const r = what(before);
-  assert.equal(r.filter((x) => x.includes("a curl without")).length, 4, r.join("\n"));
+  // the curls are fetch.sh's now: its one curl without the flags is refused as a workflow's
+  assert.deepEqual(fetchScriptRefusals(readFileSync(FETCH, "utf8").replaceAll(` ${FLAGS}`, "")).map(([, w]) => w.split(": ")[0]), ["a curl without --retry 6 --retry-all-errors"]);
   assert.equal(r.filter((x) => x.includes("rustup toolchain install not run through")).length, 4, r.join("\n"));
   assert.equal(r.filter((x) => x.includes("git submodule update not run through")).length, 1, r.join("\n"));
   assert.ok(r.some((x) => x.includes("a foundry-toolchain step without an id")), r.join("\n"));
@@ -130,6 +136,119 @@ test("the command line: exit 1 with one line per refusal, exit 0 on held workflo
     const ok = cli();
     assert.equal(ok.status, 0, ok.stderr);
     assert.match(ok.stdout, /download-retry: OK \(2 workflow file\(s\) read\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Card ci-cargo-near-cached: the cache rules on planted workflows
+const CACHE = "55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0";
+const SUM = "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a";
+const FILE = "~/.cache/ci-downloads/cargo-near-0.22.0.tgz";
+const cache = (kind, { path = FILE, key = `download-cargo-near-0.22.0-${SUM}`, id = "tgz" } = {}) =>
+  `      - id: ${id}\n        uses: actions/cache${kind}@${CACHE}\n        with:\n          path: ${path}\n          key: ${key}\n`;
+const FETCHING = run(`bash scripts/ci/fetch.sh ${FILE} ${SUM} \\\n  https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/x.tar.gz\ntar -xzf ${FILE}`);
+const PW_PATHS = "|\n            ~/.cache/ms-playwright\n            ~/.cache/playwright-debs";
+const PW = run(`debs="$HOME/.cache/playwright-debs"\nprintf 'Dir::Cache::Archives "%s/";\\n' "$debs" | sudo tee /etc/apt/apt.conf.d/90x\npnpm exec playwright install --with-deps $ENGINES`);
+// each refusal as "line: what", without the command a curl or fetch.sh refusal quotes after its last ": "
+const cached = (yml) => cacheRefusals(yml).map(([line, w]) => `${line}: ${/^a (curl to a file|scripts\/ci\/fetch\.sh without)/.test(w) ? w.split(": ")[0] : w}`);
+
+test("cache: the repo's own workflows hold every pinned file and Playwright install behind a cache, main's did not", () => {
+  for (const f of ["ci.yml", "vault-build.yml", "live.yml"]) assert.deepEqual(cacheRefusals(readFileSync(join(ROOT, ".github/workflows", f), "utf8")), [], f);
+  // main's steps before this card, each a download on every run: refused where they stood
+  const curl = (name, sum, url) => job(run(`curl -sSfL ${FLAGS} -o "$RUNNER_TEMP/${name}" \\\n  ${url}\necho "${sum}  $RUNNER_TEMP/${name}" | sha256sum -c -`));
+  assert.deepEqual(cached(curl("cargo-near.tgz", SUM, "https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/x.tar.gz")), ["9: a curl to a file"]);
+  assert.deepEqual(cached(job(run("pnpm --filter terminal exec playwright install --with-deps $ENGINES"))), ["9: a playwright install of system packages with no cache step before it in its job"]);
+});
+
+test("cache: a fetch.sh needs a cache before it in its job, holding its file, keyed on its sha256, and saved", () => {
+  assert.deepEqual(cached(job(cache("/restore") + FETCHING + cache("/save"))), []);
+  assert.deepEqual(cached(job(cache("") + FETCHING)), []);
+  assert.deepEqual(cached(job(FETCHING)), [`9: a scripts/ci/fetch.sh of ${FILE} (sha256 9429064e) with no cache step before it in its job`]);
+  // after it, not before
+  assert.deepEqual(cached(job(FETCHING + cache(""))), [`9: a scripts/ci/fetch.sh of ${FILE} (sha256 9429064e) with no cache step before it in its job`]);
+  // a key that does not name the sha256 (a bad file under a version-only key would be served forever)
+  assert.deepEqual(cached(job(cache("", { key: "download-cargo-near-0.22.0" }) + FETCHING)).length, 1);
+  // a path that does not hold the file
+  assert.deepEqual(cached(job(cache("", { path: "~/.cache/other.tgz" }) + FETCHING)).length, 1);
+  assert.deepEqual(cached(job(cache("", { path: "$HOME/.cache/ci-downloads/cargo-near-0.22.0.tgz" }) + FETCHING)), []);
+  // a restore that is never saved never fills; a save of another key does not count
+  assert.deepEqual(cached(job(cache("/restore") + FETCHING)), [`14: a scripts/ci/fetch.sh of ${FILE} (sha256 9429064e): its cache is an actions/cache/restore with no actions/cache/save of the same path and key after it`]);
+  assert.deepEqual(cached(job(cache("/restore") + FETCHING + cache("/save", { key: "other" }))).length, 1);
+  // a cache in another job is no cache of this one
+  const other = `${cache("")}  b:\n    runs-on: ubuntu-24.04\n    steps:\n${FETCHING}`;
+  assert.deepEqual(cached(job(other)).length, 1);
+  // a fetch.sh without its three arguments
+  assert.deepEqual(cached(job(cache("") + run(`bash scripts/ci/fetch.sh ${FILE} nope https://x/y`))), ["14: a scripts/ci/fetch.sh without a file, a sha256 and a url"]);
+});
+
+test("cache: a curl to a file is refused but an apt repository's key checked by its fingerprint; a curl to a pipe is not a file", () => {
+  for (const flag of ["-o f", "--output f", "-O", "-sSfLo f"]) assert.deepEqual(cached(job(run(`curl -sSfL ${FLAGS} ${flag} https://x/y`))), ["9: a curl to a file"], flag);
+  assert.deepEqual(cached(job(run(`curl -sSfL ${FLAGS} https://x/y | jq .`))), []);
+  assert.deepEqual(cached(job(run(`curl -sSfL ${FLAGS} -o k.pub https://x/key.pub\nfpr="$(gpg --show-keys --with-colons k.pub)"`))), []);
+  // the repo's one such curl is the Chrome action's key
+  assert.match(readFileSync(join(ROOT, ".github/actions/chrome/action.yml"), "utf8"), /gpg --show-keys/);
+});
+
+test("cache: a Playwright install needs ms-playwright cached, and one with system packages keeps apt's .debs in it", () => {
+  const ok = job(cache("/restore", { path: PW_PATHS, key: "pw" }) + PW + cache("/save", { path: PW_PATHS, key: "pw" }));
+  assert.deepEqual(cached(ok), []);
+  assert.deepEqual(cached(job(PW)), ["11: a playwright install of system packages with no cache step before it in its job"]);
+  // the .debs dir not in the cache
+  assert.deepEqual(cached(job(cache("", { path: "~/.cache/ms-playwright", key: "pw" }) + PW)).length, 1);
+  // the cache holds a dir, but the step keeps no .debs in it
+  assert.deepEqual(cached(ok.replace(/printf .*\n/, "")), ["17: a playwright install of system packages that does not keep apt's .debs (Dir::Cache::Archives) for its cache"]);
+  assert.deepEqual(cached(job(run("pnpm exec playwright install-deps webkit"))).length, 1);
+  // the browsers alone need ms-playwright; a dry run fetches nothing
+  assert.deepEqual(cached(job(cache("", { path: "~/.cache/ms-playwright", key: "pw" }) + run("pnpm exec playwright install webkit"))), []);
+  assert.deepEqual(cached(job(run("pnpm exec playwright install webkit"))).length, 1);
+  assert.deepEqual(cached(job(run("pnpm exec playwright install-deps --dry-run webkit"))), []);
+});
+
+test("fetch.sh: a cached file that matches is used with no request; a bad one is refused and fetched again; bad bytes fail", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fetch-sh-"));
+  try {
+    const good = join(dir, "good.bin");
+    writeFileSync(good, "the release bytes\n");
+    const sum = spawnSync("sha256sum", [good], { encoding: "utf8" }).stdout.split(" ")[0];
+    const file = join(dir, "cache/sub/x.bin");
+    const fetch = (url, s = sum, env = process.env) => spawnSync("bash", [FETCH, file, s, url], { encoding: "utf8", env });
+    // a host that answers 504 to every try: a curl on PATH that fails at once, so the test waits out no retry
+    mkdirSync(join(dir, "down"));
+    writeFileSync(join(dir, "down/curl"), `#!/bin/sh\necho "curl: (22) The requested URL returned error: 504" >&2\nexit 22\n`);
+    chmodSync(join(dir, "down/curl"), 0o755);
+    const down = { ...process.env, PATH: `${join(dir, "down")}:${process.env.PATH}` };
+    // a miss: fetched (curl reads file:// as it reads https), checked, kept at the cache's path
+    let r = fetch(`file://${good}`);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /fetched from file:/);
+    assert.equal(readFileSync(file, "utf8"), "the release bytes\n");
+    // a hit: no request (the host is down)
+    r = fetch(`https://github.com/near/cargo-near/releases/download/x`, sum, down);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /from the cache, sha256/);
+    // a poisoned entry: refused, fetched again, and the good bytes replace it
+    writeFileSync(file, "planted\n");
+    r = fetch(`file://${good}`);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /::warning::fetch\.sh: the cached .* is not sha256/);
+    assert.equal(readFileSync(file, "utf8"), "the release bytes\n");
+    // a poisoned entry and the host down: the step fails, and nothing is left for the save
+    writeFileSync(file, "planted\n");
+    r = fetch(`https://github.com/near/cargo-near/releases/download/x`, sum, down);
+    assert.equal(r.status, 22);
+    assert.match(r.stderr, /504/);
+    assert.throws(() => readFileSync(file));
+    // a host that serves other bytes: refused, nothing kept
+    writeFileSync(join(dir, "evil.bin"), "other bytes\n");
+    r = fetch(`file://${dir}/evil.bin`);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /is not sha256/);
+    assert.throws(() => readFileSync(file));
+    assert.throws(() => readFileSync(`${file}.part`));
+    // not a sha256, or a missing argument
+    assert.equal(fetch(`file://${good}`, "abc").status, 2);
+    assert.equal(spawnSync("bash", [FETCH, file, sum], { encoding: "utf8" }).status, 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

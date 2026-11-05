@@ -17,7 +17,8 @@
 #
 # On a pull request one job runs the terminal's browser chain and the signing page's browser runs.
 # Every action is pinned by commit sha, each read from its own repo: actions/checkout v7.0.1, actions/setup-node v7.1.0 and
-# pnpm/action-setup v6.1.0 as ci.yml has them, actions/upload-artifact v7.0.2 read from its repo on 2026-11-03 at 14:55Z.
+# pnpm/action-setup v6.1.0 as ci.yml has them, actions/upload-artifact v7.0.2 read from its repo on 2026-11-03 at 14:55Z,
+# actions/cache/restore and actions/cache/save v6.1.0 as ci.yml has them.
 name: live
 
 on:
@@ -99,14 +100,66 @@ jobs:
       - name: Google Chrome stable, and its sandbox comes up
         if: matrix.chrome
         uses: ./.github/actions/chrome
-      # Playwright's Firefox and WebKit have no installed channel: the launcher (scripts/browsers.mjs) starts these builds
-      - name: Playwright's Firefox and WebKit
+      # Playwright's Firefox and WebKit have no installed channel: the launcher (scripts/browsers.mjs) starts these builds.
+      # They and the system packages they need come from the cache (card ci-cargo-near-cached: run 42044118472's
+      # `playwright install --with-deps` crawled at kB/s from the image's Ubuntu mirror for 20 min and no check started).
+      # The key names the Playwright release, the engines and the runner image (ImageOS, ImageVersion), since the .debs
+      # are the ones that image lacked: a hit installs them with dpkg and no request, then `install-deps --dry-run`
+      # (apt-get -s on the image's own lists, offline) must find none missing. A miss, or a hit that fails either, runs
+      # Playwright's own install once, apt keeping each .deb it fetches for the save.
+      - name: the cache key of Playwright's engines on this runner image
+        id: engines-key
         if: matrix.engines != ''
         env:
           ENGINES: ${{ matrix.engines }}
         run: |
+          version="$(pnpm --filter terminal exec playwright --version | awk '{ print $2 }')"
+          echo "key=playwright-$version-${ENGINES// /-}-${ImageOS:-unknown}-${ImageVersion:-unknown}" | tee -a "$GITHUB_OUTPUT"
+      - id: engines
+        if: matrix.engines != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: ${{ steps.engines-key.outputs.key }}
+      - name: Playwright's Firefox and WebKit
+        if: matrix.engines != ''
+        env:
+          ENGINES: ${{ matrix.engines }}
+          HIT: ${{ steps.engines.outputs.cache-hit }}
+        run: |
+          debs="$HOME/.cache/playwright-debs"
+          started=$SECONDS
+          shopt -s nullglob
+          cached=("$debs"/*.deb)
+          # the log is the runner's own file, written by the shell, not by sudo
+          # shellcheck disable=SC2086,SC2024
+          if [ "$HIT" = true ] && { [ "${#cached[@]}" = 0 ] || sudo DEBIAN_FRONTEND=noninteractive dpkg -i "${cached[@]}" > "$RUNNER_TEMP/dpkg.log" 2>&1; } \
+            && pnpm --filter terminal exec playwright install-deps --dry-run $ENGINES; then
+            echo "the system packages from the cache: ${#cached[@]} .deb, none missing"
+          else
+            if [ "$HIT" = true ]; then echo "::warning::the cached .debs did not install or left a package missing: Playwright's own install runs"; cat "$RUNNER_TEMP/dpkg.log" 2>/dev/null || true; fi
+            sudo rm -rf "$debs"
+            mkdir -p "$debs/partial"
+            printf 'Dir::Cache::Archives "%s/";\nAPT::Keep-Downloaded-Packages "true";\nAcquire::Retries "5";\n' "$debs" | sudo tee /etc/apt/apt.conf.d/90playwright-debs
+            # shellcheck disable=SC2086
+            pnpm --filter terminal exec playwright install --with-deps $ENGINES
+            sudo rm -f /etc/apt/apt.conf.d/90playwright-debs
+            sudo rm -rf "$debs/partial" "$debs/lock"
+            sudo chown -R "$(id -u):$(id -g)" "$debs"
+          fi
+          # the engines themselves: nothing to fetch when the cache held them
           # shellcheck disable=SC2086
-          pnpm --filter terminal exec playwright install --with-deps $ENGINES
+          pnpm --filter terminal exec playwright install $ENGINES
+          echo "browser setup took $((SECONDS - started)) s"
+      - if: matrix.engines != '' && steps.engines.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: ${{ steps.engines-key.outputs.key }}
       # TMPDIR is the folder the artifact takes: a check keeps its screenshots under the temporary folder by default
       - name: ${{ matrix.name }}
         env:
