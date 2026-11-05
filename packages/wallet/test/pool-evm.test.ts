@@ -1081,7 +1081,7 @@ test("EVM_TRANSFER_RPCS: every network a pinned list of three or more keyless ht
   for (const [net, urls] of Object.entries(EVM_TRANSFER_RPCS)) {
     assert.ok(Object.isFrozen(urls), net);
     assert.ok(urls.length >= (net === "base" || net === "robinhood" ? 4 : 3), `${net}: a pair and its spares`);
-    for (const u of urls) assert.match(u, /^https:\/\/[a-z0-9.-]+$/, `${net}: ${u} is a keyless https URL`);
+    for (const u of urls) assert.match(u, /^https:\/\/[a-z0-9.-]+(\/[a-z]+)?$/, `${net}: ${u} is a keyless https URL`);
     assert.equal(new Set(urls.map(operator)).size, urls.length, `${net}: every provider another operator`);
     const rpcOf = (url: string): EvmRpc => Object.assign(async () => null, { url });
     assert.doesNotThrow(() => evmPair(urls.map(rpcOf)), `${net}: no provider twice to the kit`);
@@ -1097,7 +1097,7 @@ test("EVM_TRANSFER_RPCS: every network a pinned list of three or more keyless ht
     assert.deepEqual(both, shared[chain], `${chain}: the operators the Transfer list shares with the kit's providers`);
   }
   assert.ok(!EVM_TRANSFER_RPCS["base-sepolia"].some((u) => operator(u) === "drpc.org"), "base-sepolia.drpc.org fails a W's read");
-  assert.ok(!EVM_TRANSFER_RPCS.robinhood.some((u) => operator(u) === "pocket.network"), "robinhood.api.pocket.network's backends refuse a filter with no address");
+  assert.ok(!EVM_TRANSFER_RPCS.robinhood.some((u) => operator(u) === "pocket.network"), "robinhood.api.pocket.network's backends refuse a filter with no address on 20 to 30% of pages");
 });
 
 // ---- card evm-pool-reads-throttle: every single read of a buy's or a withdraw's survives a throttle or a timeout ----
@@ -1303,7 +1303,7 @@ test("P1 a pool's reads on a pinned list (now, trees, bind on the sync list and 
   }
 });
 
-test("P2 evmPair: two seats never on one provider; a throttle with no free spare goes up to the read's own waits; a slow log page stays (its pager halves it); a rested provider comes back", async () => {
+test("P2 evmPair: two seats never on one provider; a throttle with no free spare goes up to the read's own waits; a slow log page stays (its pager halves it); an HTTP error with no JSON-RPC answer swaps; a rested provider comes back", async () => {
   assert.throws(() => evmPair([rpc(c3, {})]), /^Error: rpcs: two or more$/);
   assert.throws(() => evmPair([rpc(c3, { url: "https://a.example" }), rpc(c3, { url: "https://b.example" }), rpc(c3, { url: "https://a.example/" })]), /one provider twice/);
   const urls = (p: readonly EvmRpc[]) => p.map((r) => r.url);
@@ -1329,6 +1329,27 @@ test("P2 evmPair: two seats never on one provider; a throttle with no free spare
   assert.deepEqual(urls(q), ["https://a.example", "https://b.example"]);
   assert.equal(await q[0]("eth_getBlockByNumber", ["latest", false]), "0x1");
   assert.deepEqual(urls(q), ["https://c.example", "https://b.example"]);
+  // a provider out (1rpc's HTTP 410 and its "answer id null", dRPC's -32601 for a standard method, 5 Nov 18:00-18:05Z): swapped; a provider's
+  // refusal in JSON-RPC words (dRPC's HTTP 400 code 35) is the read's, never a swap
+  n = { a: 0, b: 0, c: 0 };
+  const g = evmPair([mk("a", (i) => new Error(i === 0 ? "HTTP 410" : "HTTP 400: RPC error 35: ranges over 10000 blocks are not supported on free plan")), mk("b", () => null), mk("c", () => null)]);
+  assert.equal(await g[0]("eth_getLogs", [{}]), "0x1");
+  assert.deepEqual(urls(g), ["https://c.example", "https://b.example"]);
+  for (const words of ["answer id null is not request id 6", "HTTP 400: RPC error -32601: the method eth_getBlockByNumber does not exist/is not available", "RPC error -32602: invalid argument 0: missing required field 'address' for log filter"]) {
+    n = { a: 0, b: 0, c: 0 };
+    const o = evmPair([mk("a", () => new Error(words)), mk("b", () => null), mk("c", () => null)]);
+    assert.equal(await o[0]("eth_getBlockByNumber", ["latest", false]), "0x1", words);
+    assert.deepEqual(urls(o), ["https://c.example", "https://b.example"], words);
+  }
+  const h = evmPair([mk("a", () => new Error("HTTP 400: RPC error 35: ranges over 10000 blocks are not supported on free plan")), mk("b", () => null), mk("c", () => null)]);
+  await assert.rejects(h[0]("eth_getLogs", [{}]), /RPC error 35/);
+  assert.deepEqual(urls(h), ["https://a.example", "https://b.example"]);
+  // no spare free: the error goes up with the seated provider's own Retry-After, never the out one's hours
+  n = { a: 0, b: 0, c: 0 };
+  const quota = () => new SolanaRpcTransportError("http_429", "HTTP 429", 1, "c.example", 26_741_000);
+  const u = evmPair([mk("a", () => HTTP_429()), mk("b", () => null), mk("c", () => quota())]);
+  const up = await u[0]("eth_chainId", []).then(() => null, (e: unknown) => e as { afterMs: number | null; name: string });
+  assert.deepEqual([up?.name, up?.afterMs, urls(u)[0]], ["SolanaRpcTransportError", null, "https://a.example"]);
   // a rest of EVM_SPARE_REST_MS: once it ends the provider is a spare again
   const real = Date.now;
   try {

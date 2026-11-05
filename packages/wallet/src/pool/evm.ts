@@ -254,7 +254,7 @@ export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze
  * providers of three operators or more, read as a pair with spares (evmPair, card evm-transfer-rpc-spares): the first
  * two are the seats, the rest take the place of one that throttles or is out, so the pair reads on two operators while
  * any one is out. thirdweb is the last spare everywhere: its keyless quota runs out for the day on every chain at once
- * (below), so Base and Robinhood carry dRPC as well; Base Sepolia and Robinhood testnet have no fourth keyless operator
+ * (below), so Base and Robinhood carry a fourth; Base Sepolia and Robinhood testnet have no fourth keyless operator
  * that answers a W's read from the browser (below), so there a second provider out leaves one.
  * Each answers a W's Transfer read (eth_getLogs, Transfer's topic, topic 2 = the W, no address) at the chain's head and
  * 2,000,000 blocks back, and a CORS preflight from https://sign.confidential.unrealized.trade (POST, content-type)
@@ -265,8 +265,10 @@ export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze
  * since no other keyless operator answers every read on Robinhood or Robinhood testnet (below).
  * The reads, 5 Nov 17:29-17:33Z (W 0x809286a1…078e; 1,000 blocks at the head and 2,000,000 back, then 20 pages):
  * - base: base.gateway.tenderly.co 1,000 blocks 313 and 390 ms, 20 x 1,000 p50 347 ms, CORS 204 *; base.api.pocket.network
- *   1,000 blocks 250 and 316 ms, 20 x 500 p50 280 ms all answered, CORS 204 the origin (another backend caps 500 blocks,
- *   5 Nov 12:20Z: paged under).
+ *   1,000 blocks 250 and 316 ms, 20 x 500 p50 280 ms all answered, CORS 204 the origin; at 17:59Z 2 of 30 pages refused
+ *   "missing required field 'address'" (one backend's: a provider out, OUT_WORDS, the read again or a spare); 1rpc.io/base
+ *   -32602 "limited to 0 - 50 blocks range" at 1,000 (17:30Z), 15 x 50 at 17:59Z 14 answered p50 439 ms and one HTTP 410,
+ *   CORS 200 *.
  * - robinhood: rpc.mainnet.chain.robinhood.com 1,000 blocks 273 and 308 ms, CORS 204 *; robinhood.daybreak-rpc.network
  *   1,000 blocks 235 and 256 ms, CORS 204 *; robinhood.drpc.org (17:48Z) code 35 at 1,000 blocks, 10 x 100 p50 295 ms
  *   all answered, 100 blocks at the head and 2,000,000 back 339 and 230 ms, CORS 204 the origin.
@@ -286,10 +288,9 @@ export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze
  * Robinhood testnet has no other keyless operator. On Robinhood rpc-robinhood.blockmachine.io (-32002 "keyless requests
  * are served for the most recent 5000 blocks only"), robinhood.blockpi.network ("Apikey not found"),
  * robinhood.gateway.tenderly.co (HTTP 404), robinhood.api.pocket.network (-32602 "missing required field 'address'"
- * from 20 to 30% of its backends, 5 Nov), robinhood-rpc.publicnode.com (the kit's). On Base and Base Sepolia:
+ * from 20 to 30% of its backends, 5 Nov), robinhood-rpc.publicnode.com (the kit's). On Base base-mainnet.gateway.tatum.io (100 blocks, then HTTP 429 on 11 of 15). On Base and Base Sepolia:
  * base-sepolia-public.nodies.app (10 x 50 blocks p50 336 ms, 17:48Z, but its CORS preflight answers no
- * Access-Control-Allow-Origin, so no browser reads it), base-public.nodies.app and 1rpc.io (50 blocks), base-mainnet.gateway.tatum.io
- * (100), base-sepolia.drpc.org (code 19 "Temporary internal error" at 10 to 101
+ * Access-Control-Allow-Origin, so no browser reads it), base-public.nodies.app (50 blocks), base-sepolia.drpc.org (code 19 "Temporary internal error" at 10 to 101
  * blocks, 4 Nov), base-sepolia.api.onfinality.io (-32029 at once), base.api.onfinality.io (no block), base.meowrpc.com
  * (no block), base.lava.build (HTTP 410), rpc.ankr.com (a key), base-sepolia.public.blastapi.io (HTTP 403, closed),
  * base.llamarpc.com (HTTP 525), mainnet.base.org (-32011 "request limit reached"), sepolia.base.org (the pool's,
@@ -298,7 +299,7 @@ export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze
 // The freezes are marked pure, so SIGN_HOST's build, which reads none of these yet, drops them whole
 // (packages/signpage/scripts/build-network.test.mjs refuses a testnet provider in it).
 export const EVM_TRANSFER_RPCS: Readonly<Record<EvmNetwork, readonly string[]>> = /* @__PURE__ */ Object.freeze({
-  base: /* @__PURE__ */ Object.freeze(["https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://base.drpc.org", "https://8453.rpc.thirdweb.com"]),
+  base: /* @__PURE__ */ Object.freeze(["https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://base.drpc.org", "https://1rpc.io/base", "https://8453.rpc.thirdweb.com"]),
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network", "https://robinhood.drpc.org", "https://4663.rpc.thirdweb.com"]),
   "base-sepolia": /* @__PURE__ */ Object.freeze(["https://base-sepolia.gateway.tenderly.co", "https://base-testnet.api.pocket.network", "https://84532.rpc.thirdweb.com"]),
   "robinhood-testnet": /* @__PURE__ */ Object.freeze(["https://robinhood-testnet.drpc.org", "https://rpc.testnet.chain.robinhood.com", "https://46630.rpc.thirdweb.com"]),
@@ -340,10 +341,12 @@ export const EVM_SPARE_REST_MS = 60_000;
  * A pinned list of providers (two or more, no provider twice: the kit's solanaSameProvider) read as one pair of seats
  * (card evm-transfer-rpc-spares). Seat 0 starts on the list's first provider and seat 1 on its second; the rest are
  * spares. A seat's call that the provider throttles or cannot carry (`throttled`: HTTP 429, a throttle code, a
- * transport fault, and no answer in time on any call but an eth_getLogs page, whose pager halves it instead) rests that
+ * transport fault, and no answer in time on any call but an eth_getLogs page, whose pager halves it instead; and a provider
+ * out, OUT_WORDS) rests that
  * provider for its Retry-After, at least EVM_SPARE_REST_MS, and is made again at once on the next spare: never a wait
- * while a spare is free. With none free the seat takes the provider whose rest ends first and the error goes up, so the
- * read's own waits and bound apply as on a fixed pair. The two seats never hold one provider, so the pair always reads
+ * while a spare is free. With none free the seat takes the provider whose rest ends first and the error goes up with
+ * that provider's own Retry-After (none when it named none), so the read's own waits and bound apply as on a fixed
+ * pair, never another provider's hours. The two seats never hold one provider, so the pair always reads
  * on two. thirdweb's keyless daily quota answered every chain HTTP 429 with Retry-After 26,741,000 ms (5 Nov 16:28Z):
  * the kit's client ends that call at once, and with no spare it was the pair's failure. A seat's `url` is its
  * provider's now.
@@ -352,6 +355,8 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   if (!Array.isArray(list) || list.length < 2 || list.some((r) => typeof r !== "function")) throw new Error(`${what}: two or more`);
   for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (solanaSameProvider(list[i]!, list[j]!)) throw new Error(`${what}: one provider twice is one read`);
   const restUntil = list.map(() => 0);
+  // whether a provider's rest is its own Retry-After (else EVM_SPARE_REST_MS, a guess)
+  const named = list.map(() => false);
   const at = [0, 1];
   // the provider seat k moves to: a resting-free one after its own in list order, else (`soonest`) the one whose rest
   // ends first; never the other seat's
@@ -376,11 +381,15 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           const t = throttled(e);
           if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
           restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
+          named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
           if (at[k] !== i) continue; // another call on this seat moved it already
           const n = next(k, false);
           if (n === null) {
             at[k] = next(k, true) ?? i;
-            throw e;
+            // the read's wait is for the provider now seated: its own Retry-After, else the read's backoff
+            const j = at[k]!;
+            if (j === i) throw e;
+            throw Object.assign(new Error(String((e as Error)?.message ?? e), { cause: e }), { name: (e as Error)?.name ?? "Error", fault: (e as { fault?: unknown })?.fault, afterMs: named[j] ? Math.max(0, restUntil[j]! - Date.now()) : null });
           }
           at[k] = n;
         }
@@ -512,6 +521,15 @@ const THROTTLE_WORDS = /HTTP 429\b|(RPC error |"code":\s*)(-32029|-32429|-429|15
 const SLOW_WORDS = /no answer in \d+ ms|\btimed? ?out\b|TimeoutError|ETIMEDOUT/i;
 const LIMIT_32005 = /(RPC error |"code":\s*)-32005\b/;
 const CAP_WORDS = /\b(results?|range|blocks?|logs? matched|response size)\b/i;
+/** A provider out, never a word on the read (card evm-transfer-rpc-spares): an HTTP error with no JSON-RPC answer in it
+ * (the kit's client: "HTTP 410", where a refusal reads "HTTP 400: RPC error 35: ..."), an answer to another request
+ * (the client's "answer id null is not request id 6") and a standard method the provider says it lacks (-32601). Read
+ * 5 Nov 18:00-18:05Z on a restore's W reads: 1rpc.io/base HTTP 410, then "answer id null" on 7 pages in a row;
+ * robinhood-testnet.drpc.org -32601 "the method eth_getBlockByNumber does not exist/is not available" from one of its
+ * backends; base.api.pocket.network -32602 "missing required field 'address' for log filter" to 2 of 30 W pages (17:59Z),
+ * one backend's, as Robinhood's Pocket (5 Nov). A throttle: the same read again, on a spare at once when the list has
+ * one free. */
+const OUT_WORDS = /^HTTP \d{3}$|^answer id \S+ is not request id |(RPC error |"code":\s*)-32601\b|missing required field 'address'/;
 const throttled = (e: unknown): { kind: "throttle" | "slow"; afterMs: number | null } | null => {
   const t = e as { name?: unknown; afterMs?: unknown; message?: unknown; fault?: unknown } | null;
   if (t?.name === "EvmUnansweredError") return null;
@@ -519,7 +537,7 @@ const throttled = (e: unknown): { kind: "throttle" | "slow"; afterMs: number | n
   if (t?.name === "SolanaRpcTransportError") return { kind: t.fault === "timeout" ? "slow" : "throttle", afterMs };
   const m = String(t?.message ?? e);
   if ((e as Error)?.name === "TimeoutError" || SLOW_WORDS.test(m)) return { kind: "slow", afterMs: null };
-  if (THROTTLE_WORDS.test(m) || (LIMIT_32005.test(m) && !CAP_WORDS.test(m))) return { kind: "throttle", afterMs: null };
+  if (THROTTLE_WORDS.test(m) || OUT_WORDS.test(m) || (LIMIT_32005.test(m) && !CAP_WORDS.test(m))) return { kind: "throttle", afterMs: null };
   return null;
 };
 /** A page past the provider's own head (its log index behind its block headers): a lag, never a smaller page. */
