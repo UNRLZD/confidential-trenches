@@ -4,6 +4,7 @@
 // block agreement, the first-hop native rule, the v3 doubled read, the pinned launchpad pools and a lagging node. N1 and N2 are
 // the review of 9a8265b's: N1 on a modelled chain whose PoolManager holds the token's pools (chain() below). Each test states what the device must do.
 import { mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
 import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolSellQuoteRequest, type EvmPoolKey, type EvmRoute, type EvmV4Route } from "../src/index.ts";
@@ -2692,12 +2693,15 @@ test("V12 the pair's honest provider gives no confirm (it fails, or holds no suc
 });
 
 test("V13 a head is held only when more than maxLag below the lower of the two used: a liar's old head and a lagging honest one never hold the up-to-date provider", async () => {
-  // held or not, read off the hold itself: a provider not held keeps its place in the ranking once every hold has
-  // ended (EVM_HOLD_MS on); one held moves up (re-review of 59a69e2, LOW-4: "not ranked last" rode on the measured
-  // speed, and failed 2 of 30 beside CPU burners)
-  const placeOf = (urls: readonly string[], host: string, at?: number) => quoteMod.evmRanked(urls, at).map(hostOf).indexOf(host);
-  // (after every request still out has landed, `idle`: one out past EVM_HEDGE_MS also moves down)
-  const unheld = (urls: readonly string[], host: string) => placeOf(urls, host) === placeOf(urls, host, performance.now() + EVM_HOLD_MS! + 1);
+  // held or not, read off the hold itself, never off the measured speed (re-review of 59a69e2, LOW-4: "not ranked
+  // last" rode on it and failed 2 of 30 beside CPU burners; "moves up once the hold ends" rode on it too, and failed in
+  // CI when b's 1 ms answers measured slower than c's 5 ms ones): a provider the ranking has never measured goes after
+  // every measured one that is not held and before every held one, so it splits the two whatever the speeds
+  // (after every request still out has landed, `idle`: one out past EVM_HEDGE_MS also goes after it)
+  const unheld = (urls: readonly string[], host: string) => {
+    const ranked = quoteMod.evmRanked([...urls, "https://unmeasured.v13.test/"]).map(hostOf);
+    return ranked.indexOf(host) < ranked.indexOf("unmeasured.v13.test");
+  };
   quoteMod.evmSpeedReset();
   const token = freshToken();
   const pools = [best(token)];
@@ -3169,7 +3173,7 @@ test("L5 a sell at its buy's block, one provider a block behind it: the quote wa
  *  timer set and fired) and every timer still pending, or says no timer is pending: then the quote waits on a promise
  *  the mocked clock does not drive. */
 async function drive<T>(start: () => Promise<T>, ticks: number, step: number): Promise<{ value: T; ms: number }> {
-  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  enableTimers(mock.timers, { apis: ["setTimeout", "Date"], now: 0 });
   const mocked = { set: globalThis.setTimeout, clear: globalThis.clearTimeout };
   type Timer = { site: string; ms: number; at: number; fired: boolean; cleared: boolean };
   const timers = new Map<unknown, Timer>();
@@ -3214,9 +3218,26 @@ async function drive<T>(start: () => Promise<T>, ticks: number, step: number): P
   } finally {
     globalThis.setTimeout = mocked.set;
     globalThis.clearTimeout = mocked.clear;
-    mock.timers.reset();
+    // every timer still set is cleared before the reset (test/mock-timers.ts), so work that outlives this drive never
+    // takes a later drive's timer with it
+    resetTimers(mock.timers);
   }
 }
+test("drive: a timer an earlier drive left set, cleared during a later one by the work that set it, never takes the later one's timer with it", async () => {
+  // work that outlives its test (a quote's spare read, a hung provider's pause) sets a timer on one drive's mocked clock
+  // and clears it on a later one's; the mocked clock drops what is left set when it is reset, and a timer dropped so
+  // kept its place in the clock's queue, so clearing it took out whatever timer held that place then (in CI: L5b's and
+  // L2's 500 ms wait for the buy's block and LOW-1's 10 s scan answer, which never fired, and the quote stayed parked
+  // to the last tick)
+  let left: ReturnType<typeof setTimeout> | undefined;
+  await drive(async () => void (left = setTimeout(() => undefined, 60_000)), 1, 100);
+  const { ms } = await drive(async () => {
+    const wait = new Promise((r) => setTimeout(r, 500));
+    clearTimeout(left);
+    await wait;
+  }, 20, 100);
+  assert.ok(ms >= 500, `the wait ended after ${ms} ms`);
+});
 /** The sell quote's verdict and the mocked time it took, ms: the clock (Date, the wait's monotonic clock here) and
  *  every timer mocked, ticked `step` ms at a time until the quote settles (so the time read is up to two steps late). */
 async function timed(run: (mono: () => number) => Promise<unknown>, ticks = 4_000, step = 500) {

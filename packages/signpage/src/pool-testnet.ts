@@ -48,7 +48,7 @@ import type { PoolChain } from "./rules/pool.ts";
 import type { HostAnswer, KindContext } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
-import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type PendingOnward } from "./pool-withdraw.ts";
+import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
@@ -66,26 +66,86 @@ const STAGE_RANK: Readonly<Record<WithdrawStage, number>> = { proving: 0, submit
 
 /** A withdraw op record's next state, merged into what the store holds (another tab may have written it since): the
  *  stage (never back, STAGE_RANK), every tx either wrote (by hash, never one dropped), every arrival, the fee a send
- *  over its ceiling needs (`fee_needed`), and the onward send owed: set by `pending`, cleared by `clear` only while it
- *  is still that note's (a later part's, another tab's, stays), and its fee_needed with it. */
+ *  over its ceiling needs (`fee_needed`), and `owed`, the note whose onward send the op still owes: set by `owe`,
+ *  cleared by `clear` only while it is still that note's (a later part's, another tab's, stays), and its fee_needed
+ *  with it. A stage written with `clear` is that note's verdict: it applies only while the op owes that note's send or
+ *  none, never over a later part still owed (round-3 review probe3-merge). The owed send itself (its attempt, context,
+ *  To and fee ceiling) is in meta under owed/<op id>, which the frame never reads (src/state.ts op contract);
+ *  the op names only the note's random id. */
 export function mergeWithdrawOp(
   v: unknown,
-  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; pending?: PendingOnward; clear?: string; feeNeeded?: string },
+  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; owe?: string; clear?: string; feeNeeded?: string },
 ): Record<string, unknown> {
   const r = { ...(v as Record<string, unknown>) };
   const was = STAGE_RANK[r.stage as WithdrawStage] ?? -1;
-  if (w.stage !== undefined && STAGE_RANK[w.stage] >= was) r.stage = w.stage;
+  const ours = w.clear === undefined || r.owed === undefined || r.owed === w.clear;
+  if (w.stage !== undefined && STAGE_RANK[w.stage] >= was && ours) r.stage = w.stage;
   if (w.feeNeeded !== undefined) r.fee_needed = w.feeNeeded;
   const txs = [...((r.txs as TxRef[] | undefined) ?? [])];
   for (const t of w.txs ?? []) if (!txs.some((x) => x.hash === t.hash)) txs.push(t);
   r.txs = txs;
   if (w.arrived && Object.keys(w.arrived).length > 0) r.arrived = { ...((r.arrived as Arrivals | undefined) ?? {}), ...w.arrived };
-  if (w.pending) r.pending = w.pending;
-  else if (w.clear !== undefined && (r.pending as PendingOnward | undefined)?.noteId === w.clear) {
-    delete r.pending;
+  if (w.owe !== undefined) r.owed = w.owe;
+  else if (w.clear !== undefined && r.owed === w.clear) {
+    delete r.owed;
     delete r.fee_needed;
   }
+  // a record from before meta/owed/<op id> holds its send in `pending`: cleared the same way
+  if (w.clear !== undefined && (r.pending as PendingOnward | undefined)?.noteId === w.clear) delete r.pending;
   return r;
+}
+
+/** meta/owed/<op id>, the wallet store's record of one op's owed onward sends, each note's by note id: in meta, which
+ *  the frame's reader neither reads nor lists (packages/wallet/src/store WALLET_OWED_PREFIX). */
+const owedKey = (opId: string): `owed/${string}` => `owed/${opId}`;
+/** One op's owed onward sends: each note's by note id. */
+export type OwedSends = Record<string, PendingOnward>;
+/** The op's owed send for `noteId` written (awaited before its release leaves); the record's others kept. */
+export const oweSend = (w: WalletStore, opId: string, p: PendingOnward): Promise<unknown> =>
+  w.update("meta", owedKey(opId), (v) => ({ ...((v as OwedSends | undefined) ?? {}), [p.noteId]: p }));
+/** The release's own signature added to the op's owed send for `noteId` of `attempt`, only while that send is still
+ *  stored: one another tab dropped stays dropped, and the stored one keeps its own fields (fold 4, LOW). */
+export const keepRelease = (w: WalletStore, opId: string, noteId: string, attempt: string, release: string): Promise<unknown> =>
+  w.update("meta", owedKey(opId), (v) => {
+    const r = v as OwedSends | undefined;
+    const p = r !== undefined && Object.hasOwn(r, noteId) ? r[noteId] : undefined;
+    if (p === undefined || p.attempt !== attempt || p.release === release) return undefined;
+    return { ...r, [noteId]: { ...p, release } };
+  });
+/** The op's owed send for `noteId` dropped, once the op no longer owes it; a later part's stays (one compare-and-set). */
+export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<unknown> =>
+  w.update("meta", owedKey(opId), (v) => {
+    const r = v as OwedSends | undefined;
+    if (r === undefined || !Object.hasOwn(r, noteId)) return undefined;
+    const { [noteId]: _gone, ...rest } = r;
+    return rest;
+  });
+/** The op's owed send for `noteId`, or none. */
+export async function owedSendOf(w: WalletStore, opId: string, noteId: string): Promise<PendingOnward | undefined> {
+  const r = (await w.get("meta", owedKey(opId))) as OwedSends | undefined;
+  return r !== undefined && Object.hasOwn(r, noteId) ? r[noteId] : undefined;
+}
+/** The reserved pass freed these notes (no release of theirs landed by their deadline): each withdraw op owing one's
+ *  send is settled stopped, nothing sent, before the note can be spent again, and the send it owed dropped. */
+export async function settleFreedOps(ops: WalletStore, freed: readonly string[]): Promise<void> {
+  for (const k of await ops.keys("ops")) {
+    const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; pending?: PendingOnward } | undefined;
+    const owed = rec?.kind !== "withdraw" ? undefined : typeof rec.owed === "string" ? rec.owed : rec.pending?.noteId;
+    if (owed === undefined || !freed.includes(owed)) continue;
+    await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: "stopped", clear: owed }));
+    await dropSend(ops, k, owed);
+  }
+}
+/** An op record from before meta/owed/<op id> (its pending in the op, which the frame reads): moved there. */
+async function moveLegacyPending(w: WalletStore, opId: string, p: PendingOnward): Promise<void> {
+  await oweSend(w, opId, p);
+  await w.update("ops", opId, (v) => {
+    const r = { ...(v as Record<string, unknown>) };
+    if ((r.pending as PendingOnward | undefined)?.noteId !== p.noteId) return undefined;
+    delete r.pending;
+    r.owed = p.noteId;
+    return r;
+  });
 }
 
 /** The testnet build's deps for poolKinds, with `flow` the ops' flow (none: every checked request is refused). */
@@ -118,6 +178,10 @@ export type TestnetOver = {
   locks?: Pick<LockManager, "request" | "query"> | null;
   /** The Solana pool's pin (SOL_POOLS.devnet otherwise): tests run the page's own flow on a fake pool. */
   pin?: SolanaPoolPin;
+  /** The withdraw run's clock and wait (the page's own otherwise): a test's read-back bound passes on its clock, so no
+   *  run outlives its test (fold 5: each held node ~120 s on the wall clock). */
+  now?: () => bigint;
+  wait?: (ms: number) => Promise<void>;
 };
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
@@ -217,8 +281,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const ops = await page.store();
     const out = new Set<string>();
     for (const k of await ops.keys("ops")) {
-      const rec = (await ops.get("ops", k)) as { kind?: unknown; pending?: PendingOnward } | undefined;
-      if (rec?.kind === "withdraw" && rec.pending) out.add(rec.pending.noteId);
+      const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; pending?: PendingOnward } | undefined;
+      if (rec?.kind !== "withdraw") continue;
+      if (typeof rec.owed === "string") out.add(rec.owed);
+      if (rec.pending) out.add(rec.pending.noteId);
     }
     return out;
   };
@@ -408,14 +474,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: rpcs() });
         // a freed note's release never landed: an op owing its send is settled stopped, nothing sent, before the note
         // can be spent again
-        if (pass.freed.length > 0) {
-          const ops = await page.store();
-          for (const k of await ops.keys("ops")) {
-            const rec = (await ops.get("ops", k)) as { kind?: unknown; pending?: PendingOnward } | undefined;
-            const id = rec?.kind === "withdraw" ? rec.pending?.noteId : undefined;
-            if (id !== undefined && pass.freed.includes(id)) await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: "stopped", clear: id }));
-          }
-        }
+        if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
         if (pass.freed.length > 0 && open !== null) void proofs();
       } finally {
         seed64?.fill(0);
@@ -433,6 +492,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a finish that failed (a read, the send) is tried again after a wait that doubles, 2 s up to 60 s: the money is on
   // W, so it never gives up, and never hammers the RPCs either
   const owedRetry = new Map<string, { at: number; waitMs: number }>();
+  // each owed op's places in W's history, kept from one pass to the next (the RPC functions are new on every pass):
+  // a history of any length is read to its end, a share per pass (fold 4, review HIGH)
+  const owedPlaces = new Map<string, HistoryPlaces>();
+  const placesOf = (k: string): HistoryPlaces => {
+    let p = owedPlaces.get(k);
+    if (!p) owedPlaces.set(k, (p = new Map()));
+    return p;
+  };
   // one use of the seed under its shared lock, the lock let go after it: a sign out waits for a derive or a signature,
   // never for a blockhash (review #232b LOW 2)
   const withSeed = <T,>(f: (seed64: Uint8Array) => T | Promise<T>): Promise<T> =>
@@ -450,9 +517,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const ops = await page.store();
     const owed: [string, PendingOnward][] = [];
     for (const k of await ops.keys("ops")) {
-      const rec = (await ops.get("ops", k)) as { kind?: unknown; stage?: unknown; pending?: PendingOnward } | undefined;
-      // any stage: pending is the owed send's own record (a tab closed during the release leaves "proving")
-      if (rec?.kind === "withdraw" && rec.pending && !withdrawing.has(k)) owed.push([k, rec.pending]);
+      if (withdrawing.has(k)) continue;
+      const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; pending?: PendingOnward } | undefined;
+      if (rec?.kind !== "withdraw") continue;
+      if (rec.pending) await moveLegacyPending(ops, k, rec.pending);
+      const id = rec.pending?.noteId ?? rec.owed;
+      // any stage: `owed` names the note whose send the op owes (a tab closed during the release leaves "proving");
+      // its send is meta/owed/<op id>'s record (none yet: written but not marked, or the other way: read again later)
+      const p = typeof id === "string" ? await owedSendOf(ops, k, id) : undefined;
+      if (p) owed.push([k, p]);
+      else if (typeof id === "string") owedScan = true;
     }
     if (owed.length === 0) return;
     const notes = await openNoteStore(await page.store());
@@ -469,6 +543,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             rpcs: rpcs(),
             seed64: page.seed64,
             withSeed,
+            places: placesOf(k),
             notes: async () => notes,
             settle: (noteId) => withSeed((seed64) => solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: rpcs() })),
           },
@@ -482,7 +557,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           owedScan = true;
         } else if (got) {
           owedRetry.delete(k);
+          owedPlaces.delete(k);
           await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: got.stage, txs: got.txs, arrived: got.arrived, clear: pending.noteId }));
+          await dropSend(ops, k, pending.noteId);
         } else {
           const waitMs = Math.min(Math.max(2_000, (retry?.waitMs ?? 1_000) * 2), 60_000);
           owedRetry.set(k, { at: Date.now() + waitMs, waitMs });
@@ -552,17 +629,28 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const created_ms = Date.now();
     let writes: Promise<unknown> = ops.put("ops", opId, { kind: "withdraw", stage: "proving", txs: [], created_ms }).catch(() => {});
     // the op keeps the onward send still owed (a part on W), for the state reads to finish after a crash; every write
-    // merges into the record (mergeWithdrawOp), so another tab's finish of a part is never written over
+    // merges into the record (mergeWithdrawOp), so another tab's finish of a part is never written over. Only owe()
+    // names the note owed, once its send is stored: a stage write never does, so a run ending in_transit after another
+    // tab settled the op never names a send with none behind it (fold 5, review LOW)
     let owedNote: string | null = null;
-    const write = (stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals) =>
+    const write = (stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals) => {
+      const cleared = pending ? null : owedNote;
       void (writes = writes
-        .then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage, txs, arrived, ...(pending ? { pending } : owedNote ? { clear: owedNote } : {}) })))
+        .then(async () => {
+          await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage, txs, arrived, ...(cleared ? { clear: cleared } : {}) }));
+          if (cleared) await dropSend(ops, opId, cleared);
+        })
         .catch(() => {}));
-    // written before the part's release leaves, and awaited: a failed write sends nothing; in_transit with it, so the
-    // stage is never "proving" while a release is out (review #232b HIGH 1)
+    };
+    // written before the part's release leaves, and awaited: a failed write sends nothing; the send in the meta/owed/<op id>
+    // store first, then the op's in_transit naming its note, so the stage is never "proving" while a release is out
+    // (review #232b HIGH 1) and the op never names a send the store does not hold
     const owe = async (pending: PendingOnward): Promise<void> => {
       owedNote = pending.noteId;
-      const w = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage: "in_transit", pending })));
+      const w = writes.then(async () => {
+        await oweSend(ops, opId, pending);
+        await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage: "in_transit", owe: pending.noteId }));
+      });
       writes = w.catch(() => {});
       await w;
     };
@@ -592,6 +680,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             },
             stage: write,
             owe,
+            ...(over.now ? { now: over.now } : {}),
+            ...(over.wait ? { wait: over.wait } : {}),
+            keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
           },
           { ...ask },
@@ -611,11 +702,46 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // the change notes it wrote are proved for the next buy by the queue's next pass
     if (open !== null) void proofs();
   };
+  // the sends owed whose fee rose past the Max fee drawn (fee_needed), for the screen to draw the Max fee again
+  const owedFees = async (): Promise<{ opId: string; need: bigint }[]> => {
+    const ops = await page.store();
+    const out: { opId: string; need: bigint; t: number }[] = [];
+    for (const k of await ops.keys("ops")) {
+      const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; fee_needed?: unknown; created_ms?: unknown } | undefined;
+      if (rec?.kind === "withdraw" && typeof rec.owed === "string" && typeof rec.fee_needed === "string" && /^(0|[1-9][0-9]{0,19})$/.test(rec.fee_needed)) {
+        out.push({ opId: k, need: BigInt(rec.fee_needed), t: typeof rec.created_ms === "number" ? rec.created_ms : 0 });
+      }
+    }
+    return out.sort((a, b) => a.t - b.t).map(({ opId, need }) => ({ opId, need }));
+  };
+  // the Max fee drawn again at `need`, the fee the screen showed: only while the op still owes that send at that fee;
+  // its ceiling raised to it in meta/owed/<op id>, fee_needed cleared, and the finish tried again at once
+  const redraw = async (opId: string, need: bigint): Promise<void> => {
+    const ops = await page.store();
+    const rec = (await ops.get("ops", opId)) as { owed?: unknown; fee_needed?: unknown } | undefined;
+    const noteId = rec?.owed;
+    if (typeof noteId !== "string" || rec?.fee_needed !== need.toString()) throw new Error("the fee shown is no longer the one owed");
+    const raised = await ops.update("meta", owedKey(opId), (v) => {
+      const r = v as OwedSends | undefined;
+      const p = r !== undefined && Object.hasOwn(r, noteId) ? r[noteId]! : undefined;
+      return p === undefined ? undefined : { ...r, [noteId]: { ...p, feeCap: need.toString() } };
+    });
+    if (raised === undefined) throw new Error("no send owed");
+    await ops.update("ops", opId, (v) => {
+      const r = { ...(v as Record<string, unknown>) };
+      if (r.fee_needed !== need.toString()) return undefined;
+      delete r.fee_needed;
+      return r;
+    });
+    owedRetry.delete(opId);
+    owedScan = true;
+    await stateRead();
+  };
   const withdrawDeps = (chain: PoolChain, opId: string): PoolWithdrawFormDeps => ({
     chain,
     keys: chain === "solana" && pin !== undefined ? { pool: solanaPoolOf(pin.program).pool, program: pin.program, feePayer: pin.feePayer } : { pool: "" },
     funds: () => (chain === "solana" && pin !== undefined ? funds() : Promise.reject(new Error("no flow for this chain"))),
-    ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId) } : {}),
+    ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw } : {}),
   });
   return {
     flow: (ask, ctx) =>

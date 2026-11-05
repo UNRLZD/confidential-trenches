@@ -16,6 +16,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
+import { enableTimers, resetTimers } from "../test/mock-timers.ts";
 import { base58, NEP366_PREFIX } from "./bind/checks.ts";
 import { createFileStore, type DepositRecord } from "./bind/send.ts";
 import { start } from "./server.ts";
@@ -130,7 +131,7 @@ function call(port: number, method: string, path: string, body?: string) {
 async function withHelper(env: Record<string, string>, w: TokenWatches, run: (port: number, near: ReturnType<typeof fakeNear>) => Promise<void>) {
   const near = fakeNear();
   const saved = { env: { ...process.env }, fetch: globalThis.fetch };
-  mock.timers.enable({ apis: ["Date", "setTimeout"], now: NOW });
+  enableTimers(mock.timers, { apis: ["Date", "setTimeout"], now: NOW });
   Object.assign(process.env, MAINNET, TESTNET, env);
   globalThis.fetch = near.fetchFn;
   // the senders are left to the server's own defaults (handler's parameters), exactly as the deployed main builds them
@@ -144,7 +145,7 @@ async function withHelper(env: Record<string, string>, w: TokenWatches, run: (po
     globalThis.fetch = saved.fetch;
     for (const k of Object.keys(process.env)) if (!(k in saved.env)) delete process.env[k];
     Object.assign(process.env, saved.env);
-    mock.timers.reset();
+    resetTimers(mock.timers);
   }
 }
 

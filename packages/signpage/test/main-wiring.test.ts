@@ -16,6 +16,7 @@
 /// <reference types="node" />
 import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
 import { depositId, entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
@@ -280,4 +281,14 @@ test("main.ts wires the pool kinds: on the page's mainnet no pool is pinned, so 
     assert.deepEqual([data.type, a?.ok, a?.error?.code], [data.type, false, "not_allowed"]);
     assert.equal(asked.length, from, `${data.type} fetched nothing`);
   }
+});
+
+// fold 5 (review LOW): the page's seed re-read on another tab's write is walletSeedMoved's call, which skips an owed
+// send's write (meta owed/<op id>); its behaviour is the store's test (packages/wallet/test/store.test.ts)
+test("main.ts reads its seed again on another tab's write only as walletSeedMoved says: an owed send's write is none", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const body = /function storeMoved\(e: WalletEvent\): void \{\n([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  assert.match(body, /^  if \(walletSeedMoved\(e\)\) moved \+= 1;\n  else return;/, "storeMoved counts a move only by walletSeedMoved");
+  assert.ok(!/e\.stores\.includes\("meta"\)/.test(body), "no meta test of its own");
+  assert.match(src, /import \{[^}]*\bwalletSeedMoved\b[^}]*\} from "@blindfill\/wallet\/store";/);
 });

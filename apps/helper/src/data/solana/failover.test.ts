@@ -3,6 +3,7 @@
 // serving us, and take the key back when it answers its retry 5 min later.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 import { createSlot, SLOT_RETRY_MS } from "../../rpc/slot.ts";
 import { createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, STREAM_WS, wsSource, type SourceEvents } from "./trades.ts";
 
@@ -64,7 +65,8 @@ for (const [what, keyed] of [
 type Fake = { url: string; sent: string[]; onopen: (() => void) | null; onmessage: ((m: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; send(s: string): void; close(): void };
 
 test("the stream: a key refused before the socket opens reconnects to the public stream (not the key again); 5 min later a probe that hears from the key moves it back", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "setInterval"] });
+  t.after(() => resetTimers(t.mock.timers));
   let now = 1_800_000_000_000;
   const logs: string[] = [];
   const slot = createSlot("stream", true, { now: () => now, log: (l) => logs.push(l) });
@@ -106,7 +108,8 @@ test("the stream: a key refused before the socket opens reconnects to the public
 });
 
 test("the stream: a key that goes silent for 30 s falls back to the public stream", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "setInterval"] });
+  t.after(() => resetTimers(t.mock.timers));
   let now = 1_800_000_000_000;
   const slot = createSlot("stream", true, { now: () => now, log: () => undefined });
   const sockets: Fake[] = [];
@@ -131,7 +134,8 @@ test("the stream: a key that goes silent for 30 s falls back to the public strea
 });
 
 test("the stream: a keyed slot that has not failed is never probed (no probe socket, the slot stays keyed)", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "setInterval"] });
+  t.after(() => resetTimers(t.mock.timers));
   const slot = createSlot("stream", true, { log: () => undefined });
   const sockets: string[] = [];
   const src = wsSource(KEYED_WS, { note: () => undefined, down: () => undefined, up: () => undefined }, {

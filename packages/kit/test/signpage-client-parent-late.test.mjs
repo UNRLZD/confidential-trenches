@@ -7,6 +7,7 @@
 // SIGNPAGE_SRC=<abs path to a copy of src/> runs the same tests against that copy (the red-before proofs).
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { pathToFileURL } from "node:url";
 import { STATE } from "./signpage-fixtures.ts";
 
@@ -46,8 +47,8 @@ async function ticks(n, ms = 1_000) {
   }
 }
 
-test.beforeEach(() => mock.timers.enable({ apis: ["setTimeout"] }));
-test.afterEach(() => mock.timers.reset());
+test.beforeEach(() => enableTimers(mock.timers, { apis: ["setTimeout"] }));
+test.afterEach(() => resetTimers(mock.timers));
 
 test("a client made after the frame's load (its ready already sent and lost) reaches READY at once, and after a Retry", async () => {
   const w = world();

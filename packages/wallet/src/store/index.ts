@@ -44,9 +44,23 @@ export const WALLET_STORES = ["notes", "wallets", "quotes", "orders", "ops", "co
 export type WalletStoreName = (typeof WALLET_STORES)[number];
 // The meta keys a caller may write: the seed record and the settings (wallet.md:204, 06b:585-634). K_wrap and the lane
 // are the store's own.
-export type WalletMetaKey = "seed" | "settings";
+export type WalletMetaKey = "seed" | "settings" | `owed/${string}`;
+/** meta/owed/<op id> (card signpage-withdraw-own-spend): a withdraw op's onward sends still owed, with the attempt and its
+ *  context, which the frame never reads: the reader's get refuses every meta key but status and deposit/<scope>, and its
+ *  keys leaves these out. In meta, not a store of their own, so the database stays at version 1 (a version bump locks
+ *  every wallet when SIGN_HOST rolls back to a release that opens version 1 exactly). */
+export const WALLET_OWED_PREFIX = "owed/";
+const OWED_KEY = /^owed\/[^/]{1,200}$/;
 // "closed": this store's own connection was closed by another tab's delete or upgrade (versionchange); open it again
-export type WalletEvent = { kind: "changed"; stores: WalletStoreName[] } | { kind: "signout" } | { kind: "closed" };
+// "changed" names the key a caller's put, update or delete wrote (`key`; none for the store's own seed and counter
+// writes), so a listener can tell an owed send's write (meta owed/<op id>) from a seed change
+export type WalletEvent = { kind: "changed"; stores: WalletStoreName[]; key?: string } | { kind: "signout" } | { kind: "closed" };
+/** A change another tab made that may move the seed (sign out, or a meta write other than an owed send's): a page
+ *  reads its seed again on one, never on an owed send's write (fold 4, LOW: such a read could overlap a seed read and
+ *  read as no seed). An event with no key (an older release's) counts. */
+export const walletSeedMoved = (e: WalletEvent | undefined): boolean =>
+  e?.kind === "signout" ||
+  (e?.kind === "changed" && Array.isArray(e.stores) && e.stores.includes("meta") && !(e.stores.length === 1 && typeof e.key === "string" && e.key.startsWith(WALLET_OWED_PREFIX)));
 
 export interface WalletStoreOptions {
   name?: string; // tests only: the database name
@@ -184,7 +198,7 @@ function checkKey(store: WalletStoreName, key: string): void {
 function checkCallerKey(store: WalletStoreName, key: string): void {
   checkKey(store, key);
   if (store === "counters") throw new Error("counters only grow, through reserveDepositIndex");
-  if (store === "meta" && key !== "seed" && key !== "settings") throw new Error(`meta key ${key} is the store's own`);
+  if (store === "meta" && key !== "seed" && key !== "settings" && !OWED_KEY.test(key)) throw new Error(`meta key ${key} is the store's own`);
   // the seed record holds the only copy of a no-PRF account's 12 words: it is written by insertSeed only, changed by
   // setCodeSaved only, and goes only with signOut
   if (store === "meta" && key === "seed") throw new Error("the seed record is written by insertSeed and setCodeSaved only");
@@ -258,6 +272,9 @@ async function unwrapWith(kWrap: CryptoKey, store: WalletStoreName, key: string,
 }
 
 function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
+  // version 1, always: a release that opens a higher one makes every release before it fail to open the database
+  // (VersionError) and lock the wallet when SIGN_HOST rolls back to it, unless a release that opens any version ships
+  // and serves first (card signpage-withdraw-own-spend fold 3; the owed sends went into meta for this)
   const r = idb.open(name, 1);
   r.onupgradeneeded = () => {
     for (const s of WALLET_STORES) if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s);
@@ -346,7 +363,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
     }
   }
   const unwrap = (store: WalletStoreName, key: string, raw: unknown): Promise<unknown> => unwrapWith(kWrap, store, key, raw);
-  const notify = (stores: WalletStoreName[]): void => channel.postMessage({ kind: "changed", stores });
+  const notify = (stores: WalletStoreName[], key?: string): void => channel.postMessage(key === undefined ? { kind: "changed", stores } : { kind: "changed", stores, key });
 
   // The device's lane, drawn once (wallet.md:247): 8 divides 256, so one random byte mod 8 is uniform.
   async function readLane(): Promise<number> {
@@ -401,7 +418,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       const tx = live().transaction(store, "readwrite", { durability: "strict" });
       tx.objectStore(store).put(w, key);
       await done(tx);
-      notify([store]);
+      notify([store], key);
     },
     async update(store, key, change) {
       checkCallerKey(store, key);
@@ -410,7 +427,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         const next = change(await unwrap(store, key, before));
         if (next === undefined) return undefined;
         if (await casPut(store, key, before, await wrap(store, key, next))) {
-          notify([store]);
+          notify([store], key);
           return next;
         }
       }
@@ -495,7 +512,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       const tx = live().transaction(store, "readwrite", { durability: "strict" });
       tx.objectStore(store).delete(key);
       await done(tx);
-      notify([store]);
+      notify([store], key);
     },
     async keys(store) {
       checkKey(store, "x");
@@ -612,7 +629,7 @@ export async function openWalletStoreReader(
     async keys(store) {
       checkKey(store, "x");
       const all = await req(live().transaction(store, "readonly").objectStore(store).getAllKeys());
-      return all.map(String).filter((x) => !(store === "meta" && (x === K_WRAP || x === LANE)));
+      return all.map(String).filter((x) => !(store === "meta" && (x === K_WRAP || x === LANE || x.startsWith(WALLET_OWED_PREFIX))));
     },
     close: shut,
   };

@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { mock, test } from "node:test";
+import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 import { gunzipSync } from "node:zlib";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
 import { onCurve } from "../../../../terminal/src/screens/market/curve.ts";
@@ -280,8 +281,12 @@ test("fold 6 (R5b, R5d): Discover's Jupiter lists and curve reads draw on the he
   const t = AS_OF;
   const jup: string[] = [];
   const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
+  // the clock stands at AS_OF, so a wait the proxy takes (a caller's turn, a poll for room) reads the same now() after
+  // it: the wait is a turn of the event loop, never real seconds (162 s of real sleep in a fresh run, card
+  // fresh-run-margin), as crowd.test.ts's still clock does
   const proxy = createProxy({}, {
     now: () => t,
+    sleep: async () => {},
     fetch: (async (url: string) => {
       const path = new URL(url).pathname;
       jup.push(path);
@@ -359,8 +364,8 @@ test("the lists: a throttled list read (the proxy's 429) with no last answer ans
 });
 
 test("warm(): one refresh at once and one every FRESH_MS, so a caller never waits on a vendor; the stop ends it", async (t) => {
-  mock.timers.enable({ apis: ["setInterval"] });
-  t.after(() => mock.timers.reset());
+  enableTimers(mock.timers, { apis: ["setInterval"] });
+  t.after(() => resetTimers(mock.timers));
   const f = fakes();
   const lists = createSolanaLists(f.proxy, recordedRpc, { now: f.now });
   const stop = lists.warm();

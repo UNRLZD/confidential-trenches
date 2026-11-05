@@ -57,7 +57,7 @@
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
-import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
+import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
@@ -482,7 +482,7 @@ async function readSeedSettled(): Promise<Seed | undefined> {
 // Another tab's write to the seed or its sign out, heard on the shell's channel: while the layer is hidden and no step
 // runs, the page reads its store again and shows signed in or signed out, as the app does.
 function storeMoved(e: WalletEvent): void {
-  if (e?.kind === "signout" || (e?.kind === "changed" && Array.isArray(e.stores) && e.stores.includes("meta"))) moved += 1;
+  if (walletSeedMoved(e)) moved += 1;
   else return;
   // another tab signed out: the proof queue and its seed copy go now
   if (POOL_TESTNET && e.kind === "signout") void testnet?.signedOut();
