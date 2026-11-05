@@ -30,7 +30,7 @@ registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
-      return { ...r, source: wrap(String(r.source).replace(TABLE_LINE, 'export const MAINNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";'), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), ready: async () => globalThis.__ctReady }; }") };
+      return { ...r, source: wrap(String(r.source).replace(TABLE_LINE, 'export const MAINNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";'), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), ready: async () => { throw new Error(\"the state reads the ready list only with its notes, through readyWith\"); }, readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
     if (url.endsWith("/wallet/src/pool/solana.ts")) {
       const src = String(r.source);
       if (!src.includes(SOL_LINE)) throw new Error("solana.ts: SOL_POOLS's line moved; update this test's hook");

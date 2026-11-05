@@ -170,8 +170,10 @@ else {
       fs.state().then(async (s) => {
         if (s.signed_in) void testnet?.stateRead();
         const r = s.signed_in && hasSolana ? rent.get() : null;
-        const ready = s.signed_in ? await testnet?.ready() : undefined;
-        const out = await withPools(s, pageNotes, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), ready, prices.get);
+        // the ready list and the notes in one turn of the queue (card pool-ready-no-flicker): a remake's swap never
+        // falls between them, so a note that stays ready never reads as ready "0"
+        const both = s.signed_in && testnet && PAGE_POOLS.length > 0 ? await testnet.readyWith(pageNotes) : null;
+        const out = await withPools(s, both ? async () => both.value : pageNotes, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
         prices.refresh((out.pools ?? []).map((p) => p.chain));
         return out;
       }),
