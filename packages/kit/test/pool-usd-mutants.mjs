@@ -1,7 +1,8 @@
 // Weakens src/price/pool-usd.ts's agreement and staleness checks (Robinhood's hold to Base's ETH/USD among them), and
 // src/trade/solana/pool-buy.ts's refusal of a Token-2022 mint that lists an extension twice, one at a time, and runs
 // the tests named for each (test/pool-usd.test.ts "agreement" and "staleness", test/solana-pool-buy.test.ts
-// "Token-2022"): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
+// "Token-2022"), and S6's Token-2022 sides of a shared route in src/checks/solana/checks.ts (test/solana-shared-route.test.ts,
+// card solana-shared-2022-side): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/pool-usd-mutants.mjs
@@ -17,6 +18,8 @@ const PRICE = path.join(BASE, "src/price/pool-usd.ts");
 const TEST = path.join(BASE, "test/pool-usd.test.ts");
 const BUY = path.join(BASE, "src/trade/solana/pool-buy.ts");
 const BUY_TEST = path.join(BASE, "test/solana-pool-buy.test.ts");
+const S6 = path.join(BASE, "src/checks/solana/checks.ts");
+const S6_TEST = path.join(BASE, "test/solana-shared-route.test.ts");
 
 const AGREE = "agreement";
 const STALE = "staleness";
@@ -64,6 +67,24 @@ export const MUTANTS = [
   // a Token-2022 mint that lists one extension type twice
   [BUY, "if (seen.has(type)) throw", "if (false) throw", T22, BUY_TEST],
   [BUY, "    seen.add(type);\n", "", T22, BUY_TEST],
+  // S6 on a shared route: each side the wallet's own account or the authority's ATA, the source side unbounded, a
+  // Token-2022 destination through the authority's ATA only for a mint read equal on both providers without a transfer
+  // fee or hook
+  [S6, "if (key === solanaAta(c.req.wallet, mint, tp)) return;", "if (false) return;", "every recorded shared-route build passes", S6_TEST],
+  [S6, "if (key !== solanaAta(pa, mint, tp)) { wrong.push(", "if (false) { wrong.push(", "Token-2022 sell", S6_TEST],
+  [S6, "if (what !== \"destination\" || tp !== SOLANA_TOKEN_2022_PROGRAM) return;", "return;", "S6 destination refused", S6_TEST],
+  [S6, "what !== \"destination\" || tp !== SOLANA_TOKEN_2022_PROGRAM", "tp !== SOLANA_TOKEN_2022_PROGRAM", "S6 source", S6_TEST],
+  [S6, "|| tp !== SOLANA_TOKEN_2022_PROGRAM) return;", ") return;", "S6 source", S6_TEST],
+  [S6, "if (why) wrong.push(", "if (false) wrong.push(", "S6 destination refused", S6_TEST],
+  [S6, "if (!a || !b) return \"the mint is not read", "if (!a) return \"the mint is not read", "S6 destination refused: the mint not read", S6_TEST],
+  [S6, "if (a.owner !== b.owner || !eqBytes(a.data, b.data)) return \"the providers disagree", "if (!eqBytes(a.data, b.data)) return \"the providers disagree", "S6 destination refused: the providers disagree on the owner", S6_TEST],
+  [S6, "if (a.owner !== b.owner || !eqBytes(a.data, b.data)) return \"the providers disagree", "if (a.owner !== b.owner) return \"the providers disagree", "S6 destination refused: the providers disagree: B reads", S6_TEST],
+  [S6, "  if (d.length === 82) return null;\n", "", "S6 destination: every", S6_TEST],
+  [S6, "if (d.length < 166 || d[165] !== 1) return `the mint of", "if (d.length < 166) return `the mint of", "S6 destination refused: no mint account type", S6_TEST],
+  [S6, "if (o + 4 + len > d.length) return `the mint's extension", "if (false) return `the mint's extension", "S6 destination refused: an extension that runs past", S6_TEST],
+  [S6, "if (type === EXT_TRANSFER_FEE_CONFIG) return", "if (false) return", "S6 destination refused: a transfer-fee mint", S6_TEST],
+  [S6, "if (type === EXT_TRANSFER_HOOK) return \"the mint", "if (false) return \"the mint", "S6 destination refused: a transfer-hook mint", S6_TEST],
+  [S6, "if (o !== d.length && d.subarray(o).some((x) => x !== 0)) return \"the mint has bytes", "if (false) return \"the mint has bytes", "S6 destination refused: bytes after", S6_TEST],
 ];
 
 // a child test run must not inherit this process's own node --test context

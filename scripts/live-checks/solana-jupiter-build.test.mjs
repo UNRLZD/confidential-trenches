@@ -106,3 +106,24 @@ test("made from the shared-route run: the capped sell's answered outAmount raise
   const minOut = (raised * 9_000n) / 10_000n;
   assert.match(bad(r)[0], new RegExp(`^BAD S-2 sell, maxAccounts=40: .* by shared_accounts_route_v2, .*; refused: S7 floor \\d+ \\(quoted \\d+ at 1000 bps\\) vs minOut ${minOut}$`));
 });
+
+// good_shared_2022 (card solana-shared-2022-side; 2026-11-05 00:35Z through HELPER_HOST at 30ead05): the Token-2022
+// token BZFYNPeQ…B96W, whose four shapes /build answered as shared_accounts_route_v2 with the Token-2022 side through
+// Jupiter's authority's ATA (the buys' program destination, the sells' program source), its mint without a transfer fee
+// or hook: PASS (the kit at 30ead05 refused all four on S6). transfer_fee_mint: the real reads of the TransferFeeConfig
+// mint HuAXPy…CUa7 on both public RPCs at 00:37Z. Made from them: the run with that mint's bytes as the token's mint, so
+// both buys' second move out of the authority's ATA could charge a fee: FAIL on S6, the sells still pass.
+test("recorded Token-2022 shared run: all four shapes through Jupiter's authority's ATA on the Token-2022 side: PASS", async () => {
+  const r = await judge(A.good_shared_2022);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const name of NAMES) assert.ok(r.lines.some((l) => l.startsWith(`ok  ${name}: `) && l.includes(" by shared_accounts_route_v2, ") && l.endsWith("; S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S13 pass")), name);
+});
+
+test("made from the Token-2022 shared run: the token's mint charges a transfer fee: both buys FAIL on S6", async () => {
+  const g = copy(A.good_shared_2022);
+  g.reads.accounts[g.mint] = A.transfer_fee_mint.read;
+  const r = await judge(g);
+  assert.equal(r.ok, false);
+  assert.deepEqual(bad(r).map((l) => l.slice(0, 28)), ["BAD S-1 buy, maxAccounts=40:", "BAD S-1 buy, uncapped: 1028 "]);
+  for (const l of bad(r)) assert.match(l, new RegExp(`; refused: S6 program destination account \\w+ is Jupiter's authority's account of the Token-2022 mint ${g.mint}: the mint charges a transfer fee \\(TransferFeeConfig\\)$`));
+});

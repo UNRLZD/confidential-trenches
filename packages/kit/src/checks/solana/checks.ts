@@ -91,9 +91,15 @@ const ROUTE_V2 = [187, 100, 250, 204, 49, 196, 175, 20];
 // authority; on all 16 real builds read through the helper on 2026-11-02 05:05-06:34Z (ids 0 to 7, SPL Token and
 // Token-2022, buys and sells) it is Jupiter's PDA of ("authority", [id]), and each of its two accounts is its ATA of
 // that side's mint on every SPL Token side and the wallet's own account of that side on every Token-2022 side (Jupiter
-// then swaps that leg straight from or into the wallet's account). S6 takes exactly that, and the wallet's own account
-// on an SPL Token side too. The id is not bounded: the device derives the authority from it, so any id's PDA is still
-// Jupiter's alone, and a bound would only refuse a future valid id.
+// then swaps that leg straight from or into the wallet's account). That last part does not hold: the helper live check
+// run 41939321444 (5 Nov 00:10Z) read a sell of the Token-2022 mint 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump whose
+// program source account is FrhrdkCYgeaUHCih33qYhBuGrM3AKZhES45FPaW89EcC, the Token-2022 ATA of authority 0
+// (GGztQqQ6pCPaJQnNpXBgELr5cs3WwDakRbh1iEMzjgSJ; read on both RPCs at slot 465502874: owner GGzt…, that mint), and
+// the four builds of the Token-2022 mint BZFYNPeQAEW3HWQ4DNsTVahC1n4ZjTgn6jB2nnBbB96W read through the helper at
+// 00:35Z (test/fixtures/solana-shared-routes.json) take the authority's ATA on the Token-2022 side, buys and sells. So
+// S6 takes, on each side, the wallet's own account or the authority's ATA of that side's mint, with one bound on a
+// Token-2022 destination (see S6). The id is not bounded: the device derives the authority from it, so any id's PDA is
+// still Jupiter's alone, and a bound would only refuse a future valid id.
 const SHARED_ROUTE_V2 = [209, 152, 83, 147, 124, 254, 216, 233];
 // The pump.fun bonding-curve step variants of the Swap enum (same IDL; checks.js:58-64), for S8's cap only.
 const PUMP_BUY_STEPS = new Set([49, 90, 97, 112, 149, 152, 187, 191]);
@@ -104,6 +110,7 @@ const PUMP_SELL_STEPS = new Set([50, 91, 98, 113, 150, 153, 192]);
 const EXT_CONFIDENTIAL = new Set([4, 16, 24]);
 const EXT_NON_TRANSFERABLE = 9;
 const EXT_TRANSFER_HOOK = 14;
+const EXT_TRANSFER_FEE_CONFIG = 1; // the same enum, TransferFeeConfig
 
 export type SolanaQuoteRequest = {
   side: "buy" | "sell";
@@ -512,12 +519,41 @@ function s13(c: Ctx, wk: Walk): SolanaQuoteResult {
   return off.length ? fail("S13", off.join("; ")) : pass("S13", `${wk.created.size} created, every one but the output closed to the wallet`);
 }
 
+// Why a second move of the token, out of Jupiter's authority's account into the wallet's, could change the amount, or
+// null when it cannot: the token's mint, read equal on both providers, whose extensions (walked as S10 walks them) hold
+// no TransferFeeConfig and no TransferHook. Called only on a Token-2022 destination: that is the token (the output of
+// a buy), and its token program is the mint's owner on provider A (checkSolanaQuote), so the read is a Token-2022 mint.
+function secondMove(c: Ctx): string | null {
+  const [a, b] = c.reads.mint;
+  if (!a || !b) return "the mint is not read on both providers";
+  if (a.owner !== b.owner || !eqBytes(a.data, b.data)) return "the providers disagree on the mint";
+  const d = a.data;
+  if (d.length === 82) return null;
+  if (d.length < 166 || d[165] !== 1) return `the mint of ${d.length} bytes has no mint account type`;
+  let o = 166;
+  while (o + 4 <= d.length) {
+    const type = u16(d, o);
+    const len = u16(d, o + 2);
+    if (type === 0) break;
+    if (o + 4 + len > d.length) return `the mint's extension ${type} runs past it`;
+    if (type === EXT_TRANSFER_FEE_CONFIG) return "the mint charges a transfer fee (TransferFeeConfig)";
+    if (type === EXT_TRANSFER_HOOK) return "the mint runs a transfer hook (TransferHook)";
+    o += 4 + len;
+  }
+  if (o !== d.length && d.subarray(o).some((x) => x !== 0)) return "the mint has bytes after its last extension";
+  return null;
+}
+
 // S6: the swap pays only into the wallet's own account of the output mint. On a shared route the legs run between the
 // program authority's accounts, so those must be Jupiter's or the wallet's own: the authority the PDA of the signed id,
-// and each of its two accounts the wallet's own account of that side, or on an SPL Token side the authority's ATA too.
-// A Token-2022 side never goes through the authority's ATA: a fee-charging mint moved a second time, out of that account
-// after Jupiter's floor check, could leave the wallet below minOut (Jupiter builds every Token-2022 side through the
-// wallet's own account on all 16 recorded builds).
+// and each of its two accounts the wallet's own account of that side or the authority's ATA of that side's mint.
+// The source side through the authority's ATA moves exactly in_amount out of the wallet once; the floor is checked on
+// the output, so a fee charged on the way in cannot take the wallet below minOut. The destination side through the
+// authority's ATA moves the output a second time, after the legs, into the wallet: on a Token-2022 mint that move
+// passes only when the token's mint, read equal on both providers, has no TransferFeeConfig (a fee on that move could
+// leave the wallet below minOut) and no TransferHook (a hook program runs on it). Every other extension S10 lets through
+// changes no amount moved inside one transaction. The old rule, every Token-2022 side through the wallet's own account,
+// was disproved by real builds (see SHARED_ROUTE_V2 above).
 function s6(c: Ctx): SolanaQuoteResult {
   const e = needRoute("S6", c);
   if (e) return e;
@@ -532,13 +568,16 @@ function s6(c: Ctx): SolanaQuoteResult {
   if (r.shared) {
     const pa = jupiterAuthority(r.shared.id);
     if (r.shared.authority.key !== pa) wrong.push(`program authority ${r.shared.authority.key} is not Jupiter's authority ${r.shared.id} (${pa})`);
-    // Each side's account of the program: the wallet's own on a Token-2022 side, the authority's ATA or the wallet's own
-    // on an SPL Token side (null: the side's token program is unknown, so nothing passes).
+    // Each side's account of the program: the wallet's own or the authority's ATA, and on a Token-2022 destination the
+    // authority's ATA only for a mint without a transfer fee or hook (null: the side's token program is unknown, so
+    // nothing passes).
     const side = (what: string, key: string, mint: string, tp: string | null): void => {
       if (!isToken(tp)) { wrong.push(`program ${what} account ${key}: token program ${tp} unknown`); return; }
-      const own = solanaAta(c.req.wallet, mint, tp);
-      if (tp === SOLANA_TOKEN_2022_PROGRAM) { if (key !== own) wrong.push(`program ${what} account ${key} is not the wallet's own account of the Token-2022 mint ${mint}`); return; }
-      if (key !== own && key !== solanaAta(pa, mint, tp)) wrong.push(`program ${what} account ${key} is neither Jupiter's authority's account of ${mint} nor the wallet's`);
+      if (key === solanaAta(c.req.wallet, mint, tp)) return;
+      if (key !== solanaAta(pa, mint, tp)) { wrong.push(`program ${what} account ${key} is neither Jupiter's authority's account of ${mint} nor the wallet's`); return; }
+      if (what !== "destination" || tp !== SOLANA_TOKEN_2022_PROGRAM) return;
+      const why = secondMove(c);
+      if (why) wrong.push(`program destination account ${key} is Jupiter's authority's account of the Token-2022 mint ${mint}: ${why}`);
     };
     side("source", r.shared.source.key, inMint, inTp);
     side("destination", r.shared.destination.key, outMint, outTp);
