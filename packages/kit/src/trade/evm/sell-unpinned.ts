@@ -26,11 +26,16 @@
 //   now;
 // - the fee cap is above 0 and under minOut, so the deposit always holds something (and, in the kit's index, at most
 //   the device's own fee rule, evmPoolSellFeeMax: trade/evm/sell.ts);
+// - the fee recipient is an address, not the zero address, not W and not the pool: SellDelegate pays the fee to the
+//   recipient W signed, never to msg.sender, so whoever sends a signed Sell first cannot take its fee (card
+//   pool-review-3, finding L-1); it is the relayer's fee recipient a release on that chain binds (packages/wallet
+//   pool/evm.ts EvmPoolPin.feeRecipient, the helper's fee answer's fee_recipient), an input here since the kit holds
+//   no such pin;
 // and returns the sell frozen, held in a module-private set.
 //
 // W signs Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,
-// uint256 feeCap,uint256 deadline,uint256 nonce) (SellDelegate.sol:65) under {name "Blindfill", version "1", chainId,
-// verifyingContract: W}: 65 bytes r ‖ s ‖ v, s low, v 27 or 28. W's EIP-7702 authorization is keccak256(0x05 ‖
+// uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce) (SellDelegate.sol) under {name "Blindfill",
+// version "1", chainId, verifyingContract: W}: 65 bytes r ‖ s ‖ v, s low, v 27 or 28. W's EIP-7702 authorization is keccak256(0x05 ‖
 // rlp([chainId, delegate, nonce])) with the chain's own id from the venue list, never 0 (M363 (4)). No export here takes
 // a digest. A stuck sell is replaced by building and signing again with the same nonce and a new deadline; a burned
 // precommitment by signing again with a fresh one.
@@ -66,7 +71,7 @@ export type EvmPoolSellErrorCode =
   | "middle_not_listed" // a middle token that is not on the venue list
   | "bad_route" // the route's shape, its end, a hook not on a listed pool; or the chain, W or the pool
   | "bad_amount" // amount, minOut, precommitment or nonce out of range
-  | "bad_fee" // the fee cap is 0, or not under minOut
+  | "bad_fee" // the fee cap is 0, or not under minOut; or the fee recipient is not an address, or is zero, W or the pool
   | "bad_deadline" // the deadline is not seconds within the window past now
   | "not_built" // W signs only a sell evmPoolBuildSellUnpinned returned, for the chain it was built for
   | "bad_key" // W's key is not a key, or not W's
@@ -124,8 +129,9 @@ function venueOf(chain: EvmPoolChain) {
 }
 
 /** What W asks: sell `amount` of `token` through `target` along `route` for at least `minOut` wei, into the chain's
- *  pinned pool with `precommitment`, the sender's fee at most `feeCap`, by `deadline` (unix seconds, checked against
- *  the device's clock), with W's sell nonce `nonce`. */
+ *  pinned pool with `precommitment`, the sender's fee at most `feeCap` paid to `feeRecipient` (the relayer's fee
+ *  recipient the chain's release binds, packages/wallet EvmPoolPin.feeRecipient: an input, the kit holds no such pin),
+ *  by `deadline` (unix seconds, checked against the device's clock), with W's sell nonce `nonce`. */
 export type EvmPoolSellRequest = {
   w: string;
   token: string;
@@ -135,6 +141,7 @@ export type EvmPoolSellRequest = {
   minOut: bigint;
   precommitment: bigint;
   feeCap: bigint;
+  feeRecipient: string;
   deadline: bigint;
   nonce: bigint;
 };
@@ -154,6 +161,8 @@ export type EvmPoolSell = {
   readonly pool: string;
   readonly precommitment: bigint;
   readonly feeCap: bigint;
+  /** Who SellDelegate pays the fee to (never msg.sender: card pool-review-3, L-1). */
+  readonly feeRecipient: string;
   readonly deadline: bigint;
   readonly nonce: bigint;
 };
@@ -342,7 +351,7 @@ export function evmSellRouteOf(chain: EvmPoolChain, sell: EvmSignedSellCall): Ev
 /** The sell W asked for on `chain`, after every check (see the header); refused with its own code otherwise. */
 export function evmPoolBuildSellUnpinned(chain: EvmPoolChain, req: EvmPoolSellUnpinnedRequest): EvmPoolSell {
   if (typeof req !== "object" || req === null) return refuse("bad_route", "a sell request is an object");
-  const { w, token, amount, target, route, minOut, pool, precommitment, feeCap, deadline, nonce } = req;
+  const { w, token, amount, target, route, minOut, pool, precommitment, feeCap, feeRecipient, deadline, nonce } = req;
   const venue = venueOf(chain);
   if (!isWallet(w)) return refuse("bad_route", "W is not an address");
   if (!isWallet(token) || lower(token) === lower(venue.weth)) return refuse("bad_route", "the token is not an address, or is WETH");
@@ -353,13 +362,15 @@ export function evmPoolBuildSellUnpinned(chain: EvmPoolChain, req: EvmPoolSellUn
   if (!isUint(precommitment, FIELD_P)) return refuse("bad_amount", "the precommitment is a field element");
   if (!isUint(nonce, U256)) return refuse("bad_amount", "the nonce is a uint256");
   if (!isUint(feeCap, U256) || feeCap === 0n || feeCap >= minOut) return refuse("bad_fee", "the fee cap is above 0 and under minOut");
+  // SellDelegate refuses the zero address and W too; the pool would fold the fee into the deposit's own balance
+  if (!isWallet(feeRecipient) || lower(feeRecipient) === lower(w) || lower(feeRecipient) === lower(pool)) return refuse("bad_fee", "the fee recipient is an address, not zero, W or the pool");
   // the device's own clock, never a caller's now (M370 (3)): a now in milliseconds would make a sell that never expires
   const t = Math.floor(Date.now() / 1000);
   if (typeof deadline !== "bigint" || deadline < BigInt(t + EVM_POOL_SELL_DEADLINE_MIN_S) || deadline > BigInt(t + EVM_POOL_SELL_DEADLINE_MAX_S)) {
     return refuse("bad_deadline", `the deadline is ${EVM_POOL_SELL_DEADLINE_MIN_S} to ${EVM_POOL_SELL_DEADLINE_MAX_S} seconds past now (${t})`);
   }
   const data = swapData(chain, token, route, target, w, amount, minOut);
-  const built: EvmPoolSell = Object.freeze({ chain, w, token, amount, target, data, minOut, pool, precommitment, feeCap, deadline, nonce });
+  const built: EvmPoolSell = Object.freeze({ chain, w, token, amount, target, data, minOut, pool, precommitment, feeCap, feeRecipient, deadline, nonce });
   BUILT.add(built);
   return built;
 }
@@ -397,7 +408,7 @@ function sellDigest(s: Omit<EvmPoolSell, "data"> & { data: string }): Uint8Array
     ),
   );
   const type = keccak_256(
-    utf8("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)"),
+    utf8("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"),
   );
   const struct = keccak_256(
     concat(
@@ -410,6 +421,7 @@ function sellDigest(s: Omit<EvmPoolSell, "data"> & { data: string }): Uint8Array
       addressWord(built.pool),
       word(built.precommitment),
       word(built.feeCap),
+      addressWord(built.feeRecipient),
       word(built.deadline),
       word(built.nonce),
     ),
@@ -493,7 +505,8 @@ export function evmPoolSellFeeMax(chain: EvmPoolChain, baseFeePerGas: bigint, ch
   return evmPoolFee({ gas: EVM_POOL_SELL_GAS, gasPrice: baseFeePerGas + evmPoolSellTip(chain), chainFee });
 }
 
-/** A sim sell: as EvmPoolSell, into EVM_SELL_SIM, with no fee and no precommitment. */
+/** A sim sell: as EvmPoolSell, into EVM_SELL_SIM, with no fee and no precommitment; its fee recipient is EVM_SELL_SIM
+ *  too (non-zero and never W, as SellDelegate requires; a fee of 0 is paid to it). */
 export type EvmSellSim = EvmPoolSell & { readonly sim: true };
 const SIMS = new WeakSet<EvmSellSim>();
 
@@ -509,7 +522,7 @@ export function evmPoolBuildSimSellUnpinned(chain: EvmPoolChain, req: { w: strin
   const pm = Object.hasOwn(venue, "poolManager") && isAddress(venue.poolManager) ? lower(venue.poolManager) : undefined;
   if (pm === undefined) return refuse("not_deployed", `${chain} has no pinned PoolManager`);
   const data = v4Data(chain, token, hops, true);
-  const sim: EvmSellSim = Object.freeze({ chain, w: lower(w), token: lower(token), amount, target: pm, data, minOut, pool: EVM_SELL_SIM, precommitment: 0n, feeCap: 0n, deadline, nonce, sim: true as const });
+  const sim: EvmSellSim = Object.freeze({ chain, w: lower(w), token: lower(token), amount, target: pm, data, minOut, pool: EVM_SELL_SIM, precommitment: 0n, feeCap: 0n, feeRecipient: EVM_SELL_SIM, deadline, nonce, sim: true as const });
   SIMS.add(sim);
   return sim;
 }
@@ -534,12 +547,12 @@ export function evmSellCallData(s: EvmPoolSell, fee: bigint, signature: Uint8Arr
     out.set(b);
     return out;
   };
-  // the tuple (10 words of head, `data` its one dynamic field at 0x140), then fee, then the signature
+  // the tuple (11 words of head, `data` its one dynamic field at 0x160), then fee, then the signature
   const tuple = concat(
-    addressWord(s.token), word(s.amount), addressWord(s.target), word(0x140n), word(s.minOut), addressWord(s.pool),
-    word(s.precommitment), word(s.feeCap), word(s.deadline), word(s.nonce), word(BigInt(data.length)), pad(data),
+    addressWord(s.token), word(s.amount), addressWord(s.target), word(0x160n), word(s.minOut), addressWord(s.pool),
+    word(s.precommitment), word(s.feeCap), addressWord(s.feeRecipient), word(s.deadline), word(s.nonce), word(BigInt(data.length)), pad(data),
   );
-  const selector = keccak_256(utf8("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)")).slice(0, 4);
+  const selector = keccak_256(utf8("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)")).slice(0, 4);
   return toHex(concat(selector, word(0x60n), word(fee), word(BigInt(0x60 + tuple.length)), tuple, word(BigInt(signature.length)), pad(signature)));
 }
 

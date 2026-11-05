@@ -1,0 +1,125 @@
+{
+  "about": "Each High and Medium Slither hit on contracts/pool-evm (CI job slither, scripts/ci/slither-gate.mjs), with the reason it is not a bug, read in the code at the cited lines. Keyed by detector, file and element as the gate prints them, with the number of hits each entry covers; the gate fails on a High or Medium hit not listed here, a count that differs and an entry that matches no hit. First read: CI job 127548923574 (slither-analyzer 0.11.6, PR #315 at f6d32713), 19 High and Medium hits in 15 entries; pool-review-3.md is the review they cite.",
+  "findings": [
+    {
+      "check": "arbitrary-send-eth",
+      "impact": "High",
+      "file": "src/PrivacyPoolSimple.sol",
+      "element": "_push",
+      "count": 1,
+      "reason": "_push (PrivacyPoolSimple.sol:119-123) pays only the two payees of a release W signed: the request's recipient (W) and feeRecipient, both bound by the proof's context (PrivacyPool.sol:236, keccak of the whole withdrawal) and checked non-zero and not the pool (PrivacyPool.sol:176-177), with W's EIP-712 signature over the proof required (:181). Callers: withdraw (PrivacyPool.sol:127-128) and buy's fee (PrivacyPoolSimple.sol:60), each after _spendChecked marks the nullifier. The destination is the one W chose, never the caller's."
+    },
+    {
+      "check": "arbitrary-send-eth",
+      "impact": "High",
+      "file": "src/PrivacyPoolSimple.sol",
+      "element": "buy",
+      "count": 1,
+      "reason": "The ETH goes to _buy.adapter (PrivacyPoolSimple.sol:64), which is in the Buy W signs (BUY_TYPEHASH, :39-41; digest :86-101, checked in _release, PrivacyPool.sol:181), after the spend is checked and marked (:59). A relayer cannot change the adapter, route, token or minOut, and W's token balance must rise by minOut (:63-66). pool-review-3.md, Checked: Proof binding, Buy."
+    },
+    {
+      "check": "arbitrary-send-eth",
+      "impact": "High",
+      "file": "src/SellDelegate.sol",
+      "element": "sell",
+      "count": 1,
+      "reason": "Both sends go where W signed: the fee to _sell.feeRecipient (SellDelegate.sol:193, never msg.sender: review L-1, fixed in a6ee435c; refused when zero or W, :149) and the rest into _sell.pool's deposit (:196). Both fields are in the Sell W signs (SELL_TYPEHASH; checked against W itself, :150), single-use by the nonce (:152-153), and the code runs as W's own account under EIP-7702, spending only W's own sale."
+    },
+    {
+      "check": "incorrect-return",
+      "impact": "High",
+      "file": "src/verifiers/WithdrawalVerifier.sol",
+      "element": "verifyProof",
+      "count": 2,
+      "reason": "snarkJS's generated Groth16 verifier, unchanged from Privacy Pools v1.3.0 (NOTICE:24; its code hash is pinned, State.sol:50, :100). The halting return(0, 0x20) after mstore(0, 0) in checkField (WithdrawalVerifier.sol:84-87) and in g1_mulAccC (:100-103, :110-113, reached through checkPairing) is the verifier's early 'return false': it ends verifyProof with a 32-byte false, which the pool reads as InvalidProof (PrivacyPool.sol:257). The detector flags the pattern, not a wrong value."
+    },
+    {
+      "check": "incorrect-return",
+      "impact": "High",
+      "file": "src/verifiers/WithdrawalVerifier.sol",
+      "element": "checkPairing",
+      "count": 1,
+      "reason": "The same snarkJS pattern (NOTICE:24, unchanged): g1_mulAccC's return(0, 0x20) after mstore(0, 0) (WithdrawalVerifier.sol:110-113) halts verifyProof with false when a precompile call fails, which the pool refuses as InvalidProof (PrivacyPool.sol:257). Intended, not a wrong return."
+    },
+    {
+      "check": "reentrancy-balance",
+      "impact": "High",
+      "file": "src/PrivacyPoolSimple.sol",
+      "element": "buy",
+      "count": 1,
+      "reason": "_before (PrivacyPoolSimple.sol:63) is read before the adapter call on purpose: _out (:65) is W's balance rise across it, the check that the swap delivered minOut (:66). buy is nonReentrant (:55; transient guard, State.sol:83-88), so the adapter cannot re-enter any pool method, and the spend is marked before the call (:59). The only way to raise _out is to give W tokens, which is W's gain; the adapter is the one W signed."
+    },
+    {
+      "check": "reentrancy-balance",
+      "impact": "High",
+      "file": "src/SellDelegate.sol",
+      "element": "sell",
+      "count": 3,
+      "reason": "_held (SellDelegate.sol:160) is read before the three calls the detector names (POOL_MANAGER.unlock :167, _approve :170 via :315, _sell.target.call :171) on purpose: :183 requires W's token balance to fall by exactly the signed amount across them (DebitNotExact; card evm-selldelegate-exact-debit). sell holds W's transient guard (:143, cleared :198), so none of those calls can re-enter sell; unlockCallback runs only from the PoolManager with this sell's payload, once (:210-212). A balance moved during the calls fails :183, which is the point."
+    },
+    {
+      "check": "unchecked-transfer",
+      "impact": "High",
+      "file": "src/adapters/UniswapV4Adapter.sol",
+      "element": "unlockCallback",
+      "count": 1,
+      "reason": "pool-review-3.md I-6: WETH.transfer at UniswapV4Adapter.sol:133 is WETH9's, which returns true or reverts, and the settle() that follows (:134, after sync :132) credits only what arrived, so a false return leaves the currency unsettled and the PoolManager reverts the whole unlock (CurrencyNotSettled). No money can be lost on it."
+    },
+    {
+      "check": "reentrancy-no-eth",
+      "impact": "Medium",
+      "file": "src/PrivacyPool.sol",
+      "element": "_spendChecked",
+      "count": 1,
+      "reason": "The external call is verifyProof (PrivacyPool.sol:257) on WITHDRAWAL_VERIFIER, an immutable whose code hash is pinned in the constructor (State.sol:50, :100): snarkJS's verifier, a pure computation whose only calls are staticcalls to precompiles 6, 7 and 8, so it cannot call back. Every caller of _spendChecked is nonReentrant (withdraw PrivacyPool.sol:117, buy PrivacyPoolSimple.sol:55), and the nullifier and insert (:260, :263) come before any payment."
+    },
+    {
+      "check": "uninitialized-local",
+      "impact": "Medium",
+      "file": "lib/lean-imt/InternalLeanIMT.sol",
+      "element": "rightNode",
+      "count": 1,
+      "reason": "zk-kit's LeanIMT (lib/lean-imt, upstream code): rightNode (InternalLeanIMT.sol:156) is meant to start at 0, which means 'no right child', so the parent is the left node (:168-172). It is in _insertMany, which the pool never calls: State.sol uses only _insert (git grep _insertMany contracts/pool-evm/src finds none)."
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "file": "src/adapters/UniswapV4Adapter.sol",
+      "element": "buy",
+      "count": 1,
+      "reason": "POOL_MANAGER.unlock (UniswapV4Adapter.sol:87) returns unlockCallback's own return value, which is '' (:137); the swap's checks are in the callback (each hop takes its whole input :121, output at least minOut :126), and the pool rechecks W's balance rise against minOut (PrivacyPoolSimple.sol:63-66)."
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "file": "src/adapters/UniswapV4Adapter.sol",
+      "element": "unlockCallback",
+      "count": 2,
+      "reason": "settle (UniswapV4Adapter.sol:129, :134) returns the amount paid; it is not needed because the PoolManager itself reverts the unlock unless every currency delta is settled to zero, and the input is exactly _in (msg.value), with each hop required to take all of it (:121). The output is taken to the recipient only after the minOut check (:126, :136)."
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "file": "src/adapters/UniswapV3Adapter.sol",
+      "element": "buy",
+      "count": 1,
+      "reason": "exactInput's amountOut (UniswapV3Adapter.sol:47-49) is checked by SwapRouter02 against amountOutMinimum = minOut, and the pool measures W's actual balance rise against minOut (PrivacyPoolSimple.sol:63-66), which a returned figure could not prove. The adapter also refuses a fill that left ETH or a middle token in the router (:50-55)."
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "file": "src/SellDelegate.sol",
+      "element": "unlockCallback",
+      "count": 1,
+      "reason": "settle (SellDelegate.sol:249) returns the amount paid; the PoolManager reverts the unlock unless every delta is settled, and the sell then checks W's own balances: the token fell by exactly the signed amount (:183) and the ETH gained is at least minOut (:190)."
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "file": "src/SellDelegate.sol",
+      "element": "sell",
+      "count": 1,
+      "reason": "POOL_MANAGER.unlock (SellDelegate.sol:167) returns unlockCallback's return value, '' (:251). The sell's result is measured on W's balances after it: exact debit (:183), ETH gained at least minOut (:190)."
+    }
+  ]
+}

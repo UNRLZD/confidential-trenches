@@ -736,7 +736,7 @@ export function checkEvmWithdraw(pool: string, given: EvmPoolProofBinding, relay
 }
 
 /** An EVM pool sell: W's own Sell into the pinned pool, the request's token and amount, a min out at least `floor` (the
- *  device's own, from its two-RPC pool reads), within the fee cap, unexpired. */
+ *  device's own, from its two-RPC pool reads), within the fee cap, its fee paid to the pinned fee recipient, unexpired. */
 export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext & { precommitment: bigint }, floor: bigint, testnet = false): PoolDraw {
   if (ask.kind !== "pool.sell") return refuse("kind");
   // only a sell built from the device's own sell quote: never a server's route, min out or fee cap
@@ -750,6 +750,9 @@ export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext 
   if (built.amount !== ask.amount) return refuse("amount");
   if (built.precommitment !== ctx.precommitment) return refuse("precommitment");
   if (built.feeCap > ctx.feeCap) return refuse("fee_cap_over_device_cap");
+  // SellDelegate pays the fee to the Sell's fee recipient (card pool-review-3, L-1): the relayer's the page pins, as a
+  // release's relay data binds it (checkRelay)
+  if (lower(built.feeRecipient) !== lower(pins.feeRecipient)) return refuse("fee_recipient");
   if (built.deadline * 1000n <= ctx.nowMs) return refuse("deadline_past");
   if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");
   passed("evm.sell", built, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId });

@@ -53,12 +53,12 @@ export const calldata = (signature, types, values) => selector(signature) + enco
 const WITHDRAWAL = ["t", "w", "b"];
 const PROOF = ["t", ["a", 2, "w"], ["a", 2, ["a", 2, "w"]], ["a", 2, "w"], ["a", 8, "w"]];
 const BUY = ["t", "w", "b", "w", "w"];
-const SELL = ["t", "w", "w", "w", "b", "w", "w", "w", "w", "w", "w"];
+const SELL = ["t", "w", "w", "w", "b", "w", "w", "w", "w", "w", "w", "w"];
 export const SIGS = Object.freeze({
   deposit: "deposit(uint256,uint256)",
   withdraw: "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)",
   buy: "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)",
-  sell: "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)",
+  sell: "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)",
   v4Quote: "quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))",
   v3Quote: "quoteExactInputSingle((address,address,uint256,uint24,uint160))",
 });
@@ -81,7 +81,7 @@ export const buyData = (processooor, relayBytes, proof, fee, built, signature) =
   calldata(SIGS.buy, [WITHDRAWAL, PROOF, "w", BUY, "b"], [[processooor, relayBytes], proof, fee, [built.adapter, built.data, built.minOut, built.token], sigHex(signature)]);
 /** SellDelegate.sell(Sell, fee, W's signature), the kit's built sell */
 export const sellData = (s, fee, signature) =>
-  calldata(SIGS.sell, [SELL, "w", "b"], [[s.token, s.amount, s.target, s.data, s.minOut, s.pool, s.precommitment, s.feeCap, s.deadline, s.nonce], fee, sigHex(signature)]);
+  calldata(SIGS.sell, [SELL, "w", "b"], [[s.token, s.amount, s.target, s.data, s.minOut, s.pool, s.precommitment, s.feeCap, s.feeRecipient, s.deadline, s.nonce], fee, sigHex(signature)]);
 /** V4Quoter.quoteExactInputSingle({poolKey, zeroForOne, exactAmount, hookData}) */
 export const v4QuoteData = (key, zeroForOne, amount) =>
   calldata(SIGS.v4Quote, [["t", ["t", "w", "w", "w", "w", "w"], "w", "w", "b"]], [[[key.currency0, key.currency1, BigInt(key.fee), BigInt(key.tickSpacing), key.hooks], zeroForOne, amount, "0x"]]);

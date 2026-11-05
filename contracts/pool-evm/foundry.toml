@@ -31,3 +31,8 @@ runs = 1000
 [rpc_endpoints]
 base = 'http://127.0.0.1:47545/base'
 robinhood = 'http://127.0.0.1:47545/robinhood'
+
+# test/Invariant.t.sol: random deposits, withdraws, buys and replays, each run 64 calls deep
+[invariant]
+runs = 256
+depth = 64
