@@ -3491,10 +3491,12 @@ test("LH1 the provider ranked first answers its head maxLag back: ten warm quote
   const scan = scanner(H + 1, []);
   const top = (host: string) => (host === lagger ? H - Number(lag) : H);
   let laggerHeads = 0;
+  let laggerReads = 0;
   const net = mock.method(globalThis, "fetch", async (u: string, init: RequestInit) => {
     const calls = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
     const asked = calls.map((c) => ({ method: c.method, params: c.params }));
     const h = hostOf(u);
+    if (h === lagger && calls.some((c) => c.method === "eth_call")) laggerReads++;
     // the lagger answers first: every other provider a little later
     await pause(h === lagger ? 1 : 15);
     const out: readonly unknown[] =
@@ -3526,6 +3528,9 @@ test("LH1 the provider ranked first answers its head maxLag back: ten warm quote
       assert.equal((v as { block: bigint }).block, BigInt(H), rows.join("; "));
       assert.equal(hostOf(quoteMod.evmRanked(p).at(-1)!), lagger, `after quote ${q + 1} the lagger is held: ${quoteMod.evmRanked(p).map(hostOf).join(",")}`);
     }
+    // the reads go to the pair that agreed, the lagger last: a live lagger holds no block past its head, so a read
+    // asked of it first waits out askAt's retries
+    assert.equal(laggerReads, 0, "the lagger is asked no read");
   } finally {
     net.mock.restore();
   }

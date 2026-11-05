@@ -44,7 +44,7 @@ export const MUTANTS = [
   [QUOTE, "if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {", "if (false) {", R, "R1b "],
   [QUOTE, "back.number !== lo.number || back.hash !== lo.hash || back.timestamp", "back.number !== lo.number || back.timestamp", R, "R5 "],
   [QUOTE, " || back.timestamp !== lo.timestamp || back.baseFeePerGas", " || back.baseFeePerGas", R, "R5 "],
-  [QUOTE, "const [lo, at] = a.number <= b.number ? [a, j] : [b, i];", "const [lo, at] = a.number <= b.number ? [a, i] : [b, j];", R, "R5 "],
+  [QUOTE, "const [lo, at, own] = a.number <= b.number ? [a, j, i] : [b, i, j];", "const [lo, at, own] = a.number <= b.number ? [a, i, i] : [b, j, j];", R, "R5 "],
   [QUOTE, 'if (confirmed.status === "rejected") throw confirmed.reason;', "", R, "R1b "],
   [QUOTE, "if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse(", "if (false) return refuse(", Q, "Q14 "],
   [QUOTE, "if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse(", "if (atMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS + 1000) return refuse(", R, "R6 "],
@@ -193,7 +193,14 @@ export const MUTANTS = [
   [QUOTE, "    return [slow, s?.ms ?? Number.MAX_VALUE, k] as const;", "    return [0, s?.ms ?? Number.MAX_VALUE, k] as const;", R, "V4 "],
   [QUOTE, "s.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0;", "0;", R, "V4 "],
   [QUOTE, "s.held > now ? 2 : ", "s.held > now ? 1 : ", R, "V4 "],
-  [QUOTE, "      if (out.some(limited)) s.held = performance.now() + EVM_HOLD_MS;\n      else s.ms", "      s.ms", R, "V4 "],
+  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      else s.ms", "      s.ms", R, "V4 "],
+  // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
+  // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
+  [QUOTE, "    if (!(await behind(got.block))) return got;\n    if (got.low === undefined) {", "    return got;\n    if (got.low === undefined) {", R, "LH1 "],
+  [QUOTE, "    const low = got.low!;\n    HOLD.get(low)?.();", "    const low = got.low!;", R, "LH1 "],
+  [QUOTE, "    if (!Object.isFrozen(rpcs)) [...rest, low].forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "LH1 "],
+  [QUOTE, "return { block: lo, confirm, low: list[own]! };", "return { block: lo, confirm, low: list[at]! };", R, "LH1 "],
+  [QUOTE, "if (out.some(limited) || out.some(stateless)) s.held", "if (out.some(limited)) s.held", R, "LH2 "],
   [QUOTE, "      s.held = performance.now() + EVM_HOLD_MS;\n      throw e;", "      throw e;", R, "V4 "],
   // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the
   // block's confirmation (M-2); a provider that differs from what the quote used is held; the spare's timer counts
