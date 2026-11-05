@@ -8,8 +8,11 @@
 //   - devnet: getAccountInfo of the devnet pool's account answers 200 owned by the devnet pool program (the route reads
 //     devnet, not mainnet);
 //   - on both routes, each read the pool path makes beyond the original list (getSlot, getBlockTime,
-//     getSignaturesForAddress, getFeeForMessage, getProgramAccounts) is forwarded: 200 with a JSON-RPC answer for its
-//     own id, never 400 method_not_allowed (a provider's JSON-RPC error for the planted arguments still counts);
+//     getSignaturesForAddress, getFeeForMessage) is forwarded: 200 with a JSON-RPC answer for its own id, never 400
+//     method_not_allowed (a provider's JSON-RPC error for the planted arguments still counts);
+//   - on both routes, a getProgramAccounts scan with a dataSize filter alone (not the note restore's shape: no memcmp)
+//     is refused 400 method_not_allowed (review L-2: the helper forwards a scan only on its own pinned pool program with
+//     a dataSize and a memcmp filter, so no caller spends the keyed provider's quota on an open scan);
 //   - devnet pace: PACE_READS getSlot reads one after another each answer 200 with a slot, none 429, and their median is
 //     under PACE_P50_MS (the page's buy reads its two providers this way, one step after another);
 //   - every answer carries a full-sha X-Helper-Commit and echoes SIGN_HOST in Access-Control-Allow-Origin.
@@ -33,14 +36,14 @@ const SHA = /^[0-9a-f]{40}$/;
 // null value for an unknown blockhash), which shows the read was forwarded
 const FEE_MESSAGE = Buffer.concat([Buffer.from([1, 0, 0, 1]), Buffer.alloc(32, 1), Buffer.alloc(32, 1), Buffer.from([0])]).toString("base64");
 /** The reads the pool path makes beyond the route's first list (packages/signpage/src/pool-buy.ts getSlot, pool-spend.ts
- *  getSignaturesForAddress, pool-deposit.ts getFeeForMessage, wallet pool/solana.ts getBlockTime, solana-restore.ts
- *  getProgramAccounts), each with arguments that answer small. */
+ *  getSignaturesForAddress, pool-deposit.ts getFeeForMessage, wallet pool/solana.ts getBlockTime), each with arguments
+ *  that answer small, and a getProgramAccounts scan the helper must refuse (`refused`: an open scan, dataSize alone). */
 export const POOL_READS = [
   { method: "getSlot", params: [{ commitment: "finalized" }] },
   { method: "getBlockTime", params: [1] },
   { method: "getSignaturesForAddress", params: [DEVNET_POOL, { limit: 1, commitment: "finalized" }] },
   { method: "getFeeForMessage", params: [FEE_MESSAGE, { commitment: "confirmed" }] },
-  { method: "getProgramAccounts", params: [DEVNET_PROGRAM, { encoding: "base64", commitment: "finalized", filters: [{ dataSize: 1 }] }] },
+  { method: "getProgramAccounts", params: [DEVNET_PROGRAM, { encoding: "base64", commitment: "finalized", filters: [{ dataSize: 1 }] }], refused: true },
 ];
 export const ROUTES = ["solana-devnet", "solana"];
 
@@ -70,7 +73,7 @@ export function judge({ reads }) {
     headersOk(owner, "[solana-devnet getAccountInfo]");
   }
   for (const route of ROUTES)
-    for (const { method } of POOL_READS) {
+    for (const { method, refused } of POOL_READS) {
       const tag = `[${route} ${method}]`;
       const r = reads.find((x) => x.route === route && x.kind === "pool" && x.method === method);
       if (!r) {
@@ -78,7 +81,8 @@ export function judge({ reads }) {
         continue;
       }
       const b = json(r.body);
-      say(r.status === 200 && b?.jsonrpc === "2.0" && b.id === r.id && (Object.hasOwn(b, "result") || Object.hasOwn(b, "error")), `${tag} forwarded: ${r.status} ${r.body.slice(0, 100)}`);
+      if (refused) say(r.status === 400 && b?.error?.code === "method_not_allowed", `${tag} an open scan refused: ${r.status} ${r.body.slice(0, 100)}`);
+      else say(r.status === 200 && b?.jsonrpc === "2.0" && b.id === r.id && (Object.hasOwn(b, "result") || Object.hasOwn(b, "error")), `${tag} forwarded: ${r.status} ${r.body.slice(0, 100)}`);
       headersOk(r, tag);
     }
   const pace = reads.filter((x) => x.route === "solana-devnet" && x.kind === "pace");
