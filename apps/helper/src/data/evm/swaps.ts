@@ -415,6 +415,11 @@ const DYNAMIC_FEE = 0x800000;
  * id proves the key; nothing else is accepted.
  */
 export function v4Key(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base"): string | null {
+  for (const k of v4Tries(token, swapFee, around, chain)) if (keccakHex(k) === id) return k;
+  return null;
+}
+/** The keys v4Key tries, in its order. */
+function* v4Tries(token: string, swapFee: number, around: readonly string[], chain: EvmChain): Generator<string> {
   const V = VENUES[chain];
   const w = (n: bigint): string => n.toString(16).padStart(64, "0");
   const a = (x: string): string => x.slice(2).padStart(64, "0");
@@ -423,10 +428,20 @@ export function v4Key(id: string, token: string, swapFee: number, around: readon
   const spacings = [...TICK_SPACINGS, ...Array.from({ length: TICK_SPACING_MAX }, (_, i) => i + 1).filter((t) => !TICK_SPACINGS.includes(t))];
   for (const other of [ZERO, V.weth, V.usd]) {
     const [c0, c1] = token < other ? [token, other] : [other, token];
-    for (const ts of spacings) for (const h of hooks) for (const f of fees) {
-      const k = `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
-      if (keccakHex(k) === id) return k;
-    }
+    for (const ts of spacings) for (const h of hooks) for (const f of fees) yield `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
+  }
+}
+/** Keys v4KeySliced hashes between two turns of the event loop. [design: 1,000, about 60 ms on the Mac (a miss of
+ *  92,000 tries, ten hook candidates, took 5.4 s there, 2026-11-05 16:3xZ), so a box twice as slow stays under the
+ *  250 ms swaps-v4key.test.ts allows.] */
+const V4_KEY_SLICE = 1_000;
+/** v4Key, the event loop let run every V4_KEY_SLICE tries: a search that misses takes seconds of hashing, and in one go it
+ *  held every other read of the helper (card robinhood-cold-open-fast: four cold opens' posts all aborted at 14 s). */
+export async function v4KeySliced(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base"): Promise<string | null> {
+  let n = 0;
+  for (const k of v4Tries(token, swapFee, around, chain)) {
+    if (keccakHex(k) === id) return k;
+    if (++n % V4_KEY_SLICE === 0) await new Promise((go) => setImmediate(go));
   }
   return null;
 }
@@ -1376,12 +1391,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const answers = await callsSome(head.n, [...paired.map(confirmCall), ...list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` }))]);
     for (const c of confirmed(paired, answers.slice(0, paired.length))) if (c !== null) cands.push(c);
     const keys = answers.slice(paired.length);
-    list.forEach((id, i) => {
+    for (const [i, id] of list.entries()) {
       const e = seen.get(id)!;
-      // the PositionManager's key when it hashes to the id, else one worked out from the swap (it must hash to the id)
-      const c = v4Pool(token, id, keys[i]) ?? v4Pool(token, id, v4Key(id, token, e.fee, [...e.around], chain) ?? undefined);
+      // the PositionManager's key when it hashes to the id: that is the pool, whatever it pairs (a route's other hop, or
+      // the token against a quote of no venue of ours), and no search finds another (card robinhood-cold-open-fast: those
+      // misses searched seconds each); else one worked out from the swap (it must hash to the id), the event loop let run
+      const k = keys[i];
+      const c = k !== undefined && /^0x[0-9a-f]{320}$/.test(k) && keccakHex(k) === id ? v4Pool(token, id, k) : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain)) ?? undefined);
       if (c !== null) cands.push(c);
-    });
+    }
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
     cands.push(...curvePools(token, recs));
     if (cands.length === 0) return null;
