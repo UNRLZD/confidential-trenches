@@ -11,8 +11,9 @@
 //   3. SIGN_HOST's served connect-src names the mainnet pair the queue reads (provider A and the helper's keyed route,
 //      packages/signpage/src/trade.ts);
 //   4. in a fresh browser, SIGN_HOST opened top-level frames APP_HOST, which Playwright answers with a probe page; on
-//      the shell's ready the probe asks pool.sell (a mainnet USDC sell), pool.deposit and pool.withdraw on Solana. Each
-//      is refused not_allowed, and the page sends no request to the pair or the helper's pool routes. A pinned pool
+//      the shell's ready the probe asks pool.sell (a mainnet USDC sell), pool.deposit, pool.buy and pool.withdraw on
+//      Solana. Each is refused not_allowed, and the page sends no request to the pair, the other Solana RPC its CSP
+//      allows (api.mainnet-beta.solana.com) or the helper's pool routes. A pinned pool
 //      reads the sold token's mint on the pair before anything else (src/pool-kinds.ts), seed or not, so a refusal with
 //      no read is the missing pin's.
 // Not read here, and why: a real mainnet note's deposit, proof, buy, sell and withdraw on the deployed page wait for
@@ -43,14 +44,17 @@ export const PAGE_PAIR = ["https://solana-rpc.publicnode.com", `${HELPER_HOST}/v
 /** What only the pool flow and its queue carry, written out here: src/pool-deposit.ts POOL_DEPOSIT_LOCK, src/pool-sell.ts
  *  POOL_SELL_LOCK, wallet/src/pool/queue.ts's closed refusal, and the helper routes the flow calls. */
 export const QUEUE = ["ct-pool/deposit", "ct-pool/sell", "the proof queue is closed", "/v1/pool/fee?cluster=", "/v1/pool/solana/send"];
-/** Requests a pinned pool's kinds make: the pair (the helper's route reads the sell Ws' holdings too) and the helper's
- *  pool routes. */
-const POOL_READ = (u) => u.startsWith(PAGE_PAIR[0]) || u.startsWith(PAGE_PAIR[1]) || u.startsWith(`${HELPER_HOST}/v1/pool/`);
+/** The other Solana RPC SIGN_HOST's connect-src allows (the trade path's): a pool read sent there is one too. */
+const SOLANA_OTHER = "https://api.mainnet-beta.solana.com";
+/** Requests a pinned pool's kinds make: the pair (the helper's route reads the sell Ws' holdings too), any other Solana
+ *  RPC the page may reach, and the helper's pool routes. */
+const POOL_READ = (u) => u.startsWith(PAGE_PAIR[0]) || u.startsWith(PAGE_PAIR[1]) || u.startsWith(SOLANA_OTHER) || u.startsWith(`${HELPER_HOST}/v1/pool/`);
 /** Mainnet USDC: the sold token, an address of the chain, so a pinned pool would read its mint. */
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const ASKS = [
   { type: "pool.sell", chain: "solana", token: USDC_MINT, amount: "1", slippage_bps: 100 },
   { type: "pool.deposit", chain: "solana", amount: "0.02" },
+  { type: "pool.buy", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "0.001", slippage_bps: 100 },
   { type: "pool.withdraw", chain: "solana", return_key: "portfolio" },
 ];
 const READY_MS = 10_000;
@@ -82,7 +86,7 @@ export function judge(rec) {
     say(code === "not_allowed", `${ask.type} on Solana with no mainnet pin: ${code}, want not_allowed`);
   }
   const reads = Array.isArray(p.poolReads) ? p.poolReads : null;
-  say(reads !== null && reads.length === 0, `no request to the pair or the helper's pool routes for them: ${reads === null ? "not recorded" : reads.length ? reads.join(", ") : "none"}`);
+  say(reads !== null && reads.length === 0, `no request to the pair, ${new URL(SOLANA_OTHER).host} or the helper's pool routes for them: ${reads === null ? "not recorded" : reads.length ? reads.join(", ") : "none"}`);
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -128,7 +132,7 @@ async function probe(browser, { signUrl, dir }) {
   if (dir) {
     await ctx.route((u) => u.origin === signOrigin, serveDir(dir));
     // no network: the pair and the helper answer 503 here
-    for (const o of new Set([...PAGE_PAIR.map((u) => new URL(u).origin), HELPER_HOST])) await ctx.route((u) => u.origin === o, (r) => r.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
+    for (const o of new Set([...PAGE_PAIR.map((u) => new URL(u).origin), SOLANA_OTHER, HELPER_HOST])) await ctx.route((u) => u.origin === o, (r) => r.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
   }
   const all = [];
   ctx.on("request", (req) => all.push(req.url()));

@@ -1,10 +1,10 @@
 // node --test scripts/live-checks/signpage-pool-mainnet.test.mjs: the live check's verdict replays recorded runs
 // (signpage-pool-mainnet.answers.json), each read on 5 Nov by signpage-pool-mainnet.mjs collect():
-//   good: --local at 17:26:40Z, this card's signing page build (release-36's bundle) served as SIGN_HOST under its own _headers: the bundle is
-//         the checkout's and carries the flow and the queue, no testnet pin, the CSP names the mainnet pair, and in a
-//         fresh browser pool.sell, pool.deposit and pool.withdraw on Solana are refused not_allowed with no pool read:
-//         PASS;
-//   bad:  live SIGN_HOST at 17:26:43Z, serving release-35's bundle from before this card (not the checkout's, and it
+//   good: --local at 17:44:45Z, this card's signing page build (release-36's bundle) served as SIGN_HOST under its own
+//         _headers: the bundle is the checkout's and carries the flow and the queue, no testnet pin, the CSP names the
+//         mainnet pair, and in a fresh browser pool.sell, pool.deposit, pool.buy and pool.withdraw on Solana are refused
+//         not_allowed with no pool read: PASS;
+//   bad:  live SIGN_HOST at 17:44:48Z, serving release-35's bundle from before this card (not the checkout's, and it
 //         carries no flow or queue): FAIL.
 // Planted from the good run: a pinned pool's answers (a kind not refused, the mint read on the pair), a testnet pin in
 // the bundle, a bundle without the queue, a CSP without provider A, no ready from the shell.
@@ -42,7 +42,9 @@ test("planted: a pinned pool's answers (a kind that reaches the flow, the mint r
   fails(mut((rec) => (rec.probe.answers["pool.sell"] = { ok: false, error: { code: "not_funded" } })), /pool\.sell on Solana/);
   fails(mut((rec) => (rec.probe.answers["pool.withdraw"] = { ok: true, result: { pending: true } })), /pool\.withdraw on Solana/);
   fails(mut((rec) => delete rec.probe.answers["pool.deposit"]), /pool\.deposit on Solana with no mainnet pin: none/);
+  fails(mut((rec) => (rec.probe.answers["pool.buy"] = { ok: false, error: { code: "not_funded" } })), /pool\.buy on Solana/);
   fails(mut((rec) => rec.probe.poolReads.push("https://solana-rpc.publicnode.com/")), /no request to the pair/);
+  fails(mut((rec) => rec.probe.poolReads.push("https://api.mainnet-beta.solana.com/")), /no request to the pair, api\.mainnet-beta\.solana\.com/);
   fails(mut((rec) => delete rec.probe.poolReads), /not recorded/);
 });
 

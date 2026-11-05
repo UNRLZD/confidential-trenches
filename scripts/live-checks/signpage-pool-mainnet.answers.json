@@ -1,7 +1,7 @@
 {
  "good": {
   "check": "signpage-pool-mainnet",
-  "at": "2026-11-05T17:26:40.763Z",
+  "at": "2026-11-05T17:44:45.962Z",
   "source": "local, SIGN_HOST answered from this checkout's packages/signpage build",
   "browser": "157.0.8103.38",
   "treeBundle": "sha384-vvJiAOJf6qepCaslFXZ+Dw24jPKyjF5xkHU6lwS8HXYB1+uX5LgKrjsgu6z0E2A4",
@@ -34,6 +34,12 @@
       "code": "not_allowed"
      }
     },
+    "pool.buy": {
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
     "pool.withdraw": {
      "ok": false,
      "error": {
@@ -46,7 +52,7 @@
  },
  "bad": {
   "check": "signpage-pool-mainnet",
-  "at": "2026-11-05T17:26:43.459Z",
+  "at": "2026-11-05T17:44:48.849Z",
   "source": "live https://sign.confidential.unrealized.trade/",
   "browser": "157.0.8103.38",
   "treeBundle": "sha384-vvJiAOJf6qepCaslFXZ+Dw24jPKyjF5xkHU6lwS8HXYB1+uX5LgKrjsgu6z0E2A4",
@@ -68,6 +74,12 @@
      }
     },
     "pool.deposit": {
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "pool.buy": {
      "ok": false,
      "error": {
       "code": "not_allowed"
