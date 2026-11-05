@@ -928,11 +928,16 @@ const SCAN_BACKOFF_MAX_MS = 8_000;
  *    each throttle event since an answer, to 8 s; a later, shorter wait never shortens one already set.
  *  - Each answer adds 1 back up to half the limit at the last cut, and 1 / limit past it, up to `parallel` (TCP Reno:
  *    at 1 added an answer, a provider that slows past 5 in flight was sent 11 at once again and again).
- *  - A throttled request, and one whose connection was refused, is asked again whole and spends none of its tries.
+ *  - A throttled request is asked again whole and spends none of its tries. One whose connection was refused is asked
+ *    again whole too, 0.5, 1 and 2 s later, and refused at its fourth refusal in a row, never asked as its halves
+ *    (re-review of b282ce0, LOW-C: uncounted, a provider that refused every getLogs held the quote to the bound, 60 s).
  *  - Nothing is sent once the quote's bound has passed, and no request runs past it (re-review of 59a69e2, MEDIUM-1: a
  *    provider that timed out every request was asked one at a time, about 10.8 hours at the 10 s deadline).
  *  One gate per quote, so a request that never returns holds up that quote alone. */
 type ScanGate = { ask: (rpc: EvmRpc, calls: readonly EvmRpcCall[], tries: number) => Promise<readonly unknown[]> };
+/** A scan request whose connection was refused SCAN_TRIES times in a row: the scan refuses, never asks its halves,
+ *  which go to the same provider. */
+class ScanRefused extends EvmQuoteError {}
 function scanGateOf(parallel: number, untilMs: number): ScanGate {
   let limit = parallel;
   // the limit up to which each answer adds 1, half the limit at the last congestion; past it an answer adds 1 / limit
@@ -1015,10 +1020,12 @@ function scanGateOf(parallel: number, untilMs: number): ScanGate {
             continue;
           }
           if (e instanceof EvmQuoteError && /within the quote's bound/.test(e.message)) throw e;
-          // a refused connection sent nothing: asked again whole after the backoff, a try spent only at the smallest
-          // span (re-review of 59a69e2, LOW-2: halving on it sent 2,300 getLogs where 200 do)
-          if (e instanceof Unreachable && tries === 1) {
-            await nap(Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** refused++));
+          // a refused connection sent nothing: asked again whole after the backoff, never as its halves (re-review of
+          // 59a69e2, LOW-2: halving on it sent 2,300 getLogs where 200 do), and refused at the fourth in a row, as the
+          // providers' ask is (re-review of b282ce0, LOW-C: a provider that died mid-scan held the quote 60 s)
+          if (e instanceof Unreachable) {
+            if (++refused >= SCAN_TRIES) throw new ScanRefused("rpc_error", `the scan provider refused ${refused} connections in a row: ${e.message}`);
+            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));
             continue;
           }
           // a timeout is a congestion signal too (GitHub's runner, 7d6ec94: 14 of 128 and 7 of 114 of a cold quote's
@@ -1131,7 +1138,10 @@ async function scanPools(
     if (splits > 0 && b > a) {
       // one try: a request that ran out of time, failed or answered too many logs is asked as its two halves (a
       // throttled one is asked again whole by the gate; past the scan's bound each half refuses before it is sent)
-      const rs = await gate.ask(rpc, calls, 1).then(logsOf, () => null);
+      const rs = await gate.ask(rpc, calls, 1).then(logsOf, (e) => {
+        if (e instanceof ScanRefused) throw e;
+        return null;
+      });
       if (rs !== null && fine(rs)) return void keep(rs);
       const mid = a + Math.floor((b - a) / 2);
       return settle([one({ part, a, b: mid }, splits - 1), one({ part, a: mid + 1, b }, splits - 1)]);
@@ -2280,7 +2290,8 @@ function retryAfterMs(h: string | null, now = Date.now()): number | null {
 /** A request that made no connection, so no answer can have started: ask asks again, a little later. mainnet.base.org
  *  failed one connection in about every quote from this Mac ("fetch failed", ETIMEDOUT about 505 ms in: Node tries each
  *  of the host's addresses for 250 ms, and this network has no IPv6 route), 2026-11-04 15:45-16:00Z; a request that ran
- *  out of time (TimeoutError) is not one: it may have been served. */
+ *  out of time (TimeoutError) is not one: it may have been served. A browser's fetch names no cause for any failure with
+ *  no response (re-review of b282ce0, LOW-B), so there every one is one: each call is a read, safe to send again. */
 class Unreachable extends Error {}
 const limited = (a: unknown) => {
   const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
@@ -2302,9 +2313,12 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       const signal = until === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([AbortSignal.timeout(timeoutMs), until]);
       res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal });
     } catch (e) {
-      // fetch's own TypeError ("fetch failed") with a connection error as its cause: no connection was made
-      const code = (e as { cause?: { code?: unknown } } | null)?.cause?.code;
-      if (e instanceof TypeError && typeof code === "string" && CONNECT_ERRORS.has(code)) throw new Unreachable(`no connection (${code})`);
+      // fetch's own TypeError with no response: Node's ("fetch failed") names its connection error as its cause, a
+      // browser's names none ("Failed to fetch" in Chrome, "Load failed" in Safari, "NetworkError when attempting to
+      // fetch resource." in Firefox); a timeout or an abort is a DOMException, never this
+      const cause = (e as { cause?: unknown } | null)?.cause;
+      const code = (cause as { code?: unknown } | null | undefined)?.code;
+      if (e instanceof TypeError && (cause === undefined || (typeof code === "string" && CONNECT_ERRORS.has(code)))) throw new Unreachable(`no connection (${typeof code === "string" ? code : e.message})`);
       throw e;
     }
     if (res.status === 429) throw new RateLimited("the provider answered 429 Too Many Requests", retryAfterMs(res.headers.get("retry-after")));

@@ -174,9 +174,9 @@ export const MUTANTS = [
   [QUOTE, "(!kept.has(readKey(r)) || hit.has(first + j))", "(!kept.has(readKey(r)) || true)", R, "W5 "],
   [QUOTE, "filter((r, j) => r.override === undefined && (", "filter((r, j) => (", R, "W6 "],
   [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W1b "],
-  [QUOTE, "if (e instanceof TypeError && typeof code === \"string\" && CONNECT_ERRORS.has(code)) throw new Unreachable(", "if (false) throw new Unreachable(", R, "T7b "],
-  [QUOTE, "if (e instanceof TypeError && typeof code === \"string\" && CONNECT_ERRORS.has(code)) throw new Unreachable(", "if (e instanceof Error) throw new Unreachable(", R, "T7b "],
-  [QUOTE, "if (e instanceof TypeError && typeof code === \"string\" && CONNECT_ERRORS.has(code)) throw new Unreachable(", "if (e instanceof TypeError) throw new Unreachable(", R, "T7b "],
+  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (false) throw new Unreachable(", R, "T7b "],
+  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (e instanceof Error) throw new Unreachable(", R, "T7b "],
+  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (e instanceof TypeError) throw new Unreachable(", R, "T7b "],
   [QUOTE, "!(e instanceof RateLimited || e instanceof Unreachable) || i === 3", "!(e instanceof RateLimited || e instanceof Unreachable) || i === 4", R, "T7b "],
   // the providers (card evm-quote-warm-round): any two that agree decide; a spare is asked when one fails, is slow or
   // differs; the quote's later rounds ask the two that agreed first; the next quote asks the fastest first
@@ -254,7 +254,18 @@ export const MUTANTS = [
   [QUOTE, "    if (sent !== cuts) return false;", "", R, "TH6 "],
   [QUOTE, "      if (now >= untilMs) throw past();", "", R, "TH7 "],
   [QUOTE, "    const wait = Math.max(afterMs ?? 0, Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1)));", "    const wait = afterMs ?? Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1));", R, "TH8 "],
-  [QUOTE, "          if (e instanceof Unreachable && tries === 1) {", "          if (false) {", R, "TH9 "],
+  [QUOTE, "          if (e instanceof Unreachable) {", "          if (false) {", R, "TH9 "],
+  // re-review of b282ce0: a request's refusals counted, the fourth in a row refusing it, never its halves (LOW-C); a
+  // browser's fetch failure, a TypeError with no cause, asked again whole too (LOW-B); the bound's race and abort, the
+  // refusals' backoff and the per-round list, each held by a named test (LOW-A)
+  [QUOTE, "            if (++refused >= SCAN_TRIES) throw new ScanRefused(", "            if (false) throw new ScanRefused(", R, "B1r "],
+  [QUOTE, "        if (e instanceof ScanRefused) throw e;\n", "", R, "B1r "],
+  [QUOTE, "            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));", "            await nap(0);", R, "B1r "],
+  [QUOTE, "            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));", "            await nap(0);", R, "B1a "],
+  [QUOTE, 'if (e instanceof TypeError && (cause === undefined || (typeof code === "string" && CONNECT_ERRORS.has(code))))', 'if (e instanceof TypeError && typeof code === "string" && CONNECT_ERRORS.has(code))', R, "B8 "],
+  [QUOTE, "    if (left >= EVM_RPC_TIMEOUT_MS) return rpc(calls);", "    return rpc(calls);", R, "B2a "],
+  [QUOTE, "        stop.abort(e);\n", "", R, "B2a "],
+  [QUOTE, "    list = [...rpcs];\n", "", R, "B6 "],
   [QUOTE, "    resumeAt = Math.max(resumeAt, performance.now() + wait);", "    resumeAt = performance.now() + wait;", R, "TH10 "],
   [QUOTE, "        strikes = 0;\n", "", R, "TH11 "],
   [QUOTE, "  return Number.isFinite(at) && /[a-z]/i.test(t) ? Math.max(0, at - now) : null;", "  return null;", R, "TH12 "],

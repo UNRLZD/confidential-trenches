@@ -1274,6 +1274,12 @@ test("T7b a request that made no connection (fetch failed, a connect error as it
   const once = failing(1, unconnected);
   const v = await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), once.rpc], NOW));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  // a browser's form names no cause (Chrome's "Failed to fetch", Safari's "Load failed"): asked again too (re-review of
+  // b282ce0, LOW-B)
+  for (const m of ["Failed to fetch", "Load failed"]) {
+    const b = await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), failing(1, () => new TypeError(m)).rpc], NOW));
+    assert.equal(b.accepted, true, `${m}: ${String((b as { code?: string }).code)}`);
+  }
   // every request fails to connect: a refusal after the fourth
   const never = failing(1000, unconnected);
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), never.rpc], NOW)), { accepted: false, code: "rpc_error" });
@@ -2961,7 +2967,7 @@ test("TH5 a scan provider that slows past the deadline with more than 5 requests
 /** The scan provider over HTTP whose getLogs requests `fault(from, to, nth)` judges (nth: how often that range was
  *  asked before; "ok" answers it from the model scanner); every other call is answered by the model. `st` counts the
  *  getLogs requests, the ones narrower than Base's 10,000-block span (halves) and each one's send time. */
-type Fault = "ok" | "timeout" | "error" | "unreach" | `429:${string}`;
+type Fault = "ok" | "timeout" | "error" | "unreach" | "chrome" | "safari" | `429:${string}`;
 function faultScan(logs: { key: EvmPoolKey; at: number }[], fault: (a: number, b: number, nth: number) => Fault, timeoutMs = 10_000) {
   const inner = scanner(5_000_000, logs);
   const st = { logs: 0, halves: 0, sent: [] as number[], throttled: [] as number[] };
@@ -2981,6 +2987,9 @@ function faultScan(logs: { key: EvmPoolKey; at: number }[], fault: (a: number, b
       if (x === "timeout") return await new Promise<Response>((_, no) => init.signal?.addEventListener("abort", () => no(init.signal!.reason)));
       if (x === "error") throw new Error("socket hang up");
       if (x === "unreach") throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+      // a browser's fetch with no response: a TypeError that names no cause
+      if (x === "chrome") throw new TypeError("Failed to fetch");
+      if (x === "safari") throw new TypeError("Load failed");
       if (x.startsWith("429:")) {
         st.throttled.push(performance.now());
         const ra = x.slice(4);
@@ -3307,4 +3316,126 @@ test("V20 Base's and Robinhood's quote lists three providers at least on distinc
     const f = v.feeProviders;
     assert.ok(Array.isArray(f) && f.length === 2 && hostOf(f[0]!) !== hostOf(f[1]!) && f.every((u) => u.startsWith("https://")), `${c}: ${JSON.stringify(f)}`);
   }
+});
+
+// ------------------------------------------------------------------ refused connections, counted (re-review of b282ce0: LOW-A, LOW-B, LOW-C)
+test("B1r a scan provider that refuses every getLogs connection after its head: rpc_error at a request's fourth refusal in a row, about 3.5 s in, never at the bound", { timeout: 30_000 }, async () => {
+  const { rpc, st } = faultScan([], () => "unreach");
+  const r = await coldQuote(rpc, 0x3f70);
+  assert.equal(r.code, "rpc_error", r.message);
+  assert.match(r.message, /refused 4 connections in a row/);
+  // each span asked at 0, 0.5, 1.5 and 3.5 s, refused at the fourth (59a69e2: 3,062 ms; b282ce0: 60,023 ms, 1,100
+  // getLogs, the backoff doubling to 8 s with no count)
+  assert.ok(r.ms >= 3_400 && r.ms < 5_000, `refused after ${Math.round(r.ms)} ms and ${st.logs} getLogs`);
+  assert.equal(st.halves, 0, `${st.halves} halves`);
+  assert.ok(st.logs <= 4 * 100, `${st.logs} getLogs`);
+});
+
+/** A seeded draw in [0, 1) (mulberry32): the same faults on every run. */
+const draws = (seed: number) => () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
+};
+
+test("B5 30% of the scan's connections refused: each of four cold quotes has its verdict within 5 s, quoted or rpc_error at a fourth refusal in a row, never halved", { timeout: 60_000 }, async () => {
+  const rows: string[] = [];
+  for (let q = 0; q < 4; q++) {
+    const draw = draws(0xb5 + q);
+    const { rpc, st } = faultScan([], () => (draw() < 0.3 ? "unreach" : "ok"));
+    const r = await coldQuote(rpc, 0x3f80 + q);
+    // b282ce0: p50 31.5 s, each request's backoff doubling to 8 s with no count
+    assert.ok(r.code !== "rpc_error" || /refused 4 connections in a row/.test(r.message), `quote ${q}: ${r.message}`);
+    assert.ok(r.ms < 5_000, `quote ${q}: ${r.code} after ${Math.round(r.ms)} ms and ${st.logs} getLogs`);
+    assert.equal(st.halves, 0, `quote ${q}: ${st.halves} halves`);
+    rows.push(`${r.code} ${Math.round(r.ms)} ms ${st.logs} getLogs`);
+  }
+  console.log(`B5: ${rows.join("; ")}`);
+});
+
+test("B8 a refused connection is asked again whole in every runtime: Node's (cause ECONNREFUSED), Chrome's (Failed to fetch) and Safari's (Load failed) each cost two getLogs a span, no halves", { timeout: 30_000 }, async () => {
+  for (const [how, x] of [["unreach", 0x3f90], ["chrome", 0x3f91], ["safari", 0x3f92]] as const) {
+    const { rpc, st } = faultScan([], (_a, _b, nth) => (nth === 0 ? how : "ok"));
+    const r = await coldQuote(rpc, x);
+    assert.notEqual(r.code, "rpc_error", `${how}: ${r.message}`);
+    // b282ce0 in a browser: 2,300 getLogs and 2,200 halves, the TypeError with no cause read as a failure to halve on
+    assert.equal(st.halves, 0, `${how}: ${st.halves} halves`);
+    assert.equal(st.logs, 2 * 100, `${how}: ${st.logs} getLogs`);
+  }
+});
+
+test("B2a every getLogs hangs until aborted (bound 3 s): the verdict comes at the bound and every request is aborted there", { timeout: 60_000 }, async () => {
+  evmScanBound?.(3_000);
+  try {
+    const token = freshToken();
+    const better: ModelPool = { key: keyOf(token, NATIVE, 9000, 9, NATIVE), give: (a) => a };
+    const inner = scanner(5_000_000, [{ key: better.key, at: 4_500_000 }]);
+    const st = { sent: 0, aborted: 0 };
+    const rpc = evmJsonRpc("https://scan.hang.test", (async (_u: string, init: RequestInit) => {
+      const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+      if (calls.some((c) => c.method === "eth_getLogs")) {
+        st.sent++;
+        await new Promise<void>((r) => init.signal?.addEventListener("abort", () => r()));
+        st.aborted++;
+        throw init.signal!.reason;
+      }
+      const out = await inner(calls);
+      return new Response(JSON.stringify(out.map((a, id) => ({ ...(a as object), id }))), { status: 200 });
+    }) as unknown as typeof fetch, 16 << 20);
+    const t = performance.now();
+    const v = await verdict(evmPoolBuyQuoteWith({ ...warmReq(token), route: seededRoute(token) }, [chain([seeded(token), better], 0), chain([seeded(token), better], 1)], NOW, rpc));
+    const ms = performance.now() - t;
+    assert.equal((v as { code?: string }).code, "rpc_error");
+    assert.ok(ms < 3_000 + 300, `verdict at ${Math.round(ms)} ms`);
+    await pause(50);
+    assert.equal(st.aborted, st.sent, `${st.aborted} of ${st.sent} aborted`);
+  } finally {
+    evmScanBound?.();
+  }
+});
+
+test("B1a a scan provider that refuses every getLogs connection (bound 2 s): rpc_error at the bound, the refusals backed off", { timeout: 60_000 }, async () => {
+  evmScanBound?.(2_000);
+  try {
+    const token = freshToken();
+    const inner = scanner(5_000_000, []);
+    let logs = 0;
+    const rpc = evmJsonRpc("https://scan.refuse.test", (async (_u: string, init: RequestInit) => {
+      const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+      if (calls.some((c) => c.method === "eth_getLogs")) {
+        logs++;
+        throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+      }
+      const out = await inner(calls);
+      return new Response(JSON.stringify(out.map((a, id) => ({ ...(a as object), id }))), { status: 200 });
+    }) as unknown as typeof fetch, 16 << 20);
+    const t = performance.now();
+    const v = await verdict(evmPoolBuyQuoteWith({ ...warmReq(token), route: seededRoute(token) }, [chain([seeded(token)], 0), chain([seeded(token)], 1)], NOW, rpc));
+    const ms = performance.now() - t;
+    assert.equal((v as { code?: string }).code, "rpc_error");
+    assert.ok(ms < 2_000 + 300, `verdict at ${Math.round(ms)} ms`);
+    // 100 spans, each asked at 0, 0.5 and 1.5 s at most before the bound: the fourth, at 3.5 s, is past it
+    assert.ok(logs <= 100 * 3, `${logs} getLogs`);
+  } finally {
+    evmScanBound?.();
+  }
+});
+
+test("B6 a sell's wait for its buy's block, the list reordered by round 1: round 2's block is confirmed by the other provider, never the lower head's own", { timeout: 30_000 }, async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba5b6");
+  const byNum: string[] = [];
+  const tag = (name: string, rpc: EvmRpc, delayMs: number): EvmRpc => async (calls) => {
+    const latest = calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest");
+    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest")) byNum.push(name);
+    if (latest && delayMs > 0) await pause(delayMs);
+    return rpc(calls);
+  };
+  // p0 a block behind the buy's, then at it, each head 60 ms late; p1 at the buy's block at once: round 1 reorders the
+  // list to p1, p0, and round 2's first answer is p1's, so its block is p1's and the confirm goes to p0
+  const p0 = tag("p0", landed(chain([pool], 0), [BUY_AT - 1, BUY_AT]), 60);
+  const p1 = tag("p1", landed(chain([pool], 1), [BUY_AT]), 0);
+  const v = await verdict(evmPoolSellQuoteWith(req, [p0, p1], NOW));
+  assert.equal((v as { accepted?: boolean }).accepted, true, JSON.stringify(v, (_, x) => (typeof x === "bigint" ? String(x) : x)));
+  assert.ok(byNum.length > 0 && byNum.every((n) => n === "p0"), `by-number reads asked of ${byNum.join(",")}`);
 });
