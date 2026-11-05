@@ -204,7 +204,7 @@ export const MUTANTS = [
   // receipt on either provider is mined; a nonce's bound is kept by its resends; one provider's count never releases it)
   [EVM, "    if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {", "    if (false) {", T, "a lane held behind a nonce the chain dropped"],
   [EVM, "    if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {", "    if (low !== undefined && lane.key !== undefined) {", T, "a lane held behind a nonce the chain dropped"],
-  [EVM, "      low = await heldLow(lane);", "", T, "a lane held behind a nonce the chain dropped"],
+  [EVM, "      low = await read();", "", T, "a lane held behind a nonce the chain dropped"],
   [EVM, "      if (!(await usedAt(low[1]))) return low;", "      return low;", T, "a lane held while the chain halts"],
   [EVM, "    return rc.some((y) => y.status === \"fulfilled\" && y.value !== null && typeof y.value === \"object\");", "    return rc.every((y) => y.status === \"fulfilled\" && y.value !== null && typeof y.value === \"object\");", T, "a lane held while the chain halts"],
   [EVM, "    prune(lane, lower(c.la, c.lb));", "    prune(lane, higher(c.la, c.lb));", T, "a lane's watch ends at its bound"],
@@ -236,8 +236,8 @@ export const MUTANTS = [
   [EVM, "        if (await usedAt(old!)) {", "        if (false) {", T, "a stuck replacement whose earlier send mined"],
   [EVM, "        lane.sent.delete(nonce); // a receipt for any send at the nonce: it is used", "        if (lane.sent.get(nonce) === mine) lane.sent.delete(nonce);", T, "a sale that mines as its replacement goes"],
   // fold 6, M2: a held answer whose tend sent something waits one block
-  [EVM, "retryAfterS: sent > 0 ? EVM_LANE_SENT_RETRY_S : EVM_LANE_RETRY_S }", "retryAfterS: EVM_LANE_RETRY_S }", T, "a held answer whose tend sent something"],
-  [EVM, "retryAfterS: sent > 0 ? EVM_LANE_SENT_RETRY_S : EVM_LANE_RETRY_S }", "retryAfterS: EVM_LANE_SENT_RETRY_S }", T, "a held answer whose tend sent something"],
+  [EVM, "    const wait = sent > 0 ? EVM_LANE_SENT_RETRY_S : Math.max(", "    const wait = sent > 0 ? EVM_LANE_RETRY_S : Math.max(", T, "a held answer whose tend sent something"],
+  [EVM, "    const wait = sent > 0 ? EVM_LANE_SENT_RETRY_S : Math.max(1, Math.ceil((Math.min(nextTend, mined) - now()) / 1000));", "    const wait = sent > 0 ? EVM_LANE_SENT_RETRY_S : EVM_LANE_RETRY_S;", T, "callers obeying Retry-After through a heal"],
   [EVM, "      sent = await tendOnce(lane);", "      await tendOnce(lane);", T, "a held answer whose tend sent something"],
   [EVM, "        made.n++;\n        const until = now() + EVM_SELL_DROP_MARGIN_MS;\n        sentAt(lane, n, until, old!.maxFee", "        const until = now() + EVM_SELL_DROP_MARGIN_MS;\n        sentAt(lane, n, until, old!.maxFee", T, "a held answer whose tend sent something"],
   [EVM, "      made.n++;\n      lane.ceilingSaid = false;", "      lane.ceilingSaid = false;", T, "a lane's watch ends at its bound"],
@@ -259,6 +259,16 @@ export const MUTANTS = [
   [EVM, "    behindOf(sellLane, qty(ln), qty(lm));", "", T, "a provider whose latest count stays below"],
   [EVM, "    behindOf(withdrawLane, qty(ln), qty(lm));", "", T, "a provider whose latest count stays below"],
   [EVM, "    behindOf(lane, la!, lb!);", "", T, "a held answer whose tend sent something"],
+  // fold 7: a held answer's wait, one hold read per block, the prior hashes kept, a provider ahead
+  [EVM, "    const mined = lane.heldSentAt + block > now() ? lane.heldSentAt + block : Infinity;", "    const mined = Infinity;", T, "callers obeying Retry-After through a heal"],
+  [EVM, "      if (sent > 0) lane.heldSentAt = now();", "", T, "callers obeying Retry-After through a heal"],
+  [EVM, "    let low = await (lane.heldRead !== null && now() - lane.heldRead.at < block ? lane.heldRead.low : read());", "    let low = await read();", T, "held answers share one hold read per block"],
+  [EVM, "        lane.failSaid = true;\n        return made.n;", "        lane.failSaid = true;\n        return 0;", T, "a held answer whose tend sent something before it failed"],
+  [EVM, "    const prior = old === undefined ? [] : [...old.prior, ...(old.hash === hash ? [] : [old.hash])]", "    const prior = old === undefined ? [] : [...old.prior, old.hash]", T, "more sends of the same replacement than EVM_LANE_PRIOR_MAX"],
+  [EVM, ".slice(-EVM_LANE_PRIOR_MAX);", ".slice(0, EVM_LANE_PRIOR_MAX);", T, "a nonce's record keeps its newest EVM_LANE_PRIOR_MAX"],
+  [EVM, "      if (x === null && l < lane.nextNonce) x = {", "      if (x === null && l <= lane.nextNonce) x = {", T, "an idle lane is never named behind"],
+  [EVM, "      if (lane.nextNonce >= 0n && l > lane.nextNonce && !lane.ahead[i]) {", "      if (false) {", T, "a provider whose latest count is past"],
+  [EVM, "        lane.ahead[i] = true;", "", T, "a provider whose latest count is past"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a

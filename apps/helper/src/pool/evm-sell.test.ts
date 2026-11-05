@@ -10,7 +10,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { readFileSync } from "node:fs";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, evmPoolChainFee, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
-import { EVM_LANE_SENT_RETRY_S, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmEpochFee, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
+import { EVM_LANE_RETRY_S, EVM_LANE_SENT_RETRY_S, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmEpochFee, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
 import * as evmModule from "./evm.ts";
 
 // read by name, so a build without the ceiling fails only the tests that use it
@@ -1103,9 +1103,11 @@ test("a lane's watch ends at its bound with one log line; while the lowest unmin
   assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, "the held tend's replacement, its watch started past the bound, ends with no second line");
   r.setMined(8n);
   r.setMinedB(7n); // only provider a's latest count passes 7, and no receipt: still held
+  await r.step({ atMs: r.at() + EVM_LANE_SENT_RETRY_S * 1000 }); // a block on: the hold is read again
   const one = await r.s.sell(freshBody("W-one", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
   assert.deepEqual([one.status, code(one)], [503, "upstream"], `one provider's count never releases the hold: ${JSON.stringify(one.body)}`);
   r.setMinedB(undefined); // both providers' latest counts pass 7
+  await r.step({ atMs: r.at() + EVM_LANE_SENT_RETRY_S * 1000 });
   const next = await r.s.sell(freshBody("W-after", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
   assert.equal(next.status, 200, JSON.stringify(next.body));
   assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, "the held tend's replacement, its watch started past the bound, logs nothing more");
@@ -1261,10 +1263,11 @@ test("a stuck replacement whose maxFeePerGas still covers 2 x base + tip but who
 /** A chain for the held-lane tests, read the same on both providers: the sell sender's latest count `c`, pending past
  *  each nonce from `c` that a send holds; a send at `c` and those after it mine `blockMs` after they were sent (by
  *  `clock`), unless `drop` (every send vanishes: no count, no tx; `dropAt`: only those at that nonce) or `halt` (sends
- *  held unmined: counted at pending, returned by hash). `refuse`: both providers refuse every send. `lagB` freezes
+ *  held unmined: counted at pending, returned by hash). `refuse`: both providers refuse every send (`refuseAt`: those at
+ *  that nonce). `lagB` freezes
  *  provider b's latest count at 7, and it returns no receipt. A W's own count stays at 7. */
 const chainOf = (clock: () => number = () => 0, blockMs = 0) => {
-  const st = { c: 7n, drop: false, halt: false, lagB: false, refuse: false, dropAt: -1n };
+  const st = { c: 7n, drop: false, halt: false, lagB: false, refuse: false, dropAt: -1n, refuseAt: -1n };
   const held = new Map<bigint, { h: string; at: number }>();
   const mined = new Map<string, unknown>();
   const mine = () => {
@@ -1290,7 +1293,7 @@ const chainOf = (clock: () => number = () => 0, blockMs = 0) => {
       },
     });
     return async (method, params) => {
-      if (method === "eth_sendRawTransaction" && st.refuse) {
+      if (method === "eth_sendRawTransaction" && (st.refuse || fieldsOf(params[0] as string).nonce === st.refuseAt)) {
         calls.push({ method, params });
         throw new Error("RPC error -32000: already known");
       }
@@ -1360,7 +1363,7 @@ test("a lane held while the chain halts recovers when it resumes, though provide
   const later = (label: string) => s.sell(freshBody(label, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
   assert.equal((await later("W-halt-1")).status, 503, "held while the chain halts");
   ch.st.halt = false; // the chain resumes: 7 mines on a, b's latest count stays at 7
-  clock += 1_000;
+  clock += EVM_LANE_SENT_RETRY_S * 1000; // a block on: the hold is read again
   const resumed = await later("W-resumed");
   assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
   assert.deepEqual(sends(ch.x).map((r) => fieldsOf(r).nonce).at(-1), 8n);
@@ -1568,6 +1571,154 @@ test("a lane with no send past its bound reads no counts for the hold: one sale 
   assert.equal((await s.sell(body())).status, 200);
   const counts = x.filter((c) => c.method === "eth_getTransactionCount").map((c) => `${c.params[0] === W ? "W" : "S"} ${c.params[1]}`);
   assert.deepEqual(counts.sort(), ["S latest", "S pending", "W pending"], "provider a: W's pending, the sender's pending and latest, once each");
+});
+
+/** A held lane: one sale dropped by the chain (chainOf's `drop`), then past its nonce's bound with no watch left. */
+const heldLane = async (blockMs = 0) => {
+  const t = { clock: NOW };
+  const ch = chainOf(() => t.clock, blockMs);
+  ch.st.drop = true;
+  const lines: string[] = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1, log: (l: string) => lines.push(l) }, ch.providers, () => t.clock);
+  assert.equal((await s.sell(body())).status, 200);
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  for (const at of [60_001, 200_000, 400_000, 700_000, 900_000]) {
+    t.clock = deadlineMs + at;
+    await settle(() => false, 60);
+  }
+  const ask = (label: string) => s.sell(freshBody(label, { sell: { deadline: BigInt(Math.floor(t.clock / 1000)) + 300n } }));
+  return { t, ch, s, lines, ask };
+};
+
+test("callers obeying Retry-After through a heal between tends see the first 200 within the time to the next allowed tend plus one block: a held answer whose tend sent nothing waits for the next tend, or for the block of the lane's last held send", async () => {
+  const { t, ch, ask } = await heldLane(2_000);
+  const t0 = t.clock;
+  const next = Array.from({ length: 8 }, (_, i) => t0 + 5_000 * i);
+  const went: number[] = [];
+  for (let k = 0; t.clock <= t0 + 150_000 && went.length < next.length; k++, t.clock += 250) {
+    if (t.clock >= t0 + 20_000) ch.st.drop = false; // the chain heals 20 s after the first held answer's tend
+    for (let i = 0; i < next.length; i++) {
+      if (t.clock < next[i]!) continue;
+      const a = await ask(`W-obey-${i}-${k}`);
+      if (a.status === 200) {
+        went.push(t.clock);
+        next[i] = Infinity;
+        continue;
+      }
+      assert.equal(a.status, 503, JSON.stringify(a.body));
+      next[i] = t.clock + a.retryAfterS! * 1000;
+    }
+    await tick();
+  }
+  // the next allowed tend is EVM_LANE_RETRY_S after the first; its send mines one block (2 s) after it, and every caller
+  // held behind it goes then too
+  const by = t0 + EVM_LANE_RETRY_S * 1000 + 2_000 + 250;
+  assert.equal(went.length, 8, "all eight went");
+  assert.ok(Math.max(...went) <= by, `200s at t0 + ${went.map((x) => (x - t0) / 1000).join(", ")} s`);
+});
+
+test("held answers share one hold read per block: 100 held callers inside one block cost one count read and one usedAt read in all", async () => {
+  const { t, ch, ask } = await heldLane();
+  assert.equal((await ask("W-share-0")).status, 503); // it tends; the next allowed tend is EVM_LANE_RETRY_S on
+  await settle(() => false, 20);
+  t.clock += EVM_LANE_SENT_RETRY_S * 1000 + 1_000;
+  const counts = () => ch.x.filter((c) => c.method === "eth_getTransactionCount" && c.params[0] === SENDER).length;
+  const receipts = () => reads(ch.x, "eth_getTransactionReceipt");
+  const [c0, r0] = [counts(), receipts()];
+  const all: { status: number; body: unknown }[] = [];
+  for (let i = 1; i <= 100; i++) all.push(await ask(`W-share-${i}`)); // one after another (the lane's queue caps how many wait at once), all at one clock
+  assert.ok(all.every((a) => a.status === 503), [...new Set(all.map((a) => `${a.status} ${JSON.stringify(a.body).slice(0, 120)}`))].join(" | "));
+  assert.equal(counts() - c0, 2, "one count read: the sender's pending and latest on provider a");
+  assert.ok(receipts() - r0 >= 1 && receipts() - r0 <= 1 + 8, `one usedAt read: ${receipts() - r0} receipts on provider a`);
+});
+
+test("a held answer whose tend sent something before it failed answers one block: 7 sent again, 8 refused by both providers", async () => {
+  let clock = NOW;
+  const ch = chainOf(() => clock);
+  ch.st.drop = true;
+  const lines: string[] = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1, log: (l: string) => lines.push(l) }, ch.providers, () => clock);
+  assert.equal((await s.sell(freshBody("W-part-a", { sell: { deadline: NOW_S + 300n } }))).status, 200);
+  clock = NOW + 1_000;
+  assert.equal((await s.sell(freshBody("W-part-b", { sell: { deadline: NOW_S + 300n } }))).status, 200);
+  const deadlineMs = Number(NOW_S + 300n) * 1000;
+  for (const at of [60_001, 200_000, 400_000, 700_000, 900_000]) {
+    clock = deadlineMs + at;
+    await settle(() => false, 60);
+  }
+  ch.st.refuseAt = 8n;
+  const before = sends(ch.x).length;
+  const held = await s.sell(freshBody("W-part-c", { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
+  assert.equal(fieldsOf(sends(ch.x)[before]!).nonce, 7n, "7 went again");
+  assert.ok(lines.some((l) => l.includes("refused the replacement at nonce 8")), lines.join(" | "));
+  assert.deepEqual([held.status, held.retryAfterS], [503, EVM_LANE_SENT_RETRY_S]);
+});
+
+test("more sends of the same replacement than EVM_LANE_PRIOR_MAX keep the sale it replaced: once that sale mines, though the other provider lags, the next sale goes", async () => {
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  const r = await stuck((s) => s.sell(body()), deadlineMs, { base: 2n * BASE });
+  assert.equal(r.replaced, 2, "the sale S replaced by R at 7");
+  r.opts.tx = () => null; // R gone from both: each tend sends it again as it was
+  for (let k = 1; k <= 9; k++) await r.step({ atMs: deadlineMs + 60_001 + 61_000 * k });
+  const raws = sends(r.x);
+  assert.ok(raws.length >= 11 && raws.slice(2).every((x) => x === raws[1]), `R sent again ${raws.length - 2} times`);
+  r.opts.receipt = (h: string) => (h === r.hash ? { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x1" } : null);
+  r.optsB.receipt = () => null;
+  r.setMined(8n);
+  r.setMinedB(7n);
+  await r.step({ atMs: deadlineMs + 60_000 + 660_001 });
+  const next = await r.s.sell(freshBody("W-dedupe", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
+  assert.equal(next.status, 200, JSON.stringify(next.body));
+});
+
+test("a nonce's record keeps its newest EVM_LANE_PRIOR_MAX earlier sends: past ten raises, the send before the last mines, though the other provider lags, and the next sale goes", async () => {
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  const baseAt = (k: number) => (BASE * 12n ** BigInt(k)) / 10n ** BigInt(k);
+  const r = await stuck((s) => s.sell(body()), deadlineMs, { base: baseAt(1), then: Array.from({ length: 9 }, (_, k) => ({ atMs: deadlineMs + 60_001 + 61_000 * (k + 1), base: baseAt(k + 2) })) });
+  const raws = sends(r.x);
+  assert.equal(new Set(raws).size, 11, "the sale and ten raised replacements");
+  const hashOf = (raw: string) => `0x${hex(keccak_256(unhex(raw)))}`;
+  const ninth = hashOf(raws[9]!);
+  r.opts.receipt = (h: string) => (h === ninth ? { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x1" } : null);
+  r.optsB.receipt = () => null;
+  r.setMined(8n);
+  r.setMinedB(7n);
+  r.opts.base = BASE; // the base fee back down, so the next sale's fee covers it
+  await r.step({ atMs: deadlineMs + 60_000 + 660_001 });
+  const next = await r.s.sell(freshBody("W-newest", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
+  assert.equal(next.status, 200, JSON.stringify(next.body));
+});
+
+test("a provider whose latest count is past the lane's next nonce (more sends than the key made) is logged once as ahead, naming it", async () => {
+  let clock = NOW;
+  const lines: string[] = [];
+  const forged = { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x1" };
+  const a: Opts = { receipt: () => null, tx: () => null, count: () => 7n };
+  const b: Opts = { receipt: () => forged, tx: () => null, count: (at, who) => (who === SENDER && at === "latest" ? 1007n : 7n) };
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1, log: (l: string) => lines.push(l) }, [rpc([], a), rpc([], b)], () => clock);
+  for (const m of [0, 5, 10, 15]) {
+    clock = NOW + m * 60_000;
+    assert.equal((await s.sell(freshBody(`W-ahead-${m}`, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }))).status, 200);
+    await settle(() => false, 20);
+  }
+  const ahead = lines.filter((l) => l.includes("ahead of the lane's next nonce"));
+  assert.equal(ahead.length, 1, lines.join(" | "));
+  assert.ok(ahead[0]!.includes("provider b's latest count") && ahead[0]!.includes("is 1007"), ahead[0]);
+});
+
+test("an idle lane is never named behind: reads that send nothing, ten minutes apart, at a latest count equal to the lane's next nonce, log no line", async () => {
+  let clock = NOW;
+  const ch = chainOf(() => clock);
+  const lines: string[] = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1, log: (l: string) => lines.push(l) }, ch.providers, () => clock);
+  assert.equal((await s.sell(body())).status, 200); // mined at once
+  for (const m of [1, 12, 23]) {
+    clock = NOW + m * 60_000;
+    const low = await s.sell(freshBody(`W-idle-${m}`, { fee: 1n, sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
+    assert.equal(code(low), "fee_low", JSON.stringify(low.body));
+  }
+  assert.equal(ch.st.c, 8n);
+  assert.deepEqual(lines.filter((l) => l.includes("latest count")), []);
 });
 
 test("the sender's whole budget holds every sale (H1): 20 clients, each with one paid landing, then their reverting sales from fresh Ws and tokens stop at EVM_SELL_UNPAID_BUDGET_WEI with 429 and its wait", async () => {

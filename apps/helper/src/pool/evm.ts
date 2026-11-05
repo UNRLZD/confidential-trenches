@@ -117,9 +117,10 @@
 // nonce's watch ends at its bound (EVM_LANE_WATCH_MS) with one log line; while the lane's lowest unmined send is past
 // it, new sends answer 503 with Retry-After, and each such answer, at most once per EVM_LANE_RETRY_S, tends the lane and
 // reads again, so the lane goes on once the chain does: Retry-After is one block (EVM_LANE_SENT_RETRY_S) when that tend
-// sent something, else EVM_LANE_RETRY_S. A tend reads each stuck send's receipts and tx at most once per
+// sent something, else the seconds to the next allowed tend or that send's block; held answers share one hold read
+// per block. A tend reads each stuck send's receipts and tx at most once per
 // EVM_SELL_DROP_MARGIN_MS. A provider whose latest count stays below a nonce the lane sent for EVM_LANE_WATCH_MS is
-// logged once, naming the provider and the nonce.
+// logged once, naming the provider and the nonce; one whose latest count is past the lane's next nonce, once as ahead.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
@@ -511,10 +512,14 @@ export function evmPoolSender(
   type Sent = { at: number; stuckAfter: number; bound: number; maxFee: bigint; tip: bigint; hash: string; replacement: boolean; raw?: string; prior: string[]; checkedAt: number };
   // (`ceilingSaid`, `failSaid`: the lane has logged a replacement held over EVM_SELL_MAX_FEE_PER_GAS, or a tend that
   // failed, since its last replacement went or its last tend ran through; `heldTendAt`: when a held answer last tended it;
-  // `behind`: per provider, the nonce its latest count has stayed below since `since`, and whether that was logged)
+  // `heldSentAt`: when a held answer's tend last sent something; `heldRead`: the last hold read (heldLow), shared by every
+  // held answer within EVM_LANE_SENT_RETRY_S of it; `behind`: per provider, the nonce its latest count has stayed below
+  // since `since`, and whether that was logged; `ahead`: per provider, whether a latest count past the lane's next nonce
+  // was logged)
   type Behind = { nonce: bigint; since: number; said: boolean } | null;
-  type Lane = { queue: Promise<unknown>; waiting: number; nextNonce: bigint; from: string; key: Uint8Array | undefined; sent: Map<bigint, Sent>; tending: boolean; ceilingSaid: boolean; failSaid: boolean; heldTendAt: number; behind: [Behind, Behind] };
-  const laneOf = (from: string, key: Uint8Array | undefined): Lane => ({ queue: Promise.resolve(), waiting: 0, nextNonce: -1n, from, key, sent: new Map(), tending: false, ceilingSaid: false, failSaid: false, heldTendAt: -Infinity, behind: [null, null] });
+  type HeldRead = { at: number; low: Promise<[bigint, Sent] | undefined> };
+  type Lane = { queue: Promise<unknown>; waiting: number; nextNonce: bigint; from: string; key: Uint8Array | undefined; sent: Map<bigint, Sent>; tending: boolean; ceilingSaid: boolean; failSaid: boolean; heldTendAt: number; heldSentAt: number; heldRead: HeldRead | null; behind: [Behind, Behind]; ahead: [boolean, boolean] };
+  const laneOf = (from: string, key: Uint8Array | undefined): Lane => ({ queue: Promise.resolve(), waiting: 0, nextNonce: -1n, from, key, sent: new Map(), tending: false, ceilingSaid: false, failSaid: false, heldTendAt: -Infinity, heldSentAt: -Infinity, heldRead: null, behind: [null, null], ahead: [false, false] });
   /** The hashes of the lanes' sends a replacement took the nonce of, the oldest dropped first: each is ended. */
   const superseded = new Set<string>();
   const log = cfg.log ?? ((line: string) => console.log(`helper: ${line}`));
@@ -833,9 +838,14 @@ export function evmPoolSender(
   };
   /** Each provider's latest count against the nonces the lane sent: one that stays below the same sent nonce for
    *  EVM_LANE_WATCH_MS is logged once, naming the provider and the nonce (a provider that lies about receipts or counts
-   *  is never silent). A count that passes it starts the watch again at the lane's next nonce. */
+   *  is never silent). A count that passes it starts the watch again at the lane's next nonce. A count past the lane's next
+   *  nonce (more sends than this key made) is logged once as ahead, naming the provider. */
   const behindOf = (lane: Lane, la: bigint, lb: bigint): void => {
     [la, lb].forEach((l, i) => {
+      if (lane.nextNonce >= 0n && l > lane.nextNonce && !lane.ahead[i]) {
+        log(`evm ${cfg.network}: provider ${i === 0 ? "a" : "b"}'s latest count for ${lane.from} is ${l}, ahead of the lane's next nonce ${lane.nextNonce}: it counts sends this key never made`);
+        lane.ahead[i] = true;
+      }
       let x: Behind = lane.behind[i] ?? null;
       if (x !== null && l > x.nonce) x = null;
       if (x === null && l < lane.nextNonce) x = { nonce: l, since: now(), said: false };
@@ -909,21 +919,38 @@ export function evmPoolSender(
     }
   }
   /** 503 upstream while the lane's lowest unmined send is past its bound (heldLow, read only once a record is past its
-   *  bound); else null. A held answer first tends the lane, at most once per EVM_LANE_RETRY_S (a send neither provider
-   *  holds goes again, so the lane recovers once the chain does), and reads again after it. Its Retry-After is
-   *  EVM_LANE_SENT_RETRY_S when that tend sent something, else EVM_LANE_RETRY_S. */
+   *  bound, and at most once per block: a held answer within EVM_LANE_SENT_RETRY_S of the last read answers from it);
+   *  else null. A held answer first tends the lane, at most once per EVM_LANE_RETRY_S (a send neither provider holds goes
+   *  again, so the lane recovers once the chain does), and reads again after it. Its Retry-After is EVM_LANE_SENT_RETRY_S
+   *  when that tend sent something, else the seconds to the sooner of the next allowed tend and one block after the
+   *  lane's last held send (while that is ahead), at least 1. */
   async function laneHeld(lane: Lane): Promise<PoolEvmAnswer | null> {
     if (![...lane.sent.values()].some((x) => now() > x.bound)) return null;
-    let low = await heldLow(lane);
+    const block = EVM_LANE_SENT_RETRY_S * 1000;
+    const read = (): Promise<[bigint, Sent] | undefined> => {
+      const r: HeldRead = { at: now(), low: heldLow(lane) };
+      lane.heldRead = r;
+      r.low.catch(() => {
+        if (lane.heldRead === r) lane.heldRead = null; // a failed read is not shared
+      });
+      return r.low;
+    };
+    // one hold read per block, shared by every held answer in it
+    let low = await (lane.heldRead !== null && now() - lane.heldRead.at < block ? lane.heldRead.low : read());
     let sent = 0;
     if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {
       lane.heldTendAt = now();
       sent = await tendOnce(lane);
-      low = await heldLow(lane);
+      if (sent > 0) lane.heldSentAt = now();
+      low = await read();
     }
     if (low === undefined) return null;
-    // a tend that sent something: try again in a block, when its receipt can be read
-    return { ...no(503, "upstream", `the sender's nonce ${low[0]} is unmined past its watch`), retryAfterS: sent > 0 ? EVM_LANE_SENT_RETRY_S : EVM_LANE_RETRY_S };
+    // a tend that sent something: try again in a block, when its receipt can be read; else at the sooner of the next
+    // allowed tend and one block after the lane's last held send, while that is still ahead
+    const nextTend = lane.heldTendAt + EVM_LANE_RETRY_S * 1000;
+    const mined = lane.heldSentAt + block > now() ? lane.heldSentAt + block : Infinity;
+    const wait = sent > 0 ? EVM_LANE_SENT_RETRY_S : Math.max(1, Math.ceil((Math.min(nextTend, mined) - now()) / 1000));
+    return { ...no(503, "upstream", `the sender's nonce ${low[0]} is unmined past its watch`), retryAfterS: wait };
   }
   /** One tend of the lane, run now (on the lane's queue), to how many sends it made; a tend that fails logs once until
    *  one runs through. */
