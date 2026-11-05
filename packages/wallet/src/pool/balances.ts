@@ -57,6 +57,34 @@ export function evmBalancePool(id: string, chain: "base" | "robinhood", scope: b
   return Object.freeze({ id, chain, scope, asset: "ETH", ...(spendOf === undefined ? {} : { spendOf }) });
 }
 
+// What a Solana pool buy takes from the ladder's least rung, 0.01 SOL (SOL_LADDER.min), on mainnet at the worst venue
+// (card sol-small-note-buys). Reads of 5 Nov 2026 19:10:24Z on api.mainnet-beta.solana.com and
+// solana-rpc.publicnode.com, the two answering alike: the Rent sysvar 5,080 lamports per byte-year, exemption threshold
+// 1.0 (slots 465,818,293 and 465,818,299), and getMinimumBalanceForRentExemption 0 B 650,240, 13 B 716,280, 16 B
+// 731,520, 72 B 1,016,000, 137 B 1,346,200, 165 B 1,488,440, 195 B 1,640,840 (rent(n) = (128 + n) x 5,080). The
+// helper's GET /v1/pool/fee for the devnet pool 2S5wpE7U… answered fee 1,300,000 at 19:14:28Z (devnet rent is the
+// same 650,240 for 0 B), the kit's solanaPoolFee at this rent. In lamports:
+//   relay fee        1,300,000  gone: the fee payer's release cost 1,092,040 (the spent mark rent(13) 716,280 and the
+//                               change note's page entry 72 x 5,080 = 365,760, both kept: the program closes no account; two
+//                               signatures 10,000), the page reserve 715 and up to 207,245 of priority, the rest the
+//                               relayer's. The priority is inside it: 207,245 at 300,000 CU is 690,816 micro-lamports a
+//                               CU; getRecentPrioritizationFees for pump's program read p50 0, p90 199,996, max
+//                               3,087,670 (150 slots). Nothing of it comes from the chunk beyond the fee.
+//   tip cap          1,000,000  at most; the tap pays its tip (at least Jito's 1,000) and the rest stays in W. Jito's
+//                               tip floor at 19:09:35Z: p25 1,000, p50 1,440, p75 10,000, p95 4,250,000, p99 11,062,988.
+//   token account    1,640,840  rent(195), Token-2022's largest; 1,488,440 for a Token mint. Stays in W's token
+//                               account: the sell does not close it (kit solanaPoolSellSteps).
+//   volume account   1,346,200  rent(137), pump's volume account for W, made by the buy. Stays in it.
+//   sell reserve     4,328,080  kept in W so a curve coin that graduates can still be sold on PumpSwap
+//                               (solanaPoolBuySellNeed): the sell's fee 5,000 (gone), W's wrapped-SOL account rent(165)
+//                               1,488,440 (back: the sell closes it), and on a cashback coin W's PumpSwap volume account
+//                               rent(137) 1,346,200 and its wrapped-SOL account rent(165) 1,488,440, which the sell
+//                               makes and keeps. A sell on the curve uses only its fee: the rest stays in W as SOL.
+//   spend (tap_max)    384,880  what the buy can spend. Total 10,000,000.
+// So the least rung buys at today's mainnet rent: tap_max 0.00038488 SOL at the worst venue; on a Token mint's coin
+// with no cashback the same rung could spend 3,371,920, on the curve or on PumpSwap. At the older rate of 6,960 a byte (3,480 x 2)
+// the same rung's tap_max is 0 (test/pools-testnet.test.ts in packages/signpage pins both). Only the relay fee and
+// the tip it pays are certain costs; the rents and the reserve are held in W, in accounts or as SOL.
 /** A Solana proof's spend at the tap, as the tap computes it before it knows its venue: the kit's solanaPoolBuyMaxSpend
  * on SOLANA_POOL_WORST_BUY_VENUE, the relay fee at the proof's fee cap, the tip at the proof's tip cap (./solana.ts
  * SOL_TIP_CAP, 0.001 SOL: the most the release lets the tap tip, so a tap at any tip it may pay fills) and `rent`, the

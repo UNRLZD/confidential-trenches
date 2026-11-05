@@ -17,7 +17,7 @@
 //     sits in the block whose Base clock time is the trade's, was sent by the trade's trader, and carries a Transfer of
 //     the token for exactly `amt` to the pool (a sell) or from it (a buy), the pool being the emitter of the Swap log
 //     every sampled receipt shares;
-//   - no swap is missing: every swap of that pool in the blocks the tape covers, up to 12 blocks (24 s) behind the
+//   - no swap is missing: every swap of that pool in the blocks the tape covers, up to 120 blocks (24 s) behind the
 //     providers' newest, is on the tape.
 // On Robinhood (--chain robinhood), which has no fixed block clock, a trade's time must be its block's own time and the
 // providers' newest block's time within 20 s of the read, each block time read on two providers that agree; its swaps
@@ -28,20 +28,21 @@
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (every answer read).
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { BLOCK_CLOCK } from "../../apps/helper/src/data/evm/lists.ts";
+import { BLOCK_CLOCK, blockAt } from "../../apps/helper/src/data/evm/lists.ts";
 import { HEADER_TIMED, SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
 
 const KEY = "index-evm-swaps";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 export const SAMPLE = 5;
-/** Blocks behind the providers' newest a swap must be on the tape by: 24 s on Base, 6 s on Robinhood. */
-export const MARGIN = { base: 12, robinhood: 60 };
+/** Blocks behind the providers' newest a swap must be on the tape by: 24 s on Base (200 ms blocks since block 53556127,
+ *  lists.ts BLOCK_CLOCK), 6 s on Robinhood. */
+export const MARGIN = { base: 120, robinhood: 60 };
 export const MARGIN_BLOCKS = MARGIN.base;
 /** The most blocks one pool-log read asks (the chain's keyless providers' widest), and how far back the read goes. */
 const SPAN = { base: 1000, robinhood: 100 };
-const BACK = { base: 1000, robinhood: 1000 };
-const LAG = { base: 10, robinhood: 50 };
+const BACK = { base: 6000, robinhood: 1000 };
+const LAG = { base: 50, robinhood: 50 };
 const CLOCK = BLOCK_CLOCK.base;
 const SHA = /^[0-9a-f]{40}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/;
@@ -56,8 +57,13 @@ const LISTS_PATH = (net) => `/v1/market/lists?chain=${net}`;
 const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-const blockTime = (n) => CLOCK.genesisS + CLOCK.blockS * n;
-const blockOf = (s) => Math.floor((s - CLOCK.genesisS) / CLOCK.blockS);
+/** A Base block's time (whole seconds, as its header's) by the clock era it is in, and the newest block at or before a
+ *  time: a block-time change Base makes with no era for it here fails the trades' block times, naming the drift. */
+const blockTime = (n) => {
+  const e = CLOCK.findLast((x) => x.fromBlock <= n);
+  return Math.floor((e.atMs + e.blockMs * (n - e.fromBlock)) / 1000);
+};
+const blockOf = (s) => blockAt("base", s);
 const hex = (n) => `0x${n.toString(16)}`;
 
 /** The first thing wrong with a Candles answer, or null. */
