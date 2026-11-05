@@ -285,7 +285,10 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const warmed = Promise\.all\(\[warmUntilReady\(\{ lists, evmLists, token \}\), checked\]\)\.then\(\(\) => void \(ready = true\)\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
-  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
+  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
+  // card helper-robinhood-capacity: one hold per provider, the same one handed to /v1/rpc, the EVM lists and the swap reads
+  assert.equal(main.match(/const holds = providerHolds\(\);/g)?.length, 1);
+  assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, \(\) => ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
   assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env\);/);
@@ -301,7 +304,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // every outbound connect may try one address for CONNECT_ATTEMPT_MS, past one lost SYN, set before anything starts
   assert.match(main, /^ {1,}setDefaultAutoSelectFamilyAttemptTimeout\(CONNECT_ATTEMPT_MS\);/m);
   assert.ok(CONNECT_ATTEMPT_MS > 1_000, "past the 1 s SYN resend");
-  assert.match(main, /const evmLists: EvmLists = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmLists\(c, gecko\)\]\)\);/);
+  assert.match(main, /const evmLists: EvmLists = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmLists\(c, gecko, \{ holds \}\)\]\)\);/);
   assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko, slots\);/);
   assert.match(main, /for \(const l of Object\.values\(evmLists\)\) l\.warm\(\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
