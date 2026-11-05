@@ -203,33 +203,38 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   form.append(rose, to.label, to.line, amount.label, amount.line, shown, go);
   if (deps.owedFees && deps.redraw) {
     const redraw = deps.redraw;
-    void deps.owedFees().then(
-      (list) => {
-        const first = list[0];
-        if (!first) return;
-        const p = doc.createElement("p");
-        p.textContent = `${POOL_WITHDRAW_WORDS["fee-rose"]}${formatUnits(first.need, decimals)} ${symbol}.`;
-        p.dataset.draftCopy = "fee-rose";
-        // the fee drawn is the one handed over: never read again between the draw and the press
-        const again = button("fee-redraw", POOL_WITHDRAW_WORDS["fee-redraw"], () => {
-          if (again.disabled) return;
-          again.disabled = true;
-          run(async () => {
-            try {
-              await redraw(first.opId, first.need);
-              rose.replaceChildren();
-              rose.hidden = true;
-            } catch {
-              again.disabled = false;
-            }
-          });
+    const owedFees = deps.owedFees;
+    // the line drawn from a fresh read; the press reads again first (fold 2, review LOW 4): a fee that changed since
+    // is drawn anew for the next press, a send no longer owed takes the line away, and only the fee shown is handed over
+    const draw = (list: readonly { opId: string; need: bigint }[]): void => {
+      const first = list[0];
+      if (!first) {
+        rose.replaceChildren();
+        rose.hidden = true;
+        return;
+      }
+      const p = doc.createElement("p");
+      p.textContent = `${POOL_WITHDRAW_WORDS["fee-rose"]}${formatUnits(first.need, decimals)} ${symbol}.`;
+      p.dataset.draftCopy = "fee-rose";
+      const again = button("fee-redraw", POOL_WITHDRAW_WORDS["fee-redraw"], () => {
+        if (again.disabled) return;
+        again.disabled = true;
+        run(async () => {
+          try {
+            const now = (await owedFees()).find((x) => x.opId === first.opId);
+            if (now?.need !== first.need) return draw(await owedFees());
+            await redraw(first.opId, first.need);
+            draw(await owedFees());
+          } catch {
+            again.disabled = false;
+          }
         });
-        again.dataset.draftCopy = "fee-redraw";
-        rose.replaceChildren(p, again);
-        rose.hidden = false;
-      },
-      () => {},
-    );
+      });
+      again.dataset.draftCopy = "fee-redraw";
+      rose.replaceChildren(p, again);
+      rose.hidden = false;
+    };
+    void owedFees().then(draw, () => {});
   }
 
   let funds: PoolFunds | null = null;

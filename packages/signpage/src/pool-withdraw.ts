@@ -40,7 +40,7 @@
 import { base58, base64 } from "@scure/base";
 import { poolProveWithdraw, type VaultProver } from "../../kit/src/prover/prove.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { solanaDecodeTransaction } from "../../kit/src/checks/solana/message.ts";
+import { solanaDecodeTransaction, type SolanaMessage } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import {
   readSolanaRent, SOLANA_POOL_PROOF_BYTES, SOLANA_POOL_PROOF_COMPRESSED_BYTES, SOLANA_POOL_TAG_RELEASE, SOLANA_POOL_TAG_RELEASE_AND_BUY, solanaDecodePoolRelease,
@@ -237,24 +237,50 @@ async function balanceOf(rpcs: readonly [SolanaRpc, SolanaRpc], address: string,
 }
 /** The page of W's history getSignaturesForAddress gives at most (its documented limit). */
 export const HISTORY_PAGE = 1_000;
+/** The pages of W's history one read walks at most (fold 2, review MEDIUM 2): W is a fresh wallet of one part, so its
+ *  history is a handful of entries; a history longer than this (anyone can send to W) is a read error, never a verdict,
+ *  and the read ends instead of holding the tab's state read. */
+export const HISTORY_PAGES = 10;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const be = (b: Uint8Array): bigint => b.reduce((v, x) => (v << 8n) | BigInt(x), 0n);
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
+/** A landed transaction's message, v0 or legacy, or null when the bytes are neither. A legacy message is a v0 one with
+ *  no version prefix and no lookup list, so it is read by the same strict decoder with both put back: a release of this
+ *  note wrapped in a legacy message (the pool program takes either) is read, never skipped. Only the static keys are
+ *  read: a release with a key from a lookup table is never this attempt's (spendOn). */
+function landedMessage(wire: Uint8Array): SolanaMessage | null {
+  try {
+    const n = wire[0]!;
+    if (n === 0 || n >= 0x80 || wire.length <= 1 + 64 * n) return null;
+    const body = wire.subarray(1 + 64 * n);
+    if (body[0]! & 0x80) return solanaDecodeTransaction(wire).message;
+    const v0 = new Uint8Array(1 + 64 * n + 1 + body.length + 1);
+    v0.set(wire.subarray(0, 1 + 64 * n));
+    v0[1 + 64 * n] = 0x80;
+    v0.set(body, 2 + 64 * n);
+    return solanaDecodeTransaction(v0).message;
+  } catch {
+    return null;
+  }
+}
 
 /** One RPC's word on the spend: the landed transaction whose pool instruction names the nullifier hash, and whether
  *  it is this attempt's; null when its history holds none (not yet final there, or not served). */
 async function spendOn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number): Promise<{ sig: string; mine: boolean } | null> {
   const landed: string[] = []; // newest first, as the RPC lists them
   let before: string | undefined;
-  for (;;) {
+  // page on the cursor while a page holds any entry: a provider may cap its pages under HISTORY_PAGE (review P2)
+  for (let n = 0; ; n++) {
+    if (n === HISTORY_PAGES) return stop("read");
     const page = await rpc("getSignaturesForAddress", [w, { commitment: "finalized", limit: HISTORY_PAGE, minContextSlot: minSlot, ...(before !== undefined ? { before } : {}) }]);
     if (!Array.isArray(page) || page.length > HISTORY_PAGE) return stop("read");
+    if (page.length === 0) break;
     // every listed transaction, its outcome read from the transaction itself below
     for (const e of page) {
       if (!isObj(e) || typeof e.signature !== "string" || e.signature === before) return stop("read");
       landed.push(e.signature);
     }
-    if (page.length < HISTORY_PAGE) break;
     before = (page.at(-1) as { signature: string }).signature;
   }
   const { scope } = solanaPoolOf(pin.program);
@@ -266,12 +292,15 @@ async function spendOn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierH
     const meta = isObj(r) ? r.meta : undefined;
     if (!Array.isArray(t) || t[1] !== "base64" || typeof t[0] !== "string" || !isObj(meta) || !Object.hasOwn(meta, "err")) return stop("read");
     const wire = base64.decode(t[0]);
-    const tx = solanaDecodeTransaction(wire);
     // the transaction the RPC was asked for: its first signature is the id
-    if (base58.encode(wire.subarray(1, 65)) !== sig) return stop("read");
+    if (wire.length < 65 || base58.encode(wire.subarray(1, 65)) !== sig) return stop("read");
     if (meta.err !== null) continue;
-    const keys = tx.message.staticKeys;
-    for (const ix of tx.message.instructions) {
+    // anyone can land a transaction naming W, in any message format: one that is not a whole legacy or v0 message is
+    // not the spend (review HIGH 1: a throw here left every finish undecided)
+    const message = landedMessage(wire);
+    if (message === null) continue;
+    const keys = message.staticKeys;
+    for (const ix of message.instructions) {
       if (keys[ix.programIndex] !== pin.program) continue;
       const d = ix.data;
       const proof = d[0] === SOLANA_POOL_TAG_RELEASE ? SOLANA_POOL_PROOF_BYTES : d[0] === SOLANA_POOL_TAG_RELEASE_AND_BUY ? (d[1] === 1 ? SOLANA_POOL_PROOF_COMPRESSED_BYTES : SOLANA_POOL_PROOF_BYTES) : -1;
@@ -556,9 +585,10 @@ async function sendOnward(
       const bh = await blockhashOf(h.rpcs);
       // the fee is per signature: the same for the draft and the send, whose amount alone differs
       const fee = await feeOf(h.rpcs, onwardMessage(address, to, balance, bh.blockhash));
+      // a fee W cannot pay out of what it holds is a plain refusal, never a fee to draw again (fold 2, review LOW 4)
+      if (balance <= fee) return { state: "failed", signature, amount: 0n };
       // the Max fee drawn is a ceiling (review #232b LOW 4): over it, nothing is sent and the send stays owed
       if (fee > o.feeCap) return { state: "fee", signature, amount: 0n, need: fee };
-      if (balance <= fee) return { state: "failed", signature, amount: 0n };
       const exec = await checkTo(h, to);
       const message = onwardMessage(address, to, balance - fee, bh.blockhash);
       const wire = new Uint8Array(1 + 64 + message.length);

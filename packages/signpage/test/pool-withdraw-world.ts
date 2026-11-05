@@ -176,8 +176,13 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         return sig;
       }
       if (method === "getSignaturesForAddress") {
+        // as an RPC pages it: newest first, after `before` when given, at most `limit`
         const sigs = history.get(params[0] as string) ?? [];
-        return (plant.history?.(sigs, p) ?? sigs).map((signature) => ({ signature, slot: FINAL_SLOT, err: null }));
+        const all = plant.history?.(sigs, p) ?? sigs;
+        const o = (params[1] ?? {}) as { before?: string; limit?: number };
+        const from = o.before === undefined ? 0 : all.indexOf(o.before) + 1;
+        if (o.before !== undefined && from === 0) return [];
+        return all.slice(from, from + (o.limit ?? 1_000)).map((signature) => ({ signature, slot: FINAL_SLOT, err: null }));
       }
       if (method === "getTransaction") {
         const sig = params[0] as string;

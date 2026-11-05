@@ -192,7 +192,7 @@ test("the press reads the funds again: a note spent meanwhile hands nothing over
 // card signpage-withdraw-own-spend (5): a send owed whose network fee rose past the Max fee drawn; the words are drafts
 test("a send owed whose fee rose: its line and button drawn with the fee it needs, the press hands over that very fee", async () => {
   const calls: [string, bigint][] = [];
-  const f = drawn(async () => FUNDS, { owedFees: async () => [{ opId: "op1", need: 15_000n }], redraw: async (id, need) => void calls.push([id, need]) });
+  const f = drawn(async () => FUNDS, { owedFees: async () => (calls.length ? [] : [{ opId: "op1", need: 15_000n }]), redraw: async (id, need) => void calls.push([id, need]) });
   await settle();
   const rose = f.form.find((e) => e.dataset.lines === "fee-rose")!;
   assert.equal(rose.hidden, false);
@@ -206,6 +206,33 @@ test("a send owed whose fee rose: its line and button drawn with the fee it need
   await settle();
   assert.deepEqual(calls, [["op1", 15_000n]], "once, with the fee shown");
   assert.equal(rose.hidden, true);
+});
+
+test("a fee that changed since the line was drawn: the press hands nothing over and draws the new fee; the next press hands that one over (fold 2, review LOW 4)", async () => {
+  const calls: [string, bigint][] = [];
+  let need = 15_000n;
+  const f = drawn(async () => FUNDS, { owedFees: async () => (calls.length ? [] : [{ opId: "op1", need }]), redraw: async (id, n) => void calls.push([id, n]) });
+  await settle();
+  const rose = f.form.find((e) => e.dataset.lines === "fee-rose")!;
+  need = 20_000n;
+  rose.find((e) => e.dataset.action === "fee-redraw")!.fire("click");
+  await settle();
+  assert.equal(calls.length, 0, "the fee shown is no longer the one owed: nothing handed over");
+  assert.equal(rose.find((e) => e.dataset.draftCopy === "fee-rose")!.textContent, "Network fee rose. New max fee: 0.00002 SOL.");
+  rose.find((e) => e.dataset.action === "fee-redraw")!.fire("click");
+  await settle();
+  assert.deepEqual(calls, [["op1", 20_000n]]);
+  assert.equal(rose.hidden, true);
+  // a send no longer owed when pressed: the line goes, nothing handed over
+  let reads = 0;
+  const owed: { opId: string; need: bigint }[] = [{ opId: "op2", need: 15_000n }];
+  const g = drawn(async () => FUNDS, { owedFees: async () => (reads++ ? [] : owed), redraw: async (id: string, n: bigint) => void calls.push([id, n]) });
+  await settle();
+  const r2 = g.form.find((e) => e.dataset.lines === "fee-rose")!;
+  r2.find((e) => e.dataset.action === "fee-redraw")!.fire("click");
+  await settle();
+  assert.equal(r2.hidden, true);
+  assert.equal(calls.length, 1);
 });
 
 test("no send owed, none read, or a read that fails: no fee line; a redraw that fails keeps it, enabled", async () => {
