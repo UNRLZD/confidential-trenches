@@ -9,7 +9,7 @@
   "programdata": "3MWxxWW3YDamwiZ4DHdtaoGGEByAVNuBdYu11nPzsRVK",
   "funder": "FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL",
   "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
-  "keys": "/var/folders/m3/yypp543d0znbr4l1z1kg6m840000gn/T/pool-sol-deploy-8bKbth",
+  "keys": "pool-sol-deploy-8bKbth (in the OS temp folder)",
   "txs": [
     {
       "step": "funding (to the funder)",

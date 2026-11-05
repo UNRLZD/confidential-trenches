@@ -534,7 +534,7 @@ const SYSTEM_ID = "11111111111111111111111111111111";
 const FUND_SIG = "5".repeat(87);
 function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = () => {}, poolMissing = false, onRead = () => {} } = {}) {
   // `funding`: whether the funder's incoming transfer (FUND_SIG) has landed; a funder that starts funded has it
-  const c = { t: 0, bal: new Map(), txs: new Map(), sent: [], funder: null, credit: [], funding: funderStart > 0n, said: [] };
+  const c = { t: 0, bal: new Map(), txs: new Map(), sent: [], funder: null, credit: [], funding: funderStart > 0n, said: [], accounts: new Map() };
   const balOf = (a) => c.bal.get(a) ?? 0n;
   const apply = (tx) => {
     const ix = tx.ixs[0];
@@ -545,6 +545,7 @@ function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = (
     else cost += DEPOSIT + 2_000_000n; // the deposit and its mark and page rents
     if (balOf(tx.payer) < cost) return { InsufficientFundsForRent: { account_index: 0 } };
     c.bal.set(tx.payer, balOf(tx.payer) - cost);
+    if (ix.program !== SYSTEM_ID && ix.data[0] === 1) depositAccounts(c, ix);
     if (to) c.bal.set(to, balOf(to) + cost - FEE_PER_SIGNATURE);
     return null;
   };
@@ -564,6 +565,7 @@ function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = (
       case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
       case "getAccountInfo": {
         if (poolMissing && params[0] === RD.pool && ![...c.txs.values()].some((x) => x.landed && !x.err && x.tx.ixs[0].data[0] === 0 && x.tx.ixs[0].program !== SYSTEM_ID)) return ok({ value: null });
+        if (c.accounts.has(params[0])) return ok({ value: c.accounts.get(params[0]) });
         return ok(REC.good.find((x) => x.method === method && x.params[0] === params[0])?.json.result ?? { value: null });
       }
       case "getBalance": {
@@ -590,12 +592,43 @@ function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = (
         }
         return ok(tx.signature);
       }
-      case "getSignatureStatuses": return ok({ value: params[0].map((s) => { const x = c.txs.get(s); return x?.landed ? { confirmationStatus: "confirmed", err: x.err } : null; }) });
+      case "getSignatureStatuses": return ok({ value: params[0].map((s) => {
+        if (s === FUND_SIG && c.funding) return { confirmationStatus: "finalized", err: null };
+        const x = c.txs.get(s);
+        return x?.landed ? { confirmationStatus: "finalized", err: x.err } : null;
+      }) });
+      case "getTransaction": {
+        const x = c.txs.get(params[0]);
+        if (params[0] !== FUND_SIG && !x?.landed) return ok(null);
+        const payer = x ? x.tx.payer : RETURN;
+        return ok({ slot: x ? Math.floor(x.landAt / 400) + 1 : 0, meta: { err: x ? x.err : null }, transaction: { message: { accountKeys: [payer], instructions: [] } } });
+      }
       default: throw new Error(`unexpected ${method}`);
     }
   };
   c.io = { wait: async (ms) => void (c.t += ms), now: () => c.t, cli: () => ({ status: 0, stdout: "", stderr: "" }) };
   return c;
+}
+/** What a landed deposit makes, as the program does: its mark (value, nonce, tag 1) and both page leaves (the state
+ * leaf Poseidon(value, label, precommitment), the label leaf keccak256(scope, nonce) mod p), at the pool's next nonce. */
+function depositAccounts(c, ix) {
+  const [pool, , page0, page1, mark] = ix.keys;
+  const poolData = Buffer.from(REC.good.find((x) => x.method === "getAccountInfo" && x.params[0] === pool).json.result.value.data[0], "base64");
+  const nonce = poolData.readBigUInt64LE(49) + 1n;
+  const value = ix.data.readBigUInt64LE(1);
+  const pre = Buffer.from(ix.data.subarray(9, 41));
+  const label = Buffer.from(labelOf(scopeOf(ix.program, pool), nonce));
+  const commitment = Buffer.from(poseidon3([value, BigInt("0x" + label.toString("hex")), BigInt("0x" + pre.toString("hex"))]).toString(16).padStart(64, "0"), "hex");
+  const acc = (data) => ({ owner: ix.program, executable: false, lamports: 1, data: [data.toString("base64"), "base64"] });
+  const m = Buffer.alloc(17);
+  m.writeBigUInt64LE(value, 0), m.writeBigUInt64LE(nonce, 8), (m[16] = 1);
+  c.accounts.set(mark, acc(m));
+  const slot = Number((nonce - 1n) % 1024n) * 72 + 16;
+  for (const [addr, leaf] of [[page0, commitment], [page1, label]]) {
+    const d = Buffer.alloc(slot + 72);
+    leaf.copy(d, slot);
+    c.accounts.set(addr, acc(d));
+  }
 }
 const isDeposit = (tx) => tx.ixs[0].program !== SYSTEM_ID && tx.ixs[0].data[0] === 1;
 const isInit = (tx) => tx.ixs[0].program !== SYSTEM_ID && tx.ixs[0].data[0] === 0;
@@ -605,6 +638,8 @@ async function runOn(c, extra = []) {
   const soFile = path.join(work, "code.so");
   writeFileSync(soFile, recordedCode());
   const out = path.join(work, "record.json");
+  c.out = out;
+  c.journal = path.join(work, "record.journal.json");
   const said = (c.said = []);
   const realLog = console.log;
   console.log = (s) => said.push(String(s));
@@ -617,11 +652,13 @@ async function runOn(c, extra = []) {
     console.log = realLog;
   }
   const dir = keyDirOf(said);
-  const record = existsSync(out) ? JSON.parse(readFileSync(out, "utf8")) : null;
+  const read = (f) => (existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null);
+  const record = read(out);
+  const journal = read(c.journal);
   const kept = dir && existsSync(dir);
   if (dir) rmSync(dir, { recursive: true, force: true });
   rmSync(work, { recursive: true, force: true });
-  return { error, said, record, dir, kept };
+  return { error, said, record, journal, dir, kept };
 }
 const keyDirOf = (said) => said.map((l) => l.match(/the run's keys are in (\S+) until/)?.[1]).find(Boolean);
 const sweptTo = (c) => c.sent.filter((x) => x.landed && !x.err && x.tx.ixs[0].program === SYSTEM_ID && x.tx.ixs[0].keys[1] === RETURN)
@@ -632,18 +669,20 @@ test("a send that lands 95 s after it was sent, past its 90 s wait, is in the re
   const r = await runOn(c);
   assert.match(String(r.error?.message), /not confirmed in 90 s/);
   const dep = c.sent.find((x) => isDeposit(x.tx));
-  assert.ok(r.record?.txs.some((t) => t.signature === dep.tx.signature), "the deposit's signature is in the run's record");
+  assert.ok(r.journal?.txs.some((t) => t.signature === dep.tx.signature), "the deposit's signature is in the run's journal");
   assert.ok(dep.landed && !dep.err, "the deposit landed at 95 s");
-  assert.deepEqual(r.record.txs.find((t) => t.signature === dep.tx.signature), { step: "deposit 0.01 SOL (tag 1)", signature: dep.tx.signature, state: "landed" });
+  assert.deepEqual(r.journal.txs.find((t) => t.signature === dep.tx.signature), { step: "deposit 0.01 SOL (tag 1)", signature: dep.tx.signature, state: "landed" });
   // the sweep came after the deposit landed: the return address got all the funder had less the deposit and the fees
   const fees = BigInt(c.sent.filter((x) => x.landed).length) * FEE_PER_SIGNATURE;
   assert.equal(sweptTo(c), 1_000_000_000n - (DEPOSIT + 2_000_000n) - fees);
   assert.equal(c.bal.get(c.funder), 0n);
   for (const x of c.sent.filter((x) => x.tx.ixs[0].program === SYSTEM_ID)) {
     assert.ok(x.sentAt >= dep.landAt, "no sweep was sent before the late send landed");
-    assert.ok(r.record.txs.some((t) => t.signature === x.tx.signature && t.state === "landed"), "every sweep is in the record");
+    assert.ok(r.journal.txs.some((t) => t.signature === x.tx.signature && t.state === "landed"), "every sweep is in the record");
   }
-  assert.equal(r.record.complete, false);
+  assert.equal(r.journal.complete, false);
+  assert.equal(r.record, null, "a stopped run writes its journal, never the record: the record path keeps what it held");
+  assert.deepEqual(absolutePaths(r.journal), [], "the journal names no absolute path");
   assert.equal(r.kept, false, "the keys are removed once the funder reads 0");
 });
 
@@ -662,8 +701,8 @@ test("SIGHUP mid-deploy (a terminal closing) stops the run at its next step and 
   const fees = BigInt(c.sent.filter((x) => x.landed).length) * FEE_PER_SIGNATURE;
   assert.equal(sweptTo(c), 1_000_000_000n - 3_000_000n - fees);
   assert.equal(c.bal.get(c.funder), 0n);
-  assert.ok(r.record.txs.some((t) => t.step === "init (tag 0)" && t.state === "landed"));
-  assert.equal(r.record.stopped, "SIGHUP");
+  assert.ok(r.journal.txs.some((t) => t.step === "init (tag 0)" && t.state === "landed"));
+  assert.equal(r.journal.stopped, "SIGHUP");
   assert.equal(r.kept, false);
   assert.equal(process.listenerCount("SIGHUP"), listeners, "the run's SIGHUP handler is removed when it ends");
 });
@@ -692,6 +731,49 @@ test("a stop during the funding wait watches the balance 60 s: funding landing 3
   assert.match(String(r.error?.message), /stopped by SIGTERM/);
   assert.equal(c.bal.get(c.funder), 0n);
   assert.ok(c.sent.every((x) => x.sentAt >= stopAt + 30_000), "the sweep came after the funding");
-  assert.ok(r.record.txs.some((t) => t.step === "funding (to the funder)" && t.signature === FUND_SIG && t.state === "landed"));
+  assert.ok(r.journal.txs.some((t) => t.step === "funding (to the funder)" && t.signature === FUND_SIG && t.state === "landed"));
   assert.equal(r.kept, false, "the keys are removed after the sweep read the funder 0");
+});
+
+/** Every string in `v` holding an absolute file path (a temp folder, a home), URLs aside. */
+function absolutePaths(v, out = []) {
+  if (typeof v === "string") {
+    if (/(^|[\s"'(=,;])(\/(?!\/)[^\s"',;]+|[A-Za-z]:\\)/.test(v.replace(/[a-z][a-z0-9+.-]*:\/\/\S*/gi, ""))) out.push(v);
+  } else if (v && typeof v === "object") for (const x of Object.values(v)) absolutePaths(x, out);
+  return out;
+}
+
+test("a completed run writes its full record only at its end, and removes its journal then", async () => {
+  let recordDuringRun = null;
+  let journalDuringRun = null;
+  const c = cluster({
+    onSend: (tx, c) => {
+      if (isDeposit(tx)) (recordDuringRun = existsSync(c.out)), (journalDuringRun = existsSync(c.journal) && JSON.parse(readFileSync(c.journal, "utf8")));
+    },
+  });
+  const r = await runOn(c);
+  assert.equal(r.error, null, String(r.error?.stack));
+  assert.equal(recordDuringRun, false, "the record path is not written while the run is under way");
+  assert.ok(journalDuringRun?.txs.some((t) => t.step === "deposit 0.01 SOL (tag 1)" && t.state === "sent"), "the journal held the deposit before its send");
+  assert.equal(r.journal, null, "the journal is removed once the full record is written");
+  assert.equal(r.record.complete, undefined);
+  assert.equal(r.record.program_id, RD.program_id);
+  assert.deepEqual(r.record.txs.map((t) => t.step), ["funding (to the funder)", "deposit 0.01 SOL (tag 1)", "sweep (the funder's rest back)", "sweep (the funder's rest back)"]);
+  assert.deepEqual(r.record.funders, [c.funder]);
+  assert.deepEqual(absolutePaths(r.record), [], "the record names no absolute path");
+  assert.equal(c.bal.get(c.funder), 0n);
+  assert.equal(r.kept, false);
+});
+
+test("no committed deployment record or journal names an absolute path (a run's temp folder, a home)", () => {
+  const dir = path.join(REPO, "scripts/live-checks");
+  const files = readdirSync(dir).filter((f) => /^pool-sol-deploy.*\.json$/.test(f));
+  assert.ok(files.length >= 3, files.join());
+  for (const f of files) {
+    const j = JSON.parse(readFileSync(path.join(dir, f), "utf8"));
+    const records = f.endsWith(".answers.json") ? [j.deployment] : [j];
+    for (const d of records) assert.deepEqual(absolutePaths(d), [], `${f} names an absolute path`);
+  }
+  // the scan itself: a temp folder and a home are found, a URL and a repo path are not
+  assert.deepEqual(absolutePaths({ a: "/var/folders/m3/x/T/pool-sol-deploy-8bKbth", b: ["kept in /Users/x/y"], c: "https://api.devnet.solana.com/x", d: "contracts/pool-solana/out", e: "pool-sol-deploy-8bKbth (the OS temp folder)" }).length, 2);
 });

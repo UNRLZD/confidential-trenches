@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Live check of card pool-sol-deploy-sweep: the Solana pool deploy gives back every lamport however it stops. It reads
 // the record of a devnet run of contracts/pool-solana/scripts/deploy.mjs that was stopped by SIGHUP (a terminal
-// closing) during its funding wait and funded about 25 s after the stop (pool-sol-deploy-sweep.devnet.json, written
-// by deploy.mjs itself: complete false, every transaction with its state). On two RPCs of two operators, each
+// closing) during its funding wait and funded about 25 s after the stop (pool-sol-deploy-sweep.devnet.json: the run's
+// journal as deploy.mjs wrote it, complete false, every transaction with its state; its key folder named only). On two RPCs of two operators, each
 // answering devnet's genesis hash, it reads:
 //   - every transaction of the record: none is left "sent", and each landed one is found at finalized with no error;
 //   - the funding: a transfer that raised the funder's balance;

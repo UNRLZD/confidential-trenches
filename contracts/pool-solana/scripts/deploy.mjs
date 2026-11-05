@@ -33,15 +33,17 @@
 //     the label leaf against keccak256(scope, nonce) mod p, the state leaf against Poseidon(value, label,
 //     precommitment).
 //  7. Always, in a finally. SIGINT, SIGTERM or SIGHUP (a terminal closing) stop the run at its next step; later signals
-//     never cut the cleanup short. Every signature this run makes is written to the record (--out) before its send,
-//     with its state, so a send that lands after its 90 s wait, or a run killed outright, is still listed. A stop
+//     never cut the cleanup short. Every signature this run makes is written to the run's journal (the record's path
+//     with .journal.json, never the record) before its send, with its state, so a send that lands after its 90 s
+//     wait, or a run killed outright, is still listed. A stop
 //     during the funding wait first watches the funder's balance for WAITS.lateFunding, so a transfer in flight is
 //     swept too. Then the settle (each unsettled signature read as landed, failed, or past its blockhash's last valid
 //     block height, resent meanwhile), and the funder's bulk is swept to --return in one transfer (a job runner may stop
 //     the run with TERM, then KILL 10 s later), keeping CLEANUP_RESERVE for the closes; then any buffer the funder still
 //     owns and a program it can still upgrade (read at confirmed) are closed with their rent to --return; then the
 //     settle again and the rest is swept (retried). Every sweep's signature is printed. The keys are removed only after
-//     the reads in step 3. A run that stops leaves its record with complete: false and every transaction's state.
+//     the reads in step 3. A run that stops leaves its journal (complete: false, every transaction's state) and the
+//     record path as it was; a run that completes writes the record and removes the journal.
 //  8. Waits for every transaction to be finalized, writes the deployment record (scripts/live-checks/pool-sol-deploy.
 //     <cluster>.json) with every transaction on the programdata (the deploy and its SetAuthority) and every funder
 //     (the fee payers that are not --return), and prints the live check to run next.
@@ -558,6 +560,8 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, now = Date.now
   };
   const programFile = resumeId ? null : fileOf(program, "program.json");
   const outFile = opt("--out", path.join(REPO, `scripts/live-checks/pool-sol-deploy.${cluster}.json`));
+  // the run's journal, beside the record and never the record itself: a stopped run leaves the record as it was
+  const journalFile = outFile.replace(/\.json$/, "") + ".journal.json";
   // the CLI deploys from a file: the very bytes hashed above, written into the run's own folder
   const codeFile = path.join(dir, "code.so");
   writeFileSync(codeFile, so, { mode: 0o600 });
@@ -566,15 +570,16 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, now = Date.now
   const cli = runCli;
   // Every transaction of the run in order, { step, signature, state }: "landed" (read confirmed with no error), or one
   // this run signed that is "sent" (not read yet), "failed" (landed with an error, its fee spent) or "expired" (its
-  // blockhash is past, so it never lands). The record on disk is rewritten at each change, a signature before its
-  // send: a send that lands after its wait, or a run killed outright, still leaves it there for the settle or a rerun
-  // (with --prior) to read back. The final record keeps only the landed ones.
+  // blockhash is past, so it never lands). The journal on disk (journalFile) is rewritten at each change, a signature
+  // before its send: a send that lands after its wait, or a run killed outright, still leaves it there for the settle
+  // or a rerun (with --prior) to read back. The full record keeps only the landed ones; the journal is removed once it
+  // is written. The journal names the key folder by its name only, never its absolute path.
   const txs = [];
   const unsettled = new Map(); // signature -> { step, signature, base64, lastValid }
   const stoppedRecord = () => {
-    writeFileSync(outFile, JSON.stringify({
+    writeFileSync(journalFile, JSON.stringify({
       cluster, genesis_hash: genesis, rpc: url, at: new Date().toISOString(), complete: false, stopped: stop,
-      program_id: program.id, programdata: programDataAddress(program.id), funder: funder.id, return_to: returnTo, keys: dir, txs,
+      program_id: program.id, programdata: programDataAddress(program.id), funder: funder.id, return_to: returnTo, keys: `${path.basename(dir)} (in the OS temp folder)`, txs,
     }, null, 2) + "\n");
   };
   const journal = {
@@ -737,8 +742,8 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, now = Date.now
     if (result) Object.assign(result, { funder_after: String(c.after), swept: String(c.swept) });
     if (left.length) result = null;
     for (const s of SIGNALS) process.removeListener(s, onSignal);
-    stoppedRecord(); // replaced below by the full record when the run completed
-    if (!result) log(`wrote ${outFile} (complete: false): every transaction of the run with its state`);
+    stoppedRecord(); // removed below once the full record is written
+    if (!result) log(`wrote ${journalFile} (complete: false): every transaction of the run with its state; ${outFile} is unchanged`);
   }
   if (!result) throw new Error("the cleanup did not read the funder empty with nothing left: its keys are kept");
   // one line per landed transaction: a --prior signature may also be on the programdata
@@ -747,7 +752,8 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, now = Date.now
   await waitFinalized(fetchFn, url, result.txs.map((t) => t.signature), clock);
   result = await chainRecord(fetchFn, url, result);
   writeFileSync(outFile, JSON.stringify(result, null, 2) + "\n");
-  log(`every transaction finalized; wrote ${path.relative(process.cwd(), outFile)}`);
+  rmSync(journalFile, { force: true });
+  log(`every transaction finalized; wrote ${path.relative(process.cwd(), outFile)} and removed its journal`);
   for (const t of result.txs) log(`tx ${t.step}: ${t.signature}`);
   const rpcArg = cluster === "localnet" ? ` --rpc ${url},${url.replace("127.0.0.1", "localhost")} --deployment ${path.relative(process.cwd(), outFile)}` : "";
   log(`next: node scripts/live-checks/pool-sol-deploy.mjs${rpcArg}${cluster === "devnet" ? " --record /tmp/pool-sol-deploy.devnet-answers.json --write-record" : ""}`);

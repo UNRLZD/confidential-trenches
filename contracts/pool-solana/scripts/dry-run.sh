@@ -10,7 +10,8 @@
 #   5. the CLI stopped while it writes the buffer (SIGTERM): the cleanup closes the buffer and sweeps;
 #   6. a terminal closing while the CLI writes (SIGHUP to the run and its CLI): the same stop, cleanup and sweep;
 #   7. SIGHUP in the funding wait, the funding sent 30 s after it: the run watches the balance 60 s, then sweeps it
-#      back; its record (complete: false) lists the funding and the sweeps.
+#      back; its journal (record.journal.json, complete: false) lists the funding and the sweeps, and no record is
+#      written.
 # After each, the funder must hold 0. Outputs go to contracts/pool-solana/out/dry-run/ (ignored by git).
 #   bash contracts/pool-solana/scripts/dry-run.sh   (with solana-test-validator, the solana CLI and cargo-build-sbf on PATH)
 set -euo pipefail
