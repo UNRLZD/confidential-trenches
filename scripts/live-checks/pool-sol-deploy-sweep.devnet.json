@@ -1,0 +1,30 @@
+{
+  "cluster": "devnet",
+  "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "rpc": "https://api.devnet.solana.com",
+  "at": "2026-11-05T00:46:50.941Z",
+  "complete": false,
+  "stopped": "SIGHUP",
+  "program_id": "9GiAwNMgKRSWEZqsq9FvhkJWt5EiMTu8U1sqGgdUMNFY",
+  "programdata": "3MWxxWW3YDamwiZ4DHdtaoGGEByAVNuBdYu11nPzsRVK",
+  "funder": "FtDEr9ynw2ZMnnix1yAHpun97c2MDiGkfLXhBMubwnWL",
+  "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+  "keys": "/var/folders/m3/yypp543d0znbr4l1z1kg6m840000gn/T/pool-sol-deploy-8bKbth",
+  "txs": [
+    {
+      "step": "funding (to the funder)",
+      "signature": "2u9PLJniLvFRs6tkf9ghfmiq2NH7GTRYVz91F55Q4H9vcAhMDGGWuPJXDeRWawDr7Y7d6Qo5hx2Q33h9M1Dx1jo",
+      "state": "landed"
+    },
+    {
+      "step": "sweep (the funder's rest back)",
+      "signature": "38jNYChqyU1eyWo6kHG2g1qBvmxdg8FPdWDyjGcjG28wBav6n2LThPZp2BXa8RiKiULmXe5TVBto1XAhg7NsMHVA",
+      "state": "landed"
+    },
+    {
+      "step": "sweep (the funder's rest back)",
+      "signature": "2FoxZAgVjJ1NvRAV2B35YGbTCwT54Lb9u89Wt8MNa41zUzMGeuNghuARDaLFtyXm1e2jYrNSB6z5xF3MQHFsCZGG",
+      "state": "landed"
+    }
+  ]
+}
