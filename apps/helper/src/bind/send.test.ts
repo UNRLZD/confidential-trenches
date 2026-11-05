@@ -43,6 +43,7 @@ import {
   type DepositStore,
   type Receipt,
   type Relayer,
+  type RelayerStore,
   type RelayerAction,
   type Rpc,
   type SendDeps,
@@ -1710,10 +1711,9 @@ test("PROBE N1: the key's nonce jumps (key re-added); the next signing reads it,
   store.close();
 });
 
-test("RECHECK R1: after the key moved, two calls queued at once are both signed above the key and land; nothing is dropped", async () => {
-  const node = new Node();
-  node.landMs = () => 50;
-  const r = node.relayer(500);
+/** How long RECHECK R1's calls wait for their outcome. */
+const R1_WAIT_MS = 500;
+async function twoQueuedAfterKeyMove(node: Node, r: Relayer) {
   assert.equal((await r.send(prepayAction(1n), open, () => undefined)).kind, "final");
   node.keyNonce = 40n; // the key moved after the relayer last read it
   const tx: TxRef[] = [];
@@ -1722,6 +1722,29 @@ test("RECHECK R1: after the key moved, two calls queued at once are both signed 
   const third = await r.send(prepayAction(4n), open, keep(c));
   assert.deepEqual({ kinds: [a.kind, b.kind, third.kind], nonces: [...tx.map((x) => x.nonce), c[0]!.nonce] }, { kinds: ["final", "final", "final"], nonces: ["41", "42", "43"] });
   assert.equal(node.log.filter((x) => x.dropped !== undefined).length, 0);
+}
+
+test("RECHECK R1: after the key moved, two calls queued at once are both signed above the key and land; nothing is dropped", async () => {
+  const node = new Node();
+  node.landMs = () => 50;
+  await twoQueuedAfterKeyMove(node, node.relayer(R1_WAIT_MS));
+});
+
+test("RECHECK R1 on a slow disk: the second call's counter write blocks the process for 600 ms while the first call's outcome is read; both still land final", async () => {
+  const node = new Node();
+  node.landMs = () => 50;
+  const disk = node.relayerStore;
+  let writes = 0;
+  const slow: RelayerStore = {
+    ...disk,
+    nonceCas(key, expected, next) {
+      // the third write is the second queued call's; a loaded disk holds its fsync, and the whole process with it
+      if (++writes === 3) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);
+      return disk.nonceCas(key, expected, next);
+    },
+  };
+  await twoQueuedAfterKeyMove(node, createRelayer(node.rpcs(), node.archival(), RELAYER, node.secret, VAULT, node.validity, slow, R1_WAIT_MS));
+  assert.equal(writes, 4);
 });
 
 test("RECHECK R1b: after a key jump, three deposits at once all land with no silent drop", async () => {
