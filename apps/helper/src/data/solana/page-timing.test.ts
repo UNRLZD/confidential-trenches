@@ -59,6 +59,11 @@ test("card helper-ready-page-warm: a cold page's answer names each wait: the lis
   const hb = (b as { timing?: string }).timing ?? "";
   assert.ok(dur(hb, "jup-wait") >= 35, `the second search waited its turn: ${hb}`);
   assert.equal((await tok.page(mint(1)) as { timing?: string }).timing, "cache");
+  // a page whose launch came in after it was built is served as filled from what is held: still cache
+  await sleep(T.LAUNCH_WAIT_MS);
+  assert.equal((await tok.page(mint(2)) as { timing?: string }).timing, "cache");
+  assert.equal((await tok.holders(mint(1)) as { timing?: string }).timing, undefined, "a holders read made now names nothing yet");
+  assert.equal((await tok.holders(mint(1)) as { timing?: string }).timing, "cache");
 });
 
 test("card helper-ready-page-warm: a keyed Solana provider's 429 names its time before the read fell back and the public endpoint's send (red at 787f2a4: no timing)", async () => {

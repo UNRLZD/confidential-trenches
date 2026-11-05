@@ -460,7 +460,7 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
 class Upstream extends Error {}
 
 /** An answer served from what was held: its read's timing is not this request's (card helper-ready-page-warm). */
-const held = (a: DataAnswer): DataAnswer => (a.timing === undefined ? a : { ...a, timing: "cache" });
+const held = (a: DataAnswer): DataAnswer => ({ ...a, timing: "cache" });
 
 const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
 
