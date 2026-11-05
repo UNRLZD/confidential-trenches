@@ -680,7 +680,7 @@ test("vault-build.yml's paths hold contracts/vault/ and every repository file de
   };
   walk(SCRIPT);
   const outside = [...seen].map((f) => path.relative(root, f)).filter((f) => !f.startsWith("contracts/vault/")).sort();
-  assert.deepEqual(outside, ["scripts/ci/near-rpc-operators.mjs", "scripts/live-checks/vault-skeleton.mjs", "scripts/live-checks/vault-testnet-t01.mjs", "scripts/net-window.mjs"]);
+  assert.deepEqual(outside, ["scripts/ci/near-rpc-operators.mjs", "scripts/ci/rpc-wait.mjs", "scripts/live-checks/vault-skeleton.mjs", "scripts/live-checks/vault-testnet-t01.mjs", "scripts/net-window.mjs"]);
   const yml = readFileSync(path.join(root, ".github/workflows/vault-build.yml"), "utf8");
   for (const f of ["contracts/vault/**", ...outside, "scripts/ci/retry.sh"]) assert.ok(yml.includes(`      - "${f}"\n`), `vault-build.yml's paths miss ${f}`);
 });
