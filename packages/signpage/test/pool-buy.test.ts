@@ -802,7 +802,7 @@ test("card pool-buy-send-fast (review M-1): another device's spend is never told
   for (const plant of [{ helper: "502" }, { readBack: "other" }] as const) {
     const w = await world({ ...plant, otherSpent: true, finalHeight: () => 50 });
     const routes: unknown[] = [];
-    assert.equal((await runPoolBuy({ ...w.host, route: (x) => void routes.push(x) }, ASK)).stage, "not_landed");
+    assert.deepEqual(await runPoolBuy({ ...w.host, route: (x) => void routes.push(x) }, ASK), { stage: "not_landed", txs: [] });
     assert.ok(!routes.some((x) => Object.hasOwn(x as object, "tx")), JSON.stringify(routes));
   }
 });
