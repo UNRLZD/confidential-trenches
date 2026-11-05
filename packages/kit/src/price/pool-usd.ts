@@ -9,6 +9,15 @@
 //   07:40Z answered slots 465221311 and 465221313), so the agreed slot is the one the bytes carry: posted_slot, the
 //   slot the update landed in, at or before each answer's own slot. Bytes that differ are read again on both at
 //   minContextSlot = the newer slot, POOL_USD_READ_ROUNDS reads in all; still different is a refusal.
+// - A slow or lagging provider (card signpage-price-read-retry): an answer of RPC error -32016 "Minimum context slot has
+//   not been reached" (a provider behind the slot asked for, which catches up in a slot or two) or no answer in one
+//   try's bound is asked again of that provider alone, with the same params (so at the same minContextSlot), after
+//   POOL_USD_RETRY_BACKOFF_MS doubled per try, all inside one read's POOL_USD_READ_DEADLINE_MS, every round and both
+//   feeds of a Robinhood read in that one bound. A read that ends, failed or not, asks no provider again: one provider's
+//   refusal stops the other's retries. Read on 4 Nov 22:00Z and
+//   22:25Z (sign live runs 41920575578, 41924297260): one try at solana-rpc.publicnode.com answered nothing in 3500 ms,
+//   and one answered -32016; each failed the whole read. Only the asking is repeated: both providers must still answer,
+//   and agree, before a price is used.
 // - Base and Robinhood (the pools hold native ETH, 18 decimals): ETH/USD from the chain's own Chainlink feed, decimals()
 //   and latestRoundData() by eth_call on both RPCs at one block number, the lower of their two eth_blockNumber heads
 //   (each has it; never "latest" on each). That block must be one block on both (eth_getBlockByNumber: the same hash and
@@ -17,6 +26,8 @@
 //   feed (read below), so it is read there, not on Base. Its heartbeat is 24 h, so a halted feed would pass the age
 //   check for up to a day: the same call reads Base's ETH/USD too (its 1200 s heartbeat, on Base's two RPCs) and refuses
 //   a Robinhood price more than POOL_USD_CROSS_BPS from it. The two feeds' deviation thresholds are 0.5% and 0.15%.
+// - Age: told as the read returns, the device's clock given at its start moved on by the time the read ran, so a price
+//   inside its bound at the start and past it by the end is refused.
 // - Rounding: down, to the asset's base unit. A tap never spends more than the USD asked.
 //
 // Read on 4 Nov 2026, 07:40-07:45Z:
@@ -41,7 +52,7 @@ import { base58 } from "@scure/base";
 import type { Chain } from "../orders/record.ts";
 import { POOL_ASSET_DECIMALS, type PoolAsset } from "../signpage/messages.ts";
 import { solanaParseAccountsAnswer } from "../trade/solana/pool.ts";
-import { solanaSameProvider, type SolanaRpc } from "../trade/solana/send.ts";
+import { SolanaRpcTransportError, solanaSameProvider, type SolanaRpc } from "../trade/solana/send.ts";
 
 /** A price at most this far ahead of the device's clock is used: further, the clock is wrong and no age can be told. */
 export const POOL_USD_MAX_AHEAD_S = 60;
@@ -53,8 +64,13 @@ export const POOL_USD_CROSS_BPS = 100n;
 /** The Chainlink reads' block (the lower of the two RPCs' heads) is used only this close to the device's clock, either
  * way: one RPC that answers a low head can pick no older block, so no older round. */
 export const POOL_USD_BLOCK_MAX_AGE_S = 60;
-/** One RPC call's bound. */
+/** One try of one RPC call's bound. */
 export const POOL_USD_CALL_TIMEOUT_MS = 5_000;
+/** One read's bound, every try and wait of every call in it counted: a try that answers nothing in its bound, a backoff,
+ * and a second try fit in it, with room for a third. */
+export const POOL_USD_READ_DEADLINE_MS = 12_000;
+/** The wait before a call that a provider was slow or behind on is asked again of it, doubled per try of that call. */
+export const POOL_USD_RETRY_BACKOFF_MS = 250;
 
 export type PoolUsdPythFeed = {
   readonly kind: "pyth";
@@ -135,12 +151,41 @@ const fail = (why: string): never => {
   throw new Error(why);
 };
 
-function within<T>(p: Promise<T>, what: string): Promise<T> {
+/** A try that answered nothing in its bound. */
+class NoAnswer extends Error {}
+function within<T>(p: Promise<T>, what: string, ms: number): Promise<T> {
   let t: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([p, new Promise<never>((_, rej) => (t = setTimeout(() => rej(new Error(`${what}: no answer in ${POOL_USD_CALL_TIMEOUT_MS} ms`)), POOL_USD_CALL_TIMEOUT_MS)))]).finally(() => clearTimeout(t));
+  return Promise.race([p, new Promise<never>((_, rej) => (t = setTimeout(() => rej(new NoAnswer(`${what}: no answer in ${ms} ms`)), ms)))]).finally(() => clearTimeout(t));
 }
-const call = (rpc: SolanaRpc, method: string, params: readonly unknown[], what: string): Promise<unknown> =>
-  within(Promise.resolve().then(() => rpc(method, params)), what);
+/** RPC error -32016 "Minimum context slot has not been reached", as the kit's solanaJsonRpc words it: the provider is
+ *  behind the slot asked for. */
+const behind = (e: unknown): boolean => e instanceof Error && e.message.startsWith("RPC error -32016:");
+/** No answer in a try's bound: this read's own, or the provider's client's (solanaJsonRpc with retry, as the signing page
+ *  makes it, ends its call at its own deadline). */
+const slow = (e: unknown): boolean => e instanceof NoAnswer || (e instanceof SolanaRpcTransportError && e.fault === "timeout");
+/** One read's bound: it began at `start` and no try or wait of any call in it begins past `end` (unix ms on Date.now's
+ *  clock), or once `stopped`, which is set when the read ends: a read that has failed asks no provider again. */
+type Bound = { readonly start: number; readonly end: number; stopped: boolean };
+/** The device's clock as a read returns: its clock at the start (`nowS`) moved on by the time the read ran. */
+const nowAt = (nowS: number, bound: Bound): number => nowS + (Date.now() - bound.start) / 1000;
+/** One call, asked again of the same provider with the same params while it is slow or behind (see the header), until
+ *  the read's bound ends or the read is stopped. Any other answer, an error included, ends it at once. */
+async function call(rpc: SolanaRpc, method: string, params: readonly unknown[], what: string, bound: Bound): Promise<unknown> {
+  for (let tries = 1; ; tries++) {
+    if (bound.stopped) return fail(`${what}: not asked again, the read has ended`);
+    const left = bound.end - Date.now();
+    try {
+      return await within(Promise.resolve().then(() => rpc(method, params)), what, Math.max(1, Math.min(POOL_USD_CALL_TIMEOUT_MS, left)));
+    } catch (e) {
+      if (!behind(e) && !slow(e)) throw e;
+      const waitMs = POOL_USD_RETRY_BACKOFF_MS * 2 ** (tries - 1);
+      if (bound.stopped) throw e;
+      // a wait that ends past the read's bound is not begun: the call fails now, its fault named
+      if (Date.now() + waitMs >= bound.end) return fail(`${e instanceof NoAnswer ? "" : `${what}: `}${(e as Error).message} (${tries} ${tries === 1 ? "try" : "tries"} in the read's ${POOL_USD_READ_DEADLINE_MS} ms)`);
+      await new Promise((res) => setTimeout(res, waitMs));
+    }
+  }
+}
 
 function checkArgs(a: PoolUsdArgs): { feed: PoolUsdPythFeed | PoolUsdChainlinkFeed; chain: PoolUsdChain; rpcs: readonly [SolanaRpc, SolanaRpc]; nowS: number; nowMs: number } {
   const chain = a?.chain as unknown;
@@ -187,9 +232,9 @@ const PARTIAL = 0;
 
 type SolanaRead = { slot: number; account: { owner: string; data: Uint8Array } | null };
 
-async function readPythOnce(rpc: SolanaRpc, k: number, account: string, minContextSlot: number | null): Promise<SolanaRead> {
+async function readPythOnce(rpc: SolanaRpc, k: number, account: string, minContextSlot: number | null, bound: Bound): Promise<SolanaRead> {
   const config = { encoding: "base64", commitment: "confirmed", ...(minContextSlot === null ? {} : { minContextSlot }) };
-  const r = solanaParseAccountsAnswer(await call(rpc, "getMultipleAccounts", [[account], config], `rpc ${k} getMultipleAccounts`), 1);
+  const r = solanaParseAccountsAnswer(await call(rpc, "getMultipleAccounts", [[account], config], `rpc ${k} getMultipleAccounts`, bound), 1);
   if (r === null) return fail(`rpc ${k}: not a getMultipleAccounts answer`);
   return { slot: r.slot, account: r.accounts[0] ?? null };
 }
@@ -197,11 +242,11 @@ async function readPythOnce(rpc: SolanaRpc, k: number, account: string, minConte
 const sameAccount = (a: SolanaRead["account"], b: SolanaRead["account"]): boolean =>
   a === null || b === null ? a === b : a.owner === b.owner && a.data.length === b.data.length && a.data.every((x, i) => x === b.data[i]);
 
-async function pythPrice(feed: PoolUsdPythFeed, rpcs: readonly [SolanaRpc, SolanaRpc], nowS: number): Promise<PoolUsdPrice> {
+async function pythPrice(feed: PoolUsdPythFeed, rpcs: readonly [SolanaRpc, SolanaRpc], nowS: number, bound: Bound): Promise<PoolUsdPrice> {
   let reads: [SolanaRead, SolanaRead] | null = null;
   let min: number | null = null;
   for (let round = 0; round < POOL_USD_READ_ROUNDS; round++) {
-    const r = await Promise.all([readPythOnce(rpcs[0], 0, feed.account, min), readPythOnce(rpcs[1], 1, feed.account, min)]);
+    const r = await Promise.all([readPythOnce(rpcs[0], 0, feed.account, min, bound), readPythOnce(rpcs[1], 1, feed.account, min, bound)]);
     if (sameAccount(r[0].account, r[1].account)) {
       reads = r;
       break;
@@ -229,7 +274,7 @@ async function pythPrice(feed: PoolUsdPythFeed, rpcs: readonly [SolanaRpc, Solan
   if (expo > 0 || expo < -18) fail(`the Pyth exponent ${expo} is outside -18..0`);
   if (conf * 10_000n > price * BigInt(feed.maxConfBps)) fail(`the Pyth confidence ${conf} is wider than ${feed.maxConfBps} bps of the price ${price}`);
   for (const r of reads) if (BigInt(r.slot) < posted) fail(`an RPC answered at slot ${r.slot}, before the update's own slot ${posted}`);
-  checkAge(publishedS, feed.maxAgeS, nowS);
+  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));
   return { chain: "solana", asset: feed.asset, decimals: POOL_ASSET_DECIMALS[feed.asset], price, expo, publishedS, source: "pyth", at: posted };
 }
 
@@ -257,18 +302,18 @@ const wordsOf = (v: unknown, n: number, what: string): bigint[] => {
 
 type RoundRead = { decimals: bigint; round: bigint[] };
 
-async function chainlinkPrice(chain: "base" | "robinhood", feed: PoolUsdChainlinkFeed, rpcs: readonly [SolanaRpc, SolanaRpc], nowS: number): Promise<PoolUsdPrice> {
-  const ids = await Promise.all(rpcs.map((rpc, k) => call(rpc, "eth_chainId", [], `rpc ${k} eth_chainId`)));
+async function chainlinkPrice(chain: "base" | "robinhood", feed: PoolUsdChainlinkFeed, rpcs: readonly [SolanaRpc, SolanaRpc], nowS: number, bound: Bound): Promise<PoolUsdPrice> {
+  const ids = await Promise.all(rpcs.map((rpc, k) => call(rpc, "eth_chainId", [], `rpc ${k} eth_chainId`, bound)));
   ids.forEach((id, k) => {
     if (rpcHex(id) !== feed.chainId) fail(`rpc ${k}: chain id ${String(id)} is not ${chain}'s ${feed.chainId}`);
   });
-  const heads = await Promise.all(rpcs.map(async (rpc, k) => quantity(await call(rpc, "eth_blockNumber", [], `rpc ${k} eth_blockNumber`), `rpc ${k} eth_blockNumber`)));
+  const heads = await Promise.all(rpcs.map(async (rpc, k) => quantity(await call(rpc, "eth_blockNumber", [], `rpc ${k} eth_blockNumber`, bound), `rpc ${k} eth_blockNumber`)));
   const block = heads[0]! < heads[1]! ? heads[0]! : heads[1]!;
   const at = `0x${block.toString(16)}`;
   // that block on both RPCs: one block (the same hash), its time within POOL_USD_BLOCK_MAX_AGE_S of the device's clock
   const blocks = await Promise.all(
     rpcs.map(async (rpc, k) => {
-      const b = (await call(rpc, "eth_getBlockByNumber", [at, false], `rpc ${k} eth_getBlockByNumber`)) as { number?: unknown; hash?: unknown; timestamp?: unknown } | null;
+      const b = (await call(rpc, "eth_getBlockByNumber", [at, false], `rpc ${k} eth_getBlockByNumber`, bound)) as { number?: unknown; hash?: unknown; timestamp?: unknown } | null;
       const hash = rpcHex(b?.hash);
       if (hash === null || hash.length !== 66) fail(`rpc ${k}: block ${block} has no hash`);
       if (quantity(b!.number, `rpc ${k} block number`) !== block) fail(`rpc ${k}: answered another block than ${block}`);
@@ -278,12 +323,13 @@ async function chainlinkPrice(chain: "base" | "robinhood", feed: PoolUsdChainlin
   if (blocks[0]!.hash !== blocks[1]!.hash) fail(`the two RPCs disagree on block ${block}'s hash`);
   const blockS = Number(blocks[0]!.timeS);
   if (blocks[0]!.timeS !== blocks[1]!.timeS) fail(`the two RPCs disagree on block ${block}'s time`);
-  if (Math.abs(nowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(`block ${block}'s time ${blockS} is more than ${POOL_USD_BLOCK_MAX_AGE_S} s from the device's clock ${Math.floor(nowS)}`);
+  const blockNowS = nowAt(nowS, bound);
+  if (Math.abs(blockNowS - blockS) > POOL_USD_BLOCK_MAX_AGE_S) fail(`block ${block}'s time ${blockS} is more than ${POOL_USD_BLOCK_MAX_AGE_S} s from the device's clock ${Math.floor(blockNowS)}`);
   const reads: RoundRead[] = await Promise.all(
     rpcs.map(async (rpc, k) => {
       const [dec, round] = await Promise.all([
-        call(rpc, "eth_call", [{ to: feed.proxy, data: DECIMALS }, at], `rpc ${k} decimals`),
-        call(rpc, "eth_call", [{ to: feed.proxy, data: LATEST_ROUND_DATA }, at], `rpc ${k} latestRoundData`),
+        call(rpc, "eth_call", [{ to: feed.proxy, data: DECIMALS }, at], `rpc ${k} decimals`, bound),
+        call(rpc, "eth_call", [{ to: feed.proxy, data: LATEST_ROUND_DATA }, at], `rpc ${k} latestRoundData`, bound),
       ]);
       return { decimals: wordsOf(dec, 1, `rpc ${k} decimals`)[0]!, round: wordsOf(round, 5, `rpc ${k} latestRoundData`) };
     }),
@@ -301,7 +347,7 @@ async function chainlinkPrice(chain: "base" | "robinhood", feed: PoolUsdChainlin
   if (updatedAt === 0n || updatedAt >= U64) fail(`the round ${roundId} has no update time`);
   if (price <= 0n) fail(`the price ${price} is not positive`);
   const publishedS = Number(updatedAt);
-  checkAge(publishedS, feed.maxAgeS, nowS);
+  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));
   return { chain, asset: feed.asset, decimals: POOL_ASSET_DECIMALS[feed.asset], price, expo: -Number(a.decimals), publishedS, source: "chainlink", at: block };
 }
 
@@ -313,12 +359,23 @@ async function chainlinkPrice(chain: "base" | "robinhood", feed: PoolUsdChainlin
  * maxConfBps, an account or answer that is not the feed's, an unknown chain or one provider twice.
  */
 export async function poolUsdPrice(args: PoolUsdArgs): Promise<PoolUsdPrice> {
+  const start = Date.now();
+  const bound: Bound = { start, end: start + POOL_USD_READ_DEADLINE_MS, stopped: false };
+  try {
+    return await readPrice(args, bound);
+  } finally {
+    // ended, failed or not: a call still waiting on a provider asks it nothing more
+    bound.stopped = true;
+  }
+}
+
+async function readPrice(args: PoolUsdArgs, bound: Bound): Promise<PoolUsdPrice> {
   const { feed, chain, rpcs, nowS, nowMs } = checkArgs(args);
-  if (feed.kind === "pyth") return pythPrice(feed, rpcs, nowS);
-  if (chain !== "robinhood") return chainlinkPrice(chain as "base", feed, rpcs, nowS);
+  if (feed.kind === "pyth") return pythPrice(feed, rpcs, nowS, bound);
+  if (chain !== "robinhood") return chainlinkPrice(chain as "base", feed, rpcs, nowS, bound);
   // Robinhood: its own feed, held to Base's ETH/USD read now
   const base = checkArgs({ chain: "base", rpcs: args.baseRpcs ?? (fail("robinhood: Base's two RPCs are needed to hold its ETH/USD to Base's") as never), nowMs });
-  const [p, b] = await Promise.all([chainlinkPrice("robinhood", feed, rpcs, nowS), chainlinkPrice("base", base.feed as PoolUsdChainlinkFeed, base.rpcs, nowS)]);
+  const [p, b] = await Promise.all([chainlinkPrice("robinhood", feed, rpcs, nowS, bound), chainlinkPrice("base", base.feed as PoolUsdChainlinkFeed, base.rpcs, nowS, bound)]);
   // both at one exponent, the finer
   const e = Math.min(p.expo, b.expo);
   const x = p.price * 10n ** BigInt(p.expo - e);

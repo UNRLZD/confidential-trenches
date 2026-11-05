@@ -3,19 +3,24 @@
 // once by test/fixtures/pool-usd-capture.mjs (test/fixtures/pool-usd.json, its `read` field gives the time): the Pyth
 // SOL/USD account on two Solana RPCs, Chainlink's ETH/USD feed on two Base and two Robinhood RPCs. Every other case is
 // that recording with one thing planted. No network.
-// The test names' first words are what test/pool-usd-mutants.mjs runs against each mutant: "agreement" and "staleness".
+// The test names' first words are what test/pool-usd-mutants.mjs runs against each mutant: "agreement", "staleness" and
+// "retry". The retry cases run on node:test's mocked setTimeout and Date, so a wait of seconds takes none.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { base64 } from "@scure/base";
 import {
   POOL_USD_BLOCK_MAX_AGE_S,
   POOL_USD_CROSS_BPS,
   POOL_USD_FEEDS,
+  POOL_USD_CALL_TIMEOUT_MS,
   POOL_USD_MAX_AHEAD_S,
+  POOL_USD_READ_DEADLINE_MS,
+  POOL_USD_RETRY_BACKOFF_MS,
   poolUsdPrice,
   poolUsdToUnits,
   solanaProgramAddress,
+  SolanaRpcTransportError,
   type SolanaRpc,
 } from "../src/index.ts";
 
@@ -191,6 +196,166 @@ test("agreement: a disagreement re-reads both at the newer slot, and two answers
   assert.deepEqual(second, [good.context.slot + 3, good.context.slot + 3]);
 });
 
+// ------------------------------------------------------------------------------------------------ retry
+/** `run` on the mocked clock, 10 ms a step, until it ends or `maxMs` pass (then the test fails): its outcome and the ms
+ *  it took. */
+async function onClock<T>(t: TestContext, run: () => Promise<T>, maxMs = 60_000): Promise<{ ok: boolean; v?: T; e?: unknown; ms: number }> {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  let out: { ok: boolean; v?: T; e?: unknown; ms: number } | undefined;
+  run().then(
+    (v) => (out = { ok: true, v, ms: Date.now() - NOW }),
+    (e: unknown) => (out = { ok: false, e, ms: Date.now() - NOW }),
+  );
+  for (let ms = 0; out === undefined && ms < maxMs; ms += 10) {
+    await new Promise((r) => setImmediate(r));
+    if (out === undefined) t.mock.timers.tick(10);
+  }
+  if (out === undefined) assert.fail(`the read had not ended ${maxMs} ms in`);
+  return out;
+}
+const GOOD = () => structuredClone(FX.solana.calls.find((x) => x.method === "getMultipleAccounts")!.result as { context: { slot: number } });
+/** A Solana RPC that answers its asks in turn from `answers` (the last one again after), each ask's time and params kept. */
+function turns(url: string, answers: readonly (() => unknown)[]) {
+  const asks: { ms: number; min: number | undefined }[] = [];
+  const rpc = Object.assign(
+    async (_m: string, p: readonly unknown[]) => {
+      asks.push({ ms: Date.now() - NOW, min: (p[1] as { minContextSlot?: number }).minContextSlot });
+      return answers[Math.min(asks.length, answers.length) - 1]!();
+    },
+    { url },
+  );
+  return { rpc, asks };
+}
+const BEHIND = () => Promise.reject(new Error("RPC error -32016: Minimum context slot has not been reached"));
+const HANG = () => new Promise(() => {});
+const TRANSPORT = (fault: "timeout" | "http_429" | "network" | "http_5xx") => () => Promise.reject(new SolanaRpcTransportError(fault, fault === "timeout" ? "no answer in 3500 ms" : "HTTP 429", 1, "solana-rpc.publicnode.com"));
+const UNITS = (100n * 10n ** 17n) / SOL_PRICE;
+
+test("retry: a provider behind the agreed slot (RPC -32016) is asked again there after a short backoff, alone, and the price is used", async (t) => {
+  const s = GOOD().context.slot;
+  // round 1: provider a answers an older update at slot s, b the newer one at s + 3; round 2 asks both at s + 3, and a,
+  // not there yet, answers -32016 once (sign live run 41924297260, 4 Nov 22:25Z), then the bytes b answered
+  const newer = () => Object.assign(GOOD(), { context: { slot: s + 3 } });
+  const a = turns("https://a.example", [() => solEdit(setI64(AT.price, 1n))("getMultipleAccounts", [], GOOD()), BEHIND, newer]);
+  const b = turns("https://b.example", [newer]);
+  const r = await onClock(t, () => poolUsdToUnits({ chain: "solana", usd: "100", rpcs: [a.rpc, b.rpc], nowMs: NOW }));
+  assert.equal(r.ok, true, String(r.e));
+  assert.equal(r.v, UNITS);
+  assert.deepEqual(a.asks.map((x) => x.min), [undefined, s + 3, s + 3], "a: asked again at the agreed slot");
+  assert.deepEqual(b.asks.map((x) => x.min), [undefined, s + 3], "b, which answered, is not asked again");
+  assert.equal(a.asks[2]!.ms - a.asks[1]!.ms, POOL_USD_RETRY_BACKOFF_MS, "after the backoff");
+});
+
+test("retry: a provider with no answer in a try's bound is asked again, and one slow answer never fails the read", async (t) => {
+  // a: nothing in this read's own bound of a try; b: the signing page's client ending its call (sign live run 41920575578,
+  // 4 Nov 22:00Z: "no answer in 3500 ms (timeout, 1 try at solana-rpc.publicnode.com)")
+  const a = turns("https://a.example", [HANG, GOOD]);
+  const b = turns("https://b.example", [TRANSPORT("timeout"), GOOD]);
+  const r = await onClock(t, () => poolUsdToUnits({ chain: "solana", usd: "100", rpcs: [a.rpc, b.rpc], nowMs: NOW }));
+  assert.equal(r.ok, true, String(r.e));
+  assert.equal(r.v, UNITS);
+  assert.deepEqual(a.asks.map((x) => x.ms), [0, POOL_USD_CALL_TIMEOUT_MS + POOL_USD_RETRY_BACKOFF_MS], "a: asked again a try's bound and a backoff on");
+  assert.deepEqual(b.asks.map((x) => x.ms), [0, POOL_USD_RETRY_BACKOFF_MS], "b: asked again after the backoff");
+});
+
+test("retry: a provider still behind or slow fails the read inside its bound, the wait doubling per try; any other answer fails it at once", async (t) => {
+  const other = turns("https://b.example", [GOOD]);
+  const behind = turns("https://a.example", [BEHIND]);
+  let r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [behind.rpc, other.rpc], nowMs: NOW }));
+  assert.equal(r.ok, false);
+  assert.match(String(r.e), /rpc 0 getMultipleAccounts: RPC error -32016: .* \(6 tries in the read's 12000 ms\)/);
+  const at = behind.asks.map((x) => x.ms);
+  assert.deepEqual(at.slice(1).map((x, i) => x - at[i]!), [250, 500, 1000, 2000, 4000], "the wait doubles per try");
+  assert.ok(r.ms <= POOL_USD_READ_DEADLINE_MS, `ended ${r.ms} ms in`);
+  t.mock.timers.reset();
+  const hang = turns("https://a.example", [HANG]);
+  r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [hang.rpc, other.rpc], nowMs: NOW }));
+  assert.equal(r.ok, false);
+  assert.match(String(r.e), /rpc 0 getMultipleAccounts: no answer in \d+ ms \(3 tries/);
+  assert.equal(r.ms, POOL_USD_READ_DEADLINE_MS, "the last try is cut to the read's bound");
+  t.mock.timers.reset();
+  for (const [name, answer] of [
+    ["an RPC error other than -32016", () => Promise.reject(new Error("RPC error -32602: Invalid params"))],
+    ["a throttle the provider's client already retried", TRANSPORT("http_429")],
+    ["no connection, which the provider's client already retried", TRANSPORT("network")],
+    ["an HTTP 5xx the provider's client already retried", TRANSPORT("http_5xx")],
+    ["a refusal", () => Promise.reject(new Error("HTTP 403"))],
+  ] as const) {
+    const once = turns("https://a.example", [answer, GOOD]);
+    r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [once.rpc, other.rpc], nowMs: NOW }));
+    assert.equal(r.ok, false, name);
+    assert.equal(once.asks.length, 1, `${name}: one try`);
+    assert.equal(r.ms, 0, `${name}: at once`);
+    t.mock.timers.reset();
+  }
+});
+
+/** An RPC that answers nothing, ever, its asks counted. */
+const hung = (url: string) => {
+  const asks: number[] = [];
+  return { rpc: Object.assign(() => (asks.push(Date.now() - NOW), new Promise(() => {})), { url }), asks };
+};
+/** The mocked clock run on `ms`, 10 ms a step. */
+async function idle(t: TestContext, ms: number): Promise<void> {
+  for (let i = 0; i < ms; i += 10) {
+    await new Promise((r) => setImmediate(r));
+    t.mock.timers.tick(10);
+  }
+  await new Promise((r) => setImmediate(r));
+}
+
+test("retry: a second round ends inside the same read's bound", async (t) => {
+  const s = GOOD().context.slot;
+  // round 1: a answers nothing in a try's bound, then older bytes at 5250 ms, b the newer bytes; round 2 asks both at the
+  // newer slot, and a answers -32016 every time
+  const newer = () => Object.assign(GOOD(), { context: { slot: s + 3 } });
+  const older = () => solEdit(setI64(AT.price, 1n))("getMultipleAccounts", [], GOOD());
+  const a = turns("https://a.example", [HANG, older, BEHIND]);
+  const b = turns("https://b.example", [newer]);
+  const r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [a.rpc, b.rpc], nowMs: NOW }));
+  assert.equal(r.ok, false);
+  assert.match(String(r.e), /rpc 0 getMultipleAccounts: RPC error -32016/);
+  assert.equal(a.asks[1]!.ms, POOL_USD_CALL_TIMEOUT_MS + POOL_USD_RETRY_BACKOFF_MS, "a's second try");
+  assert.equal(a.asks[2]!.min, s + 3, "round 2, at the newer slot");
+  assert.ok(r.ms <= POOL_USD_READ_DEADLINE_MS, `ended ${r.ms} ms in`);
+});
+
+test("retry: a Base RPC with no answer fails the Chainlink read inside its bound", async (t) => {
+  const a = hung("https://a.example");
+  const r = await onClock(t, () => poolUsdPrice({ chain: "base", rpcs: [a.rpc, replay(FX.base, 1)], nowMs: NOW }));
+  assert.equal(r.ok, false);
+  assert.match(String(r.e), /rpc 0 eth_chainId: no answer/);
+  assert.ok(r.ms <= POOL_USD_READ_DEADLINE_MS, `ended ${r.ms} ms in`);
+});
+
+test("retry: a Robinhood RPC with no answer fails the Chainlink read inside its bound, Base's read beside it", async (t) => {
+  const a = hung("https://a.example");
+  const r = await onClock(t, () => poolUsdPrice({ chain: "robinhood", rpcs: [a.rpc, replay(FX.robinhood, 1)], nowMs: NOW, baseRpcs: pair(FX.base) }));
+  assert.equal(r.ok, false);
+  assert.match(String(r.e), /rpc 0 eth_chainId: no answer/);
+  assert.ok(r.ms <= POOL_USD_READ_DEADLINE_MS, `ended ${r.ms} ms in`);
+});
+
+test("retry: a read that has failed asks no provider again: one provider's refusal ends the other's retries", async (t) => {
+  // a refuses at once while b answers nothing: b's try runs out, and b is not asked again
+  const refuse = () => Promise.reject(new Error("HTTP 403"));
+  let b = hung("https://b.example");
+  let r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [turns("https://a.example", [refuse]).rpc, b.rpc], nowMs: NOW }));
+  assert.equal(r.ok, false);
+  assert.match(String(r.e), /HTTP 403/);
+  await idle(t, 30_000);
+  assert.deepEqual(b.asks, [0], "b: asked once in 30 s");
+  t.mock.timers.reset();
+  // a refuses 100 ms in, while b waits out its backoff after -32016: b is not asked again when the wait ends
+  const late = () => new Promise((_, rej) => setTimeout(() => rej(new Error("HTTP 403")), 100));
+  const behind = turns("https://b.example", [BEHIND]);
+  r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [turns("https://a.example", [late]).rpc, behind.rpc], nowMs: NOW }));
+  assert.equal(r.ok, false);
+  assert.equal(r.ms, 100);
+  await idle(t, 30_000);
+  assert.deepEqual(behind.asks.map((x) => x.ms), [0], "b: asked once in 30 s");
+});
+
 test("agreement: Chainlink answers that differ between the two RPCs in any field are refused", async () => {
   for (const chain of ["base", "robinhood"] as const) {
     const w = words(FX[chain]);
@@ -269,7 +434,9 @@ test("agreement: hex in upper case on one RPC is the same answer (as the wallet'
 });
 
 // ------------------------------------------------------------------------------------------------ staleness
-test("staleness: the read's block is used within 60 s of the device's clock, either way; past that it is refused", async () => {
+test("staleness: the read's block is used within 60 s of the device's clock, either way; past that it is refused", async (t) => {
+  // the age is told as the read returns: a clock that does not move, so the bound is met exactly
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
   assert.equal(POOL_USD_BLOCK_MAX_AGE_S, 60);
   for (const chain of ["base", "robinhood"] as const) {
     const t = Number(BigInt((FX[chain].calls.find((c) => c.method === "eth_getBlockByNumber")!.result as { timestamp: string }).timestamp));
@@ -290,7 +457,9 @@ test("staleness: Robinhood's read holds Base's at the device's own clock, as giv
   assert.equal(p.price, words(FX.robinhood)[1]);
 });
 
-test("staleness: a Pyth price older than 60 s is refused; at 60 s it is used; one ahead of the clock is refused", async () => {
+test("staleness: a Pyth price older than 60 s is refused; at 60 s it is used; one ahead of the clock is refused", async (t) => {
+  // the age is told as the read returns: a clock that does not move, so the bound is met exactly
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
   const f = POOL_USD_FEEDS.solana;
   assert.equal(f.maxAgeS, 60);
   assert.ok(await solana(undefined, (SOL_PUBLISH_S + 60) * 1000));
@@ -300,7 +469,9 @@ test("staleness: a Pyth price older than 60 s is refused; at 60 s it is used; on
   await assert.rejects(solana(undefined, (SOL_PUBLISH_S - POOL_USD_MAX_AHEAD_S) * 1000 - 1), /ahead of the device's clock/);
 });
 
-test("staleness: a Chainlink price older than its chain's bound is refused; at the bound it is used", async () => {
+test("staleness: a Chainlink price older than its chain's bound is refused; at the bound it is used", async (t) => {
+  // the age is told as the read returns: a clock that does not move, so the bound is met exactly
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
   assert.equal(POOL_USD_FEEDS.base.maxAgeS, 1_500);
   assert.equal(POOL_USD_FEEDS.robinhood.maxAgeS, 86_700);
   for (const chain of ["base", "robinhood"] as const) {
@@ -311,6 +482,34 @@ test("staleness: a Chainlink price older than its chain's bound is refused; at t
     await assert.rejects(evm(chain, undefined, (updated - POOL_USD_MAX_AHEAD_S) * 1000 - 1), /ahead of the device's clock/, chain);
     await assert.rejects(evm(chain, [wordEdit(LRD, 3, 0n), wordEdit(LRD, 3, 0n)]), /round/, `${chain}: an updatedAt of 0`);
   }
+});
+
+test("staleness: a price's age is told as the read returns: inside its bound at the start and past it by the end, refused", async (t) => {
+  const startS = Math.floor(NOW / 1000);
+  // Pyth: 55 s old at the read's start; read at once it is used, and with one provider slow once (5250 ms) it is 60 s old
+  const aged = () => solEdit(setI64(AT.publish, BigInt(startS - 55)))("getMultipleAccounts", [], GOOD());
+  let r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [turns("https://a.example", [aged]).rpc, turns("https://b.example", [aged]).rpc], nowMs: NOW }));
+  assert.equal(r.ok, true, String(r.e));
+  t.mock.timers.reset();
+  r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [turns("https://a.example", [HANG, aged]).rpc, turns("https://b.example", [aged]).rpc], nowMs: NOW }));
+  assert.equal(r.ok, false);
+  assert.equal(r.ms, POOL_USD_CALL_TIMEOUT_MS + POOL_USD_RETRY_BACKOFF_MS);
+  assert.match(String(r.e), /older than 60 s/);
+  t.mock.timers.reset();
+  // Chainlink on Base: 1495 s old at the start (its bound 1500 s), the same slow provider
+  const max = POOL_USD_FEEDS.base.maxAgeS;
+  const edit = then(wordEdit(LRD, 3, BigInt(startS - (max - 5))), blockAt(NOW));
+  const once = (k: 0 | 1, slow: boolean): SolanaRpc => {
+    const r0 = replay(FX.base, k, edit);
+    let n = 0;
+    return Object.assign((m: string, p: readonly unknown[]) => (slow && n++ === 0 ? new Promise(() => {}) : r0(m, p)), { url: FX.base.rpcs[k] });
+  };
+  r = await onClock(t, () => poolUsdPrice({ chain: "base", rpcs: [once(0, false), once(1, false)], nowMs: NOW }));
+  assert.equal(r.ok, true, String(r.e));
+  t.mock.timers.reset();
+  r = await onClock(t, () => poolUsdPrice({ chain: "base", rpcs: [once(0, true), once(1, false)], nowMs: NOW }));
+  assert.equal(r.ok, false);
+  assert.match(String(r.e), new RegExp(`older than ${max} s`));
 });
 
 // ------------------------------------------------------------------------------------------------ the account and the feed

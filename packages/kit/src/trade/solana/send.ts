@@ -335,12 +335,15 @@ export class SolanaRpcTransportError extends Error {
   readonly fault: SolanaRpcFault;
   readonly tries: number;
   readonly host: string;
-  constructor(fault: SolanaRpcFault, detail: string, tries: number, host: string) {
+  /** The last answer's Retry-After in ms, when it named one: a caller that asks the provider again waits at least this. */
+  readonly afterMs: number | null;
+  constructor(fault: SolanaRpcFault, detail: string, tries: number, host: string, afterMs: number | null = null) {
     super(`${detail} (${fault}, ${tries} ${tries === 1 ? "try" : "tries"} at ${host})`);
     this.name = "SolanaRpcTransportError";
     this.fault = fault;
     this.tries = tries;
     this.host = host;
+    this.afterMs = afterMs;
   }
 }
 /** The JSON-RPC throttle codes a provider may answer inside an HTTP 200: -32029 and -32429 (the card's brief), -429 and
@@ -455,7 +458,7 @@ export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: R
             // the backoff is a floor: a Retry-After of 0 never makes a throttled call a burst
             const waitMs = Math.max(e.afterMs ?? 0, retry.backoffMs * 2 ** (tries - 1));
             // a wait that ends past the deadline is not begun: the call answers now, its fault named
-            if (Date.now() + waitMs >= end) throw new SolanaRpcTransportError(e.fault, e.message, tries, host);
+            if (Date.now() + waitMs >= end) throw new SolanaRpcTransportError(e.fault, e.message, tries, host, e.afterMs);
             await new Promise((res) => setTimeout(res, waitMs));
             return go(tries + 1);
           }
