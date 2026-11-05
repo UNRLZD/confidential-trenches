@@ -651,6 +651,54 @@ contract SellTest is SellBase {
     assertEq(_w().nonce(), 0);
     assertEq(address(pool).balance, 0);
   }
+
+  /*///////////////////////////////////////////////////////////////
+      REVIEW ROUND 3, L-2: A COPIED PRECOMMITMENT (today's behaviour, held)
+  //////////////////////////////////////////////////////////////*/
+
+  // A stranger who deposits a signed Sell's precommitment first, at MIN_DEPOSIT, makes the whole sell revert: W keeps its
+  // tokens and its nonce, and signs again with a fresh precommitment (the kit's recovery: card precommit-taken-recover).
+  // Reproduced by the pool-scan-3 scanner (its Scan3.t.sol), kept here as L-2's standing test.
+  function test_aCopiedPrecommitmentRevertsTheWholeSellAndWKeepsItsTokens() public {
+    SellDelegate.Sell memory _s = _good();
+    bytes memory _sig = _signed(_s);
+    address _griefer = address(0xBAD0);
+    vm.deal(_griefer, 1 ether);
+    vm.prank(_griefer);
+    pool.deposit{value: 0.0001 ether}(0.0001 ether, _s.precommitment);
+    uint256 _tokens = token.balanceOf(W);
+    vm.prank(SENDER);
+    vm.expectRevert(IPrivacyPool.PrecommitmentAlreadyUsed.selector);
+    _w().sell(_s, FEE, _sig);
+    assertEq(token.balanceOf(W), _tokens, 'W still holds the tokens');
+    assertEq(_w().nonce(), 0, 'the nonce is not used: W signs a new Sell');
+    assertEq(_griefer.balance, 1 ether - 0.0001 ether, 'the grief costs the stranger MIN_DEPOSIT');
+  }
+
+  // The same for a plain deposit: the stranger's note is Poseidon(value, label, the copied precommitment), which only
+  // the precommitment's owner can spend, and the owner's own deposit is refused with its ether kept.
+  function test_aCopiedPrecommitmentRefusesTheOwnersDepositAndItKeepsItsEther() public {
+    uint256 _pre = 0xABCD;
+    address _owner = address(0x71C7);
+    address _griefer = address(0xBAD0);
+    vm.deal(_owner, 1 ether);
+    vm.deal(_griefer, 1 ether);
+    vm.recordLogs();
+    vm.prank(_griefer);
+    uint256 _c = pool.deposit{value: 0.0001 ether}(0.0001 ether, _pre);
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    uint256 _label;
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      if (_logs[_i].topics[0] == IPrivacyPool.Deposited.selector) {
+        (, _label,,) = abi.decode(_logs[_i].data, (uint256, uint256, uint256, uint256));
+      }
+    }
+    assertEq(_c, PoseidonT4.hash([uint256(0.0001 ether), _label, _pre]), 'the note only the precommitment owner spends');
+    vm.prank(_owner);
+    vm.expectRevert(IPrivacyPool.PrecommitmentAlreadyUsed.selector);
+    pool.deposit{value: 0.5 ether}(0.5 ether, _pre);
+    assertEq(_owner.balance, 1 ether, 'the owner keeps its ether; its deposit did not land');
+  }
 }
 
 /// Two sells of W in one call
