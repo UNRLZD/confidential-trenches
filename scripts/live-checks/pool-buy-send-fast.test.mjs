@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/pool-buy-send-fast.test.mjs: the live check replays recorded runs
 // (pool-buy-send-fast.answers.json). good_local: apps/helper at this card run on a Mac: PASS. bad_deployed: HELPER_HOST
 // before this card, with no /v1/rpc/solana-devnet route and the pool path's reads refused: FAIL. bad_open_scan: this
-// card's helper before review L-2, forwarding an open getProgramAccounts scan: FAIL. Made from the good run: a devnet
+// card's helper with no devnet pool pinned, refusing the restore's scan: FAIL. Made from the good run: a devnet
 // route that throttles like the public endpoint it replaces (1 request a second: every other read 429), one that reads
 // mainnet (no devnet pool), a pool read refused 400, the open scan forwarded, a slow median, a missing read, a CORS echo
 // of "*": each FAIL.
@@ -34,7 +34,7 @@ const edit = (rec, f) => ({ ...rec, reads: rec.reads.map((x, i) => f(x, i) ?? x)
 test("recorded good run: the devnet route reads the devnet pool, forwards the pool path's reads on both routes, paces under 1 s: PASS", async () => {
   const r = await run(A.good_local);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 3 + 2 * POOL_READS.length * 3 + 4);
+  assert.equal(r.lines.length, 3 + 2 * POOL_READS.length * 3 + 3 + 4);
 });
 
 test("recorded bad run: HELPER_HOST before this card (no devnet route, the pool reads refused 400): FAIL", async () => {
@@ -47,12 +47,12 @@ test("recorded bad run: HELPER_HOST before this card (no devnet route, the pool 
   assert.ok(b.some((l) => l.startsWith("BAD [solana-devnet pace] every read a slot")), b.join("\n"));
 });
 
-test("recorded bad run: this card's helper before review L-2, the open getProgramAccounts scan forwarded on both routes: FAIL", async () => {
-  const r = await run(A.bad_open_scan);
+test("recorded bad run: this card's helper with no devnet pool pinned, the restore's scan refused 400: FAIL", async () => {
+  const r = await run(A.bad_unpinned);
   assert.equal(r.ok, false);
   const b = bad(r);
-  for (const route of ["solana", "solana-devnet"]) assert.ok(b.some((l) => l.startsWith(`BAD [${route} getProgramAccounts] an open scan refused: 200`)), b.join("\n"));
-  assert.equal(b.length, 2, b.join("\n"));
+  assert.ok(b[0]?.startsWith("BAD [solana-devnet restore scan] forwarded, a list of the pool's marks: 400"), b.join("\n"));
+  assert.equal(b.length, 1, b.join("\n"));
 });
 
 test("made from the good run: a 1-request-a-second provider, a mainnet read, a refused read, a slow median, a missing read, a CORS *: each FAIL", () => {
@@ -77,6 +77,12 @@ test("made from the good run: a 1-request-a-second provider, a mainnet read, a r
       assert.equal(judge(flipped).ok, false, `${route} ${method} ${open ? "forwarded" : "refused"}`);
       assert.equal(judge({ ...g, reads: g.reads.filter((x) => !(x.route === route && x.kind === "pool" && x.method === method)) }).ok, false, `${route} ${method} missing`);
     }
+  // the restore's scan refused, answered with no list, or missing (review L-2 re-review): each FAIL
+  for (const body of ['{"error":{"code":"method_not_allowed"}}', JSON.stringify({ jsonrpc: "2.0", id: 0, result: { context: { slot: 1 }, value: null } })]) {
+    const off = edit(g, (x) => (x.kind === "restore" ? { ...x, status: body.includes("error") ? 400 : 200, body: body.replace('"id":0', `"id":${x.id}`) } : undefined));
+    assert.equal(judge(off).ok, false, body);
+  }
+  assert.equal(judge({ ...g, reads: g.reads.filter((x) => x.kind !== "restore") }).ok, false, "the restore's scan missing");
   const slow = edit(g, (x) => (x.kind === "pace" ? { ...x, ms: PACE_P50_MS + 1 } : undefined));
   assert.equal(judge(slow).ok, false);
   assert.equal(judge({ ...g, reads: g.reads.filter((x) => x.kind !== "pace" || x.id !== 2) }).ok, false, "a pace read missing");

@@ -13,6 +13,9 @@
 //   - on both routes, a getProgramAccounts scan with a dataSize filter alone (not the note restore's shape: no memcmp)
 //     is refused 400 method_not_allowed (review L-2: the helper forwards a scan only on its own pinned pool program with
 //     a dataSize and a memcmp filter, so no caller spends the keyed provider's quota on an open scan);
+//   - devnet: the note restore's exact scan (RESTORE_SCAN, packages/wallet/src/pool/solana-restore.ts solanaMarks: the
+//     spent marks' bucket 0 of the devnet pool program) is forwarded: 200 with { context, value: [...] } for its own id
+//     (the box's POOL_SOLANA_PROGRAM_DEVNET is the devnet pool program, else the helper refuses it 400);
 //   - devnet pace: PACE_READS getSlot reads one after another each answer 200 with a slot, none 429, and their median is
 //     under PACE_P50_MS (the page's buy reads its two providers this way, one step after another);
 //   - every answer carries a full-sha X-Helper-Commit and echoes SIGN_HOST in Access-Control-Allow-Origin.
@@ -46,6 +49,9 @@ export const POOL_READS = [
   { method: "getProgramAccounts", params: [DEVNET_PROGRAM, { encoding: "base64", commitment: "finalized", filters: [{ dataSize: 1 }] }], refused: true },
 ];
 export const ROUTES = ["solana-devnet", "solana"];
+/** The restore's request for the devnet pool's spent marks, bucket 0, as solanaMarks sends it (no minContextSlot on a
+ *  first read). */
+export const RESTORE_SCAN = [DEVNET_PROGRAM, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }];
 
 const json = (t) => {
   try {
@@ -56,7 +62,7 @@ const json = (t) => {
 };
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor((xs.length - 1) / 2)];
 
-/** The check on one recorded run: { reads: [{ route, kind: "pool" | "owner" | "pace", method, id, ms, status, headers, body }] }. */
+/** The check on one recorded run: { reads: [{ route, kind: "pool" | "owner" | "pace" | "restore", method, id, ms, status, headers, body }] }. */
 export function judge({ reads }) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -85,6 +91,13 @@ export function judge({ reads }) {
       else say(r.status === 200 && b?.jsonrpc === "2.0" && b.id === r.id && (Object.hasOwn(b, "result") || Object.hasOwn(b, "error")), `${tag} forwarded: ${r.status} ${r.body.slice(0, 100)}`);
       headersOk(r, tag);
     }
+  const restore = reads.find((x) => x.route === "solana-devnet" && x.kind === "restore");
+  if (!restore) say(false, "[solana-devnet restore scan] no read");
+  else {
+    const b = json(restore.body);
+    say(restore.status === 200 && b?.id === restore.id && Number.isSafeInteger(b?.result?.context?.slot) && Array.isArray(b?.result?.value), `[solana-devnet restore scan] forwarded, a list of the pool's marks: ${restore.status} ${restore.body.slice(0, 100)}`);
+    headersOk(restore, "[solana-devnet restore scan]");
+  }
   const pace = reads.filter((x) => x.route === "solana-devnet" && x.kind === "pace");
   say(pace.length === PACE_READS, `[solana-devnet pace] ${pace.length} of ${PACE_READS} reads`);
   const slots = pace.map((r) => ({ r, b: json(r.body) }));
@@ -107,15 +120,18 @@ export async function read(base = BASE, fetchFn = fetch) {
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
     });
     const body = await r.text();
+    // the restore's answer is read whole (a bucket holds 256 marks at most, under 100 KB); the others' first 2,000
+    const keep = kind === "restore" ? 200_000 : 2_000;
     const ms = Math.round(performance.now() - t0);
     const headers = {};
     for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
-    reads.push({ route, kind, method, id, readAt: new Date().toISOString(), ms, status: r.status, headers, body: body.length > 2_000 ? body.slice(0, 2_000) : body });
+    reads.push({ route, kind, method, id, readAt: new Date().toISOString(), ms, status: r.status, headers, body: body.length > keep ? body.slice(0, keep) : body });
     id++;
   };
   await one("solana-devnet", "owner", "getAccountInfo", [DEVNET_POOL, { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 8 } }]);
   for (let i = 0; i < PACE_READS; i++) await one("solana-devnet", "pace", "getSlot", [{ commitment: "confirmed" }]);
   for (const route of ROUTES) for (const { method, params } of POOL_READS) await one(route, "pool", method, params);
+  await one("solana-devnet", "restore", "getProgramAccounts", RESTORE_SCAN);
   return { base, reads };
 }
 
