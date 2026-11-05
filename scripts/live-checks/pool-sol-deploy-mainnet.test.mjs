@@ -11,7 +11,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkMainnet, DEPLOYMENT as RECORD } from "./pool-sol-deploy-mainnet.mjs";
-import { operatorProblems, MAINNET_CODE_SHA, MAINNET_RPCS, RPCS } from "./pool-sol-deploy.mjs";
+import { b58decode, operatorProblems, MAINNET_CODE_SHA, MAINNET_RPCS, RPCS } from "./pool-sol-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-sol-deploy-mainnet.answers.json", import.meta.url), "utf8"));
 const D = A.deployment;
@@ -30,15 +30,18 @@ function replay(answers) {
   };
 }
 const run = (answers, deployment = D, rpcs = A.rpcs) => checkMainnet({ deployment, fetchFn: replay(answers), rpcs, sleep: async () => {} });
-/** The base with one recorded bad answer's patch applied to every read of its address on its URL (or both). */
+/** The base with one recorded bad answer's patch applied to every read of its address on its URL (or both); a `swap`
+ * puts another address at one entry of the table and of the record's list alike, so the two still agree. */
 function patched(bad) {
   const out = structuredClone(A.base);
+  if (bad.swap) out.deployment = { ...D, table_addresses: D.table_addresses.map((a, i) => (i === bad.swap.index ? bad.swap.with : a)) };
   for (const a of out) {
     if (a.method !== "getAccountInfo" || a.params[0] !== bad.address || (bad.url !== "both" && a.url !== bad.url)) continue;
     let d = Buffer.from(a.json.result.value.data[0], "base64");
     if (bad.hex) Buffer.from(bad.hex, "hex").copy(d, bad.at);
     if (bad.xor) d[bad.at] ^= bad.xor;
     if (bad.truncate) d = d.subarray(0, d.length - bad.truncate);
+    if (bad.swap) Buffer.from(b58decode(bad.swap.with)).copy(d, 56 + 32 * bad.swap.index);
     a.json.result.value.data[0] = d.toString("base64");
   }
   return out;
@@ -59,7 +62,8 @@ test("the base the bad answers are cut from passes, every line ok on both mainne
 
 for (const bad of A.bad) {
   test(`recorded bad answer fails: ${bad.name}`, async () => {
-    failsOn(await run(patched(bad)), new RegExp(bad.fails));
+    const p = patched(bad);
+    failsOn(await run(p, p.deployment ?? D), new RegExp(bad.fails));
   });
 }
 
@@ -100,4 +104,34 @@ test("the owner's paste's own recording on mainnet passes, once its record exist
     a.json.result.value.data[0] = d.toString("base64");
   }
   failsOn(await checkMainnet({ deployment: g.deployment, fetchFn: replay(answers), rpcs: g.rpcs, sleep: async () => {} }), /authority none \(frozen\)/);
+});
+
+test("review 2: the table's list is the kit's own for this pool, the venue's 9 keys (pump Global's fee recipient and 8 buyback recipients) the only entries taken from the list", async () => {
+  // the 9 venue keys are free: another fee recipient (Global's own may change) still passes
+  const venue = structuredClone(A.base);
+  const swapped = D.table_addresses.map((a, i) => (i === 13 ? "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin" : a));
+  for (const a of venue) if (a.method === "getAccountInfo" && a.params[0] === D.table) {
+    const d = Buffer.from(a.json.result.value.data[0], "base64");
+    Buffer.from(b58decode(swapped[13])).copy(d, 56 + 32 * 13);
+    a.json.result.value.data[0] = d.toString("base64");
+  }
+  const r = await run(venue, { ...D, table_addresses: swapped });
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  // any fixed entry swapped fails: each one of the 16 that are not the venue's
+  for (const i of [0, 1, 5, 6, 10, 11, 12, 14, 15, 16]) {
+    const list = D.table_addresses.map((a, j) => (j === i ? "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin" : a));
+    failsOn(await run(A.base, { ...D, table_addresses: list }), /the record's table list is the kit's/);
+  }
+  // one address more or fewer fails too
+  failsOn(await run(A.base, { ...D, table_addresses: [...D.table_addresses, D.pool] }), /the record's table list is the kit's/);
+});
+
+test("review 3: a funder that is not the run's own key and still holds lamports is named as such, the funding sent from another wallet", async () => {
+  const OTHER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+  const answers = structuredClone(A.base);
+  for (const url of A.rpcs) answers.push({ url, method: "getBalance", params: [OTHER, { commitment: "finalized" }], status: 200, json: { jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: 2_000_000_000 } } });
+  const r = await run(answers, { ...D, funders: [...D.funders, OTHER] });
+  failsOn(r, new RegExp(`${OTHER} holds 2000000000 lamports on \\S+: it is not this run's key ${D.funder}: the funding came from a wallet other than the return address ${D.return_to}`));
+  // the run's own key holding lamports is its own line
+  assert.ok(!r.lines.some((l) => l.startsWith("FAIL") && l.includes(D.funder)), r.lines.join("\n"));
 });
