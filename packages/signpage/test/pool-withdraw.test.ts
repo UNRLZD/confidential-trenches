@@ -988,3 +988,18 @@ test("the release's signature is written with the owed send before its read-back
   assert.equal(a.stage, "sent");
   assert.equal(keptAtRead, true, "the read-back began before the signature was written");
 });
+
+test("a failed write of the release's signature never stops the send: keepRelease rejects, the part is still sent on, W at 0 (fold 6, review LOW)", async () => {
+  const wd = await world([30_000_000n]);
+  let asked = 0;
+  const keepRelease = async () => {
+    asked++;
+    throw new Error("the store refused the write");
+  };
+  const a = await runPoolWithdraw({ ...wd.host, keepRelease }, ASK, TO, 5_000_000n, COST);
+  assert.equal(asked, 1, "the signature's write was asked for");
+  assert.equal(a.stage, "sent");
+  assert.equal(wd.onwards().length, 1);
+  assert.equal(wd.balance.get(wd.binds[0]!.recipient), 0n);
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+});
