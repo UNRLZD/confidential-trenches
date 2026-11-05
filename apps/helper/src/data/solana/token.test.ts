@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
+import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 import { start } from "../../server.ts";
 import { geckoBudget, PAGE_RESERVE, REFRESH_SLOT, WINDOW_MS } from "../gecko.ts";
 import { createProxy } from "../../proxy/proxy.ts";
@@ -201,7 +202,8 @@ test("page: an upstream down answers 503; the last good page serves up to 60 s, 
 });
 
 test("page: Jupiter's search is batched: mints asked together share one call; one asked within JUP_GAP_MS of the last waits it out; a row is kept 12 s", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   let now = NOW;
   const proxy = fakeProxy();
   const tok = createSolanaToken(proxy, fakeRpc(), { now: () => now });
