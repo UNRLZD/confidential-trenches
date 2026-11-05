@@ -4,6 +4,10 @@
 //     11:19Z, blocks 223158625-223158627): no account, so no code hash, code or config() on either RPC. It must FAIL,
 //     and nothing may be written. Its key list reads [] (an account that does not exist has no key), so keys [] alone
 //     never passes a vault: the code hash and config() reads must fail it.
+//   - vault-mainnet-test.answers.json: the deployed vault read back after paste 4 (5 Nov 13:32Z): keys [], the pinned
+//     code hash, the code's imports and exports, config() with mainnet USDC and the record's scope on both RPCs, and
+//     its storage_prepay tx 9sZPrcGpNau1fN25R9Xqdu9iKGMkRQvCSiHwFn4ZrNRt final on both. It must PASS; the same answer
+//     with one key added to its key list must FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -47,4 +51,34 @@ test("recorded bad answer: the vault account before its deploy FAILs on its code
   assert.ok(bads(r).includes("BAD no storage_prepay: a read above failed, so nothing is written to this vault"));
   // the key list of an account that does not exist reads []: the check passes that line and fails the vault anyway
   assert.equal(r.lines.filter((l) => /^ok  \S+ key list is \[\] on /.test(l)).length, 2);
+});
+
+// the recorded storage_prepay: its hash and the precommitment it carries, read from the recorded tx itself
+function goodWrite(answers) {
+  const t = answers.find((a) => a.method === "tx").json.result.transaction;
+  return { tx: t.hash, precommitment: JSON.parse(Buffer.from(t.actions[0].FunctionCall.args, "base64").toString()).precommitment };
+}
+
+test("recorded good answer: the deployed vault PASSes on both RPCs, keyless, the pin, its config and its storage_prepay", async () => {
+  const answers = load("vault-mainnet-test.answers.json");
+  assert.deepEqual([...new Set(answers.map((a) => a.url))], ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"]);
+  const w = goodWrite(answers);
+  assert.equal(w.tx, "9sZPrcGpNau1fN25R9Xqdu9iKGMkRQvCSiHwFn4ZrNRt");
+  const r = await run(answers, w);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.deepEqual(bads(r), []);
+  assert.equal(r.lines.filter((l) => /^ok  \S+ key list is \[\] on /.test(l)).length, 2, r.lines.join("\n"));
+  assert.equal(r.tx, w.tx);
+  const config = JSON.parse(Buffer.from(answers.find((a) => a.params.method_name === "config").json.result.result).toString());
+  assert.equal(config.scope, deployment.scope);
+  assert.equal(config.asset, deployment.asset);
+});
+
+test("recorded good answer with a key added to the vault's key list FAILs", async () => {
+  const answers = load("vault-mainnet-test.answers.json");
+  const a = answers.find((x) => x.url === "https://near.drpc.org" && x.params.request_type === "view_access_key_list");
+  a.json.result.keys = [{ public_key: "ed25519:WHHJ4Rmp2dzkkWtE5UuNkeEnw6JCnXLPrnXV6fiQhhh", access_key: { nonce: 0, permission: "FullAccess" } }];
+  const r = await run(answers, goodWrite(answers));
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  assert.ok(bads(r).some((l) => l.includes("key") && l.includes("near.drpc.org")), r.lines.join("\n"));
 });
