@@ -692,6 +692,23 @@ export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promis
   }
 }
 
+/**
+ * Every pool's start check (card evm-buy-hookdata-fee, review fold 4 MEDIUM-1): each Solana pool's configured fee at its
+ * first good rent read (pool/solana.ts ready; a failed read is asked again every `everyMs` until one is good) and each
+ * EVM pool's state reads a proof's life back (pool/evm.ts ready). Resolves once all have passed; the first refusal calls
+ * `refuse` (main: exit 2) and rejects, so the helper's ready never turns true over a refused start.
+ */
+export function poolsChecked(pools: ReadonlyMap<string, Pick<SolanaPoolSender, "ready">>, evmPools: ReadonlyMap<string, Pick<EvmPoolSender, "ready">>, refuse: (e: Error) => void, everyMs = READY_EVERY_MS): Promise<void> {
+  const sol = [...pools.values()].map((p) => {
+    const again = setInterval(() => void p.ready, everyMs);
+    again.unref();
+    return p.ready.finally(() => clearInterval(again));
+  });
+  const checks = [...sol, ...[...evmPools.values()].map((p) => p.ready())];
+  for (const c of checks) c.catch(refuse);
+  return Promise.all(checks).then(() => undefined);
+}
+
 export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
@@ -804,7 +821,9 @@ if (import.meta.main) {
     // a restart loop until redeploy.sh's bound (18:55-18:58Z: a partial POOL_EVM_*_BASE_SEPOLIA set)
     const evmPools = evmPoolSendersFromEnv(process.env);
     const release = releaseOf(process.env);
-    for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
+    // card evm-buy-hookdata-fee: an EVM pool RPC that cannot answer the fee's state reads 10 min back stops the start;
+    // both pool kinds' start checks run from here, and ready (below) waits for them
+    const checked = poolsChecked(pools, evmPools, (e) => (console.error(`helper: ${e.message}`), process.exit(2)));
     const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
@@ -812,18 +831,24 @@ if (import.meta.main) {
     // card helper-restart-fresh: the charts callers read lately are re-read ahead of their next read, one GeckoTerminal
     // call at most a tick in its "ahead" lane (data/solana/token.ts ahead), so a swap hands over bars inside the bound
     setInterval(() => void token.ahead().catch(() => undefined), AHEAD_TICK_MS).unref();
+    // card helper-crowd-429: GeckoTerminal's calls a minute by lane and read, so a refused chart is named from the log
+    setInterval(() => void ((l) => l !== null && console.log(`helper: ${l}`))(gecko.minute()), 60_000).unref();
     // ready (health.ts): once the lists, a token page and its holders answer 200. A helper that replaces a running one
     // (peer) listens only then, so the proxy, which tries each helper of the service in turn, never reaches it cold
     // (deploy/redeploy.sh waits for it, bounded, before it stops the old one); one that starts alone listens at once.
+    // Every pool's start check is part of it, so a start that refuses (exit 2) is never ready and the old one stays.
     let ready = false;
-    const warmed = warmUntilReady({ lists, evmLists, token }).then(() => void (ready = true));
+    const warmed = Promise.all([warmUntilReady({ lists, evmLists, token }), checked]).then(() => void (ready = true));
     const listen = () => {
       server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools); // warms both relayers once the senders are ours
       drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready ? "" : ", warming"}`));
     };
-    if (senders.peer) void warmed.then(listen);
-    else listen();
+    if (senders.peer) void warmed.then(listen, () => undefined); // a refusal: poolsChecked's exit 2, never a listen
+    else {
+      listen();
+      void warmed.catch(() => undefined);
+    }
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
     process.exit(2);

@@ -7,7 +7,6 @@
 import { evmPoolVenues, type EvmPoolChain } from "./buy-unpinned.ts";
 import {
   EvmPoolSellError,
-  pinnedBuildSell,
   pinnedSignSell,
   pinnedSignSellAuthorization,
   pinnedSignSimSell,
@@ -15,7 +14,8 @@ import {
   type EvmSellSim,
   type EvmPoolSellAuthorization,
 } from "./sell-unpinned.ts";
-import { EVM_QUOTE_MAX_AGE_MS, EvmQuoteError, evmIsDeviceSellQuote, type EvmPoolSellQuote } from "../../checks/evm/quote.ts";
+import { type EvmPoolSellQuote } from "../../checks/evm/quote.ts";
+import { evmIsQuotedSell, evmQuotedSell, type EvmPoolSellFields } from "./quoted.ts";
 
 export {
   EVM_POOL_SELL_DEADLINE_MAX_S,
@@ -30,35 +30,24 @@ export {
   type EvmV4SellRoute,
 } from "./sell-unpinned.ts";
 
-/** What W adds to a device sell quote: the return note's precommitment, the sender's fee cap, the deadline (unix
- *  seconds) and W's sell nonce. */
-export type EvmPoolSellFields = { precommitment: bigint; feeCap: bigint; deadline: bigint; nonce: bigint };
+export type { EvmPoolSellFields } from "./quoted.ts";
 
-// Every sell evmPoolBuildSell returned: W signs no other. The kit exports no builder that takes a route or a minOut.
-const QUOTED_SELLS = new WeakSet<EvmPoolSell>();
+// W signs only a sell evmPoolBuildSell returned (quoted.ts holds the record). The kit exports no builder that takes a
+// route or a minOut.
 
 /** The sell a device quote holds (its chain, W, token, amount, route, target and minOut), into the chain's pinned pool,
  *  with `fields` (see sell-unpinned.ts evmPoolBuildSellUnpinned for every check). Only a quote evmPoolSellQuote
- *  returned, whose block is at most 30 s behind the device's clock, is built. */
+ *  returned, whose block is at most 30 s behind the device's clock, is built, at a fee cap within the quote's feeMax
+ *  (see quoted.ts evmQuotedSell). */
 export function evmPoolBuildSell(quote: EvmPoolSellQuote, fields: EvmPoolSellFields): EvmPoolSell {
-  if (!evmIsDeviceSellQuote(quote)) throw new EvmQuoteError("bad_request", "a sell is built only from a quote evmPoolSellQuote returned");
   // no caller sets the clock
-  const nowMs = Date.now();
-  if (!Number.isFinite(nowMs) || nowMs - Number(quote.block.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) {
-    throw new EvmQuoteError("stale_quote", "the quote's block is more than 30 s old");
-  }
-  if (typeof fields !== "object" || fields === null) throw new EvmPoolSellError("bad_amount", "the sell's fields are an object");
-  const { precommitment, feeCap, deadline, nonce } = fields;
-  const { chain, w, token, amountIn: amount, target, route, minOut } = quote;
-  const built = pinnedBuildSell(evmPoolVenues(), chain, { w, token, amount, target, route, minOut, precommitment, feeCap, deadline, nonce });
-  QUOTED_SELLS.add(built);
-  return built;
+  return evmQuotedSell(evmPoolVenues(), quote, fields, Date.now());
 }
 
 /** W's signature of `built`, a sell evmPoolBuildSell returned, into the chain's pinned pool (not_built otherwise; see
  *  sell-unpinned.ts evmPoolSignSellUnpinned). */
 export function evmPoolSignSell(secretKey: Uint8Array, chain: EvmPoolChain, built: EvmPoolSell): Uint8Array {
-  if (!QUOTED_SELLS.has(built)) throw new EvmPoolSellError("not_built", "W signs only a sell evmPoolBuildSell returned");
+  if (!evmIsQuotedSell(built)) throw new EvmPoolSellError("not_built", "W signs only a sell evmPoolBuildSell returned");
   return pinnedSignSell(evmPoolVenues(), secretKey, chain, built);
 }
 

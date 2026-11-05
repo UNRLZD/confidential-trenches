@@ -148,13 +148,16 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
       nativeFirst: true,
-      // Keyless, of five operators (Allnodes, dRPC, Robinhood, bloXroute, Globalstake), timed on the first five eth_call
-      // batches of a USDG quote (1.31 MB) at each one's newest block hash, 10 rounds each, every answer equal to
-      // Robinhood's (card evm-quote-warm-round, 2026-11-04 16:5xZ from this Mac): p50/p95 511/1,014 ms, 606/845,
-      // 823/1,180, 766/2,801 and 2,349/4,972 ms. Passed over: daybreak (413 on a batch this size), blockvectra (outside
-      // its history window), pocket and blockmachine (8 s and more, timeouts), thirdweb (refused requests), tatum,
-      // nodeflare (no head)
-      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
+      // Keyless, of five operators timed on the first five eth_call batches of a USDG quote (1.31 MB) at each one's newest
+      // block hash, 10 rounds each, every answer equal to Robinhood's (card evm-quote-warm-round, 2026-11-04 16:5xZ from
+      // this Mac): p50/p95 Allnodes (publicnode) 511/1,014 ms, dRPC 606/845, Robinhood 823/1,180, bloXroute 766/2,801,
+      // Globalstake 2,349/4,972. Only two hold state 600 s back, a proof's life (card evm-buy-hookdata-fee, fold 3; 30 of
+      // 30 each at 600 s, 2026-11-04 20:12Z): Robinhood's own answers 630 s and refuses 660 s; publicnode, bloXroute and
+      // Globalstake refuse a state read 600 s back ("historical state ... is not available", 2026-11-05 01:15Z), so none
+      // of them is listed; live check evm-buy-hookdata-fee reads every listed provider at 600 s. Passed over too: daybreak
+      // (413 on a batch this size), blockvectra (outside its history window), pocket and blockmachine (8 s and more,
+      // timeouts), thirdweb (refused requests), tatum, nodeflare (no head)
+      providers: Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"]),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
       maxLag: 100,
@@ -223,7 +226,13 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 6,118 bytes, keccak 0xd707b1da…, poolManager() the PoolManager above. No v3 here (M365)
       quoters: bare({ v4: "0x8dc178efb8111bb0973dd9d722ebeff267c98f94" }),
       nativeFirst: true,
-      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"] as const),
+      // dRPC, not PublicNode, beside Robinhood's own (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A): the relay fee
+      // reads state at the epoch's first block, up to a proof's 10-min life old (the helper's POOL_LIFE_MAX_MS), and
+      // robinhood-sepolia-rpc.publicnode.com keeps about 15 s ("historical state ... is not available" at 20 s, 6 of 6;
+      // at 600 s, 6 of 6), where robinhood-testnet.drpc.org answered 6 of 6 at 20, 210, 600 and 700 s and 30 of 30 at
+      // 600 s, and rpc.testnet.chain.robinhood.com 30 of 30 at 600 s (read 2026-11-04 20:09-20:13Z; live check
+      // evm-buy-hookdata-fee holds every pinned provider to 600 s)
+      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
       // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 10 s
       maxLag: 100,
     }),
@@ -361,6 +370,10 @@ function checkRoute(chain: EvmPoolChain, route: EvmRoute, quoted = false): strin
         refuse("bad_route", `a v4 tick spacing is 1 to ${MAX_TICK_SPACING}`);
       }
       if (hexBytes(h.hookData).length > EVM_POOL_MAX_HOOK_DATA) refuse("bad_route", `hook data is at most ${EVM_POOL_MAX_HOOK_DATA} bytes`);
+      // a quoted buy's hook data is the device's own, and the device makes none, as a sell's (sell-unpinned.ts v4Data;
+      // card evm-buy-hookdata-fee): a listed hook that read a referrer or a price from it would let whoever wrote it
+      // steer what W signs
+      if (quoted && h.hookData !== "0x") refuse("bad_route", "a quoted buy's hook data is the device's own: empty");
     }
     tokens = [currencyIn, ...hops.map((h) => h.currency)];
   }
