@@ -10,6 +10,7 @@
 // { trades: [...], src: "chain", as_of_ms } within ANSWER_MS. A failing tape is named by its status, Retry-After and time.
 //   node scripts/live-checks/helper-robinhood-capacity.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+// Runs: pending helper-robinhood-capacity, the 15 s bound rides fold 6
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
