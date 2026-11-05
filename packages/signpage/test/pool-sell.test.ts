@@ -1283,7 +1283,7 @@ for (const on of ["read", "simulate"] as const) {
     assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
     assert.deepEqual({ tokenAccount: w.c.accounts.get(ATA)?.lamports ?? 0, volumeAccount: w.c.accounts.get(solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM))?.lamports ?? 0, w: w.c.accounts.get(W.address)?.lamports ?? 0 }, { tokenAccount: 0, volumeAccount: 0, w: 0 });
     assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
-    // each fault told by its step and its name (the CO, 21:11Z: a rent back's fault is never silent)
+    // each fault told by its step and its name (a rent back's fault is never silent)
     assert.ok(w.told.some((t) => t.step === (on === "read" ? "teardown" : "teardown") && t.state === "fault" && t.detail === "http_429 at solana-devnet.api.onfinality.io"), JSON.stringify(w.told));
     assert.equal(w.told.at(-1)?.state, "sent");
   });
@@ -1349,7 +1349,7 @@ test("a teardown frame no provider indexes stops the rent back at POOL_RENT_BACK
   assert.equal(w.owed.get(W.address)?.passes, 1);
 });
 
-// The CO, 21:11Z, and review L7: a rent back that gives up, or a page closed before it ran, is owed: recorded before the
+// Review L7: a rent back that gives up, or a page closed before it ran, is owed: recorded before the
 // sell leaves the device and run again on the next load until nothing is left on W.
 test("a rent back owed is recorded before the sell's send and run again on the next load: one that gave up (a provider down past every try) finishes there", async () => {
   const plant: Plant = { ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], throttle: { on: "read", n: 1_000_000 } };
