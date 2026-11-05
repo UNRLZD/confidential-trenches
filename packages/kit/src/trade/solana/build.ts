@@ -79,9 +79,9 @@ export const SOLANA_JUPITER_CAP_UP: Readonly<Record<number, number>> = { 40: 48,
 export const SOLANA_JUPITER_CAP_BELOW_FIRST = 32;
 export const SOLANA_JUPITER_CAP_DOWN = 4;
 /**
- * The most cap-search builds a search makes. A trade searches once (flow.ts CapLead): its other legs build at the cap
- * the first leg found, so K legs ask K builds plus at most 2 steps past 40 plus a floor rebuild per leg that needs one
- * (apps/helper/src/proxy/proxy.ts PROXY_BUDGETS.jupiter).
+ * The most cap-search builds a search makes. A trade's legs all build at 40 at once and search the steps past it once
+ * (flow.ts CapLead): K legs ask K to 3K + 1 builds with the floor rebuilds (apps/helper/src/proxy/proxy.ts
+ * PROXY_BUDGETS.jupiter).
  */
 export const SOLANA_JUPITER_MAX_BUILDS = 3;
 /** The first step up: the cap fetchSolanaJupiterBuild retries at when 40 finds no route. */
@@ -342,6 +342,17 @@ export async function fetchSolanaJupiterBuild(
 /** One build of the cap search, as the caller's `fit` judged it. */
 export type SolanaCapStep = { maxAccounts: number; outcome: "fits" | "no_route" | "too_large"; size?: number };
 export type SolanaBuildFitted<T> = { build: SolanaJupiterBuild; fitted: T; maxAccounts: number; steps: SolanaCapStep[]; calls: SolanaBuildCall[] };
+/** The cap search's end with no build that fits: the steps it took (any `after` included) and the calls it made. */
+export class SolanaCapSearchError extends SolanaBuildError {
+  readonly steps: readonly SolanaCapStep[];
+  readonly calls: readonly SolanaBuildCall[];
+  constructor(code: "no_route" | "too_large", message: string, steps: readonly SolanaCapStep[], calls: readonly SolanaBuildCall[]) {
+    super(code, message);
+    this.name = "SolanaCapSearchError";
+    this.steps = steps;
+    this.calls = calls;
+  }
+}
 
 /**
  * The trade's build: Jupiter's requote with lower max accounts, judged on the device's own assembly. Asks at 40; on
@@ -350,26 +361,36 @@ export type SolanaBuildFitted<T> = { build: SolanaJupiterBuild; fitted: T; maxAc
  * (SOLANA_JUPITER_MAX_BUILDS) builds. Returns the first build `fit` accepts, with what `fit` returned. When none does:
  * SolanaBuildError("too_large") if any build was over 1,232 bytes, else "no_route". Any other error, from a build or
  * from `fit`, ends the search as it is (an "upstream" answer is never retried here). Nothing is returned that `fit`
- * did not accept, so a transaction over 1,232 bytes never leaves it. `startAt` asks that cap first instead of 40: a
- * trade's other legs start at the cap its first leg's search found (flow.ts), and search on only when it does not fit.
+ * did not accept, so a transaction over 1,232 bytes never leaves it; the end is a SolanaCapSearchError carrying the
+ * steps. `after`: steps this request already took (a first build at 40, flow.ts), which bound the caps, count in
+ * `maxBuilds` and lead the returned steps. `startAt` asks that cap next instead of the search's own next step, when
+ * it lies strictly between what `after` knows (else the own step): a trade's other legs ask the cap the leading leg's
+ * search found, and search on only when it does not fit.
  */
 export async function fetchSolanaJupiterBuildThatFits<T>(
   origin: string,
   req: SolanaBuildRequest,
   fit: (build: SolanaJupiterBuild, maxAccounts: number) => T | Promise<T>,
-  opts: SolanaBuildOptions & { maxBuilds?: number; startAt?: number } = {},
+  opts: SolanaBuildOptions & { maxBuilds?: number; startAt?: number; after?: readonly SolanaCapStep[] } = {},
 ): Promise<SolanaBuildFitted<T>> {
   const base = helperOrigin(origin);
   const maxBuilds = opts.maxBuilds ?? SOLANA_JUPITER_MAX_BUILDS;
   if (!Number.isInteger(maxBuilds) || maxBuilds < 1 || maxBuilds > SOLANA_JUPITER_MAX_BUILDS) throw new Error(`maxBuilds must be 1 to ${SOLANA_JUPITER_MAX_BUILDS}`);
-  const startAt = opts.startAt ?? SOLANA_JUPITER_MAX_ACCOUNTS;
-  if (!Number.isInteger(startAt) || startAt < 1 || startAt > 64) throw new Error("startAt must be 1 to 64");
+  if (opts.startAt !== undefined && (!Number.isInteger(opts.startAt) || opts.startAt < 1 || opts.startAt > 64)) throw new Error("startAt must be 1 to 64");
+  const after = opts.after ?? [];
+  if (!Array.isArray(after) || after.some((x) => !x || !Number.isInteger(x.maxAccounts) || x.maxAccounts < 1 || x.maxAccounts > 64 || (x.outcome !== "no_route" && x.outcome !== "too_large"))) throw new Error("after must be steps with no route or too large");
   const calls: SolanaBuildCall[] = [];
-  const steps: SolanaCapStep[] = [];
-  let cap: number | null = startAt;
+  const steps: SolanaCapStep[] = [...after];
   let lo = 0;
   let hi = 65;
   let largest: string | null = null;
+  for (const x of after) {
+    if (x.outcome === "no_route") lo = Math.max(lo, x.maxAccounts);
+    else (hi = Math.min(hi, x.maxAccounts)), (largest ??= "too_large");
+  }
+  const last = after.at(-1);
+  const own = last ? solanaNextCap(last.maxAccounts, last.outcome as "no_route" | "too_large", lo, hi) : SOLANA_JUPITER_MAX_ACCOUNTS;
+  let cap: number | null = opts.startAt !== undefined && opts.startAt > lo && opts.startAt < hi ? opts.startAt : own;
   while (cap !== null && steps.length < maxBuilds) {
     const a = await askBuild(base, req, cap, opts, calls);
     if (isNoRoute(a)) {
@@ -393,8 +414,8 @@ export async function fetchSolanaJupiterBuildThatFits<T>(
     }
   }
   const tried = steps.map((x) => `${x.maxAccounts} ${x.outcome}${x.size ? ` ${x.size}` : ""}`).join(", ");
-  if (largest !== null) throw new SolanaBuildError("too_large", `no build within ${SOLANA_MAX_TX_BYTES} bytes (${tried})`);
-  throw new SolanaBuildError("no_route", `no route (${tried})`);
+  if (largest !== null) throw new SolanaCapSearchError("too_large", `no build within ${SOLANA_MAX_TX_BYTES} bytes (${tried})`, steps, calls);
+  throw new SolanaCapSearchError("no_route", `no route (${tried})`, steps, calls);
 }
 
 export type SolanaBlockhash = { blockhash: string; lastValidBlockHeight: number; slot: number };

@@ -50,6 +50,7 @@ import {
 import { SOLANA_ALT_PROGRAM, solanaAta, solanaDecodeLookupTable, type SolanaLookupTable } from "../../checks/solana/message.ts";
 import {
   SolanaBuildError,
+  SolanaCapSearchError,
   type SolanaBuildFitted,
   assembleSolanaSwap,
   buildSolanaTeardown,
@@ -289,11 +290,13 @@ export async function settleSolanaSet(providers: readonly [SolanaRpc, SolanaRpc]
 
 type Prepared = { leg: SolanaTradeLeg; rec: SolanaLegRecord; assembled: SolanaAssembled };
 /**
- * A trade's one cap search (card solana-uncapped-fits fold 3): the first leg to build runs the search; every other leg
- * waits for the cap it found and builds there once, searching on from it only when that build does not fit. So the
- * search's steps are asked once a trade, not once a leg: a K-leg trade asks Jupiter K builds plus the first leg's
- * steps past 40 (at most SOLANA_JUPITER_MAX_BUILDS - 1) and the floor rebuilds, inside the helper's lend
- * (apps/helper/src/proxy/proxy.ts PROXY_BUDGETS.jupiter). `cap` is the found cap, or the search's refusal.
+ * A trade's steps past 40, searched once (card solana-uncapped-fits folds 3 and 4): every leg builds at 40 at once, so
+ * a route that fits there waits on no other leg. The first leg whose 40 has no route or is too large leads the search
+ * on; every other such leg waits for the cap it found and builds there once, searching on from it only when that build
+ * does not fit, and takes the lead's "no route" as its own when its 40 had none too. A K-leg trade asks Jupiter K
+ * builds at 40, at most SOLANA_JUPITER_MAX_BUILDS - 1 steps of the lead, one build at the lead's cap per other leg that
+ * missed 40, and the floor rebuilds: K to 3K + 1 (apps/helper/src/proxy/proxy.ts PROXY_BUDGETS.jupiter). `cap` is the
+ * lead's cap, or its refusal.
  */
 type CapLead = { cap?: Promise<number | SolanaBuildError | null> };
 
@@ -348,20 +351,27 @@ async function prepareLeg(
     });
     return { tables, assembled: assembleSolanaSwap(breq, b, { blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight, tables: decoded, tokenProgram }, feeOpts) };
   };
-  // The cap search: 40, up on no route, down when the assembly is over 1,232 bytes (build.ts, Jupiter's requote), run
-  // once a trade (CapLead): a later leg starts at the cap the first found, and a "no route" anywhere is every leg's.
+  // The cap search: 40, up on no route, down when the assembly is over 1,232 bytes (build.ts, Jupiter's requote). Every
+  // leg asks 40 at once; the steps past it are searched once a trade (CapLead).
   let found: SolanaBuildFitted<Awaited<ReturnType<typeof fitOn>>>;
-  if (ctx.lead.cap === undefined) {
-    const search = fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, opts);
-    ctx.lead.cap = search.then((f) => f.maxAccounts, (e) => (e instanceof SolanaBuildError ? e : null));
-    found = await search;
-  } else {
-    const led = await ctx.lead.cap;
-    if (led instanceof SolanaBuildError && led.code === "no_route") throw led;
-    found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, { ...opts, ...(typeof led === "number" ? { startAt: led } : {}) });
+  let first = 0;
+  try {
+    found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, { ...opts, maxBuilds: 1 });
+  } catch (e) {
+    if (!(e instanceof SolanaCapSearchError)) throw e;
+    first = e.calls.length;
+    if (ctx.lead.cap === undefined) {
+      const search = fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, { ...opts, after: e.steps });
+      ctx.lead.cap = search.then((f) => f.maxAccounts, (x) => (x instanceof SolanaBuildError ? x : null));
+      found = await search;
+    } else {
+      const led = await ctx.lead.cap;
+      if (led instanceof SolanaBuildError && led.code === "no_route" && e.code === "no_route") throw led;
+      found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, { ...opts, after: e.steps, ...(typeof led === "number" ? { startAt: led } : {}) });
+    }
   }
   rec.buildCaps = found.steps;
-  let calls = found.calls.length;
+  let calls = first + found.calls.length;
   let build = found.build;
   let fitted = found.fitted;
   let amounts = solanaRouteAmounts(build.swap.data);

@@ -404,30 +404,64 @@ test("no build of the search fits: the leg is refused too_large after at most 3 
   assert.equal(w.urls.length, 3 * req.legs.length);
 });
 
-// Card solana-uncapped-fits, fold 3: the cap search runs once a trade, the floor rebuild asks the cap it found.
-test("a sell over 3 wallets on a token with no route at 40: the first leg's search finds 48, the other two build there once (4 builds, not 6)", async () => {
-  const w = capWorld((cap) => (cap === 40 ? new Response('{"error":"No routes found"}', { status: 400 }) : null));
+// Card solana-uncapped-fits, folds 3 and 4: every leg builds at 40 at once; the steps past 40 are searched once a trade,
+// the floor rebuild asks the cap the search found.
+const noRouteBelow = (top: number) => (cap: number) => (cap < top ? new Response('{"error":"No routes found"}', { status: 400 }) : null);
+const rebuildsOf = (r: { legs: { buildCalls?: number; buildCaps?: unknown[] }[] }) => r.legs.reduce((n, l) => n + ((l.buildCalls ?? 0) - (l.buildCaps?.length ?? 0)), 0);
+
+test("a sell over 3 wallets whose routes all fit at 40: every first build is sent before any is answered (no leg waits)", async () => {
+  const recorded = builds([]);
+  const held: (() => void)[] = [];
+  let sentBeforeAnswer = 0;
+  let answered = false;
+  const fetch = async (url: string): Promise<Response> => {
+    if (!answered) sentBeforeAnswer++;
+    // the first three builds are held until all three are asked: a leg that waited on another would never come
+    if (held.length < 3 && !answered) {
+      await new Promise<void>((ok, no) => { held.push(ok); if (held.length === 3) held.forEach((f) => f()); setTimeout(() => no(new Error("a leg waited for another's build")), 2_000); });
+    }
+    answered = true;
+    return recorded(url);
+  };
+  const req = request(SELL);
+  const r = await runSolanaTrade(req, { ...deps(SELL), fetch });
+  assert.equal(sentBeforeAnswer, 3);
+  for (const l of r.legs) {
+    assert.equal(l.refused, undefined, l.refused);
+    assert.deepEqual(l.buildCaps, [{ maxAccounts: 40, outcome: "fits" }]);
+  }
+});
+
+test("a sell over 3 wallets, no route at 40: each leg asks 40 at once, the lead's search finds 48, the other two build there once (6 builds)", async () => {
+  const w = capWorld(noRouteBelow(48));
   const req = request(SELL);
   assert.equal(req.legs.length, 3);
   const r = await runSolanaTrade(req, { ...deps(SELL), fetch: w.fetch });
   for (const l of r.legs) {
     assert.equal(l.refused, undefined, l.refused);
     assert.equal(l.dry?.state, "simulated");
+    assert.deepEqual(l.buildCaps, [{ maxAccounts: 40, outcome: "no_route" }, { maxAccounts: 48, outcome: "fits" }]);
   }
-  const caps = r.legs.map((l) => l.buildCaps);
-  assert.deepEqual(caps.filter((c) => c?.length === 2), [[{ maxAccounts: 40, outcome: "no_route" }, { maxAccounts: 48, outcome: "fits" }]]);
-  assert.equal(caps.filter((c) => JSON.stringify(c) === JSON.stringify([{ maxAccounts: 48, outcome: "fits" }])).length, 2);
-  // the trade's Jupiter asks: K legs + the first leg's one step past 40 (+ any floor rebuild, counted per leg)
-  const rebuilds = r.legs.reduce((n, l) => n + ((l.buildCalls ?? 0) - (l.buildCaps?.length ?? 0)), 0);
-  assert.equal(w.urls.length, 3 + 1 + rebuilds);
-  assert.deepEqual(w.caps().filter((c) => c === 40).length, 1);
+  assert.equal(w.urls.length, 3 + 1 + 2 + rebuildsOf(r));
+  assert.deepEqual(w.caps().slice(0, 3), [40, 40, 40]);
 });
 
-test("no route at any cap for the first leg: every other leg is refused with its reason and asks nothing more", async () => {
+test("a sell over 3 wallets, no route at 40 or 48: the lead's search finds 60, the other two ask 60 once (7 builds, not 9)", async () => {
+  const w = capWorld(noRouteBelow(60));
+  const r = await runSolanaTrade(request(SELL), { ...deps(SELL), fetch: w.fetch });
+  for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+  const caps = r.legs.map((l) => JSON.stringify(l.buildCaps));
+  assert.equal(caps.filter((c) => c === JSON.stringify([{ maxAccounts: 40, outcome: "no_route" }, { maxAccounts: 48, outcome: "no_route" }, { maxAccounts: 60, outcome: "fits" }])).length, 1);
+  assert.equal(caps.filter((c) => c === JSON.stringify([{ maxAccounts: 40, outcome: "no_route" }, { maxAccounts: 60, outcome: "fits" }])).length, 2);
+  assert.equal(w.urls.length, 3 + 2 + 2 + rebuildsOf(r));
+  assert.equal(w.caps().filter((c) => c === 48).length, 1);
+});
+
+test("no route at any cap: the lead's search ends no_route, every other leg takes it and asks nothing past its 40", async () => {
   const w = capWorld(() => new Response('{"error":"No routes found"}', { status: 400 }));
   const r = await runSolanaTrade(request(SELL), { ...deps(SELL), fetch: w.fetch });
   for (const l of r.legs) assert.match(l.refused ?? "", /^build no_route: no_route: no route \(40 no_route, 48 no_route, 60 no_route\)/);
-  assert.deepEqual(w.caps(), [40, 48, 60]);
+  assert.deepEqual(w.caps(), [40, 40, 40, 48, 60]);
 });
 
 test("no route at 40, 48 fits, the floor needs a rebuild: the rebuild asks 48, the cap the search found (3 builds)", async () => {
