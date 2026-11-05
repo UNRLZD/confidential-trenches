@@ -188,3 +188,45 @@ test("card helper-robinhood-capacity fold 4: a provider at its in-flight cap (da
   assert.equal(over, 0, "daybreak was never sent past the 4 it serves at once");
   assert.ok(Math.max(...ms) < 15_000, `slowest tape ${Math.round(Math.max(...ms))} ms (${ms.map((x) => Math.round(x)).join(", ")})`);
 });
+
+test("card helper-robinhood-capacity fold 5: the traders' lookups (eth_getTransactionByHash) go in batches to providers that take them: a provider that takes one request a post (daybreak, blockvectra) is sent none of them, never one post per hash", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  for (const u of WIDE) chain.st.faults.set(u, { span: 1_000 });
+  const one = new Set([DAYBREAK, SWAP_RPCS.robinhood[4]!]);
+  let single = 0;
+  let tx = 0;
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body)) as { method: string }[];
+    if (reqs.some((r) => r.method === "eth_getTransactionByHash")) {
+      tx++;
+      if (one.has(url)) single++;
+    }
+    return chain.fetch(url, init);
+  };
+  const clock = realClock();
+  const hooked = Array.from({ length: 5 }, (_, i) => `0x${(0xd0000 + i).toString(16).padStart(40, "0")}`);
+  const pools = new Map<string, { pool: Pool; decimals: number }>([[CURVE_TOKEN, { pool: POOL_CURVE, decimals: 18 }], ...hooked.map((t) => [t, { pool: { ...POOL_MAG, token: t, hook: HOOK }, decimals: 18 }] as const)]);
+  const s = open(chain, clock, { pools, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: fetch as never, holds: providerHolds(() => clock.t) });
+  const got = await Promise.all([...hooked, CURVE_TOKEN].map((t) => s.trades(t, 50)));
+  s.stop();
+  assert.deepEqual(got.map((a) => a.status), got.map(() => 200));
+  assert.ok(tx > 0, "the traders were read");
+  assert.equal(single, 0, `${single} of ${tx} trader posts went to a one-request-a-post provider`);
+});
+
+test("card helper-robinhood-capacity fold 5: a /v1/rpc/robinhood caller waits out a short hold the helper shares with its swap reads (helper-crowd-429's rule on callEvm): every provider held 1 s answers 200 after it, one held 30 s is still 429", async () => {
+  const holds = providerHolds();
+  const fetch = async () => Response.json({ jsonrpc: "2.0", id: 1, result: "0x10" });
+  const rpc = createRpc({}, { holds, fetch: fetch as never, pinned: SWAP_RPCS, log: () => {} });
+  const call = () => rpc.handle("robinhood", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), "198.51.100.8");
+  for (const u of SWAP_RPCS.robinhood) holds.hold(u, 1);
+  const t0 = performance.now();
+  const a = await call();
+  const ms = performance.now() - t0;
+  assert.equal(a.status, 200, a.body);
+  assert.ok(ms >= 950 && ms < 2_500, `answered after ${Math.round(ms)} ms`);
+  for (const u of SWAP_RPCS.robinhood) holds.hold(u, 30);
+  const b = await call();
+  assert.equal(b.status, 429, b.body);
+});

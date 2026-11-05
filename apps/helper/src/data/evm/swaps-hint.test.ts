@@ -75,3 +75,19 @@ test("a list's rows keep each row's pool aside as its list names it (a v4 id or 
   assert.equal(got.rows.length, 3);
   for (const r of got.rows) assert.ok(!Object.hasOwn(r, "pool"));
 });
+
+test("card helper-robinhood-capacity fold 5: an eth_call at a mined block is asked once: the hint's decimals read, then the discovery's at the same block, is one agreed read (two providers), not two", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  let decimals = 0;
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    for (const r of JSON.parse(String(init.body)) as { method: string; params: { to?: string; data?: string }[] }[]) if (r.method === "eth_call" && r.params[0]?.to === CURVE_TOKEN && r.params[0]?.data === "0x313ce567") decimals++;
+    return chain.fetch(url, init);
+  };
+  // a hint the chain does not confirm: fromHint reads the token's decimals, then the discovery reads them again
+  const s = open(chain, { t: 1_000_000 }, { pools: new Map(), fetch: fetch as never, hint: async () => `0x${"7".repeat(40)}` });
+  const a = await s.trades(CURVE_TOKEN, 50);
+  s.stop();
+  assert.equal(a.status, 200, a.body);
+  assert.equal(decimals, 2, `the token's decimals asked ${decimals} times`);
+});

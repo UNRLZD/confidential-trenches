@@ -310,6 +310,8 @@ const ANSWER_MAX = 4 * 1024 * 1024;
 const TIMEOUT_MS = 8_000;
 const LOGS_MAX = 20_000;
 const TRADERS_MAX = 5_000;
+/** Agreed eth_call results kept (callsAgreed), oldest out first. */
+const CALLED_MAX = 5_000;
 export const TRADES_MAX = 50;
 export const CANDLES_MAX = 500;
 /** History before our first bar never changes: kept this long. */
@@ -705,6 +707,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
   }
   const usable = (urls: readonly string[]) => urls.filter((u) => holds.heldFor(u) === 0);
+  /** `urls` less a provider that takes one request a post (BATCH_SIZE 1: daybreak, blockvectra) when `calls` would be
+   *  more than one post to it: it takes single-post reads only (card helper-robinhood-capacity fold 5: at fa4b98d a
+   *  cold dozen sent daybreak 94 eth_getLogs posts, each wide read 3 to 6 of them in its 3 slots). */
+  const single = (urls: readonly string[], calls: number): string[] => urls.filter((u) => (BATCH_SIZE[u] ?? 10) > 1 || calls <= 1);
   /** Providers by free budget, the most first. */
   const byFree = (urls: readonly string[]) => urls.map((u) => ({ u, f: free(u) })).sort((a, b) => b.f - a.f).map((x) => x.u);
   /** A provider's free budget, in calls: what its pace lets background reads send within the next second (the free
@@ -930,19 +936,31 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return parts.some((x) => x == null) ? null : (parts as Log[][]).flat().sort((a, b) => a.block - b.block || a.index - b.index);
   }
 
-  /** The same `eth_call`s at block `n`: each result two providers gave alike, else undefined. */
+  /** The same `eth_call`s at block `n`: each result two providers gave alike, else undefined. A call at a mined block
+   *  never answers otherwise, so each agreed one is kept by (to, data, block) (`called`, at most CALLED_MAX, oldest out
+   *  first) and every tape and tick asks it once (card helper-robinhood-capacity fold 5). */
   async function callsAgreed(n: number, calls: { to: string; data: string }[]): Promise<(string | undefined)[]> {
+    const key = (c: { to: string; data: string }) => `${c.to.toLowerCase()} ${c.data.toLowerCase()} ${n}`;
+    const out: (string | undefined)[] = calls.map((c) => called.get(key(c)));
+    const ask = [...new Set(calls.filter((_, i) => out[i] === undefined).map(key))].map((k) => calls.find((c) => key(c) === k)!);
+    if (ask.length === 0) return out;
     const got = await agreed<string>(
       rpcs,
-      calls.length,
+      ask.length,
       async (u, idx, patient) => {
-        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [calls[i], `0x${n.toString(16)}`] })), patient);
+        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [ask[i], `0x${n.toString(16)}`] })), patient);
         return idx.map((_, k) => (r?.[k]?.ok && typeof (r[k] as { result: unknown }).result === "string" ? (r[k] as { result: string }).result.toLowerCase() : null));
       },
       (a, b) => a === b,
       false,
     );
-    return got.map((x) => x ?? undefined);
+    ask.forEach((c, i) => {
+      const x = got[i];
+      if (x == null) return;
+      if (called.size >= CALLED_MAX) called.delete(called.keys().next().value!);
+      called.set(key(c), x);
+    });
+    return calls.map((c) => called.get(key(c)) ?? undefined);
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -1059,7 +1077,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // from the swap's own fee and the addresses in its transaction (v4Key). Either way the key must hash to the id.
     if (pmTxs.length > 0) {
       const seen = new Map<string, { fee: number; around: Set<string> }>();
-      for (const u of byFree(usable(rpcs))) {
+      for (const u of single(byFree(usable(rpcs)), Math.min(pmTxs.length, V4_TXS))) {
         const r = await batchTo(u, pmTxs.slice(-V4_TXS).map((t) => ({ method: "eth_getTransactionReceipt", params: [t] })));
         if (r === null) continue;
         for (const x of r) {
@@ -1150,6 +1168,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   let refFrom: number | null = null; // the earliest block the ETH price is read from
   let refLock: Promise<unknown> = Promise.resolve();
   const traders = new Map<string, string | null>();
+  /** Agreed `eth_call` results by (to, data, block) (callsAgreed): a call at a mined block never answers otherwise, so
+   *  each is read once and shared by every tape and tick (fold 5). */
+  const called = new Map<string, string>();
 
   /** Reads the ETH price pool's swaps up to `to`, and back to refBack before `need` (the earliest block a book reads:
    *  a book walked back further than any before has the blocks before what is held read first). One read at a time. */
@@ -1480,7 +1501,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   async function tradersOf(txs: string[]): Promise<void> {
     const need = [...new Set(txs)].filter((t) => !traders.has(t));
     if (need.length === 0) return;
-    const order = usable(rpcs).map((u) => ({ u, f: Math.max(free(u), 0) })).sort((x, y) => y.f - x.f);
+    // per-swap lookups go in batches: a provider that takes one request a post is asked none of them (fold 5)
+    const order = single(usable(rpcs), 2).map((u) => ({ u, f: Math.max(free(u), 0) })).sort((x, y) => y.f - x.f);
     const sum = order.reduce((n, x) => n + x.f, 0);
     let at = 0;
     const shares = order.map(({ u, f }, i) => {
@@ -1504,7 +1526,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     await Promise.all(
       shares.filter((x) => x.part.length > 0).map(async ({ u, part }) => {
         if (await read(u, part)) return;
-        for (const v of byFree(usable(rpcs))) if (v !== u && (await read(v, part))) return;
+        // a share whose read failed: only its hashes still without a trader, of the others in turn
+        for (const v of byFree(usable(rpcs))) {
+          const left = part.filter((t) => !traders.has(t));
+          if (left.length === 0) return;
+          if (v !== u && single([v], 2).length > 0 && (await read(v, left))) return;
+        }
       }),
     );
   }
