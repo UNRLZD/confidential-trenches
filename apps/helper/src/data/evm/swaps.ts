@@ -1204,11 +1204,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const head = await agreedHead();
     if (head === null) throw new Error("no agreed head");
     // each read is asked with every other no answer it waits for names, and no read more (card
-    // helper-robinhood-search-ahead: the rounds one after another took a cold tape past 15 s under 12 at once; asking
-    // every address's parameters with its factory cost three calls of four for no pool, and the paces made it slower):
-    // the transfers; the factories with the v4 receipts, the token's decimals and the Pons records; a venue pool's two
-    // tokens with its parameter; the getPools with the v4 keys; the swaps with the ETH price. The token's transfers newest first, a step at a time, until a tape's worth or the cold window
-    // [design: twice TRADES_MAX transfers, since a swap through a router moves the token twice, pool to router to trader]
+    // helper-robinhood-search-ahead: a lone cold token's discovery took 9 answer times, now 7; asking every address's
+    // getPool parameters with its factory cost more calls than the round saved, and under the paces 12 at once were
+    // slower): the transfers; the factories with the v4 receipts, the token's decimals and the Pons records; a venue
+    // pool's two tokens with its parameter; the getPools with the v4 keys; the swaps with the ETH price.
+    // The token's transfers newest first, a step at a time, until a tape's worth or the cold window [design: twice
+    // TRADES_MAX transfers, since a swap through a router moves the token twice, pool to router to trader]
     const tw = await walk(head.with, (lo, hi) => ({ address: token, topics: [TOPIC.transfer], fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }), head.n, 2 * TRADES_MAX, (part) => part.length);
     if (tw == null) throw new Error("transfers not agreed");
     let from = tw.from;
@@ -1229,8 +1230,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // v2, v3 and Slipstream pools: the factory of each address, then the two tokens and the getPool parameter of those
     // of a listed venue, read at the agreed block. v4 pools: the pool ids the PoolManager's recent swaps in the token's
     // transactions name, from their receipts, read with the factories
-    // (the token's decimals and the Pons records with them: asked with the transfers' walk, they ranked its providers
-    // as busy and sent a dozen walks to drpc, 100 blocks a read; swaps-pace.test.ts fold 2)
+    // (the token's decimals and the Pons records with them: asked with the transfers' walk, they made its providers look
+    // busy, and drpc, 100 blocks a read, took 45 reads of logs to the wide providers' 100; swaps-pace.test.ts fold 2)
     const [factories, seen, own] = await Promise.all([
       callsAgreed(head.n, top.map((a) => ({ to: a, data: SEL.factory }))),
       pmTxs.length > 0 ? v4Seen(pmTxs) : Promise.resolve(new Map<string, { fee: number; around: Set<string> }>()),
@@ -1318,9 +1319,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  starts while a first open waits for its pool (`opening`), so a caller's reads find the providers' paces as free as
    *  before. Each goes through mainPool, so an open meanwhile joins its read, and what it finds is kept as an open's is
    *  (card helper-robinhood-search-ahead: at 38249ca a listed token whose listed pool the helper cannot read was looked
-   *  for only at its first open, and 4 of 12 such tapes opened at once took 9 to 15.5 s). [design: 2 at once, a quarter
-   *  of INFLIGHT_MAX's posts on the two providers a read asks first, so a dozen tapes opened mid-search still read at
-   *  once.] */
+   *  for only at its first open, and 4 of 12 such tapes opened at once took 9 to 15.5 s). [design: 2 at once, so a
+   *  first open that comes mid-search shares the providers with two searches at most.] */
   const AHEAD_AT_ONCE = 2;
   const aheadQueue = new Set<string>();
   let aheadRun: Promise<void> | null = null;

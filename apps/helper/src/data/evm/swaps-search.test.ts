@@ -3,8 +3,11 @@
 // pool the helper cannot read fell to findPool, whose reads ran one round after another (the head, the transfers, each
 // address's factory, the two tokens of a venue's, the pool's parameter, the factory's getPool, the v4 receipts, the
 // PositionManager's keys, the Pons records, then the swaps): with each provider's answer some 0.3 to 2 s late under 12
-// tapes at once, the slowest tape took 15.5 s and one run 5 of 12 within 15 s. A discovery now asks what no answer it
-// waits for names in one round (swaps.ts findPool), and the lists' tokens are looked for as the lists load (ahead).
+// tapes at once, the slowest tape took 15.5 s and one run 5 of 12 within 15 s. A discovery now asks each read with every
+// other no answer it waits for names (swaps.ts findPool: a lone token's tape in 7 answer times, not 9), and the lists'
+// tokens are looked for as the lists load (ahead). On this fake, with every answer 500 ms late, 12 discoveries at once
+// took 15.0 s at 04bb10f and 15.5 s with the rounds joined alone: the providers' paces bound them, not the rounds; so
+// the bound is held by looking ahead, and the 12 opens after it read no transfers.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeChain, open, REC, timeAt } from "../../../test/evm-swaps/robinhood.ts";
