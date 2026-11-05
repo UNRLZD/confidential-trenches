@@ -92,7 +92,11 @@ export const BASE_VENUES = {
 const ZERO = "0x0000000000000000000000000000000000000000";
 /** Selectors: token0(), token1(), factory(), decimals(), the PositionManager's poolKeys(bytes25), and the Pons v2
  *  factory's getLaunchedToken(address). */
-const SEL = { token0: "0x0dfe1681", token1: "0xd21220a7", factory: "0xc45a0155", decimals: "0x313ce567", poolKeys: "0x86b6be7d", launched: "0x3cf28b5a", tickSpacing: "0xd0c93a7c", clGetPool: "0x28af8d0b" } as const;
+const SEL = { token0: "0x0dfe1681", token1: "0xd21220a7", factory: "0xc45a0155", decimals: "0x313ce567", poolKeys: "0x86b6be7d", launched: "0x3cf28b5a" } as const;
+/** A pool's getPool parameter (Venues.getPool), and each factory kind's getPool(address,address,<it>) (keccak-256 of the
+ *  signatures, checked in swaps-confirm.test.ts). */
+const PARAM_SEL = { fee: "0xddca3f43", tickSpacing: "0xd0c93a7c", stable: "0x22be3de1" } as const;
+const GET_POOL_SEL = { fee: "0x1698ee82", tickSpacing: "0x28af8d0b", stable: "0x79bc57d5" } as const;
 /** The ETH price: Uniswap v4's native ETH / USDC 0.05% pool (tick spacing 10, no hook), the one BuyV4Fork.t.sol buys through.
  *  Its id is keccak256(abi.encode(currency0 0x0, currency1 USDC, fee 500, tickSpacing 10, hooks 0x0)); 7 swaps in 100
  *  blocks read 2026-11-03 17:08Z, the last at 2,295.6 USD per ETH. */
@@ -137,10 +141,10 @@ export type Venues = {
   positionManager: string;
   v3: readonly string[];
   v2: readonly string[];
-  /** Concentrated-liquidity factories of the Slipstream kind (getPool(tokenA, tokenB, int24 tickSpacing)), whose pools
-   *  log Uniswap v3's Swap: one is read only once its factory names it by that call (clConfirmed), never by its own
-   *  factory() alone. */
-  cl: readonly string[];
+  /** What each v2 and v3 factory's getPool takes beside the two tokens, read from the pool: Uniswap v3's uint24 fee(),
+   *  a Slipstream-kind CL factory's int24 tickSpacing(), Aerodrome v2's bool stable(). A pool is read only once its
+   *  factory names it by that call (confirmed), never by the factory() it claims alone: any contract can claim one. */
+  getPool: Readonly<Record<string, "fee" | "tickSpacing" | "stable">>;
   usd: string;
   weth: string;
   refPoolId: string;
@@ -168,7 +172,11 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     positionManager: BASE_VENUES.positionManager,
     v3: [BASE_VENUES.uniswapV3, ...BASE_VENUES.slipstream],
     v2: [BASE_VENUES.aerodromeV2],
-    cl: [],
+    // read 2026-11-05 04:5xZ on mainnet.base.org: getPool(token0, token1, fee() 500) of 0x33128a8f names the ICNT/USDC
+    // pool 0x9331f571; getPool(.., stable() false) of 0x420dd381 names VVV/WETH 0x01784ef3; each Slipstream factory's
+    // getPool(WETH, USDC, tickSpacing) names a pool whose tickSpacing() and tokens give it back (0xb2cc224c, 0x2a430beb,
+    // 0x4e392fbf)
+    getPool: { [BASE_VENUES.uniswapV3]: "fee", [BASE_VENUES.aerodromeV2]: "stable", ...Object.fromEntries(BASE_VENUES.slipstream.map((f) => [f, "tickSpacing" as const])) },
     usd: BASE_VENUES.usdc,
     weth: BASE_VENUES.weth,
     refPoolId: REF_POOL_ID,
@@ -189,9 +197,11 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
   robinhood: {
     poolManager: ROBINHOOD_VENUES.poolManager,
     positionManager: ROBINHOOD_VENUES.positionManager,
-    v3: [ROBINHOOD_VENUES.uniswapV3],
+    v3: [ROBINHOOD_VENUES.uniswapV3, ROBINHOOD_VENUES.cl],
     v2: [],
-    cl: [ROBINHOOD_VENUES.cl],
+    // read 2026-11-05 04:5xZ on rpc-robinhood.blockmachine.io: getPool(token0, token1, fee() 3000) of 0x1f7d7550 names
+    // 0x020bfc65's pool 0xd42a4910; the CL factory's getPool(.., tickSpacing() 50) names 0x39dbed3a's 0xf2a0be59
+    getPool: { [ROBINHOOD_VENUES.uniswapV3]: "fee", [ROBINHOOD_VENUES.cl]: "tickSpacing" },
     usd: ROBINHOOD_VENUES.usdg,
     weth: ROBINHOOD_VENUES.weth,
     refPoolId: ROBINHOOD_REF_POOL_ID,
@@ -1061,28 +1071,29 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** A v2 or v3 pool of the token: its factory one of the chain's venues, the token one of its two, quoted in USD or WETH. */
   function pairPool(token: string, a: string, factory: string | undefined, token0: string | undefined, token1: string | undefined): Pool | null {
     const [f, t0, t1] = [wordAddr(factory), wordAddr(token0), wordAddr(token1)];
-    if (f === null || t0 === null || t1 === null || !(V.v2.includes(f) || V.v3.includes(f) || V.cl.includes(f))) return null;
+    if (f === null || t0 === null || t1 === null || !(V.v2.includes(f) || V.v3.includes(f))) return null;
     const tokenIs0 = t0 === token;
     if (!tokenIs0 && t1 !== token) return null;
     const quote = quoteOf(tokenIs0 ? t1 : t0, false);
     return quote === null ? null : { venue: V.v2.includes(f) ? "v2" : "v3", id: a, token, tokenIs0, quote };
   }
-  /** Each candidate as it is, or null for a pool of a Slipstream-kind factory (V.cl) that factory does not name: its
-   *  getPool(token0, token1, the pool's tickSpacing()) must answer the pool, read at block `n` on two providers. A pool
-   *  of another venue passes as before. */
-  async function clConfirmed(n: number, cands: ({ pool: Pool; factory: string; t0: string; t1: string } | null)[]): Promise<(Pool | null)[]> {
-    const cl = cands.flatMap((c, i) => (c !== null && V.cl.includes(c.factory) ? [i] : []));
-    if (cl.length === 0) return cands.map((c) => c?.pool ?? null);
-    const spacing = await callsAgreed(n, cl.map((i) => ({ to: cands[i]!.pool.id, data: SEL.tickSpacing })));
-    const ask = cl.flatMap((i, k) => {
-      const ts = spacing[k];
-      if (ts === undefined || !/^0x[0-9a-f]{64}$/.test(ts)) return [];
+  /** Each v2 or v3 candidate once its factory names it, else null: the factory's getPool(token0, token1, the pool's
+   *  own Venues.getPool parameter) must answer the pool, both read at block `n` on two agreeing providers. A factory
+   *  with no getPool kind of ours names nothing. */
+  async function confirmed(n: number, cands: ({ pool: Pool; factory: string; t0: string; t1: string } | null)[]): Promise<(Pool | null)[]> {
+    const live = cands.flatMap((c, i) => (c !== null && V.getPool[c.factory] !== undefined ? [i] : []));
+    if (live.length === 0) return cands.map(() => null);
+    const kind = (i: number) => V.getPool[cands[i]!.factory]!;
+    const params = await callsAgreed(n, live.map((i) => ({ to: cands[i]!.pool.id, data: PARAM_SEL[kind(i)] })));
+    const ask = live.flatMap((i, k) => {
+      const v = params[k];
+      if (v === undefined || !/^0x[0-9a-f]{64}$/.test(v)) return [];
       const c = cands[i]!;
-      return [{ i, call: { to: c.factory, data: `${SEL.clGetPool}${pad32(c.t0)}${pad32(c.t1)}${ts.slice(2)}` } }];
+      return [{ i, call: { to: c.factory, data: `${GET_POOL_SEL[kind(i)]}${pad32(c.t0)}${pad32(c.t1)}${v.slice(2)}` } }];
     });
     const named = await callsAgreed(n, ask.map((a) => a.call));
     const ok = new Set(ask.filter((a, k) => wordAddr(named[k]) === cands[a.i]!.pool.id).map((a) => a.i));
-    return cands.map((c, i) => (c === null ? null : !cl.includes(i) || ok.has(i) ? c.pool : null));
+    return cands.map((c, i) => (c !== null && ok.has(i) ? c.pool : null));
   }
   /** A v4 pool of the token from a pool key that hashes to its id, quoted in USD or ETH, with its hook. */
   function v4Pool(token: string, id: string, k: string | undefined): Pool | null {
@@ -1129,7 +1140,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (pool === null && !id) {
       const [f, t0, t1] = await callsAgreed(head.n, [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: hint, data })));
       const c = pairPool(token, hint, f, t0, t1);
-      pool = c === null ? null : (await clConfirmed(head.n, [{ pool: c, factory: wordAddr(f)!, t0: wordAddr(t0)!, t1: wordAddr(t1)! }]))[0]!;
+      pool = c === null ? null : (await confirmed(head.n, [{ pool: c, factory: wordAddr(f)!, t0: wordAddr(t0)!, t1: wordAddr(t1)! }]))[0]!;
     }
     return pool === null ? null : { pool, decimals };
   }
@@ -1161,11 +1172,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const factories = await callsAgreed(head.n, top.map((a) => ({ to: a, data: SEL.factory })));
     const ofVenue = top.filter((_, i) => {
       const f = wordAddr(factories[i]);
-      return f !== null && (V.v2.includes(f) || V.v3.includes(f) || V.cl.includes(f));
+      return f !== null && (V.v2.includes(f) || V.v3.includes(f));
     });
     const pairs = await callsAgreed(head.n, ofVenue.flatMap((a) => [SEL.token0, SEL.token1].map((data) => ({ to: a, data }))));
     const paired = ofVenue.map((a, i) => pairPool(token, a, factories[top.indexOf(a)], pairs[2 * i], pairs[2 * i + 1]));
-    const named = await clConfirmed(head.n, paired.map((c, i) => (c === null ? null : { pool: c, factory: wordAddr(factories[top.indexOf(ofVenue[i]!)])!, t0: wordAddr(pairs[2 * i])!, t1: wordAddr(pairs[2 * i + 1])! })));
+    const named = await confirmed(head.n, paired.map((c, i) => (c === null ? null : { pool: c, factory: wordAddr(factories[top.indexOf(ofVenue[i]!)])!, t0: wordAddr(pairs[2 * i])!, t1: wordAddr(pairs[2 * i + 1])! })));
     for (const c of named) if (c !== null) cands.push(c);
     // v4 pools: the pool ids the PoolManager's recent swaps in the token's transactions name. A key is the
     // PositionManager's own record of it when there is one; a pool made without it (Doppler, Zora) has its key worked out
