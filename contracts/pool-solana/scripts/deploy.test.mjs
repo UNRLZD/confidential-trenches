@@ -1416,3 +1416,129 @@ test("review 1: mainnet refuses a --return that is off the curve, not a system a
     rmSync(w2, { recursive: true, force: true });
   }
 });
+
+test("review 4: a close or freeze the cleanup gives up on keeps the reserve in the funder, so --sweep-kept can still pay for it", async () => {
+  const c = chain({ failures: { closeBuffers: 99 } });
+  const r = await cleanup(c.ops, RETURN, fast);
+  assert.equal(r.after, CLEANUP_RESERVE, "the reserve stays");
+  assert.equal(c.balance, CLEANUP_RESERVE);
+  assert.ok(r.problems.some((p) => /kept \d+ lamports in the funder for --sweep-kept: buffer close/.test(p)), r.problems.join("; "));
+  // a freeze of the run's live table runs in the cleanup too, after the bulk, before the rest
+  const f = chain();
+  const r2 = await cleanup({ ...f.ops, freezeTable: async () => void f.calls.push("freezeTable") }, RETURN, fast);
+  assert.equal(r2.after, 0n);
+  assert.ok(firstTransfer(f) < f.calls.indexOf("freezeTable") && f.calls.indexOf("freezeTable") < lastTransfer(f), f.calls.join(", "));
+});
+
+/** A stopped run's journal with its keys kept, made by hand: a funder key in a folder of TEST_KEYS; `extra` fields. */
+function keptRun(c, extra = {}) {
+  const funder = newKey();
+  const dir = mkdtempSync(path.join(TEST_KEYS, "pool-sol-deploy-"));
+  writeFileSync(path.join(dir, "funder.json"), JSON.stringify([...funder.secret, ...funder.pub]), { mode: 0o600 });
+  const { w, journal } = work();
+  const j = { cluster: "localnet", genesis_hash: "FakeLocalGenesis1111111111111111111111111111", program_id: newKey().id, funder: funder.id, return_to: RETURN, complete: false, keys: { folder: path.basename(dir), state: "kept", why: [] }, txs: [], ...extra };
+  writeFileSync(journal, JSON.stringify(j));
+  // the funder holds what the cleanup kept, funded from the return address
+  c.funder = funder.id;
+  c.bal.set(funder.id, CLEANUP_RESERVE);
+  const order = (c.order = []);
+  wrap(c, (url, { method }, real) => (method === "sendTransaction" && order.push("send"), real()));
+  return { funder, dir, w, journal, j, done: () => (rmSync(dir, { recursive: true, force: true }), rmSync(w, { recursive: true, force: true })) };
+}
+const LOCAL_SWEEP = (journal) => ["--url", "http://127.0.0.1:1", "--sweep-kept", journal];
+const readJ = (f) => JSON.parse(readFileSync(f, "utf8"));
+
+test("review 4a: --sweep-kept closes a buffer the funder still holds, before its sweep, then removes the keys", async () => {
+  const c = cluster();
+  const k = keptRun(c);
+  const BUF = newKey().id;
+  let closed = false;
+  c.io.cli = (args) => {
+    if (args[1] === "close" && args[2] === "--buffers") (closed = true), c.order.push("close"), assert.equal(args[args.indexOf("--recipient") + 1], RETURN);
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  wrap(c, (url, { method, params }, real) => (method === "getProgramAccounts" && !closed && params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(1, 0, 0, 0)) ? okR([{ pubkey: BUF, account: {} }]) : real()));
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], LOCAL_SWEEP(k.journal));
+    assert.equal(s.error, null, String(s.error?.stack));
+    assert.ok(closed, "the buffer was closed");
+    assert.equal(c.order[0], "close", c.order.join(", "));
+    assert.equal(c.bal.get(k.funder.id), 0n);
+    assert.equal(readJ(k.journal).keys.state, "removed", readJ(k.journal).keys.why.join("; "));
+    assert.equal(existsSync(k.dir), false);
+  } finally {
+    k.done();
+  }
+});
+
+test("review 4b: --sweep-kept closes a program the funder can still upgrade, before its sweep, then removes the keys", async () => {
+  const c = cluster();
+  const k = keptRun(c);
+  const pd = programDataAddress(k.j.program_id);
+  const meta = Buffer.alloc(45);
+  meta.writeUInt32LE(3, 0), (meta[12] = 1), Buffer.from(b58decode(k.funder.id)).copy(meta, 13);
+  c.accounts.set(pd, { owner: LOADER, executable: false, lamports: 1_000_000, data: [meta.toString("base64"), "base64"] });
+  let closed = false;
+  c.io.cli = (args) => {
+    if (args[1] === "close" && args[2] === k.j.program_id) (closed = true), c.order.push("close"), c.accounts.delete(pd);
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], LOCAL_SWEEP(k.journal));
+    assert.equal(s.error, null, String(s.error?.stack));
+    assert.ok(closed, "the program was closed");
+    assert.equal(c.order[0], "close", c.order.join(", "));
+    assert.equal(readJ(k.journal).keys.state, "removed", readJ(k.journal).keys.why.join("; "));
+  } finally {
+    k.done();
+  }
+});
+
+test("review 4c: --sweep-kept on mainnet freezes the run's table the funder still holds, priced, before its sweep, then removes the keys", async () => {
+  const c = asMainnet(cluster());
+  const T = newKey().id;
+  const k = keptRun(c, { cluster: "mainnet", genesis_hash: MAINNET, table: T });
+  const meta = Buffer.alloc(56);
+  meta.writeUInt32LE(1, 0), meta.writeBigUInt64LE(0xffff_ffff_ffff_ffffn, 4), (meta[21] = 1), Buffer.from(b58decode(k.funder.id)).copy(meta, 22);
+  c.tables.set(T, { authority: k.funder.id, list: [RD.pool] });
+  c.accounts.set(T, { owner: ALT_PROGRAM, executable: false, lamports: 3_000_000, data: [Buffer.concat([meta, Buffer.from(b58decode(RD.pool))]).toString("base64"), "base64"] });
+  c.bal.set(k.funder.id, 10_000_000n);
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], ["--mainnet", "--url", MAIN_URL, "--sweep-kept", k.journal]);
+    assert.equal(s.error, null, String(s.error?.stack));
+    assert.equal(c.tables.get(T).authority, null, "frozen");
+    const freeze = c.sent.find((x) => x.tx.ixs.some((i) => i.program === ALT_PROGRAM && i.data[0] === 1));
+    assert.equal(freeze.tx.ixs[0].program, COMPUTE_BUDGET, "priced on mainnet");
+    assert.equal(c.sent.indexOf(freeze), 0, "before the sweep");
+    const j = readJ(k.journal);
+    assert.ok(j.txs.some((t) => /lookup table: freeze/.test(t.step) && t.signature === freeze.tx.signature), JSON.stringify(j.txs));
+    assert.equal(j.keys.state, "removed", j.keys.why.join("; "));
+  } finally {
+    k.done();
+  }
+});
+
+test("review 4d: the run's cleanup freezes its table when the run's own freeze failed; the journal of a mainnet paste names the paste's sweep form", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let refused = 0;
+  const cc = wrap(c, (url, { method, params }, real) => {
+    if (method === "sendTransaction" && refused === 0 && decodeTx(params[0]).ixs.some((x) => x.program === ALT_PROGRAM && x.data[0] === 1)) return refused++, errR("Transaction simulation failed: Blockhash not found");
+    return real();
+  });
+  const { w, out, journal } = work();
+  const r = await runAt(cc, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /Blockhash not found/);
+    const table = [...c.tables.values()][0];
+    assert.equal(table.authority, null, "frozen by the cleanup");
+    const j = readJ(journal);
+    assert.equal(j.keys.state, "removed", j.keys.why.join("; "));
+    assert.ok(j.txs.some((t) => /lookup table: freeze/.test(t.step) && t.state === "landed"));
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+  const { sweepCommand } = await import("./deploy.mjs");
+  assert.equal(sweepCommand(path.join(REPO, "contracts/pool-solana/deployments/mainnet.journal.json"), MAIN_URL, "mainnet"), "sh contracts/pool-solana/scripts/mainnet-deploy.sh --sweep-kept");
+  assert.equal(sweepCommand(path.join(REPO, "x/record.journal.json"), "http://127.0.0.1:1", "localnet"), "node contracts/pool-solana/scripts/deploy.mjs --sweep-kept x/record.journal.json --url http://127.0.0.1:1");
+});
