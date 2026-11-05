@@ -1212,6 +1212,19 @@ test("a partial sell closes nothing and sweeps nothing: W keeps its token accoun
   assert.deepEqual((await ours(w.ns)).map((n) => n.ref), [RETURN]);
 });
 
+test("a full sell from a W that holds another token closes nothing and sweeps nothing: what that token's sell needs stays on W", async () => {
+  const back: string[] = [];
+  const other = "So11111111111111111111111111111111111111112";
+  const holding: BuyWallet = { ...wallet(AMOUNT), holdings: { native: 0n, tokens: new Map([[MINT, { amount: AMOUNT, frozen: false }], [other, { amount: 5n, frozen: false }]]), unreadable: [] } };
+  const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }] }, [holding]);
+  w.host.back = (s) => void back.push(s);
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled");
+  assert.deepEqual(back, []);
+  assert.equal(w.c.accounts.has(solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM)), true);
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
+});
+
 test("the sweep's rule: W the only signer, the deposit alone, its value exactly W's lamports less the fee and the deposit's rents, at least the pool's least deposit", async () => {
   const pre = preOf(SECOND(0));
   const sizes = { stateSize: N + 1, labelSize: N + 1 };

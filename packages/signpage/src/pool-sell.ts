@@ -568,6 +568,7 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  *    landed, so its R second arrivals), checked by the rule (checkSolanaSweep: W ends at 0), simulated unsigned on both,
  *    then signed; its note INCOMING with the send before it leaves, and settled by the sell's own verdict
  *    (settleSellNote). Under the pool's least deposit, nothing is sent.
+ * A W that holds another token runs neither: its volume accounts and lamports are what that token's sell needs.
  */
 async function rentBack(h: PoolSellHost, x: RentBack): Promise<void> {
   const seeds: Uint8Array[] = [];
@@ -596,6 +597,8 @@ async function rentBack(h: PoolSellHost, x: RentBack): Promise<void> {
     h.back?.(signature);
   };
   try {
+    // W holding another token (the page's holdings: a skip is the safe side) keeps everything its next sell needs
+    if ([...w.holdings.tokens].some(([mint, t]) => mint !== x.token && t.amount > 0n)) return;
     // 1. the teardown; a read, check or send that fails leaves the accounts open, and the sweep still runs
     try {
       const addresses = solanaTeardownAddresses(w.address, [{ mint: x.token, program: x.tokenProgram }]);
