@@ -25,7 +25,9 @@ import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_SEND_MARGIN_MS, solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { finishPoolOnward, HISTORY_PAGE, HISTORY_PASS, type HistoryPlaces, nearestPlannable, type PendingOnward, planPoolWithdraw, poolWithdrawable, runPoolWithdraw, solanaWithdrawMinPart, withdrawNoteFloor, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
+import { buildSolanaPoolBuy, type SolanaPoolRelease } from "../../kit/src/trade/solana/pool-buy.ts";
+import { cfg as BUY_CFG, release as BUY_RELEASE, setup as buySetup, W as BUY_W } from "../../kit/test/solana-pool-buy-fx.ts";
+import { finishPoolOnward, HISTORY_PAGE, spendOwner, HISTORY_PASS, type HistoryPlaces, nearestPlannable, type PendingOnward, planPoolWithdraw, poolWithdrawable, runPoolWithdraw, solanaWithdrawMinPart, withdrawNoteFloor, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { ASK, C, COST, FEE, FINAL_SLOT, FLOOR, MIN, NOW, SCOPE, SEED64, SIG, TO, W_FEE, closers, lamportsOf, read, world } from "./pool-withdraw-world.ts";
 
@@ -1002,4 +1004,76 @@ test("a failed write of the release's signature never stops the send: keepReleas
   assert.equal(wd.onwards().length, 1);
   assert.equal(wd.balance.get(wd.binds[0]!.recipient), 0n);
   assert.equal(wd.balance.get(TO), 5_000_000n);
+});
+
+// Card signpage-buy-own-spend: spendOwner reads a release and buy (tag 3) too, its keys the static ones and those its
+// lookups load (getTransaction's meta loadedAddresses), its context from its own fields as context.rs hashes them. On
+// main 8791c3d this device's own landed tag 3 read as "other": tag 3 never decoded, and its pool account (from the
+// lookup table) never resolved.
+const BUY_SIG = base58.encode(new Uint8Array(64).fill(5));
+const OTHER_BUY_SIG = base58.encode(new Uint8Array(64).fill(6));
+const hexOf = (b: Uint8Array): string => Buffer.from(b).toString("hex");
+const contextOfBuy = (r: SolanaPoolRelease): string =>
+  solanaContextOf({ program: PROGRAM, pool: POOL, recipient: BUY_W, feePayer: FEE_PAYER, relayFee: r.relayFee, relayFeeCap: r.relayFeeCap, tipCap: r.tipCap, deadlineMs: r.deadlineMs, salt: hexOf(r.salt) }, SCOPE).toString();
+const NH = BigInt("0x" + hexOf(BUY_RELEASE.existingNullifierHash));
+/** The kit's real tag 3 for the fixture release under `sig`, with the lookups' keys getTransaction's meta gives. */
+async function buyTx(r: SolanaPoolRelease, sig: string, edit?: (data: Uint8Array) => void) {
+  const s = await buySetup("pump");
+  const tx = buildSolanaPoolBuy(BUY_CFG, r, s.venue, s.req, s.chain, { pick: () => 2 }).wire.slice();
+  tx.set(base58.decode(sig), 1);
+  const body = tx.subarray(129);
+  const m = solanaDecodeMessage(body);
+  if (edit) {
+    const data = m.instructions.at(-1)!.data;
+    let at = -1;
+    for (let i = 0; i + data.length <= body.length && at < 0; i++) if (data.every((x, k) => body[i + k] === x)) at = i;
+    edit(body.subarray(at, at + data.length));
+  }
+  const loaded = { writable: m.lookups.flatMap((l) => l.writable.map((i) => s.addresses[i]!)), readonly: m.lookups.flatMap((l) => l.readonly.map((i) => s.addresses[i]!)) };
+  return { tx, loaded };
+}
+/** Two RPCs that hold `txs` at finalized (each with its meta) and list them, newest first, in W's history. */
+const chainOf = (txs: Record<string, { tx: Uint8Array; meta: Record<string, unknown> }>): SolanaRpc =>
+  (async (m: string, p: readonly unknown[]) => {
+    if (m === "getTransaction") {
+      const t = txs[p[0] as string];
+      return t ? { transaction: [base64.encode(t.tx), "base64"], meta: t.meta } : null;
+    }
+    if (m === "getSignaturesForAddress") return (p[1] as { before?: string }).before === undefined ? Object.keys(txs).map((signature) => ({ signature, slot: 9, err: null })) : [];
+    throw new Error(m);
+  }) as SolanaRpc;
+const ownerOf = (rpc: SolanaRpc, release?: string) => spendOwner([rpc, rpc], { program: PROGRAM, feePayer: FEE_PAYER }, BUY_W, NH, contextOfBuy(BUY_RELEASE), 0, release, new Map());
+
+test("this device's own landed tag 3 is its spend: mine by its signature, and mine from W's history", async () => {
+  const { tx, loaded } = await buyTx(BUY_RELEASE, BUY_SIG);
+  const rpc = chainOf({ [BUY_SIG]: { tx, meta: { err: null, loadedAddresses: loaded } } });
+  assert.equal(await ownerOf(rpc, BUY_SIG), "mine");
+  assert.equal(await ownerOf(rpc), "mine");
+});
+
+test("a tag 3 to W under another attempt's context (another device's salt) is another's spend: other", async () => {
+  const salt = BUY_RELEASE.salt.slice();
+  salt[0] ^= 0xff;
+  const { tx, loaded } = await buyTx({ ...BUY_RELEASE, salt }, OTHER_BUY_SIG);
+  const rpc = chainOf({ [OTHER_BUY_SIG]: { tx, meta: { err: null, loadedAddresses: loaded } } });
+  assert.equal(await ownerOf(rpc), "other");
+  assert.equal(await ownerOf(rpc, OTHER_BUY_SIG), "other");
+});
+
+test("a tag 3 whose loaded keys are not known (none, a count off, a key that is not one) is no one's spend: never mine", async () => {
+  const { tx, loaded } = await buyTx(BUY_RELEASE, BUY_SIG);
+  for (const meta of [
+    { err: null },
+    { err: null, loadedAddresses: null },
+    { err: null, loadedAddresses: { writable: loaded.writable.slice(1), readonly: loaded.readonly } },
+    { err: null, loadedAddresses: { writable: loaded.writable, readonly: [...loaded.readonly, loaded.readonly[0]!] } },
+    { err: null, loadedAddresses: { writable: loaded.writable.map((k, i) => (i === 0 ? "x" : k)), readonly: loaded.readonly } },
+  ]) assert.equal(await ownerOf(chainOf({ [BUY_SIG]: { tx, meta } }), BUY_SIG), null, JSON.stringify(meta).slice(0, 80));
+});
+
+test("tag 3's flags as the program reads them: the next-page bit beside the compressed one is still the spend; an unknown bit never is", async () => {
+  const next = await buyTx(BUY_RELEASE, BUY_SIG, (d) => void (d[1] = 3));
+  assert.equal(await ownerOf(chainOf({ [BUY_SIG]: { tx: next.tx, meta: { err: null, loadedAddresses: next.loaded } } }), BUY_SIG), "mine");
+  const bad = await buyTx(BUY_RELEASE, BUY_SIG, (d) => void (d[1] = 5));
+  assert.equal(await ownerOf(chainOf({ [BUY_SIG]: { tx: bad.tx, meta: { err: null, loadedAddresses: bad.loaded } } }), BUY_SIG), null);
 });

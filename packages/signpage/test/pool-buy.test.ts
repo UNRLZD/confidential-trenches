@@ -19,6 +19,7 @@ import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
 import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
+import type { TxRef } from "../../kit/src/signpage/messages.ts";
 import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
 import type { IncomingMessage } from "../src/api.ts";
 
@@ -38,6 +39,7 @@ const LABEL_ROOT = 0x9abc_def0n;
 const SIZE = 6;
 const SPEND = 5_000_000n;
 const SIG = base58.encode(new Uint8Array(64).fill(5)); // the fee payer's signature the helper answers
+const OTHER_SIG = base58.encode(new Uint8Array(64).fill(6)); // another device's buy of the same note
 
 const beHex = (b: Uint8Array): string => BigInt("0x" + Buffer.from(b).toString("hex")).toString();
 // the fixture's 256 proof bytes as snarkjs JSON: A, B (each Fq2 imaginary part first in the bytes), C
@@ -116,7 +118,33 @@ type Plant = {
   decimals?: number;
   /** the seed the page hands is another one: the W it derives is not the proof's recipient */
   seedOther?: boolean;
+  /** another device on the same 12 words spent the note first, by its own buy (tag 3) to the same W with its own
+   *  attempt's salt: the note's spent mark is on chain (the settle finds it) and this device's transaction never
+   *  reaches finalized. `otherListed`: whether RPC p's W history lists that buy (both when not given) */
+  otherSpent?: boolean;
+  otherListed?: (p: 0 | 1) => boolean;
 };
+
+/** The keys a v0 transaction's lookups load, as getTransaction's meta gives them (loadedAddresses): every lookup's
+ *  writable indexes, then its readonly ones, read from the table's addresses. */
+function loadedOf(tx: Uint8Array, addresses: readonly string[]): { writable: string[]; readonly: string[] } {
+  const m = solanaDecodeMessage(tx.subarray(1 + 64 * tx[0]!));
+  return { writable: m.lookups.flatMap((l) => l.writable.map((i) => addresses[i]!)), readonly: m.lookups.flatMap((l) => l.readonly.map((i) => addresses[i]!)) };
+}
+/** Another device's buy of the same note to the same W: this device's transaction with another salt (so another
+ *  attempt's context) under its own signature. */
+function otherBuyOf(sent: Uint8Array): Uint8Array {
+  const tx = sent.slice();
+  const body = tx.subarray(1 + 64 * tx[0]!);
+  const data = solanaDecodeMessage(body).instructions.at(-1)!.data;
+  let at = -1;
+  for (let i = 0; i + data.length <= body.length && at < 0; i++) if (data.every((x, k) => body[i + k] === x)) at = i;
+  assert.ok(at >= 0 && data[0] === 3 && data[1] === 1, "the tag 3, compressed");
+  // the salt: the last 16 of the release's 130 field bytes, after tag, flags and the 128-byte proof
+  body[at + 2 + 128 + 114] ^= 0xff;
+  tx.set(base58.decode(OTHER_SIG), 1);
+  return tx;
+}
 
 async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   const s = await setup("pump", SPEND);
@@ -150,7 +178,26 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       return ans;
     } : undefined);
     return (async (method: string, params: readonly unknown[]) => {
-      log.push(`${p}:${method}`);
+      const finalized = (params[1] as { commitment?: string } | undefined)?.commitment === "finalized";
+      // the own-spend reads at finalized (pool-withdraw.ts spendOwner) are logged apart from the read-back's
+      log.push(method === "getTransaction" && finalized ? `${p}:getTransaction:finalized` : `${p}:${method}`);
+      if (method === "getSlot") return 500;
+      // the chain at finalized: this device's buy once the settle found its spend, or another device's buy
+      const ours = st === "SPENT" && !plant.otherSpent && sent !== null;
+      const listed = plant.otherSpent && sent !== null && (plant.otherListed?.(p) ?? true);
+      if (method === "getSignaturesForAddress") {
+        assert.equal(params[0], W.address, "W's history only");
+        if ((params[1] as { before?: string }).before !== undefined) return [];
+        return [...(listed ? [OTHER_SIG] : []), ...(ours ? [SIG] : [])].map((signature) => ({ signature, slot: 400, err: null }));
+      }
+      if (method === "getTransaction" && finalized) {
+        const at = (tx: Uint8Array) => ({ transaction: [base64.encode(tx), "base64"], meta: { err: null, loadedAddresses: loadedOf(tx, s.addresses) } });
+        if (params[0] === OTHER_SIG) return plant.otherSpent && sent !== null ? at(otherBuyOf(sent)) : null;
+        if (params[0] !== SIG || !ours) return null;
+        const tx = sent!.slice();
+        tx.set(base58.decode(SIG), 1);
+        return at(tx);
+      }
       if (method === "getMultipleAccounts") return venue(method, params);
       if (method === "getAccountInfo") {
         const a = accounts(p)[params[0] as string];
@@ -225,6 +272,11 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       log.push(`settle:${id}`);
       const how = plant.readBack ?? "ours";
       settles++;
+      // another device's spend: the note's spent mark is on chain, so the settle writes the change and the note SPENT
+      if (plant.otherSpent && sent !== null) {
+        st = "SPENT";
+        return { kind: "spent" };
+      }
       const lands = plant.landsAtSettle ?? 1;
       if (sent === null || (how !== "ours" && how !== "lieOne") || lands === "never" || settles < lands) return { kind: "unspent" };
       st = "SPENT";
@@ -658,4 +710,42 @@ test("fold 1 (L3): the page's poster names each field from the route's own keys 
     { v: 1, type: "progress", id, wallet: W.address },
     { v: 1, type: "progress", id, out: "1" },
   ]);
+});
+
+// Card signpage-buy-own-spend: a second device on the same 12 words spends the same note to the same W from its own note
+// store, so the spent mark the settle reads never says the tokens are this buy's. Each path that answered filled on
+// the settle's word alone answers not_landed on another's spend, and the settle still writes the change (SPENT).
+const SECOND_DEVICE: readonly [string, Plant, TxRef[]][] = [
+  ["the helper's 502 (no signature)", { helper: "502" }, []],
+  ["a signature that is not one", { helper: "badSig" }, []],
+  ["the helper's signature never read back", { readBack: "none" }, [{ chain: "solana", hash: SIG }]],
+  ["this transaction failed on both RPCs", { readBack: "failed" }, [{ chain: "solana", hash: SIG }]],
+  ["this transaction read back ok at confirmed, never finalized (the settle loop)", {}, [{ chain: "solana", hash: SIG }]],
+];
+for (const [name, plant, txs] of SECOND_DEVICE) {
+  test(`another device's buy spent the note first, ${name}: not_landed, the change still settled`, async () => {
+    // the blockhash never past on either RPC: only whose spend it is decides
+    const w = await world({ ...plant, otherSpent: true, finalHeight: () => 50 });
+    assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "not_landed", txs });
+    assert.equal(w.state(), "SPENT", "the settle wrote the change from the spent mark");
+    assert.ok(w.log.includes("0:getTransaction:finalized") && w.log.includes("1:getTransaction:finalized"), "whose spend, read on both RPCs");
+  });
+  test(`another device's buy listed on one RPC only, ${name}: not known, never filled`, async () => {
+    const w = await world({ ...plant, otherSpent: true, otherListed: (p) => p === 0, finalHeight: () => 50 });
+    assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "sent", txs });
+    assert.equal(w.state(), "SPENT");
+  });
+}
+
+test("this device's own buy is filled by its own signature at finalized, with no read of W's history", async () => {
+  const w = await world();
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.ok(w.log.includes("0:getTransaction:finalized") && w.log.includes("1:getTransaction:finalized"));
+  assert.ok(!w.log.some((x) => x.endsWith(":getSignaturesForAddress")), "the helper's signature read back as this attempt's");
+});
+
+test("this device's own buy with no signature from the helper is found in W's history on both RPCs: filled", async () => {
+  const w = await world({ helper: "502", finalHeight: () => 50 });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [] });
+  assert.ok(w.log.includes("0:getSignaturesForAddress") && w.log.includes("1:getSignaturesForAddress"));
 });

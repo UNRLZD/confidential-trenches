@@ -36,8 +36,13 @@
 //   transaction) and can never land: refused. A send the helper refused or never answered, a signature that is not
 //   one, another transaction under it on both RPCs, or none read back: the signed transaction may still land, so the
 //   answer is not_landed only once both RPCs' finalized height is past the blockhash's last valid one (the higher of
-//   RPC 0's word and RPC 1's height + 151) and the note's settle still finds no spend; a spend found first is filled,
-//   and past the reads it is "sent".
+//   RPC 0's word and RPC 1's height + 151) and the note's settle still finds no spend; past the reads it is "sent".
+// - Whose spend (card signpage-buy-own-spend): a spend the settle finds is filled only once both RPCs read, at
+//   finalized, that it is this attempt's (pool-withdraw.ts spendOwner: this transaction by the helper's signature, else
+//   W's history, its context this proof's). Another device signed in with the same 12 words spends the same note to the
+//   same W from its own note store, so the spent mark alone never says the tokens are this buy's: another's spend is
+//   not_landed (this transaction can never land on a spent note), and one not read yet is never filled. The settle
+//   writes the change either way.
 // - Spent: only then is the note settled through the wallet's one place for it (solanaSettleSpent: the spent mark and
 //   the change leaf read on two RPCs, the change written UNSPENT naming the note, which goes SPENT). That SPENT note is
 //   W's record: the buy wallets list (../../wallet/src/pool/buy-wallets.ts spentNotesOf) finds W and reads its holdings.
@@ -80,6 +85,7 @@ import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
+import { spendOwner, type HistoryPlaces } from "./pool-withdraw.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** What a buy run needs from the page. */
@@ -485,7 +491,8 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   }
 }
 
-/** The take, the send, the read-back on both RPCs and the settle; every answer but filled tries the settle first.
+/** The take, the send, the read-back on both RPCs, the settle and whose spend it is; every answer but filled tries the
+ *  settle first, and filled is only this attempt's own spend.
  *  fill: the buy's route, told as the run goes (W and the venue with its pool once the take holds the note, the amount
  *  out once the transaction reads back); none for a pool withdraw, whose release tells no buy route. */
 export async function sendAndSettle(
@@ -502,18 +509,43 @@ export async function sendAndSettle(
   const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
   const signedAt = clock();
   const inTime = (): boolean => clock() - signedAt < POOL_BUY_SETTLE_MS;
-  const spent = async (): Promise<boolean> => (await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }))).kind === "spent";
-  // the chain's word on the note (its spent mark and change on both RPCs) over the helper's or one RPC's: spent is
-  // filled, shown with the helper's signature only when it read back as this transaction. not_landed only once both
-  // RPCs' finalized height is past the blockhash's last one and the settle still finds no spend (the kit's rule: never
-  // not_landed while the transaction may still land, packages/kit/src/trade/solana/flow.ts finishSolanaSet); until then
-  // the reads go on, and past them the answer is "sent", the note RESERVED for the state reads' pass to settle or free
+  // the settle (solanaSettleSpent: the note SPENT, its change written), asked until it finds the spend, then never again
+  let settled = false;
+  const spent = async (): Promise<boolean> => settled || (settled = (await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }))).kind === "spent");
+  // whose spend it is, on both RPCs at finalized (spendOwner), read at or past both RPCs' finalized slot read after
+  // the settle found it; W's history read on across the reads of this run from where each RPC stopped. The pin is the
+  // proof's own, which releaseOf held to the page's. A failed read is not known yet.
+  const places: HistoryPlaces = new Map();
+  const pin = { program: r.binding.request.program, feePayer: r.binding.request.feePayer };
+  const nullifierHash = beInt(release.existingNullifierHash);
+  const owner = async (txs: TxRef[]): Promise<"mine" | "other" | null> => {
+    try {
+      const slots = await Promise.all(h.rpcs.map((rpc) => rpc("getSlot", [{ commitment: "finalized" }])));
+      return await spendOwner(h.rpcs, pin, r.wallet.address, nullifierHash, r.binding.context.toString(), Math.max(...slots.map(int)), txs[0]?.hash, places);
+    } catch {
+      return null;
+    }
+  };
+  // a spend the settle found: filled only when it is this attempt's; another's can never be this transaction's
+  // (not_landed); not known yet: null, the reads go on
+  const spentBy = async (txs: TxRef[]): Promise<PoolBuyAnswer | null> => {
+    const o = await owner(txs);
+    return o === "mine" ? { stage: "filled", txs } : o === "other" ? { stage: "not_landed", txs } : null;
+  };
+  // the chain's word on the note (its spent mark and change on both RPCs, then whose spend it is) over the helper's or
+  // one RPC's: this attempt's spend is filled, shown with the helper's signature only when it read back as this
+  // transaction. not_landed once another's spend is read, or once both RPCs' finalized height is past the blockhash's
+  // last one and the settle still finds no spend (the kit's rule: never not_landed while the transaction may still
+  // land, packages/kit/src/trade/solana/flow.ts finishSolanaSet); until then the reads go on, and past them the answer
+  // is "sent", the note RESERVED (or SPENT with its change, whose spend not read yet) for the state reads' pass
   const unlanded = async (txs: TxRef[]): Promise<PoolBuyAnswer> => {
     for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
       if (i > 0) await wait(POOL_BUY_WAIT_MS);
       const past = await pastOnBoth(h.rpcs, lastHeight); // before the settle: a spend final by then is in its read
-      if (await spent()) return { stage: "filled", txs };
-      if (past) return { stage: "not_landed", txs };
+      if (await spent()) {
+        const a = await spentBy(txs);
+        if (a) return a;
+      } else if (past) return { stage: "not_landed", txs };
     }
     return { stage: "sent", txs };
   };
@@ -545,7 +577,8 @@ export async function sendAndSettle(
     // another transaction under that name on both RPCs: the helper's signature is not this one's
     if (got[0] === "other" && got[1] === "other") return unlanded([]);
     // this very transaction failed on chain, on both RPCs: it spent nothing, and it can never land again
-    if (got[0] === "failed" && got[1] === "failed") return (await spent()) ? { stage: "filled", txs } : { stage: "refused", txs };
+    // (a spend the settle finds is another's, or not read yet: whose, as the reads read it)
+    if (got[0] === "failed" && got[1] === "failed") return (await spent()) ? unlanded(txs) : { stage: "refused", txs };
     landed = got[0] === "ok" && got[1] === "ok";
     if (landed && fill) {
       // the amount W received, from this very transaction on both RPCs: the two the same and at least the min out the
@@ -558,11 +591,13 @@ export async function sendAndSettle(
     }
   }
   if (!landed) return unlanded(txs);
-  // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized)
+  // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized), then filled
+  // only once both RPCs read the spend as this attempt's
   for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
     if (i > 0) await wait(POOL_BUY_WAIT_MS);
-    const s = await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }));
-    if (s.kind === "spent") return { stage: "filled", txs };
+    if (!(await spent())) continue;
+    const a = await spentBy(txs);
+    if (a) return a;
   }
   return { stage: "sent", txs };
 }

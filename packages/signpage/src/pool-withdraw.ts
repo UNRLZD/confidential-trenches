@@ -246,8 +246,7 @@ const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padSt
 
 /** A landed transaction's message, v0 or legacy, or null when the bytes are neither. A legacy message is a v0 one with
  *  no version prefix and no lookup list, so it is read by the same strict decoder with both put back: a release of this
- *  note wrapped in a legacy message (the pool program takes either) is read, never skipped. Only the static keys are
- *  read: a release with a key from a lookup table is never this attempt's (spendOn). */
+ *  note wrapped in a legacy message (the pool program takes either) is read, never skipped. Its keys are keysOf's. */
 function landedMessage(wire: Uint8Array): SolanaMessage | null {
   try {
     const n = wire[0]!;
@@ -263,6 +262,37 @@ function landedMessage(wire: Uint8Array): SolanaMessage | null {
     return null;
   }
 }
+
+const isKey = (k: unknown): k is string => {
+  if (typeof k !== "string" || k.length < 32 || k.length > 44) return false;
+  try {
+    return base58.decode(k).length === 32;
+  } catch {
+    return false;
+  }
+};
+/** Every key of a landed message in index order: the static keys, then the keys its lookups load, as the RPC's
+ *  getTransaction meta gives them (loadedAddresses: every lookup's writable keys, then every lookup's readonly ones,
+ *  the runtime's order). A message with no lookup list has its static keys only. With one, the meta must name exactly
+ *  as many keys of each kind as the lookups do, each an address, else null: the keys are not known, so the message
+ *  is no one's spend (a tag 3 loads the pool account from our lookup table, kit pool-buy.ts solanaPoolBuyTableAccounts). */
+function keysOf(message: SolanaMessage, meta: Record<string, unknown>): string[] | null {
+  if (message.lookups.length === 0) return message.staticKeys;
+  const loaded = meta.loadedAddresses;
+  if (!isObj(loaded)) return null;
+  const { writable, readonly } = loaded;
+  const count = (k: "writable" | "readonly"): number => message.lookups.reduce((n, l) => n + l[k].length, 0);
+  if (!Array.isArray(writable) || !Array.isArray(readonly) || writable.length !== count("writable") || readonly.length !== count("readonly")) return null;
+  if (!writable.every(isKey) || !readonly.every(isKey)) return null;
+  return [...message.staticKeys, ...writable, ...readonly];
+}
+/** Tag 3's flags the pool program takes (contracts/pool-solana src/buy.rs FLAG_COMPRESSED 1, FLAG_NEXT_PAGE 2): any
+ *  other bit is refused there, so such a tag 3 never landed. */
+const TAG3_FLAGS = 3;
+/** Tag 3's bytes after the fields, before its inner instructions: the tip (u64) and the inner count (u8). */
+const TAG3_TAIL = 9;
+/** The release's field bytes, tag 2's run after the proof (contracts/pool-solana src/release.rs FIELDS_LEN). */
+const RELEASE_FIELDS = 130;
 
 /** One transaction read on one RPC, at finalized: "none" when the RPC holds none under `sig`, "skip" when it is no
  *  landed pool instruction naming the note's nullifier hash (failed, or another kind, or another note's), else the
@@ -282,20 +312,28 @@ async function spendIn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierH
   const message = landedMessage(wire);
   if (message === null) return "skip";
   const { scope } = solanaPoolOf(pin.program);
-  const keys = message.staticKeys;
+  const keys = keysOf(message, meta);
+  if (keys === null) return "skip";
   for (const ix of message.instructions) {
     if (keys[ix.programIndex] !== pin.program) continue;
     const d = ix.data;
-    const proof = d[0] === SOLANA_POOL_TAG_RELEASE ? SOLANA_POOL_PROOF_BYTES : d[0] === SOLANA_POOL_TAG_RELEASE_AND_BUY ? (d[1] === 1 ? SOLANA_POOL_PROOF_COMPRESSED_BYTES : SOLANA_POOL_PROOF_BYTES) : -1;
-    const at = (d[0] === SOLANA_POOL_TAG_RELEASE ? 1 : 2) + proof + 32;
-    if (proof < 0 || d.length < at + 32 || be(d.subarray(at, at + 32)) !== nullifierHash) continue;
-    // the spend (the spent mark lets one release of the note land): this attempt's only when it is a release to W (a
-    // buy, tag 3, never is: the decode below refuses any tag but 2), every account in the message, whose context
-    // (context.rs, from its own fields and accounts) is this attempt's
+    // where the release's fields start: after tag 2's full proof, or after tag 3's flags and its proof (compressed
+    // when flag bit 0 is set, as buy.rs release_and_buy reads it); a tag 3 the program would refuse is not the spend
+    const tag3At = 2 + (d[1]! & 1 ? SOLANA_POOL_PROOF_COMPRESSED_BYTES : SOLANA_POOL_PROOF_BYTES);
+    const fieldsAt = d[0] === SOLANA_POOL_TAG_RELEASE ? 1 + SOLANA_POOL_PROOF_BYTES
+      : d[0] === SOLANA_POOL_TAG_RELEASE_AND_BUY && d.length >= tag3At + RELEASE_FIELDS + TAG3_TAIL && (d[1]! & ~TAG3_FLAGS) === 0 ? tag3At
+      : -1;
+    const at = fieldsAt + 32;
+    if (fieldsAt < 0 || d.length < at + 32 || be(d.subarray(at, at + 32)) !== nullifierHash) continue;
+    // the spend (the spent mark lets one release of the note land): this attempt's only when it is a release (tag 2) or
+    // a release and buy (tag 3) to W, every account in the message, whose context is this attempt's. Both tags reach
+    // one context (contracts/pool-solana src/release.rs settle, row 3: program, the pool at account 0, W at 1, the fee
+    // payer at 2, then the fields' relay fee cap, tip cap, deadline and salt; buy.rs release_and_buy reads tag 3's
+    // fields at 2 + its proof, the same 130 bytes as tag 2), so tag 3's are read from its own data as tag 2's
     const acc = ix.accounts.map((i) => keys[i]);
     if (acc.length < 3 || acc.some((k) => k === undefined) || acc[1] !== w) return { sig, mine: false };
     try {
-      const rel = solanaDecodePoolRelease(d);
+      const rel = solanaDecodePoolRelease(d[0] === SOLANA_POOL_TAG_RELEASE ? d : Uint8Array.of(SOLANA_POOL_TAG_RELEASE, ...new Uint8Array(SOLANA_POOL_PROOF_BYTES), ...d.subarray(fieldsAt, fieldsAt + RELEASE_FIELDS)));
       const q: SolanaReleaseRequest = {
         program: pin.program, pool: acc[0]!, recipient: acc[1]!, feePayer: acc[2]!, relayFee: rel.relayFee, relayFeeCap: rel.relayFeeCap, tipCap: rel.tipCap, deadlineMs: rel.deadlineMs, salt: hex(rel.salt),
       };
