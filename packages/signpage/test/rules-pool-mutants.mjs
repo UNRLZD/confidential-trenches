@@ -4,7 +4,7 @@
 // its test file that imports it, all removed after: pool.ts itself is
 // never changed, so a test run at the same time (the package's own, in parallel) never reads a mutant. Exits 1 when a
 // named test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file
-// exactly once. test/rules-pool-mutants.test.mjs runs it in the package's tests.
+// exactly once. test/rules-pool-mutants.test.mjs runs it in the package's test:mutants.
 //   node packages/signpage/test/rules-pool-mutants.mjs
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";

@@ -1,6 +1,7 @@
 // The pool rules' mutant sweep (test/rules-pool-mutants.mjs) as a test of the package: every check in src/rules/pool.ts,
 // removed or weakened one at a time, fails the test named for it. A sweep that no command runs holds nothing; this file
-// is in the package's test script, so CI's test job runs it. The sweep changes no tracked file (each mutant is a copy).
+// is in the package's test:mutants script, which CI's test job runs after the tests (card fresh-run-margin). The
+// sweep changes no tracked file (each mutant is a copy).
 //   node --test test/rules-pool-mutants.test.mjs      (from packages/signpage; a heavy job on this Mac: the box)
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

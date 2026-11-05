@@ -166,13 +166,15 @@ test("sign out broadcasts, closes the other tab and deletes the database", async
 // WU-06's property: random tabs, random closes (during and after a reservation, before any use), random concurrency,
 // with and without Web
 // Locks. A run's reservations are checked across every tab and every reopen.
-test("WU-06: no deposit index is handed out twice in 10,000 random runs (stores closed, not crashed)", async () => {
+// card fresh-run-margin: the default run takes the seeded sequence's first 1,000 runs; FULL_RUNS=1 (the package's
+// test:mutants script, CI's test-wallet job) all 10,000
+const RUNS = process.env.FULL_RUNS === "1" ? 10_000 : 1_000;
+test(`WU-06: no deposit index is handed out twice in ${RUNS.toLocaleString("en-US")} random runs (stores closed, not crashed)`, async () => {
   let seed = 0x9e3779b9;
   const rnd = (n: number): number => {
     seed = (Math.imul(seed ^ (seed >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) | 0;
     return (seed >>> 0) % n;
   };
-  const RUNS = 10_000;
   let reservations = 0;
   for (let run = 0; run < RUNS; run++) {
     const idb = new IDBFactory();

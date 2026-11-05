@@ -1,7 +1,8 @@
 // Every tracked test file runs in CI: each *.test.mjs and *.test.ts that git tracks is named, by path or by glob, by a
 // `node --test` command in a ci.yml run: line, in a root script such a line runs (`pnpm run <name>`), or in a workspace
-// package's test script (resolved from the package's folder) while a ci.yml line runs `pnpm ... run test` for that
-// package (`-r`, or a --filter that selects it). Each tracked Foundry test (*.t.sol) is under the test/ folder of a
+// package's script (resolved from the package's folder) while a ci.yml line runs `pnpm ... run <that script>` for that
+// package (`-r`, or a --filter that selects it): `test`, or `test:mutants`, the sweeps CI runs after the tests and the
+// README's fresh run leaves out (card fresh-run-margin). Each tracked Foundry test (*.t.sol) is under the test/ folder of a
 // `forge test` that names no filter, at its --root or else its folder. A test file that nothing runs passes review as
 // coverage it does not give (net-window.test.mjs on main bb4eafd, 1 Nov 06:30Z).
 //   node --test scripts/ci/tests-run.test.mjs
@@ -58,7 +59,7 @@ function testArgs(command, cwd, rootScripts) {
   return out;
 }
 
-// the workspace packages one `pnpm ... run test` command runs the test script of, as a test of the package's name:
+// the workspace packages one `pnpm ... run <script>` command runs that script of, as a test of the package's name:
 // with no --filter, every package under -r and none without it; --filter <name> (or -F, or --filter=) that package;
 // --filter '!<name>' every package but that one (the shards of ci.yml's test job split the packages so). A selector
 // of any other form (a glob, a path, ...) selects nothing here, so its packages' test files read as unrun.
@@ -77,13 +78,17 @@ export function unrun(root) {
   const rootScripts = JSON.parse(read("package.json")).scripts ?? {};
   const lines = runLines(read(".github/workflows/ci.yml"));
   const args = lines.flatMap((l) => testArgs(l, root, rootScripts));
-  const selections = lines.flatMap((l) => l.split(/&&|\|\||[;\n]/)).filter((seg) => /\bpnpm\b.*\brun\s+test(\s|$)/.test(seg)).map(selects);
+  // each `pnpm ... run <script>`: the script it names and the packages it selects
+  const selections = lines.flatMap((l) => l.split(/&&|\|\||[;\n]/)).flatMap((seg) => {
+    const m = /\bpnpm\b.*\brun\s+([^\s'"]+)/.exec(seg);
+    return m ? [{ script: m[1], pick: selects(seg) }] : [];
+  });
   if (selections.length) {
     const globs = [...read("pnpm-workspace.yaml").matchAll(/^\s+-\s+["']?([^"'\s]+)["']?\s*$/gm)].map((m) => m[1]);
     for (const pkg of globs.flatMap((g) => globSync(`${g}/package.json`, { cwd: root }))) {
       const dir = path.join(root, path.dirname(pkg));
       const { name, scripts } = JSON.parse(read(pkg));
-      if (scripts?.test && selections.some((s) => s(name))) args.push(...testArgs(scripts.test, dir, {}));
+      for (const s of selections) if (scripts?.[s.script] && s.pick(name)) args.push(...testArgs(scripts[s.script], dir, {}));
     }
   }
   const ran = new Set(args.flatMap(({ cwd, pattern }) =>
@@ -183,6 +188,45 @@ test("planted: a package no pnpm --filter shard selects fails; the full split pa
     assert.deepEqual(unrunWith(ci("pnpm --filter @x/w run test:e2e", "pnpm --filter @x/v run test")), ["packages/w/test/a.test.ts"]);
     // with no filter and no -r, pnpm runs the root's own script, no package's
     assert.deepEqual(unrunWith(ci("pnpm run test")), ["packages/v/test/b.test.ts", "packages/w/test/a.test.ts"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// card fresh-run-margin: the mutant sweeps leave each package's test script for its test:mutants script, which ci.yml
+// runs after the tests, so a sweep is run only while a ci.yml line runs test:mutants for its package
+test("planted: a sweep in test:mutants that no ci.yml line runs fails; run by -r or by the shard split, it passes", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tests-run-mutants-"));
+  try {
+    const put = (f, text) => {
+      mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+      writeFileSync(path.join(dir, f), text);
+    };
+    const ci = (...runs) => ["jobs:", ...runs.flatMap((r, i) => [`  s${i}:`, "    steps:", `      - run: ${r}`]), ""].join("\n");
+    put("package.json", JSON.stringify({ scripts: {} }));
+    put("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n');
+    put("packages/w/package.json", JSON.stringify({ name: "@x/w", scripts: { test: 'node --test "test/*.test.ts"', "test:mutants": "FULL_RUNS=1 node --test test/a.test.ts" } }));
+    put("packages/k/package.json", JSON.stringify({ name: "@x/k", scripts: { test: 'node --test "test/*.test.mjs"', "test:mutants": 'node --test "test/mutants/*.test.mjs" && node test/q-mutants.mjs' } }));
+    for (const f of ["packages/w/test/a.test.ts", "packages/k/test/b.test.mjs", "packages/k/test/mutants/m.test.mjs"]) put(f, "");
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["add", "."], { cwd: dir });
+    const unrunWith = (yml) => {
+      put(".github/workflows/ci.yml", yml);
+      return unrun(dir);
+    };
+
+    // the tests alone leave the sweep unrun: test/*.test.mjs does not reach test/mutants/
+    assert.deepEqual(unrunWith(ci("pnpm -r --if-present --no-bail run test")), ["packages/k/test/mutants/m.test.mjs"]);
+    assert.deepEqual(unrunWith(ci("pnpm -r --if-present --no-bail run test && pnpm -r --if-present run test:mutants")), []);
+    // the shard split, as ci.yml's test-wallet and test-packages run it
+    const split = ["pnpm --filter @x/w run test", "pnpm --filter @x/w run test:mutants", "pnpm -r --filter '!@x/w' --if-present --no-bail run test", "pnpm -r --filter '!@x/w' --if-present run test:mutants"];
+    assert.deepEqual(unrunWith(ci(...split)), []);
+    // the rest-of shard's test:mutants dropped: the sweep runs nowhere
+    assert.deepEqual(unrunWith(ci(...split.slice(0, 3))), ["packages/k/test/mutants/m.test.mjs"]);
+    // test:mutants alone vouches only for its own files, never for the test script's
+    assert.deepEqual(unrunWith(ci("pnpm -r --if-present run test:mutants")), ["packages/k/test/b.test.mjs"]);
+    // a test:mutants line for a package whose script is test:mutant (a typo) vouches for nothing
+    assert.deepEqual(unrunWith(ci("pnpm -r --if-present --no-bail run test", "pnpm -r --if-present run test:mutant")), ["packages/k/test/mutants/m.test.mjs"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

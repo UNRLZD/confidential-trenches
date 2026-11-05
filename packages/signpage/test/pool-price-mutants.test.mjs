@@ -1,5 +1,6 @@
 // The signing page's price retry sweep (test/pool-price-mutants.mjs) as a test of the package: every mutant of
-// src/pool-price.ts's retry of a failed read fails pool-price.test.ts's "retry" test. The package's test script runs it.
+// src/pool-price.ts's retry of a failed read fails pool-price.test.ts's "retry" test. The package's
+// test:mutants script runs it.
 //   node --test test/pool-price-mutants.test.mjs      (from packages/signpage)
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

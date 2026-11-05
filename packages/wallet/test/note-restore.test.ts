@@ -25,6 +25,9 @@ const SCOPE = vaultScopeOf(keccak_256, VAULT, TOKEN);
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const OTHER = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16).fill(0x7f)));
 const TEST_GAP = 64; // the property's walk; every generated lane gap is checked to be below it (RESTORE_GAP is tested below)
+// card fresh-run-margin: the default run keeps the property's first seeded cases and the gap rule at a gap of TEST_GAP;
+// FULL_RUNS=1 (the package's test:mutants script, CI's test-wallet job) runs every case and the rule at RESTORE_GAP
+const FULL = process.env.FULL_RUNS === "1";
 const CHAIN_TAGS = Object.keys(d.CHAINS) as d.Chain[];
 
 // ---------- a seeded PRNG ----------
@@ -407,7 +410,7 @@ test("P-03 in the Verifier's order: every note, change note, refund note, return
   assert.ok(got.pendingRefunds.length + got.notes.filter((n) => n.ref.kind === "refund").length > 0);
 });
 
-const CASES = 24;
+const CASES = FULL ? 24 : 4;
 test(`P-03 as a property: ${CASES} random orders of the same events, every note found in its state`, async () => {
   for (let c = 0; c < CASES; c++) {
     const w = randomOrder(rng(1000 + c));
@@ -422,18 +425,21 @@ test(`P-03 as a property: ${CASES} random orders of the same events, every note 
 
 test("the gap rule counts within one lane: a lane's note after gap - 1 misses is found, after gap misses it is not", () => {
   // walkLane is the rule itself; the property above runs it on every lane with TEST_GAP, this one at RESTORE_GAP
+  // (walkLane's own default, 30,000 derivations) under FULL_RUNS=1 and at TEST_GAP by default
   assert.equal(RESTORE_GAP, 10_000);
   assert.equal(RESTORE_LANES, 8);
   const lane = 3;
+  const GAP = FULL ? RESTORE_GAP : TEST_GAP;
+  const walk = (has: (p: bigint) => boolean) => (FULL ? walkLane(SEED, SCOPE, lane, has) : walkLane(SEED, SCOPE, lane, has, GAP));
   const at = (pos: number) => sec({ kind: "deposit", s: SCOPE, i: lane + 8 * pos }).precommitment;
-  const near = new Set([at(0), at(1 + RESTORE_GAP - 1)]); // RESTORE_GAP - 1 misses between: found
-  assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => near.has(p)).found, [lane, lane + 8 * RESTORE_GAP]);
-  const far = new Set([at(0), at(1 + RESTORE_GAP)]); // RESTORE_GAP misses between: the walk has stopped
-  const stop = walkLane(SEED, SCOPE, lane, (p) => far.has(p));
+  const near = new Set([at(0), at(1 + GAP - 1)]); // GAP - 1 misses between: found
+  assert.deepEqual(walk((p) => near.has(p)).found, [lane, lane + 8 * GAP]);
+  const far = new Set([at(0), at(1 + GAP)]); // GAP misses between: the walk has stopped
+  const stop = walk((p) => far.has(p));
   assert.deepEqual(stop.found, [lane]);
-  // it read exactly RESTORE_GAP indices of the lane past its last note, and names the last one's precommitment
-  assert.equal(stop.last, lane + 8 * RESTORE_GAP);
-  assert.equal(stop.lastPrecommitment, at(RESTORE_GAP));
+  // it read exactly GAP indices of the lane past its last note, and names the last one's precommitment
+  assert.equal(stop.last, lane + 8 * GAP);
+  assert.equal(stop.lastPrecommitment, at(GAP));
   // another lane's notes never reset this lane's count, and this lane never reads another's indices
   const mixed = new Set([at(0), sec({ kind: "deposit", s: SCOPE, i: 4 + 8 * 5 }).precommitment, at(9)]);
   assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => mixed.has(p), 9).found, [lane, lane + 8 * 9]); // 8 misses, then the note
