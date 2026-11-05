@@ -159,7 +159,7 @@ test("two callers and a restart get the same epoch fee; another epoch's base fee
   const restarted = await sender([], {}, [], c).fee(EPOCH);
   assert.deepEqual(a, b);
   assert.deepEqual(restarted, a);
-  assert.deepEqual(a, { chain: "evm", network: "base-sepolia", pool: POOL, fee_recipient: FEE_TO, epoch_ms: 60_000, epoch_start_ms: EPOCH, block: "0x1ae", fee: FEE.toString(), step: EVM_FEE_STEP.toString() });
+  assert.deepEqual(a, { chain: "evm", network: "base-sepolia", pool: POOL, fee_recipient: FEE_TO, sell_sender: null, epoch_ms: 60_000, epoch_start_ms: EPOCH, block: "0x1ae", fee: FEE.toString(), step: EVM_FEE_STEP.toString() });
   const next = await sender([], {}, [], c, EPOCH + 61_000).fee(EPOCH + 60_000); // 1,999,999,920 s: block 460, 3 gwei
   assert.equal(next!.fee, feeAt(3n * GWEI).toString());
   assert.equal(await s.fee(DEADLINE + 600_000), null, "no block in that epoch yet");
@@ -324,26 +324,69 @@ test("a provider that writes hex in upper case: drpc's 0xB626 reads as 46630, an
 });
 
 // card evm-quote-exec-sim (review of the exec sim, HIGH 1): the device sims each sale as sent from the kit's pinned sell
-// sender, so the helper starts a network's sender only with the key of that pin, where the kit pins one
-test("the EVM pool sender's address is the kit's pinned sell sender for its chain, or the helper does not start", () => {
+// sender, so the helper starts a network's sell sender only with the key of that pin, where the kit pins one; card
+// helper-evm-sender: the sell sender has its own key (POOL_EVM_SELL_KEY_<NETWORK>), never the withdraw sender's
+test("the EVM pool sell sender's address is the kit's pinned sell sender for its chain, or the helper does not start; a chain with no pin starts with sales off; its key is its own", async () => {
+  const SELL_KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SELL_SENDER").digest());
   const env = {
     POOL_EVM_ADDRESS_BASE_SEPOLIA: POOL,
     POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
+    POOL_EVM_SELL_KEY_BASE_SEPOLIA: "0x" + Buffer.from(SELL_KEY).toString("hex"),
     POOL_EVM_FEE_BASE_SEPOLIA: EVM_POOL_FEE_FLOOR.toString(),
     POOL_EVM_RPCS_BASE_SEPOLIA: "https://sepolia.base.org,https://base-sepolia-rpc.publicnode.com",
   };
   const kit = evmPoolVenues();
   const pinned = (sellSender: string) => ({ ...kit, "base-sepolia": { ...kit["base-sepolia"], sellSender } });
-  // the pin is the sender's own address: it starts, in either case of hex
-  const own = evmAddressOf(KEY);
-  assert.equal(evmPoolSendersFromEnv(env, pinned(own)).get(POOL)!.sender, own);
-  assert.equal(evmPoolSendersFromEnv(env, pinned(own.toUpperCase().replace("0X", "0x"))).get(POOL)!.sender, own);
-  // another address pinned: refused at start, naming the env name and the pin, never the key
-  const other = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
-  assert.throws(() => evmPoolSendersFromEnv(env, pinned(other)), (e: Error) => e.message.includes("POOL_EVM_SENDER_KEY_BASE_SEPOLIA") && e.message.includes(other) && !e.message.includes(Buffer.from(KEY).toString("hex")));
-  // the kit's own list pins no sell sender on any chain yet (no public read of the helper's sender address): it starts
-  for (const c of ["base", "robinhood", "base-sepolia", "robinhood-testnet"] as const) assert.equal(Object.hasOwn(kit[c], "sellSender"), false, c);
-  assert.equal(evmPoolSendersFromEnv(env).get(POOL)!.sender, own);
+  // the pin is the sell key's own address: it starts, in either case of hex
+  const own = evmAddressOf(SELL_KEY);
+  assert.equal(evmPoolSendersFromEnv(env, pinned(own)).get(POOL)!.sellSender, own);
+  assert.equal(evmPoolSendersFromEnv(env, pinned(own.toUpperCase().replace("0X", "0x"))).get(POOL)!.sellSender, own);
+  assert.equal(evmPoolSendersFromEnv(env, pinned(own)).get(POOL)!.sender, evmAddressOf(KEY), "the withdraw sender keeps its own key");
+  // the withdraw sender's address pinned, or another: refused at start, naming the name and the pin, never a key
+  for (const other of [evmAddressOf(KEY), "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"]) {
+    assert.throws(() => evmPoolSendersFromEnv(env, pinned(other)), (e: Error) => e.message.includes("POOL_EVM_SELL_KEY_BASE_SEPOLIA") && e.message.includes(other) && !e.message.includes(Buffer.from(KEY).toString("hex")) && !e.message.includes(Buffer.from(SELL_KEY).toString("hex")));
+  }
+  // the sell key equal to the withdraw key, not a key, or set on a network whose pool is not: refused at start
+  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_SELL_KEY_BASE_SEPOLIA: env.POOL_EVM_SENDER_KEY_BASE_SEPOLIA }), /POOL_EVM_SELL_KEY_BASE_SEPOLIA must not be POOL_EVM_SENDER_KEY_BASE_SEPOLIA/);
+  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_SELL_KEY_BASE_SEPOLIA: "0x1234" }), /POOL_EVM_SELL_KEY_BASE_SEPOLIA must be 0x and 64 lowercase hex/);
+  assert.throws(() => evmPoolSendersFromEnv({ POOL_EVM_SELL_KEY_BASE: env.POOL_EVM_SELL_KEY_BASE_SEPOLIA }), /POOL_EVM_SELL_KEY_BASE is set but base's pool is not/);
+  // no sell key: the network starts (withdraws go) and its sells are refused not_configured
+  const noSell: Record<string, string> = { ...env };
+  delete noSell.POOL_EVM_SELL_KEY_BASE_SEPOLIA;
+  assert.equal(evmPoolSendersFromEnv(noSell, pinned(own)).get(POOL)!.sellSender, null);
+  // the kit's own list pins each testnet's sell sender (the helper box's key) and no mainnet's yet: a test key on Base
+  // Sepolia is refused at start against the kit's own pin; a chain with no pin starts with sales off, never with an
+  // unpinned key (the device sims each sale from the pin, so there is nothing to sim a sale from)
+  assert.equal(kit["base-sepolia"].sellSender, "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553");
+  assert.equal(kit["robinhood-testnet"].sellSender, "0xd12d83097671d731df2db731e973ad9a07673607");
+  for (const c of ["base", "robinhood"] as const) assert.equal(Object.hasOwn(kit[c], "sellSender"), false, c);
+  assert.throws(() => evmPoolSendersFromEnv(env), (e: Error) => e.message.includes("POOL_EVM_SELL_KEY_BASE_SEPOLIA") && e.message.includes(kit["base-sepolia"].sellSender!));
+  const unpinned = { ...kit, "base-sepolia": Object.fromEntries(Object.entries(kit["base-sepolia"]).filter(([k]) => k !== "sellSender")) as typeof kit["base-sepolia"] };
+  const off = evmPoolSendersFromEnv(env, unpinned).get(POOL)!;
+  assert.equal(off.sellSender, null, "no pin: no sell sender");
+  assert.equal(off.sender, evmAddressOf(KEY), "the withdraws still go");
+  const refused = await off.sell({});
+  assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [503, "not_configured"]);
+});
+
+test("the withdraw's deadline again after the queue's wait: a carry whose deadline came within the margin while it waited is deadline_near, nothing sent", async () => {
+  let clock = NOW;
+  let open: () => void = () => {};
+  const gate = new Promise<void>((ok) => (open = ok));
+  const calls: Calls = [];
+  const inner = rpc(calls);
+  const slow: EvmRpc = async (m, p) => (m === "eth_chainId" ? gate.then(() => inner(m, p)) : inner(m, p));
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [slow, rpc([])], () => clock);
+  const first = s.carry(req());
+  const second = s.carry(req(calldata({ nullifier: 77n })));
+  await new Promise((ok) => setTimeout(ok, 5));
+  clock = NOW + 41_000; // the deadline is now 59 s away
+  open();
+  const done = await first;
+  assert.equal(done.status, 200, JSON.stringify(done.body));
+  const late = await second;
+  assert.equal(code(late), "deadline_near", JSON.stringify(late.body));
+  assert.equal(sends(calls).length, 1);
 });
 
 // card evm-buy-hookdata-fee, review fold 2 LOW-A: one floor, the kit's; the env may only repeat it
