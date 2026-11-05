@@ -2,8 +2,10 @@
 // builds the vault:
 //   - every spawned run imports a module that replaces fetch with one that throws, so a refusal "before any send" is
 //     one whose output never names the blocked fetch;
-//   - `cargo` and `rustc` are stubs put first on PATH: the cargo stub copies a planted wasm into the CARGO_TARGET_DIR it
-//     is given (STUB_WASM_A for target dir `a`, STUB_WASM_B for `b`), so the two builds can be made equal or different;
+//   - `cargo` and `rustc` are stubs put first on PATH: the cargo stub copies a planted wasm into the --out-dir it is
+//     given (STUB_WASM_A for out dir `a`, STUB_WASM_B for `b`), so the two builds can be made equal or different; each
+//     planted wasm carries the NEP-330 metadata of this checkout's HEAD for the flavor asked (--variant testnet or none)
+//     unless STUB_NO_META is set, and the stub appends its arguments to <build-dir>/cargo-args.log;
 //   - `cargo +1.96.0 near --version` answers the pinned CARGO_NEAR unless a test plants another (STUB_NEAR_VERSION);
 //     STUB_SLEEP makes each build wait that many seconds, so a test can interrupt one; STUB_FILES fills target dir a
 //     with that many files first, so removing it takes seconds; STUB_FIFO_B makes build b's wasm a FIFO a background
@@ -21,7 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { CARGO_NEAR, LIVE_CHECK, STOP_SIGNALS, chainProblems, deployProblems, loadKey, MAX_FUNCTION_BODY, MAX_REGISTRATION, nextLine, registrationProblems, repoRoots, rpcProblems } from "./deploy.mjs";
+import { CARGO_NEAR, CONTRACT_PATH, LIVE_CHECK, REPO, REPRODUCIBLE, STOP_SIGNALS, chainProblems, deployProblems, loadKey, MAX_FUNCTION_BODY, MAX_REGISTRATION, metadataProblems, nextLine, registrationProblems, repoRoots, reproducibleProblems, rpcProblems } from "./deploy.mjs";
 import { b58encode } from "./near-tx.mjs";
 import { TESTNET_TOKEN } from "../../../scripts/live-checks/vault-testnet-t01.mjs";
 import { TEST_BUILD_MARK } from "../../../scripts/live-checks/vault-skeleton.mjs";
@@ -75,24 +77,58 @@ function wasm({ body = 4, strings = [TESTNET_TOKEN], exports = ["config"] } = {}
   ]);
 }
 
+// The commit deploy.mjs builds: this checkout's HEAD.
+const HEAD = execFileSync("git", ["-C", HERE, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+// The NEP-330 metadata a reproducible build of `flavor` at `commit` holds, as near-sdk 5.29.1 serialises it.
+const meta = ({ flavor = "mainnet", commit = HEAD, ...over } = {}) => ({
+  version: "0.1.0",
+  link: REPO,
+  standards: [{ standard: "nep330", version: "1.3.0" }],
+  build_info: {
+    build_environment: `${REPRODUCIBLE.image}@${REPRODUCIBLE.image_digest}`,
+    build_command: flavor === "testnet" ? REPRODUCIBLE.variant.testnet.container_build_command : REPRODUCIBLE.container_build_command,
+    contract_path: CONTRACT_PATH,
+    source_code_snapshot: `git+${REPO}?rev=${commit}`,
+    output_wasm_path: null,
+  },
+  ...over,
+});
+// `bytes` with one more custom section holding `strings` (a wasm may end in custom sections)
+const withStrings = (bytes, ...strings) => {
+  const body = Buffer.concat([Buffer.from([4]), Buffer.from("meta"), Buffer.from(strings.join("\0"))]);
+  const len = [];
+  for (let x = body.length; ; ) {
+    const b7 = x & 0x7f;
+    x = Math.floor(x / 128);
+    len.push(x ? b7 | 0x80 : b7);
+    if (!x) break;
+  }
+  return Buffer.concat([Buffer.from(bytes), Buffer.from([0, ...len]), body]);
+};
+
 // Stub cargo and rustc in <dir>/bin, and the planted wasm files; the env a run needs.
 function stubs(dir, a, b = a) {
   const bin = path.join(dir, "bin");
   mkdirSync(bin);
   const fa = path.join(dir, "a.wasm");
   const fb = path.join(dir, "b.wasm");
-  writeFileSync(fa, a);
-  writeFileSync(fb, b);
+  for (const [f, w] of [[fa, a], [fb, b]]) {
+    writeFileSync(f + ".raw", w);
+    writeFileSync(f, withStrings(w, JSON.stringify(meta())));
+    writeFileSync(f + ".testnet", withStrings(w, JSON.stringify(meta({ flavor: "testnet" }))));
+  }
   writeFileSync(
     path.join(bin, "cargo"),
     `#!/bin/sh\ncase " $* " in *" --version "*) echo "\${STUB_NEAR_VERSION:-${CARGO_NEAR}}"; exit 0;; esac\n` +
-      'mkdir -p "$CARGO_TARGET_DIR/near"\nname=$(basename "$CARGO_TARGET_DIR")\n' +
+      'prev=; for x in "$@"; do [ "$prev" = --out-dir ] && CARGO_TARGET_DIR=$x; prev=$x; done\n' +
+      'SUF=; case " $* " in *" --variant testnet "*) SUF=.testnet;; esac; [ -n "$STUB_NO_META" ] && SUF=.raw\n' +
+      'mkdir -p "$CARGO_TARGET_DIR"\necho "$*" >> "$CARGO_TARGET_DIR/../cargo-args.log"\nname=$(basename "$CARGO_TARGET_DIR")\n' +
       `if [ "$name" = a ] && [ -n "$STUB_FILES" ]; then "${process.execPath}" -e 'const fs=require("fs");const d=process.argv[1]+"/many";fs.mkdirSync(d);for(let i=0;i<+process.argv[2];i++)fs.writeFileSync(d+"/"+i,"x")' "$CARGO_TARGET_DIR" "$STUB_FILES"; fi\n` +
       'if [ -n "$STUB_SLEEP" ]; then echo $$ > "$CARGO_TARGET_DIR/../build.pid"; sleep "$STUB_SLEEP"; fi\n' +
-      'if [ "$name" = b ] && [ -n "$STUB_FIFO_B" ]; then mkfifo "$CARGO_TARGET_DIR/near/blindfill_vault.wasm"\n' +
-      '  ( sleep 1.5; cat "$STUB_WASM_B" > "$CARGO_TARGET_DIR/near/blindfill_vault.wasm" ) </dev/null >/dev/null 2>&1 &\n' +
+      'if [ "$name" = b ] && [ -n "$STUB_FIFO_B" ]; then mkfifo "$CARGO_TARGET_DIR/blindfill_vault.wasm"\n' +
+      '  ( sleep 1.5; cat "$STUB_WASM_B$SUF" > "$CARGO_TARGET_DIR/blindfill_vault.wasm" ) </dev/null >/dev/null 2>&1 &\n' +
       '  echo done > "$CARGO_TARGET_DIR/../b.exited"; exit 0; fi\n' +
-      'if [ "$(basename "$CARGO_TARGET_DIR")" = a ]; then cp "$STUB_WASM_A" "$CARGO_TARGET_DIR/near/blindfill_vault.wasm"; else cp "$STUB_WASM_B" "$CARGO_TARGET_DIR/near/blindfill_vault.wasm"; fi\n',
+      'if [ "$(basename "$CARGO_TARGET_DIR")" = a ]; then cp "$STUB_WASM_A$SUF" "$CARGO_TARGET_DIR/blindfill_vault.wasm"; else cp "$STUB_WASM_B$SUF" "$CARGO_TARGET_DIR/blindfill_vault.wasm"; fi\n',
   );
   writeFileSync(path.join(bin, "rustc"), '#!/bin/sh\necho "rustc 1.96.0 (stub)"\n');
   chmodSync(path.join(bin, "cargo"), 0o755);
@@ -252,6 +288,79 @@ test("--build-only: two equal builds pass, the wasm is kept and both target dirs
   assert.match(r.stdout, /reproducible: both builds sha256 [0-9a-f]{64}/);
   assert.ok(existsSync(path.join(buildDir, "blindfill_vault.wasm")), "the wasm is not kept");
   targetsGone(buildDir);
+});
+
+// ---- the reproducible build (NEP-330) ----
+
+const CARGO_TOML = readFileSync(path.join(HERE, "..", "Cargo.toml"), "utf8");
+
+test("Cargo.toml pins the reproducible build's image by digest, as deploy.mjs REPRODUCIBLE holds it", () => {
+  assert.deepEqual(reproducibleProblems(CARGO_TOML), []);
+  assert.match(REPRODUCIBLE.image_digest, /^sha256:[0-9a-f]{64}$/);
+  const swap = (a, b) => {
+    assert.ok(CARGO_TOML.includes(a), `Cargo.toml has no ${a}`);
+    return reproducibleProblems(CARGO_TOML.replace(a, b));
+  };
+  const digestLine = `image_digest = "${REPRODUCIBLE.image_digest}"`;
+  // not pinned: no digest, an empty one, a tag in its place
+  for (const p of [swap(digestLine, ""), swap(digestLine, 'image_digest = ""'), swap(digestLine, 'image_digest = "latest"')]) assert.ok(p.some((x) => /the image is not pinned by digest/.test(x)), p.join("; "));
+  // pinned, but not by the digest deploy.mjs holds, or another image
+  assert.ok(swap(digestLine, `image_digest = "sha256:${"0".repeat(64)}"`).some((x) => /image_digest is "sha256:0{64}", deploy\.mjs REPRODUCIBLE has/.test(x)));
+  assert.ok(swap(`image = "${REPRODUCIBLE.image}"`, 'image = "sourcescan/cargo-near:latest"').some((x) => /\] image is "sourcescan\/cargo-near:latest"/.test(x)));
+  // a passed env (a build parameter from the builder's shell), a command without --locked, an unread multi-line list
+  assert.ok(swap("passed_env = []", 'passed_env = ["RUSTFLAGS"]').some((x) => /passed_env is \["RUSTFLAGS"\]/.test(x)));
+  assert.ok(swap('"--locked", "--no-embed-abi"]', '"--no-embed-abi"]').some((x) => /container_build_command is/.test(x)));
+  assert.ok(swap("passed_env = []", "passed_env = [\n]").some((x) => /is not one line of a string or a list of strings/.test(x)));
+  // the testnet variant's command, an extra variant, no table, another repository
+  assert.ok(swap('"--features", "testnet"]', '"--features", "testnet,test-on-payout-out-of-gas"]').some((x) => /variant\.testnet\] container_build_command/.test(x)));
+  assert.ok(reproducibleProblems(`${CARGO_TOML}\n[package.metadata.near.reproducible_build.variant.oog]\ncontainer_build_command = ["cargo"]\n`).some((x) => /variant\.oog\] is not one of/.test(x)));
+  assert.ok(swap("[package.metadata.near.reproducible_build]", "[package.metadata.near.other]").some((x) => /has no \[package\.metadata\.near\.reproducible_build\]/.test(x)));
+  assert.ok(swap(`repository = "${REPO}"`, 'repository = "https://github.com/x/y"').some((x) => /package\.repository is "https:\/\/github\.com\/x\/y"/.test(x)));
+});
+
+test("each build is cargo near build reproducible-wasm into its own out dir, the testnet one with --variant testnet", () => {
+  for (const [flavor, variant] of [["testnet", " --variant testnet"], ["mainnet", ""]]) {
+    const dir = fresh();
+    const buildDir = path.join(dir, "build");
+    const r = run(dir, ["--build-only", "--flavor", flavor, "--build-dir", buildDir], stubs(dir, wasm({ strings: [flavor === "testnet" ? TESTNET_TOKEN : MAINNET_USDC] })));
+    // the testnet stub passes every rule; the mainnet one is refused after the build, for its missing required exports
+    assert.equal(r.status, flavor === "testnet" ? 0 : 1, r.stdout + r.stderr);
+    if (flavor === "mainnet") assert.match(r.stderr, /the build would be refused: missing exports/);
+    const args = readFileSync(path.join(buildDir, "cargo-args.log"), "utf8").trim().split("\n");
+    assert.deepEqual(args, ["a", "b"].map((n) => `+1.96.0 near build reproducible-wasm${variant} --out-dir ${path.join(buildDir, n)}`), flavor);
+  }
+});
+
+test("a build whose NEP-330 metadata is missing is refused before any send, and both out dirs are gone", () => {
+  const dir = fresh();
+  const k = keyFile(dir);
+  const buildDir = path.join(dir, "build");
+  const r = run(dir, testnet(dir, k.file, buildDir), { ...stubs(dir, wasm()), STUB_NO_META: "1" });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /the wasm holds no single NEP-330 contract_source_metadata; nothing was sent/);
+  neverSent(r);
+  targetsGone(buildDir);
+});
+
+test("the wasm's NEP-330 metadata must name this repository at the commit, the pinned image and the flavor's command", () => {
+  const m = (o) => withStrings(wasm(), JSON.stringify(meta(o)));
+  assert.deepEqual(metadataProblems(m({ flavor: "testnet" }), { commit: HEAD, flavor: "testnet" }), []);
+  assert.deepEqual(metadataProblems(m(), { commit: HEAD, flavor: "mainnet" }), []);
+  const one = (w, o) => {
+    const p = metadataProblems(w, o);
+    assert.equal(p.length, 1, p.join("; "));
+    return p[0];
+  };
+  assert.match(one(m({ commit: "0".repeat(40) }), { commit: HEAD, flavor: "mainnet" }), /source_code_snapshot is "git\+https:\/\/github\.com\/UNRLZD\/confidential-trenches\?rev=0{40}"/);
+  assert.match(one(m({ link: "https://github.com/x/y" }), { commit: HEAD, flavor: "mainnet" }), /metadata link is "https:\/\/github\.com\/x\/y"/);
+  assert.match(one(m({ flavor: "testnet" }), { commit: HEAD, flavor: "mainnet" }), /build_info\.build_command is .*"testnet"\]/);
+  const other = meta();
+  other.build_info.build_environment = "sourcescan/cargo-near:0.21.1-rust-1.96.0";
+  assert.match(one(withStrings(wasm(), JSON.stringify(other)), { commit: HEAD, flavor: "mainnet" }), /build_environment is "sourcescan\/cargo-near:0\.21\.1-rust-1\.96\.0", want ".*@sha256:/);
+  // a host build carries no build_info; no metadata, or two, is none
+  assert.equal(metadataProblems(withStrings(wasm(), JSON.stringify({ version: "0.1.0", standards: [{ standard: "nep330", version: "1.3.0" }] })), { commit: HEAD, flavor: "mainnet" }).length, 5);
+  assert.match(one(wasm(), { commit: HEAD, flavor: "mainnet" }), /holds no single NEP-330/);
+  assert.match(one(withStrings(wasm(), JSON.stringify(meta()), JSON.stringify(meta())), { commit: HEAD, flavor: "mainnet" }), /holds no single NEP-330/);
 });
 
 test("the wasm refusal is fail-closed: any wasmProblems field but functionExports and promiseImports refuses when not empty", () => {

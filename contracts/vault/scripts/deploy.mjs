@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Builds the vault reproducibly, deploys it with no key and registers it on its token (vault.md 2.8, V1.6).
 //
-// 1. Build: two clean builds with the pinned toolchain and flags, each in its own new target dir, and their sha256
-//    compared. Before the first build, `rustc +1.96.0` must be 1.96.0 and `cargo +1.96.0 near --version` exactly
-//    CARGO_NEAR. Two different builds stop the run before anything is sent. Both target dirs are removed on every exit,
-//    a SIGINT or SIGTERM included;
-//    the wasm stays at <build-dir>/blindfill_vault.wasm. The flags are fixed here: Rust 1.96.0,
-//    cargo-near's `build non-reproducible-wasm --no-embed-abi --locked`, the release profile of Cargo.toml, and
-//    RUSTFLAGS `-C link-arg=-s --remap-path-prefix=<CARGO_HOME>=/cargo`, so no home path of the machine that built it
-//    is in the bytes (near-sdk's panic locations name the registry's source paths). Two machines of different
-//    architectures still build different bytes (tests/harness/mod.rs names a Linux x86_64 and a macOS arm64 build).
+// 1. Build: two clean builds by `cargo near build reproducible-wasm` (NEP-330), each into its own new out dir, and their
+//    sha256 compared. cargo-near clones the committed HEAD into a new folder and runs Cargo.toml's
+//    container_build_command in the Docker image Cargo.toml names by digest, so the bytes do not depend on the machine
+//    or its architecture, and the wasm's contract_source_metadata names this repository, the commit and the command.
+//    Before the first build, Cargo.toml's [package.metadata.near.reproducible_build] must be exactly REPRODUCIBLE (the
+//    image pinned by its digest), `rustc +1.96.0` must be 1.96.0 and `cargo +1.96.0 near --version` exactly CARGO_NEAR.
+//    Two different builds, or a wasm whose metadata is not this repository at HEAD built by the pinned image and
+//    command, stop the run before anything is sent. Both out dirs are removed on every exit, a SIGINT or SIGTERM
+//    included; the wasm stays at <build-dir>/blindfill_vault.wasm.
 // 2. Static checks on the wasm: every problem list scripts/live-checks/vault-skeleton.mjs wasmProblems returns is empty
 //    (fail-closed: a field it adds later refuses here too; today none of 2.8's banned imports, promise imports inside
 //    the seven, exports inside 2.5.7's list); every function body at most 196,608 B
@@ -78,7 +78,22 @@ export const MAX_FUNCTION_BODY = 196_608; // max_function_body_size, parameters.
 export const TOOLCHAIN = "1.96.0";
 // The cargo-near the vault is built with: `cargo +1.96.0 near --version` must print exactly this.
 export const CARGO_NEAR = "cargo-near-near 0.22.0";
-export const BUILD_ARGS = ["near", "build", "non-reproducible-wasm", "--no-embed-abi", "--locked"];
+export const BUILD_ARGS = ["near", "build", "reproducible-wasm"];
+// The repository the wasm's NEP-330 metadata links to (Cargo.toml package.repository).
+export const REPO = "https://github.com/UNRLZD/confidential-trenches";
+// The vault crate's path in it (NEP-330 build_info.contract_path).
+export const CONTRACT_PATH = "contracts/vault";
+// What Cargo.toml's [package.metadata.near.reproducible_build] must say, held here too so a Cargo.toml edited alone
+// cannot move the image: cargo-near 0.22.0's own pin for a new project (cargo-near 0.21.1 on rustc 1.96.0), named by
+// the digest Docker Hub serves for that tag; the mainnet command, and the testnet variant's.
+const CONTAINER_BUILD = ["cargo", "near", "build", "non-reproducible-wasm", "--locked", "--no-embed-abi"];
+export const REPRODUCIBLE = {
+  image: "sourcescan/cargo-near:0.21.1-rust-1.96.0",
+  image_digest: "sha256:ccb22bb4e677ed022d8b9d1aa1b32f0af52dd0471ef1c32e48dedbf68ee6ee17",
+  passed_env: [],
+  container_build_command: CONTAINER_BUILD,
+  variant: { testnet: { container_build_command: [...CONTAINER_BUILD, "--features", "testnet"] } },
+};
 export const LIVE_CHECK = "scripts/live-checks/vault-testnet-t01.mjs";
 export const MAINNET_LIVE_CHECK = "scripts/live-checks/vault-mainnet.mjs";
 // FastNEAR and dRPC, mainnet's two operators: vault-mainnet.mjs MAINNET_RPCS, held equal by deploy.test.mjs. Written
@@ -106,19 +121,120 @@ export function nextLine(network, record, { account, signer } = {}) {
   throw new Error(`no network ${network}`);
 }
 
-// The RUSTFLAGS every build passes to cargo-near (it does not inherit the shell's).
-export function rustflags(cargoHome) {
-  // cargo-near splits RUSTFLAGS on whitespace
-  if (/\s/.test(cargoHome)) throw new Error(`CARGO_HOME ${cargoHome} holds whitespace: the remap flag would split`);
-  return `-C link-arg=-s --remap-path-prefix=${cargoHome}=/cargo`;
+// What keeps Cargo.toml (its text) from building the vault reproducibly with the pinned image: package.repository is
+// not REPO, or [package.metadata.near.reproducible_build] (and its variant tables) is not exactly REPRODUCIBLE. An image
+// with no digest, a tag or a mutable name in its place, another digest, an extra key, a passed env or a line this
+// reader cannot read are each refused (fail-closed). Values are read as TOML basic strings and arrays of them, which
+// are JSON.
+export function reproducibleProblems(toml) {
+  const tables = new Map();
+  let at = null;
+  const p = [];
+  for (const [i, raw] of toml.split("\n").entries()) {
+    const line = raw.replace(/^\s+|\s+$/g, "");
+    if (!line || line.startsWith("#")) continue;
+    const head = /^\[([^\[\]]+)\]$/.exec(line);
+    if (head) {
+      at = head[1].trim();
+      if (!tables.has(at)) tables.set(at, {});
+      continue;
+    }
+    if (line.startsWith("[")) {
+      at = null;
+      continue;
+    }
+    if (at !== "package" && !at?.startsWith("package.metadata.near.reproducible_build")) continue;
+    const kv = /^([A-Za-z0-9_-]+)\s*=\s*(.+)$/.exec(line);
+    let v;
+    try {
+      if (!kv) throw new Error("not key = value");
+      v = JSON.parse(kv[2]);
+    } catch {
+      if (at === "package") continue; // [package] lines other than repository may be any TOML
+      p.push(`Cargo.toml l.${i + 1} in [${at}] is not one line of a string or a list of strings: ${raw}`);
+      continue;
+    }
+    tables.get(at)[kv[1]] = v;
+  }
+  if (tables.get("package")?.repository !== REPO) p.push(`Cargo.toml package.repository is ${JSON.stringify(tables.get("package")?.repository ?? null)}, want "${REPO}"`);
+  const root = "package.metadata.near.reproducible_build";
+  const want = new Map([[root, (({ variant, ...r }) => r)(REPRODUCIBLE)], ...Object.entries(REPRODUCIBLE.variant).map(([k, v]) => [`${root}.variant.${k}`, v])]);
+  const digest = tables.get(root)?.image_digest;
+  if (!/^sha256:[0-9a-f]{64}$/.test(digest ?? "")) p.push(`the image is not pinned by digest: Cargo.toml [${root}] image_digest is ${JSON.stringify(digest ?? null)}`);
+  for (const name of tables.keys()) {
+    if (name.startsWith(root) && !want.has(name)) p.push(`Cargo.toml [${name}] is not one of deploy.mjs REPRODUCIBLE's tables`);
+  }
+  for (const [name, w] of want) {
+    const t = tables.get(name);
+    if (!t) {
+      p.push(`Cargo.toml has no [${name}]`);
+      continue;
+    }
+    for (const k of new Set([...Object.keys(w), ...Object.keys(t)])) {
+      if (JSON.stringify(t[k]) !== JSON.stringify(w[k])) p.push(`Cargo.toml [${name}] ${k} is ${JSON.stringify(t[k] ?? null)}, deploy.mjs REPRODUCIBLE has ${JSON.stringify(w[k] ?? null)}`);
+    }
+  }
+  return p;
 }
 
-// The full cargo command line of one build.
-export function buildCommand({ flavor, cargoHome }) {
-  const args = [`+${TOOLCHAIN}`, ...BUILD_ARGS, "--env", `RUSTFLAGS=${rustflags(cargoHome)}`];
-  if (flavor === "testnet") args.push("--features", "testnet");
+// The full cargo command line of one build into outDir.
+export function buildCommand({ flavor, outDir }) {
+  const args = [`+${TOOLCHAIN}`, ...BUILD_ARGS];
+  if (flavor === "testnet") args.push("--variant", "testnet");
   else if (flavor !== "mainnet") throw new Error(`flavor ${flavor}: want testnet or mainnet`);
+  args.push("--out-dir", outDir);
   return ["cargo", args];
+}
+
+// The NEP-330 metadata the vault's contract_source_metadata returns, as near-sdk writes it into the wasm: the one JSON
+// object in its bytes that starts {"version": and holds "standards". null when there is not exactly one.
+export function sourceMetadata(wasm) {
+  const b = Buffer.from(wasm).toString("latin1");
+  const found = [];
+  for (let at = b.indexOf('{"version":'); at >= 0; at = b.indexOf('{"version":', at + 1)) {
+    let depth = 0, inStr = false, end = -1;
+    for (let i = at; i < b.length; i++) {
+      const c = b[i];
+      if (inStr) {
+        if (c === "\\") i++;
+        else if (c === '"') inStr = false;
+      } else if (c === '"') inStr = true;
+      else if (c === "{" || c === "[") depth++;
+      else if (c === "}" || c === "]") {
+        if (--depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end < 0) continue;
+    try {
+      const m = JSON.parse(Buffer.from(b.slice(at, end), "latin1").toString("utf8"));
+      if (Array.isArray(m?.standards)) found.push(m);
+    } catch {}
+  }
+  return found.length === 1 ? found[0] : null;
+}
+
+// What keeps the wasm's NEP-330 metadata from naming this vault's source: REPO, the commit `commit`, the crate's path,
+// the pinned image by digest and the flavor's container command.
+export function metadataProblems(wasm, { commit, flavor }) {
+  const m = sourceMetadata(wasm);
+  if (!m) return ["the wasm holds no single NEP-330 contract_source_metadata"];
+  const command = flavor === "testnet" ? REPRODUCIBLE.variant.testnet.container_build_command : REPRODUCIBLE.container_build_command;
+  const want = {
+    link: REPO,
+    "build_info.build_environment": `${REPRODUCIBLE.image}@${REPRODUCIBLE.image_digest}`,
+    "build_info.source_code_snapshot": `git+${REPO}?rev=${commit}`,
+    "build_info.contract_path": CONTRACT_PATH,
+    "build_info.build_command": command,
+  };
+  const p = [];
+  for (const [k, w] of Object.entries(want)) {
+    const got = k.split(".").reduce((o, f) => o?.[f], m);
+    if (JSON.stringify(got) !== JSON.stringify(w)) p.push(`the wasm's contract_source_metadata ${k} is ${JSON.stringify(got ?? null)}, want ${JSON.stringify(w)}`);
+  }
+  return p;
 }
 
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
@@ -162,12 +278,14 @@ export const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
 export async function reproducibleBuild({ flavor, buildDir, log = console.log }) {
   buildDir = path.resolve(buildDir);
   if (existsSync(buildDir) && readdirSync(buildDir).length) throw new Error(`--build-dir ${buildDir} is not empty: each build starts from a new target dir`);
-  const { rustc, near } = toolVersions();
+  const rp = reproducibleProblems(readFileSync(path.join(CRATE, "Cargo.toml"), "utf8"));
+  if (rp.length) throw new Error(`${rp.join("; ")}: nothing was built`);
+  const { near } = toolVersions();
+  // the commit cargo-near builds (it clones HEAD), which the wasm's metadata must name
+  const commit = execFileSync("git", ["-C", CRATE, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   mkdirSync(buildDir, { recursive: true });
-  const cargoHome = process.env.CARGO_HOME ?? path.join(os.homedir(), ".cargo");
-  const [cmd, args] = buildCommand({ flavor, cargoHome });
-  // the command as printed and recorded: the remap flag names <CARGO_HOME>, never the home path
-  const shown = `${cmd} ${buildCommand({ flavor, cargoHome: "<CARGO_HOME>" })[1].join(" ")}`;
+  // the command as printed and recorded: the out dir is <out-dir>, never this machine's path
+  const shown = `${buildCommand({ flavor, outDir: "<out-dir>" }).flat().join(" ")}`;
   const env = { ...process.env };
   delete env.RUSTFLAGS;
   delete env.CARGO_ENCODED_RUSTFLAGS;
@@ -187,15 +305,18 @@ export async function reproducibleBuild({ flavor, buildDir, log = console.log })
   try {
     for (const name of ["a", "b"]) {
       const target = path.join(buildDir, name);
-      log(`build ${name}: CARGO_TARGET_DIR=${target} ${shown} (in ${CRATE})`);
-      const r = await runBuild(cmd, args, { cwd: CRATE, env: { ...env, CARGO_TARGET_DIR: target } }, children);
+      const [cmd, args] = buildCommand({ flavor, outDir: target });
+      log(`build ${name}: ${cmd} ${args.join(" ")} (in ${CRATE})`);
+      const r = await runBuild(cmd, args, { cwd: CRATE, env }, children);
       if (interrupted) throw Object.assign(new Error(`interrupted by ${interrupted}: the build target dirs were removed, nothing was sent`), { signal: interrupted });
       if (r.status !== 0) throw new Error(`build ${name} failed (exit ${r.status ?? r.signal}): ${r.output.split("\n").slice(-15).join("\n")}`);
-      const wasm = readFileSync(path.join(target, "near", "blindfill_vault.wasm"));
+      const wasm = readFileSync(path.join(target, "blindfill_vault.wasm"));
       out.push({ wasm, sha: sha256(wasm) });
       log(`build ${name}: ${wasm.length} B sha256 ${out.at(-1).sha}`);
     }
     if (out[0].sha !== out[1].sha) throw new Error(`the two clean builds differ: ${out[0].sha} (${out[0].wasm.length} B) and ${out[1].sha} (${out[1].wasm.length} B); nothing was sent`);
+    const mp = metadataProblems(out[0].wasm, { commit, flavor });
+    if (mp.length) throw new Error(`${mp.join("; ")}; nothing was sent`);
     writeFileSync(file, out[0].wasm);
   } finally {
     for (const name of ["a", "b"]) rmSync(path.join(buildDir, name), { recursive: true, force: true });
@@ -205,7 +326,7 @@ export async function reproducibleBuild({ flavor, buildDir, log = console.log })
     for (const s of STOP_SIGNALS) process.off(s, onSignal);
   }
   if (interrupted) throw Object.assign(new Error(`interrupted by ${interrupted}`), { signal: interrupted });
-  return { file, wasm: out[0].wasm, sha: out[0].sha, shas: out.map((o) => o.sha), build: `${shown} (${near}, ${rustc}, ${os.platform()} ${os.arch()})` };
+  return { file, wasm: out[0].wasm, sha: out[0].sha, shas: out.map((o) => o.sha), commit, build: `${shown} (${near}, image ${REPRODUCIBLE.image}@${REPRODUCIBLE.image_digest}, on ${os.platform()} ${os.arch()}), at ${commit}` };
 }
 
 // The size of every function body in a wasm module's code section (section 10).
