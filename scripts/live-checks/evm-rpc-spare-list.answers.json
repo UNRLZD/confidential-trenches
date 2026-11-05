@@ -1,0 +1,409 @@
+{
+ "good": {
+  "recorded": "2026-11-05T20:27:22.249Z",
+  "base": "http://127.0.0.1:18787",
+  "scans": {
+   "base": [
+    "https://base-rpc.publicnode.com",
+    "https://base.gateway.tenderly.co",
+    "https://base.api.pocket.network"
+   ],
+   "robinhood": [
+    "https://rpc.mainnet.chain.robinhood.com",
+    "https://robinhood.daybreak-rpc.network",
+    "https://robinhood.api.pocket.network"
+   ]
+  },
+  "preflight": {
+   "https://base.api.pocket.network": {
+    "status": 204,
+    "allow": "https://confidential.unrealized.trade",
+    "headers": "content-type",
+    "post": "https://confidential.unrealized.trade"
+   },
+   "https://robinhood.api.pocket.network": {
+    "status": 204,
+    "allow": "https://confidential.unrealized.trade",
+    "headers": "content-type",
+    "post": "https://confidential.unrealized.trade"
+   }
+  },
+  "cases": {
+   "base-hook": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 9445
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 3237,
+      "heldAsked": 22,
+      "thirdLogs": 1
+     },
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 1109,
+      "heldAsked": 4,
+      "thirdLogs": 1
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 809,
+      "heldAsked": 4,
+      "thirdLogs": 1
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 697,
+      "heldAsked": 4,
+      "thirdLogs": 1
+     }
+    ]
+   },
+   "robinhood-torch": {
+    "first": [
+     {
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms",
+      "ms": 61062
+     },
+     {
+      "code": "ok",
+      "ms": 4689
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 3707,
+      "heldAsked": 28,
+      "thirdLogs": 4
+     },
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 2376,
+      "heldAsked": 10,
+      "thirdLogs": 4
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 952,
+      "heldAsked": 10,
+      "thirdLogs": 4
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 891,
+      "heldAsked": 10,
+      "thirdLogs": 4
+     }
+    ]
+   }
+  },
+  "helper": {
+   "base": {
+    "list": [
+     "https://mainnet.base.org",
+     "https://base-rpc.publicnode.com",
+     "https://base.gateway.tenderly.co",
+     "https://base.drpc.org",
+     "https://base-pokt.nodies.app"
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "status": 200,
+      "results": 246,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 2
+     },
+     {
+      "mode": "503",
+      "status": 200,
+      "results": 244,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 2
+     },
+     {
+      "mode": "limit",
+      "status": 200,
+      "results": 242,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 2
+     }
+    ]
+   },
+   "robinhood": {
+    "list": [
+     "https://rpc.mainnet.chain.robinhood.com",
+     "https://robinhood.daybreak-rpc.network",
+     "https://rpc-robinhood.blockmachine.io",
+     "https://robinhood.api.pocket.network",
+     "https://robinhood.drpc.org",
+     "https://api.blockvectra.com/v1/robinhood_mainnet/public"
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "status": 200,
+      "results": 232,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "503",
+      "status": 200,
+      "results": 230,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "limit",
+      "status": 200,
+      "results": 226,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     }
+    ]
+   }
+  },
+  "addressless": {
+   "base": {
+    "checkout": {
+     "status": 200,
+     "results": 0,
+     "answeredBy": "https://base.gateway.tenderly.co"
+    },
+    "deployed": {
+     "status": 200,
+     "results": 0,
+     "commit": "6883f90d563d5d3251391615aa13705611a5e8b2"
+    }
+   },
+   "robinhood": {
+    "checkout": {
+     "status": 200,
+     "results": 0,
+     "answeredBy": "https://rpc.mainnet.chain.robinhood.com"
+    },
+    "deployed": {
+     "status": 200,
+     "results": 0,
+     "commit": "6883f90d563d5d3251391615aa13705611a5e8b2"
+    }
+   }
+  }
+ },
+ "bad": {
+  "recorded": "2026-11-05T20:09:22.175Z",
+  "base": "https://api.confidential.unrealized.trade",
+  "scans": {
+   "base": [
+    "https://base-rpc.publicnode.com",
+    "https://base.gateway.tenderly.co"
+   ],
+   "robinhood": [
+    "https://rpc.mainnet.chain.robinhood.com",
+    "https://robinhood.daybreak-rpc.network"
+   ]
+  },
+  "preflight": {},
+  "cases": {
+   "base-hook": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 10565
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider refused 4 connections in a row: no connection (Failed to fetch)",
+      "ms": 3505,
+      "heldAsked": 8,
+      "thirdLogs": 0
+     },
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider refused 4 connections in a row: no connection (Failed to fetch)",
+      "ms": 3504,
+      "heldAsked": 5,
+      "thirdLogs": 0
+     },
+     {
+      "mode": "503",
+      "code": "rpc_error",
+      "message": "rpc_error: a provider did not answer: the provider answered HTTP 503",
+      "ms": 6004,
+      "heldAsked": 8,
+      "thirdLogs": 0
+     },
+     {
+      "mode": "503",
+      "code": "rpc_error",
+      "message": "rpc_error: a provider did not answer: the provider answered HTTP 503",
+      "ms": 6009,
+      "heldAsked": 8,
+      "thirdLogs": 0
+     }
+    ]
+   },
+   "robinhood-torch": {
+    "first": [
+     {
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms",
+      "ms": 60393
+     },
+     {
+      "code": "ok",
+      "ms": 3623
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider refused 4 connections in a row: no connection (Failed to fetch)",
+      "ms": 3503,
+      "heldAsked": 5,
+      "thirdLogs": 0
+     },
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider refused 4 connections in a row: no connection (Failed to fetch)",
+      "ms": 3505,
+      "heldAsked": 5,
+      "thirdLogs": 0
+     },
+     {
+      "mode": "503",
+      "code": "rpc_error",
+      "message": "rpc_error: a provider did not answer: the provider answered HTTP 503",
+      "ms": 6005,
+      "heldAsked": 8,
+      "thirdLogs": 0
+     },
+     {
+      "mode": "503",
+      "code": "rpc_error",
+      "message": "rpc_error: a provider did not answer: the provider answered HTTP 503",
+      "ms": 6006,
+      "heldAsked": 8,
+      "thirdLogs": 0
+     }
+    ]
+   }
+  },
+  "helper": {
+   "base": {
+    "list": [
+     "https://mainnet.base.org",
+     "https://base-rpc.publicnode.com",
+     "https://base.gateway.tenderly.co",
+     "https://base.drpc.org",
+     "https://base-pokt.nodies.app"
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "status": 200,
+      "results": 350,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 2
+     },
+     {
+      "mode": "503",
+      "status": 200,
+      "results": 334,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 2
+     },
+     {
+      "mode": "limit",
+      "status": 200,
+      "results": 335,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 2
+     }
+    ]
+   },
+   "robinhood": {
+    "list": [
+     "https://rpc.mainnet.chain.robinhood.com",
+     "https://robinhood.daybreak-rpc.network",
+     "https://rpc-robinhood.blockmachine.io",
+     "https://robinhood.api.pocket.network",
+     "https://robinhood.drpc.org",
+     "https://api.blockvectra.com/v1/robinhood_mainnet/public"
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "status": 200,
+      "results": 201,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "503",
+      "status": 200,
+      "results": 209,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "limit",
+      "status": 200,
+      "results": 205,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     }
+    ]
+   }
+  },
+  "addressless": {
+   "base": {
+    "checkout": {
+     "status": 200,
+     "results": null,
+     "error": "-32701 Please specify an address in your request or, to remove restrictions, order a de",
+     "answeredBy": "https://base-rpc.publicnode.com"
+    },
+    "deployed": {
+     "status": 200,
+     "results": null,
+     "error": "-32701 Please specify an address in your request or, to remove restrictions, order a de",
+     "commit": "9041265a495b476e680a29cad98f36e24d912a5f"
+    }
+   },
+   "robinhood": {
+    "checkout": {
+     "status": 200,
+     "results": 0,
+     "answeredBy": "https://rpc.mainnet.chain.robinhood.com"
+    },
+    "deployed": {
+     "status": 200,
+     "results": 0,
+     "commit": "9041265a495b476e680a29cad98f36e24d912a5f"
+    }
+   }
+  }
+ }
+}
