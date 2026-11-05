@@ -164,7 +164,7 @@ test("card helper-token-page-cold: a held mint's refresh keeps the batched searc
   assert.equal(other.done?.status, 200);
 });
 
-test("card helper-token-page-cold: searches stay at SEARCH_PER_SPAN in the proxy's counted minute; the next cold one goes the moment the oldest leaves it; past SEARCH_WAIT_MAX_MS it answers 429 with the wait and is still read", async (t) => {
+test("card helper-token-page-cold: searches stay at SEARCH_PER_SPAN in the proxy's counted minute; the next cold one goes the moment the oldest leaves it; past SEARCH_WAIT_MAX_MS it answers not ready (503, never our 429: card helper-crowd-429 fold 6) and is still read", async (t) => {
   clock(t);
   const proxy = searchProxy();
   const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
@@ -185,7 +185,7 @@ test("card helper-token-page-cold: searches stay at SEARCH_PER_SPAN in the proxy
   await run(t, 500);
   assert.equal(next.done?.status, 200);
   // another helper's minute filled at once (one search a cold mint, back to back): the next one's slot is past
-  // SEARCH_WAIT_MAX_MS, so it answers 429 naming the wait, and its mint is still searched when the slot comes
+  // SEARCH_WAIT_MAX_MS, so it answers not ready (never our 429), and its mint is still searched when the slot comes
   proxy.calls.length = 0;
   const tok2 = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
   for (let n = 200; proxy.calls.length < SEARCH_PER_SPAN; n++) {
@@ -194,10 +194,9 @@ test("card helper-token-page-cold: searches stay at SEARCH_PER_SPAN in the proxy
   }
   const late = ask(tok2, mint(999));
   await run(t, 50);
-  assert.equal(late.done?.status, 429, "not held for the slot");
-  assert.ok(late.done!.retryAfterS! * 1000 > SEARCH_WAIT_MAX_MS);
+  assert.deepEqual([late.done?.status, late.done?.retryAfterS], [503, undefined], "not held for the slot, and not our 429");
   const before = proxy.calls.length;
-  await run(t, late.done!.retryAfterS! * 1000 + 500);
+  await run(t, 61_000); // the counted minute's oldest search leaves it
   assert.equal(proxy.calls.length, before + 1);
   assert.ok(proxy.calls.at(-1)!.mints.includes(mint(999)), "its mint was searched when the slot came");
   const retry = ask(tok2, mint(999));
@@ -264,7 +263,8 @@ test("card helper-token-page-cold: page searches at their limit leave a swap bui
   const build = await proxy.handle("jupiter", "/swap/v2/build", "q=last", "", "198.51.100.200");
   assert.equal(build.status, 200, `a swap build is not refused behind token pages (${build.body})`);
   await run(t, 5_000);
-  for (const h of pages) assert.ok(h.done?.status === 200 || h.done?.status === 429, `a page answers 200 or 429 with its wait, never ${h.done?.status}`);
+  // card helper-crowd-429 fold 6: a page past Jupiter's room is not ready (503 upstream), never our 429
+  for (const h of pages) assert.ok(h.done?.status === 200 || h.done?.status === 503, `a page answers 200 or not ready, never ${h.done?.status}`);
 });
 
 test("card helper-token-page-cold: a caller waiting on a mint already queued as a refresh makes it cold: it goes at once", async (t) => {
@@ -322,4 +322,81 @@ test("card helper-token-page-cold: a search carries at most what the proxy's QUE
   assert.ok(pages.every((h) => h.done?.status === 200), `${pages.filter((h) => h.done?.status !== 200).length} pages not 200`);
   assert.equal(proxy.calls.length, 2, "two searches");
   assert.ok(proxy.calls.every((c) => `query=${c.mints.join(",")}`.length <= 4_096));
+});
+
+/** Card helper-crowd-429 fold 6: the helper live suite's helper-token-page-cold (16 pairs of cold page reads, PAIR_GAP_MS
+ *  10 s apart, the second of a pair as soon as the first answers) through the real proxy, against a Jupiter that answers
+ *  one search 429 with Retry-After `ra` (live run 41943005189 at 9beb5ba: "30 of 32 page reads answered 200; 2 did not:
+ *  429 Retry-After 4, 429 Retry-After 1", the helper's log "jupiter provider 429" then "jupiter held" on /v1/market/token
+ *  and /v1/proxy), and a device's swap build that arrives inside the hold. */
+async function suiteWithOne429(t: TestContext, ra: number) {
+  clock(t);
+  let searches = 0;
+  const upstream: { at: number; path: string; status: number }[] = [];
+  const proxy = createProxy({}, {
+    now: () => Date.now(),
+    fetch: (async (url: string) => {
+      const u = new URL(url);
+      if (u.pathname === "/tokens/v2/search" && ++searches === 9) {
+        upstream.push({ at: Date.now(), path: u.pathname, status: 429 });
+        await new Promise((ok) => setTimeout(ok, LAT)); // the 429 takes its round trip too
+        return new Response('{"message":"Rate limit exceeded"}', { status: 429, headers: { "content-type": "application/json", "retry-after": String(ra) } });
+      }
+      upstream.push({ at: Date.now(), path: u.pathname, status: 200 });
+      await new Promise((ok) => setTimeout(ok, LAT));
+      const body = u.pathname === "/tokens/v2/search" ? u.searchParams.get("query")!.split(",").map(rowOf) : { ok: 1 };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }) as never,
+  });
+  const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
+  const pages: Timed[] = [];
+  let build: { status: number; body: string } | null = null;
+  for (let pair = 0; pair < 16; pair++) {
+    for (let k = 0; k < 2; k++) {
+      const h = ask(tok, mint(1000 + pair * 2 + k));
+      if (pair === 4 && k === 0) {
+        // a device's build lands while the 429's hold stands
+        await run(t, LAT + 50);
+        void proxy.handle("jupiter", "/swap/v2/build", "q=device", "", "198.51.100.7").then((a) => (build = a));
+      }
+      for (let ms = 0; h.done === null && ms < 15_000; ms += 50) await run(t, 50);
+      pages.push(h.done ?? { status: 0, ms: -1 });
+    }
+    await run(t, 10_000);
+  }
+  return { pages, build: build as { status: number; body: string } | null, upstream };
+}
+
+for (const ra of [1, 2, 3, 4])
+  test(`card helper-crowd-429 fold 6: the suite's 32 cold page reads with one Jupiter 429 (Retry-After ${ra}) all answer 200: the hold is waited out once, then read; a build inside it never answers 429`, async (t) => {
+    const r = await suiteWithOne429(t, ra);
+    assert.deepEqual(r.pages.map((p) => p.status).filter((s) => s !== 200), [], `every page read 200: ${JSON.stringify(r.pages.filter((p) => p.status !== 200))}`);
+    const i = r.upstream.findIndex((u) => u.status === 429);
+    const inHold = r.upstream.filter((u, j) => j > i && u.at < r.upstream[i]!.at + LAT + ra * 1000);
+    assert.deepEqual(inHold, [], "nothing reached Jupiter inside its reset");
+    assert.ok(r.build !== null && r.build.status !== 429, `the build inside the hold: ${r.build?.status}, never our 429`);
+    if (ra * 1000 + LAT < 3_000) assert.equal(r.build!.status, 200, "inside its wait (QUEUE_WAIT_MS): served");
+    // after the reset the calls that waited go one a second (Jupiter Free "1 | 60"), no burst
+    const after = r.upstream.filter((u) => u.at >= r.upstream[i]!.at + LAT + ra * 1000).slice(0, 2);
+    if (after.length === 2 && r.build!.status === 200) assert.ok(after[1]!.at - after[0]!.at >= 1_000, `the waiters go in turn: ${after.map((u) => u.at - r.upstream[i]!.at)}`);
+  });
+
+test("card helper-crowd-429 fold 6: a Jupiter hold past the page's budget answers the not-ready 503 upstream, never 429, and nothing reaches Jupiter inside it", async (t) => {
+  clock(t);
+  const upstream: number[] = [];
+  const proxy = createProxy({}, {
+    now: () => Date.now(),
+    fetch: (async () => (upstream.push(Date.now()), new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": "30" } }))) as never,
+  });
+  const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
+  const a = ask(tok, mint(2000));
+  await run(t, 200);
+  const b = ask(tok, mint(2001)); // a second cold page inside the hold
+  const build = proxy.handle("jupiter", "/swap/v2/build", "q=device", "", "198.51.100.8");
+  for (let ms = 0; (a.done === null || b.done === null) && ms < 20_000; ms += 50) await run(t, 50);
+  await run(t, 100);
+  const bd = await build;
+  assert.deepEqual([a.done?.status, a.done?.retryAfterS, b.done?.status, b.done?.retryAfterS], [503, undefined, 503, undefined], "not ready, no 429 and no wait of ours named");
+  assert.deepEqual([bd.status, JSON.parse(bd.body)], [503, { error: { code: "upstream" } }], "the build too: the device falls back on its public path (H2.3)");
+  assert.equal(upstream.length, 1, "one call met the 429; nothing else reached Jupiter inside its reset");
 });
