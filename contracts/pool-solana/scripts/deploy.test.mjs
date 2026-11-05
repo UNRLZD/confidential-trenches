@@ -380,7 +380,7 @@ test("the record from chain reads: the programdata's SetAuthority gets a line, f
   assert.equal(r.txs[1].step, "deploy", "a known step keeps its name");
   assert.deepEqual(r.funders, ["F1", "F2"]);
   chainTx.auth = { ...chainTx.auth, meta: { err: { InstructionError: [0, "x"] } } };
-  await assert.rejects(chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, txs: [] }), /failed/);
+  await assert.rejects(chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, txs: [{ step: "deploy", signature: "dep" }] }), /failed/);
 });
 
 // card pool-sol-mark-tag: the record's toolchain is read from the binaries that built the code, never a fixed string (a
@@ -1139,8 +1139,12 @@ const asMainnet = (c, genesis2 = MAINNET) => {
   Object.assign(c.io, { gh: f.gh, pin: f.sha });
   return asMainnetReads(c, genesis2);
 };
+const PUBLICNODE = "https://solana-rpc.publicnode.com";
+/** PublicNode's answer to getProgramAccounts (scripts/live-checks/pool-sol-deploy.mjs's provider notes, 403 -32602). */
+const PUBLICNODE_GPA = { ok: false, status: 403, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "Indexed requests require a personal token. Get one at: https://www.allnodes.com/publicnode" } }) };
 const asMainnetReads = (c, genesis2) => wrap(c, (url, { method, params }, real) => {
   if (method === "getGenesisHash") return okR(url === MAIN_URL ? MAINNET : genesis2);
+  if (method === "getProgramAccounts" && url === PUBLICNODE) return PUBLICNODE_GPA;
   if (method === "getAccountInfo" && params[0] === RETURN) return okR(sysAccount());
   if (method === "getMultipleAccounts") {
     assert.deepEqual(params[0], [PUMP_GLOBAL]);
@@ -1221,7 +1225,7 @@ test("mainnet: the CLI deploys with mainnet's compute unit price", async () => {
     assert.match(String(r.error?.message), /stop after the deploy call/);
     assert.ok(args, "the CLI was asked to deploy");
     assert.deepEqual(args.slice(args.indexOf("--with-compute-unit-price"), args.indexOf("--with-compute-unit-price") + 2), ["--with-compute-unit-price", String(PRIORITY_MICRO_LAMPORTS)]);
-    assert.ok(args.includes("--final"));
+    assert.ok(!args.includes("--final"), "the SetAuthority to none is the script's own priced send, not the CLI's (review 89a6 M1)");
   } finally {
     if (r.dir) rmSync(r.dir, { recursive: true, force: true });
     rmSync(w, { recursive: true, force: true });
@@ -1326,7 +1330,7 @@ test("--final's SetAuthority finalized a moment after the deploy: the run waits 
       case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
       case "getBalance": return ok({ value: 1_000_000_000 });
       case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
-      case "getLatestBlockhash": throw new Error("stop after the deploy's read-back");
+      case "getLatestBlockhash": return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "stop after the deploy's read-back" } }) };
       case "getAccountInfo": {
         if (!ids) return ok({ value: null });
         const pdAddr = programDataAddress(ids.program);
@@ -1776,7 +1780,7 @@ test("re-review 7: the run is done only once both RPCs read the upgrade authorit
       case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
       case "getBalance": return ok({ value: 1_000_000_000 });
       case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
-      case "getLatestBlockhash": throw new Error("stop after the deploy's read-back");
+      case "getLatestBlockhash": return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "stop after the deploy's read-back" } }) };
       case "getAccountInfo": {
         if (!ids) return ok({ value: null });
         const pdAddr = programDataAddress(ids.program);
@@ -1831,7 +1835,7 @@ test("paste 1: a CLI deploy that fails mid-upload is retried in the same run fro
       case "getProgramAccounts": return ok([]);
       case "getSignaturesForAddress": return ok([...hist].reverse().map((signature) => ({ signature, err: null })));
       case "getTransaction": return ok({ transaction: { message: { accountKeys: [ids?.funder ?? hist.funder] } }, meta: { err: null } });
-      case "getLatestBlockhash": throw new Error("stop after the deploy's read-back");
+      case "getLatestBlockhash": return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "stop after the deploy's read-back" } }) };
       case "getAccountInfo": {
         if (!ids?.program) return ok({ value: null });
         const pdAddr = programDataAddress(ids.program);
@@ -1942,7 +1946,7 @@ test("devnet rehearsal 5 Nov: a funding wait whose balance read meets a burst of
 // ---- the review of d507200f (a763a51d): each finding a test, red at d507200f ----
 import { DEPLOY_TRIES } from "./deploy.mjs";
 
-test("review a763 1: a buffer close the CLI reports 'Failed to close buffer' with exit 0 is not done: the buffer is read on both RPCs and the close throws while it is there", async () => {
+test("review a763 1 (89a6 H1): a buffer close the CLI reports 'Failed to close buffer' with exit 0 is not done: the buffer is read on --url only (PublicNode refuses getProgramAccounts) and the close throws while it is there", async () => {
   const funder = newKey();
   const BUF = newKey().id;
   let closedOn = new Set();
@@ -1960,7 +1964,7 @@ test("review a763 1: a buffer close the CLI reports 'Failed to close buffer' wit
   const failing = (args) => (args[1] === "close" && closes++, { status: 0, stdout: "", stderr: `Failed to close buffer ${BUF}: RPC response error -32002: Transaction simulation failed` });
   const ops = chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, say: () => {}, cli: failing });
   await assert.rejects(ops.closeBuffers(), new RegExp(`buffer ${BUF}.* still has the funder as its authority`));
-  assert.deepEqual([...new Set(gpaUrls)].sort(), ["a", "b"], "read on both RPCs");
+  assert.deepEqual([...new Set(gpaUrls)], ["a"], "read on --url only, as leftovers() reads it");
   // the cleanup retries it, and on giving up keeps the reserve for --sweep-kept
   let bal = 50_000_000n;
   const sent = [];
@@ -1968,8 +1972,8 @@ test("review a763 1: a buffer close the CLI reports 'Failed to close buffer' wit
   assert.equal(closes, 1 + 5, "the CLI's close was tried again by the retry");
   assert.ok(r.problems.some((p) => /kept 1000000 lamports in the funder for --sweep-kept: buffer close gave up/.test(p)), r.problems.join("\n"));
   assert.equal(bal, CLEANUP_RESERVE, "the reserve stays in the funder");
-  // a close the RPCs read as done (on both) resolves
-  closedOn = new Set(["a", "b"]);
+  // a close --url reads as done resolves
+  closedOn = new Set(["a"]);
   await ops.closeBuffers();
 });
 
@@ -1993,25 +1997,42 @@ test("review a763 1: --sweep-kept whose buffer close fails (exit 0, 'Failed to c
 
 /** A run of main() on a local fake whose program state the planted CLI sets: `onDeploy(n, ids, state)` answers the n-th
  * deploy, `onCli(args, ids, state)` any other CLI call. Ends at the first send after the read-back. */
-async function deployRun({ onDeploy, onCli = () => ({ status: 0, stdout: "", stderr: "" }), limitGsfa = 0 }) {
+async function deployRun({ onDeploy, onCli = () => ({ status: 0, stdout: "", stderr: "" }), limitGsfa = 0, balanceAfter = null, dropSetAuthority = 0 }) {
   const f = fakeGh();
   const code = recordedCode();
   const state = { program: false, authority: null }; // authority: null none, else the funder's id
   let ids = null;
   let funded = false;
   let gsfaLimited = 0;
+  let balances = 0;
+  let hashes = 0; // a new blockhash a read, so a SetAuthority sent again is a new transaction
+  const sent = []; // the run's own sends: { tx, ix, landed }
   const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
     const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
     switch (method) {
       case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
       case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
-      case "getBalance": return (funded = true), ok({ value: 1_000_000_000 });
+      case "getBalance": return (funded = true), ok({ value: balanceAfter && balances++ > 0 ? balanceAfter : 1_000_000_000 });
       case "getSignaturesForAddress":
         if (funded && gsfaLimited < limitGsfa) return gsfaLimited++, { ok: false, status: 429, json: async () => ({ code: 429, message: "Connection rate limits exceeded" }) };
         return ok([]);
       case "getProgramAccounts": return ok([]);
-      case "getLatestBlockhash": throw new Error("stop after the deploy's read-back");
+      case "getLatestBlockhash": return ok({ value: { blockhash: b58(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 1 + (++hashes % 250) : 7))), lastValidBlockHeight: 0 } });
+      case "getBlockHeight": return ok(1);
+      case "sendTransaction": {
+        // the loader's SetAuthority lands (after `dropSetAuthority` sends that never land); any other send is the stop
+        const tx = decodeTx(params[0]);
+        const ix = tx.ixs.find((x) => x.program !== COMPUTE_BUDGET);
+        if (ix.program !== LOADER) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "stop after the deploy's read-back" } }) };
+        if (!sent.some((x) => x.tx.signature === tx.signature)) {
+          const landed = sent.filter((x) => x.ix.program === LOADER).length >= dropSetAuthority;
+          sent.push({ tx, ix, landed });
+          if (landed) state.authority = null;
+        }
+        return ok(tx.signature);
+      }
+      case "getSignatureStatuses": return ok({ value: params[0].map((sig) => (sent.some((x) => x.landed && x.tx.signature === sig) ? { confirmationStatus: "confirmed", err: null } : null)) });
       case "getAccountInfo": {
         if (!ids || !state.program) return ok({ value: null });
         const pdAddr = programDataAddress(ids.program);
@@ -2055,32 +2076,49 @@ async function deployRun({ onDeploy, onCli = () => ({ status: 0, stdout: "", std
     rmSync(w, { recursive: true, force: true });
     for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
   }
-  return { error, said, calls, state, ids: () => ids };
+  return { error, said, calls, state, sent, ids: () => ids };
 }
 const deployed = (said) => said.some((l) => /deployed \S+, upgrade authority none/.test(l));
 
-test("review a763 2a: a try whose deploy landed and whose --final SetAuthority did not is finished with set-upgrade-authority --final, never redeployed or closed", async () => {
+/** The run's own SetAuthority sends in `sent`: the loader's instruction 4 (bincode u32 LE), on [programdata, funder]. */
+const setAuthorities = (r) => r.sent.filter((x) => x.ix.program === LOADER);
+const isSetAuthorityToNone = (x, ids) => Buffer.from(x.ix.data).equals(Buffer.from([4, 0, 0, 0])) && x.ix.keys.length === 2 && x.ix.keys[0] === programDataAddress(ids.program) && x.ix.keys[1] === ids.funder && x.tx.payer === ids.funder;
+
+test("review a763 2a (89a6 M1): a try whose deploy landed with the funder as its authority is made final by the script's own SetAuthority send (loader instruction 4, [programdata, funder]), never by the CLI, never redeployed or closed", async () => {
   const r = await deployRun({
     onDeploy: (n, ids, state) => {
-      if (n === 1) return (state.program = true), (state.authority = ids.funder), { status: 1, stdout: "", stderr: "Error: Failed to set authority: Max retries exceeded" };
+      if (n === 1) return (state.program = true), (state.authority = ids.funder), { status: 1, stdout: "", stderr: "Error: Data writes to account failed: Custom error: Max retries exceeded" };
       return { status: 1, stdout: "", stderr: "Error: Program's authority Some(x) does not match authority provided" };
-    },
-    onCli: (args, ids, state) => {
-      if (args[1] === "set-upgrade-authority") state.authority = null;
-      return { status: 0, stdout: "", stderr: "" };
     },
   });
   assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
   assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1, "no second deploy");
-  const set = r.calls.find((a) => a[1] === "set-upgrade-authority");
-  assert.ok(set, r.calls.map((a) => a.slice(0, 2).join(" ")).join("; "));
-  assert.equal(set[2], r.ids().program);
-  assert.ok(set.includes("--final"));
+  assert.ok(!r.calls.some((a) => a[1] === "set-upgrade-authority"), "no CLI SetAuthority: it is unpriced (agave v4.4.0 program.rs process_set_authority)");
+  assert.ok(!r.calls.some((a) => a[1] === "deploy" && a.includes("--final")), "the CLI deploy has no --final");
+  const sa = setAuthorities(r);
+  assert.equal(sa.length, 1, r.said.join("\n"));
+  assert.ok(isSetAuthorityToNone(sa[0], r.ids()), JSON.stringify({ data: [...sa[0].ix.data], keys: sa[0].ix.keys }));
+  assert.equal(r.state.authority, null);
   assert.ok(!r.calls.some((a) => a[1] === "close" && a[2] === r.ids().program), "the program is not closed");
   assert.ok(deployed(r.said), r.said.join("\n"));
 });
 
-test("review a763 2b: a try whose CLI reported an error after its --final SetAuthority landed takes the success path: no second deploy, no set-upgrade-authority", async () => {
+test("review 89a6 M1b: a deploy that exits 0 leaves the funder as authority; a SetAuthority that never lands is sent again (journaled before each send), and no send counts as a deploy try", async () => {
+  const r = await deployRun({
+    dropSetAuthority: 2,
+    onDeploy: (n, ids, state) => ((state.program = true), (state.authority = ids.funder), { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" }),
+  });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1, "one deploy");
+  const sa = setAuthorities(r);
+  assert.equal(sa.length, 3, "two that never land, then one that does");
+  for (const x of sa) assert.ok(isSetAuthorityToNone(x, r.ids()));
+  assert.ok(!r.said.some((l) => /deploy try 2 of/.test(l)), r.said.join("\n"));
+  assert.ok(r.said.some((l) => /SetAuthority \(to none\) try 3 of 6/.test(l)), r.said.join("\n"));
+  assert.ok(deployed(r.said), r.said.join("\n"));
+});
+
+test("review a763 2b: a try whose CLI reported an error after the program read final takes the success path: no second deploy, no SetAuthority", async () => {
   const r = await deployRun({
     onDeploy: (n, ids, state) => {
       if (n === 1) return (state.program = true), (state.authority = null), { status: 1, stdout: "", stderr: "Error: unable to confirm transaction" };
@@ -2090,6 +2128,7 @@ test("review a763 2b: a try whose CLI reported an error after its --final SetAut
   assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
   assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1, "no second deploy");
   assert.ok(!r.calls.some((a) => a[1] === "set-upgrade-authority"));
+  assert.equal(setAuthorities(r).length, 0);
   assert.ok(deployed(r.said), r.said.join("\n"));
 });
 
@@ -2118,4 +2157,162 @@ test("review a763 5: the KEYS KEPT line names buffer.json beside funder.json and
   const src = readFileSync(path.join(HERE, "deploy.mjs"), "utf8");
   const line = src.split("\n").find((l) => l.includes("KEYS KEPT in"));
   assert.match(line, /funder\.json.*program\.json.*buffer\.json/);
+});
+
+// ---- the re-review of 89a6d6f3: each finding a test, red at 89a6d6f3 ----
+test("review 89a6 H1: a mainnet run with PublicNode refusing getProgramAccounts (403 -32602) completes: the record written, the keys removed, getProgramAccounts read on --url only", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const gpa = [];
+  wrap(c, (url, { method }, real) => (method === "getProgramAccounts" && gpa.push(url), real()));
+  const { w, out, journal } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(existsSync(out), "the record is written");
+    assert.equal(existsSync(journal), false, "the journal is removed");
+    assert.equal(existsSync(r.dir), false, "the keys are removed");
+    assert.deepEqual([...new Set(gpa)], [MAIN_URL]);
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 89a6 H1b: a mainnet --sweep-kept with PublicNode refusing getProgramAccounts finishes: the funder swept to 0 and the keys removed", async () => {
+  const c = asMainnet(cluster());
+  const k = keptRun(c, { cluster: "mainnet", genesis_hash: MAINNET });
+  c.bal.set(k.funder.id, 10_000_000n);
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], ["--mainnet", "--url", MAIN_URL, "--sweep-kept", k.journal]);
+    const j = readJ(k.journal);
+    assert.equal(s.error, null, String(s.error?.message) + "\n" + s.said.join("\n"));
+    assert.equal(j.keys.state, "removed", j.keys.why.join("; "));
+    assert.equal(c.bal.get(k.funder.id), 0n);
+    assert.equal(existsSync(k.dir), false);
+  } finally {
+    k.done();
+  }
+});
+
+test("review 89a6 M1: on mainnet the SetAuthority to none is the script's own send, priced (compute unit price first), on [programdata, funder]", async () => {
+  const c = asMainnet(cluster());
+  const code = recordedCode();
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  let ids = null;
+  c.io.cli = (a) => {
+    if (a[1] !== "deploy") return { status: 0, stdout: "", stderr: "" };
+    ids = { program: keyOf(a[a.indexOf("--program-id") + 1]), funder: keyOf(a[a.indexOf("--upgrade-authority") + 1]) };
+    // the deploy landed, its authority the funder (no --final)
+    const pd = programDataAddress(ids.program);
+    const acc = (executable, data) => ({ owner: LOADER, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] });
+    const meta = Buffer.alloc(45);
+    meta.writeUInt32LE(3, 0), (meta[12] = 1), Buffer.from(b58decode(ids.funder)).copy(meta, 13);
+    c.accounts.set(ids.program, acc(true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pd))])));
+    c.accounts.set(pd, acc(false, Buffer.concat([meta, code])));
+    return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+  };
+  const loaderSends = [];
+  wrap(c, (url, { method, params }, real) => {
+    if (method === "sendTransaction") {
+      const tx = decodeTx(params[0]);
+      if (tx.ixs.some((x) => x.program === LOADER)) return loaderSends.push(tx), errR("stop at the SetAuthority send");
+    }
+    return real();
+  });
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out));
+  try {
+    assert.match(String(r.error?.message), /stop at the SetAuthority send/, r.said.join("\n"));
+    assert.ok(loaderSends.length >= 1, r.said.join("\n"));
+    const tx = loaderSends[0];
+    assert.equal(tx.ixs.length, 2);
+    assert.equal(tx.ixs[0].program, COMPUTE_BUDGET);
+    assert.equal(Buffer.from(tx.ixs[0].data).readBigUInt64LE(1), PRIORITY_MICRO_LAMPORTS);
+    assert.deepEqual([...tx.ixs[1].data], [4, 0, 0, 0]);
+    assert.deepEqual(tx.ixs[1].keys, [programDataAddress(ids.program), ids.funder]);
+    assert.equal(tx.payer, ids.funder);
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 89a6 M2: a send's blockhash read and status reads that fail past rpc()'s five tries are read again: the transaction is confirmed", async () => {
+  const k = newKey();
+  const { sendAndConfirm } = await import("./deploy.mjs");
+  let hashFails = 7;
+  let statusFails = 7;
+  let t = 0;
+  const fetchFn = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getLatestBlockhash") {
+      if (hashFails-- > 0) return { ok: false, status: 429, json: async () => ({ code: 429, message: "Too many requests" }) };
+      return okR({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: 10 } });
+    }
+    if (method === "sendTransaction") return okR(decodeTx(params[0]).signature);
+    if (method === "getSignatureStatuses") {
+      if (statusFails-- > 0) throw new TypeError("fetch failed");
+      return okR({ value: [{ confirmationStatus: "confirmed", err: null }] });
+    }
+    throw new Error(`unexpected ${method}`);
+  };
+  const sig = await sendAndConfirm(fetchFn, "http://x", [transferIx(k.id, RETURN, 1n)], k, [k], { step: "a transfer", wait: async (ms) => void (t += ms), now: () => t });
+  assert.match(sig, /^[1-9A-HJ-NP-Za-km-z]{80,90}$/);
+  assert.ok(hashFails < 0 && statusFails < 0);
+});
+
+test("review 89a6 M2: the table's slot read failing past rpc()'s five tries is read again: the mainnet run completes", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let slotFails = 7;
+  wrap(c, (url, { method }, real) => (method === "getSlot" && slotFails-- > 0 ? { ok: false, status: 429, json: async () => ({ code: 429, message: "Too many requests" }) } : real()));
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(slotFails < 0);
+    assert.ok(r.said.some((l) => /the slot not read \(getSlot: HTTP 429/.test(l)), r.said.join("\n"));
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 89a6 L1: a deploy try is not started when the funder holds less than one try's bound plus the rest of the run: the run stops for the cleanup after try 1", async () => {
+  const r = await deployRun({
+    balanceAfter: 2_000_000,
+    onDeploy: () => ({ status: 1, stdout: "", stderr: "Error: Data writes to account failed: Custom error: Max retries exceeded" }),
+  });
+  assert.match(String(r.error?.message), /deploy try 2 of 6 not started: the funder holds 2000000 lamports, below the \d+ one more try and the rest of the run need/, r.said.join("\n"));
+  assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1);
+  assert.ok(r.calls.some((a) => a[1] === "close" && a[2] === "--buffers"), "the cleanup closes the run's buffer");
+});
+
+test("review 89a6 L2: the cleanup keeps the reserve in its final sweep while leftovers() names something under the funder, though no close gave up", async () => {
+  const run = async (left) => {
+    let bal = 50_000_000n;
+    const r = await cleanup({ closeBuffers: async () => {}, upgradeableByFunder: async () => false, leftovers: left, balance: async () => bal, transfer: async (to, n) => ((bal -= n + FEE_PER_SIGNATURE), "s".repeat(87)) }, RETURN, fast);
+    return { bal, r };
+  };
+  const a = await run(async () => ["the funder holds 1000000 lamports on a", "buffer B1 still has the funder as its authority"]);
+  assert.equal(a.bal, CLEANUP_RESERVE, a.r.problems.join("\n"));
+  assert.ok(a.r.problems.some((p) => /kept 1000000 lamports in the funder for --sweep-kept: buffer B1 still has the funder as its authority/.test(p)), a.r.problems.join("\n"));
+  const b = await run(async () => { throw new Error("getProgramAccounts: HTTP 503"); });
+  assert.equal(b.bal, CLEANUP_RESERVE, "a leftovers read that fails keeps the reserve too");
+  const c = await run(async () => ["the funder holds 1000000 lamports on a"]);
+  assert.equal(c.bal, 0n, "only the funder's own balance left: swept to 0");
+});
+
+test("review 89a6 I3: the record lists only the programdata's transactions whose fee payer is the run's own; a stranger's transaction naming the programdata is left out", async () => {
+  const D0 = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
+  const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, LOADER], instructions: loaderTag === undefined ? [] : [{ programIdIndex: 1, data: loaderTag === 4 ? "5" : "3" }] } } });
+  const chainTx = { fund: tx(1, D0), dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), stranger: tx(4, "S1"), init: tx(5, "F1") };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR([{ signature: "stranger", err: null }, { signature: "auth", err: null }, { signature: "dep", err: null }]);
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, funder: "F1", txs: [{ step: "funding", signature: "fund" }, { step: "init", signature: "init" }] });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "dep", "auth", "init"]);
+  assert.deepEqual(r.funders, ["F1"]);
 });
