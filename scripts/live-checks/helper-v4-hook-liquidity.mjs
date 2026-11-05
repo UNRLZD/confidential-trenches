@@ -13,6 +13,7 @@
 // that reason, never passes on nothing.
 //   node scripts/live-checks/helper-v4-hook-liquidity.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+// Runs: pending helper-v4-hook-liquidity, it fails on the deployed helper at b208632 and at 04bb10f alike (live run 41990876403 and a run by hand, 5 Nov 08:05Z), each time a launch trade whose amt is no Transfer of the token in its receipt
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { BASE_VENUES, SWAP_RPCS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
