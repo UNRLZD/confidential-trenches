@@ -516,7 +516,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         if (again === 0) continue;
         return throttled(again, undefined, budget.refusedBy());
       }
-      if (shaped !== undefined) return shaped.secretForms.some((f) => Buffer.from(shaped!.body, "utf8").includes(f)) ? UPSTREAM() : { status: shaped.status, body: shaped.body };
+      // a provider still held may serve it: the caller's wait below, never the refusal (the device would take it as
+      // the read's answer)
+      if (shaped !== undefined && soonestMs === Infinity) return shaped.secretForms.some((f) => Buffer.from(shaped!.body, "utf8").includes(f)) ? UPSTREAM() : { status: shaped.status, body: shaped.body };
       // every provider failed (none held or out of room): upstream, so the device reads its own; else the soonest wait
       return down && soonestMs === Infinity ? UPSTREAM() : throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.max(1, Math.ceil(soonestMs / 1000)), undefined, `${c} every provider held`);
     }

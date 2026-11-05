@@ -689,3 +689,17 @@ test("card evm-rpc-spare-list: a range cap and a revert are the device's to read
     assert.deepEqual(asked, ["https://cfg.test/"], JSON.stringify(error));
   }
 });
+
+test("card evm-rpc-spare-list: with the rest held for longer than the wait, a -32701 is never the caller's answer: a 429 with the hold's seconds, so the device asks again", async () => {
+  const { r, asked, holds } = shapeRig({
+    "https://cfg.test/": () => jsonOk(SHAPE_ERR),
+    "https://p1.test": () => jsonOk(SHAPE_ERR),
+    "https://p2.test": () => jsonOk({}),
+    "https://p3.test": () => jsonOk({}),
+  });
+  holds.hold("https://p2.test", 30);
+  holds.hold("https://p3.test", 30);
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.equal(a.status, 429, a.body);
+  assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test"]);
+});
