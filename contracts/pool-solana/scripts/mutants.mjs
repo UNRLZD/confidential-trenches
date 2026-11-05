@@ -5,10 +5,11 @@
 // program in out/ (must PASS). Exit 0 only when every mutant is caught.
 //   cd contracts/pool-solana && cargo-build-sbf --sbf-out-dir out && (cd svm-tests/evil-venue && cargo-build-sbf --sbf-out-dir ../../out) \
 //     && node scripts/mutants.mjs [name ...]
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runSync } from "../../../scripts/group-run.mjs";
 
 const here = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SO = "blindfill_pool_solana.so";
@@ -90,10 +91,12 @@ export const MUTANTS = [
 ];
 
 function test(name, so) {
-  const r = spawnSync("cargo", ["+1.97.1", "test", "--quiet", "--manifest-path", "svm-tests/Cargo.toml", "--", "--exact", name], {
+  // a run (its build included) past 30 min is killed, its process group with it (scripts/group-run.mjs)
+  const r = runSync("cargo", ["+1.97.1", "test", "--quiet", "--manifest-path", "svm-tests/Cargo.toml", "--", "--exact", name], {
     cwd: here,
     env: { ...process.env, POOL_SO: so },
     encoding: "utf8",
+    timeoutMs: 1_800_000,
   });
   return r.status === 0;
 }

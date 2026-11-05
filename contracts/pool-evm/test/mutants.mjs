@@ -9,6 +9,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runSync } from "../../../scripts/group-run.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PP = "src/PrivacyPool.sol";
@@ -254,23 +255,16 @@ function verifierHash(dir) {
   return execFileSync("cast", ["keccak", code.trim()], { encoding: "utf8", stdio: "pipe" }).trim();
 }
 
+// a test run (its build in the copy included) past 30 min is killed, its process group with it (scripts/group-run.mjs)
+const RUN_MS = 1_800_000;
 // "pass", "fail" or "error (...)" of one named test; throws unless forge ran exactly that one test (forge matches --mt against
 // `name()`, and a pattern that matches nothing exits 0)
 function run(dir, test) {
   if (test === "layout") {
-    try {
-      execFileSync("node", ["--test", "test/layout.test.mjs"], { cwd: dir, stdio: "pipe" });
-      return "pass";
-    } catch {
-      return "fail";
-    }
+    return runSync("node", ["--test", "test/layout.test.mjs"], { cwd: dir, stdio: "pipe", timeoutMs: RUN_MS }).status === 0 ? "pass" : "fail";
   }
-  let out;
-  try {
-    out = execFileSync("node", ["test/fork-rpc.mjs", "--", "forge", "test", "--no-storage-caching", "--mt", `^${test}\\(`], { cwd: dir, encoding: "utf8", stdio: "pipe" });
-  } catch (e) {
-    out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
-  }
+  const r = runSync("node", ["test/fork-rpc.mjs", "--", "forge", "test", "--no-storage-caching", "--mt", `^${test}\\(`], { cwd: dir, encoding: "utf8", stdio: "pipe", timeoutMs: RUN_MS });
+  const out = r.status === 0 ? r.stdout : `${r.stdout ?? ""}${r.stderr ?? ""}`;
   // a read the fork replay has no answer for makes a fork test fail for the wrong reason: an error, never a kill.
   // forge 1.8.6's two probes (anvil_nodeInfo, eth_getAccountInfo) are answered by its own fallback and do not count
   const misses = [...new Set((out.match(/fork-rpc: not recorded[^\n]*/g) ?? []).filter((m) => !/anvil_nodeInfo|eth_getAccountInfo/.test(m)))];

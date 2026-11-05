@@ -10,12 +10,11 @@
 // after another took 266 s and the named tests one by one 140 s on GitHub's runner, readme-fresh-run at 47109a7).
 // Each line prints its time.
 //   node packages/kit/test/evm-quote-mutants.mjs     (a heavy job: run it on a machine with spare cores)
-import { execFile } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { run as runGroup } from "../../../scripts/group-run.mjs";
 
 const KIT = fileURLToPath(new URL("..", import.meta.url));
 const QUOTE = "src/checks/evm/quote.ts";
@@ -471,25 +470,24 @@ export const MUTANTS = [
 ];
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
-const run$ = promisify(execFile);
 // each test run's own environment: without the node --test runner's NODE_TEST_CONTEXT, which turns a child's report
 // from TAP into the runner's own stream (the runner's test calls these judges from inside node --test)
 const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT"));
 // The longest one test run takes before it is killed and counts as failed: a mutant that leaves a wait with no end
-// (the scan gate's bound removed, a Retry-After of 120 s asked again for ever) never holds up the sweep
+// (the scan gate's bound removed, a Retry-After of 120 s asked again for ever) never holds up the sweep; the run's whole
+// process group is killed with it (scripts/group-run.mjs), so node --test's per-file child never lives on
 const RUN_MS = 60_000;
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`
 let lastFail = "";
 async function run(dir, file, name) {
-  try {
-    const { stdout } = await run$("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, env: ENV, encoding: "utf8", maxBuffer: 1 << 26, timeout: RUN_MS });
-    // a test of that name passed: a file that runs no test still reports itself as one that passed
-    const ran = [...stdout.matchAll(/^\s*ok \d+ - (.*?)(?: # .*)?$/gm)].some((m) => m[1].replace(/\\#/g, "#").replace(/\\\\/g, "\\").startsWith(name));
-    return ran ? "pass" : "none";
-  } catch (e) {
-    lastFail = (e.killed ? `killed after ${RUN_MS} ms\n` : "") + `${e.stdout ?? ""}${e.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 8).join("\n");
+  const r = await runGroup("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(name), file], { cwd: dir, env: ENV, maxBuffer: 1 << 26, timeoutMs: RUN_MS });
+  if (r.status !== 0) {
+    lastFail = (r.timedOut ? `killed after ${RUN_MS} ms\n` : "") + `${r.stdout}${r.stderr}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 8).join("\n");
     return "fail";
   }
+  // a test of that name passed: a file that runs no test still reports itself as one that passed
+  const ran = [...r.stdout.matchAll(/^\s*ok \d+ - (.*?)(?: # .*)?$/gm)].some((m) => m[1].replace(/\\#/g, "#").replace(/\\\\/g, "\\").startsWith(name));
+  return ran ? "pass" : "none";
 }
 /** Each named test's "pass", "fail" or "none" on the code as it is, judged as the kill phase judges a mutant: each name
  *  alone, by its run's exit code (`run`), as many at once as there are copies `dirs` (re-review of 037627c, LOW-1: one
