@@ -27,6 +27,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { buildSolanaPoolBuy, type SolanaPoolRelease } from "../../kit/src/trade/solana/pool-buy.ts";
 import { cfg as BUY_CFG, release as BUY_RELEASE, setup as buySetup, W as BUY_W } from "../../kit/test/solana-pool-buy-fx.ts";
+import { keysOf } from "../src/pool-spend.ts";
 import { finishPoolOnward, HISTORY_PAGE, spendOwner, HISTORY_PASS, type HistoryPlaces, nearestPlannable, type PendingOnward, planPoolWithdraw, poolWithdrawable, runPoolWithdraw, solanaWithdrawMinPart, withdrawNoteFloor, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { ASK, C, COST, FEE, FINAL_SLOT, FLOOR, MIN, NOW, SCOPE, SEED64, SIG, TO, W_FEE, closers, lamportsOf, read, world } from "./pool-withdraw-world.ts";
@@ -1047,8 +1048,10 @@ const ownerOf = (rpc: SolanaRpc, release?: string) => spendOwner([rpc, rpc], { p
 test("this device's own landed tag 3 is its spend: mine by its signature, and mine from W's history", async () => {
   const { tx, loaded } = await buyTx(BUY_RELEASE, BUY_SIG);
   const rpc = chainOf({ [BUY_SIG]: { tx, meta: { err: null, loadedAddresses: loaded } } });
-  assert.equal(await ownerOf(rpc, BUY_SIG), "mine");
-  assert.equal(await ownerOf(rpc), "mine");
+  assert.deepEqual(await ownerOf(rpc, BUY_SIG), { mine: BUY_SIG });
+  assert.deepEqual(await ownerOf(rpc), { mine: BUY_SIG }, "the spend's own signature, from W's history");
+  // a hint that is not the spend (the helper's word for another transaction): the spend found in W's history names its own
+  assert.deepEqual(await ownerOf(rpc, OTHER_BUY_SIG), { mine: BUY_SIG });
 });
 
 test("a tag 3 to W under another attempt's context (another device's salt) is another's spend: other", async () => {
@@ -1073,7 +1076,19 @@ test("a tag 3 whose loaded keys are not known (none, a count off, a key that is 
 
 test("tag 3's flags as the program reads them: the next-page bit beside the compressed one is still the spend; an unknown bit never is", async () => {
   const next = await buyTx(BUY_RELEASE, BUY_SIG, (d) => void (d[1] = 3));
-  assert.equal(await ownerOf(chainOf({ [BUY_SIG]: { tx: next.tx, meta: { err: null, loadedAddresses: next.loaded } } }), BUY_SIG), "mine");
+  assert.deepEqual(await ownerOf(chainOf({ [BUY_SIG]: { tx: next.tx, meta: { err: null, loadedAddresses: next.loaded } } }), BUY_SIG), { mine: BUY_SIG });
   const bad = await buyTx(BUY_RELEASE, BUY_SIG, (d) => void (d[1] = 5));
   assert.equal(await ownerOf(chainOf({ [BUY_SIG]: { tx: bad.tx, meta: { err: null, loadedAddresses: bad.loaded } } }), BUY_SIG), null);
+});
+
+test("keysOf with two lookup tables: the static keys, then every lookup's writable keys, then every lookup's readonly ones (the kit's message.ts order)", () => {
+  const k = (n: number): string => base58.encode(new Uint8Array(32).fill(n));
+  const message = { staticKeys: [k(1), k(2)], lookups: [{ table: k(90), writable: [0, 3], readonly: [1] }, { table: k(91), writable: [2], readonly: [0, 4] }] } as unknown as Parameters<typeof keysOf>[0];
+  // getTransaction's loadedAddresses: table 1's writables, table 2's; then table 1's readonly, table 2's
+  const loadedAddresses = { writable: [k(10), k(13), k(22)], readonly: [k(11), k(20), k(24)] };
+  assert.deepEqual(keysOf(message, { err: null, loadedAddresses }), [k(1), k(2), k(10), k(13), k(22), k(11), k(20), k(24)]);
+  assert.equal(keysOf(message, { err: null, loadedAddresses: { writable: loadedAddresses.writable.slice(0, 2), readonly: loadedAddresses.readonly } }), null, "a writable count off");
+  assert.equal(keysOf(message, { err: null, loadedAddresses: { writable: loadedAddresses.writable, readonly: [...loadedAddresses.readonly, k(25)] } }), null, "a readonly count off");
+  assert.equal(keysOf(message, { err: null }), null, "none");
+  assert.deepEqual(keysOf({ ...message, lookups: [] }, { err: null }), [k(1), k(2)], "no lookups: the static keys only");
 });

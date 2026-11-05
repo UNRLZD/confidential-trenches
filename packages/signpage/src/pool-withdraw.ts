@@ -363,20 +363,14 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
       // review #232b HIGH 1: any other answer short of filled (the release read back but its spend not yet read at
       // finalized, or the helper's error while it may still land) keeps the part owed, for finishPoolOnward
       if (got.stage !== "filled") return end(pending ? "in_transit" : "stopped");
-      // the note's spend read at finalized: W is sent on only once both RPCs read that the release which spent it is
-      // this attempt's (another device on the same 12 words spends the same note to the same W, round-3 review LOW 1);
-      // another's ends the run with nothing sent from W, its money left for that device's own send
+      // filled: the note's spend read at finalized, and both RPCs read that the release which spent it is this
+      // attempt's (sendAndSettle through spendOwner, card signpage-buy-own-spend: another device on the same 12 words
+      // spends the same note to the same W, round-3 review LOW 1). Another's was not_landed above (stopped, nothing
+      // sent from W, its money left for that device's own send); one not read yet was "sent" (in_transit, owed)
       say("in_transit");
-      let minSlot = await finalSlot(h.rpcs);
-      const owner = await spendOwner(h.rpcs, h.pin, spends[i]!.w, spends[i]!.nullifierHash, (pending as PendingOnward | null)?.context ?? "", minSlot, got.signature, new Map());
-      if (owner === "other") {
-        pending = null;
-        return end("stopped");
-      }
-      if (owner === null) return end("in_transit");
-      // the release read back by its own signature may have reached finalized after minSlot was read: W is read at or
-      // past the finalized slot read now (fold 4, LOW)
-      minSlot = await finalSlot(h.rpcs);
+      // the release may have reached finalized after the spend's read: W is read at or past the finalized slot read now
+      // (fold 4, LOW)
+      const minSlot = await finalSlot(h.rpcs);
       // the part is on W; W read at or past both RPCs' finalized slot after the spend was read there
       const on = await sendOnward(h, ask, got.l, got.j, to, got.releaseAccounts, { minSlot, feeCap: wCap });
       if (on.signature !== "") txs.push({ chain: "solana", hash: on.signature });

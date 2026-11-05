@@ -53,7 +53,7 @@ const isKey = (k: unknown): k is string => {
  *  the runtime's order). A message with no lookup list has its static keys only. With one, the meta must name exactly
  *  as many keys of each kind as the lookups do, each an address, else null: the keys are not known, so the message
  *  is no one's spend (a tag 3 loads the pool account from our lookup table, kit pool-buy.ts solanaPoolBuyTableAccounts). */
-function keysOf(message: SolanaMessage, meta: Record<string, unknown>): string[] | null {
+export function keysOf(message: SolanaMessage, meta: Record<string, unknown>): string[] | null {
   if (message.lookups.length === 0) return message.staticKeys;
   const loaded = meta.loadedAddresses;
   if (!isObj(loaded)) return null;
@@ -176,21 +176,25 @@ async function spendOn(rpc: SolanaRpc, place: Place, pin: SolanaPoolPin, w: stri
   return null;
 }
 
+/** Whose spend it is: this attempt's, with the signature of the transaction that spent the note (the one a filled
+ *  answer names); another's; or not known yet. */
+export type SpendOwner = { mine: string } | "other" | null;
+
 /** Whose release spent the note (round-3 review LOW 1): two devices on the same 12 words derive the same note and the
  *  same W, so a spent note and a full W never say it.
  *  - This attempt's own release, read back by its own signature (`release`, kept with the owed send) at finalized on
- *    both RPCs, landed without error and carrying `context`: "mine", with no read of W's history (fold 3, review HIGH
+ *    both RPCs, landed without error and carrying `context`: mine (its signature), with no read of W's history (fold 3, review HIGH
  *    2: anyone can grow W's history without bound).
  *  - Else W's history names it: on both RPCs, at or past `minSlot`, the one landed pool instruction naming the note's
- *    nullifier hash (a release, or a release and buy). "mine" when on both it is the same transaction and a release
+ *    nullifier hash (a release, or a release and buy). Mine (that transaction's signature) when on both it is the same transaction and a release
  *    to W carrying `context`; "other" when on both it is the same transaction and not; null otherwise (an RPC holds
  *    none yet, or they differ): the money may be this attempt's, so nothing is decided.
  *  The history is read on from `places` (each RPC's place and find, kept by the caller across passes).
  *  The reads name W, which the balance reads name already, and transactions of its history. */
-export async function spendOwner(rpcs: readonly [SolanaRpc, SolanaRpc], pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number, release: string | undefined, places: HistoryPlaces): Promise<"mine" | "other" | null> {
+export async function spendOwner(rpcs: readonly [SolanaRpc, SolanaRpc], pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number, release: string | undefined, places: HistoryPlaces): Promise<SpendOwner> {
   if (release !== undefined && release !== "") {
     const own = await Promise.all(rpcs.map((rpc) => spendIn(rpc, pin, w, nullifierHash, context, release)));
-    if (own.every((o) => typeof o === "object" && o.mine)) return "mine";
+    if (own.every((o) => typeof o === "object" && o.mine)) return { mine: release };
   }
   const at = rpcs.map((_, i) => placeOf(places, `${i}:${w}:${nullifierHash}:${context}`));
   const [a, b] = await Promise.all(rpcs.map((rpc, i) => spendOn(rpc, at[i]!, pin, w, nullifierHash, context, minSlot)));
@@ -200,5 +204,5 @@ export async function spendOwner(rpcs: readonly [SolanaRpc, SolanaRpc], pin: Sol
     for (const p of at) delete p.found;
     return null;
   }
-  return a.mine ? "mine" : "other";
+  return a.mine ? { mine: a.sig } : "other";
 }
