@@ -103,6 +103,16 @@ const SO = path.join(POOL_DIR, "out/blindfill_pool_solana.so");
  * transactions. The need counts each such transaction at PRIORITY_CU_BOUND units (the most one may ask), so at most
  * 140,000 lamports each; what is not spent is swept back. */
 export const PRIORITY_MICRO_LAMPORTS = 100_000n;
+// The CLI's deploy (paste 1, 5 Nov 18:01-18:16Z: its writes sent over api.mainnet-beta with --use-rpc failed "Max
+// retries exceeded" after 36 of about 80, with the RPC answering 429). Solana's deploy guide (solana-com
+// apps/docs/content/docs/en/programs/deploying.mdx, "Deployment Flags", at ab8988e) says --use-rpc "requires a
+// stake-weighted RPC connection", which a public RPC is not: the writes go to the leaders' TPUs (the CLI's default,
+// QUIC), and the RPC carries only the blockhash and status reads. --max-sign-attempts re-signs what is unconfirmed when
+// its blockhash expires, about 60 s each (agave v4.4.0 cli/src/program.rs: default 5; the guide's example 10). A try
+// that still fails is tried again from the run's own buffer (--buffer: agave writes only the chunks whose bytes differ,
+// program.rs do_process_program_deploy), at most DEPLOY_TRIES times, before the cleanup closes it.
+export const DEPLOY_SIGN_ATTEMPTS = 30;
+export const DEPLOY_TRIES = 3;
 export const PRIORITY_CU_BOUND = 1_400_000n;
 export const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
 export const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
@@ -978,6 +988,8 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     return f;
   };
   const programFile = resumeId ? null : fileOf(program, "program.json");
+  // the deploy's buffer, a key of the run's own, so a failed try is resumed into the same buffer
+  const bufferFile = resumeId ? null : fileOf(newKey(), "buffer.json");
   // the CLI deploys from a file: the very bytes hashed above, written into the run's own folder
   const codeFile = path.join(dir, "code.so");
   writeFileSync(codeFile, so, { mode: 0o600 });
@@ -1092,11 +1104,18 @@ export async function main(argv, fetchFn = fetch, io = {}) {
         log(`resume: ${priorTxs.length + prior.length} prior transaction(s) kept for the record`);
       } else {
         let dep;
-        try {
-          dep = runCli(["program", "deploy", codeFile, "--program-id", programFile, "--upgrade-authority", funderFile, "--max-len", String(so.length),
-            "--final", "--use-rpc", ...(cluster === "mainnet" ? ["--with-compute-unit-price", String(PRIORITY_MICRO_LAMPORTS)] : []), "--output", "json", ...common]);
-        } finally {
-          await afterCli("the solana CLI: program deploy (buffer, writes, deploy, SetAuthority)").catch((e) => log(`the CLI's transactions not read: ${e.message}`));
+        for (let attempt = 1; ; attempt++) {
+          if (stop) throw new Error(`stopped by ${stop}`);
+          try {
+            dep = runCli(["program", "deploy", codeFile, "--program-id", programFile, "--upgrade-authority", funderFile, "--buffer", bufferFile, "--max-len", String(so.length),
+              "--final", "--max-sign-attempts", String(DEPLOY_SIGN_ATTEMPTS), ...(cluster === "mainnet" ? ["--with-compute-unit-price", String(PRIORITY_MICRO_LAMPORTS)] : []), "--output", "json", ...common], { allowFail: true });
+          } finally {
+            await afterCli(`the solana CLI: program deploy${attempt > 1 ? ` (try ${attempt})` : ""} (buffer, writes, deploy, SetAuthority)`).catch((e) => log(`the CLI's transactions not read: ${e.message}`));
+          }
+          if (dep.status === 0) break;
+          const why = (dep.stderr || dep.stdout || dep.error?.message || "").trim().split("\n").slice(-3).join(" | ");
+          if (attempt >= DEPLOY_TRIES) throw new Error(`solana program deploy: exit ${dep.status}: ${why} (try ${attempt} of ${DEPLOY_TRIES})`);
+          log(`deploy try ${attempt} of ${DEPLOY_TRIES} failed: ${why}: trying again from the run's buffer`);
         }
         const out = JSON.parse(dep.stdout.slice(dep.stdout.indexOf("{")));
         if (out.programId !== program.id) throw new Error(`deployed ${out.programId}, not ${program.id}`);
