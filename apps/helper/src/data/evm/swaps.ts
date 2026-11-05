@@ -606,8 +606,8 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
   const hook = pool.hook;
   const after = (BigInt(hook) & AFTER_SWAP_DELTA) !== 0n;
   const tokenWord = `0x${pool.token.slice(2).padStart(64, "0")}`;
-  const byTx = new Map<string, { swaps: Log[]; senders: Map<string, number>; calls: number[]; moves: { index: number; take: bigint }[]; net: Map<string, bigint> }>();
-  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], senders: new Map(), calls: [], moves: [], net: new Map() }).get(tx)!;
+  const byTx = new Map<string, { swaps: Log[]; senders: Map<string, number>; calls: number[]; callers: Set<string>; moves: { index: number; take: bigint }[]; net: Map<string, bigint> }>();
+  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], senders: new Map(), calls: [], callers: new Set(), moves: [], net: new Map() }).get(tx)!;
   // the token an address got from the PoolManager in a transaction, less what it paid in
   const credit = (tx: string, a: string, v: bigint) => {
     const n = at(tx).net;
@@ -621,7 +621,11 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
       const t = at(l.tx);
       t.senders.set(sender, (t.senders.get(sender) ?? 0) + 1);
       if (l.topics[1] === pool.id && sender !== hook) t.swaps.push(l);
-    } else if (l.address === pm && l.topics[1] === pool.id && POOL_CALLS.includes(l.topics[0]!)) at(l.tx).calls.push(l.index);
+    } else if (l.address === pm && l.topics[1] === pool.id && POOL_CALLS.includes(l.topics[0]!)) {
+      at(l.tx).calls.push(l.index);
+      // a ModifyLiquidity's or Donate's sender settles that call, never a trade
+      if (l.topics[0] !== TOPIC.initialize && l.topics.length === 3) at(l.tx).callers.add(addrOf(l.topics[2]!.slice(2)));
+    }
     else if (l.address === pool.token && l.topics.length === 3 && l.topics[0] === TOPIC.transfer && l.data.length === 66) {
       const [from, to] = [addrOf(l.topics[1]!.slice(2)), addrOf(l.topics[2]!.slice(2))];
       const v = BigInt(l.data);
@@ -634,24 +638,32 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
       const v = BigInt(`0x${l.data.slice(66)}`);
       const mint = from === ZERO && to !== ZERO;
       const burn = to === ZERO && from !== ZERO;
-      if (mint) credit(l.tx, to, v);
-      else if (burn) credit(l.tx, from, -v);
+      // claims the hook has minted or burnt are its own moves, never a trader's
       if (addrOf(l.data.slice(2, 66)) === hook) {
         if (mint) at(l.tx).moves.push({ index: l.index, take: v });
         else if (burn) at(l.tx).moves.push({ index: l.index, take: -v });
-      }
+      } else if (mint) credit(l.tx, to, v);
+      else if (burn) credit(l.tx, from, -v);
     }
   }
-  for (const { swaps, senders, calls, moves, net } of byTx.values()) {
+  for (const { swaps, senders, calls, callers, moves, net } of byTx.values()) {
     if (swaps.length === 0) continue;
     swaps.sort((a, b) => a.index - b.index);
-    // the sender's own leg, where it settles this one swap alone
+    const alone = [...senders.values()].reduce((a, b) => a + b, 0) === 1;
+    // the sender's own leg, where it settles this one swap alone; or, the transaction's only swap of the token, the one
+    // address it moved with the PoolManager that is no hook, swap sender or call sender (a router's take sent straight
+    // to its recipient, or a payer's settle: v4's take(currency, to, amount) names no sender)
     const known = new Set<number>();
     for (const l of swaps) {
       const sender = addrOf(l.topics[2]!.slice(2));
       const s = decodeSwap(pool, l, chain);
-      const n = net.get(sender);
-      if (s === null || n === undefined || senders.get(sender) !== 1) continue;
+      if (s === null || senders.get(sender) !== 1) continue;
+      let n = net.get(sender) || undefined;
+      if (n === undefined && alone) {
+        const to = [...net].filter(([a, v]) => v !== 0n && a !== hook && !senders.has(a) && !callers.has(a));
+        if (to.length === 1) n = to[0]![1];
+      }
+      if (n === undefined) continue;
       const leg = s.side === "b" ? n : -n;
       if (leg <= 0n || (s.side === "b" ? leg > s.amt : leg < s.amt)) continue;
       known.add(l.index);

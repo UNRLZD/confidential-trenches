@@ -473,6 +473,22 @@ test("card helper-v4-hook-liquidity: a hook's transfer that settles the pool's l
   assert.equal(hookTakes(pool, noCall, "base").get(`${swap.tx}:${swap.index}`), -BigInt(logs.find((l) => l.index === 722)!.data));
 });
 
+test("card helper-v4-hook-liquidity: a router's take sent straight to its recipient (v4's take names no sender) is the trader's leg when the swap is the transaction's only one: the one address that moved the token with the PoolManager and is no hook, swap or call sender", () => {
+  const tx = "0x02b8198c518595444576c2e52c9a8a536b179a2341b09aa2d58c732a61b0a2e5";
+  const logs: Log[] = LAUNCH.map(([index, address, topics, data]) => ({ block: 0x330cae8, index, tx, address, topics, data }));
+  const swap = logs.find((l) => l.index === 730)!;
+  const pool: Pool = { venue: "v4", id: swap.topics[1]!, token: logs.find((l) => l.index === 713)!.address, tokenIs0: false, quote: { kind: "eth", decimals: 18 }, hook: "0x5e320ea6278107968c119942e57d876c5f922acc" };
+  const s = decodeSwap(pool, swap, "base") as { side: "b" | "s"; amt: bigint };
+  const out = logs.find((l) => l.index === 737)!;
+  const buyer = logs.find((l) => l.index === 741)!.topics[2]!;
+  // the take sent straight to the buyer, less a part the hook keeps
+  const direct = [...logs.filter((l) => l.index < 737), { ...out, topics: [out.topics[0]!, out.topics[1]!, buyer], data: `0x${(BigInt(out.data) - 5n).toString(16).padStart(64, "0")}` }];
+  assert.equal(traderLeg(s, hookTakes(pool, direct, "base").get(`${tx}:730`)) ?? s.amt, BigInt(out.data) - 5n);
+  // a second recipient of the token from the PoolManager makes it no read: the hook's own moves decide
+  const two = [...direct, { ...out, index: 739, topics: [out.topics[0]!, out.topics[1]!, `0x${"0".repeat(24)}${"7".repeat(40)}`], data: `0x${(5n).toString(16).padStart(64, "0")}` }];
+  assert.equal(traderLeg(s, hookTakes(pool, two, "base").get(`${tx}:730`)) ?? s.amt, s.amt);
+});
+
 // Card helper-v4-hook-liquidity, live run 41990876403 at 04bb10f: Base tx
 // 0xfaaa9cc939fffb787b906da0c1309746e5229d722df371b1a44322b2994c1460 (block 53,537,870, receipt read from
 // base-rpc.publicnode.com and base.gateway.tenderly.co alike, 2026-11-05 09:2xZ). A buy of 0xe2969931... on the pool
@@ -590,12 +606,13 @@ test("card helper-v4-hook-liquidity: a hook's cut taken as ERC-6909 claims of th
   const got = traderLeg(s, hookTakes(pool, logs, "base").get(`${tx}:43`)) ?? s.amt;
   const toBuyer = BigInt(logs.find((l) => l.index === 55)!.data);
   assert.equal(got, toBuyer, `the buy is the ${toBuyer} the buyer got, not ${got}`);
-  // with no move of the swap's sender read (55 left out), the hook's claims are its cut; a claim the hook did not have
-  // minted (another caller) is none
+  // with no move of the swap's sender read (55 left out), the hook's claims are its cut, never a trader's leg; a claim
+  // another caller had minted, the transaction's only move of the token with the PoolManager, is its recipient's leg
   const noSender = logs.filter((l) => l.index !== 55);
-  assert.equal(hookTakes(pool, noSender, "base").get(`${tx}:43`), BigInt(`0x${logs.find((l) => l.index === 52)!.data.slice(66)}`));
+  const cut = BigInt(`0x${logs.find((l) => l.index === 52)!.data.slice(66)}`);
+  assert.equal(hookTakes(pool, noSender, "base").get(`${tx}:43`), cut);
   const other = noSender.map((l) => (l.index === 52 ? { ...l, data: `0x${"0".repeat(24)}${"9".repeat(40)}${l.data.slice(66)}` } : l));
-  assert.equal(hookTakes(pool, other, "base").get(`${tx}:43`), undefined);
+  assert.equal(traderLeg(s, hookTakes(pool, other, "base").get(`${tx}:43`)), cut);
 });
 
 test("card helper-v4-hook-liquidity: a beforeSwap-only hook's take right after a pool call is the next swap's cut; its paying in there settles the call", () => {
