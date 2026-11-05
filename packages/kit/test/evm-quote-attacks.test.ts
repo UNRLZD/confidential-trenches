@@ -3189,6 +3189,11 @@ async function timedBuy(run: (mono: () => number) => Promise<unknown>) {
     mock.timers.reset();
   }
 }
+/** `rpc`, its head (eth_blockNumber) answered `ms` later and the rest at once */
+const slowHead = (rpc: EvmRpc, ms: number): EvmRpc => async (calls) => {
+  if (calls.some((c) => c.method === "eth_blockNumber")) await new Promise((r) => setTimeout(r, ms));
+  return rpc(calls);
+};
 /** `rpc`, each answer `ms` later */
 const slow = (rpc: EvmRpc, ms: number): EvmRpc => async (calls) => {
   await new Promise((r) => setTimeout(r, ms));
@@ -3238,11 +3243,12 @@ test("L2 a block old enough to be stale once the wait for the buy's block is ove
 test("LOW-1 a block's age counts the time since the quote began: a scan that takes 10 s makes a 25 s-old block stale, on a sell and a buy", async () => {
   // the block is 25 s old when the quote starts; the scan provider answers each request `wait` ms later, and a new
   // token's scan asks twice (its head, then the logs), so 5 s an answer is a 10 s scan (a token of its own each run: the
-  // kit keeps a token's scan between quotes)
+  // kit keeps a token's scan between quotes). The sell's scan reads Base's whole depth below block 5,000,000 in spans
+  // (card evm-quote-warm-round), so there its head alone takes the scan's time, twice `wait`, and its spans answer at once
   const ts = "0x" + ((NOW - 25_000) / 1000).toString(16);
   const sell = (wait: number, token: string) => (mono: () => number) => {
     const { pool, req } = landedSell(token);
-    return evmPoolSellQuoteWith(req, [landed(chain([pool], 0), [BUY_AT], { heads: 0 }, ts), landed(chain([pool], 1), [BUY_AT], { heads: 0 }, ts)], NOW, slow(scanner(BUY_AT, []), wait), undefined, () => mono());
+    return evmPoolSellQuoteWith(req, [landed(chain([pool], 0), [BUY_AT], { heads: 0 }, ts), landed(chain([pool], 1), [BUY_AT], { heads: 0 }, ts)], NOW, slowHead(scanner(BUY_AT, []), 2 * wait), undefined, () => mono());
   };
   const s10 = await timed(sell(5_000, "0x00000000000000000000000000000000000bb1ba"), 8_000, 100);
   assert.deepEqual(s10.verdict, { accepted: false, code: "stale_quote" }, `after ${s10.ms} ms`);

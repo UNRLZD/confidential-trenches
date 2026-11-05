@@ -562,7 +562,8 @@ type Block = { number: bigint; hash: string; timestamp: bigint; baseFeePerGas: b
 async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: number, minBlock = 0n, mono: () => number = monotonic, start: number = mono()): Promise<{ block: Block; confirm: () => Promise<void> }> {
   const call: EvmRpcCall = { method: "eth_getBlockByNumber", params: ["latest", false] };
   const near = (x: Block, y: Block) => x.number - y.number <= maxLag && y.number - x.number <= maxLag;
-  // the order agreeing indexes, taken at each round (`rpcs` may be reordered once a round has its two)
+  // the order agreeing indexes, taken as each round starts, as agreeing takes its own (it reorders `rpcs`, the quote's
+  // list, once a round has its two)
   let list = [...rpcs];
   // two heads within maxLag of each other, from the first two providers that give them (agreeing: a spare is asked for
   // one that fails, is slow or lags)
@@ -578,7 +579,7 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
   for (;;) {
     list = [...rpcs];
     const round = agreeing(
-      list,
+      rpcs,
       async (rpc, k) => header((await ask(rpc, [call]))[0], `provider ${k + 1}`),
       near,
       (x, y) => refuse("rpc_disagree", `the providers' heads ${x.number} and ${y.number} are more than ${maxLag} blocks apart`),
