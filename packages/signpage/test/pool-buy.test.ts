@@ -125,6 +125,9 @@ type Plant = {
    *  reaches finalized. `otherListed`: whether RPC p's W history lists that buy (both when not given) */
   otherSpent?: boolean;
   otherListed?: (p: 0 | 1) => boolean;
+  /** RPC p's first this-many read-back reads (getTransaction at confirmed) answer this very transaction with an
+   *  unreadable meta, then as `readBack` says */
+  metaJunkReads?: number;
 };
 
 /** The keys a v0 transaction's lookups load, as getTransaction's meta gives them (loadedAddresses): every lookup's
@@ -162,6 +165,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   let skewed = false;
   let settles = 0;
   const heightReads = [0, 0];
+  const txReads = [0, 0];
   const accounts = (p: 0 | 1): Record<string, { owner: string; data: Uint8Array }> => ({
     [s.tableAddr]: { owner: ALT, data: s.tableData },
     [POOL]: { owner: PROGRAM, data: poolAccount() },
@@ -219,7 +223,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         return plant.finalHeight?.(p, heightReads[p]!++) ?? 1_000;
       }
       if (method === "getTransaction") {
-        const how = plant.readBack ?? "ours";
+        const how = txReads[p]!++ < (plant.metaJunkReads ?? 0) ? "metaJunk" : plant.readBack ?? "ours";
         if (how === "none" || sent === null) return null;
         const tx = sent.slice();
         tx.set(base58.decode(SIG), 1);
@@ -375,9 +379,10 @@ test("fold 2 (1): a transaction that never lands is not_landed only once both RP
   const x = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 120 });
   assert.deepEqual(await runPoolBuy(x.host, ASK), { stage: "sent", txs: [] }, "never past within the reads: sent, not not_landed");
   assert.equal(x.state(), "RESERVED");
-  // a read-back that never shows the helper's signature: the same rule, with its signature shown
+  // a read-back that never shows the helper's signature: the same rule, and the signature never named (card
+  // signpage-sent-read-back: the helper's word alone is no transaction of the user's)
   const n = await world({ readBack: "none", finalHeight: () => 50 });
-  assert.deepEqual(await runPoolBuy(n.host, ASK), { stage: "sent", txs: [{ chain: "solana", hash: SIG }] });
+  assert.deepEqual(await runPoolBuy(n.host, ASK), { stage: "sent", txs: [] });
 });
 
 test("fold 1 (3): one RPC answering another tx under the helper's signature does not turn a landed buy into not_landed", async () => {
@@ -452,7 +457,7 @@ test("a proof another run of this page holds is never picked: a second tap at on
   assert.equal(w.state(), "HELD");
 });
 
-test("the kind answers at the send with its signature, then posts filled; the run holds the seed's shared lock", async () => {
+test("the kind answers sent with its signature once it read back on both RPCs as this transaction, then posts filled; the run holds the seed's shared lock", async () => {
   const w = await world();
   const modes: string[] = [];
   const locks = { request: (name: string, opts: { mode: string }, f: () => Promise<void>) => (modes.push(`${name}:${opts.mode}`), f()) } as unknown as Pick<LockManager, "request">;
@@ -461,6 +466,7 @@ test("the kind answers at the send with its signature, then posts filled; the ru
   const r = poolBuyKind(() => ({ ...w.host, end: () => void ended++ }), locks)(ASK, { id: "r1", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { running: true; after: Promise<void>; answer: () => unknown };
   await r.after;
   assert.deepEqual(r.answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+  assert.ok(w.log.includes("0:getTransaction") && w.log.includes("1:getTransaction"), "answered only after the read-back on both RPCs");
   await new Promise((res) => setTimeout(res, 50));
   assert.deepEqual(stages, ["filled"]);
   assert.equal(ended, 1);
@@ -718,13 +724,13 @@ test("fold 1 (L3): the page's poster names each field from the route's own keys 
 // Card signpage-buy-own-spend: a second device on the same 12 words spends the same note to the same W from its own note
 // store, so the spent mark the settle reads never says the tokens are this buy's. Each path that answered filled on
 // the settle's word alone answers not_landed on another's spend, and the settle still writes the change (SPENT).
-// Each: the plant, the answer's txs (the helper's signature only while no RPC read another transaction under it), and
+// Each: the plant, the answer's txs (the helper's signature only once both RPCs read this very transaction under it), and
 // whether whose spend it is must be read (this very transaction failed on both RPCs: a spend the settle finds is
 // another's, so not_landed with no owner read, fold 1 of the review, LOW-1).
 const SECOND_DEVICE: readonly [string, Plant, TxRef[], boolean][] = [
   ["the helper's 502 (no signature)", { helper: "502" }, [], true],
   ["a signature that is not one", { helper: "badSig" }, [], true],
-  ["the helper's signature never read back", { readBack: "none" }, [{ chain: "solana", hash: SIG }], true],
+  ["the helper's signature never read back", { readBack: "none" }, [], true],
   // the real helper's path (one send per nullifier: it answers the first send's signature, another device's)
   ["the helper's signature read as another transaction on both RPCs", { readBack: "other" }, [], true],
   ["the helper's signature read as another transaction on one RPC", { readBack: "lieOne" }, [], true],
@@ -750,6 +756,67 @@ test("the helper answers a well-formed signature that is not this transaction's,
   const w = await world({ helperSig: base58.encode(new Uint8Array(64).fill(8)), finalHeight: () => 50 });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
   assert.equal(w.state(), "SPENT");
+});
+
+// Card signpage-sent-read-back: the helper's signature is a name to read back, never a fact. The sent hook (the kind's
+// early answer) and every answer's txs name it only once both RPCs read this very transaction's bytes under it.
+const NOT_OURS = base58.encode(new Uint8Array(64).fill(8));
+const SENT_HOOK: readonly [string, Plant, string, TxRef[]][] = [
+  ["a well-formed signature that is not this transaction's, this one landing", { helperSig: NOT_OURS }, "filled", [{ chain: "solana", hash: SIG }]],
+  ["a well-formed signature that is not this transaction's, this one never landing", { helperSig: NOT_OURS, landsAtSettle: "never", finalHeight: () => 50 }, "sent", []],
+  ["its signature never read back", { readBack: "none", finalHeight: () => 50 }, "sent", []],
+  ["its signature read as another transaction on both RPCs", { readBack: "other", finalHeight: () => 50 }, "sent", []],
+  ["its signature read as another transaction on one RPC", { readBack: "lieOne" }, "filled", [{ chain: "solana", hash: SIG }]],
+];
+for (const [name, plant, stage, txs] of SENT_HOOK) {
+  test(`the helper answers ${name}: no sent hook, and the answer's txs only what both RPCs read as this transaction`, async () => {
+    const w = await world(plant);
+    const told: string[] = [];
+    const a = await runPoolBuy({ ...w.host, sent: (s) => void told.push(s) }, ASK);
+    assert.deepEqual(a, { stage, txs });
+    assert.deepEqual(told, [], "no sent hook before both RPCs read this very transaction");
+  });
+}
+
+test("the sent hook fires once, after both RPCs read this very transaction under the signature", async () => {
+  const w = await world();
+  const at: string[][] = [];
+  const a = await runPoolBuy({ ...w.host, sent: (s) => void at.push([s, ...w.log]) }, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal(at.length, 1);
+  assert.equal(at[0]![0], SIG);
+  assert.ok(at[0]!.includes("0:getTransaction") && at[0]!.includes("1:getTransaction"), "told only after the read-back on both RPCs");
+});
+
+test("the sent hook fires once: both RPCs read this very transaction with an unreadable meta for two rounds, then ok", async () => {
+  const w = await world({ metaJunkReads: 2 });
+  const told: string[] = [];
+  const a = await runPoolBuy({ ...w.host, sent: (s) => void told.push(s) }, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal(w.log.filter((x) => x === "0:getTransaction").length, 3, "three read-back rounds");
+  assert.deepEqual(told, [SIG], "told once, at the first round both RPCs read it as this transaction");
+});
+
+// Review fold (HIGH): the kind's answer may come only at the run's end (no read-back within the client's 10 s), which
+// the kit's client has dropped by then (packages/kit/src/signpage/client.ts: a timed-out request's late answer); the
+// terminal then waits on progress alone (apps/terminal/src/screens/trade/model.ts). The run's stage always goes out as
+// progress too, so the button ends.
+test("dropped tx: not_landed reaches progress", async () => {
+  const w = await world({ readBack: "none", landsAtSettle: "never" });
+  const locks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+  const stages: string[] = [];
+  const r = poolBuyKind(() => w.host, locks)(ASK, { id: "r1", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { running: true; after: Promise<void>; answer: () => unknown };
+  await r.after;
+  assert.deepEqual(r.answer(), { result: { stage: "not_landed", txs: [] } });
+  assert.deepEqual(stages, ["not_landed"], "the stage reaches the app as progress, whatever its client waited");
+});
+
+test("the kind, the helper answering a well-formed signature that is not this transaction's: the app's answer never names it", async () => {
+  const w = await world({ helperSig: NOT_OURS });
+  const locks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+  const r = poolBuyKind(() => w.host, locks)(ASK, { id: "r1", sha: "00", progress: () => {} } as never) as { running: true; after: Promise<void>; answer: () => unknown };
+  await r.after;
+  assert.deepEqual(r.answer(), { result: { stage: "filled", txs: [{ chain: "solana", hash: SIG }] } });
 });
 
 test("this device's own buy is filled by its own signature at finalized, with no read of W's history", async () => {

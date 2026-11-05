@@ -29,7 +29,8 @@
 // - The op (the kit's kind "withdraw", WithdrawStage): proving while a part proves, submitted while a release is
 //   sent, in_transit once it landed and the part is on W, sent once every part's onward send read back on both RPCs,
 //   stopped when a part was refused or did not land (the parts sent before it stay sent). txs lists every
-//   transaction's signature, release and onward.
+//   transaction's signature, release and onward, as both RPCs read it as that very transaction: a release's is the
+//   send's read-back or its spend's own, never the helper's word (card signpage-sent-read-back).
 // - W goes on only once both RPCs read that the release which spent its note is this attempt's (spendOwner, card
 //   signpage-withdraw-own-spend): another device signed in with the same 12 words spends the same note to the same W
 //   and keeps its own note store, so a spent note and a full W never say whose part it is.
@@ -354,6 +355,8 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
       // the release's take writes the note RESERVED, then the pending (with the attempt): from then on a crash leaves
       // it owed
       const got = await onePart(h, ask, notes, p, fee, wFee, pool, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (owed) => void (pending = owed));
+      // the release's signature only as both RPCs read it as this release (card signpage-sent-read-back): a helper's
+      // word not read back is never in the op's txs
       if (got.signature !== "") txs.push({ chain: "solana", hash: got.signature });
       if (got.stage === "refused" || got.stage === "not_landed") {
         // the release can never land (failed on both RPCs, or its blockhash past on both with no spend): nothing on W
@@ -619,7 +622,6 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     key = null;
     const signed = wire.slice();
     signed.set(sig, 1 + 64);
-    let signature = "";
     let owedNow: PendingOnward | null = null;
     const host = {
       rpcs: h.rpcs,
@@ -627,10 +629,10 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       settle: h.settle,
       ...(h.now ? { now: h.now } : {}),
       ...(h.reads !== undefined ? { reads: h.reads } : {}),
-      // the release's own signature kept with the owed send, so a finish after a reload reads it back first
-      // awaited by the send before its read-back (fold 5, review LOW): a failed write never stops the send
-      sent: async (s: string): Promise<void> => {
-        signature = s;
+      // the helper's word for the release's signature kept with the owed send, a name a finish after a reload reads
+      // back first (spendOwner), never in the op's txs; awaited by the send before its read-back (fold 5, review
+      // LOW): a failed write never stops the send
+      named: async (s: string): Promise<void> => {
         if (owedNow === null || s === "") return;
         owedNow = { ...owedNow, release: s };
         owing(owedNow);
@@ -649,8 +651,11 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       },
     };
     const a = await sendAndSettle(host, r, release, pool, signed, bh.lastHeight, wait);
-    if ("error" in a) stop("send");
-    return { stage: (a as { stage: string }).stage, signature, l: leaf.label, j, releaseAccounts: accounts.map((x) => x.key) };
+    if ("error" in a) return stop("send");
+    // the release's signature as the chain read it: the answer's own (this very transaction read back on both RPCs,
+    // or the spend's own signature), never the helper's word
+    const signature = a.txs[0]?.hash ?? "";
+    return { stage: a.stage, signature, l: leaf.label, j, releaseAccounts: accounts.map((x) => x.key) };
   } catch (e) {
     if (e instanceof PoolRuleRefused) stop("rule");
     throw e;
