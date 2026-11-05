@@ -8,7 +8,9 @@
 #   1. the whole run, then the live check on the fork's two loopback names, recorded; the need, each deploy's gas and
 #      what the stand-in spent are printed (the owner's funding on that chain, at the fork block's fees);
 #   2. the run key's folder and the journal are gone (the key itself never reaches a log: test/deploy-run.test.mjs);
-#   3. a second run is refused before any key: its record exists.
+#   3. a second run is refused before any key: its record exists;
+#   4. a run stopped once the pool is made writes no record and keeps its key; the same command again resumes with it,
+#      reuses the verifier and the pool, deploys the rest, and its record passes the live check.
 #   bash contracts/pool-evm/script/mainnet-rehearsal.sh   (anvil, forge, cast on PATH; the workspace installed)
 # Outputs go to contracts/pool-evm/out/mainnet-rehearsal/ (ignored by git), or $REHEARSAL_OUT.
 set -euo pipefail
@@ -42,7 +44,7 @@ for chain in base robinhood; do
   line=$(grep "^deploy: waiting for" "$log")
   need=$(awk '{print $4}' <<<"$line")
   key=$(awk '{print $9}' <<<"$line")
-  grep -q "^deploy: send exactly $need wei to $key from $STANDIN, the address you passed$" "$log"
+  grep -q "^deploy: send exactly $need wei (.* ETH) to $key from $STANDIN, the address you passed$" "$log"
   sb=$(cast balance "$STANDIN" --rpc-url "$url")
   cast send --unlocked --from "$STANDIN" "$key" --value "$need" --rpc-url "$url" >/dev/null
   echo "rehearsal [$chain]: funded $key with exactly $need wei from the stand-in"
@@ -61,6 +63,32 @@ for chain in base robinhood; do
   cat "$OUT/$chain-again.log"
   grep -q "exists: the pool is deployed on $chain: run its live check alone" "$OUT/$chain-again.log" && [ "$rc2" != 0 ] && [ "$(folders)" = "$before_keys" ]
   echo "rehearsal [$chain]: a second run is refused before any key (exit $rc2)"
+  # a run stopped (SIGTERM) once the pool is made, then the same command again: it resumes with the kept key, reuses
+  # the verifier and the pool, deploys the rest, and its record passes the live check
+  rlog="$OUT/$chain-stopped.log"
+  node "$ROOT/contracts/pool-evm/script/deploy.mjs" --mainnet --chain "$chain" --return "$STANDIN" --rpc "$url" --out "$OUT/$chain-resume.json" --no-build >"$rlog" 2>&1 &
+  pid=$!
+  for _ in $(seq 1200); do grep -q "^deploy: waiting for" "$rlog" && break; kill -0 $pid 2>/dev/null || break; sleep 0.5; done
+  line=$(grep "^deploy: waiting for" "$rlog")
+  cast send --unlocked --from "$STANDIN" "$(awk '{print $9}' <<<"$line")" --value "$(awk '{print $4}' <<<"$line")" --rpc-url "$url" >/dev/null
+  for _ in $(seq 1200); do grep -q "^deploy: PrivacyPoolSimple " "$rlog" && break; kill -0 $pid 2>/dev/null || break; sleep 0.1; done
+  kill -TERM $pid
+  rc=0; wait $pid || rc=$?
+  cat "$rlog"
+  [ "$rc" != 0 ] && [ ! -e "$OUT/$chain-resume.json" ] && grep -q "the same paste resumes with this key" "$rlog"
+  echo "rehearsal [$chain]: stopped once the pool was made (exit $rc): no record, the key kept"
+  rlog2="$OUT/$chain-resumed.log"
+  node "$ROOT/contracts/pool-evm/script/deploy.mjs" --mainnet --chain "$chain" --return "$STANDIN" --rpc "$url" --out "$OUT/$chain-resume.json" --no-build >"$rlog2" 2>&1 &
+  pid=$!
+  for _ in $(seq 1200); do grep -q "^deploy: waiting for" "$rlog2" && break; kill -0 $pid 2>/dev/null || break; sleep 0.5; done
+  line=$(grep "^deploy: waiting for" "$rlog2")
+  cast send --unlocked --from "$STANDIN" "$(awk '{print $9}' <<<"$line")" --value "$(awk '{print $4}' <<<"$line")" --rpc-url "$url" >/dev/null
+  rc=0; wait $pid || rc=$?
+  cat "$rlog2"
+  [ "$rc" = 0 ] && grep -q "^deploy: resuming the stopped run with its key: WithdrawalVerifier 0x[0-9a-f]*, PrivacyPoolSimple 0x[0-9a-f]* read back on both RPCs as the build's: reused" "$rlog2"
+  [ "$(folders)" = "$before_keys" ] && [ ! -e "$OUT/$chain-resume.journal.json" ]
+  node "$ROOT/scripts/live-checks/pool-evm-deploy.mjs" --deployment "$OUT/$chain-resume.json" --rpc "$url,http://localhost:$port" | tail -1 | grep -q ": PASS$"
+  echo "rehearsal [$chain]: the same command resumed with the kept key, reused the verifier and the pool, and its record passes the live check"
 done
 # the card's live check on both forks at once, recorded: each record, and the kit's venue with the record's contracts
 # as its pins (the kit pins mainnet's own once the owner's paste has run): the replay file of its test
