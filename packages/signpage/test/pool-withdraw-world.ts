@@ -126,6 +126,8 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   // each landed release by its own id (the fee payer's signature, distinct per release) with its wire, for W's history
   // (getSignaturesForAddress, newest first) and its getTransaction; `history` holds every landed tx naming an address
   const landed = new Map<string, Uint8Array>();
+  // another device's release or buy of the note landed: this device's own release, read by the sender's id, failed
+  let spentByOther = false;
   const history = new Map<string, string[]>();
   const touch = (address: string, sig: string) => history.set(address, [sig, ...(history.get(address) ?? [])]);
   // transactions that landed and failed (the runtime's error in their meta): W's history lists them too
@@ -195,7 +197,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         if (sig !== SIG || (plant.readBack ?? "ours") === "none" || !last) return null;
         const tx = last.slice();
         tx.set(base58.decode(SIG), 1);
-        return { transaction: [base64.encode(tx), "base64"], meta: { err: null } };
+        return { transaction: [base64.encode(tx), "base64"], meta: { err: spentByOther ? { InstructionError: [1, { Custom: 6 }] } : null } };
       }
       throw new Error(`unexpected ${method}`);
     }) as SolanaRpc;
@@ -222,6 +224,8 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         landed.set(id, wire);
         touch(m.staticKeys[ix.accounts[1]!]!, id);
         plant.afterRelease?.(m.staticKeys[ix.accounts[1]!]!);
+        // the sender's word for the id: the landed transaction's own
+        return { signature: id };
       }
       return { signature: SIG };
     },
@@ -255,6 +259,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     tx.set(base58.decode(id), 1);
     tx[tx.length - 2]! ^= 1;
     landed.set(id, tx);
+    spentByOther = true;
     touch(m.staticKeys[ix.accounts[1]!]!, id);
     add(m.staticKeys[ix.accounts[1]!]!, value);
   };
@@ -281,6 +286,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     }
     landed.set(id, tx);
     if (o.failed) failed.add(id);
+    else if (!o.nullifier) spentByOther = true;
     touchOldest(m.staticKeys[ix.accounts[1]!]!, id);
     return id;
   };
