@@ -62,9 +62,10 @@ try {
     );
   const sleep = a.wait ? undefined : async () => {};
   if (mainnet && a.pool === undefined) {
-    // the device's reader: one paced transport on the route, its queue keyed on its own function (evmHelperRpc)
+    // the device's reader: one paced transport on the route, its queue keyed on its own function (evmHelperRpc); a
+    // replay ("wait": false) reaches no provider, so it waits on no pace either, as it waits on no Retry-After
     const one = bridge(0);
-    const reader = solanaPacedRpc((m, p) => one(m, p), HOLDINGS_RPC_LIMIT);
+    const reader = a.wait ? solanaPacedRpc((m, p) => one(m, p), HOLDINGS_RPC_LIMIT) : one;
     const block = async (at: string): Promise<EvmBlock> => {
       const b = (await evmAnswered(() => reader("eth_getBlockByNumber", [at, false]), undefined, sleep)) as { number?: unknown; hash?: unknown; timestamp?: unknown } | null;
       const n = evmRpcHex(b?.number), h = evmRpcHex(b?.hash), t = evmRpcHex(b?.timestamp);

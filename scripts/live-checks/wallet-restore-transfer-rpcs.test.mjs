@@ -12,6 +12,14 @@ import { test } from "node:test";
 import { JOBS, USDC, check, replayer, spoil } from "./wallet-restore-transfer-rpcs.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./wallet-restore-transfer-rpcs.answers.json", import.meta.url), "utf8"));
+// a replay reaches no provider, so it waits for none: each run ends in seconds, the helper route's 50,000 blocks of Base
+// included (about 80 pages, which the live run paces at the holdings readers' limit)
+const REPLAY_MS = 10_000;
+const timed = async (f) => {
+  const t0 = performance.now();
+  const r = await f();
+  return { ...r, ms: performance.now() - t0 };
+};
 
 test("the recorded good run passes: each testnet's pair reads its W alike, Base's and Robinhood's Ws are read on the helper's route only, and the Base Sepolia W lists the USDC it bought", async () => {
   // the pagers met each provider's real cap: the helper's Base provider's 1,000 blocks and Robinhood's 2,000, and dRPC's code 35
@@ -21,7 +29,8 @@ test("the recorded good run passes: each testnet's pair reads its W alike, Base'
   const mainnet = A.good.filter((e) => e.network === "base" || e.network === "robinhood");
   assert.ok(mainnet.length > 0 && mainnet.every((e) => e.url === `https://api.confidential.unrealized.trade/v1/rpc/${e.network}`), [...new Set(mainnet.map((e) => e.url))].join(", "));
   assert.ok(mainnet.some((e) => e.network === "base") && mainnet.some((e) => e.network === "robinhood"));
-  const r = await check(replayer(A.good), { wait: false });
+  const r = await timed(() => check(replayer(A.good), { wait: false }));
+  assert.ok(r.ms < REPLAY_MS, `the good replay took ${Math.round(r.ms)} ms`);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.lines.length, JOBS.length);
   assert.match(r.lines[0], new RegExp(`^base-sepolia: base-sepolia\\.gateway\\.tenderly\\.co and base-testnet\\.api\\.pocket\\.network read W 0x809286a1bf1585b1eeeefcc7a7f3508158fd078e from block 54553944 to \\d+ alike: .*${USDC}`));
@@ -38,7 +47,8 @@ test("the recorded bad run (the Base Sepolia W's Transfer logs taken out) fails,
   assert.deepEqual(A.bad, spoil(A.good));
   const changed = A.bad.filter((e, i) => JSON.stringify(e) !== JSON.stringify(A.good[i]));
   assert.ok(changed.length >= 1 && changed.every((e) => e.network === "base-sepolia" && e.method === "eth_getLogs" && e.result.length === 0));
-  const r = await check(replayer(A.bad), { wait: false });
+  const r = await timed(() => check(replayer(A.bad), { wait: false }));
+  assert.ok(r.ms < REPLAY_MS, `the bad replay took ${Math.round(r.ms)} ms`);
   assert.equal(r.ok, false);
   assert.match(r.lines[0], new RegExp(`^base-sepolia: W 0x809286a1bf1585b1eeeefcc7a7f3508158fd078e lists no token, not ${USDC}$`));
 });
@@ -57,7 +67,10 @@ test("a replay whose Base Sepolia seat is out for hours (thirdweb's HTTP 429, Re
   const planted = A.good.flatMap((e) => (e.url === OUT ? [{ ...e, url: SPARE }, { network: e.network, url: OUT, method: e.method, params: e.params, error: "HTTP 429 (http_429, 1 try at base-testnet.api.pocket.network)", name: "SolanaRpcTransportError", afterMs: 26_741_000 }] : [e]));
   let outAsked = 0;
   const replay = replayer(planted);
-  const r = await check((network, url, method, params) => (url === OUT && outAsked++, replay(network, url, method, params)), { wait: true });
+  // the Base Sepolia job alone, with real waits: a wait begun would show in its time; the helper's mainnet jobs pace at
+  // the holdings readers' limit when waiting, and are the good run's above
+  const r = await timed(() => check((network, url, method, params) => (url === OUT && outAsked++, replay(network, url, method, params)), { wait: true, jobs: JOBS.filter((j) => j.network === "base-sepolia") }));
+  assert.ok(r.ms < REPLAY_MS, `the replay took ${Math.round(r.ms)} ms`);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.match(r.lines[0], new RegExp(`^base-sepolia: base-sepolia\\.gateway\\.tenderly\\.co and 84532\\.rpc\\.thirdweb\\.com read W .* alike: .*${USDC}.*; swapped out base-testnet\\.api\\.pocket\\.network$`));
   assert.equal(outAsked, 1);
