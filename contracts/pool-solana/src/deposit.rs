@@ -5,7 +5,9 @@
 //! with its rent from the payer; refused once it exists (`AlreadyInitialized`).
 //!
 //! `deposit` (tag 1), data `value u64 LE ‖ precommitment (32, big-endian)`: accounts `[pool (w), depositor (w,
-//! signer), state page (w), label page (w), precommitment mark (w), system program]`. Ported from the vault's deposit
+//! signer), state page (w), label page (w), precommitment mark (w), system program]`, optionally followed by `[next
+//! state page (w), next label page (w)]`: each tree's entry goes to its page, or to its next page when inserts that
+//! landed after the depositor read the sizes carried it there (review 2, R-1; `state::page_for`). Ported from the vault's deposit
 //! (`contracts/vault/src/deposit.rs`, rows 3-10), itself from Privacy Pools v1.3.0 `Entrypoint.sol:324-329` and
 //! `PrivacyPool.sol:90-106`, Copyright 2025 0XBOW LTD, Apache-2.0:
 //! - `value >= MIN_DEPOSIT` (`MinimumDepositAmount`); a u64 is below 2^128 (PP's `InvalidDepositValue`).
@@ -49,23 +51,28 @@ pub fn init(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
 }
 
 /// Inserts `leaf` into `t` and writes its page entry.
+/// `next`, when given, is the tree's next page, used when `page` is not leaf's (`state::page_for`).
 pub(crate) fn push<'a>(
     program_id: &Pubkey,
     payer: &AccountInfo<'a>,
     page: &AccountInfo<'a>,
+    next: Option<&AccountInfo<'a>>,
     system: &AccountInfo<'a>,
     which: u8,
     t: &mut TreeState,
     leaf: &[u8; 32],
 ) -> Result<(), ProgramError> {
     let index = t.size;
+    let page = state::page_for(program_id, page, next, which, index);
     let root = tree::insert(&mut t.size, &mut t.depth, &mut t.side, leaf)?;
     state::push_entry(program_id, payer, page, system, which, index, leaf, &root)
 }
 
 pub fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    let [pool_acc, depositor, state_page, label_page, pre_mark, system] = accounts else {
-        return Err(ProgramError::NotEnoughAccountKeys);
+    let (pool_acc, depositor, state_page, label_page, pre_mark, system, next_state, next_label) = match accounts {
+        [a, b, c, d, e, f] => (a, b, c, d, e, f, None, None),
+        [a, b, c, d, e, f, g, h] => (a, b, c, d, e, f, Some(g), Some(h)),
+        _ => return Err(ProgramError::NotEnoughAccountKeys),
     };
     if data.len() != 41 {
         return Err(PoolError::InvalidInstructionData.into());
@@ -94,8 +101,8 @@ pub fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
     }
     let label = label_of(&scope_of(&program_id.to_bytes(), &pool_acc.key.to_bytes()), pool.nonce);
     let commitment = poseidon3(&field::of_u64(value), &label, &precommitment)?;
-    push(program_id, depositor, state_page, system, TREE_STATE, &mut pool.state, &commitment)?;
-    push(program_id, depositor, label_page, system, TREE_LABEL, &mut pool.label, &label)?;
+    push(program_id, depositor, state_page, next_state, system, TREE_STATE, &mut pool.state, &commitment)?;
+    push(program_id, depositor, label_page, next_label, system, TREE_LABEL, &mut pool.label, &label)?;
     state::transfer(depositor, pool_acc, system, value)?;
     pool.deposited = pool.deposited.checked_add(value as u128).ok_or(PoolError::Overflow)?;
     pool.store(pool_acc)

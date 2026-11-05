@@ -1,7 +1,8 @@
 // Replays evm-selldelegate-exact-debit.answers.json (recorded on Base Sepolia and Robinhood testnet, each on its two
 // RPCs) through the live check: the recorded good answers pass; the same recording with one thing changed fails: the
 // evm-sell-v4 delegate's code (the build before the exact-debit check) at the new address, one byte of the code
-// flipped, a record naming an address the build file froze to the older build, and a kit pin naming another delegate;
+// flipped, a record naming an address the build file froze to another build (the evm-sell-v4 one) or to no older
+// build (the current build, since pool review round 2 moved it on), and a kit pin naming another delegate;
 // and the runs through it: each run's recorded answers pass and its spoiled ones (a spent nullifier the pool never
 // marked) fail, a chain whose only runs stopped fails, and so does a run from before the redeploy.
 //   node --test scripts/live-checks/evm-selldelegate-exact-debit.test.mjs
@@ -45,12 +46,13 @@ const fails = (r, re) => {
   assert.match(r.lines.filter((l) => l.startsWith("FAIL")).join("\n"), re);
 };
 
-test("the recorded good answers pass on both chains: the current build at the kit's pin", async () => {
+test("the recorded good answers pass on both chains: the exact-debit build frozen to its address, at the kit's pin", async () => {
   assert.deepEqual(Object.keys(A.deployments).sort(), CHAIN_NAMES.slice().sort());
   for (const chain of CHAIN_NAMES) {
     const r = await run(chain);
     assert.equal(r.ok, true, r.lines.join("\n"));
-    assert.ok(r.lines.some((l) => l.includes("code is the build pinned to it (the current one)")), chain);
+    assert.ok(r.lines.some((l) => l.startsWith("ok   SellDelegate") && l.includes("code is the build pinned to it:")), chain);
+    assert.ok(r.lines.some((l) => l.startsWith("ok   SellDelegate") && l.endsWith("is pinned to the exact-debit build the build file froze")), chain);
     assert.ok(r.lines.some((l) => l.startsWith("ok   the kit pins SellDelegate")), chain);
   }
 });
@@ -59,19 +61,20 @@ test("the evm-sell-v4 delegate's code (no exact-debit check) at the new address 
   for (const chain of CHAIN_NAMES) {
     const old = V4.deployments[chain].contracts.SellDelegate.address;
     const code = V4.good[chain].find((a) => isCode(old)(a)).json.result;
-    assert.notEqual(code.length, 2 + 2 * BUILD.contracts.SellDelegate.length, "the old build has another length");
+    assert.notEqual(code.length, 2 + 2 * BUILD.frozen["SellDelegate.exact-debit"].length, "the old build has another length");
     fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = code))), /code is the build pinned to it/);
     fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = j.result.slice(0, 40) + (j.result[40] === "0" ? "1" : "0") + j.result.slice(41)))), /code is the build pinned to it/);
   }
 });
 
-test("a record naming an address the build file froze (the evm-sell-v4 delegate) fails: this card takes only the current build", async () => {
+test("a record naming another address fails: one the build file froze to the evm-sell-v4 build, or one it pins to no older build", async () => {
   const chain = "base-sepolia";
-  const frozen = BUILD.frozen["SellDelegate.v4"].at[chain];
-  const d = structuredClone(A.deployments[chain]);
-  d.contracts.SellDelegate.address = frozen;
-  const r = await check({ deployment: d, fetchFn: async () => { throw new Error("no read"); }, rpcs: A.rpcs[chain], sleep: async () => {}, venues: { [chain]: { sellDelegate: frozen } } });
-  fails(r, /is not an address the build file froze to an older build/);
+  for (const at of [BUILD.frozen["SellDelegate.v4"].at[chain], "0x" + "ab".repeat(20)]) {
+    const d = structuredClone(A.deployments[chain]);
+    d.contracts.SellDelegate.address = at;
+    const r = await check({ deployment: d, fetchFn: async () => { throw new Error("no read"); }, rpcs: A.rpcs[chain], sleep: async () => {}, venues: { [chain]: { sellDelegate: at } } });
+    fails(r, /SellDelegate \S+ is pinned to the exact-debit build the build file froze/);
+  }
 });
 
 test("a kit pin naming another delegate fails", async () => {

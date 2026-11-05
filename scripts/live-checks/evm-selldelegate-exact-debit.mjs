@@ -5,8 +5,9 @@
 // and sold through on each chain.
 //   - Each redeploy (evm-selldelegate-exact-debit.<chain>.json), on two RPCs of two operators: the checks of
 //     evm-sell-v4.mjs (its code, both immutables and getters, no admin, the run's transactions, the swept run key), with
-//     its code the CURRENT build's (pool-evm-deploy.build.json `contracts`, the build with the exact-debit check), never
-//     a build the file froze; and the kit's pinned sellDelegate for the chain is the record's address.
+//     its code the build with the exact-debit check, frozen to these redeploys' addresses (pool-evm-deploy.build.json
+//     `frozen` "SellDelegate.exact-debit") since pool review round 2 moved the build on; and the kit's pinned
+//     sellDelegate for the chain is the record's address.
 //   - Each testnet run through it (evm-selldelegate-exact-debit.run.<chain>.json, written by
 //     contracts/pool-evm/script/testnet-run.mjs --out; a run that stopped part way, .run.<chain>.stopped[-n].json, is
 //     read back too): pool-evm-testnet-run.mjs's check (every transaction read back on both RPCs, each sell a type 4
@@ -24,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { check as sellCheck, runRecordFor } from "./evm-sell-v4.mjs";
-import { recorder as deployRecorder } from "./pool-evm-deploy.mjs";
+import { BUILD, pinnedBuild, recorder as deployRecorder } from "./pool-evm-deploy.mjs";
 import { recorder as runRecorder } from "./notes-per-pool-evm.mjs";
 import { check as runCheck, runRecord as runLinesOf, spoil } from "./pool-evm-testnet-run.mjs";
 
@@ -36,15 +37,19 @@ export const deployFile = (c) => path.join(HERE, `${KEY}.${c}.json`);
 export const runFiles = (c) => readdirSync(HERE).filter((f) => f === `${KEY}.run.${c}.json` || new RegExp(`^${KEY}\\.run\\.${c}\\.stopped(-\\d+)?\\.json$`).test(f)).sort((a, b) => (a.endsWith(`${c}.json`) ? -1 : b.endsWith(`${c}.json`) ? 1 : a.localeCompare(b))).map((f) => path.join(HERE, f));
 const RUN_RECORD = path.join(HERE, `${KEY}.md`);
 
-/** evm-sell-v4's check on the current build, plus: the kit pins this record's delegate on its chain */
+/** evm-sell-v4's check on the exact-debit build frozen to this record's address, plus: the kit pins this record's
+ * delegate on its chain */
 export async function check(o) {
-  const r = await sellCheck({ ...o, current: true });
+  const r = await sellCheck(o);
   const a = String(o.deployment?.contracts?.SellDelegate?.address ?? "").toLowerCase();
+  const frozen = BUILD.frozen?.["SellDelegate.exact-debit"];
+  const pinned = !!frozen && pinnedBuild(o.deployment?.chain, "SellDelegate", a) === frozen;
+  r.lines.push(`${pinned ? "ok  " : "FAIL"} SellDelegate ${a} is pinned to the exact-debit build the build file froze`);
   const venues = o.venues ?? evmPoolVenues();
   const pin = Object.hasOwn(venues, o.deployment?.chain) ? venues[o.deployment.chain].sellDelegate : undefined;
   const pass = !!pin && pin.toLowerCase() === a;
   r.lines.push(`${pass ? "ok  " : "FAIL"} the kit pins SellDelegate ${a} on ${o.deployment?.chain}: ${pin ?? "none"}`);
-  return { ok: r.ok && pass, lines: r.lines };
+  return { ok: r.ok && pinned && pass, lines: r.lines };
 }
 
 /** The runs through the delegate: each read back, and each chain with a run that sold through this card's delegate */

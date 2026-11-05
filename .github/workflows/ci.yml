@@ -40,7 +40,7 @@ jobs:
       # gitleaks 8.30.1, the binary checked against the sha256 in its release's checksums file (read 2026-10-26 11:25Z)
       - name: install gitleaks
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tgz" \
+          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/gitleaks.tgz" \
             https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
           echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
@@ -298,8 +298,8 @@ jobs:
         run: pnpm run test:vault-scripts
       # the Solana pool's deploy script: its cleanup never strands a lamport on the run key, and every committed
       # deployment record's commitment is Poseidon(value, label, precommitment)
-      - name: the Solana pool's deploy script's own tests
-        run: node --test contracts/pool-solana/scripts/deploy.test.mjs
+      - name: the Solana pool's deploy script's own tests, and its mutation list still names its source and tests
+        run: node --test contracts/pool-solana/scripts/deploy.test.mjs contracts/pool-solana/scripts/mutants.test.mjs
       # The EVM pool (contracts/pool-evm): forge-std from its submodule (v1.9.7, pinned by commit), Foundry v1.7.1 (the
       # version its tests were first run with, released 2026-05-08) through foundry-toolchain v1.9.1 (908c540, read
       # 2026-11-02 20:12Z), solc 0.8.28 as its foundry.toml pins. The forge tests run the kit's real proofs through the
@@ -307,8 +307,20 @@ jobs:
       # tests (Base and Robinhood at pinned blocks) read only test/fork-rpc.mjs, which answers from the recorded
       # test/fixtures/fork-rpc.json, so the job reads no public RPC.
       - name: the EVM pool's forge-std
-        run: git submodule update --init contracts/pool-evm/lib/forge-std
-      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        run: bash scripts/ci/retry.sh git submodule update --init contracts/pool-evm/lib/forge-std
+      # The action has no retry input (src/index.ts at 908c540), and a 504 outlasted foundryup's own five tries over 31 s
+      # (job 127152961657), so a failed install runs once more after 30 s; scripts/ci/download-retry.mjs holds the pair.
+      - id: foundry
+        continue-on-error: true
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: v1.7.1
+      - name: a pause after a failed Foundry install
+        if: steps.foundry.outcome == 'failure'
+        run: sleep 30
+      - name: Foundry once more
+        if: steps.foundry.outcome == 'failure'
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
           version: v1.7.1
       - name: the EVM pool's tests
@@ -329,7 +341,7 @@ jobs:
           persist-credentials: false
       - name: the vault's own tests, without the sandbox suite
         run: |
-          rustup toolchain install 1.96.0 --profile minimal
+          bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal
           cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml
 
   # The required check: it runs whatever the shards ended with (always()), and passes only when each one passed. A
@@ -424,12 +436,12 @@ jobs:
           node-version: 24
       # rustc 1.96.0 with the wasm target the three contracts build for (rustup is on the image, see the test job)
       - name: rust 1.96.0
-        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+        run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
       # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
       - name: install cargo-near
         if: steps.wasm.outputs.cache-hit != 'true'
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/cargo-near.tgz" \
+          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/cargo-near.tgz" \
             https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
           echo "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
@@ -488,11 +500,11 @@ jobs:
       # target: s20 runs contracts/vault/scripts/deploy.mjs, whose two clean builds of the recipe (cargo-near, in their
       # own target dirs) are what it proves, so every shard has cargo-near (vault-sandbox.test.mjs fails otherwise)
       - name: rust 1.96.0
-        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+        run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
       # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
       - name: install cargo-near
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/cargo-near.tgz" \
+          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/cargo-near.tgz" \
             https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
           echo "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
@@ -553,10 +565,10 @@ jobs:
         with:
           persist-credentials: false
       - name: rust 1.96.0 and 1.97.1
-        run: rustup toolchain install 1.96.0 1.97.1 --profile minimal
+        run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 1.97.1 --profile minimal
       - name: install the Solana build tools (agave v4.4.0)
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/agave.tar.bz2" \
+          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/agave.tar.bz2" \
             https://github.com/anza-xyz/agave/releases/download/v4.4.0/solana-release-x86_64-unknown-linux-gnu.tar.bz2
           echo "3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574  $RUNNER_TEMP/agave.tar.bz2" | sha256sum -c -
           tar -xjf "$RUNNER_TEMP/agave.tar.bz2" -C "$RUNNER_TEMP"

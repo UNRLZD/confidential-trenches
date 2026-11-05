@@ -7,19 +7,20 @@
 //! `3 ‖ flags u8 ‖ proof (256 raw, or 128 compressed) ‖ tag 2's FIELDS_LEN field bytes ‖ tip u64 ‖ inner count u8
 //! (1 to 8) ‖ per inner instruction: program u8 ‖ n u8 ‖ n account indexes u8 ‖ data length u16 ‖ data`, ending
 //! exactly after the last one. Flags: bit 0 set = the proof is the alt_bn128 compressed forms of A (32), B (64) and
-//! C (32); every other bit must be 0. Every index is into this instruction's accounts.
+//! C (32); bit 1 set = the next state page follows the tip account (`FLAG_NEXT_PAGE`, review 2, R-1); every other bit
+//! must be 0. Every index is into this instruction's accounts.
 //!
-//! Accounts: tag 2's eight (src/release.rs), then the tip account when `tip > 0`, then every account and program the
-//! inner instructions name.
+//! Accounts: tag 2's eight (src/release.rs), then the tip account when `tip > 0`, then the next state page when bit 1
+//! is set, then every account and program the inner instructions name.
 //!
 //! Refusals, all before the first write:
-//! - Data: a flag bit other than bit 0, an inner count of 0 or over 8, an index past the accounts, a length that does
+//! - Data: a flag bit other than bits 0 and 1, an inner count of 0 or over 8, an index past the accounts, a length that does
 //!   not end exactly (`InvalidInstructionData`); a compressed point that is not on its curve (`InvalidProofEncoding`).
 //! - An inner program that is this program (`InnerInvokesPool`): the runtime allows a program to call itself, so
 //!   this is the one re-entry it does not stop; a venue calling back into the pool is refused by the runtime
 //!   (`ReentrancyNotAllowed`).
 //! - An inner account, or the tip account, that is the pool, its spent mark or a page this release reads or writes,
-//!   or any account this program owns (`InnerNamesPoolAccount`). A callee can never debit an account it does not own,
+//!   the next state page, or any account this program owns (`InnerNamesPoolAccount`). A callee can never debit an account it does not own,
 //!   so this keeps the pool's accounts out of every call: its lamports never ride one.
 //! - An inner account that signed this instruction and is not W (`InnerSignerNotW`): the fee payer's signature never
 //!   reaches a venue, so a venue cannot debit the relayer.
@@ -46,6 +47,8 @@ use solana_program::{
 };
 
 pub const FLAG_COMPRESSED: u8 = 1;
+/// The account after the tip account (or at 8, with no tip) is the next state page (review 2, R-1; `state::page_for`).
+pub const FLAG_NEXT_PAGE: u8 = 2;
 pub const COMPRESSED_PROOF_LEN: usize = 128;
 pub const MAX_INNER: usize = 8;
 /// Tag 2's accounts, before the tip account.
@@ -102,10 +105,10 @@ fn parse_inner(mut d: &[u8], count: usize, n_accounts: usize) -> Result<Vec<Inne
     Ok(out)
 }
 
-/// The pool, its spent mark and the pages this release names (tag 2's accounts 0 and 3 to 6), or anything this
-/// program owns.
-fn is_pool_account(program_id: &Pubkey, accounts: &[AccountInfo], a: &AccountInfo) -> bool {
-    a.owner == program_id || [0, 3, 4, 5, 6].iter().any(|&i| accounts[i].key == a.key)
+/// The pool, its spent mark and the pages this release names (tag 2's accounts 0 and 3 to 6, and the next state page
+/// when given, which may not exist yet), or anything this program owns.
+fn is_pool_account(program_id: &Pubkey, accounts: &[AccountInfo], next_page: Option<&AccountInfo>, a: &AccountInfo) -> bool {
+    a.owner == program_id || [0, 3, 4, 5, 6].iter().any(|&i| accounts[i].key == a.key) || next_page.is_some_and(|n| n.key == a.key)
 }
 
 /// The runtime refuses a CPI unless the lamports it has seen still sum to what they were (agave 4.3
@@ -138,7 +141,7 @@ pub fn release_and_buy(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8
     }
     let bad = PoolError::InvalidInstructionData;
     let flags = *data.get(1).ok_or(bad)?;
-    if flags & !FLAG_COMPRESSED != 0 {
+    if flags & !(FLAG_COMPRESSED | FLAG_NEXT_PAGE) != 0 {
         return Err(bad.into());
     }
     let proof_len = if flags & FLAG_COMPRESSED != 0 { COMPRESSED_PROOF_LEN } else { PROOF_LEN };
@@ -149,10 +152,15 @@ pub fn release_and_buy(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8
     }
     let tip = u64::from_le_bytes(data[tip_at..tip_at + 8].try_into().unwrap());
     let tip_to = if tip > 0 { Some(accounts.get(RELEASE_ACCOUNTS).ok_or(ProgramError::NotEnoughAccountKeys)?) } else { None };
+    let next_page = if flags & FLAG_NEXT_PAGE != 0 {
+        Some(accounts.get(RELEASE_ACCOUNTS + tip_to.is_some() as usize).ok_or(ProgramError::NotEnoughAccountKeys)?)
+    } else {
+        None
+    };
     let inner = parse_inner(&data[tip_at + 9..], data[tip_at + 8] as usize, accounts.len())?;
     let recipient = &accounts[1];
     if let Some(t) = tip_to {
-        if is_pool_account(program_id, accounts, t) {
+        if is_pool_account(program_id, accounts, next_page, t) {
             return Err(PoolError::InnerNamesPoolAccount.into());
         }
     }
@@ -162,7 +170,7 @@ pub fn release_and_buy(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8
         }
         for &i in x.accounts {
             let a = &accounts[i as usize];
-            if is_pool_account(program_id, accounts, a) {
+            if is_pool_account(program_id, accounts, next_page, a) {
                 return Err(PoolError::InnerNamesPoolAccount.into());
             }
             if a.is_signer && a.key != recipient.key {
@@ -176,7 +184,7 @@ pub fn release_and_buy(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8
         data[2..fields_at].try_into().unwrap()
     };
     let r = Release::of(proof, &data[fields_at..tip_at]);
-    settle(program_id, accounts, &r, tip, tip_to)?;
+    settle(program_id, accounts, &r, tip, tip_to, next_page)?;
     show_balances(&accounts[1], &accounts[0], &accounts[2], tip_to, &accounts[7])?;
     for x in &inner {
         let program = &accounts[x.program];
