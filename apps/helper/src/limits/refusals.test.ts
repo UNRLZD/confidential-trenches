@@ -59,7 +59,7 @@ test("card helper-ready-page-warm: a token page or holders read answered not rea
   const counted: string[] = [];
   const page = async () => ({ status: 503, body: '{"error":{"code":"upstream"}}', why: "jupiter held" });
   const token = { page, holders: page } as never;
-  const h = handler("0123456789abcdef0123456789abcdef01234567", {} as never, { slot: { state: () => "public" } } as never, {}, {} as never, {} as never, {} as never, token, {} as never, null, new Map(), new Map(), () => Date.now(), {}, {}, () => true, Promise.resolve(), () => ({}), { count: (route: string, why: string) => counted.push(`${route} ${why}`) });
+  const h = handler("0123456789abcdef0123456789abcdef01234567", {} as never, { slot: { state: () => "public" } } as never, {} as never, {} as never, {} as never, {} as never, token, {} as never, null, new Map(), new Map(), () => Date.now(), {}, {}, () => true, Promise.resolve(), () => ({}), { count: (route: string, why: string) => counted.push(`${route} ${why}`) });
   const { createServer, get } = await import("node:http");
   const srv = createServer(h).listen(0);
   const port = await new Promise<number>((ok) => srv.on("listening", () => ok((srv.address() as { port: number }).port)));
