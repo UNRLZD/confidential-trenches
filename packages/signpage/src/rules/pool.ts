@@ -67,14 +67,17 @@ import {
   checkSolanaPoolBuy,
   solanaDecodePoolRelease,
   solanaEncodePoolRelease,
+  solanaPoolFee,
   solanaPoolPage,
   solanaPoolReleaseAccounts,
   solanaPoolSellMinOut,
   solanaPoolSellSteps,
+  solanaRentMin,
   type SolanaPoolBuyReads,
   type SolanaPoolBuyRequest,
   type SolanaPoolBuyVenue,
   type SolanaPoolRelease,
+  type SolanaRent,
 } from "../../../kit/src/trade/solana/pool-buy.ts";
 import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolProofBinding, type EvmPoolVenueList } from "../../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
@@ -580,25 +583,66 @@ const SWEEP_PAGE_HEADER = 16;
 const SWEEP_PAGE_ENTRY = 72;
 const SWEEP_PAGE_ENTRIES = 1024;
 
+/** A part's smallest arrival: rent(0), so To (when new) and W after its release (part + W's fee on it) are both
+ *  rent-exempt; and at least the relay fee less W's fee, so the chunk (part + fee + W's fee) meets the program's
+ *  backstop of 2 x fee. A withdraw binds tipCap 0 (its tag 2 pays no tip), so no tip cap counts here. */
+export const solanaWithdrawMinPart = (rent: SolanaRent, fee: bigint, wFee: bigint): bigint => {
+  const r = solanaRentMin(rent, 0);
+  return fee - wFee > r ? fee - wFee : r;
+};
+/** What every withdraw part costs: the epoch's relay fee, W's own fee for its send onward, and the smallest part. */
+export type WithdrawCosts = { fee: bigint; wFee: bigint; minPart: bigint };
+/** The smallest note one part can withdraw: a change under it (and above 0) could never leave the pool, so no part
+ *  leaves one (review #232 HIGH 2). */
+export const withdrawNoteFloor = (c: WithdrawCosts): bigint => c.fee + c.wFee + c.minPart;
+/** The smallest note the device ever makes from W's own lamports (card sol-buy-rent-back, review M1): one a withdraw
+ *  can spend, at the epoch's relay fee (the kit's solanaPoolFee), W's one signature and the smallest part. Under it the
+ *  lamports stay on W, under the device's key, where they are worth their face; in the pool they would be a note no
+ *  withdraw and no buy can spend, and the deposit's rents would be gone too. */
+export const solanaSweepFloor = (rent: SolanaRent): bigint => {
+  const fee = solanaPoolFee(rent);
+  return withdrawNoteFloor({ fee, wFee: SOLANA_LAMPORTS_PER_SIGNATURE, minPart: solanaWithdrawMinPart(rent, fee, SOLANA_LAMPORTS_PER_SIGNATURE) });
+};
+
+/** The lamports a tag 1 deposit's three accounts hold before it, on each RPC (null: no account): its mark, and the
+ *  state and label pages it writes to. */
+export type SolanaDepositHeld = { mark: readonly [bigint | null, bigint | null]; state: readonly [bigint | null, bigint | null]; label: readonly [bigint | null, bigint | null] };
+
+/**
+ * What a tag 1 deposit takes from its depositor beyond its value, as the program prices it (contracts/pool-solana
+ * src/state.rs create_pda and the page insert): each of the mark (17 bytes) and the two pages it writes (the header and
+ * one entry more than the tree's size in that page) is topped up to its rent at its new length, less what it holds
+ * already (anyone may send lamports to a page or a mark's address). `held` must be the same on both RPCs.
+ */
+export function solanaDepositRents(rent: SolanaRent, sizes: { stateSize: number; labelSize: number }, held: SolanaDepositHeld): bigint {
+  const one = (pair: readonly [bigint | null, bigint | null], len: number): bigint => {
+    if (pair[0] !== pair[1]) return refuse("deposit_reads");
+    const have = pair[0] ?? 0n;
+    const need = solanaRentMin(rent, len) - have;
+    return need > 0n ? need : 0n;
+  };
+  const page = (size: number): number => SWEEP_PAGE_HEADER + ((size % SWEEP_PAGE_ENTRIES) + 1) * SWEEP_PAGE_ENTRY;
+  return one(held.mark, SWEEP_MARK_LEN) + one(held.state, page(sizes.stateSize)) + one(held.label, page(sizes.labelSize));
+}
+
 /**
  * W's sweep after a full sell and its teardown (card sol-buy-rent-back): every lamport W holds back into the pinned pool
  * as one tag 1 deposit, W the depositor and the only signer, the device's precommitment (W's next return note), no
  * compute budget (W's fee is its one signature, SOLANA_LAMPORTS_PER_SIGNATURE), nothing else. The value is exactly
- * `lamports` (W's balance, the same on both RPCs) less that fee, the precommitment mark's rent and each tree page's
- * growth, the rent the deposit takes from W (contracts/pool-solana/src/deposit.rs), so W ends at 0 and no lamport is
- * left on it or sent anywhere but the user's own note. Under the pool's least deposit: refused.
+ * `lamports` (W's balance, the same on both RPCs) less that fee and the rents the deposit takes from W as the program
+ * prices them (solanaDepositRents, from the three accounts' lamports read on both RPCs), so W ends at 0 and no lamport is
+ * left on it or sent anywhere but the user's own note. Under the smallest note the device spends (solanaSweepFloor),
+ * refused: those lamports stay on W.
  */
-export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: { lamportsPerByte: bigint; factor: bigint }): bigint {
+export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld): bigint {
   const pin = pinOf(ctx);
   const d = decode(wire, reads);
   if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
   if (head(d.ixs) !== 0 || d.ixs.length !== 1) return refuse("instructions");
   const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);
   if (typeof lamports !== "bigint" || typeof rent?.lamportsPerByte !== "bigint" || typeof rent.factor !== "bigint" || rent.lamportsPerByte < 0n || rent.factor < 0n) return refuse("sweep_reads");
-  const rentOf = (bytes: number): bigint => BigInt(128 + bytes) * rent.lamportsPerByte * rent.factor;
-  const grow = (size: number): bigint => (size % SWEEP_PAGE_ENTRIES === 0 ? rentOf(SWEEP_PAGE_HEADER + SWEEP_PAGE_ENTRY) : BigInt(SWEEP_PAGE_ENTRY) * rent.lamportsPerByte * rent.factor);
-  if (value + SOLANA_LAMPORTS_PER_SIGNATURE + rentOf(SWEEP_MARK_LEN) + grow(reads.stateSize) + grow(reads.labelSize) !== lamports) return refuse("sweep_amount");
-  if (value < SOLANA_POOL_MIN_DEPOSIT) return refuse("amount");
+  if (value + SOLANA_LAMPORTS_PER_SIGNATURE + solanaDepositRents(rent, reads, held) !== lamports) return refuse("sweep_amount");
+  if (value < SOLANA_POOL_MIN_DEPOSIT || value < solanaSweepFloor(rent)) return refuse("amount");
   passedWire(wire);
   return value;
 }

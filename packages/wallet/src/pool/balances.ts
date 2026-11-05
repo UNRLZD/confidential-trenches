@@ -75,7 +75,7 @@ export function evmBalancePool(id: string, chain: "base" | "robinhood", scope: b
 //   token account    1,640,840  rent(195), Token-2022's largest; 1,488,440 for a Token mint. Back after a full
 //                               sell: the teardown closes it to W once the sell has filled (card sol-buy-rent-back,
 //                               signpage src/pool-sell.ts rentBack; the sell itself closes nothing, 06c A9), and
-//                               W's sweep puts it into the pool. A partial sell keeps it.
+//                               W's sweep puts it into the pool when the sweep runs (below). A partial sell keeps it.
 //   volume account   1,346,200  rent(137), pump's volume account for W, made by the buy. Back after a full sell,
 //                               closed by the teardown, unless pump keeps it open: it owes incentive tokens, volume
 //                               or cashback (the kit's solanaTeardownPlan reads it on two RPCs).
@@ -88,13 +88,19 @@ export function evmBalancePool(id: string, chain: "base" | "robinhood", scope: b
 //                               rents the teardown closed) as W's next return note, W at 0; the cashback volume
 //                               account closes as the volume account above, while its wrapped-SOL account (that
 //                               account's, not W's) stays. The sweep costs its fee, the mark's rent and two page
-//                               entries, 5,000 + 736,600 + 731,520, and each teardown frame its fee, 5,000.
+//                               entries, 5,000 + 736,600 + 731,520 (as the program prices them: less what a page or
+//                               the mark already holds), and each teardown frame its fee, 5,000. No sweep while the
+//                               teardown keeps an account (W keeps the fee to close it later), nor when the note would
+//                               be under the smallest a withdraw spends (signpage rules/pool.ts solanaSweepFloor:
+//                               fee 1,300,000 + W's 5,000 + part 1,295,000 = 2,600,000): then W keeps its SOL.
 //   spend (tap_max)    384,880  what the buy can spend. Total 10,000,000.
 // So the least rung buys at today's mainnet rent: tap_max 0.00038488 SOL at the worst venue; on a Token mint's coin
 // with no cashback the same rung could spend 3,371,920, on the curve or on PumpSwap. At the older rate of 6,960 a byte (3,480 x 2)
 // the same rung's tap_max is 0 (test/pools-testnet.test.ts in packages/signpage pins both). Only the relay fee and
 // the tip it pays are certain costs; the rents and the reserve are held in W, in accounts or as SOL, and after a full
-// sell come back into the user's pool balance, less the teardown's and the sweep's own costs above.
+// sell come back to W, and into the user's pool balance when the sweep runs, less the teardown's and its own costs above.
+// On this rung after a full curve sell W holds about 3.6M after its teardown, a note of about 2.15M: under the floor,
+// so those lamports stay on W (devnet run of 5 Nov 21:12Z, W HFGAyAxq…, before the floor: its sweep made 2,154,336).
 /** A Solana proof's spend at the tap, as the tap computes it before it knows its venue: the kit's solanaPoolBuyMaxSpend
  * on SOLANA_POOL_WORST_BUY_VENUE, the relay fee at the proof's fee cap, the tip at the proof's tip cap (./solana.ts
  * SOL_TIP_CAP, 0.001 SOL: the most the release lets the tap tip, so a tap at any tip it may pay fills) and `rent`, the

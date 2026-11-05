@@ -48,7 +48,7 @@ import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaP
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { poolSellKind, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
+import { owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
@@ -469,6 +469,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           seed64.fill(0);
         }
       },
+      // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
+      owed: owedRentBacks(page.store),
+      // each rent-back fault and end, on the page's console: public words only (W's address, a step, a fault's name)
+      told: (t) => console.warn(`rent back ${t.address} ${t.step} ${t.state}: ${t.detail}`),
       end: () => void notes?.then((n) => n.close(), () => {}),
     };
   };
@@ -497,6 +501,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let passing: Promise<unknown> | null = null;
   // the dead pending sell records are settled once per page load, not on every state read (a re-ask settles its own)
   let deadSettled = false;
+  let backsResumed = false;
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
   // once both RPCs' block time is past their deadline with no spent mark, or held (../../wallet/src/pool/solana-restore.ts
   // solanaSettleReserved); a freed note is proved again by the open queue's next pass
@@ -628,6 +633,21 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (locks && !deadSettled) {
           await settleDeadSellOps(await page.store(), locks);
           deadSettled = true;
+        }
+        // the rent backs a closed page or a provider's fault left owed (card sol-buy-rent-back): once per load, after
+        // the sells settle, in the background (it reads, checks and sends), under the seed's shared lock and the sell lock
+        if (locks && !backsResumed) {
+          backsResumed = true;
+          void locks
+            .request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+              const h = sellHost();
+              try {
+                await resumeRentBacks(h, locks);
+              } finally {
+                h.end();
+              }
+            })
+            .catch(() => {});
         }
       } catch {
         // a state read never fails for this; the next read tries again

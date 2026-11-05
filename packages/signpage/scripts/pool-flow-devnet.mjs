@@ -277,8 +277,14 @@ if (bought) {
   sell = await run("pool.sell", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
   log(`sell ${JSON.stringify(sell)}`);
   // the rent back (card sol-buy-rent-back): after the full sell, W's token account and volume accounts at finalized,
-  // and W's own lamports: each closed (null) and W at 0 when it all came back
-  const info = async (a) => (await rpcs[0]("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value;
+  // and W's own lamports: each closed (null) and W at 0 when it all came back; read once every transaction the page
+  // sent is finalized (90 s at most), since the page reads its rent back at confirmed
+  for (let i = 0; i < 45; i++) {
+    const st = (await rpcs[0]("getSignatureStatuses", [sentTxs])).value;
+    if (st.every((s) => s?.confirmationStatus === "finalized")) break;
+    await sleep(2_000);
+  }
+  const info =async (a) => (await rpcs[0]("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value;
   const program = (await info(MINT)).owner;
   const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
   const { solanaVolumeAccumulator, SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
