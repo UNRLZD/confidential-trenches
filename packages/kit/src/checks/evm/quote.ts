@@ -1088,7 +1088,7 @@ async function scanHeadOf(rpc: EvmRpc, gate: ScanGate): Promise<bigint> {
 type ScanOn = { rpc: EvmRpc; gate: ScanGate; span: number; parallel: number; orSpan?: number | undefined };
 /** The quote's scan providers: the head every scan reads up to, the provider asked first, and the second, which
  *  asks again the blocks of any request the first failed (card evm-scan-second-provider). A first that answered no
- *  head is passed over: the head is the second's, and the second is asked first. */
+ *  head still carries the requests: the head is the second's. */
 type ScanFrom = { head: bigint; first: ScanOn; spare?: ScanOn | undefined };
 /** The scan of the currencies `cs` up to the scan provider's head, then the agreed block `agreed()`, picked once those
  *  logs are in (card evm-quote-head-watch: a block picked before a long scan had aged past what Robinhood's providers
@@ -1159,15 +1159,16 @@ async function scanPools(
     // an answer at the cap may be one the provider cut there (review of 4830f1f, L)
     const fine = (rs: unknown[]) => rs.every((r) => Array.isArray(r) && r.length < SCAN_MAX_LOGS);
     const p = pin;
-    // the request up to the scan's head also asks for that block in its batch, and its logs count only where the
-    // provider holds it (card evm-scan-second-provider): base-rpc.publicnode.com, base.rpc.blxrbdn.com and
-    // rpc-robinhood.globalstake.io each answered a getLogs 2 blocks past their head with no logs and no error, so a
-    // backend behind the head another answered would read as blocks with no pools, kept as read (2026-11-05 16:14-16:22Z)
-    const top = p === null && b === head;
-    const calls = p === null && !top ? filters.map(f) : [...filters.map(f), { method: "eth_getBlockByNumber", params: ["0x" + (p === null ? b : p.number).toString(16), false] }];
-    // a provider that answers it holds no block at the head (null: not yet) is asked again, as a failure: its next try
-    // may reach a backend that does; a first with a second behind it passes the request to the second at once. Any
-    // other answer without the block counts as an answer with no logs (logsOf)
+    // every request also asks for its own last block in its batch, and its logs count only where the provider holds it
+    // (card evm-scan-second-provider; review of 22e29c9, B2: a check on the request up to the head alone let its halves
+    // and the second's spans below it count a lagging backend's [] as read). Past its head, rpc.mainnet.chain.robinhood.com
+    // answers a getLogs [] with no error, so a backend behind another's head reads as blocks with no pools; publicnode
+    // and bloXroute answer -32602 and daybreak -32000 (the review's reads, 2026-11-05 17:42-17:44Z)
+    const top = p === null;
+    const calls = [...filters.map(f), { method: "eth_getBlockByNumber", params: ["0x" + (p === null ? b : p.number).toString(16), false] }];
+    // a provider that answers it holds no such block (null: not yet) is asked again, as a failure: its next try may
+    // reach a backend that does; a first with a second behind it passes the request to the second at once. Any other
+    // answer without the block counts as an answer with no logs (logsOf)
     const rpc: EvmRpc = !top
       ? on.rpc
       : async (cs, signal) => {
@@ -1213,7 +1214,7 @@ async function scanPools(
     if (failed !== undefined) throw (failed as PromiseRejectedResult).reason;
   };
   // A request the first provider failed in any way (a refused connection; in a warm scan, no answer or a throttle's
-  // hold past EVM_SCAN_HOLD_MS; its tries spent; an answer with no logs, or one with no block at the head) is asked of the second for
+  // hold past EVM_SCAN_HOLD_MS; its tries spent; an answer with no logs, or one without its last block) is asked of the second for
   // the blocks that did not come back, in the second's own spans; the quote refuses only where the second fails them
   // too (card evm-scan-second-provider). Both read the same blocks of the same PoolManager: a scan only adds pools,
   // each read on both quote providers like any candidate.
@@ -1795,13 +1796,15 @@ async function routeSet(a: {
       ? undefined
       : { rpc: scan1, gate: scanGateOf(v.scan.parallel, t0 + scanBoundMs, spareOn !== undefined), span: v.scan.span, parallel: v.scan.parallel, orSpan: v.scan.orSpan };
   let scanFrom: Promise<ScanFrom> | undefined;
-  // the head, read once per quote on the first; a first that answers none leaves the scan to the second alone
+  // the head, read once per quote on the first; where the first answers none, on the second
   const scanFromOf = (f: ScanOn) =>
     (scanFrom ??= scanHeadOf(f.rpc, f.gate).then(
       (head) => ({ head, first: f, spare: spareOn }),
       async (e) => {
         if (spareOn === undefined) throw e;
-        return { head: await scanHeadOf(spareOn.rpc, spareOn.gate), first: spareOn };
+        // the head is the second's; the requests stay on the first, the second behind each (review of 22e29c9, B1: a
+        // head answered after 2 s sent a whole cold scan to the second, 800 getLogs where the first carried it)
+        return { head: await scanHeadOf(spareOn.rpc, spareOn.gate), first: f, spare: spareOn };
       },
     ));
   // a scan the quote waits for that fails refuses the quote, so it may pick the agreed block to keep its spans; a kept

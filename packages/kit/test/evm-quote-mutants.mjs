@@ -147,7 +147,15 @@ export const MUTANTS = [
   [QUOTE, "      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw", "      if (false) throw", R, "SP4 "],
   [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
   [QUOTE, "  const fast = spare !== undefined && jobs.reduce(", "  const fast = spare !== undefined && 0 * jobs.reduce(", R, "SP2 "],
-  [QUOTE, "    const top = p === null && b === head;", "    const top = false;", R, "SP3 "],
+  [QUOTE, "    const top = p === null;", "    const top = false;", R, "SP3 "],
+  // review of 22e29c9, B2: the block check on the request up to the head alone (SP7 on the second, SP9 on a lone first)
+  [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SP7 "],
+  [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SP9 "],
+  // review of 22e29c9, B1: a head read on the second sent the scan's requests there too
+  [QUOTE, "return { head: await scanHeadOf(spareOn.rpc, spareOn.gate), first: f, spare: spareOn };", "return { head: await scanHeadOf(spareOn.rpc, spareOn.gate), first: spareOn };", R, "SP6 "],
+  // review of 22e29c9, N4: the 2 s hold where no second follows (the head read), and a not-yet block as an answer
+  [QUOTE, "      fast &&= spareNext;", "", R, "SP8 "],
+  [QUOTE, 'throw spare !== undefined && on !== spare ? new ScanRefused("rpc_error", m) : new Error(m);', "return out;", R, "SP3 "],
   [QUOTE, "      if (fast && on !== spare) throw new ScanRefused(", "      if (false) throw new ScanRefused(", R, "SP5 "],
   [QUOTE, "  scanned?.commit();", "", R, "N1a "],
   // review of 5452011: no override for a pool the PoolManager does not hold, one hook per override, never an address
