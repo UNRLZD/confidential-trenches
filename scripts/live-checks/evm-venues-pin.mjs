@@ -82,7 +82,8 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
   say(JSON.stringify(venue.routers.map(lower)) === JSON.stringify(routers), `the routers ${JSON.stringify(venue.routers)} are pool-evm-deploy's ${JSON.stringify(routers)}`);
   // a testnet lists no middle; a mainnet's middles (Base's USDC, Robinhood's USDG) are the kit's route list, not a pin
   if (Object.hasOwn(CHAINS, chain)) say(venue.middles.length === 0, `no middle is listed: ${JSON.stringify(venue.middles)}`);
-  for (const p of operatorProblems(rpcs, { chain })) say(false, p);
+  // a dry run's record (an anvil fork, the mainnet rehearsal) is read on loopback only, as pool-evm-deploy reads it
+  for (const p of operatorProblems(rpcs, { chain, dryRun: d.dryRun === true })) say(false, p);
   // the RPCs: the chain's id, then the newest block both have
   const two = rpcs.slice(0, 2);
   const heads = [];
