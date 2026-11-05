@@ -1,0 +1,80 @@
+# The vault's mainnet build, rebuilt on a clean Linux runner on every change to contracts/vault/ and by hand: two clean
+# builds by contracts/vault/scripts/deploy.mjs --build-only (pinned rustc and cargo-near, each build in its own new
+# target dir, their sha256 compared, then every deploy refusal for a mainnet build: the banned imports, the promise
+# and export lists, the function body limit, the required exports and mainnet USDC as the only token). Then the wasm
+# is compared with the pin of contracts/vault/deployments/mainnet-test.json and deploy.mjs MAINNET_PINS, and only a
+# build that is the pin is uploaded, with its sha256, as the artifact vault-mainnet-wasm, which the owner's deploy paste
+# downloads by this run's id (gh run download <id> -n vault-mainnet-wasm); deploy.mjs refuses any other wasm on mainnet.
+# The paths are every file the build and pin steps read: contracts/vault/ and deploy.mjs's imports
+# (contracts/vault/scripts/deploy.test.mjs holds the list against them), and scripts/ci/retry.sh.
+# No secret and no token beyond the read-only one GitHub gives every run. Actions pinned by commit sha as ci.yml has
+# them (actions/checkout v7.0.1, actions/setup-node v7.1.0, actions/upload-artifact v7.0.2).
+name: vault-build
+
+on:
+  pull_request:
+    paths:
+      - "contracts/vault/**"
+      - ".github/workflows/vault-build.yml"
+      - "scripts/net-window.mjs"
+      - "scripts/live-checks/vault-skeleton.mjs"
+      - "scripts/live-checks/vault-testnet-t01.mjs"
+      - "scripts/ci/near-rpc-operators.mjs"
+      - "scripts/ci/retry.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vault-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  mainnet-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # rustc 1.96.0 with the wasm target (rustup is on the image, as ci.yml's test-vault job reads it)
+      - name: rust 1.96.0
+        run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      # cargo-near 0.22.0, the release binary checked against the sha256 ci.yml checks it by
+      - name: install cargo-near
+        run: |
+          curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/cargo-near.tgz" \
+            https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          echo "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
+          cargo +1.96.0 near --version
+      - name: two clean mainnet builds that must agree
+        run: |
+          node contracts/vault/scripts/deploy.mjs --build-only --flavor mainnet --build-dir "$RUNNER_TEMP/vault-mainnet" 2>&1 | tee "$RUNNER_TEMP/build.log"
+          test "${PIPESTATUS[0]}" = 0
+          cd "$RUNNER_TEMP/vault-mainnet"
+          sha256sum blindfill_vault.wasm | tee blindfill_vault.wasm.sha256
+          cp "$RUNNER_TEMP/build.log" build.log
+      # deploy.mjs pinProblems: the build's sha256 is mainnet-test.json's pin and MAINNET_PINS', the record's builds
+      # agree, its code_hash is the pin's base58 and it is a mainnet record; before the upload, so no other wasm is one
+      - name: the build is the pin of mainnet-test.json
+        run: |
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { pinProblems } from "./contracts/vault/scripts/deploy.mjs";
+            const wasm = readFileSync(process.argv[1]);
+            const p = pinProblems(wasm, JSON.parse(readFileSync("contracts/vault/deployments/mainnet-test.json", "utf8")));
+            if (p.length) { console.error(`not the pin: ${p.join("; ")}`); process.exit(1); }
+            console.log("the build is the pin of contracts/vault/deployments/mainnet-test.json");
+          ' "$RUNNER_TEMP/vault-mainnet/blindfill_vault.wasm"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vault-mainnet-wasm
+          path: ${{ runner.temp }}/vault-mainnet
+          if-no-files-found: error
+          retention-days: 90

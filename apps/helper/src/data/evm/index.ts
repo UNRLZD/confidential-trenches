@@ -14,11 +14,105 @@
 //
 // Built for any chain (helper-lists-own-index puts Discover's lists and Base on it): `createSwapIndex` takes the chain's
 // read and its topics, nothing of Robinhood's.
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import type { Log } from "./swaps.ts";
 
-/** A transaction's trader, the one rule for it (card helper-tape-4337-trader will change it here): its sender. */
-export function traderFrom(tx: Record<string, unknown>): unknown {
-  return tx.from;
+// -------------------------------------------------------------------------------------------------------------
+// The trader of a swap: the one rule every tape path uses (tape, tick, cold read and this index all feed the same
+// book, whose rows are named by swaps.ts lookTraders through `txTraders` and `traderAt` alone)
+// -------------------------------------------------------------------------------------------------------------
+
+/**
+ * The ERC-4337 EntryPoints, v0.6, v0.7, v0.8 and v0.9 (the addresses each release of eth-infinitism/account-abstraction
+ * names). Read 2026-11-05 10:46-10:55Z with `eth_getCode` on base-rpc.publicnode.com, base.drpc.org,
+ * rpc.mainnet.chain.robinhood.com and robinhood.drpc.org: each is deployed on Base and on Robinhood, v0.6 23,689 bytes
+ * (code hash 0xc93c806e...8e70) and v0.7 16,035 bytes (0x8db5ff69...fc58) alike on all four, v0.8 21,738 and v0.9 22,425
+ * bytes, and every one's code holds the UserOperationEvent and BeforeExecution topics. A transaction sent to one is a
+ * bundle: its `from` is the bundler that paid the gas, never the trader. 608 Robinhood transactions logged a
+ * UserOperationEvent over blocks 106,659,712-106,679,711 (rpc.mainnet.chain.robinhood.com, 10:56Z); of the first 40
+ * that logged a swap, 26 went to v0.8 from bundlers 0x4337..., 13 to v0.7 and 1 to v0.6.
+ */
+export const ENTRY_POINTS: ReadonlySet<string> = new Set([
+  "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+  "0x0000000071727de22e5e9d8baf0edac6f37da032",
+  "0x4337084d9e255ff0702461cf8895ce9e3b5ff108",
+  "0x433709009b8330fda32311df1c2afa402ed8d009",
+]);
+const topic = (sig: string): string => `0x${Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex")}`;
+export const USER_OP_EVENT = topic("UserOperationEvent(bytes32,address,address,uint256,bool,uint256,uint256)");
+export const BEFORE_EXECUTION = topic("BeforeExecution()");
+export const AGGREGATOR_CHANGED = topic("SignatureAggregatorChanged(address)");
+const ADDR = /^0x[0-9a-f]{40}$/;
+const WORD_ADDR = /^0x0{24}([0-9a-f]{40})$/;
+const HASH = /^0x[0-9a-f]{64}$/;
+const low = (v: unknown): string | null => (typeof v === "string" ? v.toLowerCase() : null);
+
+/** A transaction's traders: its sender (`from`), or for a bundle sent to an EntryPoint each user operation's account
+ *  (`sender`) over the log indexes its execution logged, lo and hi excluded (`ops`). */
+export type Traders = { from: string } | { ops: readonly { lo: number; hi: number; sender: string }[] };
+
+/** Whether a transaction (eth_getTransactionByHash's answer) is a bundle sent to an EntryPoint, whose traders only its
+ *  receipt names: the one kind that costs a read more. */
+export function toEntryPoint(tx: Record<string, unknown>): boolean {
+  return ENTRY_POINTS.has(low(tx.to) ?? "");
+}
+
+/**
+ * A transaction's traders, from its transaction and, for a bundle sent to an EntryPoint, its receipt; null when they
+ * cannot be named (a malformed answer, or a bundle with no receipt that matches it), never a guess and never the bundler.
+ *
+ * In a bundle each user operation's logs sit between the EntryPoint's own marks, in the order the EntryPoint emits them:
+ * `handleOps` validates every operation, emits BeforeExecution, then runs each one, and each one's run ends with its
+ * UserOperationEvent (eth-infinitism/account-abstraction v0.6.0 contracts/core/EntryPoint.sol:105 BeforeExecution, :108
+ * the loop of _executeUserOp, :592 UserOperationEvent at the end of _handlePostOp; v0.7.0 EntryPoint.sol:197, :200, :154
+ * in emitUserOperationEvent, called last by _postExecution at :747; v0.8.0 :68, :71, :285; v0.9.0 :88, :91, :312;
+ * v0.9.0 contracts/interfaces/IEntryPoint.sol:118-119 "Any event emitted before this event, is part of the validation").
+ * `handleAggregatedOps` does the same per aggregator, each group's run after its SignatureAggregatorChanged (v0.6.0 :148
+ * and :169, v0.7.0 :261 and :267, v0.8.0 :119 and :125, v0.9.0 :139 and :145). So
+ * an operation's run is the logs after the EntryPoint's last BeforeExecution, SignatureAggregatorChanged or
+ * UserOperationEvent and before its own UserOperationEvent, whose second indexed topic is its account. Only the
+ * EntryPoint's own logs mark anything: any contract can log the same topics. A paymaster's postOp runs inside that range
+ * too (v0.6.0 :571, before :592; v0.7.0 :705, before :747), so its logs count as the operation's.
+ */
+export function txTraders(tx: Record<string, unknown>, receipt: Record<string, unknown> | null): Traders | null {
+  const from = low(tx.from);
+  if (from === null || !ADDR.test(from)) return null;
+  if (!toEntryPoint(tx)) return { from };
+  const ep = low(tx.to)!;
+  const hash = low(tx.hash);
+  if (receipt === null || hash === null || !HASH.test(hash) || low(receipt.transactionHash) !== hash || low(receipt.to) !== ep || low(receipt.from) !== from) return null;
+  if (!Array.isArray(receipt.logs)) return null;
+  const marks: { index: number; t0: string; sender: string | null }[] = [];
+  for (const raw of receipt.logs as unknown[]) {
+    const l = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+    const index = typeof l.logIndex === "string" && /^0x[0-9a-f]{1,8}$/i.test(l.logIndex) ? parseInt(l.logIndex, 16) : null;
+    const topics = Array.isArray(l.topics) ? l.topics.map(low) : null;
+    if (index === null || topics === null) return null;
+    if (low(l.address) !== ep) continue;
+    const t0 = topics[0];
+    if (t0 === BEFORE_EXECUTION || t0 === AGGREGATOR_CHANGED) marks.push({ index, t0, sender: null });
+    else if (t0 === USER_OP_EVENT) {
+      const sender = WORD_ADDR.exec(topics[2] ?? "")?.[1];
+      if (topics.length !== 4 || sender === undefined) return null;
+      marks.push({ index, t0, sender: `0x${sender}` });
+    }
+  }
+  marks.sort((a, b) => a.index - b.index);
+  const ops: { lo: number; hi: number; sender: string }[] = [];
+  let start: number | null = null; // no run before the EntryPoint's BeforeExecution: that is validation
+  for (const m of marks) {
+    if (m.sender !== null && start !== null) ops.push({ lo: start, hi: m.index, sender: m.sender });
+    if (m.t0 === BEFORE_EXECUTION || start !== null) start = m.index;
+  }
+  return { ops };
+}
+
+/** The trader of the swap logged at `index` of a transaction whose traders are `t`: its sender, or the account of the
+ *  user operation whose run holds the log; null for a log in no operation's run (a bundle's validation) or none known. */
+export function traderAt(t: Traders | undefined, index: number): string | null {
+  if (t === undefined) return null;
+  if ("from" in t) return t.from;
+  return t.ops.find((o) => o.lo < index && index < o.hi)?.sender ?? null;
 }
 
 /** What the index serves. `upTo(n)`: read up to block `n` (one read at a time, every caller waits on the same);

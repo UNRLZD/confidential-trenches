@@ -17,10 +17,10 @@
 // throws all the same, failing the tend), and a tend's return at a nonce whose replacement would be over
 // EVM_SELL_MAX_FEE_PER_GAS against going on to the next nonce (a send above a nonce left unreplaced is never mined before
 // it, so what lands is the same either way, and the lane is tended again at its next read).
-import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runSync } from "../../../../scripts/group-run.mjs";
 
 const HELPER = fileURLToPath(new URL("../..", import.meta.url));
 const EVM = "src/pool/evm.ts";
@@ -281,17 +281,16 @@ export const MUTANTS = [
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a
-// run past 120 s is killed and counts as a fail
+// run past 120 s is killed, its process group with it (scripts/group-run.mjs), and counts as a fail
 let lastFail = "";
 function run(dir, file, name) {
   const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, file];
-  try {
-    const out = execFileSync("node", args, { cwd: dir, stdio: "pipe", encoding: "utf8", timeout: 120_000 });
-    return /^# pass ([1-9]\d*)$/m.test(out) ? "pass" : "none";
-  } catch (e) {
-    lastFail = `${e.stdout ?? ""}${e.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
+  const r = runSync("node", args, { cwd: dir, stdio: "pipe", encoding: "utf8", timeoutMs: 120_000 });
+  if (r.status !== 0) {
+    lastFail = `${r.stdout ?? ""}${r.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
     return "fail";
   }
+  return /^# pass ([1-9]\d*)$/m.test(r.stdout) ? "pass" : "none";
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -467,6 +467,41 @@ test("devnet refuses a host build and --no-build: only --ci-run, before any key 
   assert.equal(f.calls.length, 1);
 });
 
+test("devnet refuses CI's build when its sha256 is not the pinned code, before any key or transaction", async () => {
+  const devnet = async (u, init) => {
+    if (JSON.parse(init.body).method === "getGenesisHash") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" }) };
+    throw new Error("no other call before the code is the pinned code");
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  // the record and its journal go to a folder of the test's own, never the repo's, should the refusal ever not hold
+  const work = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  let made = [];
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    // the recorded devnet code is an older build: the findings file's pin is not its hash
+    const f = fakeGh();
+    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {} }), new RegExp(`devnet refused: the code's sha256 ${f.sha} is not the pinned [0-9a-f]{64} \\(contracts/pool-review-2.md\\)`));
+    // a planted pin: one hex digit off the build's own hash
+    const off = f.sha.slice(0, 63) + (f.sha[63] === "0" ? "1" : "0");
+    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: fakeGh().gh, keysBase: TEST_KEYS, wait: async () => {}, pin: off }), /is not the pinned/);
+    // the pinned hash itself passes the check: the run goes on to its next step, a resume's read of the program (here
+    // missing), still before any key
+    const missing = async (u, init) => {
+      const { method } = JSON.parse(init.body);
+      if (method === "getAccountInfo") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: null } }) };
+      return devnet(u, init);
+    };
+    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--program", RD.program_id, "--return", RETURN, "--out", path.join(work, "record.json")], missing, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, pin: f.sha }), new RegExp(`--program ${RD.program_id} refused`));
+  } finally {
+    console.log = realLog;
+    rmSync(work, { recursive: true, force: true });
+    made = ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x));
+    for (const k of made) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+  assert.deepEqual(made, [], "no key was made");
+});
+
 test("the CLI deploys the very bytes hashed: CI's artifact, from a file in the run's own folder", async () => {
   const f = fakeGh();
   const fetchFn = async (url, init) => {

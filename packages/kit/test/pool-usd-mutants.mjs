@@ -8,10 +8,10 @@
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/pool-usd-mutants.mjs
-import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runSync } from "../../../scripts/group-run.mjs";
 import { KIT, kitCopy } from "./mutant-copy.mjs";
 
 // the sweep runs in a copy of the kit; imported (for its MUTANTS), the paths are the kit's own
@@ -131,15 +131,14 @@ export const MUTANTS = [
 
 // a child test run must not inherit this process's own node --test context
 const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
+// a run past 5 min is killed, its process group with it, and counts as a fail (scripts/group-run.mjs)
+const RUN_MS = 300_000;
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`
 function run(name, file = TEST) {
   const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name}`, file];
-  try {
-    const out = execFileSync("node", args, { stdio: "pipe", encoding: "utf8", env: CHILD_ENV });
-    return /^# pass ([1-9]\d*)$/m.test(out) ? "pass" : "none";
-  } catch {
-    return "fail";
-  }
+  const r = runSync("node", args, { stdio: "pipe", encoding: "utf8", env: CHILD_ENV, timeoutMs: RUN_MS });
+  if (r.status !== 0) return "fail";
+  return /^# pass ([1-9]\d*)$/m.test(r.stdout) ? "pass" : "none";
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
