@@ -1639,3 +1639,60 @@ test("the sweep's seed copy is zeroed when the walk for its note throws, before 
   assert.equal(live, 0, "no seed copy live between tries");
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
 });
+
+// Review Low 2 of 9b23f6ae: two rules no test held. W's token account holding tokens on one RPC only is that RPC's word:
+// read again, never "holds" (which would drop what is owed on one RPC's word, the rent left on W).
+test("an owed rent back whose token account holds tokens on one RPC only reads again, never ends holds: still owed", async () => {
+  const plant: Plant = { ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], throttle: { on: "read", n: 1_000_000 } };
+  const w = await world(plant);
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled");
+  assert.equal((await ours(w.ns)).find((n) => n.ref.kind === "return")?.state, "UNSPENT");
+  assert.equal(w.owed.get(W.address)?.passes, 1);
+  delete plant.throttle;
+  const list = JSON.stringify([W.address, ...solanaTeardownAddresses(W.address, [{ mint: MINT, program: TOKEN_PROGRAM }])]);
+  const [rpc0, rpc1] = w.c.rpcs;
+  // RPC 0 shows one token unit on W's token account; RPC 1 none
+  const shows = (async (m: string, p: readonly unknown[]) => {
+    const r = await rpc0(m, p);
+    if (m !== "getMultipleAccounts" || JSON.stringify(p[0]) !== list) return r;
+    const out = structuredClone(r) as { value: ({ data: [string, string] } | null)[] };
+    const i = (p[0] as string[]).indexOf(ATA);
+    out.value[i] = { ...out.value[i]!, data: [base64.encode(tokenAccount(1n)), "base64"] };
+    return out;
+  }) as SolanaRpc;
+  const told = w.told.length;
+  await resumeRentBacks({ ...w.host, rpcs: [shows, rpc1], wallets: async () => [{ ...wallet(AMOUNT), holdings: { native: 1n, tokens: new Map([[MINT, { amount: 0n, frozen: false }]]), unreadable: [] } }] }, fakeLocks());
+  const now = w.told.slice(told);
+  assert.ok(now.some((t) => t.step === "teardown" && t.state === "fault" && /one RPC only/.test(t.detail)), JSON.stringify(now));
+  assert.ok(!now.some((t) => t.state === "holds"), JSON.stringify(now));
+  assert.equal(w.owed.get(W.address)?.passes, 2, "still owed for the next load");
+  assert.equal(w.c.accounts.has(ATA), true);
+});
+
+// The sweep's own read finds an account the plan keeps (a volume account owing incentive tokens appears after the
+// teardown): no sweep is built, W keeps the fee to claim and close it.
+test("the sweep's read finds an account the plan keeps: no sweep built, kept", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }] });
+  const list = JSON.stringify([W.address, ...solanaTeardownAddresses(W.address, [{ mint: MINT, program: TOKEN_PROGRAM }])]);
+  const amm = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
+  const d = new Uint8Array(137);
+  d.set(base58.decode(W.address), 8);
+  d[40] = 1;
+  const owedVolume = { owner: SOLANA_PUMP_AMM_PROGRAM, lamports: Number(VOLUME_RENT), data: [base64.encode(d), "base64"], executable: false, rentEpoch: 0, space: 137 };
+  const reads = [0, 0];
+  const rpcs = w.c.rpcs.map((r, k) => (async (m: string, p: readonly unknown[]) => {
+    const got = await r(m, p);
+    if (m !== "getMultipleAccounts" || JSON.stringify(p[0]) !== list || ++reads[k]! < 2) return got;
+    // the sweep's read (the teardown's was the first): W's PumpSwap volume account there, owing incentive tokens
+    const out = structuredClone(got) as { value: unknown[] };
+    out.value[(p[0] as string[]).indexOf(amm)] = owedVolume;
+    return out;
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+  const a = await runPoolSell({ ...w.host, rpcs }, ASK);
+  assert.equal("stage" in a && a.stage, "filled");
+  assert.equal(w.c.accounts.has(ATA), false, "the teardown ran");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.equal(w.told.at(-1)?.state, "kept", JSON.stringify(w.told));
+  assert.match(w.told.at(-1)!.detail, new RegExp(amm));
+});

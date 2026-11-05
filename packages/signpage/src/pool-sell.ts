@@ -1014,7 +1014,9 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
               await writes;
               if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
               else {
-                // the answer read from here on (a retry of the id) names the end and the signature that landed
+                // the message api.ts posted at the first send names that attempt (the kit never sends the id again:
+                // after its timeout it asks for state, client.ts REASK_STATE); answer() from here on, like the record
+                // state.ops reads, names the end and the signature that landed
                 if ("stage" in a && sentAnswer(answer)) answer = { result: a };
                 if ("stage" in a) ctx.progress(a.stage);
               }
