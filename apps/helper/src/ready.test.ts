@@ -46,13 +46,14 @@ test("ready only once the Solana and EVM lists, a Solana token page and its hold
     token: { page: async (m: string) => (asked.push(`page ${m}`), page), holders: async (m: string) => (asked.push(`holders ${m}`), holders) },
   });
   const sol = ok({ lists: { new: [{ token: MINT }] } });
-  assert.equal(await S.isReady(parts(down, ok({}), ok({}), ok({}))), false, "the Solana lists cold");
+  const evm = ok({ lists: { new: [{ token: "0xa" }] }, unsettled: [] });
+  assert.equal(await S.isReady(parts(down, evm, ok({}), ok({}))), false, "the Solana lists cold");
   assert.equal(await S.isReady(parts(sol, down, ok({}), ok({}))), false, "an EVM chain's lists cold");
-  assert.equal(await S.isReady(parts(sol, ok({}), { status: 429, body: "{}" }, ok({}))), false, "the token page throttled");
-  assert.equal(await S.isReady(parts(sol, ok({}), ok({}), down)), false, "the holders down");
-  assert.equal(await S.isReady(parts(ok({ lists: { new: [] } }), ok({}), ok({}), ok({}))), false, "no token to read");
+  assert.equal(await S.isReady(parts(sol, evm, { status: 429, body: "{}" }, ok({}))), false, "the token page throttled");
+  assert.equal(await S.isReady(parts(sol, evm, ok({}), down)), false, "the holders down");
+  assert.equal(await S.isReady(parts(ok({ lists: { new: [] } }), evm, ok({}), ok({}))), false, "no token to read");
   asked.length = 0;
-  assert.equal(await S.isReady(parts(sol, ok({}), ok({}), ok({}))), true);
+  assert.equal(await S.isReady(parts(sol, evm, ok({}), ok({}))), true);
   assert.deepEqual(asked.sort(), [`holders ${MINT}`, `page ${MINT}`], "the token read is one of the Solana list's");
 });
 
@@ -162,15 +163,50 @@ test("the EVM lists a helper read come back whole in the next one, parsed again,
   const m = fresh();
   m.restore({ ...st, makers: [["0x" + "b".repeat(40), "not-a-pad"], ["not an address", null]] });
   assert.ok(JSON.parse((await m.get()).body).unsettled.length > 0, "a maker with no pad of this chain or no address is not taken");
-  // a none is read again, a pad kept (card helper-ready-page-warm: from 18:00Z on 2026-11-05 Base's old 2 s clock
-  // settled every new token as none, and the warm file carried each into the next helper)
+  // a none settled on another block clock is read again, a pad kept (card helper-ready-page-warm: from 18:00Z on
+  // 2026-11-05 Base's old 2 s clock settled every new token as none, and the warm file carried each into the next helper)
   const toks: string[] = JSON.parse(before.body).lists.new.map((r: { token: string }) => r.token);
   const pad = FACTORIES.base[0]!.pad;
   const n = fresh();
-  n.restore({ ...st, makers: [[toks[0], null], [toks[1], pad]] });
+  n.restore({ reads: st.reads, makers: [[toks[0], null], [toks[1], pad]] });
   const left: string[] = JSON.parse((await n.get()).body).unsettled;
-  assert.ok(left.includes(toks[0]!), "a none restored is read again");
+  assert.ok(left.includes(toks[0]!), "a none restored from a file with no block clock is read again");
   assert.ok(!left.includes(toks[1]!), "a pad restored is kept");
+  const other = fresh();
+  other.restore({ reads: st.reads, clock: "[]", makers: [[toks[0], null]] });
+  assert.ok(JSON.parse((await other.get()).body).unsettled.includes(toks[0]!), "a none settled on another block clock is read again");
+});
+
+test("card helper-ready-page-warm: a none settled on this chain's block clock comes back settled, so a swap's Base lists are as settled as the old helper's (live run 42104885123 attempt 1, 20:36Z: 35 of 44 listed tokens unsettled straight after the swap, every none dropped at the restore and read again at 10 a tick)", async () => {
+  const now = Date.parse("2026-11-03T11:36:00Z");
+  const fx = (f: string) => readFileSync(new URL(`./data/evm/fixtures/${f}`, import.meta.url), "utf8");
+  const answerOf = (url: string) => fx(url.includes("new_pools") ? "gt-base-new.json" : url.includes("duration=5m") ? "gt-base-trending-5m.json" : "gt-base-trending-1h.json");
+  const fetch = (async (url: string) => {
+    if (String(url).includes("geckoterminal")) return new Response(answerOf(String(url)), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "no" } }), { status: 200 });
+  }) as never;
+  const old = createEvmLists("base", gk.geckoBudget(() => now, 100), { fetch, now: () => now }) as ReturnType<typeof createEvmLists> & Record<string, any>;
+  await old.tick();
+  const listed: string[] = [...new Set(Object.values(JSON.parse((await old.get()).body).lists as Record<string, { token: string }[]>).flat().map((r) => r.token))];
+  // the old helper settled every listed token as none (the maker reads it made over its life)
+  const st = JSON.parse(JSON.stringify(old.state()));
+  st.makers = listed.map((t) => [t, null]);
+  const next = createEvmLists("base", gk.geckoBudget(() => now), { fetch, now: () => now });
+  assert.equal(next.restore(st), true);
+  assert.deepEqual(JSON.parse((await next.get()).body).unsettled, [], "every none the old helper settled on this clock is kept");
+});
+
+test("card helper-ready-page-warm: ready waits until every EVM chain's lists have at most half their listed tokens unsettled, the rule market-data-evm reads", async () => {
+  const row = (token: string) => ({ token });
+  const evm = (unsettled: string[]) => ok({ lists: { new: [row("0xa"), row("0xb")], trending_5m: [row("0xc")], trending_1h: [row("0xd")], trending: [row("0xd")], graduating: [] }, unsettled });
+  const parts = (base: object) => ({
+    lists: { get: async () => ok({ lists: { new: [{ token: MINT }] } }) },
+    evmLists: { base: { get: async () => base }, robinhood: { get: async () => evm([]) } },
+    token: { page: async () => ok({}), holders: async () => ok({}) },
+  });
+  assert.equal(await S.isReady(parts(evm(["0xa", "0xb", "0xc"]))), false, "3 of 4 unsettled");
+  assert.equal(await S.isReady(parts(ok({ lists: {} }))), false, "no unsettled list: not read as settled");
+  assert.equal(await S.isReady(parts(evm(["0xa", "0xb"]))), true, "2 of 4 unsettled");
 });
 
 /** Real time for the loopback's I/O while setTimeout may be mocked (setImmediate never is). */
@@ -386,6 +422,8 @@ test("card helper-ready-without-gt: a new helper whose GeckoTerminal window is f
   const old = createEvmLists("base", gk.geckoBudget(() => now, 100), { fetch, now: () => now });
   await old.tick();
   const st = JSON.parse(JSON.stringify(old.state()));
+  // the old helper settled its makers over its life (every listed token none here): its lists are as settled as they go
+  st.makers = [...new Set(Object.values(JSON.parse((await old.get()).body).lists as Record<string, { token: string }[]>).flat().map((r) => r.token))].map((t) => [t, null]);
   const calls = gtCalls;
   now += 10_000;
   const budget = gk.geckoBudget(() => now);
@@ -393,7 +431,7 @@ test("card helper-ready-without-gt: a new helper whose GeckoTerminal window is f
   budget.hold(); // and none until the handover
   const lists = { base: createEvmLists("base", budget, { fetch, now: () => now }), robinhood: createEvmLists("robinhood", budget, { fetch, now: () => now }) };
   assert.equal(lists.base.restore(st), true);
-  assert.equal(lists.robinhood.restore({ reads: Object.fromEntries(Object.entries(st.reads)) }), true);
+  assert.equal(lists.robinhood.restore({ reads: Object.fromEntries(Object.entries(st.reads)), makers: st.makers, clock: "null" }), true);
   const ok200 = (body: unknown) => async () => ({ status: 200, body: JSON.stringify(body) });
   const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
   const p = { lists: { get: ok200({ lists: { new: [{ token: PUMP }] } }) }, evmLists: lists, token: { page: ok200({}), holders: ok200({}) } };
@@ -468,7 +506,7 @@ test("the helper is never ready before every pool's start check: with the warm-u
   const fee = String(solanaPoolFee(RENT));
   const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
   // the warm-up's reads all answer 200: warmUntilReady resolves at its first ask
-  const parts = { lists: { get: async () => ok({ lists: { new: [{ token: MINT }] } }) }, evmLists: { base: { get: async () => ok({}) } }, token: { page: async () => ok({}), holders: async () => ok({}) } };
+  const parts = { lists: { get: async () => ok({ lists: { new: [{ token: MINT }] } }) }, evmLists: { base: { get: async () => ok({ lists: {}, unsettled: [] }) } }, token: { page: async () => ok({}), holders: async () => ok({}) } };
   const health = async (ready: () => boolean) => {
     const h = server.start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ...([ready] as never[]));
     t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));

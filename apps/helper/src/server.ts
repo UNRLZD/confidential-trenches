@@ -688,19 +688,35 @@ type Ready = { lists: Pick<Lists, "get">; evmLists: Record<string, Pick<ReturnTy
 /** How often the warm-up asks again while not ready. */
 export const READY_EVERY_MS = 2_000;
 /**
- * Whether this helper is ready (card helper-ready-gate): the Solana list and every EVM chain's lists answer 200, and a
- * Solana token page and its holders answer 200 for a token on the Solana list. Each read is the one a caller makes (and
+ * Whether this helper is ready (card helper-ready-gate): the Solana list and every EVM chain's lists answer 200, each
+ * EVM chain's with at most half its listed tokens unsettled (settled, card helper-ready-page-warm), and a Solana token
+ * page and its holders answer 200 for a token on the Solana list. Each read is the one a caller makes (and
  * stays cached for them).
  */
 export async function isReady(p: Ready): Promise<boolean> {
   const sol = await p.lists.get();
   if (sol.status !== 200) return false;
-  for (const l of Object.values(p.evmLists)) if ((await l.get()).status !== 200) return false;
+  for (const l of Object.values(p.evmLists)) {
+    const a = await l.get();
+    if (a.status !== 200 || !settled(a.body)) return false;
+  }
   const snap = JSON.parse(sol.body) as { lists?: Record<string, { token?: unknown }[]> };
   const mint = Object.values(snap.lists ?? {}).flat().find((r) => typeof r?.token === "string")?.token as string | undefined;
   if (mint === undefined) return false;
   const [page, holders] = await Promise.all([p.token.page(mint, READY_CLIENT), p.token.holders(mint, READY_CLIENT)]);
   return page.status === 200 && holders.status === 200;
+}
+/** Whether an EVM chain's lists have at most half their listed tokens unsettled (their maker not read yet), the rule
+ *  market-data-evm reads (card helper-ready-page-warm): a swap's lists are as tagged as the old helper's, never a list of
+ *  untagged rows that settles over the next ticks. A snapshot that names no unsettled list is not read as settled. */
+export function settled(body: string): boolean {
+  try {
+    const s = JSON.parse(body) as { lists?: Record<string, { token?: unknown }[]>; unsettled?: unknown };
+    const listed = new Set(Object.values(s.lists ?? {}).flatMap((rows) => (Array.isArray(rows) ? rows.map((r) => r?.token) : [])).filter((t) => typeof t === "string"));
+    return Array.isArray(s.unsettled) && s.unsettled.length * 2 <= listed.size;
+  } catch {
+    return false;
+  }
 }
 /** The client the warm-up's token reads draw as (a caller's share, the callers' room). */
 const READY_CLIENT = "helper-ready";
