@@ -5,7 +5,9 @@
 //   node scripts/ci/download-retry.mjs [root]      (exit 1 and one line per refusal)
 // It reads every workflow (.github/workflows/*.yml) and local action (.github/actions/*/action.yml) and refuses, in a
 // run step (comment lines left out, a line ending in \ joined to the next):
-//  - a curl without curl's own retry: --retry 5 --retry-all-errors --retry-delay 2 (the sha256 check after it stays);
+//  - a curl without curl's own retry, --retry 6 --retry-all-errors, or with a --retry-delay, which turns off curl's
+//    doubling wait: six tries wait 1+2+4+8+16+32 = 63 s, past the 504 that lasted at least 31 s (the sha256 check after
+//    it stays);
 //  - a wget, which carries none of those flags here;
 //  - an apt-get in a run step that sets no Acquire::Retries (apt's own retry, with its doubling wait);
 //  - a rustup toolchain install (or install, target add, component add), a cargo install or a git submodule update not
@@ -17,8 +19,9 @@
 import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-export const CURL_FLAGS = [/\s--retry\s+5(?=\s|$)/, /\s--retry-all-errors(?=\s|$)/, /\s--retry-delay\s+2(?=\s|$)/];
-const CURL_WANT = "--retry 5 --retry-all-errors --retry-delay 2";
+export const CURL_FLAGS = [/\s--retry\s+6(?=\s|$)/, /\s--retry-all-errors(?=\s|$)/];
+const CURL_WANT = "--retry 6 --retry-all-errors";
+const CURL_NO_DELAY = /\s--retry-delay(?=\s|$)/;
 const NET_TOOL = /\b(rustup\s+(?:toolchain\s+install|install|target\s+add|component\s+add)|cargo\s+(?:\+\S+\s+)?install|git\s+submodule\s+update)\b/;
 const RETRY = "scripts/ci/retry.sh";
 const word = (w) => new RegExp(`(?:^|[\\s;&|(\`$])${w}(?=\\s|$)`);
@@ -85,6 +88,7 @@ export function refusals(yml) {
     for (const [n, cmd] of step.cmds) {
       for (const seg of cmd.split(/&&|\|\||[;|]/)) {
         if (word("curl").test(seg) && !CURL_FLAGS.every((f) => f.test(seg))) out.push([n, `a curl without ${CURL_WANT}: ${seg.trim()}`]);
+        if (word("curl").test(seg) && CURL_NO_DELAY.test(seg)) out.push([n, `a curl with --retry-delay, which turns off curl's doubling wait: ${seg.trim()}`]);
         if (word("wget").test(seg)) out.push([n, `a wget, with no retry here; use curl ${CURL_WANT}: ${seg.trim()}`]);
         if (word("apt-get").test(seg) && !/Acquire::Retries=\d/.test(all)) out.push([n, `an apt-get in a step that sets no Acquire::Retries: ${seg.trim()}`]);
         const tool = NET_TOOL.exec(seg);

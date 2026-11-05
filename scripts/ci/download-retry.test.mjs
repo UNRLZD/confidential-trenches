@@ -15,7 +15,7 @@ import { downloadRetry, refusals, withoutHeldRetries } from "./download-retry.mj
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const GATE = join(ROOT, "scripts/ci/download-retry.mjs");
 const RETRY = join(ROOT, "scripts/ci/retry.sh");
-const FLAGS = "--retry 5 --retry-all-errors --retry-delay 2";
+const FLAGS = "--retry 6 --retry-all-errors";
 const SHA = "908c540300062bd5a7e473851cdb4282204cee09";
 
 const job = (steps) => `name: x\non: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    steps:\n${steps}`;
@@ -53,17 +53,20 @@ test("curl: each of the three flags is needed, on any line of a continued comman
   assert.deepEqual(what(job(run(`curl -sSfL ${FLAGS} -o f https://x/y`))), []);
   assert.deepEqual(what(job(run(`curl -sSfL -o f \\\n  ${FLAGS} \\\n  https://x/y\necho ok | sha256sum -c -`))), []);
   assert.deepEqual(what(job(run("# curl -sSfL https://x/y with no flags, in a comment\necho done"))), []);
-  assert.deepEqual(what(job(run("curl -sSfL -o f https://x/y"))), ["9: a curl without --retry 5 --retry-all-errors --retry-delay 2"]);
-  assert.deepEqual(what(job(run("curl -sSfL --retry 5 --retry-delay 2 -o f https://x/y"))), ["9: a curl without --retry 5 --retry-all-errors --retry-delay 2"]);
-  assert.deepEqual(what(job(run("curl -sSfL --retry 3 --retry-all-errors --retry-delay 2 -o f https://x/y"))), ["9: a curl without --retry 5 --retry-all-errors --retry-delay 2"]);
-  assert.deepEqual(what(job(run("curl -sSfL --retry 5 --retry-all-errors -o f https://x/y"))), ["9: a curl without --retry 5 --retry-all-errors --retry-delay 2"]);
+  assert.deepEqual(what(job(run("curl -sSfL -o f https://x/y"))), ["9: a curl without --retry 6 --retry-all-errors"]);
+  assert.deepEqual(what(job(run("curl -sSfL --retry 6 -o f https://x/y"))), ["9: a curl without --retry 6 --retry-all-errors"]);
+  assert.deepEqual(what(job(run("curl -sSfL --retry 5 --retry-all-errors -o f https://x/y"))), ["9: a curl without --retry 6 --retry-all-errors"]);
+  assert.deepEqual(what(job(run("curl -sSfL --retry-all-errors -o f https://x/y"))), ["9: a curl without --retry 6 --retry-all-errors"]);
+  // a --retry-delay turns off curl's doubling wait (the brief's first flags: five tries in about 10 s)
+  assert.deepEqual(what(job(run("curl -sSfL --retry 6 --retry-all-errors --retry-delay 2 -o f https://x/y"))), ["9: a curl with --retry-delay, which turns off curl's doubling wait"]);
+  assert.deepEqual(what(job(run("curl -sSfL --retry 5 --retry-all-errors --retry-delay 2 -o f https://x/y"))), ["9: a curl without --retry 6 --retry-all-errors", "9: a curl with --retry-delay, which turns off curl's doubling wait"]);
   // a one-line run: and a curl piped into another command
-  assert.deepEqual(what(job("      - run: curl -sSfL https://x/y | tar -xz\n")), ["7: a curl without --retry 5 --retry-all-errors --retry-delay 2"]);
+  assert.deepEqual(what(job("      - run: curl -sSfL https://x/y | tar -xz\n")), ["7: a curl without --retry 6 --retry-all-errors"]);
   assert.deepEqual(what(job(run(`echo a && curl -sSfL ${FLAGS} https://x/y | tar -xz`))), []);
 });
 
 test("wget is refused; apt-get needs Acquire::Retries in its step", () => {
-  assert.deepEqual(what(job(run("wget https://x/y"))), ["9: a wget, with no retry here; use curl --retry 5 --retry-all-errors --retry-delay 2"]);
+  assert.deepEqual(what(job(run("wget https://x/y"))), ["9: a wget, with no retry here; use curl --retry 6 --retry-all-errors"]);
   assert.deepEqual(what(job(run("sudo apt-get update\nsudo apt-get install -y z"))), ["9: an apt-get in a step that sets no Acquire::Retries", "10: an apt-get in a step that sets no Acquire::Retries"]);
   assert.deepEqual(what(job(run('APT=(-o Acquire::Retries=5)\nsudo apt-get "${APT[@]}" update'))), []);
   // the option set in another step does not count

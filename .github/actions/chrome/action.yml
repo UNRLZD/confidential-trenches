@@ -20,7 +20,7 @@ runs:
   steps:
     - shell: bash
       run: |
-        curl -sSfL --retry 5 --retry-all-errors --retry-delay 2 -o "$RUNNER_TEMP/google-signing-key.pub" https://dl.google.com/linux/linux_signing_key.pub
+        curl -sSfL --retry 6 --retry-all-errors -o "$RUNNER_TEMP/google-signing-key.pub" https://dl.google.com/linux/linux_signing_key.pub
         fpr="$(gpg --show-keys --with-colons "$RUNNER_TEMP/google-signing-key.pub" | awk -F: '$1 == "fpr" { print $10; exit }')"
         test "$fpr" = EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796 || { echo "Google's signing key is $fpr"; exit 1; }
         gpg --dearmor --yes -o "$RUNNER_TEMP/google-chrome.gpg" "$RUNNER_TEMP/google-signing-key.pub"
