@@ -550,9 +550,12 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     sent.push(lastSearch);
     let rows: unknown = null;
     let at = now();
+    // the proxy's part of the search (its budget wait, Jupiter's hold or turn, each 429 and the send), as jup-<entry>
+    let parts: string[] = [];
     try {
       // proxy.ts PROXY_RESERVE; a hold of Jupiter's is waited out within SEARCH_HOLD_WAIT_MS (proxy.ts turn)
       const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS);
+      parts = (a.timing ?? []).map((e) => `jup-${e}`);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
@@ -573,7 +576,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       }
       const r: JupRow = { row: searchRow(rows, mint), at };
       jrows.set(mint, { ...r, readAt: now() });
-      const timing = [`jup-wait;dur=${Math.round(sentAt - since)}`, `jup;dur=${Math.round(performance.now() - sentAt)}`];
+      const timing = [`jup-wait;dur=${Math.round(sentAt - since)}`, ...parts, `jup;dur=${Math.round(performance.now() - sentAt)}`];
       for (const w of ws) w.ok({ ...r, timing });
     }
     searching = false;
