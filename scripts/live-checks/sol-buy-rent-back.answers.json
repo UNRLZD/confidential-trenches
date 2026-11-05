@@ -1,0 +1,28 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet, build-app.mjs bundle) at card/sol-buy-rent-back d159cd02: the pool sell's teardown rule and volume close, and its sweep rule: PASS",
+    "bad": "main 987fae20's build (mainnet): no teardown rule, no sweep rule (the volume close is the kit's direct trade teardown's): FAIL",
+    "liveBefore": "SIGN_HOST read 2026-11-05T20:37Z, before this card's deploy: FAIL"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-lGQInkFCZDxIB7szHQURFVqx5SIdH39ZyEDiZHccqpgLyhF0+zgJfrOKt6Wvzoio\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-lGQInkFCZDxIB7szHQURFVqx5SIdH39ZyEDiZHccqpgLyhF0+zgJfrOKt6Wvzoio",
+    "teardown": true,
+    "volumeClose": true,
+    "sweep": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
+    "teardown": false,
+    "volumeClose": true,
+    "sweep": false
+  },
+  "liveBefore": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
+    "teardown": false,
+    "volumeClose": true,
+    "sweep": false
+  }
+}
