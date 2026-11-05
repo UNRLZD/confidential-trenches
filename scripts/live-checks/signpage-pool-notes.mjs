@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Live check of card signpage-pool-notes: the signing page's pool.deposit landed a note on the devnet pool its testnet
 // build pins, and SIGN_HOST (https://sign.confidential.unrealized.trade) still serves the mainnet build, which carries no
-// testnet pin and no pool deposit flow. The run is signpage-pool-notes.run.json, written by
+// testnet pin. Since card signpage-pool-mainnet that build carries the same deposit flow (it runs on the page's own
+// network, and refuses every pool kind while mainnet pins no pool: signpage-pool-mainnet's check), so the flow's
+// presence is recorded here and no longer judged. The run is signpage-pool-notes.run.json, written by
 // packages/signpage/scripts/pool-deposit-devnet.mjs (runPoolDeposit, src/pool-deposit.ts, with a seed made in that run).
 // On each of two devnet RPCs of two operators, at finalized:
 //   - the run's deposit tx: no error, signed and paid by the run's one-time wallet U, calling the pinned program;
@@ -40,8 +42,8 @@ export async function readSignFlow(fetchFn = fetch) {
 export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), precommitment = run.precommitment, fetchFn = fetch, rpcs = RPCS, sleep, sign } = {}) {
   const lines = [];
   const say = (pass, text) => lines.push(`${pass ? "ok  " : "BAD "} ${text}`);
-  say(sign?.status === 200 && sign.bytes > 0 && Array.isArray(sign.found) && sign.found.length === 0 && sign.flow === false,
-    `SIGN_HOST's /app.js is the mainnet build, with no testnet pin or provider and no pool deposit flow: ${sign ? `${sign.status}, ${sign.bytes} chars, carries [${sign.found.join(", ")}], deposit flow ${sign.flow}` : "not read"}`);
+  say(sign?.status === 200 && sign.bytes > 0 && Array.isArray(sign.found) && sign.found.length === 0,
+    `SIGN_HOST's /app.js is the mainnet build, with no testnet pin or provider: ${sign ? `${sign.status}, ${sign.bytes} chars, carries [${sign.found.join(", ")}], deposit flow ${sign.flow}` : "not read"}`);
   say(run.cluster === "devnet" && run.program === PIN.program && run.pool === PIN.pool, `the run is on the pinned devnet pool: ${run.cluster}, ${run.program}, ${run.pool}`);
   say(precommitment === run.precommitment, `the precommitment read is the run's: ${precommitment}`);
   say(new Set(rpcs.slice(0, 2).map((u) => new URL(u).hostname)).size === 2, `two RPCs: ${rpcs.slice(0, 2).join(", ")}`);

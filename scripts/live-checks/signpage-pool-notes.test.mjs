@@ -1,8 +1,8 @@
 // node --test scripts/live-checks/signpage-pool-notes.test.mjs: the live check replays recorded answers
 // (signpage-pool-notes.answers.json). good: the signing page's devnet deposit (signpage-pool-notes.run.json) read on two
-// devnet RPCs, and SIGN_HOST's /app.js with no testnet pin and no deposit flow: PASS. bad: the same reads with another
-// precommitment in the run's place, whose mark does not exist: FAIL. Planted on the good one: SIGN_HOST serving the
-// deposit flow, the deposit tx failed, the mark's value another, a state leaf another, U not emptied, a record naming
+// devnet RPCs, and SIGN_HOST's /app.js with no testnet pin: PASS (with the deposit flow too, as SIGN_HOST's build carries
+// it since card signpage-pool-mainnet). bad: the same reads with another precommitment in the run's place, whose mark
+// does not exist: FAIL. Planted on the good one: SIGN_HOST serving a testnet pin, the deposit tx failed, the mark's value another, a state leaf another, U not emptied, a record naming
 // another deposit's leaf and commitment: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -45,8 +45,12 @@ test("recorded bad answer: another precommitment in the run's place: FAIL", asyn
   bad(r, "mark ");
 });
 
-test("planted on the good answer: SIGN_HOST serving the deposit flow or a testnet pin, or not read: FAIL", async () => {
-  for (const sign of [{ ...A.good.sign, flow: true }, { ...A.good.sign, found: [R.program] }, { ...A.good.sign, status: 404 }, null]) bad(await run(A.good, undefined, sign), "SIGN_HOST's /app.js");
+test("planted on the good answer: SIGN_HOST serving a testnet pin, or not read: FAIL", async () => {
+  for (const sign of [{ ...A.good.sign, found: [R.program] }, { ...A.good.sign, status: 404 }, null]) bad(await run(A.good, undefined, sign), "SIGN_HOST's /app.js");
+});
+
+test("SIGN_HOST's mainnet build carrying the deposit flow (card signpage-pool-mainnet) still passes: the flow is recorded, not judged", async () => {
+  assert.equal((await run(A.good, undefined, { ...A.good.sign, flow: true })).ok, true);
 });
 
 test("planted on the good answer: the deposit failed, the mark another value, a state leaf another, U not emptied: FAIL", async () => {
