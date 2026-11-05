@@ -1887,11 +1887,11 @@ test("paste 1: a CLI deploy that fails mid-upload is retried in the same run fro
     assert.ok(!a.includes("--use-rpc"), "writes go to the leaders, not the public RPC");
     assert.equal(a[a.indexOf("--max-sign-attempts") + 1], String(DEPLOY_SIGN_ATTEMPTS));
   }
-  assert.ok(DEPLOY_SIGN_ATTEMPTS >= 20);
+  assert.ok(DEPLOY_SIGN_ATTEMPTS >= 10); // ten a try, six tries (review a763a51d: a new CLI process each try)
   assert.equal(said.filter((l) => /waiting for \S+ to hold/.test(l)).length, 1, "one funding wait");
   const sigs = journal.txs.map((t) => t.signature);
   for (const s of ["A".repeat(87), "a".repeat(87), "B".repeat(87)]) assert.ok(sigs.includes(s), `${s.slice(0, 4)}... journaled`);
-  assert.ok(said.some((l) => /deploy try 1 of 3 failed: .*Max retries exceeded.*: trying again from the run's buffer/.test(l)), said.join("\n"));
+  assert.ok(said.some((l) => /deploy try 1 of 6 failed: .*Max retries exceeded.*: trying again from the run's buffer/.test(l)), said.join("\n"));
 });
 import { DEPLOY_SIGN_ATTEMPTS } from "./deploy.mjs";
 
@@ -1933,4 +1933,185 @@ test("devnet rehearsal 5 Nov: a funding wait whose balance read meets a burst of
   assert.equal(said.filter((l) => /waiting for \S+ to hold/.test(l)).length, 1, "one funding wait");
   assert.ok(said.some((l) => /the funder's balance not read \(getBalance: HTTP 429.*\): reading it again/.test(l)), said.join("\n"));
   assert.ok(said.some((l) => /funded: /.test(l)), said.join("\n"));
+});
+
+// ---- the review of d507200f (a763a51d): each finding a test, red at d507200f ----
+import { DEPLOY_TRIES } from "./deploy.mjs";
+
+test("review a763 1: a buffer close the CLI reports 'Failed to close buffer' with exit 0 is not done: the buffer is read on both RPCs and the close throws while it is there", async () => {
+  const funder = newKey();
+  const BUF = newKey().id;
+  let closedOn = new Set();
+  const gpaUrls = [];
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getProgramAccounts") {
+      gpaUrls.push(url);
+      const buffer = params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(1, 0, 0, 0));
+      return okR(buffer && !closedOn.has(url) ? [{ pubkey: BUF, account: {} }] : []);
+    }
+    throw new Error(`unexpected ${method}`);
+  };
+  let closes = 0;
+  const failing = (args) => (args[1] === "close" && closes++, { status: 0, stdout: "", stderr: `Failed to close buffer ${BUF}: RPC response error -32002: Transaction simulation failed` });
+  const ops = chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, say: () => {}, cli: failing });
+  await assert.rejects(ops.closeBuffers(), new RegExp(`buffer ${BUF}.* still has the funder as its authority`));
+  assert.deepEqual([...new Set(gpaUrls)].sort(), ["a", "b"], "read on both RPCs");
+  // the cleanup retries it, and on giving up keeps the reserve for --sweep-kept
+  let bal = 50_000_000n;
+  const sent = [];
+  const r = await cleanup({ ...ops, upgradeableByFunder: async () => false, balance: async () => bal, transfer: async (to, n) => (sent.push(n), (bal -= n + FEE_PER_SIGNATURE), "s".repeat(87)) }, RETURN, fast);
+  assert.equal(closes, 1 + 5, "the CLI's close was tried again by the retry");
+  assert.ok(r.problems.some((p) => /kept 1000000 lamports in the funder for --sweep-kept: buffer close gave up/.test(p)), r.problems.join("\n"));
+  assert.equal(bal, CLEANUP_RESERVE, "the reserve stays in the funder");
+  // a close the RPCs read as done (on both) resolves
+  closedOn = new Set(["a", "b"]);
+  await ops.closeBuffers();
+});
+
+test("review a763 1: --sweep-kept whose buffer close fails (exit 0, 'Failed to close buffer') keeps the reserve in the funder and the keys, naming the buffer", async () => {
+  const c = cluster();
+  const k = keptRun(c);
+  const BUF = newKey().id;
+  c.io.cli = (args) => ({ status: 0, stdout: "", stderr: args[1] === "close" && args[2] === "--buffers" ? `Failed to close buffer ${BUF}: Transaction simulation failed` : "" });
+  wrap(c, (url, { method, params }, real) => (method === "getProgramAccounts" && params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(1, 0, 0, 0)) ? okR([{ pubkey: BUF, account: {} }]) : real()));
+  try {
+    await runAt(c, path.join(k.w, "x.json"), [], LOCAL_SWEEP(k.journal));
+    assert.equal(c.bal.get(k.funder.id), CLEANUP_RESERVE, "the funder keeps the reserve for a later close");
+    const j = readJ(k.journal);
+    assert.equal(j.keys.state, "kept");
+    assert.ok(j.keys.why.some((w) => w.includes(BUF)), j.keys.why.join("; "));
+    assert.equal(existsSync(k.dir), true);
+  } finally {
+    k.done();
+  }
+});
+
+/** A run of main() on a local fake whose program state the planted CLI sets: `onDeploy(n, ids, state)` answers the n-th
+ * deploy, `onCli(args, ids, state)` any other CLI call. Ends at the first send after the read-back. */
+async function deployRun({ onDeploy, onCli = () => ({ status: 0, stdout: "", stderr: "" }), limitGsfa = 0 }) {
+  const f = fakeGh();
+  const code = recordedCode();
+  const state = { program: false, authority: null }; // authority: null none, else the funder's id
+  let ids = null;
+  let funded = false;
+  let gsfaLimited = 0;
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return (funded = true), ok({ value: 1_000_000_000 });
+      case "getSignaturesForAddress":
+        if (funded && gsfaLimited < limitGsfa) return gsfaLimited++, { ok: false, status: 429, json: async () => ({ code: 429, message: "Connection rate limits exceeded" }) };
+        return ok([]);
+      case "getProgramAccounts": return ok([]);
+      case "getLatestBlockhash": throw new Error("stop after the deploy's read-back");
+      case "getAccountInfo": {
+        if (!ids || !state.program) return ok({ value: null });
+        const pdAddr = programDataAddress(ids.program);
+        const acc = (owner, executable, data) => ({ value: { owner, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] } });
+        if (params[0] === ids.program) return ok(acc(LOADER, true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pdAddr))])));
+        if (params[0] === pdAddr) {
+          const meta = Buffer.alloc(45);
+          meta.writeUInt32LE(3, 0);
+          if (state.authority) (meta[12] = 1), Buffer.from(b58decode(state.authority)).copy(meta, 13);
+          return ok(acc(LOADER, false, Buffer.concat([meta, code])));
+        }
+        return ok({ value: null });
+      }
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  const calls = [];
+  let deploys = 0;
+  const cli = (args) => {
+    calls.push(args);
+    if (args[1] === "deploy") {
+      ids = { program: keyOf(args[args.indexOf("--program-id") + 1]), funder: keyOf(args[args.indexOf("--upgrade-authority") + 1]) };
+      return onDeploy(++deploys, ids, state);
+    }
+    return onCli(args, ids, state);
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const realLog = console.log;
+  const said = [];
+  console.log = (s) => said.push(String(s));
+  let error = null;
+  let clock = Date.now();
+  try {
+    await main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, now: () => (clock += 1000), cli, gh: f.gh, keysBase: TEST_KEYS });
+  } catch (e) {
+    error = e;
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+  return { error, said, calls, state, ids: () => ids };
+}
+const deployed = (said) => said.some((l) => /deployed \S+, upgrade authority none/.test(l));
+
+test("review a763 2a: a try whose deploy landed and whose --final SetAuthority did not is finished with set-upgrade-authority --final, never redeployed or closed", async () => {
+  const r = await deployRun({
+    onDeploy: (n, ids, state) => {
+      if (n === 1) return (state.program = true), (state.authority = ids.funder), { status: 1, stdout: "", stderr: "Error: Failed to set authority: Max retries exceeded" };
+      return { status: 1, stdout: "", stderr: "Error: Program's authority Some(x) does not match authority provided" };
+    },
+    onCli: (args, ids, state) => {
+      if (args[1] === "set-upgrade-authority") state.authority = null;
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1, "no second deploy");
+  const set = r.calls.find((a) => a[1] === "set-upgrade-authority");
+  assert.ok(set, r.calls.map((a) => a.slice(0, 2).join(" ")).join("; "));
+  assert.equal(set[2], r.ids().program);
+  assert.ok(set.includes("--final"));
+  assert.ok(!r.calls.some((a) => a[1] === "close" && a[2] === r.ids().program), "the program is not closed");
+  assert.ok(deployed(r.said), r.said.join("\n"));
+});
+
+test("review a763 2b: a try whose CLI reported an error after its --final SetAuthority landed takes the success path: no second deploy, no set-upgrade-authority", async () => {
+  const r = await deployRun({
+    onDeploy: (n, ids, state) => {
+      if (n === 1) return (state.program = true), (state.authority = null), { status: 1, stdout: "", stderr: "Error: unable to confirm transaction" };
+      return { status: 1, stdout: "", stderr: "Error: Program is no longer upgradeable" };
+    },
+  });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1, "no second deploy");
+  assert.ok(!r.calls.some((a) => a[1] === "set-upgrade-authority"));
+  assert.ok(deployed(r.said), r.said.join("\n"));
+});
+
+test("review a763 3: five 429s on the funder's history right after the funding are read again: the run goes on to its deploy", async () => {
+  const r = await deployRun({ limitGsfa: 5, onDeploy: (n, ids, state) => ((state.program = true), (state.authority = null), { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" }) });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.ok(r.said.some((l) => /funded: /.test(l)), r.said.join("\n"));
+  assert.ok(r.said.some((l) => /the funder's history not read \(getSignaturesForAddress: HTTP 429.*\): reading it again/.test(l)), r.said.join("\n"));
+});
+
+test("review a763 4: about 10 sign attempts a try and 6 tries, a pause between tries, and one line per try with its longest time", async () => {
+  assert.equal(DEPLOY_SIGN_ATTEMPTS, 10);
+  assert.equal(DEPLOY_TRIES, 6);
+  const r = await deployRun({
+    onDeploy: (n, ids, state) => {
+      if (n < 3) return { status: 1, stdout: "", stderr: "Error: Data writes to account failed: Custom error: Max retries exceeded" };
+      return (state.program = true), (state.authority = null), { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+    },
+  });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  for (const n of [1, 2, 3]) assert.ok(r.said.some((l) => new RegExp(`deploy try ${n} of 6: at most about 10 min \\(10 sign attempts, a blockhash's ~60 s each\\)`).test(l)), r.said.join("\n"));
+  assert.ok(r.said.some((l) => /deploy try 2 of 6 failed: .*: trying again from the run's buffer in 5 s/.test(l)), r.said.join("\n"));
+});
+
+test("review a763 5: the KEYS KEPT line names buffer.json beside funder.json and program.json", () => {
+  const src = readFileSync(path.join(HERE, "deploy.mjs"), "utf8");
+  const line = src.split("\n").find((l) => l.includes("KEYS KEPT in"));
+  assert.match(line, /funder\.json.*program\.json.*buffer\.json/);
 });
