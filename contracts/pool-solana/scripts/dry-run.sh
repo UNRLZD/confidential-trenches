@@ -9,9 +9,9 @@
 #   4. a second resume of it: its pool exists, so init is skipped;
 #   5. the CLI stopped while it writes the buffer (SIGTERM): the cleanup closes the buffer and sweeps;
 #   6. a terminal closing while the CLI writes (SIGHUP to the run and its CLI): the same stop, cleanup and sweep;
-#   7. SIGHUP in the funding wait, the funding sent 30 s after it: the run watches the balance 60 s, then sweeps it
-#      back; its journal (record.journal.json, complete: false) lists the funding and the sweeps, and no record is
-#      written.
+#   7. SIGHUP in the funding wait, the funding sent 30 s after it: the run sweeps at once, watches the balance 60 s,
+#      sweeps it back and keeps its keys (it stopped before its funding was read); its journal (late.journal.json,
+#      complete: false) gives the --sweep-kept command, which runs next and removes the keys once both RPCs read 0.
 # After each, the funder must hold 0. Outputs go to contracts/pool-solana/out/dry-run/ (ignored by git).
 #   bash contracts/pool-solana/scripts/dry-run.sh   (with solana-test-validator, the solana CLI and cargo-build-sbf on PATH)
 set -euo pipefail
@@ -66,6 +66,9 @@ run() {
     echo "dry-run [$name]: sent SIGHUP to the run and its CLI while it writes (a terminal closing)"
   fi
   local rc=0; wait $pid || rc=$?
+  if [ "$name" = late ]; then
+    node "$ROOT/contracts/pool-solana/scripts/deploy.mjs" --url "$URL" --sweep-kept "$OUT/late.journal.json" >>"$log" 2>&1 || true
+  fi
   cat "$log"
   echo "dry-run [$name]: exit $rc; funder $funder holds $(solana -u "$URL" balance "$funder" --lamports)"
 }
@@ -78,7 +81,7 @@ run stopped --no-build
 run hangup --no-build
 run late --no-build
 echo "dry-run: stand-in wallet $D holds $(solana -u "$URL" balance "$D" --lamports) after every run"
-echo "dry-run: runs whose cleanup read the funder empty with nothing left, so removed its keys: $(grep -l 'keys removed (gone)' "$OUT"/*.log | wc -l | tr -d ' ') of 7; kept: $(grep -h 'KEYS KEPT' "$OUT"/*.log | wc -l | tr -d ' ')"
+echo "dry-run: runs whose cleanup read the funder empty with nothing left, so removed its keys: $(grep -lE 'keys removed \(gone\)|sweep-kept: keys removed' "$OUT"/*.log | wc -l | tr -d ' ') of 7; kept: $(grep -h 'KEYS KEPT' "$OUT"/*.log | wc -l | tr -d ' ')"
 echo "dry-run: buffers left with any authority: $(solana -u "$URL" program show --buffers --all 2>&1 | tail -n +1 | grep -c '^ *[1-9A-HJ-NP-Za-km-z]\{32,44\} ' || true)"
 node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/whole.json" --rpc "$URL,http://localhost:$PORT" --record "$OUT/whole-answers.json"
 node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/resumed.json" --rpc "$URL,http://localhost:$PORT" | tail -1
