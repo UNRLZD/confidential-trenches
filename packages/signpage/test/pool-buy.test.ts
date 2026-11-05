@@ -125,6 +125,9 @@ type Plant = {
    *  reaches finalized. `otherListed`: whether RPC p's W history lists that buy (both when not given) */
   otherSpent?: boolean;
   otherListed?: (p: 0 | 1) => boolean;
+  /** RPC p's first this-many read-back reads (getTransaction at confirmed) answer this very transaction with an
+   *  unreadable meta, then as `readBack` says */
+  metaJunkReads?: number;
 };
 
 /** The keys a v0 transaction's lookups load, as getTransaction's meta gives them (loadedAddresses): every lookup's
@@ -162,6 +165,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   let skewed = false;
   let settles = 0;
   const heightReads = [0, 0];
+  const txReads = [0, 0];
   const accounts = (p: 0 | 1): Record<string, { owner: string; data: Uint8Array }> => ({
     [s.tableAddr]: { owner: ALT, data: s.tableData },
     [POOL]: { owner: PROGRAM, data: poolAccount() },
@@ -219,7 +223,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         return plant.finalHeight?.(p, heightReads[p]!++) ?? 1_000;
       }
       if (method === "getTransaction") {
-        const how = plant.readBack ?? "ours";
+        const how = txReads[p]!++ < (plant.metaJunkReads ?? 0) ? "metaJunk" : plant.readBack ?? "ours";
         if (how === "none" || sent === null) return null;
         const tx = sent.slice();
         tx.set(base58.decode(SIG), 1);
@@ -782,6 +786,29 @@ test("the sent hook fires once, after both RPCs read this very transaction under
   assert.equal(at.length, 1);
   assert.equal(at[0]![0], SIG);
   assert.ok(at[0]!.includes("0:getTransaction") && at[0]!.includes("1:getTransaction"), "told only after the read-back on both RPCs");
+});
+
+test("the sent hook fires once: both RPCs read this very transaction with an unreadable meta for two rounds, then ok", async () => {
+  const w = await world({ metaJunkReads: 2 });
+  const told: string[] = [];
+  const a = await runPoolBuy({ ...w.host, sent: (s) => void told.push(s) }, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal(w.log.filter((x) => x === "0:getTransaction").length, 3, "three read-back rounds");
+  assert.deepEqual(told, [SIG], "told once, at the first round both RPCs read it as this transaction");
+});
+
+// Review fold (HIGH): the kind's answer may come only at the run's end (no read-back within the client's 10 s), which
+// the kit's client has dropped by then (packages/kit/src/signpage/client.ts: a timed-out request's late answer); the
+// terminal then waits on progress alone (apps/terminal/src/screens/trade/model.ts). The run's stage always goes out as
+// progress too, so the button ends.
+test("dropped tx: not_landed reaches progress", async () => {
+  const w = await world({ readBack: "none", landsAtSettle: "never" });
+  const locks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+  const stages: string[] = [];
+  const r = poolBuyKind(() => w.host, locks)(ASK, { id: "r1", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { running: true; after: Promise<void>; answer: () => unknown };
+  await r.after;
+  assert.deepEqual(r.answer(), { result: { stage: "not_landed", txs: [] } });
+  assert.deepEqual(stages, ["not_landed"], "the stage reaches the app as progress, whatever its client waited");
 });
 
 test("the kind, the helper answering a well-formed signature that is not this transaction's: the app's answer never names it", async () => {

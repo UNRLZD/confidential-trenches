@@ -630,7 +630,7 @@ type Locks = Pick<LockManager, "request">;
 
 /** The pool.buy kind: one run per tap under the seed's shared lock (sign out waits for it), answered "sent" with its
  *  signature once that reads back on both RPCs as this very transaction (sendAndSettle's sent), or at the run's end
- *  with the run's own answer, then its stage as it comes. */
+ *  with the run's own answer; the run's final stage is always posted as progress as well. */
 export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
@@ -646,7 +646,10 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
             give();
           }, route: (x) => ctx?.route?.(x) }, ask);
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
-          else if ("stage" in a) ctx?.progress(a.stage);
+          // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end
+          // (no read-back within the client's 10 s) is one the kit's client has dropped, and the app waits on progress
+          // (api.ts holds a progress event until its id's answer is posted)
+          if ("stage" in a) ctx?.progress(a.stage);
         } finally {
           h.end?.();
         }
