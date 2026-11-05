@@ -3,6 +3,9 @@ Money path: yes
 Tx: solana-devnet 4FvHxn7UZBHg9g3ngurXiADquA3jfK1vqS7sP1xVZT6BZSviZDWwjTzMLB57uAFq7mrQseSS2W7ofzz3G9jndCP
 Tx: solana-devnet 9gZ4Y5BEShJ6qwSVRQACKzhKWZAfz6SY8NYXM6svpvNi2ZXDY7P7K1v9SEtLBUNHgsH7QTYjQsZ3DamGKTVBpXH
 Tx: solana-devnet 3bRnzYmmPnkoNjioyU7cW1WG9rVaZ3QbPdB4Hzd9hKRr7aSzfsUhvTXbWH65scPY9Kc8fg8TCWf1KeacQuDbEJRJ
+Verdict, as the run printed it (11:54:02Z, exit 0): `B filled, A not_landed; A's note SPENT, its change UNSPENT, value 0, leaf 19: PASS`.
+- Device B's pool.buy: its only stage filled; B's note at leaf 18 SPENT, its change UNSPENT at leaf 19.
+- Device A's pool.buy: its only stage not_landed, never filled; A's note at leaf 18 SPENT, its change UNSPENT at leaf 19.
 
 The run, on Solana devnet, 2026-11-05 11:47-11:54Z, through packages/signpage/scripts/pool-buy-own-spend-devnet.mjs
 (table 4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy, coin AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P, 0.004 SOL a buy),
