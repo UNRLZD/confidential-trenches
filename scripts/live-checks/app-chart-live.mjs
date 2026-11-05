@@ -92,26 +92,29 @@ const getJson = async (url) => {
   }
 };
 const candlesUrl = (mint, limit) => `${CANDLES}chain=solana&token=${encodeURIComponent(mint)}&tf=15m&limit=${limit}`;
-const tradesUrl = (mint) => `${HELPER_HOST}/v1/market/trades?chain=solana&token=${encodeURIComponent(mint)}&limit=5`;
+const tradesUrl = (mint, limit = 5) => `${HELPER_HOST}/v1/market/trades?chain=solana&token=${encodeURIComponent(mint)}&limit=${limit}`;
 
-/** The first listed token, column by column, with the helper's own 15m bars, a trade in the last ACTIVE_S s and five
- *  in the last minute. */
+/** The busiest of the first PICK_MAX listed tokens, column by column, with the helper's own 15m bars: the most trades
+ *  in the last minute (a coin quiet for the watch is no proof either way: 5 Nov 13:25Z a pick with 5 trades a minute
+ *  then had none for 90 s), at least five, the newest in the last ACTIVE_S s. */
 async function pickActive(lists) {
   const seen = new Set();
+  let best = null;
   for (const column of ["new", "trending_5m", "trending_1h", "trending", "graduating"]) {
     for (const r of lists?.[column] ?? []) {
       if (typeof r?.token !== "string" || seen.has(r.token)) continue;
-      if (seen.size >= PICK_MAX) return null;
+      if (seen.size >= PICK_MAX) return best;
       seen.add(r.token);
       const c = await getJson(candlesUrl(r.token, 2));
       if (c.status !== 200 || !Number.isSafeInteger(c.body?.own_from_s)) continue;
-      const t = await getJson(tradesUrl(r.token));
+      const t = await getJson(tradesUrl(r.token, 50));
       const ms = (t.body?.trades ?? []).map((x) => x?.t_ms).filter(Number.isFinite);
       const ago = ms.length ? Math.round((Date.now() - ms[0]) / 1000) : null;
-      if (ago !== null && ago <= ACTIVE_S && ms.length >= 5 && Date.now() - ms[4] <= 60_000) return { mint: r.token, symbol: r.symbol ?? null, column, own: true, tradeAgoS: ago };
+      const perMin = ms.filter((x) => Date.now() - x <= 60_000).length;
+      if (ago !== null && ago <= ACTIVE_S && perMin >= 5 && perMin > (best?.perMin ?? 0)) best = { mint: r.token, symbol: r.symbol ?? null, column, own: true, tradeAgoS: ago, perMin };
     }
   }
-  return null;
+  return best;
 }
 
 const MEASURE = () => {
