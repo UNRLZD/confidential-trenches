@@ -592,12 +592,14 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, now = Date.now
   };
   let result = null;
   // A signal stops the run at its next step (the step's send finishes first), then the cleanup runs. SIGHUP is a
-  // terminal closing: the same stop, and the log's writes to that gone terminal must not end the run mid-cleanup.
-  // Later signals never cut the cleanup short.
+  // terminal closing: the same stop. Later signals never cut the cleanup short. A log line written to a terminal that
+  // is gone fails with EIO, which unhandled ends the process mid-cleanup; the handlers are set here, while the
+  // terminal is there (set in the SIGHUP handler, making process.stderr on the gone terminal hung the run: tried in a
+  // pty, 5 Nov). The record on disk keeps every signature either way.
   const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+  for (const s of [process.stdout, process.stderr]) s.on("error", () => {});
   let stop = null;
   const onSignal = (sig) => {
-    if (sig === "SIGHUP") for (const s of [process.stdout, process.stderr]) s.on("error", () => {});
     if (stop) return log(`${sig} again: the cleanup finishes first`);
     stop = sig ?? "a signal";
     log(`${stop}: stopping: the cleanup runs next`);
