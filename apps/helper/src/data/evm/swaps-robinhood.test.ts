@@ -492,3 +492,48 @@ test("card helper-chart-fresh: a quiet token's discovery walks the whole cold wi
   assert.ok(chain.st.spans.length > 2 * VENUES.robinhood.step / VENUES.robinhood.span, "the walk went past one step");
   assert.ok(peak <= INFLIGHT_MAX, `${peak} requests out to one provider at once`);
 });
+
+// card helper-robinhood-capacity fold 7: a pool of a Slipstream-kind CL factory (ROBINHOOD_VENUES.cl) is read only once
+// that factory names it by getPool(token0, token1, tickSpacing), as 0xe0c4ceb9... names 0xf2a0be59... (04:2xZ read)
+function withCl(c: ReturnType<typeof fakeChain>, coin: string, pool: string, names: string) {
+  const w = (a: string) => `0x${a.slice(2).padStart(64, "0")}`;
+  const asked = { transfers: 0, getPool: 0 };
+  const local = (r: { method: string; params: unknown[] }): unknown => {
+    if (r.method === "eth_getLogs" && ((r.params[0] as { topics: unknown[] }).topics[0] === TOPIC.transfer)) asked.transfers++;
+    if (r.method !== "eth_call") return undefined;
+    const q = r.params[0] as { to: string; data: string };
+    if (q.to === pool && q.data === "0xc45a0155") return w(ROBINHOOD_VENUES.cl);
+    if (q.to === pool && q.data === "0x0dfe1681") return w(coin);
+    if (q.to === pool && q.data === "0xd21220a7") return w(ROBINHOOD_VENUES.usdg);
+    if (q.to === pool && q.data === "0xd0c93a7c") return w("0x32");
+    if (q.to === ROBINHOOD_VENUES.cl && q.data.startsWith("0x28af8d0b")) return asked.getPool++, w(names);
+    return undefined;
+  };
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+    const mine = reqs.map((r) => local(r));
+    const rest = reqs.filter((_, i) => mine[i] === undefined);
+    const fwd = rest.length === 0 ? [] : ((await (await c.fetch(url, { ...init, body: JSON.stringify(rest) })).json()) as { id: number }[]);
+    if (!Array.isArray(fwd)) return c.fetch(url, init);
+    const out = reqs.map((r, i) => (mine[i] !== undefined ? { jsonrpc: "2.0", id: r.id, result: mine[i] } : fwd.find((x) => x.id === r.id)));
+    return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return { fetch, asked };
+}
+
+test("fold 7: a Slipstream-kind CL pool the lists name is the token's pool once its factory names it by getPool(token0, token1, tickSpacing): no transfer walk; a pool its factory does not name is never read", async () => {
+  const coin = `0x${"39".repeat(20)}`;
+  const pool = `0x${"f2".repeat(20)}`;
+  for (const [names, read] of [[pool, true], [`0x${"0b".repeat(20)}`, false]] as const) {
+    const chain = fakeChain();
+    chain.st.head = REC.lastHead;
+    const cl = withCl(chain, coin, pool, names);
+    const s = open(chain, undefined, { fetch: cl.fetch, pools: new Map(), hint: async () => pool });
+    const r = await s.trades(coin, 50);
+    s.stop();
+    assert.equal(r.status, 200);
+    assert.ok(cl.asked.getPool > 0, "the factory was asked");
+    if (read) assert.equal(cl.asked.transfers, 0, "the confirmed pool is the token's: no walk of its transfers");
+    else assert.ok(cl.asked.transfers > 0, "an unconfirmed pool is no pool: the discovery walks the token's transfers");
+  }
+});
