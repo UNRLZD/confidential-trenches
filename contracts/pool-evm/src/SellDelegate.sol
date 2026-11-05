@@ -147,8 +147,11 @@ contract SellDelegate {
     if (_sell.nonce != $.nonce) revert InvalidNonce();
     $.nonce = _sell.nonce + 1;
 
+    // WETH is read only for a route that can pay W in it, so a v4 route to the native asset trusts no WETH contract
+    // (Robinhood Chain's is an upgradeable proxy: review 2, R-3)
+    bool _viaWeth = _paysInWeth(_sell);
     uint256 _eth = address(this).balance;
-    uint256 _weth = WETH.balanceOf(address(this));
+    uint256 _weth = _viaWeth ? WETH.balanceOf(address(this)) : 0;
     uint256 _held = IERC20Sell(_sell.token).balanceOf(address(this));
 
     if (_sell.target == address(POOL_MANAGER)) {
@@ -174,8 +177,10 @@ contract SellDelegate {
     // takes less (a target giving tokens back); a balance that rose is an underflow revert (Panic 0x11)
     if (_held - IERC20Sell(_sell.token).balanceOf(address(this)) != _sell.amount) revert DebitNotExact();
 
-    uint256 _wethGained = WETH.balanceOf(address(this)) - _weth;
-    if (_wethGained != 0) WETH.withdraw(_wethGained);
+    if (_viaWeth) {
+      uint256 _wethGained = WETH.balanceOf(address(this)) - _weth;
+      if (_wethGained != 0) WETH.withdraw(_wethGained);
+    }
     uint256 _gained = address(this).balance - _eth;
     if (_gained < _sell.minOut) revert MinOutNotMet();
 
@@ -239,6 +244,18 @@ contract SellDelegate {
     POOL_MANAGER.settle();
     POOL_MANAGER.take(_currency, address(this), _got);
     return '';
+  }
+
+  /**
+   * @notice Whether the sell's route can pay W in WETH: any v3 route (SwapRouter02 pays WETH), and a v4 route whose
+   *         last hop ends in WETH; a v4 route to the native asset never does (an empty route reverts in the callback)
+   * @param _sell The sell
+   * @return True when the sell must count and unwrap WETH
+   */
+  function _paysInWeth(Sell calldata _sell) internal view returns (bool) {
+    if (_sell.target != address(POOL_MANAGER)) return true;
+    PathKey[] memory _path = abi.decode(_sell.data, (PathKey[]));
+    return _path.length != 0 && _path[_path.length - 1].intermediateCurrency == address(WETH);
   }
 
   /**
