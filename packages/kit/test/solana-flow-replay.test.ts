@@ -680,3 +680,116 @@ test("a leg whose fresh simulation now gives it nothing is refused on the renewa
   assert.equal(legWires(cap.signed, r.legs).length, req.legs.length - 1);
   for (const b of legWires(cap.signed, r.legs)) assert.equal(signedHash(b), FRESH);
 });
+
+// The renewal's reference (review M1): the market can move while the helper holds the set, so the renewal reads E
+// again for the same set and S12 holds each leg's floor and simulated out to the fresh E; minOut stays the leg's own.
+/** The renewal's simulation (each wallet's second) pays `k` x the first's gain in lamports. */
+function renewalPays(k: number): Edit {
+  const gains = new Map<string, number>();
+  return (at, method, n, x, params) => {
+    const y = freshAfterFirst(at, method, n, x, params);
+    const sim = method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : null;
+    if (sim) {
+      const w = sim[0]!;
+      const pre = (fx.rpc.find((q) => q.at === at && q.ask.startsWith('["getMultipleAccounts"') && q.ask.includes(w))!.answer as { value: ({ lamports: number } | null)[] }).value[0]!.lamports;
+      const acc = (y as { value: { accounts: ({ lamports: number } | null)[] } }).value.accounts[0]!;
+      if (n === 0) gains.set(`${at}${w}`, acc.lamports - pre);
+      else acc.lamports = pre + Math.floor((gains.get(`${at}${w}`) ?? 0) * k);
+    }
+    return y;
+  };
+}
+/** The reference read: the first as recorded, every later one scaled by `k` (null: no reference pool). */
+function movedReference(d: SolanaTradeDeps, k: bigint | null) {
+  const reads = { n: 0 };
+  const reference: SolanaTradeDeps["reference"] = async (q, p) => {
+    reads.n++;
+    const x = await d.reference(q, p);
+    if (reads.n === 1 || !x) return x;
+    if (k === null) return null;
+    return { expectedOut: (x.expectedOut * k) / 10_000n, ...(x.expectedOuts ? { expectedOuts: x.expectedOuts.map((e) => (e * k) / 10_000n) } : {}) };
+  };
+  return { reference, reads };
+}
+
+test("the market moved 50% for the user while the set waited: the renewal reads E again and refuses every leg whose floor is now under the fresh E_k less s; nothing is signed", async () => {
+  const clock = slowBuilds(25_000);
+  const req = request(SELL);
+  const cap = signedOn(renewalPays(1.5));
+  const d = deps(SELL, { edit: cap.edit });
+  const m = movedReference(d, 15_000n);
+  const r = await runSolanaTrade(req, { ...d, reference: m.reference, fetch: clock.fetch, now: clock.now });
+  const ref = fx.references[SELL]!.answer!;
+  r.legs.forEach((l, k) => {
+    const s12 = l.verdict?.results.find((x) => x.id === "S12");
+    assert.equal(s12?.ok, false, s12?.detail);
+    assert.match(s12?.detail ?? "", new RegExp(`^minOut ${l.minOut} < E_k \\d+ less ${req.slippageBps} bps \\(\\d+\\)$`));
+    assert.match(l.refused ?? "", /^checks: S12 minOut /);
+    assert.equal(l.signature, undefined);
+    // the leg's own floor and first reference are kept; the fresh E is on the record beside them
+    assert.equal(l.legExpectedOut, BigInt(ref.expectedOuts[k]!));
+    assert.equal(l.renewedReference?.legExpectedOut, (BigInt(ref.expectedOuts[k]!) * 15_000n) / 10_000n);
+  });
+  assert.equal(legWires(cap.signed, r.legs).length, 0);
+  assert.equal(m.reads.n, 2, "E read before the builds and again at the renewal");
+});
+
+test("the market moved 3% against the user while the set waited, inside the slippage: the floors still hold on the fresh E, every leg is signed on the fresh blockhash", async () => {
+  const clock = slowBuilds(25_000);
+  const cap = signedOn(renewalPays(0.97));
+  const d = deps(SELL, { edit: cap.edit });
+  const m = movedReference(d, 9_700n);
+  const r = await runSolanaTrade(request(SELL), { ...d, reference: m.reference, fetch: clock.fetch, now: clock.now });
+  assert.equal(m.reads.n, 2);
+  for (const l of r.legs) {
+    assert.equal(l.refused, undefined, l.refused);
+    assert.equal(l.verdict?.ok, true);
+  }
+  assert.equal(legWires(cap.signed, r.legs).length, r.legs.length);
+  for (const b of legWires(cap.signed, r.legs)) assert.equal(signedHash(b), FRESH);
+});
+
+test("the renewal's reference read answers no pool: every leg refused, nothing signed", async () => {
+  const clock = slowBuilds(25_000);
+  const cap = signedOn(freshAfterFirst);
+  const d = deps(SELL, { edit: cap.edit });
+  const m = movedReference(d, null);
+  const r = await runSolanaTrade(request(SELL), { ...d, reference: m.reference, fetch: clock.fetch, now: clock.now });
+  for (const l of r.legs) {
+    assert.equal(l.refused, "renewal: no reference pool");
+    assert.equal(l.signature, undefined);
+  }
+  assert.equal(legWires(cap.signed, r.legs).length, 0);
+});
+
+test("a leg refused by the renewal keeps no passing verdict: its first check is on firstVerdict, verdict is the renewal's own or none", async () => {
+  const clock = slowBuilds(25_000);
+  const d = deps(SELL, { edit: freshAfterFirst, valid: (at) => at === "A" });
+  const r = await runSolanaTrade(request(SELL), { ...d, fetch: clock.fetch, now: clock.now });
+  for (const l of r.legs) {
+    assert.match(l.refused ?? "", /^renewal: no blockhash both providers hold/);
+    assert.equal(l.verdict, undefined);
+    assert.equal(l.firstVerdict?.ok, true);
+  }
+});
+
+test("a leg whose bytes to sign are not its checked copy is refused in the trade itself, never signed (the guard in runSolanaTrade)", async (t) => {
+  // The checked copy is made with Uint8Array.from: here it gets one signature-slot byte the bytes to sign do not have.
+  // The checks never read the signature slot, so they pass the copy; only the guard sees the two differ.
+  const from = Uint8Array.from as unknown as (this: unknown, ...a: unknown[]) => Uint8Array;
+  t.mock.method(Uint8Array, "from", (src: ArrayLike<number>, ...rest: unknown[]) => {
+    const out = from.call(Uint8Array, src, ...rest);
+    const unsigned = src instanceof Uint8Array && src.length > 65 && src[0] === 1 && src.subarray(1, 65).every((b) => b === 0);
+    if (unsigned && new Error().stack?.includes("verdictOn")) out[1] = 7;
+    return out;
+  });
+  const d = deps(SELL);
+  const r = await runSolanaTrade(request(SELL), d);
+  t.mock.restoreAll();
+  for (const l of r.legs) {
+    assert.equal(l.verdict?.ok, true, "the checks passed the copy");
+    assert.equal(l.refused, "the bytes to sign are not the bytes the checks passed");
+    assert.equal(l.signature, undefined);
+    assert.equal(l.dry, undefined);
+  }
+});
