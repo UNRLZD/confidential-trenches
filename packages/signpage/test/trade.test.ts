@@ -92,8 +92,13 @@ type Script = {
   /** awaited after the final stage, before run() resolves (a teardown) */
   tail?: Promise<void>;
   atStart?: () => void;
+  /** legs whose signature the kit drops as late (its age rule at a signature): signed, then refused, never kept */
+  late?: readonly number[];
+  /** each dropped signature, as the signer gave it */
+  dropped?: string[];
 };
-/** runSolanaTrade's stand-in: signs each leg (or `signAs`) through deps.sign, then signed, sent and the final stage. */
+/** runSolanaTrade's stand-in: signs each leg (or `signAs`) through deps.sign, hands the kept signatures to onSigned, then
+ * signed, sent and the final stage. */
 function standIn(script: Script, calls: SolanaTradeRequest[]) {
   return async (req: SolanaTradeRequest, deps: SolanaTradeDeps): Promise<SolanaTradeRecord> => {
     script.atStart?.();
@@ -105,15 +110,20 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
       return { side: req.side, token: req.token, reference: 1n, blockhash: null, legs };
     }
     const msg = message(`message of ${req.side}`);
-    for (const l of legs) {
+    for (const [i, l] of legs.entries()) {
       const sig = await deps.sign!(script.signAs ?? l.wallet, msg, { lastValidBlockHeight: LVBH });
       assert.ok(ed25519.verify(sig, msg, base58.decode(script.signAs ?? l.wallet)));
-      l.signature = base58.encode(sig);
+      if (script.late?.includes(i)) {
+        script.dropped?.push(base58.encode(sig));
+        l.refused = "checks: the reference is 25000 ms old at the signature, past the 20000 ms limit";
+      } else l.signature = base58.encode(sig);
     }
+    const kept = legs.filter((l) => l.signature);
+    deps.onSigned?.(kept.map((l) => ({ wallet: l.wallet, signature: l.signature! })));
     deps.onProgress?.("signed");
     deps.onProgress?.("sent");
     await script.hold;
-    legs.forEach((l, i) => (l.outcome = { signature: l.signature!, state: script.legState?.(i) ?? "filled" } as never));
+    kept.forEach((l, i) => (l.outcome = { signature: l.signature!, state: script.legState?.(i) ?? "filled" } as never));
     if (script.final) deps.onProgress?.(script.final as never);
     await script.tail;
     return { side: req.side, token: req.token, reference: 1n, blockhash: null, legs };
@@ -184,6 +194,34 @@ test("a buy: the ladder split's READY wallets from the arm records, answered at 
   assert.deepEqual([0, 1, 2, 3].map((j) => (s.m.wallets!.get(armKey("sol", L, j)) as ArmRecord).state), ["IN_POSITION", "IN_POSITION", "IN_POSITION", "READY"]);
   assert.equal((s.m.wallets!.get(armKey("sol", L, 0)) as ArmRecord).token, MINT);
   assert.equal(p.opened(), 1, "the seed opened once for the trade");
+});
+
+test("a leg the kit drops as late after its signer answered reaches no answer, stage write or txs; the set's fresh legs are answered at sent and filled", async () => {
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n), [armKey("sol", L, 1)]: rec(1, 500n), [armKey("sol", L, 2)]: rec(2, 200n), [armKey("sol", L, 3)]: rec(3, 200n) });
+  // every write of the op, as the store got it
+  const opWrites: { stage: string; txs: { hash: string }[] }[] = [];
+  const put = s.put.bind(s);
+  s.put = async (st: string, k: string, v: unknown) => {
+    if (st === "ops") opWrites.push(structuredClone(v) as never);
+    return put(st, k, v);
+  };
+  const dropped: string[] = [];
+  const p = page(s, { final: "filled", late: [1], dropped });
+  const { id, answer } = await p.ask(buy("17"));
+  assert.equal(dropped.length, 1, "the late leg was signed by the signer, then dropped by the kit");
+  const late = dropped[0]!;
+  const sent = (answer as { result: { stage: string; txs: { chain: string; hash: string }[] } }).result;
+  assert.equal(sent.stage, "sent");
+  // the control: the two fresh legs are named, each a signature of its own wallet
+  assert.equal(sent.txs.length, 2, JSON.stringify(sent.txs));
+  assert.ok(sent.txs.every((t) => t.chain === "solana" && base58.decode(t.hash).length === 64));
+  // the dropped signature is in no answer, no stage write and no txs
+  assert.ok(!sent.txs.some((t) => t.hash === late), "the sent answer names the dropped signature");
+  const staged = opWrites.filter((w) => w.stage === "signed" || w.stage === "sent" || w.stage === "filled");
+  assert.ok(staged.some((w) => w.stage === "signed") && staged.some((w) => w.stage === "sent"));
+  for (const w of opWrites) assert.ok(!w.txs.some((t) => t.hash === late), `the ${w.stage} write names the dropped signature`);
+  for (const w of staged) assert.deepEqual(w.txs.map((t) => t.hash), sent.txs.map((t) => t.hash), `the ${w.stage} write names the kept signatures`);
+  assert.deepEqual((s.m.ops!.get(id) as { txs: unknown }).txs, sent.txs);
 });
 
 test("a wallet without this device's own arm record is refused before any signature, whatever the legs say", async () => {
@@ -455,6 +493,26 @@ test("a dead tab's tx that can never land frees its wallet: both providers' fina
   const op = s.m.ops!.get(first.id) as { stage: string; txs: { hash: string; state?: string }[] };
   assert.equal(op.stage, "not_landed", "the dead trade's op reads not_landed");
   assert.deepEqual(op.txs.map((t) => t.state), ["not_landed"]);
+});
+
+test("a leg the kit returned unsigned frees its wallet at the trade's end: a later pick and a repeated id never name its dropped signature", async () => {
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n), [armKey("sol", L, 1)]: rec(1, 500n), [armKey("sol", L, 2)]: rec(2, 200n), [armKey("sol", L, 3)]: rec(3, 200n) });
+  const dropped: string[] = [];
+  const first = await page(s, { final: "filled", late: [1], dropped }).ask(buy("17"));
+  const late = dropped[0]!;
+  const kept = (first.answer as { result: { txs: { hash: string }[] } }).result.txs.map((t) => t.hash);
+  assert.equal(kept.length, 2);
+  // a later pick in another tab, with the dropped tx's blockhash dead on both providers
+  const later = page(s, { final: "filled" }, [sigStatus(null, LVBH + 1), sigStatus(null, LVBH + 1)]);
+  await later.ask(buy("10"));
+  const op = s.m.ops!.get(first.id) as { stage: string; txs: { hash: string }[] };
+  assert.deepEqual(op.txs.map((t) => t.hash), kept, "the op names the kept signatures alone");
+  // the same id asked again is answered from the op, without the dropped signature
+  const again = await page(s, { final: "filled" }).ask(buy("17"), first.id);
+  const txs = (again.answer as { result: { txs: { hash: string }[] } }).result.txs.map((t) => t.hash);
+  assert.ok(!txs.includes(late), "the repeated id's answer names the dropped signature");
+  assert.deepEqual(txs, kept);
+  assert.equal(mark(s, 1), undefined, "the unsigned leg's wallet holds no mark: its tx was never sent");
 });
 
 test("a store write that never answers refuses the trade within its bound, and sign out's lock is granted", async (c) => {

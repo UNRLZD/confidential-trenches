@@ -11,10 +11,12 @@
 //   refuses a wallet this device did not arm is the wallet's signer on the signing page ("Buy from fresh wallets"),
 //   which holds the arm records and signs nothing else; the kit never takes the caller's word as that refusal.
 // - Blockhash: getLatestBlockhash at `finalized` on both providers; the read from the lower slot is used, so both
-//   providers already hold it, with that read's own lastValidBlockHeight. A trade not signed within
-//   SOLANA_BLOCKHASH_REFRESH_MS of that read (its builds waited for the helper's room) reads every leg's pre-state and
-//   simulation again, then last, together, the set's reference and a blockhash both providers answer valid, and checks
-//   each leg's tx on it again, its minOut held to the fresh E, before signing (renewSet).
+//   providers already hold it, with that read's own lastValidBlockHeight. A trade whose read is older than
+//   SOLANA_BLOCKHASH_REFRESH_MS less SOLANA_SIGNING_MARGIN_MS before its signatures (its builds waited for the helper's
+//   room) reads every leg's pre-state and simulation again, then last, together, the set's reference and a blockhash
+//   both providers answer valid, and checks each leg's tx on it again, its minOut held to the fresh E, before signing
+//   (renewSet). No leg is signed on a reference (read with its blockhash) older than SOLANA_BLOCKHASH_REFRESH_MS at
+//   its signature (referenceLate).
 // - Floors (T1.3): E(A) is the device's own pool read for the whole size A = Σ a_k (the caller's `reference`, never
 //   the helper or the route); each wallet's floor is minOut_k = ⌊E_k × (1 − s)⌋ with E_k = ⌊E(A) × a_k / A⌋, while
 //   S12 holds its simulated out to E(a_k), its own exact input priced from the same read (no extra read). The build is asked at the user's s; if the route's decoded floor is under minOut_k, it is asked once
@@ -103,10 +105,21 @@ export const SOLANA_TRADE_BUILD_WAIT_MS = 10 * 60_000;
 /**
  * The oldest the trade's blockhash may be when its legs are signed. A finalized blockhash is about 32 slots old when
  * read and a tx on it lands for 150 slots, about 47 s after the read at 400 ms a slot; past 20 s the send would have
- * under half of that, so a trade whose builds waited longer reads its pre-states and simulations again, then its
- * reference and a fresh blockhash, and checks every leg again on them before any is signed (renewSet). A trade signed within 20 s reads nothing more.
+ * under half of that, so no leg is signed on a blockhash and reference read longer ago than this (referenceLate), and a
+ * trade whose builds waited past it less SOLANA_SIGNING_MARGIN_MS reads its pre-states and simulations again, then its
+ * reference and a fresh blockhash, and checks every leg again on them before any is signed (renewSet). A trade that
+ * reaches its signatures within 15 s reads nothing more.
  */
 export const SOLANA_BLOCKHASH_REFRESH_MS = 20_000;
+/**
+ * The time a trade keeps for its signatures (card kit-renewal-read-bounded): a reference older than
+ * SOLANA_BLOCKHASH_REFRESH_MS less this when the signing starts is read again first (renewSet), so a slow device's store
+ * reads and seed open inside its signer renew the trade instead of running it past the limit at the signature. The
+ * limit at the signature itself stays SOLANA_BLOCKHASH_REFRESH_MS.
+ */
+export const SOLANA_SIGNING_MARGIN_MS = 5_000;
+/** A reference read begun at `at` is renewed before the signatures when older than this at `now`. */
+const renewDue = (at: number, now: number): boolean => now - at > SOLANA_BLOCKHASH_REFRESH_MS - SOLANA_SIGNING_MARGIN_MS;
 export type SolanaTradeDeps = {
   /** The helper's origin, for the Jupiter build proxy. */
   readonly helper: string;
@@ -128,6 +141,11 @@ export type SolanaTradeDeps = {
   /** The legs' builds while they wait for the helper's room (card solana-legs-share-wait): the state the app shows
    * during a long trade, called when a leg's build lands or a leg starts or ends a wait. */
   readonly onBuilds?: (p: SolanaBuildsProgress) => void;
+  /** The legs' signatures the kit kept, in send order: only those, each a leg's signature that passed the age rule at
+   * its signature (card kit-renewal-read-bounded) and is about to be sent; a signature the kit dropped as late is never
+   * in it, nor is a teardown frame's. Called once, right before onProgress("signed"), and not at all when no leg is
+   * kept. Optional: a caller that does not pass it sees the trade as before. */
+  readonly onSigned?: (signed: readonly { wallet: string; signature: string }[]) => void;
   /** The wait's sleep, for tests (with `now`, the clock the trade's bound is held on). */
   readonly sleep?: (ms: number) => Promise<void>;
   /** sendSolanaSet's deadline, for tests. */
@@ -531,8 +549,27 @@ function signSet(deps: Pick<SolanaTradeDeps, "dry" | "sign">, items: readonly { 
   return Promise.all(items.map(async ({ wallet, tx }) => ({ wire: await solanaSignedWire(deps, wallet, tx), lastValidBlockHeight: tx.lastValidBlockHeight })));
 }
 
+/**
+ * The age rule at a leg's signature (card kit-renewal-read-bounded): the price a leg is signed on is the reference read
+ * begun at `at`, and it must be no older than SOLANA_BLOCKHASH_REFRESH_MS at `now`. Taken at the sign point's re-read,
+ * right before each leg's signer is asked and again when it answers (its store reads and seed open are inside it), so
+ * the age that counts is the age at the signature. Late: the leg's refusal, a price check's (the signing page's
+ * refusalCode reads `checks: ` as quote_check_failed); a clock that answers no number, or an age under 0 (a reference
+ * begun in the future, a clock run backwards), is late too.
+ */
+function referenceLate(at: number, now: number): string | null {
+  const age = now - at;
+  return age >= 0 && age <= SOLANA_BLOCKHASH_REFRESH_MS ? null : `checks: the reference is ${Number.isFinite(age) ? Math.round(age) : 0} ms old at the signature, past the ${SOLANA_BLOCKHASH_REFRESH_MS} ms limit`;
+}
+
 /** The signature into the wire's one slot, checked against the wallet's key before anything is sent. */
 export async function solanaSignedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: string, a: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number }): Promise<Uint8Array> {
+  return (await signedWire(deps, wallet, a, () => null)) as Uint8Array;
+}
+
+/** solanaSignedWire with the age rule: `late` is read when the signer answers, before its signature is checked or put
+ * in the wire; a reason from it is answered instead of the wire, and the signature is dropped. */
+async function signedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: string, a: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number }, late: () => string | null): Promise<Uint8Array | string> {
   // The bytes signed are the bytes checked: one signature slot, and the message is the wire's own message.
   if (a.wire[0] !== 1 || a.wire.length !== 65 + a.message.length || a.wire.subarray(65).some((b, i) => b !== a.message[i])) throw new Error("the message is not the checked wire's message");
   let sig: Uint8Array;
@@ -545,8 +582,10 @@ export async function solanaSignedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign
     if (!deps.sign) throw new Error("no signer");
     if (!Number.isSafeInteger(a.lastValidBlockHeight) || a.lastValidBlockHeight <= 0) throw new Error("the tx has no lastValidBlockHeight");
     sig = await deps.sign(wallet, a.message, { lastValidBlockHeight: a.lastValidBlockHeight });
-    if (!(sig instanceof Uint8Array) || sig.length !== 64 || !ed25519.verify(sig, a.message, base58.decode(wallet))) throw new Error(`the signature for ${wallet} does not verify`);
   }
+  const why = late();
+  if (why) return why;
+  if (!deps.dry && (!(sig instanceof Uint8Array) || sig.length !== 64 || !ed25519.verify(sig, a.message, base58.decode(wallet)))) throw new Error(`the signature for ${wallet} does not verify`);
   const wire = Uint8Array.from(a.wire);
   wire.set(sig, 1);
   return wire;
@@ -609,12 +648,14 @@ function pacedDeps(deps: SolanaTradeDeps): SolanaTradeDeps {
 /** The set on a fresh blockhash. First every leg's pre-state and simulation read again, at once (on keyless providers
  * this can take tens of seconds for a large set); then, last and together, the set's reference and one blockhash both
  * providers answer valid; then each leg's tx on that blockhash checked again on those reads: its own minOut held to the
- * fresh E_k less s, its simulated out to the fresh E(a_k). At the sign point, a reference older than the limit (the
- * blockhash read was slow) is read once more, the reference only, and the legs checked again on it: one read, so a large
- * set never loops. A leg that fails any of it is refused and keeps its money; a set with no fresh reference or blockhash
- * signs nothing. A leg's first check moves to firstVerdict, so `verdict` is only ever the check of the bytes about to be
- * signed. */
-async function renewSet(prepared: readonly Prepared[], deps: SolanaTradeDeps, record: SolanaTradeRecord, rereference: () => Promise<Map<SolanaLegRecord, LegReference> | null>, clock: () => number): Promise<Prepared[]> {
+ * fresh E_k less s, its simulated out to the fresh E(a_k). At the sign point, a reference due again (renewDue: the
+ * blockhash read was slow) is read once more with a fresh blockhash both providers answer valid, and the legs checked
+ * again on both: one read, so a large set never loops; that read answering past the limit refuses every leg
+ * (referenceLate), never read again, and the legs sign on its blockhash. A leg
+ * that fails any of it is refused and keeps its money; a set with no fresh reference or blockhash signs nothing. A leg's
+ * first check moves to firstVerdict, so `verdict` is only ever the check of the bytes about to be signed. `at` is when
+ * the reference the legs passed on was begun, for the age rule at each signature. */
+async function renewSet(prepared: readonly Prepared[], deps: SolanaTradeDeps, record: SolanaTradeRecord, rereference: () => Promise<Map<SolanaLegRecord, LegReference> | null>, clock: () => number): Promise<{ legs: Prepared[]; at: number }> {
   const why = (err: unknown) => String((err as Error)?.message ?? err).slice(0, 200);
   for (const p of prepared) {
     if (p.rec.verdict) p.rec.firstVerdict = p.rec.verdict;
@@ -628,18 +669,18 @@ async function renewSet(prepared: readonly Prepared[], deps: SolanaTradeDeps, re
       return null;
     }
   }));
-  if (!next.some((f) => f)) return [];
+  if (!next.some((f) => f)) return { legs: [], at: clock() };
   const readReference = () => rereference().catch((err: unknown) => `renewal: error: ${why(err)}`);
-  const refAt = clock();
+  let refAt = clock();
   const [refs, fresh] = await Promise.all([readReference(), readSolanaBlockhashValid(deps.providers).catch((err: unknown) => new Error(`renewal: ${why(err)}`))]);
   if (fresh instanceof Error) {
     prepared.forEach((p, i) => { if (next[i]) p.rec.refused = fresh.message; });
-    return [];
+    return { legs: [], at: refAt };
   }
   if (record.blockhash) record.firstBlockhash = record.blockhash;
   record.blockhash = fresh;
   // each leg's renewed tx on the fresh blockhash, checked on reference `r`: the legs that pass, by their index in the set
-  const checkOn = async (r: Map<SolanaLegRecord, LegReference> | string | null, legs: readonly number[]): Promise<{ i: number; p: Prepared }[]> => {
+  const checkOn = async (r: Map<SolanaLegRecord, LegReference> | string | null, legs: readonly number[], bh: SolanaBlockhash): Promise<{ i: number; p: Prepared }[]> => {
     if (r === null || typeof r === "string") {
       for (const i of legs) (prepared[i] as Prepared).rec.refused = r ?? "renewal: no reference pool";
       return [];
@@ -652,7 +693,7 @@ async function renewSet(prepared: readonly Prepared[], deps: SolanaTradeDeps, re
       if (!ref) { p.rec.refused = "renewal: no reference for the leg"; return null; }
       p.rec.renewedReference = ref;
       try {
-        const renewed = await f(fresh, ref);
+        const renewed = await f(bh, ref);
         return renewed ? { i, p: renewed } : null;
       } catch (err) {
         p.rec.refused = `renewal: error: ${why(err)}`;
@@ -661,12 +702,22 @@ async function renewSet(prepared: readonly Prepared[], deps: SolanaTradeDeps, re
     }));
     return ok.filter((x): x is { i: number; p: Prepared } => x !== null);
   };
-  let passed = await checkOn(refs, prepared.flatMap((_, i) => (next[i] ? [i] : [])));
+  let passed = await checkOn(refs, prepared.flatMap((_, i) => (next[i] ? [i] : [])), fresh);
   // the sign point: nothing slow runs between here and the signatures
-  if (passed.length && clock() - refAt > SOLANA_BLOCKHASH_REFRESH_MS) {
-    passed = await checkOn(await readReference(), passed.map((x) => x.i));
+  if (passed.length && renewDue(refAt, clock())) {
+    // the time again, just before the one re-read of the reference and the blockhash: a re-read that answers past the
+    // limit refuses every leg, unsigned
+    refAt = clock();
+    const [again, bh] = await Promise.all([readReference(), readSolanaBlockhashValid(deps.providers).catch((err: unknown) => new Error(`renewal: ${why(err)}`))]);
+    const late = bh instanceof Error ? bh.message : referenceLate(refAt, clock());
+    if (late || bh instanceof Error) {
+      for (const x of passed) x.p.rec.refused = late ?? "renewal: no blockhash";
+      return { legs: [], at: refAt };
+    }
+    record.blockhash = bh;
+    passed = await checkOn(again, passed.map((x) => x.i), bh);
   }
-  return passed.map((x) => x.p);
+  return { legs: passed.map((x) => x.p), at: refAt };
 }
 
 export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTradeDeps): Promise<SolanaTradeRecord> {
@@ -761,10 +812,23 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
     record.renewedReference = e2;
     return new Map(live.map((i, j) => [recs[i] as SolanaLegRecord, { legExpectedOut: outs[j] as bigint, expectedOut: (floors2[j] as { expectedOut: bigint }).expectedOut }]));
   };
-  const ready = solanaSignOnlyChecked(clock() - blockhashAt > SOLANA_BLOCKHASH_REFRESH_MS ? await renewSet(prepared, deps, record, rereference, clock) : prepared);
+  // The reference the legs pass on was begun at blockhashAt (read with the blockhash), or at the renewal's last read.
+  const renewed = renewDue(blockhashAt, clock()) ? await renewSet(prepared, deps, record, rereference, clock) : { legs: prepared, at: blockhashAt };
+  const checked = solanaSignOnlyChecked(renewed.legs);
+  // Each leg signed under the age rule (referenceLate), right before its signer is asked and when it answers: a late
+  // leg is refused and its signature, if one was made, is dropped, never put in a wire or sent.
+  const late = () => referenceLate(renewed.at, clock());
+  const wires = await Promise.all(checked.map(async (p) => {
+    const w = late() ?? (await signedWire(deps, p.leg.wallet, p.assembled, late));
+    if (typeof w === "string") { p.rec.refused = w; return null; }
+    return { p, tx: { wire: w, lastValidBlockHeight: p.assembled.lastValidBlockHeight } };
+  }));
+  const signedLegs = wires.filter((x): x is NonNullable<typeof x> => x !== null);
+  const ready = signedLegs.map((x) => x.p);
+  const set = signedLegs.map((x) => x.tx);
   if (ready.length === 0) { progress("refused"); return record; }
-  const set = await signSet(deps, ready.map((p) => ({ wallet: p.leg.wallet, tx: p.assembled })));
   ready.forEach((p, i) => { p.rec.signature = base58.encode((set[i] as { wire: Uint8Array }).wire.subarray(1, 65)); });
+  try { deps.onSigned?.(ready.map((p) => ({ wallet: p.leg.wallet, signature: p.rec.signature as string }))); } catch { /* the caller's display never stops a trade */ }
   progress("signed");
   const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}), ...(deps.providerRps ? { providerRps: deps.providerRps } : {}) };
   const tokenProgram = (mint[0] as Acc).owner;
