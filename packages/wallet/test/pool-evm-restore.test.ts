@@ -820,6 +820,29 @@ test("T5 a provider's one-minute window outlasted: Robinhood's own HTTP 429 \"To
   }
 });
 
+test("T6 the Transfer pair's own reads before any W (its chain id, the anchor's block) take a throttle or no answer in time as the same read again, bounded: every W read; past the bound, every W unread with that error, every note read", async () => {
+  for (const [name, throttle] of [...THROTTLES, ["no answer in time", timedOut] as const]) {
+    for (const method of ["eth_chainId", "eth_getBlockByNumber"]) {
+      const { world, W0, W1 } = seeded();
+      const want = await restore(pair(world, world), wpair(world));
+      let n = 0;
+      const waits: number[] = [];
+      // the pair's first two reads of `method` throttled, then answered
+      const twice = (b: Body) => (b.method === method && n++ < 2 ? (throttle(b) as Response) : undefined);
+      const label = `${name} on ${method}`;
+      const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), twice)], { sleep: async (ms) => void waits.push(ms) });
+      assert.deepEqual(r.wallets, want.wallets, label);
+      assert.ok(waits.filter((ms) => ms >= 1_000).length >= 2 && waits.every((ms) => ms <= EVM_LOG_THROTTLE_WAIT_MAX_MS), `${label}: waits ${waits}`);
+      // never answered: every W unread with the provider's error, the notes read
+      const never = (b: Body) => (b.method === method ? (throttle(b) as Response) : undefined);
+      const r2 = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), never)], { sleep: async () => {} });
+      assert.ok(r2.wallets.every((w) => w.tokens === null && /^the Transfer RPCs: /.test(w.error ?? "")), `${label}: ${JSON.stringify(r2.wallets.map((w) => w.error))}`);
+      assert.equal(r2.notes.length, 10, label);
+      void W0, void W1;
+    }
+  }
+});
+
 // ---- the review of card wallet-restore-transfer-rpcs, LOW: the abort guard ----
 
 test("T3 RPC 0 fails at once and RPC 1's call rejects after the abort with cap words: RPC 1's page stays 10,000, the next W's first page on it 10,000 blocks", async () => {

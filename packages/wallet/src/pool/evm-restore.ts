@@ -229,13 +229,13 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   }
   const wallets: EvmRestoredWallet[] = spends.map((s) => ({ note: s.note, w: s.w, tokens: null }));
   // a W read that fails while the pool pair no longer holds the anchor: a reorg under the restore, the pool pair's lag
-  const poolHolds = () => evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal);
+  const poolHolds = () => evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal, sleep);
   // the Transfer RPCs on the pool's chain and at the restore's block before any W is named to them; a pair that fails
   // leaves every W unread with its error, never the notes
   let pairError: string | null = null;
   if (order.length > 0) {
     try {
-      await evmRetryLag(() => evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal), sleep, a.signal);
+      await evmRetryLag(() => evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal, sleep), sleep, a.signal);
     } catch (e) {
       a.signal?.throwIfAborted();
       await poolHolds();

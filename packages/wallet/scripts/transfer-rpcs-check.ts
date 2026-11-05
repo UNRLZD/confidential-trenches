@@ -15,7 +15,7 @@
 // same on both byte for byte), each a retry on a lag (evmRetryLag). The report: the URLs, the anchor, the tokens and
 // each RPC's last page size.
 import { createInterface } from "node:readline";
-import { EVM_CHAIN_IDS, EVM_LOG_PAGE_BLOCKS, EVM_NEWEST_TAG, EVM_POOL_TAG, EVM_TRANSFER_RPCS, evmAgreedBlock, evmHoldsAnchor, evmRetryLag, evmTokensSentTo, type EvmNetwork, type EvmRpc } from "../src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_LOG_PAGE_BLOCKS, EVM_NEWEST_TAG, EVM_POOL_TAG, EVM_TRANSFER_RPCS, evmAgreedBlock, evmAnswered, evmHoldsAnchor, evmRetryLag, evmTokensSentTo, type EvmNetwork, type EvmRpc } from "../src/pool/evm.ts";
 
 type Args = { network: EvmNetwork; w: string; from?: string; back?: string; wait: boolean };
 
@@ -50,9 +50,11 @@ try {
   const sleep = a.wait ? undefined : async () => {};
   const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
   const read = async () => {
-    const fin = await evmAgreedBlock(rpcs, EVM_POOL_TAG);
-    const anchor = await evmAgreedBlock(rpcs, EVM_NEWEST_TAG);
-    await evmHoldsAnchor(rpcs, chainId, anchor);
+    // the device takes its anchors from the pool pair's sync; here the Transfer pair's stand-in, each read again on a
+    // throttle as evmHoldsAnchor's own reads are (evmAnswered)
+    const fin = await evmAnswered(() => evmAgreedBlock(rpcs, EVM_POOL_TAG), undefined, sleep);
+    const anchor = await evmAnswered(() => evmAgreedBlock(rpcs, EVM_NEWEST_TAG), undefined, sleep);
+    await evmHoldsAnchor(rpcs, chainId, anchor, undefined, sleep);
     const from = a.from !== undefined ? BigInt(a.from) : anchor.number - BigInt(a.back ?? "0");
     return { anchor, from, tokens: await evmTokensSentTo(rpcs, a.w, from, { fin, anchor }, page, undefined, sleep) };
   };

@@ -326,6 +326,23 @@ function blockOf(v: unknown, what: string): EvmBlock | null {
 }
 const getBlock = async (rpc: EvmRpc, at: string, what: string): Promise<EvmBlock | null> => blockOf(await rpc("eth_getBlockByNumber", [at, false]), what);
 
+/** One read that is not a page (a chain id, a block): a throttle or no answer in time (throttled) is the same read
+ * again after the wait readLogs takes, at most EVM_LOG_THROTTLE_TRIES tries, then its failure. Any other error at once.
+ * On 5 Nov 13:58Z one eth_getBlockByNumber with no answer in 3.5 s (base-testnet.api.pocket.network, and
+ * robinhood.daybreak-rpc.network) was a whole pair's failure. */
+export async function evmAnswered<T>(f: () => Promise<T>, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<T> {
+  for (let tries = 1; ; tries++) {
+    try {
+      return await f();
+    } catch (e) {
+      signal?.throwIfAborted();
+      const t = throttled(e);
+      if (t === null || tries >= EVM_LOG_THROTTLE_TRIES) throw e;
+      await sleep(Math.min(EVM_LOG_THROTTLE_WAIT_MAX_MS, Math.max(t.afterMs ?? 0, 1_000 * 2 ** (tries - 1))), signal);
+    }
+  }
+}
+
 /** A JSON-RPC error that says the node does not know the block yet (a lag, not a lie). */
 const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such block/i;
 // A provider's cap on one eth_getLogs call (its range, its number of results or its answer's size) has no standard
@@ -609,11 +626,11 @@ export async function evmTokensSentTo(rpcs: readonly [EvmRpc, EvmRpc], w: string
  * is refused), and the anchor's height must hold the anchor's hash on both (another hash, or none yet, is a lag: a
  * retry). Run before a W's Transfer reads, so no Transfer log of another chain or another fork is ever taken.
  */
-export async function evmHoldsAnchor(rpcs: readonly [EvmRpc, EvmRpc], chainId: bigint, anchor: EvmBlock, signal?: AbortSignal): Promise<void> {
+export async function evmHoldsAnchor(rpcs: readonly [EvmRpc, EvmRpc], chainId: bigint, anchor: EvmBlock, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<void> {
   checkEvmRpcs(rpcs);
-  const ids = await both(rpcs, async (rpc, k) => qty(await rpc("eth_chainId", []), `rpc ${k} eth_chainId`), signal);
+  const ids = await both(rpcs, async (rpc, k, sig) => qty(await evmAnswered(() => rpc("eth_chainId", []), sig, sleep), `rpc ${k} eth_chainId`), signal);
   if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);
-  const bs = await both(rpcs, (rpc, k) => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), signal);
+  const bs = await both(rpcs, (rpc, k, sig) => evmAnswered(() => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), sig, sleep), signal);
   if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(`an RPC does not hold block ${anchor.number} as ${anchor.hash}`);
 }
 
