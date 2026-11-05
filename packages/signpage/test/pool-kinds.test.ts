@@ -3,6 +3,8 @@
 // never from the app; a request that passed is handed to its flow, and with no flow it is refused.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { throughApi } from "./api-ends.ts";
 import { ERC20_DECIMALS, poolKinds, readTokenDecimals, type PoolKindsDeps, type PoolRpc } from "../src/pool-kinds.ts";
 import { SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
@@ -167,4 +169,31 @@ test("a pool.withdraw is an open: answered pending at once, with no progress aft
   const r = await throughApi("pool.withdraw", k["pool.withdraw"] as never, { return_key: "portfolio", chain: "solana" });
   assert.deepEqual((r.answer as { result: unknown }).result, { pending: true });
   assert.deepEqual(r.stages, []);
+});
+
+// card precommit-taken-recover: an EVM pool deposit or sell signs on a precommitment anyone who sees it pending can take
+// first with MIN_DEPOSIT. Every device file that builds or signs one (the kit's evmPoolBuildSell or the rule's
+// signEvmSell called, or the pool's deposit(uint256,uint256) encoded) must pick its note through the wallet's
+// evmNextNote, which restores a taken note and names the next one to sign. Today none does: EVM pool.deposit is refused
+// (EVM_REFUSED) and the flow answers only Solana, so the list below is empty; the first flow that lands is held to it.
+const EVM_SIGNS = /(?<!function )\b(?:evmPoolBuildSell|signEvmSell|pinnedSignSell)\(|deposit\(uint256,uint256\)/;
+const unguarded = (files: readonly { path: string; text: string }[]): string[] =>
+  files.filter((f) => EVM_SIGNS.test(f.text) && !/\bevmNextNote\b/.test(f.text)).map((f) => f.path);
+const sources = (dir: string): { path: string; text: string }[] =>
+  readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return sources(path);
+    return /\.(ts|tsx|js|mjs)$/.test(name) ? [{ path, text: readFileSync(path, "utf8") }] : [];
+  });
+
+test("precommit-taken-recover: no device file signs an EVM pool deposit or sell without picking its note through evmNextNote", () => {
+  const root = new URL("../../../", import.meta.url).pathname;
+  // the rule's own signer and the kit's builders define what is called; every caller is in these trees
+  const own = new Set([join(root, "packages/signpage/src/rules/pool.ts")]);
+  const files = ["packages/signpage/src", "apps/terminal/src", "packages/wallet/src"].flatMap((d) => sources(join(root, d))).filter((f) => !own.has(f.path));
+  assert.ok(files.length > 50, "the trees were read");
+  assert.deepEqual(unguarded(files), []);
+  // planted: a flow that signs a sell, or encodes a deposit, without evmNextNote is caught; one that uses it is not
+  assert.deepEqual(unguarded([{ path: "a.ts", text: "const s = signEvmSell(key, ctx, built);" }, { path: "b.ts", text: 'const sel = "deposit(uint256,uint256)";' }, { path: "c.ts", text: "const b = evmPoolBuildSell(q, f);" }]), ["a.ts", "b.ts", "c.ts"]);
+  assert.deepEqual(unguarded([{ path: "d.ts", text: "const { next } = evmNextNote(seed, scope, events, first); const s = signEvmSell(key, ctx, built);" }, { path: "e.ts", text: "export function signEvmSell(k) {}" }]), []);
 });
