@@ -162,6 +162,13 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      refusal, so the sender's gas is not spent on such a token. The cost, two balanceOf reads: the mock-router sell at
      depth 0 442,886 to 445,008 and at depth 32 1,757,396 to 1,759,518, the v4 one hop to ETH 491,954 to 494,066 and at
      depth 32 1,806,385 to 1,808,497 (forge 1.7.1, test/Sell.t.sol and test/SellV4.t.sol).
+ 17. SellDelegate reads WETH only for a route that can pay in it (pool review round 2, finding F3): a v3 target, or a
+     v4 path whose last hop ends in WETH. A v4 sell to the native asset reads no WETH balance and unwraps nothing, so a
+     WETH that reverts or misreports cannot stop it (test_v4SellToTheNativeAssetTrustsNoWeth, which puts reverting code
+     at WETH's address; the two mutants that fix the route's answer to always or never are killed in test/mutants.mjs).
+     The cost: the v4 one hop to ETH 494,066 to 490,040 and at depth 32 1,808,497 to 1,804,471 (two reads saved), the
+     v4 one hop to WETH 504,757 to 506,926 (the path decode), the mock-router sell 445,008 to 445,273 (forge 1.7.1,
+     test/Sell.t.sol and test/SellV4.t.sol).
 
 Gas, each pool call its own transaction (isolate = true in foundry.toml), so a figure is what a sender pays: the
 21,000 base, calldata and cold reads included. The kit's real proofs (test/fixtures/buy-proofs.json), fee 0.01 ETH.

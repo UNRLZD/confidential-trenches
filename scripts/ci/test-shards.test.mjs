@@ -11,6 +11,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { e2ePart } from "./test-shards.mjs";
+import { withoutHeldRetries } from "./download-retry.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CI = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
@@ -63,9 +64,12 @@ export function shardProblems(ci) {
   for (const s of shards) if (needs && !needs.includes(s)) p.push(`test does not need ${s}`);
   for (const n of needs ?? []) if (!shards.includes(n)) p.push(`test needs ${n}, which is no shard job (test-*)`);
   if (!/^ {4}if:.*\balways\(\)/m.test(job)) p.push("test's if has no always(): a failed shard would skip test, and a skipped required check passes");
+  // a foundry-toolchain install that may fail once is no shard that may fail: download-retry.mjs holds its second run,
+  // the same action in the same job, which fails the job when the install fails twice
+  const held = jobs(withoutHeldRetries(ci));
   for (const [name, text] of Object.entries(all)) {
     if (name !== "test" && !shards.includes(name)) continue;
-    if (/continue-on-error/.test(text)) p.push(`${name} has continue-on-error`);
+    if (/continue-on-error/.test(held[name] ?? text)) p.push(`${name} has continue-on-error`);
     if (name !== "test" && !/^ {4}timeout-minutes:\s*\d+\s*$/m.test(text)) p.push(`${name} has no timeout of its own`);
   }
   if (!/^ {10}NEEDS: \$\{\{ toJSON\(needs\) \}\}$/m.test(job)) p.push("test's step does not read NEEDS from toJSON(needs)");
@@ -98,6 +102,8 @@ const PLANTED = {
   "a failed shard read as passed": ['all(.[]; .result == "success")', 'all(.[]; .result != "cancelled")', "test passes when a shard is failure"],
   "a step that passes on anything": ['|| { echo "a shard did not pass"; exit 1; }', "|| true", "test passes when a shard is failure"],
   "a shard that may fail": [/(\n  test-scripts:\n)/, "$1    continue-on-error: true\n", "test-scripts has continue-on-error"],
+  "a step that may fail in a shard": ["      - name: the EVM pool's tests\n", "      - name: the EVM pool's tests\n        continue-on-error: true\n", "test-scripts has continue-on-error"],
+  "a foundry install that may fail with no second run": [/      - name: Foundry once more\n(?:.*\n){4}/, "", "test-scripts has continue-on-error"],
   "a shard with no timeout": [/(\n  test-vault:\n(?:.*\n){2}) {4}timeout-minutes: \d+\n/, "$1", "test-vault has no timeout of its own"],
   "a browser part count set by hand": ["TOTAL: ${{ strategy.job-total }}", "TOTAL: 2", "test-browser does not take its part"],
   "a shard job left out of the list": [/(\n {2}test:\n)/, "\n  test-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: \"true\"\n$1", "test does not need test-extra"],

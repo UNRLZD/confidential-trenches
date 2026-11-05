@@ -33,6 +33,9 @@
 //! - No `LeafAlreadyExists` map (src/tree.rs gives the reason).
 //! - Each page entry also holds the Clock's unix_timestamp at its insert, so any client can tell from the pages alone
 //!   which root was the newest at a given chain time, and devices prove against a shared root (src/state.rs).
+//! - Each insert names its page, and a deposit or a release may also name each tree's next page: a sender builds with
+//!   the page of the size it read, and inserts that land before its own can carry the index onto the next page, which
+//!   would otherwise fail its transaction on chain (review 2, R-1; `state::page_for`). The vault's storage needs no page.
 //! - Tag 3 releases and buys in one instruction: the release, then the instructions W signed for, run with `invoke`
 //!   and W's signer privilege only (src/buy.rs); the vault has no such call. One transaction must hold the proof and
 //!   the venue's accounts in 1,232 bytes, which a v0 message reaches only when the venue's program loads from a

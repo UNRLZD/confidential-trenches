@@ -65,6 +65,7 @@
 //! 129937 B on macOS arm64).
 #![allow(dead_code)] // shared by every sandbox test; each uses a part
 
+use near_sdk::json_types::Base64VecU8;
 use near_sdk::serde_json::{self, json, Value};
 use near_workspaces::network::Sandbox;
 use near_workspaces::operations::Function;
@@ -426,13 +427,72 @@ impl Harness {
     /// sandbox's state patch puts it there), with 100 N for its storage.
     pub async fn deploy_mock_token(&self) -> R<()> {
         let wasm = wasm_from_env("MOCK_TOKEN_WASM")?;
-        self.worker
-            .patch(&self.token)
-            .account(AccountDetailsPatch::default().balance(NearToken::from_near(100)).storage_usage(wasm.len() as u64 + 100))
-            .code(&wasm)
-            .transact()
-            .await?;
-        Ok(())
+        let (balance, usage) = (NearToken::from_near(100), wasm.len() as u64 + 100);
+        let send = async || -> R<()> {
+            let account = AccountDetailsPatch::default().balance(balance).storage_usage(usage);
+            self.worker.patch(&self.token).account(account).code(&wasm).transact().await?;
+            Ok(())
+        };
+        let landed = async || -> R<bool> {
+            let a = self.account_final(&self.token).await?;
+            Ok(a["code_hash"] == json!(code_hash(&wasm)) && a["amount"] == json!(balance.as_yoctonear().to_string()) && a["storage_usage"] == json!(usage))
+        };
+        self.patch_landed(&format!("the mock token at {}", self.token), send, landed).await
+    }
+
+    // ---- state patches ----
+
+    /// A sandbox state patch, sent by `send`, that has landed: `landed` reads back at final what it wrote. The sandbox
+    /// can answer a patch before it is applied, or lose it, so a patch not read back within 10 s is sent again, up to 3
+    /// times; after that the test fails naming it, never going on against a state it did not write. A real transaction
+    /// never needs this: the vault writes its side nodes, sizes and depths in one receipt.
+    pub async fn patch_landed(&self, what: &str, send: impl AsyncFn() -> R<()>, landed: impl AsyncFn() -> R<bool>) -> R<()> {
+        for sent in 1..=3 {
+            send().await?;
+            for _ in 0..50 {
+                if landed().await? {
+                    if sent > 1 {
+                        println!("{what}: landed on send {sent}");
+                    }
+                    return Ok(());
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
+        Err(format!("{what}: sent 3 times and not read back at final").into())
+    }
+
+    /// Writes `records` (key, value) into `id`'s storage as one patch, in their order, and returns once every key holds
+    /// its value at final (`patch_landed`).
+    pub async fn patch_data(&self, id: &AccountId, records: &[(Vec<u8>, Vec<u8>)]) -> R<()> {
+        let send = async || -> R<()> {
+            self.worker.patch(id).states(records.iter().map(|(k, v)| (k.as_slice(), v.as_slice()))).transact().await?;
+            Ok(())
+        };
+        let landed = async || -> R<bool> {
+            for (k, v) in records {
+                if self.data_final(id, k).await?.as_deref() != Some(v.as_slice()) {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        };
+        self.patch_landed(&format!("{} records of {id}'s storage", records.len()), send, landed).await
+    }
+
+    /// The value at `key` in `id`'s storage at final; `None` when there is no such key.
+    pub async fn data_final(&self, id: &AccountId, key: &[u8]) -> R<Option<Vec<u8>>> {
+        let k = serde_json::to_value(Base64VecU8(key.to_vec()))?;
+        let v = self.rpc("query", json!({"request_type": "view_state", "finality": "final", "account_id": id, "prefix_base64": k})).await?;
+        let values = v["result"]["values"].as_array().ok_or_else(|| format!("view_state {id} at final: {v}"))?;
+        let Some(e) = values.iter().find(|e| e["key"] == k) else { return Ok(None) };
+        let b: Base64VecU8 = serde_json::from_value(e["value"].clone())?;
+        Ok(Some(b.0))
+    }
+
+    /// `view_account` of `id` at final: its `result`, null when the account does not exist there yet.
+    async fn account_final(&self, id: &AccountId) -> R<Value> {
+        Ok(self.rpc("query", json!({"request_type": "view_account", "finality": "final", "account_id": id})).await?["result"].clone())
     }
 
     // ---- the real USDC and intents.near ----
@@ -442,12 +502,19 @@ impl Harness {
     /// registrar cannot create). Only the account and its key are patched; its code and state come from transactions.
     pub async fn keyed_account(&self, id: &AccountId, near: u128) -> R<Account> {
         let sk = SecretKey::from_random(KeyType::ED25519);
-        self.worker
-            .patch(id)
-            .account(AccountDetailsPatch::default().balance(NearToken::from_near(near)).storage_usage(182))
-            .access_key(sk.public_key(), AccessKey::full_access())
-            .transact()
-            .await?;
+        let balance = NearToken::from_near(near);
+        let send = async || -> R<()> {
+            let account = AccountDetailsPatch::default().balance(balance).storage_usage(182);
+            self.worker.patch(id).account(account).access_key(sk.public_key(), AccessKey::full_access()).transact().await?;
+            Ok(())
+        };
+        let landed = async || -> R<bool> {
+            let a = self.account_final(id).await?;
+            let q = json!({"request_type": "view_access_key", "finality": "final", "account_id": id, "public_key": sk.public_key().to_string()});
+            let k = self.rpc("query", q).await?;
+            Ok(a["amount"] == json!(balance.as_yoctonear().to_string()) && a["storage_usage"] == json!(182) && k["result"]["permission"] == json!("FullAccess"))
+        };
+        self.patch_landed(&format!("the keyed account {id}"), send, landed).await?;
         Ok(Account::from_secret_key(id.clone(), sk, &self.worker))
     }
 

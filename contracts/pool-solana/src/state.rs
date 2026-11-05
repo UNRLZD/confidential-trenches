@@ -254,6 +254,30 @@ fn page_entries(program_id: &Pubkey, page: &AccountInfo, tree: u8, page_no: u32)
     Some((body / PAGE_ENTRY) as u64)
 }
 
+/// Whether `page` is where leaf `index`'s entry goes, as `push_entry` checks it: the page's address when the entry
+/// opens its page, else the page of `tree` whose entries end right before it.
+fn is_page_for(program_id: &Pubkey, page: &AccountInfo, tree: u8, index: u64) -> bool {
+    let Ok(page_no) = u32::try_from(index / PAGE_ENTRIES) else { return false };
+    let slot = index % PAGE_ENTRIES;
+    if slot == 0 {
+        Pubkey::find_program_address(&[PAGE_SEED, &[tree], &page_no.to_le_bytes()], program_id).0 == *page.key
+    } else {
+        page_entries(program_id, page, tree, page_no) == Some(slot)
+    }
+}
+
+/// The page leaf `index`'s entry goes to: `page`, the one the sender built with, or, when the sender also gave `next`
+/// and `page` is not the one, `next` (review 2, R-1). A sender builds with the page of the tree's size it read; inserts
+/// that land between its read and its landing can carry the index onto the next page, and the transaction would
+/// otherwise fail on chain. `next` is not checked here: it may be any account the index's entry may go to, and
+/// `push_entry` checks the page it writes to, whichever is picked (a page that is not the index's own is refused).
+pub fn page_for<'b, 'a>(program_id: &Pubkey, page: &'b AccountInfo<'a>, next: Option<&'b AccountInfo<'a>>, tree: u8, index: u64) -> &'b AccountInfo<'a> {
+    match next {
+        Some(n) if !is_page_for(program_id, page, tree, index) => n,
+        _ => page,
+    }
+}
+
 /// The root `tree` had right after leaf `index` went in, read from its page; None when the tree has no such index
 /// (`index >= size`) or `page` is not the page holding it.
 pub fn root_at(program_id: &Pubkey, page: &AccountInfo, tree: u8, size: u64, index: u64) -> Option<[u8; 32]> {

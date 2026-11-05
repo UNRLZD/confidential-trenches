@@ -180,7 +180,10 @@ export const MUTANTS = [
   [SELL, "(_ret.length != 0 && !abi.decode(_ret, (bool)))) revert ApproveFailed();", "!abi.decode(_ret, (bool))) revert ApproveFailed();", "test_aTokenWhoseApproveReturnsNothingSells"],
   [SELL, "      if (!_ok) {\n        assembly", "      if (false) {\n        assembly", "test_aTargetsRevertIsPassedOn"],
   [SELL, "uint256 _eth = address(this).balance;", "uint256 _eth = 0;", "test_whatWAlreadyHoldsDoesNotCount"],
-  [SELL, "uint256 _weth = WETH.balanceOf(address(this));", "uint256 _weth = 0;", "test_whatWAlreadyHoldsDoesNotCount"],
+  [SELL, "uint256 _weth = _viaWeth ? WETH.balanceOf(address(this)) : 0;", "uint256 _weth = 0;", "test_whatWAlreadyHoldsDoesNotCount"],
+  // review 2, R-3: WETH is read only for a route that can pay in it
+  [SELL, "bool _viaWeth = _paysInWeth(_sell);", "bool _viaWeth = true;", "test_v4SellToTheNativeAssetTrustsNoWeth"],
+  [SELL, "bool _viaWeth = _paysInWeth(_sell);", "bool _viaWeth = false;", "test_v4SellToWethLands"],
   [SELL, "if (_wethGained != 0) WETH.withdraw(_wethGained);", "", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
   [SELL, "  receive() external payable {}\n", "", "test_aSellPaidInEtherLands"],
   // card evm-selldelegate-exact-debit: W's balance of the token falls by exactly the amount, on v3 and v4
