@@ -38,6 +38,7 @@ export const LIVE_CHECKS = [
   "helper-tape-4337-trader",
   "helper-live-bars-no-503",
   "sol-small-note-buys",
+  "evm-rpc-spare-list",
   "base-200ms-blocks",
 ];
 
