@@ -653,6 +653,8 @@ export function sweepCommand(journalFile, url, cluster) {
   if (cluster === "mainnet" && rel === PASTE_JOURNAL) return "sh contracts/pool-solana/scripts/mainnet-deploy.sh --sweep-kept";
   return `node contracts/pool-solana/scripts/deploy.mjs --sweep-kept ${rel} --url ${new URL(url).origin}${cluster === "mainnet" ? " --mainnet" : ""}`;
 }
+/** The mainnet live check as the owner's paste runs it after the deploy. */
+export const MAINNET_LIVE_CHECK = "node scripts/live-checks/pool-sol-deploy-mainnet.mjs --record scripts/live-checks/pool-sol-deploy-mainnet.good.json --write-record";
 /** The owner's paste's journal (mainnet-deploy.sh's --out, with .journal.json). */
 export const PASTE_JOURNAL = "contracts/pool-solana/deployments/mainnet.journal.json";
 
@@ -712,7 +714,11 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
   };
   const funder = load("funder.json", j.funder);
   if (!funder) throw new Error(`${dir} has no funder.json`);
-  const holders = [funder, load("program.json", j.program_id)].filter(Boolean);
+  // the program id's key holds what was sent to it, unless it is a deployed program (executable, the upgradeable
+  // loader's): then its lamports are the program's own rent, never sweepable (the rule leftovers uses)
+  const programKey = load("program.json", j.program_id);
+  const pa = programKey ? await account(fetchFn, url, programKey.id, undefined, "confirmed") : null;
+  const holders = [funder, ...(programKey && !(pa?.executable && pa.owner === LOADER_V3) ? [programKey] : [])];
   const known = new Set(j.txs.map((t) => t.signature));
   // the transfers into a key, read on chain: [{ signature, from }]
   const incoming = async (k) => {
@@ -745,50 +751,73 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
     afterCli: cliTxs, priced: (ixs) => (mainnet ? [priceIx(PRIORITY_MICRO_LAMPORTS), ...ixs] : ixs),
   });
   const failed = [];
-  for (const [name, step] of [
-    ["buffer close", () => ops.closeBuffers()],
-    ["program close", async () => {
-      if (await ops.upgradeableByFunder()) await ops.closeProgram();
-    }],
-    ["table freeze", async () => {
-      const sig = await ops.freezeTable();
-      if (sig) known.add(sig), j.txs.push({ step: "lookup table: freeze (authority none), by --sweep-kept", signature: sig, state: "landed" });
-    }],
-  ]) {
-    try {
-      await step();
-    } catch (e) {
-      failed.push(`${name}: ${String(e.message).split("\n")[0]}`);
-      log(`sweep-kept: ${name} failed: ${String(e.message).split("\n")[0]}`);
+  let left = null;
+  try {
+    for (const [name, step] of [
+      ["buffer close", () => ops.closeBuffers()],
+      ["program close", async () => {
+        if (await ops.upgradeableByFunder()) await ops.closeProgram();
+      }],
+      ["table freeze", async () => {
+        const sig = await ops.freezeTable();
+        if (sig) known.add(sig), j.txs.push({ step: "lookup table: freeze (authority none), by --sweep-kept", signature: sig, state: "landed" });
+      }],
+    ]) {
+      try {
+        await step();
+      } catch (e) {
+        failed.push(`${name}: ${String(e.message).split("\n")[0]}`);
+        log(`sweep-kept: ${name} failed: ${String(e.message).split("\n")[0]}`);
+      }
     }
+    for (const k of holders) {
+      const balance = BigInt((await rpc(fetchFn, url, "getBalance", [k.id, { commitment: "confirmed" }])).value);
+      const ins = await incoming(k);
+      for (const i of ins) if (!known.has(i.signature)) known.add(i.signature), j.txs.push({ step: `funding (to ${k === funder ? "the funder" : "the program id"})`, signature: i.signature, state: "landed" });
+      if (balance <= FEE_PER_SIGNATURE) continue;
+      // to the run's return address, which the run read as a wallet in use before any key; --return may name another
+      // only when it sent to this key (a funding from another wallet of the owner's)
+      const sources = [...new Set(ins.map((i) => i.from))];
+      if (to && !sources.includes(to) && to !== j.return_to) throw new Error(`--return ${to} is neither a sender to ${k.id} (${sources.join(", ") || "none read"}) nor the run's return address`);
+      const dest = to ?? j.return_to;
+      const sig = await sendAndConfirm(fetchFn, url, [transferIx(k.id, dest, balance - FEE_PER_SIGNATURE)], k, [k], { wait, now });
+      j.txs.push({ step: `sweep (kept keys, to ${dest === j.return_to ? "the run's return address" : "a sender of the funding"} ${dest})`, signature: sig, state: "landed" });
+      log(`sweep-kept: ${balance - FEE_PER_SIGNATURE} lamports from ${k.id} to ${dest}: ${sig}`);
+    }
+    // what is left, read again for about 20 s while it is not nothing: a read right after the sweep can lag on either RPC
+    const leftNow = async () => {
+      const out = [...failed];
+      for (const k of holders) for (const u of [...new Set([url, second])]) {
+        const b = BigInt((await rpc(fetchFn, u, "getBalance", [k.id, { commitment: "confirmed" }])).value);
+        if (b !== 0n) out.push(`${k.id} holds ${b} lamports on ${u}`);
+      }
+      return [...out, ...(await ops.leftovers())];
+    };
+    left = await settledLeft(leftNow, { wait, again: !failed.length });
+  } catch (e) {
+    left = [...(left ?? failed), `--sweep-kept stopped: ${String(e.message).split("\n")[0]}`];
+    throw e;
+  } finally {
+    if (left?.length) Object.assign(j.keys, { state: "kept", why: [...new Set(left)] });
+    else {
+      rmSync(dir, { recursive: true, force: true });
+      Object.assign(j.keys, { state: "removed", why: ["swept by --sweep-kept: every key of the run reads 0 on both RPCs, nothing under the funder's authority"] });
+    }
+    writeFileSync(file, JSON.stringify(j, null, 2) + "\n");
+    log(`sweep-kept: keys ${j.keys.state}${left?.length ? `: ${left.join("; ")}` : ""}; wrote ${file}`);
   }
-  for (const k of holders) {
-    const balance = BigInt((await rpc(fetchFn, url, "getBalance", [k.id, { commitment: "confirmed" }])).value);
-    const ins = await incoming(k);
-    for (const i of ins) if (!known.has(i.signature)) known.add(i.signature), j.txs.push({ step: `funding (to ${k === funder ? "the funder" : "the program id"})`, signature: i.signature, state: "landed" });
-    if (balance <= FEE_PER_SIGNATURE) continue;
-    const sources = [...new Set(ins.map((i) => i.from))];
-    const dest = to ?? (sources.length === 1 ? sources[0] : null);
-    if (!dest) throw new Error(`${k.id} holds ${balance} lamports from ${sources.length} senders (${sources.join(", ") || "none read"}): pass --return <one of them>`);
-    if (to && !sources.includes(to) && to !== j.return_to) throw new Error(`--return ${to} is neither a sender to ${k.id} (${sources.join(", ")}) nor the run's return address`);
-    const sig = await sendAndConfirm(fetchFn, url, [transferIx(k.id, dest, balance - FEE_PER_SIGNATURE)], k, [k], { wait, now });
-    j.txs.push({ step: `sweep (kept keys, to the funding's source ${dest})`, signature: sig, state: "landed" });
-    log(`sweep-kept: ${balance - FEE_PER_SIGNATURE} lamports from ${k.id} to ${dest}: ${sig}`);
-  }
-  const left = [...failed];
-  for (const k of holders) for (const u of [...new Set([url, second])]) {
-    const b = BigInt((await rpc(fetchFn, u, "getBalance", [k.id, { commitment: "confirmed" }])).value);
-    if (b !== 0n) left.push(`${k.id} holds ${b} lamports on ${u}`);
-  }
-  left.push(...(await ops.leftovers()));
-  if (left.length) Object.assign(j.keys, { state: "kept", why: [...new Set(left)] });
-  else {
-    rmSync(dir, { recursive: true, force: true });
-    Object.assign(j.keys, { state: "removed", why: ["swept by --sweep-kept: every key of the run reads 0 on both RPCs, nothing under the funder's authority"] });
-  }
-  writeFileSync(file, JSON.stringify(j, null, 2) + "\n");
-  log(`sweep-kept: keys ${j.keys.state}${left.length ? `: ${left.join("; ")}` : ""}; wrote ${file}`);
   return j;
+}
+
+/** What is left after a run or a sweep (`read()`: [] when nothing), read again up to 10 times 2 s apart while it is not
+ * [] and `again`: the reads right after the sweep can lag on either RPC (a stale balance kept a good run's keys). */
+export async function settledLeft(read, { wait = sleep, again = true, tries = 10 } = {}) {
+  let left = await read();
+  for (let i = 0; again && left.length && i < tries; i++) {
+    await wait(2000);
+    left = await read();
+  }
+  return left;
 }
 
 /** The deploy run. The third argument is for tests: `wait` and `now` (a virtual clock), `cli` and `gh` (planted),
@@ -830,6 +859,11 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     log(`rebuilt ${target} from ${url}: ${r.txs.length} transactions, funders ${r.funders.join(", ")}`);
     for (const t of r.txs) log(`tx ${t.step}: ${t.signature}`);
     return r;
+  }
+  // mainnet: one program, ever. A record there means the run completed; a second paste would deploy a second program
+  const outFile = opt("--out", path.join(REPO, `scripts/live-checks/pool-sol-deploy.${cluster}.json`));
+  if (cluster === "mainnet" && existsSync(outFile)) {
+    throw new Error(`${path.relative(REPO, outFile)} exists: the program is deployed: run its live check alone: ${MAINNET_LIVE_CHECK}`);
   }
   const returnTo = opt("--return");
   if (!returnTo) throw new Error("--return <address> is required: the funder's rest goes back there");
@@ -901,7 +935,6 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     log(`resume: ${resumeId} is final with this build's code on ${url} and ${second}; its pool ${poolExists ? "exists, init skipped" : "is missing, init runs"}`);
   }
 
-  const outFile = opt("--out", path.join(REPO, `scripts/live-checks/pool-sol-deploy.${cluster}.json`));
   // the run's journal, beside the record and never the record itself: a stopped run leaves the record as it was. One
   // that exists is a stopped run's, never written over: refused while its keys are kept (its sweep goes first), when it
   // is another cluster's, when it is another program's than --program, and for a fresh run while its program is final
@@ -917,7 +950,8 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     if (j.genesis_hash !== genesis) refuse(`of genesis ${j.genesis_hash}, not ${url}'s: move it aside before another run to ${outFile}`);
     if (j.keys?.state !== "removed") refuse(`, its keys ${j.keys?.state ?? "in an unknown state"}: sweep them first with: ${j.keys?.sweep ?? "its keys.sweep command"}`);
     if (resumeId && j.program_id !== resumeId) refuse(`of program ${j.program_id}, not --program ${resumeId}: move it aside before another run to ${outFile}`);
-    if (!resumeId && j.program_id && !(await programProblems(fetchFn, url, j.program_id, so)).length && !(await programProblems(fetchFn, second0, j.program_id, so)).length) {
+    // either RPC reading it final refuses: one lagging must never let a second program be deployed
+    if (!resumeId && j.program_id && (!(await programProblems(fetchFn, url, j.program_id, so)).length || !(await programProblems(fetchFn, second0, j.program_id, so)).length)) {
       refuse(`, its program ${j.program_id} is final with this code: resume it with --program ${j.program_id}${cluster === "mainnet" ? ` (sh contracts/pool-solana/scripts/mainnet-deploy.sh ${returnTo} --program ${j.program_id})` : ""}`);
     }
     const aside = `${outFile.replace(/\.json$/, "")}.stopped-${String(j.stopped_at ?? j.at ?? new Date().toISOString()).replace(/[^0-9TZ]/g, "")}.journal.json`;
@@ -1073,9 +1107,10 @@ export async function main(argv, fetchFn = fetch, io = {}) {
         await settled(fetchFn, url, programDataAddress(program.id), undefined, clock);
         // --final's SetAuthority is the CLI's second transaction: a finalized read right after the deploy can still show
         // the funder as authority (the table rehearsal on a local validator, 5 Nov), so the read is retried up to 90 s
+        // on both RPCs: the run is done only once each reads the program final with this code
         let problems;
         for (const until = clock.now() + 90_000; ; await clock.wait(2000)) {
-          problems = await programProblems(fetchFn, url, program.id, so);
+          problems = [...(await programProblems(fetchFn, url, program.id, so)), ...(await programProblems(fetchFn, second, program.id, so))];
           if (!problems.length || clock.now() > until) break;
         }
         if (problems.length) throw new Error(problems.join("; "));
@@ -1173,10 +1208,17 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       log(sigs.length ? `swept ${swept} lamports to ${returnTo}: ${sigs.join(", ")}; the funder holds ${c.after ?? "an unread balance"}` : `no sweep sent; the funder holds ${c.after ?? "an unread balance"}`);
       // the keys go only once the funder and the program id read empty on both RPCs with nothing left under the
       // funder's authority, and never after a stop before the funding was read
+      // when funded, read again for about 20 s while something reads left: a read right after the sweep can lag
       let left;
       try {
-        left = [...(funded ? [] : ["the run stopped before its funding was read: a transfer can still land on the funder"]),
-          ...(c.after === 0n ? [] : [`the cleanup left the funder at ${c.after ?? "an unread balance"}`]), ...(await ops.leftovers())];
+        let after = c.after;
+        left = await settledLeft(async () => {
+          const l = [...(funded ? [] : ["the run stopped before its funding was read: a transfer can still land on the funder"]),
+            ...(after === 0n ? [] : [`the cleanup left the funder at ${after ?? "an unread balance"}`]), ...(await ops.leftovers())];
+          if (l.length) after = await ops.balance().catch(() => after);
+          return l;
+        }, { wait, again: funded && c.problems.every((p) => !p.startsWith("kept ")) });
+        c.after = after;
       } catch (e) {
         left = [`the check for what is left failed: ${String(e.message).split("\n")[0]}`];
       }

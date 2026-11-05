@@ -27,6 +27,8 @@
 #    and writes contracts/pool-solana/deployments/mainnet.json.
 # 3. The live check on mainnet: records its answers (the card's good answer, scripts/live-checks/
 #    pool-sol-deploy-mainnet.good.json) and, on PASS, writes the run record scripts/live-checks/pool-sol-deploy-mainnet.md.
+# Once deployments/mainnet.json exists the program is deployed: a second paste is refused before any key and names the
+# live check line below, to run alone.
 # Nothing is typed in: no seed phrase or key is asked for. The run's two keys are made in memory and kept in a 0700
 # folder only until the cleanup reads the funder empty on both RPCs. Ctrl-C or a closed terminal stops the run at its
 # next step and its cleanup sweeps every lamport back; this shell waits for it before removing the CLI.

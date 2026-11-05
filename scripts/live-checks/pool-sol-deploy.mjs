@@ -15,7 +15,8 @@
 //     (contracts/pool-solana/scripts/deploy.mjs; deploy.test.mjs re-checks every committed record);
 //   - every funder of the run (the record's `funders`, the fee payers of its transactions that are not the return
 //     address): 0 lamports at finalized, so no lamport is left behind a run key; one that is not the run's own key and
-//     holds lamports is named as a funding sent from a wallet other than the return address.
+//     holds lamports is a wallet that sent the funding, not the return address: its balance is not the deployment's, so
+//     it is an info line, never a FAIL.
 // A mainnet record (card pool-sol-deploy-mainnet, scripts/live-checks/pool-sol-deploy-mainnet.mjs) has no test deposit,
 // so the mark and leaf lines are not read; instead, on mainnet's two RPCs of two operators:
 //   - the pool exists as above;
@@ -327,9 +328,10 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
       say(funders.length > 0, `the record names the run's funders: ${funders.length} ${at}`);
       for (const f of funders) {
         const b = (await rpc(fetchFn, url, "getBalance", [f, { commitment: "finalized" }], sleep))?.value;
-        // a fee payer of the run that is not its key and not the return address: a funding sent from another wallet
-        const why = b !== 0 && d.funder && f !== d.funder ? `: it is not this run's key ${d.funder}: the funding came from a wallet other than the return address ${d.return_to}` : "";
-        say(b === 0, why ? `funder ${f} holds ${b} lamports ${at}${why}` : `funder ${f} holds 0 lamports ${at}: ${b}`);
+        // a fee payer of the run that is not its key and not the return address: a funding sent from another wallet,
+        // whose balance is not the deployment's: an info line, never a FAIL
+        if (b !== 0 && d.funder && f !== d.funder) lines.push(`info fee payer ${f} holds ${b} lamports ${at}: it is not this run's key ${d.funder}: the funding came from a wallet other than the return address ${d.return_to}`);
+        else say(b === 0, `funder ${f} holds 0 lamports ${at}: ${b}`);
       }
     } catch (e) {
       say(false, `read ${at}: ${String(e.message).split("\n")[0]}`);
