@@ -12,9 +12,9 @@ import { SafetyGrid } from "../trade/SafetyGrid.tsx";
 import { safetyCells } from "../trade/safety.ts";
 import { SIGN_HOST_URL } from "../../shell/signpage-frame.tsx";
 import { TradeBox } from "../trade/TradeBox.tsx";
-import { CHART_TFS, DEFAULT_TF, loadCandles } from "./candles.ts";
+import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
-import { drawBars, mountChart, unmountChart } from "./chart.ts";
+import { liveBars, mountChart, unmountChart } from "./chart.ts";
 import type { Drawn } from "./chart.ts";
 import { copyText, readWatch, shareHref, toggleWatch, tokenLinks, tokenView } from "./model.ts";
 import type { TokenView } from "./model.ts";
@@ -149,17 +149,26 @@ const TF_LEGEND: Record<ChartTf, string> = { "1m": "1", "5m": "5", "15m": "15", 
 const MINUS = "\u2212";
 
 /** The chart's candle read, one per page (the desktop and the phone draw the same): `token` null while the token read
- *  is still loading. A new token or timeframe reads again from loading; `retry` reads the same again. */
+ *  is still loading. A new token or timeframe reads again from loading; `retry` reads the same again. Bars of the
+ *  helper's own reads are then followed live (candles.ts followCandles, card app-chart-live) until the page, the token
+ *  or the timeframe changes. */
 function useCandles(chain: MarketChain | null, token: string | null, tf: ChartTf): { data: CandleData; retry: () => void } {
   const [data, setData] = useState<CandleData>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (chain === null || token === null) return;
+    const [ch, id] = [chain, token];
     let live = true;
+    let stop = () => {};
     setData({ status: "loading" });
-    void loadCandles(chain, token, tf).then((d) => live && setData(d));
+    void loadCandles(ch, id, tf).then((d) => {
+      if (!live) return;
+      setData(d);
+      if (d.status === "ready" && d.own) stop = followCandles(ch, id, d, (r) => live && setData(r));
+    });
     return () => {
       live = false;
+      stop();
     };
   }, [chain, token, tf, attempt]);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
@@ -242,9 +251,12 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
     if (!shown || ready === null) return;
     drawn.current ??= mountChart(el, phone === true, setAt);
     if (drawn.current === null) return;
-    drawBars(drawn.current, c.sym ?? "", ready.tf, ready.bars, ready.precision);
-    el.dataset.bars = String(drawn.current.chart.getDataList().length);
-    setAt(null);
+    // a live read moves the last bar in place (the crosshair kept); a new read or timeframe draws them all again
+    if (liveBars(drawn.current, c.sym ?? "", ready.tf, ready.bars, ready.precision)) setAt(null);
+    const list = drawn.current.chart.getDataList();
+    el.dataset.bars = String(list.length);
+    const last = list.at(-1);
+    el.dataset.last = last ? `${last.timestamp}:${last.close}` : "";
   }, [shown, ready]);
   const tfs = (
     <div className={phone ? "tkp-tfs tkp-tfs-ph" : "tkp-tfs"}>

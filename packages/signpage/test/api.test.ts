@@ -5,6 +5,7 @@
 // and drops a wrong origin, a wrong source, a request over the UTF-8 size cap, a forbidden key or a malformed envelope
 // with no answer and no change. public/app.js being this source's build is scripts/build-app.test.mjs's.
 import assert from "node:assert/strict";
+import { throughApi } from "./api-ends.ts";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { APP_ORIGIN, REMEMBERED_IDS, RELEASE, SIGNPAGE_MAX_REQUEST_BYTES, signedOutState, startApi } from "../src/api.ts";
@@ -477,4 +478,26 @@ test("a running id's answer refreshes its place among the remembered ids, so ids
   assert.deepEqual(posted.at(-1), { v: 1, id: a, ok: true, result: { stage: "sent", txs: [] } });
   const bytes = new TextEncoder().encode(JSON.stringify({ ...buy, id: a, side: "buy" }));
   assert.equal(shas.get(a), Buffer.from(await crypto.subtle.digest("SHA-256", bytes)).toString("hex"), "ctx.sha is the request's SHA-256");
+});
+
+// Card signpage-error-after-timeout: a trade kind's end goes out as progress after its answer, since the kit's client
+// drops an answer that comes past its 10 s window and the app then ends the trade on progress alone. The rule's edges.
+test("a trade kind's end as progress: refused for a refusal, never for id_reused, never twice; other kinds untouched", async () => {
+  const BUY = { chain: "solana", token: "So11111111111111111111111111111111111111112", side: "buy", amount: "10", slippage_bps: 500 };
+  const running = (answer: unknown, held: string[] = []) => (_p: Record<string, unknown>, ctx: { progress(s: string): void }) => {
+    for (const s of held) ctx.progress(s);
+    return { running: true, after: Promise.resolve(), answer: () => answer };
+  };
+  const refused = await throughApi("buy", running({ error: "failed" }) as never, BUY);
+  assert.deepEqual(refused.stages, ["refused"]);
+  const reused = await throughApi("buy", running({ error: "id_reused" }) as never, BUY);
+  assert.deepEqual(reused.stages, [], "id_reused: that id runs elsewhere, its end is that run's");
+  const late = await throughApi("buy", running({ result: { stage: "not_landed", txs: [] } }) as never, BUY);
+  assert.deepEqual(late.stages, ["not_landed"]);
+  const once = await throughApi("buy", running({ result: { stage: "not_landed", txs: [] } }, ["not_landed"]) as never, BUY);
+  assert.deepEqual(once.stages, ["not_landed"], "a held end is not posted again");
+  const sent = await throughApi("buy", running({ result: { stage: "sent", txs: [] } }) as never, BUY);
+  assert.deepEqual(sent.stages, [], "sent is no end: the run's own progress tells its end");
+  const open = await throughApi("pool.withdraw", running({ error: "failed" }) as never, { return_key: "portfolio", chain: "solana" });
+  assert.deepEqual(open.stages, [], "not a trade kind");
 });

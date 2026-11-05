@@ -10,6 +10,7 @@
 //   node --test test/pool-deposit.test.ts      (from packages/signpage)
 /// <reference types="node" />
 import assert from "node:assert/strict";
+import { throughApi } from "./api-ends.ts";
 import { after, test } from "node:test";
 import { readFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
@@ -777,4 +778,16 @@ test("a deposit that never lands stops at POOL_DEPOSIT_READS seconds on the wall
   const a = (await runPoolDeposit(host(c, ns, { reads: 1_000, wait: async (ms: number) => void (waited += ms), now: () => BigInt(1_000 + waited) }), ask(RUNG))) as { stage: string };
   assert.notEqual(a.stage, "filled");
   assert.ok(waited <= POOL_DEPOSIT_READS * POOL_DEPOSIT_WAIT_MS, `waited ${waited} ms`);
+});
+
+// Card signpage-error-after-timeout: a deposit refused after the client's 10 s window still ends the app's button.
+test("a pool.deposit refused (U holds the rung but not its costs: not_funded) reaches the app as progress refused after its answer", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, Number(RUNG));
+  const r = await throughApi("pool.deposit", (_p, ctx) => poolDepositKind(() => host(c, ns))(ask(RUNG), ctx), { chain: "solana", amount: "0.01" });
+  assert.ok(Object.hasOwn(r.answer as object, "error"), JSON.stringify(r.answer));
+  assert.equal((r.answer as { error: { code: string } }).error.code, "not_funded");
+  assert.deepEqual(r.stages, ["refused"]);
+  assert.equal(c.sent.length, 0);
 });
