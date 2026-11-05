@@ -335,7 +335,7 @@ test("POST's reads fail closed: providers that disagree throw, so the call is he
   await assert.rejects(checkWithdraw(structuredClone(fixture.request), CFG, q.reads("mainnet")), FeeReadRefused);
 });
 
-// ---- The review's folds (Opus FIX on f4e3444) ----
+// ---- The review's folds (FIX on f4e3444) ----
 
 const RD_MIN = 1_250_000_000_000_000_000_000n;
 const body = (rd: bigint) => ({ register_deposit: rd }) as never;

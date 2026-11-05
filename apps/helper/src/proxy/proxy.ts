@@ -116,8 +116,9 @@ type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise
 const error = (status: number, code: string): ProxyAnswer => ({ status, headers: {}, body: JSON.stringify({ error: { code } }) });
 const UPSTREAM = () => error(503, "upstream");
 /** The not-ready form (503 upstream, the device's fallback, H2.3) for a vendor's hold or room: `why` names it for the
- *  refusal log, never sent. */
-const notReady = (why: string): ProxyAnswer => ({ ...UPSTREAM(), why });
+ *  refusal log, never sent. `retryAfterS`: the seconds until the vendor's total has the room (card solana-legs-share-wait),
+ *  so a device waits it out and asks again; a hold whose end is not known names none. */
+const notReady = (why: string, retryAfterS?: number): ProxyAnswer => ({ ...UPSTREAM(), ...(retryAfterS ? { headers: { "Retry-After": String(retryAfterS) } } : {}), why });
 
 /** The keys this host holds, from its environment. A key of the wrong shape stops the start; the message names the variable, never the value. */
 export function readKeys(env: Record<string, string | undefined>): Partial<Record<VendorName, string>> {
@@ -228,9 +229,11 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   }
 
   async function call(name: VendorName, v: Vendor, up: Upstream, path: string, query: string, body: string, reserved: boolean, by: number): Promise<Read | ProxyAnswer> {
+    // the seconds to the vendor's reset, for the not-ready answer's Retry-After
+    const heldS = (): number => Math.max(1, Math.ceil((budget.heldUntil(name) - now()) / 1000));
     for (let attempt = 0; ; attempt++) {
       // the vendor's reset holds every call to it: waited out when it ends by `by`, else not ready (never our 429)
-      if (!(await turn(name, by))) return notReady(`${name} held`);
+      if (!(await turn(name, by))) return notReady(`${name} held`, heldS());
       if (attempt > 0) {
         // the retry reaches the vendor again, so it draws from the total too
         if (budget.take(name, undefined, 1, false, reserved) > 0) return notReady(budget.refusedBy());
@@ -256,7 +259,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
           const wait = Math.max(resetMs(r.headers, now()), 0);
           budget.hold(name, now() + (wait <= WAIT_MAX_MS ? wait : upstreamRetryAfterS(r.headers, now()) * 1000));
           if (attempt === 0) continue;
-          return notReady(`${name} provider 429`);
+          return notReady(`${name} provider 429`, heldS());
         }
         text = await readBody(r);
       } catch {
@@ -315,10 +318,11 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         return last;
       })();
     };
-    // a refusal past the wait: the caller's own share is its 429; the vendor's hold or room is not ready, never our 429
+    // a refusal past the wait: the caller's own share is its 429; the vendor's hold or room is not ready, never our 429,
+    // both with the seconds until the draw would go (Retry-After)
     const refused = (wait: number): ProxyAnswer => {
       const why = budget.refusedBy();
-      return why.endsWith(" share") ? throttled(wait, undefined, why) : notReady(why);
+      return why.endsWith(" share") ? throttled(wait, undefined, why) : notReady(why, wait);
     };
     const params = new URLSearchParams(rawQuery);
     if (up.cacheMs) params.sort();

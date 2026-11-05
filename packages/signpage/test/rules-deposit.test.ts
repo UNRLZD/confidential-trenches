@@ -256,7 +256,7 @@ test("the deposit quote: the answer goes through the kit's 1Click check with its
   assert.throws(() => checkDepositQuote(small.request, small.answer, c), (e: unknown) => e instanceof OneClickQuoteError && e.check === "floor");
 });
 
-// ---------- the review's cases (card signpage-deposit-kinds, Opus review on 158005f), on U ----------
+// ---------- the review's cases (card signpage-deposit-kinds, review on 158005f), on U ----------
 // Raw borsh pieces field by field, for shapes encodeDelegateAction refuses to make.
 const enc8 = (t: string) => new TextEncoder().encode(t);
 const BOM = [0xef, 0xbb, 0xbf];
