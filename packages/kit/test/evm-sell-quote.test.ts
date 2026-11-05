@@ -54,7 +54,7 @@ test("planted: a server's route is never taken: a request with a route is refuse
   const route = { venue: "uniswap-v4", hops: [{ currency: NATIVE, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
   assert.deepEqual(await verdict(sell({ price: flat }, "base", { route })), { accepted: false, code: "bad_request" });
   assert.deepEqual(await verdict(sell({ price: flat }, "base", { route: undefined })), { accepted: false, code: "bad_request" });
-  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
   const code = (f: () => unknown) => {
     try {
       f();
@@ -93,7 +93,7 @@ test("planted: a stale quote is refused, when quoted (a head 31 s old) and when 
   const old = Math.floor(Date.now() / 1000) - 31;
   assert.deepEqual(await verdict(sell({ price: flat, headSec: old })), { accepted: false, code: "stale_quote" });
   const q = await sellQuoteWith(req("base-sepolia"), [provider({ price: flat }), provider({ price: flat })], Date.now());
-  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
   const later = Number(q.block.timestamp) * 1000 + 30_001;
   enableTimers(mock.timers, { apis: ["Date"], now: later });
   try {
@@ -212,6 +212,8 @@ test("planted: the sim signer refuses a live deadline, the real pool, a block pa
   assert.equal(kit.EVM_SELL_SIM, "0x" + Buffer.from(keccak("blindfill.sell.sim.v1")).subarray(12).toString("hex"));
   const s = sim();
   assert.equal(s.pool, kit.EVM_SELL_SIM);
+  // its fee recipient too (card pool-review-3: SellDelegate refuses zero and W; the fee is 0)
+  assert.equal(s.feeRecipient, kit.EVM_SELL_SIM);
   const sig = evmPoolSignSimSellUnpinned(key, "base-sepolia", s, ts, now);
   assert.equal(sig.length, 65);
   // the signature is W's, over the sim as SellDelegate digests it (its EIP-712 digest written out here, as
@@ -221,8 +223,8 @@ test("planted: the sim signer refuses a live deadline, the real pool, a block pa
   const a32 = (a: string) => w32(BigInt(a));
   const domain = keccak_256(Buffer.concat([keccak("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"), keccak("Blindfill"), keccak("1"), w32(84532n), a32(WALLET)]));
   const struct = keccak_256(Buffer.concat([
-    keccak("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)"),
-    a32(s.token), w32(s.amount), a32(s.target), keccak_256(Buffer.from(s.data.slice(2), "hex")), w32(s.minOut), a32(s.pool), w32(s.precommitment), w32(s.feeCap), w32(s.deadline), w32(s.nonce),
+    keccak("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"),
+    a32(s.token), w32(s.amount), a32(s.target), keccak_256(Buffer.from(s.data.slice(2), "hex")), w32(s.minOut), a32(s.pool), w32(s.precommitment), w32(s.feeCap), a32(s.feeRecipient), w32(s.deadline), w32(s.nonce),
   ]));
   const digest = keccak_256(Buffer.concat([Uint8Array.of(0x19, 0x01), domain, struct]));
   assert.ok(sig[64] === 27 || sig[64] === 28, "v is 27 or 28");
@@ -230,7 +232,7 @@ test("planted: the sim signer refuses a live deadline, the real pool, a block pa
   const signer = "0x" + Buffer.from(keccak_256(secp256k1.Point.fromBytes(pub).toBytes(false).subarray(1)).subarray(12)).toString("hex");
   assert.equal(signer, WALLET, "the sim's signature recovers to W");
   const data = evmSellCallData(s, 0n, sig);
-  assert.equal(data.slice(2, 10), Buffer.from(keccak("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)")).subarray(0, 4).toString("hex"));
+  assert.equal(data.slice(2, 10), Buffer.from(keccak("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)")).subarray(0, 4).toString("hex"));
   const code = (f: () => unknown) => {
     try {
       f();
@@ -247,7 +249,7 @@ test("planted: the sim signer refuses a live deadline, the real pool, a block pa
   assert.equal(code(() => evmPoolSignSimSellUnpinned(key, "base-sepolia", { ...s, pool: evmPoolVenues()["base-sepolia"].pool! }, ts, now)), "not_built");
   // the sell signer never signs a sim, the sim signer never a real sell
   assert.equal(code(() => evmPoolSignSellUnpinned(key, "base-sepolia", s)), "not_built");
-  const real = pinnedBuildSell(evmPoolVenues(), "base-sepolia", { w: WALLET, token: TOKEN, amount: AMOUNT, target: evmPoolVenues()["base-sepolia"].poolManager!, route: { venue: "uniswap-v4", hops: [{ ...hops[0]!, hooks: NATIVE }] }, minOut: 2n, precommitment: 1n, feeCap: 1n, deadline: BigInt(Math.floor(Date.now() / 1000) + 120), nonce: 3n });
+  const real = pinnedBuildSell(evmPoolVenues(), "base-sepolia", { w: WALLET, token: TOKEN, amount: AMOUNT, target: evmPoolVenues()["base-sepolia"].poolManager!, route: { venue: "uniswap-v4", hops: [{ ...hops[0]!, hooks: NATIVE }] }, minOut: 2n, precommitment: 1n, feeCap: 1n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(Math.floor(Date.now() / 1000) + 120), nonce: 3n });
   assert.equal(code(() => evmPoolSignSimSellUnpinned(key, "base-sepolia", real as never, ts, now)), "not_built");
   // a key not W's; a chain with no pinned sell delegate
   assert.equal(code(() => evmPoolSignSimSellUnpinned(new Uint8Array(32).fill(7), "base-sepolia", s, ts, now)), "bad_key");
@@ -264,7 +266,7 @@ test("planted: the sender's fee cap is the device's own rule's at the agreed blo
       return (e as { code?: string }).code ?? String(e);
     }
   };
-  const f = { precommitment: 0x5e11n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  const f = { precommitment: 0x5e11n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
   // 2 x EVM_POOL_SELL_GAS (1,000,000) x (the block's base fee + the sale's tip: Base's 1,000,000 wei, Robinhood's 0),
   // rounded up to the 1e13 wei step, at least one step
   const cases: [EvmPoolChain, bigint, bigint][] = [
@@ -278,6 +280,10 @@ test("planted: the sender's fee cap is the device's own rule's at the agreed blo
     assert.equal((q as { feeMax?: bigint }).feeMax, want, `${chain} at ${baseFee}`);
     // no cap named: the rule's; the rule's own or a lower one: as named; above it: refused
     assert.equal(kit.evmPoolBuildSell(q, f).feeCap, want);
+    // the fee recipient is the caller's (its pin's), checked by the builder (card pool-review-3, L-1)
+    assert.equal(kit.evmPoolBuildSell(q, f).feeRecipient, f.feeRecipient);
+    assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeRecipient: q.w })), "bad_fee");
+    assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeRecipient: "0x0000000000000000000000000000000000000000" })), "bad_fee");
     assert.equal(kit.evmPoolBuildSell(q, { ...f, feeCap: want }).feeCap, want);
     assert.equal(kit.evmPoolBuildSell(q, { ...f, feeCap: want - 1n }).feeCap, want - 1n);
     assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeCap: want + 1n })), "bad_fee");
