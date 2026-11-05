@@ -352,10 +352,10 @@ test("the lists: one list down or not a list answers 503 when there is no last a
   assert.equal((await lists.get()).status, 503);
 });
 
-test("the lists: a throttled list read (the proxy's 429) with no last answer answers 429 with its wait, never 503", async () => {
+test("the lists: a throttled list read (the proxy's 429) with no last answer answers not ready (503 upstream), never our 429 (card helper-crowd-429 fold 6: Jupiter's limit is not the caller's)", async () => {
   const lists = createSolanaLists({ handle: async (_v: string, p: string): Promise<{ status: number; headers: Record<string, string>; body: string }> => (p === READS.new ? { status: 429, headers: { "Retry-After": "8" }, body: '{"error":{"code":"rate_limited"}}' } : { status: 200, headers: {}, body: JSON.stringify(RAW.trending_5m) }) }, recordedRpc);
   const a = await lists.get();
-  assert.deepEqual([a.status, JSON.parse(a.body), a.retryAfterS], [429, { error: { code: "rate_limited" } }, 8]);
+  assert.deepEqual([a.status, JSON.parse(a.body), a.retryAfterS], [503, { error: { code: "upstream" } }, undefined]);
 });
 
 test("warm(): one refresh at once and one every FRESH_MS, so a caller never waits on a vendor; the stop ends it", async (t) => {

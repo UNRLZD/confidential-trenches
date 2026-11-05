@@ -566,13 +566,13 @@ test("review F-E: a GeckoTerminal 429 (and the paused queue after it) answers 42
   assert.equal(second.status, 429, "the helper's own paused GT queue is a throttle");
 });
 
-test("page and holders: a throttled RPC or Jupiter read with nothing good to serve answers 429 with the throttle's wait; the last good page still serves", async () => {
+test("page and holders: a throttled RPC read with nothing good to serve answers 429 with the throttle's wait, a Jupiter refusal the not-ready 503 (card helper-crowd-429 fold 6: never our 429 for Jupiter's limit); the last good page still serves", async () => {
   const throttledRpc = { handle: async () => ({ status: 429, headers: { "Retry-After": "7" }, body: '{"error":{"code":"rate_limited"}}' }) };
   const a = await createSolanaToken(fakeProxy(), throttledRpc, { now: () => NOW }).page(PUMP);
   assert.deepEqual([a.status, JSON.parse(a.body), a.retryAfterS], [429, { error: { code: "rate_limited" } }, 7]);
   const throttledProxy = { handle: async () => ({ status: 429, headers: { "Retry-After": "12" }, body: '{"error":{"code":"rate_limited"}}' }) };
   const b = await createSolanaToken(throttledProxy, fakeRpc(), { now: () => NOW }).page(PUMP);
-  assert.deepEqual([b.status, b.retryAfterS], [429, 12]);
+  assert.deepEqual([b.status, JSON.parse(b.body), b.retryAfterS], [503, { error: { code: "upstream" } }, undefined]);
   let now = NOW;
   let throttle = false;
   const rpc = fakeRpc();

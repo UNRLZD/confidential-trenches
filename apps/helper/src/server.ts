@@ -234,7 +234,8 @@ export function handler(
     };
     let route = "other";
     const reply = (a: { status: number; headers?: Headers; body: string; why?: string }) => {
-      if (a.status === 429) refusals.count(route, a.why ?? "unnamed");
+      // a 429, and a 503 a vendor's hold or room answered (card helper-crowd-429: proxy.ts notReady), both named
+      if (a.status === 429 || (a.status === 503 && a.why !== undefined)) refusals.count(route, a.why ?? "unnamed");
       const h: Headers = { ...base, ...cors(req), ...a.headers, "Content-Type": "application/json; charset=utf-8", "Content-Length": String(Buffer.byteLength(a.body)) };
       if (a.status === 413) h.Connection = "close";
       res.writeHead(a.status, h);
