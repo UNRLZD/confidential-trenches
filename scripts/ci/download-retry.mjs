@@ -92,6 +92,15 @@ export function refusals(yml) {
       }
     }
   }
+  out.push(...foundryPairs(yml).problems);
+  return out.sort((a, b) => a[0] - b[0]);
+}
+
+/** The foundry-toolchain steps' pairs: problems as [line, what], and the line index of each held pair's
+ * continue-on-error: true (its second run, in the same job, fails the job when the install fails twice). */
+export function foundryPairs(yml) {
+  const out = [];
+  const held = [];
   const lines = yml.split(/\r?\n/);
   const foundry = [];
   lines.forEach((l, i) => /^\s*(?:- )?uses:\s*foundry-rs\/foundry-toolchain@/.test(l) && foundry.push(i));
@@ -110,16 +119,25 @@ export function refusals(yml) {
     const next = foundry[k + 1];
     const second = next === undefined ? null : stepAt(lines, next);
     const cond = second && field(second, "if");
-    if (!second || !cond || !new RegExp(`^steps\\.${id}\\.outcome\\s*==\\s*'failure'$`).test(cond.replace(/^\$\{\{\s*|\s*\}\}$/g, ""))) {
+    const sameJob = next !== undefined && !lines.slice(foundry[k], next).some((l) => /^ {2}[\w-]+:\s*$/.test(l));
+    if (!second || !sameJob || !cond || !new RegExp(`^steps\\.${id}\\.outcome\\s*==\\s*'failure'$`).test(cond.replace(/^\$\{\{\s*|\s*\}\}$/g, ""))) {
       out.push([at, `a foundry-toolchain step with no second run after it (if: steps.${id}.outcome == 'failure')`]);
       continue;
     }
     if (lines[next].trim().replace(/^- /, "") !== lines[foundry[k]].trim().replace(/^- /, "") || field(second, "version") !== field(first, "version") || field(second, "continue-on-error") === "true") {
       out.push([next + 1, "a foundry-toolchain second run that is not the same action and version, or does not fail the job"]);
-    }
+    } else held.push(first.find(([, l]) => /^\s*(?:- )?continue-on-error:\s*true\s*(?:#.*)?$/.test(l))[0] - 1);
     k++;
   }
-  return out.sort((a, b) => a[0] - b[0]);
+  return { problems: out, held };
+}
+
+/** The workflow's text with each held foundry-toolchain pair's continue-on-error: true turned into a comment, line
+ * for line: for a gate that refuses any step that may fail (scripts/ci/test-shards.test.mjs), since a held pair's
+ * second run fails the job when the install fails twice. */
+export function withoutHeldRetries(yml) {
+  const held = new Set(foundryPairs(yml).held);
+  return yml.split("\n").map((l, i) => (held.has(i) ? l.replace(/continue-on-error:\s*true/, "# a held retry") : l)).join("\n");
 }
 
 export function downloadRetry(root) {

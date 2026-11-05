@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync 
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { downloadRetry, refusals } from "./download-retry.mjs";
+import { downloadRetry, refusals, withoutHeldRetries } from "./download-retry.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const GATE = join(ROOT, "scripts/ci/download-retry.mjs");
@@ -93,6 +93,20 @@ test("foundry-toolchain: a first step that may fail, then the same action and ve
   assert.deepEqual(what(job(PAIR.replace(/version: v1\.7\.1\n$/, "version: v1.6.0\n"))), ["15: a foundry-toolchain second run that is not the same action and version, or does not fail the job"]);
   assert.deepEqual(what(job(PAIR.replace(/(- if: steps\.foundry\.outcome == 'failure'\n)(        uses)/, "$1        continue-on-error: true\n$2"))), ["16: a foundry-toolchain second run that is not the same action and version, or does not fail the job"]);
   assert.deepEqual(what(job(foundry("if: steps.foundry.outcome == 'failure'\n        "))), ["8: a foundry-toolchain retry with no first step before it"]);
+});
+
+test("a pair holds only within one job, and only a held pair's continue-on-error is blanked for the shard rule", () => {
+  // the second run in another job is no second run of this one
+  const split = PAIR.replace("      - if: steps.foundry.outcome == 'failure'\n        run: sleep 30\n", "      - if: steps.foundry.outcome == 'failure'\n        run: sleep 30\n  b:\n    runs-on: ubuntu-24.04\n    steps:\n");
+  assert.ok(what(job(split)).includes("9: a foundry-toolchain step with no second run after it (if"), what(job(split)).join("\n"));
+  assert.doesNotMatch(withoutHeldRetries(job(split)), /# a held retry/);
+  const held = withoutHeldRetries(job(PAIR));
+  assert.doesNotMatch(held, /continue-on-error/);
+  assert.equal(held.split("\n").length, job(PAIR).split("\n").length);
+  // any other step's continue-on-error stays for the shard rule to refuse
+  const other = job(PAIR + "      - continue-on-error: true\n        run: \"true\"\n");
+  assert.equal(withoutHeldRetries(other).split("continue-on-error").length - 1, 1);
+  assert.equal(withoutHeldRetries(job(foundry("id: foundry\n        continue-on-error: true\n        "))).split("continue-on-error").length - 1, 1);
 });
 
 test("the command line: exit 1 with one line per refusal, exit 0 on held workflows, exit 1 on none read", () => {
