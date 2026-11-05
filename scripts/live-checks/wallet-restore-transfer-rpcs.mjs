@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // Live check of card wallet-restore-transfer-rpcs: a restore from the 12 words reads every W's tokens on every EVM
-// network's Transfer pair (the wallet's EVM_TRANSFER_RPCS, which testnet-run takes too), never "unread" because a
-// provider caps the range. On 4 Nov 23:18Z the evm-buy-hookdata-fee run's restore left two of its three Base Sepolia Ws
+// network's Transfer list (the wallet's EVM_TRANSFER_RPCS, which testnet-run takes too), never "unread" because a
+// provider caps the range, or because one is out (card evm-transfer-rpc-spares: each list is three operators read as a
+// pair with a spare; on 5 Nov 17:1xZ thirdweb's keyless daily quota failed Base and Robinhood testnet, HTTP 429 with
+// Retry-After about 7.4 h). On 4 Nov 23:18Z the evm-buy-hookdata-fee run's restore left two of its three Base Sepolia Ws
 // unread: base-sepolia.drpc.org answered code 19 "Temporary internal error" at 10 to 101 blocks and code 35 above
 // (read 5 Nov 12:20Z), and the pager halved only on cap words it knew. This check runs a W's read through the wallet's
 // own code (packages/wallet/scripts/transfer-rpcs-check.ts, a child process, so Blindfill's code stays behind the kit's
-// entry for this file and no check here is a second implementation of the wallet's) on each network's pair:
+// entry for this file and no check here is a second implementation of the wallet's) on each network's list:
 //   - Base Sepolia: that run's v3 buy's W 0x809286a1…078e from its buy's block 54553944 to the newest agreed block,
 //     which must list the USDC it bought (0x036cbd53…3dcf7e), read on both providers alike;
 //   - Robinhood, Base and Robinhood testnet: a W's Transfer read over the newest 100,000, 50,000 and 10,000 blocks,
@@ -122,8 +124,9 @@ export async function check(transport, { wait = true } = {}) {
     try {
       const r = await runCheck(job, (url, method, params) => transport(job.network, url, method, params), wait);
       const urls = r.urls;
+      const swapped = (r.asked ?? []).filter((u) => !urls.includes(u));
       if (job.want !== undefined && !r.tokens.includes(job.want)) throw new Error(`W ${job.w} lists ${r.tokens.length ? r.tokens.join(", ") : "no token"}, not ${job.want}`);
-      lines.push(`${job.network}: ${urls.map(host).join(" and ")} read W ${job.w} from block ${r.from} to ${r.anchor.number} alike: ${r.tokens.length ? r.tokens.join(", ") : "no token"} (last pages ${r.page.join(" and ")} blocks)`);
+      lines.push(`${job.network}: ${urls.map(host).join(" and ")} read W ${job.w} from block ${r.from} to ${r.anchor.number} alike: ${r.tokens.length ? r.tokens.join(", ") : "no token"} (last pages ${r.page.join(" and ")} blocks)${swapped.length ? `; swapped out ${swapped.map(host).join(" and ")}` : ""}`);
     } catch (e) {
       ok = false;
       lines.push(`${job.network}: ${e?.message ?? e}`);

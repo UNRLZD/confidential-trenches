@@ -1,6 +1,7 @@
 // The device half of card wallet-restore-transfer-rpcs's live check (scripts/live-checks/wallet-restore-transfer-rpcs.mjs
-// runs it as a child process): a restore's W read, src/pool/evm.ts, on the network's own Transfer pair
-// (EVM_TRANSFER_RPCS), with no second implementation of any check. Its two RPCs are a bridge over stdio, as in
+// runs it as a child process): a restore's W read, src/pool/evm.ts, on the network's own Transfer list
+// (EVM_TRANSFER_RPCS, read as a pair with a spare: evmPair), with no second implementation of any check. Its RPCs are a
+// bridge over stdio, as in
 // ./rpc-hex-case-check.ts, so the live check makes every network call (and records or replays it) and this file makes
 // none:
 //   node packages/wallet/scripts/transfer-rpcs-check.ts '{"network":"base-sepolia","w":"0x…","from":"54553944","wait":true}'
@@ -12,10 +13,10 @@
 // What it runs, on both RPCs, as evmRestoreNotes does for each W: the finalized and the newest agreed anchors
 // (evmAgreedBlock), evmHoldsAnchor (the network's chain id on both, the anchor's hash held on both), then
 // evmTokensSentTo (the W's Transfer logs from `from` to the newest anchor, paged under each provider's own cap, the
-// same on both byte for byte), each a retry on a lag (evmRetryLag). The report: the URLs, the anchor, the tokens and
-// each RPC's last page size.
+// same on both byte for byte), each a retry on a lag (evmRetryLag). The report: the two seats' URLs at the end, every
+// URL asked, the anchor, the tokens and each seat's last page size.
 import { createInterface } from "node:readline";
-import { EVM_CHAIN_IDS, EVM_LOG_PAGE_BLOCKS, EVM_NEWEST_TAG, EVM_POOL_TAG, EVM_TRANSFER_RPCS, evmAgreedBlock, evmAnswered, evmHoldsAnchor, evmRetryLag, evmTokensSentTo, type EvmNetwork, type EvmRpc } from "../src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_LOG_PAGE_BLOCKS, EVM_NEWEST_TAG, EVM_POOL_TAG, EVM_TRANSFER_RPCS, evmAgreedBlock, evmAnswered, evmHoldsAnchor, evmPair, evmRetryLag, evmTokensSentTo, type EvmNetwork, type EvmRpc } from "../src/pool/evm.ts";
 
 type Args = { network: EvmNetwork; w: string; from?: string; back?: string; wait: boolean };
 
@@ -36,17 +37,19 @@ try {
   const urls = EVM_TRANSFER_RPCS[a.network];
   const chainId = EVM_CHAIN_IDS[a.network];
   if (urls === undefined || chainId === undefined) throw new Error(`network: unknown ${String(a.network)}`);
+  const asked = new Set<string>();
   const bridge = (k: number): EvmRpc =>
     Object.assign(
       (method: string, params: readonly unknown[]) =>
         new Promise<unknown>((resolve, reject) => {
           const id = next++;
           waiting.set(id, { resolve, reject });
+          asked.add(urls[k]!);
           out({ rpc: { id, k, url: urls[k], method, params } });
         }),
       { url: urls[k]! },
     );
-  const rpcs: [EvmRpc, EvmRpc] = [bridge(0), bridge(1)];
+  const rpcs = evmPair(urls.map((_, k) => bridge(k)));
   const sleep = a.wait ? undefined : async () => {};
   const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
   const read = async () => {
@@ -59,7 +62,7 @@ try {
     return { anchor, from, tokens: await evmTokensSentTo(rpcs, a.w, from, { fin, anchor }, page, undefined, sleep) };
   };
   const r = await evmRetryLag(read, sleep);
-  out({ done: { urls, chainId: chainId.toString(), anchor: { number: r.anchor.number.toString(), hash: r.anchor.hash }, from: r.from.toString(), tokens: r.tokens, page: page.map(String) } });
+  out({ done: { urls: rpcs.map((r) => r.url), asked: urls.filter((u) => asked.has(u)), chainId: chainId.toString(), anchor: { number: r.anchor.number.toString(), hash: r.anchor.hash }, from: r.from.toString(), tokens: r.tokens, page: page.map(String) } });
   process.exit(0);
 } catch (e) {
   out({ fail: String((e as Error)?.message ?? e) });

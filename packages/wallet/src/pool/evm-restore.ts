@@ -29,8 +29,10 @@
 //   that sent it a Transfer log from its release's block on (./evm.ts evmTokensSentTo: topic 2 = W, no token named, on
 //   two RPCs, paged under each provider's range and result caps, any log one RPC gives and the other lacks refused for
 //   every device alike), and a buy's _token. Each read names one W and nothing else; the Ws are read in a random order,
-//   never in the notes' order (./buy-wallets.ts does the same for holdings). The Transfer RPCs are their own pair, no
-//   provider of the pool's pair, and must be on the pool's chain and hold the restore's anchor block first.
+//   never in the notes' order (./buy-wallets.ts does the same for holdings). The Transfer RPCs are their own list, read
+//   as a pair with spares (./evm.ts evmPair): a provider of the pool's list is dropped from it, so no W is ever named to
+//   a provider that reads the pool, and two must be left. They must be on the pool's chain and hold the restore's anchor
+//   block first.
 // - Only the pool pair may refuse the whole restore. The notes never wait on a W: a W whose read fails (a lag that
 //   stays, a lie, a provider's cap no page can meet, as a stranger's Transfer spam to a public W can force) is listed
 //   with tokens null and its error, and a Transfer pair that fails its check (another chain, or the restore's block
@@ -50,7 +52,7 @@ import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf } from "../notes/store.ts";
 import { solanaSameProvider } from "@blindfill/kit";
-import { checkEvmRpcs, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LOG_PAGE_BLOCKS, EvmLagError, evmHoldsAnchor, evmLatestHigh, evmPoolScopeOf, evmRetryLag, evmTokensSentTo, evmTreeSync, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "./evm.ts";
+import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LOG_PAGE_BLOCKS, EvmLagError, evmHoldsAnchor, evmLatestHigh, evmPair, evmPoolScopeOf, evmRetryLag, evmTokensSentTo, evmTreeSync, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "./evm.ts";
 import { jOf } from "./queue.ts";
 
 const U32 = 0xffffffff;
@@ -186,10 +188,11 @@ export type EvmRestoreNotesArgs = {
   seed64: Uint8Array;
   /** The network's pin (EVM_POOLS[network]). */
   pin: EvmPoolPin;
-  /** Two RPCs of different operators on the pool's network: the pool's events. */
-  rpcs: readonly [EvmRpc, EvmRpc];
-  /** Two RPCs of different operators on the pool's network: each W's Transfer logs. Each call names one W. */
-  walletRpcs: readonly [EvmRpc, EvmRpc];
+  /** A pinned list of two or more providers of different operators on the pool's network: the pool's events. */
+  rpcs: readonly EvmRpc[];
+  /** A pinned list of providers of different operators on the pool's network (EVM_TRANSFER_RPCS): each W's Transfer
+   * logs, on those of them that are no provider of `rpcs`, two or more. Each call names one W. */
+  walletRpcs: readonly EvmRpc[];
   signal?: AbortSignal;
   /** tests only: RESTORE_GAP, the wait between lag retries, and the Ws' order (a random index below n) */
   gap?: number;
@@ -204,19 +207,20 @@ export type EvmRestoreNotesArgs = {
  * own budget. A W that cannot be read is listed unread; the notes never fail with it.
  */
 export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[]; wallets: EvmRestoredWallet[]; block: bigint }> {
-  checkEvmRpcs(a.rpcs);
-  checkEvmRpcs(a.walletRpcs);
-  for (const w of a.walletRpcs) for (const p of a.rpcs) if (solanaSameProvider(w, p)) throw new Error("walletRpcs: a provider of the pool's rpcs; the Transfer reads name Ws and go to their own pair");
+  const rpcs = evmPair(a.rpcs);
+  if (!Array.isArray(a.walletRpcs)) throw new Error("walletRpcs: two or more");
+  // the Transfer reads name Ws: never on a provider of the pool's list
+  const walletRpcs = evmPair(a.walletRpcs.filter((w) => !a.rpcs.some((p) => solanaSameProvider(w, p))), "walletRpcs (no provider of the pool's rpcs)");
   const chainId = EVM_CHAIN_IDS[a.pin.network];
   if (chainId === undefined) throw new Error(`network: unknown ${String(a.pin.network)}`);
   const scope = evmPoolScopeOf(a.pin.pool, chainId);
   const sleep = a.sleep;
-  const sync = evmTreeSync({ rpcs: a.rpcs, pin: a.pin, ...(sleep ? { sleep } : {}) });
+  const sync = evmTreeSync({ rpcs, pin: a.pin, ...(sleep ? { sleep } : {}) });
   const pick = a.pick ?? randomIndex;
   const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
   const r = await evmRetryLag(async () => {
     const r = await sync.events(a.signal, true);
-    const high = await evmLatestHigh(a.rpcs, a.signal, sleep);
+    const high = await evmLatestHigh(rpcs, a.signal, sleep);
     if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw new EvmLagError(`the newest agreed block ${r.anchor.number} is more than an epoch behind an RPC's latest block`);
     return r;
   }, sleep, a.signal);
@@ -229,13 +233,13 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   }
   const wallets: EvmRestoredWallet[] = spends.map((s) => ({ note: s.note, w: s.w, tokens: null }));
   // a W read that fails while the pool pair no longer holds the anchor: a reorg under the restore, the pool pair's lag
-  const poolHolds = () => evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal, sleep);
+  const poolHolds = () => evmHoldsAnchor(rpcs, chainId, r.anchor, a.signal, sleep);
   // the Transfer RPCs on the pool's chain and at the restore's block before any W is named to them; a pair that fails
   // leaves every W unread with its error, never the notes
   let pairError: string | null = null;
   if (order.length > 0) {
     try {
-      await evmRetryLag(() => evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal, sleep), sleep, a.signal);
+      await evmRetryLag(() => evmHoldsAnchor(walletRpcs, chainId, r.anchor, a.signal, sleep), sleep, a.signal);
     } catch (e) {
       a.signal?.throwIfAborted();
       await poolHolds();
@@ -249,7 +253,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
       continue;
     }
     try {
-      const tokens = await evmRetryLag(() => evmTokensSentTo(a.walletRpcs, s.w, s.block, r, page, a.signal, sleep), sleep, a.signal);
+      const tokens = await evmRetryLag(() => evmTokensSentTo(walletRpcs, s.w, s.block, r, page, a.signal, sleep), sleep, a.signal);
       wallets[k]!.tokens = s.token === null || tokens.includes(s.token) ? tokens : [...tokens, s.token].sort();
     } catch (e) {
       a.signal?.throwIfAborted();

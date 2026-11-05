@@ -10,7 +10,7 @@ import { solanaJsonRpc, VaultTree, vaultLabelOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { refKey } from "../src/notes/store.ts";
-import { EVM_LAG_TRIES, EVM_LOG_PAGE_BLOCKS, EVM_LOG_THROTTLE_TRIES, EVM_LOG_THROTTLE_WAIT_MAX_MS, EVM_POOL_EVENTS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmTokensSentTo, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
+import { EVM_LAG_TRIES, EVM_LOG_PAGE_BLOCKS, EVM_LOG_THROTTLE_TRIES, EVM_LOG_THROTTLE_WAIT_MAX_MS, EVM_POOL_EVENTS, EVM_TRANSFER_RPCS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmTokensSentTo, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
 import { evmRestore, evmRestoreNotes } from "../src/pool/evm-restore.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -178,7 +178,7 @@ const pair = (a: World, b: World, oa: Over = {}, ob: Over = {}): [EvmRpc, EvmRpc
 /** The Transfer RPCs: their own pair, never a provider of the pool's (card notes-restore-evm F7). */
 const wpair = (a: World, b: World = a, oa: Over = {}, ob: Over = {}): [EvmRpc, EvmRpc] => [rpc(a, { url: "https://c.example", ...oa }), rpc(b, { url: "https://d.example", ...ob })];
 type Extra = { sleep?: (ms: number) => Promise<void>; pick?: (n: number) => number };
-const restore = (rpcs: [EvmRpc, EvmRpc], walletRpcs: [EvmRpc, EvmRpc], extra: Extra = {}) =>
+const restore = (rpcs: readonly EvmRpc[], walletRpcs: readonly EvmRpc[], extra: Extra = {}) =>
   evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs, walletRpcs, gap: 4, sleep: async () => {}, ...extra });
 const isXfer = (c: { method: string; params: unknown }) => c.method === "eth_getLogs" && (c.params as [{ address?: string }])[0].address === undefined;
 const namedIn = (log: NonNullable<Over["log"]>) => log.filter(isXfer).map((c) => (c.params as [{ topics: string[] }])[0].topics[2]!);
@@ -249,11 +249,17 @@ test("no read names a note: only the pool's whole-set logs and its five views on
   assert.deepEqual(namedIn(wlog2), [addrTopic(W0), addrTopic(W1)]);
 });
 
-test("the Transfer RPCs are their own pair: one that is a provider of the pool's pair is refused", async () => {
+test("the Transfer RPCs are their own list: a provider of the pool's list is dropped from it, never named a W; fewer than two left is refused", async () => {
   const { world } = seeded();
-  await assert.rejects(restore(pair(world, world), pair(world, world)), /walletRpcs: a provider of the pool's rpcs/);
-  await assert.rejects(restore(pair(world, world), [rpc(world, { url: "https://c.example" }), rpc(world, { url: "https://b.example" })]), /walletRpcs: a provider of the pool's rpcs/);
-  await assert.rejects(evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: pair(world, world), gap: 4 } as unknown as Parameters<typeof evmRestoreNotes>[0]), /rpcs: two/);
+  await assert.rejects(restore(pair(world, world), pair(world, world)), /walletRpcs \(no provider of the pool's rpcs\): two or more/);
+  await assert.rejects(restore(pair(world, world), [rpc(world, { url: "https://c.example" }), rpc(world, { url: "https://b.example" })]), /walletRpcs \(no provider of the pool's rpcs\): two or more/);
+  await assert.rejects(evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: pair(world, world), gap: 4 } as unknown as Parameters<typeof evmRestoreNotes>[0]), /walletRpcs: two or more/);
+  // card evm-transfer-rpc-spares: Robinhood testnet's own RPC is in both lists there; the W reads go to the other two
+  const want = await restore(pair(world, world), wpair(world));
+  const shared: Over["log"] = [];
+  const r = await restore(pair(world, world), [rpc(world, { url: "https://c.example" }), rpc(world, { url: "https://b.example", log: shared }), rpc(world, { url: "https://d.example" })]);
+  assert.deepEqual(r.wallets, want.wallets);
+  assert.equal(shared.filter(isXfer).length, 0, "a W named to a provider of the pool's list");
 });
 
 test("paging past a provider's range cap and its result cap still reads every log, under each cap", async () => {
@@ -911,4 +917,49 @@ test("T4 no answer in time halves a page over one block (Pocket's 10,000-block p
     assert.equal(waits2.length, EVM_LOG_THROTTLE_TRIES - 1, client);
     assert.deepEqual(r2.wallets.find((w) => w.w === w2.W1)!.tokens, [TY], client);
   }
+});
+
+// ---- card evm-transfer-rpc-spares: a provider out for hours is swapped for a spare at once ----
+
+/** thirdweb's keyless daily quota as the device's client ends it (read 5 Nov 16:28Z and 17:29Z on every chain): HTTP 429
+ *  -32005 "Rate limit exceeded", Retry-After 26,741 s, past the client's 3.5 s, so one try and no wait. */
+const QUOTA_OUT = (b: Body) => new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32005, message: "Rate limit exceeded. Upgrade your plan at https://thirdweb.com/pricing" } }), { status: 429, headers: { "retry-after": "26741" } });
+
+test("S0 every network's pinned Transfer list (EVM_TRANSFER_RPCS) reads every W while thirdweb's keyless daily quota is out (HTTP 429, Retry-After 26,741 s, 5 Nov 16:28Z and 17:29Z): no wait begun", async () => {
+  for (const [net, urls] of Object.entries(EVM_TRANSFER_RPCS)) {
+    const { world } = seeded();
+    const want = await restore(pair(world, world), wpair(world));
+    const waits: number[] = [];
+    const list = urls.map((u) => (new URL(u).hostname.endsWith(".thirdweb.com") ? viaRetryClient(u, rpc(world, { url: u }), QUOTA_OUT) : viaKitClient(u, rpc(world, { url: u }), () => undefined)));
+    const r = await restore(pair(world, world), list, { sleep: async (ms) => void waits.push(ms) });
+    assert.deepEqual(r.wallets, want.wallets, net);
+    assert.deepEqual(waits, [], `${net}: a wait begun: ${waits}`);
+  }
+});
+
+test("S1 a Transfer provider out for hours (thirdweb's daily quota, Retry-After 26,741 s) is swapped for the list's spare at once: every W read, no wait begun, the out provider asked once", async () => {
+  for (const [name, at] of [["a seat", 0], ["the other seat", 1]] as const) {
+    const { world } = seeded();
+    const want = await restore(pair(world, world), wpair(world));
+    let asked = 0;
+    const out = viaRetryClient("https://out.example", rpc(world), (b) => (asked++, QUOTA_OUT(b)));
+    const list = [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), () => undefined)];
+    list.splice(at, 0, out);
+    const spare = viaKitClient("https://e.example", rpc(world), () => undefined);
+    const waits: number[] = [];
+    const r = await restore(pair(world, world), [...list.slice(0, 2), spare, ...list.slice(2)], { sleep: async (ms) => void waits.push(ms) });
+    assert.deepEqual(r.wallets, want.wallets, name);
+    assert.deepEqual(waits, [], `${name}: a wait begun: ${waits}`);
+    assert.equal(asked, 1, `${name}: the out provider asked ${asked} times`);
+  }
+});
+
+test("S2 every provider of the list out: the pair's error, as on a fixed pair (its waits bounded), every W unread and every note read", async () => {
+  const { world } = seeded();
+  const out = (u: string) => viaRetryClient(u, rpc(world), QUOTA_OUT);
+  const waits: number[] = [];
+  const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), out("https://d.example"), out("https://e.example")], { sleep: async (ms) => void waits.push(ms) });
+  assert.ok(r.wallets.every((w) => w.tokens === null && /^the Transfer RPCs: /.test(w.error ?? "")), JSON.stringify(r.wallets));
+  assert.equal(r.notes.length, 10);
+  assert.ok(waits.every((ms) => ms <= EVM_LOG_THROTTLE_WAIT_MAX_MS), `waits ${waits}`);
 });
