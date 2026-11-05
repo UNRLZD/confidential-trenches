@@ -731,6 +731,14 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     for (const r of [read.trending_1h, read.trending_5m, read.new]) for (const [t, p] of r.pools) if (!Object.hasOwn(pools, t)) pools[t] = p;
     const body = JSON.stringify({ chain, lists, as_of_ms: asOf, unsettled, pools } satisfies EvmSnapshot);
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: asOf };
+    for (const fn of listeners) fn();
+  }
+  /** Called as each new answer is built (swaps.ts ahead: the tokens' pools looked for as the lists load), and at once
+   *  when one is held already. */
+  const listeners = new Set<() => void>();
+  function onAnswer(fn: () => void): void {
+    listeners.add(fn);
+    if (last !== null) fn();
   }
 
   async function tick(): Promise<void> {
@@ -822,5 +830,5 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return all() !== null;
   }
 
-  return { get, warm, tick, state, restore };
+  return { get, warm, tick, state, restore, onAnswer };
 }
