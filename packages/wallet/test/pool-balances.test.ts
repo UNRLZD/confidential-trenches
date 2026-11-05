@@ -2,6 +2,7 @@
 // notes, and how much of it has a proof ready (card balances-per-chain, src/pool/balances.ts). Planted notes only: no
 // seed, no key. Each pool names its asset; its 1.0 is the kit's POOL_ASSET_DECIMALS, never a ladder's `one`.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { NoteRecord, NoteState } from "../src/notes/store.ts";
 import { SOLANA_JITO_TIP_MIN, SOLANA_POOL_VOLUME_ACCOUNT_SIZE, SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyFunds, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed, solanaPoolFee, solanaRentMin, type SolanaPoolRelease, type SolanaRent } from "@blindfill/kit";
@@ -156,6 +157,11 @@ test("the ladder's least rung at mainnet rent: every cost of src/pool/balances.t
   const rent: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
   const chunk = SOL_LADDER.min;
   assert.equal(chunk, 10_000_000n);
+  // the live check (scripts/live-checks/sol-small-note-buys.mjs, kit entry only) writes the rung and the tip cap itself:
+  // they are these
+  const check = readFileSync(new URL("../../../scripts/live-checks/sol-small-note-buys.mjs", import.meta.url), "utf8");
+  const big = (name: string) => BigInt((new RegExp(`^export const ${name} = ([0-9_]+)n;$`, "m").exec(check)?.[1] ?? "-1").replaceAll("_", ""));
+  assert.deepEqual([big("SOL_RUNG"), big("SOL_TIP")], [SOL_LADDER.min, SOL_TIP_CAP]);
   const fee = solanaPoolFee(rent);
   const v = SOLANA_POOL_WORST_BUY_VENUE;
   const items = {
