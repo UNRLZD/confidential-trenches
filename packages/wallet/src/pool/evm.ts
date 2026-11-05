@@ -513,9 +513,11 @@ const CAP_WORDS = /\b(results?|range|blocks?|logs? matched|response size)\b/i;
  * 5 Nov 18:00-18:05Z on a restore's W reads: 1rpc.io/base HTTP 410, then "answer id null" on 7 pages in a row;
  * robinhood-testnet.drpc.org -32601 "the method eth_getBlockByNumber does not exist/is not available" from one of its
  * backends; base.api.pocket.network -32602 "missing required field 'address' for log filter" to 2 of 30 W pages (17:59Z),
- * one backend's, as Robinhood's Pocket (5 Nov). A throttle: the same read again, on a spare at once when the list has
- * one free. */
-const OUT_WORDS = /^HTTP \d{3}$|^answer id \S+ is not request id |(RPC error |"code":\s*)-32601\b|missing required field 'address'/;
+ * one backend's, as Robinhood's Pocket (5 Nov). And a provider that refuses a read for want of a key, HTTP 401 or 403
+ * whatever its words: robinhood-rpc.publicnode.com, the kit's first Robinhood provider, answered a pool-shaped log read
+ * 2,000 blocks back HTTP 403 -32602 "Archive requests require a personal token" (5 Nov 18:55Z); a cap is a 400, never
+ * these. A throttle: the same read again, on a spare at once when the list has one free. */
+const OUT_WORDS = /^HTTP \d{3}$|^HTTP 40[13]\b|^answer id \S+ is not request id |(RPC error |"code":\s*)-32601\b|missing required field 'address'/;
 const throttled = (e: unknown): { kind: "throttle" | "slow"; afterMs: number | null } | null => {
   const t = e as { name?: unknown; afterMs?: unknown; message?: unknown; fault?: unknown } | null;
   if (t?.name === "EvmUnansweredError") return null;

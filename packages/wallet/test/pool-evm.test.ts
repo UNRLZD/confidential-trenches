@@ -1334,7 +1334,9 @@ test("P2 evmPair: two seats never on one provider; a throttle with no free spare
   const g = evmPair([mk("a", (i) => new Error(i === 0 ? "HTTP 410" : "HTTP 400: RPC error 35: ranges over 10000 blocks are not supported on free plan")), mk("b", () => null), mk("c", () => null)]);
   assert.equal(await g[0]("eth_getLogs", [{}]), "0x1");
   assert.deepEqual(urls(g), ["https://c.example", "https://b.example"]);
-  for (const words of ["answer id null is not request id 6", "HTTP 400: RPC error -32601: the method eth_getBlockByNumber does not exist/is not available", "RPC error -32602: invalid argument 0: missing required field 'address' for log filter"]) {
+  // and a provider that refuses a read for want of a key (robinhood-rpc.publicnode.com, the kit's first Robinhood
+  // provider, at a log read 2,000 blocks back: HTTP 403 "Archive requests require a personal token", 5 Nov 18:55Z)
+  for (const words of ["answer id null is not request id 6", "HTTP 400: RPC error -32601: the method eth_getBlockByNumber does not exist/is not available", "RPC error -32602: invalid argument 0: missing required field 'address' for log filter", "HTTP 403: RPC error -32602: Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode", "HTTP 401: RPC error -32001: unauthorized"]) {
     n = { a: 0, b: 0, c: 0 };
     const o = evmPair([mk("a", () => new Error(words)), mk("b", () => null), mk("c", () => null)]);
     assert.equal(await o[0]("eth_getBlockByNumber", ["latest", false]), "0x1", words);
