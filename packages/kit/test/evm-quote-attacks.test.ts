@@ -3808,3 +3808,95 @@ test("LQ5 a call's error naming the provider's compute units per second holds it
   await quoteMod.evmProviders([url, "https://x.lq5.test"], g)[0]!([{ method: "eth_call", params: [{ to: NATIVE, data: "0x" }, "latest"] }]);
   assert.ok(isHeld([url], "cu.lq5.test"));
 });
+
+// ------------------------------------------------------------------ the second scan provider (card evm-scan-second-provider)
+// App live runs 42053555246 and 42059239410 (2026-11-05 15:18Z, 15:51Z): Base cold quotes ended rpc_error at 60.3 s ("the
+// scan provider did not answer within the quote's bound"), a warm one in 193 ms ("the scan provider answered no logs"),
+// and Robinhood warm quotes at 56-60 s on its scan provider's rate limit. Each case below holds the first scan provider
+// and the second (the venue's scan.spare) finds the token's real pool, which holds the seeded route: below_reference.
+const pairQuote = async (token: string, first: EvmRpc, second: EvmRpc, chainName: "base" | "robinhood" = "base") => {
+  const pools = [seeded(token), real(token)];
+  const t = performance.now();
+  const v = await verdict(evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, [first, second]));
+  return { v, ms: performance.now() - t };
+};
+const realAt = (token: string, at: number) => [{ key: real(token).key, at }];
+
+test("SP1 a first scan provider that refuses connections: the scan goes on at the second at once, on Base and Robinhood", { timeout: 30_000 }, async () => {
+  for (const [c, token] of [["base", "0x00000000000000000000000000000000005c4501"], ["robinhood", "0x00000000000000000000000000000000005c4502"]] as const) {
+    const { rpc, st } = faultScan([], () => "unreach");
+    const asked: [number, number][] = [];
+    const { v, ms } = await pairQuote(token, rpc, scanner(5_000_000, realAt(token, 4_500_000), asked), c);
+    assert.deepEqual(v, below, c);
+    // each refused request goes to the second at its first refusal, never after the first's 0.5, 1 and 2 s backoffs
+    assert.ok(ms < 1_500, `${c}: ${Math.round(ms)} ms`);
+    assert.ok(st.logs > 0 && asked.length > 0, `${c}: ${st.logs} getLogs on the first, ${asked.length} on the second`);
+    // the second reads in its own span: Base 2,500 blocks, Robinhood 100,000
+    const span = c === "base" ? 2_500 : 100_000;
+    assert.ok(asked.every(([a, b]) => b - a + 1 <= span), `${c}: a request on the second spans more than ${span}`);
+  }
+  // a first that refuses its head too: the head and every request are the second's
+  const token = "0x00000000000000000000000000000000005c4503";
+  const down = evmJsonRpc("https://down.s1.test", (async () => {
+    throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+  }) as unknown as typeof fetch);
+  assert.deepEqual((await pairQuote(token, down, scanner(5_000_000, realAt(token, 4_500_000)))).v, below);
+});
+
+test("SP2 a first scan provider that does not answer: the second has the blocks the first left at its share of the bound (half)", { timeout: 30_000 }, async () => {
+  evmScanBound?.(2_000);
+  try {
+    const token = "0x00000000000000000000000000000000005c4504";
+    // the first answers the older half of the depth and hangs on every newer request until aborted; the real pool is in
+    // the newer half
+    const { rpc } = faultScan(realAt(token, 4_800_000), (a) => (a <= 4_500_000 ? "ok" : "timeout"));
+    const asked: [number, number][] = [];
+    const { v, ms } = await pairQuote(token, rpc, scanner(5_000_000, realAt(token, 4_800_000), asked));
+    assert.deepEqual(v, below);
+    assert.ok(ms >= 1_000 && ms < 2_000 + 500, `${Math.round(ms)} ms`);
+    // the second is asked only the blocks the first did not answer
+    assert.ok(asked.length > 0 && asked.every(([a]) => a > 4_500_000), `the second read ${JSON.stringify(asked.filter(([a]) => a <= 4_500_000).slice(0, 3))}`);
+  } finally {
+    evmScanBound?.();
+  }
+});
+
+test("SP3 a first scan provider that answers no logs, or no logs from behind the head: the second's answer counts", { timeout: 30_000 }, async () => {
+  // base-rpc.publicnode.com's answer to a range past the backend's head (-32602 on blastapi's and bloXroute's: "block
+  // range extends beyond current head block", 2026-11-05 16:13Z), the warm quote's "answered no logs" in 193 ms
+  const token = "0x00000000000000000000000000000000005c4505";
+  const refusing = scanner(5_000_000, realAt(token, 4_999_999));
+  const noLogs: EvmRpc = async (calls) => {
+    const out = await refusing(calls);
+    return out.map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32602, message: "block range extends beyond current head block" } } : o));
+  };
+  assert.deepEqual((await pairQuote(token, noLogs, scanner(5_000_000, realAt(token, 4_999_999)))).v, below);
+  // a backend behind the head: its getLogs answer no logs and no error, and it holds no block at the head (publicnode,
+  // bloXroute and Globalstake each answered a range 2 blocks past their head with [] and no error, 2026-11-05 16:14-16:22Z)
+  const token2 = "0x00000000000000000000000000000000005c4506";
+  const lagging = scanner(5_000_000, realAt(token2, 4_999_999));
+  const behind: EvmRpc = async (calls) => {
+    const out = await lagging(calls);
+    return out.map((o, i) => {
+      const c = calls[i]!;
+      if (c.method === "eth_getLogs") {
+        const f = c.params[0] as { toBlock: string };
+        return Number(f.toBlock) >= 4_999_990 ? { jsonrpc: "2.0", id: i, result: [] } : o;
+      }
+      if (c.method === "eth_getBlockByNumber" && Number(c.params[0]) >= 4_999_990) return { jsonrpc: "2.0", id: i, result: null };
+      return o;
+    });
+  };
+  const { v, ms } = await pairQuote(token2, behind, scanner(5_000_000, realAt(token2, 4_999_999)));
+  assert.deepEqual(v, below);
+  assert.ok(ms < 1_500, `${Math.round(ms)} ms`);
+});
+
+test("SP4 a first scan provider whose rate limit would hold a request past 2 s: the request goes to the second, never waits to the bound", { timeout: 30_000 }, async () => {
+  // rpc.mainnet.chain.robinhood.com held warm Robinhood quotes 56-60 s on its rate limit (run 42059239410, evm-quote-lag-held)
+  const token = "0x00000000000000000000000000000000005c4507";
+  const { rpc, st } = faultScan([], () => "429:30");
+  const { v, ms } = await pairQuote(token, rpc, scanner(5_000_000, realAt(token, 4_500_000)), "robinhood");
+  assert.deepEqual(v, below);
+  assert.ok(ms < 1_500, `${Math.round(ms)} ms, ${st.throttled.length} throttled`);
+});
