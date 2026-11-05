@@ -3400,11 +3400,13 @@ test("B1a a scan provider that refuses every getLogs connection (bound 2 s): rpc
   try {
     const token = freshToken();
     const inner = scanner(5_000_000, []);
-    let logs = 0;
+    // each request's send times, on the test's own clock, by its body (a span and its currencies)
+    const asks = new Map<string, number[]>();
     const rpc = evmJsonRpc("https://scan.refuse.test", (async (_u: string, init: RequestInit) => {
       const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
       if (calls.some((c) => c.method === "eth_getLogs")) {
-        logs++;
+        const k = JSON.stringify(calls);
+        asks.set(k, [...(asks.get(k) ?? []), performance.now()]);
         throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
       }
       const out = await inner(calls);
@@ -3415,8 +3417,17 @@ test("B1a a scan provider that refuses every getLogs connection (bound 2 s): rpc
     const ms = performance.now() - t;
     assert.equal((v as { code?: string }).code, "rpc_error");
     assert.ok(ms < 2_000 + 300, `verdict at ${Math.round(ms)} ms`);
-    // 100 spans, each asked at 0, 0.5 and 1.5 s at most before the bound: the fourth, at 3.5 s, is past it
-    assert.ok(logs <= 100 * 3, `${logs} getLogs`);
+    // each request asked again 0.5 s, then 1 s after a refusal, so three times at most before the bound (the fourth would
+    // be 3.5 s after its first): gaps read per request, never a total, which a slower machine changes (CI at f4d842f:
+    // 308 getLogs where a total of 300 was asserted)
+    // a wait that reaches the bound is cut there and may end a millisecond early, so an ask at the bound is no gap
+    assert.ok(asks.size > 0, "no getLogs asked");
+    for (const [k, all] of asks) {
+      const ts = all.filter((x) => x < t + 2_000 - 50);
+      const gaps = ts.slice(1).map((x, i) => x - ts[i]!);
+      assert.ok(ts.length <= 3, `${ts.length} asks of one request: ${k.slice(0, 80)}`);
+      assert.ok(gaps.every((g, i) => g >= [500, 1_000][i]! - 5), `gaps ${gaps.map(Math.round).join(", ")} ms: ${k.slice(0, 80)}`);
+    }
   } finally {
     evmScanBound?.();
   }
