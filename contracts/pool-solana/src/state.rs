@@ -269,7 +269,8 @@ fn is_page_for(program_id: &Pubkey, page: &AccountInfo, tree: u8, index: u64) ->
 /// The page leaf `index`'s entry goes to: `page`, the one the sender built with, or, when the sender also gave `next`
 /// and `page` is not the one, `next` (review 2, R-1). A sender builds with the page of the tree's size it read; inserts
 /// that land between its read and its landing can carry the index onto the next page, and the transaction would
-/// otherwise fail on chain. `push_entry` still checks whichever is picked, so `next` can only be the next page.
+/// otherwise fail on chain. `next` is not checked here: it may be any account the index's entry may go to, and
+/// `push_entry` checks the page it writes to, whichever is picked (a page that is not the index's own is refused).
 pub fn page_for<'b, 'a>(program_id: &Pubkey, page: &'b AccountInfo<'a>, next: Option<&'b AccountInfo<'a>>, tree: u8, index: u64) -> &'b AccountInfo<'a> {
     match next {
         Some(n) if !is_page_for(program_id, page, tree, index) => n,

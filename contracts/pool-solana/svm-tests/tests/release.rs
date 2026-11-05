@@ -1081,6 +1081,45 @@ fn a_tag3_built_on_the_full_page_lands_with_the_next_page() {
     assert_eq!(hex(&root_at(&env, 0, 1024)), b["state_roots"]["1024"].as_str().unwrap());
 }
 
+/// Tag 3 with no tip: the next page sits at account 8 (with a tip it is at 9, the test above). An inner instruction
+/// naming it is refused, and the release lands on it.
+#[test]
+fn a_tag3_with_no_tip_names_its_next_page_at_8() {
+    let (mut env, b) = at_the_page_boundary();
+    let to = Keypair::new().pubkey();
+    env.svm.airdrop(&to, 1_000_000_000).unwrap();
+    let next = page(&env, 0, 1024);
+    let stale = |env: &Env, inner: Vec<Instruction>| {
+        let buy = Buy { r: rel_of(env, &b["spends"][0]), compressed: true, flags: 0, tip: 0, tip_to: Pubkey::new_from_array([0; 32]), inner, trailing: vec![], count: None };
+        let mut ix = buy_ix(env, &buy);
+        ix.accounts[6] = AccountMeta::new(page(env, 0, 1023), false);
+        with_next_page(&mut ix, 8, next);
+        ix
+    };
+    let ix = stale(&env, vec![transfer_ix(&env.w.pubkey(), &next, 1_000_000)]);
+    assert_eq!(send_tag3(&mut env, ix).err(), Some(INNER_NAMES_POOL_ACCOUNT), "an inner instruction naming the next page at 8");
+    let ix = stale(&env, vec![transfer_ix(&env.w.pubkey(), &to, 1_000_000)]);
+    send_tag3(&mut env, ix).expect("tag 3 with no tip lands on the next page at 8");
+    let p1 = env.svm.get_account(&next).unwrap();
+    assert_eq!(&p1.data[16..48], &rel_of(&env, &b["spends"][0]).new_commitment, "the change note is leaf 1,024, on page 1");
+    assert_eq!(hex(&root_at(&env, 0, 1024)), b["state_roots"]["1024"].as_str().unwrap());
+}
+
+/// At a page's first entry the page named first is the one when it sits at the new page's address: a next page named
+/// after it, whatever it is, is never read.
+#[test]
+fn at_a_page_start_the_right_first_page_lands_whatever_the_next() {
+    let (mut env, b) = at_the_page_boundary();
+    let r = rel_of(&env, &b["spends"][0]);
+    let (fp, w) = (env.fee_payer.insecure_clone(), env.w.insecure_clone());
+    let payer = fp.pubkey();
+    let mut ix = release_ix(&env, &r);
+    assert_eq!(ix.accounts[6].pubkey, page(&env, 0, 1024), "the release names page 1, the index's own");
+    ix.accounts.push(AccountMeta::new(Keypair::new().pubkey(), false));
+    send(&mut env, &[compute_limit(400_000), ix], &payer, &[&fp, &w]).expect("the right first page lands, the ninth unread");
+    assert_eq!(hex(&root_at(&env, 0, 1024)), b["state_roots"]["1024"].as_str().unwrap());
+}
+
 // Ported from the independent review of c53a7f9: three checks that had no test failing without them.
 
 /// The pool account's size (src/state.rs POOL_LEN): header 49 bytes, then two trees of size, depth and 33 side nodes.
