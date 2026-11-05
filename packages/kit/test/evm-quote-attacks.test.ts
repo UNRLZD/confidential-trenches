@@ -4,6 +4,7 @@
 // block agreement, the first-hop native rule, the v3 doubled read, the pinned launchpad pools and a lagging node. N1 and N2 are
 // the review of 9a8265b's: N1 on a modelled chain whose PoolManager holds the token's pools (chain() below). Each test states what the device must do.
 import { mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
 import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolSellQuoteRequest, type EvmPoolKey, type EvmRoute, type EvmV4Route } from "../src/index.ts";
@@ -3172,7 +3173,7 @@ test("L5 a sell at its buy's block, one provider a block behind it: the quote wa
  *  timer set and fired) and every timer still pending, or says no timer is pending: then the quote waits on a promise
  *  the mocked clock does not drive. */
 async function drive<T>(start: () => Promise<T>, ticks: number, step: number): Promise<{ value: T; ms: number }> {
-  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  enableTimers(mock.timers, { apis: ["setTimeout", "Date"], now: 0 });
   const mocked = { set: globalThis.setTimeout, clear: globalThis.clearTimeout };
   type Timer = { site: string; ms: number; at: number; fired: boolean; cleared: boolean };
   const timers = new Map<unknown, Timer>();
@@ -3215,13 +3216,11 @@ async function drive<T>(start: () => Promise<T>, ticks: number, step: number): P
     }
     return { value: await p, ms: Date.now() };
   } finally {
-    // every timer still set is cleared here, never left to the reset: the mocked clock's reset drops them but leaves each
-    // its place in its queue, and work that outlives this drive, clearing one during a later drive, would take out the
-    // later drive's timer at that place (a wait that then never ends)
-    for (const [h, t] of timers) if (!t.fired && !t.cleared) mocked.clear(h as Parameters<typeof clearTimeout>[0]);
     globalThis.setTimeout = mocked.set;
     globalThis.clearTimeout = mocked.clear;
-    mock.timers.reset();
+    // every timer still set is cleared before the reset (test/mock-timers.ts), so work that outlives this drive never
+    // takes a later drive's timer with it
+    resetTimers(mock.timers);
   }
 }
 test("drive: a timer an earlier drive left set, cleared during a later one by the work that set it, never takes the later one's timer with it", async () => {

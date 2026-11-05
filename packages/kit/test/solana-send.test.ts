@@ -4,6 +4,7 @@
 // both providers' finalized height passes lastValidBlockHeight, and a status read the two providers disagree on is
 // never a fill. Fake endpoints only: nothing here reaches a network.
 import { test, mock } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { base58, base64 } from "@scure/base";
 import {
@@ -135,7 +136,7 @@ const FIN: Status = { confirmationStatus: "finalized", err: null, slot: 9 };
 const ERR: Status = { confirmationStatus: "confirmed", err: { InstructionError: [2, { Custom: 6001 }] }, slot: 9 };
 
 function setup(modes: ("ok" | "down" | "hang")[] = ["ok", "ok", "ok", "ok"]) {
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   tick = 0;
   const paths = modes.map((m, i) => path(["sender", "jito", "rpc", "helper"][i]!, m));
   const a = provider();
@@ -144,7 +145,7 @@ function setup(modes: ("ok" | "down" | "hang")[] = ["ok", "ok", "ok", "ok"]) {
 }
 
 test("all four paths get the same bytes in the same tick, before sendSolanaSet returns", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, opts } = setup();
   const set = [tx(11), tx(12), tx(13)];
   const h = sendSolanaSet(set, opts);
@@ -161,7 +162,7 @@ test("all four paths get the same bytes in the same tick, before sendSolanaSet r
 });
 
 test("a path that is down or hangs never delays the others: they get the bytes, the rebroadcast and the fill", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, a, b, opts } = setup(["down", "hang", "ok", "ok"]);
   const one = tx(21);
   const h = sendSolanaSet([one], opts);
@@ -181,7 +182,7 @@ test("a path that is down or hangs never delays the others: they get the bytes, 
 });
 
 test("rebroadcast every 2 s, and stops once both providers read the fill", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, a, b, opts } = setup();
   const one = tx(31);
   const h = sendSolanaSet([one], opts);
@@ -199,7 +200,7 @@ test("rebroadcast every 2 s, and stops once both providers read the fill", async
 });
 
 test("rebroadcast stops when both providers' finalized height passes lastValidBlockHeight; the tx is then dead", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, a, b, opts } = setup();
   const one = tx(41, 500);
   a.valid = false; // the height is the only gate left here
@@ -224,7 +225,7 @@ test("rebroadcast stops when both providers' finalized height passes lastValidBl
 });
 
 test("a landed tx read late is never called dead: past the height with a status on one provider is not expired", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const one = tx(42, 500);
   const h = sendSolanaSet([one], { ...opts, deadlineMs: 20_000 });
@@ -241,7 +242,7 @@ test("a landed tx read late is never called dead: past the height with a status 
 });
 
 test("a status the two providers disagree on is not a fill, nor a failure; both failed is a failure", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const [x, y, z, w] = [tx(51), tx(52), tx(53), tx(54)];
   const h = sendSolanaSet([x, y, z, w], { ...opts, deadlineMs: 10_000 });
@@ -259,7 +260,7 @@ test("a status the two providers disagree on is not a fill, nor a failure; both 
 });
 
 test("a hostile or broken status answer is never a fill", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const one = tx(61);
   const h = sendSolanaSet([one], { ...opts, deadlineMs: 10_000 });
@@ -284,7 +285,7 @@ test("a hostile or broken status answer is never a fill", async (t) => {
 });
 
 test("a hostile height answer never stops the rebroadcast", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, a, b, opts } = setup();
   a.valid = b.valid = false; // the height is the only gate left here
   const h = sendSolanaSet([tx(62, 500)], { ...opts, deadlineMs: 30_000 });
@@ -301,7 +302,7 @@ test("a hostile height answer never stops the rebroadcast", async (t) => {
 });
 
 test("in a set, a decided tx is never sent again while its siblings still are", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, a, b, opts } = setup();
   const [x, y] = [tx(64), tx(65)];
   const h = sendSolanaSet([x, y], { ...opts, deadlineMs: 20_000 });
@@ -321,7 +322,7 @@ test("in a set, a decided tx is never sent again while its siblings still are", 
 });
 
 test("a tx past lastValidBlockHeight on both providers is never sent again, even while its status is undecided", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, a, b, opts } = setup();
   const one = tx(66, 500);
   const h = sendSolanaSet([one], { ...opts, deadlineMs: 30_000 });
@@ -340,7 +341,7 @@ test("a tx past lastValidBlockHeight on both providers is never sent again, even
 });
 
 test("a status with no err field is neither a fill nor a failure, on both providers", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const one = tx(67);
   const h = sendSolanaSet([one], { ...opts, deadlineMs: 4_000 });
@@ -352,7 +353,7 @@ test("a status with no err field is neither a fill nor a failure, on both provid
 });
 
 test("a provider that hangs holds no fill back from being read once it answers, and never fills alone", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const one = tx(63);
   b.hang = true;
@@ -365,7 +366,7 @@ test("a provider that hangs holds no fill back from being read once it answers, 
 });
 
 test("the set is refused before any send: unsigned, duplicate, too large, bad lastValidBlockHeight, empty", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, opts } = setup();
   const unsigned = tx(0);
   assert.throws(() => sendSolanaSet([unsigned], opts), /not signed/);
@@ -474,7 +475,7 @@ test("solanaJsonRpc refuses an answer that is not a JSON-RPC result for its own 
 });
 
 test("dry: the set is simulated on both providers and no path is called", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, a, b, opts } = setup();
   const set = [tx(91), tx(92), tx(93)];
   const r = await dryRunSolanaSet(set, opts);
@@ -491,7 +492,7 @@ test("dry: the set is simulated on both providers and no path is called", async 
 // ---- the Opus review of 694ecb9 (R1-R3 ported from its repros)
 
 test("High (R1): a tx that landed at 1 s and left the status cache is read with searchTransactionHistory and ends filled, never expired", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, opts } = setup();
   const one = tx(101, 500);
   const flags: unknown[] = [];
@@ -521,7 +522,7 @@ test("High (R1): a tx that landed at 1 s and left the status cache is read with 
 });
 
 test("High: dead is decided only on reads made with searchTransactionHistory: true", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const one = tx(102, 500);
   a.height = b.height = 600;
@@ -538,7 +539,7 @@ test("High: dead is decided only on reads made with searchTransactionHistory: tr
 });
 
 test("Medium 1 (R2): a status answer whose context.slot is below the slot its provider's height was read at never counts toward dead", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const one = tx(103, 595);
   a.height = b.height = 600;
@@ -551,7 +552,7 @@ test("Medium 1 (R2): a status answer whose context.slot is below the slot its pr
 });
 
 test("Medium 1: a history read from a bank behind the one that read the blockhash as expired never counts toward dead", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const one = tx(110, 595);
   a.height = b.height = 600;
@@ -565,7 +566,7 @@ test("Medium 1: a history read from a bank behind the one that read the blockhas
 });
 
 test("Medium 1: the same reads at or above the height's slot do make it dead", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const one = tx(104, 595);
   a.height = b.height = 600;
@@ -578,7 +579,7 @@ test("Medium 1: the same reads at or above the height's slot do make it dead", a
 });
 
 test("Medium 2: a lowered lastValidBlockHeight never makes a live tx dead: isBlockhashValid still true on either provider", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, a, b, opts } = setup();
   const one = tx(105, 500); // the caller claims 500
   a.height = b.height = 600; // both finalized heights are past the claim
@@ -603,7 +604,7 @@ test("Medium 2: a lowered lastValidBlockHeight never makes a live tx dead: isBlo
 });
 
 test("Medium 3 (R3): on a 1-rps path each tx of a set of 3 is admitted within 4 s; the other paths get every tx every tick", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { paths, opts } = setup();
   let windowStart = -Infinity;
   const admitted = new Map<string, number>();
@@ -633,7 +634,7 @@ test("Medium 3 (R3): on a 1-rps path each tx of a set of 3 is admitted within 4 
 });
 
 test("a provider answering 429 is backed off, and a 429 stays no answer", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts, b } = setup();
   let calls = 0;
   const limited: SolanaRpc = async () => { calls++; throw new Error("HTTP 429"); };
@@ -645,7 +646,7 @@ test("a provider answering 429 is backed off, and a 429 stays no answer", async 
 });
 
 test("a provider that once read the tx landed never calls it dead, even when a later history read has none", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const one = tx(111, 500);
   a.set(sigOf(one), OK); // A reads it landed in the first poll
@@ -661,7 +662,7 @@ test("a provider that once read the tx landed never calls it dead, even when a l
 // ---- the Opus re-check of 8bdcb6c (N1 ported from its repro2)
 
 test("Medium (N1): a false isBlockhashValid from a provider that never read the hash as valid is not expiry", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts } = setup();
   // Agave answers false for a hash its bank does not hold at all (blockhash_queue.rs:98-108 at v4.3.2), the same as
   // for an expired one: a node a few slots behind the fresh hash's block answers false. B is hostile.
@@ -683,7 +684,7 @@ test("Medium (N1): a false isBlockhashValid from a provider that never read the 
 });
 
 test("Medium (N1 control): valid at slot 1500, then false at 2500, on both providers, is expiry", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts } = setup();
   const seen = [0, 0];
   const prov = (k: 0 | 1): SolanaRpc => async (method, params) => {
@@ -698,7 +699,7 @@ test("Medium (N1 control): valid at slot 1500, then false at 2500, on both provi
 });
 
 test("Medium: the blockhash is read from the first dead cycle on, before the height is past", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const h = sendSolanaSet([tx(123, 5_000)], { ...opts, deadlineMs: 3_000 }); // heights 0: far from past
   await advance(3_000);
@@ -707,7 +708,7 @@ test("Medium: the blockhash is read from the first dead cycle on, before the hei
 });
 
 test("a valid answer from a bank above the later false one does not make it valid-then-expired", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts } = setup();
   const seen = [0, 0];
   const prov = (k: 0 | 1): SolanaRpc => async (method, params) => {
@@ -741,7 +742,7 @@ function oneRpsFetch() {
 }
 
 test("solanaSendPaths' Sender and Jito through sendSolanaSet on a 1-rps fake: no refusal, every tx on both within 4 s, never the same tx in the same second", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts } = setup();
   const { fetchFn, log } = oneRpsFetch();
   const set = [tx(131), tx(132), tx(133)];
@@ -762,7 +763,7 @@ test("solanaSendPaths' Sender and Jito through sendSolanaSet on a 1-rps fake: no
 });
 
 test("two sets at once on the same 1-rps URLs stay at 1 request a second per URL together", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts } = setup();
   const { fetchFn, log } = oneRpsFetch();
   const h1 = sendSolanaSet([tx(141), tx(142)], { ...opts, paths: solanaSendPaths({ fetch: fetchFn }) });
@@ -781,7 +782,7 @@ test("two sets at once on the same 1-rps URLs stay at 1 request a second per URL
 });
 
 test("a later valid read clears an earlier expired one: a provider that reads the hash valid again is not dead", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts } = setup();
   const seen = [0, 0];
   const answers = [{ slot: 1_500, value: true }, { slot: 2_500, value: false }];
@@ -821,7 +822,7 @@ function laProvider(refuseValid: boolean): SolanaRpc {
 }
 
 test("Low (L-a): a refused isBlockhashValid is no answer, and that cycle's history read still runs: the filled tx ends filled", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts } = setup();
   const h = sendSolanaSet([tx(151, 500)], { ...opts, providers: [laProvider(false), laProvider(true)], deadlineMs: 10_000 });
   await advance(10_000);
@@ -829,7 +830,7 @@ test("Low (L-a): a refused isBlockhashValid is no answer, and that cycle's histo
 });
 
 test("Low (L-a control): with isBlockhashValid answered on both, the same tx ends filled", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts } = setup();
   const h = sendSolanaSet([tx(152, 500)], { ...opts, providers: [laProvider(false), laProvider(false)], deadlineMs: 10_000 });
   await advance(10_000);
@@ -837,7 +838,7 @@ test("Low (L-a control): with isBlockhashValid answered on both, the same tx end
 });
 
 test("Low: a pacer leaves the map once its last set is done and its interval has passed (a fresh path object per trade)", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { opts } = setup();
   const count = (kit as { solanaSendPacerCount?: () => number }).solanaSendPacerCount;
   assert.equal(typeof count, "function", "solanaSendPacerCount is exported");
@@ -859,7 +860,7 @@ test("Low: a pacer leaves the map once its last set is done and its interval has
 const statusCalls = (p: FakeProvider) => p.calls.map((c, k) => ({ ...c, k })).filter((c) => c.method === "getSignatureStatuses");
 
 test("every status read carries one signature, on both providers, for the fill poll and the history read", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b, opts } = setup();
   const set = [tx(91), tx(92), tx(93)];
   a.height = 2_000; // past every tx's lastValidBlockHeight, so the dead check reads the history too
@@ -877,8 +878,8 @@ test("every status read carries one signature, on both providers, for the fill p
 });
 
 test("the fill poll is spread over the interval: one tx a call, in turn, never two calls in the same tick", async (t) => {
-  t.after(() => mock.timers.reset());
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(mock.timers));
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const a = provider();
   const b = provider();
   const at: number[] = [];
@@ -896,8 +897,8 @@ test("the fill poll is spread over the interval: one tx a call, in turn, never t
 });
 
 test("a keyless provider stays within its published limit: 100 calls in any 10 s, 40 of one method", async (t) => {
-  t.after(() => mock.timers.reset());
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(mock.timers));
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const a = provider();
   const b = provider();
   const at: { t: number; m: string }[] = [];
@@ -919,8 +920,8 @@ test("a keyless provider stays within its published limit: 100 calls in any 10 s
 const perSecond = (at: readonly number[]): number => Math.max(0, ...at.map((x) => at.filter((y) => y >= x && y < x + 1_000).length));
 
 test("one queue a provider: two sets in flight on it stay within its rate together", async (t) => {
-  t.after(() => mock.timers.reset());
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(mock.timers));
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const a = provider();
   const b = provider();
   const at: number[] = [];
@@ -936,8 +937,8 @@ test("one queue a provider: two sets in flight on it stay within its rate togeth
 });
 
 test("one queue a provider: another caller's reads through solanaPacedRpc and a set share it, first come first served", async (t) => {
-  t.after(() => mock.timers.reset());
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(mock.timers));
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const a = provider();
   const b = provider();
   const at: { t: number; m: string }[] = [];
@@ -957,8 +958,8 @@ test("one queue a provider: another caller's reads through solanaPacedRpc and a 
 });
 
 test("one queue a provider, first in first out per method: while the status budget is spent, another method's call goes at once", async (t) => {
-  t.after(() => mock.timers.reset());
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(mock.timers));
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const at: { t: number; m: string }[] = [];
   const rpc = Object.assign(async (m: string) => { at.push({ t: Date.now(), m }); return null; }, { url: "https://fifo.example" }) as SolanaRpc;
   const paced = kit.solanaPacedRpc(rpc);
@@ -974,8 +975,8 @@ test("one queue a provider, first in first out per method: while the status budg
 });
 
 test("a set unlanded and not yet expired for 25 s on a keyless provider: alone, the fill poll reads its burst and then the steady pool, leaves a later set's burst unread and books no later turn, so no other read on the provider waits", async (t) => {
-  t.after(() => mock.timers.reset());
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(mock.timers));
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const a = provider();
   const b = provider();
   a.height = 500; // under the txs' lastValidBlockHeight: undecided, no history read
@@ -1004,8 +1005,8 @@ test("a set unlanded and not yet expired for 25 s on a keyless provider: alone, 
 });
 
 test("while another caller's status read waits on the provider, it goes at the first turn the limit allows: the fill poll never takes it", async (t) => {
-  t.after(() => mock.timers.reset());
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(mock.timers));
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const a = provider();
   const b = provider();
   a.height = 500;
@@ -1030,8 +1031,8 @@ test("while another caller's status read waits on the provider, it goes at the f
 });
 
 test("one URL, several limits: a providerRps 4 set beside a keyless wrapper and the RPC send path on the same URL stays at 4 a second", async (t) => {
-  t.after(() => mock.timers.reset());
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(mock.timers));
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const U = "https://one-url-many-limits.example";
   const a = provider();
   const b = provider();
@@ -1059,8 +1060,8 @@ test("one URL, several limits: a providerRps 4 set beside a keyless wrapper and 
 });
 
 test("the dry run through a direct caller's bare providers is paced: 1 a second simulates a set of 3 one a second", async (t) => {
-  t.after(() => mock.timers.reset());
-  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(mock.timers));
+  enableTimers(mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const a = provider();
   const b = provider();
   const at: number[] = [];
@@ -1094,7 +1095,7 @@ const mostInWindow = (ts: number[], w: number) => Math.max(0, ...ts.map((x) => t
 
 for (const rtt of FILL_RTTS) {
   test(`fill poll at ${rtt} ms a call: a stuck set of 9 has every tx read again within its revisit plus the round trip, and spends at most the budget less one burst in any window`, async (t) => {
-    t.after(() => mock.timers.reset());
+    t.after(() => resetTimers(mock.timers));
     const { a, b } = setup();
     a.height = 500; // under the txs' lastValidBlockHeight: undecided, no history read
     b.height = 500;
@@ -1117,9 +1118,9 @@ for (const rtt of FILL_RTTS) {
   });
 
   test(`fill poll at ${rtt} ms a call: a 3-tx set started at 3 s or 6 s beside a stuck set of 9, and two at once, are read filled within 1 s of landing`, async (t) => {
-    t.after(() => mock.timers.reset());
+    t.after(() => resetTimers(mock.timers));
     for (const [start, quicks] of [[3_000, 1], [6_000, 1], [3_000, 2]] as const) {
-      mock.timers.reset();
+      resetTimers(mock.timers);
       const { a, b } = setup();
       a.height = 500;
       b.height = 500;
@@ -1145,7 +1146,7 @@ for (const rtt of FILL_RTTS) {
 }
 
 test("a tx one provider has read landed is not read again there, and one the other never sees land holds no other tx back", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b } = setup();
   const [x, y] = [tx(210, 5_000), tx(211, 5_000)];
   a.set(sigOf(x), OK); // B never sees x land
@@ -1165,7 +1166,7 @@ test("a tx one provider has read landed is not read again there, and one the oth
 const sharedA = (a: FakeProvider, url: string, rtt: number, log: { t: number; sig: string }[]): SolanaRpc => Object.assign(late(a.rpc, rtt, log), { url });
 for (const rps of [1, 2]) {
   test(`the fill poll reads at providerRps ${rps}, where the dead checks of two stuck sets fill the budget: each keeps reading and a later set is read filled`, async (t) => {
-    t.after(() => mock.timers.reset());
+    t.after(() => resetTimers(mock.timers));
     const { a, b } = setup();
     a.height = 500;
     b.height = 500;
@@ -1192,7 +1193,7 @@ for (const rps of [1, 2]) {
 
 // Each test below is named for the rule it holds (the planted break it catches in brackets).
 test("fill burst [Q5]: a burst read the poll skips (backed off after a 429) is not spent: the whole burst is read after the back-off", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b } = setup();
   a.height = 500;
   b.height = 500;
@@ -1211,7 +1212,7 @@ test("fill burst [Q5]: a burst read the poll skips (backed off after a 429) is n
 });
 
 test("fill pool [Q6]: a set with nothing left to read on a provider spends none of its steady pool", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b } = setup();
   a.height = 500;
   b.height = 500;
@@ -1231,7 +1232,7 @@ test("fill pool [Q6]: a set with nothing left to read on a provider spends none 
 });
 
 test("fill pool [Q7, Q8]: two stuck sets on one provider share one steady pool, so a later set's burst stays free", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b } = setup();
   a.height = 500;
   b.height = 500;
@@ -1252,7 +1253,7 @@ test("fill pool [Q7, Q8]: two stuck sets on one provider share one steady pool, 
 });
 
 test("fill burst [Q9]: a set's burst is spread over FILL_BURST_MS, not spent at pollMs over its txs", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b } = setup();
   a.height = 500;
   b.height = 500;
@@ -1266,7 +1267,7 @@ test("fill burst [Q9]: a set's burst is spread over FILL_BURST_MS, not spent at 
 
 // rtt 0: the set is in its steady reads when the budget is busy; rtt 3 s (one read in flight): still in its burst
 for (const rtt of [0, 3_000]) test(`fill poll [lastFast]: at ${rtt} ms a call, while another caller keeps the status budget busy past the first window and the set still reads in every window, the poll books no turn`, async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b } = setup();
   a.height = 500;
   b.height = 500;
@@ -1297,7 +1298,7 @@ for (const rtt of [0, 3_000]) test(`fill poll [lastFast]: at ${rtt} ms a call, w
 });
 
 test("a set stopped while its dead check waits on one blockhash's isBlockhashValid asks no other and leaves no turn booked [Q3]", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   setup();
   // a set of 2 on two blockhashes; isBlockhashValid answers in 800 ms; the dead check every 300 ms; stopped at 500 ms
   const tx2 = (seed: number, bh: number): SolanaSignedTx => {
@@ -1324,7 +1325,7 @@ test("a set stopped while its dead check waits on one blockhash's isBlockhashVal
 });
 
 test("30 sets given up while their calls wait their turn leave no turn booked in the provider's queue", async (t) => {
-  t.after(() => mock.timers.reset());
+  t.after(() => resetTimers(mock.timers));
   const { a, b } = setup();
   a.height = 500;
   b.height = 500;
@@ -1346,8 +1347,8 @@ test("30 sets given up while their calls wait their turn leave no turn booked in
 
 test("the fill poll's back-off runs on the monotonic clock: a wall clock set back an hour does not hold the reads back", async (t) => {
   realPerf = true;
-  t.after(() => { realPerf = false; mock.timers.reset(); });
-  mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  t.after(() => { realPerf = false; resetTimers(mock.timers); });
+  enableTimers(mock.timers, { apis: ["Date"], now: 1_800_000_000_000 });
   const a = provider();
   const b = provider();
   a.height = 500;
@@ -1379,8 +1380,8 @@ test("pollMs of 0, below 0 or not a number is refused before any send", () => {
 
 test("the queue's clock is monotonic: a step of the wall clock never lets a window's calls look older and one more through", async (t) => {
   realPerf = true;
-  t.after(() => { realPerf = false; mock.timers.reset(); });
-  mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  t.after(() => { realPerf = false; resetTimers(mock.timers); });
+  enableTimers(mock.timers, { apis: ["Date"], now: 1_800_000_000_000 });
   const at: number[] = [];
   const rpc: SolanaRpc = async () => { at.push(perfNow()); return null; };
   const paced = kit.solanaPacedRpc(rpc, { windowMs: 400, total: 2, perMethod: 2 });

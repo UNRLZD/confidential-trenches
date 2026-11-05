@@ -5,6 +5,7 @@
 // pool pinned), a page with no flow, or the mainnet tables are refused. Its own file: the network is read once, at
 // import, so this process runs as the testnet build does (test/pool-network.test.ts runs the mainnet one).
 import { after, mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
@@ -352,7 +353,7 @@ test("pool.buy runs on the pinned devnet pool once a lookup table is pinned; wit
 test("a pool send still pending at the kind's 10 s, and at 90 s, is not aborted: its own window is over 90 s", async () => {
   assert.equal(SIGNPAGE_TIMEOUT_MS["pool.buy"], 10_000);
   assert.ok(POOL_SEND_TIMEOUT_MS > 90_000);
-  mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
     let signal!: AbortSignal;
     let answer!: (r: Response) => void;
@@ -379,7 +380,7 @@ test("a pool send still pending at the kind's 10 s, and at 90 s, is not aborted:
     assert.equal(signal.aborted, true);
     await assert.rejects(q, /no answer in 120000 ms/);
   } finally {
-    mock.timers.reset();
+    resetTimers(mock.timers);
   }
 });
 

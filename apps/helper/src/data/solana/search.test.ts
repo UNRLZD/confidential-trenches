@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test, type TestContext } from "node:test";
+import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 import { createProxy, PROXY_BUDGETS, PROXY_RESERVE } from "../../proxy/proxy.ts";
 import { b58encode } from "./lists.ts";
 import * as T from "./token.ts";
@@ -75,7 +76,10 @@ function ask(tok: ReturnType<typeof T.createSolanaToken>, m: string): { done: Ti
   h.p = tok.page(m).then((a) => (h.done = { status: a.status, ms: Date.now() - t0, ...(a.retryAfterS === undefined ? {} : { retryAfterS: a.retryAfterS }) }));
   return h;
 }
-const clock = (t: TestContext) => t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+const clock = (t: TestContext) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "Date"], now: NOW });
+  t.after(() => resetTimers(t.mock.timers));
+};
 
 test("card helper-token-page-cold: four cold mints arriving together 1 s after a search each answer within 1 s, in one search", async (t) => {
   clock(t);

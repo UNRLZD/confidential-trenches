@@ -10,6 +10,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { enableTimers, resetTimers } from "../test/mock-timers.ts";
 import * as nodeFs from "node:fs";
 import * as server from "./server.ts";
 import * as gk from "./data/gecko.ts";
@@ -246,7 +247,8 @@ const pending = () => {
 };
 
 test("a bind answers within HELPER_BIND_ANSWER_MS of its arrival: the wait for the senders is inside that bound", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   let clock = 1_800_000_000_000;
   const senders = pending();
   let carried = 0;
@@ -283,7 +285,8 @@ test("a bind answers within HELPER_BIND_ANSWER_MS of its arrival: the wait for t
 });
 
 test("every route the senders serve waits for them, bounded: a send, a pool send and a fee quote go once they are this helper's, else 503 and nothing done", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const done: string[] = [];
   const carrier = (name: string) => ({ carry: async () => (done.push(name), { status: 200, body: { ok: true } }), fee: () => ({}), ready: Promise.resolve(), warm: () => undefined, stop: () => undefined });
   const parts = {
