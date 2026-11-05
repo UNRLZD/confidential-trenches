@@ -3,15 +3,19 @@
 // holds it.
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
-import { BLOCK_CLOCK } from "../../src/data/evm/lists.ts";
 import { BASE_VENUES, createSwaps, REF_POOL_ID, type Log, type Pool } from "../../src/data/evm/swaps.ts";
 
 // -- the recorded logs -----------------------------------------------------------------------------------------------
 
 export type Rec = { firstHead: number; lastHead: number; blockTimes: Record<string, number>; logs: Record<"icnt" | "vvv" | "ref", { b: number; i: number; tx: string; t: string[]; d: string; a: string }[]>; recordedAt: string };
 export const REC = JSON.parse(gunzipSync(readFileSync(new URL("../../src/data/evm/fixtures/swaps-base-hour.json.gz", import.meta.url))).toString("utf8")) as Rec;
-export const CLOCK = BLOCK_CLOCK.base!;
-export const timeOf = (n: number) => CLOCK.genesisS + CLOCK.blockS * n;
+/** Base's block times as read on chain: a block every 2 s from genesis at 1686789347, and every 200 ms from block
+ *  53556127 at 1793901601000 ms (base-rpc.publicnode.com, 2026-11-05 19:0xZ; lists.ts BLOCK_CLOCK). */
+export const FAST_FROM = 53556127;
+export const timeMsOf = (n: number) => (n < FAST_FROM ? (1686789347 + 2 * n) * 1000 : 1793901601000 + 200 * (n - FAST_FROM));
+export const timeOf = (n: number) => Math.floor(timeMsOf(n) / 1000);
+/** Blocks the recording is moved by to sit in the 200 ms era (fakeChain's `shift`): its first block 1,000 after it. */
+export const FAST_SHIFT = FAST_FROM + 1_000 - REC.firstHead;
 export const toLog = (l: Rec["logs"]["icnt"][number]): Log => ({ block: l.b, index: l.i, tx: l.tx, address: l.a, topics: l.t, data: l.d });
 
 export const ICNT = "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d";
@@ -26,19 +30,26 @@ export const KNOWN = new Map([[ICNT, { pool: POOL_ICNT, decimals: 18 }], [VVV, {
 /** The log's second word with its last hex digit changed: a different amount, the same sign and shape. */
 export const tamper = (d: string): string => `${d.slice(0, 2 + 64 + 63)}${d[2 + 64 + 63] === "7" ? "3" : "7"}${d.slice(2 + 64 + 64)}`;
 export const URLS = ["https://a.test", "https://b.test", "https://c.test"];
-type Fault = { lag?: number; status?: number; limit?: number; corrupt?: boolean; down?: boolean; badClock?: boolean; fork?: boolean };
-export function fakeChain() {
-  const st = { head: REC.firstHead, calls: new Map<string, number>(), faults: new Map<string, Fault>(), fork: null as null | { from: number } };
+/** `badClock`: the provider's head and log times are this many seconds off its blocks' own. */
+type Fault = { lag?: number; status?: number; limit?: number; corrupt?: boolean; down?: boolean; badClock?: number; fork?: boolean };
+/** `shift`: every recorded block is served this many blocks later (FAST_SHIFT: in the 200 ms era), timed as Base times
+ *  it there; the test sets `st.head` in the shifted blocks. */
+export function fakeChain(o: { shift?: number } = {}) {
+  const shift = o.shift ?? 0;
+  // `methods`: each provider's requests by method ("<url> <method>")
+  const st = { head: REC.firstHead, calls: new Map<string, number>(), methods: new Map<string, number>(), faults: new Map<string, Fault>(), fork: null as null | { from: number } };
   const sources = [
     { addr: POOL_ICNT.id, t1: null as string | null, logs: REC.logs.icnt },
     { addr: POOL_VVV.id, t1: null as string | null, logs: REC.logs.vvv },
     { addr: BASE_VENUES.poolManager, t1: REF_POOL_ID as string | null, logs: REC.logs.ref },
   ];
-  const wire = (l: Rec["logs"]["icnt"][number], corrupt: boolean, fork: boolean) => ({
+  // each log with its block's time, as Base's providers log it (`blockTimestamp`)
+  const wire = (l: Rec["logs"]["icnt"][number], corrupt: boolean, fork: boolean, off: number) => ({
     address: l.a,
     topics: l.t,
     data: corrupt || fork ? tamper(l.d) : l.d,
-    blockNumber: `0x${l.b.toString(16)}`,
+    blockNumber: `0x${(l.b + shift).toString(16)}`,
+    blockTimestamp: `0x${(timeOf(l.b + shift) + off).toString(16)}`,
     logIndex: `0x${l.i.toString(16)}`,
     transactionHash: l.tx,
     removed: false,
@@ -50,16 +61,17 @@ export function fakeChain() {
     if (f.status !== undefined) return new Response("{}", { status: f.status, headers: { "retry-after": "7" } });
     const head = st.head - (f.lag ?? 0);
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+    for (const r of reqs) st.methods.set(`${url} ${r.method}`, (st.methods.get(`${url} ${r.method}`) ?? 0) + 1);
     const out = reqs.map((r) => {
       if (f.limit !== undefined) return { jsonrpc: "2.0", id: r.id, error: { code: -32005, message: "rate limited", data: { backoff_seconds: f.limit } } };
-      if (r.method === "eth_getBlockByNumber") return { jsonrpc: "2.0", id: r.id, result: { number: `0x${head.toString(16)}`, timestamp: `0x${(timeOf(head) + (f.badClock ? 1 : 0)).toString(16)}` } };
+      if (r.method === "eth_getBlockByNumber") return { jsonrpc: "2.0", id: r.id, result: { number: `0x${head.toString(16)}`, timestamp: `0x${(timeOf(head) + (f.badClock ?? 0)).toString(16)}` } };
       if (r.method === "eth_getLogs") {
         const q = r.params[0] as { address: string; topics: string[]; fromBlock: string; toBlock: string };
         const [from, to] = [parseInt(q.fromBlock, 16), parseInt(q.toBlock, 16)];
         const src = sources.find((s) => s.addr === q.address && (s.t1 === null || s.t1 === q.topics[1]));
         if (src === undefined || to > head) return { jsonrpc: "2.0", id: r.id, error: { code: -32000, message: "bad range" } };
         const forkFrom = st.fork?.from ?? Infinity;
-        return { jsonrpc: "2.0", id: r.id, result: src.logs.filter((l) => l.b >= from && l.b <= to).map((l, k) => wire(l, f.corrupt === true && k % 5 === 0, l.b >= forkFrom)) };
+        return { jsonrpc: "2.0", id: r.id, result: src.logs.filter((l) => l.b + shift >= from && l.b + shift <= to).map((l, k) => wire(l, f.corrupt === true && k % 5 === 0, l.b + shift >= forkFrom, f.badClock ?? 0)) };
       }
       if (r.method === "eth_getTransactionByHash") return { jsonrpc: "2.0", id: r.id, result: { hash: r.params[0], from: `0x${(r.params[0] as string).slice(26, 66)}` } };
       return { jsonrpc: "2.0", id: r.id, error: { code: -32601, message: "no" } };

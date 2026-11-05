@@ -40,7 +40,7 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { budgetFromEnv, evmThrottleS, LIMIT_WINDOW_MS, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
+import { budgetFromEnv, evmThrottleS, LIMIT_WINDOW_MS, LOGS_REFUSED, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
@@ -426,7 +426,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (!(await holdOver(c, deadline))) return throttled(budget.heldFor(c), undefined, `${c} held`);
     const wait = budget.takeEach(drawsOf(c, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
-    const list = [...new Set([upstreams[c].url, ...(deps.pinned?.[c] ?? [])])];
+    // a log read is never sent to a provider that refuses every one (LOGS_REFUSED): its 429 would hold it for the reads
+    // it does answer
+    const list = [...new Set([upstreams[c].url, ...(deps.pinned?.[c] ?? [])])].filter((u) => !(methods.includes("eth_getLogs") && LOGS_REFUSED.has(u)));
     for (let tries = 0; ; tries++) {
       let soonestMs = Infinity;
       let down = false;

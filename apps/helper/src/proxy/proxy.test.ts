@@ -102,7 +102,10 @@ test("the answer: the vendor's status and JSON body, X-Helper-Source and X-Fetch
   const c = clock();
   const f = vendor(() => json({ route: [] }, 200, { "set-cookie": "a=b", "x-ratelimit-remaining": "3", server: "up" }));
   const a = await createProxy(ENV, { fetch: f.fetch, now: c.now }).handle("jupiter", "/swap/v2/build", "", "");
-  assert.deepEqual(a, { status: 200, headers: { "X-Helper-Source": "jupiter", "X-Fetched-At": new Date(c.now()).toISOString() }, body: '{"route":[]}' });
+  const { timing, ...answer } = a;
+  assert.deepEqual(answer, { status: 200, headers: { "X-Helper-Source": "jupiter", "X-Fetched-At": new Date(c.now()).toISOString() }, body: '{"route":[]}' });
+  // the call's own waits for the helper's Server-Timing (card helper-ready-page-warm): a field of the answer, never a header
+  assert.deepEqual(timing?.map((e) => e.split(";")[0]), ["budget", "turn", "send"]);
   const b = await createProxy(ENV, { fetch: vendor(() => json({ error: "no route" }, 400)).fetch }).handle("jupiter", "/swap/v2/build", "", "");
   assert.equal(b.status, 400, "a vendor's own 4xx passes as data");
   assert.equal(b.body, '{"error":"no route"}');
