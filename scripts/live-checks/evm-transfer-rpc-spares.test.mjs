@@ -1,33 +1,39 @@
 // node --test scripts/live-checks/evm-transfer-rpc-spares.test.mjs: card evm-transfer-rpc-spares's live check,
-// replayed. evm-transfer-rpc-spares.answers.json holds a real run on Base's and Robinhood's Transfer lists (good: each
-// network's newest 2,000 blocks read for a W with every provider live, then once per provider with that one answering
-// as thirdweb's daily quota, HTTP 429 with Retry-After 26,741,000 ms) and the same answers with every answer of Base's
-// dRPC a quota 429 too (bad: with thirdweb's own quota out then, one provider left on Base whenever one more is out). The wallet's own read runs on the replay: good
-// passes, bad fails on Base.
+// replayed. evm-transfer-rpc-spares.answers.json holds a real run on every network's pool list and each testnet's
+// Transfer list (good: the newest 2,000 blocks read with every provider live, then once per provider but thirdweb's with
+// that one answering as thirdweb's daily quota, HTTP 429 with Retry-After 26,741,000 ms) and the same answers with every
+// answer of Base's pool list but its first provider's a quota 429 too (bad: one provider left there). The wallet's own
+// read runs on the replay: good passes, bad fails on Base's pool list only.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { NETWORKS, spares, spoil } from "./evm-transfer-rpc-spares.mjs";
+import { LISTS, spares, spoil } from "./evm-transfer-rpc-spares.mjs";
 import { replayer } from "./wallet-restore-transfer-rpcs.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-transfer-rpc-spares.answers.json", import.meta.url), "utf8"));
+const CASE = /^([a-z-]+ (?:pool|transfer)), (\S+) out: (?:(\S+) and (\S+) read alike from block \d+ to \d+, the out one asked [01] times?|(skipped: .+))$/;
 
-test("the recorded good run passes: with any one provider of any network's list out, the W read runs alike on two others of two operators", async () => {
+test("the recorded good run passes: on every list with any one provider out the read runs alike on two others; a case skipped says why in its line", async () => {
   const r = await spares(replayer(A.good), { wait: false });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.ok(r.lines.length >= 3 * NETWORKS.length, r.lines.join("\n"));
-  for (const n of NETWORKS) assert.ok(r.lines.filter((l) => l.startsWith(`${n}, `)).length >= 3, `${n}: three providers out in turn`);
-  for (const l of r.lines) {
-    const m = /^[a-z-]+, (\S+) out: (\S+) and (\S+) read W alike from block \d+ to \d+, the out one asked [01] times?$/.exec(l);
-    assert.ok(m && m[1] !== m[2] && m[1] !== m[3], l);
+  for (const l of LISTS) {
+    assert.ok(r.lines.some((x) => x.startsWith(`${l.label}, every provider live: `) && / read alike from block /.test(x)), `${l.label}: no live read`);
+    const cases = r.lines.filter((x) => x.startsWith(`${l.label}, `) && !x.includes("every provider live"));
+    assert.equal(cases.length, (l.pool ?? l.urls).filter((u) => !u.includes(".thirdweb.com")).length, `${l.label}: one case per provider but thirdweb's`);
+    for (const c of cases) {
+      const m = CASE.exec(c);
+      assert.ok(m, c);
+      if (m[5] === undefined) assert.ok(m[2] !== m[3] && m[2] !== m[4], c);
+    }
   }
+  // Base's and Robinhood's pool lists hold five providers: no case of theirs is skipped
+  assert.ok(r.lines.filter((x) => /^(base|robinhood) pool, /.test(x)).every((x) => !/skipped/.test(x)), r.lines.join("\n"));
 });
 
-test("the recorded bad run (Base's dRPC out too) fails on Base, and is the good run but that", async () => {
+test("the recorded bad run (Base's pool list down to one) fails on Base's pool list only, and is the good run but that", async () => {
   assert.deepEqual(A.bad, spoil(A.good));
   const r = await spares(replayer(A.bad), { wait: false });
   assert.equal(r.ok, false);
-  const base = r.lines.filter((l) => l.startsWith("base, "));
-  assert.ok(base.some((l) => !/read W alike/.test(l)), base.join("\n"));
-  assert.ok(r.lines.filter((l) => !l.startsWith("base, ")).every((l) => /read W alike/.test(l)), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("base pool, ") && !/read alike|skipped/.test(l)), r.lines.join("\n"));
+  assert.ok(r.lines.filter((l) => !l.startsWith("base pool, ")).every((l) => /read alike|skipped/.test(l)), r.lines.join("\n"));
 });
