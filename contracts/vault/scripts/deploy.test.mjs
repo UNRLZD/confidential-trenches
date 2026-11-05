@@ -602,3 +602,9 @@ test("mainnet (d): a batch that would leave a key on the vault (an AddKey, or an
   assert.deepEqual(txActionTags(swapped)[3], 5);
   assert.ok(recipeProblems(swapped).length, "an AddKey in the fourth place passed");
 });
+
+test("mainnet: deploy.mjs sends to the two RPCs the mainnet read-back reads (vault-mainnet.mjs MAINNET_RPCS)", async () => {
+  const { MAINNET_RPCS } = await import(SCRIPT);
+  const { MAINNET_RPCS: READ } = await import("../../../scripts/live-checks/vault-mainnet.mjs");
+  assert.deepEqual(MAINNET_RPCS, READ);
+});

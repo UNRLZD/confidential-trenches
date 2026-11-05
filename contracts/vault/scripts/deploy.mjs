@@ -63,7 +63,6 @@ import { fileURLToPath } from "node:url";
 import { b58decode, b58encode, functionCallTx, recipeTx } from "./near-tx.mjs";
 import { EXPORTS_ALLOWED, RPCS as TESTNET_RPCS, TESTNET_VERSION, wasmProblems } from "../../../scripts/live-checks/vault-skeleton.mjs";
 import { MAINNET_USDC, TESTNET_TOKEN, networkProblems, tokenProblems } from "../../../scripts/live-checks/vault-testnet-t01.mjs";
-import { MAINNET_RPCS } from "../../../scripts/live-checks/vault-mainnet.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CRATE = path.resolve(HERE, "..");
@@ -79,6 +78,9 @@ export const CARGO_NEAR = "cargo-near-near 0.22.0";
 export const BUILD_ARGS = ["near", "build", "non-reproducible-wasm", "--no-embed-abi", "--locked"];
 export const LIVE_CHECK = "scripts/live-checks/vault-testnet-t01.mjs";
 export const MAINNET_LIVE_CHECK = "scripts/live-checks/vault-mainnet.mjs";
+// FastNEAR and dRPC, mainnet's two operators: vault-mainnet.mjs MAINNET_RPCS, held equal by deploy.test.mjs. Written
+// here, not imported: that module's imports reach scripts/ci (money-gate.mjs), which the sandbox suite does not read.
+export const MAINNET_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 // config().version of a mainnet build (contracts/vault/src/constants.rs NETWORK)
 export const MAINNET_VERSION = /^blindfill-vault \S+ mainnet$/;
 // What the parent must hold on mainnet beyond the code storage and the registration: the recipe's 100 Tgas config call
