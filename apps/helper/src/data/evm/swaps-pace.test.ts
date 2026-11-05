@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CURVE_TOKEN, fakeChain, open, POOL_CURVE, POOL_MAG, REC, URLS } from "../../../test/evm-swaps/robinhood.ts";
+import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { CALLER_ROOM, PROVIDER_PACE, providerHolds } from "../../limits/limits.ts";
 import { HEADER_TIMED, SWAP_RPCS, type Pool } from "./swaps.ts";
@@ -57,10 +58,9 @@ function rig() {
   };
   return { chain, fetch, refused, logs };
 }
-const realClock = () => {
-  const t0 = performance.now();
-  return { get t() { return 9_000_000 + Math.round(performance.now() - t0); } };
-};
+/** The helper's clock on the run's virtual time (onVirtualTime), so the paces refill as the run's own time passes,
+ *  never as fast as the machine is (#266's CI at 05351af: drpc's share of the fold 2 reads moved with the load). */
+const runClock = { get t() { return Date.now(); } };
 const show = (m: Map<string, number>) => [...m].map(([u, k]) => `${new URL(u).host} ${k}`).join(", ") || "none";
 
 test("the pace: a bucket per provider, background reads leaving CALLER_ROOM of it for callers; a provider with no pace is never waited for", () => {
@@ -86,18 +86,18 @@ test("the pace: a bucket per provider, background reads leaving CALLER_ROOM of i
 
 test("card helper-robinhood-capacity fold 2: 12 cold tokens at once, hooked v4 pools among them, against providers that refuse past their read limits: all 12 answer 200 and no provider refuses once; drpc (100 blocks a read) is the last resort", async () => {
   const r = rig();
-  const clock = realClock();
+  const clock = runClock;
   // five hooked v4 pools (two eth_getLogs a span: swaps and the hook's transfers), the curve, six tokens with no pool
   const hooked = Array.from({ length: 5 }, (_, i) => `0x${(0xb0000 + i).toString(16).padStart(40, "0")}`);
   const none = Array.from({ length: 6 }, (_, i) => `0x${(0xabc00 + i).toString(16).padStart(40, "0")}`);
   const pools = new Map<string, { pool: Pool; decimals: number }>([[CURVE_TOKEN, { pool: POOL_CURVE, decimals: 18 }], ...hooked.map((t) => [t, { pool: { ...POOL_MAG, token: t, hook: HOOK }, decimals: 18 }] as const)]);
-  const holds = providerHolds(() => clock.t);
-  const s = open(r.chain, clock, { pools, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never, holds });
   const tokens = [...hooked, CURVE_TOKEN, ...none];
-  const t0 = performance.now();
-  const got = await Promise.all(tokens.map((t) => s.trades(t, 50)));
-  const ms = performance.now() - t0;
-  s.stop();
+  const { value: got, ms } = await onVirtualTime(9_000_000, async () => {
+    const s = open(r.chain, clock, { pools, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never, holds: providerHolds(() => clock.t) });
+    const got = await Promise.all(tokens.map((t) => s.trades(t, 50)));
+    s.stop();
+    return got;
+  });
   assert.deepEqual(got.map((a) => a.status), tokens.map(() => 200), got.map((a) => a.body.slice(0, 60)).join("\n"));
   for (const t of [...hooked, CURVE_TOKEN]) assert.ok(JSON.parse(got[tokens.indexOf(t)]!.body).trades.length > 0, `${t}: a tape`);
   assert.equal(r.refused.size, 0, `refused: ${show(r.refused)} (eth_getLogs ${show(r.logs)})`);
@@ -150,12 +150,15 @@ test("card helper-robinhood-capacity fold 2: a caller of /v1/rpc/robinhood never
 test("card helper-robinhood-capacity fold 3: every provider's bucket spent at once (each read passed at PACE_WAIT_MAX_MS everywhere, as on the loaded box) still answers 200: a read fails on a refusal or a disagreement, never on the pace alone", async () => {
   const chain = fakeChain();
   chain.st.head = REC.lastHead;
-  const clock = realClock();
+  const clock = runClock;
   const tight = { perS: 3, burst: 3, unit: "post" as const };
-  const holds = providerHolds(() => clock.t, Object.fromEntries(URLS.map((u) => [u, tight])));
-  const s = open(chain, clock, { pools: new Map([[CURVE_TOKEN, { pool: POOL_CURVE, decimals: 18 }]]), fetch: chain.fetch, holds });
-  const got = await Promise.all([s.trades(CURVE_TOKEN, 50), s.trades(CURVE_TOKEN, 50)]);
-  s.stop();
+  const { value: got } = await onVirtualTime(9_000_000, async () => {
+    const holds = providerHolds(() => clock.t, Object.fromEntries(URLS.map((u) => [u, tight])));
+    const s = open(chain, clock, { pools: new Map([[CURVE_TOKEN, { pool: POOL_CURVE, decimals: 18 }]]), fetch: chain.fetch, holds });
+    const got = await Promise.all([s.trades(CURVE_TOKEN, 50), s.trades(CURVE_TOKEN, 50)]);
+    s.stop();
+    return got;
+  });
   for (const a of got) assert.equal(a.status, 200, a.body);
   assert.ok(JSON.parse(got[0]!.body).trades.length > 0);
 });
@@ -177,14 +180,17 @@ test("card helper-robinhood-capacity fold 4: a provider at its in-flight cap (da
       out.set(url, out.get(url)! - 1);
     }
   };
-  const clock = realClock();
+  const clock = runClock;
   const hooked = Array.from({ length: 5 }, (_, i) => `0x${(0xc0000 + i).toString(16).padStart(40, "0")}`);
   const none = Array.from({ length: 6 }, (_, i) => `0x${(0xabd00 + i).toString(16).padStart(40, "0")}`);
   const pools = new Map<string, { pool: Pool; decimals: number }>([[CURVE_TOKEN, { pool: POOL_CURVE, decimals: 18 }], ...hooked.map((t) => [t, { pool: { ...POOL_MAG, token: t, hook: HOOK }, decimals: 18 }] as const)]);
-  const s = open(chain, clock, { pools, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: fetch as never, holds: providerHolds(() => clock.t) });
-  const t0 = performance.now();
-  const ms = await Promise.all([...hooked, CURVE_TOKEN, ...none].map((t) => s.trades(t, 50).then((a) => (assert.equal(a.status, 200, a.body), performance.now() - t0))));
-  s.stop();
+  const { value: ms } = await onVirtualTime(9_000_000, async () => {
+    const s = open(chain, clock, { pools, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: fetch as never, holds: providerHolds(() => clock.t) });
+    const t0 = performance.now();
+    const ms = await Promise.all([...hooked, CURVE_TOKEN, ...none].map((t) => s.trades(t, 50).then((a) => (assert.equal(a.status, 200, a.body), performance.now() - t0))));
+    s.stop();
+    return ms;
+  });
   assert.equal(over, 0, "daybreak was never sent past the 4 it serves at once");
   assert.ok(Math.max(...ms) < 15_000, `slowest tape ${Math.round(Math.max(...ms))} ms (${ms.map((x) => Math.round(x)).join(", ")})`);
 });
@@ -204,12 +210,15 @@ test("card helper-robinhood-capacity fold 5: the traders' lookups (eth_getTransa
     }
     return chain.fetch(url, init);
   };
-  const clock = realClock();
+  const clock = runClock;
   const hooked = Array.from({ length: 5 }, (_, i) => `0x${(0xd0000 + i).toString(16).padStart(40, "0")}`);
   const pools = new Map<string, { pool: Pool; decimals: number }>([[CURVE_TOKEN, { pool: POOL_CURVE, decimals: 18 }], ...hooked.map((t) => [t, { pool: { ...POOL_MAG, token: t, hook: HOOK }, decimals: 18 }] as const)]);
-  const s = open(chain, clock, { pools, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: fetch as never, holds: providerHolds(() => clock.t) });
-  const got = await Promise.all([...hooked, CURVE_TOKEN].map((t) => s.trades(t, 50)));
-  s.stop();
+  const { value: got } = await onVirtualTime(9_000_000, async () => {
+    const s = open(chain, clock, { pools, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: fetch as never, holds: providerHolds(() => clock.t) });
+    const got = await Promise.all([...hooked, CURVE_TOKEN].map((t) => s.trades(t, 50)));
+    s.stop();
+    return got;
+  });
   assert.deepEqual(got.map((a) => a.status), got.map(() => 200));
   assert.ok(tx > 0, "the traders were read");
   assert.equal(single, 0, `${single} of ${tx} trader posts went to a one-request-a-post provider`);

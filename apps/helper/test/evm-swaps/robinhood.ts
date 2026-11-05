@@ -35,10 +35,13 @@ export const URLS = ["https://a.test", "https://b.test", "https://c.test"];
  *  `backTime`: an hour earlier for the logs of every other block, so time goes back; `window`: logs only of the newest
  *  this many blocks, older ones refused -32011, as api.blockvectra.com's public endpoint (about 850, 2026-11-04 14:38Z);
  *  `span`: the widest `eth_getLogs` it takes (100 unless set: the wide providers of swaps.ts WIDE_SPAN take 1,000);
+ *  `addressOnly`: refuses an `eth_getLogs` with no address (-32602), as pocket and blockvectra do;
  *  `refuse`: a refusal it answers instead, when it returns one (a 429, a throttle). */
-type Fault = { zeroTime?: boolean; skewTime?: boolean; backTime?: boolean; down?: boolean; window?: number; span?: number; refuse?: () => Response | null };
+type Fault = { zeroTime?: boolean; skewTime?: boolean; backTime?: boolean; down?: boolean; window?: number; span?: number; addressOnly?: boolean; refuse?: () => Response | null };
 export function fakeChain() {
-  const st = { head: REC.firstHead, calls: new Map<string, number>(), faults: new Map<string, Fault>(), spans: [] as number[] };
+  // `own`: eth_getLogs of one address's swap events (a token's own read), `ownFrom` each one's first block; `wide`: of
+  // no address (the index's); `seq`: the ETH price's reads ("ref") and each sender lookup ("tx <hash>") in the order asked
+  const st = { head: REC.firstHead, calls: new Map<string, number>(), faults: new Map<string, Fault>(), spans: [] as number[], own: 0, wide: 0, ownFrom: [] as number[], seq: [] as string[] };
   const sources = [
     { addr: REC.curve, t1: null as string | null, logs: REC.logs.curve },
     { addr: ROBINHOOD_VENUES.poolManager, t1: REC.v4id as string | null, logs: REC.logs.v4 },
@@ -74,6 +77,18 @@ export function fakeChain() {
         if (to > st.head || to - from + 1 > (f.span ?? 100)) return { jsonrpc: "2.0", id: r.id, error: { code: -32602, message: "eth_getLogs block range exceeds 100 blocks" } };
         if (f.window !== undefined && from < st.head - f.window) return { jsonrpc: "2.0", id: r.id, error: { code: -32011, message: "block reference is outside the public history window" } };
         if (q.topics[0] === TOPIC.transfer) return ok([]);
+        // a filter with no address (the chain's swap index, index.ts): every source's logs of its topics, as
+        // daybreak, blockmachine and drpc answer one; `addressOnly` refuses it, as pocket and blockvectra do
+        if (q.address === undefined) {
+          st.wide++;
+          if (f.addressOnly) return { jsonrpc: "2.0", id: r.id, error: { code: -32602, message: "missing required field 'address'" } };
+          const want = [q.topics[0]].flat();
+          const all = sources.flatMap((s) => s.logs).filter((l) => l.b >= from && l.b <= to && want.includes(l.t[0]!));
+          return ok(all.sort((x, y) => x.b - y.b || x.i - y.i).map((l) => wire(l, f)));
+        }
+        st.own++;
+        st.ownFrom.push(from);
+        if (q.topics[1] === ROBINHOOD_REF_POOL_ID) st.seq.push("ref");
         const src = sources.find((s) => s.addr === q.address && (s.t1 === null || s.t1 === q.topics[1]));
         if (src === undefined) return ok([]);
         return ok(src.logs.filter((l) => l.b >= from && l.b <= to && (Array.isArray(q.topics[0]) ? q.topics[0].includes(l.t[0]!) : q.topics[0] === l.t[0])).map((l) => wire(l, f)));
@@ -86,6 +101,7 @@ export function fakeChain() {
         if (c.data === "0x313ce567") return ok(`0x${(18).toString(16).padStart(64, "0")}`);
         return { jsonrpc: "2.0", id: r.id, error: { code: -32000, message: "execution reverted" } };
       }
+      if (r.method === "eth_getTransactionByHash") st.seq.push(`tx ${r.params[0]}`);
       if (r.method === "eth_getTransactionByHash") return ok({ hash: r.params[0], from: `0x${(r.params[0] as string).slice(26, 66)}` });
       return { jsonrpc: "2.0", id: r.id, error: { code: -32601, message: "no" } };
     });
