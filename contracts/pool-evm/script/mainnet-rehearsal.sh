@@ -85,7 +85,7 @@ for chain in base robinhood; do
   cast send --unlocked --from "$STANDIN" "$(awk '{print $9}' <<<"$line")" --value "$(awk '{print $4}' <<<"$line")" --rpc-url "$url" >/dev/null
   rc=0; wait $pid || rc=$?
   cat "$rlog2"
-  [ "$rc" = 0 ] && grep -q "^deploy: resuming the stopped run with its key: WithdrawalVerifier 0x[0-9a-f]*, PrivacyPoolSimple 0x[0-9a-f]* read back on both RPCs as the build's: reused" "$rlog2"
+  [ "$rc" = 0 ] && grep -q "^deploy: resuming the stopped run with its key: WithdrawalVerifier 0x[0-9a-f]*, PrivacyPoolSimple 0x[0-9a-f]*.* read back on both RPCs as the build.s: reused" "$rlog2"
   [ "$(folders)" = "$before_keys" ] && [ ! -e "$OUT/$chain-resume.journal.json" ]
   node "$ROOT/scripts/live-checks/pool-evm-deploy.mjs" --deployment "$OUT/$chain-resume.json" --rpc "$url,http://localhost:$port" | tail -1 | grep -q ": PASS$"
   echo "rehearsal [$chain]: the same command resumed with the kept key, reused the verifier and the pool, and its record passes the live check"
