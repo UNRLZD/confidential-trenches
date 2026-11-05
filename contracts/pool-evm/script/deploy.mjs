@@ -103,7 +103,7 @@ const SWEEP_TX_BYTES = 200n; // an EIP-1559 transfer signed is about 110 bytes
 // pool-evm-deploy.build.json makes it: its length and keccak256. solc 0.8.28 with contracts/pool-evm/foundry.toml builds
 // these bytes on any host (the metadata hashes the sources, not the paths), so a mainnet run takes no other: a
 // constructor changed, or code from another commit, is refused before a key is made. Read from forge build --root
-// contracts/pool-evm (forge 1.8.6 on the box unrlzd-pc-ct, 2026-11-05 17:27Z); the verifier's, the pool's and both
+// contracts/pool-evm (forge 1.8.6 on a Linux build host, 2026-11-05 17:27Z); the verifier's, the pool's and both
 // adapters' are also the init code of the 3 Nov testnet deploys built on the Mac (their transactions' input, read
 // 2026-11-05 17:39Z); the sell delegate was rebuilt since (pool review round 2). test/deploy-run.test.mjs fails when
 // forge's out/ differs (CI builds with forge 1.7.1).
