@@ -805,3 +805,35 @@ test("a new database holds every store at version 1; one from before owed goes t
   c.close();
   assert.equal(await versionOf(old), 2, "no step up when every store is there");
 });
+test("another tab takes the database a version further between this open's read and its step up: the step up meets VersionError and the open starts again, at that tab's version", async () => {
+  const real = new IDBFactory();
+  await new Promise<void>((ok, no) => {
+    const r = real.open("ct-wallet", 1);
+    r.onupgradeneeded = () => {
+      for (const s of ["notes", "wallets", "quotes", "orders", "ops", "counters", "meta"]) r.result.createObjectStore(s);
+    };
+    r.onsuccess = () => (r.result.close(), ok());
+    r.onerror = () => no(r.error);
+  });
+  let raced = false;
+  const idb = {
+    open(name: string, version?: number) {
+      if (version === 2 && !raced) {
+        raced = true;
+        // the other tab's open, queued first: version 3, adding "owed" and a store of its own
+        const other = real.open(name, 3);
+        other.onupgradeneeded = () => {
+          for (const s of ["owed", "later"]) if (!other.result.objectStoreNames.contains(s)) other.result.createObjectStore(s);
+        };
+        other.onsuccess = () => other.result.close();
+      }
+      return version === undefined ? real.open(name) : real.open(name, version);
+    },
+    deleteDatabase: (name: string) => real.deleteDatabase(name),
+  } as unknown as IDBFactory;
+  const s = await openWalletStore({ indexedDB: idb, locks: null });
+  assert.ok(raced, "the step up ran");
+  await s.put("owed", "op1", { n1: { noteId: "n1" } });
+  s.close();
+  assert.equal(await versionOf(real), 3);
+});
