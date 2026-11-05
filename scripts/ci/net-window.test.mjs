@@ -68,6 +68,7 @@ export const CHANGED = [
   "scripts/live-checks/money-gate-testnet.mjs",
   "scripts/live-checks/near-rpc-operators.mjs",
   "scripts/live-checks/notes-per-pool-evm.mjs",
+  "scripts/live-checks/pool-evm-deploy-mainnet.mjs",
   "scripts/live-checks/pool-evm-deploy.mjs",
   "scripts/live-checks/pool-ready-no-flicker.mjs",
   "scripts/live-checks/pool-sol-deploy-sweep.mjs",
