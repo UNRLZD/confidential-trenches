@@ -573,7 +573,7 @@ function slowBuilds(ms: number) {
   let t = 1_000;
   let moved = false;
   const base = builds([]);
-  return { now: () => t, fetch: async (url: string) => { if (!moved) { moved = true; t += ms; } return base(url); } };
+  return { now: () => t, advance: (by: number) => { t += by; }, fetch: async (url: string) => { if (!moved) { moved = true; t += ms; } return base(url); } };
 }
 const signedHash = (b64: string): string => solanaDecodeMessage(base64.decode(b64).subarray(65)).blockhash;
 /** The captured wires that are the legs' own signed txs (a teardown frame's dry simulation is not one). */
@@ -792,4 +792,68 @@ test("a leg whose bytes to sign are not its checked copy is refused in the trade
     assert.equal(l.signature, undefined);
     assert.equal(l.dry, undefined);
   }
+});
+
+// The renewal's reference is read last (review fold 2, M1): after the legs' re-reads, beside the blockhash; and at the
+// sign point, a reference older than the limit is read once more, the reference only, so a large set never loops.
+/** E as the market gives it at the clock's time: the recorded E before `at`, then `k` x it. */
+function marketAt(d: SolanaTradeDeps, now: () => number, at: number, k: bigint, cost = 0, advance: (ms: number) => void = () => {}) {
+  const reads: number[] = [];
+  const reference: SolanaTradeDeps["reference"] = async (q, p) => {
+    reads.push(now());
+    const moved = now() >= at;
+    advance(cost);
+    const x = await d.reference(q, p);
+    if (!x || !moved) return x;
+    return { expectedOut: (x.expectedOut * k) / 10_000n, ...(x.expectedOuts ? { expectedOuts: x.expectedOuts.map((e) => (e * k) / 10_000n) } : {}) };
+  };
+  return { reference, reads };
+}
+
+test("the legs' re-reads take 30 s and the market moves 50% for the user during them: S12 holds the E read after them, every leg refused", async () => {
+  const clock = slowBuilds(25_000);
+  const pays = renewalPays(1.5);
+  // each leg's renewal simulation on provider A takes 10 s of the clock: 3 legs, 30 s
+  const cap = signedOn((at, method, n, x, params) => {
+    const sim = method === "simulateTransaction" ? (params[1] as { accounts?: unknown })?.accounts : null;
+    if (sim && n >= 1 && at === "A") clock.advance(10_000);
+    return pays(at, method, n, x, params);
+  });
+  const d = deps(SELL, { edit: cap.edit });
+  const start = 1_000 + 25_000;
+  const m = marketAt(d, clock.now, start + 15_000, 15_000n);
+  const r = await runSolanaTrade(request(SELL), { ...d, reference: m.reference, fetch: clock.fetch, now: clock.now });
+  for (const l of r.legs) {
+    assert.match(l.refused ?? "", /^checks: S12 minOut /, l.refused);
+    assert.equal(l.signature, undefined);
+  }
+  assert.equal(legWires(cap.signed, r.legs).length, 0);
+  assert.equal(m.reads.length, 2);
+  assert.ok(m.reads[1]! >= start + 30_000, `the renewal's E read after the legs' re-reads (${m.reads[1]! - start} ms into them)`);
+});
+
+test("the blockhash takes 25 s to agree and the market moves 50% meanwhile: at the sign point the reference alone is read once more, and every leg is refused on it", async () => {
+  const clock = slowBuilds(25_000);
+  const cap = signedOn(renewalPays(1.5));
+  // the renewal's validity read on B takes 25 s of the clock
+  const d = deps(SELL, { edit: cap.edit, valid: (at) => { if (at === "B") clock.advance(25_000); return true; } });
+  const m = marketAt(d, clock.now, 1_000 + 25_000 + 10_000, 15_000n);
+  const r = await runSolanaTrade(request(SELL), { ...d, reference: m.reference, fetch: clock.fetch, now: clock.now });
+  assert.equal(m.reads.length, 3, "the first read, the renewal's, and one at the sign point");
+  for (const l of r.legs) {
+    assert.match(l.refused ?? "", /^checks: S12 minOut /, l.refused);
+    assert.equal(l.signature, undefined);
+  }
+  for (const p of d.providers) assert.equal(p.asks.filter((k) => k.startsWith('["simulateTransaction"') && k.includes('"addresses"') && k.includes(request(SELL).legs[0]!.wallet)).length, 2, "the set's own reads are not run a third time");
+});
+
+test("every reference read takes 25 s: the sign point reads it once more and signs, never a loop", async () => {
+  const clock = slowBuilds(25_000);
+  const cap = signedOn(renewalPays(1));
+  const d = deps(SELL, { edit: cap.edit });
+  const m = marketAt(d, clock.now, Number.MAX_SAFE_INTEGER, 10_000n, 25_000, clock.advance);
+  const r = await runSolanaTrade(request(SELL), { ...d, reference: m.reference, fetch: clock.fetch, now: clock.now });
+  assert.equal(m.reads.length, 3);
+  for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+  assert.equal(legWires(cap.signed, r.legs).length, r.legs.length);
 });

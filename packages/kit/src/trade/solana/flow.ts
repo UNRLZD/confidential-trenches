@@ -13,8 +13,8 @@
 // - Blockhash: getLatestBlockhash at `finalized` on both providers; the read from the lower slot is used, so both
 //   providers already hold it, with that read's own lastValidBlockHeight. A trade not signed within
 //   SOLANA_BLOCKHASH_REFRESH_MS of that read (its builds waited for the helper's room) reads every leg's pre-state and
-//   simulation and the set's reference again, then a blockhash both providers answer valid, and checks each leg's tx on
-//   it again, its minOut held to the fresh E, before signing.
+//   simulation again, then last, together, the set's reference and a blockhash both providers answer valid, and checks
+//   each leg's tx on it again, its minOut held to the fresh E, before signing (renewSet).
 // - Floors (T1.3): E(A) is the device's own pool read for the whole size A = Σ a_k (the caller's `reference`, never
 //   the helper or the route); each wallet's floor is minOut_k = ⌊E_k × (1 − s)⌋ with E_k = ⌊E(A) × a_k / A⌋, while
 //   S12 holds its simulated out to E(a_k), its own exact input priced from the same read (no extra read). The build is asked at the user's s; if the route's decoded floor is under minOut_k, it is asked once
@@ -103,8 +103,8 @@ export const SOLANA_TRADE_BUILD_WAIT_MS = 10 * 60_000;
 /**
  * The oldest the trade's blockhash may be when its legs are signed. A finalized blockhash is about 32 slots old when
  * read and a tx on it lands for 150 slots, about 47 s after the read at 400 ms a slot; past 20 s the send would have
- * under half of that, so a trade whose builds waited longer reads its pre-states, simulations and reference again,
- * then a fresh blockhash, and checks every leg again on it before any is signed. A trade signed within 20 s reads nothing more.
+ * under half of that, so a trade whose builds waited longer reads its pre-states and simulations again, then its
+ * reference and a fresh blockhash, and checks every leg again on them before any is signed (renewSet). A trade signed within 20 s reads nothing more.
  */
 export const SOLANA_BLOCKHASH_REFRESH_MS = 20_000;
 export type SolanaTradeDeps = {
@@ -497,7 +497,7 @@ async function prepareLeg(
   // The checks on the very bytes to be signed: a copy is checked and kept, and only bytes equal to it are signed
   // (solanaSignOnlyChecked). minOut is the leg's own on every check; the reference is the first read's, or at a renewal
   // the one read again then, so a floor the market has since left behind is refused.
-  const verdictOn = async (a: SolanaAssembled, st: { simulations: [SolanaSimulation | null, SolanaSimulation | null]; spendable: bigint }, ref: LegReference = { legExpectedOut: rec.legExpectedOut as bigint, expectedOut: rec.expectedOut as bigint }): Promise<Prepared | null> => {
+  const verdictOn = async (a: SolanaAssembled, st: { simulations: [SolanaSimulation | null, SolanaSimulation | null]; spendable: bigint }, ref: LegReference): Promise<Prepared | null> => {
     await growth;
     const checked = Uint8Array.from(a.wire);
     const verdict = checkSolanaQuote(checked, { side: req.side, wallet: w, token: req.token, amount: leg.amount, spendable: st.spendable, minOut, otherWallets: ctx.otherWallets, links: ctx.links, heldMints: ctx.heldMints }, {
@@ -521,7 +521,7 @@ async function prepareLeg(
   };
   const st = await stateOn(assembled.wire, pre);
   if (!st) return null;
-  const out = await verdictOn(assembled, st);
+  const out = await verdictOn(assembled, st, { legExpectedOut: rec.legExpectedOut as bigint, expectedOut: rec.expectedOut as bigint });
   rec.quoteMs = now() - t0;
   return out;
 }
@@ -606,56 +606,67 @@ function pacedDeps(deps: SolanaTradeDeps): SolanaTradeDeps {
   return { ...deps, providers: [solanaPacedRpc(p[0], limits[0]), solanaPacedRpc(p[1], limits[1])] };
 }
 
-/** The set on a fresh blockhash: every leg's pre-state and simulation and the set's reference read again, at once, then
- * one blockhash both providers answer valid, then each leg's tx on it checked again on those reads: its own minOut held
- * to the fresh E_k less s, its simulated out to the fresh E(a_k). A leg that fails any of it is refused and keeps its
- * money; a set with no fresh reference or blockhash signs nothing. A leg's first check moves to firstVerdict, so
- * `verdict` is only ever the check of the bytes about to be signed. */
-async function renewSet(prepared: readonly Prepared[], deps: SolanaTradeDeps, record: SolanaTradeRecord, rereference: () => Promise<Map<SolanaLegRecord, LegReference> | null>): Promise<Prepared[]> {
+/** The set on a fresh blockhash. First every leg's pre-state and simulation read again, at once (on keyless providers
+ * this can take tens of seconds for a large set); then, last and together, the set's reference and one blockhash both
+ * providers answer valid; then each leg's tx on that blockhash checked again on those reads: its own minOut held to the
+ * fresh E_k less s, its simulated out to the fresh E(a_k). At the sign point, a reference older than the limit (the
+ * blockhash read was slow) is read once more, the reference only, and the legs checked again on it: one read, so a large
+ * set never loops. A leg that fails any of it is refused and keeps its money; a set with no fresh reference or blockhash
+ * signs nothing. A leg's first check moves to firstVerdict, so `verdict` is only ever the check of the bytes about to be
+ * signed. */
+async function renewSet(prepared: readonly Prepared[], deps: SolanaTradeDeps, record: SolanaTradeRecord, rereference: () => Promise<Map<SolanaLegRecord, LegReference> | null>, clock: () => number): Promise<Prepared[]> {
   const why = (err: unknown) => String((err as Error)?.message ?? err).slice(0, 200);
   for (const p of prepared) {
     if (p.rec.verdict) p.rec.firstVerdict = p.rec.verdict;
     delete p.rec.verdict;
   }
-  const [next, refs] = await Promise.all([
-    Promise.all(prepared.map(async (p) => {
-      try {
-        return await p.renew();
-      } catch (err) {
-        p.rec.refused = `renewal: error: ${why(err)}`;
-        return null;
-      }
-    })),
-    rereference().catch((err: unknown) => `renewal: error: ${why(err)}`),
-  ]);
-  if (!next.some((f) => f)) return [];
-  if (refs === null || typeof refs === "string") {
-    prepared.forEach((p, i) => { if (next[i]) p.rec.refused = refs ?? "renewal: no reference pool"; });
-    return [];
-  }
-  let fresh: SolanaBlockhash;
-  try {
-    fresh = await readSolanaBlockhashValid(deps.providers);
-  } catch (err) {
-    prepared.forEach((p, i) => { if (next[i]) p.rec.refused = `renewal: ${why(err)}`; });
-    return [];
-  }
-  if (record.blockhash) record.firstBlockhash = record.blockhash;
-  record.blockhash = fresh;
-  const out = await Promise.all(prepared.map(async (p, i) => {
-    const f = next[i];
-    const ref = refs.get(p.rec);
-    if (!f) return null;
-    if (!ref) { p.rec.refused = "renewal: no reference for the leg"; return null; }
-    p.rec.renewedReference = ref;
+  const next = await Promise.all(prepared.map(async (p) => {
     try {
-      return await f(fresh, ref);
+      return await p.renew();
     } catch (err) {
       p.rec.refused = `renewal: error: ${why(err)}`;
       return null;
     }
   }));
-  return out.filter((x): x is Prepared => x !== null);
+  if (!next.some((f) => f)) return [];
+  const readReference = () => rereference().catch((err: unknown) => `renewal: error: ${why(err)}`);
+  const refAt = clock();
+  const [refs, fresh] = await Promise.all([readReference(), readSolanaBlockhashValid(deps.providers).catch((err: unknown) => new Error(`renewal: ${why(err)}`))]);
+  if (fresh instanceof Error) {
+    prepared.forEach((p, i) => { if (next[i]) p.rec.refused = fresh.message; });
+    return [];
+  }
+  if (record.blockhash) record.firstBlockhash = record.blockhash;
+  record.blockhash = fresh;
+  // each leg's renewed tx on the fresh blockhash, checked on reference `r`: the legs that pass, by their index in the set
+  const checkOn = async (r: Map<SolanaLegRecord, LegReference> | string | null, legs: readonly number[]): Promise<{ i: number; p: Prepared }[]> => {
+    if (r === null || typeof r === "string") {
+      for (const i of legs) (prepared[i] as Prepared).rec.refused = r ?? "renewal: no reference pool";
+      return [];
+    }
+    const ok = await Promise.all(legs.map(async (i) => {
+      const p = prepared[i] as Prepared;
+      const f = next[i];
+      const ref = r.get(p.rec);
+      if (!f) return null;
+      if (!ref) { p.rec.refused = "renewal: no reference for the leg"; return null; }
+      p.rec.renewedReference = ref;
+      try {
+        const renewed = await f(fresh, ref);
+        return renewed ? { i, p: renewed } : null;
+      } catch (err) {
+        p.rec.refused = `renewal: error: ${why(err)}`;
+        return null;
+      }
+    }));
+    return ok.filter((x): x is { i: number; p: Prepared } => x !== null);
+  };
+  let passed = await checkOn(refs, prepared.flatMap((_, i) => (next[i] ? [i] : [])));
+  // the sign point: nothing slow runs between here and the signatures
+  if (passed.length && clock() - refAt > SOLANA_BLOCKHASH_REFRESH_MS) {
+    passed = await checkOn(await readReference(), passed.map((x) => x.i));
+  }
+  return passed.map((x) => x.p);
 }
 
 export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTradeDeps): Promise<SolanaTradeRecord> {
@@ -750,7 +761,7 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
     record.renewedReference = e2;
     return new Map(live.map((i, j) => [recs[i] as SolanaLegRecord, { legExpectedOut: outs[j] as bigint, expectedOut: (floors2[j] as { expectedOut: bigint }).expectedOut }]));
   };
-  const ready = solanaSignOnlyChecked(clock() - blockhashAt > SOLANA_BLOCKHASH_REFRESH_MS ? await renewSet(prepared, deps, record, rereference) : prepared);
+  const ready = solanaSignOnlyChecked(clock() - blockhashAt > SOLANA_BLOCKHASH_REFRESH_MS ? await renewSet(prepared, deps, record, rereference, clock) : prepared);
   if (ready.length === 0) { progress("refused"); return record; }
   const set = await signSet(deps, ready.map((p) => ({ wallet: p.leg.wallet, tx: p.assembled })));
   ready.forEach((p, i) => { p.rec.signature = base58.encode((set[i] as { wire: Uint8Array }).wire.subarray(1, 65)); });
