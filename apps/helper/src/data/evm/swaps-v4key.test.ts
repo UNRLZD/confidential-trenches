@@ -108,12 +108,13 @@ async function stallOf<T>(p: () => Promise<T>): Promise<{ value: T; stallMs: num
   }
 }
 
-/** [design: 250 ms, a tenth of a hedge (swaps.ts HEDGE_MS): a stall past it ages every post out toward a hedge that is
- *  no provider's fault; one v4Key miss with ten hook candidates stalled 5.4 s on the Mac.] */
-const STALL_MAX_MS = 250;
+/** [design: 1 s, half a hedge (swaps.ts HEDGE_MS): a stall past it ages every post out toward a hedge that is no
+ *  provider's fault; one v4Key miss with ten hook candidates stalled 5.4 s on the Mac, these tests' 3.1 s and 4.0 s at
+ *  6509fd7, and a first run's own compile and collection pauses reached 344 ms (2 of 8 runs over 250 ms).] */
+const STALL_MAX_MS = 1_000;
 
 for (const hopKnown of [true, false]) {
-  test(`card robinhood-cold-open-fast: a cold token whose swaps' transactions also log a route's other pool ${hopKnown ? "the PositionManager knows (its key pairs two other tokens)" : "the PositionManager never made (no key: worked out by search, which misses)"} is found and served while the event loop never stalls past ${STALL_MAX_MS} ms (red at 6509fd7: v4Key's search ran in one go, seconds)`, async () => {
+  test(`card robinhood-cold-open-fast: a cold token whose swaps' transactions also log a route's other pool ${hopKnown ? "the PositionManager knows (its key pairs two other tokens)" : "the PositionManager never made (no key: worked out by search, which misses)"} is found and served while the event loop never stalls a second (red at 6509fd7: v4Key's search ran in one go, seconds)`, async () => {
     const r = rig(hopKnown);
     const clock = { get t() { return Date.now(); } };
     const s = open(r.chain, clock, { pools: new Map(), fetch: r.fetch as never });
@@ -128,13 +129,15 @@ for (const hopKnown of [true, false]) {
 // A discovery's receipts (v4Seen) are one provider's read: at 6509fd7 the provider with the most free budget, which on
 // Robinhood is robinhood.api.pocket.network (a 200-call burst), and the slowest: its three receipts took 3.4 s, 3.7 s
 // and 1.1 s while every other provider answered in 0.3 s (the Mac, 2026-11-05 16:4xZ, four cold opens at once).
-test("card robinhood-cold-open-fast: a discovery asks its receipts of the provider expected to answer first, not of the one with the most free budget that answers 2 s late (red at 6509fd7: every receipt read went to it)", async () => {
+test("card robinhood-cold-open-fast: a discovery asks its receipts, and the tape its senders, of the providers expected to answer first, not of the one with the most free budget that answers 2 s late (red at 6509fd7: every receipt read went to it)", async () => {
   const r = rig(true);
   const SLOW = URLS[0]!;
   const receipts = new Map<string, number>();
+  const senders = new Map<string, number>();
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     const body = String(init.body);
     if (body.includes("eth_getTransactionReceipt")) receipts.set(url, (receipts.get(url) ?? 0) + 1);
+    if (body.includes("eth_getTransactionByHash")) senders.set(url, (senders.get(url) ?? 0) + 1);
     await new Promise((go) => setTimeout(go, url === SLOW ? 2_000 : 50));
     return r.fetch(url, init);
   };
@@ -149,4 +152,6 @@ test("card robinhood-cold-open-fast: a discovery asks its receipts of the provid
   assert.equal(a.status, 200, a.body);
   assert.equal((JSON.parse(a.body) as { trades: unknown[] }).trades.length, SWAPS);
   assert.equal(receipts.get(SLOW) ?? 0, 0, `receipts asked of the slow provider: ${JSON.stringify([...receipts])}`);
+  // the tape's senders (lookTraders) alike: at 439ab7b split by free budget, the slow one's share the biggest
+  assert.equal(senders.get(SLOW) ?? 0, 0, `senders asked of the slow provider: ${JSON.stringify([...senders])}`);
 });
