@@ -4,6 +4,8 @@
 // contracts/vault/deployments/mainnet-test.json: keys [], the code hash and sha256 of the pinned build (57535ae7...ca6a),
 // the import and export lists, config() naming mainnet USDC and a mainnet version, then the one storage_prepay write
 // (the owner's paste the check prints, signed by confidential.unrlzd.near) read back by --tx and --precommitment.
+// keys [] alone never passes the vault: view_access_key_list answers [] for an account that does not exist (the recorded
+// bad answer, read before the deploy), so the code hash, code and config() reads are the ones that decide.
 // This entry runs that check with the vault's account, record and signer fixed, the same exit codes, and any of its
 // --tx, --precommitment and --record arguments passed on; its recorded runs are vault-mainnet-test.*.answers.json,
 // replayed by vault-mainnet-test.test.mjs.
