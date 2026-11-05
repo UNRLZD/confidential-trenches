@@ -303,7 +303,7 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 // The served answers
 // ---------------------------------------------------------------------------------------------------------------
 
-type Answer = { status: number; headers: Record<string, string>; body: string };
+type Answer = { status: number; headers: Record<string, string>; body: string; timing?: string[] };
 type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number): Promise<Answer> };
 type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string; why?: string; timing?: string[] }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
