@@ -157,14 +157,14 @@ test("R4 no standard or pinned launchpad pool answers: a helper's hookless 50%-f
 });
 
 test("R5 heads within the chain's lag whose lower block the other provider holds with another hash or time refuse", async () => {
-  // Base allows 5 blocks: provider 1's head 0xfe is 2 behind; provider 2 holds 0xfe with another hash, or another time
+  // Base allows 50 blocks (10 s of 200 ms blocks): provider 1's head 0xfe is 2 behind; provider 2 holds 0xfe with another hash, or another time
   const a = provider(head("0xfe", OLD), flat);
   assert.deepEqual(await buy(v3direct, a, provider(head("0x100"), flat, { "0xfe": head("0xfe", NEW) })), { accepted: false, code: "rpc_disagree" });
   assert.deepEqual(await buy(v3direct, a, provider(head("0x100"), flat, { "0xfe": head("0xfe", OLD, "0x1") })), { accepted: false, code: "rpc_disagree" });
   // nor holds it at all
   assert.deepEqual(await buy(v3direct, a, provider(head("0x100"), flat)), { accepted: false, code: "rpc_error" });
-  // and 6 blocks apart is past Base's lag
-  assert.deepEqual(await buy(v3direct, provider(head("0xfa"), flat), provider(head("0x100"), flat, { "0xfa": head("0xfa") })), { accepted: false, code: "rpc_disagree" });
+  // and 51 blocks apart is past Base's lag
+  assert.deepEqual(await buy(v3direct, provider(head("0xcd"), flat), provider(head("0x100"), flat, { "0xcd": head("0xcd") })), { accepted: false, code: "rpc_disagree" });
   // where it holds the same block, the quote reads at it
   const ok = await buy(v3direct, a, provider(head("0x100"), flat, { "0xfe": head("0xfe", OLD) }));
   assert.equal(ok.accepted, true, String((ok as { code?: string }).code));
@@ -532,30 +532,30 @@ test("card evm-quote-head-watch: a scan that ends more than maxLag blocks behind
   const token = "0x00000000000000000000000000000000000c44c4";
   const pools = [seeded(token), real(token)];
   const asked: [number, number][] = [];
-  // the scan provider's head 4,999,990, ten blocks behind the agreed 5,000,000 (Base's maxLag 5); the real pool at 4,999,995
-  const late = scanner(4_999_990, [{ key: real(token).key, at: 4_999_995 }], asked);
-  const caught = scanner(5_000_000, [{ key: real(token).key, at: 4_999_995 }], asked);
+  // the scan provider's head 4,999,900, 100 blocks behind the agreed 5,000,000 (Base's maxLag 50); the real pool at 4,999,950
+  const late = scanner(4_999_900, [{ key: real(token).key, at: 4_999_950 }], asked);
+  const caught = scanner(5_000_000, [{ key: real(token).key, at: 4_999_950 }], asked);
   // the catch-up's requests, each with the agreed block by number in its batch, reach a backend that holds it (the
-  // scan's newest request asks its own head, 4,999,990, in its batch: card evm-scan-second-provider)
+  // scan's newest request asks its own head, 4,999,900, in its batch: card evm-scan-second-provider)
   let pinned = 0;
   const both: EvmRpc = (calls) => (calls.some((c) => c.method === "eth_getBlockByNumber" && Number(c.params[0]) === 5_000_000) && ++pinned > 0 ? caught(calls) : late(calls));
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), both), below);
   assert.equal(pinned, 1, "the catch-up request carries the agreed block");
-  assert.deepEqual(asked.slice(-2), [[4_999_991, 5_000_000], [4_999_991, 5_000_000]]);
+  assert.deepEqual(asked.slice(-2), [[4_999_901, 5_000_000], [4_999_901, 5_000_000]]);
 });
 
 test("review of 4830f1f, H1: a scan backend more than maxLag behind that answers [] past its own head refuses as main did, and never keeps a scan its provider did not name", async () => {
   const token = "0x00000000000000000000000000000000000e74e7";
   const pools = [seeded(token), real(token)];
-  const full = scanner(4_999_990, [{ key: real(token).key, at: 4_999_995 }]);
-  // a backend at 4,999,990: logs past it are not there yet, answered as [] with no error
+  const full = scanner(4_999_900, [{ key: real(token).key, at: 4_999_950 }]);
+  // a backend at 4,999,900: logs past it are not there yet, answered as [] with no error
   const lagging: EvmRpc = async (calls) => {
     const out = (await full(calls)) as { result?: unknown }[];
-    return out.map((o, i) => (calls[i]!.method !== "eth_getLogs" ? o : { ...o, result: (o.result as { blockNumber: string }[]).filter((l) => Number(l.blockNumber) <= 4_999_990) }));
+    return out.map((o, i) => (calls[i]!.method !== "eth_getLogs" ? o : { ...o, result: (o.result as { blockNumber: string }[]).filter((l) => Number(l.blockNumber) <= 4_999_900) }));
   };
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), lagging), { accepted: false, code: "rpc_disagree" });
   // the next quote, the scan backend caught up and honest: the real pool holds the seeded route
-  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_002, [{ key: real(token).key, at: 4_999_995 }]), undefined, "base", 5_000_002), below);
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_002, [{ key: real(token).key, at: 4_999_950 }]), undefined, "base", 5_000_002), below);
 });
 
 test("review of 4830f1f, H2: 16,384 pools only initialized, with ids ground below the real pool's, are read and hold nothing, so the real pool holds a seeded route (card evm-quote-one-round: the empty pools no longer refuse)", async () => {
@@ -1624,18 +1624,18 @@ test("review of a9f1d32, MEDIUM: a catch-up whose logs come from a backend that 
   // (the probe's provider: a head read on a fresh backend proves nothing about the lagging one answering the logs)
   const token = "0x00000000000000000000000000000000000d77d7";
   const pools = [seeded(token), real(token)];
-  const lagHead = scanner(4_999_990, [{ key: real(token).key, at: 4_999_995 }]);
+  const lagHead = scanner(4_999_900, [{ key: real(token).key, at: 4_999_950 }]);
   const freshHead = scanner(5_000_000, []);
   let heads = 0;
   // the first head from a lagging backend, the head asked again from a fresh one, every other request on the lagging one
   const lb: EvmRpc = async (calls) => {
     if (calls[0]!.method === "eth_blockNumber") return (heads++ > 0 ? freshHead : lagHead)(calls);
     const out = (await lagHead(calls)) as { result?: unknown }[];
-    return out.map((o, i) => (calls[i]!.method !== "eth_getLogs" ? o : { ...o, result: (o.result as { blockNumber: string }[]).filter((l) => Number(l.blockNumber) <= 4_999_990) }));
+    return out.map((o, i) => (calls[i]!.method !== "eth_getLogs" ? o : { ...o, result: (o.result as { blockNumber: string }[]).filter((l) => Number(l.blockNumber) <= 4_999_900) }));
   };
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), lb), { accepted: false, code: "rpc_disagree" });
   // nothing was kept past what the scan read: the next quote, on an honest provider, scans the gap and finds the pool
-  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_002, [{ key: real(token).key, at: 4_999_995 }]), undefined, "base", 5_000_002), below);
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_002, [{ key: real(token).key, at: 4_999_950 }]), undefined, "base", 5_000_002), below);
 });
 
 test("card evm-quote-one-round: pools that cannot beat the route are never quoted and never count; past EVM_QUOTE_MAX_QUOTED routes that could, or EVM_QUOTE_MAX_OTHER currencies, the quote refuses (too_many_pools), never cuts", async () => {
@@ -2709,20 +2709,20 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   quoteMod.evmSpeedReset();
   const token = freshToken();
   const pools = [best(token)];
-  // Base's maxLag is 5: l1 names 4,999,990, h2 lags at 4,999,992, h1, h3 and h4 are at 5,000,000; each block by number
+  // Base's maxLag is 50: l1 names 4,999,900, h2 lags at 4,999,920, h1, h3 and h4 are at 5,000,000; each block by number
   // answered as that number's block (every model block carries the hash NEW)
   const byNum = (rpc: EvmRpc): EvmRpc => async (calls) =>
     calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest") ? calls.map((c, id) => ({ jsonrpc: "2.0", id, result: head(c.params[0] as string) })) : rpc(calls);
   const { f, urls, idle } = hosted({
-    "l1.v13.test": { rpc: byNum(chain(pools, 0, 4_999_990)), ms: 1 },
+    "l1.v13.test": { rpc: byNum(chain(pools, 0, 4_999_900)), ms: 1 },
     "h1.v13.test": { rpc: byNum(chain(pools, 0, 5_000_000)), ms: 5 },
-    "h2.v13.test": { rpc: byNum(chain(pools, 1, 4_999_992)), ms: 5 },
+    "h2.v13.test": { rpc: byNum(chain(pools, 1, 4_999_920)), ms: 5 },
     "h3.v13.test": { rpc: byNum(chain(pools, 1, 5_000_000)), ms: 50 },
     "h4.v13.test": { rpc: byNum(chain(pools, 1, 5_000_000)), ms: 50 },
   });
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(urls, f), NOW));
   // the heads are no vote: the first two near ones (l1, h2) pick the block, the lower
-  assert.equal((v as { block?: bigint }).block, 4_999_990n, big(v));
+  assert.equal((v as { block?: bigint }).block, 4_999_900n, big(v));
   await idle();
   assert.ok(unheld(urls, "h1.v13.test"), `h1 is not held: ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
   // a head more than maxLag below is held, by its head alone: b holds the agreed block by number like the others, so no
@@ -2737,12 +2737,12 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   assert.equal(hostOf(quoteMod.evmRanked(low.urls).at(-1)!), "b.v13.test");
   await low.idle();
   assert.ok(!unheld(low.urls, "b.v13.test"), "b is held: it moves up once the hold ends");
-  // the edges (re-review of 47109a7, LOW-1): the first head, then one 6 or 10 blocks below it (not near), then the spare
+  // the edges (re-review of 47109a7, LOW-1): the first head, then one 51 or 100 blocks below it (not near), then the spare
   // the two pair on; the head between is exactly maxLag below the lower of the pair, or one below a pair that spans
   // maxLag: neither is held
   for (const [hi, mid, lo] of [
-    [5_000_005, 4_999_995, 5_000_000],
-    [5_000_005, 4_999_999, 5_000_000],
+    [5_000_050, 4_999_950, 5_000_000],
+    [5_000_050, 4_999_999, 5_000_000],
   ] as const) {
     quoteMod.evmSpeedReset();
     const edge = hosted({
