@@ -14,6 +14,7 @@ import { solanaDecodePoolRelease, solanaPoolFee, solanaPoolPage, solanaRentMin }
 import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import type { TxRef } from "../../kit/src/signpage/messages.ts";
 import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
@@ -74,6 +75,8 @@ export type Plant = {
   hangReadBack?: boolean;
   /** W's history as RPC p lists it (newest first): the world's own by default */
   history?: (sigs: string[], p: 0 | 1) => string[];
+  /** the helper answers this well-formed signature, not the release's own; the release lands under its own all the same */
+  helperSig?: string;
 };
 /** Both RPCs' finalized slot in the world. */
 export const FINAL_SLOT = 20;
@@ -208,6 +211,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
       throw new Error(`unexpected ${method}`);
     }) as SolanaRpc;
   const stages: string[] = [];
+  const stageTxs: TxRef[][] = [];
   const pendings: unknown[] = [];
   const host: PoolWithdrawHost = {
     pin: { program: PROGRAM, feePayer: FEE_PAYER },
@@ -231,9 +235,9 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         touch(m.staticKeys[ix.accounts[1]!]!, id);
         plant.afterRelease?.(m.staticKeys[ix.accounts[1]!]!);
         // the sender's word for the id: the landed transaction's own
-        return { signature: id };
+        return { signature: plant.helperSig ?? id };
       }
-      return { signature: SIG };
+      return { signature: plant.helperSig ?? SIG };
     },
     settle: async (noteId) => {
       if (plant.settleUnspent) return { kind: "unspent" };
@@ -245,7 +249,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     now: () => NOW,
     reads: 2,
     wait: async () => {},
-    stage: (s, _txs, pending) => void (stages.push(s), pendings.push(pending)),
+    stage: (s, txs, pending) => void (stages.push(s), stageTxs.push(txs), pendings.push(pending)),
     owe: async (p) => void (owed.push(p), order.push(`owe:${(await ns.get(p.noteId))?.state}`)),
     keepRelease: async (noteId, attempt, release) => {
       const p = owed.findLast((x) => (x as PendingOnward).noteId === noteId && (x as PendingOnward).attempt === attempt) as PendingOnward | undefined;
@@ -301,7 +305,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     touchOldest(m.staticKeys[ix.accounts[1]!]!, id);
     return id;
   };
-  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, pendings, binds, plant, fees, owed, landed, foreign, foreignLand, alias, landOlder, unhang };
+  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, stageTxs, pendings, binds, plant, fees, owed, landed, foreign, foreignLand, alias, landOlder, unhang };
 }
 
 /** A wire's signers and instructions, as keys: [signers, [program, accounts, data][]]. */

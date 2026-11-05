@@ -40,6 +40,8 @@ export const PATHS = [
   "apps/helper/test/withdraw-send/",
   "scripts/live-checks/vault-",
   "scripts/ci/near-rpc-operators.mjs",
+  // the shared read that waits out a rate limit, which vault-skeleton.mjs and vault-testnet-t01.mjs read through
+  "scripts/ci/rpc-wait.mjs",
   "scripts/net-window.mjs",
   // the install every script runs on
   "package.json",

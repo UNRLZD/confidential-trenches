@@ -1,0 +1,27 @@
+{
+ "_note": "good: the testnet build of this card (2955783), the one build that sends pool transactions: W history and loaded keys read. live: SIGN_HOST read 5 Nov 11:32Z, its mainnet build, which sends no pool transaction (no pinned pool yet). bad: the testnet build of main 8791c3d, before this card: the pool send with no loaded-key read, so a buy is filled on the spent mark alone. mutant: the review's testnet build of main's pool-buy.ts with this card's spend reader (its sha384 and its counts: pool send 3, loadedAddresses 1; the index is the build's page, which pins that sha384): PASS, so this check never stands for the buy's owner rule.",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-H3ODnY6KbVXv3waqDNfchBa0Ln7c8afa+UYl5xfaIIg4Xy5m+g7R0Cbxu7FhSNfH\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-H3ODnY6KbVXv3waqDNfchBa0Ln7c8afa+UYl5xfaIIg4Xy5m+g7R0Cbxu7FhSNfH",
+  "poolSend": true,
+  "loadedKeys": true
+ },
+ "live": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-iwK5k++7TjhzqMjcKPOuO1jNw2IiiaLHv9mcglgocwOnUS+IH/WHTtBDoscxi0fH\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-iwK5k++7TjhzqMjcKPOuO1jNw2IiiaLHv9mcglgocwOnUS+IH/WHTtBDoscxi0fH",
+  "poolSend": false,
+  "loadedKeys": false
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-FG6qSkaEk/GID+x7Fhum/sMDPKnO3FNQqKIx9/OB8WGUCUXsFqEH4yB54jE88coS\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-FG6qSkaEk/GID+x7Fhum/sMDPKnO3FNQqKIx9/OB8WGUCUXsFqEH4yB54jE88coS",
+  "poolSend": true,
+  "loadedKeys": false
+ },
+ "mutant": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-595NJQuerDiAnYb/bXk3grCNWcA9FbobunjuwfBmQXIToRxMyru5cLtoyWhxXdOq\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-595NJQuerDiAnYb/bXk3grCNWcA9FbobunjuwfBmQXIToRxMyru5cLtoyWhxXdOq",
+  "poolSend": true,
+  "loadedKeys": true
+ }
+}
