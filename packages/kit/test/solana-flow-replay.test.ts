@@ -16,6 +16,7 @@ import {
   SOLANA_TOKEN_PROGRAM,
   SolanaWalletLinks,
   runSolanaTrade,
+  SOLANA_BLOCKHASH_REFRESH_MS,
   SOLANA_TRADE_BUILD_WAIT_MS,
   solanaAta,
   solanaDecodeMessage,
@@ -38,8 +39,10 @@ const askOf = (method: string, params: readonly unknown[]): string =>
   JSON.stringify(method === "simulateTransaction" ? [method, (params[1] as { accounts?: unknown })?.accounts] : [method, params]);
 
 type Edit = (at: "A" | "B", method: string, n: number, answer: unknown, params: readonly unknown[]) => unknown;
+/** isBlockhashValid, which the recording holds no answer to: the n-th ask on a provider (0 first) answers this. */
+type Valid = (at: "A" | "B", hash: string, n: number) => boolean;
 /** A provider answering from the recording: the n-th ask of a key gets the n-th recorded answer (the last repeats). */
-function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x): SolanaRpc & { asks: string[]; times: number[] } {
+function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, valid: Valid = () => true): SolanaRpc & { asks: string[]; times: number[] } {
   const by = new Map<string, unknown[]>();
   for (const r of fx.rpc) if (r.at === at) by.set(r.ask, [...(by.get(r.ask) ?? []), r.answer]);
   const seen = new Map<string, number>();
@@ -49,6 +52,7 @@ function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x): SolanaRpc & {
     const k = askOf(method, params);
     asks.push(k);
     times.push(Date.now());
+    if (method === "isBlockhashValid") return { context: { slot: 1 }, value: valid(at, params[0] as string, asks.filter((x) => x.startsWith('["isBlockhashValid"')).length - 1) };
     const list = by.get(k);
     if (!list) throw new Error(`not recorded on ${at}: ${k.slice(0, 160)}`);
     const n = seen.get(k) ?? 0;
@@ -79,12 +83,12 @@ const request = (i: number): SolanaTradeRequest & { legs: SolanaTradeRequest["le
   const r = fx.requests[i]!;
   return { side: r.side, token: r.mint, slippageBps: r.slippageBps, wallets: r.wallets, legs: r.legs.map((l) => ({ wallet: l.wallet, amount: BigInt(l.amount), arm: l.arm })) };
 };
-function deps(i: number, o: { edit?: Edit; scale?: bigint; urls?: string[]; keepSlippage?: boolean } = {}): SolanaTradeDeps & { providers: readonly [SolanaRpc & { asks: string[]; times: number[] }, SolanaRpc & { asks: string[]; times: number[] }] } {
+function deps(i: number, o: { edit?: Edit; scale?: bigint; urls?: string[]; keepSlippage?: boolean; valid?: Valid } = {}): SolanaTradeDeps & { providers: readonly [SolanaRpc & { asks: string[]; times: number[] }, SolanaRpc & { asks: string[]; times: number[] }] } {
   const ref = fx.references[i]!.answer!;
   const k = o.scale ?? 10_000n;
   return {
     helper: "https://api.confidential.unrealized.trade",
-    providers: [replay("A", o.edit), replay("B", o.edit)],
+    providers: [replay("A", o.edit, o.valid), replay("B", o.edit, o.valid)],
     reference: async () => ({ expectedOut: (BigInt(ref.expectedOut) * k) / 10_000n, expectedOuts: ref.expectedOuts.map((x) => (BigInt(x) * k) / 10_000n) }),
     fetch: builds(o.urls, o.keepSlippage),
     // A dry run never sends: this path fails the test if it is ever called.
@@ -553,4 +557,126 @@ test("a leg whose waits would end past the trade's 10-minute bound is refused al
   assert.equal(asks, 10, "9 waits of 61 s fit in 600 s, the tenth would not");
   assert.ok(time.at() - t0 <= SOLANA_TRADE_BUILD_WAIT_MS);
   for (const l of r.legs.filter((x) => x.wallet !== late)) assert.equal(l.refused, undefined, l.refused);
+});
+
+// Card solana-legs-share-wait, the blockhash: a trade not signed within SOLANA_BLOCKHASH_REFRESH_MS of its blockhash
+// read reads each leg's pre-state and simulation again, then a blockhash both providers answer valid, and checks each
+// leg's tx on it again, with the trade's own floors, before anything is signed.
+const FRESH = base58.encode(new Uint8Array(32).fill(7));
+/** The second blockhash read (and any after) answers FRESH, as a newer finalized block would. */
+const freshAfterFirst: Edit = (_at, method, n, x) => {
+  if (method === "getLatestBlockhash" && n >= 1) (x as { value: { blockhash: string } }).value.blockhash = FRESH;
+  return x;
+};
+/** A clock the builds move: the first build takes `ms`. */
+function slowBuilds(ms: number) {
+  let t = 1_000;
+  let moved = false;
+  const base = builds([]);
+  return { now: () => t, fetch: async (url: string) => { if (!moved) { moved = true; t += ms; } return base(url); } };
+}
+const signedHash = (b64: string): string => solanaDecodeMessage(base64.decode(b64).subarray(65)).blockhash;
+/** The captured wires that are the legs' own signed txs (a teardown frame's dry simulation is not one). */
+const legWires = (signed: readonly string[], legs: readonly { signature?: string }[]): string[] =>
+  signed.filter((b) => legs.some((l) => l.signature === base58.encode(base64.decode(b).subarray(1, 65))));
+/** The bytes the dry run sent to each provider's simulation (the signed wires: no `accounts` read-back). */
+function signedOn(edit: Edit = (_a, _m, _n, x) => x): { edit: Edit; signed: string[] } {
+  const signed: string[] = [];
+  return { signed, edit: (at, method, n, x, params) => {
+    if (method === "simulateTransaction" && !(params[1] as { accounts?: unknown })?.accounts && at === "A") signed.push(params[0] as string);
+    return edit(at, method, n, x, params);
+  } };
+}
+
+test("a trade signed within 20 s of its blockhash read reads no blockhash again and asks no isBlockhashValid", async () => {
+  assert.equal(SOLANA_BLOCKHASH_REFRESH_MS, 20_000);
+  const clock = slowBuilds(19_000);
+  const d = deps(SELL, { edit: freshAfterFirst });
+  const r = await runSolanaTrade(request(SELL), { ...d, fetch: clock.fetch, now: clock.now });
+  for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+  assert.equal(r.firstBlockhash, undefined);
+  assert.notEqual(r.blockhash?.blockhash, FRESH);
+  for (const p of d.providers) {
+    assert.equal(p.asks.filter((k) => k.startsWith('["isBlockhashValid"')).length, 0);
+    assert.equal(p.asks.filter((k) => k.startsWith('["getLatestBlockhash"')).length, 1 + r.legs.filter((l) => l.teardown).length, "the trade's one read, and one a teardown");
+  }
+});
+
+test("builds that took 25 s: every leg's pre-state and simulation read again, a fresh blockhash both providers hold, each leg checked and signed on it", async () => {
+  const clock = slowBuilds(25_000);
+  const cap = signedOn(freshAfterFirst);
+  const d = deps(SELL, { edit: cap.edit });
+  const req = request(SELL);
+  const r = await runSolanaTrade(req, { ...d, fetch: clock.fetch, now: clock.now });
+  for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+  assert.equal(r.blockhash?.blockhash, FRESH);
+  assert.ok(r.firstBlockhash && r.firstBlockhash.blockhash !== FRESH);
+  // the signed bytes are on the fresh blockhash, one tx a leg
+  assert.equal(legWires(cap.signed, r.legs).length, req.legs.length);
+  for (const b of legWires(cap.signed, r.legs)) assert.equal(signedHash(b), FRESH);
+  // the same trade signed at once, for its count of simulations read back on accounts (the legs' and the teardowns')
+  const fast = slowBuilds(0);
+  const d0 = deps(SELL, { edit: freshAfterFirst });
+  await runSolanaTrade(request(SELL), { ...d0, fetch: fast.fetch, now: fast.now });
+  const sims = (asks: string[]) => asks.filter((k) => k.startsWith('["simulateTransaction"') && k.includes('"addresses"')).length;
+  for (const i of [0, 1] as const) {
+    const p = d.providers[i];
+    assert.equal(p.asks.filter((k) => k.startsWith('["isBlockhashValid"')).length, 1, "the fresh hash asked once on each provider");
+    assert.equal(sims(p.asks), sims(d0.providers[i].asks) + req.legs.length, "one more simulation a leg: the renewal's");
+  }
+  // the floors are the trade's own: S12 still names each leg's reference E, the check on the fresh bytes passed
+  const ref = fx.references[SELL]!.answer!;
+  r.legs.forEach((l, k) => {
+    assert.equal(l.verdict?.ok, true);
+    assert.match(l.verdict?.results.find((x) => x.id === "S12")?.detail ?? "", new RegExp(`E ${ref.expectedOuts[k]}$`));
+  });
+});
+
+test("the fresh blockhash read valid on one provider only: read once more; valid on both then, the trade goes on it", async () => {
+  const clock = slowBuilds(25_000);
+  const cap = signedOn(freshAfterFirst);
+  const d = deps(SELL, { edit: cap.edit, valid: (at, _h, n) => !(at === "B" && n === 0) });
+  const r = await runSolanaTrade(request(SELL), { ...d, fetch: clock.fetch, now: clock.now });
+  for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+  assert.equal(legWires(cap.signed, r.legs).length, r.legs.length);
+  for (const b of legWires(cap.signed, r.legs)) assert.equal(signedHash(b), FRESH);
+  for (const p of d.providers) assert.equal(p.asks.filter((k) => k.startsWith('["isBlockhashValid"')).length, 2);
+});
+
+test("the two providers do not both answer the fresh blockhash valid, twice: every leg refused, nothing signed", async () => {
+  const clock = slowBuilds(25_000);
+  const cap = signedOn(freshAfterFirst);
+  const d = deps(SELL, { edit: cap.edit, valid: (at) => at === "A" });
+  const r = await runSolanaTrade(request(SELL), { ...d, fetch: clock.fetch, now: clock.now });
+  for (const l of r.legs) {
+    assert.equal(l.refused, `renewal: no blockhash both providers hold (${FRESH}: valid on A true, on B false)`);
+    assert.equal(l.signature, undefined);
+    assert.equal(l.dry, undefined);
+  }
+  assert.equal(cap.signed.length, 0);
+});
+
+test("a leg whose fresh simulation now gives it nothing is refused on the renewal check and keeps its money; the others are signed", async () => {
+  const clock = slowBuilds(25_000);
+  const req = request(SELL);
+  const w0 = req.legs[0]!.wallet;
+  // the renewal's simulation for w0 (its second): the wallet gains no lamports from the sell
+  const cap = signedOn((at, method, n, x, params) => {
+    const y = freshAfterFirst(at, method, n, x, params);
+    const sim = method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : null;
+    if (sim && sim[0] === w0 && n >= 1) {
+      const pre = fx.rpc.find((q) => q.at === at && q.ask.startsWith('["getMultipleAccounts"') && q.ask.includes(w0))!.answer as { value: ({ lamports: number } | null)[] };
+      (y as { value: { accounts: ({ lamports: number } | null)[] } }).value.accounts[0]!.lamports = pre.value[0]!.lamports;
+    }
+    return y;
+  });
+  const d = deps(SELL, { edit: cap.edit });
+  const r = await runSolanaTrade(req, { ...d, fetch: clock.fetch, now: clock.now });
+  const l0 = r.legs[0]!;
+  assert.match(l0.refused ?? "", /^checks: /);
+  assert.equal(l0.verdict?.ok, false);
+  assert.equal(l0.signature, undefined);
+  for (const l of r.legs.slice(1)) assert.equal(l.refused, undefined, l.refused);
+  assert.equal(legWires(cap.signed, r.legs).length, req.legs.length - 1);
+  for (const b of legWires(cap.signed, r.legs)) assert.equal(signedHash(b), FRESH);
 });

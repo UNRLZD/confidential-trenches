@@ -28,7 +28,7 @@
 // Every answer is hostile input: size-bounded, shape-checked; anything else is SolanaBuildError("bad_answer").
 import { base58, base64 } from "@scure/base";
 import { HELPER_FETCH_INIT, HELPER_V1_PREFIX } from "../../helper/v1.ts";
-import { SOLANA_ATA_PROGRAM, SOLANA_MAX_TX_BYTES, solanaAta, solanaTableIsActive, type SolanaLookupTable } from "../../checks/solana/message.ts";
+import { SOLANA_ATA_PROGRAM, SOLANA_MAX_TX_BYTES, solanaAta, solanaDecodeMessage, solanaTableIsActive, type SolanaLookupTable } from "../../checks/solana/message.ts";
 import {
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_CU_PRICE_MAX,
@@ -663,6 +663,26 @@ export function assembleSolanaSwap(req: SolanaBuildRequest, build: SolanaJupiter
   wire.set(message, 65);
   if (wire.length > SOLANA_MAX_TX_BYTES) throw new SolanaBuildError("too_large", `${wire.length} bytes > ${SOLANA_MAX_TX_BYTES}`);
   return { wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit, cuPrice: build.cuPrice, tablesUsed };
+}
+
+/**
+ * The same assembled tx on a newer blockhash (card solana-legs-share-wait): the message's 32 blockhash bytes and the
+ * height its signer is handed change, and no other byte, so a simulation run with replaceRecentBlockhash holds for it
+ * unchanged. Assembling the build again would not do: the tip accounts are picked at random. The result is checked
+ * (checkSolanaQuote) before it is signed, like any assembly.
+ */
+export function solanaWithBlockhash(a: SolanaAssembled, chain: { blockhash: string; lastValidBlockHeight: number }): SolanaAssembled {
+  if (!isKey(chain.blockhash) || !Number.isSafeInteger(chain.lastValidBlockHeight) || chain.lastValidBlockHeight <= 0) throw new Error("the blockhash must be the device's own read");
+  if (a.wire[0] !== 1 || a.wire.length !== 65 + a.message.length || a.wire.subarray(65).some((b, i) => b !== a.message[i])) throw new Error("the wire is not its own message");
+  const keys = solanaDecodeMessage(a.message).staticKeys.length;
+  const at = 4 + compact(keys).length + 32 * keys;
+  const message = Uint8Array.from(a.message);
+  message.set(base58.decode(chain.blockhash), at);
+  if (solanaDecodeMessage(message).blockhash !== chain.blockhash) throw new Error("the blockhash is not at its place in the message");
+  const wire = new Uint8Array(1 + 64 + message.length);
+  wire[0] = 1;
+  wire.set(message, 65);
+  return { ...a, wire, message, lastValidBlockHeight: chain.lastValidBlockHeight };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
