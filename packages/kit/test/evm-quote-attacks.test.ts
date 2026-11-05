@@ -3838,8 +3838,8 @@ test("SP1 a first scan provider that refuses connections: the scan goes on at th
     // without a second asks it again after 0.5, 1 and 2 s, refusing at the fourth)
     assert.equal(again, 0, `${c}: a range asked of the first ${again + 1} times`);
     assert.ok(st.logs > 0 && asked.length > 0, `${c}: ${st.logs} getLogs on the first, ${asked.length} on the second`);
-    // the second reads in its own span: Base 2,500 blocks (bloXroute), Robinhood 2,000 (daybreak)
-    const span = c === "base" ? 2_500 : 2_000;
+    // the second reads in its own span: Base 1,000 blocks (Tenderly), Robinhood 2,000 (daybreak)
+    const span = c === "base" ? 1_000 : 2_000;
     assert.ok(asked.every(([a, b]) => b - a + 1 <= span), `${c}: a request on the second spans more than ${span}`);
   }
   // a first that refuses its head too: the head is the second's, and each request it refuses goes to the second

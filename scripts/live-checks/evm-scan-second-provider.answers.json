@@ -1,11 +1,10 @@
 {
  "good": {
-  "note": "a real run of the check at 7c3cecb from this Mac: Base second bloXroute, Robinhood second daybreak; every held quote ended ok",
-  "recorded": "2026-11-05T17:27:23.078Z",
+  "recorded": "2026-11-05T18:10:05.288Z",
   "scans": {
    "base": {
     "first": "https://base-rpc.publicnode.com",
-    "spare": "https://base.rpc.blxrbdn.com"
+    "spare": "https://base.gateway.tenderly.co"
    },
    "robinhood": {
     "first": "https://rpc.mainnet.chain.robinhood.com",
@@ -13,10 +12,10 @@
    }
   },
   "preflight": {
-   "https://base.rpc.blxrbdn.com": {
+   "https://base.gateway.tenderly.co": {
     "status": 204,
     "allow": "*",
-    "headers": "Content-Type, Authorization, User-Agent",
+    "headers": "content-type",
     "post": "*"
    },
    "https://robinhood.daybreak-rpc.network": {
@@ -31,35 +30,35 @@
     "first": [
      {
       "code": "ok",
-      "ms": 11239
+      "ms": 12517
      }
     ],
     "held": [
      {
       "mode": "refused",
       "code": "ok",
-      "ms": 1635,
-      "firstAsked": 13,
+      "ms": 2459,
+      "firstAsked": 20,
       "spareLogs": 1
      },
      {
       "mode": "refused",
       "code": "ok",
-      "ms": 854,
-      "firstAsked": 1,
+      "ms": 1309,
+      "firstAsked": 2,
       "spareLogs": 1
      },
      {
       "mode": "no logs",
       "code": "ok",
-      "ms": 1807,
-      "firstAsked": 8,
+      "ms": 988,
+      "firstAsked": 2,
       "spareLogs": 1
      },
      {
       "mode": "no logs",
       "code": "ok",
-      "ms": 869,
+      "ms": 1658,
       "firstAsked": 2,
       "spareLogs": 1
      }
@@ -68,42 +67,53 @@
    "robinhood-torch": {
     "first": [
      {
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms",
+      "ms": 60375
+     },
+     {
+      "code": "rpc_error",
+      "message": "rpc_error: provider 2 answered the multicall with an error: historical state 2f316bbfcc859da2cd96a1fd4c87e3b3b702cee9c9b8642c6fbe08e8fede344f is not available",
+      "ms": 14718
+     },
+     {
       "code": "ok",
-      "ms": 51474
+      "ms": 3245
      }
     ],
     "held": [
      {
       "mode": "refused",
       "code": "ok",
-      "ms": 4372,
+      "ms": 2658,
       "firstAsked": 25,
       "spareLogs": 4
      },
      {
       "mode": "refused",
       "code": "ok",
-      "ms": 2183,
-      "firstAsked": 1,
+      "ms": 2431,
+      "firstAsked": 25,
       "spareLogs": 4
      },
      {
       "mode": "no logs",
       "code": "ok",
-      "ms": 2619,
-      "firstAsked": 5,
+      "ms": 2162,
+      "firstAsked": 12,
       "spareLogs": 4
      },
      {
       "mode": "no logs",
       "code": "ok",
-      "ms": 2007,
-      "firstAsked": 5,
+      "ms": 1961,
+      "firstAsked": 12,
       "spareLogs": 4
      }
     ]
    }
-  }
+  },
+  "where": "this Mac, 18:10-18:14Z: the kit at fa85b5f with the Base second swapped to base.gateway.tenderly.co (Tenderly), the commit that records this answer: PASS"
  },
  "bad": {
   "note": "a real run of the check at 0273ca1 from this Mac: Robinhood second Globalstake, 3 of 4 held quotes rpc_error at the 60 s bound",
@@ -223,5 +233,125 @@
     ]
    }
   }
+ },
+ "down": {
+  "recorded": "2026-11-05T18:04:23.108Z",
+  "scans": {
+   "base": {
+    "first": "https://base-rpc.publicnode.com",
+    "spare": "https://base.rpc.blxrbdn.com"
+   },
+   "robinhood": {
+    "first": "https://rpc.mainnet.chain.robinhood.com",
+    "spare": "https://robinhood.daybreak-rpc.network"
+   }
+  },
+  "preflight": {
+   "https://base.rpc.blxrbdn.com": {
+    "status": 204,
+    "allow": "*",
+    "headers": "Content-Type, Authorization, User-Agent",
+    "post": null
+   },
+   "https://robinhood.daybreak-rpc.network": {
+    "status": 204,
+    "allow": "*",
+    "headers": "Content-Type",
+    "post": "*"
+   }
+  },
+  "cases": {
+   "base-hook": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 55325
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: a provider did not answer: the provider answered HTTP 503",
+      "ms": 4031,
+      "firstAsked": 4,
+      "spareLogs": 0
+     },
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: a provider did not answer: the provider answered HTTP 503",
+      "ms": 4096,
+      "firstAsked": 1,
+      "spareLogs": 0
+     },
+     {
+      "mode": "no logs",
+      "code": "rpc_error",
+      "message": "rpc_error: a provider did not answer: the provider answered HTTP 503",
+      "ms": 6530,
+      "firstAsked": 2,
+      "spareLogs": 39
+     },
+     {
+      "mode": "no logs",
+      "code": "rpc_error",
+      "message": "rpc_error: a provider did not answer: the provider answered HTTP 503",
+      "ms": 5851,
+      "firstAsked": 2,
+      "spareLogs": 39
+     }
+    ]
+   },
+   "robinhood-torch": {
+    "first": [
+     {
+      "code": "rpc_error",
+      "message": "rpc_error: provider 1 answered the multicall with an error: historical state 51d4177c31b1c05a80dbc7c8a3007b1966c8b74e36ba4edeef6a0ec97178467b is not available",
+      "ms": 40760
+     },
+     {
+      "code": "rpc_error",
+      "message": "rpc_error: provider 3 answered the multicall with an error: historical state d97ac5b2b599c745b54d9d83099c3e5c8c109ffab45c2509dda658ce44aee7d4 is not available",
+      "ms": 23323
+     },
+     {
+      "code": "ok",
+      "ms": 4736
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 3128,
+      "firstAsked": 26,
+      "spareLogs": 4
+     },
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 2477,
+      "firstAsked": 26,
+      "spareLogs": 4
+     },
+     {
+      "mode": "no logs",
+      "code": "ok",
+      "ms": 4275,
+      "firstAsked": 24,
+      "spareLogs": 4
+     },
+     {
+      "mode": "no logs",
+      "code": "ok",
+      "ms": 2264,
+      "firstAsked": 12,
+      "spareLogs": 4
+     }
+    ]
+   }
+  },
+  "where": "this Mac, 17:59-18:07Z: the kit at fa85b5f with the Base second base.rpc.blxrbdn.com (bloXroute), which answered every request 503 \"No server is available to handle this request\": FAIL"
  }
 }

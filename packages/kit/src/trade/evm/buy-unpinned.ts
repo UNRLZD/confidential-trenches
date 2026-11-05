@@ -147,19 +147,19 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // the quotes 8.6 s and 7.6 s (2026-11-04 21:31-21:34Z). publicnode limits each address's getLogs work: about two
       // cold scans back to back, at either span, then 429 for most requests for under a minute (21:26-21:27Z).
       poolManager: "0x498581fF718922c3f8e6A244956aF099B2652b2b",
-      // The second: bloXroute (base.rpc.blxrbdn.com, its own edge, not Cloudflare; card evm-scan-second-provider,
-      // 2026-11-05 16:13-16:25Z from this Mac). Its getLogs spans up to 100,000 blocks ("query exceeds max block range
-      // 100000") and keeps them from block 52,000,000 (about 1.55M back; "pruned history unavailable … earliest available
-      // 52000000"); the browser's preflight from the app's origin answers 204, access-control-allow-origin *; the 519
-      // Initialize logs of blocks 52,563,278-52,568,277 the same as publicnode's, log for log; 20 warm requests (10 blocks)
-      // at once all answered, p50 254-773 ms, no 429 in any read. Its span: 2,500 blocks, 10 at once all answered
-      // 700,000 back (p50 6.3-8.0 s), where 5,000 timed out 3 to 10 of 10 at 10 s. Passed over: Blast (10 blocks a
-      // getLogs), dRPC ("ranges over 10000 blocks are not supported on free plan" for 1,000-block spans deep back), BlockPI
-      // (5,000 blocks, then "Due to the high consumption or frequency of RPC requests" on the third burst and failed
-      // connections), Tenderly (1,000 blocks without a key), 1rpc (50 blocks), meowrpc (no eth_getLogs), ankr (a key),
-      // llamarpc and omniatech (525/521), lava (410). No keyless one carries a cold 1M-block scan within the bound
-      // alone: it carries what the first left, and a warm scan whole.
-      scan: bare({ url: "https://base-rpc.publicnode.com", span: 10_000, depth: 1_000_000, parallel: 20, spare: bare({ url: "https://base.rpc.blxrbdn.com", span: 2_500, parallel: 10 }) }),
+      // The second: Tenderly's public gateway (base.gateway.tenderly.co; card evm-scan-second-provider, 2026-11-05
+      // 18:08-18:09Z from this Mac). The browser's preflight from the app's origin answers 204, allow-origin *, and its
+      // POST allow-origin *; its getLogs spans up to 1,000 blocks without a key ("Block range too large" at 2,500); 8
+      // requests of 1,000 blocks at the head at once each answered, 449-552 ms; a range past its head answers -32602
+      // "block range extends beyond current head block", never []. A warm scan (scanPools `fast`) fits in its one round
+      // of 8,000 blocks; a cold one stays on the first. bloXroute (base.rpc.blxrbdn.com), the second at 22e29c9, answered
+      // every request 503 "No server is available to handle this request" at 18:07-18:09Z, so the live check's held
+      // Base quotes ended rpc_error. Passed over: Blast (10 blocks a getLogs), dRPC ("ranges over 10000 blocks are not
+      // supported on free plan" on 2,500-block spans, 18:08Z), BlockPI ("Apikey not found", 18:08Z), mainnet.base.org
+      // (-32011 "request limit reached" on its first getLogs, 18:08Z), 1rpc (50 blocks), meowrpc (no eth_getLogs), ankr
+      // (a key), llamarpc (525, 18:08Z), omniatech (521), lava (410). No keyless one carries a cold 1M-block scan within
+      // the bound alone: it carries what the first left, and a warm scan whole.
+      scan: bare({ url: "https://base-rpc.publicnode.com", span: 10_000, depth: 1_000_000, parallel: 20, spare: bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 8 }) }),
     }),
     robinhood: bare({
       chainId: 4663,
