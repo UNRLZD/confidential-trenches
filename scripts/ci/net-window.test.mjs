@@ -92,6 +92,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-solana-trade.mjs",
   "scripts/live-checks/signpage-withdraw-form.mjs",
   "scripts/live-checks/signpage-withdraw-own-spend.mjs",
+  "scripts/live-checks/sol-small-note-buys.mjs",
   "scripts/live-checks/solana-jupiter-build.mjs",
   "scripts/live-checks/solana-legs-share-wait.mjs",
   "scripts/live-checks/trade-box-bal-cash.mjs",

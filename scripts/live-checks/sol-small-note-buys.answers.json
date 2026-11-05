@@ -1,0 +1,32 @@
+{
+ "good": {
+  "check": "sol-small-note-buys",
+  "at": "2026-11-05T19:17:14.840Z",
+  "source": "live: the page's Solana pair and https://api.confidential.unrealized.trade",
+  "rent": {
+   "rpcs": [
+    "https://solana-rpc.publicnode.com",
+    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+   ],
+   "lamportsPerByte": "5080",
+   "factor": "1"
+  },
+  "pin": null,
+  "helperFee": null
+ },
+ "bad": {
+  "check": "sol-small-note-buys",
+  "at": "2026-11-05T19:17:16.193Z",
+  "source": "harness: rent 3480x2 standing for the pair's read",
+  "rent": {
+   "rpcs": [
+    "https://solana-rpc.publicnode.com",
+    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+   ],
+   "lamportsPerByte": "3480",
+   "factor": "2"
+  },
+  "pin": null,
+  "helperFee": null
+ }
+}
