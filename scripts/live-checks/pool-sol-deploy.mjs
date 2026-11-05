@@ -14,13 +14,16 @@
 //     deploy script computed as Poseidon(value, label, precommitment) and checked against this leaf when it deployed
 //     (contracts/pool-solana/scripts/deploy.mjs; deploy.test.mjs re-checks every committed record);
 //   - every funder of the run (the record's `funders`, the fee payers of its transactions that are not the return
-//     address): 0 lamports at finalized, so no lamport is left behind a run key.
+//     address): 0 lamports at finalized, so no lamport is left behind a run key; one that is not the run's own key and
+//     holds lamports is named as a funding sent from a wallet other than the return address.
 // A mainnet record (card pool-sol-deploy-mainnet, scripts/live-checks/pool-sol-deploy-mainnet.mjs) has no test deposit,
 // so the mark and leaf lines are not read; instead, on mainnet's two RPCs of two operators:
 //   - the pool exists as above;
 //   - the pool buy's lookup table (the record's `table`): owned by the address lookup table program, active, its
 //     authority none (frozen: nobody can deactivate or close it), holding exactly the record's `table_addresses` in
-//     order, a list that holds this program's pool and the pages up to entry 2,047 of each tree;
+//     order, a list that is the kit's own (solanaPoolBuyTableAccounts from its public entry) for this program, its pool
+//     and the pages up to entry 2,047 of each tree, only the venue's 9 keys (pump Global's fee recipient and 8 buyback
+//     recipients, which Global may change) taken from the list;
 //   - the programdata and the table read as the same bytes on both RPCs.
 // Every constant it compares against is pinned here or read from chain; the record gives only the ids, the code's
 // sha256, the deposit and the table's list.
@@ -250,6 +253,15 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
     const list = Array.isArray(d.table_addresses) ? d.table_addresses : [];
     const own = [pool.address, ...[0, 1].flatMap((tree) => [0n, 1n].map((n) => pageAddress(prog, tree, n).address))];
     say(typeof d.table === "string" && own.every((a) => list.includes(a)), `the record names the pool buy's lookup table ${d.table ?? "(none)"}, its list holding pool ${pool.address} and the pages to entry 2,047 of each tree`);
+    // the whole list, rebuilt from the kit's public entry for this program: only the venue's 9 keys (pump Global's fee
+    // recipient and its 8 buyback recipients, which Global may change) are taken from the list itself
+    const kit = await import("../../packages/kit/src/index.ts");
+    const slot = Array.from({ length: 9 }, (_, i) => `venue key ${i}`);
+    const template = kit.solanaPoolBuyTableAccounts({ program: prog, pool: pool.address }, { kind: "pump-curve", feeRecipient: slot[0], buybackFeeRecipients: slot.slice(1) }, kit.solanaPoolPages(prog, 1024, 1024));
+    const want = template.map((a, i) => (slot.includes(a) ? list[i] : a));
+    const first = want.findIndex((a, i) => a !== list[i]);
+    say(list.length === want.length && first < 0,
+      `the record's table list is the kit's for this program (solanaPoolBuyTableAccounts, pages to entry 2,047), its 9 venue keys taken from the list: ${list.length} addresses, ${want.length} wanted${first < 0 ? "" : `, entry ${first} is ${list[first] ?? "missing"}, not ${want[first] ?? "none"}`}`);
   }
   const bytesOn = { programdata: [], table: [] };
   for (const url of rpcs.slice(0, 2)) {
@@ -315,7 +327,9 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
       say(funders.length > 0, `the record names the run's funders: ${funders.length} ${at}`);
       for (const f of funders) {
         const b = (await rpc(fetchFn, url, "getBalance", [f, { commitment: "finalized" }], sleep))?.value;
-        say(b === 0, `funder ${f} holds 0 lamports ${at}: ${b}`);
+        // a fee payer of the run that is not its key and not the return address: a funding sent from another wallet
+        const why = b !== 0 && d.funder && f !== d.funder ? `: it is not this run's key ${d.funder}: the funding came from a wallet other than the return address ${d.return_to}` : "";
+        say(b === 0, why ? `funder ${f} holds ${b} lamports ${at}${why}` : `funder ${f} holds 0 lamports ${at}: ${b}`);
       }
     } catch (e) {
       say(false, `read ${at}: ${String(e.message).split("\n")[0]}`);

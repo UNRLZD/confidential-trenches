@@ -132,6 +132,7 @@ test("review 3: a funder that is not the run's own key and still holds lamports 
   for (const url of A.rpcs) answers.push({ url, method: "getBalance", params: [OTHER, { commitment: "finalized" }], status: 200, json: { jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: 2_000_000_000 } } });
   const r = await run(answers, { ...D, funders: [...D.funders, OTHER] });
   failsOn(r, new RegExp(`${OTHER} holds 2000000000 lamports on \\S+: it is not this run's key ${D.funder}: the funding came from a wallet other than the return address ${D.return_to}`));
-  // the run's own key holding lamports is its own line
-  assert.ok(!r.lines.some((l) => l.startsWith("FAIL") && l.includes(D.funder)), r.lines.join("\n"));
+  // the run's own key reads 0: its own line passes
+  assert.ok(r.lines.some((l) => l.startsWith(`ok   funder ${D.funder} holds 0 lamports`)), r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => l.startsWith(`FAIL funder ${D.funder}`)), r.lines.join("\n"));
 });
