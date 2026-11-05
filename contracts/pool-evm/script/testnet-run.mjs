@@ -87,8 +87,8 @@ const lower = (a) => a.toLowerCase();
 export const NETS = Object.freeze({
   "base-sepolia": Object.freeze({
     rpcs: ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
-    // the restore's Transfer reads go to two other providers (evmRestoreNotes refuses a pool provider): the wallet's
-    // own list, one source for the device and the run (card wallet-restore-transfer-rpcs)
+    // the restore's Transfer reads go to other providers (evmRestoreNotes names no W to a pool provider): the wallet's
+    // own list, one source for the device and the run (cards wallet-restore-transfer-rpcs, evm-transfer-rpc-spares)
     walletRpcs: EVM_TRANSFER_RPCS["base-sepolia"],
     op: true,
     coin: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", // the token bought: USDC
@@ -101,7 +101,8 @@ export const NETS = Object.freeze({
   // pool (fee 10000, tick spacing 200, no hook, id 0x601b493e...) is the deepest hookless one the PoolManager's
   // Initialize logs name. No v3 and no router there (M365), so the run buys and sells through v4 only, the sell through
   // the pinned PoolManager (card evm-sell-v4-kit). The Transfer reads
-  // go to the wallet's EVM_TRANSFER_RPCS (thirdweb's and dRPC's public gateways), neither a pool provider. The sync's
+  // go to the wallet's EVM_TRANSFER_RPCS (dRPC's and thirdweb's public gateways; Robinhood's own, the list's third, is
+  // this run's pool provider, so evmRestoreNotes drops it from the W reads). The sync's
   // pair pages the pool's logs (PublicNode 50,000 blocks a page); the relay fee's state reads at the epoch's first
   // block go to the kit pin's providers instead (Robinhood's own and dRPC, which keep state 600 s back; PublicNode
   // keeps about 15 s: card evm-buy-hookdata-fee, fold 3), as feeRpcs below.
@@ -465,12 +466,14 @@ export async function main(args, io = {}) {
       }
       if (amount !== BigInt(b.out)) throw new Error(`W ${W.address} holds ${amount} of the token, not the ${b.out} its buy paid, after 60 s`);
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
+      const sellFeeTo = sellHelper ? lower((await (await fetchFn(`${sellHelper}/v1/pool/fee?pool=${pool}`)).json()).fee_recipient) : relayer;
       const { q, built } = await fresh(
         // `bought` and `boughtBlock`: the route of the buy that paid W the token and the block it landed in, which the
         // sell quote requires (it reads at that block or a later one)
         () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block }),
-        // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole
-        (q) => kit.evmPoolBuildSell(q, { precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
+        // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole, paid to the fee
+        // recipient W signs (pool review round 3, L-1): the helper's own, as its GET /v1/pool/fee names it, or the run key
+        (q) => kit.evmPoolBuildSell(q, { feeRecipient: sellFeeTo, precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
       );
       const fee = built.feeCap;
       const sv = q.route.venue === "uniswap-v4" ? "v4" : "v3";

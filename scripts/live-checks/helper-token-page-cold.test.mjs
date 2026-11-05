@@ -41,6 +41,9 @@ test("planted on the good answer: a slow read past p95, a 429, warm reads, a mis
   assert.ok(bad(r).some((l) => l.startsWith("BAD cold page reads")), r.lines.join("\n"));
   r = edit((run) => Object.assign(run.reads[3], { status: 429, retryAfter: "5" }));
   assert.ok(bad(r).some((l) => / did not: 429 Retry-After 5/.test(l)), r.lines.join("\n"));
+  // card helper-ready-page-warm: a not-ready page's cause, its Server-Timing, is on the FAIL line
+  r = edit((run) => Object.assign(run.reads[4], { status: 503, timing: 'search-held;desc="jupiter held"' }));
+  assert.ok(bad(r).some((l) => / did not: 503 Server-Timing search-held;desc="jupiter held"/.test(l)), r.lines.join("\n"));
   // a read whose Jupiter row is older than its send was served from what the helper held: not cold
   r = edit((run) => run.reads.slice(0, run.reads.length - COLD_MIN + 1).forEach((x) => (x.jupAt = x.sentAt - 60_000)));
   assert.ok(bad(r).some((l) => /read cold/.test(l)), r.lines.join("\n"));

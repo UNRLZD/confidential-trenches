@@ -26,7 +26,7 @@ const hop = (currency: string, o: Partial<{ fee: number; tickSpacing: number; ho
 const built = (chain: "base" | "base-sepolia", o: Partial<EvmPoolSellUnpinnedRequest>) =>
   evmPoolBuildSellUnpinned(chain, {
     w: W, token: X, amount: 10n ** 18n, target: B.routers[0]!, route: { venue: "uniswap-v3", tokens: [X, USDC, B.weth], fees: [500, 3000] }, minOut: 10n ** 15n,
-    pool: "0x00000000000000000000000000000000b1f1f001", precommitment: 1n, feeCap: 1n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n, ...o,
+    pool: "0x00000000000000000000000000000000b1f1f001", precommitment: 1n, feeCap: 1n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n, ...o,
   });
 const call = (b: ReturnType<typeof built>): EvmSignedSellCall => ({ w: b.w, token: b.token, amount: b.amount, minOut: b.minOut, target: b.target, data: b.data });
 

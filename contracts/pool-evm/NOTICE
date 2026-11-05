@@ -105,12 +105,15 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
  14. SellDelegate (card pool-evm-sell), not in the source and not part of the pool: an EIP-7702 delegate for W, so W,
      which holds the bought token and no ETH, sells it and deposits the ETH back into the pool in one transaction that
      anyone sends (the helper, which pays the gas). W signs Sell(address token,uint256 amount,address target,bytes
-     data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce) under the
+     data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256
+     nonce) under the
      domain {name "Blindfill", version "1", chainId, verifyingContract: W}, 65 bytes with s in the lower half; deadline
      is in unix seconds. The delegate approves the target exactly the amount, calls it with W's calldata (a revert is
      passed on), and refuses unless the target took the whole approval, so the approval always ends at 0 and a partial
      fill reverts the sell. It unwraps the WETH the sale paid W, refuses an ETH gain under minOut (never 0), pays
-     the sender the fee it names (at most feeCap) and deposits the rest with W's precommitment; ETH or WETH W already
+     the fee the sender names (at most feeCap) to the feeRecipient W signed, never to the sender (pool review round 3,
+     L-1: a front-run with the whole cap took it), refusing a zero or W fee recipient, and deposits the rest with W's
+     precommitment; ETH or WETH W already
      held is not counted. No owner, setter, selfdestruct, DELEGATECALL or CREATE; WETH is an immutable (code); the one
      stored value is W's nonce, at the ERC-7201 slot of "blindfill.sell" in W's own account, and a reentrancy guard,
      at the ERC-7201 transient slot of "blindfill.sell.guard" (as OpenZeppelin's ReentrancyGuardTransient keeps its

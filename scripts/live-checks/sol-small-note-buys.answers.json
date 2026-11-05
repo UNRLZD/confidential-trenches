@@ -1,0 +1,63 @@
+{
+ "good": {
+  "check": "sol-small-note-buys",
+  "at": "2026-11-05T19:32:12.876Z",
+  "source": "live: the page's Solana pair and https://api.confidential.unrealized.trade",
+  "rent": {
+   "rpcs": [
+    "https://solana-rpc.publicnode.com",
+    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+   ],
+   "lamportsPerByte": "5080",
+   "factor": "1"
+  },
+  "pin": null,
+  "helperFee": null
+ },
+ "bad": {
+  "check": "sol-small-note-buys",
+  "at": "2026-11-05T19:32:13.657Z",
+  "source": "harness: rent 3480x2 standing for the pair's read",
+  "rent": {
+   "rpcs": [
+    "https://solana-rpc.publicnode.com",
+    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+   ],
+   "lamportsPerByte": "3480",
+   "factor": "2"
+  },
+  "pin": null,
+  "helperFee": null
+ },
+ "pinned": {
+  "check": "sol-small-note-buys",
+  "at": "2026-11-05T19:32:13.789Z",
+  "source": "live: the page's Solana pair and https://api.confidential.unrealized.trade",
+  "rent": {
+   "rpcs": [
+    "https://solana-rpc.publicnode.com",
+    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+   ],
+   "lamportsPerByte": "5080",
+   "factor": "1"
+  },
+  "pin": {
+   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "feePayer": "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb"
+  },
+  "helperFee": {
+   "status": 200,
+   "answer": {
+    "chain": "solana",
+    "cluster": "devnet",
+    "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+    "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+    "fee_payer": "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb",
+    "epoch_ms": 60000,
+    "epoch_start_ms": 1793907120000,
+    "fee": "1300000",
+    "step": "100000"
+   }
+  }
+ }
+}
