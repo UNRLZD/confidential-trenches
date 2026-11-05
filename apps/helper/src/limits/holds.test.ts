@@ -26,7 +26,10 @@ const blockNumber = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNu
 
 test("card helper-robinhood-capacity: one hold per provider: a 429 the swap reads met holds /v1/rpc/robinhood and the maker reads, and a 429 /v1/rpc/robinhood met holds the swap reads", async () => {
   const clock = { t: 9_000_000 };
-  const holds = providerHolds(() => clock.t);
+  // no paces here, so the providers tie and the first read asks the chain's own RPC first (card robinhood-cold-open-fast:
+  // with the paces on this frozen clock its 2-post bucket ranked it last for every read, and the sender lookups, which
+  // gave it a share by free budget and met its 429, now go to the providers expected to answer first)
+  const holds = providerHolds(() => clock.t, {});
   // the swap reads meet the chain's own RPC's 429 (it is asked first here)
   const r = rig([CHAIN_RPC]);
   const s = open(r.chain, clock, { pools: new Map(), rpcs: [CHAIN_RPC, ...WIDE], headerTimed: HEADER_TIMED, fetch: r.fetch as never, holds });

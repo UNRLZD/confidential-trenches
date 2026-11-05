@@ -12,6 +12,7 @@ import type { NoteRecord } from "../src/notes/store.ts";
 import { NEAR_EPOCH_MS, NEAR_LIFE_MS, USDC_LADDER, nearVaultPool } from "../src/pool/near.ts";
 import { NEWEST_GRACE_MS, TAKE_SLACK_MS, type Pool, type PoolBindArgs, type PoolTrees, type ReadyProof } from "../src/pool/pool.ts";
 import { openProofQueue, proofPoolSize, readySetSize, type ProofQueue } from "../src/pool/queue.ts";
+import { poolBalances, type BalancePool } from "../src/pool/balances.ts";
 import {
   BLOCK_MS, BLOCK_NS, closeVaults, FEE_MAX, FEE_RECIPIENT, feeReplay, REGISTER_DEPOSIT, SCOPE, SEED, signalsProver, TOKEN, VAULT, vaultWith, type Vault,
 } from "./withdraw-fixture.ts";
@@ -502,6 +503,62 @@ test("a take, close or drop that arrives during the swap's HELD -> HELD write wa
     assert.equal((await v.ns.list())[0]!.state, "UNSPENT");
     assert.deepEqual(q.ready(), []);
   }
+});
+
+// card pool-ready-no-flicker: the signing page's state (src/main.ts) reads the ready list and the notes, and
+// poolBalances counts a proof only while its note is HELD by the proof's attempt. A remake's swap gives the note a new
+// attempt (HELD -> HELD) and then puts the new proof in the ready list; a state read that copies the list before that
+// write commits and reads the notes after it saw ready "0" for one read (devnet, 5 Nov 16:48:56Z). readyWith reads
+// both in one turn that the swap's write and its ready list update also take, so a read sees both before or both after.
+const NEAR_POOL: BalancePool = { id: "test:pool", chain: "near", scope: SCOPE, asset: "USDC" };
+/** The state's read: through readyWith, or, where the queue has none, the ready list copied before the notes are read. */
+const stateRead = async (q: ProofQueue<unknown>, read: () => Promise<NoteRecord[]>): Promise<string | undefined> => {
+  const qq = q as ProofQueue<unknown> & { readyWith?: <T>(read: () => Promise<T>) => Promise<{ ready: ReadyProof<unknown>[]; value: T }> };
+  const r = qq.readyWith !== undefined ? await qq.readyWith(read) : { ready: q.ready(), value: await read() };
+  return poolBalances(r.value, [NEAR_POOL], r.ready)[0]!.ready;
+};
+
+test("a state read during a remake's swap never sees ready 0: the new attempt's write and the ready list move in one turn", async () => {
+  const v = await vaultWith([usd(5)]);
+  const pool = fakePool(v);
+  let q!: ProofQueue<unknown>;
+  let during: Promise<string | undefined> | undefined;
+  // the read starts as the swap's HELD -> HELD write is sent, before it commits
+  q = openProofQueue({ seed64: SEED, notes: hooked(v, "HELD", "HELD", () => (during = stateRead(q, () => v.ns.list()))), pool: pool as Pool<unknown>, provers: [signalsProver()], hardwareConcurrency: 2 });
+  open.push(q);
+  await q.refresh();
+  const [a] = q.ready();
+  const before = await stateRead(q, () => v.ns.list());
+  assert.notEqual(before, "0", "the ready proof counts before the boundary");
+  pool.t.now = START + E + 10n;
+  assert.deepEqual((await q.refresh()).remade, [a!.noteId]);
+  assert.equal(await during, before, "a read during the swap: the note's proof still counts");
+  assert.equal(await stateRead(q, () => v.ns.list()), before, "and after it");
+});
+
+test("a state read already reading the notes when a swap is ready to write: the swap waits for it, and neither read sees ready 0", async () => {
+  const v = await vaultWith([usd(5)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool as Pool<unknown>, [signalsProver()], 2);
+  await q.refresh();
+  const [a] = q.ready();
+  const before = await stateRead(q, () => v.ns.list());
+  pool.t.now = START + E + 10n;
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  // a slow notes read: it holds while the remake is made and its swap is ready to write
+  const slow = stateRead(q, async () => {
+    await gate;
+    return v.ns.list();
+  });
+  const pass = q.refresh();
+  // the pass ends, or it waits on the read: either way the read goes on after 300 ms
+  await Promise.race([pass, new Promise((ok) => setTimeout(ok, 300))]);
+  release();
+  assert.equal(await slow, before, "the slow read: the note's proof still counts");
+  assert.deepEqual((await pass).remade, [a!.noteId]);
+  assert.notEqual(q.ready()[0]!.attempt, a!.attempt, "the swap ran after the read");
+  assert.equal(await stateRead(q, () => v.ns.list()), before);
 });
 
 test("a full ready set (3 of 3) is made again at the boundary, on the epoch root even when a leaf landed after it", async () => {
