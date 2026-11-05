@@ -67,10 +67,13 @@ export type EvmPoolVenue = {
   readonly hookedPools?: readonly EvmHookedPool[];
   /** Uniswap v4's PoolManager (the V4Quoter's poolManager()), whose state the device reads for each pool it found, and
    *  the provider it scans for the PoolManager's Initialize logs: `span` blocks a request, `depth` blocks back, at most
-   *  `parallel` requests at once. */
+   *  `parallel` requests at once; and the second provider (`spare`, of another operator) the scan goes on at where the
+   *  first refuses, does not answer within its share of the quote's bound, or answers no logs (checks/evm/quote.ts
+   *  scanPools, card evm-scan-second-provider), with its own span and requests at once over the same depth. */
   readonly poolManager?: string;
-  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number }>;
+  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number; spare?: EvmScanSpare }>;
 };
+export type EvmScanSpare = Readonly<{ url: string; span: number; parallel: number; orSpan?: number }>;
 export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "weth"; readonly fee: number; readonly tickSpacing: number; readonly hooks: string };
 
 /** The chains the EVM pool runs on and their venues (the venue list). The builder's checks and the signer's chain id
@@ -144,7 +147,19 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // the quotes 8.6 s and 7.6 s (2026-11-04 21:31-21:34Z). publicnode limits each address's getLogs work: about two
       // cold scans back to back, at either span, then 429 for most requests for under a minute (21:26-21:27Z).
       poolManager: "0x498581fF718922c3f8e6A244956aF099B2652b2b",
-      scan: bare({ url: "https://base-rpc.publicnode.com", span: 10_000, depth: 1_000_000, parallel: 20 }),
+      // The second: bloXroute (base.rpc.blxrbdn.com, its own edge, not Cloudflare; card evm-scan-second-provider,
+      // 2026-11-05 16:13-16:25Z from this Mac). Its getLogs spans up to 100,000 blocks ("query exceeds max block range
+      // 100000") and keeps them from block 52,000,000 (about 1.55M back; "pruned history unavailable … earliest available
+      // 52000000"); the browser's preflight from the app's origin answers 204, access-control-allow-origin *; the 519
+      // Initialize logs of blocks 52,563,278-52,568,277 the same as publicnode's, log for log; 20 warm requests (10 blocks)
+      // at once all answered, p50 254-773 ms, no 429 in any read. Its span: 2,500 blocks, 10 at once all answered
+      // 700,000 back (p50 6.3-8.0 s), where 5,000 timed out 3 to 10 of 10 at 10 s. Passed over: Blast (10 blocks a
+      // getLogs), dRPC ("ranges over 10000 blocks are not supported on free plan" for 1,000-block spans deep back), BlockPI
+      // (5,000 blocks, then "Due to the high consumption or frequency of RPC requests" on the third burst and failed
+      // connections), Tenderly (1,000 blocks without a key), 1rpc (50 blocks), meowrpc (no eth_getLogs), ankr (a key),
+      // llamarpc and omniatech (525/521), lava (410). No keyless one carries a cold 1M-block scan within the bound
+      // alone: it carries what the first left, and a warm scan whole.
+      scan: bare({ url: "https://base-rpc.publicnode.com", span: 10_000, depth: 1_000_000, parallel: 20, spare: bare({ url: "https://base.rpc.blxrbdn.com", span: 2_500, parallel: 10 }) }),
     }),
     robinhood: bare({
       chainId: 4663,
@@ -189,7 +204,22 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // (it answers 429 to 4 at once, 2026-11-03 20:27Z); a request with more than one value in a topic position spans
       // at most 100,000 blocks ("query spans 1000000 blocks …, but only 100000 are allowed for this request; narrow the
       // block range, or send one value per position", 2026-11-04 06:55Z): `orSpan`
-      scan: bare({ url: "https://rpc.mainnet.chain.robinhood.com", span: 1_000_000, depth: 10_000_000, parallel: 2, orSpan: 100_000 }),
+      // The second: Globalstake (rpc-robinhood.globalstake.io; card evm-scan-second-provider, 2026-11-05 16:21-16:27Z
+      // from this Mac), the one keyless provider of the five that serves getLogs at depth: publicnode answers "Archive
+      // requests require a personal token" for the newest 100 blocks, dRPC refuses 1,000-block spans on its free plan,
+      // bloXroute "Method not available on this endpoint". Its preflight answers 200, access-control-allow-origin *; the
+      // 289 Initialize logs of 100,000 blocks 3M back the same as Robinhood's own, log for log; 4 requests of 100,000
+      // blocks at once all answered, p50 3.5-4.1 s, an OR of topics too (2.7 s); 1M blocks took 11.4 s, past the 10 s
+      // timeout, and 100,000 blocks 9.95M back "request timed out" at 30 s, so it carries what the first left of the
+      // newest blocks, and a warm scan whole.
+      scan: bare({
+        url: "https://rpc.mainnet.chain.robinhood.com",
+        span: 1_000_000,
+        depth: 10_000_000,
+        parallel: 2,
+        orSpan: 100_000,
+        spare: bare({ url: "https://rpc-robinhood.globalstake.io", span: 100_000, parallel: 4 }),
+      }),
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
     // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build
