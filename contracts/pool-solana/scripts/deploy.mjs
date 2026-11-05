@@ -419,7 +419,7 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
   const common = ["--url", url, "--keypair", keyFile, "--commitment", "confirmed"];
   const pdAddr = programDataAddress(programId);
   const byFunder = async () => {
-    const pd = await account(fetchFn, url, pdAddr, undefined, "confirmed");
+    const pd = await account(fetchFn, url, pdAddr, wait, "confirmed");
     return !!pd && pd.owner === LOADER_V3 && pd.data[0] === 3 && pd.data[12] === 1 && b58encode(pd.data.subarray(13, 45)) === funder.id;
   };
   const balanceOn = async (u) => BigInt((await rpc(fetchFn, u, "getBalance", [funder.id, { commitment: "confirmed" }], wait)).value);
@@ -439,7 +439,7 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
       // requests require a personal token"), and --url is the one the run checks answers it
       let left = [];
       for (let i = 0; i < 15; i++) {
-        left = (await rpc(fetchFn, url, "getProgramAccounts", [LOADER_V3, buffersOf(funder)])).map((a) => `${a.pubkey} on ${url}`);
+        left = (await rpc(fetchFn, url, "getProgramAccounts", [LOADER_V3, buffersOf(funder)], wait)).map((a) => `${a.pubkey} on ${url}`);
         if (!left.length) return;
         await wait(2000);
       }
@@ -467,7 +467,7 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
       const t = tableOf();
       if (!t) return null;
       const live = async () => {
-        const a = await account(fetchFn, url, t, undefined, "confirmed");
+        const a = await account(fetchFn, url, t, wait, "confirmed");
         return !!a && a.owner === ALT_PROGRAM && a.data.length >= TABLE_META && Buffer.from(a.data).readBigUInt64LE(4) === 0xffff_ffff_ffff_ffffn && a.data[21] === 1 && b58encode(a.data.subarray(22, 54)) === funder.id;
       };
       if (!(await live())) return null;

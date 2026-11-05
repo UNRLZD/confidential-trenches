@@ -57,6 +57,8 @@ function chain({ balance = START, upgradeable = false, failures = {} } = {}) {
   return { ops, calls, get balance() { return balance; }, get returned() { return returned; }, get fees() { return fees; } };
 }
 const fast = { wait: async () => {} };
+/** A virtual clock's now(), a second a read: a read-again loop in a fake ends in its own time, never the wall clock's. */
+const vnow = () => { let t = 0; return () => (t += 1000); };
 const firstTransfer = (c) => c.calls.findIndex((x) => x.startsWith("transfer"));
 const lastTransfer = (c) => c.calls.findLastIndex((x) => x.startsWith("transfer"));
 
@@ -289,9 +291,11 @@ test("main keeps the run's key folder when the sweep fails: the funder still hol
   const said = [];
   const realLog = console.log;
   console.log = (s) => said.push(String(s));
+  // a virtual clock: each send is sent again until its 90 s deadline ("Blockhash not found" passes on, review 7a21 L-2)
+  let clock = Date.now();
   try {
     await assert.rejects(main(["--url", "http://127.0.0.1:1", "--no-build", "--so", soFile, "--program", RD.program_id, "--return", RETURN, "--out", path.join(work, "record.json")], fetchFn,
-      { wait: async () => {}, cli: () => ({ status: 0, stdout: "", stderr: "" }), keysBase: TEST_KEYS }));
+      { wait: async (ms) => void (clock += ms), now: () => (clock += 10), cli: () => ({ status: 0, stdout: "", stderr: "" }), keysBase: TEST_KEYS }));
   } finally {
     console.log = realLog;
   }
@@ -327,7 +331,7 @@ test("the cleanup reads the authority at confirmed: a deploy whose SetAuthority 
     throw new Error(`unexpected ${method}`);
   };
   const runs = [];
-  const ops = chainOps({ fetchFn, url: "u", second: "u", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, say: () => {},
+  const ops = chainOps({ fetchFn, url: "u", second: "u", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, now: vnow(), say: () => {},
     cli: (args) => (runs.push(args.slice(0, 3).join(" ")), args[1] === "close" && args[2] === RD.program_id && (closed = true), { status: 0, stdout: "", stderr: "" }) });
   assert.equal(await ops.upgradeableByFunder(), true);
   await cleanup({ ...ops, balance: async () => 0n }, RETURN, fast);
@@ -354,7 +358,7 @@ test("what is left keeps the keys: a lamport on either RPC, a buffer or programd
       if (method === "getAccountInfo") return ok({ value: null });
       throw new Error(`unexpected ${method}`);
     };
-    return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {} }).leftovers();
+    return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, now: vnow() }).leftovers();
   };
   assert.deepEqual(await run({}), []);
   assert.match((await run({ bal: { b: 1 } })).join(), /holds 1 lamports on b/);
@@ -483,10 +487,10 @@ test("devnet refuses CI's build when its sha256 is not the pinned code, before a
   try {
     // the recorded devnet code is an older build: the findings file's pin is not its hash
     const f = fakeGh();
-    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {} }), new RegExp(`devnet refused: the code's sha256 ${f.sha} is not the pinned [0-9a-f]{64} \\(contracts/pool-review-2.md\\)`));
+    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow() }), new RegExp(`devnet refused: the code's sha256 ${f.sha} is not the pinned [0-9a-f]{64} \\(contracts/pool-review-2.md\\)`));
     // a planted pin: one hex digit off the build's own hash
     const off = f.sha.slice(0, 63) + (f.sha[63] === "0" ? "1" : "0");
-    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: fakeGh().gh, keysBase: TEST_KEYS, wait: async () => {}, pin: off }), /is not the pinned/);
+    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: fakeGh().gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow(), pin: off }), /is not the pinned/);
     // the pinned hash itself passes the check: the run goes on to its next step, a resume's read of the program (here
     // missing), still before any key
     const missing = async (u, init) => {
@@ -494,7 +498,7 @@ test("devnet refuses CI's build when its sha256 is not the pinned code, before a
       if (method === "getAccountInfo" && !isReturnRead(init)) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: null } }) };
       return devnet(u, init);
     };
-    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--program", RD.program_id, "--return", RETURN, "--out", path.join(work, "record.json")], missing, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, pin: f.sha }), new RegExp(`--program ${RD.program_id} refused`));
+    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--program", RD.program_id, "--return", RETURN, "--out", path.join(work, "record.json")], missing, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow(), pin: f.sha }), new RegExp(`--program ${RD.program_id} refused`));
   } finally {
     console.log = realLog;
     rmSync(work, { recursive: true, force: true });
@@ -531,7 +535,7 @@ test("the CLI deploys the very bytes hashed: CI's artifact, from a file in the r
   const realLog = console.log;
   console.log = () => {};
   try {
-    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], fetchFn, { wait: async () => {}, cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy call/);
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], fetchFn, { wait: async () => {}, now: vnow(), cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy call/);
   } finally {
     console.log = realLog;
     rmSync(work, { recursive: true, force: true });
@@ -992,7 +996,7 @@ test("fold 2 E: what is left reads the program id too: lamports there keep the k
       if (method === "getAccountInfo") return okR({ value: params[0] === RD.program_id ? acc : null });
       throw new Error(`unexpected ${method}`);
     };
-    return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {} }).leftovers();
+    return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, now: vnow() }).leftovers();
   };
   assert.match((await run({ owner: SYSTEM_ID, executable: false, lamports: 50_000_000, data: ["", "base64"] })).join(), new RegExp(`program id ${RD.program_id} holds 50000000 lamports on a`));
   assert.deepEqual(await run({ owner: "BPFLoaderUpgradeab1e11111111111111111111111", executable: true, lamports: 1_141_440, data: ["", "base64"] }), []);
@@ -1168,7 +1172,7 @@ test("mainnet: refused before any key without --mainnet, with --mainnet on anoth
       if (isReturnRead(init)) return okR(sysAccount());
       return noCall("read")();
     };
-    const io = { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, pin: f.sha };
+    const io = { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow(), pin: f.sha };
     await assert.rejects(main(mainArgs(out).filter((a) => a !== "--mainnet"), genesisOnly(MAINNET), io), /mainnet refused: its deploy is the owner's.*passes --mainnet/);
     await assert.rejects(main(mainArgs(out), genesisOnly("EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"), io), /--mainnet refused: genesis EtWTRAB\S+ at https:\/\/api.mainnet-beta.solana.com is not mainnet's/);
     await assert.rejects(main(mainArgs(out).map((a) => (a === MAIN_URL ? "https://solana-rpc.publicnode.com" : a)), genesisOnly(MAINNET, MAINNET), io), /mainnet refused: --url https:\/\/solana-rpc.publicnode.com is not https:\/\/api.mainnet-beta.solana.com/);
@@ -1176,7 +1180,7 @@ test("mainnet: refused before any key without --mainnet, with --mainnet on anoth
     assert.equal(f.calls.length, 0, "no CI read before both RPCs answer mainnet");
     await assert.rejects(main(mainArgs(out), genesisOnly(MAINNET), { ...io, pin: "0".repeat(64) }), /mainnet refused: the code's sha256 [0-9a-f]{64} is not the pinned 0{64}/);
     // the findings file's own pin (c86fc7fc..., 79,088 B) refuses the recorded older build
-    await assert.rejects(main(mainArgs(out), genesisOnly(MAINNET), { gh: fakeGh().gh, keysBase: TEST_KEYS, wait: async () => {} }), /mainnet refused: the code's sha256 [0-9a-f]{64} is not the pinned c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162/);
+    await assert.rejects(main(mainArgs(out), genesisOnly(MAINNET), { gh: fakeGh().gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow() }), /mainnet refused: the code's sha256 [0-9a-f]{64} is not the pinned c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162/);
   } finally {
     console.log = realLog;
     rmSync(w, { recursive: true, force: true });
@@ -1363,7 +1367,7 @@ test("--final's SetAuthority finalized a moment after the deploy: the run waits 
   const said = [];
   console.log = (s) => said.push(String(s));
   try {
-    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy's read-back/);
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, now: vnow(), cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy's read-back/);
   } finally {
     console.log = realLog;
     rmSync(w, { recursive: true, force: true });
@@ -1399,7 +1403,7 @@ test("review 1: mainnet refuses a --return that is off the curve, not a system a
   };
   try {
     const f = fakeGh();
-    const io = { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, pin: f.sha };
+    const io = { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow(), pin: f.sha };
     const withReturn = (r) => mainArgs(out).map((a) => (a === RETURN ? r : a));
     // the pool address: a PDA, 32 bytes that no key signs for
     await assert.rejects(main(withReturn(RD.pool), reads(() => sysAccount()), io), new RegExp(`mainnet refused: --return ${RD.pool} is not on the ed25519 curve`));
@@ -1811,7 +1815,7 @@ test("re-review 7: the run is done only once both RPCs read the upgrade authorit
   const realLog = console.log;
   console.log = () => {};
   try {
-    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, cli, gh: f.gh, keysBase: TEST_KEYS }), /upgrade authority \S+ is set on http:\/\/localhost:1/);
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, now: vnow(), cli, gh: f.gh, keysBase: TEST_KEYS }), /upgrade authority \S+ is set on http:\/\/localhost:1/);
   } finally {
     console.log = realLog;
     rmSync(w, { recursive: true, force: true });
@@ -1876,7 +1880,7 @@ test("paste 1: a CLI deploy that fails mid-upload is retried in the same run fro
   console.log = (s) => said.push(String(s));
   let journal = null;
   try {
-    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", out], fetchFn, { wait: async () => {}, cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy's read-back/);
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", out], fetchFn, { wait: async () => {}, now: vnow(), cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy's read-back/);
     journal = JSON.parse(readFileSync(out.replace(/\.json$/, ".journal.json"), "utf8"));
   } finally {
     console.log = realLog;
@@ -1962,7 +1966,7 @@ test("review a763 1 (89a6 H1): a buffer close the CLI reports 'Failed to close b
   };
   let closes = 0;
   const failing = (args) => (args[1] === "close" && closes++, { status: 0, stdout: "", stderr: `Failed to close buffer ${BUF}: RPC response error -32002: Transaction simulation failed` });
-  const ops = chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, say: () => {}, cli: failing });
+  const ops = chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, now: vnow(), say: () => {}, cli: failing });
   await assert.rejects(ops.closeBuffers(), new RegExp(`buffer ${BUF}.* still has the funder as its authority`));
   assert.deepEqual([...new Set(gpaUrls)], ["a"], "read on --url only, as leftovers() reads it");
   // the cleanup retries it, and on giving up keeps the reserve for --sweep-kept
