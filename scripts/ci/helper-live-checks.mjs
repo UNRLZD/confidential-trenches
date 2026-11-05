@@ -29,6 +29,7 @@ export const LIVE_CHECKS = [
   "app-console-429",
   "helper-token-page-cold",
   "solana-jupiter-build",
+  "solana-legs-share-wait",
   "wallet-per-buy",
   "evm-buy-hookdata-fee",
 ];
