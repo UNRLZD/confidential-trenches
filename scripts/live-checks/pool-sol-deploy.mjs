@@ -377,7 +377,7 @@ export function runRecord(d, rpcs) {
 }
 
 /** The mainnet run record (card pool-sol-deploy-mainnet): every tx of the owner's paste, mainnet, money path. */
-export function mainnetRunRecord(d, rpcs) {
+export function mainnetRunRecord(d, rpcs, attempts = []) {
   return [
     "CARD pool-sol-deploy-mainnet / live: PASS",
     "Money path: yes",
@@ -388,6 +388,9 @@ export function mainnetRunRecord(d, rpcs) {
     `Upgrade authority: none, read on ${rpcs.join(" and ")}. No test deposit on mainnet.`,
     `The pool buy's lookup table ${d.table}: ${d.table_addresses.length} addresses, authority none (frozen), read the same bytes on both RPCs.`,
     `Funders: ${(d.funders ?? [d.funder]).join(", ")}, run keys, swept to ${d.return_to} at the run's end; this live check reads each at 0 lamports on both RPCs. The run was funded with ${d.need} lamports (the printed need). Every key lived only in its run.`,
+    // a paste that stopped before this one: its journal is kept and named here, never as Tx lines (the money gate reads
+    // those as this run's transactions)
+    ...attempts.map((a) => `Paste ${a.n} (${a.journal.at}) stopped mid-upload and is kept as ${a.file}: ${a.journal.txs.length} transactions, ${a.journal.keys?.state === "removed" ? "its keys removed with every lamport read back at 0 on both RPCs" : `its keys ${a.journal.keys?.state ?? "unrecorded"}`}; this record is paste ${attempts.length + 1}'s.`),
     "",
   ].join("\n");
 }

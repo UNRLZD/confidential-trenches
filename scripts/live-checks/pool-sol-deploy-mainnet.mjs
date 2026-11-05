@@ -17,7 +17,7 @@
 // writes the run record scripts/live-checks/pool-sol-deploy-mainnet.md (Money path: yes, one Tx: solana line per tx).
 // Runs: once, a contract deploy's read-back; no host deploy changes it
 import "../net-window.mjs";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { check, mainnetRunRecord, recorder, MAINNET_RPCS } from "./pool-sol-deploy.mjs";
@@ -26,6 +26,16 @@ const KEY = "pool-sol-deploy-mainnet";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DEPLOYMENT = path.join(HERE, "../../contracts/pool-solana/deployments/mainnet.json");
 export const RECORD = path.join(HERE, `${KEY}.md`);
+
+/** The journals of earlier pastes that stopped (contracts/pool-solana/deployments/mainnet.attempt-<n>.journal.json, kept
+ * and committed as they were), oldest first, for the run's record to name. */
+export function earlierAttempts(dir = path.dirname(DEPLOYMENT)) {
+  return readdirSync(dir)
+    .map((f) => [f, /^mainnet\.attempt-(\d+)\.journal\.json$/.exec(f)])
+    .filter(([, m]) => m)
+    .map(([f, m]) => ({ n: Number(m[1]), file: `contracts/pool-solana/deployments/${f}`, journal: JSON.parse(readFileSync(path.join(dir, f), "utf8")) }))
+    .sort((a, b) => a.n - b.n);
+}
 
 /** The check on a mainnet record: pool-sol-deploy.mjs's, mainnet mode, on mainnet's two RPCs unless told otherwise. */
 export const checkMainnet = ({ deployment, fetchFn = fetch, rpcs = MAINNET_RPCS, sleep }) => check({ deployment, fetchFn, rpcs, sleep, mainnet: true });
@@ -42,7 +52,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"}`);
     if (r.ok && args.includes("--write-record")) {
-      writeFileSync(RECORD, mainnetRunRecord(deployment, rpcs));
+      writeFileSync(RECORD, mainnetRunRecord(deployment, rpcs, earlierAttempts()));
       console.log(`live-check ${KEY}: wrote ${path.relative(process.cwd(), RECORD)}`);
     }
     process.exit(r.ok ? 0 : 1);
