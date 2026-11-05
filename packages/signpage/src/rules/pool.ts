@@ -24,7 +24,9 @@
 // - Solana sell: the kit's venue sell of the request's amount from W, a min out at least the device's floor, then the
 //   deposit back into the pinned pool (tag 1, W the depositor, the device's precommitment) as the last instruction, of
 //   exactly that min out less the device's reserve for W's fees. Its
-//   teardown frames (card solana-sell-teardown) go through the kit's checkSolanaTeardown for W.
+//   teardown frames (card solana-sell-teardown) go through the kit's checkSolanaTeardown for W; after a full sell, W's
+//   sweep (card sol-buy-rent-back) is one tag 1 deposit of exactly what W holds less its fee and the deposit's rents, on
+//   the device's precommitment, so W ends at 0 (checkSolanaSweep).
 // - EVM buy and withdraw: the proof binds a context; the device recomputes it from the relay data and the pinned pool
 //   and holds W the recipient, the pinned fee recipient, the fee cap and the deadline. The buy is one the kit built from
 //   the device's own quote (kit trade/evm/quoted.ts evmQuotedBuy: its route, min out and empty hook data the device's,
@@ -569,6 +571,36 @@ export function checkSolanaSell(
   if (back !== minOut - reserve) return refuse("deposit_amount");
   passedWire(wire);
   return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap: 0n, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back };
+}
+
+/** The least a Solana pool deposit may be: contracts/pool-solana/src/lib.rs MIN_DEPOSIT (MinimumDepositAmount). */
+export const SOLANA_POOL_MIN_DEPOSIT = 1_000_000n;
+const SWEEP_MARK_LEN = 17;
+const SWEEP_PAGE_HEADER = 16;
+const SWEEP_PAGE_ENTRY = 72;
+const SWEEP_PAGE_ENTRIES = 1024;
+
+/**
+ * W's sweep after a full sell and its teardown (card sol-buy-rent-back): every lamport W holds back into the pinned pool
+ * as one tag 1 deposit, W the depositor and the only signer, the device's precommitment (W's next return note), no
+ * compute budget (W's fee is its one signature, SOLANA_LAMPORTS_PER_SIGNATURE), nothing else. The value is exactly
+ * `lamports` (W's balance, the same on both RPCs) less that fee, the precommitment mark's rent and each tree page's
+ * growth, the rent the deposit takes from W (contracts/pool-solana/src/deposit.rs), so W ends at 0 and no lamport is
+ * left on it or sent anywhere but the user's own note. Under the pool's least deposit: refused.
+ */
+export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: { lamportsPerByte: bigint; factor: bigint }): bigint {
+  const pin = pinOf(ctx);
+  const d = decode(wire, reads);
+  if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
+  if (head(d.ixs) !== 0 || d.ixs.length !== 1) return refuse("instructions");
+  const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);
+  if (typeof lamports !== "bigint" || typeof rent?.lamportsPerByte !== "bigint" || typeof rent.factor !== "bigint" || rent.lamportsPerByte < 0n || rent.factor < 0n) return refuse("sweep_reads");
+  const rentOf = (bytes: number): bigint => BigInt(128 + bytes) * rent.lamportsPerByte * rent.factor;
+  const grow = (size: number): bigint => (size % SWEEP_PAGE_ENTRIES === 0 ? rentOf(SWEEP_PAGE_HEADER + SWEEP_PAGE_ENTRY) : BigInt(SWEEP_PAGE_ENTRY) * rent.lamportsPerByte * rent.factor);
+  if (value + SOLANA_LAMPORTS_PER_SIGNATURE + rentOf(SWEEP_MARK_LEN) + grow(reads.stateSize) + grow(reads.labelSize) !== lamports) return refuse("sweep_amount");
+  if (value < SOLANA_POOL_MIN_DEPOSIT) return refuse("amount");
+  passedWire(wire);
+  return value;
 }
 
 /** A sell's teardown frames (card solana-sell-teardown): the kit's checkSolanaTeardown for W, nothing else. */
