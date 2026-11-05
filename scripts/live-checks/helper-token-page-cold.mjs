@@ -68,7 +68,7 @@ async function page(base, mint, fetchFn) {
       if (Number.isSafeInteger(h?.as_of_ms)) jupAt = h.as_of_ms;
       if (typeof h?.src === "string") src = h.src;
     } catch {}
-    return { mint, sentAt, status: r.status, ms, rttMs, jupAt, src, retryAfter: r.headers.get("retry-after") };
+    return { mint, sentAt, status: r.status, ms, rttMs, jupAt, src, retryAfter: r.headers.get("retry-after"), timing: r.headers.get("server-timing") };
   } catch (e) {
     return { mint, sentAt, status: 0, ms: Math.round(performance.now() - t0), rttMs, jupAt: null, src: null, error: String(e?.message ?? e).slice(0, 200) };
   }
@@ -110,6 +110,19 @@ export const helperMs = (r) => Math.max(0, r.ms - r.rttMs);
 /** A read whose Jupiter row was read for it: at or after its send, less the clocks' skew. */
 export const cold = (r) => r.src === "jupiter" && r.jupAt !== null && r.jupAt >= r.sentAt - SKEW_MS;
 
+/**
+ * Every read over LIMIT_MS of the helper's time, with its offset from the run's start and the helper's Server-Timing
+ * (each upstream the read waited on, card helper-ready-page-warm): the WARN lines that say which wait a slow read was.
+ * They never change the verdict.
+ */
+export function slow(run) {
+  const start = Date.parse(run.at ?? "");
+  return (run.reads ?? [])
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.status === 200 && Number.isSafeInteger(r.rttMs) && helperMs(r) > LIMIT_MS)
+    .map(({ r, i }) => `WARN slow read #${i} (pair ${r.pair}, ${r.order === 0 ? "first" : "second"}) ${r.mint}: helper ${helperMs(r)} ms at +${Number.isFinite(start) ? ((r.sentAt - start) / 1000).toFixed(1) : "?"} s; Server-Timing: ${r.timing ?? "none"}`);
+}
+
 /** The check on one recorded run. */
 export function judge(run) {
   const lines = [];
@@ -144,6 +157,7 @@ if (import.meta.main) {
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     const { ok, lines } = judge(run);
     for (const l of lines) console.log(l);
+    for (const l of slow(run)) console.log(l);
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${run.base})`);
     process.exit(ok ? 0 : 1);
   } catch (e) {

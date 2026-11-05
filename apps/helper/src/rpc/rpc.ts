@@ -214,7 +214,9 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `pacer`: another client's, when this one sends to the same keyed URL (card helper-crowd-429); else its own. */
 type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
-type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string };
+/** `timing` (card helper-ready-page-warm): this read's Server-Timing entries, the wait before its send (a hold or the
+ *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint. */
+type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timing?: string[] };
 type Upstream = { url: string; forms: Buffer[] };
 
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
@@ -505,8 +507,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   async function call(key: string, url: string, secretForms: Buffer[], forward: string, methods: string[], client: string | undefined, reserved: boolean): Promise<Answer> {
     const c = (key === PUBLIC_KEY ? "solana" : key) as RpcChain;
     const viaSlot = c === "solana" && keyed && key !== PUBLIC_KEY;
+    const begun = now();
     /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). */
-    const fellBack = (): Promise<Answer> => (publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : Promise.resolve(UPSTREAM()));
+    const fellBack = (): Promise<Answer> =>
+      publicFallback
+        ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved).then((a) => ({ ...a, timing: [`rpc-keyed;dur=${Math.round(now() - begun)};desc="fell back"`, ...(a.timing ?? [])] }))
+        : Promise.resolve(UPSTREAM());
     // card helper-crowd-429: a hold that ends within HOLD_WAIT_MS is waited out and the send paced from its end, and a
     // send the provider throttles is sent once more after its short hold, all by `deadline`; a longer hold is the
     // caller's 429 with its seconds. An EVM chain's provider is held for every path of the helper that reads it (Deps
@@ -596,7 +602,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const b = Buffer.from(text, "utf8");
     if (secretForms.some((f) => b.includes(f))) return UPSTREAM();
     if (viaSlot) slot.ok();
-    return { status: r.status, body: text };
+    const waited = Math.round(sent - begun);
+    return { status: r.status, body: text, timing: [...(waited > 0 ? [`rpc-wait;dur=${waited}`] : []), `rpc;dur=${Math.round(now() - sent)};desc="${key === PUBLIC_KEY ? "public" : key}"`] };
   }
 
   /**
