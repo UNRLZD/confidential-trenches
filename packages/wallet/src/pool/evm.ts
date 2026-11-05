@@ -104,10 +104,13 @@ export const EVM_POOL_TAG = "finalized";
 export const EVM_NEWEST_TAG = "latest";
 /** The first eth_getLogs page, in blocks; a range-cap error halves it for that RPC. */
 export const EVM_LOG_PAGE_BLOCKS = 10_000n;
-/** A throttled page (EVM_LOG_THROTTLE): tried this many times in all at its own size, then the read's failure. */
-export const EVM_LOG_THROTTLE_TRIES = 5;
+/** A throttled page (EVM_LOG_THROTTLE): tried this many times in all at its own size, then the read's failure. Its waits
+ * (1, 2, 4, 8, 16 and 30 s, 61 s in all) outlast a provider's one-minute window: rpc.mainnet.chain.robinhood.com
+ * answered 189 eth_getLogs in 59 s, then HTTP 429 "Too Many Requests" with no Retry-After, and again 5 s later (read
+ * 5 Nov 13:55Z); at 5 tries and 10 s (15 s of waits) a W one day old was left unread there (13:52Z). */
+export const EVM_LOG_THROTTLE_TRIES = 7;
 /** The wait before a throttled page's next try: the provider's Retry-After, else 1 s doubled per try; at most this. */
-export const EVM_LOG_THROTTLE_WAIT_MAX_MS = 10_000;
+export const EVM_LOG_THROTTLE_WAIT_MAX_MS = 30_000;
 export const EVM_LAG_TRIES = 5;
 export const EVM_LAG_WAIT_MS = 2_000;
 

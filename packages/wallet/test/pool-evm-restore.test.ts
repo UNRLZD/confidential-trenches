@@ -800,6 +800,26 @@ test("T2 throttles past the bound end that W unread, never an empty list: EVM_LO
   }
 });
 
+test("T5 a provider's one-minute window outlasted: Robinhood's own HTTP 429 \"Too Many Requests\" with no Retry-After (read 5 Nov 13:55Z) on every page for 60 s, then answers: every W read, the page never smaller", async () => {
+  const { world, W0, W1 } = seeded();
+  const want = await restore(pair(world, world), wpair(world));
+  for (const [client, via] of [["plain", viaKitClient], ["retry", viaRetryClient]] as const) {
+    const sizes: number[] = [], waits: number[] = [];
+    let slept = 0;
+    const window = (b: Body) => {
+      if (b.method !== "eth_getLogs" || (b.params[0] as { address?: string }).address !== undefined) return undefined;
+      const { from, to } = span(b);
+      sizes.push(to - from + 1);
+      if (slept >= 60_000) return undefined;
+      return new Response(JSON.stringify({ jsonrpc: "2.0", error: { code: 429, message: "Too Many Requests" } }), { status: 429 });
+    };
+    const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), via("https://d.example", rpc(world), window)], { sleep: async (ms) => void (waits.push(ms), (slept += ms)) });
+    assert.deepEqual(r.wallets, want.wallets, `${client}: waits ${waits}`);
+    assert.ok(sizes.every((x) => x === 61 || x === 81), `${client}: never a smaller page: ${sizes}`);
+    assert.ok(waits.every((ms) => ms <= EVM_LOG_THROTTLE_WAIT_MAX_MS), `${client}: waits ${waits}`);
+  }
+});
+
 // ---- the review of card wallet-restore-transfer-rpcs, LOW: the abort guard ----
 
 test("T3 RPC 0 fails at once and RPC 1's call rejects after the abort with cap words: RPC 1's page stays 10,000, the next W's first page on it 10,000 blocks", async () => {
