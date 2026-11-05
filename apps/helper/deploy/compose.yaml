@@ -31,7 +31,7 @@ services:
       SOLANA_STREAM_WS_URL: ${SOLANA_STREAM_WS_URL:-}
       SOLANA_TRADES_RPC_URL: ${SOLANA_TRADES_RPC_URL:-}
       # the testnet build's second Solana provider, POST /v1/rpc/solana-devnet (src/rpc/rpc.ts): a keyed devnet URL of
-      # another operator than api.devnet.solana.com, which the page reads itself; empty: the public endpoint
+      # another operator than api.devnet.solana.com, which the page reads itself; empty: the route answers 503 (no fallback)
       SOLANA_DEVNET_RPC_URL: ${SOLANA_DEVNET_RPC_URL:-}
       BASE_RPC_URL: ${BASE_RPC_URL:-}
       ROBINHOOD_RPC_URL: ${ROBINHOOD_RPC_URL:-}

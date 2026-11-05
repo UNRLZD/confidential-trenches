@@ -9,7 +9,8 @@
 // "method", say) cannot carry an unlisted method; and content-type: application/json. No header of the caller.
 // What reaches the caller: the provider's status and JSON body. A provider that is down, slow, refusing our key (401,
 // 403), failing (5xx), answering anything but JSON within the size cap, or whose answer holds its own URL's key in any
-// form answers 503 upstream, so the device falls back to its own providers (H2.3).
+// form answers 503 upstream, so the device falls back to its own providers (H2.3). So does a route with no provider
+// set and no public fallback (RPC_UPSTREAMS: solana-devnet without SOLANA_DEVNET_RPC_URL), before anything is sent.
 // Throttling (card helper-abuse-limits, ../limits/limits.ts): each chain's provider is one budget every call draws
 // from, the helper's own reads included (RPC_BUDGET_<CHAIN>, default RPC_CHAIN_MAX requests in any 10 s, no caller
 // more than RPC_CLIENT_MAX of them a window, a batch drawing one per request in it), and where the provider also limits
@@ -205,20 +206,22 @@ const ID_MAX = 128;
 /**
  * Each chain's provider: the URL in the host's environment (a keyed provider puts its key in the URL, markets paper
  * H2.1), else a public endpoint, so a helper anyone runs works with no key. Each default answered a read from the
- * Mac on 2026-11-01 06:24Z (getBlockHeight, eth_blockNumber, block).
+ * Mac on 2026-11-01 06:24Z (getBlockHeight, eth_blockNumber, block). A null fallback: the route is off with no URL set
+ * (every call 503 upstream, nothing sent).
  */
-export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: string }>> = {
+export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: string | null }>> = {
   solana: { env: "SOLANA_RPC_URL", fallback: "https://api.mainnet-beta.solana.com" },
   base: { env: "BASE_RPC_URL", fallback: "https://mainnet.base.org" },
   robinhood: { env: "ROBINHOOD_RPC_URL", fallback: "https://rpc.mainnet.chain.robinhood.com" },
   near: { env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com" },
-  // a keyed devnet URL on the deployed helper (the page reads api.devnet.solana.com itself, so this must be another
-  // operator's); a helper anyone runs with no key forwards to the public endpoint
-  "solana-devnet": { env: "SOLANA_DEVNET_RPC_URL", fallback: "https://api.devnet.solana.com" },
+  // the testnet build's second provider: a keyed devnet URL of another operator than api.devnet.solana.com, which the
+  // page reads itself as its first (packages/signpage/src/pool-testnet.ts TESTNET_RPCS); none set: off (503), never
+  // a silent fallback to that same operator, which would make the page's two reads one provider's (review L-1)
+  "solana-devnet": { env: "SOLANA_DEVNET_RPC_URL", fallback: null },
 };
 
 /** Solana's public endpoint: a keyed SOLANA_RPC_URL's fallback (card helper-solana-failover, rpc/slot.ts). */
-export const SOLANA_PUBLIC = RPC_UPSTREAMS.solana.fallback;
+export const SOLANA_PUBLIC = RPC_UPSTREAMS.solana.fallback as string;
 /** The budget key of the public endpoint when a keyed provider is set: its own budget, the public limits (RPC_BUDGETS
  *  solana: 100 per 10 s, 40 per method), never RPC_BUDGET_SOLANA, which is the keyed plan's. */
 const PUBLIC_KEY = "solana-public";
@@ -240,7 +243,8 @@ type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; s
 /** `timing` (card helper-ready-page-warm): this read's Server-Timing entries, the wait before its send (a hold or the
  *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint. */
 type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timing?: string[] };
-type Upstream = { url: string; forms: Buffer[] };
+/** `off`: no URL set for a route with no public fallback (RPC_UPSTREAMS); handle() answers 503 and sends nothing. */
+type Upstream = { url: string; forms: Buffer[]; off?: true };
 
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 const REFUSED = () => error(400, "method_not_allowed");
@@ -267,7 +271,7 @@ export function readUpstreams(env: Record<string, string | undefined>): Record<R
     const { env: name, fallback } = RPC_UPSTREAMS[chain];
     const set = env[name];
     if (set === undefined || set === "") {
-      out[chain] = { url: fallback, forms: [] };
+      out[chain] = fallback === null ? { url: "", forms: [], off: true } : { url: fallback, forms: [] };
       continue;
     }
     let u: URL;
@@ -399,6 +403,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false): Promise<Answer> {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return error(404, "not_found");
     const c = chain as RpcChain;
+    if (upstreams[c].off) return UPSTREAM();
     if (Buffer.byteLength(body) > RPC_BODY_MAX) return error(413, "too_large");
     if (!/^application\/json\s*(;|$)/i.test(contentType ?? "")) return REFUSED();
     let parsed: unknown;

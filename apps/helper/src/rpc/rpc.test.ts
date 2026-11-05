@@ -98,9 +98,24 @@ test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded t
   // the key never reaches the answer
   next = { status: 200, type: JSON_T, body: () => JSON.stringify({ jsonrpc: "2.0", id: 1, error: { message: `bad key ${DEV}` } }) };
   assert.deepEqual([(await call(r, "solana-devnet", { jsonrpc: "2.0", id: 1, method: "getSlot" })).status], [503]);
-  // its own budget variable, a name a shell can set; no key set: the public devnet endpoint
+  // its own budget variable, a name a shell can set
   assert.equal(rpcModule.rpcBudgetEnv("solana-devnet"), "RPC_BUDGET_SOLANA_DEVNET");
-  assert.equal(readUpstreams({})["solana-devnet"].url, "https://api.devnet.solana.com");
+});
+
+test("solana-devnet with no SOLANA_DEVNET_RPC_URL (review L-1): 503 upstream for every call and nothing sent, never the page's own first provider (api.devnet.solana.com) behind the helper's name", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  for (const env of [{ SOLANA_RPC_URL: `${base}/?api-key=${KEY}` }, { SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: "" }]) {
+    const r = createRpc(env);
+    seen.length = 0;
+    for (const body of [{ jsonrpc: "2.0", id: 1, method: "getSlot", params: [] }, [{ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [] }]]) {
+      const a = await call(r, "solana-devnet", body);
+      assert.deepEqual([a.status, code(a)], [503, "upstream"], JSON.stringify(body));
+    }
+    assert.equal(seen.length, 0, "nothing reached any provider");
+    // the other chains are served as before
+    assert.equal((await call(r, "solana", { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] })).status, 200);
+  }
+  assert.equal(RPC_UPSTREAMS["solana-devnet"].fallback, null);
 });
 
 test("the kit's Solana set send reads are forwarded: isBlockhashValid (card solana-set-send), the finalized blockhash, statuses and the send", async () => {
@@ -511,10 +526,11 @@ test("each chain is one budget callers draw from fairly: a heavy caller is throt
   assert.ok(RPC_CLIENT_MAX * 6 <= RPC_CHAIN_MAX, "six callers at their full share before anyone else is throttled");
 });
 
-test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default", () => {
+test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default (solana-devnet: none, off)", () => {
   const d = readUpstreams({});
   for (const c of RPC_CHAINS) {
-    assert.match(d[c].url, /^https:\/\//);
+    if (c === "solana-devnet") assert.equal(d[c].off, true, c);
+    else assert.match(d[c].url, /^https:\/\//);
     assert.deepEqual(d[c].forms, []);
   }
   for (const bad of ["not a url", "ftp://x.example/", "file:///etc/passwd", "https://x.example/#frag", "javascript:alert(1)"]) {
