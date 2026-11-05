@@ -1,0 +1,105 @@
+{
+  "at": "2026-11-05T16:49:26.797Z",
+  "cluster": "devnet",
+  "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+  "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+  "rpcs": [
+    "https://api.devnet.solana.com",
+    "https://solana-devnet.api.onfinality.io/public"
+  ],
+  "U": "FwoQnrT7EDG8Njnv9ifeyYmBRhBU5Aoebhk8zaJ9dNcY",
+  "need": "21473120",
+  "deposit": {
+    "answer": {
+      "result": {
+        "stage": "sent",
+        "txs": [
+          {
+            "chain": "solana",
+            "hash": "b72jFbgKkivW1GbNcHSPi51mdgrtR9JniCT6VYhJZEJqtfCysJWQ5aiUT5fgWTZ3qjywUGX955cJYSApdP6cpnv"
+          }
+        ]
+      }
+    },
+    "notes": [
+      {
+        "ref": "deposit",
+        "state": "UNSPENT",
+        "value": "20000000",
+        "sends": [
+          "b72jFbgKkivW1GbNcHSPi51mdgrtR9JniCT6VYhJZEJqtfCysJWQ5aiUT5fgWTZ3qjywUGX955cJYSApdP6cpnv"
+        ]
+      }
+    ]
+  },
+  "stages": [
+    "filled"
+  ],
+  "states": [
+    {
+      "at": "2026-11-05T16:48:20.342Z",
+      "pools": [
+        {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0.02",
+          "ready": "0.02"
+        }
+      ]
+    },
+    {
+      "at": "2026-11-05T16:48:56.774Z",
+      "pools": [
+        {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0.02",
+          "ready": "0"
+        }
+      ]
+    },
+    {
+      "at": "2026-11-05T16:49:11.789Z",
+      "pools": [
+        {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0.02",
+          "ready": "0.02",
+          "tap_max": "0.01038488"
+        }
+      ]
+    },
+    {
+      "at": "2026-11-05T16:49:26.796Z",
+      "pools": [
+        {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0.02",
+          "ready": "0.02",
+          "tap_max": "0.01038488",
+          "price": {
+            "price": "9052223918",
+            "expo": -8,
+            "published_s": 1793897342,
+            "read_ms": 1793897352282
+          }
+        }
+      ]
+    }
+  ],
+  "pools": {
+    "chain": "solana",
+    "asset": "SOL",
+    "balance": "0.02",
+    "ready": "0.02",
+    "tap_max": "0.01038488",
+    "price": {
+      "price": "9052223918",
+      "expo": -8,
+      "published_s": 1793897342,
+      "read_ms": 1793897352282
+    }
+  }
+}

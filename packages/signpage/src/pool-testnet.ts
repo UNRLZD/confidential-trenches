@@ -32,7 +32,7 @@ import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore, readNotes, type NoteStore } from "../../wallet/src/notes/store.ts";
-import type { Pool } from "../../wallet/src/pool/pool.ts";
+import type { Pool, ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
@@ -262,6 +262,11 @@ export type TestnetPool = {
   stateRead(): Promise<void>;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
+  /** The open proof queue's ready proofs, state.pools' `ready` (src/pools.ts); undefined while no queue is open. */
+  ready(): Promise<readonly ReadyProof[] | undefined>;
+  /** `fn` runs after each pass that made or remade a proof: a proof made changes no store record (its note was HELD
+   * before it began), so the page's state is read again on this. */
+  watch(fn: () => void): void;
   /** Sign out: the queue closed (its notes freed, its seed copy zeroed), its note store closed, the worker ended. */
   signedOut(): Promise<void>;
   /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
@@ -306,10 +311,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64?.fill(0); // the queue keeps its own copy
     }
   };
+  const watchers = new Set<() => void>();
   const proofs = async (): Promise<QueuePass | null> => {
     const p = (open ??= openQueue());
     try {
-      return await (await p).queue.refresh();
+      const pass = await (await p).queue.refresh();
+      if (pass.made.length > 0 || pass.remade.length > 0) for (const f of watchers) f();
+      return pass;
     } catch {
       // a queue that could not open (no seed: signed out) is dropped, so the next landing opens it again
       if (open === p) await p.then(() => {}, () => void (open = null));
@@ -457,6 +465,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // included) gets the same promise and never starts a second pass. No follow-up pass: a note turns INCOMING only in an
   // ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later state read settles what it leaves.
   let reading: Promise<void> | null = null;
+  // a state read's proof pass, while it runs (a landing's or a tap's pass runs on its own)
+  let passing: Promise<unknown> | null = null;
   // the dead pending sell records are settled once per page load, not on every state read (a re-ask settles its own)
   let deadSettled = false;
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
@@ -582,6 +592,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
         if (mine.some((n) => n.state === "RESERVED")) await settleReserved().catch(() => {});
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R")))) await settleSells();
+        // the next buy's proofs (card signpage-pool-pins): a page that loads with the pool's notes landed opens the
+        // queue, and each read while it is open makes the epoch's proofs again, one pass at a time
+        if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) passing ??= proofs().finally(() => (passing = null));
         await finishOnward();
         // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
         if (locks && !deadSettled) {
@@ -761,6 +774,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     settle,
     stateRead,
     proofs,
+    ready: async () => {
+      const p = open;
+      return p ? (await p.catch(() => null))?.queue.ready() : undefined;
+    },
+    watch: (fn) => void watchers.add(fn),
     signedOut,
     withdrawDeps,
     withdraw,

@@ -27,7 +27,7 @@ import { SOL_USDC } from "./oneclick-mock.ts";
 
 const SCOPE = 4242n;
 const ANCHOR = "export function vaultScope(network: NearNetwork): bigint | null {";
-const TABLE = "export const PAGE_POOLS: readonly BalancePool[] = Object.freeze([]);";
+const TABLE = 'export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POOL_TESTNET ? "testnet" : "mainnet");';
 // each call of the note store's openNoteStore and readNotes, with the stack it was called from
 const calls: { name: string; stack: string }[] = ((globalThis as { __ctNoteCalls?: unknown }).__ctNoteCalls = []) as never;
 const record = (src: string, name: string): string => {
