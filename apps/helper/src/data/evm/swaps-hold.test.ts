@@ -60,7 +60,7 @@ function rig(refusals: Refusal[]) {
   // no pace and one request a batch last
   const holds = providerHolds(() => clock.t, { [ONE]: { perS: 1_000, burst: 1_000, unit: "post" } });
   const s = open(chain, clock, { pools: new Map(), rpcs: RPCS, fetch: fetch as never, holds });
-  return { s, st, chain, clock };
+  return { s, st, chain, clock, holds };
 }
 
 for (const [name, refusal] of [
@@ -81,7 +81,7 @@ for (const [name, refusal] of [
 
 test("card helper-rpc-hold-queued: a shorter 429 never cuts a longer hold, and at the longer one's end the provider's reads go again, in order and at most INFLIGHT_MAX at once", async () => {
   // two reads out at once, both refused: the first names 30 s, the second (answered later) 1 s
-  const { s, st, chain, clock } = rig([http429(30), http429(1)]);
+  const { s, st, chain, clock, holds } = rig([http429(30), http429(1)]);
   const r = await s.trades(CURVE_TOKEN, 50);
   assert.equal(r.status, 200, r.body);
   assert.ok(st.logsSeen >= 2, "both refusals answered");
@@ -94,9 +94,12 @@ test("card helper-rpc-hold-queued: a shorter 429 never cuts a longer hold, and a
   await s.tick();
   assert.equal(st.sendsAfter, 0, "asked inside the longer hold");
 
-  // past 30 s: a step of new blocks is read again from the provider, its spans in the order they were queued
+  // past 30 s: a step of new blocks is read again from the provider, its spans in the order they were queued (c.test
+  // held, so the pair is a.test and ONE: ranked by expected wait (card helper-robinhood-capacity fold 4), a provider that
+  // takes one request a post is asked last for a step of spans while two others answer in batches)
   clock.t += 29_000;
   chain.st.head += VENUES.robinhood.step;
+  holds.hold("https://c.test", 60);
   st.peak = 0;
   await s.tick();
   s.stop();

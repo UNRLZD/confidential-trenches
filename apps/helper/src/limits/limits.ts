@@ -149,7 +149,12 @@ export type Pace = { perS: number; burst: number; unit: "post" | "call"; infligh
  *     in the 10 s before); and -32005 "too many concurrent requests" past about 4 calls at once: single 1,000-block
  *     eth_getLogs at 10 posts a second (4.4 in flight, p50 442 ms) refused at 4.1 s, at 8 a second (3.2 in flight) none
  *     in 12 s, and batches of 5 at 4 posts a second refused at the 4th post (sweep from the Mac 2026-11-04 20:48-20:52Z).
- *     Paced at 7 posts a second, one call a post (lists.ts BATCH_MAX) and 3 out at once.
+ *     Its concurrency, measured (single 1,000-block PoolManager eth_getLogs from the Mac, 2026-11-04 23:32-23:35Z): bursts
+ *     of 3 and of 4 at once (five each, 2.5 s apart) all served, 15 of 15 and 20 of 20; of 6, 20 of 30, and of 8, 20 of
+ *     40, each refused HTTP 429 -32005 "too many concurrent requests" with no Retry-After; held at 3, 4, 6 and 8 in flight
+ *     at most 7 posts a second for 10 s, all served (63, 56, 71, 71). It serves 4 at once. Paced at 7 posts a second, one
+ *     call a post (lists.ts BATCH_MAX) and 3 out at once: the 4th is left for /v1/rpc's callers (rpc.ts callEvm sends to
+ *     it with no in-flight count), the in-flight form of CALLER_ROOM.
  *   - rpc-robinhood.blockmachine.io: its 429 names x-ratelimit-limit 60, x-ratelimit-unit cu_per_minute (the same logs,
  *     Retry-After 41-42 s); the sweep's single eth_getLogs, 1 then 2 a second for 12 s each, passed, and 4 a second was
  *     refused at its 31st post, the minute's 67th call, Retry-After 23 (20:53Z). Paced under its header's 60 a minute: half

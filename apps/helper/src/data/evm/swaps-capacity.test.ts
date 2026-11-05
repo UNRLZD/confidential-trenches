@@ -66,11 +66,12 @@ test("card helper-robinhood-capacity: 12 cold tokens at once, the chain's own RP
 test("card helper-robinhood-capacity: a block range limit is no refusal: the provider that answered it is asked again at once (before the card its 'limit exceeded' held it)", async () => {
   const r = rig([]);
   let ranged = 0;
-  r.chain.st.faults.set(WIDE[0]!, { span: 1_000, refuse: () => (ranged++ === 0 ? Response.json([{ jsonrpc: "2.0", id: 0, error: { code: -32000, message: "block range limit exceeded" } }]) : null) });
+  // pocket, asked in the first pair (swaps.ts ranked by expected wait: daybreak takes one request a post)
+  r.chain.st.faults.set(POCKET, { span: 1_000, refuse: () => (ranged++ === 0 ? Response.json([{ jsonrpc: "2.0", id: 0, error: { code: -32000, message: "block range limit exceeded" } }]) : null) });
   const clock = { t: 7_000_000 };
   const s = open(r.chain, clock, { pools: new Map(), rpcs: WIDE.slice(0, 3), fetch: r.fetch as never });
   assert.equal((await s.trades(CURVE_TOKEN, 50)).status, 200);
   s.stop();
   assert.equal(ranged > 0, true);
-  assert.ok((r.sends.get(WIDE[0]!) ?? 0) > 1, `asked ${r.sends.get(WIDE[0]!)} times: held after a range error`);
+  assert.ok((r.sends.get(POCKET) ?? 0) > 1, `asked ${r.sends.get(POCKET)} times: held after a range error`);
 });

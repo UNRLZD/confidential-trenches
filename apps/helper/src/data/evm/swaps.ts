@@ -219,9 +219,10 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // then -32005 "too many concurrent requests", the chain's own 3.8 then 429. Not added: robinhood-rpc.publicnode.com
   // (-32602 archive), blockreq.com (only the newest blocks), rpc.ordofi.network (no answer), robinhood.rpc.blxrbdn.com
   // and rpc.nodeflare.app (403), lb.routeme.sh and 4663.rpc.thirdweb.com (429 at once), the Tatum gateway (5 a minute),
-  // rpc.degenprotocol.io (502s; logs blockTimestamp 0x0) and rpc-robinhood.globalstake.io (10 s timeouts). The wide
-  // providers (WIDE_SPAN) first, the pair asked first by free budget (ranked); the chain's own RPC last, since
-  // /v1/rpc/robinhood's callers read it too.
+  // rpc.degenprotocol.io (502s; logs blockTimestamp 0x0) and rpc-robinhood.globalstake.io (10 s timeouts). Asked in
+  // order of expected answer time (ranked: each one's in-flight queue and pace, the wide providers (WIDE_SPAN) first among
+  // equals), so the chain's own RPC, whose logs cost a second post for their headers and whose pace /v1/rpc/robinhood's
+  // callers share, is asked whenever its bucket has room for that.
   robinhood: ["https://robinhood.daybreak-rpc.network", "https://rpc-robinhood.blockmachine.io", "https://robinhood.api.pocket.network", "https://robinhood.drpc.org", "https://api.blockvectra.com/v1/robinhood_mainnet/public", "https://rpc.mainnet.chain.robinhood.com"],
 };
 
@@ -248,6 +249,14 @@ const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://ba
 
 /** Requests out to one provider at once (swaps.ts batchTo). */
 export const INFLIGHT_MAX = 4;
+/** A provider's answer time before its first answer, and the weight of each new one in its moving average (waitOf).
+ *  [design: 500 ms, about a wide 1,000-block read's (WIDE_SPAN: 0.6 to 1.9 s; heads and calls under 0.3 s), and 0.3, so
+ *  three slow answers in a row move the rank.] */
+const LATENCY_START_MS = 1_000;
+const LATENCY_WEIGHT = 0.3;
+/** Expected waits within this of each other rank alike, and free budget orders them (ranked). [design: 100 ms, under
+ *  one answer time, so the rank follows free budget until a queue or a pace wait is a real one.] */
+const WAIT_GRAIN_MS = 100;
 /** The longest a read waits for its provider's pace (limits.ts PROVIDER_PACE) before it is the next provider's to
  *  answer. [design: 1.5 s, ten of daybreak's posts at its pace; a provider whose bucket is that far spent is not the
  *  one to wait for while another has room.] A provider that holds is passed over at once: the pace keeps the reads
@@ -277,7 +286,8 @@ export const REF_COLD_BLOCKS = VENUES.base.step + VENUES.base.refBack;
  *  window (which takes cold / span reads). */
 export const SPAN_MAX = VENUES.base.span;
 const CHUNKS_MAX = 3;
-/** Providers asked for one answer at most: two, and two more when they differ. */
+/** Providers that answer one read at most: two, and two more when they differ (agreed: one that answers nothing, past
+ *  its pace's or its queue's wait or held, does not count, and the next is asked). */
 const PROVIDERS_MAX = 4;
 /** A provider this many blocks behind the other is passed over for the third (Base). */
 export const LAG_MAX = VENUES.base.lagMax;
@@ -575,27 +585,45 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const max = BATCH_SIZE[url] ?? 10;
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
-    const got = await Promise.all(parts.map((part) => slot(url, part.length, () => one(url, part, patient))));
+    const got = await Promise.all(parts.map((part) => slot(url, part.length, patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS, () => one(url, part, patient))));
     return got.some((g) => g === null) ? null : got.flat() as Reply[];
   }
 
   // at most INFLIGHT_MAX requests out to a provider at once, the rest queued in order: a first read's walk sent 246 at
   // once to the Robinhood providers, which answered 429, -32005, drpc's code 30 and timeouts that one at a time they
   // did not (card helper-chart-fresh, 2026-11-04 14:49Z)
-  // (`calls`: the calls out or queued to it, by which free counts its budget)
-  const inflight = new Map<string, { n: number; calls: number; queue: (() => void)[] }>();
-  async function slot<T>(url: string, calls: number, run: () => Promise<T>): Promise<T> {
+  // (`calls`: the calls out or queued to it, by which free counts its budget; `queue`: each queued post's calls, by
+  // which waitOf counts the units it will take)
+  const inflight = new Map<string, { n: number; calls: number; queue: { go: () => void; calls: number }[] }>();
+  // a post queued past `maxWaitMs` is another provider's, as a read past its pace's wait is (one): null, counted in
+  // `paced` so agreed's patient round may ask it again (fold 4: at c780282 a cold dozen's reads waited 68.7 s in all in
+  // daybreak's queue, and the slowest tape took 16.7 s)
+  async function slot<T>(url: string, calls: number, maxWaitMs: number, run: () => Promise<T>): Promise<T | null> {
     const q = inflight.get(url) ?? { n: 0, calls: 0, queue: [] };
     inflight.set(url, q);
     q.calls += calls;
-    if (q.n >= (holds.paceOf(url)?.inflight ?? INFLIGHT_MAX)) await new Promise<void>((go) => q.queue.push(go));
-    else q.n++;
+    if (q.n >= (holds.paceOf(url)?.inflight ?? INFLIGHT_MAX)) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const sent = await new Promise<boolean>((go) => {
+        const entry = { go: () => go(true), calls };
+        q.queue.push(entry);
+        timer = setTimeout(() => {
+          // handed a slot meanwhile (shifted out and resolved true): nothing to take back
+          const i = q.queue.indexOf(entry);
+          if (i < 0) return;
+          q.queue.splice(i, 1);
+          go(false);
+        }, maxWaitMs);
+      });
+      clearTimeout(timer);
+      if (!sent) return (q.calls -= calls), paced.set(url, (paced.get(url) ?? 0) + 1), null;
+    } else q.n++;
     try {
       return await run();
     } finally {
       q.calls -= calls;
       const next = q.queue.shift();
-      if (next !== undefined) next();
+      if (next !== undefined) next.go();
       else q.n--;
     }
   }
@@ -606,6 +634,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  seven batches queued before the chain's own Robinhood RPC's 429 were sent within 190 ms of it). */
   /** Reads each provider passed at its pace's wait, by which agreed's last round knows whom to ask again. */
   const paced = new Map<string, number>();
+  /** Each provider's answer time, a moving average of its posts' (waitOf), from LATENCY_START_MS; `out`: when each post
+   *  now out to it was sent, so a provider whose answers are late counts as slow before the first returns. */
+  const latency = new Map<string, number>();
+  const out = new Map<string, Set<number>>();
+  const latencyOf = (u: string): number => {
+    const ewma = latency.get(u) ?? LATENCY_START_MS;
+    const o = out.get(u);
+    return o === undefined || o.size === 0 ? ewma : Math.max(ewma, performance.now() - Math.min(...o));
+  };
   async function one(url: string, part: Call[], patient = false): Promise<Reply[] | null> {
     if (holds.heldFor(url) > 0) return null;
     // the provider's pace, which every path of the helper draws from (limits.ts providerHolds take): a background read
@@ -617,6 +654,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       slept += w;
       if (holds.heldFor(url) > 0) return null;
     }
+    const sent = performance.now();
+    const o = out.get(url) ?? new Set<number>();
+    out.set(url, o);
+    o.add(sent);
     try {
       const r = await doFetch(url, {
         method: "POST",
@@ -625,6 +666,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         redirect: "error",
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
+      latency.set(url, (latency.get(url) ?? LATENCY_START_MS) * (1 - LATENCY_WEIGHT) + (performance.now() - sent) * LATENCY_WEIGHT);
       if (r.status === 429) {
         await r.body?.cancel();
         // a later, shorter wait never cuts a longer one (providerHolds), as the limit path below
@@ -653,6 +695,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return got;
     } catch {
       return null;
+    } finally {
+      o.delete(sent);
     }
   }
   const usable = (urls: readonly string[]) => urls.filter((u) => holds.heldFor(u) === 0);
@@ -669,17 +713,47 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const room = p === undefined ? INFLIGHT_MAX : Math.max(0, holds.room(u) * p.burst - p.burst * CALLER_ROOM) + p.perS;
     return room * per - (inflight.get(u)?.calls ?? 0);
   };
-  /** Providers in the order to ask them (card helper-robinhood-capacity fold 2): the wide ones (WIDE_SPAN) first, a
-   *  header-timed one (HEADER_TIMED: Robinhood's own, which /v1/rpc's callers read first and whose logs cost a second
-   *  post for their headers) after the other wide ones, then by free budget, the most first, so the walks share the wide
-   *  providers and a 100-block one (drpc) is the last resort; ties take turns, so a dozen walks starting on full
-   *  buckets do not all start on the same two. A read that names no block range (an eth_call, a receipt, a sender) is
-   *  ranked by free budget alone (wideFirst false). */
+  /** How long a read of `calls` calls to `u` (with `headers`, a second post each for their headers) expects to wait
+   *  for its answer (card helper-robinhood-capacity fold 4): one answer time (latency) after the longer of its in-flight
+   *  queue (the posts out and queued ahead of it and its own, past the provider's in-flight cap, each round one answer
+   *  time long) and its pace (the units the queued posts and its own will take, past the bucket's free units above
+   *  CALLER_ROOM, at the provider's refill). Free budget alone
+   *  ranked daybreak first while its queue was longest: at c780282 a cold dozen's reads waited 68.7 s in all in
+   *  daybreak's queue against 12.1 s of its pace, and the slowest tape took 16.7 s. */
+  const waitOf = (u: string, calls: number, headers: boolean): number => {
+    const batch = BATCH_SIZE[u] ?? 10;
+    const posts = Math.ceil(Math.max(calls, 1) / batch) * (headers ? 2 : 1);
+    const q = inflight.get(u);
+    const p = holds.paceOf(u);
+    const cap = p?.inflight ?? INFLIGHT_MAX;
+    const ahead = (q?.n ?? 0) + (q?.queue.length ?? 0);
+    const lat = latencyOf(u);
+    const queued = Math.floor((ahead + posts - 1) / cap) * lat;
+    if (p === undefined) return queued + lat;
+    const units = (q?.queue ?? []).reduce((a, x) => a + (p.unit === "post" ? 1 : x.calls), 0) + (p.unit === "post" ? posts : Math.max(calls, 1) * (headers ? 2 : 1));
+    const short = units - Math.max(0, holds.room(u) * p.burst - p.burst * CALLER_ROOM);
+    return Math.max(queued, short > 0 ? (short * 1000) / p.perS : 0) + lat;
+  };
+  /** Providers in the order to ask them (card helper-robinhood-capacity fold 2, fold 4): the wide ones (WIDE_SPAN) first
+   *  for a read of a block range, then by expected wait (waitOf: a header-timed provider's logs cost a second post, for
+   *  their headers), the shortest first, then by free budget, the most first, so the walks share the wide providers, one
+   *  whose queue is longer than another's pace wait goes second, and a 100-block one (drpc) is the last resort; ties
+   *  take turns, so a dozen walks starting on full buckets do not all start on the same two. A read that names no block
+   *  range (an eth_call, a receipt, a sender) is ranked by expected wait and free budget alone (wideFirst false). */
   let turn = 0;
-  const ranked = (urls: readonly string[], wideFirst = true): string[] => {
+  const ranked = (urls: readonly string[], wideFirst = true, calls = 1): string[] => {
     const t = turn++;
     const n = Math.max(urls.length, 1);
-    const key = (u: string, i: number): number[] => [wideFirst && (WIDE_SPAN[u] ?? 0) > V.span ? 1 : 0, wideFirst && clock === null && headerTimed.has(u) ? 0 : 1, Math.round(free(u)), -((i - (t % n) + n) % n)];
+    const key = (u: string, i: number): number[] => {
+      // a read of a block range is `calls` reads of V.span blocks: a wide provider joins them up to its span (logsOf)
+      const span = wideFirst ? Math.max(WIDE_SPAN[u] ?? V.span, V.span) : V.span;
+      return [
+        -Math.round(waitOf(u, Math.ceil(calls / Math.floor(span / V.span)), wideFirst && clock === null && headerTimed.has(u)) / WAIT_GRAIN_MS),
+        wideFirst && span > V.span ? 1 : 0,
+        Math.round(free(u)),
+        -((i - (t % n) + n) % n),
+      ];
+    };
     return urls
       .map((u, i) => ({ u, k: key(u, i) }))
       .sort((a, b) => b.k[0]! - a.k[0]! || b.k[1]! - a.k[1]! || b.k[2]! - a.k[2]! || b.k[3]! - a.k[3]!)
@@ -732,26 +806,28 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
 
   /** The providers to ask, in order (ranked): those of `urls` not held, then any other of ours alike (a provider held
-   *  since the head was read, or lags, is made up for by the next), at most PROVIDERS_MAX. */
-  const askOrder = (urls: readonly string[], wideFirst: boolean): string[] => {
-    const have = ranked(usable(urls), wideFirst);
-    return [...new Set([...have, ...ranked(usable(rpcs).filter((u) => !have.includes(u)), wideFirst)])].slice(0, PROVIDERS_MAX);
+   *  since the head was read, or lags, is made up for by the next); agreed stops at PROVIDERS_MAX that answered. */
+  const askOrder = (urls: readonly string[], wideFirst: boolean, calls = 1): string[] => {
+    const have = ranked(usable(urls), wideFirst, calls);
+    return [...new Set([...have, ...ranked(usable(rpcs).filter((u) => !have.includes(u)), wideFirst, calls)])];
   };
 
   /** Asks `urls` the same `n` requests, two at once and then one more at a time while some answer has no two alike.
-   *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. A wide provider
-   *  (WIDE_SPAN) of the first two is asked again for the requests it did not answer before any narrower one is asked (a
-   *  read past its pace's wait or held answers nothing at once): the local helper at 95730cb (2026-11-04
-   *  20:10Z) sent the walks daybreak missed in its one 1 s hold to drpc, 71 reads of 100 blocks in 2 s. */
+   *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. Each next one,
+   *  of the rest and the wide ones (WIDE_SPAN) of the first two (a read past its pace's or queue's wait or held answers
+   *  nothing at once), is ranked when it is asked, by expected answer time with the requests still left (fold 4). */
   async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true): Promise<(A | null)[]> {
-    const order = askOrder(urls, wideFirst);
+    const order = askOrder(urls, wideFirst, n);
     const passedBefore = new Map(order.map((u) => [u, paced.get(u) ?? 0]));
     const got: A[][] = Array.from({ length: n }, () => []);
     const by: Set<string>[] = Array.from({ length: n }, () => new Set());
+    // the providers that answered something: PROVIDERS_MAX of them at most (a read past its pace's wait or held answers
+    // nothing, and the next is asked instead; fold 4: capping the asks left drpc out while daybreak's queue held tapes)
+    const answered = new Set<string>();
     const run = async (u: string, idx: number[], patient = false) => {
       const r = await ask(u, idx, patient);
       idx.forEach((i, k) => {
-        if (r[k] != null) got[i]!.push(r[k]!), by[i]!.add(u);
+        if (r[k] != null) got[i]!.push(r[k]!), by[i]!.add(u), answered.add(u);
       });
     };
     const pick = (i: number): A | null => {
@@ -763,10 +839,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     await Promise.all(order.slice(0, 2).map((u) => run(u, all)));
     const wide = (u: string) => (WIDE_SPAN[u] ?? 0) > V.span;
     const rest = order.slice(2);
-    const then = [...rest.filter(wide), ...order.slice(0, 2).filter(wide), ...rest.filter((u) => !wide(u))];
-    for (const u of then) {
-      const left = all.filter((i) => pick(i) === null && !by[i]!.has(u));
-      if (all.every((i) => pick(i) !== null)) break;
+    // the next one is ranked when it is asked, not when the read began: a dozen tapes ranked at once saw no queue yet,
+    // and all asked daybreak next, 37 slow posts in its 3 slots (fold 4)
+    const tier = [...rest, ...order.slice(0, 2).filter(wide)];
+    while (tier.length > 0 && answered.size < PROVIDERS_MAX && !all.every((i) => pick(i) !== null)) {
+      const want = all.filter((i) => pick(i) === null);
+      const u = ranked(tier, wideFirst, want.length)[0]!;
+      tier.splice(tier.indexOf(u), 1);
+      const left = want.filter((i) => !by[i]!.has(u));
       if (left.length > 0) await run(u, left);
     }
     // a request still without two alike answers: asked again, patiently, of each provider (not held) that passed a read
