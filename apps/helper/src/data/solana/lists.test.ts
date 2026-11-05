@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { mock, test } from "node:test";
+import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 import { gunzipSync } from "node:zlib";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
 import { onCurve } from "../../../../terminal/src/screens/market/curve.ts";
@@ -363,8 +364,8 @@ test("the lists: a throttled list read (the proxy's 429) with no last answer ans
 });
 
 test("warm(): one refresh at once and one every FRESH_MS, so a caller never waits on a vendor; the stop ends it", async (t) => {
-  mock.timers.enable({ apis: ["setInterval"] });
-  t.after(() => mock.timers.reset());
+  enableTimers(mock.timers, { apis: ["setInterval"] });
+  t.after(() => resetTimers(mock.timers));
   const f = fakes();
   const lists = createSolanaLists(f.proxy, recordedRpc, { now: f.now });
   const stop = lists.warm();

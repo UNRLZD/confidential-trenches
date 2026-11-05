@@ -110,9 +110,9 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's seventeen checks (signpage-shell runs four ways) and every app check, with the network a testnet build names", async () => {
+test("the signing page's eighteen checks (signpage-shell runs four ways, signpage-withdraw-own-spend the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 17);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 18);
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
@@ -152,7 +152,7 @@ test("a job gets Chrome when its check reaches the launcher, and Firefox or WebK
   assert.deepEqual(enginesFor(""), []);
   const sign = await planFor("sign", { commit: COMMIT });
   assert.ok(sign.include.filter((e) => e.chrome).length >= 6);
-  assert.ok(sign.include.filter((e) => ["signpage-skeleton", "signpage-release", "signpage-withdraw-form", "app-harness-signin-e2e"].includes(e.key)).every((e) => !e.chrome));
+  assert.ok(sign.include.filter((e) => ["signpage-skeleton", "signpage-release", "signpage-withdraw-form", "signpage-withdraw-own-spend", "app-harness-signin-e2e"].includes(e.key)).every((e) => !e.chrome));
 });
 
 test("a plan refuses a commit that is not 40 hex, an unknown host, a network that is neither, an argument a job would split wrongly", async () => {

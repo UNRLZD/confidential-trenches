@@ -487,7 +487,7 @@ async function run(dir, file, name) {
     const ran = [...stdout.matchAll(/^\s*ok \d+ - (.*?)(?: # .*)?$/gm)].some((m) => m[1].replace(/\\#/g, "#").replace(/\\\\/g, "\\").startsWith(name));
     return ran ? "pass" : "none";
   } catch (e) {
-    lastFail = `${e.stdout ?? ""}${e.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
+    lastFail = (e.killed ? `killed after ${RUN_MS} ms\n` : "") + `${e.stdout ?? ""}${e.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 8).join("\n");
     return "fail";
   }
 }
@@ -500,7 +500,11 @@ export async function baseline(dirs, byFile) {
   const out = [];
   let next = 0;
   await Promise.all(dirs.map(async (dir) => {
-    for (let i = next++; i < jobs.length; i = next++) out[i] = { ...jobs[i], r: await run(dir, jobs[i].file, jobs[i].name) };
+    for (let i = next++; i < jobs.length; i = next++) {
+      const r = await run(dir, jobs[i].file, jobs[i].name);
+      // why a run failed, read before another run ends: a clean-code failure in CI printed only its name
+      out[i] = { ...jobs[i], r, why: r === "fail" ? lastFail : "" };
+    }
   }));
   return out;
 }
@@ -522,9 +526,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const byFile = new Map();
     for (const m of MUTANTS) byFile.set(m[3], [...new Set([...(byFile.get(m[3]) ?? []), m[4]])]);
     const tb = performance.now();
-    for (const { file, name: n, r } of await baseline(dirs, byFile)) {
+    for (const { file, name: n, r, why } of await baseline(dirs, byFile)) {
       if (r !== "pass") {
-        console.log(`FAIL "${n}" in ${file} ${r === "none" ? "names no test" : "fails on the code as it is"}`);
+        console.log(`FAIL "${n}" in ${file} ${r === "none" ? "names no test" : "fails on the code as it is"}${why ? `:\n${why}` : ""}`);
         bad++;
       }
     }

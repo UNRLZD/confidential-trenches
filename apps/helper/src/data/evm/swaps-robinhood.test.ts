@@ -92,6 +92,90 @@ const reading = (steps: number) =>
   });
 for (const n of [1, 3, 11]) reading(n);
 
+// card helper-robinhood-capacity fold 6: the chain's swaps read once, chain-wide, for every tape and tick (index.ts)
+const follow = (s: ReturnType<typeof open>) => (s as { follow?: () => Promise<boolean> }).follow?.();
+const tapeOf = (tape: { trades: { tx: string; side: string; usd: string; amt: string; t_ms: number }[] }) => tape.trades.map((t) => [t.tx, t.side, t.usd, t.amt, t.t_ms]);
+const indexed = (steps: number) =>
+  test(`fold 6: with the chain's swap index, a recorded stretch read live ${steps} block${steps === 1 ? "" : "s"} a tick gives the same bars and tape as rebuilt in one go, and no tape, chart or tick reads a token's own swap logs`, async () => {
+    const chain = fakeChain();
+    chain.st.head = START;
+    const s = open(chain, undefined, { index: URLS });
+    await follow(s);
+    await s.candles(CURVE_TOKEN, "1m", null, 500);
+    await s.candles(MAG, "1m", null, 500);
+    let head = START;
+    while (head < REC.lastHead) {
+      head = Math.min(REC.lastHead, head + steps);
+      chain.st.head = head;
+      await follow(s);
+      await s.tick();
+    }
+    s.stop();
+    for (const [token, pool] of [[CURVE_TOKEN, POOL_CURVE], [MAG, POOL_MAG]] as const) {
+      const whole = rebuild(pool, REC.lastHead);
+      for (const tf of TFS.filter((x) => x !== "1s")) assert.deepEqual((await bodyOf(s.candles(token, tf, null, 500))).candles, whole.candles(tf, null, 500), `${token} ${tf}`);
+      const tape = await bodyOf(s.trades(token, 50));
+      assert.ok(tape.trades.length > 5);
+      assert.deepEqual(tapeOf(tape), tapeOf({ trades: whole.tape(50) }), `${token} tape`);
+    }
+    assert.equal(chain.st.own, 0, "no eth_getLogs of one token's swaps");
+    assert.ok(chain.st.wide > 0, "the chain-wide reads served them");
+  });
+for (const n of [1, 11]) indexed(n);
+
+test("fold 6: tapes asked while the index's first read is out wait on that one read, not their own (12 at once: no token's own swap logs read)", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const s = open(chain, undefined, { index: URLS });
+  const tapes = await Promise.all(Array.from({ length: 12 }, (_, i) => s.trades(i % 2 === 0 ? CURVE_TOKEN : MAG, 50)));
+  s.stop();
+  for (const t of tapes) assert.equal(t.status, 200);
+  assert.equal(chain.st.own, 0, "no eth_getLogs of one token's swaps");
+  const c = fakeChain();
+  c.st.head = REC.lastHead;
+  const p = open(c);
+  for (const [i, token] of [CURVE_TOKEN, MAG].entries()) assert.deepEqual(tapeOf(JSON.parse(tapes[i]!.body)), tapeOf(await bodyOf(p.trades(token, 50))), `${token}: the index's tape is the token's own read's`);
+  p.stop();
+});
+
+test("fold 6: a tape whose head is past the index's newest block answers from the index up to it and reads only the blocks after it itself, never waiting on the index's next read", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead - 40;
+  const clock = { t: 1_000_000 };
+  const s = open(chain, clock, { index: URLS });
+  assert.equal(await follow(s), true);
+  const wide = chain.st.wide;
+  chain.st.head = REC.lastHead;
+  clock.t += 5_000; // the follower's next read not yet due; the tape reads the newest head
+  const r = await s.trades(MAG, 50);
+  s.stop();
+  assert.equal(r.status, 200);
+  assert.equal(chain.st.wide, wide, "no index read waited on");
+  assert.ok(chain.st.own > 0 && chain.st.ownFrom.every((b) => b > REC.lastHead - 40), `own reads only past the index's newest: ${chain.st.ownFrom.join(",")}`);
+  const c = fakeChain();
+  c.st.head = REC.lastHead;
+  const p = open(c);
+  assert.deepEqual(tapeOf(JSON.parse(r.body)), tapeOf(await bodyOf(p.trades(MAG, 50))), "the same tape as the token's own read");
+  p.stop();
+});
+
+test("fold 6: with every index provider refusing a filter with no address (as pocket and blockvectra do), a tape falls back to the token's own reads and answers the same", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  for (const u of URLS) chain.st.faults.set(u, { addressOnly: true });
+  const s = open(chain, undefined, { index: URLS });
+  await follow(s);
+  const r = await s.trades(CURVE_TOKEN, 50);
+  s.stop();
+  assert.equal(r.status, 200);
+  assert.ok(chain.st.own > 0, "the token's own reads answered it");
+  const c = fakeChain();
+  c.st.head = REC.lastHead;
+  const p = open(c);
+  assert.deepEqual(tapeOf(JSON.parse(r.body)), tapeOf(await bodyOf(p.trades(CURVE_TOKEN, 50))));
+  p.stop();
+});
+
 test("a Pons token's main pool is its curve, named by the factory's own record (no pool given), and its first read is the discovery's", async () => {
   const chain = fakeChain();
   chain.st.head = REC.lastHead;
@@ -407,4 +491,67 @@ test("card helper-chart-fresh: a quiet token's discovery walks the whole cold wi
   assert.equal(r.status, 200, r.body);
   assert.ok(chain.st.spans.length > 2 * VENUES.robinhood.step / VENUES.robinhood.span, "the walk went past one step");
   assert.ok(peak <= INFLIGHT_MAX, `${peak} requests out to one provider at once`);
+});
+
+// card helper-robinhood-capacity fold 7: a pool of a Slipstream-kind CL factory (ROBINHOOD_VENUES.cl) is read only once
+// that factory names it by getPool(token0, token1, tickSpacing), as 0xe0c4ceb9... names 0xf2a0be59... (04:2xZ read)
+function withCl(c: ReturnType<typeof fakeChain>, coin: string, pool: string, names: string) {
+  const w = (a: string) => `0x${a.slice(2).padStart(64, "0")}`;
+  const asked = { transfers: 0, getPool: 0 };
+  const local = (r: { method: string; params: unknown[] }): unknown => {
+    if (r.method === "eth_getLogs" && ((r.params[0] as { topics: unknown[] }).topics[0] === TOPIC.transfer)) asked.transfers++;
+    if (r.method !== "eth_call") return undefined;
+    const q = r.params[0] as { to: string; data: string };
+    if (q.to === pool && q.data === "0xc45a0155") return w(ROBINHOOD_VENUES.cl);
+    if (q.to === pool && q.data === "0x0dfe1681") return w(coin);
+    if (q.to === pool && q.data === "0xd21220a7") return w(ROBINHOOD_VENUES.usdg);
+    if (q.to === pool && q.data === "0xd0c93a7c") return w("0x32");
+    if (q.to === ROBINHOOD_VENUES.cl && q.data.startsWith("0x28af8d0b")) return asked.getPool++, w(names);
+    return undefined;
+  };
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+    const mine = reqs.map((r) => local(r));
+    const rest = reqs.filter((_, i) => mine[i] === undefined);
+    const fwd = rest.length === 0 ? [] : ((await (await c.fetch(url, { ...init, body: JSON.stringify(rest) })).json()) as { id: number }[]);
+    if (!Array.isArray(fwd)) return c.fetch(url, init);
+    const out = reqs.map((r, i) => (mine[i] !== undefined ? { jsonrpc: "2.0", id: r.id, result: mine[i] } : fwd.find((x) => x.id === r.id)));
+    return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return { fetch, asked };
+}
+
+test("fold 7: a Slipstream-kind CL pool the lists name is the token's pool once its factory names it by getPool(token0, token1, tickSpacing): no transfer walk; a pool its factory does not name is never read", async () => {
+  const coin = `0x${"39".repeat(20)}`;
+  const pool = `0x${"f2".repeat(20)}`;
+  for (const [names, read] of [[pool, true], [`0x${"0b".repeat(20)}`, false]] as const) {
+    const chain = fakeChain();
+    chain.st.head = REC.lastHead;
+    const cl = withCl(chain, coin, pool, names);
+    const s = open(chain, undefined, { fetch: cl.fetch, pools: new Map(), hint: async () => pool });
+    const r = await s.trades(coin, 50);
+    s.stop();
+    assert.equal(r.status, 200);
+    assert.ok(cl.asked.getPool > 0, "the factory was asked");
+    if (read) assert.equal(cl.asked.transfers, 0, "the confirmed pool is the token's: no walk of its transfers");
+    else assert.ok(cl.asked.transfers > 0, "an unconfirmed pool is no pool: the discovery walks the token's transfers");
+  }
+});
+
+test("fold 8: a book's trader lookups start once its first logs are read, alongside the ETH price's read, and two tapes asked at once look each sender up once", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const s = open(chain);
+  const [a, b] = await Promise.all([s.trades(MAG, 50), s.trades(MAG, 50)]);
+  s.stop();
+  assert.equal(a.status, 200);
+  assert.equal(a.body, b.body);
+  const seq = chain.st.seq;
+  const firstTx = seq.findIndex((x) => x.startsWith("tx "));
+  const lastRef = seq.lastIndexOf("ref");
+  assert.ok(firstTx >= 0 && lastRef >= 0);
+  assert.ok(firstTx < lastRef, `a lookup is asked before the ETH price's last read (${seq.slice(0, 8).join(", ")} ...)`);
+  const txs = seq.filter((x) => x.startsWith("tx "));
+  assert.equal(new Set(txs).size, txs.length, "no sender is asked twice");
+  assert.ok(JSON.parse(a.body).trades.every((t: { trader: string | null }) => t.trader !== null), "every trade has its trader");
 });

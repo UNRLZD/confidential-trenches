@@ -1,0 +1,831 @@
+{
+ "release": "release-29",
+ "commit": "acee672158ba2727883d0f52821ff802291183e9",
+ "tree": "f127435ff46b62e127fad710f7c9695ca866616a",
+ "hosts": {
+  "SIGN_HOST": {
+   "origin": "https://sign.confidential.unrealized.trade",
+   "headers_file": {
+    "bytes": 3045,
+    "sha256": "78ca9348c51359264e2cda31c17b91d49297a52e12603da278073760b2c5e351",
+    "sha384": "sha384-HHew4Uzx2DEI8F9tVFxSl7z1w9Vd3AWPBOjX77F8/WnkSmIqvNz58yy6ketwjWaG"
+   },
+   "files": [
+    {
+     "path": "/",
+     "bytes": 382,
+     "sha256": "0f57ccfef631545a8074a3a684b36a6f87e9d5d1a7de8cd7da7b803a124c82dc",
+     "sha384": "sha384-78yVl9QdvpZ6lzAwUMGvTqcAT9VrGRDbSF9ZTOhRP9M78NGWTQBzXlQNA/I4lWMQ",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/app.js",
+     "bytes": 394849,
+     "sha256": "b2d12a40fb8feb6901106a74f2c524e42dca2d33c53f5a47b1c381e8e2db661f",
+     "sha384": "sha384-d6NAyriWlrd1E9rmer1F9lurADAiASrZzM7bEEQze2hluHL9dnnHn+EwZbZlOpzD",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/zk/254d2130607182fd6fd1aee67971526b13cfe178c88e360da96dce92663828d8.wasm",
+     "bytes": 2380442,
+     "sha256": "254d2130607182fd6fd1aee67971526b13cfe178c88e360da96dce92663828d8",
+     "sha384": "sha384-hwGWwK19+qeroaVWHkmETq2K6WQ3IdK9O198uP2JC7IVCqQttLw+Ap6p4WFW06hj",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+      "cache-control": "public, max-age=31536000, immutable"
+     }
+    },
+    {
+     "path": "/assets/zk/2a893b42174c813566e5c40c715a8b90cd49fc4ecf384e3a6024158c3d6de677.zkey",
+     "bytes": 17793015,
+     "sha256": "2a893b42174c813566e5c40c715a8b90cd49fc4ecf384e3a6024158c3d6de677",
+     "sha384": "sha384-IRp/jAX//BehzZxn0zesnM50s37lLaS3VAqj/9xKowhwen3Wvd+jFc3crId59SIG",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+      "cache-control": "public, max-age=31536000, immutable"
+     }
+    },
+    {
+     "path": "/assets/zk/36cda22791def3d520a55c0fc808369cd5849532a75fab65686e666ed3d55c10.wasm",
+     "bytes": 2607967,
+     "sha256": "36cda22791def3d520a55c0fc808369cd5849532a75fab65686e666ed3d55c10",
+     "sha384": "sha384-e8tMlGOkn36dPLM8fDxM0+xjNGdQK7vOqnyzXOQx21GDyGXyeBvwmvsTePrk5m6h",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+      "cache-control": "public, max-age=31536000, immutable"
+     }
+    },
+    {
+     "path": "/assets/zk/494ae92d64098fda2a5649690ddc5821fcd7449ca5fe8ef99ee7447544d7e1f3.zkey",
+     "bytes": 901233,
+     "sha256": "494ae92d64098fda2a5649690ddc5821fcd7449ca5fe8ef99ee7447544d7e1f3",
+     "sha384": "sha384-wzZWmery3QkU3G/O/gnQxbLHKaXyMQc6Dcg936nEFYefv9SoYLWtrQdLkLseAPcZ",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+      "cache-control": "public, max-age=31536000, immutable"
+     }
+    },
+    {
+     "path": "/assets/zk/666bd0983b20c1611543b04f7712e067fbe8cad69f07ada8a310837ff398d21e.vkey",
+     "bytes": 4208,
+     "sha256": "666bd0983b20c1611543b04f7712e067fbe8cad69f07ada8a310837ff398d21e",
+     "sha384": "sha384-phdQ5K9IKQCtataurNqbztqb9s3dCMmiyDVQU168HCnPZz5H2rAJbbFgmVUuMOv8",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+      "cache-control": "public, max-age=31536000, immutable"
+     }
+    },
+    {
+     "path": "/assets/zk/7d48b4eb3dedc12fb774348287b587f0c18c3c7254cd60e9cf0f8b3636a570d8.vkey",
+     "bytes": 3477,
+     "sha256": "7d48b4eb3dedc12fb774348287b587f0c18c3c7254cd60e9cf0f8b3636a570d8",
+     "sha384": "sha384-zvLBF2HCvqofFDqTAghPcWe4yvpaAABrJXpumtU1f6ue7XgjAYB0AdfuT24ZHW6P",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+      "cache-control": "public, max-age=31536000, immutable"
+     }
+    },
+    {
+     "path": "/licenses/Apache-2.0.txt",
+     "bytes": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+     "sha384": "sha384-II9e1ieUDl5AxyiVq3/FflTua1Sr0kMJ25e6imG7rXg7SiAsA2VemsvEqVsLqM7/",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/licenses/GPL-3.0.txt",
+     "bytes": 35149,
+     "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+     "sha384": "sha384-y9iBRdwGwwAfzh6QFQxRFgWDWy19U+LYit4lkfA19KYWwfbxcQU/r6VI3L5zIvz3",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/licenses/LGPL-3.0.txt",
+     "bytes": 7652,
+     "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",
+     "sha384": "sha384-Io9/eyPWtrlOgLOOJ8IPrbwtdSJs285seV8nBpSwa8PzLBgx6nx4xsp6HCm5e64g",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/licenses/zk-NOTICE.txt",
+     "bytes": 2873,
+     "sha256": "056ea1028e3cdd17c728bcb156d93257231d73325897bbb8d7ead6d2f231ef33",
+     "sha384": "sha384-4D1X/hsAFL5R4wL2lJSR56VsI0g8IR5pxY7i/+Ny3nuUq/8P0P7noyUNhy2HYqpE",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/prover-thread.js",
+     "bytes": 4285,
+     "sha256": "d2d61af55de7f1c92e8d3edc2c5fd68fd37c4294b4a4d4da54b5b963aceb4e46",
+     "sha384": "sha384-bS1kz2E5i/qSsRUMLqxTCHM8z5sQ3f7YugHdk5YzLYmZOSfWScsHwHxpT7SqgqxT",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/prover-worker.js",
+     "bytes": 718988,
+     "sha256": "f3ce25c397023e9a2602e350c2e4ed737a63d374d752b7f6184859e76a8e5309",
+     "sha384": "sha384-zHNjmaNZ97qPqPts+uRmDEnYVWia8beI/ULfjNfwo63pTnSHJBphX/htq5miZnIr",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'",
+      "integrity-policy": "blocked-destinations=(script)",
+      "origin-agent-cluster": "?1",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    }
+   ]
+  },
+  "APP_HOST": {
+   "origin": "https://confidential.unrealized.trade",
+   "headers_file": {
+    "bytes": 1577,
+    "sha256": "7408a2b5fab10d65ba1b05dfe9ecd44bb24b915c00060b6b016e901ff68c6e35",
+    "sha384": "sha384-htZ50IcMDvdxm8Fvqw2Fm60I+eb81nhFM7aPUIC/Ju3Ui0vp4hA47aJL/47AUb8d"
+   },
+   "files": [
+    {
+     "path": "/",
+     "bytes": 3919,
+     "sha256": "91df99402392c0f9a171febc6e9319d712419c76757d766b4d22a527442d7808",
+     "sha384": "sha384-CUI6v/+KlBZxp5lDa0KZL24mYdc0xXajPcFpqXd6su/iejtkKYIrPbotSjsh6SVu",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/bags-DuVw1SSY.png",
+     "bytes": 1396,
+     "sha256": "bdf3d87086b48f566a7eecb8615d2b90109a44bb11a1ec28cbdadf70197439ee",
+     "sha384": "sha384-XweEnHFuB0kzDQth8WSVt2mWItvMjz+q5y1Gd9wpFyX4vQhFgWQyYM8sJY2OGN39",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/base-Cq6sCJBo.svg",
+     "bytes": 672,
+     "sha256": "b4f2b487011713f98481cc53c4ce095629b4876acbdbc2f0f3ad69a9688ba82e",
+     "sha384": "sha384-Qr+HNf40om193TMnj6RRq/ByxL0RKVTRG4mZTboJfGIxu3mod5h8+Hkb+8aF5Nvh",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/bonkfun-Bybx5U8g.png",
+     "bytes": 7024,
+     "sha256": "4f2dce0491a5f8f827cc04741bcfa47636d337727f8102947822156a65271a7a",
+     "sha384": "sha384-SlguMmsbrTmBt+dWNLk4iIe3PAUNxtTJ8xcxnyHgB9gs8DP6ettZ0bbHGJyq2Lyo",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+     "bytes": 12112,
+     "sha256": "d103882f9a90474f378c4fb156276e7f430602f6283ef75c2f00e354dae0be45",
+     "sha384": "sha384-dPc2qvDvltQEEHI7byirUK9q6ZsdP8IvZsmvmYDikThyE1U9A6wBKLzoapOQZApT",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/clanker-D2hIlSiE.png",
+     "bytes": 2136,
+     "sha256": "bd4cb9e99c85f8b2f2197bd143c0cd9611d163c3b1d5890dd003719581ac16d1",
+     "sha384": "sha384-lQkIDWL2qUXt4QUxI3kO/vmWOkSW5gObSuk7WhFuQuoKraX8sXMozHuJXGTMvH7x",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+     "bytes": 44630,
+     "sha256": "d25bc40c7081cd4603957907faf14d95b8ce1d9d82bb89eae69298f064ea7c17",
+     "sha384": "sha384-xgngcUcg0DfQZcsyT+zBUt0InPOGWt7HGkaH1wH6DlVytF/2lL+6ByvMepT0allk",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/ct-stack-1x-z6B8R7os.svg",
+     "bytes": 44258,
+     "sha256": "cd5b4883154ee35a3818c58e34ec28872dc956c1b44a53751e9b853195a799d1",
+     "sha384": "sha384-5pqWu1hJPMyIlNBpVVF2dkGODE7g00jUnwb4MB82Enfqy1gdZijXFequCKl9zHs5",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/ct-stack-2x-DCJZ3gWM.svg",
+     "bytes": 76305,
+     "sha256": "75179836d95bd5c43868da38fb6bff17fb31f372adfe7ca28a9c2257acfe44a5",
+     "sha384": "sha384-EX7x47pgwmijuZNFIS4ils/+TfLaak3TbSE9EOlmwBMmABBvzJJC+CJQ5HCMWgt7",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/ct-stack-2x-cool-CyRdqxKi.svg",
+     "bytes": 76169,
+     "sha256": "5ae1c9952de22076c14e164db965a11e92ed74a85ce1c0a865e4f72f63ad2622",
+     "sha384": "sha384-830NYfpt1A3ql8hJpey/tgN8oncajY5LMrxfsEmTX1YW3NBHtELR6HHvSlNLQ+KH",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+     "bytes": 31392,
+     "sha256": "0d0ffc61166639b3f0939d6e96563df846fadf3515d2699182a2cd8fba274335",
+     "sha384": "sha384-N3x+rj8ji95w44QyjJTkiNy/ir3lOGnpFTrPsFecETY33cF6+w4zxEsofJRA551c",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+     "bytes": 31599,
+     "sha256": "b657d59403c6e2ccc684845d4f07c82d3eeb799f7181c40cd26630903938bca8",
+     "sha384": "sha384-REGOu9V6h190TZ9+CtLZIRcZj7ZWK9e2x7/psKsMjAIEnzdFzNgy0mMWR/WeUJ+d",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/doppler-zFaQa6do.png",
+     "bytes": 2025,
+     "sha256": "6f7b51fc114cc29e8743f364aa0d08aca92041b92b9fa427bea33df421ee6e9b",
+     "sha384": "sha384-IHAxWOX5IbvR3OaoWLtEzqFxovtw0Ld3PyFc5Bf8ZFFN9/i0b1D2kPl1Y7sagR9E",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/flaunch-C_nYd02m.svg",
+     "bytes": 908,
+     "sha256": "8769f115c7c1ff6eeb8f9dfd5ed137d6f1f0079a460a7022e52924e984fd9cc6",
+     "sha384": "sha384-02gI71Jq+bCTIVpwmS1dJueGB/rJOWz0PC7UKNj3bV0aUFMHVJV+SPB6Xi62SBBw",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/grainpad-DOXmTbIU.svg",
+     "bytes": 2338,
+     "sha256": "17302e449905659bcb5b033acc55f33caae0e84f9449cd12ae1a524bd5ad8a1e",
+     "sha384": "sha384-cRiN+wbNQhUt4mNyEP1M3ObGvfamdQPfdSRffyN9A/W/zyP7xa+d0bhL3PGOY1K8",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/index-DgSVpjvn.js",
+     "bytes": 791896,
+     "sha256": "b537e6aeb72033f8c565d0f866ad1129dfeff2ef57023176c46795762ca6af7f",
+     "sha384": "sha384-FEtphXoTcPmLVx12V0nzu4t4QWnPihawZC9UPPgVlV5PKn7F90I5iMml7cyxk3zp",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/jupstudio-1yIKQoP-.png",
+     "bytes": 5125,
+     "sha256": "9c490c64c47a48f514a6b983e84ca699c8dc28284bc94c81757673c3dab4e014",
+     "sha384": "sha384-3zZt/X1T8TehYbqRrLulx01BIMPJAqBCBNR/4sbZ+CnLNyD1cSx70mjDTs9nsAk8",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/metadao-Bb8M0dJR.svg",
+     "bytes": 1020,
+     "sha256": "1da844fd5a282c297d9524843c814f775b26cf8552d4b08e06e57f4edbbd4a40",
+     "sha384": "sha384-PCWiv/dHMjIWDZ9Ovwmmab8M5E2Vdf5Y1knWbjHT+LBhnWN5ioLxGl9BhJ1fxikE",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/meteora-DAMKb6zU.png",
+     "bytes": 4684,
+     "sha256": "57025edd8c0160c1f78ca915cdcee6b93df81052986ffdb737c2307d22c5740b",
+     "sha384": "sha384-XeT0eh9Ka9EzEx32U9D4xH9IyWe7oPgNL+bJKm8Wb57kHH9hozXNwD0hr5lBhO7h",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/near-r3ZkGNCQ.png",
+     "bytes": 1533,
+     "sha256": "17da73e6e78a8ed533e5a6adc609ce562c53c29ad00ef9a3cd139bafd345b1f1",
+     "sha384": "sha384-eT+8LcpRgdwRYL7YGAOKbM3Y24FlPRyMPLavbCody1fQT6XnS2bKw4FQQNuaWON5",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/pons-PCbYTPWc.png",
+     "bytes": 5681,
+     "sha256": "0b3177e8953b3d15fe097f4cfa16210dff8b5f851f81d711b103eb7bde7f0047",
+     "sha384": "sha384-s9EjtZnDvbueCGCoUOjlE3iZnfMh5xmN5xEXVUT6u9ZRphXPwXRrEwAfK+zO9rYP",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/pumpfun-CzP5o1vG.png",
+     "bytes": 2830,
+     "sha256": "9f37263e142ed48d91634dff6d90f102652470440644780c339ed62f39230b37",
+     "sha384": "sha384-MT2XfAos3hxgA1fCMX2b5tCDRb92bVMdSFgFiSsovob0b5jadTSUjfMOVqsr6lQa",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/raydium-Cj9-4qNB.png",
+     "bytes": 4444,
+     "sha256": "83d28048a0415f36dbd2ac90f901ab59a30baee34ba336d653a63c1ee630efe3",
+     "sha384": "sha384-LvnSF+wiRlwoUoJqDjDtzK2RE5ku6e/0qM4p/rJgot6MxSpIRvCaUinpuQiRtN35",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/robinhood-CY6OFotH.png",
+     "bytes": 2533,
+     "sha256": "ba5ceda948b2ae29cde81074262f848a5a5480093ce8fc4d1bc147934cc6102b",
+     "sha384": "sha384-3Kf42kQyXK/Qs01LuYFBRThymubE49xpzEGy7gN7jsugpG2cnH+kPUKMM78qoH4Z",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+     "bytes": 24344,
+     "sha256": "437cd97c802be9f10f60b4db8a723261e5c35dfe1529de0562981871028bd670",
+     "sha384": "sha384-/Y/Fsi1pLDnmU8FGxH0lWNrj+TQE5eaHawCjzPkGhG/nQc8kpc5lGh1qJ/jc/gpL",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+     "bytes": 25220,
+     "sha256": "83c497a1c028bfc2ae231f88c49ec7da542e1e4bbdfe23ad207a6dbb91d4f15d",
+     "sha384": "sha384-rxTIa5RR5pRbbUpFeWzvL0VbScDiddWY0Zl1gBBXu8yqwb0n9OpnT9E+56+RHyP9",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+     "bytes": 25180,
+     "sha256": "d00ac8735bf6b96cc4cfbfb22576c4168645547a264bd22d127c46519cab3250",
+     "sha384": "sha384-cxFvDK50RWuzqgchO9OT7rokqr+eKPxkBz2vdqMl2x3LsSaXQtswZTPRUvQDrfbX",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/solana-BJOXkE6i.svg",
+     "bytes": 2519,
+     "sha256": "3d3401109aa061dec40a8659f1847817a8e647f98de1e65e76e86a95bbe1f08a",
+     "sha384": "sha384-i8xlkBbP1tngtmah5CRrqs82JK1LupO3XDX8iNWDYkaVzqar5JOdwRZhwEgRxQ+8",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/stonkfun-DtKL-dVT.png",
+     "bytes": 1866,
+     "sha256": "7842839c3662b0454ee21cf4b929aaf50353969b950a4264438fe67f324bced5",
+     "sha384": "sha384-RSxnAuTH0EwfauKvnlvIcggMlLJnd5jnRlMYVvCfExPnfz7iAe74eX+c9hWog/Lj",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/style-DXUsLvaP.css",
+     "bytes": 77356,
+     "sha256": "0ec30eb2047ed015fdcccf8b2866de7787de7a829109f1601cac67562fb239e9",
+     "sha384": "sha384-itMiNYdMCljGMYc76k5egHCpAj95pwd4nCJsZDkant6CaFjzbwBX5XQB8SSiYl9U",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/torch-BQZ5SLLj.png",
+     "bytes": 2666,
+     "sha256": "6315480b4693fdaa795e6c5403e0f31bc440c8858530df37b51decab94985963",
+     "sha384": "sha384-l7xuzJT2PBcMtc3FKdaxJ8I/GqjNx8mFZrq+1xEOq5ggaYw45B34dOKtZtJzLFu1",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/virtuals-D8QuHs5k.png",
+     "bytes": 2190,
+     "sha256": "5f333d3c9780fa665af4dce9cfe8e1b644d2908a97227d7eb352fd45a5c25df4",
+     "sha384": "sha384-8+wkBki2fyQr5Ub4lWaIVgajN4GfwMBZr5Sst/LYXE0U+mlvkSFOCiqxLjeKv3R0",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+     "bytes": 18799,
+     "sha256": "6c69f31d29ae856a2ca157f3b3bdea296246b441d17a95902be61c15f6669bda",
+     "sha384": "sha384-1J+MM42qQFpzfcfRcTcL6b4IHexqPzdcOUwMpYgVSjpVseJ5zlyWiSsCUVKhTaot",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+     "bytes": 19137,
+     "sha256": "35eabd51da4bb16cfada2bd55c6b0041b32ede1865f8ef0ef9e1c52d95d34509",
+     "sha384": "sha384-uU4BGcUtfF5h+7UXeVSrXbefm/kBmUHQqL4N/ijj6Blrt+8vYaKtky0suNfIorMF",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/zora-DsOpqJ9b.png",
+     "bytes": 7049,
+     "sha256": "a44f9586f053f0cbc5c83856fd77e3d738429a6a4e125d3a7e35a1f6642a1d1b",
+     "sha384": "sha384-goAeemo32+EefemsN/37lvQ6lPKYbJUF438ugyTlYSbB7U7lpS52qei6C92Jvoki",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    }
+   ]
+  }
+ }
+}

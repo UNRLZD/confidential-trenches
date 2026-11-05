@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, mock, test } from "node:test";
+import { enableTimers, resetTimers } from "../mock-timers.ts";
 import { buildProverWorker, HEADER, SNARKJS_BUILD } from "../../src/prover/build.mjs";
 
 const KIT = new URL("../../", import.meta.url);
@@ -21,8 +22,8 @@ const bytes = (n) => readFileSync(new URL(`zk/${n}`, KIT));
 const ab = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
 const good = () => ({ wasm: ab(bytes("withdraw.wasm")), zkey: ab(bytes("withdraw.zkey")) });
 // every test runs on fake timers: a thread's 30 s start limit fires only when a test moves the clock
-beforeEach(() => mock.timers.enable({ apis: ["setTimeout"] }));
-afterEach(() => mock.timers.reset());
+beforeEach(() => enableTimers(mock.timers, { apis: ["setTimeout"] }));
+afterEach(() => resetTimers(mock.timers));
 
 const ASKED = ["blob:https://sign.example/5f0c7a4e-0000-4000-8000-000000000000", "data:application/javascript;base64,KGZ1bmN0aW9uKCl7fSkoKQ=="];
 

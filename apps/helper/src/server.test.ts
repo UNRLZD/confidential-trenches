@@ -8,6 +8,7 @@ import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { after, before, mock, test } from "node:test";
+import { enableTimers, resetTimers } from "../test/mock-timers.ts";
 import { HELPER_BIND_ANSWER_MS } from "@blindfill/kit";
 import { PARTS, releaseOf } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
@@ -397,7 +398,7 @@ test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the de
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
   // one clock: the bound's timer and the helper's now() (which reads Date.now when called) both move only by tick
-  mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  enableTimers(mock.timers, { apis: ["setTimeout", "Date"], now: Date.now() });
   try {
     // a carry still running at the bound
     let inside = new Promise<void>((ok) => (entered = ok));
@@ -425,7 +426,7 @@ test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the de
     const b = await fast;
     assert.deepEqual([b.status, JSON.parse(b.body)], [200, { tx_hash: TX }]);
   } finally {
-    mock.timers.reset();
+    resetTimers(mock.timers);
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
   }

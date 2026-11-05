@@ -4,6 +4,7 @@
 // (Robinhood testnet's v3, M365) is refused (not_deployed), and W's 7702 authorization names only the pinned delegate.
 // scripts/live-checks/evm-venues-pin.mjs reads each pin's code on the chain's two RPCs.
 import { mock, test } from "node:test";
+import { enableTimers } from "./mock-timers.ts";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -33,7 +34,7 @@ const sellRecord = (chain: string) =>
 const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string }; poolManager: { address: string } }> };
 
 const NOW = 1_800_000_000;
-mock.timers.enable({ apis: ["Date"], now: NOW * 1000 });
+enableTimers(mock.timers, { apis: ["Date"], now: NOW * 1000 });
 const W_KEY = new Uint8Array(32).fill(7);
 const W = "0x" + Buffer.from(keccak_256(secp256k1.getPublicKey(W_KEY, false).subarray(1)).subarray(12)).toString("hex");
 const X = "0xF111111111111111111111111111111111111111";

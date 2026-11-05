@@ -5,6 +5,7 @@
 // SIGNPAGE_SRC=<abs path to a copy of src/> runs the same tests against that copy (the red-before proofs).
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { pathToFileURL } from "node:url";
 import { SIGNPAGE_KINDS } from "../src/signpage/messages.ts";
 import { FIXTURES, STATE } from "./signpage-fixtures.ts";
@@ -108,8 +109,8 @@ async function open(h, c, kind) {
 
 const noFrame = (h) => assert.deepEqual(h.calls, { createElement: 0, appendChild: 0 }, "no iframe is made or mounted");
 
-test.beforeEach(() => mock.timers.enable({ apis: ["setTimeout"] }));
-test.afterEach(() => mock.timers.reset());
+test.beforeEach(() => enableTimers(mock.timers, { apis: ["setTimeout"] }));
+test.afterEach(() => resetTimers(mock.timers));
 
 // ------------------------------------------------------------------------------------------------ a. where it posts
 test("parent mode posts every request to host.parent at SIGN_HOST's origin exactly, never *, and makes no iframe", async () => {
@@ -202,8 +203,8 @@ async function exchange(mode) {
 
 test("parent mode gives an app the same snapshots and outcomes as the iframe mode for the same exchange", async () => {
   const framed = await exchange("iframe");
-  mock.timers.reset();
-  mock.timers.enable({ apis: ["setTimeout"] });
+  resetTimers(mock.timers);
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
   const shelled = await exchange("parent");
   assert.equal(framed.status, "down");
   assert.equal(framed.outcomes.length, SIGNPAGE_KINDS.length + 5);

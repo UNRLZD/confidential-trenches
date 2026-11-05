@@ -108,7 +108,7 @@ export type PoolBuyHost = {
   reads?: number;
   wait?(ms: number): Promise<void>;
   /** The transaction was sent: its signature (the helper's word until it reads back). */
-  sent?(signature: string): void;
+  sent?(signature: string): void | Promise<void>;
   /** The buy's route as the run binds and reads it (messages.ts BuyRoute): W and the venue with its pool once the check
    *  passed and W derived to the proof's recipient, then the amount W received once the transaction read back on both
    *  RPCs as the same. Each once, in that order; a throw here never stops the buy. */
@@ -534,7 +534,7 @@ export async function sendAndSettle(
   }
   const signature = (answer as { signature?: unknown } | null)?.signature;
   if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature) || base58.decode(signature).length !== 64) return unlanded([]);
-  h.sent?.(signature);
+  await h.sent?.(signature);
   const txs: TxRef[] = [{ chain: "solana", hash: signature }];
   let landed = false;
   for (let i = 0; i < reads && !landed && (i === 0 || inTime()); i++) {

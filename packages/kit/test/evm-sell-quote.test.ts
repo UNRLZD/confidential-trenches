@@ -4,6 +4,7 @@
 // code. Each planted lie is a server's or an RPC's: a quote off on one RPC, a server's route, a fee-on-transfer token,
 // a stale quote, an unlisted hook, a pool that runs out, a hand-made quote.
 import { mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -94,11 +95,11 @@ test("planted: a stale quote is refused, when quoted (a head 31 s old) and when 
   const q = await sellQuoteWith(req("base-sepolia"), [provider({ price: flat }), provider({ price: flat })], Date.now());
   const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
   const later = Number(q.block.timestamp) * 1000 + 30_001;
-  mock.timers.enable({ apis: ["Date"], now: later });
+  enableTimers(mock.timers, { apis: ["Date"], now: later });
   try {
     assert.throws(() => kit.evmPoolBuildSell(q, fields), (e: unknown) => (e as { code?: string }).code === "stale_quote");
   } finally {
-    mock.timers.reset();
+    resetTimers(mock.timers);
   }
   assert.equal(kit.evmPoolBuildSell(q, fields).minOut, q.minOut);
 });
