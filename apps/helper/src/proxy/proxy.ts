@@ -58,9 +58,12 @@ export const VENDOR_WINDOW_MS = 60_000;
  *   requests in one bucket (developers.jup.ag/docs/api-rate-limit, read 2026-11-03 09:15Z): 60. The helper's own reads
  *   draw from it: token search at most SEARCH_PER_SPAN 16 a counted minute (data/solana/token.ts), and
  *   Discover's three lists once per 12 s refresh through a 10 s cache (data/solana/lists.ts), about 15 a minute; 34 of
- *   the 60 at most (PROXY_RESERVE), the rest for devices. Share 4: a device's one trade asks /swap/v2/build at most
- *   four times, a capped build and its uncapped retry (packages/kit/src/trade/solana/build.ts l.243-246), twice when
- *   the route's floor needs a rebuild (packages/kit/src/trade/solana/flow.ts l.318, l.325).
+ *   the 60 at most (PROXY_RESERVE), the rest for devices. Share 4: a device's trade asks /swap/v2/build at most
+ *   four times a leg, every leg at once: the cap search's three builds (packages/kit/src/trade/solana/build.ts
+ *   SOLANA_JUPITER_MAX_BUILDS) and one rebuild when the route's floor needs it (packages/kit/src/trade/solana/flow.ts
+ *   prepareLeg). K legs ask K to 4K (3 legs too large at 40 and 32, fitting at 28, each with a floor rebuild: 12); a
+ *   one-leg trade at most 4, the share. More draw past the share as lent (limits.ts LEND_FREE_SHARES: 8 a minute on
+ *   the total alone, then while room stays for others).
  * - relay: "`/quote` | 50 requests per minute" for a self-serve key, other endpoints 200 (docs.relay.link/references/
  *   api/api-keys, read 09:15Z): 50, the quote's. Share 2: no kit call yet; a tap's hop is one quote and one status.
  * - lifi: keys "currently default to **100 requests per minute**" (docs.li.fi/api-reference/rate-limits, read 09:15Z):

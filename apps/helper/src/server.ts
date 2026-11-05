@@ -720,6 +720,16 @@ export function poolsChecked(pools: ReadonlyMap<string, Pick<SolanaPoolSender, "
   return Promise.all(checks).then(() => undefined);
 }
 
+/**
+ * The helper's ready (health.ts): true once the warm-up (warmUntilReady) and every pool's start check (poolsChecked)
+ * have both passed, never before either. `warmed` settles with them: it rejects on a refused start check.
+ */
+export function readyGate(warm: Promise<void>, checked: Promise<void>): { ready: () => boolean; warmed: Promise<void> } {
+  let ready = false;
+  const warmed = Promise.all([warm, checked]).then(() => void (ready = true));
+  return { ready: () => ready, warmed };
+}
+
 export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
@@ -852,13 +862,14 @@ if (import.meta.main) {
     // ready (health.ts): once the lists, a token page and its holders answer 200. A helper that replaces a running one
     // (peer) listens only then, so the proxy, which tries each helper of the service in turn, never reaches it cold
     // (deploy/redeploy.sh waits for it, bounded, before it stops the old one); one that starts alone listens at once.
-    // Every pool's start check is part of it, so a start that refuses (exit 2) is never ready and the old one stays.
-    let ready = false;
-    const warmed = Promise.all([warmUntilReady({ lists, evmLists, token }), checked]).then(() => void (ready = true));
+    // Every pool's start check is part of it, so a start that refuses (exit 2) is never ready and the old one stays. A
+    // Solana pool's check waits for its first good rent read, so a deploy beside a running helper is not ready while
+    // that cluster's rent reads fail (each failure logged, pool/solana.ts), and redeploy.sh keeps the old one serving.
+    const { ready, warmed } = readyGate(warmUntilReady({ lists, evmLists, token }), checked);
     const listen = () => {
-      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, () => ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools); // warms both relayers once the senders are ours
+      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools); // warms both relayers once the senders are ours
       drain = drainer(server);
-      server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready ? "" : ", warming"}`));
+      server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready() ? "" : ", warming"}`));
     };
     if (senders.peer) void warmed.then(listen, () => undefined); // a refusal: poolsChecked's exit 2, never a listen
     else {
