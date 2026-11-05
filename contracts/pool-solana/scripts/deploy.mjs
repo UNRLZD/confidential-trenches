@@ -37,7 +37,9 @@
 //     funder holds that much, and records the funding transactions.
 //  5. solana program deploy --final (the upgradeable loader). --final is two transactions: the deploy, then a
 //     SetAuthority to none (on devnet 3H2Vatu... then 2Wii4A6vy... 10 s later), so a stop between them leaves a program
-//     the funder can upgrade; the cleanup closes it. The authority is read back.
+//     the funder can upgrade; the cleanup closes it. The authority is read back. The writes go to the leaders (no
+//     --use-rpc), re-signed up to DEPLOY_SIGN_ATTEMPTS times, into the run's own --buffer; a failed try is tried again
+//     from that buffer up to DEPLOY_TRIES times (only the chunks that differ are written again) before the cleanup.
 //  6. Tag 0 init, then a 0.01 SOL deposit from the funder with a fresh note (nullifier and secret random in this run,
 //     never printed or kept; the precommitment is public). The mark and both page leaves are read back and checked:
 //     the label leaf against keccak256(scope, nonce) mod p, the state leaf against Poseidon(value, label,
