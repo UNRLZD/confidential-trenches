@@ -2,7 +2,9 @@
 // `cast calldata "exactInput((bytes,address,uint256,uint256))"` for the swap, `cast wallet sign --data` of the Sell
 // typed data under {Blindfill, 1, chainId, verifyingContract W} and `cast wallet sign-auth <delegate> --chain <id>
 // --nonce <n>`, each with the Hardhat mnemonic's index 0 (`sells` is the Sell's token field), and sign-auth at RLP's
-// nonce edges. A refusal test per check.
+// nonce edges; `sellCallData` is `cast calldata "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,
+// address,uint256,uint256),uint256,bytes)"` of the Sell, fee = feeCap and cast's signature (the Sell with feeRecipient,
+// card pool-review-3: cast 1.7.1, 5 Nov). A refusal test per check.
 import { mock, test } from "node:test";
 import { enableTimers } from "./mock-timers.ts";
 import { readFileSync } from "node:fs";
@@ -23,6 +25,7 @@ import {
   pinnedBuildSell,
   pinnedSignSell,
   pinnedSignSellAuthorization,
+  evmSellCallData,
   type EvmPoolSellUnpinnedRequest as EvmPoolSellRequest,
 } from "../src/trade/evm/sell-unpinned.ts";
 import { forkSells } from "./make-kit-sells.ts";
@@ -68,6 +71,8 @@ const USDG = R.middles[0]!;
 const X = "0xF111111111111111111111111111111111111111";
 const Y = "0x2222222222222222222222222222222222222222";
 const NOW = 1_800_000_000;
+// the sell's fee recipient (pool-review-3 L-1): the relayer's, as a release binds it (packages/wallet EvmPoolPin.feeRecipient)
+const FEE_TO = "0x000000000000000000000000000000000000fee1";
 // the device's clock, mocked (the kit reads Date.now(), never a caller's now): NOW unless a test moves it
 enableTimers(mock.timers, { apis: ["Date"], now: NOW * 1000 });
 const at = <T>(sec: number, f: () => T): T => {
@@ -90,6 +95,7 @@ const req = (o: Partial<EvmPoolSellRequest> = {}): EvmPoolSellRequest => ({
   pool: "0x00000000000000000000000000000000b1f1f001",
   precommitment: 0x5e11n,
   feeCap: 5n * 10n ** 14n,
+  feeRecipient: FEE_TO,
   deadline: BigInt(NOW + 300),
   nonce: 0n,
   ...o,
@@ -106,6 +112,7 @@ const fromCast = (t: any): [EvmPoolChain, EvmPoolSellRequest] => [
     pool: t.pool,
     precommitment: BigInt(t.precommitment),
     feeCap: BigInt(t.feeCap),
+    feeRecipient: t.feeRecipient,
     deadline: BigInt(t.deadline),
     nonce: BigInt(t.nonce),
   },
@@ -126,13 +133,14 @@ function rlpList(h: string): Uint8Array[] {
 }
 const big = (b: Uint8Array) => (b.length === 0 ? 0n : BigInt(hex(b)));
 
-test("the swap data equals cast calldata and W's Sell signature equals cast's EIP-712 signature, on Base and Robinhood", () => {
+test("the swap data equals cast calldata, W's Sell signature cast's EIP-712 signature and SellDelegate.sell's calldata cast's, on Base and Robinhood", () => {
   for (const [name, t] of Object.entries(CAST.sells) as [string, any][]) {
     const [chain, r] = fromCast(t);
     const built = at(Number(t.deadline) - 300, () => evmPoolBuildSell(chain, r));
     assert.equal(built.data, t.data, name);
     assert.equal(evmPoolVenues()[chain].chainId, t.chainId, name);
     assert.equal(hex(evmPoolSignSell(W_KEY, chain, built)), t.sellSignature, name);
+    assert.equal(evmSellCallData(built, built.feeCap, evmPoolSignSell(W_KEY, chain, built)), t.sellCallData, name);
   }
 });
 
@@ -237,6 +245,67 @@ test("the fee cap is above 0 and under minOut", () => {
   assert.equal(code(() => evmPoolBuildSell("base", req({ feeCap: -1n }))), "bad_fee");
   assert.equal(code(() => evmPoolBuildSell("base", req({ feeCap: 5 as unknown as bigint }))), "bad_fee");
   assert.equal(code(() => evmPoolBuildSell("base", req({ feeCap: minOut - 1n }))), "built");
+});
+
+test("pool-review-3 L-1: the fee recipient is an address, never zero, W or the pool (bad_fee), and the Sell carries it", () => {
+  const POOL = req().pool;
+  const c = (feeRecipient: unknown) => code(() => evmPoolBuildSell("base", req({ feeRecipient: feeRecipient as string })));
+  assert.equal(c("0x0000000000000000000000000000000000000000"), "bad_fee");
+  assert.equal(c(W), "bad_fee");
+  assert.equal(c(W.toLowerCase()), "bad_fee");
+  assert.equal(c(W.toUpperCase().replace("0X", "0x")), "bad_fee");
+  assert.equal(c(POOL), "bad_fee");
+  assert.equal(c(POOL.toUpperCase().replace("0X", "0x")), "bad_fee");
+  assert.equal(c("0xfee1"), "bad_fee");
+  assert.equal(c(FEE_TO + "00"), "bad_fee");
+  assert.equal(c(undefined), "bad_fee");
+  assert.equal(c(0xfee1), "bad_fee");
+  assert.equal(c(ACCOUNT_1), "built");
+  assert.equal(evmPoolBuildSell("base", req()).feeRecipient, FEE_TO);
+  // read once: a getter cannot show the check one recipient and the Sell another
+  let reads = 0;
+  const tricky = { ...req(), get feeRecipient() { return reads++ === 0 ? FEE_TO : W; } };
+  assert.equal(evmPoolBuildSell("base", tricky).feeRecipient, FEE_TO);
+  assert.equal(reads, 1);
+});
+
+test("pool-review-3 L-1: W's Sell signature binds the fee recipient: another recipient is another signature", () => {
+  const a = evmPoolSignSell(W_KEY, "base", evmPoolBuildSell("base", req()));
+  const b = evmPoolSignSell(W_KEY, "base", evmPoolBuildSell("base", req({ feeRecipient: ACCOUNT_1 })));
+  assert.notEqual(hex(a), hex(b));
+  assert.equal(hex(evmPoolSignSell(W_KEY, "base", evmPoolBuildSell("base", req({ feeRecipient: FEE_TO.toUpperCase().replace("0X", "0x") })))), hex(a));
+});
+
+test("pool-review-3 L-1: SellDelegate.sell's calldata decodes back to the 11 fields, the fee and the signature", () => {
+  const built = evmPoolBuildSell("base", req());
+  const sig = evmPoolSignSell(W_KEY, "base", built);
+  const d = Buffer.from(evmSellCallData(built, 7n, sig).slice(2), "hex");
+  const w = (o: number) => big(d.subarray(4 + o, 4 + o + 32));
+  const sel = "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)";
+  assert.equal(hex(d.subarray(0, 4)), hex(keccak_256(new TextEncoder().encode(sel)).slice(0, 4)));
+  assert.equal(w(0), 0x60n);
+  assert.equal(w(32), 7n);
+  const t = Number(w(0));
+  const f = (i: number) => w(t + 32 * i);
+  const addr = (i: number) => "0x" + f(i).toString(16).padStart(40, "0");
+  assert.equal(addr(0), X.toLowerCase());
+  assert.equal(f(1), built.amount);
+  assert.equal(addr(2), built.target.toLowerCase());
+  assert.equal(f(3), 0x160n, "data's offset inside the 11-word tuple head");
+  assert.equal(f(4), built.minOut);
+  assert.equal(addr(5), built.pool.toLowerCase());
+  assert.equal(f(6), built.precommitment);
+  assert.equal(f(7), built.feeCap);
+  assert.equal(addr(8), FEE_TO);
+  assert.equal(f(9), built.deadline);
+  assert.equal(f(10), built.nonce);
+  const dataAt = t + Number(f(3));
+  const len = Number(w(dataAt));
+  assert.equal(hex(d.subarray(4 + dataAt + 32, 4 + dataAt + 32 + len)), built.data);
+  const sigAt = Number(w(64));
+  assert.equal(Number(w(sigAt)), 65);
+  assert.equal(hex(d.subarray(4 + sigAt + 32, 4 + sigAt + 32 + 65)), hex(sig));
+  assert.equal(d.length, 4 + sigAt + 32 + 96);
 });
 
 test("amount, minOut, precommitment and nonce are in range; W, the token and the pool are addresses; the chain is listed", () => {

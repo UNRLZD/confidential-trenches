@@ -91,6 +91,7 @@ abstract contract SellForkBase is SellBase {
       pool: address(pool),
       precommitment: PRE,
       feeCap: FEE,
+      feeRecipient: SENDER,
       deadline: block.timestamp + 60,
       nonce: 0
     });
@@ -157,6 +158,7 @@ abstract contract SellForkBase is SellBase {
     assertEq(vm.parseJsonAddress(_j, string.concat(_k, '.pool')), _s.pool);
     assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.precommitment'))), _s.precommitment);
     assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.feeCap'))), _s.feeCap);
+    assertEq(vm.parseJsonAddress(_j, string.concat(_k, '.feeRecipient')), _s.feeRecipient);
     assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.deadline'))), _s.deadline);
     assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.nonce'))), _s.nonce);
     bytes memory _sig = vm.parseJsonBytes(_j, string.concat(_k, '.signature'));
