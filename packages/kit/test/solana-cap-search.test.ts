@@ -12,7 +12,6 @@ import {
   SOLANA_JUPITER_CAP_UP,
   SOLANA_JUPITER_MAX_BUILDS,
   SolanaBuildError,
-  SolanaCapSearchError,
   fetchSolanaJupiterBuildThatFits,
   solanaNextCap,
   type SolanaBuildRequest,
@@ -104,27 +103,6 @@ test("startAt: a trade's later leg asks the cap its first leg found, and searche
   await assert.rejects(fetchSolanaJupiterBuildThatFits(ORIGIN, R, top.fit, { fetch: top.f, startAt: 60 }), (e: unknown) => e instanceof SolanaBuildError && e.code === "no_route");
   assert.deepEqual(top.asked, [60]);
   for (const bad of [0, 65, 40.5]) await assert.rejects(fetchSolanaJupiterBuildThatFits(ORIGIN, R, top.fit, { fetch: top.f, startAt: bad }), /startAt must be 1 to 64/);
-});
-
-test("after: a leg's own first build at 40 bounds and leads the search; the end carries every step and the calls", async () => {
-  const up = world({ 48: "fit" });
-  const got = await fetchSolanaJupiterBuildThatFits(ORIGIN, R, up.fit, { fetch: up.f, after: [{ maxAccounts: 40, outcome: "no_route" }] });
-  assert.deepEqual(up.asked, [48]);
-  assert.deepEqual(got.steps, [{ maxAccounts: 40, outcome: "no_route" }, { maxAccounts: 48, outcome: "fits" }]);
-  // the lead's cap (startAt) is asked next when it lies between what after knows, else the search's own next step
-  const led = world({ 60: "fit" });
-  assert.equal((await fetchSolanaJupiterBuildThatFits(ORIGIN, R, led.fit, { fetch: led.f, after: [{ maxAccounts: 40, outcome: "no_route" }], startAt: 60 })).maxAccounts, 60);
-  assert.deepEqual(led.asked, [60]);
-  const off = world({ 32: "fit", 48: "fit" });
-  assert.equal((await fetchSolanaJupiterBuildThatFits(ORIGIN, R, off.fit, { fetch: off.f, after: [{ maxAccounts: 40, outcome: "no_route" }], startAt: 32 })).maxAccounts, 48);
-  assert.deepEqual(off.asked, [48]);
-  // after counts in maxBuilds, and the end carries the steps and the calls
-  const none = world({});
-  await assert.rejects(fetchSolanaJupiterBuildThatFits(ORIGIN, R, none.fit, { fetch: none.f, after: [{ maxAccounts: 40, outcome: "no_route" }] }), (e: unknown) => e instanceof SolanaCapSearchError && e.code === "no_route" && e.steps.length === 3 && e.calls.length === 2 && e.message === "no_route: no route (40 no_route, 48 no_route, 60 no_route)");
-  assert.deepEqual(none.asked, [48, 60]);
-  const one = world({ 40: "big" });
-  await assert.rejects(fetchSolanaJupiterBuildThatFits(ORIGIN, R, one.fit, { fetch: one.f, maxBuilds: 1 }), (e: unknown) => e instanceof SolanaCapSearchError && e.code === "too_large" && JSON.stringify(e.steps) === JSON.stringify([{ maxAccounts: 40, outcome: "too_large", size: 1240 }]) && e.calls.length === 1);
-  await assert.rejects(fetchSolanaJupiterBuildThatFits(ORIGIN, R, none.fit, { fetch: none.f, after: [{ maxAccounts: 40, outcome: "fits" }] as never }), /after must be steps with no route or too large/);
 });
 
 test("40's route over 1,232 bytes: asked again at 32", async () => {

@@ -1,9 +1,10 @@
 // node --test scripts/live-checks/solana-jupiter-build.test.mjs: the live check replays recorded runs
 // (solana-jupiter-build.answers.json), each a real read of HELPER_HOST and two public Solana RPCs, through the kit's own
 // fetchSolanaJupiterBuildThatFits, the cap search a device's trade builds with (card solana-uncapped-fits).
-// - good (2026-11-05 05:07Z, fold 3's pace and probe): the listed token 5UUH9RTD…hgH2 at 40; the no-route token
-//   B9kVVWm4…pump probed on both sides (no route at 40, fits at 48 on the device's assembly), its buy and sell asked 40
-//   (no route) then 48, which fit; 23 Jupiter calls, at most 8 in a counted minute: PASS.
+// - good (2026-11-05 05:37Z, the pace and the probe of folds 3 and 4): the listed token CniPCE4b…pump at 40; the
+//   no-route token 3cn1tDL4…WhcV probed on both sides (no route at 40, fits at 48 on the device's assembly; the sell of
+//   what the buy quoted out), its buy and sell asked 40 (no route) then 48, which fit; 14 Jupiter calls, at most 8 in a
+//   counted minute: PASS.
 // - bad_too_large (05:02Z, the probe before it judged fit): the no-route token 3JHceq2R…NfT8 routes at 60 only, 1,284
 //   and 1,249 bytes, so the 3 builds end too_large: FAIL. The probe now passes such a token over.
 // - good_shared (04:20Z, before send times were kept): the listed token 9cRCn9rG…pump's buy and sell answered as
@@ -50,6 +51,10 @@ test("every recorded call asked maxAccounts, and the no-route token was probed o
   assert.equal(p.mint, A.good.mints.noRoute);
   assert.equal(p.buy.at40, "no route");
   assert.equal(p.sell.at40, "no route");
+  // the sell probe sells what the buy probe quoted out, the size the sell shape sells
+  assert.match(p.sell.amount, /^[1-9]\d*$/);
+  // (in this record the probe's buy and the buy shape quoted the same out amount, 265817113977)
+  assert.equal(p.sell.amount, A.good.amounts.noRoute.sell);
   assert.match(p.buy.reach, /^fits at (48|60)$/);
   assert.match(p.sell.reach, /^fits at (48|60)$/);
 });

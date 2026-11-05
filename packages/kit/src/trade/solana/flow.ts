@@ -50,8 +50,6 @@ import {
 import { SOLANA_ALT_PROGRAM, solanaAta, solanaDecodeLookupTable, type SolanaLookupTable } from "../../checks/solana/message.ts";
 import {
   SolanaBuildError,
-  SolanaCapSearchError,
-  type SolanaBuildFitted,
   assembleSolanaSwap,
   buildSolanaTeardown,
   fetchSolanaJupiterBuild,
@@ -289,22 +287,12 @@ export async function settleSolanaSet(providers: readonly [SolanaRpc, SolanaRpc]
 }
 
 type Prepared = { leg: SolanaTradeLeg; rec: SolanaLegRecord; assembled: SolanaAssembled };
-/**
- * A trade's steps past 40, searched once (card solana-uncapped-fits folds 3 and 4): every leg builds at 40 at once, so
- * a route that fits there waits on no other leg. The first leg whose 40 has no route or is too large leads the search
- * on; every other such leg waits for the cap it found and builds there once, searching on from it only when that build
- * does not fit, and takes the lead's "no route" as its own when its 40 had none too. A K-leg trade asks Jupiter K
- * builds at 40, at most SOLANA_JUPITER_MAX_BUILDS - 1 steps of the lead, one build at the lead's cap per other leg that
- * missed 40, and the floor rebuilds: K to 3K + 1 (apps/helper/src/proxy/proxy.ts PROXY_BUDGETS.jupiter). `cap` is the
- * lead's cap, or its refusal.
- */
-type CapLead = { cap?: Promise<number | SolanaBuildError | null> };
 
 async function prepareLeg(
   req: SolanaTradeRequest,
   leg: SolanaTradeLeg,
   rec: SolanaLegRecord,
-  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[]; lead: CapLead },
+  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[] },
 ): Promise<Prepared | null> {
   const { deps, blockhash } = ctx;
   const [pa, pb] = deps.providers;
@@ -351,27 +339,12 @@ async function prepareLeg(
     });
     return { tables, assembled: assembleSolanaSwap(breq, b, { blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight, tables: decoded, tokenProgram }, feeOpts) };
   };
-  // The cap search: 40, up on no route, down when the assembly is over 1,232 bytes (build.ts, Jupiter's requote). Every
-  // leg asks 40 at once; the steps past it are searched once a trade (CapLead).
-  let found: SolanaBuildFitted<Awaited<ReturnType<typeof fitOn>>>;
-  let first = 0;
-  try {
-    found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, { ...opts, maxBuilds: 1 });
-  } catch (e) {
-    if (!(e instanceof SolanaCapSearchError)) throw e;
-    first = e.calls.length;
-    if (ctx.lead.cap === undefined) {
-      const search = fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, { ...opts, after: e.steps });
-      ctx.lead.cap = search.then((f) => f.maxAccounts, (x) => (x instanceof SolanaBuildError ? x : null));
-      found = await search;
-    } else {
-      const led = await ctx.lead.cap;
-      if (led instanceof SolanaBuildError && led.code === "no_route" && e.code === "no_route") throw led;
-      found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, { ...opts, after: e.steps, ...(typeof led === "number" ? { startAt: led } : {}) });
-    }
-  }
+  // The cap search: 40, up on no route, down when the assembly is over 1,232 bytes (build.ts, Jupiter's requote). Each
+  // leg searches on its own answers, all at once: no leg waits on another (at most SOLANA_JUPITER_MAX_BUILDS builds and
+  // one floor rebuild a leg, so K legs ask Jupiter K to 4K builds; a one-leg trade at most 4, the helper's share).
+  const found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, opts);
   rec.buildCaps = found.steps;
-  let calls = first + found.calls.length;
+  let calls = found.calls.length;
   let build = found.build;
   let fitted = found.fitted;
   let amounts = solanaRouteAmounts(build.swap.data);
@@ -594,14 +567,13 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
     r.legExpectedOut = (ref.expectedOuts as readonly bigint[])[j] as bigint;
     if ((r.minOut as bigint) <= 0n) r.refused = "the floor rounds to 0";
   });
-  const lead: CapLead = {};
   const prepared = (
     await Promise.all(
       live.map(async (i) => {
         const rec = recs[i] as SolanaLegRecord;
         if (rec.refused) return null;
         try {
-          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints, lead });
+          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints });
         } catch (err) {
           rec.refused = err instanceof SolanaBuildError ? `build ${err.code}: ${err.message.slice(0, 160)}` : `error: ${String((err as Error)?.message ?? err).slice(0, 200)}`;
           return null;

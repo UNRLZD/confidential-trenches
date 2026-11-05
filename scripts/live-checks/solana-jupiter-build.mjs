@@ -16,7 +16,9 @@
 // "No routes found" at 40 and end in a build that fits, the first token's go as its route goes.
 // The check's Jupiter calls are a device's builds and its probes, each at least PACE_MS after the last, so one runner
 // asks at most JUPITER_PER_MINUTE in any counted minute, what the helper lends a client on the total alone
-// (apps/helper/src/limits/limits.ts LEND_FREE_SHARES x the share), so no other device's use can make it a 429. Each
+// (apps/helper/src/limits/limits.ts LEND_FREE_SHARES x the share): the run is never past its own share or lent, so the
+// helper's 429 (a caller past its own limit) never comes. The vendor's total can still be spent by every caller
+// together in a minute, which the helper answers 503 upstream (limits.ts totalWait), and a shape then FAILs. Each
 // call's send time is recorded and the judge holds the run to it. The taker
 // is a random address nobody holds a key for, made per run (so no wallet is linked to the check).
 // The device's reads come from two public RPCs: both mints and every lookup table any build names (processed), and the
@@ -55,9 +57,6 @@ export const BASE = "https://api.confidential.unrealized.trade";
 export const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 export const BUY_LAMPORTS = 10_000_000n; // 0.01 SOL
 export const SLIPPAGE_BPS = 1000;
-/** A probe's sell size, in the token's base units (a pump.fun token's 6 decimals: 1 token); the shapes sell what the
- * buy quoted out. */
-export const PROBE_SELL_UNITS = 1_000_000n;
 /** Tokens asked at 40 to find one with no route there; 7 of 40 listed tokens had none on 2026-11-05 03:30Z. */
 export const PROBES = 12;
 /** What the helper lends one client of Jupiter's a counted minute on the total alone, before it lends only while room
@@ -245,14 +244,17 @@ export async function read({ base = BASE, token, noRouteToken } = {}) {
     for (const t of rows(["new", "graduating"])) {
       if (seen.has(t.token) || probes.length >= PROBES) continue;
       seen.add(t.token);
-      // each side at 40, and when both have no route there, each within the cap search's reach (its steps past 40, on
-      // the device's assembly): a token with no fitting route the search reaches is not the retry path, so it is passed over
+      // the buy at 40, and when it has no route there, within the cap search's reach (its steps past 40, on the device's
+      // assembly); then the sell of what that buy quoted out, the size the sell shape sells, the same two ways: a token
+      // with no fitting route the search reaches is not the retry path, so it is passed over
       const p = { mint: t.token, sentAt: [] };
-      const ask = (side) => {
-        const req = { side, wallet, token: t.token, amount: side === "buy" ? BUY_LAMPORTS : PROBE_SELL_UNITS, slippageBps: SLIPPAGE_BPS };
+      let out = null;
+      const ask = (side, amount) => {
+        const req = { side, wallet, token: t.token, amount, slippageBps: SLIPPAGE_BPS };
         const fetch = async (url, init) => {
           const c = await paced(url, init).catch((e) => { p.sentAt.push(last - t0); throw e; });
           p.sentAt.push(c.sentAt);
+          if (side === "buy" && c.status === 200) { try { const o = JSON.parse(c.body).outAmount; if (/^[1-9]\d{0,19}$/.test(String(o))) out = String(o); } catch { /* judged by the search */ } }
           return new Response(c.body, { status: c.status });
         };
         const said = (e) => (e instanceof SolanaBuildError && e.code === "no_route" ? "no route" : e instanceof SolanaBuildError ? e.code : "no answer");
@@ -263,12 +265,14 @@ export async function read({ base = BASE, token, noRouteToken } = {}) {
           reach: () => fetchSolanaJupiterBuildThatFits(base, req, fitFor(req), { fetch, startAt: SOLANA_JUPITER_CAP_UP[40], maxBuilds: SOLANA_JUPITER_MAX_BUILDS - 1 }).then((f) => `fits at ${f.maxAccounts}`, said),
         };
       };
-      const buy = ask("buy");
-      const sell = ask("sell");
+      const buy = ask("buy", BUY_LAMPORTS);
       p.buy = { at40: await buy.at40() };
-      if (p.buy.at40 === "no route") p.sell = { at40: await sell.at40() };
-      if (p.sell?.at40 === "no route") p.buy.reach = await buy.reach();
-      if (p.buy.reach?.startsWith("fits")) p.sell.reach = await sell.reach();
+      if (p.buy.at40 === "no route") p.buy.reach = await buy.reach();
+      if (p.buy.reach?.startsWith("fits") && out !== null) {
+        const sell = ask("sell", BigInt(out));
+        p.sell = { amount: out, at40: await sell.at40() };
+        if (p.sell.at40 === "no route") p.sell.reach = await sell.reach();
+      }
       probes.push(p);
       if (p.sell?.reach?.startsWith("fits")) { noRouteToken = t.token; break; }
     }
