@@ -40,5 +40,9 @@ export * from "./trade/solana/pool-buy.ts";
 export * from "./trade/evm/pool-fee.ts";
 export * from "./trade/evm/buy.ts";
 export * from "./trade/evm/sell.ts";
+// the pins the helper's EVM pool sender sends a sale with (card helper-evm-sender), which the device's sim copies: the
+// sale's gas, its tip per chain and the authorization's intrinsic gas (no digest: the helper writes its own); and the
+// one reading of a signed sale's target and data as a route the builder makes, which the helper sends only on
+export { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, evmPoolSellTip, evmSellRouteOf, type EvmSignedSellCall } from "./trade/evm/sell-unpinned.ts";
 export { nearPairNetwork, nearPairRule, type NearNetwork } from "./near/networks.ts";
 export * from "./price/pool-usd.ts";

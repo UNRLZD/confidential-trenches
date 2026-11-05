@@ -187,9 +187,10 @@ test("an answer that holds one of our keys in any form is refused, never passed 
 });
 
 // card helper-abuse-limits (review finding 3): the helper is the vendor's one client, so a vendor's 429 holds the
-// vendor until its reset and every caller is told the seconds left as a 429 (at be4b353 the hold answered 503; at
-// 06a656f the next caller still reached the vendor)
-test("429: the vendor is held until its reset (at most a minute); a short reset is waited once by that request; a long one answers every caller 429 with the seconds left, code only, and nothing reaches the vendor inside it", async () => {
+// vendor until its reset (at 06a656f the next caller still reached the vendor). Card helper-crowd-429 fold 6: the hold
+// is never the caller's 429 (a 429 of ours says the caller is past its own limit, live run 41943005189): a reset inside
+// the call's wait is waited out, one past it is the not-ready 503 upstream, code only
+test("429: the vendor is held until its reset (at most a minute); a reset inside the call's wait is waited out and read; a long one answers every caller 503 upstream, code only, and nothing reaches the vendor inside it", async () => {
   const c = clock();
   const f = vendor((_, n) => (n === 1 ? json({ e: "slow down" }, 429, { "retry-after": "0.5" }) : json({ ok: n })));
   const p = createProxy(ENV, { fetch: f.fetch, now: c.now, sleep: c.sleep });
@@ -203,16 +204,19 @@ test("429: the vendor is held until its reset (at most a minute); a short reset 
   const g = vendor(() => (throttle ? json({ e: "slow down, key fake" }, 429, { "x-ratelimit-reset": "30" }) : json({ ok: 1 })));
   const q = createProxy(ENV, { fetch: g.fetch, now: c2.now, sleep: c2.sleep });
   const t = await q.handle("lifi", "/v1/status", "", "", "heavy");
-  assert.deepEqual([t.status, t.headers["Retry-After"], JSON.parse(t.body)], [429, "30", { error: { code: "rate_limited" } }], "the code only: no vendor text");
+  assert.deepEqual([t.status, t.headers["Retry-After"], JSON.parse(t.body)], [503, undefined, { error: { code: "upstream" } }], "the code only: no vendor text, never our 429");
   assert.equal(g.seen.length, 1, "a long reset is not waited by the request");
   throttle = false;
   c2.add(10_000);
   const h = await q.handle("lifi", "/v1/quote", "", "", "honest");
-  assert.deepEqual([h.status, h.headers["Retry-After"]], [429, "20"], "another caller waits out the vendor's reset too");
-  assert.equal((await q.handle("lifi", "/v1/status", "", "")).status, 429, "and so does the helper's own read");
+  assert.deepEqual([h.status, h.headers["Retry-After"]], [503, undefined], "another caller meets the vendor's reset as not ready too");
+  assert.equal((await q.handle("lifi", "/v1/status", "", "")).status, 503, "and so does the helper's own read");
   assert.equal(g.seen.length, 1, "nothing reached the vendor inside its reset");
   assert.equal((await q.handle("relay", "/quote/v2", "", "{}", "honest")).status, 200, "another vendor is not held");
-  c2.add(20_000);
+  const t1 = c2.now();
+  const w = await q.handle("lifi", "/v1/status", "", "", "patient", false, 25_000);
+  assert.deepEqual([w.status, c2.now() - t1], [200, 20_000], "a call whose wait covers the reset waits it out, then reads");
+  assert.equal(g.seen.length, 3, "one read at the reset, beside the relay call");
   assert.equal((await q.handle("lifi", "/v1/quote", "", "", "honest")).status, 200, "at the reset the vendor is open");
   assert.ok(WAIT_MAX_MS < 30_000);
 });
@@ -366,7 +370,8 @@ test("fold 5: the own-read reserve holds at any plan: a Developer key's 600 leav
     let callers = 0;
     for (let a = 0; a < 200; a++) for (let i = 0; i < 4; i++) if ((await p.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
     assert.equal(callers, total - 34, `callers' part at ${total}`);
-    assert.equal((await p.handle("jupiter", "/tokens/v2/search", "query=x", "")).status, 429, "an own read not marked reserved stops with the callers");
+    // the vendor's room, not the reader's own limit: not ready (card helper-crowd-429 fold 6), never our 429
+    assert.equal((await p.handle("jupiter", "/tokens/v2/search", "query=x", "")).status, 503, "an own read not marked reserved stops with the callers");
     let own = 0;
     for (let i = 0; i < 40; i++) if ((await p.handle("jupiter", "/tokens/v2/search", `query=${i}`, "", undefined, true)).status === 200) own++;
     assert.equal(own, 34, `the reserve at ${total}`);
@@ -380,7 +385,7 @@ test("re-check F-D: a retry after a vendor's short reset reaches the vendor agai
   const p = createProxy({ PROXY_BUDGET_RELAY: "2,1" }, { fetch: f.fetch, now: c.now, sleep: c.sleep });
   assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "a")).status, 200, "served by the retry");
   assert.equal(f.seen.length, 2);
-  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "b")).status, 429, "the call and its retry spent the total of 2");
+  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "b")).status, 503, "the call and its retry spent the total of 2: the vendor's room, not b's limit, so not ready (fold 6)");
   assert.equal(f.seen.length, 2, "nothing past the total reached the vendor");
 });
 
@@ -475,4 +480,21 @@ test("cache: concurrent misses make one vendor call; a failed read is not cached
   assert.equal((await q.handle("oneclick", "/v0/tokens", "", "")).status, 503);
   assert.equal((await q.handle("oneclick", "/v0/tokens", "", "")).status, 200);
   assert.equal(g.seen.length, 2);
+});
+
+test("card helper-crowd-429 fold 6: identical GETs in flight share one vendor call (a build's GET too); a different query is its own", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const f = vendor(async () => (await gate, json({ tx: "x" })));
+  const p = createProxy(ENV, { fetch: f.fetch });
+  const a = p.handle("jupiter", "/swap/v2/build", "taker=A&amount=1", "", "198.51.100.1");
+  const b = p.handle("jupiter", "/swap/v2/build", "amount=1&taker=A", "", "198.51.100.2");
+  const c = p.handle("jupiter", "/swap/v2/build", "taker=B&amount=1", "", "198.51.100.3");
+  await new Promise((ok) => setImmediate(ok));
+  release();
+  const got = await Promise.all([a, b, c]);
+  assert.deepEqual(got.map((g) => g.status), [200, 200, 200]);
+  assert.equal(f.seen.length, 2, "one call for the two identical builds, one for the other");
+  assert.equal((await p.handle("jupiter", "/swap/v2/build", "taker=A&amount=1", "", "198.51.100.1")).status, 200);
+  assert.equal(f.seen.length, 3, "a build is never cached: the next one is read again");
 });

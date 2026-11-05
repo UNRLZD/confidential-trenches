@@ -363,6 +363,18 @@ test("two providers must answer and agree: one failing is covered by the third, 
   assert.equal(fresh.size, 0, "none is not settled within SETTLE_MS of the pool");
 });
 
+test("the lists name each listed token's pool as its list's row does (card helper-robinhood-capacity fold 3: the swap reads' hint), beside the rows, never in one", async () => {
+  const r = recorded();
+  const l = createEvmLists("base", geckoBudget(() => NOW), { fetch: r.fetch, now: () => NOW });
+  await l.tick();
+  const s = JSON.parse((await l.get()).body) as { lists: Record<string, { token: string }[]>; pools: Record<string, string> };
+  const listed = new Set(["new", "trending_5m", "trending_1h"].flatMap((k) => s.lists[k]!.map((x) => x.token)));
+  assert.ok(listed.size > 0);
+  assert.deepEqual(new Set(Object.keys(s.pools)), listed, "every listed token's pool, and only theirs");
+  for (const p of Object.values(s.pools)) assert.match(p, /^0x([0-9a-f]{40}|[0-9a-f]{64})$/);
+  for (const k of Object.keys(s.lists)) for (const x of s.lists[k]!) assert.ok(!Object.hasOwn(x, "pool"));
+});
+
 test("the lists: tagged rows, the tokens not read yet named in unsettled, the lists read once per LIST_MS within the lane's yield; 503 only while GeckoTerminal never answered, a read past STALE_MS served dated by it", async () => {
   let now = NOW;
   const r = recorded();
