@@ -52,7 +52,15 @@ export type WalletMetaKey = "seed" | "settings" | `owed/${string}`;
 export const WALLET_OWED_PREFIX = "owed/";
 const OWED_KEY = /^owed\/[^/]{1,200}$/;
 // "closed": this store's own connection was closed by another tab's delete or upgrade (versionchange); open it again
-export type WalletEvent = { kind: "changed"; stores: WalletStoreName[] } | { kind: "signout" } | { kind: "closed" };
+// "changed" names the key a caller's put, update or delete wrote (`key`; none for the store's own seed and counter
+// writes), so a listener can tell an owed send's write (meta owed/<op id>) from a seed change
+export type WalletEvent = { kind: "changed"; stores: WalletStoreName[]; key?: string } | { kind: "signout" } | { kind: "closed" };
+/** A change another tab made that may move the seed (sign out, or a meta write other than an owed send's): a page
+ *  reads its seed again on one, never on an owed send's write (fold 4, LOW: such a read could overlap a seed read and
+ *  read as no seed). An event with no key (an older release's) counts. */
+export const walletSeedMoved = (e: WalletEvent | undefined): boolean =>
+  e?.kind === "signout" ||
+  (e?.kind === "changed" && Array.isArray(e.stores) && e.stores.includes("meta") && !(e.stores.length === 1 && typeof e.key === "string" && e.key.startsWith(WALLET_OWED_PREFIX)));
 
 export interface WalletStoreOptions {
   name?: string; // tests only: the database name
@@ -355,7 +363,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
     }
   }
   const unwrap = (store: WalletStoreName, key: string, raw: unknown): Promise<unknown> => unwrapWith(kWrap, store, key, raw);
-  const notify = (stores: WalletStoreName[]): void => channel.postMessage({ kind: "changed", stores });
+  const notify = (stores: WalletStoreName[], key?: string): void => channel.postMessage(key === undefined ? { kind: "changed", stores } : { kind: "changed", stores, key });
 
   // The device's lane, drawn once (wallet.md:247): 8 divides 256, so one random byte mod 8 is uniform.
   async function readLane(): Promise<number> {
@@ -410,7 +418,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       const tx = live().transaction(store, "readwrite", { durability: "strict" });
       tx.objectStore(store).put(w, key);
       await done(tx);
-      notify([store]);
+      notify([store], key);
     },
     async update(store, key, change) {
       checkCallerKey(store, key);
@@ -419,7 +427,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         const next = change(await unwrap(store, key, before));
         if (next === undefined) return undefined;
         if (await casPut(store, key, before, await wrap(store, key, next))) {
-          notify([store]);
+          notify([store], key);
           return next;
         }
       }
@@ -504,7 +512,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       const tx = live().transaction(store, "readwrite", { durability: "strict" });
       tx.objectStore(store).delete(key);
       await done(tx);
-      notify([store]);
+      notify([store], key);
     },
     async keys(store) {
       checkKey(store, "x");

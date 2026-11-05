@@ -20,7 +20,7 @@ import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_SEND_MARGIN_MS, solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { solanaWithdrawMinPart, withdrawNoteFloor, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
+import { solanaWithdrawMinPart, withdrawNoteFloor, type PendingOnward, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { after } from "node:test";
 export { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent };
@@ -241,6 +241,11 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     wait: async () => {},
     stage: (s, _txs, pending) => void (stages.push(s), pendings.push(pending)),
     owe: async (p) => void (owed.push(p), order.push(`owe:${(await ns.get(p.noteId))?.state}`)),
+    keepRelease: async (noteId, attempt, release) => {
+      const p = owed.findLast((x) => (x as PendingOnward).noteId === noteId && (x as PendingOnward).attempt === attempt) as PendingOnward | undefined;
+      if (p) owed.push({ ...p, release });
+      order.push(`release:${(await ns.get(noteId))?.state}`);
+    },
   };
   /** Another device's spend of a landed release: its salt changed, so its context is not this device's attempt's. */
   const foreign = (i = 0): void => {

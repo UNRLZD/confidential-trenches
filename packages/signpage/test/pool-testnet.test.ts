@@ -23,7 +23,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -650,4 +650,80 @@ test("a withdraw whose tab closed during the release's read-back: the reopened p
   assert.equal(after.owed, undefined);
   assert.deepEqual(await wd.w.get("meta", "owed/op-w"), {}, "the send owed dropped once sent");
   assert.equal(after.txs.length, 1, "the onward send's tx");
+});
+
+// fold 4 (review LOW): the release's own signature is added to the send still stored, never a whole owe again
+test("keepRelease adds the release's signature to the owed send still stored only: a dropped send stays dropped, the stored one keeps its own fee ceiling", async () => {
+  const { w } = await wallet();
+  const p = owedPending("n1", "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx");
+  await oweSend(w, "op1", { ...p, feeCap: "9000" });
+  await keepRelease(w, "op1", "n1", p.attempt, "sig1");
+  assert.deepEqual(await w.get("meta", "owed/op1"), { n1: { ...p, feeCap: "9000", release: "sig1" } });
+  // another attempt's signature never lands on this attempt's send
+  await keepRelease(w, "op1", "n1", "cd".repeat(16), "sig2");
+  assert.equal(((await w.get("meta", "owed/op1")) as Record<string, { release: string }>).n1!.release, "sig1");
+  await dropSend(w, "op1", "n1");
+  await keepRelease(w, "op1", "n1", p.attempt, "sig3");
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
+  await keepRelease(w, "op2", "n1", p.attempt, "sig4");
+  assert.equal(await w.get("meta", "owed/op2"), undefined);
+});
+
+type World = Awaited<ReturnType<typeof WORLD.world>>;
+/** The tab-closed withdraw: its release out, its read-back never answering; `onSend` runs before the helper answers. */
+async function hungWithdraw(onSend: (wd: World) => Promise<void> = async () => {}) {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n], { hangReadBack: true });
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    const answer = await wd.host.send(pool, base64.decode(tx));
+    await onSend(wd);
+    return new Response(JSON.stringify(answer), { status: 200 });
+  }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn };
+  const page = { store: async () => wd.w, seed64: async () => SEED64.slice() };
+  const t1 = testnetPool(page, over);
+  void t1.withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  for (let i = 0; wd.releases.length === 0 && i < 1_000; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(wd.releases.length, 1, "the release went out");
+  await new Promise((r) => setTimeout(r, 20));
+  return { wd, over, page, TO };
+}
+
+test("another tab settled the op while the release was out: the run's late signature brings back neither its owed send nor the op's (fold 4)", async () => {
+  const { wd } = await hungWithdraw(async (wd) => {
+    // another tab's finish: the op settled stopped and its send dropped, as settleFreedOps does
+    const id = wd.ids[0]!;
+    await wd.w.update("ops", "op-w", (v) => mergeWithdrawOp(v, { stage: "stopped", clear: id }));
+    await dropSend(wd.w, "op-w", id);
+  });
+  assert.deepEqual(await wd.w.get("meta", "owed/op-w"), {}, "the dropped send stays dropped");
+  assert.equal(((await wd.w.get("ops", "op-w")) as { owed?: unknown }).owed, undefined, "the op still owes nothing");
+});
+
+test("an owed send with no release signature under 2,500 newer entries of W's history, the page's RPC functions new on every pass: the next finish reads on from the last one's place and sends it (fold 4, review HIGH)", async () => {
+  const { wd, over, page, TO } = await hungWithdraw();
+  const id = wd.ids[0]!;
+  // a record from before fold 3, or a tab closed before the signature was written: no release kept
+  await wd.w.update("meta", "owed/op-w", (v) => {
+    const r = v as Record<string, Record<string, unknown>>;
+    const { release: _r, ...rest } = r[id]!;
+    return { ...r, [id]: rest };
+  });
+  const pad = Array.from({ length: 2_500 }, (_, i) => base58.encode(Uint8Array.from({ length: 64 }, (_, k) => (k < 4 ? (i >> (8 * k)) & 255 : 9))));
+  wd.plant.history = (s) => [...pad, ...s];
+  const [r0, r1] = wd.host.rpcs;
+  const fresh = (rpc: typeof r0): typeof r0 => (async (m: string, p: readonly unknown[]) => rpc(m, p)) as typeof r0;
+  const o2 = { ...over, fetch: undefined };
+  Object.defineProperty(o2, "rpcs", { get: () => [fresh(r0), fresh(r1)], enumerable: true });
+  const t2 = testnetPool(page, o2);
+  const W = wd.binds[0]!.recipient;
+  await t2.stateRead();
+  assert.equal(wd.balance.get(TO), undefined, "one pass (2,000 entries) read in the first finish: not yet found");
+  // the failed finish waits 2 s before the next try
+  await new Promise((r) => setTimeout(r, 2_100));
+  await t2.stateRead();
+  assert.equal(wd.balance.get(W), 0n);
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+  assert.equal(((await wd.w.get("ops", "op-w")) as { stage: string }).stage, "sent");
 });

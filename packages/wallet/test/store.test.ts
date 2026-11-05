@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
-import { backupFirst, openWalletStore as openStore, openWalletStoreReader, WALLET_LANES, WALLET_LOCK, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
+import { backupFirst, openWalletStore as openStore, openWalletStoreReader, WALLET_LANES, WALLET_LOCK, walletSeedMoved, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
 
 // every store a test opens is closed at the end, so a failing assertion fails the run instead of leaving it hanging on
 // an open BroadcastChannel
@@ -729,6 +729,30 @@ test("an owed send is kept in meta under owed/<op id>: the frame's reader neithe
   reader.close();
   await s.delete("meta", "owed/op1");
   assert.equal(await s.get("meta", "owed/op1"), undefined);
+  s.close();
+});
+
+// fold 4 (LOW): another tab's owed-send write is a meta change too; the page re-reads its seed on a seed move only
+test("a caller's write names its key in the change event: an owed send's write is no seed move, a seed write or sign out is", async () => {
+  const idb = new IDBFactory();
+  const seen: WalletEvent[] = [];
+  const s = await openWalletStore({ indexedDB: idb });
+  const other = await openWalletStore({ indexedDB: idb, onEvent: (e) => seen.push(e) });
+  await s.insertSeed(SEED(true));
+  await s.update("meta", "owed/op1", () => ({ n1: { noteId: "n1" } }));
+  await s.delete("meta", "owed/op1");
+  await s.put("meta", "settings", { v: 1 });
+  await s.put("ops", "op1", { kind: "withdraw" });
+  await new Promise((ok) => setTimeout(ok, 20));
+  const changed = seen.filter((e): e is Extract<WalletEvent, { kind: "changed" }> => e.kind === "changed");
+  assert.deepEqual(changed.map((e) => [e.stores, e.key]), [[["meta"], undefined], [["meta"], "owed/op1"], [["meta"], "owed/op1"], [["meta"], "settings"], [["ops"], "op1"]]);
+  assert.deepEqual(changed.map(walletSeedMoved), [true, false, false, true, false]);
+  assert.equal(walletSeedMoved({ kind: "signout" }), true);
+  // an older release's event names no key: counted, as before
+  assert.equal(walletSeedMoved({ kind: "changed", stores: ["meta"] }), true);
+  assert.equal(walletSeedMoved({ kind: "changed", stores: ["meta", "ops"], key: "owed/op1" }), true);
+  assert.equal(walletSeedMoved({ kind: "closed" }), false);
+  other.close();
   s.close();
 });
 

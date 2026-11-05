@@ -48,7 +48,7 @@ import type { PoolChain } from "./rules/pool.ts";
 import type { HostAnswer, KindContext } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
-import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type PendingOnward } from "./pool-withdraw.ts";
+import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
@@ -103,6 +103,15 @@ export type OwedSends = Record<string, PendingOnward>;
 /** The op's owed send for `noteId` written (awaited before its release leaves); the record's others kept. */
 export const oweSend = (w: WalletStore, opId: string, p: PendingOnward): Promise<unknown> =>
   w.update("meta", owedKey(opId), (v) => ({ ...((v as OwedSends | undefined) ?? {}), [p.noteId]: p }));
+/** The release's own signature added to the op's owed send for `noteId` of `attempt`, only while that send is still
+ *  stored: one another tab dropped stays dropped, and the stored one keeps its own fields (fold 4, LOW). */
+export const keepRelease = (w: WalletStore, opId: string, noteId: string, attempt: string, release: string): Promise<unknown> =>
+  w.update("meta", owedKey(opId), (v) => {
+    const r = v as OwedSends | undefined;
+    const p = r !== undefined && Object.hasOwn(r, noteId) ? r[noteId] : undefined;
+    if (p === undefined || p.attempt !== attempt || p.release === release) return undefined;
+    return { ...r, [noteId]: { ...p, release } };
+  });
 /** The op's owed send for `noteId` dropped, once the op no longer owes it; a later part's stays (one compare-and-set). */
 export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<unknown> =>
   w.update("meta", owedKey(opId), (v) => {
@@ -479,6 +488,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a finish that failed (a read, the send) is tried again after a wait that doubles, 2 s up to 60 s: the money is on
   // W, so it never gives up, and never hammers the RPCs either
   const owedRetry = new Map<string, { at: number; waitMs: number }>();
+  // each owed op's places in W's history, kept from one pass to the next (the RPC functions are new on every pass):
+  // a history of any length is read to its end, a share per pass (fold 4, review HIGH)
+  const owedPlaces = new Map<string, HistoryPlaces>();
+  const placesOf = (k: string): HistoryPlaces => {
+    let p = owedPlaces.get(k);
+    if (!p) owedPlaces.set(k, (p = new Map()));
+    return p;
+  };
   // one use of the seed under its shared lock, the lock let go after it: a sign out waits for a derive or a signature,
   // never for a blockhash (review #232b LOW 2)
   const withSeed = <T,>(f: (seed64: Uint8Array) => T | Promise<T>): Promise<T> =>
@@ -522,6 +539,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             rpcs: rpcs(),
             seed64: page.seed64,
             withSeed,
+            places: placesOf(k),
             notes: async () => notes,
             settle: (noteId) => withSeed((seed64) => solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: rpcs() })),
           },
@@ -535,6 +553,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           owedScan = true;
         } else if (got) {
           owedRetry.delete(k);
+          owedPlaces.delete(k);
           await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: got.stage, txs: got.txs, arrived: got.arrived, clear: pending.noteId }));
           await dropSend(ops, k, pending.noteId);
         } else {
@@ -655,6 +674,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             },
             stage: write,
             owe,
+            keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
           },
           { ...ask },
