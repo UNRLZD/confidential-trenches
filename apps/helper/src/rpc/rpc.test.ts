@@ -10,7 +10,7 @@ import { HELPER_RPC_BATCH_MAX, HELPER_RPC_METHODS, HELPER_V1_PATHS } from "../..
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS } from "./methods.ts";
 import * as rpcModule from "./rpc.ts";
 import { createRpc, readUpstreams, RPC_ANSWER_MAX, RPC_UPSTREAMS } from "./rpc.ts";
-import { RETRY_AFTER_MAX_S } from "../limits/limits.ts";
+import { providerHolds, RETRY_AFTER_MAX_S } from "../limits/limits.ts";
 // read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
 const { RPC_CHAIN_MAX, RPC_CLIENT_MAX } = rpcModule as unknown as { RPC_CHAIN_MAX: number; RPC_CLIENT_MAX: number };
 
@@ -579,3 +579,29 @@ test("card helper-rpc-hold-queued: a send waiting for a keyed provider's second 
   assert.ok(Number(last.headers?.["Retry-After"]) >= 28, `Retry-After ${last.headers?.["Retry-After"]}: the hold's seconds`);
   assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), ["rpc hold base caller 30 s"]);
 });
+
+// -- card evm-rpc-spare-list: a caller's read on an EVM chain reaches any listed provider that answers ----------------
+
+/** What each listed provider answers a caller's read, by how it is down; the last answers. */
+const SPARE_DOWN: [string, (url: string) => Promise<Response>][] = [
+  ["HTTP 503", async () => new Response("down", { status: 503 })],
+  ["a thrown connection error", async () => { throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) }); }],
+  ["a JSON-RPC limit error (-32011 request limit reached, mainnet.base.org's answer to every eth_getLogs on 5 Nov)", async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32011, message: "request limit reached" } }), { status: 200, headers: { "content-type": "application/json" } })],
+];
+for (const [what, down] of SPARE_DOWN) {
+  test(`card evm-rpc-spare-list: with the configured provider and the first pinned one down (${what}), the second pinned one's answer reaches the caller`, async () => {
+    const asked: string[] = [];
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+      asked.push(url);
+      if (url === "https://cfg.test/" || url === "https://p1.test") return down(url);
+      const b = JSON.parse(String(init.body)) as { id: unknown };
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: "0x2a" }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const t = { v: performance.timeOrigin + performance.now() };
+    const r = createRpc({ BASE_RPC_URL: "https://cfg.test/" }, { fetch: fetch as never, holds: providerHolds(() => t.v), pinned: { base: ["https://p1.test", "https://p2.test", "https://p3.test"] }, now: () => t.v });
+    const a = await call(r, "base", { jsonrpc: "2.0", id: 7, method: "eth_blockNumber", params: [] }, JSON_T);
+    assert.equal(a.status, 200, a.body);
+    assert.equal(JSON.parse(a.body).result, "0x2a");
+    assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test", "https://p2.test"], "each down provider asked once, then the one that answers; the last is not needed");
+  });
+}
