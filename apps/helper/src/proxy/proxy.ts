@@ -59,8 +59,8 @@ export const VENDOR_WINDOW_MS = 60_000;
  *   draw from it: token search at most SEARCH_PER_SPAN 16 a counted minute (data/solana/token.ts), and
  *   Discover's three lists once per 12 s refresh through a 10 s cache (data/solana/lists.ts), about 15 a minute; 34 of
  *   the 60 at most (PROXY_RESERVE), the rest for devices. Share 4: a device's one trade asks /swap/v2/build at most
- *   four times, a capped build and its uncapped retry (packages/kit/src/trade/solana/build.ts l.243-246), twice when
- *   the route's floor needs a rebuild (packages/kit/src/trade/solana/flow.ts l.318, l.325).
+ *   four times, the cap search's three builds (packages/kit/src/trade/solana/build.ts SOLANA_JUPITER_MAX_BUILDS) and
+ *   the one rebuild when the route's floor needs it (packages/kit/src/trade/solana/flow.ts prepareLeg).
  * - relay: "`/quote` | 50 requests per minute" for a self-serve key, other endpoints 200 (docs.relay.link/references/
  *   api/api-keys, read 09:15Z): 50, the quote's. Share 2: no kit call yet; a tap's hop is one quote and one status.
  * - lifi: keys "currently default to **100 requests per minute**" (docs.li.fi/api-reference/rate-limits, read 09:15Z):

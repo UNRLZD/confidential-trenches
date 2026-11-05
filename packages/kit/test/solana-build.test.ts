@@ -85,11 +85,10 @@ test("the query: the paper's parameters, maxAccounts=40 first; maxAccounts is al
   assert.equal(SOLANA_JUPITER_MAX_ACCOUNTS, 40);
   const sell = solanaJupiterBuildQuery({ ...r, side: "sell", amount: 5n }, SOLANA_JUPITER_RETRY_MAX_ACCOUNTS);
   assert.equal(sell, `inputMint=${G.mint}&outputMint=${SOLANA_SOL_MINT}&amount=5&slippageBps=950&computeUnitPricePercentile=veryHigh&maxAccounts=${SOLANA_JUPITER_RETRY_MAX_ACCOUNTS}&taker=${G.wallet}`);
-  // no unbounded route: a missing, zero, fractional or past-64 cap is refused before any call
-  for (const cap of [null, undefined, 0, 65, 40.5, Number.NaN] as unknown[]) {
-    if (cap === undefined) continue; // the default is 40
-    assert.throws(() => solanaJupiterBuildQuery(r, cap as number), /maxAccounts must be 1 to 64/, String(cap));
-  }
+  // a zero, fractional or past-64 cap is refused before any call
+  for (const cap of [0, 65, 40.5, Number.NaN]) assert.throws(() => solanaJupiterBuildQuery(r, cap), /maxAccounts must be 1 to 64/, String(cap));
+  // kit-v1.4's null (deprecated) still leaves maxAccounts out; none of the kit's own builds asks it
+  assert.ok(!solanaJupiterBuildQuery(r, null).includes("maxAccounts"));
   for (const bad of [{ ...r, amount: 0n }, { ...r, amount: 1n << 64n }, { ...r, slippageBps: 10_001 }, { ...r, slippageBps: 1.5 }, { ...r, wallet: "x" }, { ...r, token: SOLANA_SOL_MINT }]) {
     assert.throws(() => solanaJupiterBuildQuery(bad));
   }
@@ -446,7 +445,13 @@ test("at the retry cap from the start (the live check's retry shapes): one call 
   const s = stub([OK]);
   const got = await fetchSolanaJupiterBuild(ORIGIN, R0, { fetch: s.f, atRetryCap: true });
   assert.equal(got.retried, true);
+  assert.equal(got.uncapped, true); // kit-v1.4's name, kept as an alias
   assert.deepEqual(s.calls.map((c) => c.url), [`${ORIGIN}${SOLANA_JUPITER_BUILD_PROXY_PATH}?${solanaJupiterBuildQuery(R0, SOLANA_JUPITER_RETRY_MAX_ACCOUNTS)}`]);
+  // kit-v1.4's `uncapped: true` option: the same one call, now at the retry's cap, never without maxAccounts
+  const old = stub([OK]);
+  const v14 = await fetchSolanaJupiterBuild(ORIGIN, R0, { fetch: old.f, uncapped: true });
+  assert.deepEqual(old.calls.map((c) => capOf(c.url)), [String(SOLANA_JUPITER_RETRY_MAX_ACCOUNTS)]);
+  assert.equal(v14.uncapped, true);
   const none = stub([NO_ROUTE, OK]);
   await assert.rejects(fetchSolanaJupiterBuild(ORIGIN, R0, { fetch: none.f, atRetryCap: true }), (e: unknown) => e instanceof SolanaBuildError && e.code === "no_route");
   assert.equal(none.calls.length, 1);
