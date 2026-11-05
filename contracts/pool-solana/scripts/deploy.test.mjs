@@ -1543,3 +1543,98 @@ test("review 4d: the run's cleanup freezes its table when the run's own freeze f
   assert.equal(sweepCommand(path.join(REPO, "contracts/pool-solana/deployments/mainnet.journal.json"), MAIN_URL, "mainnet"), "sh contracts/pool-solana/scripts/mainnet-deploy.sh --sweep-kept");
   assert.equal(sweepCommand(path.join(REPO, "x/record.journal.json"), "http://127.0.0.1:1", "localnet"), "node contracts/pool-solana/scripts/deploy.mjs --sweep-kept x/record.journal.json --url http://127.0.0.1:1");
 });
+
+/** A stopped run's journal at `journal` (keys `state`, program `program`), its two landed transactions of its own in `c`
+ * (a funding and an init, paid by its old funder), a CLI write and an expired send that never go in a record. */
+function stoppedJournal(c, journal, { state = "removed", program = RD.program_id } = {}) {
+  const OLD = newKey().id;
+  const sig = (d) => d.repeat(87);
+  for (const [s, step] of [[sig("6"), "funding (to the funder)"], [sig("7"), "init (tag 0)"]]) {
+    c.txs.set(s, { tx: { signature: s, payer: OLD, ixs: [{ program: SYSTEM_ID, keys: [OLD], data: Buffer.alloc(12) }] }, landed: true, err: null, landAt: 0, sentAt: 0, step });
+  }
+  const j = {
+    cluster: "localnet", genesis_hash: "FakeLocalGenesis1111111111111111111111111111", program_id: program, funder: OLD, return_to: RETURN, complete: false,
+    stopped: "SIGINT", stopped_at: "2026-11-05T16:00:00.000Z", keys: { folder: "pool-sol-deploy-gone", state, why: [], sweep: "node contracts/pool-solana/scripts/deploy.mjs --sweep-kept x --url http://127.0.0.1:1" },
+    txs: [
+      { step: "funding (to the funder)", signature: sig("6"), state: "landed" },
+      { step: "the solana CLI: program deploy", signature: sig("8"), state: "landed", cli: true },
+      { step: "init (tag 0)", signature: sig("7"), state: "landed" },
+      { step: "deposit 0.01 SOL (tag 1)", signature: sig("9"), state: "expired" },
+    ],
+  };
+  const text = JSON.stringify(j, null, 2) + "\n";
+  writeFileSync(journal, text);
+  return { j, text, OLD, sigs: [sig("6"), sig("7")] };
+}
+const asideOf = (out) => out.replace(/\.json$/, "") + ".stopped-20261105T160000000Z.journal.json";
+
+test("review 5a: a resume takes the stopped run's journal (keys removed, its program): its landed transactions go in the record, and the journal is moved aside byte for byte", async () => {
+  const c = cluster();
+  const { w, out, journal } = work();
+  const s = stoppedJournal(c, journal);
+  const r = await runAt(c, out);
+  try {
+    assert.equal(r.error, null, String(r.error?.stack) + "\n" + r.said.join("\n"));
+    assert.equal(readFileSync(asideOf(out), "utf8"), s.text, "moved aside unchanged");
+    const rec = readJ(out);
+    for (const [i, step] of [[0, "first run: funding (to the funder)"], [1, "first run: init (tag 0)"]]) {
+      assert.ok(rec.txs.some((t) => t.signature === s.sigs[i] && t.step === step), JSON.stringify(rec.txs));
+    }
+    assert.ok(!rec.txs.some((t) => /^[89]+$/.test(t.signature)), "never a CLI write or an expired send");
+    assert.ok(rec.funders.includes(s.OLD), "the first run's funder is a funder of the record");
+    assert.equal(existsSync(journal), false, "the run's own journal is removed once its record is written");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 5b: a stopped run's journal is refused, unchanged, before any key: keys kept (its sweep named), another program than --program, or a fresh run while its program is final", async () => {
+  for (const [opts, argv, re] of [
+    [{ state: "kept" }, null, /its keys kept: sweep them first with: node contracts\/pool-solana\/scripts\/deploy\.mjs --sweep-kept x/],
+    [{ program: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P" }, null, new RegExp(`of program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P, not --program ${RD.program_id}`)],
+    [{}, "fresh", new RegExp(`its program ${RD.program_id} is final with this code: resume it with --program ${RD.program_id}`)],
+  ]) {
+    const c = cluster();
+    const { w, out, journal } = work();
+    const s = stoppedJournal(c, journal, opts);
+    const soDir = mkdtempSync(path.join(tmpdir(), "probe-so-"));
+    writeFileSync(path.join(soDir, "code.so"), recordedCode());
+    const fresh = ["--url", "http://127.0.0.1:1", "--no-build", "--so", path.join(soDir, "code.so"), "--return", RETURN, "--out", out];
+    const r = await runAt(c, out, [], argv === "fresh" ? fresh : null);
+    try {
+      assert.match(String(r.error?.message), re);
+      assert.equal(readFileSync(journal, "utf8"), s.text, "the journal is unchanged");
+      assert.equal(existsSync(asideOf(out)), false);
+      assert.equal(r.dir, undefined, "no key folder was made");
+      assert.equal(c.sent.length, 0);
+    } finally {
+      if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+      rmSync(w, { recursive: true, force: true });
+      rmSync(soDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("review 5c: a fresh run after a stop before any deploy (keys removed, its program never made) moves the journal aside and goes on", async () => {
+  const c = cluster();
+  const { w, out, journal } = work();
+  const s = stoppedJournal(c, journal, { program: newKey().id });
+  c.io.cli = (args) => {
+    if (args[1] === "deploy") throw new Error("stop at the deploy call");
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const soDir = mkdtempSync(path.join(tmpdir(), "probe-so-"));
+  writeFileSync(path.join(soDir, "code.so"), recordedCode());
+  const r = await runAt(c, out, [], ["--url", "http://127.0.0.1:1", "--no-build", "--so", path.join(soDir, "code.so"), "--return", RETURN, "--out", out]);
+  try {
+    assert.match(String(r.error?.message), /stop at the deploy call/);
+    assert.equal(readFileSync(asideOf(out), "utf8"), s.text, "moved aside unchanged");
+    assert.equal(readJ(journal).complete, false, "the new run's own journal");
+    assert.ok(!readJ(journal).txs.some((t) => s.sigs.includes(t.signature)), "a fresh run takes none of the old run's transactions");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+    rmSync(soDir, { recursive: true, force: true });
+  }
+});
