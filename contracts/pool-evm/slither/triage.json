@@ -1,0 +1,4 @@
+{
+  "about": "Each Slither hit on contracts/pool-evm/src (CI job slither, scripts/ci/slither-gate.mjs), with the reason it is accepted or the fix. Keyed by detector, file and element as the gate prints them; the gate fails on a High or Medium hit not listed here and on an entry that matches no hit. Empty until the job's first run on GitHub's runner, whose report is the first read (Slither is never installed on a team machine).",
+  "findings": []
+}
