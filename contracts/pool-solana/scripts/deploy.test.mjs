@@ -999,15 +999,19 @@ test("fold 2 E: what is left reads the program id too: lamports there keep the k
   assert.deepEqual(await run(null), []);
 });
 
-test("fold 2 F: the funding read failing once right after the wait: the journal still lists the funding, and the keys stay", async () => {
+// review a763a51d (3) changed this one: a funding read that fails once is read again (it ended the run before, with the
+// funding in the journal and the keys kept), so the run goes on, and its record lists the funding
+test("fold 2 F: the funding read failing once right after the wait is read again: the run finishes, its record lists the funding, the keys are removed", async () => {
   const { w, out, journal } = work();
   let n = 0;
   const c = wrap(cluster(), (url, { method }, real) => (method === "getSignaturesForAddress" && n++ === 0 ? errR("planted: getSignaturesForAddress failed") : real()));
   const r = await runAt(c, out);
   try {
-    const j = JSON.parse(readFileSync(journal, "utf8"));
-    assert.ok(j.txs.some((t) => t.signature === FUND_SIG && t.step === "funding (to the funder)"), JSON.stringify(j.txs.map((t) => t.step)));
-    assert.equal(j.keys.state, "kept");
+    assert.equal(r.error, null, String(r.error?.stack));
+    assert.ok(r.said.some((l) => /the funder's history not read \(.*planted: getSignaturesForAddress failed.*\): reading it again/.test(l)), r.said.join("\n"));
+    const d = JSON.parse(readFileSync(out, "utf8"));
+    assert.ok(d.txs.some((t) => t.signature === FUND_SIG && t.step === "funding (to the funder)"), JSON.stringify(d.txs.map((t) => t.step)));
+    assert.equal(existsSync(journal), false, "a finished run removes its journal");
     assert.equal(c.bal.get(c.funder), 0n);
   } finally {
     if (r.dir) rmSync(r.dir, { recursive: true, force: true });
