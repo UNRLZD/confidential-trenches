@@ -272,7 +272,8 @@ test("main keeps the run's key folder when the sweep fails: the funder still hol
       case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
       case "getBalance": return ok({ value: 1_000_000_000 });
       case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
-      case "getLatestBlockhash": return ok({ value: { blockhash: "11111111111111111111111111111111" } });
+      case "getLatestBlockhash": return ok({ value: { blockhash: "11111111111111111111111111111111", lastValidBlockHeight: 150 } });
+      case "getBlockHeight": return ok(151); // every send's blockhash is past: the settle reads each expired
       case "sendTransaction": sends++; return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32002, message: "Blockhash not found" } }) };
       case "getSignatureStatuses": return ok({ value: [null] });
       default: throw new Error(`unexpected ${method}`);
@@ -283,7 +284,7 @@ test("main keeps the run's key folder when the sweep fails: the funder still hol
   const realLog = console.log;
   console.log = (s) => said.push(String(s));
   try {
-    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--no-build", "--so", soFile, "--program", RD.program_id, "--return", RETURN], fetchFn,
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--no-build", "--so", soFile, "--program", RD.program_id, "--return", RETURN, "--out", path.join(work, "record.json")], fetchFn,
       { wait: async () => {}, cli: () => ({ status: 0, stdout: "", stderr: "" }) }));
   } finally {
     console.log = realLog;
@@ -482,15 +483,215 @@ test("the CLI deploys the very bytes hashed: CI's artifact, from a file in the r
     return { status: 0, stdout: "", stderr: "" };
   };
   const before = new Set(ls(tmpdir()).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const work = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
   const realLog = console.log;
   console.log = () => {};
   try {
-    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN], fetchFn, { wait: async () => {}, cli, gh: f.gh }), /stop after the deploy call/);
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], fetchFn, { wait: async () => {}, cli, gh: f.gh }), /stop after the deploy call/);
   } finally {
     console.log = realLog;
+    rmSync(work, { recursive: true, force: true });
     for (const k of ls(tmpdir()).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(tmpdir(), k), { recursive: true, force: true });
   }
   assert.ok(deployed, "the CLI was asked to deploy");
   assert.equal(deployed.sha, f.sha);
   assert.match(path.basename(path.dirname(deployed.file)), /^pool-sol-deploy-/);
+});
+
+// ---- however the run stops, every lamport is swept back (card pool-sol-deploy-sweep) ----
+// A mock cluster for main(): a virtual clock (the run's wait advances it), balances, and transactions that land when
+// the test says (each landing debits its payer: a fee, a transfer's amount, the deposit's amount and rents; refused
+// with InsufficientFundsForRent when the payer cannot pay). Its block height moves one block per 700 ms, so a
+// blockhash stays valid 105 s.
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const b58 = (bytes) => {
+  let n = BigInt("0x" + (Buffer.from(bytes).toString("hex") || "0"));
+  let s = "";
+  while (n > 0n) (s = B58[Number(n % 58n)] + s), (n /= 58n);
+  for (const b of bytes) if (b === 0) s = "1" + s; else break;
+  return s;
+};
+function decodeTx(b64) {
+  const b = Buffer.from(b64, "base64");
+  let o = 1;
+  const signature = b58(b.subarray(o, o + 64));
+  o += 64 * b[0] + 3;
+  const keys = [];
+  for (let n = b[o++], i = 0; i < n; i++, o += 32) keys.push(b58(b.subarray(o, o + 32)));
+  o += 32;
+  const ixs = [];
+  for (let n = b[o++], i = 0; i < n; i++) {
+    const program = keys[b[o++]];
+    const ks = [...b.subarray(o + 1, o + 1 + b[o])].map((j) => keys[j]);
+    o += 1 + b[o];
+    const data = b.subarray(o + 1, o + 1 + b[o]);
+    o += 1 + b[o];
+    ixs.push({ program, keys: ks, data });
+  }
+  return { signature, payer: keys[0], ixs };
+}
+const SYSTEM_ID = "11111111111111111111111111111111";
+const FUND_SIG = "5".repeat(87);
+function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = () => {}, poolMissing = false, onRead = () => {} } = {}) {
+  // `funding`: whether the funder's incoming transfer (FUND_SIG) has landed; a funder that starts funded has it
+  const c = { t: 0, bal: new Map(), txs: new Map(), sent: [], funder: null, credit: [], funding: funderStart > 0n, said: [] };
+  const balOf = (a) => c.bal.get(a) ?? 0n;
+  const apply = (tx) => {
+    const ix = tx.ixs[0];
+    let cost = FEE_PER_SIGNATURE;
+    let to = null;
+    if (ix.program === SYSTEM_ID) (cost += ix.data.readBigUInt64LE(4)), (to = ix.keys[1]);
+    else if (ix.data[0] === 0) cost += 3_000_000n; // init: the pool's rent
+    else cost += DEPOSIT + 2_000_000n; // the deposit and its mark and page rents
+    if (balOf(tx.payer) < cost) return { InsufficientFundsForRent: { account_index: 0 } };
+    c.bal.set(tx.payer, balOf(tx.payer) - cost);
+    if (to) c.bal.set(to, balOf(to) + cost - FEE_PER_SIGNATURE);
+    return null;
+  };
+  const tick = () => {
+    for (const f of c.credit) if (!f.done && c.t >= f.at) (f.done = true), f.fn();
+    for (const x of c.txs.values()) if (!x.landed && c.t >= x.landAt) (x.landed = true), (x.err = apply(x.tx));
+  };
+  const height = () => Math.floor(c.t / 700);
+  c.fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    const err = (message) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32002, message } }) });
+    tick();
+    onRead(method, params, c);
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getAccountInfo": {
+        if (poolMissing && params[0] === RD.pool && ![...c.txs.values()].some((x) => x.landed && !x.err && x.tx.ixs[0].data[0] === 0 && x.tx.ixs[0].program !== SYSTEM_ID)) return ok({ value: null });
+        return ok(REC.good.find((x) => x.method === method && x.params[0] === params[0])?.json.result ?? { value: null });
+      }
+      case "getBalance": {
+        if (params[0] !== RETURN && !c.funder) (c.funder = params[0]), c.bal.set(params[0], funderStart);
+        return ok({ value: Number(balOf(params[0])) });
+      }
+      case "getSignaturesForAddress": {
+        const mine = [...c.txs.values()].filter((x) => x.landed && x.tx.payer === params[0]).map((x) => ({ signature: x.tx.signature, err: x.err }));
+        return ok(params[0] === c.funder && c.funding ? [...mine.reverse(), { signature: FUND_SIG, err: null }] : mine.reverse());
+      }
+      case "getProgramAccounts": return ok([]);
+      case "getLatestBlockhash": return ok({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: height() + 150 } });
+      case "getBlockHeight": return ok(height());
+      case "sendTransaction": {
+        const tx = decodeTx(params[0]);
+        const known = c.txs.get(tx.signature);
+        if (known?.landed) return err("Transaction simulation failed: This transaction has already been processed");
+        if (!known) {
+          const x = { tx, sentAt: c.t, landAt: c.t + landAfter(tx), landed: false, err: null };
+          c.txs.set(tx.signature, x);
+          c.sent.push(x);
+          onSend(tx, c);
+          tick();
+        }
+        return ok(tx.signature);
+      }
+      case "getSignatureStatuses": return ok({ value: params[0].map((s) => { const x = c.txs.get(s); return x?.landed ? { confirmationStatus: "confirmed", err: x.err } : null; }) });
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  c.io = { wait: async (ms) => void (c.t += ms), now: () => c.t, cli: () => ({ status: 0, stdout: "", stderr: "" }) };
+  return c;
+}
+const isDeposit = (tx) => tx.ixs[0].program !== SYSTEM_ID && tx.ixs[0].data[0] === 1;
+const isInit = (tx) => tx.ixs[0].program !== SYSTEM_ID && tx.ixs[0].data[0] === 0;
+/** Runs main() (a resume of the recorded program, so no CLI deploy) on `c`; returns its error, log, record and key dir. */
+async function runOn(c, extra = []) {
+  const work = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const soFile = path.join(work, "code.so");
+  writeFileSync(soFile, recordedCode());
+  const out = path.join(work, "record.json");
+  const said = (c.said = []);
+  const realLog = console.log;
+  console.log = (s) => said.push(String(s));
+  let error = null;
+  try {
+    await main(["--url", "http://127.0.0.1:1", "--no-build", "--so", soFile, "--program", RD.program_id, "--return", RETURN, "--out", out, ...extra], c.fetchFn, c.io);
+  } catch (e) {
+    error = e;
+  } finally {
+    console.log = realLog;
+  }
+  const dir = keyDirOf(said);
+  const record = existsSync(out) ? JSON.parse(readFileSync(out, "utf8")) : null;
+  const kept = dir && existsSync(dir);
+  if (dir) rmSync(dir, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true });
+  return { error, said, record, dir, kept };
+}
+const keyDirOf = (said) => said.map((l) => l.match(/the run's keys are in (\S+) until/)?.[1]).find(Boolean);
+const sweptTo = (c) => c.sent.filter((x) => x.landed && !x.err && x.tx.ixs[0].program === SYSTEM_ID && x.tx.ixs[0].keys[1] === RETURN)
+  .reduce((s, x) => s + x.tx.ixs[0].data.readBigUInt64LE(4), 0n);
+
+test("a send that lands 95 s after it was sent, past its 90 s wait, is in the record and swept after it lands", async () => {
+  const c = cluster({ landAfter: (tx) => (isDeposit(tx) ? 95_000 : 0) });
+  const r = await runOn(c);
+  assert.match(String(r.error?.message), /not confirmed in 90 s/);
+  const dep = c.sent.find((x) => isDeposit(x.tx));
+  assert.ok(r.record?.txs.some((t) => t.signature === dep.tx.signature), "the deposit's signature is in the run's record");
+  assert.ok(dep.landed && !dep.err, "the deposit landed at 95 s");
+  assert.deepEqual(r.record.txs.find((t) => t.signature === dep.tx.signature), { step: "deposit 0.01 SOL (tag 1)", signature: dep.tx.signature, state: "landed" });
+  // the sweep came after the deposit landed: the return address got all the funder had less the deposit and the fees
+  const fees = BigInt(c.sent.filter((x) => x.landed).length) * FEE_PER_SIGNATURE;
+  assert.equal(sweptTo(c), 1_000_000_000n - (DEPOSIT + 2_000_000n) - fees);
+  assert.equal(c.bal.get(c.funder), 0n);
+  for (const x of c.sent.filter((x) => x.tx.ixs[0].program === SYSTEM_ID)) {
+    assert.ok(x.sentAt >= dep.landAt, "no sweep was sent before the late send landed");
+    assert.ok(r.record.txs.some((t) => t.signature === x.tx.signature && t.state === "landed"), "every sweep is in the record");
+  }
+  assert.equal(r.record.complete, false);
+  assert.equal(r.kept, false, "the keys are removed once the funder reads 0");
+});
+
+test("SIGHUP mid-deploy (a terminal closing) stops the run at its next step and sweeps, like SIGINT and SIGTERM", async () => {
+  const listeners = process.listenerCount("SIGHUP");
+  const c = cluster({
+    poolMissing: true,
+    onSend: (tx) => {
+      if (isInit(tx)) process.emit("SIGHUP", "SIGHUP");
+      if (isDeposit(tx)) throw new Error("planted: the deposit was sent after the SIGHUP");
+    },
+  });
+  const r = await runOn(c);
+  assert.match(String(r.error?.message), /stopped by SIGHUP/);
+  assert.ok(!c.sent.some((x) => isDeposit(x.tx)), "no step after the SIGHUP was sent");
+  const fees = BigInt(c.sent.filter((x) => x.landed).length) * FEE_PER_SIGNATURE;
+  assert.equal(sweptTo(c), 1_000_000_000n - 3_000_000n - fees);
+  assert.equal(c.bal.get(c.funder), 0n);
+  assert.ok(r.record.txs.some((t) => t.step === "init (tag 0)" && t.state === "landed"));
+  assert.equal(r.record.stopped, "SIGHUP");
+  assert.equal(r.kept, false);
+  assert.equal(process.listenerCount("SIGHUP"), listeners, "the run's SIGHUP handler is removed when it ends");
+});
+
+test("a stop during the funding wait watches the balance 60 s: funding landing 30 s after the stop is swept, its key file kept until then", async () => {
+  let stopAt = null;
+  let keyFileAtFunding = null;
+  const c = cluster({
+    funderStart: 0n,
+    onRead: (method, params, c) => {
+      if (method !== "getBalance" || params[0] !== c.funder || stopAt !== null) return;
+      stopAt = c.t;
+      process.emit("SIGTERM", "SIGTERM");
+      c.credit.push({ at: stopAt + 30_000, fn: () => {
+        keyFileAtFunding = existsSync(path.join(keyDirOf(c.said), "funder.json"));
+        c.bal.set(c.funder, 50_000_000n);
+        c.funding = true;
+      } });
+    },
+  });
+  const r = await runOn(c);
+  assert.ok(stopAt !== null, "the stop came during the funding wait");
+  assert.match(String(r.error?.message), /stopped/);
+  assert.equal(sweptTo(c), 50_000_000n - FEE_PER_SIGNATURE * BigInt(c.sent.filter((x) => x.landed).length), "the late funding was swept back");
+  assert.equal(keyFileAtFunding, true, "the key file was there when the funding landed");
+  assert.match(String(r.error?.message), /stopped by SIGTERM/);
+  assert.equal(c.bal.get(c.funder), 0n);
+  assert.ok(c.sent.every((x) => x.sentAt >= stopAt + 30_000), "the sweep came after the funding");
+  assert.ok(r.record.txs.some((t) => t.step === "funding (to the funder)" && t.signature === FUND_SIG && t.state === "landed"));
+  assert.equal(r.kept, false, "the keys are removed after the sweep read the funder 0");
 });

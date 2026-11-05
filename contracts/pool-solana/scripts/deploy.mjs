@@ -32,10 +32,16 @@
 //     never printed or kept; the precommitment is public). The mark and both page leaves are read back and checked:
 //     the label leaf against keccak256(scope, nonce) mod p, the state leaf against Poseidon(value, label,
 //     precommitment).
-//  7. Always, in a finally: the funder's bulk is swept to --return first, in one transfer (a job runner may stop the run
-//     with TERM, then KILL 10 s later), keeping CLEANUP_RESERVE for the closes; then any buffer the funder still owns and a
-//     program it can still upgrade (read at confirmed) are closed with their rent to --return; then the rest is swept
-//     (retried). Every sweep's signature is printed. The keys are removed only after the reads in step 3.
+//  7. Always, in a finally. SIGINT, SIGTERM or SIGHUP (a terminal closing) stop the run at its next step; later signals
+//     never cut the cleanup short. Every signature this run makes is written to the record (--out) before its send,
+//     with its state, so a send that lands after its 90 s wait, or a run killed outright, is still listed. A stop
+//     during the funding wait first watches the funder's balance for WAITS.lateFunding, so a transfer in flight is
+//     swept too. Then the settle (each unsettled signature read as landed, failed, or past its blockhash's last valid
+//     block height, resent meanwhile), and the funder's bulk is swept to --return in one transfer (a job runner may stop
+//     the run with TERM, then KILL 10 s later), keeping CLEANUP_RESERVE for the closes; then any buffer the funder still
+//     owns and a program it can still upgrade (read at confirmed) are closed with their rent to --return; then the
+//     settle again and the rest is swept (retried). Every sweep's signature is printed. The keys are removed only after
+//     the reads in step 3. A run that stops leaves its record with complete: false and every transaction's state.
 //  8. Waits for every transaction to be finalized, writes the deployment record (scripts/live-checks/pool-sol-deploy.
 //     <cluster>.json) with every transaction on the programdata (the deploy and its SetAuthority) and every funder
 //     (the fee payers that are not --return), and prints the live check to run next.
@@ -127,30 +133,46 @@ export const transferIx = (from, to, lamports) => ({
   data: cat(le(2, 4), le(lamports, 8)),
 });
 
-/** Sends a transaction and waits until it is confirmed with no error, resending while it is not. */
-export async function sendAndConfirm(fetchFn, url, ixs, payer, keys) {
+/** The waits (ms): how long one send is resent and watched before it throws; how long the cleanup's settle waits for
+ * the run's unsettled transactions; the balance watch after a stop during the funding wait (a funding transfer still in
+ * flight lands and is swept too); the funding wait's poll. */
+export const WAITS = Object.freeze({ confirm: 90_000, settle: 180_000, lateFunding: 60_000, poll: 5_000 });
+const LANDED = ["confirmed", "finalized"];
+
+/**
+ * Sends a transaction and waits until it is confirmed with no error, resending while it is not. `journal.signed` is
+ * called with its signature, bytes and last valid block height before the first send (the run writes it to its record
+ * there), and `journal.settled` once its status is read; so a send that lands after this gives up is still known, and
+ * the cleanup's settle reads it back. `wait` and `now` are the clock (a test's is virtual).
+ */
+export async function sendAndConfirm(fetchFn, url, ixs, payer, keys, { step = "a transaction", journal, wait = sleep, now = Date.now } = {}) {
   const { value } = await rpc(fetchFn, url, "getLatestBlockhash", [{ commitment: "confirmed" }]);
   const tx = signTx(compileMessage(payer.id, ixs, value.blockhash), keys);
-  const until = Date.now() + 90_000;
+  journal?.signed(step, tx, value.lastValidBlockHeight);
+  const until = now() + WAITS.confirm;
+  const seen = (s) => {
+    if (s?.err) {
+      journal?.settled(tx.signature, "failed");
+      throw new Error(`${tx.signature} failed: ${JSON.stringify(s.err)}`);
+    }
+    if (s && LANDED.includes(s.confirmationStatus)) return journal?.settled(tx.signature, "landed"), true;
+    return false;
+  };
   const status = async () => (await rpc(fetchFn, url, "getSignatureStatuses", [[tx.signature], { searchTransactionHistory: true }])).value[0];
-  while (Date.now() < until) {
+  while (now() < until) {
     try {
       await rpc(fetchFn, url, "sendTransaction", [tx.base64, { encoding: "base64", preflightCommitment: "confirmed" }]);
     } catch (e) {
       // a resend of a transaction that already landed ("already been processed") is not a failure: its status says
-      const s = await status();
-      if (s?.err) throw new Error(`${tx.signature} failed: ${JSON.stringify(s.err)}`);
-      if (s && ["confirmed", "finalized"].includes(s.confirmationStatus)) return tx.signature;
+      if (seen(await status())) return tx.signature;
       if (!/already been processed/i.test(e.message)) throw e;
     }
     for (let i = 0; i < 4; i++) {
-      await sleep(500);
-      const s = (await rpc(fetchFn, url, "getSignatureStatuses", [[tx.signature]])).value[0];
-      if (s?.err) throw new Error(`${tx.signature} failed: ${JSON.stringify(s.err)}`);
-      if (s && ["confirmed", "finalized"].includes(s.confirmationStatus)) return tx.signature;
+      await wait(500);
+      if (seen((await rpc(fetchFn, url, "getSignatureStatuses", [[tx.signature]])).value[0])) return tx.signature;
     }
   }
-  throw new Error(`${tx.signature} not confirmed in 90 s`);
+  throw new Error(`${tx.signature} not confirmed in ${WAITS.confirm / 1000} s`);
 }
 
 // ---- the solana CLI ----
@@ -188,16 +210,27 @@ export async function needOf(rent, soLen, { resume = false, poolExists = false }
  * 650,240 on devnet), so it stays rent-exempt between them. */
 export const CLEANUP_RESERVE = 1_000_000n;
 /**
- * Runs every step, whichever one throws: sweeps the funder's bulk to `returnTo` at once (less `reserve`), closes the
- * funder's buffers and the program while the funder can still upgrade it (each retried, their rent to `returnTo`),
- * then sweeps the rest less one fee, retried. Returns { swept, signatures, after, problems }. `ops` holds the chain
- * calls (the test plants failures in them).
+ * Runs every step, whichever one throws: settles the run's transactions still unsettled (`ops.settle`: each reads as
+ * landed, failed, or its blockhash expired, so none can land after a balance read), sweeps the funder's bulk to
+ * `returnTo` (less `reserve`), closes the funder's buffers and the program while the funder can still upgrade it (each
+ * retried, their rent to `returnTo`), then settles again and sweeps the rest less one fee, retried. Returns { swept,
+ * signatures, after, problems }. `ops` holds the chain calls (the test plants failures in them).
  */
 export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve = CLEANUP_RESERVE } = {}) {
   const problems = [];
   const signatures = [];
   let swept = 0n;
-  // the bulk first, one try and no wait: a stop's KILL may come 10 s after its TERM
+  const settle = async () => {
+    try {
+      if (ops.settle && !(await ops.settle())) problems.push(`a transaction of the run is still unsettled after ${WAITS.settle / 1000} s; sweeping anyway`);
+    } catch (e) {
+      problems.push(`settle: ${e.message}`);
+    }
+  };
+  // a send whose wait gave up may still land: settled first, so the bulk reads the balance after it (a stop by TERM
+  // finds nothing unsettled: the step it stops at finishes its send first). Then the bulk, one try and no wait: a
+  // stop's KILL may come 10 s after its TERM
+  await settle();
   try {
     const bal = await ops.balance();
     if (bal > reserve + FEE_PER_SIGNATURE) {
@@ -225,6 +258,7 @@ export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve 
     if (await ops.upgradeableByFunder()) await ops.closeProgram();
   });
   for (let i = 0; i < tries; i++) {
+    await settle(); // a sweep of the last pass may land late too
     try {
       const bal = await ops.balance();
       if (bal <= FEE_PER_SIGNATURE) {
@@ -246,7 +280,7 @@ export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve 
  * upgrade authority is read at confirmed, and a read that fails throws: a finalized read of a deploy that landed a
  * moment ago reads nothing, and "nothing" must never be taken for "not upgradeable".
  */
-export function chainOps({ fetchFn, url, second, funder, programId, keyFile, returnTo, resume = false, cli: run = cli, wait = sleep, say = log }) {
+export function chainOps({ fetchFn, url, second, funder, programId, keyFile, returnTo, resume = false, cli: run = cli, wait = sleep, now = Date.now, say = log, journal }) {
   const common = ["--url", url, "--keypair", keyFile, "--commitment", "confirmed"];
   const pdAddr = programDataAddress(programId);
   const byFunder = async () => {
@@ -272,7 +306,28 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
       throw new Error(`${programId} still reads upgradeable by the funder after its close`);
     },
     balance: () => balanceOn(url),
-    transfer: async (to, lamports) => sendAndConfirm(fetchFn, url, [transferIx(funder.id, to, lamports)], funder, [funder]),
+    transfer: async (to, lamports) => sendAndConfirm(fetchFn, url, [transferIx(funder.id, to, lamports)], funder, [funder], { step: "sweep (the funder's rest back)", journal, wait, now }),
+    /** Until every transaction the run signed reads as landed, failed, or expired (the confirmed block height is past
+     * its blockhash's last valid one, read first, so a status read after it is final), each still pending is sent
+     * again. true once none is pending, false after WAITS.settle. */
+    settle: async () => {
+      if (!journal) return true;
+      for (const end = now() + WAITS.settle; ; ) {
+        const open = journal.pending();
+        if (!open.length) return true;
+        const height = await rpc(fetchFn, url, "getBlockHeight", [{ commitment: "confirmed" }]);
+        const st = (await rpc(fetchFn, url, "getSignatureStatuses", [open.map((p) => p.signature), { searchTransactionHistory: true }])).value;
+        open.forEach((p, i) => {
+          const v = st[i];
+          const state = v?.err ? "failed" : v && LANDED.includes(v.confirmationStatus) ? "landed" : !v && height > p.lastValid ? "expired" : null;
+          if (state) journal.settled(p.signature, state), say(`settle: ${p.step} ${p.signature} ${state}${v?.err ? ` (${JSON.stringify(v.err)})` : ""}`);
+        });
+        if (!journal.pending().length) return true;
+        if (now() >= end) return false;
+        for (const p of journal.pending()) await rpc(fetchFn, url, "sendTransaction", [p.base64, { encoding: "base64", skipPreflight: true }]).catch(() => {});
+        await wait(2000);
+      }
+    },
     /** Why the run's keys must be kept: the funder's balance on two RPCs, then any buffer or programdata on `url` whose
      * authority is the funder (the 33-byte Option at offset 4 or 12 equal to Some(funder)). [] when none. */
     leftovers: async () => {
@@ -320,13 +375,13 @@ export async function chainRecord(fetchFn, url, d) {
 
 /** An account once a finalized read shows it (and `ready(acc)` holds), waiting up to 60 s: steps confirm at
  * "confirmed", reads are "finalized". */
-async function settled(fetchFn, url, addr, ready = () => true) {
-  const until = Date.now() + 60_000;
+async function settled(fetchFn, url, addr, ready = () => true, { wait = sleep, now = Date.now } = {}) {
+  const until = now() + 60_000;
   for (;;) {
     const a = await account(fetchFn, url, addr);
     if (a && ready(a)) return a;
-    if (Date.now() > until) throw new Error(`${addr} not readable at finalized in 60 s`);
-    await sleep(2000);
+    if (now() > until) throw new Error(`${addr} not readable at finalized in 60 s`);
+    await wait(2000);
   }
 }
 
@@ -358,12 +413,12 @@ export function poolState(acc, programId) {
   return acc.owner === programId && acc.data.length === POOL_LEN && Buffer.from(acc.data.subarray(0, 8)).toString() === "bfpool01" ? "ours" : `not the pool (owner ${acc.owner}, ${acc.data.length} bytes)`;
 }
 
-async function waitFinalized(fetchFn, url, sigs) {
-  const until = Date.now() + 120_000;
-  while (Date.now() < until) {
+async function waitFinalized(fetchFn, url, sigs, { wait = sleep, now = Date.now } = {}) {
+  const until = now() + 120_000;
+  while (now() < until) {
     const v = (await rpc(fetchFn, url, "getSignatureStatuses", [sigs, { searchTransactionHistory: true }])).value;
     if (v.every((s) => s?.confirmationStatus === "finalized" && s.err === null)) return;
-    await sleep(2000);
+    await wait(2000);
   }
   throw new Error("not every transaction finalized in 120 s");
 }
@@ -423,7 +478,8 @@ export function ciCode(runId, { gh = ghCli } = {}) {
   }
 }
 
-export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = cli, gh = ghCli } = {}) {
+/** The deploy run. The third argument is for tests: `wait` and `now` (a virtual clock), `cli` and `gh` (planted). */
+export async function main(argv, fetchFn = fetch, { wait = sleep, now = Date.now, cli: runCli = cli, gh = ghCli } = {}) {
   const opt = (n, d) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
   const url = opt("--url", "https://api.devnet.solana.com");
   const genesis = await rpc(fetchFn, url, "getGenesisHash", []);
@@ -500,22 +556,65 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     return f;
   };
   const programFile = resumeId ? null : fileOf(program, "program.json");
+  const outFile = opt("--out", path.join(REPO, `scripts/live-checks/pool-sol-deploy.${cluster}.json`));
   // the CLI deploys from a file: the very bytes hashed above, written into the run's own folder
   const codeFile = path.join(dir, "code.so");
   writeFileSync(codeFile, so, { mode: 0o600 });
   const funderFile = fileOf(funder, "funder.json");
   const common = ["--url", url, "--keypair", funderFile, "--commitment", "confirmed"];
   const cli = runCli;
+  // Every transaction of the run in order, { step, signature, state }: "landed" (read confirmed with no error), or one
+  // this run signed that is "sent" (not read yet), "failed" (landed with an error, its fee spent) or "expired" (its
+  // blockhash is past, so it never lands). The record on disk is rewritten at each change, a signature before its
+  // send: a send that lands after its wait, or a run killed outright, still leaves it there for the settle or a rerun
+  // (with --prior) to read back. The final record keeps only the landed ones.
   const txs = [];
+  const unsettled = new Map(); // signature -> { step, signature, base64, lastValid }
+  const stoppedRecord = () => {
+    writeFileSync(outFile, JSON.stringify({
+      cluster, genesis_hash: genesis, rpc: url, at: new Date().toISOString(), complete: false, stopped: stop,
+      program_id: program.id, programdata: programDataAddress(program.id), funder: funder.id, return_to: returnTo, keys: dir, txs,
+    }, null, 2) + "\n");
+  };
+  const journal = {
+    signed(step, tx, lastValid) {
+      txs.push({ step, signature: tx.signature, state: "sent" });
+      unsettled.set(tx.signature, { step, signature: tx.signature, base64: tx.base64, lastValid: Number(lastValid) });
+      stoppedRecord();
+    },
+    settled(signature, state) {
+      if (!unsettled.delete(signature)) return;
+      for (const t of txs) if (t.signature === signature) t.state = state;
+      stoppedRecord();
+    },
+    pending: () => [...unsettled.values()],
+  };
   let result = null;
-  let stop = false;
-  const onSignal = () => ((stop = true), log("stopping: the cleanup runs next"));
-  process.on("SIGINT", onSignal).on("SIGTERM", onSignal);
+  // A signal stops the run at its next step (the step's send finishes first), then the cleanup runs. SIGHUP is a
+  // terminal closing: the same stop, and the log's writes to that gone terminal must not end the run mid-cleanup.
+  // Later signals never cut the cleanup short.
+  const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+  let stop = null;
+  const onSignal = (sig) => {
+    if (sig === "SIGHUP") for (const s of [process.stdout, process.stderr]) s.on("error", () => {});
+    if (stop) return log(`${sig} again: the cleanup finishes first`);
+    stop = sig ?? "a signal";
+    log(`${stop}: stopping: the cleanup runs next`);
+  };
+  for (const s of SIGNALS) process.on(s, onSignal);
   const check = (step) => {
-    if (stop) throw new Error("stopped");
+    if (stop) throw new Error(`stopped by ${stop}`);
     if (failAfter === step) throw new Error(`planted failure after ${step} (--fail-after)`);
   };
-  const ops = chainOps({ fetchFn, url, second, funder, programId: program.id, keyFile: funderFile, returnTo, resume: !!resumeId, cli: runCli, wait });
+  const clock = { wait, now };
+  const send = (step, ixs) => sendAndConfirm(fetchFn, url, ixs, funder, [funder], { step, journal, ...clock });
+  const ops = chainOps({ fetchFn, url, second, funder, programId: program.id, keyFile: funderFile, returnTo, resume: !!resumeId, cli: runCli, journal, ...clock });
+  // what came in to the funder: every transaction on it with no error that this run did not sign
+  const fundingTxs = async () => (await rpc(fetchFn, url, "getSignaturesForAddress", [funder.id, { commitment: "confirmed" }]))
+    .filter((f) => f.err === null && !txs.some((t) => t.signature === f.signature)).reverse()
+    .map((f) => ({ step: "funding (to the funder)", signature: f.signature, state: "landed" }));
+  let funded = false;
+  stoppedRecord();
   try {
     const rent = async (n) => BigInt(await rpc(fetchFn, url, "getMinimumBalanceForRentExemption", [n]));
     const need = await needOf(rent, so.length, { resume: !!resumeId, poolExists });
@@ -523,27 +622,30 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     log(`funder ${funder.id} needs ${need.total} lamports (${Object.entries(need.parts).map(([k, v]) => `${k} ${v}`).join(", ")}); the rest is swept back to ${returnTo}`);
     log(`waiting for ${funder.id} to hold ${need.total} lamports`);
     for (;;) {
-      if (stop) throw new Error("stopped");
+      if (stop) throw new Error(`stopped by ${stop}`);
       if ((await ops.balance()) >= need.total) break;
-      await sleep(5000);
+      await wait(WAITS.poll);
     }
-    const funding = (await rpc(fetchFn, url, "getSignaturesForAddress", [funder.id, { commitment: "confirmed" }])).filter((s) => s.err === null);
-    for (const f of funding.reverse()) txs.push({ step: "funding (to the funder)", signature: f.signature });
+    funded = true;
+    const funding = await fundingTxs();
+    txs.push(...funding);
+    stoppedRecord();
     log(`funded: ${funding.length} incoming transfer(s)`);
     check("funding");
 
     if (resumeId) {
       // the first run's transactions: its own (--prior: its funding and sweep), then the program's history before now
       // (the record adds the programdata's own: the deploy and its SetAuthority)
-      for (const sig of prior) txs.push({ step: "first run (--prior)", signature: sig });
+      for (const sig of prior) txs.push({ step: "first run (--prior)", signature: sig, state: "landed" });
       log(`resume: ${prior.length} prior transaction(s) kept for the record`);
     } else {
       const dep = cli(["program", "deploy", codeFile, "--program-id", programFile, "--upgrade-authority", funderFile, "--max-len", String(so.length),
         "--final", "--use-rpc", "--output", "json", ...common]);
       const out = JSON.parse(dep.stdout.slice(dep.stdout.indexOf("{")));
       if (out.programId !== program.id) throw new Error(`deployed ${out.programId}, not ${program.id}`);
-      txs.push({ step: "deploy with the upgradeable loader, --final", signature: out.signature });
-      await settled(fetchFn, url, programDataAddress(program.id));
+      txs.push({ step: "deploy with the upgradeable loader, --final", signature: out.signature, state: "landed" });
+      stoppedRecord();
+      await settled(fetchFn, url, programDataAddress(program.id), undefined, clock);
       const problems = await programProblems(fetchFn, url, program.id, so);
       if (problems.length) throw new Error(problems.join("; "));
       log(`deployed ${program.id}, upgrade authority none, code sha256 ${soSha}`);
@@ -554,14 +656,13 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     const sysKey = { id: SYSTEM, signer: false, writable: false };
     if (poolExists) log(`pool ${pool.address} exists: init skipped`);
     else {
-      const init = await sendAndConfirm(fetchFn, url, [{ program: program.id, keys: [{ id: pool.address, signer: false, writable: true }, { id: funder.id, signer: true, writable: true }, sysKey], data: Uint8Array.of(0) }], funder, [funder]);
-      txs.push({ step: "init (tag 0)", signature: init });
+      await send("init (tag 0)", [{ program: program.id, keys: [{ id: pool.address, signer: false, writable: true }, { id: funder.id, signer: true, writable: true }, sysKey], data: Uint8Array.of(0) }]);
       log(`pool ${pool.address} made`);
     }
     check("init");
 
     // a fresh note: its nullifier and secret live only in this block
-    const before = await settled(fetchFn, url, pool.address);
+    const before = await settled(fetchFn, url, pool.address, undefined, clock);
     const size = Buffer.from(before.data.subarray(49, 57)).readBigUInt64LE();
     const pageNo = size / 1024n;
     let precommitment;
@@ -573,7 +674,7 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     const pre = be32(precommitment);
     const mark = preMarkAddress(program.id, pre);
     const data = cat(Uint8Array.of(1), le(DEPOSIT, 8), pre);
-    const deposit = await sendAndConfirm(fetchFn, url, [{
+    await send("deposit 0.01 SOL (tag 1)", [{
       program: program.id,
       keys: [
         { id: pool.address, signer: false, writable: true }, { id: funder.id, signer: true, writable: true },
@@ -581,9 +682,8 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
         { id: mark.address, signer: false, writable: true }, sysKey,
       ],
       data,
-    }], funder, [funder]);
-    txs.push({ step: "deposit 0.01 SOL (tag 1)", signature: deposit });
-    const mk = await settled(fetchFn, url, mark.address);
+    }]);
+    const mk = await settled(fetchFn, url, mark.address, undefined, clock);
     const value = Buffer.from(mk.data.subarray(0, 8)).readBigUInt64LE();
     const nonce = Buffer.from(mk.data.subarray(8, 16)).readBigUInt64LE();
     const scope = scopeOf(program.id, pool.address);
@@ -591,7 +691,7 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     const commitment = be32(poseidon3([value, BigInt("0x" + hex(label)), precommitment]));
     const slot = Number((nonce - 1n) % 1024n) * 72 + 16;
     for (const [tree, want] of [[0, commitment], [1, label]]) {
-      const pg = await settled(fetchFn, url, pageAddress(program.id, tree, (nonce - 1n) / 1024n).address, (a) => a.data.length >= slot + 32);
+      const pg = await settled(fetchFn, url, pageAddress(program.id, tree, (nonce - 1n) / 1024n).address, (a) => a.data.length >= slot + 32, clock);
       if (!Buffer.from(pg.data.subarray(slot, slot + 32)).equals(Buffer.from(want))) throw new Error(`page ${tree}'s leaf is not the deposit's`);
     }
     if (value !== DEPOSIT) throw new Error(`the mark reads value ${value}`);
@@ -605,9 +705,19 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
       funder: funder.id, return_to: returnTo, need: String(need.total), need_parts: Object.fromEntries(Object.entries(need.parts).map(([k, v]) => [k, String(v)])),
     };
   } finally {
+    if (!funded) {
+      // stopped (or failed) before the funding was read: a transfer to the funder may be in flight; watch its balance
+      // first, so what lands in that time is swept too, and the keys stay until after that sweep
+      log(`stopped before funding; watching ${funder.id}'s balance for ${WAITS.lateFunding / 1000} s, then sweeping`);
+      let seen = 0n;
+      for (const end = now() + WAITS.lateFunding; now() < end; await wait(WAITS.poll)) {
+        const b = await ops.balance().catch(() => seen);
+        if (b !== seen) log(`the funder holds ${(seen = b)} lamports`);
+      }
+    }
     const c = await cleanup(ops, returnTo, { wait });
     for (const p of c.problems) log(`cleanup: ${p}`);
-    for (const sig of c.signatures) txs.push({ step: "sweep (the funder's rest back)", signature: sig });
+    if (!funded) txs.unshift(...(await fundingTxs().catch((e) => (log(`funding read failed: ${e.message}`), []))));
     log(c.signatures.length ? `swept ${c.swept} lamports to ${returnTo}: ${c.signatures.join(", ")}; the funder holds ${c.after ?? "an unread balance"}` : `no sweep sent; the funder holds ${c.after ?? "an unread balance"}`);
     // the keys go only once the funder reads empty on both RPCs with nothing left under its authority
     let left;
@@ -623,15 +733,16 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     }
     if (result) Object.assign(result, { funder_after: String(c.after), swept: String(c.swept) });
     if (left.length) result = null;
-    process.removeListener("SIGINT", onSignal).removeListener("SIGTERM", onSignal);
+    for (const s of SIGNALS) process.removeListener(s, onSignal);
+    stoppedRecord(); // replaced below by the full record when the run completed
+    if (!result) log(`wrote ${outFile} (complete: false): every transaction of the run with its state`);
   }
   if (!result) throw new Error("the cleanup did not read the funder empty with nothing left: its keys are kept");
-  // one line per transaction: a --prior signature may also be on the programdata
+  // one line per landed transaction: a --prior signature may also be on the programdata
   const seen = new Set();
-  result.txs = txs.filter((t) => !seen.has(t.signature) && seen.add(t.signature));
-  await waitFinalized(fetchFn, url, result.txs.map((t) => t.signature));
+  result.txs = txs.filter((t) => t.state === "landed" && !seen.has(t.signature) && seen.add(t.signature)).map(({ step, signature }) => ({ step, signature }));
+  await waitFinalized(fetchFn, url, result.txs.map((t) => t.signature), clock);
   result = await chainRecord(fetchFn, url, result);
-  const outFile = opt("--out", path.join(REPO, `scripts/live-checks/pool-sol-deploy.${cluster}.json`));
   writeFileSync(outFile, JSON.stringify(result, null, 2) + "\n");
   log(`every transaction finalized; wrote ${path.relative(process.cwd(), outFile)}`);
   for (const t of result.txs) log(`tx ${t.step}: ${t.signature}`);
