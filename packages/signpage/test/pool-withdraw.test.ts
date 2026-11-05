@@ -13,7 +13,8 @@ import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { VaultTree } from "../../kit/src/vault/inputs.ts";
 import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
-import { solanaDecodePoolRelease, solanaPoolFee, solanaPoolPage, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
+import { solanaDecodePoolRelease, solanaEncodePoolTag3, solanaPoolFee, solanaPoolPage, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
+import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import { mergeWithdrawOp } from "../src/pool-testnet.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
@@ -24,9 +25,9 @@ import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_SEND_MARGIN_MS, solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { finishPoolOnward, nearestPlannable, type PendingOnward, planPoolWithdraw, poolWithdrawable, runPoolWithdraw, solanaWithdrawMinPart, withdrawNoteFloor, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
+import { finishPoolOnward, HISTORY_PAGE, HISTORY_PASS, type HistoryPlaces, nearestPlannable, type PendingOnward, planPoolWithdraw, poolWithdrawable, runPoolWithdraw, solanaWithdrawMinPart, withdrawNoteFloor, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
-import { ASK, C, COST, FEE, FLOOR, MIN, NOW, SCOPE, SEED64, SIG, TO, W_FEE, closers, lamportsOf, read, world } from "./pool-withdraw-world.ts";
+import { ASK, C, COST, FEE, FINAL_SLOT, FLOOR, MIN, NOW, SCOPE, SEED64, SIG, TO, W_FEE, closers, lamportsOf, read, world } from "./pool-withdraw-world.ts";
 
 
 test("the min part: rent(0), and the relay fee less W's fee where that is more (the 2 x fee backstop); no tip cap", () => {
@@ -121,8 +122,11 @@ test("a withdraw sends exactly the typed amount to To from one note: the release
   assert.equal(lamportsOf(on.ixs[0]!.data), amount, "exactly the typed amount arrives");
   assert.equal(wd.balance.get(TO), amount);
   assert.equal(wd.balance.get(W), 0n, "W ends at 0");
-  assert.deepEqual(a.txs, [{ chain: "solana", hash: SIG }, { chain: "solana", hash: base58.encode(wd.onwards()[0]!.subarray(1, 65)) }]);
-  assert.deepEqual(wd.order, ["owe:RESERVED", "send:1", `settle:${wd.ids[0]}`], "RESERVED, then the onward owed, before the release leaves");
+  assert.deepEqual(a.txs, [{ chain: "solana", hash: [...wd.landed.keys()][0]! }, { chain: "solana", hash: base58.encode(wd.onwards()[0]!.subarray(1, 65)) }]);
+  // the release's own signature, once the sender names it, added to the owed send still stored, the op left alone
+  // (fold 3; fold 4: never a whole owe again)
+  assert.deepEqual(wd.order, ["owe:RESERVED", "send:1", "release:RESERVED", `settle:${wd.ids[0]}`], "RESERVED, then the onward owed, before the release leaves");
+  assert.equal((wd.owed.at(-1) as { release?: string }).release, [...wd.landed.keys()][0]);
   assert.deepEqual([wd.stages[0], wd.stages.includes("in_transit"), wd.stages.at(-1)], ["proving", true, "sent"]);
   // W signed the release's slot 1; the fee payer's slot 0 is the helper's
   assert.ok(wd.releases[0]!.subarray(65, 129).some((b) => b !== 0));
@@ -234,7 +238,7 @@ test("a release whose spend is not read in time keeps the part owed: in_transit,
   const W = wd.binds[0]!.recipient;
   assert.equal(a.stage, "in_transit");
   const held = (await wd.ns.get(wd.ids[0]!))!;
-  assert.deepEqual(a.pending, { noteId: wd.ids[0], attempt: held.attempt, context: held.contexts!.at(-1)!.context, to: TO, last: true, feeCap: W_FEE.toString() });
+  assert.deepEqual(a.pending, { noteId: wd.ids[0], attempt: held.attempt, context: held.contexts!.at(-1)!.context, to: TO, last: true, feeCap: W_FEE.toString(), release: [...wd.landed.keys()][0]! });
   assert.deepEqual(wd.pendings.at(-1), a.pending, "the op's last write still owes it");
   assert.deepEqual(wd.order.slice(0, 2), ["owe:RESERVED", "send:1"], "owed before the release left");
   assert.equal(wd.balance.get(W), amount + W_FEE);
@@ -313,6 +317,20 @@ test("a fee that rose past the Max fee drawn: nothing sent, the part owed on W w
   assert.equal(wd.balance.get(TO), amount - W_FEE);
 });
 
+test("a fee above all W holds is no fee to draw again: nothing sent, no fee needed named, the part kept owed (fold 2, review LOW 4)", async () => {
+  let rose = false;
+  const wd = await world([30_000_000n], { feeFor: () => (rose ? 10n ** 12n : W_FEE), afterRelease: () => void (rose = true) });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  const W = wd.binds[0]!.recipient;
+  assert.equal(a.feeNeeded, undefined);
+  assert.notEqual(a.pending, null, "still owed");
+  assert.equal(wd.onwards().length, 0);
+  assert.equal(wd.balance.get(W), 5_000_000n + W_FEE);
+  const f = await finishPoolOnward(wd.host, a.pending!);
+  assert.equal(f?.feeNeeded, undefined);
+  assert.equal(wd.onwards().length, 0);
+});
+
 test("the plan's fee for W is read on a message of exactly the onward's shape: one signer, one System transfer", async () => {
   const wd = await world([30_000_000n]);
   await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
@@ -386,19 +404,17 @@ test("another tab sent a part on first: the run goes on to its next part, never 
   assert.equal(wd.balance.get(TO), 33_000_000n);
 });
 
-const pend = (noteId: string, last: boolean): PendingOnward => ({ noteId, attempt: "00".repeat(16), context: "1", to: TO, last, feeCap: W_FEE.toString() });
-
 test("a withdraw op's writes merge: another tab's onward tx and arrival are never dropped, a later part's pending never cleared", () => {
-  const b = mergeWithdrawOp({ kind: "withdraw", stage: "in_transit", txs: [{ chain: "solana", hash: "R1" }], created_ms: 1, pending: pend("n1", false) }, { stage: "stopped", txs: [{ chain: "solana", hash: "O1" }], arrived: { O1: "5" }, clear: "n1" });
+  const b = mergeWithdrawOp({ kind: "withdraw", stage: "in_transit", txs: [{ chain: "solana", hash: "R1" }], created_ms: 1, owed: "n1" }, { stage: "stopped", txs: [{ chain: "solana", hash: "O1" }], arrived: { O1: "5" }, clear: "n1" });
   assert.deepEqual(b.txs, [{ chain: "solana", hash: "R1" }, { chain: "solana", hash: "O1" }]);
-  assert.equal(b.pending, undefined);
+  assert.equal(b.owed, undefined);
   // tab A's own write comes after: its txs are added to B's, B's onward and arrival stay
-  const a = mergeWithdrawOp(b, { stage: "in_transit", txs: [{ chain: "solana", hash: "R1" }, { chain: "solana", hash: "R2" }], arrived: {}, pending: pend("n2", true) });
+  const a = mergeWithdrawOp(b, { stage: "in_transit", txs: [{ chain: "solana", hash: "R1" }, { chain: "solana", hash: "R2" }], arrived: {}, owe: "n2" });
   assert.deepEqual((a.txs as { hash: string }[]).map((t) => t.hash), ["R1", "O1", "R2"]);
   assert.deepEqual(a.arrived, { O1: "5" });
   // B's late clear of part 1 leaves part 2's pending
   const late = mergeWithdrawOp(a, { stage: "stopped", txs: [], clear: "n1" });
-  assert.deepEqual(late.pending, pend("n2", true));
+  assert.equal(late.owed, "n2");
   assert.equal(late.created_ms, 1);
 });
 
@@ -407,7 +423,7 @@ test("the onward owed names its note by id, never by its label (which links the 
   const wd = await world([30_000_000n], { settleUnspent: true });
   const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
   const n = (await wd.ns.list())[0]!;
-  assert.deepEqual(Object.keys(a.pending!).sort(), ["attempt", "context", "feeCap", "last", "noteId", "to"]);
+  assert.deepEqual(Object.keys(a.pending!).sort(), ["attempt", "context", "feeCap", "last", "noteId", "release", "to"]);
   const text = JSON.stringify([a.pending, wd.owed]);
   assert.ok(!text.includes(n.leaf!.label.toString()), "no label in what the op stores");
 });
@@ -502,4 +518,488 @@ test("an owed send that names no attempt or context is no attempt's: stopped, no
   assert.deepEqual(await finishPoolOnward(wd.host, { ...a.pending!, attempt: "" }), { stage: "stopped", txs: [], arrived: {} });
   assert.equal(wd.onwards().length, 0);
   assert.equal(n.state, "RESERVED");
+});
+
+// ---------- card signpage-withdraw-own-spend: the round-3 review's LOW 1 ----------
+
+// Two devices signed in with the same 12 words derive the same note and the same W, and each keeps its own note store.
+// A spent note and a full W never say whose release it was: W goes on only once both RPCs read that the release which
+// spent the note carries this attempt's context.
+const youngRpcs = (wd: Awaited<ReturnType<typeof world>>): PoolWithdrawHost["rpcs"] => {
+  const [r0, r1] = wd.host.rpcs;
+  const young = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (m === "getBlockHeight" ? 0 : rpc(m, p))) as SolanaRpc;
+  return [young(r0), young(r1)];
+};
+
+test("another device's release spent the note to the same W: the run sends nothing from W and ends stopped", async () => {
+  const wd = await world([30_000_000n]);
+  // the release that landed carries another attempt's context (another device's, same words, same W)
+  wd.plant.afterRelease = () => wd.foreign();
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  const W = wd.binds[0]!.recipient;
+  assert.equal(a.stage, "stopped");
+  assert.equal(a.pending, null);
+  assert.equal(wd.onwards().length, 0, "nothing sent from W");
+  assert.equal(wd.balance.get(TO) ?? 0n, 0n);
+  assert.equal(wd.balance.get(W), 5_000_000n + W_FEE, "the other device's part stays on W for that device");
+});
+
+test("an owed send whose note another device spent, W already sent on by it: the finish is stopped, never sent", async () => {
+  const wd = await world([30_000_000n], { landed: false, readBack: "none" });
+  const op1 = await runPoolWithdraw({ ...wd.host, rpcs: youngRpcs(wd) }, ASK, TO, 5_000_000n, COST);
+  assert.equal(op1.stage, "in_transit");
+  // device 2 spends the note (to the same W) and sends W on: W at 0, the note spent on chain
+  wd.foreignLand(wd.releases[0]!, 0n);
+  wd.plant.landed = true;
+  wd.plant.readBack = "ours";
+  assert.deepEqual(await finishPoolOnward(wd.host, op1.pending!), { stage: "stopped", txs: [], arrived: {} }, "never reported sent with nothing arrived");
+  assert.equal(wd.onwards().length, 0);
+});
+
+test("an owed send whose note another device spent, its part still on W: the finish sends nothing to this device's To", async () => {
+  const wd = await world([30_000_000n], { landed: false, readBack: "none" });
+  const op1 = await runPoolWithdraw({ ...wd.host, rpcs: youngRpcs(wd) }, ASK, TO, 5_000_000n, COST);
+  const W = wd.binds[0]!.recipient;
+  wd.foreignLand(wd.releases[0]!, 7_000_000n);
+  wd.plant.landed = true;
+  wd.plant.readBack = "ours";
+  assert.deepEqual(await finishPoolOnward(wd.host, op1.pending!), { stage: "stopped", txs: [], arrived: {} });
+  assert.equal(wd.onwards().length, 0);
+  assert.equal(wd.balance.get(TO) ?? 0n, 0n);
+  assert.equal(wd.balance.get(W), 7_000_000n, "device 2's part stays on W");
+});
+
+test("whose release it was must be read on both RPCs (its own signature not kept): one that lists no spend, or another transaction, decides nothing", async () => {
+  type Wd = Awaited<ReturnType<typeof world>>;
+  const histories: ((wd: Wd) => (s: string[], p: 0 | 1) => string[])[] = [
+    () => (s, p) => (p === 1 ? [] : s),
+    // the second RPC names another transaction (the same bytes under another id) for the spend
+    (wd) => (s, p) => (p === 1 ? s.map((x) => (wd.landed.has(x) ? wd.alias(x) : x)) : s),
+  ];
+  for (const historyOf of histories) {
+    const wd = await world([30_000_000n], { settleUnspent: true });
+    const history = historyOf(wd);
+    const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+    wd.plant.settleUnspent = false;
+    wd.plant.history = history;
+    const W = wd.binds[0]!.recipient;
+    const f = await finishPoolOnward(wd.host, noRelease(a.pending!));
+    assert.equal(f, null, "read again later: the money may be this attempt's");
+    assert.equal(wd.onwards().length, 0);
+    assert.equal(wd.balance.get(W), 5_000_000n + W_FEE);
+    // both RPCs agree: this attempt's release, so W goes on
+    wd.plant.history = undefined;
+    assert.equal((await finishPoolOnward(wd.host, noRelease(a.pending!)))?.stage, "sent");
+    assert.equal(wd.balance.get(TO), 5_000_000n);
+  }
+});
+
+// card signpage-withdraw-own-spend (3): a stage written with a clear is that note's verdict (round-3 review
+// probe3-merge): it never stands over a later part's send still owed
+test("a stale finish's stage for one note never stands over another note's send still owed; it does once none is owed", () => {
+  const owed2 = { kind: "withdraw", stage: "in_transit", txs: [{ chain: "solana", hash: "rel1" }, { chain: "solana", hash: "on1" }, { chain: "solana", hash: "rel2" }], created_ms: 1, owed: "n2" };
+  const r2 = mergeWithdrawOp(owed2, { stage: "stopped", clear: "n1" });
+  assert.equal(r2.stage, "in_transit", "part 2 still owed: not stopped");
+  assert.equal(r2.owed, "n2");
+  const r3 = mergeWithdrawOp(r2, { stage: "sent", txs: [{ chain: "solana", hash: "on2" }], arrived: { on2: "5000000" }, clear: "n2" });
+  assert.equal(r3.stage, "sent");
+  assert.equal(r3.owed, undefined);
+  // no send owed: the stage applies (the op's own end, or a freed note's stopped)
+  assert.equal(mergeWithdrawOp({ ...owed2, owed: undefined }, { stage: "stopped", clear: "n1" }).stage, "stopped");
+  assert.equal(mergeWithdrawOp({ ...owed2, owed: "n1" }, { stage: "stopped", clear: "n1" }).stage, "stopped");
+  // a fee_needed goes with its own note's clear only
+  const f = mergeWithdrawOp(owed2, { feeNeeded: "10000" });
+  assert.equal(mergeWithdrawOp(f, { clear: "n1" }).fee_needed, "10000");
+  assert.equal(mergeWithdrawOp(f, { clear: "n2" }).fee_needed, undefined);
+});
+
+test("a failed transaction of the note in W's history is no spend: another device's landed release after it decides, nothing sent", async () => {
+  const wd = await world([30_000_000n], { landed: false, readBack: "none" });
+  const op1 = await runPoolWithdraw({ ...wd.host, rpcs: youngRpcs(wd) }, ASK, TO, 5_000_000n, COST);
+  const W = wd.binds[0]!.recipient;
+  // this device's release landed and failed (the note spent first by device 2), then device 2's landed
+  wd.foreignLand(wd.releases[0]!, 7_000_000n);
+  wd.landOlder(wd.releases[0]!, { failed: true });
+  wd.plant.landed = true;
+  wd.plant.readBack = "ours";
+  assert.deepEqual(await finishPoolOnward(wd.host, op1.pending!), { stage: "stopped", txs: [], arrived: {} });
+  assert.equal(wd.onwards().length, 0);
+  assert.equal(wd.balance.get(W), 7_000_000n);
+});
+
+test("a release of another note to W (anyone may send one there), before or after this attempt's, never decides whose spend it was", async () => {
+  for (const newer of [false, true]) {
+    const wd = await world([30_000_000n], { settleUnspent: true });
+    const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+    const other = wd.landOlder(wd.releases[0]!, { nullifier: true });
+    // W's history read newest first: the other note's release read before this attempt's when it is the newer
+    if (newer) wd.plant.history = (s) => [other, ...s.filter((x) => x !== other)];
+    // its own signature not kept: W's history alone decides
+    const f = await finishPoolOnward(wd.host, noRelease(a.pending!));
+    assert.equal(f?.stage, "sent", newer ? "newer" : "older");
+    assert.equal(wd.balance.get(TO), 5_000_000n);
+  }
+});
+
+test("the run: the release read back not this attempt's, and an RPC that lists no spend for the part, decides nothing: in_transit, nothing sent from W, the part owed", async () => {
+  const wd = await world([30_000_000n], { history: (s, p) => (p === 1 ? [] : s) });
+  wd.plant.afterRelease = () => wd.foreign();
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  const W = wd.binds[0]!.recipient;
+  assert.equal(a.stage, "in_transit");
+  assert.ok(a.pending);
+  assert.equal(wd.onwards().length, 0);
+  assert.equal(wd.balance.get(W), 5_000_000n + W_FEE);
+});
+
+// ---- fold 2 (review of ebafdf3): W's history read takes any message format, pages on the cursor, and ends ----
+
+/** A legacy (unversioned) 1-lamport transfer to `to`: anyone can land one naming W, before or after the release. */
+function legacyTransfer(payer: string, to: string): Uint8Array {
+  const keys = [payer, to, SOLANA_SYSTEM_PROGRAM].map((k) => base58.decode(k));
+  const ix = [2, 2, 0, 1, 12, 2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+  const msg = [1, 0, 1, 3, ...keys.flatMap((k) => [...k]), ...new Uint8Array(32).fill(3), 1, ...ix];
+  return Uint8Array.from([1, ...new Uint8Array(64).fill(44), ...msg]);
+}
+const withTx = (rpc: SolanaRpc, sig: string, wire: Uint8Array, failed: boolean): SolanaRpc =>
+  (async (m: string, p: readonly unknown[]) =>
+    m === "getTransaction" && p[0] === sig ? { transaction: [base64.encode(wire), "base64"], meta: { err: failed ? { InstructionError: [0, "x"] } : null } } : rpc(m, p)) as SolanaRpc;
+
+for (const failed of [false, true]) {
+  test(`a ${failed ? "failed" : "landed"} legacy transaction naming W, older than this device's release, is not the spend: the finish still sends (review HIGH 1)`, async () => {
+    const wd = await world([30_000_000n], { settleUnspent: true });
+    const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+    wd.plant.settleUnspent = false;
+    const W = wd.binds[0]!.recipient;
+    const leg = legacyTransfer(FEE_PAYER, W);
+    const sig = base58.encode(leg.subarray(1, 65));
+    wd.plant.history = (s) => [...s, sig];
+    const [r0, r1] = wd.host.rpcs;
+    const f = await finishPoolOnward({ ...wd.host, rpcs: [withTx(r0, sig, leg, failed), withTx(r1, sig, leg, failed)] }, a.pending!);
+    assert.equal(f?.stage, "sent");
+    assert.equal(wd.balance.get(TO), 5_000_000n);
+  });
+}
+
+test("this device's own release landed in a legacy message (the pool program takes either) is read as its own: sent", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  const W = wd.binds[0]!.recipient;
+  const [r0, r1] = wd.host.rpcs;
+  const listed = (await r0("getSignaturesForAddress", [W, {}])) as { signature: string }[];
+  assert.equal(listed.length, 1, "W's history: the release alone");
+  const sig = listed[0]!.signature;
+  const v0 = wd.landed.get(sig)!;
+  const n = v0[0]!;
+  assert.equal(v0[1 + 64 * n], 0x80);
+  assert.equal(v0.at(-1), 0, "no lookups");
+  // the same release, its message unversioned: no prefix, no lookup list
+  const leg = Uint8Array.from([...v0.subarray(0, 1 + 64 * n), ...v0.subarray(2 + 64 * n, v0.length - 1)]);
+  const f = await finishPoolOnward({ ...wd.host, rpcs: [withTx(r0, sig, leg, false), withTx(r1, sig, leg, false)] }, a.pending!);
+  assert.equal(f?.stage, "sent");
+});
+
+const dust = (n: number, tag: number) => Array.from({ length: n }, (_, i) => base58.encode(Uint8Array.from({ length: 64 }, (_, k) => (k < 4 ? (i >> (8 * k)) & 255 : tag))));
+/** An RPC that pages getSignaturesForAddress for real (before, limit), `cap` its own page size. */
+const paged = (rpc: SolanaRpc, cap: number, calls: { n: number }): SolanaRpc =>
+  (async (m: string, p: readonly unknown[]) => {
+    const r = await rpc(m, p);
+    if (m !== "getSignaturesForAddress") return r;
+    calls.n++;
+    const all = r as { signature: string }[];
+    const o = p[1] as { limit: number; before?: string };
+    const from = o.before === undefined ? 0 : all.findIndex((e) => e.signature === o.before) + 1;
+    return all.slice(from, from + Math.min(o.limit, cap));
+  }) as SolanaRpc;
+
+/** The owed send as a record from before the release's own signature was kept: W's history alone decides. */
+const noRelease = (p: PendingOnward): PendingOnward => {
+  const { release: _r, ...rest } = p;
+  return rest;
+};
+/** A new function for an RPC, as the page's pageRpc makes on every rpcs() call. */
+const fresh = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => rpc(m, p)) as SolanaRpc;
+/** finishPoolOnward until it decides, at most `max` passes: the verdict and the passes it took. As the page runs it
+ *  (pool-testnet's finishOnward): new RPC functions on every pass, the op's places in W's history kept across them. */
+async function passes(h: PoolWithdrawHost, p: PendingOnward, max: number) {
+  const places: HistoryPlaces = new Map();
+  for (let n = 1; n <= max; n++) {
+    const f = await finishPoolOnward({ ...h, rpcs: [fresh(h.rpcs[0]), fresh(h.rpcs[1])], places }, p);
+    if (f !== null) return { f, n };
+  }
+  return { f: null, n: max };
+}
+
+test("9,000 one-lamport transfers to W after this device's release: its release read back by its own signature, sent, W's history never read (review HIGH 2, G1)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  assert.ok(a.pending?.release, "the release's signature kept with the owed send");
+  const pad = dust(9_000, 9);
+  wd.plant.history = (s) => [...pad, ...s];
+  const calls = { n: 0 };
+  const f = await finishPoolOnward({ ...wd.host, rpcs: [paged(wd.host.rpcs[0], HISTORY_PAGE, calls), paged(wd.host.rpcs[1], HISTORY_PAGE, calls)] }, a.pending!);
+  assert.equal(f?.stage, "sent");
+  assert.equal(calls.n, 0, "no history read");
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+});
+
+test("4,500 newer entries in W's history, this device's release the oldest and its signature not kept: each pass reads its share and the next goes on from there, across finishes with new RPC functions; sent (review P1, LOW 4; fold 4)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  // past two passes: one finish (two passes, before and after its settle) never reaches it, the next goes on to it
+  const pad = dust(4_500, 9);
+  wd.plant.history = (s) => [...pad, ...s];
+  const calls = { n: 0 };
+  const { f, n } = await passes({ ...wd.host, rpcs: [paged(wd.host.rpcs[0], HISTORY_PAGE, calls), paged(wd.host.rpcs[1], HISTORY_PAGE, calls)] }, noRelease(a.pending!), 3);
+  assert.equal(f?.stage, "sent");
+  assert.equal(n, 2, `${n} finishes`);
+  assert.ok(calls.n >= 10, `${calls.n} page reads`);
+});
+
+test("a provider that pages 100 at a time: the release past its first page is still found, sent (review P2)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  const pad = dust(150, 9);
+  wd.plant.history = (s) => [...pad, ...s];
+  const calls = { n: 0 };
+  const { f } = await passes({ ...wd.host, rpcs: [paged(wd.host.rpcs[0], HISTORY_PAGE, calls), paged(wd.host.rpcs[1], 100, calls)] }, noRelease(a.pending!), 2);
+  assert.equal(f?.stage, "sent");
+});
+
+test("9,000 transfers to W and another device's release the oldest, this device's never landed: the passes read on to it, stopped, nothing sent (fold 3)", async () => {
+  const wd = await world([30_000_000n], { landed: false, readBack: "none" });
+  const op1 = await runPoolWithdraw({ ...wd.host, rpcs: youngRpcs(wd) }, ASK, TO, 5_000_000n, COST);
+  assert.equal(op1.stage, "in_transit");
+  const W = wd.binds[0]!.recipient;
+  wd.foreignLand(wd.releases[0]!, 7_000_000n);
+  wd.plant.landed = true;
+  wd.plant.readBack = "ours";
+  const pad = dust(9_000, 9);
+  wd.plant.history = (s) => [...pad, ...s];
+  const { f, n } = await passes(wd.host, op1.pending!, 8);
+  assert.deepEqual(f, { stage: "stopped", txs: [], arrived: {} });
+  assert.ok(n >= 2, `${n} finishes, two passes of ${HISTORY_PASS} entries each`);
+  assert.equal(wd.onwards().length, 0);
+  assert.equal(wd.balance.get(W), 7_000_000n);
+});
+
+test(`an RPC that pages forever: each pass ends after ${HISTORY_PASS} entries, no verdict and nothing sent (review MEDIUM 2)`, async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  let k = 0;
+  let entries = 0;
+  const forever = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => {
+    if (m !== "getSignaturesForAddress") return rpc(m, p);
+    k++;
+    const n = Math.min(HISTORY_PAGE, (p[1] as { limit: number }).limit);
+    entries += n;
+    return Array.from({ length: n }, (_, i) => ({ signature: base58.encode(Uint8Array.from({ length: 64 }, (_, j) => (j < 4 ? (i >> (8 * j)) & 255 : j < 8 ? (k >> (8 * (j - 4))) & 255 : 7))), slot: 20, err: null }));
+  }) as SolanaRpc;
+  const r = await Promise.race([
+    finishPoolOnward({ ...wd.host, rpcs: [forever(wd.host.rpcs[0]), wd.host.rpcs[1]] }, noRelease(a.pending!)).then((x) => ({ x }), (e: unknown) => ({ e })),
+    new Promise<"timeout">((res) => setTimeout(() => res("timeout"), 5_000)),
+  ]);
+  assert.notEqual(r, "timeout");
+  // two passes in one finish (before and after its settle), each its own share
+  assert.ok(entries > 0 && entries <= 2 * HISTORY_PASS, `${entries} entries in ${k} pages`);
+  assert.ok(!("x" in (r as object)) || (r as { x: unknown }).x === null, `no verdict: ${JSON.stringify(r)}`);
+  assert.equal(wd.onwards().length, 0);
+});
+
+test("a message of a later version (prefix 0x81) in W's history is not the spend: sent (review LOW 5)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  const v1 = Uint8Array.from([1, ...new Uint8Array(64).fill(45), 0x81, 1, 0, 1, 1, ...new Uint8Array(64).fill(3), 0, 0]);
+  const sig = base58.encode(v1.subarray(1, 65));
+  wd.plant.history = (s) => [sig, ...s];
+  const [r0, r1] = wd.host.rpcs;
+  const { f } = await passes({ ...wd.host, rpcs: [withTx(r0, sig, v1, false), withTx(r1, sig, v1, false)] }, noRelease(a.pending!), 2);
+  assert.equal(f?.stage, "sent");
+});
+
+/** Another device's buy (tag 3) of the same note, to the same W: this device's release fields with another salt. */
+function tag3Of(wd: Awaited<ReturnType<typeof world>>, compressed: boolean): Uint8Array {
+  const wire = wd.releases[0]!;
+  const m = solanaDecodeMessage(wire.subarray(1 + 64 * wire[0]!));
+  const ix = m.instructions.at(-1)!;
+  const rel = solanaDecodePoolRelease(ix.data);
+  const salt = rel.salt.slice();
+  salt[0] ^= 0xff;
+  const r = { ...rel, salt, proof: compressed ? rel.proof.slice(0, 128) : rel.proof };
+  const data = solanaEncodePoolTag3(r, compressed, 0n, [{ program: 7, accounts: [1], data: Uint8Array.of(2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }]);
+  const keys = ix.accounts.map((i) => m.staticKeys[i]!);
+  const accounts = keys.map((key, n) => ({ key, signer: n === 1 || n === 2, writable: [0, 1, 2, 3, 6].includes(n) }));
+  const { message } = solanaCompileV0(keys[2]!, [{ program: m.staticKeys[ix.programIndex]!, accounts, data }], "11111111111111111111111111111111", [], [keys[2]!, keys[1]!]);
+  const out = new Uint8Array(1 + 128 + message.length);
+  out[0] = 2;
+  out.set(message, 129);
+  return out;
+}
+for (const compressed of [false, true]) {
+  test(`another device's buy (tag 3, ${compressed ? "compressed" : "full"} proof) spent the note to W: read at its nullifier, stopped, nothing sent (review P4)`, async () => {
+    const wd = await world([30_000_000n], { landed: false, readBack: "none" });
+    const op1 = await runPoolWithdraw({ ...wd.host, rpcs: youngRpcs(wd) }, ASK, TO, 5_000_000n, COST);
+    assert.equal(op1.stage, "in_transit");
+    const W = wd.binds[0]!.recipient;
+    wd.landOlder(tag3Of(wd, compressed));
+    wd.add(W, 7_000_000n);
+    wd.plant.landed = true;
+    wd.plant.readBack = "ours";
+    assert.deepEqual(await finishPoolOnward(wd.host, op1.pending!), { stage: "stopped", txs: [], arrived: {} });
+    assert.equal(wd.onwards().length, 0);
+  });
+}
+
+test("this device's release read back by its own signature on one RPC only decides nothing by itself: the other RPC must read it too (fold 3)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  const release = a.pending!.release!;
+  // the second RPC neither serves the release by its signature nor lists it in W's history
+  wd.plant.history = (s, p) => (p === 1 ? [] : s);
+  const [r0, r1] = wd.host.rpcs;
+  const blind = (async (m: string, p: readonly unknown[]) => (m === "getTransaction" && p[0] === release ? null : r1(m, p))) as SolanaRpc;
+  assert.equal(await finishPoolOnward({ ...wd.host, rpcs: [r0, blind] }, a.pending!), null);
+  assert.equal(wd.onwards().length, 0);
+});
+
+test("the two RPCs reach the spend in different passes: each keeps what it found, so the finish decides once both have (fold 3)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  // the release 3,000 entries deep on the first RPC, 4,500 on the second: found in passes two and three
+  const pad0 = dust(3_000, 9);
+  const pad1 = dust(4_500, 10);
+  wd.plant.history = (s, p) => [...(p === 0 ? pad0 : pad1), ...s];
+  // with what each found kept: decided by the third pass (the second finish); with none kept, the two RPCs' finds
+  // never meet in one pass until the sixth (each find sends its RPC back to the newest)
+  const { f, n } = await passes(wd.host, noRelease(a.pending!), 3);
+  assert.equal(f?.stage, "sent");
+  assert.ok(n <= 2, `${n} finishes`);
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+});
+
+// fold 4 (review LOW): the run reads its own release back by the signature its send gave, never W's history first
+test("the run reads its release back by the signature its send gave: 2,500 newer entries in W's history, still sent (fold 4)", async () => {
+  const wd = await world([30_000_000n]);
+  const pad = dust(2_500, 9);
+  wd.plant.history = (s) => [...pad, ...s];
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  assert.equal(a.stage, "sent");
+  assert.equal(wd.onwards().length, 1);
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+});
+
+/** The page's two RPCs, whose finalized slot is behind until the release is read at finalized (it reached finalized
+ *  after the first read of the slot); with plant.stale, a balance read below FINAL_SLOT answers 0. */
+const lateFinal = (wd: Awaited<ReturnType<typeof world>>): PoolWithdrawHost["rpcs"] => {
+  let seen = false;
+  const late = (rpc: SolanaRpc): SolanaRpc =>
+    (async (m: string, p: readonly unknown[]) => {
+      if (m === "getTransaction" && (p[1] as { commitment?: string }).commitment === "finalized") seen = true;
+      if (m === "getSlot") return seen ? FINAL_SLOT : FINAL_SLOT - 5;
+      return rpc(m, p);
+    }) as SolanaRpc;
+  return [late(wd.host.rpcs[0]), late(wd.host.rpcs[1])];
+};
+
+for (const where of ["run", "finish"] as const) {
+  test(`the ${where}: the release read back at finalized after the slot was first read, W is read at the finalized slot read after it, never at the older one (fold 4)`, async () => {
+    const wd = await world([30_000_000n], { settleUnspent: where === "finish" });
+    const W = () => wd.binds[0]!.recipient;
+    let stage: string | undefined;
+    if (where === "run") {
+      wd.plant.stale = true;
+      stage = (await runPoolWithdraw({ ...wd.host, rpcs: lateFinal(wd) }, ASK, TO, 5_000_000n, COST)).stage;
+    } else {
+      const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+      assert.equal(a.stage, "in_transit");
+      wd.plant.settleUnspent = false;
+      wd.plant.stale = true;
+      stage = (await finishPoolOnward({ ...wd.host, rpcs: lateFinal(wd) }, a.pending!))?.stage;
+    }
+    assert.equal(stage, "sent");
+    assert.equal(wd.onwards().length, 1, "W sent on, never read as 0 at the older slot");
+    assert.equal(wd.balance.get(W()), 0n);
+    assert.equal(wd.balance.get(TO), 5_000_000n);
+  });
+}
+
+test("a pass that fails part way keeps what it read: a provider that refuses after 1,600 reads in a row, the spend under 3,000 newer entries, the next finish goes on from there; sent (fold 5, review MEDIUM)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  const pad = dust(3_000, 9);
+  wd.plant.history = (s) => [...pad, ...s];
+  // each provider serves 1,600 transaction reads, then refuses one (its rate limit), then serves again
+  const limited = (rpc: SolanaRpc): SolanaRpc => {
+    let n = 0;
+    return (async (m: string, p: readonly unknown[]) => {
+      if (m === "getTransaction" && ++n > 1_600) {
+        n = 0;
+        throw new Error("429");
+      }
+      return rpc(m, p);
+    }) as SolanaRpc;
+  };
+  const { f, n } = await passes({ ...wd.host, rpcs: [limited(wd.host.rpcs[0]), limited(wd.host.rpcs[1])] }, noRelease(a.pending!), 3);
+  assert.equal(f?.stage, "sent");
+  assert.equal(n, 2, `${n} finishes`);
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+});
+
+test("the page's two RPCs in the other order on the next pass: what one found never stands for the other; nothing decided, nothing sent (fold 5, review LOW)", async () => {
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+  wd.plant.settleUnspent = false;
+  const release = a.pending!.release!;
+  const [x, y0] = wd.host.rpcs;
+  // Y neither lists the spend in W's history nor serves it by its signature; X does both
+  wd.plant.history = (s, p) => (p === 1 ? [] : s);
+  const y = (async (m: string, p: readonly unknown[]) => (m === "getTransaction" && p[0] === release ? null : y0(m, p))) as SolanaRpc;
+  const places: HistoryPlaces = new Map();
+  const p = noRelease(a.pending!);
+  assert.equal(await finishPoolOnward({ ...wd.host, rpcs: [fresh(x), fresh(y)], places }, p), null, "X found it, Y did not");
+  assert.equal(await finishPoolOnward({ ...wd.host, rpcs: [fresh(y), fresh(x)], places }, p), null, "Y never stands on X's find");
+  assert.equal(wd.onwards().length, 0);
+});
+
+test("the release's signature is written with the owed send before its read-back starts: the send awaits it (fold 5, review LOW)", async () => {
+  const wd = await world([30_000_000n]);
+  let kept = false;
+  let keptAtRead: boolean | undefined;
+  const [r0, r1] = wd.host.rpcs;
+  const watch = (rpc: SolanaRpc): SolanaRpc =>
+    (async (m: string, p: readonly unknown[]) => {
+      if (m === "getTransaction" && keptAtRead === undefined) keptAtRead = kept;
+      return rpc(m, p);
+    }) as SolanaRpc;
+  const keepRelease = async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    kept = true;
+  };
+  const a = await runPoolWithdraw({ ...wd.host, rpcs: [watch(r0), watch(r1)], keepRelease }, ASK, TO, 5_000_000n, COST);
+  assert.equal(a.stage, "sent");
+  assert.equal(keptAtRead, true, "the read-back began before the signature was written");
+});
+
+test("a failed write of the release's signature never stops the send: keepRelease rejects, the part is still sent on, W at 0 (fold 6, review LOW)", async () => {
+  const wd = await world([30_000_000n]);
+  let asked = 0;
+  const keepRelease = async () => {
+    asked++;
+    throw new Error("the store refused the write");
+  };
+  const a = await runPoolWithdraw({ ...wd.host, keepRelease }, ASK, TO, 5_000_000n, COST);
+  assert.equal(asked, 1, "the signature's write was asked for");
+  assert.equal(a.stage, "sent");
+  assert.equal(wd.onwards().length, 1);
+  assert.equal(wd.balance.get(wd.binds[0]!.recipient), 0n);
+  assert.equal(wd.balance.get(TO), 5_000_000n);
 });

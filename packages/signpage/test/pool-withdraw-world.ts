@@ -20,7 +20,7 @@ import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_SEND_MARGIN_MS, solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { solanaWithdrawMinPart, withdrawNoteFloor, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
+import { solanaWithdrawMinPart, withdrawNoteFloor, type PendingOnward, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { after } from "node:test";
 export { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent };
@@ -70,8 +70,10 @@ export type Plant = {
   /** both RPCs' nodes behind: a balance read with no minContextSlot, or one below FINAL_SLOT, answers 0 (review
    *  #232b LOW 2: a lagging node behind a load balancer) */
   stale?: boolean;
-  /** the release's read-back never answers: the run hangs there, as a tab closed during the send */
+  /** the release's read-back never answers until unhang(): the run hangs there, as a tab closed during the send */
   hangReadBack?: boolean;
+  /** W's history as RPC p lists it (newest first): the world's own by default */
+  history?: (sigs: string[], p: 0 | 1) => string[];
 };
 /** Both RPCs' finalized slot in the world. */
 export const FINAL_SLOT = 20;
@@ -121,7 +123,23 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   const order: string[] = [];
   const fees: Uint8Array[] = [];
   const owed: unknown[] = [];
+  // each landed release by its own id (the fee payer's signature, distinct per release) with its wire, for W's history
+  // (getSignaturesForAddress, newest first) and its getTransaction; `history` holds every landed tx naming an address
+  const landed = new Map<string, Uint8Array>();
+  // another device's release or buy of the note landed: this device's own release, read by the sender's id, failed
+  let spentByOther = false;
+  const history = new Map<string, string[]>();
+  const touch = (address: string, sig: string) => history.set(address, [sig, ...(history.get(address) ?? [])]);
+  // transactions that landed and failed (the runtime's error in their meta): W's history lists them too
+  const failed = new Set<string>();
+  // older than every transaction W's history holds so far
+  const touchOldest = (address: string, sig: string) => history.set(address, [...(history.get(address) ?? []), sig]);
   const keysOf = (wire: Uint8Array) => solanaDecodeMessage(wire.subarray(1 + 64 * wire[0]!));
+  const hung: (() => void)[] = [];
+  const unhang = (): void => {
+    plant.hangReadBack = false;
+    for (const r of hung.splice(0)) r();
+  };
   const rpc = (p: 0 | 1): SolanaRpc =>
     (async (method: string, params: readonly unknown[]) => {
       if (method === "getAccountInfo") {
@@ -161,18 +179,31 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         add(from, -(v + fee));
         add(to, v);
         onwards.set(sig, wire.slice());
+        touch(from, sig);
         return sig;
+      }
+      if (method === "getSignaturesForAddress") {
+        // as an RPC pages it: newest first, after `before` when given, at most `limit`
+        const sigs = history.get(params[0] as string) ?? [];
+        const all = plant.history?.(sigs, p) ?? sigs;
+        const o = (params[1] ?? {}) as { before?: string; limit?: number };
+        const from = o.before === undefined ? 0 : all.indexOf(o.before) + 1;
+        if (o.before !== undefined && from === 0) return [];
+        return all.slice(from, from + (o.limit ?? 1_000)).map((signature) => ({ signature, slot: FINAL_SLOT, err: null }));
       }
       if (method === "getTransaction") {
         const sig = params[0] as string;
+        const rel = landed.get(sig);
+        if (rel) return { transaction: [base64.encode(rel), "base64"], meta: { err: failed.has(sig) ? { InstructionError: [1, { Custom: 6 }] } : null } };
         const on = onwards.get(sig);
         if (on) return { transaction: [base64.encode(on), "base64"], meta: { err: null } };
         const last = releases.at(-1);
-        if (sig === SIG && plant.hangReadBack) return new Promise(() => {});
+        // held until unhang(): then answered as the chain has it, so the run ends and holds nothing after its test
+        if (sig === SIG && plant.hangReadBack) await new Promise<void>((r) => hung.push(r));
         if (sig !== SIG || (plant.readBack ?? "ours") === "none" || !last) return null;
         const tx = last.slice();
         tx.set(base58.decode(SIG), 1);
-        return { transaction: [base64.encode(tx), "base64"], meta: { err: null } };
+        return { transaction: [base64.encode(tx), "base64"], meta: { err: spentByOther ? { InstructionError: [1, { Custom: 6 }] } : null } };
       }
       throw new Error(`unexpected ${method}`);
     }) as SolanaRpc;
@@ -193,7 +224,14 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         const ix = m.instructions.at(-1)!;
         const r = solanaDecodePoolRelease(ix.data);
         add(m.staticKeys[ix.accounts[1]!]!, r.withdrawnValue - r.relayFee);
+        const id = base58.encode(new Uint8Array(64).fill(100 + landed.size));
+        const wire = tx.slice();
+        wire.set(base58.decode(id), 1);
+        landed.set(id, wire);
+        touch(m.staticKeys[ix.accounts[1]!]!, id);
         plant.afterRelease?.(m.staticKeys[ix.accounts[1]!]!);
+        // the sender's word for the id: the landed transaction's own
+        return { signature: id };
       }
       return { signature: SIG };
     },
@@ -209,8 +247,61 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     wait: async () => {},
     stage: (s, _txs, pending) => void (stages.push(s), pendings.push(pending)),
     owe: async (p) => void (owed.push(p), order.push(`owe:${(await ns.get(p.noteId))?.state}`)),
+    keepRelease: async (noteId, attempt, release) => {
+      const p = owed.findLast((x) => (x as PendingOnward).noteId === noteId && (x as PendingOnward).attempt === attempt) as PendingOnward | undefined;
+      if (p) owed.push({ ...p, release });
+      order.push(`release:${(await ns.get(noteId))?.state}`);
+    },
   };
-  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, pendings, binds, plant, fees, owed };
+  /** Another device's spend of a landed release: its salt changed, so its context is not this device's attempt's. */
+  const foreign = (i = 0): void => {
+    const id = [...landed.keys()][i]!;
+    const wire = landed.get(id)!;
+    wire[wire.length - 2]! ^= 1; // the salt's last byte: the release data ends the message, before its 0 lookups
+    landed.set(id, wire);
+  };
+  /** Another device's release of note `noteId`'s part to W, never this device's (its context another attempt's):
+   *  this device's own release bytes for it, its salt changed, landed on W. */
+  const foreignLand = (wire: Uint8Array, value: bigint): void => {
+    const m = keysOf(wire);
+    const ix = m.instructions.at(-1)!;
+    const id = base58.encode(new Uint8Array(64).fill(200 + landed.size));
+    const tx = wire.slice();
+    tx.set(base58.decode(id), 1);
+    tx[tx.length - 2]! ^= 1;
+    landed.set(id, tx);
+    spentByOther = true;
+    touch(m.staticKeys[ix.accounts[1]!]!, id);
+    add(m.staticKeys[ix.accounts[1]!]!, value);
+  };
+  /** Another id for a landed release's very bytes: what an RPC that names another transaction for it would list. */
+  const alias = (sig: string): string => {
+    const id = base58.encode(new Uint8Array(64).fill(150 + landed.size));
+    const tx = landed.get(sig)!.slice();
+    tx.set(base58.decode(id), 1);
+    landed.set(id, tx);
+    return id;
+  };
+  /** A transaction in W's history older than the rest: `wire` with its own id, failed or landed. `nullifier` set: its
+   *  release's nullifier hash and salt changed (another note's release to W, which anyone can make). */
+  const landOlder = (wire: Uint8Array, o: { failed?: boolean; nullifier?: boolean } = {}): string => {
+    const m = keysOf(wire);
+    const ix = m.instructions.at(-1)!;
+    const id = base58.encode(new Uint8Array(64).fill(230 + landed.size));
+    const tx = wire.slice();
+    tx.set(base58.decode(id), 1);
+    // another note's release: its own nullifier hash and its own context (its salt)
+    if (o.nullifier) {
+      tx[tx.length - 1 - 387 + 1 + 256 + 63]! ^= 1;
+      tx[tx.length - 2]! ^= 1;
+    }
+    landed.set(id, tx);
+    if (o.failed) failed.add(id);
+    else if (!o.nullifier) spentByOther = true;
+    touchOldest(m.staticKeys[ix.accounts[1]!]!, id);
+    return id;
+  };
+  return { w, host, ns, ids, releases, onwards: () => [...onwards.values()], balance, add, order, stages, pendings, binds, plant, fees, owed, landed, foreign, foreignLand, alias, landOlder, unhang };
 }
 
 /** A wire's signers and instructions, as keys: [signers, [program, accounts, data][]]. */
