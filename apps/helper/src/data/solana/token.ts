@@ -79,9 +79,15 @@ export const SEARCH_PER_SPAN = 16;
  *  once; such a mint goes as soon as there is room, carrying every refresh due (card helper-token-page-cold). */
 export const JUP_GAP_MS = 4_000;
 export const COLD_ROOM = 4;
-/** A search whose room is further off than this answers its waiting callers 429 with the wait instead of holding them
- *  (never longer than the old batch gap); the mint stays in the next search, so the retry finds its row. */
+/** A search whose room, or Jupiter's hold, is further off than this answers its waiting callers not ready (503 upstream)
+ *  instead of holding them (never longer than the old batch gap), never our 429; the mint stays in the next search, so
+ *  the retry finds its row. */
 export const SEARCH_WAIT_MAX_MS = 4_000;
+/** The longest a search waits out Jupiter's hold (its 429's reset) before it reads again (card helper-crowd-429 fold 6):
+ *  past it the waiting pages answer not ready. [design: the app's 10 s page request (apps/terminal/src/screens/token/
+ *  source.ts TIMEOUT_MS) less SEARCH_WAIT_MAX_MS and 1 s for the search's answer and the page's chain reads; Jupiter's
+ *  resets in live run 41943005189 were 1 and 4 s.] */
+export const SEARCH_HOLD_WAIT_MS = 5_000;
 /** Tokens held per cache; the oldest goes first. */
 export const CACHE_MAX = 2_000;
 export const HOLDERS_MAX = 20;
@@ -298,7 +304,7 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 // ---------------------------------------------------------------------------------------------------------------
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
-type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean): Promise<Answer> };
+type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number): Promise<Answer> };
 type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string; why?: string }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
@@ -502,7 +508,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     const at = Math.max(lastFailed + JUP_GAP_MS, cold ? roomAt(SEARCH_PER_SPAN, t) : Math.max(lastSearch + JUP_GAP_MS, roomAt(SEARCH_PER_SPAN - COLD_ROOM, t)));
     if (at - t > SEARCH_WAIT_MAX_MS) {
       // too far off to hold a caller: each answers 429 with the wait; the mints stay for that search
-      for (const w of waiting.values()) for (const f of w.ws.splice(0)) f.fail(new Throttled(secondsUntil(at, t), "jupiter search"));
+      // card helper-crowd-429 (fold 6): the search's room is Jupiter's, not the caller's limit: not ready, never our 429
+      for (const w of waiting.values()) for (const f of w.ws.splice(0)) f.fail(new Upstream());
     }
     if (timer !== null && timerAt <= at) return;
     if (timer !== null) clearTimeout(timer);
@@ -535,11 +542,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     sent.push(lastSearch);
     let rows: unknown = null;
     let at = now();
-    let wait = 0;
-    let why: string | undefined;
     try {
-      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true); // proxy.ts PROXY_RESERVE
-      if (a.status === 429) (wait = retryAfterOf(a.headers)), (why = (a as { why?: string }).why);
+      // proxy.ts PROXY_RESERVE; a hold of Jupiter's is waited out within SEARCH_HOLD_WAIT_MS (proxy.ts turn)
+      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
@@ -553,7 +558,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const ws = waiting.get(mint)?.ws ?? [];
       waiting.delete(mint);
       if (!Array.isArray(rows)) {
-        for (const w of ws) w.fail(wait > 0 ? new Throttled(wait, why) : new Upstream());
+        // Jupiter's refusal is not the caller's limit: not ready, the page reads again (card helper-crowd-429, fold 6)
+        for (const w of ws) w.fail(new Upstream());
         continue;
       }
       const r: JupRow = { row: searchRow(rows, mint), at };
