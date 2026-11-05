@@ -166,6 +166,15 @@ export type Pace = { perS: number; burst: number; unit: "post" | "call"; infligh
  *   - rpc.mainnet.chain.robinhood.com, the chain's own and /v1/rpc/robinhood's first: 3.8 posts a second, then 429 (the
  *     same note), and a fourth quick read refused 429 (19:2xZ). Paced at 1, 2 at once: at most 3 in any second.
  * api.blockvectra.com (100 blocks, last) is not paced: its holds keep it, as before.
+ * Base's swap providers, swept from the Mac 2026-11-05 19:2xZ with single 1,000-block eth_getLogs for 6 s (card
+ * helper-ready-page-warm: once Base made 200 ms blocks and base.drpc.org refused 250 blocks and more, the two left took
+ * the walks' bursts and 429'd them, and a quiet token's cold tape found no pair, 503):
+ *   - base-rpc.publicnode.com: 3 a second none refused, 5 a second refused 3 of 30 (-32005, from 1.4 s); 8 at once served.
+ *     Paced at 3 calls a second, 6 at once.
+ *   - base.gateway.tenderly.co: 2 a second none refused, 4 a second refused 2 of 24 at once; batches of 3 a second refused
+ *     1 of 18. Paced at 2 calls a second, 3 at once.
+ *   - base.public.blockpi.network's public endpoint: 4 a second none refused; batches of 5 a second refused 7 of 30
+ *     (-32000 "Max messages exceeded (Limit: 5)"). Paced at 3 calls a second, 4 at once.
  */
 export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
@@ -173,7 +182,20 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.api.pocket.network": { perS: 15, burst: 200, unit: "call" },
   "https://robinhood.drpc.org": { perS: 15, burst: 15, unit: "call" },
   "https://rpc.mainnet.chain.robinhood.com": { perS: 1, burst: 2, unit: "post" },
+  "https://base-rpc.publicnode.com": { perS: 3, burst: 6, unit: "call" },
+  "https://base.gateway.tenderly.co": { perS: 2, burst: 3, unit: "call" },
+  "https://base.public.blockpi.network/v1/rpc/public": { perS: 3, burst: 4, unit: "call" },
+  // mainnet.base.org, Base's own and /v1/rpc/base's first: 5 eth_getTransactionByHash posts a second for 5 s and
+  // batches of 10 at 2 a second (20 calls a second) none refused (2026-11-05 19:3xZ, from the Mac). Paced at 10 calls a
+  // second, 20 at once. It refuses every eth_getLogs (LOGS_REFUSED).
+  "https://mainnet.base.org": { perS: 10, burst: 20, unit: "call" },
 };
+/** Providers that refuse every `eth_getLogs` and answer the other reads: no path sends them one (rpc.ts callEvm, the
+ *  swap reads), so a log read never holds the provider for the reads it does answer. mainnet.base.org answered every
+ *  eth_getLogs, of 1 to 1,000 blocks, from the helper box and from the Mac, -32011 "request limit reached" (HTTP 429;
+ *  2026-11-03 and again 2026-11-05 18:5x-19:0xZ), and eth_blockNumber and eth_getTransactionByHash 200; a caller's log
+ *  read sent there held it 1 s about every 3 s on the box (the helper's log, 5 Nov 18:5xZ: 231 holds in 8 min). */
+export const LOGS_REFUSED: ReadonlySet<string> = new Set(["https://mainnet.base.org"]);
 /** The share of a paced provider's burst background reads leave for callers' reads. [design: a quarter, so a caller's
  *  read finds room at once on the provider it asks first while the walks run at three quarters of its pace.] */
 export const CALLER_ROOM = 0.25;
