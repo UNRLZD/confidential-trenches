@@ -1,0 +1,61 @@
+CARD pool-sol-deploy-mainnet / live: FAIL
+Money path: yes
+Tx: solana-devnet To8y5vj2JhdXryRixS1FQyhEPZC5xiMsjStMrsxXuNEKMrbRb6utCXt9vs9tingK23d1N122A5JUtuoMoQcttNC
+Tx: solana-devnet 59VnwNvBuf1DvSAzkxEcLv2XyPtHGMMD3R9ThEPQidSwVmDGjokaUHAekVNSEBRLY5VegYT1PVeN8PF3R2Kgs1b
+Tx: solana-devnet 4weXUDyTHz9wTU4DWGYXDUd1x3vtLYnzsGaGa194Sd5LU3DgvMn38zmKoGM7UUf8rcSxSBaYs9tvD8MSxP2sG16
+Tx: solana-devnet 4yiFyM41rQMqCREpF7ZVwoA7T3fBDWAKbYGik9pV2KUxTH7P7kzvZjEAXyTbgo93CdUiKPi8ynxHaK5zMD3Tjj46
+Tx: solana-devnet 2QezWXbeyptde8rdBGXA1mtGGSFQ24mVeUv2qqmSWx7b6YjKaV24Tg1AZ5EzFyuHd6PJaBqKQLR7TXbCqCUSuvwD
+Tx: solana-devnet 5y2BhK9CSUDtK37kubD7mfMucw84Spq1JcZGhnbbL4wmaJw6HNU7eBdn8dwo9Aa3ubqVha27dDU92DyPgm8JiZrN
+Tx: solana-devnet 3MdAgaotYujbsHcrox2zyKZw9BePJp74pddpfGGipkpYEQcwhmuw8JzxVBdkDe536B4Tbh49aDgtxpyGBYUtJ4zz
+Tx: solana-devnet 4LNgJ28koBi3d85KCupdgoGf7Awb9tQwzKoJoHg4GuTMSVaiTEfGtvnYoF459uD9jcyKwn5JvaGkmdYhwMw9nS1y
+Tx: solana-devnet 48ivJSfcmPzgiQxXJHZ57opSdd97yWFCxSLZkUEoGHrsADWD8qbKarogBTgQLZQu3ywekMaEyTPSPG5zHuB5d4sb
+Tx: solana-devnet 3LtUy3V85XGJxJukpTCHsMFSPU3MWJ9c416zS534pnhgHNZQzFRhs31SLH2ii1oHWygX2378rPBLerF5uu6k5Jvz
+Tx: solana-devnet 3qk11CoRvKUqkrLhkUDibhYnKbWHR3Yaxjubk8jSpZGEvedTJJ8D9uzLuQkBSLpKSH2Frtq5zbWNDt9naHmAf9Zk
+Tx: solana-devnet 3uV6ucFc8ebjtqwqGVKVT2diyKWQCq4G6nGz4VKLdswMYrWwbZh81FR1Nq8wJ97um6ZnHY97jQWGhEWTyP1u8Uwn
+Tx: solana-devnet 56vCdhihbc7vHHZTVgZYd4Eh6p8QCF5fhEqoUv1U6K7KxbkqdhoRxacrdaJeUCx6rer38zLDr4w7YnqAqvaumtpx
+Tx: solana-devnet 2PW31PrAeHKZTJmRVzB8JmQA5gpDzVd5H7tyFrSWmdcr3HzQNNEbBEb3vked5HGtJ4n8g84TZTyrin539Cs3879a
+Tx: solana-devnet Jhp8GVLoCjam5R5Xk1pvUBRgrjBfZ9RabKRmBmnznvnDTFETnV89h9efCdoFyhCvVSb6BHUJBvUEbBKP88L7SKh
+Tx: solana-devnet 3mxuMwzsua2omTio9NsFn7RN9EbjXXuZMGjJcrszqw5jXcKDV29THrWrTFN64WxJBd1Pe3m1mU1kg6nJohYrNMeR
+Tx: solana-devnet 3xUxPxj7Vx79TzVGpFpxa7o57hU5CPJS65mxCMCTQFfSnjtJVz9dwwicKTrPhHQs25Fzk9RAAgfMWoDRiHcuGXya
+Tx: solana-devnet 45xXrMgzYQcMh4davqruu1pCvPaStbqUPhyGL8L6jzWYUGGv21c6pfrdKvayheaDPZxKs8NmtMuxBuciuMfe41si
+Tx: solana-devnet hA98WjM6V9Vpfkfw8TAQwwMas54VeLuxZHNSXAygqGuehoCxnBAhsRuXJBP1TZrfFVoVedmnEPitNRCzYTzy63N
+Tx: solana-devnet 5f69WPXYDgSfPvq6Zb4mQitrQa6dGf7bJWQ1dYkqBT98zhV3ZYBiAN5VefvuhVAbSgu7oTUFV1LrGQRp7PTTHj6T
+Tx: solana-devnet 4xfjy3SdioaMAjbu49Ti9BboVW9f4UxiqmynwAFVwhMVS2vB6gNvT3FLb4BBTQeTDLgGbC6DAs4TQif4yAbiXCfV
+Tx: solana-devnet 2X7dEogJcipQPdPcPVVz6JUykpfP8wG4UGRXNHUkoQJ3K2drbjR3xkK1PcWLFMVS9vbewFnw7JjQhLwScucNhjUB
+Tx: solana-devnet 4Axme3HfsJfuK3nu4MkA3H8EdDATXvzbDTyZ8yDn9RThNUnC1zxK9wkWfPVUUcLZgcda4wCgx3JMSVc7eqFpNHBL
+Tx: solana-devnet YR9VZz3D5djZW7rZrTUSTeaEiZPdf8EnCoQem5M27Rhb9C5Wr4DP8QJbuZLvNvqhXLUWfULXJHC9UwxvSr36wvf
+Tx: solana-devnet 4ofgL165SnGP9Mx5FuBiaMigGUQjDX5e7TgrnLzTjb1o6ZDDpvrn5TQ35YFngAJzzrqxXq6JCJLtBJLRf6xPyNQR
+Tx: solana-devnet 2W15gDfUzWYDg9qn7ufw7fU36pMkQSUbMRj1tEjUAZb2Jjiub8Tm4bgWWcKgBrXwhgWWiN6nD7N2EX1HcprWcAev
+Tx: solana-devnet 343pA7L8sWHqd65MfYsAPRzds7ZCTdeDD5FvNmcWsSrpFWQqJWDkgiMoCZUn5Zwq6zCfXbDgGHZkeszyqssjtHBt
+Tx: solana-devnet 2UK8tqyLX5TsQgCdBarSjtNokMDrQVYK5GvE7hcFKfDmEFSvWCb7hanDJYpMN27MYaFaT4mPzzf8FbZcj9L6tXRq
+Tx: solana-devnet 51wmU8DfqpfZsc3xP6usg7Gp7mD2q2guK4CwuRb1pRtt1Y5MCwsESgJrr726qx2Vt7yMTujMEDAU4wE4epaiwBSS
+Tx: solana-devnet 4RwR25v9U8cQBRhGmQmMxDkWnwPSsvNDvUwg7pGPaFncCYksCh4Fd1xDmnpBx2LnE6ZradggkQPF4YkBaPkzmGME
+Tx: solana-devnet 3fKHkWgFEvML7zHX4Gbd4fNr1fP49prhz5j1uW48gQXDzAEjeiF1hMfeUvcBv6yYNPiYoYEwe3SpfwvzUB54haoF
+Tx: solana-devnet 2WpUF3So9oaFAJN1wTa2TcbDnsea7p4aqMQJ85Rg4N4UPw9g5887jXZrZqFb8znsqXDU3sazYDWVPkj4cr7v7vg2
+Tx: solana-devnet 21ywbZ5ywi2BQqSTnsaCMmdcewf13dDQLNvxfEkrYs6FGLAYKGXHNZ1ADCyhzMgnBMC9i5bhDwu9uNaU36n53r1v
+Tx: solana-devnet 47CLQUFWZ4gCmsPx7HyAn9X6CLhFAu2CnyV7HUFEMXxiLqjv6FCE7yC14wU3LhGpArr5XyJ2zbA8qDjembSUKkLC
+Tx: solana-devnet 2sCrhiQDK1jCosCS56uVUeGPRRvS8FT9Gu8TDvjpfExrurQYqtJNrhehuJBu8j8dVQW5en1BXQ9tBTecNBdKqGpi
+Tx: solana-devnet 66DxzkuEWteRX25MpT8aj1A44k2cstYiijuV5sp5FyM4JHiWNHQGQXC668AfnxLZmxUgujZF7fhkucumDRE2d5WM
+Tx: solana-devnet 5hFDpL9rbyki3rNSCcHxV1dgPCETgTBt1rpchtDXWDd7EtgnQFsxnTenhprtwTVVCQtTYyJRrejNnd54vDAjPp6M
+Tx: solana-devnet 49Z5iG5Hpaf6WSArXLL9Zh4WjpoK2zbvnojsuwUYUVebDc6XQH5HwQRYDoSTZsjdD3QAw2RgN4dnkSBKSwYeic9n
+Tx: solana-devnet 36m7cpynXHzu4GuxzAdm8LTQGzwAFSWiQ8XTHn9VNBDwSjCQe6TkVLtnpDR6bF6W4kSRY5SVMv9Dsp5g32WCGmwx
+Tx: solana-devnet 3iUEzb5Ea4sDdbRHFhuj8v1LGU7qKqnZvxiJRrFCuowAPEaEDhdH8szuvqYF7Cqhk3uCLRuE2x9km9t1EHZmx1hR
+Tx: solana-devnet 4dhbAxw32MsguKRLjqwDdY3JeHK2eRA2wsn4dNz6KGxot5DUQHAzU1fDfn8iNN5UKTTPZiLD7WeemjbmkAnnYyaX
+Tx: solana-devnet 47zATWh98cjAETN62MKvNxP64jq7jkAZaUaV7NgHf8onaR8VkiiLg2iFtCdnymJwe7B1M6Z9cc5ucp5cUErvXDNs
+Tx: solana-devnet 2PE5xF27Y67RLcKKCam63fpcvwHGTD5Uw5XMtzJtEg98WvrgFhjAEDuKRjPW6g6sz83GfCY7fxgVQNCeSi5y5CU6
+Tx: solana-devnet 2F7Dc6UQCuGU3f5DVhMHofu1vED3JJVKEg2cHs1e7kkrzQTmmLASMNwVgT2HWZXB7F51Gz8bZEnzxpqs6pq82DCA
+Tx: solana-devnet 2FuwgCaw3YXx8pHFWaL4ZXQwmDnqEbcH8nhmgG3FYDvinTkatyw94JG6iB1pc5iUzrwrHrKT4eVLJNZQrE4qovu1
+Tx: solana-devnet v8BbFC13qmLzq7dapi1JWSY3rMJ8awUHdBVKWJAFzkWm6vyjhYe8nURbF7SkFz3dFQg1uwQP8G77r88YaYkCPFx
+Tx: solana-devnet 5ihrdvZwdYiP614M5yHBcKZoCDNJ2FaRkvHtLvMsDTSJ83GfkxtUm6BEkKGPFf7KtoEbB736DXNkLp6rLmX3jasd
+Tx: solana-devnet 3stahFwWbBWMSebPfQZRevpCrEmPsQJ4NEy4tdAe6wHBe8ZL1jTJKihNZkzsEN7xS5RhHB32KLSrB7DQYiGemmC6
+Tx: solana-devnet QNmHu5ykwwjpGBnhTyt6tHLJsABnN8HXEXMdMWBoMCpepE5d3svpu4WDa8QHQAvidjuByLX61YMwbJoxe8yjrXg
+Tx: solana-devnet 3adt6xHLbtNdRVgcUN3eBrBpcUDCc5QSZqeouW6Z5co7Piqpubt8b7NH7FtnGchHrH39B7kjNwhWf8VoReSrUSVA
+Tx: solana-devnet 5k6Vr5uNmg1JKa8jFjWmuTpjsaP7PkJtgD2QppMRCDxTuSd6XZZY4zvqBhWLAsmoAco8SjJhN3sVhrVd6S5npXeE
+Tx: solana-devnet 4o86unJmi6DJtzibE1DXsDASwrjVydPErevuq7c22fQkdWQFtUu8xvR25qKu1dofm4i2NEn9hSspCQeFJgmgCpiw
+Tx: solana-devnet 3oWpah1B12cQ1SpJzDCU7yHtvWBMfd6M2DKjWV374af7WL1iGPyrcgFimkLgXsLbpbvWSzH93ztMyaMypW52Xjcv
+Tx: solana-devnet 3GycQF9gNUaLbTe7BLk5durQEhbCLbKwPaLoUVbcVTPuDKqgdfHGBJkNMb9Vfrx34B6D4ngQxxfgAaozbXz9gX1N
+
+The verdict above is the card's live check on mainnet today: FAIL, no record, since paste 2 has not run. Paste 2's live check writes this file again with the mainnet run's own lines and its verdict. Until then it holds the devnet proof of the fix for paste 1 (5 Nov, the pinned CLI solana-cli 4.4.0 (src:9ef63128) through scripts/deploy/agave-devnet.sh, the same code as paste 1: 79088 bytes, sha256 c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162, CI run 42012187381).
+Old flags (d47a2a55, --use-rpc, the CLI's default 5 sign attempts), the first 47 Tx lines: program 7BUCyqW35Zou2g2NmfJgcmfjL4crQc6y1HjBXB3rSgQb, funded 429764960 lamports at 2026-11-05T18:52:28.978Z. The CLI's deploy failed "Data writes to account failed: Custom error: Max retries exceeded", as paste 1 did on mainnet. The cleanup closed the buffer and swept the rest back to 3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx, and the keys were removed. Its steps: funding (to the funder), sweep (the funder's rest back), the solana CLI: program close, the solana CLI: program deploy (buffer, writes, deploy, SetAuthority).
+New flags (0f49b4ee, no --use-rpc so the writes go to the leaders, --max-sign-attempts 30, the run's own --buffer), the last 7 Tx lines: program A44JsuUduDcKUfgtJ3QQ4Sk1Pb9JZq5zewFsEo1yg47z landed on its first try at 2026-11-05T19:03:41.550Z, with upgrade authority none read on https://api.devnet.solana.com and https://solana-devnet.api.onfinality.io/public. Pool 8ftFPL1BbqC8R7Npj7UNsHPa4T2J1H4XeVsrfx5dVJRH, a test deposit of 0.01 SOL, and the funder 7j1CuEbar6eUd3dqHoQiAtYSX3k4CuqnJaos9J3j7Qah read at 0 lamports on both RPCs. Its steps, in order: funding (to the funder), deploy with the upgradeable loader, --final, the upgradeable loader: SetAuthority (--final: to none), init (tag 0), deposit 0.01 SOL (tag 1), sweep (the funder's rest back), sweep (the funder's rest back).
+A third run, started while the old-flags run's writes were rate-limiting api.devnet, ended in its funding wait on one getBalance 429, before any funding. Its keys were swept by --sweep-kept and removed, and it sent no transaction. That stop is fixed in 0f49b4ee (red 871dc928): the funding wait reads again at the next poll.
