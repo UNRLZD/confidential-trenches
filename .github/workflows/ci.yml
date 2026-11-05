@@ -225,17 +225,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: every other workspace package's test script
         run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test
-      # The mutant sweeps, after the tests: each package's test:mutants (card fresh-run-margin). The README's test command
-      # runs a package's test script only, so a reviewer's fresh run ends well inside readme-fresh-run's 15 minutes; no
-      # sweep is lost, as scripts/ci/tests-run.test.mjs reads this line too.
-      - name: every other workspace package's mutant sweeps
-        run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test:mutants
       - name: every workspace package's typecheck
         run: pnpm -r --if-present run typecheck
       - name: the deploy gate's own tests
         run: node --test apps/terminal/scripts/check-deploy.test.ts
       - name: every live check replays its recorded answers
         run: node --test scripts/live-checks/*.test.mjs
+
+  # The mutant sweeps: each package's test:mutants but the wallet's (card fresh-run-margin), a shard of their own (card
+  # mutant-sweep-no-orphans): in test-packages, after its tests, they grew from 351 s to 502 s and the job hit its
+  # 15 minutes at f3a9cbb (run 42009584431, 904 s), cutting off the live replays. The README's test command runs a
+  # package's test script only, so a reviewer's fresh run ends well inside readme-fresh-run's 15 minutes; no sweep is
+  # lost, as scripts/ci/tests-run.test.mjs reads this line too.
+  test-mutants:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: every other workspace package's mutant sweeps
+        run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test:mutants
 
   # The terminal's browser runs, split across the matrix: scripts/ci/test-shards.mjs reads apps/terminal's test:e2e,
   # runs its first command (the build) in every part and gives each later command to exactly one part, by the job's
@@ -335,7 +351,7 @@ jobs:
   # The required check: it runs whatever the shards ended with (always()), and passes only when each one passed. A
   # shard that failed, was skipped or was cancelled fails it; a test that skipped instead would pass the ruleset.
   test:
-    needs: [test-wallet, test-packages, test-browser, test-scripts, test-vault]
+    needs: [test-wallet, test-packages, test-mutants, test-browser, test-scripts, test-vault]
     if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
