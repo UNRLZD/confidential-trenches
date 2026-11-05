@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/index-evm-swaps.test.mjs: the live check replays recorded answers
-// (index-evm-swaps.answers.json). good: apps/helper at the card branch run on a Mac against the real GeckoTerminal lists
-// and Base providers (the deployed helper has no Base candles yet): PASS. bad_not_deployed: the deployed helper before
-// this card, 404 on every listed Base token's candles: FAIL. Made from the good answer: a trade source that is the
+// (index-evm-swaps.answers.json). good: apps/helper at card helper-ready-page-warm run on a Mac against the real
+// GeckoTerminal lists and Base providers, Base at its 200 ms blocks: PASS. bad_not_deployed: the deployed helper before
+// card index-evm-swaps, 404 on every listed Base token's candles: FAIL. bad_base_2s_clock: the deployed helper once Base
+// made 200 ms blocks (2026-11-05 18:00:01Z), 503 on every Base read: FAIL. Made from the good answer: a trade source that is the
 // vendor, a candles answer with an extra field, a bar whose high is under its open, a tape oldest first, a stale read, no
 // CORS echo, a trade time off Base's clock, a trade that is not on chain, a failed receipt, another sender, an amount the
 // chain never moved, a swap on chain that the tape lacks, and a provider newest block far from now: each FAIL.
@@ -35,9 +36,10 @@ const replay = (run) => async (url, init) => {
   if (req.method === "eth_call") return ok(`0x${c.decimals.toString(16).padStart(64, "0")}`);
   if (req.method === "eth_getTransactionReceipt") return ok(c.receipts[req.params[0]]);
   if (req.method === "eth_getLogs") {
-    assert.equal(req.params[0].fromBlock, hex(c.poolLogs.from));
-    assert.equal(req.params[0].toBlock, hex(c.poolLogs.to));
-    return ok(c.poolLogs.logs);
+    // the pool read goes in spans of at most the chain's widest: each span's logs of the run
+    const [lo, hi] = [Number.parseInt(req.params[0].fromBlock, 16), Number.parseInt(req.params[0].toBlock, 16)];
+    assert.ok(lo >= c.poolLogs.from && hi <= c.poolLogs.to && lo <= hi, `${lo}..${hi} in ${c.poolLogs.from}..${c.poolLogs.to}`);
+    return ok(c.poolLogs.logs.filter((l) => Number.parseInt(l.blockNumber, 16) >= lo && Number.parseInt(l.blockNumber, 16) <= hi));
   }
   assert.fail(req.method);
 };
@@ -73,6 +75,17 @@ test("the deployed helper before this card fails", async () => {
   const r = run(A.bad_not_deployed);
   assert.equal(r.ok, false);
   assert.ok(bad(r).length >= 2);
+});
+
+test("the deployed helper on Base's old 2 s clock fails: every Base candles and trades read 503 once Base made 200 ms blocks (card helper-ready-page-warm)", () => {
+  const r = run(A.bad_base_2s_clock);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.includes("answers 503")), bad(r).join("\n"));
+});
+
+test("a trade timed by Base's old 2 s clock, not its block's own time, fails", () => {
+  const rec = edit((r) => body(r, "trades", (b) => (b.trades[0].t_ms = (1686789347 + 2 * Number.parseInt(r.chain.receipts[b.trades[0].tx].blockNumber, 16)) * 1000)));
+  assert.equal(run(rec).ok, false);
 });
 
 test("a source that is not our own reads fails", () => {
@@ -145,9 +158,9 @@ test("a swap on chain that the tape lacks fails, and so does a pool whose Swap l
   assert.equal(run(dropped).ok, false, "a trade missing from the tape");
 });
 
-test("providers whose newest block is far from now fail, as do two that disagree by more than 10 blocks", () => {
+test("providers whose newest block is far from now fail, as do two that disagree by more than 50 blocks (10 s of Base's)", () => {
   assert.equal(run(edit((r) => (r.chain.heads = [r.chain.heads[0] - 1000, r.chain.heads[1] - 1000]))).ok, false);
-  assert.equal(run(edit((r) => (r.chain.heads = [r.chain.heads[0], r.chain.heads[0] + 50]))).ok, false);
+  assert.equal(run(edit((r) => (r.chain.heads = [r.chain.heads[0], r.chain.heads[0] + 60]))).ok, false);
   assert.equal(run(edit((r) => (r.chain.heads = []))).ok, false);
 });
 
