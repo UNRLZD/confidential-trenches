@@ -220,7 +220,7 @@ export const MUTANTS = [
   [QUOTE, "    let holds = 1;\n", "    let holds = 0;\n", R, "V3 "],
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => !near(x, a) && !near(x, b),", R, "V13 "],
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    () => false,", R, "V13 "],
-  [QUOTE, "    // a head past maxLag is a missing answer, not a vote\n    false,\n", "", R, "V13 "],
+  [QUOTE, "      // a head past maxLag is a missing answer, not a vote\n      false,\n", "", R, "V13 "],
   [QUOTE, "      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails < need) return lose();\n", "", R, "V14 "],
   [QUOTE, "      if (strict() && holds + others.length - n < need) break;\n", "", R, "V15 "],
   // the re-review of 47109a7: the held head's edges (E3, E4) and the confirm's early stop without a vote against (E6)
@@ -431,9 +431,9 @@ export const MUTANTS = [
   [QD, "const feeCap = asked === undefined ? feeMax : asked;", "const feeCap = asked === undefined ? feeMax - 1n : asked;", S, "planted: the sender's fee cap"],
   [QUOTE, 'if (typeof boughtBlock !== "bigint" || boughtBlock < 1n) return refuse(', "if (false) return refuse(", S, "planted: a sell quote takes the buy's block"],
   [QUOTE, "boughtBlock < 1n) return refuse(", "boughtBlock < 0n) return refuse(", S, "planted: a sell quote takes the buy's block"],
-  [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "break;", R, "L5 "],
-  [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "if (a.number >= minBlock || b.number >= minBlock) break;", R, "L5 "],
-  [QUOTE, "if (a.number >= minBlock && b.number >= minBlock) break;", "if (a.number > minBlock && b.number > minBlock) break;", R, "L5 "],
+  [QUOTE, "if (got.a.number >= minBlock && got.b.number >= minBlock) break;", "break;", R, "L5 "],
+  [QUOTE, "if (got.a.number >= minBlock && got.b.number >= minBlock) break;", "if (got.a.number >= minBlock || got.b.number >= minBlock) break;", R, "L5 "],
+  [QUOTE, "if (got.a.number >= minBlock && got.b.number >= minBlock) break;", "if (got.a.number > minBlock && got.b.number > minBlock) break;", R, "L5 "],
   [QUOTE, "    if (left() <= 0) return late();\n", "", R, "L5b "],
   [QUOTE, "export const EVM_MIN_BLOCK_WAIT_MS = 30_000;", "export const EVM_MIN_BLOCK_WAIT_MS = 3_000;", R, "L5b "],
   [QUOTE, "const EVM_MIN_BLOCK_EVERY_MS = 500;", "const EVM_MIN_BLOCK_EVERY_MS = 1_000;", R, "L5b "],
@@ -441,7 +441,7 @@ export const MUTANTS = [
   [QUOTE, "    await new Promise((r) => setTimeout(r, EVM_MIN_BLOCK_EVERY_MS));\n", "", R, "L5b "],
   [QUOTE, "setTimeout(r, EVM_MIN_BLOCK_EVERY_MS)", "setTimeout(r, 0)", R, "L5b "],
   // review fold 1 M2 and L2: one deadline over the reads and the sleeps; the age at the clock after the wait
-  [QUOTE, "const heads = minBlock === 0n ? await read : await within(read, left(), late);", "const heads = await read;", R, "M2 "],
+  [QUOTE, "    got = minBlock === 0n ? await round : await within(round, left(), late);", "    got = await round;", R, "M2 "],
   [QUOTE, "const left = () => EVM_MIN_BLOCK_WAIT_MS - (mono() - t0);", "const left = () => EVM_MIN_BLOCK_WAIT_MS;", R, "M2 "],
   [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs;", R, "L2 "],
   // the age from the quote's entry, the scan's time included, on a sell and a buy (review fold 2, LOW-1)

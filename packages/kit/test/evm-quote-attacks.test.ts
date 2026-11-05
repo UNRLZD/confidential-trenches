@@ -2711,12 +2711,13 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   assert.equal((v as { block?: bigint }).block, 4_999_990n, big(v));
   await idle();
   assert.ok(unheld(urls, "h1.v13.test"), `h1 is not held: ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
-  // a head more than maxLag below is held
+  // a head more than maxLag below is held, by its head alone: b holds the agreed block by number like the others, so no
+  // confirm's vote against it holds it instead
   quoteMod.evmSpeedReset();
   const low = hosted({
-    "a.v13.test": { rpc: chain(pools, 0, 5_000_000), ms: 1 },
-    "b.v13.test": { rpc: chain(pools, 0, 4_999_000), ms: 1 },
-    "c.v13.test": { rpc: chain(pools, 1, 5_000_000), ms: 5 },
+    "a.v13.test": { rpc: byNum(chain(pools, 0, 5_000_000)), ms: 1 },
+    "b.v13.test": { rpc: byNum(chain(pools, 0, 4_999_000)), ms: 1 },
+    "c.v13.test": { rpc: byNum(chain(pools, 1, 5_000_000)), ms: 5 },
   });
   assert.equal((await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(low.urls, low.f), NOW))).accepted, true);
   assert.equal(hostOf(quoteMod.evmRanked(low.urls).at(-1)!), "b.v13.test");
@@ -3253,4 +3254,21 @@ test("LOW-1 a block's age counts the time since the quote began: a scan that tak
   assert.deepEqual(await timedBuy(buyAt(5_000, "0x00000000000000000000000000000000000bb3ba")), { accepted: false, code: "stale_quote" });
   const b4 = await timedBuy(buyAt(2_000, "0x00000000000000000000000000000000000bb4ba"));
   assert.equal((b4 as { accepted: boolean }).accepted, true, (b4 as { code?: string }).code);
+});
+
+// card evm-quote-warm-round fold 8: the quote reads the latest block on three providers at least (a pair that colludes
+// is outvoted, agreedBlock and agreeing), and every read at a past block goes to the venue's fee pair, which keeps state
+// a proof's life back (on Robinhood only two providers do, 2026-11-05 01:15Z)
+test("V20 Base's and Robinhood's quote lists three providers at least on distinct hosts; every venue with providers names a fee pair of two distinct hosts", () => {
+  const all = builder.evmPoolVenues();
+  for (const c of ["base", "robinhood"] as const) {
+    const p = all[c].providers!;
+    assert.ok(p.length >= 3, `${c}: ${p.length} providers`);
+    assert.equal(new Set(p.map(hostOf)).size, p.length, c);
+  }
+  for (const [c, v] of Object.entries(all)) {
+    if (!Object.hasOwn(v, "providers")) continue;
+    const f = v.feeProviders;
+    assert.ok(Array.isArray(f) && f.length === 2 && hostOf(f[0]!) !== hostOf(f[1]!) && f.every((u) => u.startsWith("https://")), `${c}: ${JSON.stringify(f)}`);
+  }
 });

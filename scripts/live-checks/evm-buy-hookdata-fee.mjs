@@ -5,8 +5,8 @@
 // pool's tree depth and the chain fee there when it prices a proof's epoch, up to 600 s back (apps/helper/src/pool/
 // evm.ts feeOf). A provider that prunes state sooner refuses those reads: robinhood-sepolia-rpc.publicnode.com kept
 // about 15 s ("historical state <root> is not available" at 20 s, read 2026-11-04 20:10Z), so a bind started 15 s or
-// more into an epoch failed. For each chain the kit pins (evmPoolVenues, every provider it lists: a device's two fee
-// RPCs may be any two of them):
+// more into an epoch failed. For each chain the kit pins (evmPoolVenues, its fee pair feeProviders: every read at a past
+// block goes there, card evm-quote-warm-round fold 8; the quote's providers read the latest block and need not keep it):
 //   - the newest block on the first provider, then the last block at least 600 s older than it (by block time), read by
 //     number on both providers, one hash on both;
 //   - at that hash, on each provider alone: every chain fee read (the kit's evmPoolChainFeeReads) and, where the chain
@@ -14,8 +14,11 @@
 // Any error, a missing answer or two hashes fails it.
 //   node scripts/live-checks/evm-buy-hookdata-fee.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
+// The block 600 s back is the oldest epoch's first block a proof's fee is read at, so a provider that keeps it keeps
+// every one. A fee pair that gains a provider without that state fails here after the deploy.
 // --record writes the run as the good run of evm-buy-hookdata-fee.answers.json, and as its bad run a real run with
-// Robinhood testnet's second provider the old pin, robinhood-sepolia-rpc.publicnode.com (which must fail).
+// Robinhood's second fee provider replaced by robinhood-rpc.publicnode.com, one of the quote's providers that keeps
+// about 15 s of state (which must fail).
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
@@ -27,8 +30,9 @@ const KEY = "evm-buy-hookdata-fee";
 export const AGE_S = 600;
 /** The pool's tree depth view (State.sol currentTreeDepth), keccak256("currentTreeDepth()")[0..4]. */
 const TREE_DEPTH = "0x4a2b75c8";
-/** The pin this card replaced, for the recorded bad run. */
-export const OLD_RH_TESTNET = "https://robinhood-sepolia-rpc.publicnode.com";
+/** A quote provider that keeps no state 600 s back, for the recorded bad run ("historical state ... is not available",
+ *  2026-11-05 01:15Z). */
+export const QUOTE_ONLY_RH = "https://robinhood-rpc.publicnode.com";
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -83,11 +87,11 @@ const host = (u) => new URL(u).host;
 const hex = (n) => `0x${n.toString(16)}`;
 const WORD = /^0x[0-9a-fA-F]{64}/;
 
-/** The chains and providers the kit pins, with each chain's reads; `over` replaces a chain's providers (the bad run). */
+/** The chains and fee pairs the kit pins, with each chain's reads; `over` replaces a chain's pair (the bad run). */
 export function pinned(over = {}) {
   return Object.entries(evmPoolVenues()).map(([chain, v]) => {
     const reads = [...evmPoolChainFeeReads(chain, evmPoolGas(0)), ...(v.pool ? [{ to: v.pool, data: TREE_DEPTH }] : [])];
-    return { chain, providers: over[chain] ?? v.providers, reads };
+    return { chain, providers: over[chain] ?? v.feeProviders, reads };
   });
 }
 
@@ -103,7 +107,7 @@ export async function check(transport, chains = pinned()) {
   let ok = true;
   for (const { chain, providers, reads } of chains) {
     try {
-      if (!Array.isArray(providers) || providers.length < 2) throw new Error("fewer than two pinned providers");
+      if (!Array.isArray(providers) || providers.length < 2) throw new Error("fewer than two fee providers");
       const [first] = providers;
       const blockAt = async (n) => {
         const b = await call(transport, first, "eth_getBlockByNumber", [hex(n), false]);
@@ -157,8 +161,8 @@ async function main(argv) {
   for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
   if (record) {
     const bad = recorder();
-    const rh = evmPoolVenues()["robinhood-testnet"].providers;
-    const b = await check(bad.transport, pinned({ "robinhood-testnet": [rh[0], OLD_RH_TESTNET] }).filter((c) => c.chain === "robinhood-testnet"));
+    const rh = evmPoolVenues().robinhood.feeProviders;
+    const b = await check(bad.transport, pinned({ robinhood: [rh[0], QUOTE_ONLY_RH] }).filter((c) => c.chain === "robinhood"));
     for (const l of b.lines) console.log(`(bad run) ${b.ok ? "PASS" : "FAIL"} ${l}`);
     writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: rec.log, bad: bad.log }, null, 1)}\n`);
     console.log(`recorded ${record}`);

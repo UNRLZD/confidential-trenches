@@ -55,6 +55,12 @@ export type EvmPoolVenue = {
    *  as measured: a quote asks two and the rest when one fails, is slow or differs (quote.ts agreeing, evmRanked); and
    *  how many blocks two heads may differ. */
   readonly providers?: readonly string[];
+  /** The two providers every read at a past block goes to (card evm-quote-warm-round fold 8): the chain fee and the
+   *  pool's tree depth at an epoch's first block, read by the device before it binds and by the helper when it prices a
+   *  proof's epoch, up to a proof's life (the helper's POOL_LIFE_MAX_MS, 600 s) back. Each keeps state that far back,
+   *  which live check evm-buy-hookdata-fee reads after every deploy; `providers` need not (a quote reads the latest
+   *  block). */
+  readonly feeProviders?: readonly [string, string];
   readonly maxLag?: number;
   /** The launchpads' hooked v4 pool shapes the device reads as reference pools (a route through any other hook has only
    *  the standard pools to be held to): the asset the pool pairs the token with, fee, tick spacing and hook. */
@@ -111,6 +117,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // sooner than the honest provider they are asked beside, decide before its answer lands (re-review of fd9dd16,
       // Q10).
       providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://base.rpc.blxrbdn.com", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
+      // all five kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
+      // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
+      // 600 s (fold 3, 2026-11-04 20:12Z)
+      feeProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
       maxLag: 5, // 2 s blocks: 10 s
       // Each launchpad factory's recent creations (apps/helper/src/data/evm/lists.ts) and the PoolManager Initialize log in
       // the same transaction, read 2026-11-03 18:49Z on base-rpc.publicnode.com; each hook's code the same on both
@@ -148,16 +158,18 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
       nativeFirst: true,
-      // Keyless, of five operators timed on the first five eth_call batches of a USDG quote (1.31 MB) at each one's newest
-      // block hash, 10 rounds each, every answer equal to Robinhood's (card evm-quote-warm-round, 2026-11-04 16:5xZ from
-      // this Mac): p50/p95 Allnodes (publicnode) 511/1,014 ms, dRPC 606/845, Robinhood 823/1,180, bloXroute 766/2,801,
-      // Globalstake 2,349/4,972. Only two hold state 600 s back, a proof's life (card evm-buy-hookdata-fee, fold 3; 30 of
-      // 30 each at 600 s, 2026-11-04 20:12Z): Robinhood's own answers 630 s and refuses 660 s; publicnode, bloXroute and
-      // Globalstake refuse a state read 600 s back ("historical state ... is not available", 2026-11-05 01:15Z), so none
-      // of them is listed; live check evm-buy-hookdata-fee reads every listed provider at 600 s. Passed over too: daybreak
-      // (413 on a batch this size), blockvectra (outside its history window), pocket and blockmachine (8 s and more,
-      // timeouts), thirdweb (refused requests), tatum, nodeflare (no head)
-      providers: Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"]),
+      // Keyless, of five operators (Allnodes, dRPC, Robinhood, bloXroute, Globalstake), timed on the first five eth_call
+      // batches of a USDG quote (1.31 MB) at each one's newest block hash, 10 rounds each, every answer equal to
+      // Robinhood's (card evm-quote-warm-round, 2026-11-04 16:5xZ from this Mac): p50/p95 511/1,014 ms, 606/845,
+      // 823/1,180, 766/2,801 and 2,349/4,972 ms. Passed over: daybreak (413 on a batch this size), blockvectra (outside
+      // its history window), pocket and blockmachine (8 s and more, timeouts), thirdweb (refused requests), tatum,
+      // nodeflare (no head)
+      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
+      // only these two of the five keep state 600 s back: Robinhood's own answers 630 s and refuses 660 s, dRPC 600 s
+      // (card evm-buy-hookdata-fee, fold 3; 30 of 30 each at 600 s, 2026-11-04 20:12Z); publicnode, bloXroute and
+      // Globalstake refused a state read at the block 600 s back, "historical state ... is not available" (card
+      // evm-quote-warm-round fold 8, 2026-11-05 01:15Z from this Mac)
+      feeProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
       maxLag: 100,
@@ -203,6 +215,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 0x156c129c…, factory() 0x4752ba5d…ad24; and 5,820 bytes, keccak 0x2dddcef8…, poolManager() the PoolManager above
       quoters: bare({ v3: "0xc5290058841028f1614f3a6f0f5816cad0df5e27", v4: "0x4a6513c898fe1b2d0e78d3b0e0a4a151589b1cba" }),
       providers: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
+      feeProviders: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
       // 2 s blocks; the two heads were 5 blocks apart in one read (2026-11-04 09:53Z), so 10 blocks, 20 s
       maxLag: 10,
     }),
@@ -233,6 +246,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 600 s, and rpc.testnet.chain.robinhood.com 30 of 30 at 600 s (read 2026-11-04 20:09-20:13Z; live check
       // evm-buy-hookdata-fee holds every pinned provider to 600 s)
       providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
+      feeProviders: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
       // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 10 s
       maxLag: 100,
     }),

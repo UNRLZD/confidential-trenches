@@ -846,8 +846,9 @@ export type EvmPoolArgs = {
   /**
    * The two RPCs bind reads the chain fee on, at the epoch's first block's hash, always given (never `rpcs` in their
    * place: card evm-buy-hookdata-fee, fold 4 LOW-1): each must keep
-   * state that far back (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A), the kit pin's providers (evmPoolVenues,
-   * held to 600 s by live check evm-buy-hookdata-fee). The sync's pair needs wide log pages instead, and on Robinhood
+   * state that far back (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A): the kit's fee pair (evmPoolVenues
+   * feeProviders, held to 600 s by live check evm-buy-hookdata-fee), never its quote providers, some of which keep no
+   * state that far back (card evm-quote-warm-round fold 8). The sync's pair needs wide log pages instead, and on Robinhood
    * testnet no second free provider gives both (read 2026-11-04 20:09-20:44Z: PublicNode keeps about 15 s of state and
    * pages 50,000 blocks of logs; dRPC keeps 600 s and more but refuses a 1,000-block page of the pool's old logs).
    */
