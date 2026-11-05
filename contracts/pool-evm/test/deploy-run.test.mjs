@@ -8,12 +8,12 @@
 //   nothing for 40 min, and a stuck deploy on a chain whose suggested tip is 0 (as Robinhood's is).
 //   node --test contracts/pool-evm/test/deploy-run.test.mjs     (after a forge build: it reads out/)
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { CHAINS, DUST, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { ORDER, createAddress, main } from "../script/deploy.mjs";
+import { CHAINS, DUST, MAINNETS, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
+import { MAINNET_INIT, ORDER, addressOf, createAddress, initProblems, main } from "../script/deploy.mjs";
 
 const OUT_DIR = new URL("../out/", import.meta.url);
 const runtime = (name) => JSON.parse(readFileSync(new URL(`${name}.sol/${name}.json`, OUT_DIR), "utf8")).deployedBytecode.object;
@@ -57,7 +57,7 @@ const parse = (raw) => {
 
 /** A mock chain and a virtual clock. `on` hooks: lose(t) -> true loses that send's answer; afterMine(chain). */
 function chain(on = {}) {
-  const c = { base: 5_000_000n, tip: on.tip ?? 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), created: [], pool: [], receipts: new Map(), seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
+  const c = { id: on.id ?? "0x14a34", calls: [], base: 5_000_000n, tip: on.tip ?? 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), created: [], pool: [], receipts: new Map(), seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
   const g = (m, k) => m.get(k.toLowerCase()) ?? 0n;
   const l1Of = (len) => c.l1Scale * (len > 100n ? len : 100n);
   const costOf = (t) => t.gas * t.maxFee + t.value + l1Of(t.len);
@@ -89,8 +89,9 @@ function chain(on = {}) {
   c.fetch = async (url, init) => {
     c.mine();
     const { method, params } = JSON.parse(init.body);
+    c.calls.push({ url, method, params });
     switch (method) {
-      case "eth_chainId": return ok("0x14a34");
+      case "eth_chainId": return ok(c.id);
       case "eth_getBlockByNumber": return ok({ baseFeePerGas: "0x" + c.base.toString(16) });
       case "eth_maxPriorityFeePerGas": return ok("0x" + c.tip.toString(16));
       case "eth_estimateGas": return ok(params[0].to ? "0x5208" : "0x" + (600000).toString(16));
@@ -107,6 +108,7 @@ function chain(on = {}) {
       case "eth_sendRawTransaction": {
         const t = parse(params[0]);
         const hash = keccak(params[0]);
+        on.sent?.(params[0], hash, c);
         if (c.pool.some((p) => p.hash === hash)) return err("already known");
         if (t.nonce < g(c.nonce, c.deployer)) return err("nonce too low");
         const at = c.pool.findIndex((p) => p.t.nonce === t.nonce);
@@ -138,7 +140,7 @@ function chain(on = {}) {
 
 /** Runs main() on the mock with the funder sending the printed need `fundDelay` virtual ms after the waiting line;
  * `onLine(line, c)` sees every printed line. Returns the run's outcome and the chain. */
-async function run(t, c, { ret = E, fundDelay = 0, onLine, args = [] } = {}) {
+async function run(t, c, { ret = E, fundDelay = 0, onLine, args = [], head = ["--chain", "base-sepolia", "--rpc", "https://mock.invalid"], io = {}, outArg = true, out: out0 } = {}) {
   const exits = [];
   t.mock.method(process, "exit", (code) => void exits.push(code));
   const realFetch = globalThis.fetch;
@@ -152,11 +154,11 @@ async function run(t, c, { ret = E, fundDelay = 0, onLine, args = [] } = {}) {
   };
   t.mock.method(console, "log", see);
   t.mock.method(console, "error", see);
-  const out = path.join(TMP, `${t.name.replace(/\W+/g, "-")}.json`);
+  const out = out0 ?? path.join(TMP, `${t.name.replace(/\W+/g, "-").slice(0, 80)}.json`);
   let error = null;
   const before = process.exitCode;
   try {
-    await main(["--chain", "base-sepolia", "--return", ret, "--rpc", "https://mock.invalid", "--out", out, "--no-build", ...args], c.io);
+    await main([...head, ...(ret === null ? [] : ["--return", ret]), ...(outArg ? ["--out", out] : []), "--no-build", ...args], { ...c.io, ...io });
   } catch (e) {
     error = e;
   } finally {
@@ -301,5 +303,158 @@ test("--only takes the sell delegate alone: any other contract, or none named, i
     const r = await run(t, c, { args: only === undefined ? ["--only"] : ["--only", only] });
     assert.match(String(r.error?.message), /--only is one of SellDelegate/, String(only));
     assert.equal(c.deployer, null, "no run key");
+  }
+});
+
+// ---- the mainnets (card pool-evm-deploy-mainnet): the owner's paste runs deploy.mjs --mainnet --chain <base|robinhood> ----
+const BASE = MAINNETS.base;
+const MAIN = ["--chain", "base", "--mainnet", "--rpc", BASE.rpcs[0]];
+/** a mainnet chain (Base's id) where the return address E is a wallet in use (it holds ETH); a run's own key folder
+ * and record path in a fresh folder */
+const mainnet = (on = {}) => {
+  const c = chain({ id: BASE.chainId, ...on });
+  c.bal.set(E, 10n ** 15n);
+  c.e0 = 10n ** 15n;
+  return c;
+};
+const room = (t) => {
+  const dir = mkdtempSync(path.join(TMP, "m-"));
+  const out = path.join(dir, "base.json");
+  return { dir, keys: path.join(dir, "keys"), out, journal: path.join(dir, "base.journal.json"), io: { keysBase: path.join(dir, "keys"), recordOf: () => out } };
+};
+const folders = (keys) => (existsSync(keys) ? readdirSync(keys) : []);
+
+test("mainnet: --mainnet goes with a mainnet chain on its own first RPC (or a loopback fork with --out); a mainnet id without --mainnet is refused; no key is made", OPTS, async (t) => {
+  for (const [head, re, outArg] of [
+    [["--chain", "base", "--rpc", BASE.rpcs[0]], /--mainnet/, false],
+    [["--chain", "base-sepolia", "--mainnet", "--rpc", BASE.rpcs[0]], /--mainnet is for base, robinhood/, false],
+    [["--chain", "base", "--mainnet", "--rpc", "https://evil.example"], /https:\/\/mainnet\.base\.org/, false],
+    [["--chain", "base", "--mainnet", "--rpc", BASE.rpcs[0]], /--out .*loopback/, true],
+    [["--chain", "base", "--mainnet", "--rpc", "http://127.0.0.1:8545"], /needs --out/, false],
+  ]) {
+    const c = mainnet();
+    const m = room(t);
+    const r = await run(t, c, { head, io: m.io, outArg, out: m.out });
+    assert.match(String(r.error?.message), re, head.join(" ") + why(c));
+    assert.equal(c.deployer, null, "no run key");
+    assert.deepEqual(folders(m.keys), [], "no key folder");
+  }
+});
+
+test("mainnet: --return must be a wallet in use, an account with no code holding ETH on both RPCs; the funding line says to send from it", OPTS, async (t) => {
+  const c = mainnet();
+  c.bal.set(E, 0n);
+  const m = room(t);
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /holds no ETH on https:\/\/mainnet\.base\.org/, why(c));
+  assert.equal(c.deployer, null, "no run key");
+  // held on the first RPC only: the second's answer counts too
+  const c2 = mainnet();
+  const fetch0 = c2.fetch;
+  c2.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "eth_getBalance" && u === BASE.rpcs[1] && params[0] === E) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x0" }) };
+    return fetch0(u, init);
+  };
+  const r2 = await run(t, c2, { head: MAIN, io: room(t).io, outArg: false, out: room(t).out });
+  assert.match(String(r2.error?.message), /holds no ETH on https:\/\/base-rpc\.publicnode\.com/, why(c2));
+  // a wallet in use: the run goes on, and the funding line names it as the sender
+  const c3 = mainnet();
+  const m3 = room(t);
+  const r3 = await run(t, c3, { head: MAIN, io: m3.io, outArg: false, out: m3.out });
+  assert.equal(r3.error, null, String(r3.error?.message) + why(c3));
+  assert.ok(c3.logs.some((l) => l === `deploy: send exactly ${c3.fundWei} wei to ${c3.deployer} from ${E}, the address you passed`), why(c3));
+});
+
+test("mainnet: the run key is kept 0700/0600 until swept, every transaction is journaled before its send, the final reads are on both RPCs, then the key and the journal are removed and no key is left in a log or a file", OPTS, async (t) => {
+  const m = room(t);
+  let key = null;
+  const unjournaled = [];
+  const c = mainnet({
+    sent: (raw, hash) => {
+      const j = existsSync(m.journal) ? readFileSync(m.journal, "utf8") : "";
+      if (!j.includes(hash)) unjournaled.push(hash);
+    },
+  });
+  const r = await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (!l.startsWith("deploy: waiting for")) return;
+      const [f] = folders(m.keys);
+      const dir = path.join(m.keys, f);
+      assert.equal(statSync(m.keys).mode & 0o777, 0o700);
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+      assert.equal(statSync(path.join(dir, "key")).mode & 0o777, 0o600);
+      key = readFileSync(path.join(dir, "key"), "utf8").trim();
+      assert.equal(addressOf(bytes(key)), c.deployer, "the kept key is the run key");
+      assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.folder, f, "the journal names the key folder before any funding");
+    },
+  });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  assert.ok(key, "the key was kept during the run");
+  assert.deepEqual(unjournaled, [], "every transaction journaled before its send");
+  for (const u of BASE.rpcs) {
+    for (const n of ORDER) assert.ok(c.calls.some((x) => x.url === u && x.method === "eth_getCode" && x.params[0] === r.record.contracts[n].address), `${n}'s code read on ${u}`);
+    assert.ok(c.calls.some((x) => x.url === u && x.method === "eth_getBalance" && x.params[0] === c.deployer), `the key's rest read on ${u}`);
+  }
+  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+  assert.equal(existsSync(m.journal), false, "the journal is removed once the record is written and the key is gone");
+  assert.ok(!c.logs.some((l) => l.toLowerCase().includes(key.slice(2).toLowerCase())), "no log line holds the key");
+  for (const f of readdirSync(m.dir)) if (statSync(path.join(m.dir, f)).isFile()) assert.ok(!readFileSync(path.join(m.dir, f), "utf8").includes(key.slice(2)), `${f} holds the key`);
+  assert.ok(c.logs.some((l) => l === `deploy: done. Next: node scripts/live-checks/pool-evm-deploy.mjs --deployment ${path.relative(process.cwd(), m.out)}`), why(c));
+});
+
+test("mainnet: a run whose record exists is refused before any key, naming the live check to run alone", OPTS, async (t) => {
+  const m = room(t);
+  writeFileSync(m.out, "{}\n");
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /exists: the pool is deployed on base: run its live check alone: node scripts\/live-checks\/pool-evm-deploy\.mjs --deployment /, why(c));
+  assert.equal(c.deployer, null, "no run key");
+});
+
+test("mainnet: a stopped run whose key still holds ETH keeps it; a new run is refused until --sweep-kept sends it back to the return address only, read on both RPCs; then a new run moves the journal aside", OPTS, async (t) => {
+  const m = room(t);
+  // stopped during the funding wait; the funding lands after the late-funding watch: the key holds the need
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 120_000, onLine: (l) => l.startsWith("deploy: waiting for") && process.emit("SIGTERM", "SIGTERM") });
+  assert.match(String(r.error?.message), /stopped by SIGTERM/, why(c));
+  assert.equal(c.balanceOf(c.deployer), c.fundWei, "the late funding sits on the key");
+  const j = JSON.parse(readFileSync(m.journal, "utf8"));
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.deepEqual(folders(m.keys), [j.keys.folder]);
+  assert.ok(c.logs.some((l) => l.includes("--sweep-kept")), why(c));
+  // a new run is refused while the key is kept
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r2.error?.message), /kept.*--sweep-kept/, why(c));
+  // --sweep-kept to any other address is refused
+  const other = "0x1111111111111111111111111111111111111111";
+  const r3 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: other, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r3.error?.message), /goes back only to the run's return address/, why(c));
+  // --sweep-kept: the key's ETH back to E, the key folder removed once both RPCs read it at most DUST
+  const e0 = c.balanceOf(E);
+  c.calls.length = 0;
+  const r4 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(r4.error, null, String(r4.error?.message) + why(c));
+  assert.ok(c.balanceOf(E) - e0 > (c.fundWei * 9n) / 10n, `E got back ${c.balanceOf(E) - e0} of ${c.fundWei}${why(c)}`);
+  assert.ok(c.balanceOf(c.deployer) <= DUST);
+  for (const u of BASE.rpcs) assert.ok(c.calls.some((x) => x.url === u && x.method === "eth_getBalance" && x.params[0] === c.deployer), `the key's rest read on ${u}`);
+  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "removed");
+  // a new run: the journal (its key removed) is moved aside and the run goes on
+  const c5 = mainnet();
+  const r5 = await run(t, c5, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r5.error, null, String(r5.error?.message) + why(c5));
+  assert.ok(readdirSync(m.dir).some((f) => /^base\.stopped-\d+T?\d*Z?\.journal\.json$/.test(f)), readdirSync(m.dir).join(","));
+});
+
+test("mainnet: each contract's init code is pinned in deploy.mjs (forge's out/ is the pin; one byte off is refused)", OPTS, async () => {
+  assert.deepEqual(Object.keys(MAINNET_INIT), ORDER);
+  for (const n of ORDER) {
+    const code = init(n);
+    assert.equal(initProblems(n, code), null, n);
+    const off = code.slice(0, -2) + (code.endsWith("00") ? "01" : "00");
+    assert.match(String(initProblems(n, off)), new RegExp(`${n}: init code keccak256 .* not the pinned`), n);
   }
 });
