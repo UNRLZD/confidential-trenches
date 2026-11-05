@@ -415,7 +415,16 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
  * provider queue (any (method, params) call) at HOLDINGS_RPC_LIMIT on the readers' own queue for the route; a 429
  * waits the answer's Retry-After. */
 export function evmHelperHoldings(origin: string, chain: "base" | "robinhood", tokens: readonly string[]): HoldingsReader {
-  const url = helperUrl(origin, chain);
-  const r = holdingsRoute((fetch) => solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch }));
+  const r = evmHelperRoute(origin, chain);
   return evmHoldingsReader(r.rpc, tokens, { wait429: r.wait429 });
+}
+function evmHelperRoute(origin: string, chain: "base" | "robinhood"): { rpc: SolanaRpc; wait429: () => number } {
+  const url = helperUrl(origin, chain);
+  return holdingsRoute((fetch) => solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch }));
+}
+/** The helper's route for a mainnet W's other reads (./evm-restore.ts, the Transfer logs a restore reads for each W):
+ * the holdings readers' one paced transport on POST /v1/rpc/{chain}, the same queue, so a restore's reads and the
+ * holdings reads together stay at HOLDINGS_RPC_LIMIT. */
+export function evmHelperRpc(origin: string, chain: "base" | "robinhood"): SolanaRpc {
+  return evmHelperRoute(origin, chain).rpc;
 }
