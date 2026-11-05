@@ -265,7 +265,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     // posted, and only an event the kit's client takes (signpageProgressRouteSchema): anything else is not told
     const route = (r: BuyRoute): void => {
       const own = (k: string): boolean => Object.hasOwn(r, k);
-      const f: BuyRoute | null = own("wallet") ? { wallet: (r as { wallet: string }).wallet } : own("venue") ? { venue: (r as { venue: string }).venue, pool: (r as { pool: string }).pool } : own("out") ? { out: (r as { out: string }).out } : null;
+      const f: BuyRoute | null = own("wallet") ? { wallet: (r as { wallet: string }).wallet } : own("venue") ? { venue: (r as { venue: string }).venue, pool: (r as { pool: string }).pool } : own("out") ? { out: (r as { out: string }).out } : own("tx") ? { tx: (r as { tx: string }).tx } : null;
       const msg: ProgressRouteEvent | null = f && { v: 1, type: "progress", id, ...f };
       if (msg === null || !signpageProgressRouteSchema(msg)) return;
       queue = queue.then(() => post(msg)).catch(() => {});

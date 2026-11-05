@@ -57,7 +57,8 @@
 //   again).
 // - The route (card signpage-buy-route-events): the run tells the app, through the kind's route events (messages.ts
 //   BuyRoute), only what it bound or read itself: W and the venue with its pool once the check passed, W derived to the
-//   proof's recipient and signed, and the take holds the note, before the transaction leaves; then the amount W
+//   proof's recipient and signed, and the take holds the note, before the transaction leaves; then the transaction's
+//   signature once both RPCs read this very transaction back under it (card pool-buy-send-fast); then the amount W
 //   received, read from this very transaction's token balances on both RPCs (the two the same, at least the min out,
 //   within the kit's bound), once it reads back as succeeded on both. Not read plainly on both: not told.
 // - Every read names a public account or the transaction itself; no request carries a key, the words or which note is
@@ -599,9 +600,12 @@ export async function sendAndSettle(
     // settle finds is another's, so not_landed at once
     if (got[0] === "failed" && got[1] === "failed") return (await spent()) ? { stage: "not_landed", txs } : { stage: "refused", txs };
     landed = got[0] === "ok" && got[1] === "ok";
-    // read back on both RPCs as this very transaction: only now is it told as sent, by its signature
+    // read back on both RPCs as this very transaction: only now is it told as sent, by its signature; a buy tells it
+    // as a route fact too (card pool-buy-send-fast), which reaches the app however late it comes: an answer past the
+    // kit client's 10 s is dropped (a mainnet bundle the helper holds until it lands)
     if (!ours && seen[0] && seen[1]) {
       ours = true;
+      fill?.tell({ tx: signature });
       await h.sent?.(signature);
     }
     if (landed && fill) {

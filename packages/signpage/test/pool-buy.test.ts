@@ -579,6 +579,9 @@ test("a fixture buy posts its route under its id, each once and in order: W, the
   assert.deepEqual(route, [
     { v: 1, type: "progress", id, wallet: W.address },
     { v: 1, type: "progress", id, venue: "pump-curve", pool: w.curve },
+    // card pool-buy-send-fast: the transaction, once both RPCs read it back, posted whenever it comes (an answer past the
+    // kit client's 10 s is dropped, this event is not)
+    { v: 1, type: "progress", id, tx: SIG },
     { v: 1, type: "progress", id, out: whole6(w.E) },
   ]);
   assert.ok(w.E >= w.minOut);
@@ -590,8 +593,8 @@ test("a fixture buy posts its route under its id, each once and in order: W, the
   ]);
   // queued in order with the id's stage events: the amount before the filled event (the answer, posted on its own, may
   // come before or after the route events)
-  const out = posted.indexOf(route[2]);
-  assert.ok(posted.indexOf(route[0]) < posted.indexOf(route[1]) && posted.indexOf(route[1]) < out);
+  const out = posted.indexOf(route[3]);
+  assert.ok(posted.indexOf(route[0]) < posted.indexOf(route[1]) && posted.indexOf(route[1]) < posted.indexOf(route[2]) && posted.indexOf(route[2]) < out);
   assert.ok(out < posted.indexOf(stages[1]), "the amount before filled");
   // nothing posted carries more than an address, a venue name or an amount
   assert.ok(!JSON.stringify(posted).includes(Buffer.from(SEED64).toString("hex")));
@@ -604,13 +607,13 @@ test("the amount W received is not told when the two RPCs differ on it or it is 
     const told: unknown[] = [];
     const a = await runPoolBuy({ ...w.host, route: (x) => void told.push(x) }, ASK);
     assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
-    assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: w.curve }], String(received));
+    assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: w.curve }, { tx: SIG }], String(received));
   }
   // a meta with no token balances: no amount
   const w = await world();
   const told: unknown[] = [];
   await runPoolBuy({ ...w.host, route: (x) => void told.push(x) }, ASK);
-  assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: w.curve }]);
+  assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: w.curve }, { tx: SIG }]);
 });
 
 test("a buy refused before its check passes tells no route; a route listener that throws never stops a buy", async () => {
@@ -666,14 +669,14 @@ test("fold 1 (L1): a take the queue refuses tells nothing: W and the pool are to
   const order: string[] = [];
   const log = ok.log;
   await runPoolBuy({ ...ok.host, route: (x) => void order.push(`${Object.keys(x)[0]}@${log.filter((l) => l === "take:note-1" || l === "send").join(",")}`) }, ASK);
-  assert.deepEqual(order, ["wallet@take:note-1", "venue@take:note-1", "out@take:note-1,send"]);
+  assert.deepEqual(order, ["wallet@take:note-1", "venue@take:note-1", "tx@take:note-1,send", "out@take:note-1,send"]);
 });
 
 test("fold 1 (L3): an amount past the kit's bound (a token of 80 decimals) is never told; W and the venue still are", async () => {
   const base = await world();
   const { a, told } = await tellRun({ received: [base.E, base.E], decimals: 80 });
   assert.equal("stage" in a && a.stage, "filled");
-  assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: base.curve }]);
+  assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: base.curve }, { tx: SIG }]);
 });
 
 test("fold 1 (L4): this very transaction with an unreadable meta on both RPCs proves nothing: the answer keeps its ref", async () => {
@@ -772,11 +775,23 @@ for (const [name, plant, stage, txs] of SENT_HOOK) {
   test(`the helper answers ${name}: no sent hook, and the answer's txs only what both RPCs read as this transaction`, async () => {
     const w = await world(plant);
     const told: string[] = [];
-    const a = await runPoolBuy({ ...w.host, sent: (s) => void told.push(s) }, ASK);
+    const routes: unknown[] = [];
+    const a = await runPoolBuy({ ...w.host, sent: (s) => void told.push(s), route: (x) => void routes.push(x) }, ASK);
     assert.deepEqual(a, { stage, txs });
     assert.deepEqual(told, [], "no sent hook before both RPCs read this very transaction");
+    // card pool-buy-send-fast: the route's tx is told at the sent hook's point only, so never the helper's word
+    assert.ok(!routes.some((x) => Object.hasOwn(x as object, "tx")), `no tx told: ${JSON.stringify(routes)}`);
   });
 }
+
+test("card pool-buy-send-fast: the route's tx is this very transaction's signature, told once, at the sent hook, before the amount", async () => {
+  const w = await world({ received: [0n, 0n] });
+  const order: string[] = [];
+  await runPoolBuy({ ...w.host, sent: (s) => void order.push(`sent:${s}`), route: (x) => void order.push(JSON.stringify(x)) }, ASK);
+  const i = order.indexOf(JSON.stringify({ tx: SIG }));
+  assert.ok(i > 0 && order[i + 1] === `sent:${SIG}`, order.join(" | "));
+  assert.equal(order.filter((x) => x.includes('"tx"')).length, 1);
+});
 
 test("the sent hook fires once, after both RPCs read this very transaction under the signature", async () => {
   const w = await world();
