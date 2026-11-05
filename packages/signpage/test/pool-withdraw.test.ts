@@ -872,7 +872,10 @@ test("the two RPCs reach the spend in different passes: each keeps what it found
   const pad0 = dust(3_000, 9);
   const pad1 = dust(4_500, 10);
   wd.plant.history = (s, p) => [...(p === 0 ? pad0 : pad1), ...s];
-  const { f } = await passes(wd.host, noRelease(a.pending!), 5);
+  // with what each found kept: decided by the third pass (the second finish); with none kept, the two RPCs' finds
+  // never meet in one pass until the sixth (each find sends its RPC back to the newest)
+  const { f, n } = await passes(wd.host, noRelease(a.pending!), 3);
   assert.equal(f?.stage, "sent");
+  assert.ok(n <= 2, `${n} finishes`);
   assert.equal(wd.balance.get(TO), 5_000_000n);
 });
