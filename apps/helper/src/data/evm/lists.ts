@@ -696,7 +696,10 @@ const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { cod
 type Read = { rows: Row[]; created: Map<string, number>; pools: Map<string, string>; at: number; raw: string };
 /** What a restart's next process takes over (../warm.ts, card helper-ready-gate): each list's GeckoTerminal answer as
  *  read and its read time, and the makers read. The answers are parsed again by toRows, as from GeckoTerminal. */
-export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][] };
+export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][]; clock?: string };
+/** The block clock a chain's makers were settled on (BLOCK_CLOCK), as the warm file carries it: a none settled on
+ *  another clock may come from a wrong block range, so restore reads it again (card helper-ready-page-warm). */
+export const clockOf = (chain: EvmChain): string => JSON.stringify(BLOCK_CLOCK[chain]);
 
 /** Discover's lists for one EVM chain: GeckoTerminal's lists once per LIST_MS, makers read and kept, rebuilt per TICK_MS. */
 /** `holds`: the helper's one hold per provider (limits.ts providerHolds), which the maker reads keep (heldFetch). */
@@ -814,20 +817,23 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
 
   /** This chain's lists as a next process takes them over. */
   function state(): EvmListsState {
-    const out: EvmListsState = { reads: {}, makers: [...makers] };
+    const out: EvmListsState = { reads: {}, makers: [...makers], clock: clockOf(chain) };
     for (const k of LIST_KEYS) if (reads[k] !== undefined) out.reads[k] = { raw: reads[k]!.raw, at: reads[k]!.at };
     return out;
   }
 
   /** A previous process's state (hostile input, as a vendor's): each list read, however old, is parsed again by
-   *  toRows; a maker is kept only as an address and one of this chain's pads. A none (null) is read again: it may have
-   *  been settled on a wrong block range (card helper-ready-page-warm: from 18:00Z on 2026-11-05 Base's old 2 s clock put
-   *  every new token's pool hours before its code, and each was settled as none and carried over in the warm file), and
-   *  a read is a few calls, never a GeckoTerminal one. Reads held already are kept.
+   *  toRows; a maker is kept only as an address and one of this chain's pads, or none (null) when the state was settled
+   *  on this chain's block clock (clockOf). A none from another clock, or from a state that names none, is read again:
+   *  it may have been settled on a wrong block range (card helper-ready-page-warm: from 18:00Z on 2026-11-05 Base's old
+   *  2 s clock put every new token's pool hours before its code, and each was settled as none and carried over in the
+   *  warm file). Dropping every none instead left a swap's Base lists 35 of 44 unsettled (live run 42104885123 attempt
+   *  1, 20:36Z), read again at MAKER_PER_TICK a tick. Reads held already are kept.
    *  True when every list is held after it, so the lists answer without a GeckoTerminal call. */
   function restore(st: unknown): boolean {
     const t = now();
-    const o = (st ?? {}) as { reads?: unknown; makers?: unknown };
+    const o = (st ?? {}) as { reads?: unknown; makers?: unknown; clock?: unknown };
+    const sameClock = o.clock === clockOf(chain);
     const rs = (o.reads ?? {}) as Record<string, unknown>;
     for (const k of LIST_KEYS) {
       const r = (Object.hasOwn(rs, k) ? rs[k] : undefined) as { raw?: unknown; at?: unknown } | undefined;
@@ -842,7 +848,8 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     const pads = new Set(FACTORIES[chain].map((f) => f.pad));
     if (Array.isArray(o.makers))
       for (const m of o.makers.slice(0, MAKER_MAX)) {
-        if (!Array.isArray(m) || m.length !== 2 || typeof m[0] !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(m[0]) || typeof m[1] !== "string" || !pads.has(m[1])) continue;
+        if (!Array.isArray(m) || m.length !== 2 || typeof m[0] !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(m[0])) continue;
+        if (!(m[1] === null ? sameClock : typeof m[1] === "string" && pads.has(m[1]))) continue;
         if (!makers.has(m[0])) makers.set(m[0], m[1]);
       }
     build();

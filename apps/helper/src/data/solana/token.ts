@@ -303,7 +303,7 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 // The served answers
 // ---------------------------------------------------------------------------------------------------------------
 
-type Answer = { status: number; headers: Record<string, string>; body: string; timing?: string[] };
+type Answer = { status: number; headers: Record<string, string>; body: string; timing?: string[]; why?: string };
 type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number): Promise<Answer> };
 type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string; why?: string; timing?: string[] }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -448,7 +448,7 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
             if (a.status === 200 || a.status === 404) last.set(key, { a, at: started });
             return a;
           })
-          .catch((e) => (hit !== undefined && hit.a.status === 200 && ((opts.keepHeld === true && e instanceof Throttled) || now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS) ? hit.a : e instanceof Throttled ? limited(e.retryAfterS, e.why) : UPSTREAM))
+          .catch((e) => (hit !== undefined && hit.a.status === 200 && ((opts.keepHeld === true && e instanceof Throttled) || now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS) ? hit.a : e instanceof Throttled ? limited(e.retryAfterS, e.why) : e instanceof Upstream && e.why !== undefined ? { ...UPSTREAM, why: e.why, ...(e.metric === undefined ? {} : { timing: e.metric }) } : UPSTREAM))
           .finally(() => running.delete(key));
         running.set(key, p);
       }
@@ -457,7 +457,25 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
   };
 }
 
-class Upstream extends Error {}
+/** `why`: what failed, for the refusal log (server.ts counts a 503 that names one), never sent. `metric`: the same
+ *  cause for the caller, the 503's Server-Timing entry (card helper-ready-page-warm: a cold page's 503 in live runs
+ *  42087160851 and 42104885123 named its cause nowhere, and the helper's log was gone with its container): search-room,
+ *  search-gap, search-held, search-429, search-upstream or rpc, with desc= the proxy's or RPC's own reason, never a
+ *  URL, a key or the caller's input. */
+class Upstream extends Error {
+  readonly why?: string;
+  readonly metric?: string;
+  constructor(why?: string, metric?: string) {
+    super(why);
+    this.why = why;
+    this.metric = metric;
+  }
+}
+/** The Server-Timing entry of a cause: a fixed metric name, and desc= a reason of ours (letters, digits, spaces, :._-). */
+const causeOf = (metric: string, desc?: string): string => (desc === undefined || !/^[\w :.-]{1,80}$/.test(desc) ? metric : `${metric};desc="${desc}"`);
+/** A failed search's metric, from the proxy's not-ready reason (proxy.ts notReady: "<vendor> held", "<vendor> provider
+ *  429", "<vendor> total"...). */
+const searchMetric = (why: string | undefined): string => (why === undefined ? "search-upstream" : /held$/.test(why) ? "search-held" : /429$/.test(why) ? "search-429" : "search-upstream");
 
 /** An answer served from what was held: its read's timing is not this request's (card helper-ready-page-warm). */
 const held = (a: DataAnswer): DataAnswer => ({ ...a, timing: "cache" });
@@ -475,9 +493,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   async function call(method: string, params: unknown[], via: Rpc = rpc, client?: string): Promise<{ result: Record<string, unknown>; timing: string[] }> {
     const a = await via.handle("solana", "application/json", rpcBody(method, params), client);
     if (a.status === 429) throw new Throttled(retryAfterOf(a.headers), a.why);
-    if (a.status !== 200) throw new Upstream();
+    if (a.status !== 200) throw new Upstream(`solana rpc: ${a.why ?? a.status}`, causeOf("rpc", a.why ?? String(a.status)));
     const j = obj(JSON.parse(a.body));
-    if (!Object.hasOwn(j, "result")) throw new Upstream();
+    if (!Object.hasOwn(j, "result")) throw new Upstream("solana rpc: no result", causeOf("rpc", "no result"));
     return { result: obj(j.result), timing: a.timing ?? [] };
   }
 
@@ -516,7 +534,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     if (at - t > SEARCH_WAIT_MAX_MS) {
       // too far off to hold a caller: each answers 429 with the wait; the mints stay for that search
       // card helper-crowd-429 (fold 6): the search's room is Jupiter's, not the caller's limit: not ready, never our 429
-      for (const w of waiting.values()) for (const f of w.ws.splice(0)) f.fail(new Upstream());
+      for (const w of waiting.values()) for (const f of w.ws.splice(0)) f.fail(at === lastFailed + JUP_GAP_MS ? new Upstream("jupiter search gap", "search-gap") : new Upstream("jupiter search room", "search-room"));
     }
     if (timer !== null && timerAt <= at) return;
     if (timer !== null) clearTimeout(timer);
@@ -552,10 +570,13 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     let at = now();
     // the proxy's part of the search (its budget wait, Jupiter's hold or turn, each 429 and the send), as jup-<entry>
     let parts: string[] = [];
+    let failed = "jupiter search failed";
+    let proxyWhy: string | undefined;
     try {
       // proxy.ts PROXY_RESERVE; a hold of Jupiter's is waited out within SEARCH_HOLD_WAIT_MS (proxy.ts turn)
       const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS);
       parts = (a.timing ?? []).map((e) => `jup-${e}`);
+      if (a.status !== 200) (failed = a.why ?? `jupiter ${a.status}`), (proxyWhy = a.why);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
@@ -571,7 +592,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       waiting.delete(mint);
       if (!Array.isArray(rows)) {
         // Jupiter's refusal is not the caller's limit: not ready, the page reads again (card helper-crowd-429, fold 6)
-        for (const w of ws) w.fail(new Upstream());
+        for (const w of ws) w.fail(new Upstream(failed, causeOf(searchMetric(proxyWhy), proxyWhy)));
         continue;
       }
       const r: JupRow = { row: searchRow(rows, mint), at };

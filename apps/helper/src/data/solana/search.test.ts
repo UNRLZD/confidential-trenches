@@ -404,3 +404,35 @@ test("card helper-crowd-429 fold 6: a Jupiter hold past the page's budget answer
   assert.deepEqual([bd.status, JSON.parse(bd.body)], [503, { error: { code: "upstream" } }], "the build too: the device falls back on its public path (H2.3)");
   assert.equal(upstream.length, 1, "one call met the 429; nothing else reached Jupiter inside its reset");
 });
+
+test("card helper-ready-page-warm: a page that answers not ready names why in the refusal log (never sent): Jupiter's hold or 429, the search's room, or the mint's RPC read (live runs 42087160851 and 42104885123 attempt 1: one cold page 503 each, its cause named nowhere)", async (t) => {
+  clock(t);
+  const why = (tok: ReturnType<typeof T.createSolanaToken>, m: string) => tok.page(m).then((a) => [a.status, a.why, a.body]);
+  // Jupiter holds the search past the page's wait (its 429 with a 30 s reset)
+  const held = createProxy({}, { now: () => Date.now(), fetch: (async () => new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": "30" } })) as never });
+  const a = why(T.createSolanaToken(held, rpc, { now: () => Date.now() }), mint(3000));
+  for (let ms = 0; ms < 20_000; ms += 50) await run(t, 50);
+  assert.deepEqual(await a, [503, "jupiter held", '{"error":{"code":"upstream"}}'], "Jupiter's 429 holds it past the wait: the body unchanged, the cause logged");
+  // the mint's RPC read fails
+  const down = { handle: async () => ({ status: 503, body: '{"error":{"code":"upstream"}}', why: "solana held" }) };
+  const ok = searchProxy();
+  const b = why(T.createSolanaToken(ok, down, { now: () => Date.now() }), mint(3001));
+  await run(t, 1_000);
+  assert.deepEqual((await b).slice(0, 2), [503, "solana rpc: solana held"], "the RPC's own why");
+});
+
+test("card helper-ready-page-warm: a not-ready page tells its caller why in the standard Server-Timing header: search-held, search-429 (desc the proxy's reason) or rpc, never a URL, a key or the caller's input", async (t) => {
+  clock(t);
+  const timing = (tok: ReturnType<typeof T.createSolanaToken>, m: string) => tok.page(m).then((a) => [a.status, a.timing, a.body]);
+  const proxyOf = (retryAfter: string) => createProxy({}, { now: () => Date.now(), fetch: (async () => new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": retryAfter } })) as never });
+  const held = timing(T.createSolanaToken(proxyOf("30"), rpc, { now: () => Date.now() }), mint(3100));
+  for (let ms = 0; ms < 20_000; ms += 50) await run(t, 50);
+  assert.deepEqual(await held, [503, 'search-held;desc="jupiter held"', '{"error":{"code":"upstream"}}'], "Jupiter's hold past the wait");
+  const twice = timing(T.createSolanaToken(proxyOf("1"), rpc, { now: () => Date.now() }), mint(3101));
+  for (let ms = 0; ms < 20_000; ms += 50) await run(t, 50);
+  assert.deepEqual(await twice, [503, 'search-429;desc="jupiter provider 429"', '{"error":{"code":"upstream"}}'], "Jupiter's 429 twice");
+  const down = { handle: async () => ({ status: 503, body: '{"error":{"code":"upstream"}}', why: "solana held" }) };
+  const r = timing(T.createSolanaToken(searchProxy(), down, { now: () => Date.now() }), mint(3102));
+  await run(t, 1_000);
+  assert.deepEqual((await r).slice(0, 2), [503, 'rpc;desc="solana held"'], "the mint's RPC read");
+});
