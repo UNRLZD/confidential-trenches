@@ -12,7 +12,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkMainnet, DEPLOYMENT as RECORD } from "./pool-sol-deploy-mainnet.mjs";
-import { b58decode, operatorProblems, MAINNET_CODE_SHA, MAINNET_RPCS, RPCS } from "./pool-sol-deploy.mjs";
+import { b58decode, mainnetRunRecord, operatorProblems, MAINNET_CODE_SHA, MAINNET_RPCS, RPCS } from "./pool-sol-deploy.mjs";
+import { earlierAttempts } from "./pool-sol-deploy-mainnet.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-sol-deploy-mainnet.answers.json", import.meta.url), "utf8"));
 const D = A.deployment;
@@ -140,4 +141,16 @@ test("re-review 6: another wallet's balance is an info line, never a FAIL: the l
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith(`info fee payer ${OTHER} holds 2000000000 lamports`) && l.includes(`not this run's key ${D.funder}`)), r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith(`ok   funder ${D.funder} holds 0 lamports`)), r.lines.join("\n"));
+});
+
+test("paste 1's stopped journal is named in the run's record, and its words never make a Tx line", () => {
+  const attempts = earlierAttempts();
+  assert.deepEqual(attempts.map((a) => a.file), ["contracts/pool-solana/deployments/mainnet.attempt-1.journal.json"]);
+  const md = mainnetRunRecord({ ...D, txs: [{ signature: "s".repeat(88), step: "funding (to the funder)" }], need: "1" }, MAINNET_RPCS, attempts);
+  const line = md.split("\n").find((l) => l.includes("mainnet.attempt-1.journal.json"));
+  assert.ok(line, md);
+  assert.match(line, /^Paste 1 \(2026-11-05T18:16:25\.178Z\) stopped mid-upload and is kept as contracts\/pool-solana\/deployments\/mainnet\.attempt-1\.journal\.json: 42 transactions, its keys removed with every lamport read back at 0 on both RPCs; this record is paste 2's\.$/);
+  assert.equal(md.split("\n").filter((l) => l.startsWith("Tx: ")).length, 1, "the earlier attempt adds no Tx line");
+  // no earlier attempt, no line
+  assert.ok(!mainnetRunRecord({ ...D, txs: [], need: "1" }, MAINNET_RPCS).includes("attempt-1"));
 });
