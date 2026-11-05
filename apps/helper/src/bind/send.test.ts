@@ -17,6 +17,7 @@ import { vaultDepositMessage } from "../../../../packages/kit/src/index.ts";
 import { NEP366_PREFIX, VAULT_TOKEN, base58, decodeSignedDelegate, type KeyRead } from "./checks.ts";
 import {
   MAX_FAILED_SENDS,
+  OUTCOME_WAIT_MS,
   PREPAY_BYTES,
   PREPAY_MAX_BYTES,
   PER_P_WORST_YOCTO,
@@ -1711,8 +1712,13 @@ test("PROBE N1: the key's nonce jumps (key re-added); the next signing reads it,
   store.close();
 });
 
-/** How long RECHECK R1's calls wait for their outcome. */
-const R1_WAIT_MS = 500;
+/**
+ * The window of a test where calls queue at once and every one must land: the production one. The first call's first
+ * outcome read shares the process with the next call's turn (its counter write is two fsyncs), and a window a slow
+ * disk or a busy runner can outlast leaves that read the last one, made before the landing: 'unknown' at random.
+ * A call that lands is read on the next poll, so the window costs nothing when the test passes.
+ */
+const QUEUED_WAIT_MS = OUTCOME_WAIT_MS;
 async function twoQueuedAfterKeyMove(node: Node, r: Relayer) {
   assert.equal((await r.send(prepayAction(1n), open, () => undefined)).kind, "final");
   node.keyNonce = 40n; // the key moved after the relayer last read it
@@ -1727,7 +1733,7 @@ async function twoQueuedAfterKeyMove(node: Node, r: Relayer) {
 test("RECHECK R1: after the key moved, two calls queued at once are both signed above the key and land; nothing is dropped", async () => {
   const node = new Node();
   node.landMs = () => 50;
-  await twoQueuedAfterKeyMove(node, node.relayer(R1_WAIT_MS));
+  await twoQueuedAfterKeyMove(node, node.relayer(QUEUED_WAIT_MS));
 });
 
 test("RECHECK R1 on a slow disk: the second call's counter write blocks the process for 600 ms while the first call's outcome is read; both still land final", async () => {
@@ -1743,7 +1749,7 @@ test("RECHECK R1 on a slow disk: the second call's counter write blocks the proc
       return disk.nonceCas(key, expected, next);
     },
   };
-  await twoQueuedAfterKeyMove(node, createRelayer(node.rpcs(), node.archival(), RELAYER, node.secret, VAULT, node.validity, slow, R1_WAIT_MS));
+  await twoQueuedAfterKeyMove(node, createRelayer(node.rpcs(), node.archival(), RELAYER, node.secret, VAULT, node.validity, slow, QUEUED_WAIT_MS));
   assert.equal(writes, 4);
 });
 
@@ -1751,7 +1757,7 @@ test("RECHECK R1b: after a key jump, three deposits at once all land with no sil
   const node = new Node();
   node.landMs = () => 20;
   const store = newStore();
-  const deps = node.deps(store, node.relayer(400));
+  const deps = node.deps(store, node.relayer(QUEUED_WAIT_MS));
   ok(await carryDeposit(signed(node.user(), P, 101n, node.final + 100n), deps));
   node.keyNonce += 1_000_000n;
   const answers = await Promise.all([1n, 2n, 3n].map((i) => carryDeposit(signed(node.user(), P + i, 101n, node.final + 100n), deps)));
@@ -1873,7 +1879,7 @@ test("H1: the queue is released at the send, not at FINAL: a second transaction 
   const node = new Node();
   let first = "";
   node.landMs = (tx) => (tx.hash === first ? 300 : 400); // included in nonce order, as the pool orders one key's
-  const r = node.relayer(3_000);
+  const r = node.relayer(QUEUED_WAIT_MS);
   const order: string[] = [];
   const a = r.send(prepayAction(1n), open, (tx) => {
     first = tx.tx_hash;
@@ -1915,7 +1921,7 @@ test("the durable write comes before the send: a write that fails sends nothing"
 test("nonces: transactions in flight at once get distinct nonces; each is signed on the block the key was read at, which its record keeps", async () => {
   const node = new Node();
   node.landMs = () => 50;
-  const r = node.relayer();
+  const r = node.relayer(QUEUED_WAIT_MS);
   const tx: TxRef[] = [];
   const outs = await Promise.all([1n, 2n, 3n].map((p) => r.send(prepayAction(p), open, keep(tx))));
   assert.deepEqual(outs.map((o) => o.kind), ["final", "final", "final"]);
@@ -2751,9 +2757,9 @@ test("the nonce counter: a restart while a transaction is in flight signs the ne
 test("the nonce counter: two signers on one key at once never both take n; the one that loses the compare-and-set takes the next", async () => {
   const node = new Node();
   node.landMs = () => 30;
-  assert.equal((await node.relayer(500).send(prepayAction(9n), open, () => undefined)).kind, "final"); // the counter holds 12
+  assert.equal((await node.relayer(QUEUED_WAIT_MS).send(prepayAction(9n), open, () => undefined)).kind, "final"); // the counter holds 12
   const tx: TxRef[] = [];
-  const outs = await Promise.all([node.relayer(500).send(prepayAction(1n), open, keep(tx)), node.relayer(500).send(prepayAction(2n), open, keep(tx))]);
+  const outs = await Promise.all([node.relayer(QUEUED_WAIT_MS).send(prepayAction(1n), open, keep(tx)), node.relayer(QUEUED_WAIT_MS).send(prepayAction(2n), open, keep(tx))]);
   assert.deepEqual(outs.map((o) => o.kind), ["final", "final"]);
   assert.deepEqual(tx.map((x) => x.nonce).sort(), ["12", "13"]);
   assert.equal(node.relayerStore.nonceNext(`${RELAYER}/ed25519:${base58(relayerKey(node.secret).pub)}`), 14n);
