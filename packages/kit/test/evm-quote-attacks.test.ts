@@ -3672,8 +3672,9 @@ test("LH2b a revert never holds a provider, whatever its string, nor an answer f
     // not yet, which askAt asks again: Base's (-32001, base-rpc.publicnode.com 2026-11-03 19:09Z) and a lagging backend's
     ["n1", -32001, "block not found: canonical hash 0x1111111111111111111111111111111111111111111111111111111111111111", false],
     ["n2", -32000, "header not found", false],
-    ["n3", -32000, "Unknown state. First available state is 1000", false],
     // no longer
+    // robinhood.drpc.org, 200, code 27, to a state read by hash 100 to 2,000 blocks back, 6 of 6 (2026-11-05 11:53Z)
+    ["n3", 27, "Unknown state. First available state is 1", true],
     ["h1", -32000, "historical state 6643e0bcdc929518b5f64f26a3c7a6482b7ac94e3edb3f36e616cbbbf086f42a is not available", true],
     ["h2", -32602, "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode", true],
   ];
@@ -3701,4 +3702,109 @@ test("LW a sell's retry without a held provider waits for the buy's block to the
   assert.deepEqual(r.verdict, { accepted: false, code: "not_landed" }, `after ${r.ms} ms: ${big(r.verdict)}`);
   // the first agreement waited 29 s, so not about 59 s
   assert.ok(r.ms >= 29_000 && r.ms <= quoteMod.EVM_MIN_BLOCK_WAIT_MS + 1_000, `not_landed after ${r.ms} ms, the first wait's deadline at ${quoteMod.EVM_MIN_BLOCK_WAIT_MS} ms`);
+});
+
+// the re-review of the fold (card evm-quote-lag-held): RQ1 drpc past its state cut, RQ2-RQ4 a revert is never provider
+// state, LQ3 a refused answer's body, LQ4 a not-yet answer, LQ5 a compute-units limit
+test("RQ1 robinhood.drpc.org's answer past its state cut (200, code 27 \"Unknown state. First available state is 1\") ranks it behind the others, never first by its speed", async () => {
+  quoteMod.evmSpeedReset();
+  const token = freshToken();
+  const pools = [best(token)];
+  // read 2026-11-05 11:53Z on robinhood.drpc.org: a state read by hash 100, 200, 1,000 and 2,000 blocks behind its head
+  const pruned = (rpc: EvmRpc): EvmRpc => async (calls) =>
+    calls.some((c) => c.method === "eth_call") ? calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: 27, message: "Unknown state. First available state is 1" } })) : rpc(calls);
+  const { f, urls, idle } = hosted({
+    "cut.rq1.test": { rpc: pruned(chain(pools, 0)), ms: 1 },
+    "a.rq1.test": { rpc: chain(pools, 0), ms: 80 },
+    "b.rq1.test": { rpc: chain(pools, 0), ms: 80 },
+  });
+  for (let i = 0; i < 3; i++) await Promise.all(quoteMod.evmProviders(urls, f).map((r) => r([{ method: "eth_getBlockByNumber", params: ["latest", false] }])));
+  assert.equal(hostOf(quoteMod.evmRanked(urls)[0]!), "cut.rq1.test", "it is the fastest");
+  const ms: number[] = [];
+  for (let k = 0; k < 3; k++) {
+    const t = performance.now();
+    const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(quoteMod.evmRanked(urls), f), NOW));
+    ms.push(Math.round(performance.now() - t));
+    assert.equal((v as { accepted: boolean }).accepted, true, big(v));
+    await idle();
+    await pause(1700);
+  }
+  console.log(`RQ1 quotes took ${ms.join(", ")} ms; ranked ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
+  assert.equal(hostOf(quoteMod.evmRanked(urls).at(-1)!), "cut.rq1.test", `ranked ${quoteMod.evmRanked(urls).map(hostOf).join(",")}; quotes took ${ms.join(", ")} ms`);
+});
+
+test("RQ2 a revert whose string reads like a block not held yet (code 3 \"execution reverted: header not found\") is asked once, never again as a block not held yet", async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba7c1");
+  let probes = 0;
+  const reverting = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const out = await rpc(calls);
+    return calls.map((c, id) => {
+      const probe = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code === quoteMod.EVM_SELL_PROBE_CODE;
+      if (!probe) return out[id];
+      probes++;
+      return { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted: header not found" } };
+    });
+  };
+  const r = await timed((mono) => evmPoolSellQuoteWith(req, [landed(reverting(chain([pool], 0)), [BUY_AT]), landed(reverting(chain([pool], 1)), [BUY_AT])], NOW, undefined, undefined, mono), 400, 100);
+  console.log(`RQ2 probes asked ${probes} times; ${big(r.verdict)} after ${r.ms} ms (mocked clock)`);
+  assert.equal(probes, 2, `asked ${probes} times; ${big(r.verdict)} after ${r.ms} ms`);
+});
+
+test("RQ3 a revert carrying a rate-limit string (code 3) never holds a provider", async () => {
+  for (const [name, message] of [["q1", "execution reverted: rate limit"], ["q2", "execution reverted: Too Many Requests"]] as const) {
+    const url = `https://${name}.rq3.test`;
+    const g = answering(`${name}.rq3.test`, 200, errs(1, 3, message), {});
+    await quoteMod.evmProviders([url, "https://x.rq3.test"], g)[0]!([{ method: "eth_call", params: [{ to: NATIVE, data: "0x" }, "latest"] }]);
+    assert.equal(isHeld([url], `${name}.rq3.test`), false, message);
+  }
+});
+
+test("RQ4 a sell whose token's transfer reverts with a rate-limit string is asked once per provider, never again as a rate limit", async () => {
+  const { pool, req } = landedSell("0x00000000000000000000000000000000000ba7c2");
+  let probes = 0;
+  const reverting = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const out = await rpc(calls);
+    return calls.map((c, id) => {
+      const probe = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code === quoteMod.EVM_SELL_PROBE_CODE;
+      if (!probe) return out[id];
+      probes++;
+      return { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted: rate limit" } };
+    });
+  };
+  const r = await timed((mono) => evmPoolSellQuoteWith(req, [landed(reverting(chain([pool], 0)), [BUY_AT]), landed(reverting(chain([pool], 1)), [BUY_AT])], NOW, undefined, undefined, mono), 400, 100);
+  console.log(`RQ4 probes asked ${probes} times; ${big(r.verdict)} after ${r.ms} ms (mocked clock)`);
+  assert.equal(probes, 2, `asked ${probes} times; ${big(r.verdict)} after ${r.ms} ms`);
+});
+
+test("LQ3 an answer outside 2xx is refused without its body read, and its body is cancelled, never left open", async () => {
+  let cancelled = false;
+  const body = new ReadableStream({ pull: (c) => c.enqueue(new TextEncoder().encode("[")), cancel: () => void (cancelled = true) });
+  const f = (async () => new Response(body, { status: 403 })) as unknown as typeof fetch;
+  await assert.rejects(evmJsonRpc("https://lq3.test", f)([{ method: "eth_blockNumber", params: [] }]), /HTTP 403/);
+  assert.equal(cancelled, true);
+});
+
+test("LQ4 an answer for a block a provider does not hold yet is neither held nor timed: a fast not-yet answer never ranks a provider first", async () => {
+  const slow = "https://slow.lq4.test", fast = "https://fast.lq4.test", none = "https://unmeasured.lq4.test";
+  const f = (async (u: string, init: RequestInit) => {
+    const calls = JSON.parse(init.body as string) as { id: number }[];
+    if (new URL(u).hostname === "slow.lq4.test") {
+      await pause(80);
+      return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, result: "0x01" }))));
+    }
+    // base-rpc.publicnode.com's not-yet answer (-32001, 2026-11-03 19:09Z), and a header asked before the provider has it
+    return new Response(JSON.stringify(calls.map((c, i) => (i === 0 ? { jsonrpc: "2.0", id: c.id, error: { code: -32001, message: "block not found: canonical hash 0x" + "11".repeat(32) } } : { jsonrpc: "2.0", id: c.id, result: null }))));
+  }) as unknown as typeof fetch;
+  const [s, q] = quoteMod.evmProviders([slow, fast, none], f);
+  await s!([{ method: "eth_call", params: [{ to: NATIVE, data: "0x" }, "latest"] }]);
+  await q!([{ method: "eth_call", params: [{ to: NATIVE, data: "0x" }, "latest"] }, { method: "eth_getBlockByNumber", params: ["0x10", false] }]);
+  assert.deepEqual(quoteMod.evmRanked([slow, fast, none]).map(hostOf), ["slow.lq4.test", "fast.lq4.test", "unmeasured.lq4.test"]);
+});
+
+test("LQ5 a call's error naming the provider's compute units per second holds it, as any rate limit does", async () => {
+  const url = "https://cu.lq5.test";
+  // base.meowrpc.com, a JSON-RPC error inside the answer, 2026-11-04 23:48Z (the pinned providers' read); blastapi the same
+  const g = answering("cu.lq5.test", 200, errs(1, 429, "Your app has exceeded its compute units per second capacity. If you have retries enabled, you can safely ignore this message."), {});
+  await quoteMod.evmProviders([url, "https://x.lq5.test"], g)[0]!([{ method: "eth_call", params: [{ to: NATIVE, data: "0x" }, "latest"] }]);
+  assert.ok(isHeld([url], "cu.lq5.test"));
 });

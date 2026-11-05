@@ -158,7 +158,7 @@ export const MUTANTS = [
   // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
   // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
   // build; scans as ORs within a provider's span; 429s asked again; each provider at most its limit at once
-  [QUOTE, "    if (!behind || i === 3) return out;", "    return out;", R, "R10 "],
+  [QUOTE, "    if (!out.some(notYet) || i === 3) return out;", "    return out;", R, "R10 "],
   [QUOTE, "for (const { k, id } of ordered) {", "for (const { k, id } of [] as typeof ordered) {", R, "N1a "],
   [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (false) f.quotes.push(", R, "A1 "],
   // (no mutant reads `found` for `held` here: a buy's pool the PoolManager does not hold reads a price of 0, which the
@@ -192,7 +192,7 @@ export const MUTANTS = [
   [QUOTE, "    return [slow, s?.ms ?? Number.MAX_VALUE, k] as const;", "    return [0, s?.ms ?? Number.MAX_VALUE, k] as const;", R, "V4 "],
   [QUOTE, "s.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0;", "0;", R, "V4 "],
   [QUOTE, "s.held > now ? 2 : ", "s.held > now ? 1 : ", R, "V4 "],
-  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      else s.ms", "      s.ms", R, "V4 "],
+  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) s.ms", "      s.ms", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
   // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
   [QUOTE, "    if (!(await behind(got.block))) return got;\n    if (got.low === undefined) {", "    return got;\n    if (got.low === undefined) {", R, "LH1 "],
@@ -202,11 +202,22 @@ export const MUTANTS = [
   [QUOTE, "if (out.some(limited) || out.some(stateless)) s.held", "if (out.some(limited)) s.held", R, "LH2 "],
   // the review of the lag hold: each no-longer answer, never a revert, a non-2xx answer, the whole list's majority, the
   // two-provider list, one wait
-  [QUOTE, "/historical state \\S+ is not available|archive requests require a personal token/i", "/archive requests require a personal token/i", R, "LH2b "],
-  [QUOTE, "/historical state \\S+ is not available|archive requests require a personal token/i", "/historical state \\S+ is not available/i", R, "LH2b "],
-  [QUOTE, "e?.code !== 3 && !/^execution reverted/i.test(m) && ", "!/^execution reverted/i.test(m) && ", R, "LH2b "],
-  [QUOTE, "e?.code !== 3 && !/^execution reverted/i.test(m) && ", "e?.code !== 3 && ", R, "LH2b "],
-  [QUOTE, "    if (!res.ok) throw new Error(`the provider answered HTTP ${res.status}`);", "", R, "LH3 "],
+  [QUOTE, "/historical state \\S+ is not available|archive", "/archive", R, "LH2b "],
+  [QUOTE, "|archive requests require a personal token|", "|", R, "LH2b "],
+  [QUOTE, "!reverted(a) && /historical state", "/historical state", R, "LH2b "],
+  [QUOTE, "  return e?.code === 3 || (typeof e?.message", "  return (typeof e?.message", R, "LH2b "],
+  [QUOTE, " || (typeof e?.message === \"string\" && /^execution reverted/i.test(e.message));", ";", R, "LH2b "],
+  [QUOTE, "    if (!res.ok) {", "    if (false) {", R, "LH3 "],
+  // the re-review of the fold: drpc's no-longer answer, a revert never a state or a limit, a refused answer's body, a
+  // not-yet answer untimed, a compute-units limit
+  [QUOTE, "|^unknown state\\b/i", "/i", R, "LH2b "],
+  [QUOTE, "|^unknown state\\b/i", "/i", R, "RQ1 "],
+  [QUOTE, "(!reverted(a) && typeof o?.error?.message", "(typeof o?.error?.message", R, "RQ2 "],
+  [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ3 "],
+  [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ4 "],
+  [QUOTE, "      await res.body?.cancel().catch(() => {});\n", "", R, "LQ3 "],
+  [QUOTE, "      else if (!out.some(notYet)) s.ms", "      else s.ms", R, "LQ4 "],
+  [QUOTE, "|too many requests|exceeded its compute units per second/i", "|too many requests/i", R, "LQ5 "],
   [QUOTE, "const need = Math.floor(Math.max(of, list.length) / 2) + 1;", "const need = Math.floor(list.length / 2) + 1;", R, "LM2 "],
   [QUOTE, "    if (rest.length < 2) return got;", "", R, "LL4 "],
   [QUOTE, "(waitFrom ??= (a.mono ?? monotonic)())", "(a.mono ?? monotonic)()", R, "LW "],

@@ -531,15 +531,17 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly 
 async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly unknown[]> {
   for (let i = 0; ; i++) {
     const out = await ask(rpc, calls);
-    const behind = out.some((a) => {
-      const o = a as { result?: unknown; error?: { message?: unknown } } | null;
-      return o?.result === null || (typeof o?.error?.message === "string" && /(block|header).*not found|unknown block|unknown state/i.test(o.error.message));
-    });
-    if (!behind || i === 3) return out;
+    if (!out.some(notYet) || i === 3) return out;
     await new Promise((r) => setTimeout(r, FRESH_RETRY_MS * (i + 1)));
   }
 }
 const FRESH_RETRY_MS = 250;
+/** An answer for a block the provider does not hold yet (askAt's): no result, or an error naming the block or its
+ *  state; never a revert, whose string is the called contract's own. */
+const notYet = (a: unknown) => {
+  const o = a as { result?: unknown; error?: { message?: unknown } } | null;
+  return o?.result === null || (!reverted(a) && typeof o?.error?.message === "string" && /(block|header).*not found|unknown block|unknown state/i.test(o.error.message));
+};
 
 /** A block header from a provider's answer: number, hash, timestamp and base fee (null when it gives none), or a
  *  refusal. */
@@ -1273,7 +1275,8 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
       // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
       // evm-quote-lag-held)
       if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;
-      else s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
+      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)
+      else if (!out.some(notYet)) s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
       return out;
     } catch (e) {
       s.held = performance.now() + EVM_HOLD_MS;
@@ -2336,19 +2339,31 @@ class Unreachable extends Error {}
 /** A call's error naming state the provider no longer keeps (its state cut), read from the pinned providers:
  *  - "historical state <root> is not available": a Robinhood provider of the quote's list answering a TORCH quote's
  *    reads at its agreed block, 2026-11-05 10:00Z and 10:03Z (card evm-quote-lag-held's live runs);
- *  - "Archive requests require a personal token…": robinhood-rpc.publicnode.com, -32602, to a state read 100 and 130
- *    blocks back, 6 of 6, 2026-11-05 11:01Z (its HTTP status 403, which evmJsonRpc refuses before any call is read).
+ *  - "Archive requests require a personal token…": robinhood-rpc.publicnode.com, -32602, to a state read by number 100
+ *    and 130 blocks back, 6 of 6, 2026-11-05 11:01Z (its HTTP status 403, which evmJsonRpc refuses before any call is
+ *    read);
+ *  - "Unknown state. First available state is 1": robinhood.drpc.org, 200, code 27, to a state read by hash 100, 200,
+ *    1,000 and 2,000 blocks back, 6 of 6, 2026-11-05 11:53Z (askAt still asks it again, as the same string once came
+ *    from a node a block behind the head, 2026-11-04 06:52Z).
  *  Never a revert (code 3, "execution reverted…"): a call may revert with any string, "header not found" among them
  *  (every pinned Base provider passed it through, 10:54Z). Never an answer for a block a provider does not hold yet
- *  ("block not found: canonical hash", "header not found", "Unknown state"): askAt asks those again. */
+ *  ("block not found: canonical hash", "header not found"): askAt asks those again, and timed does not time them. */
 const stateless = (a: unknown) => {
-  const e = (a as { error?: { code?: unknown; message?: unknown } } | null)?.error;
-  const m = e?.message;
-  return typeof m === "string" && e?.code !== 3 && !/^execution reverted/i.test(m) && /historical state \S+ is not available|archive requests require a personal token/i.test(m);
+  const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
+  return typeof m === "string" && !reverted(a) && /historical state \S+ is not available|archive requests require a personal token|^unknown state\b/i.test(m);
 };
+/** A call's error naming the provider's rate limit: "25/second request limit reached" (mainnet.base.org, 2026-11-04
+ *  07:4xZ), "Your app has exceeded its compute units per second capacity…" (base.meowrpc.com, 2026-11-04 23:48Z; Base's
+ *  blastapi the same, re-review 2026-11-05); never a revert. */
 const limited = (a: unknown) => {
   const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
-  return typeof m === "string" && /request limit|rate limit|too many requests/i.test(m);
+  return typeof m === "string" && !reverted(a) && /request limit|rate limit|too many requests|exceeded its compute units per second/i.test(m);
+};
+/** A call that reverted (code 3, or a message "execution reverted…"): its string is the called contract's, never the
+ *  provider's state or limit (review LOW-2). */
+const reverted = (a: unknown) => {
+  const e = (a as { error?: { code?: unknown; message?: unknown } } | null)?.error;
+  return e?.code === 3 || (typeof e?.message === "string" && /^execution reverted/i.test(e.message));
 };
 // the errors of a connection that was never made (Node's net and undici: a timed-out or refused connect, an
 // unreachable network, a name that did not resolve)
@@ -2377,7 +2392,11 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     if (res.status === 429) throw new RateLimited("the provider answered 429 Too Many Requests", retryAfterMs(res.headers.get("retry-after")));
     // any other status outside 2xx is a failure, never an answer to read (review MED-1: robinhood-rpc.publicnode.com
     // answers a read past its state cut 403 with a JSON-RPC error inside, which was timed as a fast answer)
-    if (!res.ok) throw new Error(`the provider answered HTTP ${res.status}`);
+    if (!res.ok) {
+      // the body is never read, so it is let go, never left holding the connection (re-review INFO 3)
+      await res.body?.cancel().catch(() => {});
+      throw new Error(`the provider answered HTTP ${res.status}`);
+    }
     const text = await res.text();
     if (text.length > maxBytes) throw new Error("the answer is too long");
     const arr: unknown = JSON.parse(text);
