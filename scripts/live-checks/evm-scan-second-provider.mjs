@@ -129,7 +129,7 @@ async function quote(req, first, spare, mode) {
 
 export async function measure(venues = evmPoolVenues()) {
   const scans = {};
-  for (const c of ["base", "robinhood"]) scans[c] = { first: venues[c]?.scan?.url ?? null, spare: venues[c]?.scan?.spare?.url ?? null };
+  for (const c of ["base", "robinhood"]) scans[c] = { first: venues[c]?.scan?.url ?? null, spare: venues[c]?.scan?.spares?.[0]?.url ?? null };
   const run = { recorded: new Date().toISOString(), scans, preflight: await preflight(Object.values(scans).map((s) => s.spare).filter((u) => typeof u === "string")), cases: {} };
   for (const [name, req] of CASES) {
     const { first, spare } = scans[req.chain];

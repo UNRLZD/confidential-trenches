@@ -5,8 +5,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
-import { fakeChain, ICNT, open, POOL_ICNT, POOL_VVV, REC, timeOf, toLog, URLS, VVV, KNOWN } from "../../../test/evm-swaps/base.ts";
-import { BASE_VENUES, createSwaps, decodeRef, decodeSwap, hookTakes, parseLog, parseLogs, REF_POOL_ID, sameLogs, swapFilter, TOPIC, traderLeg, v4Key, type Log, type Pool } from "./swaps.ts";
+import { FAST_SHIFT, fakeChain, ICNT, open, POOL_ICNT, POOL_VVV, REC, timeOf, toLog, URLS, VVV, KNOWN } from "../../../test/evm-swaps/base.ts";
+import { BASE_VENUES, createSwaps, decodeRef, decodeSwap, hookTakes, LAG_MAX, parseLog, parseLogs, REF_POOL_ID, sameLogs, swapFilter, TOPIC, traderLeg, v4Key, type Log, type Pool } from "./swaps.ts";
 
 /** The book the same logs make rebuilt in one go: every swap and ETH price in order, all settled. */
 function rebuild(pool: Pool, upTo: number) {
@@ -196,9 +196,9 @@ test("the newest blocks are read again every tick: a fork of the last blocks rep
   assert.deepEqual(after.trades, direct.trades);
 });
 
-test("a provider 30 blocks behind is passed over for the third; the agreed block is the newest two have", async () => {
+test("a provider more than LAG_MAX blocks behind is passed over for the third; the agreed block is the newest two have", async () => {
   const chain = fakeChain();
-  chain.st.faults.set(URLS[0]!, { lag: 30 });
+  chain.st.faults.set(URLS[0]!, { lag: LAG_MAX + 20 });
   const s = open(chain);
   chain.st.head = REC.firstHead + 200;
   const got = await bodyOf(s.candles(ICNT, "1m", null, 500));
@@ -261,14 +261,45 @@ test("a provider that refuses is held for the wait it names (the helper's RPC ru
   assert.ok(chain.st.calls.get(URLS[1]!)! > b0);
 });
 
-test("a provider whose newest block is not on Base's clock reads nothing", async () => {
-  const chain = fakeChain();
-  chain.st.faults.set(URLS[0]!, { badClock: true });
-  chain.st.faults.set(URLS[1]!, { badClock: true });
+/** Each trade's time is its block's own, as Base times it (base.ts timeOf). */
+function timedByBlocks(body: string, shift = 0): number {
+  const blockOf = new Map(REC.logs.icnt.map((l) => [l.tx, l.b + shift]));
+  const rows = JSON.parse(body).trades as { t_ms: number; tx: string }[];
+  for (const r of rows) assert.equal(r.t_ms, timeOf(blockOf.get(r.tx)!) * 1000, r.tx);
+  return rows.length;
+}
+
+test("Base at 200 ms blocks (block 53556127 on, 2026-11-05 18:00:01Z): a token's candles and tape are read, each swap timed by the block time its providers log", async () => {
+  const chain = fakeChain({ shift: FAST_SHIFT });
   const s = open(chain);
-  chain.st.head = REC.firstHead + 100;
-  const none = await s.candles(ICNT, "1m", null, 500);
+  chain.st.head = REC.firstHead + FAST_SHIFT + 100;
+  const c = await s.candles(ICNT, "1m", null, 500);
+  const t = await s.trades(ICNT, 50);
   s.stop();
+  assert.equal(c.status, 200, c.body);
+  assert.equal(t.status, 200, t.body);
+  assert.ok(timedByBlocks(t.body, FAST_SHIFT) > 0, "a tape");
+  const bars = JSON.parse(c.body).candles as number[][];
+  assert.ok(bars.length > 0, "bars");
+  assert.ok(bars.every((b) => b[0]! >= Math.floor(timeOf(REC.firstHead + FAST_SHIFT) / 60) * 60 && b[0]! <= timeOf(chain.st.head)), "every bar within the blocks read, at their own times");
+});
+
+test("a provider whose head and log times are off its blocks' is no agreement: one of three leaves the two alike, two off apart leave no pair (503)", async () => {
+  const one = fakeChain();
+  one.st.faults.set(URLS[0]!, { badClock: 1 });
+  const s = open(one);
+  one.st.head = REC.firstHead + 100;
+  const t = await s.trades(ICNT, 50);
+  s.stop();
+  assert.equal(t.status, 200, t.body);
+  assert.ok(timedByBlocks(t.body) > 0, "the two alike time the tape");
+  const two = fakeChain();
+  two.st.faults.set(URLS[0]!, { badClock: 1 });
+  two.st.faults.set(URLS[1]!, { badClock: 2 });
+  const s2 = open(two);
+  two.st.head = REC.firstHead + 100;
+  const none = await s2.candles(ICNT, "1m", null, 500);
+  s2.stop();
   assert.equal(none.status, 503);
 });
 

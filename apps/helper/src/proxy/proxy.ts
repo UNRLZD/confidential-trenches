@@ -107,10 +107,13 @@ export const CACHE_ENTRIES = 256;
 export const CACHE_BYTES = 32 * 1024 * 1024;
 const KEY_SHAPE = /^[\x21-\x7e]{8,4096}$/; // printable ASCII, no space or line break, so it can never split a header
 
-/** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
-export type ProxyAnswer = { status: number; headers: Record<string, string>; body: string; why?: string };
+/** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. `timing` (card helper-ready-page-warm):
+ *  the call's Server-Timing entries for the helper's own reads that name them (the token page's Jupiter search): its
+ *  wait for the budget's room (budget), for the vendor's hold or turn (turn), each 429 the vendor answered (429), and
+ *  the send (send). */
+export type ProxyAnswer = { status: number; headers: Record<string, string>; body: string; why?: string; timing?: string[] };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-type Read = { status: number; body: string; fetchedAt: string };
+type Read = { status: number; body: string; fetchedAt: string; timing?: string[] };
 type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void> };
 
 const error = (status: number, code: string): ProxyAnswer => ({ status, headers: {}, body: JSON.stringify({ error: { code } }) });
@@ -231,9 +234,15 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   async function call(name: VendorName, v: Vendor, up: Upstream, path: string, query: string, body: string, reserved: boolean, by: number): Promise<Read | ProxyAnswer> {
     // the seconds to the vendor's reset, for the not-ready answer's Retry-After
     const heldS = (): number => Math.max(1, Math.ceil((budget.heldUntil(name) - now()) / 1000));
+    // the call's own waits, for its Server-Timing (ProxyAnswer.timing)
+    let turnMs = 0;
+    let refusals = 0;
     for (let attempt = 0; ; attempt++) {
       // the vendor's reset holds every call to it: waited out when it ends by `by`, else not ready (never our 429)
-      if (!(await turn(name, by))) return notReady(`${name} held`, heldS());
+      const t0 = performance.now();
+      const turned = await turn(name, by);
+      turnMs += performance.now() - t0;
+      if (!turned) return notReady(`${name} held`, heldS());
       if (attempt > 0) {
         // the retry reaches the vendor again, so it draws from the total too
         if (budget.take(name, undefined, 1, false, reserved) > 0) return notReady(budget.refusedBy());
@@ -244,6 +253,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       if (up.method === "POST") headers["content-type"] = "application/json";
       let r: Response;
       let text: string | undefined;
+      const sentAt = performance.now();
       try {
         r = await doFetch(`${v.base}${path}${query}`, {
           method: up.method,
@@ -254,6 +264,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         });
         if (r.status === 429) {
           await r.body?.cancel();
+          refusals++;
           // the vendor is held until its reset, for every caller; this call reads again once it ends, if that is by
           // `by` (turn), once: a second 429 is not ready
           const wait = Math.max(resetMs(r.headers, now()), 0);
@@ -275,7 +286,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         return UPSTREAM();
       }
       if (holdsKey(text)) return UPSTREAM();
-      return { status: r.status, body: text, fetchedAt };
+      const timing = [`turn;dur=${Math.round(turnMs)}`, ...(refusals > 0 ? [`429;desc="${refusals}"`] : []), `send;dur=${Math.round(performance.now() - sentAt)}`];
+      return { status: r.status, body: text, fetchedAt, timing };
     }
   }
 
@@ -328,6 +340,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     if (up.cacheMs) params.sort();
     const qs = params.size ? `?${params}` : "";
     let out: Read | ProxyAnswer;
+    let budgetMs = 0;
     if (up.method === "GET") {
       // a GET is a read: identical ones in flight share one call (card helper-crowd-429, fold 6), and a public list is
       // also kept cacheMs
@@ -342,8 +355,10 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         out = hit;
       } else {
         let p = inflight.get(id);
+        const b0 = performance.now();
         const first = draw(p !== undefined);
         const wait = typeof first === "number" ? first : await first;
+        budgetMs = performance.now() - b0;
         if (wait > 0) return source(refused(wait));
         // a read another call began while this one waited is joined, not sent twice
         p ??= inflight.get(id);
@@ -363,7 +378,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       out = await call(name, v, up, path, qs, up.method === "POST" ? body : "", reserved, by);
     }
     if (!("fetchedAt" in out)) return source(out);
-    return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body });
+    return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body, ...(out.timing ? { timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : {}) });
   }
 
   return { handle, keyCount: Object.keys(keys).length };

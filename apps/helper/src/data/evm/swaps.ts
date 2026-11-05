@@ -41,10 +41,12 @@
 // ANSWER_MAX bytes or not JSON is a failure. A tick that cannot agree changes nothing; the book keeps serving what it
 // holds, dated by its last read, and a read asked of a book STALE_MS old starts one (card helper-live-bars-no-503).
 //
-// Block times on Base come from its fixed clock (BLOCK_CLOCK, lists.ts): checked against each tick's newest block on both
-// providers, and a tick whose block disagrees with the clock reads nothing. Robinhood has no fixed clock (it put 10 or
-// more blocks in one second): a swap is timed by its log's `blockTimestamp`, part of what two providers must answer
-// alike, never 0 and never before an earlier swap's.
+// Block times: a swap is timed by its log's `blockTimestamp`, part of what two providers must answer alike, never 0 and
+// never before an earlier swap's, on every chain. No clock is assumed: Base's block time went from 2 s to 200 ms at block
+// 53556127 (2026-11-05 18:00:01Z, lists.ts BLOCK_CLOCK), and a read that checked each head against the 2 s clock
+// answered 503 for every Base token from then (card helper-ready-page-warm); Robinhood puts 10 or more blocks in one
+// second. Base's providers fill `blockTimestamp` (base-rpc.publicnode.com, base.gateway.tenderly.co and base.drpc.org
+// on all 124 v4 swaps of 100 blocks, read 2026-11-05 19:0xZ).
 //
 // Display only: nothing here feeds a signature. Every provider value is hostile input: a log counts only when its
 // emitter, topic0, topic count and data length match the venue exactly; an amount must fit its type and its legs have
@@ -52,9 +54,9 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
-import { CALLER_ROOM, evmThrottleS, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
+import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
-import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
+import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -154,7 +156,7 @@ export type Venues = {
   pons: readonly string[];
   /** The most blocks one `eth_getLogs` asks (the smallest the chain's providers take). */
   span: number;
-  /** The blocks a token's first read and its discovery may go back: COLD_S of the chain's measured block time. */
+  /** The blocks a token's first read and its discovery may go back (about five minutes of the chain's blocks). */
   cold: number;
   /** The blocks one round of that walk reads, newest first: an active token's swaps are found in the first. */
   step: number;
@@ -163,12 +165,6 @@ export type Venues = {
   /** A provider this many blocks behind the other is passed over for the third. */
   lagMax: number;
 };
-/** How far back a token's discovery and first read may walk: 20 minutes on every chain, Base's window before
- *  (600 blocks of 2 s), so a token quiet for a few minutes still has its pool, tape and bars (card app-console-429: at
- *  Robinhood's 3,000 blocks, 306 s, a v4 token with $36.6k of 5-minute volume had no transfer and answered an empty
- *  chart, 2026-11-04 12:59Z). */
-export const COLD_S = 1_200;
-const coldOf = (blockMs: number) => Math.ceil((COLD_S * 1000) / blockMs);
 export const VENUES: Readonly<Record<EvmChain, Venues>> = {
   base: {
     poolManager: BASE_VENUES.poolManager,
@@ -185,11 +181,17 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     refPoolId: REF_POOL_ID,
     pons: [],
     span: 1_000,
-    // Base's clock: one block every 2 s (lists.ts BLOCK_CLOCK)
-    cold: coldOf(2_000),
-    step: 600,
-    refBack: 1_400,
-    lagMax: 10,
+    // one block every 200 ms from block 53556127 (lists.ts BLOCK_CLOCK). The window is Robinhood's five minutes, one
+    // step, 1,500 blocks, two calls a filter (at 2 s it was 20 minutes, 600 blocks, one call; at 200 ms 20 minutes is
+    // 6,000 blocks, and a quiet token's walk of it on the three providers left took their bursts' 429s, no
+    // pair, 503, read live 2026-11-05 19:2xZ); a token quiet longer has GeckoTerminal's bars of its top pool, as on
+    // Robinhood. The ETH price is read 1,000 blocks (200 s) before a book's first, its pool's longest gap 374 blocks (88 swaps in
+    // 5,000 blocks read 2026-11-05 19:1xZ on base-rpc.publicnode.com); a provider 50 blocks (10 s) behind is passed
+    // over (four heads read at once five times, 2026-11-05 19:1xZ, were at most 2 blocks apart)
+    cold: 1_500,
+    step: 1_500,
+    refBack: 1_000,
+    lagMax: 50,
   },
   // Robinhood makes about 10 blocks a second (10,000 blocks over 1,024 s, 2026-11-03 19:1xZ): a step of 3,000 blocks is
   // its last five minutes (600, one minute, found no pool for a v4 token with 213 swaps in the 2,000 blocks before, read
@@ -210,7 +212,7 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     refPoolId: ROBINHOOD_REF_POOL_ID,
     pons: [ROBINHOOD_VENUES.ponsV2],
     span: 100,
-    // one step, not COLD_S (card helper-robinhood-swaps): 20 minutes of 102 ms blocks is 118 spans of 100 blocks a
+    // one step, not 20 minutes (card helper-robinhood-swaps): 20 minutes of 102 ms blocks is 118 spans of 100 blocks a
     // filter a provider, and under it every keyless provider answered 429, -32005, code 30 or a timeout and the swaps
     // routes 503 (2026-11-04 14:36-15:16Z reads, a soak at 15:13Z still 503 after 195 s); a token quiet longer than the
     // step's five minutes has GeckoTerminal's bars of its top pool, as a token with no pool found
@@ -225,8 +227,20 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
  *  blocks answered by base-rpc.publicnode.com (457 ms) and base.gateway.tenderly.co (582 ms); base.drpc.org up to 10,000
  *  blocks but batches of 3; mainnet.base.org "request limit reached"; base-mainnet.public.blastapi.io at most 10 blocks;
  *  1rpc.io 50 blocks. */
+//
+// Read again 2026-11-05 19:0x-19:2xZ from the Mac (card helper-ready-page-warm), after Base went to 200 ms blocks: one
+// 1,000-block `eth_getLogs` answered by base-rpc.publicnode.com (130-300 ms; 429 past about 6 a second),
+// base.gateway.tenderly.co (350-600 ms, 2.5 a second sequential none refused) and base.public.blockpi.network's public
+// endpoint (380-1,200 ms, 3.6 a second none refused), each log with its blockTimestamp; base.drpc.org now refuses 250
+// blocks and more (code 35 "ranges over 10000 blocks are not supported on free plan") and 429s bursts; base-pokt.nodies.app
+// takes 50 blocks at most (-32001) and 429s bursts; 1rpc.io, base.meowrpc.com, base.llamarpc.com, base.lava.build,
+// base.api.onfinality.io, api.zan.top, endpoints.omniatech.io and base.blockpi.network (no key) refused or failed every read.
 export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
-  base: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co", "https://base.drpc.org", "https://base-pokt.nodies.app"],
+  // base.drpc.org is left out: it answers none of the reads' ranges (250 blocks and more) and 429s about one a second.
+  // mainnet.base.org, Base's own, answers the heads, calls and the traders' lookups (20 eth_getTransactionByHash a
+  // second none refused, 19:3xZ) and is sent no log read (limits.ts LOGS_REFUSED): with the three above alone a cold
+  // tape's 50 lookups waited on their paces and its traders answered null (index-evm-swaps on a local build, 19:30Z)
+  base: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co", "https://base.public.blockpi.network/v1/rpc/public", "https://base-pokt.nodies.app", "https://mainnet.base.org"],
   // Robinhood, 2026-11-03 19:2xZ, `eth_getLogs` of the v4 PoolManager: robinhood.daybreak-rpc.network up to 2,000 blocks
   // (batches of 10), robinhood.drpc.org up to 101 blocks (batches of 3), api.blockvectra.com up to 100 blocks (no
   // batches); each of the three fills a log's `blockTimestamp`. rpc.mainnet.chain.robinhood.com answers 5,000 blocks but
@@ -296,8 +310,16 @@ const WIDE_SPAN: Readonly<Record<string, number>> = {
 };
 
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
- *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ). */
-const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://base.gateway.tenderly.co": 4, "https://api.blockvectra.com/v1/robinhood_mainnet/public": 1 };
+ *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ);
+ *  a paced provider's at most its burst (limits.ts PROVIDER_PACE), so a batch never asks more than its bucket holds
+ *  (publicnode 6, Tenderly 3, blockpi 4: its public endpoint refused batches of 5, 2026-11-05 19:2xZ). */
+const BATCH_SIZE: Readonly<Record<string, number>> = {
+  ...BATCH_MAX,
+  "https://base-rpc.publicnode.com": 6,
+  "https://base.gateway.tenderly.co": 3,
+  "https://base.public.blockpi.network/v1/rpc/public": 4,
+  "https://api.blockvectra.com/v1/robinhood_mainnet/public": 1,
+};
 
 /** Requests out to one provider at once (swaps.ts batchTo). */
 export const INFLIGHT_MAX = 4;
@@ -483,8 +505,8 @@ export function parseLogs(result: unknown): Log[] | null {
 }
 
 const key = (l: Log, withTime: boolean) => `${l.block}:${l.index}:${l.tx}:${l.address}:${l.topics.join(",")}:${l.data}${withTime ? `:${l.t ?? "-"}` : ""}`;
-/** Whether two providers' answers for one filter are the same logs; `withTime`: with the same block times too (a chain
- *  with no fixed block clock, whose swaps are timed by them). */
+/** Whether two providers' answers for one filter are the same logs; `withTime`: with the same block times too (the
+ *  swaps' reads, which are timed by them). */
 export const sameLogs = (a: Log[], b: Log[], withTime = false): boolean => a.length === b.length && a.every((l, i) => key(l, withTime) === key(b[i]!, withTime));
 
 const word = (data: string, i: number): string => data.slice(2 + 64 * i, 2 + 64 * (i + 1));
@@ -752,10 +774,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
   const headerTimed = deps.headerTimed ?? HEADER_TIMED;
   const V = VENUES[chain];
-  // Base's fixed clock times its blocks; a chain with none (Robinhood) is timed by each log's own block time, which two
-  // providers must give alike
-  const clock = BLOCK_CLOCK[chain];
-  const timeOf = (l: Log): number | null => (clock !== null ? clock.genesisS + clock.blockS * l.block : typeof l.t === "number" && l.t > 0 ? l.t : null);
+  // a swap is timed by its log's own block time, which two providers must give alike (sameLogs with times)
+  const timeOf = (l: Log): number | null => (typeof l.t === "number" && l.t > 0 ? l.t : null);
   /** Blocks `from` to `to` in spans of at most V.span. */
   const spans = (from: number, to: number): [number, number][] => {
     const out: [number, number][] = [];
@@ -949,7 +969,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const span = wideFirst ? Math.max(WIDE_SPAN[u] ?? V.span, V.span) : V.span;
       return [
         wideFirst && span > V.span ? 1 : 0,
-        -Math.round(waitOf(u, Math.ceil(calls / Math.floor(span / V.span)), wideFirst && clock === null && headerTimed.has(u)) / WAIT_GRAIN_MS),
+        -Math.round(waitOf(u, Math.ceil(calls / Math.floor(span / V.span)), wideFirst && headerTimed.has(u)) / WAIT_GRAIN_MS),
         Math.round(free(u)),
         -((i - (t % n) + n) % n),
       ];
@@ -994,36 +1014,43 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // read out is waited for (each bounded by TIMEOUT_MS), so its answer still counts
     const reads: Promise<void>[] = [];
     const go = (urls: string[]) => (reads.push(read(urls)), hedged(reads.at(-1)!, urls));
+    // two heads within V.lagMax of each other are in hand
+    const pair = (): boolean => {
+      const ns = [...heads.values()].map((h) => h.n).sort((a, b) => b - a);
+      return ns.some((n, i) => i > 0 && ns[i - 1]! - n <= V.lagMax);
+    };
     await go(ok.slice(0, 2));
-    const first = [...heads.values()];
-    if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await go(ok.slice(2, 3));
+    // the whole ranked list is walked, one more at a time, until a pair is in hand or the list is spent (card
+    // evm-rpc-spare-list: with Base's first two providers down the third answered, the patient round asked the first two
+    // again and the fourth never, so no head was read and every read of the chain stopped)
+    for (let i = 2; i < ok.length && !pair(); i++) await go(ok.slice(i, i + 1));
     if (heads.size < 2) await Promise.all(reads);
-    // no two heads within the pace's wait: the providers not read yet, and those that passed, read patiently
+    // no two heads within the pace's wait, the whole list asked: those that passed a read at their pace's wait read again,
+    // patiently (a provider not yet asked has been, above)
     if (heads.size < 2) await read(ok.filter((u) => !heads.has(u)).slice(0, 2), true);
     const sorted = [...heads].sort((a, b) => b[1].n - a[1].n);
     if (sorted.length < 2) return null;
     const agreed = sorted[1]![1].n; // the newest block at least two providers have
     const withIt = sorted.filter(([, h]) => h.n >= agreed).map(([u]) => u);
-    if (clock === null) return { n: agreed, t: sorted[1]![1].t, with: withIt };
-    // every provider's head block must sit on the chain's clock
-    for (const [, h] of sorted) if (h.t !== clock.genesisS + clock.blockS * h.n) return null;
-    return { n: agreed, t: clock.genesisS + clock.blockS * agreed, with: withIt };
+    return { n: agreed, t: sorted[1]![1].t, with: withIt };
   }
 
   /** The providers to ask, in order (ranked): those of `urls` not held, then any other of ours alike (a provider held
-   *  since the head was read, or lags, is made up for by the next); agreed stops at PROVIDERS_MAX that answered. */
-  const askOrder = (urls: readonly string[], wideFirst: boolean, calls = 1, only = false): string[] => {
-    const have = ranked(usable(urls), wideFirst, calls);
-    return only ? have : [...new Set([...have, ...ranked(usable(rpcs).filter((u) => !have.includes(u)), wideFirst, calls)])];
+   *  since the head was read, or lags, is made up for by the next); agreed stops at PROVIDERS_MAX that answered. None
+   *  in `skip` (a log read's: LOGS_REFUSED). */
+  const askOrder = (urls: readonly string[], wideFirst: boolean, calls = 1, only = false, skip?: ReadonlySet<string>): string[] => {
+    const can = (u: string) => skip === undefined || !skip.has(u);
+    const have = ranked(usable(urls).filter(can), wideFirst, calls);
+    return only ? have : [...new Set([...have, ...ranked(usable(rpcs).filter((u) => can(u) && !have.includes(u)), wideFirst, calls)])];
   };
 
   /** Asks `urls` the same `n` requests, two at once and then one more at a time while some answer has no two alike.
    *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. Each next one,
    *  of the rest and the wide ones (WIDE_SPAN) of the first two (a read past its pace's or queue's wait or held answers
    *  nothing at once), is ranked when it is asked, by expected answer time with the requests still left (fold 4). */
-  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true, only = false): Promise<(A | null)[]> {
-    // `only`: none but `urls` (the index's chain-wide read, which the others refuse)
-    const order = askOrder(urls, wideFirst, n, only);
+  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true, only = false, skip?: ReadonlySet<string>): Promise<(A | null)[]> {
+    // `only`: none but `urls` (the index's chain-wide read, which the others refuse); `skip`: never these
+    const order = askOrder(urls, wideFirst, n, only, skip);
     const passedBefore = new Map(order.map((u) => [u, paced.get(u) ?? 0]));
     const got: A[][] = Array.from({ length: n }, () => []);
     const by: Set<string>[] = Array.from({ length: n }, () => new Set());
@@ -1111,11 +1138,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       filters.length,
       async (u, idx, patient) => {
         const got = await logsOf(u, idx.map((i) => filters[i]!), patient);
-        return clock === null && headerTimed.has(u) ? timedByHeaders(u, got, patient) : got;
+        return headerTimed.has(u) ? timedByHeaders(u, got, patient) : got;
       },
-      (a, b) => sameLogs(a, b, clock === null),
+      (a, b) => sameLogs(a, b, true),
       true,
       only,
+      LOGS_REFUSED,
     );
   }
 
@@ -1473,7 +1501,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const AHEAD_AT_ONCE = 2;
   const AHEAD_ROOM = 0.75;
   const AHEAD_WAIT_MS = 500;
-  const roomy = (): boolean => single(usable(rpcs), 2).filter((u) => holds.room(u) >= AHEAD_ROOM).length >= 2;
+  const roomy = (): boolean => single(usable(rpcs), 2).filter((u) => !LOGS_REFUSED.has(u) && holds.room(u) >= AHEAD_ROOM).length >= 2;
   const aheadQueue = new Set<string>();
   let aheadRun: Promise<void> | null = null;
   let opening = 0;
