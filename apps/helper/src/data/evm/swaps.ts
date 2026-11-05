@@ -585,11 +585,19 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
   const pm = VENUES[chain].poolManager;
   const hook = pool.hook;
   const after = (BigInt(hook) & AFTER_SWAP_DELTA) !== 0n;
-  const byTx = new Map<string, { swaps: Log[]; calls: number[]; moves: { index: number; take: bigint }[] }>();
-  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], calls: [], moves: [] }).get(tx)!;
+  const byTx = new Map<string, { swaps: Log[]; own: { index: number; amt: bigint }[]; calls: number[]; moves: { index: number; take: bigint }[] }>();
+  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], own: [], calls: [], moves: [] }).get(tx)!;
   for (const l of logs) {
-    if (l.address === pm && l.topics.length === 3 && l.topics[0] === TOPIC.swap4 && l.topics[1] === pool.id && addrOf(l.topics[2]!.slice(2)) !== hook) at(l.tx).swaps.push(l);
-    else if (l.address === pm && l.topics[1] === pool.id && POOL_CALLS.includes(l.topics[0]!)) at(l.tx).calls.push(l.index);
+    if (l.address === pm && l.topics.length === 3 && l.topics[0] === TOPIC.swap4 && l.topics[1] === pool.id) {
+      if (addrOf(l.topics[2]!.slice(2)) !== hook) at(l.tx).swaps.push(l);
+      else {
+        // the hook's own swap of the pool: the token it paid in or was paid out settles it (card
+        // helper-v4-hook-liquidity: Base tx 0xfaaa9cc9's hook sold twice after the buy, and its payments were counted as
+        // the buy's cut)
+        const s = decodeSwap(pool, l, chain);
+        if (s !== null) at(l.tx).own.push({ index: l.index, amt: s.amt });
+      }
+    } else if (l.address === pm && l.topics[1] === pool.id && POOL_CALLS.includes(l.topics[0]!)) at(l.tx).calls.push(l.index);
     else if (l.address === pool.token && l.topics.length === 3 && l.topics[0] === TOPIC.transfer && l.data.length === 66) {
       const [from, to] = [addrOf(l.topics[1]!.slice(2)), addrOf(l.topics[2]!.slice(2))];
       const v = BigInt(l.data);
@@ -597,10 +605,18 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
       else if (from === hook && to === pm) at(l.tx).moves.push({ index: l.index, take: -v });
     }
   }
-  for (const { swaps, calls, moves } of byTx.values()) {
+  for (const { swaps, own, calls, moves } of byTx.values()) {
     if (swaps.length === 0) continue;
     swaps.sort((a, b) => a.index - b.index);
+    const settled = new Set<number>();
+    const between = (lo: number, hi: number) => swaps.some((s) => s.index > lo && s.index < hi) || own.some((x) => x.index > lo && x.index < hi);
     for (const m of moves) {
+      // settles the hook's own swap: its exact token leg, moved after it and before the pool's next swap, once
+      const o = own.find((x) => !settled.has(x.index) && x.index < m.index && x.amt === (m.take < 0n ? -m.take : m.take) && !between(x.index, m.index));
+      if (o !== undefined) {
+        settled.add(o.index);
+        continue;
+      }
       const call = Math.max(-1, ...calls.filter((i) => i < m.index));
       // settles that call: any move of an afterSwap hook (its cut follows its swap), and a beforeSwap-only hook's paying
       // in (hook to PoolManager), never its take, which is the next swap's beforeSwap cut
