@@ -181,6 +181,20 @@ export const HELPER_RPC_METHODS = {
     "getMinimumBalanceForRentExemption",
     // the set send's dead check (trade/solana/send.ts): is the tx's blockhash still valid at processed
     "isBlockhashValid",
+    // the signing page's pool path, whose second provider is this route (card pool-buy-send-fast; signpage
+    // test/page-rpc.test.ts reads every Solana method that path names and fails on one off this list): the finalized
+    // slot (pool-buy.ts whose spend, pool-withdraw.ts), W's history (pool-spend.ts), a transaction's fee
+    // (pool-deposit.ts, pool-sell.ts, pool-withdraw.ts, wallet pool/solana.ts), a block's time (the deadline settle),
+    // the finalized height and slot in one read (pool-sell.ts)
+    "getSlot",
+    "getSignaturesForAddress",
+    "getFeeForMessage",
+    "getBlockTime",
+    "getEpochInfo",
+    // a note restore's scan of the pool program (wallet pool/solana-restore.ts, memcmp-filtered). The heaviest read on
+    // the list: bounded on the helper by the caller's share (16 per 10 s), the per-method budget, the provider's pace
+    // and its 4 MB answer (apps/helper/src/rpc/rpc.ts RPC_ANSWER_MAX: an answer over it is refused, never passed on)
+    "getProgramAccounts",
   ],
   base: [
     "eth_call",

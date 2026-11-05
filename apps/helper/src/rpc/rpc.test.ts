@@ -48,8 +48,9 @@ const call = (r: ReturnType<typeof createRpc>, chain: string, body: unknown, typ
 const code = (a: { body: string }) => JSON.parse(a.body).error?.code;
 
 test("the allowlist, batch size and body limit are the kit's (a change goes through packages/kit/src/helper/v1.ts)", () => {
-  assert.deepEqual([...RPC_CHAINS], Object.keys(HELPER_RPC_METHODS));
-  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], [...HELPER_RPC_METHODS[c]], c);
+  // the kit's chains, then the testnet build's second Solana provider (card pool-buy-send-fast) on the kit's Solana list
+  assert.deepEqual([...RPC_CHAINS], [...Object.keys(HELPER_RPC_METHODS), "solana-devnet"]);
+  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], [...HELPER_RPC_METHODS[c === "solana-devnet" ? "solana" : c]], c);
   assert.equal(RPC_BATCH_MAX, HELPER_RPC_BATCH_MAX);
   const row = HELPER_V1_PATHS.find((p) => p.path === "/v1/rpc/{chain}");
   assert.equal(row?.limitBytes, RPC_BODY_MAX);
@@ -76,6 +77,30 @@ test("an allowlisted call on each chain is forwarded to that chain's provider an
     assert.equal(seen[0]!.headers["content-type"], "application/json");
     assert.deepEqual(JSON.parse(seen[0]!.body), { jsonrpc: "2.0", id: 7, method, params: [] });
   }
+});
+
+test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded to SOLANA_DEVNET_RPC_URL, its key never in the answer; anything else refused before any call", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const DEV = "fake-devnet-key-0123456789abcdef";
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet?api-key=${DEV}` });
+  // the reads a pool buy makes (packages/signpage/src/pool-buy.ts), each to the devnet URL, never the mainnet one
+  for (const method of ["getAccountInfo", "getMultipleAccounts", "getLatestBlockhash", "isBlockhashValid", "getBlockHeight", "getTransaction", "getSlot", "getSignaturesForAddress", "getFeeForMessage", "getBlockTime", "getEpochInfo", "getProgramAccounts"]) {
+    seen.length = 0;
+    const a = await call(r, "solana-devnet", { jsonrpc: "2.0", id: 3, method, params: [] });
+    assert.equal(a.status, 200, method);
+    assert.equal(seen.length, 1, method);
+    assert.equal(seen[0]!.url, `/devnet?api-key=${DEV}`, method);
+  }
+  seen.length = 0;
+  for (const method of ["eth_blockNumber", "EXPERIMENTAL_tx_status", "requestAirdrop", "getClusterNodes"])
+    assert.deepEqual([(await call(r, "solana-devnet", { jsonrpc: "2.0", id: 1, method, params: [] })).status, seen.length], [400, 0], method);
+  for (const c of ["solana_devnet", "Solana-devnet", "solana-devnet ", "solana-testnet"]) assert.equal((await call(r, c, { jsonrpc: "2.0", id: 1, method: "getSlot" })).status, 404, c);
+  // the key never reaches the answer
+  next = { status: 200, type: JSON_T, body: () => JSON.stringify({ jsonrpc: "2.0", id: 1, error: { message: `bad key ${DEV}` } }) };
+  assert.deepEqual([(await call(r, "solana-devnet", { jsonrpc: "2.0", id: 1, method: "getSlot" })).status], [503]);
+  // its own budget variable, a name a shell can set; no key set: the public devnet endpoint
+  assert.equal(rpcModule.rpcBudgetEnv("solana-devnet"), "RPC_BUDGET_SOLANA_DEVNET");
+  assert.equal(readUpstreams({})["solana-devnet"].url, "https://api.devnet.solana.com");
 });
 
 test("the kit's Solana set send reads are forwarded: isBlockhashValid (card solana-set-send), the finalized blockhash, statuses and the send", async () => {
@@ -124,7 +149,7 @@ test("refused before any call: an unlisted method, alone or anywhere in a batch,
   const r = rpc();
   seen.length = 0;
   const refused: [string, unknown][] = [
-    ["solana", { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [] }],
+    ["solana", { jsonrpc: "2.0", id: 1, method: "requestAirdrop", params: [] }],
     ["base", { jsonrpc: "2.0", id: 1, method: "debug_traceTransaction", params: [] }],
     ["base", { jsonrpc: "2.0", id: 1, method: "eth_sendTransaction", params: [] }],
     ["near", { jsonrpc: "2.0", id: 1, method: "EXPERIMENTAL_changes", params: {} }],

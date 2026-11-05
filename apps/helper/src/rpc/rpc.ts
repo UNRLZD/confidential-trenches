@@ -146,7 +146,7 @@ export type Pacer = ReturnType<typeof createPacer>;
  * token watches and the pool senders read their own providers), so 0. The token page's reads are not in it: they are
  * one per token a caller opens, so they draw that caller's share and stop at the total less this, as callers do.
  */
-export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0 };
+export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0, "solana-devnet": 0 };
 /**
  * The part of each chain's total, and of each method's, the helper's own background reads never draw (card
  * helper-ready-gate): the trade walks and the SOL price reads (data/solana/trades.ts) go only while half stays free,
@@ -162,6 +162,9 @@ export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?:
   base: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
   robinhood: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
   near: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
+  // mainnet's public numbers: under what api.devnet.solana.com's headers named (x-ratelimit-rps-limit 250,
+  // x-ratelimit-method-limit 150, read 5 Nov 15:03Z); a keyed SOLANA_DEVNET_RPC_URL names its plan's in RPC_BUDGET_SOLANA_DEVNET
+  "solana-devnet": { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX, perMethod: RPC_METHOD_MAX },
 };
 /** The chains whose providers speak EVM JSON-RPC, where -32005 is a throttle (limits.ts EVM_LIMIT_CODE). */
 const EVM_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
@@ -179,7 +182,7 @@ function evmLimited(chain: RpcChain, answer: unknown): number {
 }
 /** The environment variable naming a chain's budget, "<total>,<per client>[,<per method>]" per 10 s; the share at
  * least RPC_BATCH_MAX, so a full batch can be served, and a method's at least that and at most the total. */
-export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase()}`;
+export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase().replace(/-/g, "_")}`;
 const ID_MAX = 128;
 
 /**
@@ -192,6 +195,9 @@ export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: s
   base: { env: "BASE_RPC_URL", fallback: "https://mainnet.base.org" },
   robinhood: { env: "ROBINHOOD_RPC_URL", fallback: "https://rpc.mainnet.chain.robinhood.com" },
   near: { env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com" },
+  // a keyed devnet URL on the deployed helper (the page reads api.devnet.solana.com itself, so this must be another
+  // operator's); a helper anyone runs with no key forwards to the public endpoint
+  "solana-devnet": { env: "SOLANA_DEVNET_RPC_URL", fallback: "https://api.devnet.solana.com" },
 };
 
 /** Solana's public endpoint: a keyed SOLANA_RPC_URL's fallback (card helper-solana-failover, rpc/slot.ts). */

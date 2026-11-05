@@ -30,6 +30,9 @@ services:
       # and its HTTP endpoint for the reads, asked first; empty: the public endpoints
       SOLANA_STREAM_WS_URL: ${SOLANA_STREAM_WS_URL:-}
       SOLANA_TRADES_RPC_URL: ${SOLANA_TRADES_RPC_URL:-}
+      # the testnet build's second Solana provider, POST /v1/rpc/solana-devnet (src/rpc/rpc.ts): a keyed devnet URL of
+      # another operator than api.devnet.solana.com, which the page reads itself; empty: the public endpoint
+      SOLANA_DEVNET_RPC_URL: ${SOLANA_DEVNET_RPC_URL:-}
       BASE_RPC_URL: ${BASE_RPC_URL:-}
       ROBINHOOD_RPC_URL: ${ROBINHOOD_RPC_URL:-}
       NEAR_RPC_URL: ${NEAR_RPC_URL:-}
@@ -41,6 +44,7 @@ services:
       RPC_BUDGET_BASE: ${RPC_BUDGET_BASE:-}
       RPC_BUDGET_ROBINHOOD: ${RPC_BUDGET_ROBINHOOD:-}
       RPC_BUDGET_NEAR: ${RPC_BUDGET_NEAR:-}
+      RPC_BUDGET_SOLANA_DEVNET: ${RPC_BUDGET_SOLANA_DEVNET:-}
       # each vendor's budget per 10 s, "<total>,<per client>" (src/proxy/proxy.ts; empty: the vendor's published limit
       # for a starting key); set it to the key's plan
       PROXY_BUDGET_JUPITER: ${PROXY_BUDGET_JUPITER:-}
