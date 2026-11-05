@@ -1,10 +1,10 @@
 // node --test scripts/live-checks/signpage-pool-mainnet.test.mjs: the live check's verdict replays recorded runs
 // (signpage-pool-mainnet.answers.json), each read on 5 Nov by signpage-pool-mainnet.mjs collect():
-//   good: --local at 17:24:22Z, this card's signing page build served as SIGN_HOST under its own _headers: the bundle is
+//   good: --local at 17:26:40Z, this card's signing page build (release-36's bundle) served as SIGN_HOST under its own _headers: the bundle is
 //         the checkout's and carries the flow and the queue, no testnet pin, the CSP names the mainnet pair, and in a
 //         fresh browser pool.sell, pool.deposit and pool.withdraw on Solana are refused not_allowed with no pool read:
 //         PASS;
-//   bad:  live SIGN_HOST at 17:24:32Z, serving release-34's bundle from before this card (not the checkout's, and it
+//   bad:  live SIGN_HOST at 17:26:43Z, serving release-35's bundle from before this card (not the checkout's, and it
 //         carries no flow or queue): FAIL.
 // Planted from the good run: a pinned pool's answers (a kind not refused, the mint read on the pair), a testnet pin in
 // the bundle, a bundle without the queue, a CSP without provider A, no ready from the shell.
@@ -32,7 +32,7 @@ test("recorded good answer: this release's bundle with the flow and the queue, a
   assert.equal(r.ok, true, r.lines.join("\n"));
 });
 
-test("recorded bad answer: live SIGN_HOST on release-34, before this card: FAIL on the bundle and the queue", () => {
+test("recorded bad answer: live SIGN_HOST on release-35, before this card: FAIL on the bundle and the queue", () => {
   const r = judge(ANSWERS.bad);
   fails(r, /is this release's/);
   fails(r, /carries the pool flow and its proof queue: missing/);
