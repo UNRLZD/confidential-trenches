@@ -5,10 +5,10 @@
 // exactly once. R1-R14 are the evm-pool-buy-tx review's mutants (R10 moved with the digest's data check, now the hook
 // data hex check); K1-K16 are the fold's (merge note M366).
 //   node packages/kit/test/evm-pool-buy-mutants.mjs     (a heavy job: run it on a machine with spare cores)
-import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runSync } from "../../../scripts/group-run.mjs";
 import { KIT, kitCopy } from "./mutant-copy.mjs";
 
 // the sweep runs in a copy of the kit; imported (for its MUTANTS), the paths are the kit's own
@@ -150,15 +150,14 @@ export const MUTANTS = [
 // a child test run must not inherit this process's own node --test context (when the sweep runs as a test, the child
 // would report to the parent's runner and print no summary of its own)
 const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
+// a run past 5 min is killed, its process group with it, and counts as a fail (scripts/group-run.mjs)
+const RUN_MS = 300_000;
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`
 function run(name) {
   const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, ...TESTS];
-  try {
-    const out = execFileSync("node", args, { stdio: "pipe", encoding: "utf8", env: CHILD_ENV });
-    return /^# pass ([1-9]\d*)$/m.test(out) ? "pass" : "none";
-  } catch {
-    return "fail";
-  }
+  const r = runSync("node", args, { stdio: "pipe", encoding: "utf8", env: CHILD_ENV, timeoutMs: RUN_MS });
+  if (r.status !== 0) return "fail";
+  return /^# pass ([1-9]\d*)$/m.test(r.stdout) ? "pass" : "none";
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
