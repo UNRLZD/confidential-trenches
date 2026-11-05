@@ -453,6 +453,8 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     try {
       got = await rpc("eth_getLogs", [{ ...filter, fromBlock: tag(at), toBlock: tag(end) }]);
     } catch (e) {
+      // the other RPC failed and this read was stopped: never a smaller page for the next W
+      signal?.throwIfAborted();
       const m = String((e as Error)?.message ?? e);
       if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
       if (end > at) {
