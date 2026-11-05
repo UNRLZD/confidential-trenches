@@ -1382,7 +1382,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (first) {
       // a first read with no discovery's seed: newest first, until the tape's TRADES_MAX swaps or the cold window
       const w = await walk(urls, (lo, hi) => poolFilters(e.pool, lo, hi, chain), head.n, TRADES_MAX, (part) => part.filter((l) => decodeSwap(e.pool, l, chain) !== null).length);
-      if (w == null || (e.pool.quote.kind === "eth" && !((await refReady) && (await readRef(urls, head.n, w.from))))) return false;
+      if (w == null) return false;
+      tradersAhead(e.pool, w.logs);
+      if (e.pool.quote.kind === "eth" && !((await refReady) && (await readRef(urls, head.n, w.from)))) return false;
       return apply(e, w.from, head.n, head.n, w.logs);
     }
     const from = e.book.settledTo + 1;
@@ -1478,7 +1480,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         e = { pool: found.pool, decimals: found.decimals, book: createBook({ decimals: found.decimals, quote: found.pool.quote }), touched: now(), readAt: null, headN: 0 };
         // the discovery already read the pool's newest swaps on two providers (walked back to a tape's worth or the cold
         // window): that is the book's first read
-        if (found.seed !== undefined) apply(e, found.seed.from, found.seed.to, found.seed.headN, found.seed.logs);
+        if (found.seed !== undefined) {
+          tradersAhead(found.pool, found.seed.logs);
+          apply(e, found.seed.from, found.seed.to, found.seed.headN, found.seed.logs);
+        }
         books.set(token, e);
       }
     }
@@ -1620,9 +1625,29 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  helper-robinhood-capacity fold 2), so they are split across the providers not held by free budget (free), each share
    *  read at once, and a share whose read fails asked of the others in turn; a tx whose read fails everywhere stays null
    *  this time and is asked again the next. */
+  /** The lookups out now, by transaction: a tape asks a hash in flight once (card helper-robinhood-capacity fold 8). */
+  const looking = new Map<string, Promise<void>>();
+  /** Each transaction's sender into `traders`, one lookup per hash however many callers ask it at once. */
   async function tradersOf(txs: string[]): Promise<void> {
-    const need = [...new Set(txs)].filter((t) => !traders.has(t));
-    if (need.length === 0) return;
+    const ask = [...new Set(txs)].filter((t) => !traders.has(t));
+    const waits = ask.flatMap((t) => (looking.has(t) ? [looking.get(t)!] : []));
+    const need = ask.filter((t) => !looking.has(t));
+    if (need.length > 0) {
+      const p = lookTraders(need).finally(() => {
+        for (const t of need) if (looking.get(t) === p) looking.delete(t);
+      });
+      for (const t of need) looking.set(t, p);
+      waits.push(p);
+    }
+    await Promise.all(new Set(waits));
+  }
+  /** A book's newest swaps' traders asked as soon as its first logs are read, alongside the ETH price's read, so the
+   *  tape that follows waits for no lookup it could have started (fold 8: 8.6 s of lookups after a cold read). */
+  function tradersAhead(pool: Pool, logs: readonly Log[]): void {
+    const txs = logs.filter((l) => decodeSwap(pool, l, chain) !== null).slice(-TRADES_MAX).map((l) => l.tx);
+    if (txs.length > 0) void tradersOf(txs).catch(() => undefined);
+  }
+  async function lookTraders(need: string[]): Promise<void> {
     // per-swap lookups go in batches: a provider that takes one request a post is asked none of them (fold 5)
     const order = single(usable(rpcs), 2).map((u) => ({ u, f: Math.max(free(u), 0) })).sort((x, y) => y.f - x.f);
     const sum = order.reduce((n, x) => n + x.f, 0);

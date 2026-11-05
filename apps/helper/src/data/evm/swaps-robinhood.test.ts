@@ -537,3 +537,21 @@ test("fold 7: a Slipstream-kind CL pool the lists name is the token's pool once 
     else assert.ok(cl.asked.transfers > 0, "an unconfirmed pool is no pool: the discovery walks the token's transfers");
   }
 });
+
+test("fold 8: a book's trader lookups start once its first logs are read, alongside the ETH price's read, and two tapes asked at once look each sender up once", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const s = open(chain);
+  const [a, b] = await Promise.all([s.trades(MAG, 50), s.trades(MAG, 50)]);
+  s.stop();
+  assert.equal(a.status, 200);
+  assert.equal(a.body, b.body);
+  const seq = chain.st.seq;
+  const firstTx = seq.findIndex((x) => x.startsWith("tx "));
+  const lastRef = seq.lastIndexOf("ref");
+  assert.ok(firstTx >= 0 && lastRef >= 0);
+  assert.ok(firstTx < lastRef, `a lookup is asked before the ETH price's last read (${seq.slice(0, 8).join(", ")} ...)`);
+  const txs = seq.filter((x) => x.startsWith("tx "));
+  assert.equal(new Set(txs).size, txs.length, "no sender is asked twice");
+  assert.ok(JSON.parse(a.body).trades.every((t: { trader: string | null }) => t.trader !== null), "every trade has its trader");
+});

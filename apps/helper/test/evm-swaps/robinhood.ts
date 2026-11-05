@@ -40,8 +40,8 @@ export const URLS = ["https://a.test", "https://b.test", "https://c.test"];
 type Fault = { zeroTime?: boolean; skewTime?: boolean; backTime?: boolean; down?: boolean; window?: number; span?: number; addressOnly?: boolean; refuse?: () => Response | null };
 export function fakeChain() {
   // `own`: eth_getLogs of one address's swap events (a token's own read), `ownFrom` each one's first block; `wide`: of
-  // no address (the index's)
-  const st = { head: REC.firstHead, calls: new Map<string, number>(), faults: new Map<string, Fault>(), spans: [] as number[], own: 0, wide: 0, ownFrom: [] as number[] };
+  // no address (the index's); `seq`: the ETH price's reads ("ref") and each sender lookup ("tx <hash>") in the order asked
+  const st = { head: REC.firstHead, calls: new Map<string, number>(), faults: new Map<string, Fault>(), spans: [] as number[], own: 0, wide: 0, ownFrom: [] as number[], seq: [] as string[] };
   const sources = [
     { addr: REC.curve, t1: null as string | null, logs: REC.logs.curve },
     { addr: ROBINHOOD_VENUES.poolManager, t1: REC.v4id as string | null, logs: REC.logs.v4 },
@@ -88,6 +88,7 @@ export function fakeChain() {
         }
         st.own++;
         st.ownFrom.push(from);
+        if (q.topics[1] === ROBINHOOD_REF_POOL_ID) st.seq.push("ref");
         const src = sources.find((s) => s.addr === q.address && (s.t1 === null || s.t1 === q.topics[1]));
         if (src === undefined) return ok([]);
         return ok(src.logs.filter((l) => l.b >= from && l.b <= to && (Array.isArray(q.topics[0]) ? q.topics[0].includes(l.t[0]!) : q.topics[0] === l.t[0])).map((l) => wire(l, f)));
@@ -100,6 +101,7 @@ export function fakeChain() {
         if (c.data === "0x313ce567") return ok(`0x${(18).toString(16).padStart(64, "0")}`);
         return { jsonrpc: "2.0", id: r.id, error: { code: -32000, message: "execution reverted" } };
       }
+      if (r.method === "eth_getTransactionByHash") st.seq.push(`tx ${r.params[0]}`);
       if (r.method === "eth_getTransactionByHash") return ok({ hash: r.params[0], from: `0x${(r.params[0] as string).slice(26, 66)}` });
       return { jsonrpc: "2.0", id: r.id, error: { code: -32601, message: "no" } };
     });
