@@ -200,11 +200,18 @@ test("a lists answer that is not a 200 with lists is a BAD line naming the chain
   }
 });
 
-test("card helper-restart-fresh: Robinhood's pool logs are agreed on providers that log their block time: the chain's own RPC, second in SWAP_RPCS since 5f8e5fd, logs blockTimestamp 0x0 (read 2026-11-04 17:4xZ) and never pairs for them (live run 41871356171: 'blocks none to none')", async () => {
+test("card helper-restart-fresh: Robinhood's pool logs are agreed on providers that log their block time: the chain's own RPC logs blockTimestamp 0x0 (read 2026-11-04 17:4xZ) and never pairs for them, wherever SWAP_RPCS puts it (live run 41871356171: 'blocks none to none')", async () => {
   const rec = A.robinhood_good;
   const c = rec.chain;
-  const rpcs = SWAP_RPCS.robinhood;
-  assert.ok(HEADER_TIMED.has(rpcs[1]), "the second provider is header-timed");
+  // the rule, not a position (helper-robinhood-capacity fold 5 put the wide providers first and the chain's own RPC
+  // last): the chain's own RPC is header-timed, at least two providers log their block time, and the header-timed one
+  // is put second here, where the agreed read would pair it with the first if the check did not leave it out
+  const CHAIN_RPC = "https://rpc.mainnet.chain.robinhood.com";
+  assert.ok(SWAP_RPCS.robinhood.includes(CHAIN_RPC) && HEADER_TIMED.has(CHAIN_RPC), "the chain's own RPC is a provider, and header-timed");
+  const timed = SWAP_RPCS.robinhood.filter((u) => !HEADER_TIMED.has(u));
+  assert.ok(timed.length >= 2, "two providers that log their block time can pair");
+  const rpcs = [timed[0], ...SWAP_RPCS.robinhood.filter((u) => HEADER_TIMED.has(u)), ...timed.slice(1)];
+  assert.ok(HEADER_TIMED.has(rpcs[1]));
   const fetchFn = async (url, init) => {
     if (!rpcs.includes(url)) {
       const k = url.endsWith(CANDLES_PATH(rec.coin, "robinhood")) ? "candles" : "trades";
@@ -224,7 +231,7 @@ test("card helper-restart-fresh: Robinhood's pool logs are agreed on providers t
     }
     assert.fail(req.method);
   };
-  const again = await read("https://helper.test", rec.coin, fetchFn, undefined, "robinhood");
+  const again = await read("https://helper.test", rec.coin, fetchFn, rpcs, "robinhood");
   assert.deepEqual(again.chain.poolLogs, c.poolLogs, "the pool's logs, agreed by two providers that time them");
   again.readAt = rec.readAt;
   const r = judge(again);
