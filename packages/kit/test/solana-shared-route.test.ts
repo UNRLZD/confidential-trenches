@@ -139,8 +139,9 @@ for (const c of PICK) {
 // Token-2022 side through the wallet's own account, was disproved by real builds: helper live runs 41939321444 and
 // 41942368434 (5 Nov 00:10Z and 00:37Z) were refused on 9cRC…pump's sells and buys, and the builds of BZFY…B96W (four,
 // 00:35Z) and 9cRC…pump (two, 00:40Z) in the fixture take the authority's ATA on the Token-2022 side, buys and sells.
-// The source side passes: the floor is checked on the output. The destination side passes only when the token's mint,
-// read equal on both providers, has no transfer fee and no transfer hook; the fixture's mints are real reads of a
+// Either side passes through the authority's ATA only when the token's mint, read equal on both providers, charges no
+// transfer fee and runs no transfer hook (on the destination a fee could take the wallet below minOut; on the source a
+// fee would be charged twice, the second inside the slippage); the fixture's mints are real reads of a
 // TransferFeeConfig mint (HuAXPy…CUa7) and a TransferHook mint (7cDSVG…6NEj) on both public RPCs, 5 Nov 00:37Z. The
 // recorded mints agree with the rule: the three 11-02 Token-2022 mints (8RNU, DEW9, 8RVB) carry a TransferFeeConfig and
 // Jupiter built every one through the wallet's own account; BZFY and 9cRC carry none and it built them through its own.
@@ -191,47 +192,56 @@ test("S6 real: the 5 Nov builds take Jupiter's authority's ATA on the Token-2022
   }
 });
 
-test("S6 source: every Token-2022 sell passes with its source through Jupiter's authority's ATA, whatever the mint's extensions", () => {
-  assert.ok(SELLS.length >= 6);
-  for (const c of SELLS) {
-    for (const [what, mint] of [["the recorded mint", pair(c.run, c.run.mint)], ["a transfer-fee mint", mintOf("transferFee")], ["a transfer-hook mint", mintOf("transferHook")]] as const) {
-      const got = s6(check(c, viaAuthority(c), undefined, mint));
-      assert.equal(got.ok, true, `${c.name}, ${what}: ${got.detail}`);
+// Each Token-2022 side is its own case: a buy's program destination, a sell's program source.
+const sideOf = (c: Case): string => (c.side === "buy" ? "destination" : "source");
+const prefix = (c: Case): string => `program ${sideOf(c)} account ${authorityAta(c)} is Jupiter's authority's account of the Token-2022 mint ${c.run.mint}: `;
+const M = 1_000_000_000_000_000n;
+// The hook mint with no hook authority and this program id.
+const hookProgram = (program: number[]): SolanaAccountRead =>
+  changed(mintOf("transferHook")[0]!, (d) => { const b = extAt(d, 14); d.fill(0, b, b + 32); d.set(program, b + 32); });
+// A fee config that charges nothing, then a TransferHook entry with no authority and program 7…7 after it.
+const zeroFeeThenHook = (): SolanaAccountRead => {
+  const m = changed(feeSlots([M, 0], [M, 0]), (d) => Uint8Array.from([...d, 14, 0, 64, 0, ...new Array(32).fill(0), ...new Array(32).fill(7)]));
+  assert.equal(extAt(m.data, 14), m.data.length - 64, "the walk reaches the hook after the fee config");
+  return m;
+};
+
+test("S6 pass: every Token-2022 side passes through Jupiter's authority's ATA when the mint charges no fee and runs no hook", () => {
+  assert.ok(BUYS.length >= 5 && SELLS.length >= 6);
+  for (const c of T22_CASES) {
+    assert.deepEqual(offFrame(check(c, viaAuthority(c), undefined, both(CLEAN))), [], c.name);
+    // a Token-2022 mint without extensions: 82 bytes
+    const bare = changed(CLEAN, (d) => d.subarray(0, 82));
+    assert.equal(s6(check(c, viaAuthority(c), undefined, both(bare))).ok, true, `${c.name}, an 82-byte mint`);
+  }
+});
+
+test("S6 pass: through the wallet's own account any mint passes, on either side", () => {
+  for (const c of T22_CASES) {
+    for (const k of ["transferFee", "transferHook"] as const) {
+      const got = s6(check(c, viaWallet(c), undefined, mintOf(k)));
+      assert.equal(got.ok, true, `${c.name}, the wallet's own account, ${k}: ${got.detail}`);
     }
   }
 });
 
-test("S6 destination: every Token-2022 buy passes with its destination through Jupiter's authority's ATA when the mint has no transfer fee or hook", () => {
-  assert.ok(BUYS.length >= 5);
-  for (const c of BUYS) {
-    const v = check(c, viaAuthority(c), undefined, both(CLEAN));
-    assert.deepEqual(offFrame(v), [], c.name);
-    // a Token-2022 mint without extensions: 82 bytes
-    const bare = changed(CLEAN, (d) => d.subarray(0, 82));
-    assert.equal(s6(check(c, viaAuthority(c), undefined, both(bare))).ok, true, `${c.name}, an 82-byte mint`);
-    // the wallet's own destination takes any mint: the bound is on the authority's account only
-    for (const k of ["transferFee", "transferHook"] as const) assert.equal(s6(check(c, viaWallet(c), undefined, mintOf(k))).ok, true, `${c.name}, the wallet's own account, ${k}`);
-  }
-});
-
-test("S6 destination refused: the recorded transfer-fee mints' own buys (8RNU) through Jupiter's authority's ATA", () => {
-  const fee = BUYS.filter(hasFee);
-  assert.deepEqual(fee.map((c) => c.name), ["8RNU S-1 buy, maxAccounts=40", "8RNU S-1 buy, uncapped"]);
+test("S6 refused: the recorded transfer-fee mints' own builds (8RNU, DEW9, 8RVB) through Jupiter's authority's ATA", () => {
+  const fee = T22_CASES.filter(hasFee);
+  assert.deepEqual(fee.map((c) => c.name), ["8RNU S-1 buy, maxAccounts=40", "8RNU S-1 buy, uncapped", "DEW9 S-2 sell, maxAccounts=40", "DEW9 S-2 sell, uncapped", "8RVB S-2 sell, uncapped"]);
   for (const c of fee) {
     assert.deepEqual(offFrame(check(c)), [], `${c.name}: as Jupiter built it, through the wallet's own account`);
-    assert.equal(s6(check(c, viaAuthority(c))).detail, `program destination account ${authorityAta(c)} is Jupiter's authority's account of the Token-2022 mint ${c.run.mint}: the mint charges a transfer fee (TransferFeeConfig)`, c.name);
+    assert.equal(s6(check(c, viaAuthority(c))).detail, `${prefix(c)}the mint charges a transfer fee (TransferFeeConfig)`, c.name);
   }
 });
 
-test("S6 destination: a fee config that charges nothing or a hook with no program passes through Jupiter's authority's ATA", () => {
-  const M = 1_000_000_000_000_000n;
+test("S6 pass: a fee config that charges nothing or a hook with no program passes through Jupiter's authority's ATA", () => {
   const cases: [string, SolanaAccountRead][] = [
     ["both fee slots at 0 bps", feeSlots([M, 0], [M, 0])],
     ["both fee slots with a 0 maximum", feeSlots([0n, 300], [0n, 300])],
     ["the older slot at 0 bps, the newer with a 0 maximum", feeSlots([M, 0], [0n, 300])],
     ["a hook with no authority and no program", hookOf(0, 0)],
   ];
-  for (const c of BUYS) {
+  for (const c of T22_CASES) {
     for (const [what, m] of cases) {
       const v = check(c, viaAuthority(c), undefined, both(m));
       assert.equal(s6(v).ok, true, `${c.name}, ${what}: ${s6(v).detail}`);
@@ -240,36 +250,40 @@ test("S6 destination: a fee config that charges nothing or a hook with no progra
   }
 });
 
-// Each refusal on a buy whose destination goes through Jupiter's authority's ATA: the mint reads in place of the
-// recorded ones, and S6's words.
-const DEST_REFUSALS: { what: string; detail: RegExp; mint: () => MintPair; s10?: boolean }[] = [
-  { what: "a transfer-fee mint", detail: /: the mint charges a transfer fee \(TransferFeeConfig\)$/, mint: () => mintOf("transferFee"), s10: true },
-  { what: "a transfer-hook mint", detail: /: the mint runs a transfer hook \(TransferHook\)$/, mint: () => mintOf("transferHook") },
+// Each refusal of a Token-2022 side through Jupiter's authority's ATA, a buy's destination and a sell's source: the
+// mint reads in place of the recorded ones, and S6's words.
+const MINT_REFUSALS: { what: string; detail: RegExp; mint: () => MintPair; s10?: boolean }[] = [
+  { what: "a transfer-fee mint", detail: /the mint charges a transfer fee \(TransferFeeConfig\)$/, mint: () => mintOf("transferFee"), s10: true },
+  { what: "a transfer-hook mint", detail: /the mint runs a transfer hook \(TransferHook\)$/, mint: () => mintOf("transferHook") },
   {
     what: "a transfer-hook mint whose hook authority is none (S10 lets it through)",
-    detail: /: the mint runs a transfer hook \(TransferHook\)$/,
+    detail: /the mint runs a transfer hook \(TransferHook\)$/,
     mint: () => both(changed(mintOf("transferHook")[0]!, (d) => { d.fill(0, extAt(d, 14), extAt(d, 14) + 32); })),
     s10: true,
   },
-  { what: "a fee in the older slot only", detail: /: the mint charges a transfer fee \(TransferFeeConfig\)$/, mint: () => both(feeSlots([1_000n, 1], [0n, 0])), s10: true },
-  { what: "a fee in the newer slot only", detail: /: the mint charges a transfer fee \(TransferFeeConfig\)$/, mint: () => both(feeSlots([0n, 0], [1_000n, 1])), s10: true },
-  { what: "a hook program with no hook authority", detail: /: the mint runs a transfer hook \(TransferHook\)$/, mint: () => both(hookOf(0, 7)), s10: true },
-  { what: "a fee config of 107 bytes", detail: /: the mint's transfer fee config is 107 bytes$/, mint: () => both(extLen(feeSlots([0n, 0], [0n, 0]), 1, 107)) },
-  { what: "a transfer hook of 63 bytes", detail: /: the mint's transfer hook is 63 bytes$/, mint: () => both(extLen(hookOf(0, 0), 14, 63)) },
-  { what: "the providers disagree: B reads a transfer-fee mint", detail: /: the providers disagree on the mint$/, mint: () => [CLEAN, mintOf("transferFee")[0]] },
-  { what: "the providers disagree on the owner", detail: /: the providers disagree on the mint$/, mint: () => [CLEAN, { owner: SOLANA_TOKEN_PROGRAM, data: CLEAN.data }] },
-  { what: "the mint not read on provider B", detail: /: the mint is not read on both providers$/, mint: () => [CLEAN, null] },
-  { what: "no mint account type", detail: /: the mint of \d+ bytes has no mint account type$/, mint: () => both(changed(CLEAN, (d) => { d[165] = 2; })) },
-  { what: "an extension that runs past the mint", detail: /: the mint's extension \d+ runs past it$/, mint: () => both(changed(CLEAN, (d) => { d[168] = 0xff; d[169] = 0xff; })) },
-  { what: "bytes after the last extension", detail: /: the mint has bytes after its last extension$/, mint: () => both(changed(CLEAN, (d) => Uint8Array.from([...d, 0, 0, 0, 0, 7]))) },
+  { what: "a fee in the older slot only", detail: /the mint charges a transfer fee \(TransferFeeConfig\)$/, mint: () => both(feeSlots([1_000n, 1], [0n, 0])), s10: true },
+  { what: "a fee in the newer slot only", detail: /the mint charges a transfer fee \(TransferFeeConfig\)$/, mint: () => both(feeSlots([0n, 0], [1_000n, 1])), s10: true },
+  { what: "a fee of 256 bps, its low byte 0", detail: /the mint charges a transfer fee \(TransferFeeConfig\)$/, mint: () => both(feeSlots([1_000n, 256], [0n, 0])), s10: true },
+  { what: "a hook program with no hook authority", detail: /the mint runs a transfer hook \(TransferHook\)$/, mint: () => both(hookOf(0, 7)), s10: true },
+  { what: "a hook program whose first byte is 0", detail: /the mint runs a transfer hook \(TransferHook\)$/, mint: () => both(hookProgram([0, ...new Array(31).fill(7)])), s10: true },
+  { what: "a hook program whose last byte alone is set", detail: /the mint runs a transfer hook \(TransferHook\)$/, mint: () => both(hookProgram([...new Array(31).fill(0), 7])), s10: true },
+  { what: "a zero fee config followed by a hook program", detail: /the mint runs a transfer hook \(TransferHook\)$/, mint: () => both(zeroFeeThenHook()), s10: true },
+  { what: "a fee config of 107 bytes", detail: /the mint's transfer fee config is 107 bytes$/, mint: () => both(extLen(feeSlots([0n, 0], [0n, 0]), 1, 107)) },
+  { what: "a transfer hook of 63 bytes", detail: /the mint's transfer hook is 63 bytes$/, mint: () => both(extLen(hookOf(0, 0), 14, 63)) },
+  { what: "the providers disagree: B reads a transfer-fee mint", detail: /the providers disagree on the mint$/, mint: () => [CLEAN, mintOf("transferFee")[0]] },
+  { what: "the providers disagree on the owner", detail: /the providers disagree on the mint$/, mint: () => [CLEAN, { owner: SOLANA_TOKEN_PROGRAM, data: CLEAN.data }] },
+  { what: "the mint not read on provider B", detail: /the mint is not read on both providers$/, mint: () => [CLEAN, null] },
+  { what: "no mint account type", detail: /the mint of \d+ bytes has no mint account type$/, mint: () => both(changed(CLEAN, (d) => { d[165] = 2; })) },
+  { what: "an extension that runs past the mint", detail: /the mint's extension \d+ runs past it$/, mint: () => both(changed(CLEAN, (d) => { d[168] = 0xff; d[169] = 0xff; })) },
+  { what: "bytes after the last extension", detail: /the mint has bytes after its last extension$/, mint: () => both(changed(CLEAN, (d) => Uint8Array.from([...d, 0, 0, 0, 0, 7]))) },
 ];
-for (const r of DEST_REFUSALS) {
-  test(`S6 destination refused: ${r.what}`, () => {
-    for (const c of BUYS) {
+for (const r of MINT_REFUSALS) {
+  test(`S6 refused: ${r.what}`, () => {
+    for (const c of T22_CASES) {
       const v = check(c, viaAuthority(c), undefined, r.mint());
       const got = s6(v);
       assert.equal(got.ok, false, `${c.name}: S6 passed: ${got.detail}`);
-      assert.match(got.detail, new RegExp(`^program destination account ${authorityAta(c)} is Jupiter's authority's account of the Token-2022 mint ${c.run.mint}: `), c.name);
+      assert.ok(got.detail.startsWith(prefix(c)), `${c.name}: ${got.detail}`);
       assert.match(got.detail, r.detail, c.name);
       if (r.s10) assert.equal(result(v, "S10").ok, true, `${c.name}: S10 refuses it too, so S6 is not the only guard here`);
     }

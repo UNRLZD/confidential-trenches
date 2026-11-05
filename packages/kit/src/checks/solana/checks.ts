@@ -521,8 +521,8 @@ function s13(c: Ctx, wk: Walk): SolanaQuoteResult {
 
 // Why a second move of the token, out of Jupiter's authority's account into the wallet's, could change the amount, or
 // null when it cannot: the token's mint, read equal on both providers, whose extensions (walked as S10 walks them)
-// charge no fee and run no hook. Called only on a Token-2022 destination: that is the token (the output of a buy), and
-// its token program is the mint's owner on provider A (checkSolanaQuote), so the read is a Token-2022 mint.
+// charge no fee and run no hook. Called only on a Token-2022 side: that is the token (the output of a buy, the input of
+// a sell), and its token program is the mint's owner on provider A (checkSolanaQuote), so the read is a Token-2022 mint.
 // From solana-program/token-2022 @ a2ef578 (read 2026-11-05 01:05Z): TransferFeeConfig is two 32-byte authorities, a
 // u64 withheld amount, then older_transfer_fee and newer_transfer_fee, each TransferFee { epoch u64, maximum_fee u64,
 // transfer_fee_basis_points u16 } (interface/src/extension/transfer_fee/mod.rs:34-42, 135-149: 108 bytes); a transfer
@@ -563,13 +563,14 @@ function secondMove(c: Ctx): string | null {
 // S6: the swap pays only into the wallet's own account of the output mint. On a shared route the legs run between the
 // program authority's accounts, so those must be Jupiter's or the wallet's own: the authority the PDA of the signed id,
 // and each of its two accounts the wallet's own account of that side or the authority's ATA of that side's mint.
-// The source side through the authority's ATA moves exactly in_amount out of the wallet once; the floor is checked on
-// the output, so a fee charged on the way in cannot take the wallet below minOut. The destination side through the
-// authority's ATA moves the output a second time, after the legs, into the wallet: on a Token-2022 mint that move
-// passes only when the token's mint, read equal on both providers, charges no transfer fee in either of its fee slots (a
-// fee on that move could leave the wallet below minOut) and names no transfer hook program (a hook program runs on it);
-// see secondMove. Every other extension S10 lets through changes no amount moved inside one transaction. The old rule, every Token-2022 side through the wallet's own account,
-// was disproved by real builds (see SHARED_ROUTE_V2 above).
+// Either side through the authority's ATA moves the token one more time than through the wallet's own account: on the
+// destination the output, after the legs, into the wallet (a fee there could leave the wallet below minOut); on the
+// source the input, from the wallet before the legs (a fee there is charged twice, the second taken inside the
+// slippage, for the mint's withdraw authority). So on a Token-2022 side that account passes only when the token's mint,
+// read equal on both providers, charges no transfer fee in either of its fee slots and names no transfer hook program
+// (a hook program runs on that move); see secondMove. Every other extension S10 lets through changes no amount moved
+// inside one transaction. The old rule, every Token-2022 side through the wallet's own account, was disproved by real
+// builds (see SHARED_ROUTE_V2 above).
 function s6(c: Ctx): SolanaQuoteResult {
   const e = needRoute("S6", c);
   if (e) return e;
@@ -584,16 +585,16 @@ function s6(c: Ctx): SolanaQuoteResult {
   if (r.shared) {
     const pa = jupiterAuthority(r.shared.id);
     if (r.shared.authority.key !== pa) wrong.push(`program authority ${r.shared.authority.key} is not Jupiter's authority ${r.shared.id} (${pa})`);
-    // Each side's account of the program: the wallet's own or the authority's ATA, and on a Token-2022 destination the
+    // Each side's account of the program: the wallet's own or the authority's ATA, and on a Token-2022 side the
     // authority's ATA only for a mint that charges no fee and runs no hook (null: the side's token program is unknown, so
     // nothing passes).
     const side = (what: string, key: string, mint: string, tp: string | null): void => {
       if (!isToken(tp)) { wrong.push(`program ${what} account ${key}: token program ${tp} unknown`); return; }
       if (key === solanaAta(c.req.wallet, mint, tp)) return;
       if (key !== solanaAta(pa, mint, tp)) { wrong.push(`program ${what} account ${key} is neither Jupiter's authority's account of ${mint} nor the wallet's`); return; }
-      if (what !== "destination" || tp !== SOLANA_TOKEN_2022_PROGRAM) return;
+      if (tp !== SOLANA_TOKEN_2022_PROGRAM) return;
       const why = secondMove(c);
-      if (why) wrong.push(`program destination account ${key} is Jupiter's authority's account of the Token-2022 mint ${mint}: ${why}`);
+      if (why) wrong.push(`program ${what} account ${key} is Jupiter's authority's account of the Token-2022 mint ${mint}: ${why}`);
     };
     side("source", r.shared.source.key, inMint, inTp);
     side("destination", r.shared.destination.key, outMint, outTp);
