@@ -1407,6 +1407,25 @@ test("a pause between the queue letting a call go and the call going out never l
   assert.ok(at[2]! - at[0]! >= 200, `the third call reached the provider ${(at[2]! - at[0]!).toFixed(1)} ms after the first, inside the 200 ms window`);
 });
 
+test("the queue's clock has one origin here: a call booked on the wall clock, then one read on the real monotonic clock, waits its window, never a clock time", { timeout: 10_000 }, async (t) => {
+  // (card evm-quote-l5b-flake: the clock above took the wall clock's origin, ms since 1970, and the real one's, ms since
+  // the process began, so a turn booked between two tests made a later wait 1.79e12 ms: a timer set to it fires at 1 ms,
+  // TimeoutOverflowWarning, and the call spun on it, in CI thousands of times)
+  const warned: Error[] = [];
+  const onWarning = (w: Error) => void (w.name === "TimeoutOverflowWarning" && warned.push(w));
+  process.on("warning", onWarning);
+  t.after(() => { realPerf = false; process.off("warning", onWarning); });
+  const paced = kit.solanaPacedRpc(async () => null, { windowMs: 200, total: 1, perMethod: 1 });
+  await paced("getSlot", []); // booked with no clock mocked: on the wall clock
+  realPerf = true;
+  const t0 = perfNow();
+  await paced("getSlot", []);
+  const waited = perfNow() - t0;
+  await new Promise((r) => setImmediate(r));
+  assert.ok(waited <= 1_000, `the second call waited ${waited.toFixed(0)} ms, past its 200 ms window`);
+  assert.equal(warned.length, 0, `a timer was set to a clock time: ${warned[0]?.message}`);
+});
+
 // a provider for a tx signed in an earlier session: its finalized bank (slot, height), the blockhash's verdict at
 // processed and its bank's slot, and the status read with its bank's slot; `landsAfter` lands the tx once that method was asked
 function endProvider(o: { slot: number; height: number; valid: boolean; validSlot?: number; status: "ok" | "err" | "pending" | null; statusSlot?: number; landsAfter?: string }): SolanaRpc & { asked: string[] } {

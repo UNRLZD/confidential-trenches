@@ -2698,6 +2698,7 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   const placeOf = (urls: readonly string[], host: string, at?: number) => quoteMod.evmRanked(urls, at).map(hostOf).indexOf(host);
   // (after every request still out has landed, `idle`: one out past EVM_HEDGE_MS also moves down)
   const unheld = (urls: readonly string[], host: string) => placeOf(urls, host) === placeOf(urls, host, performance.now() + EVM_HOLD_MS! + 1);
+
   quoteMod.evmSpeedReset();
   const token = freshToken();
   const pools = [best(token)];
@@ -3217,6 +3218,21 @@ async function drive<T>(start: () => Promise<T>, ticks: number, step: number): P
     mock.timers.reset();
   }
 }
+test("drive: a timer an earlier drive left set, cleared during a later one by the work that set it, never takes the later one's timer with it", async () => {
+  // work that outlives its test (a quote's spare read, a hung provider's pause) sets a timer on one drive's mocked clock
+  // and clears it on a later one's; the mocked clock drops what is left set when it is reset, and a timer dropped so
+  // kept its place in the clock's queue, so clearing it took out whatever timer held that place then (in CI: L5b's and
+  // L2's 500 ms wait for the buy's block and LOW-1's 10 s scan answer, which never fired, and the quote stayed parked
+  // to the last tick)
+  let left: ReturnType<typeof setTimeout> | undefined;
+  await drive(async () => void (left = setTimeout(() => undefined, 60_000)), 1, 100);
+  const { ms } = await drive(async () => {
+    const wait = new Promise((r) => setTimeout(r, 500));
+    clearTimeout(left);
+    await wait;
+  }, 20, 100);
+  assert.ok(ms >= 500, `the wait ended after ${ms} ms`);
+});
 /** The sell quote's verdict and the mocked time it took, ms: the clock (Date, the wait's monotonic clock here) and
  *  every timer mocked, ticked `step` ms at a time until the quote settles (so the time read is up to two steps late). */
 async function timed(run: (mono: () => number) => Promise<unknown>, ticks = 4_000, step = 500) {
