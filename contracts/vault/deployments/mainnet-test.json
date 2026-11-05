@@ -36,6 +36,6 @@
   "wasm_witnesses": [
     "the team's Linux x64 box (rustc 1.96.0, cargo-near-near 0.22.0), deploy.mjs --build-only --flavor mainnet at 1656ae5, 2026-11-05 11:11Z: builds a and b both 57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a, 229864 B",
     "GitHub Actions ubuntu-24.04, .github/workflows/vault-build.yml run 42017944135 at f3318ce, 2026-11-05 11:20-11:21Z: builds a and b both 57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a, 229864 B, and its pin step passed",
-    "the team's Linux x64 box again, deploy.mjs --build-only --deployment mainnet-test.json at 86cd904, 2026-11-05 11:25Z (VT-S12's pin run): both builds 57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a, the pin"
+    "the team's Linux x64 box again, deploy.mjs --build-only --deployment mainnet-test.json at cb3af80, 2026-11-05 11:25Z (VT-S12's pin run): both builds 57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a, the pin"
   ]
 }
