@@ -41,9 +41,9 @@ const M = [
   [R, "if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw", "if (false) throw", T, "more than an epoch"],
   [R, "if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw", "if (r.anchor.timestamp * 1000n + 3n * EVM_EPOCH_MS < high) throw", T, "more than an epoch"],
   [R, "    } catch (e) {\n      a.signal?.throwIfAborted();\n      await poolHolds();\n      wallets[k]!.error", "    } catch (e) {\n      throw e;\n      wallets[k]!.error", T, "spam"],
-  [R, "      await evmRetryLag(() => evmHoldsAnchor(", "      if (false) await evmRetryLag(() => evmHoldsAnchor(", T, "another chain, or one that never holds"],
+  [R, "      await evmRetryLag(reads.holds, sleep, a.signal);", "      if (false) await evmRetryLag(reads.holds, sleep, a.signal);", T, "another chain, or one that never holds"],
   // only the pool pair refuses (N1); a provider's words cut to their code (N2)
-  [R, "      a.signal?.throwIfAborted();\n      await poolHolds();\n      pairError = `the Transfer RPCs: ${cutError(e)}`;", "      throw e;", T, "another chain, or one that never holds"],
+  [R, "      a.signal?.throwIfAborted();\n      await poolHolds();\n      pairError = `${reads.name}: ${cutError(e)}`;", "      throw e;", T, "another chain, or one that never holds"],
   [R, "    if (pairError !== null) {\n      wallets[k]!.error = pairError;\n      continue;\n    }\n", "", T, "another chain, or one that never holds"],
   [R, "  if (code !== undefined) return `rpc error ${code}`;\n", "", T, "cut to their code"],
   // none of a provider's text the kit's client composes, and a reorg under the restore is the pool pair's lag (fold 4)
@@ -51,14 +51,18 @@ const M = [
   [R, "e instanceof SyntaxError || /RPC error|answer id/.test(m)", "/RPC error|answer id/.test(m)", T, "K4 a 200 body"],
   [R, "e instanceof SyntaxError || /RPC error|answer id/.test(m)", "e instanceof SyntaxError || /answer id/.test(m)", T, "K1 no code|K2 a string code|K5 a head lag"],
   [R, "e instanceof SyntaxError || /RPC error|answer id/.test(m)", "e instanceof SyntaxError || /RPC error/.test(m)", T, "K3 an id"],
-  [R, "pairError = `the Transfer RPCs: ${cutError(e)}`;", "pairError = `the Transfer RPCs: ${String(e)}`;", T, "a Transfer pair's failed check"],
+  [R, "pairError = `${reads.name}: ${cutError(e)}`;", "pairError = `${reads.name}: ${String(e)}`;", T, "a Transfer pair's failed check"],
   [R, "      a.signal?.throwIfAborted();\n      await poolHolds();\n      pairError", "      a.signal?.throwIfAborted();\n      pairError", T, "reorgs between the pool read"],
   [R, "      a.signal?.throwIfAborted();\n      await poolHolds();\n      wallets[k]!.error", "      a.signal?.throwIfAborted();\n      wallets[k]!.error", T, "reorgs while a W's"],
-  [R, "evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal, sleep);", "evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal, sleep);", T, "another chain, or one that never holds"],
+  [R, "reads = { holds: () => evmHoldsAnchor(walletRpcs, chainId,", "reads = { holds: () => evmHoldsAnchor(rpcs, chainId,", T, "another chain, or one that never holds"],
   [S, "if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);\n  const bs", "const bs", T, "another chain, or one that never holds"],
   [S, "if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(", "if (false) lag(", T, "another chain, or one that never holds"],
-  [R, "for (const w of a.walletRpcs) for (const p of a.rpcs) if (solanaSameProvider(w, p)) throw", "if (false) throw", T, "their own pair"],
-  [R, "s.w, s.block, r, page", "s.w, 0n, r, page", T, "restore of a seeded chain"],
+  [R, "a.walletRpcs.filter((w) => !a.rpcs.some((p) => solanaSameProvider(w, p)))", "a.walletRpcs", T, "their own list"],
+  [R, "reads.tokens(s.w, s.block)", "reads.tokens(s.w, 0n)", T, "restore of a seeded chain"],
+  // a Base or Robinhood W on the helper's route only (decision M359, card evm-transfer-rpc-spares)
+  [R, "    if (a.walletRpcs !== undefined) throw new Error(`walletRpcs: a ${net} W is read on the helper's route only`);\n", "", T, "^M1 "],
+  [R, "const reader = evmHelperRpc(a.helper, net);", "const reader = a.rpcs[0]!;", T, "^M1 "],
+  [S, "if (b === null || b.hash !== anchor.hash) lag(`the reader does not hold", "if (false) lag(`the reader does not hold", T, "^M3 "],
   // the pool's event fields and the Transfer read (./evm.ts)
   [S, "value: dep ? w(2) : w(1),", "value: w(2),", T, "restore of a seeded chain"],
   [S, "token: t0 === TOPIC_BOUGHT ? addrWord(w(5), \"the token\") : null,", "token: t0 === TOPIC_BOUGHT ? addrWord(w(6), \"the token\") : null,", T, "restore of a seeded chain"],
@@ -66,7 +70,7 @@ const M = [
   [S, "if (topics[2] !== `0x${w.slice(2).padStart(64, \"0\")}`) throw", "if (false) throw", T, "a lying Transfer RPC"],
   [S, "if (topics[0] !== EVM_TRANSFER_TOPIC) throw", "if (false) throw", T, "a lying Transfer RPC"],
   [S, "(l.topics.length !== 3 && l.topics.length !== 4)", "(l.topics.length !== 3)", T, "restore of a seeded chain"],
-  [S, "{ topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, \"0\")}`] }", "{ topics: [EVM_TRANSFER_TOPIC, null, null] }", T, "restore of a seeded chain"],
+  [S, "await evmAgreedLogs(rpcs, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, \"0\")}`] }", "await evmAgreedLogs(rpcs, { topics: [EVM_TRANSFER_TOPIC, null, null] }", T, "restore of a seeded chain"],
   // the one pager and the one two-RPC compare, now shared by the pool's events and W's Transfers
   // any refusal of a page over one block halves it, in whatever words: dRPC's (HTTP 400 through the kit's client), a
   // results cap, and the caps read live 5 Nov in words never read before (card wallet-restore-transfer-rpcs)
@@ -89,7 +93,7 @@ const M = [
   [S, "if (at === short.length && long.slice(at).every((e) => e.block > fin.number)) lag(", "if (false) lag(", T, "a lagging Transfer RPC"],
   [S, "  if (at >= 0) {\n    const [short, long]", "  if (false) {\n    const [short, long]", T, "a lying Transfer RPC"],
   [S, "if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(", "if (false) await refuse(", T, "a lying Transfer RPC"],
-  [S, "if (e.block === fin.number && e.blockHash !== fin.hash) throw", "if (false) throw", TE, "not of the anchor's block"],
+  [S, "for (const e of [...x, ...y]) {\n    if (e.block === fin.number && e.blockHash !== fin.hash) throw", "for (const e of [...x, ...y]) {\n    if (false) throw", TE, "not of the anchor's block"],
 ];
 let ok = 0;
 for (const [f, find, repl, file, pat] of M) {

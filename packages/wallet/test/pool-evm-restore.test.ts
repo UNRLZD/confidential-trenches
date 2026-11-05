@@ -27,8 +27,12 @@ const addrTopic = (a: string): string => `0x${a.slice(2).toLowerCase().padStart(
 
 const POOL = "0x00000000000000000000000000000000b1f1f001";
 const FEE_TO = "0x000000000000000000000000000000000000fee1";
-const PIN: EvmPoolPin = { network: "base", pool: POOL, feeRecipient: FEE_TO, fromBlock: 1n };
-const SCOPE = evmPoolScopeOf(POOL, 8453n);
+// the list-based Transfer reads are a testnet's (EVM_TRANSFER_RPCS); Base's and Robinhood's go through the helper's
+// route (PIN_BASE, the M section below)
+const PIN: EvmPoolPin = { network: "base-sepolia", pool: POOL, feeRecipient: FEE_TO, fromBlock: 1n };
+const SCOPE = evmPoolScopeOf(POOL, 84532n);
+const PIN_BASE: EvmPoolPin = { ...PIN, network: "base" };
+const SCOPE_BASE = evmPoolScopeOf(POOL, 8453n);
 const T0 = 1_800_000_000n;
 const TA = "0x00000000000000000000000000000000000000aa"; // the token the buy bought
 const TX = "0x00000000000000000000000000000000000000cc"; // a token on no list, sent to W0 later
@@ -39,7 +43,7 @@ const STRANGER = "0x0000000000000000000000000000000000005555";
 
 type PoolEv = { block: number; kind: "deposit" | "withdraw" | "buy"; state: bigint; label?: bigint; value: bigint; pre?: bigint; nul?: bigint; to?: string; token?: string };
 type Xfer = { block: number; token: string; from: string; to: string; nft?: boolean };
-type World = { pool: PoolEv[]; xfers: Xfer[]; head: number; finalized: number; hashOf: (n: number) => string };
+type World = { scope: bigint; pool: PoolEv[]; xfers: Xfer[]; head: number; finalized: number; hashOf: (n: number) => string };
 
 const P = (ref: NoteRef) => noteSecrets(SEED, ref).precommitment;
 const N = (ref: NoteRef) => noteSecrets(SEED, ref).nullifierHash;
@@ -51,19 +55,19 @@ const W = (l: bigint, j: number) => {
 
 /** The seeded chain: a stranger's deposits, two of ours and a second arrival, a buy of deposit 0 paying W0, a return
  * deposit, and a withdraw of its change paying W1; Transfer logs to W0 and W1 and to a stranger. */
-function seeded() {
+function seeded(scope = SCOPE) {
   let nonce = 0n;
   const pool: PoolEv[] = [];
   const dep = (block: number, pre: bigint, value: bigint): bigint => {
-    const label = vaultLabelOf(keccak_256, SCOPE, ++nonce);
+    const label = vaultLabelOf(keccak_256, scope, ++nonce);
     pool.push({ block, kind: "deposit", state: noteCommitment(value, label, pre), label, value, pre });
     return label;
   };
-  const d0: NoteRef = { kind: "deposit", s: SCOPE, i: 0 }, d1: NoteRef = { kind: "deposit", s: SCOPE, i: 1 };
+  const d0: NoteRef = { kind: "deposit", s: scope, i: 0 }, d1: NoteRef = { kind: "deposit", s: scope, i: 1 };
   dep(5, 11n, 10n ** 16n);
   const l0 = dep(10, P(d0), 10n ** 16n);
   dep(12, P(d1), 2n * 10n ** 15n);
-  dep(14, P({ kind: "second", id: { id: "U", s: SCOPE, i: 0 }, n: 0 }), 3n * 10n ** 15n);
+  dep(14, P({ kind: "second", id: { id: "U", s: scope, i: 0 }, n: 0 }), 3n * 10n ** 15n);
   const c0: NoteRef = { kind: "change", l: l0, j: 0 }, c1: NoteRef = { kind: "change", l: l0, j: 1 };
   pool.push({ block: 20, kind: "buy", state: noteCommitment(6n * 10n ** 15n, l0, P(c0)), value: 4n * 10n ** 15n, nul: N(d0), to: W(l0, 0), token: TA });
   dep(30, P({ kind: "return", c: "evm", l: l0, j: 0 }), 10n ** 15n);
@@ -84,7 +88,7 @@ function seeded() {
     { block: 70, token: TX, from: STRANGER, to: STRANGER },
     { block: 97, token: TZ, from: STRANGER, to: W0 },
   ];
-  const world: World = { pool, xfers, head: 100, finalized: 90, hashOf: (n) => h32(`block ${n}`) };
+  const world: World = { scope, pool, xfers, head: 100, finalized: 90, hashOf: (n) => h32(`block ${n}`) };
   return { world, l0, W0, W1, d0, d1, c0, c1 };
 }
 
@@ -127,7 +131,7 @@ function rpc(w: World, o: Over = {}): EvmRpc {
   const f = async (method: string, params: readonly unknown[]): Promise<unknown> => {
     o.log?.push({ method, params });
     switch (method) {
-      case "eth_chainId": return q(o.chainId ?? 8453n);
+      case "eth_chainId": return q(o.chainId ?? 84532n);
       case "eth_getBlockByNumber": {
         const at = params[0] as string;
         return block(at === "finalized" ? w.finalized : at === "latest" ? w.head : Number(BigInt(at)));
@@ -161,7 +165,7 @@ function rpc(w: World, o: Over = {}): EvmRpc {
         const v = viewsAt(w, n);
         const s = data.slice(2, 10);
         const out =
-          s === sel("SCOPE()") ? SCOPE
+          s === sel("SCOPE()") ? w.scope
           : s === sel("currentRoot()") ? v.root
           : s === sel("currentTreeSize()") ? v.size
           : s === sel("currentLabelRoot()") ? v.labelRoot
@@ -326,7 +330,7 @@ test("a Transfer pair on another chain, or one that never holds the restore's bl
     }
   };
   const wlog: Over["log"] = [];
-  unread(await restore(pair(world, world), wpair(world, world, { chainId: 84532n, log: wlog })), /^the Transfer RPCs: rpcs: chain 84532 and 8453, not 8453$/);
+  unread(await restore(pair(world, world), wpair(world, world, { chainId: 8453n, log: wlog })), /^the Transfer RPCs: rpcs: chain 8453 and 84532, not 84532$/);
   assert.equal(namedIn(wlog).length, 0, "no W named to an RPC of another chain");
   const other: World = { ...world, hashOf: (n) => h32(`other chain ${n}`), xfers: [...world.xfers, { block: 50, token: "0x00000000000000000000000000000000000000f0", from: STRANGER, to: W0 }] };
   const waits: number[] = [];
@@ -925,7 +929,7 @@ test("T4 no answer in time halves a page over one block (Pocket's 10,000-block p
  *  -32005 "Rate limit exceeded", Retry-After 26,741 s, past the client's 3.5 s, so one try and no wait. */
 const QUOTA_OUT = (b: Body) => new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32005, message: "Rate limit exceeded. Upgrade your plan at https://thirdweb.com/pricing" } }), { status: 429, headers: { "retry-after": "26741" } });
 
-test("S0 every network's pinned Transfer list (EVM_TRANSFER_RPCS) reads every W while thirdweb's keyless daily quota is out (HTTP 429, Retry-After 26,741 s, 5 Nov 16:28Z and 17:29Z): no wait begun", async () => {
+test("S0 every testnet's pinned Transfer list (EVM_TRANSFER_RPCS) reads every W while thirdweb's keyless daily quota is out (HTTP 429, Retry-After 26,741 s, 5 Nov 16:28Z and 17:29Z): no wait begun", async () => {
   for (const [net, urls] of Object.entries(EVM_TRANSFER_RPCS)) {
     const { world } = seeded();
     const want = await restore(pair(world, world), wpair(world));
@@ -962,4 +966,86 @@ test("S2 every provider of the list out: the pair's error, as on a fixed pair (i
   assert.ok(r.wallets.every((w) => w.tokens === null && /^the Transfer RPCs: /.test(w.error ?? "")), JSON.stringify(r.wallets));
   assert.equal(r.notes.length, 10);
   assert.ok(waits.every((ms) => ms <= EVM_LOG_THROTTLE_WAIT_MAX_MS), `waits ${waits}`);
+});
+
+// ---- card evm-transfer-rpc-spares, fold (decision M359): a Base or Robinhood W is read on the helper's route only ----
+
+/** The helper's POST /v1/rpc/{chain} as fetch sees it: the mock chain's answers, each request kept; `bad` may answer
+ *  in its place. */
+function helperFetch(route: string, world: World, chainId: bigint, seen: Body[], bad: (b: Body) => Response | undefined = () => undefined): typeof fetch {
+  const chain = rpc(world, { chainId });
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.equal(String(input), route, "the helper's route only");
+    const b = JSON.parse(String(init?.body)) as Body;
+    seen.push(b);
+    const r = bad(b);
+    if (r) return r;
+    try {
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: await chain(b.method, b.params) }));
+    } catch (e) {
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32000, message: String((e as Error).message) } }));
+    }
+  }) as typeof fetch;
+}
+async function withFetch<T>(f: typeof fetch, run: () => Promise<T>): Promise<T> {
+  const was = globalThis.fetch;
+  globalThis.fetch = f;
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = was;
+  }
+}
+const namedBy = (seen: Body[]) => seen.filter((b) => isXfer(b)).map((b) => (b.params[0] as { topics: string[] }).topics[2]!);
+
+test("M1 a Base or Robinhood restore names no W to any provider the device reaches itself: a list given there is refused before any read, and every W is read on the helper's route, one W a call", async () => {
+  for (const [chain, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network: chain };
+    const { world, d0, c0, W0, W1 } = seeded(evmPoolScopeOf(POOL, chainId));
+    const poolLog: NonNullable<Over["log"]> = [], deviceLog: NonNullable<Over["log"]> = [];
+    const pool = pair(world, world, { chainId, log: poolLog }, { chainId, log: poolLog });
+    const devices = [...wpair(world, world, { chainId, log: deviceLog }, { chainId, log: deviceLog }), rpc(world, { url: "https://e.example", chainId, log: deviceLog })];
+    const origin = `https://m1-${chain}.example`;
+    const seen: Body[] = [];
+    await withFetch(helperFetch(`${origin}/v1/rpc/${chain}`, world, chainId, seen), async () => {
+      const given = await evmRestoreNotes({ seed64: SEED, pin, rpcs: pool, walletRpcs: devices, helper: origin, gap: 4, sleep: async () => {} }).catch((e: Error) => e);
+      assert.deepEqual([...namedIn(deviceLog), ...namedIn(poolLog)], [], `${chain}: a W named to a provider the device reaches itself`);
+      assert.ok(given instanceof Error && /walletRpcs: a .* W is read on the helper's route only/.test(given.message), `${chain}: ${String(given)}`);
+      const r = await evmRestoreNotes({ seed64: SEED, pin, rpcs: pool, helper: origin, gap: 4, sleep: async () => {} });
+      assert.deepEqual(r.wallets, [{ note: refKey(d0), w: W0, tokens: [TA, TX, TZ] }, { note: refKey(c0), w: W1, tokens: [TY] }], chain);
+      assert.equal(r.notes.length, 10, chain);
+    });
+    assert.deepEqual([...namedIn(deviceLog), ...namedIn(poolLog)], [], `${chain}: a W named to a provider the device reaches itself`);
+    assert.deepEqual(new Set(namedBy(seen)), new Set([addrTopic(W0), addrTopic(W1)]), `${chain}: the helper read each W`);
+    assert.ok(seen.every((b) => b.method === "eth_getLogs" || b.method === "eth_getBlockByNumber"), `${chain}: ${seen.map((b) => b.method)}`);
+  }
+});
+
+test("M2 a W the helper's route fails is listed unread with its error cut to its code, every note read, no W named elsewhere; a testnet takes no helper, a mainnet needs one", async () => {
+  const { world, W0 } = seeded(SCOPE_BASE);
+  const poolLog: NonNullable<Over["log"]> = [];
+  const pool = pair(world, world, { chainId: 8453n, log: poolLog }, { chainId: 8453n, log: poolLog });
+  const origin = "https://m2.example";
+  const seen: Body[] = [];
+  // a provider's words that echo the W, as an error with a code
+  const echo = (b: Body) => (namesW(b, W0) ? new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32000, message: `no logs for ${W0}` } })) : undefined);
+  const r = await withFetch(helperFetch(`${origin}/v1/rpc/base`, world, 8453n, seen, echo), () => evmRestoreNotes({ seed64: SEED, pin: PIN_BASE, rpcs: pool, helper: origin, gap: 4, sleep: async () => {} }));
+  assert.equal(r.notes.length, 10);
+  assert.deepEqual(r.wallets.map((w) => [w.w, w.tokens, w.error]), [[W0, null, "rpc error -32000"], [r.wallets[1]!.w, [TY], undefined]]);
+  assert.deepEqual(namedIn(poolLog), []);
+  await assert.rejects(evmRestoreNotes({ seed64: SEED, pin: PIN_BASE, rpcs: pool, gap: 4 }), /^Error: helper: a base W is read on the helper's route$/);
+  const t = seeded();
+  await assert.rejects(evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: pair(t.world, t.world), walletRpcs: wpair(t.world), helper: origin, gap: 4 }), /^Error: helper: base-sepolia has no helper route$/);
+});
+
+test("M3 the helper's route that does not hold the restore's block (another fork) leaves each W unread and takes no Transfer log", async () => {
+  const { world } = seeded(SCOPE_BASE);
+  const pool = pair(world, world, { chainId: 8453n }, { chainId: 8453n });
+  const origin = "https://m3.example";
+  const seen: Body[] = [];
+  const fork = (b: Body) => (b.method === "eth_getBlockByNumber" && b.params[0] === q(world.head) ? new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: { number: q(world.head), hash: h32("another fork"), timestamp: q(T0), baseFeePerGas: q(1n) } })) : undefined);
+  const r = await withFetch(helperFetch(`${origin}/v1/rpc/base`, world, 8453n, seen, fork), () => evmRestoreNotes({ seed64: SEED, pin: PIN_BASE, rpcs: pool, helper: origin, gap: 4, sleep: async () => {} }));
+  assert.equal(r.notes.length, 10);
+  assert.ok(r.wallets.every((w) => w.tokens === null && /does not hold block/.test(w.error ?? "")), JSON.stringify(r.wallets));
+  assert.deepEqual(namedBy(seen), []);
 });

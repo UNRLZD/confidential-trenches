@@ -250,57 +250,43 @@ export type EvmNetwork = "base" | "robinhood" | "base-sepolia" | "robinhood-test
 /** Each network's chain id (eth_chainId), as the money gate pins them (scripts/ci/money-gate.mjs CHAIN_ID). */
 export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze({ base: 8453n, robinhood: 4663n, "base-sepolia": 84532n, "robinhood-testnet": 46630n });
 /**
- * Each network's Transfer RPCs, the restore's walletRpcs (./evm-restore.ts evmRestoreNotes): a pinned list of keyless
- * providers of three operators or more, read as a pair with spares (evmPair, card evm-transfer-rpc-spares): the first
- * two are the seats, the rest take the place of one that throttles or is out, so the pair reads on two operators while
- * any one is out. thirdweb is the last spare everywhere: its keyless quota runs out for the day on every chain at once
- * (below), so Base and Robinhood carry a fourth; Base Sepolia and Robinhood testnet have no fourth keyless operator
- * that answers a W's read from the browser (below), so there a second provider out leaves one.
+ * Each testnet's Transfer RPCs, the restore's walletRpcs there (./evm-restore.ts evmRestoreNotes): a pinned list of
+ * keyless providers of three operators, read as a pair with spares (evmPair, card evm-transfer-rpc-spares): the first
+ * two are the seats, the third takes the place of one that throttles or is out. On Base and Robinhood a W is read on the
+ * helper's route only (decision M359: holdings are display, one reader, the helper's keyed provider and its fallbacks),
+ * so no mainnet W is ever named to a provider the device reaches itself, and there is no mainnet list. The testnets have
+ * no helper route. thirdweb is the last spare: its keyless quota runs out for the day on every chain at once (below),
+ * and neither testnet has a fourth keyless operator that answers a W's read from the browser (below), so there a second
+ * provider out leaves one.
  * Each answers a W's Transfer read (eth_getLogs, Transfer's topic, topic 2 = the W, no address) at the chain's head and
  * 2,000,000 blocks back, and a CORS preflight from https://sign.confidential.unrealized.trade (POST, content-type)
  * with 204 or 200 and that origin or *. testnet-run takes these too; evmRestoreNotes never names a W to a provider of
  * the pool's own list, so one that is (Robinhood testnet's own, below) is dropped from the W reads there. None is an
- * operator of the kit's providers (evmPoolVenues) but four, each named by the independence test: Robinhood's own
- * rpc.mainnet.chain.robinhood.com and rpc.testnet.chain.robinhood.com, robinhood.drpc.org and robinhood-testnet.drpc.org,
- * since no other keyless operator answers every read on Robinhood or Robinhood testnet (below).
+ * operator of the kit's providers (evmPoolVenues) but two, each named by the independence test:
+ * rpc.testnet.chain.robinhood.com and robinhood-testnet.drpc.org, since no other keyless operator answers every read on
+ * Robinhood testnet (below).
  * The reads, 5 Nov 17:29-17:33Z (W 0x809286a1…078e; 1,000 blocks at the head and 2,000,000 back, then 20 pages):
- * - base: base.gateway.tenderly.co 1,000 blocks 313 and 390 ms, 20 x 1,000 p50 347 ms, CORS 204 *; base.api.pocket.network
- *   1,000 blocks 250 and 316 ms, 20 x 500 p50 280 ms all answered, CORS 204 the origin; at 17:59Z 2 of 30 pages refused
- *   "missing required field 'address'" (one backend's: a provider out, OUT_WORDS, the read again or a spare); 1rpc.io/base
- *   -32602 "limited to 0 - 50 blocks range" at 1,000 (17:30Z), 15 x 50 at 17:59Z 14 answered p50 439 ms and one HTTP 410,
- *   CORS 200 *.
- * - robinhood: rpc.mainnet.chain.robinhood.com 1,000 blocks 273 and 308 ms, CORS 204 *; robinhood.daybreak-rpc.network
- *   1,000 blocks 235 and 256 ms, CORS 204 *; robinhood.drpc.org (17:48Z) code 35 at 1,000 blocks, 10 x 100 p50 295 ms
- *   all answered, 100 blocks at the head and 2,000,000 back 339 and 230 ms, CORS 204 the origin.
- * - base, 17:48Z: base.drpc.org code 35 at 500 blocks, 10 x 100 p50 446 ms all answered, 100 blocks at the head and
- *   2,000,000 back 416 and 518 ms, CORS 204 the origin.
  * - base-sepolia: base-sepolia.gateway.tenderly.co 1,000 blocks 338 and 447 ms, CORS 204 *;
  *   base-testnet.api.pocket.network 1,000 blocks 190 and 288 ms, 20 x 1,000 p50 213 ms all answered, CORS 204 the origin.
  * - robinhood-testnet: robinhood-testnet.drpc.org code 35 at 1,000 blocks, 20 x 100 p50 311 ms all answered (101 is its
  *   page, 5 Nov 12:28Z), CORS 204 the origin; rpc.testnet.chain.robinhood.com 20 x 10,000 blocks, 8 answered and then
  *   HTTP 429 (a throttle, waited out or swapped), CORS 204 *.
- * - thirdweb, the spare on every network (8453, 4663, 84532 and 46630.rpc.thirdweb.com): 1,000 blocks on 5 Nov
- *   12:20-12:28Z (-32005 "Log response size exceeded" above, HTTP 429 after about 4 calls with Retry-After up to 9 s);
- *   at 16:28Z and again 17:29-17:30Z every chain answered eth_chainId HTTP 429 -32005 "Rate limit exceeded" (its keyless
- *   daily quota, Retry-After 26,741,000 ms): a spare that rests, never a seat; CORS 204 *.
+ * - thirdweb, the spare (84532 and 46630.rpc.thirdweb.com): 1,000 blocks on 5 Nov 12:20-12:28Z (-32005 "Log response
+ *   size exceeded" above, HTTP 429 after about 4 calls with Retry-After up to 9 s); at 16:28Z and again 17:29-17:30Z
+ *   every chain answered eth_chainId HTTP 429 -32005 "Rate limit exceeded" (its keyless daily quota, Retry-After
+ *   26,741,000 ms): a spare that rests, never a seat; CORS 204 *.
  * Not taken (17:29-17:31Z unless dated): on Robinhood testnet robinhood-sepolia-rpc.publicnode.com (-32701 "Please
  * specify an address"), robinhood-testnet.gateway.tenderly.co and robinhood-testnet.api.pocket.network (HTTP 404):
- * Robinhood testnet has no other keyless operator. On Robinhood rpc-robinhood.blockmachine.io (-32002 "keyless requests
- * are served for the most recent 5000 blocks only"), robinhood.blockpi.network ("Apikey not found"),
- * robinhood.gateway.tenderly.co (HTTP 404), robinhood.api.pocket.network (-32602 "missing required field 'address'"
- * from 20 to 30% of its backends, 5 Nov), robinhood-rpc.publicnode.com (the kit's). On Base base-mainnet.gateway.tatum.io (100 blocks, then HTTP 429 on 11 of 15). On Base and Base Sepolia:
- * base-sepolia-public.nodies.app (10 x 50 blocks p50 336 ms, 17:48Z, but its CORS preflight answers no
- * Access-Control-Allow-Origin, so no browser reads it), base-public.nodies.app (50 blocks), base-sepolia.drpc.org (code 19 "Temporary internal error" at 10 to 101
- * blocks, 4 Nov), base-sepolia.api.onfinality.io (-32029 at once), base.api.onfinality.io (no block), base.meowrpc.com
- * (no block), base.lava.build (HTTP 410), rpc.ankr.com (a key), base-sepolia.public.blastapi.io (HTTP 403, closed),
- * base.llamarpc.com (HTTP 525), mainnet.base.org (-32011 "request limit reached"), sepolia.base.org (the pool's,
- * 200 blocks), publicnode ("Please specify an address"), and the kit's providers' operators.
+ * Robinhood testnet has no other keyless operator. On Base Sepolia base-sepolia-public.nodies.app (10 x 50 blocks p50
+ * 336 ms, 17:48Z, but its CORS preflight answers no Access-Control-Allow-Origin, so no browser reads it),
+ * base-sepolia.drpc.org (code 19 "Temporary internal error" at 10 to 101 blocks, 4 Nov), base-sepolia.api.onfinality.io
+ * (-32029 at once), base-sepolia.public.blastapi.io (HTTP 403, closed), sepolia.base.org (the pool's, 200 blocks),
+ * publicnode ("Please specify an address"), rpc.ankr.com (a key), and the kit's providers' operators.
  */
 // The freezes are marked pure, so SIGN_HOST's build, which reads none of these yet, drops them whole
 // (packages/signpage/scripts/build-network.test.mjs refuses a testnet provider in it).
-export const EVM_TRANSFER_RPCS: Readonly<Record<EvmNetwork, readonly string[]>> = /* @__PURE__ */ Object.freeze({
-  base: /* @__PURE__ */ Object.freeze(["https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://base.drpc.org", "https://1rpc.io/base", "https://8453.rpc.thirdweb.com"]),
-  robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network", "https://robinhood.drpc.org", "https://4663.rpc.thirdweb.com"]),
+export type EvmTestnet = "base-sepolia" | "robinhood-testnet";
+export const EVM_TRANSFER_RPCS: Readonly<Record<EvmTestnet, readonly string[]>> = /* @__PURE__ */ Object.freeze({
   "base-sepolia": /* @__PURE__ */ Object.freeze(["https://base-sepolia.gateway.tenderly.co", "https://base-testnet.api.pocket.network", "https://84532.rpc.thirdweb.com"]),
   "robinhood-testnet": /* @__PURE__ */ Object.freeze(["https://robinhood-testnet.drpc.org", "https://rpc.testnet.chain.robinhood.com", "https://46630.rpc.thirdweb.com"]),
 });
@@ -785,6 +771,30 @@ export async function evmHoldsAnchor(rpcs: readonly [EvmRpc, EvmRpc], chainId: b
   if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);
   const bs = await both(rpcs, (rpc, k, sig) => evmAnswered(() => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), sig, sleep), signal);
   if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(`an RPC does not hold block ${anchor.number} as ${anchor.hash}`);
+}
+
+/**
+ * Every token a W was sent from block `from` up to the newest anchor, on one reader: the helper's route on mainnet
+ * (./evm-restore.ts, decision M359: a W's holdings are display, read on the helper's keyed provider, never named to a
+ * provider the device reaches itself). The anchor's height must hold the anchor's hash on it first (another hash, or
+ * none yet, is a lag: a retry), which also holds it to the pool's chain, since the route answers no eth_chainId; then
+ * the Transfer logs to W (eth_getLogs, topic 2 = W, no address), paged under its cap (`page[0]`, kept across Ws), each
+ * log in the finalized or the newest anchor's block of that block's hash (the newest's another hash is a lag). Each
+ * call names this one W and nothing else of the user's. No second provider compares them: they gate no signature.
+ */
+export async function evmTokensSentToOne(rpc: EvmRpc, w: string, from: bigint, { fin, anchor }: EvmAnchors, page: bigint[], signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<string[]> {
+  addr20(w, "W");
+  const to = lower(w);
+  if (typeof from !== "bigint" || from < 0n) throw new Error("from: a block number");
+  const b = await evmAnswered(() => getBlock(rpc, tag(anchor.number), `block ${anchor.number}`), signal, sleep);
+  if (b === null || b.hash !== anchor.hash) lag(`the reader does not hold block ${anchor.number} as ${anchor.hash}`);
+  if (from > anchor.number) return [];
+  const logs = await readLogs(rpc, 0, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, "0")}`] }, (raw, f, t, what) => decodeTransfer(raw, to, f, t, what), from, anchor.number, page, signal, sleep);
+  for (const e of logs) {
+    if (e.block === fin.number && e.blockHash !== fin.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${fin.hash}`);
+    if (e.block === anchor.number && e.blockHash !== anchor.hash) lag(`a log of block ${e.block} is not of the anchor ${anchor.hash}`);
+  }
+  return [...new Set(logs.map((l) => l.token))].sort();
 }
 
 /** What a trees() call may ask beyond the cut: a deposit's own note's newest root, read like every other read. */
