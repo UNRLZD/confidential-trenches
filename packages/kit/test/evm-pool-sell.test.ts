@@ -4,6 +4,7 @@
 // --nonce <n>`, each with the Hardhat mnemonic's index 0 (`sells` is the Sell's token field), and sign-auth at RLP's
 // nonce edges. A refusal test per check.
 import { mock, test } from "node:test";
+import { enableTimers } from "./mock-timers.ts";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -68,7 +69,7 @@ const X = "0xF111111111111111111111111111111111111111";
 const Y = "0x2222222222222222222222222222222222222222";
 const NOW = 1_800_000_000;
 // the device's clock, mocked (the kit reads Date.now(), never a caller's now): NOW unless a test moves it
-mock.timers.enable({ apis: ["Date"], now: NOW * 1000 });
+enableTimers(mock.timers, { apis: ["Date"], now: NOW * 1000 });
 const at = <T>(sec: number, f: () => T): T => {
   mock.timers.setTime(sec * 1000);
   try {

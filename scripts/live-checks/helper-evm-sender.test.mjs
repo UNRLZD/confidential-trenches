@@ -220,8 +220,9 @@ test("read() asks each record's pool for its fee, then posts every plant to the 
 // ---- The sells the helper sent ----
 
 const RUN = JSON.parse(readFileSync(path.join(HERE, "pool-evm-testnet-run.answers.json"), "utf8"));
-/** The recorded whole runs (pool-evm-testnet-run), each sell read as one the helper sent, with `f` applied to its log. */
-const helperRuns = (f = (log) => log) => RUN.runs.filter((r) => !r.record.stopped).map((r) => ({ record: { ...r.record, txs: r.record.txs.map((t) => (t.kind === "sell" ? { ...t, via: "helper", landed: true } : t)) }, urls: r.urls, log: f(structuredClone(r.good)) }));
+/** The recorded whole runs (pool-evm-testnet-run), each sell read as one the helper sent, with `f` applied to its log.
+ *  A row as testnet-run.mjs writes it: every row listed has landed, so none carries a `landed` field. */
+const helperRuns = (f = (log) => log) => RUN.runs.filter((r) => !r.record.stopped).map((r) => ({ record: { ...r.record, txs: r.record.txs.map((t) => (t.kind === "sell" ? { ...t, via: "helper" } : t)) }, urls: r.urls, log: f(structuredClone(r.good)) }));
 const relayers = (runs) => Object.fromEntries(runs.map((r) => [r.record.chain, r.record.relayer]));
 const replayOf = (x) => replayer(x.log);
 /** the log with each sell's transaction read at the helper's gas limit */
@@ -238,7 +239,8 @@ test("checkSells on the recorded testnet runs: every check reads real sells; the
   assert.equal(r.ok, false);
   const sells = runs.flatMap((x) => x.record.txs.filter((t) => t.kind === "sell"));
   assert.ok(sells.length >= 3);
-  assert.deepEqual(bad(r).map((l) => l.replace(/ gas limit \d+,.*/, "")), sells.map((t) => `BAD [${runs.find((x) => x.record.txs.includes(t)).record.chain} sell ${t.hash}]`), bad(r).join("\n"));
+  // and no testnet has a sell read back whole, so each one's own line fails too
+  assert.deepEqual(bad(r).map((l) => l.replace(/ gas limit \d+,.*/, "")), [...sells.map((t) => `BAD [${runs.find((x) => x.record.txs.includes(t)).record.chain} sell ${t.hash}]`), ...NETWORKS.map((n) => `BAD [${n}] a sell the helper sent, read back (helper-evm-sender.run.${n}.json)`)], bad(r).join("\n"));
   for (const t of sells) {
     assert.ok(r.lines.some((l) => l.startsWith(`ok  [`) && l.includes(`${t.hash}] the authorization is signed by ${t.w}`)), `${t.hash}: W signed the authorization`);
     assert.ok(r.lines.some((l) => l.startsWith(`ok  [`) && l.includes(`${t.hash}] the fee ${t.fee} covers the cost`)), `${t.hash}: the fee covers the cost`);
@@ -248,6 +250,7 @@ test("checkSells on the recorded testnet runs: every check reads real sells; the
 test("checkSells: the same reads at the helper's gas limit pass; another sender, a fee under the cost, a spoiled run, or a testnet with no helper sell: each FAIL", async () => {
   const runs = helperRuns();
   const at = helperRuns(atSellGas(runs));
+  assert.ok(at.every((x) => x.record.txs.every((t) => !("landed" in t))), "the record's shape: no landed field");
   const good = await checkSells(at, replayOf, relayers(at));
   assert.equal(good.ok, true, good.lines.join("\n"));
   // another sell sender, or none named
@@ -264,6 +267,7 @@ test("checkSells: the same reads at the helper's gas limit pass; another sender,
   const c = await checkSells(cheap, replayOf, relayers(cheap));
   assert.equal(c.ok, false);
   assert.ok(bad(c).some((l) => l.includes("the fee 1 covers the cost")), bad(c).join("\n"));
+  for (const n of NETWORKS) assert.ok(bad(c).includes(`BAD [${n}] a sell the helper sent, read back (helper-evm-sender.run.${n}.json)`), `${n}: a sell whose reads fail is not read back`);
   // a sell's receipt reverted on one RPC
   const reverted = helperRuns((log) => {
     atSellGas(runs)(log);

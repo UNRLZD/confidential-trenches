@@ -5,6 +5,7 @@
 // pool pinned), a page with no flow, or the mainnet tables are refused. Its own file: the network is read once, at
 // import, so this process runs as the testnet build does (test/pool-network.test.ts runs the mainnet one).
 import { after, mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
@@ -23,8 +24,10 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
+// the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
+const WORLD = await import("./pool-withdraw-world.ts");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
 
 const RECORD = JSON.parse(readFileSync(new URL("../../../scripts/live-checks/pool-sol-deploy.devnet.json", import.meta.url), "utf8")) as { cluster: string; program_id: string; pool: string };
@@ -352,7 +355,7 @@ test("pool.buy runs on the pinned devnet pool once a lookup table is pinned; wit
 test("a pool send still pending at the kind's 10 s, and at 90 s, is not aborted: its own window is over 90 s", async () => {
   assert.equal(SIGNPAGE_TIMEOUT_MS["pool.buy"], 10_000);
   assert.ok(POOL_SEND_TIMEOUT_MS > 90_000);
-  mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
     let signal!: AbortSignal;
     let answer!: (r: Response) => void;
@@ -379,7 +382,7 @@ test("a pool send still pending at the kind's 10 s, and at 90 s, is not aborted:
     assert.equal(signal.aborted, true);
     await assert.rejects(q, /no answer in 120000 ms/);
   } finally {
-    mock.timers.reset();
+    resetTimers(mock.timers);
   }
 });
 
@@ -533,37 +536,217 @@ test("an owed onward send's finish: a sign out never waits on its slow RPC read,
   assert.equal(reads, before, "not tried again at once");
 });
 
+// card signpage-withdraw-own-spend (4): the testnet page's own owed-note rules
+const owedPending = (noteId: string, to: string) => ({ noteId, attempt: "ab".repeat(16), context: "1", to, last: true, feeCap: "5000" });
+
+test("a note the reserved pass freed settles the op owing its send as stopped, the send dropped; another note's op stays owed", async () => {
+  const { w } = await wallet();
+  const to = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
+  await w.put("ops", "op1", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 1, owed: "n1" });
+  await oweSend(w, "op1", owedPending("n1", to));
+  await w.put("ops", "op2", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 2, owed: "n2" });
+  await oweSend(w, "op2", owedPending("n2", to));
+  // a record from before the owed store: its pending in the op
+  await w.put("ops", "op3", { kind: "withdraw", stage: "proving", txs: [], created_ms: 3, pending: owedPending("n3", to) });
+  await settleFreedOps(w, ["n1", "n3"]);
+  const op1 = (await w.get("ops", "op1")) as Record<string, unknown>;
+  assert.equal(op1.stage, "stopped");
+  assert.equal(op1.owed, undefined);
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
+  const op2 = (await w.get("ops", "op2")) as Record<string, unknown>;
+  assert.equal(op2.stage, "in_transit");
+  assert.equal(op2.owed, "n2");
+  assert.deepEqual(Object.keys((await w.get("meta", "owed/op2")) as object), ["n2"]);
+  const op3 = (await w.get("ops", "op3")) as Record<string, unknown>;
+  assert.equal(op3.stage, "stopped");
+  assert.equal(op3.pending, undefined);
+});
+
+test("the withdraw screen's funds leave out a note an op still owes a send for, and a run never plans it, until the op is settled", async () => {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n, 30_000_000n]);
+  const [n0, n1] = wd.ids as [string, string];
+  await wd.w.put("ops", "op1", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 1, owed: n0 });
+  await oweSend(wd.w, "op1", owedPending(n0, TO));
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    return new Response(JSON.stringify(await wd.host.send(pool, base64.decode(tx))), { status: 200 });
+  }) as unknown as typeof fetch;
+  const t = testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn });
+  const f = await t.withdrawDeps("solana", "op2").funds();
+  assert.deepEqual(f.notes.map((n) => n.id), [n1], "the owed note is out of the screen's funds");
+  // an amount only both notes can send: the run's plan has no owed note, so it stops with no release
+  await t.withdraw({ chain: "solana", to: TO, amount: 40_000_000n, maxFee: 2n * COST }, "op2");
+  assert.equal(((await wd.w.get("ops", "op2")) as { stage: string }).stage, "stopped");
+  assert.equal(wd.releases.length, 0);
+  // op 1 settled: the note is back in the funds
+  await wd.w.update("ops", "op1", (v) => mergeWithdrawOp(v, { stage: "stopped", clear: n0 }));
+  assert.equal((await t.withdrawDeps("solana", "op3").funds()).notes.length, 2);
+});
+
+test("a send owed whose fee rose past the Max fee: the screen reads the fee it needs, and drawing it again at that fee sends it on", async () => {
+  const { world, TO, COST, W_FEE } = WORLD;
+  let rose = false;
+  const wd = await world([30_000_000n], { feeFor: () => (rose ? 2n * W_FEE : W_FEE), afterRelease: () => void (rose = true) });
+  // the part's run (the world's own settle), its op written as the page's run writes it: the send owed in meta/owed/<op id>
+  const { runPoolWithdraw } = await import("../src/pool-withdraw.ts");
+  const ran = await runPoolWithdraw(wd.host, { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 }, TO, 5_000_000n, COST);
+  assert.equal(ran.stage, "in_transit");
+  await wd.w.put("ops", "op-f", { kind: "withdraw", stage: "in_transit", txs: ran.txs, created_ms: 1, owed: ran.pending!.noteId, fee_needed: ran.feeNeeded });
+  await oweSend(wd.w, "op-f", ran.pending!);
+  const t = testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} } });
+  const deps = t.withdrawDeps("solana", "op-g");
+  assert.deepEqual(await deps.owedFees!(), [{ opId: "op-f", need: 2n * W_FEE }]);
+  // a fee other than the one owed (the screen's read gone stale) raises nothing
+  await assert.rejects(deps.redraw!("op-f", 3n * W_FEE));
+  assert.equal(wd.onwards().length, 0);
+  await deps.redraw!("op-f", 2n * W_FEE);
+  const op = (await wd.w.get("ops", "op-f")) as { stage: string; fee_needed?: unknown; owed?: unknown };
+  assert.equal(op.stage, "sent");
+  assert.equal(op.fee_needed, undefined);
+  assert.equal(op.owed, undefined);
+  assert.equal(wd.balance.get(TO), 5_000_000n - W_FEE, "To never less than the amount less the Max fee drawn again");
+  assert.deepEqual(await deps.owedFees!(), []);
+});
+
 // Review #232b fold 3, HIGH 1: the page's own withdraw run, its tab closed while the release's read-back is out (the
 // run never answers): the op owes the send from before the release leaves, in_transit, and the reopened page's state
 // read sends it on, W at 0 and To given the amount.
+/** A clock for the page's withdraw run whose waits pass at once: each moves it on by the time waited. */
+const quickClock = () => {
+  let skew = 0n;
+  return { now: () => BigInt(Date.now()) + skew, wait: async (ms: number) => void (skew += BigInt(ms)) };
+};
+
 test("a withdraw whose tab closed during the release's read-back: the reopened page sends the part on, W at 0, To the amount", async () => {
-  const { world, TO, COST } = await import("./pool-withdraw-world.ts");
+  const { world, TO, COST } = WORLD;
   const wd = await world([30_000_000n], { hangReadBack: true });
   const fetchFn = (async (_url: string, init: { body: string }) => {
     const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
     const answer = await wd.host.send(pool, base64.decode(tx));
     return new Response(JSON.stringify(answer), { status: 200 });
   }) as unknown as typeof fetch;
-  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn };
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
   const page = { store: async () => wd.w, seed64: async () => SEED64.slice() };
   const amount = 5_000_000n;
   const t1 = testnetPool(page, over);
-  void t1.withdraw({ chain: "solana", to: TO, amount, maxFee: COST }, "op-w");
+  const run = t1.withdraw({ chain: "solana", to: TO, amount, maxFee: COST }, "op-w");
   for (let i = 0; wd.releases.length === 0 && i < 1_000; i++) await new Promise((r) => setTimeout(r, 5));
   assert.equal(wd.releases.length, 1, "the release went out");
   await new Promise((r) => setTimeout(r, 20));
   const W = wd.binds[0]!.recipient;
-  const rec = (await wd.w.get("ops", "op-w")) as { stage: string; pending?: unknown };
+  const rec = (await wd.w.get("ops", "op-w")) as { stage: string; owed?: unknown };
   assert.equal(rec.stage, "in_transit", "never proving while a release is out");
-  assert.ok(rec.pending, "the send owed");
+  // card signpage-withdraw-own-spend (2): the op (which the frame reads) names only the note; the send owed, with its
+  // attempt and context, is in meta under owed/<op id>, which the frame never reads
+  const held = (await wd.ns.get(wd.ids[0]!))!;
+  assert.equal(rec.owed, wd.ids[0], "the send owed, by its note's id");
+  const owedRec = (await wd.w.get("meta", "owed/op-w")) as Record<string, { attempt: string; context: string }>;
+  assert.deepEqual(Object.keys(owedRec), [wd.ids[0]]);
+  assert.equal(owedRec[wd.ids[0]!]!.context, held.contexts!.at(-1)!.context);
+  const text = JSON.stringify(rec);
+  assert.ok(!text.includes(held.contexts!.at(-1)!.context) && !text.includes(held.attempt!) && !text.includes(TO), "no context, attempt or To in the op record");
   assert.equal(wd.balance.get(W), amount + 5_000n, "the part on W");
   // the tab is gone (its run never answers); the page opened again reads its state
   const t2 = testnetPool(page, { ...over, fetch: undefined });
   await t2.stateRead();
   assert.equal(wd.balance.get(W), 0n);
   assert.equal(wd.balance.get(TO), amount);
-  const after = (await wd.w.get("ops", "op-w")) as { stage: string; pending?: unknown; txs: { hash: string }[] };
+  const after = (await wd.w.get("ops", "op-w")) as { stage: string; owed?: unknown; txs: { hash: string }[] };
   assert.equal(after.stage, "sent");
-  assert.equal(after.pending, undefined);
+  assert.equal(after.owed, undefined);
+  assert.deepEqual(await wd.w.get("meta", "owed/op-w"), {}, "the send owed dropped once sent");
   assert.equal(after.txs.length, 1, "the onward send's tx");
+  // the closed tab's run let go, so nothing of it outlives the test (fold 5: it held node ~120 s)
+  wd.unhang();
+  await run;
+});
+
+// fold 4 (review LOW): the release's own signature is added to the send still stored, never a whole owe again
+test("keepRelease adds the release's signature to the owed send still stored only: a dropped send stays dropped, the stored one keeps its own fee ceiling", async () => {
+  const { w } = await wallet();
+  const p = owedPending("n1", "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx");
+  await oweSend(w, "op1", { ...p, feeCap: "9000" });
+  await keepRelease(w, "op1", "n1", p.attempt, "sig1");
+  assert.deepEqual(await w.get("meta", "owed/op1"), { n1: { ...p, feeCap: "9000", release: "sig1" } });
+  // another attempt's signature never lands on this attempt's send
+  await keepRelease(w, "op1", "n1", "cd".repeat(16), "sig2");
+  assert.equal(((await w.get("meta", "owed/op1")) as Record<string, { release: string }>).n1!.release, "sig1");
+  await dropSend(w, "op1", "n1");
+  await keepRelease(w, "op1", "n1", p.attempt, "sig3");
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
+  await keepRelease(w, "op2", "n1", p.attempt, "sig4");
+  assert.equal(await w.get("meta", "owed/op2"), undefined);
+});
+
+/** The tab-closed withdraw: its release out, its read-back not answering until `end`. */
+async function hungWithdraw() {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n], { hangReadBack: true });
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    const answer = await wd.host.send(pool, base64.decode(tx));
+    return new Response(JSON.stringify(answer), { status: 200 });
+  }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
+  const page = { store: async () => wd.w, seed64: async () => SEED64.slice() };
+  const t1 = testnetPool(page, over);
+  const run = t1.withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  for (let i = 0; wd.releases.length === 0 && i < 1_000; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(wd.releases.length, 1, "the release went out");
+  await new Promise((r) => setTimeout(r, 20));
+  // the closed tab's run let go at the test's end, so nothing of it outlives the test
+  const end = async () => {
+    wd.unhang();
+    await run;
+  };
+  return { wd, over, page, TO, end };
+}
+
+test("another tab settled the op while the release was out, the run ending in_transit: at the run's end the op owes nothing and its dropped send stays dropped (fold 4; fold 5, review LOW)", async () => {
+  const { world, TO, COST } = WORLD;
+  // the release lands, its spend not read in time: the run ends in_transit
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    const answer = await wd.host.send(pool, base64.decode(tx));
+    // another tab's finish, before the helper answers: the op settled stopped and its send dropped (settleFreedOps)
+    const id = wd.ids[0]!;
+    await wd.w.update("ops", "op-w", (v) => mergeWithdrawOp(v, { stage: "stopped", clear: id }));
+    await dropSend(wd.w, "op-w", id);
+    return new Response(JSON.stringify(answer), { status: 200 });
+  }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
+  await testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, over).withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  assert.equal(wd.releases.length, 1, "the release went out");
+  assert.deepEqual(await wd.w.get("meta", "owed/op-w"), {}, "the dropped send stays dropped");
+  assert.equal(((await wd.w.get("ops", "op-w")) as { owed?: unknown }).owed, undefined, "the op still owes nothing");
+});
+
+test("an owed send with no release signature under 2,500 newer entries of W's history, the page's RPC functions new on every pass: the next finish reads on from the last one's place and sends it (fold 4, review HIGH)", async () => {
+  const { wd, over, page, TO, end } = await hungWithdraw();
+  const id = wd.ids[0]!;
+  // a record from before fold 3, or a tab closed before the signature was written: no release kept
+  await wd.w.update("meta", "owed/op-w", (v) => {
+    const r = v as Record<string, Record<string, unknown>>;
+    const { release: _r, ...rest } = r[id]!;
+    return { ...r, [id]: rest };
+  });
+  const pad = Array.from({ length: 2_500 }, (_, i) => base58.encode(Uint8Array.from({ length: 64 }, (_, k) => (k < 4 ? (i >> (8 * k)) & 255 : 9))));
+  wd.plant.history = (s) => [...pad, ...s];
+  const [r0, r1] = wd.host.rpcs;
+  const fresh = (rpc: typeof r0): typeof r0 => (async (m: string, p: readonly unknown[]) => rpc(m, p)) as typeof r0;
+  const o2 = { ...over, fetch: undefined };
+  Object.defineProperty(o2, "rpcs", { get: () => [fresh(r0), fresh(r1)], enumerable: true });
+  const t2 = testnetPool(page, o2);
+  const W = wd.binds[0]!.recipient;
+  await t2.stateRead();
+  assert.equal(wd.balance.get(TO), undefined, "one pass (2,000 entries) read in the first finish: not yet found");
+  // the failed finish waits 2 s before the next try
+  await new Promise((r) => setTimeout(r, 2_100));
+  await t2.stateRead();
+  assert.equal(wd.balance.get(W), 0n);
+  assert.equal(wd.balance.get(TO), 5_000_000n);
+  assert.equal(((await wd.w.get("ops", "op-w")) as { stage: string }).stage, "sent");
+  await end();
 });

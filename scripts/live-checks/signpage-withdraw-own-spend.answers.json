@@ -1,0 +1,20 @@
+{
+ "_note": "good: this card's build (packages/signpage/index.html and public/app.js after fold 5, on main f30c9be: seven stores, version 1, owed/<op id> in meta, the reader hiding it, the seed-move test skipping owed writes). bad: SIGN_HOST read live 5 Nov 03:03Z (release-26 of main 7dcc60a): no owed key rule, a reader that lists every meta key, a seed re-read on every meta write.",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-d6NAyriWlrd1E9rmer1F9lurADAiASrZzM7bEEQze2hluHL9dnnHn+EwZbZlOpzD\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-d6NAyriWlrd1E9rmer1F9lurADAiASrZzM7bEEQze2hluHL9dnnHn+EwZbZlOpzD",
+  "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`]",
+  "opensV1": true,
+  "owedKey": true,
+  "readerHidesOwed": true,
+  "seedMovedSkipsOwed": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-/dHJM+JCeBsYkN8tKZWRq7zfIf5LfsmKXkDfnF9wCDixxq9CgYfPyEb1oDid5WXy\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-/dHJM+JCeBsYkN8tKZWRq7zfIf5LfsmKXkDfnF9wCDixxq9CgYfPyEb1oDid5WXy",
+  "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`]",
+  "opensV1": true,
+  "owedKey": false,
+  "readerHidesOwed": false
+ }
+}

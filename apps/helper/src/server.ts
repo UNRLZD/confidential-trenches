@@ -25,7 +25,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { createSolanaLists } from "./data/solana/lists.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
-import { createSwaps, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
+import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
 import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
@@ -557,6 +557,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       gecko,
       holds,
       rpcs: url === undefined || url === "" ? SWAP_RPCS[chain] : [url, ...SWAP_RPCS[chain]],
+      index: INDEX_RPCS[chain],
       listed: async (token) => (await snapshot())?.tokens.has(token) ?? false,
       // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's
       hint: async (token) => {

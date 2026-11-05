@@ -91,3 +91,20 @@ test("card helper-robinhood-capacity fold 5: an eth_call at a mined block is ask
   assert.equal(a.status, 200, a.body);
   assert.equal(decimals, 2, `the token's decimals asked ${decimals} times`);
 });
+
+test("card helper-robinhood-capacity fold 9: a call that reverts is agreed by two providers as a result is: a listed address that is no pool (its factory() reverts) is asked of two providers, never of every one and again patiently", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const hint = `0x${"7".repeat(40)}`;
+  const asked = new Map<string, number>();
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    for (const r of JSON.parse(String(init.body)) as { method: string; params: { to?: string; data?: string }[] }[])
+      if (r.method === "eth_call" && r.params[0]?.to === hint && r.params[0]?.data === "0xc45a0155") asked.set(url, (asked.get(url) ?? 0) + 1);
+    return chain.fetch(url, init);
+  };
+  const s = open(chain, { t: 1_000_000 }, { pools: new Map(), fetch: fetch as never, hint: async () => hint });
+  const a = await s.trades(CURVE_TOKEN, 50);
+  s.stop();
+  assert.equal(a.status, 200, a.body);
+  assert.equal([...asked.values()].reduce((x, y) => x + y, 0), 2, `factory() asked ${[...asked].map(([u, k]) => `${new URL(u).host} ${k}`).join(", ")}`);
+});

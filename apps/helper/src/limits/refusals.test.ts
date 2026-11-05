@@ -4,6 +4,7 @@
 // read after a swap answered 429 in 0.08 s and docker logs held nothing about it).
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { enableTimers, resetTimers } from "../../test/mock-timers.ts";
 import { refusalLog, throttled, upstreamBudget } from "./limits.ts";
 
 test("one line per route and reason a window, with its count; nothing for a window with none; never per request", () => {
@@ -20,7 +21,8 @@ test("one line per route and reason a window, with its count; nothing for a wind
 });
 
 test("the window's line is written by its own timer, at the window's end", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const lines: string[] = [];
   const r = refusalLog((l) => lines.push(l));
   r.count("other", "client window");
