@@ -236,21 +236,25 @@ export async function sendAndConfirm(fetchFn, url, ixs, payer, keys, { step = "a
       return null;
     }
   };
+  let lastSend = null;
   while (now() < until) {
     try {
       await call("sendTransaction", [tx.base64, { encoding: "base64", preflightCommitment: "confirmed" }]);
     } catch (e) {
       // a resend of a transaction that already landed ("already been processed") is not a failure: its status says;
-      // a send that failed past its tries is sent again at the next pass (the same bytes, the same signature)
+      // a send that failed past its tries, or that a load-balanced RPC's node answered "Blockhash not found" (-32002:
+      // that node is behind the one the blockhash came from) or "node is behind" (-32005), is sent again at the next
+      // pass: the same bytes, the same signature, so it lands at most once
       if (seen(await status(true))) return tx.signature;
-      if (!e.transient && !/already been processed/i.test(e.message)) throw e;
+      lastSend = e.message;
+      if (!e.transient && !/already been processed|Blockhash not found|"code":-32005/i.test(e.message)) throw e;
     }
     for (let i = 0; i < 4; i++) {
       await wait(500);
       if (seen(await status(false))) return tx.signature;
     }
   }
-  throw new Error(`${tx.signature} not confirmed in ${WAITS.confirm / 1000} s`);
+  throw new Error(`${tx.signature} not confirmed in ${WAITS.confirm / 1000} s${lastSend ? ` (the last send's answer: ${lastSend})` : ""}`);
 }
 
 // ---- the solana CLI ----
@@ -484,8 +488,9 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
       for (const end = now() + WAITS.settle; ; ) {
         const open = journal.pending();
         if (!open.length) return true;
-        const height = await rpc(fetchFn, url, "getBlockHeight", [{ commitment: "confirmed" }]);
-        const st = (await rpc(fetchFn, url, "getSignatureStatuses", [open.map((p) => p.signature), { searchTransactionHistory: true }])).value;
+        // reads that fail past rpc()'s tries are read again: a settle given up lets a close race a send still in flight
+        const height = await readAgain(() => rpc(fetchFn, url, "getBlockHeight", [{ commitment: "confirmed" }], wait), "the block height", { wait, now });
+        const st = (await readAgain(() => rpc(fetchFn, url, "getSignatureStatuses", [open.map((p) => p.signature), { searchTransactionHistory: true }], wait), "the run's statuses", { wait, now })).value;
         open.forEach((p, i) => {
           const v = st[i];
           const state = v?.err ? "failed" : v && LANDED.includes(v.confirmationStatus) ? "landed" : !v && height > p.lastValid ? "expired" : null;
@@ -500,26 +505,28 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
      * deployed program (executable, the upgradeable loader's: its rent is the program's own); then any buffer or
      * programdata on `url` whose authority is the funder (the 33-byte Option at offset 4 or 12 equal to Some(funder)).
      * [] when none. */
-    leftovers: async () => {
+    leftovers: () => readAgain(async () => {
+      // read again whole while a read fails past rpc()'s tries: one rate-limited read must never keep a finished run's
+      // keys
       const out = [];
       for (const u of [...new Set([url, second])]) {
         const b = await balanceOn(u);
         if (b !== 0n) out.push(`the funder holds ${b} lamports on ${u}`);
-        const pa = await account(fetchFn, u, programId, undefined, "confirmed");
+        const pa = await account(fetchFn, u, programId, wait, "confirmed");
         if (pa && BigInt(pa.lamports) > 0n && !(pa.executable && pa.owner === LOADER_V3)) out.push(`the program id ${programId} holds ${pa.lamports} lamports on ${u} and is not a deployed program`);
         // the run's lookup table (mainnet): a live authority is the funder's key, so the keys stay until it is frozen
         const t = tableOf();
         if (t) {
-          const ta = await account(fetchFn, u, t, undefined, "confirmed");
+          const ta = await account(fetchFn, u, t, wait, "confirmed");
           if (ta && ta.owner === ALT_PROGRAM && ta.data[21] === 1 && b58encode(ta.data.subarray(22, 54)) === funder.id) out.push(`lookup table ${t} still has the funder as its authority on ${u}`);
         }
       }
       for (const [tag, at, what] of [[1, 4, "buffer"], [3, 12, "upgradeable program's data"]]) {
-        const found = await rpc(fetchFn, url, "getProgramAccounts", [LOADER_V3, byAuthority(funder, tag, at)]);
+        const found = await rpc(fetchFn, url, "getProgramAccounts", [LOADER_V3, byAuthority(funder, tag, at)], wait);
         for (const a of found) out.push(`${what} ${a.pubkey} still has the funder as its authority`);
       }
       return out;
-    },
+    }, "what the run left", { wait, now }),
   };
 }
 
@@ -573,7 +580,7 @@ async function tableReadBack(fetchFn, urls, table, list, authority, { wait = sle
 }
 
 // ---- the record from chain reads ----
-const LOADER_STEPS = { 0: "buffer made", 1: "buffer write", 2: "deploy with the upgradeable loader (DeployWithMaxDataLen)", 3: "upgrade", 4: "SetAuthority (--final: to none)", 5: "close" };
+const LOADER_STEPS = { 0: "buffer made", 1: "buffer write", 2: "deploy with the upgradeable loader (DeployWithMaxDataLen)", 3: "upgrade", 4: "SetAuthority (to none)", 5: "close" };
 /**
  * A deployment record's transactions and funders from chain reads alone: its transactions plus each of the run's own
  * on its programdata (the deploy and the SetAuthority to none after it; immutable after, so the list ends there): one
@@ -589,7 +596,8 @@ export async function chainRecord(fetchFn, url, d, { wait } = {}) {
   }
   const read = async (signature) => {
     const t = await rpc(fetchFn, url, "getTransaction", [signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }], wait);
-    if (!t) throw new Error(`${signature}: not found at finalized on ${url}`);
+    // not found yet: a load-balanced RPC's transaction server can be a slot behind its status reads (read again)
+    if (!t) throw Object.assign(new Error(`${signature}: not found at finalized on ${url}`), { transient: true });
     return t;
   };
   const rows = [];
@@ -598,10 +606,17 @@ export async function chainRecord(fetchFn, url, d, { wait } = {}) {
     const keys = t.transaction.message.accountKeys;
     const ix = t.transaction.message.instructions.find((i) => keys[i.programIdIndex] === LOADER_V3);
     const step = known ?? (ix ? `the upgradeable loader: ${LOADER_STEPS[b58decode(ix.data)[0]] ?? "another instruction"}` : "on the programdata");
-    rows.push({ step, signature, slot: t.slot, payer: keys[0] });
+    // a funding, read from the transaction itself: a System transfer from its payer into another key
+    const into = t.transaction.message.instructions.filter((i) => keys[i.programIdIndex] === SYSTEM && (() => { const d = b58decode(i.data); return d.length === 12 && d[0] === 2 && d[1] === 0 && d[2] === 0 && d[3] === 0; })() && keys[i.accounts[0]] === keys[0]).map((i) => keys[i.accounts[1]]);
+    rows.push({ step, signature, slot: t.slot, payer: keys[0], into });
   };
   for (const [signature, known] of steps) add(signature, await read(signature), known);
-  const ours = new Set([d.funder, ...(d.funders ?? []), ...rows.filter((r) => !/funding/.test(r.step)).map((r) => r.payer)].filter((p) => p && p !== d.return_to));
+  // the run's payers: its funder, and each payer of its own transactions that is not a funding (a transfer into another
+  // of the record's payers, not the return address a sweep goes to): never from a step's label, nor an older record's
+  // funders, which carry the funding's payer
+  const payers = new Set(rows.map((r) => r.payer));
+  const funding = (r) => r.into.some((k) => k !== r.payer && k !== d.return_to && payers.has(k));
+  const ours = new Set([d.funder, ...rows.filter((r) => !funding(r)).map((r) => r.payer)].filter((p) => p && p !== d.return_to));
   for (const signature of history) {
     const t = await read(signature);
     if (ours.has(t.transaction.message.accountKeys[0])) add(signature, t, null);
@@ -1066,6 +1081,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   // its landed transactions (not the CLI's writes) into the record
   const journalFile = journalOf(outFile);
   const priorTxs = [];
+  let priorTable = null; // a resume: the stopped run's lookup table, reused when it reads frozen with exactly the list
   if (existsSync(journalFile)) {
     const j = JSON.parse(readFileSync(journalFile, "utf8"));
     const refuse = (why) => {
@@ -1081,6 +1097,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     const aside = `${outFile.replace(/\.json$/, "")}.stopped-${String(j.stopped_at ?? j.at ?? new Date().toISOString()).replace(/[^0-9TZ]/g, "")}.journal.json`;
     if (existsSync(aside)) refuse(`, and ${aside} exists too: move one of them aside`);
     if (resumeId) for (const t of j.txs ?? []) if (t.state === "landed" && !t.cli) priorTxs.push({ step: `first run: ${t.step}`, signature: t.signature });
+    if (resumeId && typeof j.table === "string") priorTable = address(j.table) && j.table;
     renameSync(journalFile, aside);
     log(`the stopped run's journal (keys removed) moved to ${aside}${resumeId ? `; its ${priorTxs.length} landed transaction(s) go in the record` : ""}`);
   }
@@ -1351,7 +1368,22 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       check("init");
 
       if (withTable) {
-        // step 6m: the pool buy's lookup table, made, read back, frozen, read back; no test deposit
+        // step 6m: the pool buy's lookup table, made, read back, frozen, read back; no test deposit. A resume whose
+        // stopped run made it and froze it (the same bytes on both RPCs at finalized, active, authority none, exactly
+        // this list) reuses it: a second frozen table would lock its rent for good
+        let reused = false;
+        if (priorTable) {
+          const reads = await readAgain(() => Promise.all([url, second].map((u) => account(fetchFn, u, priorTable, wait))), "the stopped run's lookup table", clock);
+          const same = reads.every((r) => r && reads[0] && r.owner === reads[0].owner && Buffer.from(r.data).equals(Buffer.from(reads[0].data)));
+          const why = same ? tableProblems(reads[0], tableList, null) : [`the reads on ${url} and ${second} are not the same bytes`];
+          if (!why.length) {
+            fields.table = priorTable;
+            stoppedRecord();
+            reused = true;
+            log(`lookup table ${priorTable}, the stopped run's, is frozen (authority none) and holds exactly the list on both RPCs at finalized: reused`);
+          } else log(`lookup table ${priorTable}, the stopped run's, is not reused (${why.join("; ")}): a new one is made`);
+        }
+        if (!reused) {
         const slot = BigInt(await readAgain(() => rpc(fetchFn, url, "getSlot", [{ commitment: "finalized" }], wait), "the slot", clock));
         const t = pda([funder.pub, le(slot, 8)], ALT_PROGRAM);
         fields.table = t.address;
@@ -1366,6 +1398,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
         log(`lookup table ${t.address} is frozen (authority none) and holds exactly the list on both RPCs at finalized`);
         stoppedRecord();
         check("freeze");
+        }
         result = { ...fields, at: new Date().toISOString() };
       } else {
       // a fresh note: its nullifier and secret live only in this block
@@ -1465,7 +1498,13 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     result.txs = txs.filter((t) => t.state === "landed" && !t.cli && !seen.has(t.signature) && seen.add(t.signature)).map(({ step, signature }) => ({ step, signature }));
     await waitFinalized(fetchFn, url, result.txs.map((t) => t.signature), clock);
     const done = result;
-    result = await readAgain(() => chainRecord(fetchFn, url, done, clock), "the record's transactions", clock);
+    try {
+      result = await readAgain(() => chainRecord(fetchFn, url, done, clock), "the record's transactions", clock);
+    } catch (e) {
+      // the keys are removed and every lamport is back: the record is written later from the journal, from chain reads
+      log(`the record not written (${e.message}): write it from the journal with: node contracts/pool-solana/scripts/deploy.mjs --rebuild-record ${journalFile} --url ${url}${cluster === "mainnet" ? " --mainnet" : ""}`);
+      throw e;
+    }
     writeFileSync(outFile, JSON.stringify(result, null, 2) + "\n");
     rmSync(journalFile, { force: true });
     log(`every transaction finalized; wrote ${path.relative(process.cwd(), outFile)} and removed its journal`);

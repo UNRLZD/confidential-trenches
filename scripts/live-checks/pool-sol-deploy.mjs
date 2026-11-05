@@ -187,6 +187,8 @@ export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries =
       r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
       j = await r.json().catch(() => null);
       transient = r.status === 429 || r.status >= 500 || [-32029, -32429].includes(j?.error?.code) ? new Error(`${method}: HTTP ${r.status} ${JSON.stringify(j?.error ?? null).slice(0, 80)}`) : null;
+      // a 2xx whose body never arrived whole (a socket reset while a large account is read) is a reset too
+      if (!transient && !j && r.ok) transient = new Error(`${method}: HTTP ${r.status}, no JSON (the body was cut)`);
     } catch (e) {
       transient = new Error(`${method}: ${e?.cause?.code ?? e?.message ?? e}`);
     }

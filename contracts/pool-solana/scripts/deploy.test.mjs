@@ -1532,13 +1532,13 @@ test("review 4d: the run's cleanup freezes its table when the run's own freeze f
   const c = asMainnet(cluster({ poolMissing: true }));
   let refused = 0;
   const cc = wrap(c, (url, { method, params }, real) => {
-    if (method === "sendTransaction" && refused === 0 && decodeTx(params[0]).ixs.some((x) => x.program === ALT_PROGRAM && x.data[0] === 1)) return refused++, errR("Transaction simulation failed: Blockhash not found");
+    if (method === "sendTransaction" && refused === 0 && decodeTx(params[0]).ixs.some((x) => x.program === ALT_PROGRAM && x.data[0] === 1)) return refused++, errR("Transaction simulation failed: Error processing Instruction 1: custom program error: 0x1"); // a refusal that stands (a Blockhash not found is sent again: review 7a21 L-2)
     return real();
   });
   const { w, out, journal } = work();
   const r = await runAt(cc, out, [], mainArgs(out, ["--program", RD.program_id]));
   try {
-    assert.match(String(r.error?.message), /Blockhash not found/);
+    assert.match(String(r.error?.message), /custom program error: 0x1/);
     const table = [...c.tables.values()][0];
     assert.equal(table.authority, null, "frozen by the cleanup");
     const j = readJ(journal);
