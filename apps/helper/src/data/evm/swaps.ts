@@ -71,7 +71,14 @@ export const TOPIC = {
   curveBuy: topic("CurveBuy(address,address,uint256,uint256,uint256,uint256)"),
   curveSell: topic("CurveSell(address,address,uint256,uint256,uint256,uint256)"),
   transfer: topic("Transfer(address,address,uint256)"),
+  // the PoolManager's other calls on a pool, whose settling transfers are no swap's (hookTakes; card
+  // helper-v4-hook-liquidity: a launch's hook paid its 1e9 tokens of liquidity in next to the first buy)
+  initialize: topic("Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)"),
+  modifyLiquidity: topic("ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)"),
+  donate: topic("Donate(bytes32,address,uint256,uint256)"),
 } as const;
+/** The PoolManager's events of a pool that are not a swap: a hook's transfer next to one settles it (hookTakes). */
+const POOL_CALLS = [TOPIC.initialize, TOPIC.modifyLiquidity, TOPIC.donate];
 
 export const BASE_VENUES = {
   poolManager: "0x498581ff718922c3f8e6a244956af099b2652b2b",
@@ -242,7 +249,7 @@ const INDEX_FOLLOW_MS = 5_000;
  *  newest still finds its oldest block held (a 15-block miss at 02:36Z: the ETH price read its first blocks itself). */
 const INDEX_SLACK = 1_000;
 /** The swap events the index holds: every venue's a tape reads (swapFilter, refFilter). */
-const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell];
+const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell, ...POOL_CALLS];
 
 /** Providers whose logs carry no block time on a chain timed by them (Robinhood): their logs are timed by their own
  *  `eth_getBlockByNumber` of each log's block, and count for a swap's time only where another provider logged the same. */
@@ -466,13 +473,18 @@ export function hookOf(key: string): string | undefined {
 }
 
 /** The `eth_getLogs` filters for a pool's trades over blocks `from` to `to`: its swaps, and for a pool with a hook
- *  (Pool.hook) the token's transfers between the PoolManager and the hook, which are the hook's cut (hookTakes). Two
- *  filters, never one with two addresses: api.blockvectra.com refuses an address list (-32602, 2026-11-04 20:2xZ). */
+ *  (Pool.hook) the token's transfers between the PoolManager and the hook, which are the hook's cut (hookTakes), and
+ *  the pool's other PoolManager calls (POOL_CALLS), whose own transfers are no cut. One address a filter, never a list:
+ *  api.blockvectra.com refuses an address list (-32602, 2026-11-04 20:2xZ). */
 export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
   const swaps = swapFilter(pool, from, to, chain);
   if (pool.venue !== "v4" || pool.hook === undefined) return [swaps];
   const ends = [VENUES[chain].poolManager, pool.hook].map((a) => `0x${a.slice(2).padStart(64, "0")}`);
-  return [swaps, { address: pool.token, topics: [TOPIC.transfer, ends, ends], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock }];
+  return [
+    swaps,
+    { address: pool.token, topics: [TOPIC.transfer, ends, ends], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
+    { address: VENUES[chain].poolManager, topics: [POOL_CALLS, pool.id], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
+  ];
 }
 
 /** The `eth_getLogs` filter for a pool's swaps over blocks `from` to `to`. */
@@ -535,7 +547,10 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
  * transfers between the PoolManager and the hook moved to the hook (less what they moved back), in the logs read with
  * the swaps (poolFilters). A hook settles its delta inside its own call, so its transfers sit next to the swap's log:
  * an afterSwap hook's after it (before the transaction's next swap of the pool), a beforeSwap-only hook's before it.
- * A swap the hook sends itself is no one's trade through the hook (v4 calls no hook for its own swaps): no cut.
+ * A swap the hook sends itself is no one's trade through the hook (v4 calls no hook for its own swaps): no cut. A
+ * transfer whose nearest PoolManager event of the pool before it is another call (POOL_CALLS: its liquidity added or
+ * taken, its start, a donation) settles that call, never a swap: no cut (card helper-v4-hook-liquidity, Base tx
+ * 0x02b8198c...a2e5 at block 53,529,320: Initialize, ModifyLiquidity, the hook's 1e9 tokens in, then the first buy).
  */
 export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "base"): Map<string, bigint> {
   const takes = new Map<string, bigint>();
@@ -543,10 +558,11 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
   const pm = VENUES[chain].poolManager;
   const hook = pool.hook;
   const after = (BigInt(hook) & AFTER_SWAP_DELTA) !== 0n;
-  const byTx = new Map<string, { swaps: Log[]; moves: { index: number; take: bigint }[] }>();
-  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], moves: [] }).get(tx)!;
+  const byTx = new Map<string, { swaps: Log[]; calls: number[]; moves: { index: number; take: bigint }[] }>();
+  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], calls: [], moves: [] }).get(tx)!;
   for (const l of logs) {
     if (l.address === pm && l.topics.length === 3 && l.topics[0] === TOPIC.swap4 && l.topics[1] === pool.id && addrOf(l.topics[2]!.slice(2)) !== hook) at(l.tx).swaps.push(l);
+    else if (l.address === pm && l.topics[1] === pool.id && POOL_CALLS.includes(l.topics[0]!)) at(l.tx).calls.push(l.index);
     else if (l.address === pool.token && l.topics.length === 3 && l.topics[0] === TOPIC.transfer && l.data.length === 66) {
       const [from, to] = [addrOf(l.topics[1]!.slice(2)), addrOf(l.topics[2]!.slice(2))];
       const v = BigInt(l.data);
@@ -554,10 +570,12 @@ export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "b
       else if (from === hook && to === pm) at(l.tx).moves.push({ index: l.index, take: -v });
     }
   }
-  for (const { swaps, moves } of byTx.values()) {
+  for (const { swaps, calls, moves } of byTx.values()) {
     if (swaps.length === 0) continue;
     swaps.sort((a, b) => a.index - b.index);
     for (const m of moves) {
+      const call = Math.max(-1, ...calls.filter((i) => i < m.index));
+      if (call >= 0 && !swaps.some((s) => s.index > call && s.index < m.index)) continue; // settles that call
       const before = swaps.filter((s) => s.index < m.index).at(-1);
       const next = swaps.find((s) => s.index > m.index);
       const owner = after ? (before ?? next)! : (next ?? before)!;

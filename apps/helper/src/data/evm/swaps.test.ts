@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
 import { fakeChain, ICNT, open, POOL_ICNT, POOL_VVV, REC, timeOf, toLog, URLS, VVV, KNOWN } from "../../../test/evm-swaps/base.ts";
-import { BASE_VENUES, createSwaps, decodeRef, decodeSwap, parseLog, parseLogs, REF_POOL_ID, sameLogs, swapFilter, TOPIC, v4Key, type Log, type Pool } from "./swaps.ts";
+import { BASE_VENUES, createSwaps, decodeRef, decodeSwap, hookTakes, parseLog, parseLogs, REF_POOL_ID, sameLogs, swapFilter, TOPIC, traderLeg, v4Key, type Log, type Pool } from "./swaps.ts";
 
 /** The book the same logs make rebuilt in one go: every swap and ETH price in order, all settled. */
 function rebuild(pool: Pool, upTo: number) {
@@ -441,4 +441,33 @@ test("card helper-crowd-429: GeckoTerminal's bars before a book of ours are an o
   assert.equal(got.src, "chain");
   assert.deepEqual(gt, [], "no GeckoTerminal call for the seed");
   assert.equal(budget.take("pages"), true, "the window's last call is still there for a cold chart");
+});
+
+// Card helper-v4-hook-liquidity: Base tx 0x02b8198c518595444576c2e52c9a8a536b179a2341b09aa2d58c732a61b0a2e5 (block
+// 53,529,320, receipt read from mainnet.base.org 2026-11-05 03:2xZ) launches a token on a hooked v4 pool and buys it in one
+// transaction: 1e9 minted to the hook (713), Initialize (717), ModifyLiquidity (721), the hook's 1e9 in to the
+// PoolManager for that liquidity (722), the Swap (730), and 5,978.99 out to the router and on to the buyer (737, 738,
+// 741). At c68e2b7 hookTakes counted 722 as the swap's cut and the tape showed a buy of 1,000,005,978.99.
+const LAUNCH: [number, string, string[], string][] = [
+  [713, "0xc98d5da74a488b9857a8d676d828860f59e7cccc", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000000000000000000000000000000000000000000000","0x0000000000000000000000005e320ea6278107968c119942e57d876c5f922acc"], "0x0000000000000000000000000000000000000000033b2e3c9fd0803ce8000000"],
+  [717, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438","0x2273c4b8ed2f570523372c6f26664bb4ccf01242f6f457fc32738afec620a5f1","0x0000000000000000000000000000000000000000000000000000000000000000","0x000000000000000000000000c98d5da74a488b9857a8d676d828860f59e7cccc"], "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c80000000000000000000000005e320ea6278107968c119942e57d876c5f922acc0000000000000000000000000000000000005fff3c531962481c82e8ccb0bfdb00000000000000000000000000000000000000000000000000000000000315d8"],
+  [721, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec","0x2273c4b8ed2f570523372c6f26664bb4ccf01242f6f457fc32738afec620a5f1","0x0000000000000000000000005e320ea6278107968c119942e57d876c5f922acc"], "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff2766000000000000000000000000000000000000000000000000000000000000315d800000000000000000000000000000000000000000000089de231e289aecd747c0000000000000000000000000000000000000000000000000000000000000000"],
+  [722, "0xc98d5da74a488b9857a8d676d828860f59e7cccc", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000005e320ea6278107968c119942e57d876c5f922acc","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b"], "0x0000000000000000000000000000000000000000033b2e3c9fd0803ce7ffc991"],
+  [730, "0x498581ff718922c3f8e6a244956af099b2652b2b", ["0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f","0x2273c4b8ed2f570523372c6f26664bb4ccf01242f6f457fc32738afec620a5f1","0x000000000000000000000000c3ace43169bbf51752b1603067f91ef60f8a662a"], "0xfffffffffffffffffffffffffffffffffffffffffffffffffffff6fefa0448000000000000000000000000000000000000000000000001441f2f04bdf958c7d80000000000000000000000000000000000005fff16b58ece5ff657a52365dc7b00000000000000000000000000000000000000000000089de231e289aecd747c00000000000000000000000000000000000000000000000000000000000315d70000000000000000000000000000000000000000000000000000000000000000"],
+  [737, "0xc98d5da74a488b9857a8d676d828860f59e7cccc", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000498581ff718922c3f8e6a244956af099b2652b2b","0x000000000000000000000000c3ace43169bbf51752b1603067f91ef60f8a662a"], "0x0000000000000000000000000000000000000000000001441f2f04bdf958c7d8"],
+  [738, "0xc98d5da74a488b9857a8d676d828860f59e7cccc", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x000000000000000000000000c3ace43169bbf51752b1603067f91ef60f8a662a","0x0000000000000000000000005c65823dc5eaf0c37205f73213fc2f73d359da4d"], "0x0000000000000000000000000000000000000000000001441f2f04bdf958c7d8"],
+  [741, "0xc98d5da74a488b9857a8d676d828860f59e7cccc", ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x0000000000000000000000005c65823dc5eaf0c37205f73213fc2f73d359da4d","0x000000000000000000000000f04c41cf7d0046fd0895f24e885b3abfc5162187"], "0x0000000000000000000000000000000000000000000001441f2f04bdf958c7d8"],
+];
+test("card helper-v4-hook-liquidity: a hook's transfer that settles the pool's liquidity (after its ModifyLiquidity) is no cut of the next swap: the launch's first buy is the 5,978.99 its buyer got", () => {
+  const logs: Log[] = LAUNCH.map(([index, address, topics, data]) => ({ block: 0x330cae8, index, tx: "0x02b8198c518595444576c2e52c9a8a536b179a2341b09aa2d58c732a61b0a2e5", address, topics, data }));
+  const swap = logs.find((l) => l.index === 730)!;
+  const pool: Pool = { venue: "v4", id: swap.topics[1]!, token: logs.find((l) => l.index === 713)!.address, tokenIs0: false, quote: { kind: "eth", decimals: 18 }, hook: "0x5e320ea6278107968c119942e57d876c5f922acc" };
+  const s = decodeSwap(pool, swap, "base")!;
+  assert.equal(s.kind, "swap");
+  const got = traderLeg(s as { side: "b" | "s"; amt: bigint }, hookTakes(pool, logs, "base").get(`${swap.tx}:${swap.index}`)) ?? (s as { amt: bigint }).amt;
+  const toBuyer = BigInt(logs.find((l) => l.index === 741)!.data);
+  assert.equal(got, toBuyer, `the buy is the ${toBuyer} the buyer got, not ${got}`);
+  // the same transfer with no ModifyLiquidity before it is a hook's cut as before (a hook paying the swap in)
+  const noCall = logs.filter((l) => l.index !== 721 && l.index !== 717);
+  assert.equal(hookTakes(pool, noCall, "base").get(`${swap.tx}:${swap.index}`), -BigInt(logs.find((l) => l.index === 722)!.data));
 });

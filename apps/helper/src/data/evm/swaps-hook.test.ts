@@ -65,9 +65,10 @@ test("hookOf: the pool's real key (it hashes to the id) names the hook, whose ad
   assert.equal(hookOf("0x12"), undefined);
 });
 
-test("poolFilters: a hooked pool's read is its swaps and the token's transfers between the PoolManager and the hook, two filters with one address each; an unhooked pool's, its swaps alone", () => {
+test("poolFilters: a hooked pool's read is its swaps, the token's transfers between the PoolManager and the hook, and the pool's other PoolManager calls, three filters with one address each; an unhooked pool's, its swaps alone", () => {
   const f = poolFilters(POOL, 10, 109, "robinhood");
-  assert.equal(f.length, 2);
+  assert.equal(f.length, 3);
+  assert.deepEqual(f[2], { address: PM, topics: [[TOPIC.initialize, TOPIC.modifyLiquidity, TOPIC.donate], ID], fromBlock: "0xa", toBlock: "0x6d" });
   assert.deepEqual(f[0], { address: PM, topics: [TOPIC.swap4, ID], fromBlock: "0xa", toBlock: "0x6d" });
   const ends = [PM, HOOK].map((a) => `0x${a.slice(2).padStart(64, "0")}`);
   assert.deepEqual(f[1], { address: COIN, topics: [TOPIC.transfer, ends, ends], fromBlock: "0xa", toBlock: "0x6d" });
