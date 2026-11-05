@@ -68,8 +68,9 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 /** One JSON-RPC call. */
 export type EvmRpcCall = { readonly method: string; readonly params: readonly unknown[] };
 /** One RPC provider: answers a batch with one JSON-RPC answer object ({ result } or { error }) per call, in order;
- *  throws when it cannot be reached. evmJsonRpc makes one from a URL. */
-export type EvmRpc = (calls: readonly EvmRpcCall[]) => Promise<readonly unknown[]>;
+ *  throws when it cannot be reached. evmJsonRpc makes one from a URL. `signal`, when given, ends the request early
+ *  (the scan's bound). */
+export type EvmRpc = (calls: readonly EvmRpcCall[], signal?: AbortSignal) => Promise<readonly unknown[]>;
 
 /** The user's own request: the token they picked, the amount of the native asset in (wei), their slippage, and the route
  *  to quote (the helper's, or one the device made). */
@@ -881,14 +882,17 @@ const SCAN_TRIES = 4;
 const SCAN_BACKOFF_MAX_MS = 8_000;
 /** The scan provider's requests of one quote: the token's and each X's scans queue in the order they ask (the token's
  *  first), at most `limit` in flight, `limit` starting at the venue's `parallel` (nine scans that each sent their own
- *  `parallel` at once drew 429s on rpc.mainnet.chain.robinhood.com, 2026-11-03 21:20Z: 89 of 125 requests). A throttle
- *  (HTTP 429, or a call's error naming the rate limit) or a request that ran out of time halves `limit`, to 1 at
- *  least, once per event (a request sent before the last cut never cuts again), and a throttle holds every request not yet sent until its Retry-After, or the backoff where it names none;
- *  each answer then adds 1 back up to half the limit at the last congestion, and 1 / limit past it, up to `parallel`
- *  (TCP Reno's additive increase, multiplicative decrease: at 1 added an answer, a provider that slows past 5 in
- *  flight was sent 11 at once again and again, and a span ran out its four tries). A throttled request is asked again whole and spends none of its
- *  tries; one that would wait past the quote's bound refuses. One gate per quote, so a request that never returns
- *  holds up that quote alone. */
+ *  `parallel` at once drew 429s on rpc.mainnet.chain.robinhood.com, 2026-11-03 21:20Z: 89 of 125 requests).
+ *  - A throttle (HTTP 429, or a call's error naming the rate limit) or a request that ran out of time halves `limit`,
+ *    to 1 at least, once per event: a request sent before the last cut never cuts again (TCP NewReno).
+ *  - A throttle holds every request not yet sent for the longer of its Retry-After and the backoff, 0.5 s doubled for
+ *    each throttle event since an answer, to 8 s; a later, shorter wait never shortens one already set.
+ *  - Each answer adds 1 back up to half the limit at the last cut, and 1 / limit past it, up to `parallel` (TCP Reno:
+ *    at 1 added an answer, a provider that slows past 5 in flight was sent 11 at once again and again).
+ *  - A throttled request, and one whose connection was refused, is asked again whole and spends none of its tries.
+ *  - Nothing is sent once the quote's bound has passed, and no request runs past it (re-review of 59a69e2, MEDIUM-1: a
+ *    provider that timed out every request was asked one at a time, about 10.8 hours at the 10 s deadline).
+ *  One gate per quote, so a request that never returns holds up that quote alone. */
 type ScanGate = { ask: (rpc: EvmRpc, calls: readonly EvmRpcCall[], tries: number) => Promise<readonly unknown[]> };
 function scanGateOf(parallel: number, untilMs: number): ScanGate {
   let limit = parallel;
@@ -900,12 +904,16 @@ function scanGateOf(parallel: number, untilMs: number): ScanGate {
   // the cuts so far: a request records the count when it is sent
   let cuts = 0;
   const waiting: (() => void)[] = [];
+  // a wait between tries, never past the bound (the next send then refuses)
+  const nap = (ms: number) => new Promise((r) => setTimeout(r, Math.max(0, Math.min(ms, untilMs - performance.now()))));
+  const past = () => new EvmQuoteError("rpc_error", `the scan provider did not answer within the quote's bound of ${scanBoundMs} ms`);
   // every request waiting looks again: one sent, an answer back, a wait ended
   const wake = () => waiting.splice(0).forEach((r) => r());
   // a slot, once the provider's wait is over
   const take = async () => {
     for (;;) {
       const now = performance.now();
+      if (now >= untilMs) throw past();
       if (resumeAt > untilMs) return refuse("rpc_error", `the scan provider limited its rate past the quote's bound of ${scanBoundMs} ms`);
       if (now < resumeAt) await new Promise((r) => setTimeout(r, resumeAt - now));
       else if (flying < Math.floor(limit)) {
@@ -921,35 +929,63 @@ function scanGateOf(parallel: number, untilMs: number): ScanGate {
   // a congestion signal halves the limit once per event, as TCP NewReno does: only a request sent after the last cut
   // cuts again, so the twenty answers of one burst take 20 to 10, not to 1
   const congest = (sent: number) => {
-    if (sent !== cuts) return;
+    if (sent !== cuts) return false;
     cuts++;
     limit = sst = Math.max(1, Math.floor(limit / 2));
+    return true;
   };
+  // the backoff of the event this throttle is part of; a new event is a strike more
   const throttle = (sent: number, afterMs: number | null) => {
-    congest(sent);
-    const wait = afterMs ?? Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** strikes);
-    strikes++;
+    const wait = Math.max(afterMs ?? 0, Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** strikes));
+    if (congest(sent)) strikes++;
     resumeAt = Math.max(resumeAt, performance.now() + wait);
+  };
+  // the request, ended at the quote's bound where that comes before its own deadline
+  const send = async (rpc: EvmRpc, calls: readonly EvmRpcCall[]) => {
+    const left = untilMs - performance.now();
+    if (left >= EVM_RPC_TIMEOUT_MS) return rpc(calls);
+    const stop = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<never>((_, no) => {
+      timer = setTimeout(() => {
+        const e = past();
+        stop.abort(e);
+        no(e);
+      }, Math.max(0, left));
+    });
+    try {
+      return await Promise.race([rpc(calls, stop.signal), bound]);
+    } finally {
+      clearTimeout(timer);
+    }
   };
   return {
     async ask(rpc, calls, tries) {
+      let refused = 0;
       for (let i = 0; ; ) {
         await take();
         const sent = cuts;
         let out: unknown;
         try {
-          out = await rpc(calls);
+          out = await send(rpc, calls);
         } catch (e) {
           done();
           if (e instanceof RateLimited) {
             throttle(sent, e.afterMs);
             continue;
           }
+          if (e instanceof EvmQuoteError && /within the quote's bound/.test(e.message)) throw e;
+          // a refused connection sent nothing: asked again whole after the backoff, a try spent only at the smallest
+          // span (re-review of 59a69e2, LOW-2: halving on it sent 2,300 getLogs where 200 do)
+          if (e instanceof Unreachable && tries === 1) {
+            await nap(Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** refused++));
+            continue;
+          }
           // a timeout is a congestion signal too (GitHub's runner, 7d6ec94: 14 of 128 and 7 of 114 of a cold quote's
           // getLogs ran out of time at 20 at once, no 429); it and any other failure spend a try
           if ((e as Error | null)?.name === "TimeoutError") congest(sent);
           if (++i >= tries) throw e instanceof EvmQuoteError ? e : new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
-          await new Promise((r) => setTimeout(r, 500 * i));
+          await nap(500 * i);
           continue;
         }
         done();
@@ -2177,12 +2213,13 @@ export const EVM_RPC_TIMEOUT_MS = 10_000;
 /** A provider from a JSON-RPC URL: one POST per batch, answers matched to calls by id, at most `maxBytes` read. */
 export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes = 1 << 20, timeoutMs = EVM_RPC_TIMEOUT_MS): EvmRpc {
   if (typeof url !== "string" || !/^https:\/\//.test(url)) return refuse("bad_request", "a provider URL is https");
-  return async (calls) => {
+  return async (calls, until) => {
     const body = JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params })));
     // a request that never returns is a refusal once its time runs out, never a quote (and a buy button) that hangs
     let res: Response;
     try {
-      res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(timeoutMs) });
+      const signal = until === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([AbortSignal.timeout(timeoutMs), until]);
+      res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal });
     } catch (e) {
       // fetch's own TypeError ("fetch failed") with a connection error as its cause: no connection was made
       const code = (e as { cause?: { code?: unknown } } | null)?.cause?.code;

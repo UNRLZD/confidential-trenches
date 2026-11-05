@@ -2670,6 +2670,12 @@ test("V12 the pair's honest provider gives no confirm (it fails, or holds no suc
 });
 
 test("V13 a head is held only when more than maxLag below the lower of the two used: a liar's old head and a lagging honest one never hold the up-to-date provider", async () => {
+  // held or not, read off the hold itself: a provider not held keeps its place in the ranking once every hold has
+  // ended (EVM_HOLD_MS on); one held moves up (re-review of 59a69e2, LOW-4: "not ranked last" rode on the measured
+  // speed, and failed 2 of 30 beside CPU burners)
+  const placeOf = (urls: readonly string[], host: string, at?: number) => quoteMod.evmRanked(urls, at).map(hostOf).indexOf(host);
+  // (after every request still out has landed: one out past EVM_HEDGE_MS also moves down)
+  const unheld = (urls: readonly string[], host: string) => placeOf(urls, host) === placeOf(urls, host, performance.now() + EVM_HOLD_MS! + 1);
   quoteMod.evmSpeedReset();
   const token = freshToken();
   const pools = [best(token)];
@@ -2687,7 +2693,8 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(urls, f), NOW));
   // the heads are no vote: the first two near ones (l1, h2) pick the block, the lower
   assert.equal((v as { block?: bigint }).block, 4_999_990n, big(v));
-  assert.notEqual(hostOf(quoteMod.evmRanked(urls).at(-1)!), "h1.v13.test", `h1 is not held: ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
+  await pause(60);
+  assert.ok(unheld(urls, "h1.v13.test"), `h1 is not held: ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
   // a head more than maxLag below is held
   quoteMod.evmSpeedReset();
   const low = hosted({
@@ -2697,6 +2704,8 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   });
   assert.equal((await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(low.urls, low.f), NOW))).accepted, true);
   assert.equal(hostOf(quoteMod.evmRanked(low.urls).at(-1)!), "b.v13.test");
+  await pause(60);
+  assert.ok(!unheld(low.urls, "b.v13.test"), "b is held: it moves up once the hold ends");
   // the edges (re-review of 47109a7, LOW-1): the first head, then one 6 or 10 blocks below it (not near), then the spare
   // the two pair on; the head between is exactly maxLag below the lower of the pair, or one below a pair that spans
   // maxLag: neither is held
@@ -2712,7 +2721,8 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
     });
     const w = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(edge.urls, edge.f), NOW));
     assert.equal((w as { block?: bigint }).block, BigInt(lo), big(w));
-    assert.notEqual(hostOf(quoteMod.evmRanked(edge.urls).at(-1)!), "x.e.v13.test", `${mid} under ${hi}/${lo} is not held: ${quoteMod.evmRanked(edge.urls).map(hostOf).join(",")}`);
+    await pause(60);
+    assert.ok(unheld(edge.urls, "x.e.v13.test"), `${mid} under ${hi}/${lo} is not held: ${quoteMod.evmRanked(edge.urls).map(hostOf).join(",")}`);
   }
 });
 
@@ -2796,10 +2806,10 @@ for (const [name, header] of [["TH1 ", "1"], ["TH2 ", null]] as const) {
     const t0 = performance.now();
     const at: number[] = [];
     const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, throttlingScan(logs, () => performance.now() - t0 < 4_000, header, [], at)));
-    // the waits between throttled requests: the Retry-After's 1 s each, or the backoff's 0.5, 1 and 2 s
+    // the waits between throttled requests: the longer of the Retry-After's 1 s and the backoff's 0.5, 1 and 2 s
     const gaps = at.slice(1).map((t, i) => t - at[i]!);
-    const want = header === null ? [500, 1_000, 2_000] : [1_000, 1_000, 1_000];
-    assert.ok(gaps.length >= 3 && want.every((w, i) => gaps[i]! >= w - 50), `waits ${gaps.map(Math.round).join(", ")} ms, at least ${want.join(", ")}`);
+    const want = header === null ? [500, 1_000, 2_000] : [1_000, 1_000];
+    assert.ok(gaps.length >= want.length && want.every((w, i) => gaps[i]! >= w - 50), `waits ${gaps.map(Math.round).join(", ")} ms, at least ${want.join(", ")}`);
     const t2 = freshToken();
     const c2 = warmCase(t2, xAt(0x3e20 + (header === null ? 16 : 0)));
     const fresh = await verdict(evmPoolBuyQuoteWith(warmReq(t2), [chain(c2.pools, 0), chain(c2.pools, 1)], NOW, scanner(5_000_000, c2.logs)));
@@ -2913,4 +2923,129 @@ test("TH5 a scan provider that slows past the deadline with more than 5 requests
   // at 7d6ec94's fixed 20: rpc_error after 18.4 s, 790 of 1,541 requests timed out; with the gate, halving at every
   // timeout (f9bd53c): ok in 5.1 s, 93 of 387; halving once per event: ok in 6.9 s, 126 of 447
   assert.ok(timedOut <= 160 && ms < 10_000, `${timedOut} requests ran out of time in ${Math.round(ms)} ms`);
+});
+
+// ------------------------------------------------------------------ the scan gate's bound, waits and refused connections (re-review of 59a69e2)
+/** The scan provider over HTTP whose getLogs requests `fault(from, to, nth)` judges (nth: how often that range was
+ *  asked before; "ok" answers it from the model scanner); every other call is answered by the model. `st` counts the
+ *  getLogs requests, the ones narrower than Base's 10,000-block span (halves) and each one's send time. */
+type Fault = "ok" | "timeout" | "error" | "unreach" | `429:${string}`;
+function faultScan(logs: { key: EvmPoolKey; at: number }[], fault: (a: number, b: number, nth: number) => Fault, timeoutMs = 10_000) {
+  const inner = scanner(5_000_000, logs);
+  const st = { logs: 0, halves: 0, sent: [] as number[], throttled: [] as number[] };
+  const nth = new Map<string, number>();
+  const rpc = evmJsonRpc("https://scan.fault.test", (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    const g = calls.find((c) => c.method === "eth_getLogs");
+    if (g !== undefined) {
+      st.logs++;
+      st.sent.push(performance.now());
+      const f = g.params[0] as { fromBlock: string; toBlock: string };
+      const [a, b] = [Number(f.fromBlock), Number(f.toBlock)];
+      if (b - a + 1 < 10_000 && b < 5_000_000) st.halves++;
+      const n = nth.get(`${a}-${b}`) ?? 0;
+      nth.set(`${a}-${b}`, n + 1);
+      const x = fault(a, b, n);
+      if (x === "timeout") return await new Promise<Response>((_, no) => init.signal?.addEventListener("abort", () => no(init.signal!.reason)));
+      if (x === "error") throw new Error("socket hang up");
+      if (x === "unreach") throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+      if (x.startsWith("429:")) {
+        st.throttled.push(performance.now());
+        const ra = x.slice(4);
+        return new Response("", { status: 429, headers: ra === "none" ? {} : { "retry-after": ra } });
+      }
+    }
+    return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+  }) as unknown as typeof fetch, 1 << 20, timeoutMs);
+  return { rpc, st };
+}
+/** The longest pause in the scan's getLogs sends from `t` on: the gate's wait after a throttle at `t`. */
+const gapAfter = (sent: number[], t: number) => {
+  const xs = [t, ...sent.filter((x) => x >= t)];
+  return Math.max(...xs.slice(1).map((x, i) => x - xs[i]!));
+};
+const coldQuote = async (scan: EvmRpc, x = 0x3f00) => {
+  const token = freshToken();
+  const { pools } = warmCase(token, xAt(x));
+  const t = performance.now();
+  try {
+    await evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scan);
+    return { code: "ok", message: "", ms: performance.now() - t };
+  } catch (e) {
+    if (!(e instanceof EvmQuoteError)) throw e;
+    return { code: e.code as string, message: e.message, ms: performance.now() - t };
+  }
+};
+
+test("TH7 a scan provider that times out or fails every getLogs refuses rpc_error within the quote's bound and one deadline, never asking on for hours", { timeout: 30_000 }, async () => {
+  evmScanBound?.(1_000);
+  try {
+    for (const how of ["timeout", "error"] as const) {
+      const { rpc, st } = faultScan([], () => how, 100);
+      const r = await coldQuote(rpc, how === "timeout" ? 0x3f00 : 0x3f10);
+      assert.equal(r.code, "rpc_error", `${how}: ${r.message}`);
+      assert.ok(r.ms < 1_000 + 100 + 400, `${how}: refused after ${Math.round(r.ms)} ms and ${st.logs} getLogs`);
+      // nothing is sent past the bound
+      assert.ok(st.sent.every((t) => t - st.sent[0]! < 1_000 + 50), `${how}: a getLogs sent ${Math.round(Math.max(...st.sent) - st.sent[0]!)} ms in`);
+    }
+  } finally {
+    evmScanBound?.();
+  }
+});
+
+test("TH8 a 429 with Retry-After: 0 still waits the backoff: the provider gets at most a few times the limit in 1.5 s", { timeout: 30_000 }, async () => {
+  const t0 = performance.now();
+  const { rpc, st } = faultScan(warmCase(freshToken(), xAt(0x3f20)).logs, () => (performance.now() - t0 < 1_500 ? "429:0" : "ok"));
+  const r = await coldQuote(rpc, 0x3f20);
+  assert.ok(r.code === "ok" || r.code === "no_reference" || r.code === "below_reference", r.message);
+  const inWindow = st.sent.filter((t) => t - t0 < 1_500).length;
+  assert.ok(inWindow <= 3 * 20, `${inWindow} getLogs in the first 1.5 s`);
+});
+
+test("TH9 a refused connection in a span that would split is asked again whole after the backoff: two getLogs a span, no halves", { timeout: 30_000 }, async () => {
+  const { rpc, st } = faultScan([], (_a, _b, nth) => (nth === 0 ? "unreach" : "ok"));
+  const r = await coldQuote(rpc, 0x3f30);
+  assert.notEqual(r.code, "rpc_error", r.message);
+  assert.equal(st.halves, 0, `${st.halves} halves`);
+  assert.equal(st.logs, 2 * 100, `${st.logs} getLogs`);
+});
+
+test("TH10 a later, shorter wait never shortens one already set: a Retry-After: 2 holds the scan even when the burst's other 429s name none", { timeout: 30_000 }, async () => {
+  // the first getLogs answers Retry-After: 2, the rest of the first burst 429 with no header, after it
+  let first = true;
+  const t0 = performance.now();
+  const { rpc, st } = faultScan([], () => {
+    if (performance.now() - t0 > 50) return "ok";
+    if (first) return (first = false), "429:2";
+    return "429:none";
+  });
+  const r = await coldQuote(rpc, 0x3f40);
+  assert.notEqual(r.code, "rpc_error", r.message);
+  assert.ok(st.throttled.length > 1, `${st.throttled.length} throttled`);
+  const gap = gapAfter(st.sent, st.throttled[0]!);
+  assert.ok(gap >= 1_950, `the scan paused ${Math.round(gap)} ms after the Retry-After: 2`);
+});
+
+test("TH11 after an answer the backoff starts again at 0.5 s: a throttle event late in a scan waits 0.5 s, not its predecessors' doubled wait", { timeout: 30_000 }, async () => {
+  // two throttle events with answers between: the first getLogs and the 60th each answer 429 once, no header
+  let n = 0;
+  const { rpc, st } = faultScan([], (_a, _b, nth) => {
+    n++;
+    return nth === 0 && (n === 1 || n === 60) ? "429:none" : "ok";
+  });
+  const r = await coldQuote(rpc, 0x3f50);
+  assert.notEqual(r.code, "rpc_error", r.message);
+  assert.equal(st.throttled.length, 2);
+  const wait = gapAfter(st.sent, st.throttled[1]!);
+  assert.ok(wait >= 450 && wait < 900, `the second event waited ${Math.round(wait)} ms`);
+});
+
+test("TH12 a Retry-After given as an HTTP date is honoured", { timeout: 30_000 }, async () => {
+  const when = new Date(Date.now() + 3_000).toUTCString();
+  let first = true;
+  const { rpc, st } = faultScan([], () => (first ? ((first = false), `429:${when}` as Fault) : "ok"));
+  const r = await coldQuote(rpc, 0x3f60);
+  assert.notEqual(r.code, "rpc_error", r.message);
+  const gap = gapAfter(st.sent, st.throttled[0]!);
+  assert.ok(gap >= 1_500, `the scan paused ${Math.round(gap)} ms after a Retry-After of ${when}`);
 });
