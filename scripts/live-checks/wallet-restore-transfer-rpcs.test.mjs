@@ -13,8 +13,9 @@ import { JOBS, USDC, check, replayer, spoil } from "./wallet-restore-transfer-rp
 
 const A = JSON.parse(readFileSync(new URL("./wallet-restore-transfer-rpcs.answers.json", import.meta.url), "utf8"));
 // a replay reaches no provider, so it waits for none: each run ends in seconds, the helper route's 50,000 blocks of Base
-// included (about 80 pages, which the live run paces at the holdings readers' limit)
-const REPLAY_MS = 10_000;
+// included (about 80 pages, which the live run paces at the holdings readers' limit). The bound is 30 s: a paced replay
+// took 163 s, and an unpaced one took up to 11 s on a loaded Mac, so it fails the first and never the second
+const REPLAY_MS = 30_000;
 const timed = async (f) => {
   const t0 = performance.now();
   const r = await f();
