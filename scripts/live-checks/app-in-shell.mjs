@@ -342,8 +342,9 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
       run.app = null;
       run.topApp = await page.evaluate(READ_APP);
     }
-    run.shot = path.join(shots, `${engine}-${w.name}${kind === "signed" ? "" : `-${kind}`}.png`);
-    await page.screenshot({ path: run.shot });
+    // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
+    run.shot = `${engine}-${w.name}${kind === "signed" ? "" : `-${kind}`}.png`;
+    await page.screenshot({ path: path.join(shots, run.shot) });
     if (f && kind === "signed") {
       // the address follows the app: a tap on a link, then a reload of the top window (read after the hop reads above)
       const until = Date.now() + 3_000;
