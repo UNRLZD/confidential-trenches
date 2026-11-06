@@ -22,6 +22,11 @@
 // SOLANA_RPC_RETRY), on the helper's route the helper client's (solanaJsonRpc with HELPER_FETCH_INIT, no retry), so a
 // throttle reaches the wallet's pager as it does on the device.
 // It fails if any read is refused, two providers disagree, or the W's USDC is not listed.
+// Bounded (card restore-check-bounded): the four networks are read at once, each printed as it ends with its calls,
+// time and refusals, and each has NETWORK_DEADLINE_MS: a read still going then fails, naming the call it is stuck on
+// (the URL's host, never a key; the method, the block range, its try, and the Retry-After the provider named and the
+// time waited since its last answer). Run 42146750370's job was cancelled at 20 min with no line: four reads one after
+// another, printed only at the end, the Base one at 78-block pages (EVM_LOG_CEILING_PAGES in the wallet's evm.ts).
 //   node scripts/live-checks/wallet-restore-transfer-rpcs.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of wallet-restore-transfer-rpcs.answers.json, and its bad run: the
@@ -41,6 +46,11 @@ export const CHECK = path.join(REPO, "packages", "wallet", "scripts", "transfer-
 export const W = "0x809286a1bf1585b1eeeefcc7a7f3508158fd078e";
 export const USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
 export const HELPER = "https://api.confidential.unrealized.trade";
+/** Each network's read ends within this: the slowest, Base's 50,000 blocks on the helper's route at its 1,000-block cap,
+ * is 80 pages of 625 blocks at the holdings pace (2 eth_getLogs in 3 s), 130 s from the Mac (6 Nov 02:53Z, 88 calls)
+ * and 3.2 min on GitHub's runner (run 42152968842); this is 2.8 times the Mac's read, and with the networks read at once
+ * the job (its setup about 15 s) stays under 10 min. */
+export const NETWORK_DEADLINE_MS = 360_000;
 export const JOBS = Object.freeze([
   { network: "base-sepolia", w: W, from: "54553944", want: USDC },
   { network: "base", w: W, back: "50000", helper: HELPER },
@@ -90,15 +100,44 @@ export function replayer(log) {
   };
 }
 
-/** The wallet's W read on one network's Transfer pair, its RPCs bridged to `transport`. Resolves its report, or
- * throws its refusal. */
-function runCheck(job, transport, wait) {
+const host = (u) => new URL(u).host;
+const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
+/** A call as a line names it: the method, an eth_getLogs page's range or a block's tag, and the URL's host only. */
+function callName(c) {
+  const f = c.params?.[0];
+  const what = c.method === "eth_getLogs" && f?.fromBlock !== undefined ? ` ${BigInt(f.fromBlock)}..${BigInt(f.toBlock)} (${BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n} blocks)` : typeof f === "string" ? ` ${f}` : "";
+  return `${c.method}${what} on ${host(c.url)}`;
+}
+
+/** The wallet's W read on one network's Transfer pair, its RPCs bridged to `transport`, ended at `deadlineMs`.
+ * Resolves its report with its calls (`stats`), or throws its refusal; past the deadline the child is stopped and the
+ * refusal names the stuck call: the oldest still unanswered, else the last answered (the read waiting out a throttle
+ * or its pace), with its try, its error and Retry-After, and the time since. */
+function runCheck(job, transport, wait, deadlineMs) {
   return new Promise((resolve, reject) => {
     const { want, ...args } = job;
+    const t0 = Date.now();
     const child = spawn(process.execPath, [CHECK, JSON.stringify({ ...args, wait })], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
     let buf = "", err = "", settled = false;
+    const stats = { calls: 0, refused: new Map() };
+    const open = new Map(); // id -> the call, asked at
+    const tries = new Map(); // [url, method, params] -> times asked
+    let last = null; // the last answered call, its answer and when
     child.stdin.on("error", () => {}); // an answer after the check has exited
-    const settle = (f, v) => (settled ? undefined : ((settled = true), f(v)));
+    const stuck = () => {
+      const now = Date.now();
+      const o = [...open.values()].sort((a, b) => a.at - b.at)[0];
+      if (o !== undefined) return `${callName(o)}, try ${o.try}, no answer in ${secs(now - o.at)}`;
+      if (last === null) return "no call asked";
+      const said = last.error === undefined ? "answered" : `refused (${String(last.error).slice(0, 100)}), Retry-After ${last.afterMs == null ? "none" : secs(last.afterMs)}`;
+      return `${callName(last)}, try ${last.try}, ${said}, ${secs(now - last.at)} waited since`;
+    };
+    const timer = setTimeout(() => {
+      const why = `no end in ${secs(deadlineMs)} (${stats.calls} calls): stuck on ${stuck()}`;
+      settle(reject, new Error(why));
+      child.kill("SIGKILL");
+    }, deadlineMs);
+    const settle = (f, v) => (settled ? undefined : ((settled = true), clearTimeout(timer), f(v)));
     child.stderr.on("data", (d) => (err += d));
     child.stdout.on("data", (d) => {
       buf += d;
@@ -107,10 +146,21 @@ function runCheck(job, transport, wait) {
         buf = buf.slice(i + 1);
         if (m.rpc) {
           // the URL is the wallet's own (EVM_TRANSFER_RPCS[network], or the helper's route), named by the bridge
+          const k = JSON.stringify([m.rpc.url, m.rpc.method, m.rpc.params]);
+          const c = { url: m.rpc.url, method: m.rpc.method, params: m.rpc.params, at: Date.now(), try: (tries.get(k) ?? 0) + 1 };
+          tries.set(k, c.try);
+          open.set(m.rpc.id, c);
+          stats.calls++;
           transport(m.rpc.url, m.rpc.method, m.rpc.params).then((a) => {
+            open.delete(m.rpc.id);
+            last = { ...c, at: Date.now(), error: a.error, afterMs: a.afterMs };
+            if (a.error !== undefined) {
+              const w = String(a.error).slice(0, 80);
+              stats.refused.set(w, (stats.refused.get(w) ?? 0) + 1);
+            }
             if (!child.stdin.destroyed) child.stdin.write(`${JSON.stringify({ id: m.rpc.id, ...a })}\n`);
           });
-        } else if (m.done) settle(resolve, m.done);
+        } else if (m.done) settle(resolve, { ...m.done, stats: { calls: stats.calls, refused: stats.refused, ms: Date.now() - t0 } });
         else if (m.fail) settle(reject, new Error(m.fail));
       }
     });
@@ -121,30 +171,35 @@ function runCheck(job, transport, wait) {
   });
 }
 
-const host = (u) => new URL(u).host;
+/** "88 calls in 129.8 s, 4 refused: <words> x4": a read's calls, its time and each refusal's words (the first 80
+ * characters) with their count, the three most often. */
+function statsOf({ calls, refused, ms }) {
+  const n = [...refused.values()].reduce((a, b) => a + b, 0);
+  const top = [...refused].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, c]) => `${w} x${c}`);
+  return `${calls} calls in ${secs(ms)}${n ? `, ${n} refused: ${top.join("; ")}` : ""}`;
+}
 
-/** The check: { ok, lines, reports } (a job's report, or null when it failed). `transport(network, url, method,
- * params)`; each network's URLs are the wallet's own. `jobs`: JOBS, or others of their shape. */
-export async function check(transport, { wait = true, jobs = JOBS } = {}) {
-  const lines = [];
-  const reports = [];
-  let ok = true;
-  for (const job of jobs) {
+/** The check: { ok, lines, reports } (a job's report, or null when it failed), in the order of `jobs`, every job read
+ * at once. `transport(network, url, method, params)`; each network's URLs are the wallet's own. `jobs`: JOBS, or others
+ * of their shape. `onLine(ok, line)`: each job's line as it ends. `deadlineMs`: each job's (NETWORK_DEADLINE_MS). */
+export async function check(transport, { wait = true, jobs = JOBS, onLine = () => {}, deadlineMs = NETWORK_DEADLINE_MS } = {}) {
+  const ends = await Promise.all(jobs.map(async (job) => {
+    let end;
     try {
-      const r = await runCheck(job, (url, method, params) => transport(job.network, url, method, params), wait);
-      reports.push(r);
+      const r = await runCheck(job, (url, method, params) => transport(job.network, url, method, params), wait, deadlineMs);
       const urls = r.urls;
       const swapped = (r.asked ?? []).filter((u) => !urls.includes(u));
       if (job.want !== undefined && !r.tokens.includes(job.want)) throw new Error(`W ${job.w} lists ${r.tokens.length ? r.tokens.join(", ") : "no token"}, not ${job.want}`);
       const who = job.helper ? `the helper's route ${urls[0]}` : `${urls.map(host).join(" and ")}`;
-      lines.push(`${job.network}: ${who} read W ${job.w} from block ${r.from} to ${r.anchor.number}${job.helper ? "" : " alike"}: ${r.tokens.length ? r.tokens.join(", ") : "no token"} (last pages ${r.page.join(" and ")} blocks)${swapped.length ? `; swapped out ${swapped.map(host).join(" and ")}` : ""}`);
+      const { stats, ...report } = r;
+      end = { ok: true, report, line: `${job.network}: ${who} read W ${job.w} from block ${r.from} to ${r.anchor.number}${job.helper ? "" : " alike"}: ${r.tokens.length ? r.tokens.join(", ") : "no token"} (last pages ${r.page.join(" and ")} blocks; ${statsOf(stats)})${swapped.length ? `; swapped out ${swapped.map(host).join(" and ")}` : ""}` };
     } catch (e) {
-      ok = false;
-      reports.push(null);
-      lines.push(`${job.network}: ${e?.message ?? e}`);
+      end = { ok: false, report: null, line: `${job.network}: ${e?.message ?? e}` };
     }
-  }
-  return { ok, lines, reports };
+    onLine(end.ok, end.line);
+    return end;
+  }));
+  return { ok: ends.every((e) => e.ok), lines: ends.map((e) => e.line), reports: ends.map((e) => e.report) };
 }
 
 /** The bad run kept beside a good one: every Transfer log of the Base Sepolia W taken out of both providers' answers. */
@@ -156,8 +211,7 @@ async function main(argv) {
   const at = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : undefined);
   const record = at("--record");
   const rec = recorder();
-  const r = await check(rec.transport);
-  for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
+  const r = await check(rec.transport, { onLine: (ok, l) => console.log(`${ok ? "PASS" : "FAIL"} ${l}`) });
   if (record) {
     writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: rec.log, bad: spoil(rec.log) }, null, 1)}\n`);
     console.log(`recorded ${record}`);
