@@ -156,7 +156,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
   try {
-    const run = await collect(opt("--base") ?? process.env.HELPER_HOST ?? BASE, args.includes("--in-process"));
+    const run = await collect(opt("--base") ?? BASE, args.includes("--in-process"));
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     const { ok, lines } = judge(run);
     console.log(lines.join("\n"));
