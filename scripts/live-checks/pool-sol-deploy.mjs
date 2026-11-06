@@ -193,18 +193,33 @@ export const pageAddress = (program, tree, pageNo) => pda([enc("page"), Uint8Arr
 export const programDataAddress = (program) => pda([address(program)], LOADER_V3).address;
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+/** The longest Retry-After rpc() waits out in one try (card signpage-pool-flow-answers): a longer one is waited for this
+ * long, so a throttled provider never holds a check past its job's bound. */
+export const RETRY_AFTER_CAP_MS = 30_000;
+/** A 429's Retry-After in ms (delay-seconds or an HTTP date, RFC 9110 10.2.3), or null when the answer gives none. */
+export function retryAfterMs(r, now = Date.now()) {
+  const v = r?.headers?.get?.("retry-after");
+  if (v == null || String(v).trim() === "") return null;
+  const ms = /^\d+$/.test(String(v).trim()) ? Number(v) * 1000 : Date.parse(v) - now;
+  return Number.isFinite(ms) ? Math.max(0, ms) : null;
+}
 /** One JSON-RPC call, five tries at most: a transient failure (the fetch throws, as on a reset or "fetch failed"; a
- * 429 or a 5xx; a -32029 / -32429 rate answer) is retried with backoff (the devnet run of 90522c4 stopped on one).
+ * 429 or a 5xx; a -32029 / -32429 rate answer) is retried with backoff (the devnet run of 90522c4 stopped on one), or
+ * after the answer's Retry-After when it gives one (at most RETRY_AFTER_CAP_MS).
  * A JSON-RPC error answer is never retried: it is the node's word. Re-sending a signed transaction is safe, since it
  * keeps its signature. The error thrown after five transient failures has `transient: true`, so a caller can read
  * again later and still stop at once on the node's word. */
 export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries = 5) {
   for (let i = 1; ; i++) {
-    let r, j, transient;
+    let r, j, transient, wait = null;
     try {
       r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
       j = await r.json().catch(() => null);
-      transient = r.status === 429 || r.status >= 500 || [-32029, -32429].includes(j?.error?.code) ? new Error(`${method}: HTTP ${r.status} ${JSON.stringify(j?.error ?? null).slice(0, 80)}`) : null;
+      if (r.status === 429 || r.status >= 500 || [-32029, -32429].includes(j?.error?.code)) {
+        const after = retryAfterMs(r);
+        if (after !== null) wait = Math.min(after, RETRY_AFTER_CAP_MS);
+        transient = new Error(`${method}: HTTP ${r.status}${after !== null ? `, Retry-After ${r.headers.get("retry-after")}` : ""} ${JSON.stringify(j?.error ?? null).slice(0, 80)}`);
+      }
       // a 2xx whose body never arrived whole (a socket reset while a large account is read) is a reset too
       if (!transient && !j && r.ok) transient = new Error(`${method}: HTTP ${r.status}, no JSON (the body was cut)`);
     } catch (e) {
@@ -212,11 +227,11 @@ export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries =
     }
     if (transient) {
       if (i >= tries) throw Object.assign(transient, { transient: true });
-      await sleep(1500 * i);
+      await sleep(wait ?? 1500 * i);
       continue;
     }
     if (!j) throw new Error(`${method}: HTTP ${r.status}, no JSON`);
-    if (j.error) throw new Error(`${method}: ${JSON.stringify(j.error).slice(0, 160)}`);
+    if (j.error) throw new Error(`${method}: HTTP ${r.status} ${JSON.stringify(j.error).slice(0, 160)}`);
     return j.result;
   }
 }
@@ -299,16 +314,67 @@ export function operatorProblems(rpcs, cluster) {
 
 /** `fetchFn` as a walk's provider is read: a refusal (a non-2xx answer other than the 429 and 5xx rpc() retries) or a
  * 2xx answer that is no JSON-RPC answer (neither a result nor an error: OnFinality's on GitHub's runners, sign live run
- * 42201131294, which rpc() returned as undefined) throws, so rpc() tries it again and then throws `transient`. */
-const strictFetch = (fetchFn) => async (url, init) => {
-  const r = await fetchFn(url, init);
-  const j = await r.json().catch(() => null);
-  const retried = r.status === 429 || r.status >= 500;
-  if (!retried && (!r.ok || !j || typeof j !== "object" || !("result" in j || "error" in j))) {
-    throw new Error(`HTTP ${r.status}, ${r.ok ? "no JSON-RPC answer" : "refused"}: ${JSON.stringify(j?.error ?? j).slice(0, 80)}`);
-  }
-  return { ok: r.ok, status: r.status, json: async () => j };
+ * 42201131294, which rpc() returned as undefined) throws, so rpc() tries it again and then throws `transient`. Every
+ * answer is kept in the returned function's `answers` ({ method, params, status, json }, in order), so a line can name
+ * what the provider answered (answerOf) and the walk can tell a provider behind the other (behindOf). */
+const strictFetch = (fetchFn) => {
+  const answers = [];
+  const strict = async (url, init) => {
+    const r = await fetchFn(url, init);
+    const j = await r.json().catch(() => null);
+    let ask = {};
+    try {
+      ask = JSON.parse(init?.body ?? "{}");
+    } catch {}
+    answers.push({ method: ask.method, params: ask.params, status: r.status, json: j });
+    const retried = r.status === 429 || r.status >= 500;
+    if (!retried && (!r.ok || !j || typeof j !== "object" || !("result" in j || "error" in j))) {
+      throw new Error(`HTTP ${r.status}, ${r.ok ? "no JSON-RPC answer" : "refused"}: ${JSON.stringify(j?.error ?? j).slice(0, 80)}`);
+    }
+    return { ok: r.ok, status: r.status, headers: r.headers, json: async () => j };
+  };
+  strict.answers = answers;
+  return strict;
 };
+
+/** A kept answer's null: getTransaction's `result: null`, or a context answer's `value: null` (getAccountInfo). */
+const nullOf = (a) => !!a.json && typeof a.json === "object" && "result" in a.json && (a.json.result === null || (typeof a.json.result === "object" && "context" in a.json.result && a.json.result.value === null));
+/** The slot a kept answer stands at: its context slot, or a found transaction's own slot. */
+const slotOf = (a) => a.json?.result?.context?.slot ?? (a.method === "getTransaction" ? a.json?.result?.slot : undefined) ?? null;
+const sameAsk = (a, b) => a.method === b.method && JSON.stringify(a.params) === JSON.stringify(b.params);
+
+/** What the provider behind `fetchFn` (a walk's, which keeps its answers) last answered to `method` on `first` (its
+ * first param), in its own words: the HTTP status and then the JSON-RPC error's code and message, a null at its context
+ * slot, or a value at its slot. A read the walk did not keep is "not kept". */
+export function answerOf(fetchFn, method, first) {
+  const a = (fetchFn?.answers ?? []).findLast((x) => x.method === method && JSON.stringify(x.params?.[0]) === JSON.stringify(first));
+  if (!a) return "not kept";
+  const at = slotOf(a);
+  if (a.json?.error) return `HTTP ${a.status}, JSON-RPC error ${a.json.error.code}: ${String(a.json.error.message).slice(0, 120)}`;
+  if (!a.json || !("result" in a.json)) return `HTTP ${a.status}, no JSON-RPC answer`;
+  if (nullOf(a)) return `HTTP ${a.status}, null${at !== null ? ` at slot ${at}` : ""}`;
+  return `HTTP ${a.status}, a value${at !== null ? ` at slot ${at}` : ""}`;
+}
+
+/** Each null `mine` answered at a slot behind `theirs`' value for the same ask: { ask, at, their }. A null's slot is its
+ * context slot; a getTransaction null has none, so it stands at the highest context slot `mine` answered. A null at
+ * the other's slot or past it is a disagreement, never behind. */
+export function behindOf(mine, theirs) {
+  const top = Math.max(-1, ...mine.map((a) => a.json?.result?.context?.slot ?? -1));
+  const out = [];
+  for (const a of mine) {
+    if (!nullOf(a)) continue;
+    const at = a.json.result?.context?.slot ?? (top >= 0 ? top : null);
+    const b = theirs.findLast((x) => sameAsk(x, a) && x.json && "result" in x.json && !nullOf(x));
+    const their = b ? slotOf(b) : null;
+    if (at !== null && their !== null && at < their) out.push({ ask: a, at, their });
+  }
+  return out;
+}
+
+/** How long the walk reads a provider again whose null stands behind the other's answer, and how many times. */
+export const REREAD_BOUND_MS = 60_000;
+export const REREADS = 5;
 
 /**
  * `read(url, say, fetchFn)` on the first two operators of the ordered list `rpcs` that answer (card
@@ -317,28 +383,60 @@ const strictFetch = (fetchFn) => async (url, init) => {
  * line, its lines dropped, and the read moves to the next provider of an operator not yet read. Any other throw is the
  * caller's, and a provider's own answer (a result or a JSON-RPC error) is never moved past. Each answering provider's
  * `say(pass, text)` lines are kept, so every assertion stands on both. Fewer than two operators answering FAILs: two
- * stay required. { urls, values, lines: [[pass | null for info, text]] }.
+ * stay required.
+ * Card signpage-pool-flow-answers: a provider that answered null at a slot behind the other's answer to the same ask
+ * (behindOf) is read again, whole, after a wait, within REREAD_BOUND_MS and REREADS, its new lines in place of the old;
+ * one info line names each such null. A null at the other's slot or past it is never read again, so its FAIL stands,
+ * and a read again that is out keeps the first answer. `opts`: { sleep, boundMs }.
+ * { urls, values, lines: [[pass | null for info, text]] }.
  */
-export async function onTwoOperators(rpcs, operatorOf, fetchFn, read) {
-  const strict = strictFetch(fetchFn);
-  const urls = [], values = [], lines = [], used = new Set();
+export async function onTwoOperators(rpcs, operatorOf, fetchFn, read, { sleep = sleepMs, boundMs = REREAD_BOUND_MS } = {}) {
+  const provs = [], parts = [], used = new Set();
+  const readOn = async (url) => {
+    const f = strictFetch(fetchFn);
+    const mine = [];
+    const value = await read(url, (pass, text) => mine.push([pass, text]), f);
+    return { url, value, mine, f };
+  };
   for (const url of rpcs) {
-    if (urls.length === 2) break;
+    if (provs.length === 2) break;
     const op = operatorOf(url);
     if (op === null || used.has(op)) continue;
-    const mine = [];
-    let value;
     try {
-      value = await read(url, (pass, text) => mine.push([pass, text]), strict);
+      provs.push(await readOn(url));
     } catch (e) {
       if (!e?.transient) throw e;
-      lines.push([null, `${url} is out, the read moves to the next operator: ${String(e.message).split("\n")[0]}`]);
+      parts.push([null, `${url} is out, the read moves to the next operator: ${String(e.message).split("\n")[0]}`]);
       continue;
     }
-    used.add(op), urls.push(url), values.push(value), lines.push(...mine);
+    used.add(op), parts.push(provs.length - 1);
   }
-  if (urls.length < 2) lines.push([false, `two operators answered: ${urls.length} (${urls.join(", ") || "none"}) of ${rpcs.join(", ")}`]);
-  return { urls, values, lines };
+  if (provs.length === 2) {
+    const deadline = Date.now() + boundMs;
+    for (let n = 1; ; n++) {
+      const i = [0, 1].find((k) => behindOf(provs[k].f.answers, provs[1 - k].f.answers).length > 0);
+      if (i === undefined) break;
+      const lag = behindOf(provs[i].f.answers, provs[1 - i].f.answers);
+      const named = lag.map((l) => `${l.ask.method} ${JSON.stringify(l.ask.params?.[0])} null at slot ${l.at}, ${provs[1 - i].url} a value at slot ${l.their}`).join("; ");
+      const left = deadline - Date.now();
+      if (n > REREADS || left <= 0) {
+        parts.push([null, `${provs[i].url} still answers behind ${provs[1 - i].url} after ${n - 1} read(s) again: ${named}`]);
+        break;
+      }
+      parts.push([null, `${provs[i].url} answered behind ${provs[1 - i].url}, read again (${n}): ${named}`]);
+      await sleep(Math.min(2000 * n, left));
+      try {
+        provs[i] = await readOn(provs[i].url);
+      } catch (e) {
+        if (!e?.transient) throw e;
+        parts.push([null, `${provs[i].url} is out on its read again, its first answer stands: ${String(e.message).split("\n")[0]}`]);
+        break;
+      }
+    }
+  }
+  const lines = parts.flatMap((x) => (typeof x === "number" ? provs[x].mine : [x]));
+  if (provs.length < 2) lines.push([false, `two operators answered: ${provs.length} (${provs.map((p) => p.url).join(", ") || "none"}) of ${rpcs.join(", ")}`]);
+  return { urls: provs.map((p) => p.url), values: provs.map((p) => p.value), lines };
 }
 
 export async function check({ deployment: d, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep = sleepMs, mainnet = false }) {
@@ -389,10 +487,10 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = DEVNET_PROV
       say(g === genesis, `genesis ${g} is ${d.cluster}'s ${at}`);
       const pa = await account(fetchFn, url, prog, sleep);
       say(!!pa && pa.executable && pa.owner === LOADER_V3 && pa.data.length === 36 && pa.data[0] === 2 && b58encode(pa.data.subarray(4, 36)) === pdaData,
-        `${prog} is an executable upgradeable-loader program pointing at ${pdaData} ${at}: ${pa ? `owner ${pa.owner}, executable ${pa.executable}, ${pa.data.length} bytes` : "missing"}`);
+        `${prog} is an executable upgradeable-loader program pointing at ${pdaData} ${at}: ${pa ? `owner ${pa.owner}, executable ${pa.executable}, ${pa.data.length} bytes` : `missing (${answerOf(fetchFn, "getAccountInfo", prog)})`}`);
       const pd = await account(fetchFn, url, pdaData, sleep);
       if (!pd || pd.owner !== LOADER_V3 || pd.data.length < PROGRAMDATA_META || pd.data[0] !== 3) {
-        say(false, `programdata ${pdaData} ${at}: ${pd ? `owner ${pd.owner}, ${pd.data.length} bytes, tag ${pd.data[0]}` : "missing"}`);
+        say(false, `programdata ${pdaData} ${at}: ${pd ? `owner ${pd.owner}, ${pd.data.length} bytes, tag ${pd.data[0]}` : `missing (${answerOf(fetchFn, "getAccountInfo", pdaData)})`}`);
       } else {
         own.programdata = hex(pd.data);
         const auth = pd.data[12] === 0 ? null : b58encode(pd.data.subarray(13, 45));
@@ -405,7 +503,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = DEVNET_PROV
       }
       const pl = await account(fetchFn, url, pool.address, sleep);
       const poolOk = !!pl && pl.owner === prog && pl.data.length === POOL_LEN && Buffer.from(pl.data.subarray(0, 8)).toString() === "bfpool01" && pl.data[8] === pool.bump;
-      say(poolOk, `pool ${pool.address} is the program's, ${POOL_LEN} bytes, "bfpool01", bump ${pool.bump} ${at}: ${pl ? `owner ${pl.owner}, ${pl.data.length} bytes` : "missing"}`);
+      say(poolOk, `pool ${pool.address} is the program's, ${POOL_LEN} bytes, "bfpool01", bump ${pool.bump} ${at}: ${pl ? `owner ${pl.owner}, ${pl.data.length} bytes` : `missing (${answerOf(fetchFn, "getAccountInfo", pool.address)})`}`);
       const poolNonce = poolOk ? u64At(pl.data, 9) : -1n;
       const stateSize = poolOk ? u64At(pl.data, OFF_TREES) : -1n;
       const labelSize = poolOk ? u64At(pl.data, OFF_TREES + TREE_LEN) : -1n;
@@ -419,7 +517,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = DEVNET_PROV
         const active = shaped && td.readBigUInt64LE(4) === 0xffff_ffff_ffff_ffffn;
         const got = shaped ? Array.from({ length: (td.length - TABLE_META) / 32 }, (_, i) => b58encode(td.subarray(TABLE_META + 32 * i, TABLE_META + 32 * i + 32))) : [];
         const list = d.table_addresses ?? [];
-        say(shaped && active && tauth === null, `lookup table ${d.table} is the table program's, active, authority none (frozen) ${at}: ${t ? `owner ${t.owner}, authority ${tauth ?? "none"}, active ${active}` : "missing"}`);
+        say(shaped && active && tauth === null, `lookup table ${d.table} is the table program's, active, authority none (frozen) ${at}: ${t ? `owner ${t.owner}, authority ${tauth ?? "none"}, active ${active}` : `missing (${answerOf(fetchFn, "getAccountInfo", d.table)})`}`);
         say(shaped && got.length === list.length && got.every((a, i) => a === list[i]), `lookup table ${d.table} holds exactly the record's ${list.length} addresses in order ${at}: ${got.length} held`);
       } else {
       const pre = Buffer.from(dep.precommitment, "hex");
@@ -427,7 +525,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = DEVNET_PROV
       const mk = await account(fetchFn, url, mark.address, sleep);
       const mv = mk && mk.data.length === PRE_MARK_LEN ? [u64At(mk.data, 0), u64At(mk.data, 8), mk.data[16]] : null;
       say(!!mk && mk.owner === prog && !!mv && mv[0] === BigInt(dep.value) && mv[1] === nonce && mv[2] === MARK_TAG,
-        `mark ${mark.address} reads value ${mv?.[0] ?? "?"} nonce ${mv?.[1] ?? "?"} tag ${mv?.[2] ?? "?"}, the record's ${dep.value} and ${nonce}, tag ${MARK_TAG} ${at}${mk ? ` (${mk.data.length} bytes)` : ": missing"}`);
+        `mark ${mark.address} reads value ${mv?.[0] ?? "?"} nonce ${mv?.[1] ?? "?"} tag ${mv?.[2] ?? "?"}, the record's ${dep.value} and ${nonce}, tag ${MARK_TAG} ${at}${mk ? ` (${mk.data.length} bytes)` : `: missing (${answerOf(fetchFn, "getAccountInfo", mark.address)})`}`);
       for (const [tree, want, name] of [[1, label, "label"], [0, Buffer.from(dep.commitment, "hex"), "state"]]) {
         const pg = pageAddress(prog, tree, pageNo);
         const a = await account(fetchFn, url, pg.address, sleep);
@@ -438,7 +536,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = DEVNET_PROV
         const leaf = hdr && entries > slotNo ? a.data.subarray(at0, at0 + 32) : null;
         const root = leaf ? a.data.subarray(at0 + 32, at0 + 64) : null;
         say(!!leaf && Buffer.from(leaf).equals(Buffer.from(want)) && root.some((b) => b !== 0),
-          `${name} page ${pageNo} entry ${slotNo} holds ${name === "label" ? "keccak256(scope, nonce) mod p" : "the record's commitment"} ${hex(want)} ${at}: ${leaf ? hex(leaf) : a ? "no such entry" : "missing"}`);
+          `${name} page ${pageNo} entry ${slotNo} holds ${name === "label" ? "keccak256(scope, nonce) mod p" : "the record's commitment"} ${hex(want)} ${at}: ${leaf ? hex(leaf) : a ? "no such entry" : `missing (${answerOf(fetchFn, "getAccountInfo", pg.address)})`}`);
       }
       }
       const funders = d.funders ?? (d.funder ? [d.funder] : []);
@@ -458,7 +556,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = DEVNET_PROV
       say(false, `read ${at}: ${String(e.message).split("\n")[0]}`);
     }
     return own;
-  });
+  }, { sleep });
   for (const [pass, text] of walk.lines) pass === null ? lines.push(`info ${text}`) : say(pass, text);
   const of = (k) => walk.values.map((v) => v[k]).filter((x) => x !== null);
   const bytesOn = { programdata: of("programdata"), table: of("table") };
