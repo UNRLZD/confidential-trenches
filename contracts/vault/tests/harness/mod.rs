@@ -1000,3 +1000,187 @@ impl Harness {
         s
     }
 }
+
+// ---- a tree at any size, and a deposit through intents.near (tests/s12.rs, tests/s13.rs) ----
+
+/// STATE's offsets (tests/s10.rs): the state tree's size u64 and depth u8, the label tree's.
+const STATE_SIZE_AT: usize = 8;
+const LABEL_SIZE_AT: usize = 37;
+
+/// One deposit through intents.near (`execute_intents` with one signed `ft_withdraw`), read raw: the `Outcome`, and the
+/// gas each function-call receipt was given, by receipt id.
+pub struct Sent {
+    pub o: Outcome,
+    pub given: BTreeMap<String, u64>,
+}
+
+impl Sent {
+    pub fn one(&self, executor: &AccountId, method: &str) -> R<&Receipt> {
+        Ok(self.o.calls_exactly(executor, method, 1)?[0])
+    }
+    pub fn given_to(&self, r: &Receipt) -> R<u64> {
+        Ok(*self.given.get(&r.id).ok_or_else(|| format!("no gas given for {}", r.line()))?)
+    }
+}
+
+/// `ns` nanoseconds since the Unix epoch as RFC 3339 with milliseconds, the form intents.near reads a deadline in
+/// (DF `crates/primitives/time`).
+pub fn rfc3339(ns: u64) -> String {
+    let (secs, ms) = (ns / 1_000_000_000, (ns / 1_000_000) % 1_000);
+    let (days, rem) = ((secs / 86_400) as i64, secs % 86_400);
+    // days to a civil date (H. Hinnant, chrono-compatible)
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if mo <= 2 { 1 } else { 0 };
+    format!("{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}.{ms:03}Z", rem / 3_600, rem % 3_600 / 60, rem % 60)
+}
+
+impl Harness {
+    /// The vault's contract state record (key `STATE`) at final; `None` before the vault's first write.
+    pub async fn state_record(&self) -> R<Option<Vec<u8>>> {
+        let v = self.rpc("query", json!({"request_type": "view_state", "finality": "final", "account_id": self.vault, "prefix_base64": "U1RBVEU="})).await?;
+        let values = v["result"]["values"].as_array().ok_or_else(|| format!("view_state: {v}"))?;
+        let Some(e) = values.iter().find(|e| e["key"] == "U1RBVEU=") else { return Ok(None) };
+        let b: Base64VecU8 = serde_json::from_value(e["value"].clone())?;
+        Ok(Some(b.into()))
+    }
+
+    /// A tree view's (size, depth): `which` is `state_tree` or `label_tree`.
+    pub async fn tree(&self, which: &str) -> R<(u64, u64)> {
+        let t = self.view(&self.vault, which, json!({})).await?;
+        Ok((t["size"].as_u64().ok_or("size")?, t["depth"].as_u64().ok_or("depth")?))
+    }
+
+    /// The state tree (`state`) and the label tree (`label`) patched to (size, depth) with a side node at every level
+    /// 0..=depth, so the next insert into a patched tree, at index `size`, hashes every level whose bit is 1 (all of
+    /// them for size 2^depth - 1): tests/s10.rs `seed_depth32` at any size (vault.md 2.11). Only STATE's sizes and
+    /// depths and the side nodes are patched, the side nodes first and STATE last, read back at final before the next
+    /// call; a tree given `None` is left as it is.
+    pub async fn seed_trees(&self, state: Option<(u64, u8)>, label: Option<(u64, u8)>) -> R<()> {
+        let mut s = self.state_record().await?.ok_or("no state record to patch")?;
+        // the prefixes Borsh writes for the state tree, state_leaf_index and the label tree (src/lib.rs `Key`)
+        let pfx = |b: &[u8], at: usize, k: u8| b[at..at + 5] == [1, 0, 0, 0, k];
+        assert!(pfx(&s, 17, 0) && pfx(&s, 22, 1) && pfx(&s, 27, 5) && pfx(&s, 32, 2), "STATE's state tree is not where the patch writes");
+        assert!(pfx(&s, 46, 3) && pfx(&s, 51, 4) && pfx(&s, 56, 6), "STATE's label tree is not where the patch writes");
+        let mut records = vec![];
+        for (tree, at, side) in [(state, STATE_SIZE_AT, 0u8), (label, LABEL_SIZE_AT, 3)] {
+            let Some((size, depth)) = tree else { continue };
+            s[at..at + 8].copy_from_slice(&size.to_le_bytes());
+            s[at + 8] = depth;
+            for level in 0..=depth {
+                let mut v = vec![0u8; 32];
+                v[31] = level + 1;
+                records.push((vec![side, level], v));
+            }
+        }
+        records.push((b"STATE".to_vec(), s));
+        self.patch_data(&self.vault, &records).await?;
+        for (which, tree) in [("state_tree", state), ("label_tree", label)] {
+            if let Some((size, depth)) = tree {
+                assert_eq!(self.tree(which).await?, (size, depth as u64), "the {which} view after the patch");
+            }
+        }
+        Ok(())
+    }
+
+    /// Both trees at (size, depth): `seed_trees` on both.
+    pub async fn seed(&self, size: u64, depth: u8) -> R<()> {
+        self.seed_trees(Some((size, depth)), Some((size, depth))).await
+    }
+
+    /// `signer`'s `ft_withdraw` of `amount` to the vault with `msg` and the intent's other fields `extra` (a JSON
+    /// object merged in: `min_gas`, or nothing), as intents.near's raw_ed25519 signed payload (DF
+    /// `core/src/payload/raw.rs`): deadline 10 minutes past the final block, a versioned nonce under the current salt.
+    pub async fn ft_withdraw_intent(&self, signer: &Account, amount: u128, msg: &str, extra: Value) -> R<Value> {
+        let intents: AccountId = INTENTS.parse()?;
+        let salt = self.view(&intents, "current_salt", json!({})).await?;
+        let salt = salt.as_str().ok_or_else(|| format!("current_salt: {salt}"))?;
+        let salt: Vec<u8> = (0..4).map(|i| u8::from_str_radix(&salt[2 * i..2 * i + 2], 16)).collect::<Result<_, _>>()?;
+        let block = self.rpc("block", json!({"finality": "final"})).await?;
+        let now: u64 = block["result"]["header"]["timestamp_nanosec"].as_str().ok_or_else(|| format!("block: {block}"))?.parse()?;
+        let deadline = now + 600 * 1_000_000_000;
+        // magic 5628f6c6, version 0, salt, the nonce's deadline (ns, LE), its start (ns, LE), 7 bytes unique to this call
+        let mut nonce = vec![0x56, 0x28, 0xf6, 0xc6, 0];
+        nonce.extend(&salt);
+        nonce.extend(deadline.to_le_bytes());
+        nonce.extend(now.to_le_bytes());
+        nonce.extend(&near_sdk::env::sha256(format!("{} {now} {msg} {extra}", signer.id()).as_bytes())[..7]);
+        let mut intent = json!({"intent": "ft_withdraw", "token": self.token, "receiver_id": self.vault, "amount": amount.to_string(), "msg": msg});
+        for (k, v) in extra.as_object().ok_or("extra: not a JSON object")? {
+            intent[k] = v.clone();
+        }
+        let payload = json!({
+            "signer_id": signer.id(), "verifying_contract": intents, "deadline": rfc3339(deadline),
+            "nonce": serde_json::to_value(Base64VecU8(nonce))?,
+            "intents": [intent],
+        })
+        .to_string();
+        let sk: near_crypto::SecretKey = signer.secret_key().to_string().parse().map_err(|e| format!("key: {e}"))?;
+        Ok(json!({"standard": "raw_ed25519", "payload": payload, "public_key": sk.public_key().to_string(),
+                  "signature": sk.sign(payload.as_bytes()).to_string()}))
+    }
+
+    /// `who`'s balance of the token inside intents.near (NEP-245 `mt_balance_of`, token id `nep141:<token>`).
+    pub async fn intents_held(&self, who: &AccountId) -> R<u128> {
+        let intents: AccountId = INTENTS.parse()?;
+        let v = self.view(&intents, "mt_balance_of", json!({"account_id": who, "token_id": format!("nep141:{}", self.token)})).await?;
+        Ok(v.as_str().ok_or_else(|| format!("mt_balance_of: {v}"))?.parse()?)
+    }
+
+    /// A fresh 64-hex implicit S holding `amount` of the token inside intents.near, by its own `ft_transfer_call` in
+    /// (0.5 N for its gas).
+    pub async fn intents_funded(&self, amount: u128) -> R<Account> {
+        let intents: AccountId = INTENTS.parse()?;
+        let s = self.implicit_account(500).await?;
+        self.mint(s.id(), amount).await?;
+        let into = json!({"receiver_id": intents, "amount": amount.to_string(), "msg": s.id()});
+        let _ = self.call(&s, &self.token, "ft_transfer_call", into, ONE_YOCTO, Gas::from_tgas(100)).await?;
+        assert_eq!(self.intents_held(s.id()).await?, amount, "S's balance inside intents.near");
+        Ok(s)
+    }
+
+    /// `signed` (one signed intent) in `execute_intents`, sent by `relayer` with `gas` Tgas, read raw, with the gas
+    /// each function-call receipt was given (`given`).
+    pub async fn execute_intents(&self, relayer: &Account, signed: Value, gas: u64) -> R<Sent> {
+        let intents: AccountId = INTENTS.parse()?;
+        let o = self.call_outcome(relayer, &intents, "execute_intents", json!({"signed": [signed]}), NearToken::from_yoctonear(0), Gas::from_tgas(gas)).await?;
+        let given = self.given(&o, relayer.id()).await?;
+        Ok(Sent { o, given })
+    }
+
+    /// The gas each function-call receipt of `o` (sent by `signer`) was given, by receipt id: the sum of its function
+    /// calls' prepaid gas, from the same transaction read at final (`EXPERIMENTAL_tx_status`); the first receipt's from
+    /// the transaction itself.
+    pub async fn given(&self, o: &Outcome, signer: &AccountId) -> R<BTreeMap<String, u64>> {
+        let v = self.rpc("EXPERIMENTAL_tx_status", json!({"tx_hash": o.tx_hash, "sender_account_id": signer, "wait_until": "FINAL"})).await?;
+        let mut given = BTreeMap::new();
+        let gas_of = |a: &Value| a["FunctionCall"]["gas"].as_u64().or_else(|| a["FunctionCall"]["gas"].as_str().and_then(|g| g.parse().ok()));
+        for rc in v["result"]["receipts"].as_array().into_iter().flatten() {
+            let g: u64 = rc["receipt"]["Action"]["actions"].as_array().into_iter().flatten().filter_map(gas_of).sum();
+            given.insert(rc["receipt_id"].as_str().unwrap_or_default().to_string(), g);
+        }
+        let first = v["result"]["transaction_outcome"]["outcome"]["receipt_ids"][0].as_str().unwrap_or_default().to_string();
+        let g: u64 = v["result"]["transaction"]["actions"].as_array().into_iter().flatten().filter_map(gas_of).sum();
+        given.entry(first).or_insert(g);
+        Ok(given)
+    }
+}
+
+/// The `min_gas` an intents.near `ft_withdraw` into the vault signs, in Tgas: the kit's `VAULT_ALSO_ACCEPTS[0]
+/// .min_gas_tgas` (packages/kit/src/vault/shapes.ts), the only line of shapes.ts that declares VAULT_ALSO_ACCEPTS
+/// (VT-S13, tests/s13.rs).
+pub fn kit_intents_min_gas() -> u64 {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/kit/src/vault/shapes.ts");
+    let src = std::fs::read_to_string(&path).expect("read packages/kit/src/vault/shapes.ts");
+    let lines: Vec<&str> = src.lines().filter(|l| l.starts_with("export const VAULT_ALSO_ACCEPTS = [")).collect();
+    assert_eq!(lines.len(), 1, "shapes.ts declares VAULT_ALSO_ACCEPTS once, on one line");
+    let at = lines[0].find("min_gas_tgas: ").expect("VAULT_ALSO_ACCEPTS names min_gas_tgas") + "min_gas_tgas: ".len();
+    let digits: String = lines[0][at..].chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().expect("min_gas_tgas: a whole number of Tgas")
+}

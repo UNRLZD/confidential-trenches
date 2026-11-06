@@ -33,8 +33,9 @@ const KEY = "vault-review-fixes-kit";
 export const BUDGET_TGAS = 125;
 /**
  * Tgas a row, at most: a 1,000-row page of each list's largest rows, measured with the release build in near-sandbox
- * 2.13.4 (vault review R-03, contracts/vault/tests/review_viewgas.rs): spends 497.053, deposits 276.385, leaves
- * 162.548; labels share the leaves' view code (lib.rs tree_page). The call's own cost is counted in each row's share.
+ * 2.13.4 (vault review R-03, its probe kept with the review; contracts/vault/tests/s12.rs measures every view per row
+ * in the tree): spends 497.053, deposits 276.385, leaves 162.548; labels share the leaves' view code (lib.rs
+ * tree_page). The call's own cost is counted in each row's share.
  */
 export const GAS_PER_ROW = { deposits: 0.276385, spends: 0.497053, leaves: 0.162548, labels: 0.162548 };
 export const LISTS = Object.keys(GAS_PER_ROW);

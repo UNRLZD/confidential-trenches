@@ -1893,3 +1893,55 @@ test("review L2: prepay_open (R2) with U's previous note marked TAKEN but its P 
   assert.equal(r.sent[1]!.bytes, r.sent[0]!.bytes);
   assert.equal(note.leaf!.leafIndex, 2n);
 });
+
+// ---------- r2 (card wallet-deposit-follow): every wait is told first, so a caller can end the bind before a sleep ----------
+test("onWait is told before every sleep of the bind, with the code it waits on", async () => {
+  const t = await setup(["token_halted", "resign_needed", "tx"]);
+  const told: string[] = [];
+  let sleptUntold = 0;
+  let pending = 0;
+  const deps = { ...t.deps, onWait: (c: string) => void (told.push(c), pending++), sleep: async () => (pending === 0 && sleptUntold++, (pending = 0), t.chain.tick(), await turn()) };
+  landed(await bindDeposit(SEED, t.args, deps));
+  assert.ok(told.length >= 2, told.join());
+  assert.equal(sleptUntold, 0, `a sleep with no wait told first (told ${told.join()})`);
+  assert.ok(told.includes("token_halted") && told.includes("resign_needed"), told.join());
+});
+
+test("prepay_open on U's first note is refused before any wait: onWait is never told", async () => {
+  const t = await setup(["prepay_open"]);
+  const told: string[] = [];
+  assert.deepEqual(await bindDeposit(SEED, t.args, { ...t.deps, onWait: (c) => void told.push(c) }), { kind: "refused", code: "prepay_open" });
+  assert.deepEqual(told, []);
+  assert.equal(t.sleeps(), 0);
+});
+
+test("a bind that ends on a retry code's wait (onWait throws): the next bind of the note sends the same bytes again while ahead, then lands", async () => {
+  const t = await setup(["token_halted", "tx"]);
+  class Stop extends Error {}
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, onWait: (c) => { if (c === "token_halted") throw new Stop(c); } }), Stop);
+  assert.equal(t.sent.length, 1);
+  assert.equal(t.sleeps(), 0, "ended before the sleep");
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, 2);
+  assert.equal(t.sent[1]!.bytes, t.sent[0]!.bytes, "the same signed bytes, so the same nonce");
+
+  // a reload (the session gone) settles the call written instead: nothing is sent again blind
+  const r = await setup(["token_halted"]);
+  await assert.rejects(bindDeposit(SEED, r.args, { ...r.deps, onWait: () => { throw new Stop("x"); } }), Stop);
+  resetBindSession();
+  let n = 0;
+  const settled = bindDeposit(SEED, r.args, { ...r.deps, sleep: async () => (++n === 3 && (lands(r.chain)(r.sent[0]!)), r.chain.tick(), await turn()) });
+  landed(await settled);
+  assert.equal(r.sent.length, 1);
+});
+
+test("a sign that waits on a read (U's USDC not in U yet) tells onWait that read's code before it sleeps", async () => {
+  const t = await setup(["tx"]);
+  t.chain.balance = 0n;
+  let polls = 0;
+  const tick = t.chain.tick;
+  t.chain.tick = () => (tick(), ++polls === 3 && (t.chain.balance = 100_000_000n));
+  const told: string[] = [];
+  landed(await bindDeposit(SEED, t.args, { ...t.deps, onWait: (c) => void told.push(c) }));
+  assert.ok(told.length >= 1 && told.every((c) => c === "balance"), told.join());
+});

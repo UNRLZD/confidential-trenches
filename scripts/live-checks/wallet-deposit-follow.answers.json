@@ -1,0 +1,29 @@
+{
+ "good": {
+  "note": "this card's SIGN_HOST build (packages/signpage/index.html and public/app.js of release-66: the r3 fold with main merged) and the helper's live POST answer, read 2026-11-06T20:29:27.750Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-u/2uPkjrMqoDl7YcqbxjLX2PyufVZ7Ld8qnauuuNhJZwcsihY6tApvrRDcg+yARb\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-u/2uPkjrMqoDl7YcqbxjLX2PyufVZ7Ld8qnauuuNhJZwcsihY6tApvrRDcg+yARb",
+  "status_url": true,
+  "lock": true,
+  "helper": {
+   "status": 200,
+   "source": "oneclick",
+   "answer": {
+    "status": "SUCCESS",
+    "depositAddress": "a998c6585100ca4bccbc0e0bcceb9abd66e59666e87bd03b1d83bb9544f7ce2f"
+   }
+  }
+ },
+ "bad": {
+  "note": "SIGN_HOST as served before the card (read 2026-11-06T20:29:27.750Z) and the helper asked by GET, the device's first build's read, read 2026-11-06T20:29:27.750Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-WZEESmLR1IK+1UdhFfnR0VIN63auvdkZC+Lk6jsl7li6C19VR8OXEZmRkEJV03yB\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-WZEESmLR1IK+1UdhFfnR0VIN63auvdkZC+Lk6jsl7li6C19VR8OXEZmRkEJV03yB",
+  "status_url": false,
+  "lock": false,
+  "helper": {
+   "status": 405,
+   "source": null,
+   "answer": {}
+  }
+ }
+}
