@@ -1,6 +1,6 @@
 // The child-host gate (host-children.mjs) on planted trees: a child of SIGN_HOST in any served or reached place is
-// refused by file and line, plain, escaped, wildcard or in capitals; prose, written release lists, recorded answers and
-// tests are not read; the repo's own tree passes. And the hosts themselves: SIGN_HOST is the main address and the
+// refused by file and line, plain, escaped, wildcard, in capitals or built in code from SIGN_HOST; prose, written
+// release lists, recorded answers and tests are not read, except under a public/ folder; the repo's own tree passes. And the hosts themselves: SIGN_HOST is the main address and the
 // passkey's rp.id, APP_HOST and HELPER_HOST are siblings of it, in every place that names them (card hosts-main-on-top).
 //   node --test scripts/ci/host-children.test.mjs
 import { test } from "node:test";
@@ -38,7 +38,8 @@ const run = (dir) => {
 };
 
 const GOOD = {
-  "packages/wallet/src/derive/constants.ts": `export const SIGN_HOST = "${SIGN_HOST}";\n`,
+  // SIGN_HOST and URLs built on it, not children of it
+  "packages/wallet/src/derive/constants.ts": `export const SIGN_HOST = "${SIGN_HOST}";\nexport const U = \`https://\${SIGN_HOST}/\`;\nexport const V = "https://" + SIGN_HOST;\nexport const W = [SIGN_HOST, "json"].join(".");\n`,
   "apps/terminal/public/_headers": `/*\n  Content-Security-Policy: connect-src 'self' https://${HELPER} https://${SIGN_HOST}; frame-ancestors https://${SIGN_HOST}\n`,
   "apps/helper/deploy/Caddyfile": `{$HELPER_SITE:${HELPER}} {\n}\n`,
   // a name that only ends like ours, and SIGN_HOST's parent, are not children
@@ -79,6 +80,13 @@ const PLANTED = {
   "apps/terminal/src/a7-data.json": [`{ "helper": "https://${child("api")}" }\n`, /a7-data\.json:1: api\.confidential\.unrealized\.trade is a child/],
   "packages/kit/src/a6-deep.ts": [`// a comment still names it: ${child("x.y")}\n`, /a6-deep\.ts:1: x\.y\.confidential\.unrealized\.trade is a child/],
   "scripts/live-checks/kit-freeze-helper-api.mjs": [`export const OLD = "https://${child("api")}";\n`, /kit-freeze-helper-api\.mjs:1: api\.confidential\.unrealized\.trade is a child/],
+  // built in code from the constant: a template literal, a concatenation, a join, an interpolated label on a member
+  "packages/signpage/src/a8-template.ts": ["import { SIGN_HOST } from \"@blindfill/kit\";\nexport const H = `https://api.${SIGN_HOST}`;\n", /a8-template\.ts:2: api\.\$\{SIGN_HOST\} is a child/],
+  "packages/signpage/src/a9-concat.ts": [`export const H = "https://" + "sign." + SIGN_HOST;\n`, /a9-concat\.ts:1: "sign\." \+ SIGN_HOST is a child/],
+  "packages/signpage/src/a10-join.ts": [`export const H = ["app", SIGN_HOST].join(".");\n`, /a10-join\.ts:1: \["app", SIGN_HOST\]\.join\("\."\) is a child/],
+  "apps/terminal/src/a11-label.ts": [`export const h = (label: string) => \`\${label}.\${d.SIGN_HOST}\`;\n`, /a11-label\.ts:1: \$\{label\}\.\$\{d\.SIGN_HOST\} is a child/],
+  // test data under a public/ folder is served by Pages, so it is read
+  "apps/terminal/public/fixtures/a12.json": [`{ "helper": "https://${child("api")}" }\n`, /public\/fixtures\/a12\.json:1: api\.confidential\.unrealized\.trade is a child/],
 };
 
 for (const [path, [body, want]] of Object.entries(PLANTED)) {
