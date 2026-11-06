@@ -141,6 +141,7 @@ function stubs(dir, a, b = a) {
     `#!/bin/sh\ncase " $* " in *" --version "*) echo "\${STUB_NEAR_VERSION:-${CARGO_NEAR}}"; exit 0;; esac\n` +
       'prev=; for x in "$@"; do [ "$prev" = --out-dir ] && CARGO_TARGET_DIR=$x; prev=$x; done\n' +
       'SUF=; case " $* " in *" --variant testnet "*) SUF=.testnet;; esac; [ -n "$STUB_NO_META" ] && SUF=.raw\n' +
+      '[ -n "$STUB_FAIL" ] && { echo "stub: a crates.io blip, before any wasm exists" >&2; exit 101; }\n' +
       'mkdir -p "$CARGO_TARGET_DIR"\necho "$*" >> "$CARGO_TARGET_DIR/../cargo-args.log"\nname=$(basename "$CARGO_TARGET_DIR")\n' +
       `if [ "$name" = a ] && [ -n "$STUB_FILES" ]; then "${process.execPath}" -e 'const fs=require("fs");const d=process.argv[1]+"/many";fs.mkdirSync(d);for(let i=0;i<+process.argv[2];i++)fs.writeFileSync(d+"/"+i,"x")' "$CARGO_TARGET_DIR" "$STUB_FILES"; fi\n` +
       'if [ -n "$STUB_SLEEP" ]; then echo $$ > "$CARGO_TARGET_DIR/../build.pid"; sleep "$STUB_SLEEP"; fi\n' +
@@ -285,10 +286,29 @@ test("two clean builds that differ stop the run before any send, and both target
   const k = keyFile(dir);
   const buildDir = path.join(dir, "build");
   const r = run(dir, testnet(dir, k.file, buildDir), stubs(dir, wasm(), wasm({ strings: [TESTNET_TOKEN, "another build"] })));
-  assert.equal(r.status, 1, r.stdout + r.stderr);
+  // exit 3, deploy.mjs's own code for two hashes that disagree (card ci-cargo-fetch-retry): vault-build never retries it
+  assert.equal(r.status, 3, r.stdout + r.stderr);
   assert.match(r.stderr, /the two clean builds differ: [0-9a-f]{64} \(\d+ B\) and [0-9a-f]{64} \(\d+ B\); nothing was sent/);
   neverSent(r);
   targetsGone(buildDir);
+});
+
+// card ci-cargo-fetch-retry: vault-build runs --build-only and --verify-records under scripts/ci/retry.sh, which tries a
+// failed run again. A build that fails before any hash exists (a crates.io blip, the image) is that, exit 1; two builds
+// of one commit that disagree are not, and end with the code RETRY_FINAL names there, so a build that is reproducible
+// only some of the time is never green on its second try.
+test("--build-only: two builds that differ exit 3, the code vault-build never retries; a build that fails before a hash exists exits 1", async () => {
+  const { EXIT_HASH_DISAGREE } = await import(SCRIPT);
+  assert.equal(EXIT_HASH_DISAGREE, 3);
+  const args = (dir) => ["--build-only", "--flavor", "testnet", "--build-dir", path.join(dir, "build")];
+  const dir = fresh();
+  const differ = run(dir, args(dir), stubs(dir, wasm(), wasm({ strings: [TESTNET_TOKEN, "another build"] })));
+  assert.equal(differ.status, 3, differ.stdout + differ.stderr);
+  assert.match(differ.stderr, /the two clean builds differ/);
+  const dir2 = fresh();
+  const failed = run(dir2, args(dir2), { ...stubs(dir2, wasm()), STUB_FAIL: "1" });
+  assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+  assert.match(failed.stderr, /build a failed \(exit 101\)/);
 });
 
 test("the fetch block holds: a wasm that passes every rule stops at the first RPC read, after the build", () => {
@@ -537,7 +557,8 @@ test("--verify-records: a non-reproducible record is a NOTE, a reproducible one 
     // a rebuild that is not the record's code hash, and an unmarked record
     const wrong = "ef".repeat(32);
     write("b-repro.json", { wasm_sha256: wrong, code_hash: b58encode(Buffer.from(wrong, "hex")), source_commit: HEAD });
-    await assert.rejects(verifyRecords({ dir: recs, buildDir: path.join(dir, "v2"), log: () => {} }), new RegExp(`b-repro\\.json: the rebuild of ${HEAD} is sha256 ${sha}, the record's is ${wrong}`));
+    // exit 3 for it too (see "--build-only" above): a record that rebuilds to another hash is never retried
+    await assert.rejects(verifyRecords({ dir: recs, buildDir: path.join(dir, "v2"), log: () => {} }), (e) => e.exitCode === 3 && new RegExp(`b-repro\\.json: the rebuild of ${HEAD} is sha256 ${sha}, the record's is ${wrong}`).test(e.message));
     write("b-repro.json", { wasm_sha256: sha, code_hash: b58encode(Buffer.from(sha, "hex")) });
     await assert.rejects(verifyRecords({ dir: recs, buildDir: path.join(dir, "v3"), log: () => {} }), /b-repro\.json: the record names neither source_commit/);
   } finally {
