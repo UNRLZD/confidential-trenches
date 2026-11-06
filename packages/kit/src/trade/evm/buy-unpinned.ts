@@ -299,7 +299,18 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // sepolia.base.org and base-sepolia-rpc.publicnode.com, the same on both (2026-11-04 09:55Z): 8,273 bytes, keccak
       // 0x156c129c…, factory() 0x4752ba5d…ad24; and 5,820 bytes, keccak 0x2dddcef8…, poolManager() the PoolManager above
       quoters: bare({ v3: "0xc5290058841028f1614f3a6f0f5816cad0df5e27", v4: "0x4a6513c898fe1b2d0e78d3b0e0a4a151589b1cba" }),
-      providers: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
+      // The pool's pair, which the wallet's pool sync pages the pool's logs on from its deploy block (evmPool,
+      // evmTreeSync), and the quotes' (card notes-per-pool-evm-base-hang). The chain makes a block every 200 ms: blocks
+      // 53,801,443 (the pool's deploy) to 55,089,154 in 257,542 s on sepolia.base.org, base-sepolia-rpc.publicnode.com
+      // and base-testnet.api.pocket.network alike (2026-11-06 04:35Z). sepolia.base.org answers the pool's eth_getLogs
+      // over 200 blocks "-32614: eth_getLogs is limited to a 200 range" (1,000 to 100,000 blocks, 04:35Z): the pager's
+      // 156-block pages, 744 pages in 222 s, about 8,250 pages and 41 min for the pool's life, 2,770 more a day
+      // (04:27-04:31Z). PublicNode answered the same filter over 1,000 to 50,000 blocks in 116-176 ms and refused
+      // 100,000 ("-32701: exceed maximum block range: 50000"); Pocket answered 1,000 to 100,000 in 188-265 ms (04:35Z).
+      // Both answer the signing page's CORS preflight (POST, content-type) from https://sign.confidential.unrealized.trade
+      // with 204: PublicNode allow-origin *, Pocket that origin (04:42Z). sepolia.base.org stays in the fee pair, whose
+      // reads are views and blocks, never a log page.
+      providers: Object.freeze(["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network"] as const),
       feeProviders: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
       // 20 s of its blocks: the two heads were 5 blocks apart in one read at 2 s blocks (2026-11-04 09:53Z), so 10 then;
       // one every 200 ms now (10,000 blocks to block 54946277 took 2,000 s on sepolia.base.org and
@@ -334,8 +345,16 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // robinhood-sepolia-rpc.publicnode.com keeps about 15 s ("historical state ... is not available" at 20 s, 6 of 6;
       // at 600 s, 6 of 6), where robinhood-testnet.drpc.org answered 6 of 6 at 20, 210, 600 and 700 s and 30 of 30 at
       // 600 s, and rpc.testnet.chain.robinhood.com 30 of 30 at 600 s (read 2026-11-04 20:09-20:13Z; live check
-      // evm-buy-hookdata-fee holds every pinned provider to 600 s)
-      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
+      // evm-buy-hookdata-fee holds every pinned provider to 600 s). Since card evm-quote-warm-round every read at a past
+      // block goes to feeProviders, so the pool's pair (the wallet's pool sync and the quotes, at the newest block) is
+      // Robinhood's own and PublicNode, the signing page's TESTNET_RPCS.robinhood and the money gate's (card
+      // notes-per-pool-evm-base-hang): robinhood-testnet.drpc.org answers the pool's eth_getLogs over 101 blocks "RPC
+      // error 35: ranges over 10000 blocks are not supported on free plan" (1,000 and 10,000 blocks; 100 and 101 answered,
+      // 2026-11-06 05:02Z), so the pager's 78-block pages, about 23,700 for the pool's 1,849,721 blocks at 140 ms; Robinhood's
+      // own answered 1,000 to 100,000 blocks in 183-205 ms and PublicNode 1,000 to 50,000 in 100-180 ms, refusing 100,000
+      // "-32701: exceed maximum block range: 50000" (05:01Z). PublicNode answers the signing page's CORS preflight 204,
+      // allow-origin * (05:03Z).
+      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"] as const),
       feeProviders: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
       // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 16 s of its blocks (10,000
       // to block 149155719 took 1,634 s on both providers, read 2026-11-05 20:38Z)
