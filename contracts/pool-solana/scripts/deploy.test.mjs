@@ -698,7 +698,8 @@ function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = (
         if (params[0] !== FUND_SIG && !x?.landed) return ok(null);
         if (!x) {
           const d = Buffer.alloc(12);
-          d.writeUInt32LE(2, 0), d.writeBigUInt64LE(c.fundAmount ?? 1n, 4);
+          // the funding is what the funder starts with (a run's funding is its need or more: the funding rule sums it)
+          d.writeUInt32LE(2, 0), d.writeBigUInt64LE(c.fundAmount ?? (funderStart > 0n ? funderStart : 1n), 4);
           return ok({ slot: 0, blockTime: c.fundBlockTime ?? null, meta: { err: null }, transaction: { message: { accountKeys: [c.fundFrom ?? RETURN, c.funder, SYSTEM_ID], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: b58(d) }] } } });
         }
         // the transaction as sent: its payer first, each instruction's program, accounts and data
@@ -824,7 +825,7 @@ test("a stop during the funding wait watches the balance 60 s: funding landing 3
       c.credit.push({ at: stopAt + 30_000, fn: () => {
         keyFileAtFunding = existsSync(path.join(keyDirOf(c.said), "funder.json"));
         c.bal.set(c.funder, 50_000_000n);
-        c.funding = true;
+        Object.assign(c, { funding: true, fundAmount: 50_000_000n });
       } });
     },
   });
@@ -1593,7 +1594,7 @@ function stoppedJournal(c, journal, { state = "removed", program = RD.program_id
   // the first run's own, as sent: its funding (a plain Transfer from the return address), its SetAuthority to none on
   // the programdata, its init
   const transfer = Buffer.alloc(12);
-  transfer.writeUInt32LE(2, 0), transfer.writeBigUInt64LE(1_000_000n, 4);
+  transfer.writeUInt32LE(2, 0), transfer.writeBigUInt64LE(1_000_000_000n, 4); // the first run's need or more
   for (const [s, payer, ix] of [
     [sig("6"), RETURN, { program: SYSTEM_ID, keys: [RETURN, OLD], data: transfer }],
     [sig("5"), OLD, { program: "BPFLoaderUpgradeab1e11111111111111111111111", keys: [RD.programdata, OLD], data: Buffer.from([4, 0, 0, 0]) }],
@@ -3005,4 +3006,57 @@ test("F4: no step label of the deploy carries an address: the dust label and bot
     const label = l.slice(l.indexOf("step: ") + 6);
     assert.ok(!/\$\{(payer|dest|to|funder\.id|k\.id|returnTo)\}/.test(label), l.trim());
   }
+});
+
+test("open item 2: the record keeps another payer's plain transfer as a funding only when that payer's plain transfers into run keys reach the run's need (the --return rule): a dust payer is never a funder", async () => {
+  const SYS = "11111111111111111111111111111111";
+  const transfer = (n) => { const d = Buffer.alloc(12); d.writeUInt32LE(2, 0), d.writeBigUInt64LE(BigInt(n), 4); return b58(d); };
+  const tx = (slot, from, to, n) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [from, to, SYS], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: transfer(n) }] } } });
+  const LOOK = "9xQeWvG816bUx9EPjHmaT24yvVM2ZWbrrpZb9PusVFin";
+  const chainTx = {
+    fund: tx(1, "R0", "F1", 1000), // the owner's funding: the need
+    dust: tx(2, LOOK, "F1", 1), // a look-alike's one lamport
+    half1: tx(3, SOURCE, "F1", 600), // another wallet of the owner's, the need in two transfers
+    half2: tx(4, SOURCE, "F1", 400),
+    sweep: tx(5, "F1", "R0", 999),
+  };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR([]);
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const said = [];
+  const steps = Object.keys(chainTx).map((signature) => ({ step: signature === "sweep" ? "sweep (the funder's rest back)" : "funding (to the funder)", signature }));
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "F1", need: "1000", txs: steps }, { say: (l) => said.push(l) });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "half1", "half2", "sweep"]);
+  assert.deepEqual(r.funders, [SOURCE, "F1"], "the look-alike is no funder of the run (funders in slot order)");
+  assert.ok(said.some((l) => l.includes("dust") && /left out of the record/.test(l)), said.join("\n"));
+  // a record from before the need was recorded: every plain transfer into a run key, as before
+  const old = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "F1", txs: steps });
+  assert.ok(old.txs.some((t) => t.signature === "dust"));
+});
+
+test("open item 2: the run's journal labels a plain transfer into the funder a funding only when its sender sent at least the need: a look-alike's one lamport is not a funding", async () => {
+  const LOOK = "9xQeWvG816bUx9EPjHmaT24yvVM2ZWbrrpZb9PusVFin";
+  const DUST_SIG = "2".repeat(87);
+  const c = cluster();
+  Object.assign(c, { fundAmount: 1_000_000_000n });
+  wrap(c, async (url, { method, params }, real) => {
+    if (method === "getSignaturesForAddress" && params[0] === c.funder) {
+      const r = await (await real()).json();
+      return okR([{ signature: DUST_SIG, err: null }, ...r.result]);
+    }
+    if (method === "getTransaction" && params[0] === DUST_SIG) {
+      const d = Buffer.alloc(12);
+      d.writeUInt32LE(2, 0), d.writeBigUInt64LE(1n, 4);
+      return okR({ slot: 0, meta: { err: null }, transaction: { message: { accountKeys: [LOOK, c.funder, SYSTEM_ID], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: b58(d) }] } } });
+    }
+    return real();
+  });
+  const r = await runOn(c, ["--fail-after", "funding"]);
+  assert.match(String(r.error?.message), /planted failure after funding/);
+  const steps = new Map(r.journal.txs.map((t) => [t.signature, t.step]));
+  assert.equal(steps.get(FUND_SIG), "funding (to the funder)");
+  assert.equal(steps.get(DUST_SIG), "a plain transfer into the funder below the run's need: not a funding");
 });

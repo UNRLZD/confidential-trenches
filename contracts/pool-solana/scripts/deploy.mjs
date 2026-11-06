@@ -706,9 +706,16 @@ export async function chainRecord(fetchFn, url, d, { wait, say = () => {} } = {}
   const ours = new Set([d.funder].filter(Boolean));
   for (const k of [...known, ...onChain]) if (authorityOf(k.t)) ours.add(keysOf(k.t)[0]);
   ours.delete(d.return_to);
+  // each other payer's plain transfers into the run's keys, summed: a funding only at the run's need in all
+  const need = needIn(d);
+  const sent = new Map();
   for (const k of known) {
-    if (ours.has(keysOf(k.t)[0]) || ours.has(plainTo(k.t))) add(k.signature, k.t, k.step);
-    else say(`left out of the record: ${k.signature} (${k.step}): paid by ${keysOf(k.t)[0]}, not a run key's nor one plain System Transfer from its payer into a run key`);
+    const p = plainTransfer(k.t);
+    if (p && ours.has(p.to) && !ours.has(p.from)) sent.set(p.from, (sent.get(p.from) ?? 0n) + p.lamports);
+  }
+  for (const k of known) {
+    if (ours.has(keysOf(k.t)[0]) || (ours.has(plainTo(k.t)) && fundedEnough(sent, keysOf(k.t)[0], need))) add(k.signature, k.t, k.step);
+    else say(`left out of the record: ${k.signature} (${k.step}): paid by ${keysOf(k.t)[0]}, not a run key's nor plain System Transfers from its payer into a run key${need === null ? "" : ` adding up to the run's need ${need}`}`);
   }
   for (const k of onChain) if (ours.has(keysOf(k.t)[0])) add(k.signature, k.t, null);
   rows.sort((a, b) => a.slot - b.slot);
@@ -720,6 +727,13 @@ export async function chainRecord(fetchFn, url, d, { wait, say = () => {} } = {}
  * other shape (paste 2's 3qRUcXSY: a stranger's 1 lamport to each of 18 addresses, the funder among them) is no
  * funding. */
 export const plainTransferTo = (t) => plainTransfer(t)?.to ?? null;
+/** A record's or journal's need in lamports, or null for one from before the need was written. */
+export const needIn = (d) => (/^\d+$/.test(String(d?.need ?? "")) ? BigInt(d.need) : null);
+/** The funding rule, one for the record (chainRecord), the run's journal (history) and --sweep-kept's --return: a
+ * sender funded the run only when its plain transfers into the run's keys add up to at least the run's need (`sent`:
+ * sender -> lamports), so a look-alike address poisoner's 1-lamport transfer is never a funding; with no need written,
+ * every plain transfer into a run key is one, as before. */
+export const fundedEnough = (sent, from, need) => need === null || (sent.get(from) ?? 0n) >= need;
 
 /** An account once a finalized read shows it (and `ready(acc)` holds), waiting up to 60 s: steps confirm at
  * "confirmed", reads are "finalized". */
@@ -958,7 +972,7 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
   // --return's rule (a look-alike address poisoner sends one plain 1-lamport transfer into a run key, and the run's own
   // history labels any plain transfer a funding): a sender counts only when its plain transfers into the key add up to
   // at least the run's need; a journal from before the need was journaled takes the senders it labels a funding
-  const need = /^\d+$/.test(String(j.need ?? "")) ? BigInt(j.need) : null;
+  const need = needIn(j);
   const journaledFunding = new Set(j.txs.filter((t) => /^(first run: )?funding \(/.test(t.step)).map((t) => t.signature));
   // the plain transfers into a key, read on chain: [{ signature, from, lamports }]
   const incoming = async (k) => {
@@ -1013,8 +1027,9 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
     for (const k of holders) {
       const balance = await ops.balanceAt(url, k.id);
       const ins = await incoming(k);
-      const sent = (from) => ins.filter((i) => i.from === from).reduce((a, i) => a + i.lamports, 0n);
-      const counts = (i) => (need === null ? journaledFunding.has(i.signature) : sent(i.from) >= need);
+      const sent = new Map();
+      for (const i of ins) sent.set(i.from, (sent.get(i.from) ?? 0n) + i.lamports);
+      const counts = (i) => (need === null ? journaledFunding.has(i.signature) : fundedEnough(sent, i.from, need));
       const who = k === funder ? "the funder" : "the program id";
       for (const i of ins) {
         if (!known.has(i.signature)) known.add(i.signature), j.txs.push({ step: need === null || counts(i) ? `funding (to ${who})` : `a plain transfer into ${who} below the run's need: not a funding`, signature: i.signature, state: "landed" });
@@ -1279,9 +1294,11 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   };
   // what came in to the funder, and what the CLI sent: the funder's history read on chain, each signature not yet in
   // the journal read for its fee payer (the funder: the CLI's; another: a funding)
+  const sentToFunder = new Map(); // each other payer's plain transfers into the funder, summed (fundedEnough)
   const history = async (cliStep) => {
     const sigs = (await rpc(fetchFn, url, "getSignaturesForAddress", [funder.id, { commitment: "confirmed" }], wait)).reverse();
     const found = [];
+    const into = []; // [entry, its plain transfer into the funder]: labelled once every one of this read is summed
     for (const f of sigs) {
       if (f.err === null) raise(floor, f.slot);
       if (txs.some((t) => t.signature === f.signature)) continue;
@@ -1289,8 +1306,14 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       const payer = t?.transaction.message.accountKeys[0];
       const state = f.err === null ? "landed" : "failed";
       if (payer === funder.id) found.push({ step: cliStep ?? "the funder's own (not this run's journal)", signature: f.signature, state, cli: true });
-      else if (state === "landed") found.push({ step: plainTransferTo(t) === funder.id ? "funding (to the funder)" : "another payer's transaction naming the funder: not a funding", signature: f.signature, state });
+      else if (state === "landed") {
+        const p = plainTransfer(t);
+        const e = { step: "another payer's transaction naming the funder: not a funding", signature: f.signature, state };
+        found.push(e);
+        if (p?.to === funder.id) into.push([e, p]), sentToFunder.set(p.from, (sentToFunder.get(p.from) ?? 0n) + p.lamports);
+      }
     }
+    for (const [e, p] of into) e.step = fundedEnough(sentToFunder, p.from, needIn(fields)) ? "funding (to the funder)" : "a plain transfer into the funder below the run's need: not a funding";
     return found;
   };
   const afterCli = async (step) => {
