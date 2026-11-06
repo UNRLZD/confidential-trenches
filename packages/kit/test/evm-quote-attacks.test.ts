@@ -285,7 +285,9 @@ type SimCtx = { origin: string; sender: string; gas: bigint; gasPrice: bigint };
 // `most`: the most of the currency it was found for the pool gives at any price, which an exact-output quote of more
 // reverts NotEnoughLiquidity on (card rh-cold-quote; none: any amount); `mostOn`: on that provider only; `over`: any
 // exact-output quote of it answers SafeCastOverflow (on provider `over`, or both); `plainOn`: a revert with no data there
-type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; exec?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint]; ticks?: number[]; most?: bigint; mostOn?: 0 | 1; over?: 0 | 1 | "both"; plainOn?: 0 | 1 };
+// (or on both); `mostOf`: the most of each currency, by address, the pool gives at any price, read on the quote's
+// direction (its zeroForOne: currency1 out, else currency0)
+type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; exec?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint]; ticks?: number[]; most?: bigint; mostOn?: 0 | 1; mostOf?: Record<string, bigint>; over?: 0 | 1 | "both"; plainOn?: 0 | 1 | "both" };
 const pidOf = (k: EvmPoolKey) => kk(W(BigInt(k.currency0)) + W(BigInt(k.currency1)) + W(BigInt(k.fee)) + W(BigInt(k.tickSpacing)) + W(BigInt(k.hooks)));
 const keyOf = (token: string, other: string, fee: number, tickSpacing: number, hooks: string): EvmPoolKey => {
   const [currency0, currency1] = BigInt(other) < BigInt(token) ? [other, token] : [token, other];
@@ -345,7 +347,9 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     const p = byPid.get(pidOf({ currency0: a(1), currency1: a(2), fee: Number(w(3)), tickSpacing: Number(BigInt.asIntN(256, w(4))), hooks: a(5) }));
     if (p === undefined) return null;
     if (p.over === "both" || p.over === who) return OVERFLOW;
-    if (p.plainOn === who) return null;
+    if (p.plainOn === "both" || p.plainOn === who) return null;
+    const out = p.mostOf?.[(w(6) === 1n ? a(2) : a(1)).toLowerCase()];
+    if (out !== undefined && w(7) > out) return RAN_OUT;
     const most = p.mostOn === undefined || p.mostOn === who ? p.most : undefined;
     return most !== undefined && w(7) > most ? RAN_OUT : w(7);
   };
@@ -1281,6 +1285,72 @@ test("card rh-cold-quote: one provider that answers SafeCastOverflow for a curre
   const d = rcX("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11a6", { over: 0, plainOn: 1 }, 0, rcAt(4));
   assert.deepEqual(await verdict(d.run()), { accepted: false, code: "rpc_disagree" });
   assert.deepEqual(await verdict(c.run()), { accepted: false, code: "rpc_disagree" });
+});
+
+test("card rh-cold-quote: the prune reads the token out of a currency's pool: one deep in the token and shallow in its other currency is kept, the token as currency1 or as currency0", async () => {
+  // each pool holds less than Q of X, so a read that named X as the output would prune it and let the seeded route pass
+  const x1 = rcAt(0x200);
+  const c1 = rcX("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11b1", { mostOf: { [x1]: AMOUNT / 100n } }, 0, x1);
+  assert.ok(BigInt(x1) < BigInt("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11b1"), "the token is currency1");
+  await assert.rejects(c1.run(), heldTo(c1.x));
+  const x0 = "0x7fffffffffffffffffffffffffffffffff0000b2";
+  const c0 = rcX("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11b2", { mostOf: { [x0]: AMOUNT / 100n } }, 0, x0);
+  await assert.rejects(c0.run(), heldTo(c0.x));
+});
+
+test("card rh-cold-quote: a currency's pool whose exact-output read reverts with no data on both providers is kept: its market still holds a seeded route", async () => {
+  const c = rcX("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11b3", { plainOn: "both" }, 0, rcAt(5));
+  await assert.rejects(c.run(), heldTo(c.x));
+});
+
+// a cold Robinhood quote whose first scan provider fails once at once and whose spare hides the token's real pool (a
+// native pool of a shape only the scan finds, initialized 5M blocks back): the first still reads every block but the
+// newest few, so the seeded route is refused (review of 9c962b6d, HIGH: the spare had the whole 10M depth alone)
+// `fail`: the first's request that answers HTTP 503, once
+const rcLag = async (token: string, fail: (calls: readonly EvmRpcCall[]) => boolean) => {
+  const real: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const pools = [seeded(token), real];
+  const inner = scanner(RC_HEAD, [{ key: real.key, at: RC_HEAD - 5_000_000 }]);
+  let failed = 0;
+  const first: EvmRpc = async (calls, s) => {
+    if (failed === 0 && fail(calls) && ++failed) throw new Error("the provider answered HTTP 503");
+    return inner(calls, s);
+  };
+  const spareAsked: [number, number][] = [];
+  const spare = scanner(RC_HEAD, [], spareAsked);
+  const req = { chain: "robinhood" as const, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) };
+  // the blocks the spare read, each range once (a request's filters each ask it)
+  const spared = () => [...new Set(spareAsked.map(String))].map((r) => r.split(",").map(Number)).reduce((n, [a, b]) => n + b! - a! + 1, 0);
+  return { spareAsked, spared, failed: () => failed, run: (rpc = first) => evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, [rpc, spare]) };
+};
+const toBlock = (c: EvmRpcCall) => Number((c.params[0] as { toBlock: string }).toBlock);
+
+test("card rh-cold-quote: a first whose backend is a block behind its head hands the spare the newest 2,000 blocks alone, never the cold depth: the seeded route is refused", async () => {
+  const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed11c1";
+  const c = await rcLag(coin, () => false);
+  const inner = scanner(RC_HEAD, [{ key: keyOf(coin, NATIVE, 2500, 50, NATIVE), at: RC_HEAD - 5_000_000 }]);
+  let lagged = 0;
+  const first: EvmRpc = async (calls, s) => {
+    const out = await inner(calls, s);
+    return out.map((o, i) => (calls[i]!.method === "eth_getBlockByNumber" && Number(calls[i]!.params[0]) === RC_HEAD && ++lagged ? { ...(o as object), result: null } : o));
+  };
+  await assert.rejects(c.run(first), (e: unknown) => e instanceof EvmQuoteError && e.code === "below_reference");
+  assert.ok(lagged > 0);
+  assert.equal(c.spared(), 2_000, JSON.stringify(c.spareAsked));
+});
+
+test("card rh-cold-quote: one HTTP 503 from the first on a cold getLogs is asked again as its halves on the first: the seeded route is refused", async () => {
+  const c = await rcLag("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11c2", (calls) => calls.some((x) => x.method === "eth_getLogs") && toBlock(calls[0]!) - Number((calls[0]!.params[0] as { fromBlock: string }).fromBlock) + 1 > 1_000_000);
+  await assert.rejects(c.run(), (e: unknown) => e instanceof EvmQuoteError && e.code === "below_reference");
+  assert.equal(c.failed(), 1);
+  assert.ok(c.spareAsked.every(([a, b]) => b - a + 1 <= 1_000_000), JSON.stringify(c.spareAsked));
+});
+
+test("card rh-cold-quote: a first that answers HTTP 503 to the newest blocks hands the spare those blocks alone: the seeded route is refused", async () => {
+  const c = await rcLag("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11c3", (calls) => calls.some((x) => x.method === "eth_getLogs") && toBlock(calls[0]!) === RC_HEAD);
+  await assert.rejects(c.run(), (e: unknown) => e instanceof EvmQuoteError && e.code === "below_reference");
+  assert.equal(c.failed(), 1);
+  assert.equal(c.spared(), 2_000, JSON.stringify(c.spareAsked));
 });
 
 test("D1 the reference through unlisted v4 middles is a route the device quotes and builds; the same route unquoted, or on v3, is refused", async () => {

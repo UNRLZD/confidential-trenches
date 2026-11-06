@@ -910,6 +910,12 @@ const SCAN_MAX_LOGS = 10_000;
  *  10:50Z), so a cold scan of USDC refused every quote and never kept what it read. At the smallest span the request is
  *  asked as before (askScan) and a failure refuses. */
 const SCAN_SPLITS = 3;
+/** Where another provider follows, the most blocks of a cold scan's request it is handed that the one before failed at
+ *  once (an HTTP 5xx, a refused connection, its last block not held yet): a longer one is asked as its halves on the
+ *  one that failed it first, as a timeout is (review of 9c962b6d, HIGH, a repeat of M382's HIGH-1: one such failure
+ *  on Robinhood's first handed its spare alone the whole 10M-block depth of a cold quote, and a spare that hid the
+ *  token's real pool had a seeded route pass). */
+const SCAN_ALONE = 1_000_000;
 /** The most currencies one getLogs request names: an OR of topics, so the currencies of a quote's scan cost the
  *  requests of one. */
 const SCAN_OR = 256;
@@ -1167,7 +1173,16 @@ async function scanPools(
   let pin: Block | null = null;
   type Job = { part: Each[]; a: number; b: number; on: ScanOn };
   const jobs: Job[] = [];
-  const jobsOf = (g: Each[], from: number, to: number, on = first, into = jobs) => {
+  const jobsOf = (g: Each[], from: number, to: number, on = first, into = jobs): void => {
+    // where the request up to the head would span more than SCAN_ALONE blocks, its newest blocks, the next provider's
+    // span of them, are a request of their own (review of 9c962b6d): a backend a block or two behind its head answers
+    // null for that request's last block alone, and the next carries those blocks in one request; the rest stays under
+    // the provider's cap (Robinhood's 10M a request)
+    if (on.next !== undefined && to === head && Math.min(on.span, to - from + 1) > SCAN_ALONE) {
+      const k = Math.min(on.next.span, SCAN_ALONE);
+      jobsOf(g, from, to - k, on, into);
+      return jobsOf(g, to - k + 1, to, on, into);
+    }
     // a provider may span fewer blocks a request when a topic position holds more than one value (orSpan): then each
     // currency is asked alone, at the provider's whole span, where that is no more requests than the OR (card
     // rh-cold-quote: Robinhood's 10M blocks are 100 OR requests of 100,000 for any number of currencies, and one
@@ -1228,16 +1243,29 @@ async function scanPools(
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
     const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[] })));
+    // a cold request this provider failed at once, where another follows, is asked as its halves on this one down to
+    // SCAN_ALONE blocks, its splits left as they were, before the next has any of it (SCAN_ALONE)
+    const alone = !fast && on.next !== undefined && b - a + 1 > SCAN_ALONE;
+    const halves = (left: number) => {
+      const mid = a + Math.floor((b - a) / 2);
+      return settle([one({ part, a, b: mid, on }, left), one({ part, a: mid + 1, b, on }, left)]);
+    };
     if (splits > 0 && b > a) {
       // one try: a request that ran out of time, failed or answered too many logs is asked as its two halves (a
       // throttled one is asked again whole by the gate; past the scan's bound each half refuses before it is sent); one
       // whose last block the provider does not hold yet is asked again whole, its tries left (NotHeldYet)
       let notYet = false;
+      let out = false;
       const rs = await on.gate.ask(rpc, calls, 1, fast).then(logsOf, (e) => {
-        if (e instanceof ScanRefused) throw e;
+        if (e instanceof ScanRefused) {
+          if (!alone) throw e;
+          out = true;
+          return null;
+        }
         notYet = e instanceof NotHeldYet;
         return null;
       });
+      if (out) return halves(splits);
       if (rs !== null && fine(rs)) return void keep(rs);
       // a warm scan's request one failed goes to the next whole: halves help a span too long for its time or its logs,
       // never a warm one (card evm-scan-second-provider: Robinhood's first answering no logs held a warm quote 9.5 to
@@ -1251,7 +1279,11 @@ async function scanPools(
       const mid = a + Math.floor((b - a) / 2);
       return settle([one({ part, a, b: mid, on }, splits - 1), one({ part, a: mid + 1, b, on }, splits - 1)]);
     }
-    const rs = logsOf(await on.gate.ask(rpc, calls, SCAN_TRIES, fast));
+    const rs = await on.gate.ask(rpc, calls, SCAN_TRIES, fast).then(logsOf, (e) => {
+      if (e instanceof ScanRefused && alone) return null;
+      throw e;
+    });
+    if (rs === null) return halves(0);
     if (!fine(rs)) return refuse("rpc_error", "the scan provider answered no logs");
     keep(rs);
   };
