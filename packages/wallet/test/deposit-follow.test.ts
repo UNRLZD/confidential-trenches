@@ -737,3 +737,23 @@ test("reload mid-bind with bind.ts: the call already out is settled, no second c
   assert.equal(out.kind, "done");
   assert.equal(sent.length, 1, `a second call at nonce ${sent[1]?.nonce} after the reload`);
 });
+
+test("helper-create-u: after SUCCESS, while U reads not_created, the status is read again each round (the read the helper creates U on); once U exists, no more", async () => {
+  const t = await setup(["SUCCESS"]);
+  t.chain.credit(CREDIT);
+  const spy = t.deps.bind!;
+  let calls = 0;
+  const reads: number[] = [];
+  const binds: number[] = [];
+  const bind: typeof bindDeposit = async (s, a, dps) => {
+    binds.push(t.ticks());
+    if (++calls <= 3) await dps.onWait?.("not_created"); // U not created yet: the phase ends, the next round binds again
+    return spy(s, a, dps);
+  };
+  const fetchFn = (async (url: string, init?: RequestInit) => (reads.push(t.ticks()), t.oc.fetchFn(url, init))) as typeof fetch;
+  const out = await followDeposit(t.args, { ...t.deps, bind, fetchFn });
+  assert.equal(out.kind, "done");
+  assert.equal(calls, 4);
+  assert.deepEqual(reads, [0, 1, 2], "SUCCESS read at round 0, read again in rounds 1 and 2 while U was not created, none once it exists");
+  assert.deepEqual(binds, [0, 1, 2, 3]);
+});

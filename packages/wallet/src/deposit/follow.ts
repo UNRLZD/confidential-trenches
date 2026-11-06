@@ -486,6 +486,10 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     return { state: r.row.depositor === U ? "ours" : "theirs", value: r.row.value };
   };
 
+  // U not created yet (the bind's not_created wait): the helper creates U on a status read of SUCCESS once the delivery
+  // is final (card helper-create-u), so the op's status is read again each round until U exists
+  let uMissing = false;
+
   // ---------- a bind phase: the seed open (under deps.seedLock), U's next note bound at U's credit ----------
   const bindPhase = async (amount: bigint): Promise<"bound" | "paused" | "held"> => {
     for (const [id, op] of await opsOfU())
@@ -510,6 +514,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
             store, rpcs, fetchFn, sleep, pollMs, signal,
             ...(deps.relayerAccount !== undefined ? { relayerAccount: deps.relayerAccount } : {}),
             onWait: async (code) => {
+              if (code === "not_created") uMissing = true;
               if (!HALTS.has(code)) throw new BindPaused(code);
               halted = true;
               for (const [id, op] of await opsOfU()) if (!ENDS.has(op.stage) && op.stage === "into_vault") await write(id, "halted", legFacts(op, "halted"));
@@ -532,6 +537,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     // halted clears when the halt does
     if (halted) for (const [id, op] of await opsOfU()) if (op.stage === "halted") await write(id, "into_vault", legFacts(op, "into_vault"));
     if (out === "paused") return "paused";
+    uMissing = false;
     if (out.kind === "struck" || out.kind === "refused") {
       await holdAll(out.kind === "struck" ? "sender_struck" : out.code);
       return "held";
@@ -631,6 +637,8 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
         if (op.stage === "quote_checked") await write(id, "expired", {});
         continue;
       }
+      // after SUCCESS the status is read again only while U is not created (its read is what creates it)
+      if (op.follow.delivered !== undefined && !uMissing) continue;
       if (now() < (statusAt.get(id) ?? 0)) continue;
       const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());
       if (st === null) continue;
