@@ -1,0 +1,68 @@
+{
+ "at": "2026-11-06T04:09:41.711Z",
+ "cluster": "devnet",
+ "pools": [
+  {
+   "chain": "solana",
+   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ"
+  }
+ ],
+ "before": 0,
+ "stage": "done",
+ "ms": 39989,
+ "ops": [
+  {
+   "id": "0e771d1d-45bc-432e-8bc7-dd12534d3156",
+   "kind": "restore",
+   "stage": "done",
+   "txs": [],
+   "created_ms": 1793938139686
+  }
+ ],
+ "notes": [
+  {
+   "ref": "deposit",
+   "state": "SPENT",
+   "value": "10000000",
+   "leafIndex": "38",
+   "label": "3200474172729628326463125717848828151928025882067197133045549097171052127537",
+   "j": null
+  },
+  {
+   "ref": "change",
+   "state": "UNSPENT",
+   "value": "0",
+   "leafIndex": "39",
+   "label": "3200474172729628326463125717848828151928025882067197133045549097171052127537",
+   "j": 1
+  },
+  {
+   "ref": "return",
+   "state": "UNSPENT",
+   "value": "3482099",
+   "leafIndex": "40",
+   "label": "5396292379962577567880052507470785670468193442322512475382790628692111211911",
+   "j": 0
+  }
+ ],
+ "wallets": [
+  {
+   "note": "deposit",
+   "w": "co4Njaq8gY25mqFMtGfGFkRVToSzAncpMEavxJfQAfc",
+   "reads": [
+    {
+     "rpc": "https://api.devnet.solana.com",
+     "slot": 519174244,
+     "lamports": "3627456",
+     "tokenAccounts": 0
+    },
+    {
+     "rpc": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+     "slot": 519174247,
+     "lamports": "3627456",
+     "tokenAccounts": 0
+    }
+   ]
+  }
+ ]
+}
