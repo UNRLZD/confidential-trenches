@@ -534,7 +534,7 @@ export async function main(args, io = {}) {
   // and listed: { step, hash, raw, nonce, tip, maxFee, gas, sentAt, receipt }. The record lists the ones that landed.
   // A --sweep-kept run starts from its journal's.
   const signed = kept || resume
-    ? (j0.txs ?? []).map((s) => ({ ...s, nonce: big0(s.nonce), tip: big0(s.tip), maxFee: big0(s.maxFee), gas: big0(s.gas), receipt: null }))
+    ? (j0.txs ?? []).map((s) => ({ ...s, nonce: big0(s.nonce), tip: big0(s.tip), maxFee: big0(s.maxFee), gas: big0(s.gas), value: big0(s.value), receipt: null }))
     : [];
   let stopped = null;
   let stoppedAt = null;
@@ -548,13 +548,13 @@ export async function main(args, io = {}) {
   // signed transaction (its raw form is public once sent; no key), the key folder's name and state and why
   const writeJournal = () => {
     if (!journalFile) return;
-    const txs = signed.map((s) => ({ step: s.step, ...(s.contract ? { contract: s.contract } : {}), ...(s.address ? { address: s.address } : {}), hash: s.hash, raw: s.raw, nonce: String(s.nonce), tip: String(s.tip), maxFee: String(s.maxFee), gas: String(s.gas), sentAt: s.sentAt, landed: Boolean(s.receipt) || Boolean(s.landed) }));
-    const j = { chain: chainName, chainId: Number(BigInt(id)), dryRun, return: ret, deployer, need: String(need ?? (j0?.need ?? "0")), at: j0?.at ?? startedAt, complete: complete || Boolean(j0?.complete), funded, stopped: stopped ?? (kept ? j0?.stopped : null) ?? null, stopped_at: stoppedAt ?? (kept ? j0?.stopped_at : null) ?? null, keys: journalKeys, txs };
+    const txs = signed.map((s) => ({ step: s.step, ...(s.contract ? { contract: s.contract } : {}), ...(s.address ? { address: s.address } : {}), hash: s.hash, raw: s.raw, nonce: String(s.nonce), tip: String(s.tip), maxFee: String(s.maxFee), gas: String(s.gas), ...(s.value !== undefined ? { value: String(s.value) } : {}), to: s.to ?? null, sentAt: s.sentAt, landed: Boolean(s.receipt) || Boolean(s.landed) }));
+    const j = { chain: chainName, chainId: Number(BigInt(id)), dryRun, return: ret, deployer, need: String(need ?? (j0?.need ?? "0")), at: j0?.at ?? startedAt, complete: complete || Boolean(j0?.complete), funded, wait_nonce: kept ? (j0?.wait_nonce ?? null) : String(nonce0), stopped: stopped ?? (kept ? j0?.stopped : null) ?? null, stopped_at: stoppedAt ?? (kept ? j0?.stopped_at : null) ?? null, keys: journalKeys, txs };
     writeAtomic(journalFile, JSON.stringify(j, null, 2) + "\n");
   };
   const landed = () => signed.filter((s) => s.receipt).sort((a, b) => Number(a.nonce - b.nonce));
   const send = async (step, t, extra = {}) => {
-    const s = { step, ...extra, nonce: t.nonce, tip: t.maxPriorityFeePerGas, maxFee: t.maxFeePerGas, gas: t.gas, ...signTx(sk, { chainId: big(id), ...t }), sentAt: now(), receipt: null };
+    const s = { step, ...extra, nonce: t.nonce, tip: t.maxPriorityFeePerGas, maxFee: t.maxFeePerGas, gas: t.gas, value: t.value ?? 0n, to: t.to ?? null, ...signTx(sk, { chainId: big(id), ...t }), sentAt: now(), receipt: null };
     signed.push(s);
     writeJournal();
     try {
@@ -582,6 +582,27 @@ export async function main(args, io = {}) {
     return { tip, maxFee: maxOf(bump(maxOf(...at.map((s) => s.maxFee))), f.maxFee, tip) };
   };
   const receiptOf = async (s) => (s.receipt ??= await call("eth_getTransactionReceipt", [s.hash]));
+  // --sweep-kept: what the key sent out since its run's funding wait (its journaled transactions from wait_nonce on):
+  // each landed one's fee from its receipt (gasUsed x effectiveGasPrice, plus an OP stack chain's l1Fee; an Arbitrum
+  // chain's gasUsed holds its L1 part) and the value of each that landed to another address. Any of it unread (a
+  // receipt, or a journal from before value was kept) counts nothing, so the key is kept.
+  const sentOut = async () => {
+    if (j0?.wait_nonce == null) return 0n;
+    let out = 0n;
+    try {
+      for (const s of signed) {
+        if (s.nonce < BigInt(j0.wait_nonce)) continue;
+        const r = await receiptOf(s);
+        if (!r) continue; // replaced at its nonce, or not landed: it sent nothing
+        if (r.effectiveGasPrice == null || s.value === undefined) return 0n;
+        out += big(r.gasUsed) * big(r.effectiveGasPrice) + (r.l1Fee != null ? big(r.l1Fee) : 0n);
+        if (r.status === "0x1" && String(s.to ?? "").toLowerCase() !== deployer.toLowerCase()) out += s.value;
+      }
+    } catch {
+      return 0n;
+    }
+    return out;
+  };
   const waitReceipt = async (s, ms) => {
     for (const end = now() + ms; now() < end; await sleep(2000)) if (await receiptOf(s)) return s.receipt;
     return null;
@@ -760,13 +781,16 @@ export async function main(args, io = {}) {
         for (const end = now() + WAITS.lateFunding; now() < end; ) await sleep(WAITS.poll);
         if (kept) {
           // the transfer the run asked for (its need) has landed: nothing more is coming, and the key may go once swept;
-          // less than that (nothing, or a part) and the key is kept
+          // less than that (nothing, or a part) and the key is kept. What the key sent out since its funding wait (an
+          // earlier --sweep-kept's landed sweeps and every landed transaction's fee) came out of what it was sent, so it
+          // counts toward the need: a part held and sent back is no reading of it, the rest landing later is
           const bal = await call("eth_getBalance", [deployer, "latest"]).then(big, () => 0n);
-          if (bal >= BigInt(j0.need ?? 0) && bal > 0n) {
+          const out = await sentOut();
+          if (bal + out >= BigInt(j0.need ?? 0) && bal > 0n) {
             funded = true;
             writeJournal();
           }
-          else console.log(`deploy: the run key holds ${bal} wei, less than the ${j0.need} wei its run asked for: it is kept, since that transfer may still land`);
+          else console.log(`deploy: the run key holds ${bal} wei${out ? ` and sent out ${out} since its funding wait` : ""}, less than the ${j0.need} wei its run asked for: it is kept, since that transfer may still land`);
         }
       }
       await sweep();

@@ -73,14 +73,15 @@ function chain(on = {}) {
       if (t.nonce !== g(c.nonce, c.deployer) || t.maxFee < c.base) break;
       c.pool.shift();
       const used = t.to ? 21000n : (t.gas * 10n) / 12n;
-      const fee = used * (c.base + (t.tip < t.maxFee - c.base ? t.tip : t.maxFee - c.base)) + l1Of(t.len);
+      const price = c.base + (t.tip < t.maxFee - c.base ? t.tip : t.maxFee - c.base);
+      const fee = used * price + l1Of(t.len);
       if (g(c.bal, c.deployer) < t.value + fee) continue; // dropped: it cannot pay at execution
       c.bal.set(c.deployer, g(c.bal, c.deployer) - t.value - fee);
       let ca = null;
       if (t.to) c.bal.set(t.to, g(c.bal, t.to) + t.value);
       else c.code.set((ca = createAddress(c.deployer, t.nonce)), runtime(createdBy(t.data))), c.created.push(t.data);
       c.nonce.set(c.deployer, t.nonce + 1n);
-      c.receipts.set(hash, { status: "0x1", contractAddress: ca, gasUsed: "0x" + used.toString(16), from: c.deployer });
+      c.receipts.set(hash, { status: "0x1", contractAddress: ca, gasUsed: "0x" + used.toString(16), effectiveGasPrice: "0x" + price.toString(16), l1Fee: "0x" + l1Of(t.len).toString(16), from: c.deployer });
       on.afterMine?.(c, t);
     }
   };
@@ -897,6 +898,8 @@ test("mainnet review 3: a funding-wait key holding part of its need is kept by e
   const s3 = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
   assert.equal(s3.error, null, String(s3.error?.message) + why(c2));
   assert.ok(c2.balanceOf(j.deployer) <= DUST, "the rest is sent back once it lands" + why(c2));
+  assert.deepEqual(folders(m.keys), [], "once the rest has landed and is swept, the key is removed" + why(c2));
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "removed");
 });
 
 test("mainnet review 3: a settled run's final record reads no receipt over RPC: an outage once its key is removed still leaves a record of every transaction", OPTS, async (t) => {
@@ -918,4 +921,43 @@ test("mainnet review 3: a settled run's final record reads no receipt over RPC: 
   assert.equal(r.error, null, String(r.error?.message) + why(c));
   const d = JSON.parse(readFileSync(m.out, "utf8"));
   assert.equal(d.txs.length, Number(c.nonce.get(c.deployer)), "the record lists every transaction of the key" + why(c));
+});
+
+test("mainnet review 4: a funding-wait key that held part of its need and sent it back is removed once the rest lands and is swept, and kept on every pass before", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let snap = null;
+  let keyFile = null;
+  let key = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: send exactly") && !snap) (snap = readFileSync(m.journal, "utf8")), (keyFile = path.join(m.keys, folders(m.keys)[0], "key")), (key = readFileSync(keyFile, "utf8"));
+    },
+  });
+  const j = JSON.parse(snap);
+  const need = BigInt(j.need);
+  const c2 = mainnet();
+  c2.deployer = j.deployer;
+  c2.bal.set(j.deployer.toLowerCase(), need / 2n);
+  c2.fundAt = 1e9;
+  c2.fundWei = need - need / 2n;
+  writeFileSync(m.journal, snap);
+  mkdirSync(path.dirname(keyFile), { recursive: true });
+  writeFileSync(keyFile, key);
+  // pass 1: the part is sent back; the rest is still to land: kept
+  const s1 = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(s1.error, null, String(s1.error?.message) + why(c2));
+  assert.equal(folders(m.keys).length, 1, "pass 1 keeps the key");
+  // the rest lands
+  c2.clock = c2.fundAt;
+  c2.mine();
+  // pass 2: the key's balance and what it sent out reach the need: swept and removed
+  const s2 = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(s2.error, null, String(s2.error?.message) + why(c2));
+  assert.ok(c2.balanceOf(j.deployer) <= DUST, "the rest is sent back" + why(c2));
+  assert.deepEqual(folders(m.keys), [], "the key is removed once the rest has landed and is swept" + why(c2));
+  const jj = JSON.parse(readFileSync(m.journal, "utf8"));
+  assert.equal(jj.keys.state, "removed");
+  assert.equal(jj.funded, true);
 });
