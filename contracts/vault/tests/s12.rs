@@ -337,7 +337,7 @@ async fn vt_s12_direct() -> R<()> {
             n => {
                 // per row on these rows (ids of 11-18 B), and a page of PAGE_MAX rows of them (E); no bound on it: the
                 // largest rows cost more, and the kit's page sizes (packages/kit/src/vault/sync.ts VAULT_SYNC_PAGE) rest
-                // on review_viewgas.rs, which measures them
+                // on review R-03's measure of them (spends 497.053 Tgas for 1,000 of its largest rows, so 250 a page)
                 let per = (t - one[method]) / (n - 1) as f64;
                 let page = one[method] + per * (PAGE_MAX - 1) as f64;
                 println!("VT-S12 direct | view {method} | {per:.4} Tgas per row of these | {page:.3} Tgas at PAGE_MAX {PAGE_MAX} such rows | E (the per-row fit) | {} | {} | {}", m.build, m.sandbox, m.platform);
