@@ -127,8 +127,11 @@ export const RISK_FIELDS = [
   "insiders_bps", "bundlers_bps", "fresh_bps",
 ] as const;
 export type Risk = Record<(typeof RISK_FIELDS)[number], Field<unknown>>;
-export const PAGE_FIELDS = ["row", "decimals", "pool", "risk", "route"] as const;
-export type TokenPage = { row: Row; decimals: number; pool: string | null; risk: Risk; route: "ok" | "none" | "unknown" };
+/** 06b's TokenPage fields, then `filling` (card token-page-fills-after, added after the frozen list): true only while
+ *  the page is named on chain and its Jupiter row is still coming (its search was late), so the app draws those fields
+ *  loading; false for a Discover row, a Jupiter row, and a mint Jupiter answered it does not list. */
+export const PAGE_FIELDS = ["row", "decimals", "pool", "risk", "route", "filling"] as const;
+export type TokenPage = { row: Row; decimals: number; pool: string | null; risk: Risk; route: "ok" | "none" | "unknown"; filling: boolean };
 export type Holder = { addr: string; amt: string; bps: number | null; kind?: "burn" };
 export const HOLDERS_FIELDS = ["holders", "total", "top_bps", "src", "as_of_ms"] as const;
 export type Holders = { holders: Holder[]; total: number | null; top_bps: number | null; src: string; as_of_ms: number };
@@ -263,7 +266,7 @@ export function jupiterPool(jup: Record<string, unknown>): string | null {
  *  and the token's launch as read on chain (origin.ts; null for none, undefined when not read). The launch names the
  *  row's launchpad: a Discover row keeps its own (read on chain by the lists, with Jupiter's config) when this read
  *  finds none; a row from Jupiter's search never keeps Jupiter's tag alone. */
-export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number): TokenPage {
+export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number, filling = false): TokenPage {
   const row: Row = { ...base };
   row.launchpad = origin?.pad ?? (listed ? base.launchpad : null);
   const curveBps = origin?.curveBps ?? null;
@@ -303,6 +306,7 @@ export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Or
     },
     // whether a token routes is the device's reference-pool read at the quote (S12), never the data part's call
     route: "unknown",
+    filling,
   };
 }
 
@@ -766,7 +770,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // each token's last page as built, `answer` as the cache keeps it and `filled` once its launch came in after
   type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer; rowLater?: boolean };
   const built = bounded<Built>(CACHE_MAX);
-  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt)), src: b.base.src === "chain" ? "chain" : "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
+  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt, b.rowLater === true)), src: b.base.src === "chain" ? "chain" : "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
   /** Card helper-page-jup-429: the page's Jupiter row within JUP_PAGE_WAIT_MS, else a row held from an earlier read,
    *  under STALE_MS old, else null (the page is named on chain); the search goes on and its row is held for the next
    *  read. A search that fails (Jupiter's 429 or its hold past SEARCH_HOLD_WAIT_MS) is answered the same way. */
