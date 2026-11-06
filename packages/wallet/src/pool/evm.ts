@@ -105,8 +105,45 @@ export const EVM_NATIVE_ASSET = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 export const EVM_POOL_TAG = "finalized";
 /** The tag every root, time and epoch block is read at (the newest block both RPCs agree on); never kept. */
 export const EVM_NEWEST_TAG = "latest";
-/** The first eth_getLogs page, in blocks; a range-cap error halves it for that RPC. */
+/** A W's Transfer read's first and widest eth_getLogs page, in blocks; a range-cap error halves it for that RPC. */
 export const EVM_LOG_PAGE_BLOCKS = 10_000n;
+/** The pool sync's first eth_getLogs page on each provider, in blocks (card evm-pool-sync-wide-pages). Base makes a block
+ * every 200 ms, so a month-old pool is about 13M blocks: about 1,300 pages a provider at EVM_LOG_PAGE_BLOCKS, 130 at
+ * this. The pool's filter (its address, its three topics in one position) read live on every provider of the EVM
+ * venues' lists, at the head over 100,000 to 10,000,000 blocks and again from the testnet pool's deploy block or 13M
+ * blocks back (6 Nov 07:31Z from this Mac): the widest each answered, with its words past it.
+ * - base: base.api.pocket.network 100,000 at the head and 13M back (1.8 s), "query exceeds max block range 100000"
+ *   (13M back at 07:44Z, 4 of 4: "block range exceeds maximum 500": its backends differ);
+ *   base-rpc.publicnode.com 50,000 ("-32701: exceed maximum block range: 50000"), and 13M back HTTP 403 "Archive
+ *   requests require a personal token"; base.public.blockpi.network 5,000; base.gateway.tenderly.co "-32602: invalid
+ *   params" (1,000, 5 Nov); rpc.sentio.xyz HTTP 429 code 8 "public eth_getLogs is limited to 1000 blocks" (a 429: a
+ *   throttle to the pager, so never a pool provider); base-mainnet.public.blastapi.io 10 blocks; mainnet.base.org HTTP
+ *   429 -32011 "request limit reached" on the first call.
+ * - robinhood: rpc.mainnet.chain.robinhood.com 100,000 at the head and 13M back, "query spans 200000 blocks ..., but
+ *   only 100000 are allowed for this request; ... or send one value per position"; robinhood.api.pocket.network 100,000
+ *   at the head, then "block range exceeds maximum 50000" at 200,000 and "max 10001 blocks" 13M back (its backends
+ *   differ); rpc-robinhood.globalstake.io 5,000,000 (10.1 s for its first page, 0.6-3.8 s after), no answer in 15 s at
+ *   10,000,000 and 13M back; robinhood.drpc.org code 35 "ranges over 10000 blocks are not supported on free plan";
+ *   robinhood.daybreak-rpc.network 2,000; robinhood-rpc.publicnode.com and robinhood.rpc.blxrbdn.com HTTP 403.
+ * - base-sepolia: base-sepolia.gateway.tenderly.co 10,000,000 (54 logs, 0.5-4.2 s); base-testnet.api.pocket.network
+ *   100,000 at the head, "max block range 10000" from the deploy block (again at 07:44Z on 3 of 6 pages of
+ *   100,000 from there, the rest answered: its backends differ); base-sepolia-rpc.publicnode.com 50,000 at the
+ *   head and from the deploy block (07:44Z);
+ *   84532.rpc.thirdweb.com 1,000 (-32005 "Log response size exceeded"); sepolia.base.org 200.
+ * - robinhood-testnet: rpc.testnet.chain.robinhood.com 100,000 (as mainnet's own), from the deploy block too;
+ *   robinhood-sepolia-rpc.publicnode.com 50,000 at the head and from the deploy block (07:44Z); 46630.rpc.thirdweb.com 1,000; robinhood-testnet.drpc.org under 10,000.
+ * A page the provider answers in full doubles, up to EVM_POOL_LOG_PAGE_MAX_BLOCKS. */
+export const EVM_POOL_LOG_PAGE_BLOCKS = 100_000n;
+/** The pool sync's widest page: 8 x its first. Tenderly's Base Sepolia gateway answered the pool's logs over 500,000
+ * blocks in 1.3 s and 1,000,000 in 2.7 s (6 Nov 07:31Z), against the device's 3.5 s client (the kit's SOLANA_RPC_RETRY
+ * deadlineMs), so no page grows to where an honest provider's answer outlasts the client. */
+export const EVM_POOL_LOG_PAGE_MAX_BLOCKS = 800_000n;
+/** A refusal of a page no wider than its provider already answered in full is not its cap but one of its backends': the
+ * same page again at once, at most this many times in a row, then halved. Pocket's gateways answer one range from
+ * backends of different caps: base-testnet.api.pocket.network refused 3 of 6 pages of 100,000 blocks from the Base
+ * Sepolia pool's deploy block "query exceeds max block range 10000" and answered the rest (6 Nov 07:44Z), and the
+ * restore's Base Sepolia sync there took 96 pages and 21 refusals where PublicNode took 31 and 3 (07:47Z). */
+export const EVM_LOG_REFUSED_AGAIN = 2;
 /** A log read's ceiling (the smallest page size refused in it) holds for this many full pages in a row, then the page
  * may double past it once more: a W's Transfer read (card restore-check-bounded; evmTokensSentTo, evmTokensSentToOne)
  * and the pool sync's (card notes-per-pool-evm-base-hang, evmTreeSync). The pager reads no cap's words, so a refusal under a provider's
@@ -647,26 +684,82 @@ export type EvmLogFilter = { address?: string; topics: readonly (string | readon
 /** A log's decoder: refuses a log the filter would not give or a field not in its shape. */
 export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to: bigint, what: string) => E;
 
+/** How one log read pages (readLogs): its widest page, how many full pages a refused size holds as the read's
+ * ceiling before the page may grow past it once more (doubled each time its probe is refused at that same size again,
+ * so a true cap costs a few refused calls in a read, never one per EVM_LOG_CEILING_PAGES pages; a refusal at any other
+ * size, as one under the cap, holds it for ceilingPages again), and whether no answer in time on a
+ * page over one block halves it (a W's Transfer read, whose filter names no address: base-testnet.api.pocket.network
+ * answered no 10,000-block one in time, 5 Nov 13:44Z) or never does (the pool sync, card evm-pool-sync-wide-pages: its
+ * filter names the pool, and the pool pairs answered its pages of 50,000 and 100,000 blocks in 0.1-0.9 s, 6 Nov
+ * 07:31-07:44Z). */
+export type EvmLogRules = { max: bigint; ceilingPages: number; slowHalves: boolean };
+/** One provider's page: its size now and the widest it answered in full (null: none yet). */
+export type EvmLogPage = { size: bigint; answered: bigint | null };
+/** Where each read finds its page: by the RPC and its index, at each page (a seat's provider may change mid-read). */
+export type EvmLogPager = { rules: EvmLogRules; of(rpc: EvmRpc, k: number): EvmLogPage };
+
+/** A W's Transfer read's pager: one size per RPC index in `page`, kept across Ws (the restore's). */
+const transferPager = (page: bigint[], ceilingPages = Infinity): EvmLogPager => ({
+  rules: { max: EVM_LOG_PAGE_BLOCKS, ceilingPages, slowHalves: true },
+  of: (_rpc, k) => ({ get size() { return page[k]!; }, set size(v: bigint) { page[k] = v; }, answered: null }),
+});
+
 /**
- * One RPC's logs of a filter over from..to, in pages that end at or below `to`. A throttle (`throttled`: a rate
- * limit, or a one-block page with no answer in time) is no cap: the same page again after the provider's Retry-After
- * (else 1 s doubled per try, at most EVM_LOG_THROTTLE_WAIT_MAX_MS), at most EVM_LOG_THROTTLE_TRIES tries, then the
- * read's failure (unread, never an empty list). Any other refusal of a page over one block (a provider's cap, in
- * whatever words, or no answer in time) halves its page; after a
- * full page reads, the page doubles again, up to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read
- * until `ceilingPages` full pages in a row have read under it (the Transfer reads' and the pool sync's
- * EVM_LOG_CEILING_PAGES; none: to the read's end), so a cap lifted, a refusal under the cap or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG) is a lag. A page of
- * one block refused is the read's failure, with the provider's own error.
+ * The pool sync's pager (card evm-pool-sync-wide-pages): one page for each provider, by its URL (a seat's provider now,
+ * evmPair), so a spare that takes a seat pages at its own size and the provider it left keeps its own. Each starts at
+ * EVM_POOL_LOG_PAGE_BLOCKS, doubles after each full page up to EVM_POOL_LOG_PAGE_MAX_BLOCKS, halves only on its own
+ * refusal (a range cap, in any words), never on a 429 or no answer in time (the same page again), and keeps its size
+ * and the widest it answered across the sync's rounds.
  */
-async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, ceilingPages = Infinity): Promise<E[]> {
+export function evmPoolLogPager(): EvmLogPager {
+  const pages = new Map<string, EvmLogPage>();
+  return {
+    rules: { max: EVM_POOL_LOG_PAGE_MAX_BLOCKS, ceilingPages: EVM_LOG_CEILING_PAGES, slowHalves: false },
+    of(rpc, k) {
+      const key = (rpc as { url?: unknown }).url;
+      const id = typeof key === "string" ? key : `rpc ${k}`;
+      let p = pages.get(id);
+      if (p === undefined) pages.set(id, (p = { size: EVM_POOL_LOG_PAGE_BLOCKS, answered: null }));
+      return p;
+    },
+  };
+}
+
+/**
+ * One RPC's logs of a filter over from..to, in pages that end at or below `to`, each page's size its provider's
+ * (`pager`). A throttle (`throttled`: a rate limit, or a one-block page with no answer in time) is no cap: the same
+ * page again after the provider's Retry-After (else 1 s doubled per try, at most EVM_LOG_THROTTLE_WAIT_MAX_MS), at most
+ * EVM_LOG_THROTTLE_TRIES tries, then the read's failure (unread, never an empty list). No answer in time on a page over
+ * one block halves it where the rules say so (slowHalves); where not, it is a throttle too, but on a page wider than
+ * the provider ever answered in full, which takes the page back to that width (the read's ceiling), never below it.
+ * Any other refusal of a page over one block (a provider's cap, in whatever words) halves its page, but one no wider
+ * than the provider answered in full, asked again at once first (EVM_LOG_REFUSED_AGAIN); after a full page
+ * reads, the page doubles again, up to the rules' max and below the smallest size refused in this read until the
+ * rules' ceilingPages full pages in a row have read under it (doubled while its probe meets that same size), so a
+ * cap lifted, a refusal under the cap or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG)
+ * is a lag. A page of one block refused is the read's failure, with the provider's own error.
+ */
+async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<E[]> {
+  const { max, slowHalves } = pager.rules;
   const out: E[] = [];
   let refused: bigint | null = null;
-  // full pages read in a row since the ceiling was set (`ceilingPages`)
+  // full pages read in a row since the ceiling was set, and how many it holds for: doubled when the size refused is the
+  // last ceiling's again (its probe met the same cap), else the rules' ceilingPages (a refusal under the cap)
   let held = 0;
+  let hold = pager.rules.ceilingPages;
+  let lastCeiling: bigint | null = null;
   let tries = 0;
+  // refusals in a row of a page no wider than its provider answered (EVM_LOG_REFUSED_AGAIN)
+  let again = 0;
+  const ceiling = (size: bigint) => {
+    hold = size === lastCeiling ? hold * 2 : pager.rules.ceilingPages;
+    refused = lastCeiling = size;
+    held = 0;
+  };
   for (let at = from; at <= to; ) {
     signal?.throwIfAborted();
-    const size = page[k]!;
+    const p = pager.of(rpc, k);
+    const size = p.size;
     const end = at + size - 1n < to ? at + size - 1n : to;
     let got: unknown;
     try {
@@ -677,24 +770,34 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       const m = String((e as Error)?.message ?? e);
       if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
       const t = throttled(e);
-      if (t !== null && (t.kind === "throttle" || end === at)) {
+      if (t?.kind === "slow" && !slowHalves && end > at && p.answered !== null && end - at + 1n > p.answered) {
+        // wider than this provider ever answered: back to the widest it did, held as the read's ceiling
+        ceiling(end - at + 1n);
+        p.size = p.answered;
+        continue;
+      }
+      if (t !== null && (t.kind === "throttle" || end === at || !slowHalves)) {
         if (++tries >= EVM_LOG_THROTTLE_TRIES) throw e;
         await sleep(throttleWaitMs(tries, t.afterMs), signal);
         continue;
       }
+      if (end > at && p.answered !== null && end - at + 1n <= p.answered && ++again <= EVM_LOG_REFUSED_AGAIN) continue;
       if (end > at) {
-        refused = end - at + 1n;
-        page[k] = refused / 2n;
-        held = 0;
+        again = 0;
+        ceiling(end - at + 1n);
+        p.size = (end - at + 1n) / 2n;
         continue;
       }
       throw e;
     }
     tries = 0;
+    again = 0;
     if (!Array.isArray(got)) throw new Error(`rpc ${k}: eth_getLogs ${at}..${end}: not a list`);
     out.push(...got.map((g, i) => decode(g, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
-    if (end - at + 1n === size && refused !== null && ++held >= ceilingPages) refused = null;
-    if (end - at + 1n === size && size * 2n <= EVM_LOG_PAGE_BLOCKS && (refused === null || size * 2n < refused)) page[k] = size * 2n;
+    const full = end - at + 1n === size;
+    if (full && (p.answered === null || size > p.answered)) p.answered = size;
+    if (full && refused !== null && ++held >= hold) refused = null;
+    if (full && size * 2n <= max && (refused === null || size * 2n < refused)) p.size = size * 2n;
     at = end + 1n;
   }
   for (let i = 1; i < out.length; i++) {
@@ -713,16 +816,18 @@ export type EvmAnchors = { fin: EvmBlock; anchor: EvmBlock };
  * the two lists differing, is refused unless the newest anchor's height holds another hash now (a reorg under the
  * read: a retry). One list a strict prefix of the other, every log it lacks past the finalized anchor, is one RPC's log
  * index a moment behind its headers: a retry. Whose logs they are never matters: any other difference is refused,
- * for every device alike. `at0` numbers the logs in the refusal (the pool's leaves held before `from`); `ceilingPages`
+ * for every device alike. `at0` numbers the logs in the refusal (the pool's leaves held before `from`). `page` is a W's
+ * Transfer read's one size per RPC (with `ceilingPages`, each RPC's readLogs') or the pool sync's pager
  * is each RPC's readLogs'.
  */
-export async function evmAgreedLogs<E extends EvmLogRow>(rpcs: Rpcs, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, { fin, anchor }: EvmAnchors, page: bigint[], at0: number, signal?: AbortSignal, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>, ceilingPages?: number): Promise<E[]> {
+export async function evmAgreedLogs<E extends EvmLogRow>(rpcs: Rpcs, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, { fin, anchor }: EvmAnchors, page: bigint[] | EvmLogPager, at0: number, signal?: AbortSignal, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>, ceilingPages?: number): Promise<E[]> {
   const refuse = async (why: string): Promise<never> => {
     const now = await both(rpcs, (rpc, k, sig) => readBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`, sig, sleep ?? wait), signal);
     if (now.some((b) => b === null || b.hash !== anchor.hash)) return lag(`block ${anchor.number} moved under the read (a reorg)`);
     throw new Error(why);
   };
-  const [x, y] = await both(rpcs, (rpc, k, sig) => readLogs(rpc, k, filter, decode, from, anchor.number, page, sig, sleep, ceilingPages), signal);
+  const pager = Array.isArray(page) ? transferPager(page, ceilingPages) : page;
+  const [x, y] = await both(rpcs, (rpc, k, sig) => readLogs(rpc, k, filter, decode, from, anchor.number, pager, sig, sleep), signal);
   for (const e of [...x, ...y]) {
     if (e.block === fin.number && e.blockHash !== fin.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${fin.hash}`);
     if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(`a log of block ${e.block} is not of the anchor ${anchor.hash}`);
@@ -810,7 +915,7 @@ export async function evmTokensSentToOne(rpc: EvmRpc, w: string, from: bigint, {
   const b = await evmAnswered(() => getBlock(rpc, tag(anchor.number), `block ${anchor.number}`), signal, sleep);
   if (b === null || b.hash !== anchor.hash) lag(`the reader does not hold block ${anchor.number} as ${anchor.hash}`);
   if (from > anchor.number) return [];
-  const logs = await readLogs(rpc, 0, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, "0")}`] }, (raw, f, t, what) => decodeTransfer(raw, to, f, t, what), from, anchor.number, page, signal, sleep, EVM_LOG_CEILING_PAGES);
+  const logs = await readLogs(rpc, 0, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, "0")}`] }, (raw, f, t, what) => decodeTransfer(raw, to, f, t, what), from, anchor.number, transferPager(page, EVM_LOG_CEILING_PAGES), signal, sleep);
   for (const e of logs) {
     if (e.block === fin.number && e.blockHash !== fin.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${fin.hash}`);
     if (e.block === anchor.number && e.blockHash !== anchor.hash) lag(`a log of block ${e.block} is not of the anchor ${anchor.hash}`);
@@ -840,9 +945,51 @@ export type EvmSyncArgs = {
   /** A pinned list of two or more providers on the pool's network, read as a pair with spares (evmPair). */
   rpcs: readonly EvmRpc[];
   pin: EvmPoolPin;
+  /** Where the device holds this pool's sync between syncs (evmMemoryHold, or the device's store): none, the sync
+   * starts from the pin's deploy block. */
+  held?: EvmSyncHold;
   /** tests only: the wait between lag retries */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
+
+/**
+ * A pool sync's held part, as the device keeps it between syncs (card evm-pool-sync-wide-pages): every leaf event of
+ * the pool in blocks fromBlock..to, read on both RPCs, the same on both byte for byte, at or below a finalized anchor,
+ * and with the tail of its round making the pool's trees at that round's newest anchor. Its events are the trees'
+ * leaves, in log order, so the tree is rebuilt from them; `to` is the last block synced. The pool's public logs only: no
+ * secret, and nothing that says which leaf is the user's.
+ */
+export type EvmSyncHeld = { network: EvmNetwork; pool: string; fromBlock: bigint; to: bigint; events: readonly EvmPoolEvent[] };
+/** Where a sync's held part is kept: read once, at its first round (a record that is not this pin's, or not in shape,
+ * is not taken); written each time the held part rises. A later sync then reads only the blocks after `to`, and its
+ * first round holds the held leaves to the pool's views with the new ones: a held part they do not make is dropped and
+ * the pool read again from its deploy block, once. A write that fails leaves the sync as it is. */
+export type EvmSyncHold = { read(): Promise<EvmSyncHeld | null | undefined>; write(h: EvmSyncHeld): Promise<void> };
+
+/** A hold in this page's memory: every sync given it (the pool's, a restore's) reads only past the last one's blocks. */
+export function evmMemoryHold(): EvmSyncHold {
+  let h: EvmSyncHeld | null = null;
+  return { read: async () => h, write: async (v) => void (h = v) };
+}
+
+const KINDS = new Set(["deposit", "withdraw", "buy"]);
+const nullOr = (v: unknown, t: string): boolean => v === null || typeof v === t;
+/** A held record this pin's and in shape: its events in this pin's blocks up to `to`, in order, each of the shape the
+ * sync and a restore read (the views check holds what they say). */
+function heldOf(h: unknown, pin: EvmPoolPin, pool: string): EvmSyncHeld | null {
+  const r = h as Partial<EvmSyncHeld> | null | undefined;
+  if (r === null || typeof r !== "object" || r.network !== pin.network || typeof r.pool !== "string" || lower(r.pool) !== pool || r.fromBlock !== pin.fromBlock) return null;
+  if (typeof r.to !== "bigint" || r.to < pin.fromBlock - 1n || !Array.isArray(r.events)) return null;
+  let last: Ev | null = null;
+  for (const e of r.events as Ev[]) {
+    if (e === null || typeof e !== "object" || typeof e.block !== "bigint" || e.block < pin.fromBlock || e.block > r.to || typeof e.logIndex !== "bigint") return null;
+    if (last !== null && (e.block < last.block || (e.block === last.block && e.logIndex <= last.logIndex))) return null;
+    if (!KINDS.has(e.kind) || typeof e.state !== "bigint" || typeof e.value !== "bigint" || typeof e.blockHash !== "string" || typeof e.bytes !== "string") return null;
+    if (!nullOr(e.label, "bigint") || !nullOr(e.precommitment, "bigint") || !nullOr(e.nullifier, "bigint") || !nullOr(e.recipient, "string") || !nullOr(e.token, "string")) return null;
+    last = e;
+  }
+  return r as EvmSyncHeld;
+}
 
 const wait = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -906,7 +1053,11 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   let held: Ev[] = [];
   let heldTo = a.pin.fromBlock - 1n;
   let checked = false;
-  const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
+  // the device's held part (a.held): read at the first round; `fromHold` until a round's views check has held it
+  let read = a.held === undefined;
+  let fromHold = false;
+  let writtenTo = heldTo;
+  const pager = evmPoolLogPager();
   const poolFilter: EvmLogFilter = { address: pool, topics: [[TOPIC_DEPOSITED, TOPIC_WITHDRAWN, TOPIC_BOUGHT]] };
   const poolDecode: EvmLogDecode<Ev> = (raw, from, to, what) => decodeLog(raw, pool, from, to, what);
   const times = new Map<string, bigint>();
@@ -944,6 +1095,15 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
    * does the cache take the leaves up to the finalized anchor; the tail is read again on the next round.
    */
   async function round(signal?: AbortSignal): Promise<Round & { stateTree: VaultTree; labelTree: VaultTree }> {
+    if (!read) {
+      const h = heldOf(await a.held!.read().catch(() => null), a.pin, pool);
+      read = true;
+      if (h !== null && h.to > heldTo) {
+        held = [...h.events];
+        heldTo = writtenTo = h.to;
+        fromHold = true;
+      }
+    }
     if (!checked) {
       const ids = await both(rpcs, async (rpc, k, sig) => qty(await poolRead(`rpc ${k} eth_chainId`, () => rpc("eth_chainId", []), sig, sleep), `rpc ${k} eth_chainId`), signal);
       if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${a.pin.network}'s ${chainId}`);
@@ -969,7 +1129,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       if (now.some((b) => b === null || b.hash !== anchor.hash)) return lag(`block ${anchor.number} moved under the read (a reorg)`);
       throw new Error(why);
     };
-    const fresh = anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, page, held.length, signal, sleep, EVM_LOG_CEILING_PAGES) : [];
+    const fresh = anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, pager, held.length, signal, sleep) : [];
     const events = [...held, ...fresh];
     const stateTree = new VaultTree(events.map((e) => e.state));
     const labels = events.flatMap((e) => (e.label === null ? [] : [e.label]));
@@ -978,12 +1138,28 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       BigInt(stateTree.size) !== size || (stateTree.root ?? 0n) !== root ? `the state tree from the logs (${stateTree.size} leaves) is not the pool's at ${anchor.hash} (${size})`
       : BigInt(labelTree.size) !== labelSize || (labelTree.root ?? 0n) !== labelRoot ? `the label tree from the logs (${labelTree.size} leaves) is not the pool's at ${anchor.hash} (${labelSize})`
       : null;
+    if (wrong !== null && fromHold) {
+      // a reorg under the read is a retry, the held part kept; else the held part is not the pool's: dropped, and the
+      // pool read again from its deploy block (once: the read again holds nothing from the hold)
+      await refuse(wrong).catch((e: unknown) => {
+        if (e instanceof EvmLagError) throw e;
+      });
+      held = [];
+      heldTo = writtenTo = a.pin.fromBlock - 1n;
+      fromHold = false;
+      return round(signal);
+    }
     if (wrong !== null) await refuse(wrong);
     checked = true;
+    fromHold = false;
     // the cache only ever rises
     const top = fin.number > heldTo ? fin.number : heldTo;
     held = events.filter((e) => e.block <= top);
     heldTo = top;
+    if (a.held !== undefined && top > writtenTo) {
+      writtenTo = top;
+      await a.held.write({ network: a.pin.network, pool, fromBlock: a.pin.fromBlock, to: top, events: held }).catch(() => {});
+    }
     return { fin, anchor, events, stateTree, labelTree };
   }
 
@@ -1133,6 +1309,8 @@ export type EvmPoolArgs = {
    * pages 50,000 blocks of logs; dRPC keeps 600 s and more but refuses a 1,000-block page of the pool's old logs).
    */
   feeRpcs: readonly EvmRpc[];
+  /** Where the device holds the pool's sync between syncs (EvmSyncArgs held). */
+  held?: EvmSyncHold;
   /** GET /v1/pool/fee?pool=&epoch= on the helper: its answer, refused unless every field is this pool's and its fee
    * the device's own. */
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<EvmFeeAnswer>;
@@ -1151,7 +1329,7 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
   const feeRecipient = lower(a.pin.feeRecipient);
   addr20(feeRecipient, "feeRecipient");
   if (feeRecipient === pool || BigInt(feeRecipient) === 0n) throw new Error("feeRecipient: the pool or the zero address");
-  const sync = evmTreeSync({ rpcs, pin: a.pin, ...(a.sleep ? { sleep: a.sleep } : {}) });
+  const sync = evmTreeSync({ rpcs, pin: a.pin, ...(a.held ? { held: a.held } : {}), ...(a.sleep ? { sleep: a.sleep } : {}) });
   const scope = evmPoolScopeOf(pool, EVM_CHAIN_IDS[a.pin.network]);
   const sleep = a.sleep ?? wait;
   return {
