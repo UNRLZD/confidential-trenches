@@ -1,5 +1,7 @@
-// Replays evm-quote-warm-round.answers.json through the live check. The good answer is a real run of the check at the
-// card's build (fc7f1b1, on the box, 2026-11-04): every listed provider's preflight and its POST's answer allow the app's origin, every quote ends as
+// Replays evm-quote-warm-round.answers.json through the live check. The good answer is a real run of the check on the
+// kit's list with Pocket in blockpi's place (card helper-evm-range-cap-walk, c939a4da, this Mac, 2026-11-06 18:58-19:00Z;
+// before it, fc7f1b1's run on the box, 2026-11-04, which read no preflight of Pocket): every listed provider's
+// preflight and its POST's answer allow the app's origin, every quote ends as
 // its case says, both cases under a second at warm p95; it passes. The bad answer is a real run before the card
 // (db834f9, 2026-11-04): base-hook with two rpc_error quotes and one of 20,986 ms, warm p95 20,986 ms, no
 // base-partial-v4, and the preflights read on the providers bc189de listed, whose base-public.nodies.app allows no
@@ -13,11 +15,11 @@ import { check } from "./evm-quote-warm-round.mjs";
 const A = JSON.parse(readFileSync(new URL("./evm-quote-warm-round.answers.json", import.meta.url), "utf8"));
 const has = (lines, re) => assert.ok(lines.some((l) => re.test(l)), `a line matches ${re}:\n${lines.join("\n")}`);
 
-test("the good answer (fc7f1b1, the box) passes: every preflight allows the app, both cases under a second at warm p95", () => {
+test("the good answer (c939a4da's list, this Mac) passes: every preflight allows the app, both cases under a second at warm p95", () => {
   const r = check(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  has(r.lines, /^PASS base-hook: warm p50 533 ms, p95 653 ms over 20/);
-  has(r.lines, /^PASS base-partial-v4: warm p50 557 ms, p95 718 ms over 20/);
+  has(r.lines, /^PASS base-hook: warm p50 526 ms, p95 797 ms over 20/);
+  has(r.lines, /^PASS base-partial-v4: warm p50 594 ms, p95 828 ms over 20/);
   // bloXroute's Base host left the kit's list (card base-rpc-list-fix): the replay reads no line for it
   assert.ok(!r.lines.some((l) => /base\.rpc\.blxrbdn\.com/.test(l)), r.lines.join("\n"));
   has(r.lines, /^PASS base-hook: 21 of 21 quotes end ok$/);
