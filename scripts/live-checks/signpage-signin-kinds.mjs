@@ -44,6 +44,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { kitTakesState } from "../signpage-state.mjs";
+import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { consoleError } from "./console-errors.mjs";
 
 const KEY = "signpage-signin-kinds";
@@ -299,7 +300,7 @@ async function send(page, type, params = {}) {
   // no frame: the layer is open (an open kind a page should have refused took it), so no kind can be sent
   const f = await appFrame(page).catch(() => null);
   if (!f) return { noFrame: true };
-  return f.evaluate(({ type, params, origin }) => new Promise((done) => {
+  return f.evaluate(({ type, params, origin, hello }) => new Promise((done) => {
     const id = crypto.randomUUID();
     const t = setTimeout(() => done({ timeout: true }), 5_000);
     addEventListener("message", (e) => {
@@ -307,8 +308,10 @@ async function send(page, type, params = {}) {
       clearTimeout(t);
       done(e.data);
     });
+    // the kit's hello first, as the kit's client sends it (card kit-frame-version): an app that names none is kit-v1.4
+    parent.postMessage(hello, origin);
     parent.postMessage({ v: 1, id, type, ...params }, origin);
-  }), { type, params, origin: `https://${SIGN_HOST}` });
+  }), { type, params, origin: `https://${SIGN_HOST}`, hello: { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION } });
 }
 
 // The APP_HOST frame after a sign-in: its <html data-signpage> once the terminal's client settles (ready, down or

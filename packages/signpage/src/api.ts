@@ -16,11 +16,15 @@
 // The state is the host's: in the frame, src/state.ts reads it from the wallet store (card signpage-frame-state). On
 // every change the host reports, the page reads the state again and posts a `state` event {v: 1, type, state} when it
 // differs from the last state it sent; none before the first `state` answer, which carries a fresh read itself.
+// Every message it posts is shaped for the app's kit version (card kit-frame-version, src/kit-version.ts): a hello
+// {v: 1, type: "hello", kit} names it, read in the queue like a request and answered with nothing; until one comes, and
+// again from each `ready`, the app is read as kit-v1.4.
 //
 // src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
 import type { BuyRoute, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_PARAM_SCHEMAS, signpageProgressRouteSchema } from "../../kit/src/signpage/schema.ts";
+import { KIT_DEFAULT, helloKit, kitLevel, resultFor, stageFor, stateFor, type KitLevel } from "./kit-version.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
 export const APP_ORIGIN = "https://confidential.unrealized.trade";
@@ -241,28 +245,44 @@ function hostAnswer(host: ApiHost, m: Record<string, unknown>, ctx: KindContext)
  */
 export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void } {
   // answer null: a Running kind's id whose answer is not posted yet; `held` keeps its progress events until it is
-  const answered = new Map<string, { sha: string; answer: SignpageAnswer | null }>();
+  const answered = new Map<string, { sha: string; kind: SignpageKind; answer: SignpageAnswer | null }>();
   const held = new Map<string, Stage[]>();
-  const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent) => host.parent.postMessage(msg, APP_ORIGIN);
-  // the JSON of the last state sent; null until the first `state` answer
+  // the app's kit version, as a hello named it (src/kit-version.ts)
+  let level: KitLevel = KIT_DEFAULT;
+  // the message as the app's kit reads it, or null when it reads none of it; `kind`: an answer's request kind
+  const shaped = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent, kind?: SignpageKind): unknown => {
+    if ("ok" in msg) return msg.ok && kind !== undefined ? { ...msg, result: resultFor(level, kind, msg.result) } : msg;
+    if (msg.type === "state") return { ...msg, state: stateFor(level, msg.state) };
+    if (msg.type !== "progress") return msg;
+    if (!("stage" in msg)) return level === "current" ? msg : null;
+    const stage = stageFor(level, msg.stage);
+    return stage === null ? null : stage === msg.stage ? msg : { ...msg, stage };
+  };
+  const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent, kind?: SignpageKind) => {
+    const out = shaped(msg, kind);
+    if (out !== null) host.parent.postMessage(out, APP_ORIGIN);
+  };
+  // the JSON of the last state sent, as the app's kit reads it; null until the first `state` answer
   let sent: string | null = null;
   const read = async (): Promise<SignpageState> => {
     const s = await host.state();
-    sent = JSON.stringify(s);
+    sent = JSON.stringify(stateFor(level, s));
     return s;
   };
 
   const handle = async (data: unknown): Promise<void> => {
     const bytes = plainRequestBytes(data);
     if (!bytes) return;
+    const kit = helloKit(data);
+    if (kit !== null) return void (level = kitLevel(kit));
     const m = envelope(data);
     if (!m) return;
     const id = m.id as string;
     const sha = hex(await crypto.subtle.digest("SHA-256", bytes));
     const first = answered.get(id);
     if (first && first.sha !== sha) return post({ v: 1, id, ok: false, error: { code: "id_reused" } });
-    if (first) return first.answer ? post(first.answer) : undefined;
-    if (isStateRequest(m)) return post({ v: 1, id, ok: true, result: await read() });
+    if (first) return first.answer ? post(first.answer, first.kind) : undefined;
+    if (isStateRequest(m)) return post({ v: 1, id, ok: true, result: await read() }, STATE);
     // a Deferred is answered once its wait settles, either way; a plain answer is used as it is, in this task
     const progress = (stage: Stage): void => {
       const waiting = held.get(id);
@@ -280,11 +300,12 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     };
     // a progress event before the id's answer waits for it (give posts it after)
     held.set(id, []);
+    const kind = m.type as SignpageKind;
     const got = hostAnswer(host, m, { id, sha, progress, route });
     if (got && "running" in got) {
-      answered.set(id, { sha, answer: null });
-      const ends = ENDS_AS_PROGRESS.has(m.type as SignpageKind);
-      void got.after.catch(() => {}).then(() => give(id, sha, got.answer(), progress, ends));
+      answered.set(id, { sha, kind, answer: null });
+      const ends = ENDS_AS_PROGRESS.has(kind);
+      void got.after.catch(() => {}).then(() => give(kind, id, sha, got.answer(), progress, ends));
       return;
     }
     let own: HostAnswer<SignpageKind> | HostRefusal | null;
@@ -292,21 +313,21 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
       await got.after.catch(() => {});
       own = got.answer();
     } else own = got;
-    give(id, sha, own, progress);
+    give(kind, id, sha, own, progress);
   };
   // posts a host kind's answer (null: not_allowed), keeps it for a retry, then the id's progress events held for it,
   // then, for a trade kind (`ends`), its end as a progress stage unless one of those was it
-  const give = (id: string, sha: string, own: HostAnswer<SignpageKind> | HostRefusal | null, progress: (stage: Stage) => void, ends = false): void => {
+  const give = (kind: SignpageKind, id: string, sha: string, own: HostAnswer<SignpageKind> | HostRefusal | null, progress: (stage: Stage) => void, ends = false): void => {
     const ok = own !== null && "result" in own ? own : null;
     const code: ErrorCode = own !== null && "error" in own && typeof own.error === "string" ? own.error : "not_allowed";
     const answer: SignpageAnswer = ok ? { v: 1, id, ok: true, result: ok.result } : { v: 1, id, ok: false, error: { code } };
     answered.delete(id);
     // a "not now" refusal is not kept: the same request again runs again
     if (ok || !RETRY_CODES.has(code)) {
-      answered.set(id, { sha, answer });
+      answered.set(id, { sha, kind, answer });
       if (answered.size > REMEMBERED_IDS) answered.delete(answered.keys().next().value as string);
     }
-    post(answer);
+    post(answer, kind);
     const stages = held.get(id) ?? [];
     held.delete(id);
     for (const stage of stages) progress(stage);
@@ -338,7 +359,16 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     const data = e.data;
     queue = queue.then(() => handle(data)).catch(() => {});
   });
-  const ready = (): void => post({ v: 1, type: "ready", release: RELEASE, api: API });
+  // each ready starts a new app document, read as kit-v1.4 until its hello, and sent no state event before its own first
+  // `state` answer (its client asks one at once, after its hello); in the queue, so a hello its document posted before
+  // is read first and the new one's after
+  const ready = (): void => {
+    queue = queue.then(() => {
+      level = KIT_DEFAULT;
+      sent = null;
+    });
+    post({ v: 1, type: "ready", release: RELEASE, api: API });
+  };
   if (!host.readyOnLoad) ready();
   // the shell posts `ready` on each load of its frame instead: each APP_HOST document needs its own, once
   return { idle: () => queue, ready };

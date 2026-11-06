@@ -23,6 +23,7 @@ import { depositId, entropyToWords, wordsToSeed64 } from "@blindfill/wallet/deri
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { noteCommitment } from "../../wallet/src/notes/secrets.ts";
 import { APP_ORIGIN } from "../src/api.ts";
+import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import { SOL_USDC } from "./oneclick-mock.ts";
 
 const SCOPE = 4242n;
@@ -157,6 +158,10 @@ async function quote(): Promise<{ code: string; body: string | undefined }> {
 /** Asks `state` as the APP_HOST frame does, and waits for its result. */
 async function askState(): Promise<{ signed_in: boolean; pools?: unknown }> {
   const id = crypto.randomUUID();
+  // the app on this kit names its version before it asks, as the kit's client does (card kit-frame-version)
+  const hello = new Event("message");
+  Object.defineProperties(hello, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION } } });
+  win.dispatchEvent(hello);
   const e = new Event("message");
   Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "state" } } });
   win.dispatchEvent(e);

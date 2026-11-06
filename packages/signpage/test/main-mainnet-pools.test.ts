@@ -16,6 +16,7 @@ import { test } from "node:test";
 import { base64 } from "@scure/base";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { APP_ORIGIN } from "../src/api.ts";
+import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 
 const DEVNET_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
 const DEVNET_FEE_PAYER = "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb";
@@ -156,6 +157,10 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
 
 async function askState(): Promise<{ signed_in: boolean; pools?: { chain: string; ready?: string; tap_max?: string; price?: { price: string; expo: number } }[] }> {
   const id = crypto.randomUUID();
+  // the app on this kit names its version before it asks, as the kit's client does (card kit-frame-version)
+  const hello = new Event("message");
+  Object.defineProperties(hello, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION } } });
+  win.dispatchEvent(hello);
   const e = new Event("message");
   Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "state" } } });
   win.dispatchEvent(e);

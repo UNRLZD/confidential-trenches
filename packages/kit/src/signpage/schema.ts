@@ -218,6 +218,17 @@ const depositWalletList = arr(depositWalletFits);
 const depositWallets: SignpageSchema = (v) =>
   depositWalletList(v) && new Set((v as { chain: string; address: string }[]).map((w) => `${w.chain}\n${w.address}`)).size === (v as unknown[]).length;
 
+/** One op of state.ops, told apart by its kind. */
+const stateOp = by("kind", {
+  deposit: depositOp,
+  withdraw: op(lit("withdraw"), WITHDRAW),
+  buy: op(lit("buy"), TRADE, { code: errorCode }),
+  sell: op(lit("sell"), TRADE, { code: errorCode }),
+  hop: op(lit("hop"), HOP),
+  return: op(lit("return"), RETURN),
+  restore: op(lit("restore"), RESTORE),
+});
+
 const state = obj(
   {
     release: str,
@@ -234,20 +245,22 @@ const state = obj(
       ),
     ),
     held: arr(obj({ id: str, asset: str, amount: dec })),
-    ops: arr(
-      by("kind", {
-        deposit: depositOp,
-        withdraw: op(lit("withdraw"), WITHDRAW),
-        buy: op(lit("buy"), TRADE, { code: errorCode }),
-        sell: op(lit("sell"), TRADE, { code: errorCode }),
-        hop: op(lit("hop"), HOP),
-        return: op(lit("return"), RETURN),
-        restore: op(lit("restore"), RESTORE),
-      }),
-    ),
+    ops: arr(stateOp),
   },
   { way, signin_failed: obj({ way, reason: str }), pools, deposit_wallets: depositWallets },
 );
+
+/**
+ * `v` with every op of its `ops` this client cannot read left out, and the rest of it as it came (card
+ * kit-frame-version): an op of a newer kind, stage or fact costs that op, never the whole state, which kit-v1.4 and
+ * earlier refused for one. Anything but a plain object with a plain `ops` array comes back as it is, for the state
+ * schema to refuse; the state schema still checks every field of what comes back, the kept ops included.
+ */
+export function signpageReadableOps(v: unknown): unknown {
+  if (!isPlainObject(v) || !Object.hasOwn(v, "ops") || !isPlainArray(v.ops)) return v;
+  const ops = v.ops.filter((o) => stateOp(o));
+  return ops.length === v.ops.length ? v : { ...v, ops };
+}
 
 const open = obj({ pending: lit(true) });
 

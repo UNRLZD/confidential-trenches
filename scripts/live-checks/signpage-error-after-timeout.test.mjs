@@ -51,3 +51,13 @@ test("the facts read from a bundle", () => {
   assert.equal(facts("", js.replace("`id_reused`?null:`refused`", "`id_reused`?null:null")).rule, null);
   assert.equal(facts("", js.replace(",p,e))", ",p))")).running, null);
 });
+
+test("the facts read from a bundle of card kit-frame-version's shape (the kind read once and handed to give first)", () => {
+  const js = "ks=new Set([`buy`,`pool.buy`,`pool.sell`,`pool.deposit`]);n.set(f,[]);let _=d.type,v=fl(e,d,{id:f,sha:p,progress:h,route:g});if(v&&`running`in v){t.set(f,{sha:p,kind:_,answer:null});let e=ks.has(_);v.after.catch(()=>{}).then(()=>l(_,f,p,v.answer(),h,e));return}";
+  const f = facts("", js);
+  assert.deepEqual(f.kinds, ["buy", "pool.buy", "pool.sell", "pool.deposit"]);
+  // the verdict not handed to give, or the set asked of another value than the request's kind: not read
+  assert.equal(facts("", js.replace(",h,e))", ",h))")).running, null);
+  assert.equal(facts("", js.replace("ks.has(_)", "ks.has(x)")).running, null);
+  assert.equal(facts("", js.replace("l(_,f,p,", "l(x,f,p,")).running, null);
+});

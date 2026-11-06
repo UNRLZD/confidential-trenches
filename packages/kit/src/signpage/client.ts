@@ -24,9 +24,13 @@
 // A retry has no frame to replace: once the shell's ready has been seen, it asks `state` again and READY is that answer;
 // before it, it waits SIGNPAGE_HANDSHAKE_MS for a ready. Everything else is the iframe mode's, so an app sees the same
 // snapshots and outcomes in both.
+//
+// Kit version (card kit-frame-version): before each handshake `state` request the client posts a hello naming
+// SIGNPAGE_KIT_VERSION (messages.ts HelloMessage), so the page sends it only what this version reads; a page of an
+// earlier release drops the hello unanswered. A state's op this client cannot read is left out, never the whole state.
 
-import { OPEN_KINDS } from "./messages.ts";
-import type { BuyRoute, ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
+import { OPEN_KINDS, SIGNPAGE_KIT_VERSION } from "./messages.ts";
+import type { BuyRoute, HelloMessage, ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
 import {
   SIGNPAGE_MAX_REQUEST_BYTES,
   SIGNPAGE_PARAM_SCHEMAS,
@@ -37,6 +41,7 @@ import {
   signpageIsPlainMessage,
   signpageProgressRouteSchema,
   signpageProgressSchema,
+  signpageReadableOps,
   signpageReadySchema,
   signpageStateEventSchema,
 } from "./schema.ts";
@@ -374,6 +379,14 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     });
   };
 
+  /** The kit version, named to the page before each handshake `state` request (messages.ts HelloMessage). */
+  const hello = () => {
+    const win = peer();
+    if (destroyed || !win) return;
+    const msg: HelloMessage = { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION };
+    win.postMessage(msg, origin);
+  };
+
   const onReady = (msg: { release: string; api: number }) => {
     if (msg.api !== SIGNPAGE_CLIENT_API) return toUpdate();
     clearTimer(retryTimer);
@@ -383,6 +396,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     loadTimer = null;
     set({ release: msg.release });
     if (snap.status === "ready") {
+      // a ready again is a page that started again: it reads this client as kit-v1.4 until told
+      hello();
       void client.request("state", {});
       return;
     }
@@ -398,6 +413,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     handshakeTimer = null;
     const g = gen;
     const a = ++ask;
+    hello();
     const msgState = signpageBuildRequest("state", {}, crypto.randomUUID());
     void post(msgState, SIGNPAGE_HANDSHAKE_MS, () => {}).then((o) => {
       if (g !== gen || destroyed || snap.status === "update") return;
@@ -418,16 +434,21 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     if (Object.hasOwn(m, "ok")) {
       const p = typeof m.id === "string" ? pending.get(m.id) : undefined;
       if (!p) return void drops.id++;
-      if (signpageAnswerOkSchema(m) && SIGNPAGE_RESULT_SCHEMAS[p.kind](m.result)) {
-        if (p.kind === "state") set({ state: m.result as SignpageState, stale: false });
-        return settle(m.id as string, { ok: true, result: m.result as SignpageResults[SignpageKind] });
+      // a state's op this client cannot read is left out, never the whole state (card kit-frame-version)
+      const result = signpageAnswerOkSchema(m) ? (p.kind === "state" ? signpageReadableOps(m.result) : m.result) : undefined;
+      if (result !== undefined && SIGNPAGE_RESULT_SCHEMAS[p.kind](result)) {
+        if (p.kind === "state") set({ state: result as SignpageState, stale: false });
+        return settle(m.id as string, { ok: true, result: result as SignpageResults[SignpageKind] });
       }
       if (signpageAnswerErrorSchema(m)) return settle(m.id as string, { ok: false, error: m.error as { code: ErrorCode } });
       return void drops.shape++;
     }
     if (signpageReadySchema(m)) return onReady(m as { release: string; api: number });
     if (snap.status !== "ready") return void drops.shape++;
-    if (signpageStateEventSchema(m)) return set({ state: m.state as SignpageState, stale: false });
+    if (m.type === "state" && Object.hasOwn(m, "state")) {
+      const ev = { ...m, state: signpageReadableOps(m.state) };
+      if (signpageStateEventSchema(ev)) return set({ state: ev.state as SignpageState, stale: false });
+    }
     if (signpageProgressSchema(m)) {
       for (const f of progressListeners) f(m.id as string, m.stage as Stage);
       return;
