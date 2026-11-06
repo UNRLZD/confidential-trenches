@@ -225,8 +225,29 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     assert_eq!(code(&v, 0), (400, "recipient_refused".into()), "{}", v["answers"]);
     assert_eq!(w.key_nonce().await?, n0, "a refused fund_recipient request signs nothing");
 
-    // 3. same_call carried, its fee failing the payout (the relayer not registered): refund_pending, settled with a refund note
-    let alice0 = w.h.token_balance(w.alice.id()).await?;
+    // 3. check 7b (card vault-review-fixes-1, review F-1): the fee is paid in the recipient's own payout receipt, so a
+    // fee account the token refuses would fail the whole payout. The relayer reads its fee account first and signs
+    // nothing while it is unregistered or blocklisted: 503 relayer_low, its log naming the fee account.
+    let fee_hold = |v: &Value, why: &str| -> R<()> {
+        assert_eq!(code(v, 0), (503, "relayer_low".into()), "{why}: {}", v["answers"]);
+        assert!(row(v, "same_call").is_null(), "{why}: no record for a held request");
+        let logs = v["logs"].as_array().ok_or("no logs")?;
+        assert!(logs.iter().any(|l| l.as_str().is_some_and(|l| l.starts_with("withdraw 503 relayer_low: relayer fee account not ready (relayer.test.near") && l.ends_with(why))), "{why}: {logs:?}");
+        Ok(())
+    };
+    let v = w.carry(&["ok"], &["same_call"], 0).await?;
+    fee_hold(&v, "registered false, blocklisted false)")?;
+    assert_eq!(w.key_nonce().await?, n0, "an unregistered fee account signs nothing");
+    let _ = w.h.storage_deposit(&w.relayer, w.relayer.id()).await?;
+    w.h.mock_fail("is_blocklisted", Some(w.relayer.id()), true).await?;
+    assert_eq!(w.h.view(&w.h.token, "is_blocklisted", json!({"account_id": w.relayer.id()})).await?, json!(true));
+    let v = w.carry(&["ok"], &["same_call"], 0).await?;
+    fee_hold(&v, "registered true, blocklisted true)")?;
+    assert_eq!(w.key_nonce().await?, n0, "a blocklisted fee account signs nothing");
+    w.h.mock_fail("is_blocklisted", Some(w.relayer.id()), false).await?;
+
+    // 3b. the fee account ready: same_call carried and paid in one receipt, alice the withdrawal less the fee
+    let (alice0, fee0) = (w.h.token_balance(w.alice.id()).await?, w.h.token_balance(w.relayer.id()).await?);
     let v = w.carry(&["ok"], &["same_call"], 60).await?;
     assert_eq!(code(&v, 0), (200, "ok".into()), "{}", v["answers"]);
     assert_eq!(v["answers"][0]["body"]["state"], "submitted");
@@ -240,8 +261,11 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     assert_eq!(w.vault_receipts(&settle_tx, "settle").await?, vec![true], "the settle ran on the vault");
     let s = w.spend_row("same_call").await?;
     assert_eq!((s["status"].as_str(), s["payer"].as_str(), s["recipient"].as_str()), (Some("settled"), Some("relayer.test.near"), Some("alice.test.near")), "{s}");
-    assert_eq!(s["refund_value"], "2000000", "the whole withdrawal came back into a refund note: {s}");
-    assert_eq!(w.h.token_balance(w.alice.id()).await? - alice0, 0, "alice was paid by a payout that failed");
+    assert_eq!(s["refund_value"], "0", "paid whole: {s}");
+    let (withdrawn, fee): (u128, u128) = (s["withdrawn"].as_str().ok_or("withdrawn")?.parse()?, s["fee"].as_str().ok_or("fee")?.parse()?);
+    assert!(fee > 0, "same_call is relayed with a fee: {s}");
+    assert_eq!(w.h.token_balance(w.alice.id()).await? - alice0, withdrawn - fee, "alice holds the withdrawal less the fee");
+    assert_eq!(w.h.token_balance(w.relayer.id()).await? - fee0, fee, "the relayer holds the fee");
 
     // 4. a restart: the same note again
     let n1 = w.key_nonce().await?;
@@ -249,8 +273,7 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     assert_eq!(code(&v, 0), (400, "spent".into()));
     assert_eq!(w.key_nonce().await?, n1, "spent signs nothing");
 
-    // 5. one nullifier, two proofs at once: one send
-    let _ = w.h.storage_deposit(&w.relayer, w.relayer.id()).await?;
+    // 5. one nullifier, two proofs at once: one send (the relayer registered at step 3)
     let spends0 = w.spends().await?;
     let v = w.carry(&["ok"], &["same_nullifier_a", "same_nullifier_b"], 60).await?;
     let mut codes = vec![code(&v, 0).1, code(&v, 1).1];

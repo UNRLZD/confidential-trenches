@@ -13,6 +13,11 @@
 //        when it is null, both read at one agreed final block on two NEAR RPCs (fee.ts agreedBlock and viewAt); else
 //        register_deposit_wrong. A send of a stored withdrawal (H3.7's send after done, a carry of the stored request,
 //        the restart's send) also takes the minimum for a recipient registered after the request was taken.
+//   7b.  the fee account (fee_recipient, check 3's own): storage_balance_of(fee_recipient) set and
+//        is_blocklisted(fee_recipient) exactly false at check 7's block on both RPCs, else 503 relayer_low, its log line
+//        "relayer fee account not ready". The vault pays the fee in the same receipt as the recipient's amount (card
+//        vault-review-fixes-1, review A-01), so a fee account the token refuses fails every payout whole into
+//        refund_pending; read again in the queue right before signing, at a fresh agreed block, as check 10 is.
 //   8.   recipient and fee_recipient are neither the vault nor intents.near, else bad_recipient.
 //   9.   deadline_ms is at least the newest final block's time + 30 s (120 s for a request that funds A, H3.7 item 1),
 //        the time read as header.timestamp_nanosec (a decimal string) / 10^6 on both providers, never header.timestamp
@@ -103,6 +108,8 @@ export type WithdrawSendDeps = {
   tokenStatus(at: HoldAt): Promise<TokenStatus>;
   /** The helper's clock, only for the age bound on two frozen finals (fee.ts agreedBlock), never for the deadline. */
   now?: () => number;
+  /** The helper's log; console.log under "helper: " by default. */
+  log?: (line: string) => void;
 };
 
 const no = (code: HelperWithdrawCode | "upstream", status = 400): WithdrawAnswer => ({ status, body: { error: { code } } });
@@ -149,7 +156,39 @@ export type ChainReads = {
   totals: { deposited: bigint; spent: bigint; returned: bigint };
   /** The recipient, read only for a request with fund_recipient true. */
   recipient?: AccountRead;
+  /** Check 7b: the fee account on the token. */
+  feeAccount: FeeAccount;
 };
+
+/** Check 7b's reads of the fee account on the token: registered (storage_balance_of set) and blocklisted. */
+export type FeeAccount = { registered: boolean; blocklisted: boolean };
+
+/** Check 7b on its reads: a fee account the token would refuse (not registered, or blocklisted) holds the send. */
+export const feeAccountReady = (f: FeeAccount): boolean => f.registered && !f.blocklisted;
+
+/** The log line's words for check 7b's hold, apart from a low balance's (both answer 503 relayer_low). */
+export const FEE_ACCOUNT_NOT_READY = "relayer fee account not ready";
+
+/** Check 7b's two views of `fee` on `token` at block `b`, on both providers; throws on any answer but the two shapes. */
+export async function readFeeAccount(rpcs: readonly [Rpc, Rpc], b: Block, token: string, fee: string): Promise<FeeAccount> {
+  const [bal, listed] = await Promise.all([viewAt(rpcs, b, token, "storage_balance_of", { account_id: fee }), viewAt(rpcs, b, token, "is_blocklisted", { account_id: fee })]);
+  if (bal !== null && !(isObj(bal) && decimal(bal.total, U128) !== null)) throw new FeeReadRefused("storage_balance_of(fee_recipient): neither null nor a balance");
+  if (typeof listed !== "boolean") throw new FeeReadRefused("is_blocklisted(fee_recipient): not a boolean");
+  return { registered: bal !== null, blocklisted: listed };
+}
+
+/**
+ * Check 7b again in the queue, at a fresh agreed block: null when the fee account reads ready, else what held it (its
+ * reads, or "unread" for a read that failed or disagreed: a failed read holds).
+ */
+export async function feeAccountHold(rpcs: readonly [Rpc, Rpc], token: string, fee: string, now: () => number = Date.now): Promise<FeeAccount | "unread" | null> {
+  try {
+    const f = await readFeeAccount(rpcs, await agreedBlock(rpcs, now), token, fee);
+    return feeAccountReady(f) ? null : f;
+  } catch {
+    return "unread";
+  }
+}
 
 /**
  * One provider's view of `id` at block `b`: view_account and view_access_key_list, both answered at `b`. An absent
@@ -193,13 +232,14 @@ export async function accountAt(rpcs: readonly [Rpc, Rpc], b: Block, id: string)
  */
 export async function readChecks(rpcs: readonly [Rpc, Rpc], vault: string, token: string, w: CheckedWithdraw, now: () => number = Date.now): Promise<ChainReads> {
   const [block, finalMs] = await Promise.all([agreedBlock(rpcs, now), newestFinalMs(rpcs)]);
-  const [bal, bounds, stateKnown, labelKnown, totals, recipient] = await Promise.all([
+  const [bal, bounds, stateKnown, labelKnown, totals, recipient, feeAccount] = await Promise.all([
     viewAt(rpcs, block, token, "storage_balance_of", { account_id: w.recipient }),
     viewAt(rpcs, block, token, "storage_balance_bounds", {}),
     viewAt(rpcs, block, vault, "is_known_state_root", { root: w.stateRoot.toString() }),
     viewAt(rpcs, block, vault, "is_known_label_root", { root: w.ASPRoot.toString() }),
     viewAt(rpcs, block, vault, "totals", {}),
     w.fund_recipient === true ? accountAt(rpcs, block, w.recipient) : Promise.resolve(undefined),
+    readFeeAccount(rpcs, block, token, w.fee_recipient),
   ]);
   if (bal !== null && !(isObj(bal) && decimal(bal.total, U128) !== null)) throw new FeeReadRefused("storage_balance_of: neither null nor a balance");
   const registerMin = isObj(bounds) ? decimal(bounds.min, U128) : null;
@@ -207,7 +247,7 @@ export async function readChecks(rpcs: readonly [Rpc, Rpc], vault: string, token
   if (typeof stateKnown !== "boolean" || typeof labelKnown !== "boolean") throw new FeeReadRefused("is_known_*_root: not a boolean");
   const t = isObj(totals) ? { deposited: decimal(totals.deposited, U128), spent: decimal(totals.spent, U128), returned: decimal(totals.returned, U128) } : null;
   if (t === null || t.deposited === null || t.spent === null || t.returned === null) throw new FeeReadRefused("totals: not three u128");
-  return { registered: bal !== null, registerMin, finalMs, stateKnown, labelKnown, totals: t as ChainReads["totals"], ...(recipient !== undefined && { recipient }) };
+  return { registered: bal !== null, registerMin, finalMs, stateKnown, labelKnown, totals: t as ChainReads["totals"], feeAccount, ...(recipient !== undefined && { recipient }) };
 }
 
 /** Check 5's rows 5, 6 and 9 on what was read; null when they pass. */
@@ -297,30 +337,37 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
   if (reads === null) return no("upstream", 503);
   const c = check5(w, reads) ?? leaf ?? checks7to9(w, deps.cfg.vault, reads) ?? checkFunded(w, reads);
   if (c !== null) return no(c);
+  const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
+  const feeHold = (f: FeeAccount | "unread") => {
+    log(`withdraw 503 relayer_low: ${FEE_ACCOUNT_NOT_READY} (${w.fee_recipient} on ${deps.cfg.token}: ${f === "unread" ? "not read at an agreed block" : `registered ${f.registered}, blocklisted ${f.blocklisted}`})`);
+    return no("relayer_low", 503);
+  };
+  if (!feeAccountReady(reads.feeAccount)) return feeHold(reads.feeAccount);
   if (await held(deps)) return no("token_halted", 503);
 
   const relayer = deps.relayers[turn++ % deps.relayers.length]!;
   const deposit = vaultWithdrawYocto(w.register_deposit, w.relay_fee, true);
+  let feeHeld: FeeAccount | "unread" | null = null;
   const action = { kind: "call" as const, receiver: deps.cfg.vault, method: "withdraw", args: withdrawArgs(w), gas: WITHDRAW_GAS, deposit };
   try {
     const out = await relayer.send<HelperWithdrawCode>(
       action,
       // the hold first, check 9's margin last: a hold that waits (check 10's wait for H, a 429 waited out) never spends
       // the margin it was checked against at the reads above
-      async () =>
-        (await held(deps))
-          ? "token_halted"
-          : (await relayer.balance()) < withdrawFloor(deposit)
-            ? "relayer_low"
-            : BigInt(w.deadline_ms) < (await newestFinalMs(deps.rpcs)) + SEND_MARGIN_MS
-              ? "deadline_too_close"
-              : null,
+      async () => {
+        if (await held(deps)) return "token_halted";
+        feeHeld = await feeAccountHold(deps.rpcs, deps.cfg.token, w.fee_recipient, deps.now); // check 7b again
+        if (feeHeld !== null) return "relayer_low";
+        if ((await relayer.balance()) < withdrawFloor(deposit)) return "relayer_low";
+        return BigInt(w.deadline_ms) < (await newestFinalMs(deps.rpcs)) + SEND_MARGIN_MS ? "deadline_too_close" : null;
+      },
       (tx) => {
         const claim = deps.store.claim({ ...tx, nullifier: nullifierKey(nf), key: relayer.key, deadline_ms: w.deadline_ms });
         if (!claim.ok) throw new ClaimLost(claim.code);
       },
       { wait: false },
     );
+    if (out.kind === "guarded" && feeHeld !== null) return feeHold(feeHeld);
     if (out.kind === "guarded") return no(out.code, out.code === "token_halted" || out.code === "relayer_low" ? 503 : 400);
     return { status: 200, body: { tx_hash: out.tx_hash, state: "submitted" } };
   } catch (e) {

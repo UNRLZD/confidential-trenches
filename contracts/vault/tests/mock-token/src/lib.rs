@@ -13,7 +13,8 @@
 //! account registered); without one it fails every call of that method. A failing call panics with
 //! `MockTokenFail: <method>` before it changes anything, so the caller's promise result is Failed. This drives the
 //! vault's `on_payout` with each part Successful or Failed (VT-S08, VT-S17), a failed registration and VT-P02's random
-//! part failures.
+//! part failures. A rule on `is_blocklisted` makes that view answer true for the account (or for every account),
+//! as USDC's blocklist does: the relayer reads it of its fee account before it signs (card vault-review-fixes-1, F-1).
 
 use near_sdk::json_types::U128;
 use near_sdk::store::LookupMap;
@@ -22,7 +23,7 @@ use near_sdk::{
 };
 
 /// The methods `set_fail` can fail.
-const FAILABLE: [&str; 3] = ["ft_transfer", "ft_transfer_call", "storage_deposit"];
+const FAILABLE: [&str; 4] = ["ft_transfer", "ft_transfer_call", "storage_deposit", "is_blocklisted"];
 /// USDC's `storage_balance_bounds` on NEAR mainnet: min = max = 0.00125 N (vault.md 2.8).
 const STORAGE_BYTES_COST: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
 /// What `ft_transfer_call` keeps for itself and for `ft_resolve_transfer`, as near-contract-standards' token does.
@@ -191,6 +192,11 @@ impl MockToken {
 
     pub fn ft_total_supply(&self) -> U128 {
         U128(self.total_supply)
+    }
+
+    /// USDC's blocklist view: true when an `is_blocklisted` rule names the account, or names none.
+    pub fn is_blocklisted(&self, account_id: AccountId) -> bool {
+        self.fail.iter().any(|(m, a)| m == "is_blocklisted" && a.as_ref().is_none_or(|a| a == &account_id))
     }
 }
 

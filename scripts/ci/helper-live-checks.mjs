@@ -43,6 +43,7 @@ export const LIVE_CHECKS = [
   "wallet-restore-transfer-rpcs",
   "pool-buy-send-fast",
   "helper-page-jup-429",
+  "relayer-fee-account",
 ];
 
 // `{commit}` is the deployed commit
