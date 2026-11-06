@@ -11,7 +11,8 @@
 // - `filled`: the transaction read back on chain as the buy (the kit's `filled`); the pool and the token check on it.
 // - data: the buy's wallet, the quote's venue and pool address, the filled amount: the signing page's route events for
 //   the buy's id (the kit's BuyRoute, card signpage-buy-route-events), through TradeKit.route (fromBuyRoute). A page of
-//   an earlier release sends none: a step checks and its value stays empty, never made up.
+//   an earlier release sends none: a step checks and its value stays empty, never made up. The route's `tx` (card
+//   pool-buy-send-fast) is the toast link's transaction when the answer that names it was dropped at the client's 10 s.
 // A step checks only when it is the one waiting and its own event comes: an event out of order is ignored. A failure
 // marks the step that was waiting and nothing after it ever checks. No time is held here: an animation runs on its own
 // clock from the event, and the times on the button and the toast are the buy's own measured ones (model.ts).
@@ -53,7 +54,8 @@ export type RouteEvent =
   | { t: "fail"; id: string }
   | { t: "wallet"; id: string; address: string }
   | { t: "route"; id: string; venue: string | null; pool: string }
-  | { t: "out"; id: string; amount: string };
+  | { t: "out"; id: string; amount: string }
+  | { t: "tx"; id: string; tx: string };
 
 /** The Buy release: a new strip, the wallet step grown in, Private balance waiting. */
 export function routeTap(id: string, at: number, cents: Cents): Route {
@@ -70,6 +72,8 @@ export function routeEvent(r: Route, ev: RouteEvent): Route {
   if (ev.t === "wallet") return { ...r, wallet: ev.address };
   if (ev.t === "route") return { ...r, venue: ev.venue, pool: ev.pool };
   if (ev.t === "out") return { ...r, out: ev.amount };
+  // the transaction the answer named stays; the route's names it when the answer came too late to be read
+  if (ev.t === "tx") return r.tx ? r : { ...r, tx: ev.tx };
   if (r.k !== "running") return r;
   switch (ev.t) {
     case "taken":
@@ -119,7 +123,7 @@ export function fromOutcome(
 }
 
 /** What the signing page tells the app of a buy besides its stage (TradeKit.route). */
-export type RouteData = Extract<RouteEvent, { t: "wallet" | "route" | "out" }>;
+export type RouteData = Extract<RouteEvent, { t: "wallet" | "route" | "out" | "tx" }>;
 
 /** The kit's venue ids the strip names, each by a name already on screen (market/pads.ts): the bonding curve is
  *  pump.fun's own. An id with none names no venue, so the pool's label stays the bare one: never the raw id. */
@@ -128,13 +132,14 @@ const VENUE_PAD: Readonly<Record<string, string>> = { "pump-curve": "pump.fun" }
 /** One route event of the kit (the signing page's own reads, by the buy's id) as the strip's data. */
 export function fromBuyRoute(id: string, r: BuyRoute): RouteData | null {
   // the kit's own keys only (its client checked the shape): an inherited field names nothing
-  const x = r as Partial<Record<"wallet" | "venue" | "pool" | "out", string>>;
+  const x = r as Partial<Record<"wallet" | "venue" | "pool" | "out" | "tx", string>>;
   if (Object.hasOwn(r, "wallet") && x.wallet) return { t: "wallet", id, address: x.wallet };
   if (Object.hasOwn(r, "venue") && Object.hasOwn(r, "pool") && x.venue !== undefined && x.pool) {
     const pad = Object.hasOwn(VENUE_PAD, x.venue) ? padOf(VENUE_PAD[x.venue]) : null;
     return { t: "route", id, venue: pad ? pad.name : null, pool: x.pool };
   }
   if (Object.hasOwn(r, "out") && x.out) return { t: "out", id, amount: x.out };
+  if (Object.hasOwn(r, "tx") && x.tx) return { t: "tx", id, tx: x.tx };
   return null;
 }
 

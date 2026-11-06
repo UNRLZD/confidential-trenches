@@ -57,7 +57,8 @@
 //   again).
 // - The route (card signpage-buy-route-events): the run tells the app, through the kind's route events (messages.ts
 //   BuyRoute), only what it bound or read itself: W and the venue with its pool once the check passed, W derived to the
-//   proof's recipient and signed, and the take holds the note, before the transaction leaves; then the amount W
+//   proof's recipient and signed, and the take holds the note, before the transaction leaves; then the transaction's
+//   signature once both RPCs read this very transaction back under it (card pool-buy-send-fast); then the amount W
 //   received, read from this very transaction's token balances on both RPCs (the two the same, at least the min out,
 //   within the kit's bound), once it reads back as succeeded on both. Not read plainly on both: not told.
 // - Every read names a public account or the transaction itself; no request carries a key, the words or which note is
@@ -522,6 +523,15 @@ export async function sendAndSettle(
   if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();
   // the take holds the note for this very transaction: W and the venue with its pool, told before it leaves
   if (fill) for (const x of fill.bound) fill.tell(x);
+  // the buy's transaction as a route fact (card pool-buy-send-fast), told once, by the first read that names it as this
+  // very transaction: both RPCs reading it back under the helper's signature, or the spend's own signature read as this
+  // attempt's on both (spentBy), so a filled answer the client dropped at its 10 s still links its transaction
+  let toldTx = false;
+  const tellTx = (tx: string): void => {
+    if (!fill || toldTx) return;
+    toldTx = true;
+    fill.tell({ tx });
+  };
   const reads = h.reads ?? POOL_BUY_READS;
   // the wall clock from the signature (the page's clock, h.now, in tests): bounds the resends and the read-back
   const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
@@ -549,7 +559,10 @@ export async function sendAndSettle(
   // helper's word); another's can never be this transaction's (not_landed); not known yet: null, the reads go on
   const spentBy = async (hint: string | undefined, txs: TxRef[]): Promise<PoolBuyAnswer | null> => {
     const o = await owner(hint);
-    return o === "other" ? { stage: "not_landed", txs } : o === null ? null : { stage: "filled", txs: [{ chain: "solana", hash: o.mine }] };
+    if (o === "other") return { stage: "not_landed", txs };
+    if (o === null) return null;
+    tellTx(o.mine);
+    return { stage: "filled", txs: [{ chain: "solana", hash: o.mine }] };
   };
   // the chain's word on the note (its spent mark and change on both RPCs, then whose spend it is) over the helper's or
   // one RPC's: this attempt's spend is filled, named by the signature both RPCs read it under. not_landed once
@@ -606,9 +619,12 @@ export async function sendAndSettle(
     // settle finds is another's, so not_landed at once
     if (got[0] === "failed" && got[1] === "failed") return (await spent()) ? { stage: "not_landed", txs } : { stage: "refused", txs };
     landed = got[0] === "ok" && got[1] === "ok";
-    // read back on both RPCs as this very transaction: only now is it told as sent, by its signature
+    // read back on both RPCs as this very transaction: only now is it told as sent, by its signature; a buy tells it
+    // as a route fact too (card pool-buy-send-fast), which reaches the app however late it comes: an answer past the
+    // kit client's 10 s is dropped (a mainnet bundle the helper holds until it lands)
     if (!ours && seen[0] && seen[1]) {
       ours = true;
+      tellTx(signature);
       await h.sent?.(signature);
     }
     if (landed && fill) {
