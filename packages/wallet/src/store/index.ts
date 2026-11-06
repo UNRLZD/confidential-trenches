@@ -51,18 +51,22 @@ export type WalletMetaKey = "seed" | "settings" | `owed/${string}`;
  *  every wallet when SIGN_HOST rolls back to a release that opens version 1 exactly). */
 export const WALLET_OWED_PREFIX = "owed/";
 const OWED_KEY = /^owed\/[^/]{1,200}$/;
-// the note store's vault cursor, one per vault (../notes/store.ts syncCursor, card wallet-bind-on-sync)
+/** The note store's vault cursor, one per vault (../notes/store.ts syncCursor, card wallet-bind-on-sync): meta
+ *  sync/<vault>, a count of public rows and a block height, written as a bind reads the pages. It moves no seed, so its
+ *  writes are no seed move (walletSeedMoved), and the frame's reader neither reads nor lists it. */
+export const WALLET_SYNC_PREFIX = "sync/";
 const SYNC_KEY = /^sync\/[^/]{1,200}$/;
 // "closed": this store's own connection was closed by another tab's delete or upgrade (versionchange); open it again
 // "changed" names the key a caller's put, update or delete wrote (`key`; none for the store's own seed and counter
 // writes), so a listener can tell an owed send's write (meta owed/<op id>) from a seed change
 export type WalletEvent = { kind: "changed"; stores: WalletStoreName[]; key?: string } | { kind: "signout" } | { kind: "closed" };
-/** A change another tab made that may move the seed (sign out, or a meta write other than an owed send's): a page
+/** A change another tab made that may move the seed (sign out, or a meta write other than an owed send's or a vault
+ *  cursor's): a page
  *  reads its seed again on one, never on an owed send's write (fold 4, LOW: such a read could overlap a seed read and
  *  read as no seed). An event with no key (an older release's) counts. */
 export const walletSeedMoved = (e: WalletEvent | undefined): boolean =>
   e?.kind === "signout" ||
-  (e?.kind === "changed" && Array.isArray(e.stores) && e.stores.includes("meta") && !(e.stores.length === 1 && typeof e.key === "string" && e.key.startsWith(WALLET_OWED_PREFIX)));
+  (e?.kind === "changed" && Array.isArray(e.stores) && e.stores.includes("meta") && !(e.stores.length === 1 && typeof e.key === "string" && (e.key.startsWith(WALLET_OWED_PREFIX) || e.key.startsWith(WALLET_SYNC_PREFIX))));
 
 export interface WalletStoreOptions {
   name?: string; // tests only: the database name
@@ -631,7 +635,7 @@ export async function openWalletStoreReader(
     async keys(store) {
       checkKey(store, "x");
       const all = await req(live().transaction(store, "readonly").objectStore(store).getAllKeys());
-      return all.map(String).filter((x) => !(store === "meta" && (x === K_WRAP || x === LANE || x.startsWith(WALLET_OWED_PREFIX))));
+      return all.map(String).filter((x) => !(store === "meta" && (x === K_WRAP || x === LANE || x.startsWith(WALLET_OWED_PREFIX) || x.startsWith(WALLET_SYNC_PREFIX))));
     },
     close: shut,
   };

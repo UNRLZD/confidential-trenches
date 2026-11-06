@@ -49,14 +49,15 @@
 //   note holds its calls from INCOMING on (a call is signed only for an INCOMING note) and keeps them once landed, so
 //   the clean-up gate reads every call U signed after a reload. Nothing in a call is secret: its signed bytes go to
 //   the relayer and the rest is on chain.
-// - The vault's deposits cursor (card wallet-bind-on-sync): per vault, the kit's VaultSyncCursor the last bind's sync
-//   returned (syncCursor, saveSyncCursor; meta "sync/<vault>"), so a bind searches the pages from where the last one
-//   stopped instead of from 0. It only moves forward: each field is the higher of the stored one and the one saved, and
-//   it is written only when a list's count moves (a new block alone writes nothing). A
-//   store with none (a new device, a restore) gives the cursor of a vault never read, every list from 0. Each note's
-//   own start (searchFrom) is written with its first call, before its P first leaves the device: no row below it can
-//   hold that P, so a reload searches from there however far the vault's cursor has moved since. Nothing in either
-//   is secret: a count of public rows and a block height.
+// - The vault's cursor (card wallet-bind-on-sync): per vault, the kit's VaultSyncCursor the last bind's sync returned
+//   (syncCursor, saveSyncCursor; meta "sync/<vault>", no seed move for another tab, ../store WALLET_SYNC_PREFIX). It
+//   only moves forward: each field is the higher of the stored one and the one saved, and it is written only when a
+//   list's count moves (a new block alone writes nothing). A store with none (a new device, a restore) gives the cursor
+//   of a vault never read. A bind takes only its height (no older block than the last one read): its counts are only
+//   this device's reads, and another device on the seed can land a P below them, so no search for a note's P starts at
+//   them (review H1). Each note's own start (searchFrom) is written with its first call: the count its bind read, from
+//   0, before its P first left the device, so no row below it holds that P and a reload searches from there. Nothing
+//   in either is secret: a count of public rows and a block height.
 // - Attempt contexts (card wallet-withdraw-request; wallet.md l.214-217): the move UNSPENT -> HELD takes the attempt's
 //   withdrawal context (a decimal below p) and appends { context, deadlineMs } to the note's contexts in the same
 //   compare-and-set, so the context is stored before its proof starts. Only the moves HELD -> UNSPENT and HELD -> HELD
@@ -71,7 +72,7 @@
 //   chain with the proof, and the ops records, which the frame reads, never hold it.
 import { VAULT_FIELD_P, vaultSyncStart, type VaultSyncCursor } from "@blindfill/kit";
 import { CHAINS } from "../derive/index.ts";
-import type { WalletStore } from "../store/index.ts";
+import { WALLET_SYNC_PREFIX, type WalletStore } from "../store/index.ts";
 import { noteCommitment, type NoteRef } from "./secrets.ts";
 
 export const NOTES_LOCK = "ct-wallet/notes";
@@ -290,7 +291,7 @@ function count(x: unknown, what: string): number {
   return x;
 }
 const CURSOR_KEYS = ["vault", "height", "deposits", "spends", "leaves", "labels"] as const;
-const cursorKey = (vault: string): string => `sync/${vault}`;
+const cursorKey = (vault: string): string => `${WALLET_SYNC_PREFIX}${vault}`;
 const VAULT_LISTS = ["deposits", "spends", "leaves", "labels"] as const;
 // A cursor as vaultSync takes it: this vault's, every count a whole number, nothing else in it.
 function checkCursor(c: unknown, vault: string): VaultSyncCursor {

@@ -274,9 +274,9 @@ test("planted: a page read from one RPC only does not confirm; the note stays IN
   assert.equal(t.sent.length, 1);
 });
 
-// R2 waits on U's previous note landed in the note store (its leaf read from the pages on both RPCs, card
-// wallet-bind-on-sync); here the pages' own read waits first, while RPC b lacks the previous row (the sync disagrees).
-test("prepay_open (R2): waits until both RPCs hold U's previous P, then sends the same signed bytes at the same nonce", async () => {
+// The wait here is P's own: the bind's first read of the pages stops while RPC b lacks the previous row (the sync
+// disagrees), so nothing is signed until both RPCs answer the same pages (card wallet-bind-on-sync, review L3).
+test("a pages read that stops (RPC b lacks a row RPC a has) holds the first call until both agree; prepay_open (R2) then sends the same signed bytes at the same nonce", async () => {
   const store = await noteStore();
   const first = await store.planDeposit(1n, pc);
   const i = (first.ref as { i: number }).i;
@@ -1673,6 +1673,11 @@ test("bind-on-sync 1: vault reads pinned below max_block_height + 5 never read P
   const ac = new AbortController();
   let ticks = 0;
   t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 40 && ac.abort(new Error("caller stopped")));
+  // a second call on P fails the test at once (review L4): its send never reaches the relayer
+  const fetchFn = (async (url: string, init: RequestInit) => {
+    if (t.sent.length > 0) throw new Error("a second call on P");
+    return t.deps.fetchFn(url, init);
+  }) as typeof fetch;
   const rpcs = t.deps.rpcs.map((r, k) => ({
     name: r.name,
     tx: r.tx,
@@ -1686,7 +1691,7 @@ test("bind-on-sync 1: vault reads pinned below max_block_height + 5 never read P
       return j;
     },
   })) as unknown as [BindRpc, BindRpc];
-  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, rpcs, signal: ac.signal }), /caller stopped/);
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, rpcs, fetchFn, signal: ac.signal }), /caller stopped/);
   assert.ok(t.chain.low() > t.sent[0]!.mbh + LAPSE_MARGIN, "U's reads went past the window");
   assert.equal(t.sent.length, 1, `a second call on P at nonce ${t.sent[1]?.nonce}`);
 });
@@ -1738,12 +1743,12 @@ test("bind-on-sync 3: U's key nonce and USDC are read at the block of the sync t
   }
 });
 
-test("bind-on-sync 4: the vault's cursor resumes across binds, and a note's own start (taken before P left) across a reload", async () => {
+test("bind-on-sync 4: a note with no call reads from 0 (review H1); its own start, the count read before P left, resumes across a reload", async () => {
   const t = await setup(["tx"]);
   for (let k = 0; k < 5; k++) t.chain.addRow(BigInt(9_000 + k), { depositor: "x.testnet" });
   landed(await bindDeposit(SEED, t.args, t.deps)); // P1 at row 5
   assert.equal((await t.store.syncCursor(VAULT)).deposits, 6);
-  // the next note, U's second arrival 0: its search starts at the store's cursor, not 0
+  // the next note, U's second arrival 0, has no call: its search starts at 0, whatever the store's cursor
   const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i: t.i }, n: 0 };
   const second = await t.store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
   t.chain.addRow(9_100n, { depositor: "x.testnet" }); // row 6
@@ -1755,7 +1760,7 @@ test("bind-on-sync 4: the vault's cursor resumes across binds, and a note's own 
   const sleep = async () => (t.chain.tick(), ++sleeps === 3 && ac.abort(new Error("reload")), await turn());
   await assert.rejects(bindDeposit(SEED, args, { ...t.deps, fetchFn: r.fetchFn, sleep, signal: ac.signal }), /reload/);
   assert.equal(r.sent.length, 1);
-  assert.equal(fromOf(t.chain.queries.slice(before).find(isDeposits)), 6);
+  assert.equal(fromOf(t.chain.queries.slice(before).find(isDeposits)), 0);
   assert.equal((await t.store.get(second.id))!.searchFrom, 7, "the count read before P left, written with the call");
   // the call is carried after all: P2 lands at row 9, and other binds move the store's cursor past it
   for (let k = 0; k < 2; k++) t.chain.addRow(BigInt(9_200 + k), { depositor: "x.testnet" });
@@ -1827,4 +1832,61 @@ test("bind-on-sync: prepay_open (R2) waits on U's previous note landed in the no
   const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.blocks(1n), ++ticks === 30 && ac.abort(new Error("caller stopped")), await turn()), signal: ac.signal, relayerAccount: RELAYER };
   await assert.rejects(bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, deps), /caller stopped/);
   assert.equal(r.sent.length, 1);
+});
+
+// ---------- REVIEW (wallet-bind-on-sync, independent reviewer): planted cases ----------
+test("REVIEW H1a: a note with no call in this store whose P another device on the seed landed, below the store's vault cursor, lands; nothing is sent", async () => {
+  const t = await setup(["tx", "tx", "tx", "tx"]);
+  // another device on this seed (same lane, same index) sent U's call: P at row 2; U's nonce moved, AMOUNT left U
+  t.chain.addRow(9_100n, { depositor: "x.testnet" });
+  t.chain.addRow(9_101n, { depositor: "x.testnet" });
+  t.chain.addRow(t.note.precommitment); // row 2, depositor U, value AMOUNT
+  t.chain.a.nonce = t.chain.b.nonce = t.chain.a.nonce + 1n;
+  t.chain.balance -= AMOUNT; // U still holds 75 USDC (a later arrival)
+  for (let k = 0; k < 3; k++) t.chain.addRow(BigInt(9_200 + k), { depositor: "x.testnet" });
+  // a bind of another note on this device read the pages to their end and kept its cursor (DepositsWatch.read's save)
+  await t.store.saveSyncCursor({ ...vaultSyncStart(VAULT), deposits: t.chain.a.rows.length, height: Number(t.chain.low()) });
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 60 && ac.abort(new Error("caller stopped")));
+  const out = await bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }).catch((e: unknown) => e);
+  assert.equal(t.sent.length, 0, `${t.sent.length} call(s) sent on a P the vault already holds, at nonce ${t.sent.map((s) => s.nonce).join(",")}`);
+  landed(out as BindOutcome);
+});
+
+test("REVIEW H1b: the first read finds P (landed elsewhere), the cursor is saved past P's row, the page dies before land: the next bind still finds P", async () => {
+  const t = await setup(["tx", "tx", "tx", "tx"]);
+  t.chain.addRow(9_100n, { depositor: "x.testnet" });
+  t.chain.addRow(t.note.precommitment); // row 1, landed by another device
+  t.chain.a.nonce = t.chain.b.nonce = t.chain.a.nonce + 1n;
+  t.chain.balance -= AMOUNT;
+  t.chain.addRow(9_200n, { depositor: "x.testnet" });
+  // the page dies inside land(): the first store.move after the pages read never happens
+  const dying = { ...t.store, get: t.store.get, list: t.store.list, syncCursor: t.store.syncCursor, saveSyncCursor: t.store.saveSyncCursor, addCall: t.store.addCall, addCallTx: t.store.addCallTx,
+    move: async () => { throw new Error("page killed"); } } as unknown as NoteStore;
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, store: dying }), /page killed/);
+  assert.equal((await t.store.get(t.note.id))!.state, "PLANNED");
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 60 && ac.abort(new Error("caller stopped")));
+  const out = await bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }).catch((e: unknown) => e);
+  assert.equal(t.sent.length, 0, `${t.sent.length} call(s) sent on a P the vault already holds`);
+  landed(out as BindOutcome);
+});
+
+test("review L2: prepay_open (R2) with U's previous note marked TAKEN but its P landed by another device: read in the pages, the same bytes go again", async () => {
+  const store = await noteStore();
+  const first = await store.planDeposit(1n, pc);
+  const i = (first.ref as { i: number }).i;
+  const chain = new Chain(depositAccount(SEED, 1n, i).account);
+  await store.move(first.id, "PLANNED", "TAKEN");
+  chain.addRow(first.precommitment); // another device on the seed landed the TAKEN note's P
+  const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i }, n: 0 };
+  const second = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  const r = relayer(chain, ["prepay_open", "tx"], lands(chain));
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.blocks(1n), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
+  const note = landed(await bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, deps));
+  assert.equal(r.sent.length, 2);
+  assert.equal(r.sent[1]!.bytes, r.sent[0]!.bytes);
+  assert.equal(note.leaf!.leafIndex, 2n);
 });

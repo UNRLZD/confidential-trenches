@@ -9,9 +9,11 @@
 //     block, byte for byte; card wallet-bind-on-sync) and matched on the device (P, depositor U, value = amount): never
 //     from the relayer's answer, a tx read by hash or a prepaid read (W:419, V:674-675). A sync that stops
 //     (VaultSyncStopped: one RPC behind, down or disagreeing) confirms nothing: the device reads again.
-//   - The search for P starts at the note's searchFrom, a count of the vault's rows taken before P first left the
-//     device (the note store's vault cursor, written with the note's first call), so no row below it can hold P; a note
-//     with no call yet starts at the store's cursor, and a store with none (a restore) at 0.
+//   - The search for P starts at 0 while the note holds no call: "no call" is only this store's word, and P comes from
+//     the seed, so another device on the seed (same lane) may have landed P anywhere (review H1). The first read runs to
+//     the pages' end before P leaves this device, and the note's first call records that count (searchFrom); every
+//     later read, a reload's too, starts there, since no row below it can hold P. A call written before notes held a
+//     start reads from 0. The note store's vault cursor gives the reads only its height (no older block than the last).
 //   - Nothing landed (W:448-455, V:675-677): P counts as absent only from a sync at a block past max_block_height + 5,
 //     a floor put in the sync's cursor.height so a lower block stops ("behind"); U's key nonce and USDC are read at
 //     that same block (block_id), so the pages and U are one state. With P not held and U's key nonce unchanged there,
@@ -453,8 +455,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
   if (struck.has(U)) throw new DepositBindRefused("struck", "the relayer struck U: its USDC leaves by withdraw.open");
   running.set(U, (running.get(U) ?? 0) + 1);
   try {
-    // The vault's cursor is read before the note: a note read with no call has not sent P yet, so no row below this
-    // cursor (every one read before this read) can hold P.
+    // The vault's cursor: its height, so no read is at an older block than the last one this device read.
     const stored = await store.syncCursor(vault);
     // The note: in the store before P leaves, of U, and its P the one the seed gives its ref.
     let note = await store.get(own.noteId);
@@ -465,14 +466,21 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     const prevRef = previousRef(note.ref);
     const previousP = prevRef === null ? null : noteSecrets(seed, prevRef).precommitment;
     const call = { network: own.network, amount: own.amount, precommitment: P, window: own.window };
-    // The watch for P: from the note's own start once a call is written (taken before P first left; a call written
-    // before the note held a start: 0), else from the store's cursor; every later read at the count it reached.
-    const from = note.calls === undefined ? stored.deposits : (note.searchFrom ?? 0);
-    const watch = new DepositsWatch(vault, P, rpcs, { ...stored, deposits: from }, (c) => store.saveSyncCursor(c));
+    // The watch for P: from 0 until a call is written (review H1), then from the note's own start (the count read
+    // before P first left; a call written before notes held a start: 0); every later read at the count it reached.
+    const watch = new DepositsWatch(vault, P, rpcs, { ...stored, deposits: note.searchFrom ?? 0 }, (c) => store.saveSyncCursor(c));
     // P is absent only at a block past the call's window and margin: the floor of the sync's cursor.height.
     const lapsed = (c: EarlierCall): bigint => c.max_block_height + LAPSE_MARGIN + 1n;
-    // R2: U's previous note has landed (its leaf, from the pages on both RPCs, in the note store).
-    const previousLanded = async (): Promise<boolean> => (await store.list()).some((n) => n.precommitment === previousP && n.leaf !== undefined);
+    // R2: U's previous note has landed: its leaf (from the pages on both RPCs) in the note store, or its P read in the
+    // pages, as for a previous note marked TAKEN whose P another device on the seed landed (review L2). That P's own
+    // watch reads from 0 once, then on from the count it reached.
+    let previousWatch: DepositsWatch | null = null;
+    const previousLanded = async (): Promise<boolean> => {
+      if (previousP === null) return false;
+      if ((await store.list()).some((n) => n.precommitment === previousP && n.leaf !== undefined)) return true;
+      previousWatch ??= new DepositsWatch(vault, previousP, rpcs, { ...stored, deposits: 0 }, (c) => store.saveSyncCursor(c));
+      return (await previousWatch.read(signal)).state === "held";
+    };
     // The note's calls as last read (the store's, so a reload, a retry or another tab sees every call signed for it).
     let calls: readonly BindCall[] = [];
     const reread = async (): Promise<NoteRecord> => {

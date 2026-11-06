@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
-import { backupFirst, openWalletStore as openStore, openWalletStoreReader, WALLET_LANES, WALLET_LOCK, walletSeedMoved, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
+import { backupFirst, openWalletStore as openStore, openWalletStoreReader, WALLET_LANES, WALLET_LOCK, WALLET_SYNC_PREFIX, walletSeedMoved, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
 
 // every store a test opens is closed at the end, so a failing assertion fails the run instead of leaving it hanging on
 // an open BroadcastChannel
@@ -778,4 +778,30 @@ test("the wallet database is version 1, and stays 1 after every record kind is w
     r.onerror = () => no(r.error);
   });
   assert.equal(v, 1);
+});
+
+// card wallet-bind-on-sync (review L1): the note store's vault cursor, meta sync/<vault>, is written as a bind reads the
+// pages; another tab never reads its seed again on that write, and the frame's reader neither reads nor lists it
+test("a vault cursor's write (meta sync/<vault>) is no seed move, and the frame's reader neither reads nor lists it", async () => {
+  const idb = new IDBFactory();
+  const seen: WalletEvent[] = [];
+  const s = await openWalletStore({ indexedDB: idb });
+  const other = await openWalletStore({ indexedDB: idb, onEvent: (e) => seen.push(e) });
+  await s.insertSeed(SEED(true));
+  const key = `${WALLET_SYNC_PREFIX}vault.testnet`;
+  await s.put("meta", key, { deposits: 3 });
+  await s.update("meta", key, () => ({ deposits: 4 }));
+  for (const k of ["sync/", "sync/a/b", "syncvault"]) await assert.rejects(s.put("meta", k, {}), /is the store's own/, k);
+  await new Promise((ok) => setTimeout(ok, 20));
+  const changed = seen.filter((e): e is Extract<WalletEvent, { kind: "changed" }> => e.kind === "changed");
+  assert.deepEqual(changed.map((e) => [e.stores, e.key]), [[["meta"], undefined], [["meta"], key], [["meta"], key]]);
+  assert.deepEqual(changed.map(walletSeedMoved), [true, false, false]);
+  assert.equal(walletSeedMoved({ kind: "changed", stores: ["meta", "notes"], key }), true);
+  const reader = (await openWalletStoreReader({ indexedDB: idb }))!;
+  await assert.rejects(reader.get("meta", key), /reader opens meta\/status, meta\/deposit\/<scope> and ops only/);
+  assert.ok(!(await reader.keys("meta")).some((k) => k.startsWith(WALLET_SYNC_PREFIX)), "the reader lists no vault cursor");
+  assert.ok((await reader.keys("meta")).includes("seed"));
+  reader.close();
+  other.close();
+  s.close();
 });
