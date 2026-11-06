@@ -442,11 +442,13 @@ test("checks the review's mutants passed: a negative fee, an over-long list, a n
 
 const PIN_POOL = "0x00000000000000000000000000000000b1f1f00a";
 const PIN_DELEGATE = "0x000000000000000000000000000000000000de1e";
+// the chain's FeeCollector, which every Sell pays its fee to (card evm-testnet-delegate-review3)
+const PIN_COLLECTOR = "0x00000000000000000000000000000000000c011e";
 const PINNED = Object.freeze({
-  base: Object.freeze({ ...B, pool: PIN_POOL, sellDelegate: PIN_DELEGATE }),
-  robinhood: Object.freeze({ ...R, pool: PIN_POOL, sellDelegate: PIN_DELEGATE }),
+  base: Object.freeze({ ...B, pool: PIN_POOL, sellDelegate: PIN_DELEGATE, feeCollector: PIN_COLLECTOR }),
+  robinhood: Object.freeze({ ...R, pool: PIN_POOL, sellDelegate: PIN_DELEGATE, feeCollector: PIN_COLLECTOR }),
 });
-const { pool: _pool, ...pinnedReq } = req();
+const { pool: _pool, ...pinnedReq } = req({ feeRecipient: PIN_COLLECTOR });
 
 test("M370 today no pool or sell delegate is pinned: the pinned builder and signer under the kit's evmPoolBuildSell and evmPoolSignSell, and evmPoolSignSellAuthorization, refuse not_deployed", () => {
   for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
@@ -519,6 +521,43 @@ test("M370 a polluted Object.prototype names no pool and no delegate: every sell
     }
   });
   assert.equal(({} as Record<string, unknown>).pool, undefined, "the prototype is emptied again");
+});
+
+// card evm-testnet-delegate-review3: SellDelegate pays a sale's fee to the Sell's signed feeRecipient (pool-review-3,
+// L-1), and the helper sends only a Sell that pays the network's FeeCollector, whose Paid log proves the fee
+// (apps/helper pool/evm.ts): the pinned builder takes no other recipient, and a chain that pins no collector no sale
+test("card evm-testnet-delegate-review3: a pinned sell pays its fee only to the chain's pinned FeeCollector (not_pinned otherwise), and a chain that pins none takes no sell (not_deployed)", () => {
+  const built = pinnedBuildSell(PINNED, "base", pinnedReq);
+  assert.equal(built.feeRecipient, PIN_COLLECTOR);
+  assert.equal(code(() => pinnedBuildSell(PINNED, "base", { ...pinnedReq, feeRecipient: PIN_COLLECTOR.toUpperCase().replace("0X", "0x") })), "built");
+  // the withdraw relayer's fee recipient (a release's), or any other address, is refused
+  assert.equal(code(() => pinnedBuildSell(PINNED, "base", { ...pinnedReq, feeRecipient: FEE_TO })), "not_pinned");
+  assert.equal(code(() => pinnedBuildSell(PINNED, "robinhood", { ...pinnedReq, target: R.routers[0]!, route: v3([X, R.weth]), feeRecipient: ACCOUNT_1 })), "not_pinned");
+  // the build pays the recipient the check read: a getter cannot show it the pin and the Sell another
+  let reads = 0;
+  const tricky = { ...pinnedReq, get feeRecipient() { return reads++ === 0 ? PIN_COLLECTOR : FEE_TO; } };
+  assert.equal(pinnedBuildSell(PINNED, "base", tricky).feeRecipient, PIN_COLLECTOR);
+  // a pool but no collector: not_deployed, whatever recipient is named, and a polluted prototype names none
+  const noCollector = Object.freeze({ ...PINNED, base: Object.freeze({ ...B, pool: PIN_POOL, sellDelegate: PIN_DELEGATE }) });
+  assert.equal(code(() => pinnedBuildSell(noCollector, "base", pinnedReq)), "not_deployed");
+  assert.equal(code(() => pinnedBuildSell(noCollector, "base", { ...pinnedReq, feeRecipient: FEE_TO })), "not_deployed");
+  const P = Object.prototype as Record<string, unknown>;
+  try {
+    P.feeCollector = EVIL;
+    assert.equal(code(() => pinnedBuildSell(noCollector, "base", { ...pinnedReq, feeRecipient: EVIL })), "not_deployed");
+  } finally {
+    delete P.feeCollector;
+  }
+  // the kit's own testnet pins: a v4 sell pays the chain's collector, never another address; the mainnets pin none
+  const ZERO = "0x0000000000000000000000000000000000000000";
+  for (const chain of ["base-sepolia", "robinhood-testnet"] as EvmPoolChain[]) {
+    const v = evmPoolVenues()[chain];
+    const r = { ...pinnedReq, target: v.poolManager!, route: { venue: "uniswap-v4" as const, hops: [{ currency: ZERO, fee: 10000, tickSpacing: 200, hooks: ZERO, hookData: "0x" }] } };
+    assert.ok(v.feeCollector, chain);
+    assert.equal(pinnedBuildSell(evmPoolVenues(), chain, { ...r, feeRecipient: v.feeCollector! }).feeRecipient, v.feeCollector, chain);
+    assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), chain, { ...r, feeRecipient: FEE_TO })), "not_pinned", chain);
+  }
+  for (const chain of ["base", "robinhood"] as EvmPoolChain[]) assert.equal(evmPoolVenues()[chain].feeCollector, undefined, chain);
 });
 
 // A v4 sell (card evm-sell-v4-kit): SellDelegate's data, abi.encode(PathKey[]), against cast (evm-pool-sell-v4.cast.json),
