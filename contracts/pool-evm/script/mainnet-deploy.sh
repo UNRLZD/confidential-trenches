@@ -12,12 +12,14 @@
 # 1. deploy.mjs --mainnet. Before any key or transaction it refuses: an RPC that does not answer the chain's id (the
 #    chain's own public RPC and PublicNode's, pool-evm-deploy.mjs MAINNETS), a return address with code or with no ETH
 #    on either RPC, a build whose runtime is not pool-evm-deploy.build.json's or whose init code is not deploy.mjs
-#    MAINNET_INIT's, and a chain whose record (contracts/pool-evm/deployments/<chain>.json) exists. Then it prints the
-#    run key's address and the need with its parts, and waits. Send exactly that much ETH to the printed address from
-#    the address you passed, in one transfer (the line says "send exactly ... from" it): more than asked, or a second
-#    transfer, can hide one still to land. It deploys the withdrawal verifier, the pool,
-#    the v4 adapter, the v3 adapter and the sell delegate, each checked as the build's code on both RPCs, sweeps the
-#    rest back to your address and writes contracts/pool-evm/deployments/<chain>.json.
+#    MAINNET_INIT's, a chain whose record (contracts/pool-evm/deployments/<chain>.json) exists, a checkout whose
+#    packages/kit/src/trade/evm/buy-unpinned.ts differs from origin/main's (the kit's sell sender pin is main's), and a
+#    pin with code on either RPC. Then it prints the run key's address and the need with its parts, and waits. Send
+#    exactly that much ETH to the printed address from the address you passed, in one transfer (the line says "send
+#    exactly ... from" it): more than asked, or a second transfer, can hide one still to land. It deploys the
+#    withdrawal verifier, the pool, the v4 adapter, the v3 adapter, the sell delegate and, last, the fee collector, its
+#    sink the sell sender the kit pins for the chain, each checked as the build's code on both RPCs (the collector's
+#    with that sink), sweeps the rest back to your address and writes contracts/pool-evm/deployments/<chain>.json.
 # 2. The live check on that record, on both of the chain's RPCs: no owner, no proxy, the pinned code, the run key empty.
 # Once both chains' records pass and the kit pins them, the money gate's run record is written by
 #   node scripts/live-checks/pool-evm-deploy-mainnet.mjs --write-record   (scripts/live-checks/pool-evm-deploy-mainnet.md)

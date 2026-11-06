@@ -4,7 +4,8 @@
 //   - its record, contracts/pool-evm/deployments/<chain>.json, exists and is a real run (the owner's paste,
 //     contracts/pool-evm/script/mainnet-deploy.sh; evm-venues-pin.mjs recordOf refuses a dry run's);
 //   - pool-evm-deploy.mjs's check of it on the chain's two RPCs of two operators passes: each contract's code is the
-//     build's, no owner() answers, no EIP-1967 slot is set, the PoolManager's, the router's and WETH's code hashes (and
+//     build's, no owner() answers, no EIP-1967 slot is set, the fee collector's sink is the sell sender the kit pins
+//     (`venues`, as below), the PoolManager's, the router's and WETH's code hashes (and
 //     Robinhood WETH's implementation) are the pinned ones, and the run key sent exactly the record's transactions and
 //     keeps at most DUST;
 //   - evm-venues-pin.mjs's check of the kit's venue for it (evmPoolVenues(), through the kit's public entry) passes:
@@ -48,7 +49,7 @@ export async function checkMainnets({ read = (c) => recordOf(c), venues = evmPoo
       continue;
     }
     const rpcs = rpcsOf(chain);
-    const a = await deployCheck({ deployment: d, fetchFn, rpcs, ...(sleep ? { sleep } : {}) });
+    const a = await deployCheck({ deployment: d, fetchFn, rpcs, venues, ...(sleep ? { sleep } : {}) });
     for (const l of a.lines) lines.push(`${chain}: deploy ${l}`);
     say(a.ok, `the deploy record's check on ${rpcs.join(" and ")}`);
     const venue = venues[chain];

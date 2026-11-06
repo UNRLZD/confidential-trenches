@@ -12,7 +12,7 @@ import { ADDRESS, H72, h1c, NOW, SOL_USDC, U, type Mock } from "./oneclick-mock.
 const SCOPE = 7n;
 const RECORD: DepositRecord = { v: 1, scope: "7", index: 3, id: U };
 const SAVED: DepositPublic = { status: { source: "code", code_saved: true }, deposit: RECORD };
-const GOOD = { deposit_address: ADDRESS, origin_asset: SOL_USDC, amount_in: "25", min_amount_out: "24.7005", deadline: new Date(NOW + 30 * 60_000 + H72).toISOString(), time_estimate_s: 20 };
+const GOOD = { deposit_address: ADDRESS, origin_asset: SOL_USDC, amount_in: "25", min_amount_out: "24.74208", deadline: new Date(NOW + 30 * 60_000 + H72).toISOString(), time_estimate_s: 20 };
 
 /** A page whose deposit.quote reads `reads` in turn (the last one again once they run out) and asks the mock `mocks` in turn. */
 function page(o: { reads?: (DepositPublic | null)[]; mocks?: Mock[]; scope?: bigint | null; named?: () => Promise<unknown> } = {}) {

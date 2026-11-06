@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Deploys the Blindfill EVM pool to Base Sepolia or Robinhood testnet, or with --mainnet to Base or Robinhood (or an
 // anvil fork of one, the dry run), with no admin: the withdrawal verifier, the pool, the v4 adapter, the v3 adapter
-// (of the testnets Base Sepolia only; both mainnets, M365) and the sell delegate. The deployer is a run key made in memory; it is never printed or passed to another process, and written
+// (of the testnets Base Sepolia only; both mainnets, M365), the sell delegate and, on the mainnets, the fee collector
+// (card evm-mainnet-senders; its sink as for --only FeeCollector below, read before any key is made). The deployer is a run key made in memory; it is never printed or passed to another process, and written
 // only on a mainnet run, to its 0700 key folder until swept.
 //
 //   node contracts/pool-evm/script/deploy.mjs --chain <base-sepolia|robinhood-testnet> --return <address>
@@ -17,9 +18,12 @@
 // evm-testnet-delegate-review3.mjs (card evm-testnet-delegate-review3's redeploy at the pool-review-3 build;
 // evm-sell-v4's and evm-selldelegate-exact-debit's records keep theirs).
 // --only FeeCollector (card evm-fee-collector) deploys the fee collector alone, beside the chain's set (the testnets'
-// 3 Nov sets predate it), constructed with its sink: the sell sender the kit pins for the chain (evmPoolVenues()
-// sellSender), refused when the kit pins none; its record (evm-fee-collector.<chain>.json, or --out) names the sink
-// beside the address, and its live check is evm-fee-collector.mjs.
+// 3 Nov sets predate it; the mainnet sets end with it), constructed with its sink: the sell sender the kit pins for the
+// chain (evmPoolVenues() sellSender) as origin/main has it (sinkOf: a checkout whose KIT_PIN_FILE differs from main's
+// is refused), refused when the kit pins none or the pin has code on either RPC (an EIP-7702 delegation), before a key
+// is made (a mainnet paste too); its
+// record (evm-fee-collector.<chain>.json, or --out) names the sink beside the address, and its live check is
+// evm-fee-collector.mjs.
 //
 //   node contracts/pool-evm/script/deploy.mjs --mainnet --chain <base|robinhood> --return <address> [--rpc <loopback> --out <file>]
 //   node contracts/pool-evm/script/deploy.mjs --mainnet --chain <base|robinhood> --sweep-kept <journal> [--return <address>]
@@ -40,7 +44,8 @@
 //     alike); the run's journal (the record's path, .journal.json) holds every transaction it signs, written before
 //     the send and in the finally, and the key's state. A stopped run that made a contract keeps its key; while a
 //     journal's key is kept the same paste (the same --return, no other) resumes with that key: each contract the
-//     stopped run made is reused once its receipt and its code on both RPCs read back as the build's (one that landed
+//     stopped run made is reused once its receipt and its code on both RPCs read back as the build's (a fee collector's
+//     with this run's sink at its immutable; one that landed
 //     but does not read back stops the resume before any funding, and the pool is reused only with its verifier), and
 //     only the rest is deployed, at the key's next nonces; or --sweep-kept sends the key's rest back to that journal's
 //     return address, and no other, then removes the key unless something still keeps it (a run not whole that made a
@@ -103,7 +108,7 @@ const { secp256k1 } = await import(pathToFileURL(req.resolve("@noble/curves/secp
 
 // The contracts in deploy order, each with its constructor's arguments on a chain (the pool's is the verifier's
 // address the run computes).
-export const ORDER = ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate"];
+export const ORDER = ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate", "FeeCollector"];
 const argsOf = (name, chain, addrs, sink) => ({
   WithdrawalVerifier: [],
   PrivacyPoolSimple: [addrs.WithdrawalVerifier],
@@ -114,14 +119,31 @@ const argsOf = (name, chain, addrs, sink) => ({
 })[name];
 // The contracts a run may deploy alone (--only): the sell delegate, whose constructor needs no other contract of the run
 // (card evm-testnet-delegate-review3; evm-sell-v4's and evm-selldelegate-exact-debit's records stay under their own keys)
-// The fee collector (card evm-fee-collector) is deployed alone beside the chain's set (`beside`): its constructor takes
-// only the chain's sell sender, and the testnets' sets were deployed before it existed
+// The fee collector (card evm-fee-collector) is deployed alone beside a testnet's set (`beside`): its constructor takes
+// only the chain's sell sender, and the testnets' sets were deployed before it existed (the mainnet sets hold it)
 export const ALONE = Object.freeze({ SellDelegate: { key: "evm-testnet-delegate-review3" }, FeeCollector: { key: "evm-fee-collector", beside: true } });
 // Every contract the build file pins: the chain sets' (ORDER), then those deployed only beside them
 export const BUILT = Object.freeze([...ORDER, ...Object.keys(ALONE).filter((n) => !ORDER.includes(n))]);
-/** The fee collector's sink on `chainName`: the sell sender the kit pins there, or a throw (nothing is sent) */
-export async function sinkOf(chainName) {
-  const { evmPoolVenues } = await import(pathToFileURL(path.join(REPO, "packages/kit/src/index.ts")).href);
+// The kit's file whose evmPoolVenues() holds each chain's sell sender pin; it imports no other file of the kit's, so
+// what it holds is what sinkOf reads
+export const KIT_PIN_FILE = "packages/kit/src/trade/evm/buy-unpinned.ts";
+const repoGit = (...a) => spawnSync("git", ["-C", REPO, ...a], { encoding: "utf8" });
+/** origin/main fetched and in this checkout, or a throw saying `what` could not be read (nothing is sent) */
+const fetchMain = (git, what) => {
+  if (git("fetch", "-q", "origin", "main").status !== 0) throw new Error(`git fetch origin main failed, so ${what} could not be read: nothing was sent; run the paste again once the fetch works`);
+  if (git("rev-parse", "--verify", "-q", "origin/main").status !== 0) throw new Error(`origin/main is not in this checkout, so ${what} could not be read: nothing was sent`);
+};
+/**
+ * The fee collector's sink on `chainName`: the sell sender the kit pins there as origin/main has it, or a throw
+ * (nothing is sent). origin/main is fetched, then a checkout whose KIT_PIN_FILE differs from main's (a commit or
+ * an edit not on main) is refused, so the pin in use is main's. `git` is for tests.
+ */
+export async function sinkOf(chainName, { git = repoGit } = {}) {
+  fetchMain(git, "main's sell sender pin");
+  const d = git("diff", "--quiet", "origin/main", "--", KIT_PIN_FILE).status;
+  if (d === 1) throw new Error(`${KIT_PIN_FILE} in this checkout differs from origin/main's: the FeeCollector's sink is the sell sender main pins; update this checkout to main and run the paste again: nothing was sent`);
+  if (d !== 0) throw new Error(`${KIT_PIN_FILE} could not be compared with origin/main's: nothing was sent`);
+  const { evmPoolVenues } = await import(pathToFileURL(path.join(REPO, KIT_PIN_FILE)).href);
   const s = String(evmPoolVenues()[chainName]?.sellSender ?? "").toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(s) || /^0x0{40}$/.test(s)) throw new Error(`the kit pins no sell sender on ${chainName}, the FeeCollector's sink: nothing was sent`);
   return s;
@@ -163,7 +185,8 @@ export const MAINNET_INIT = Object.freeze({
   UniswapV3Adapter: { length: 2269, keccak: "0x1460db6407c61d6d70d3d423a04a46a512f5df9c00978987cd9f38a267db4f05" },
   SellDelegate: { length: 9479, keccak: "0x60ae724bd23ec2c11ee8faf40a6027b43e256e7719efe8d85646ed7079fc3132" },
   // card evm-fee-collector: read from forge build --root contracts/pool-evm (forge 1.7.1 on the Mac, 2026-11-06), where
-  // the five above read as above; no mainnet set deploys it until each mainnet's sell sender is pinned in the kit
+  // the five above read as above; each mainnet set deploys it last (card evm-mainnet-senders), and its paste is refused
+  // until the kit pins that mainnet's sell sender (sinkOf)
   FeeCollector: { length: 407, keccak: "0xaf9a87d9faaac0c448dabec1f6ce81371789f00eddce4f0479db5e07da5e2e2d" },
 });
 /** Why `code` is not `name`'s pinned init code, or null when it is */
@@ -178,11 +201,10 @@ export function initProblems(name, code) {
  * Why `chainName`'s pool counts as deployed beyond this checkout, or null: origin/main holds its record (fetched first),
  * or the kit pins a pool for it. A paste in another clone of the repository is refused as one in this folder is.
  */
-export async function deployedElsewhere(chainName, { git = (...a) => spawnSync("git", ["-C", REPO, ...a], { encoding: "utf8" }) } = {}) {
+export async function deployedElsewhere(chainName, { git = repoGit } = {}) {
   const file = path.relative(REPO, deploymentFile(chainName));
   // main's record unread is its own refusal, never "deployed already"
-  if (git("fetch", "-q", "origin", "main").status !== 0) throw new Error("git fetch origin main failed, so main's record could not be read: nothing was sent; run the paste again once the fetch works");
-  if (git("rev-parse", "--verify", "-q", "origin/main").status !== 0) throw new Error("origin/main is not in this checkout, so main's record could not be read: nothing was sent");
+  fetchMain(git, "main's record");
   if (git("cat-file", "-e", `origin/main:${file}`).status === 0) return `origin/main holds ${file}`;
   const { evmPoolVenues } = await import(pathToFileURL(path.join(REPO, "packages/kit/src/index.ts")).href);
   const pool = evmPoolVenues()[chainName]?.pool;
@@ -478,7 +500,9 @@ async function run(args, io = {}) {
   if (!mainnet && MAINNET_IDS[id]) throw new Error(`${url} answers ${MAINNET_IDS[id]} mainnet (${id}): its deploy is the owner's`);
   if (id !== chain.chainId) throw new Error(`${url} answers chain id ${id}, not ${chainName}'s ${chain.chainId}`);
   console.log(`deploy: ${chainName} (${BigInt(id)}) on ${url}${dryRun ? ", a loopback fork: the dry run" : ""}`);
-  for (const u of dryRun ? [url, ...(mainnet ? [second] : [])] : chain.rpcs) {
+  // the RPCs every account read before a key is made goes to: the chain's two (the fork's on a dry run)
+  const reads = dryRun ? [url, ...(mainnet ? [second] : [])] : chain.rpcs;
+  for (const u of reads) {
     if ((await call("eth_chainId", [], u)) !== chain.chainId) throw new Error(`${u} does not answer ${chainName}'s chain id`);
     const c = await call("eth_getCode", [ret, "latest"], u);
     if (c !== "0x") throw new Error(`--return ${ret} has code on ${u} (${(c.length - 2) / 2} bytes): the rest goes only to an account with none`);
@@ -499,9 +523,11 @@ async function run(args, io = {}) {
     deployer = addressOf(sk);
     if (deployer !== j0.deployer) throw new Error(`${keyDir}/key is not the key of ${j0.deployer}`);
   };
+  // the build's code; a fee collector's also holds this run's sink (sinkOf) at its one immutable
   const isBuild = (n, code) => {
     const got = runtimeOf(code, pinned[n].immutables);
-    return got.length === pinned[n].length && got.masked === pinned[n].masked;
+    const sinkHeld = n !== "FeeCollector" || (got.words.length === 1 && got.words[0].length === 1 && got.words[0][0] === "0x" + word(BigInt(sink)));
+    return got.length === pinned[n].length && got.masked === pinned[n].masked && sinkHeld;
   };
   let rest = [];
   let nonce0 = 0n;
@@ -523,10 +549,15 @@ async function run(args, io = {}) {
     const built = buildOf();
     for (const n of BUILT) if (JSON.stringify(built[n]) !== JSON.stringify(pinned[n])) throw new Error(`${n}: forge's build differs from ${path.basename(BUILD_FILE)}`);
     names = only ? [only] : chain.contracts;
-    // the fee collector's sink before the run key exists: a chain whose sell sender the kit does not pin is refused
-    // with nothing made
+    // the fee collector's sink before the run key exists: a chain whose sell sender the kit does not pin (as main has
+    // it), or a pin with code on either RPC, is refused with nothing made (a mainnet paste: no key, no key folder, no
+    // funding line)
     if (names.includes("FeeCollector")) {
       sink = await (io.sinkOf ?? sinkOf)(chainName);
+      for (const u of reads) {
+        const code = await call("eth_getCode", [sink, "latest"], u);
+        if (code !== "0x") throw new Error(`the FeeCollector's sink ${sink} has code on ${u} (${(String(code).length - 2) / 2} bytes): an EIP-7702 delegation there would run inside every fee the collector forwards: nothing was sent`);
+      }
       console.log(`deploy: FeeCollector's sink ${sink}, the sell sender the kit pins on ${chainName}`);
     }
     // read once: the bytes checked here are the bytes sent
@@ -574,7 +605,7 @@ async function run(args, io = {}) {
         // pointing at a verifier the record does not name)
         const codes = await onBoth((u) => call("eth_getCode", [t.address, "latest"], u), (code) => isBuild(n, code));
         const bad = codes.filter(([, code]) => !isBuild(n, code)).map(([u]) => u);
-        if (bad.length) throw new Error(`the stopped run's ${n} at ${t.address} (${t.hash}) landed, but its code does not read back as the build's on ${bad.join(" and ")}: nothing was sent; run the same paste again once both RPCs have it, or send the key's rest back: ${sweepCommand(chainName)}`);
+        if (bad.length) throw new Error(`the stopped run's ${n} at ${t.address} (${t.hash}) landed, but its code does not read back as the build's${n === "FeeCollector" ? ` with the sink ${sink}` : ""} on ${bad.join(" and ")}: nothing was sent; run the same paste again once both RPCs have it, or send the key's rest back: ${sweepCommand(chainName)}`);
         reused[n] = t.address;
       }
       if (reused.PrivacyPoolSimple && !reused.WithdrawalVerifier) throw new Error(`the stopped run's pool ${reused.PrivacyPoolSimple} is reused only with its verifier, which did not read back: nothing was sent; send the key's rest back: ${sweepCommand(chainName)}`);
@@ -742,8 +773,10 @@ async function run(args, io = {}) {
   };
   // The record: every transaction of the key that landed, in nonce order, and each contract its landed deploy made (a
   // resumed run's reused deploys included: their receipts are read first). `prev`, a record already written, keeps its
-  // own run fields (--sweep-kept rewrites it with the sweeps).
+  // own run fields (--sweep-kept rewrites it with the sweeps), the fee collector's sink among them: --sweep-kept reads
+  // no sink, and prev's is the one the completed run read and checked at the collector's immutable.
   const record = async (prev = null) => {
+    const sinkHeld = prev ? prev.contracts?.FeeCollector?.sink : sink;
     // a receipt is read only where the nonce has none landed yet (a resume's reused deploys): a settled run reads
     // nothing here, so an RPC outage after its key is removed cannot cost it the record
     for (const s of signed) if (!signed.some((o) => o.receipt && o.nonce === s.nonce)) await receiptOf(s);
@@ -753,7 +786,7 @@ async function run(args, io = {}) {
     const d = {
       chain: chainName, chainId: Number(BigInt(id)), dryRun, at: prev?.at ?? new Date().toISOString(), deployer, return: ret, need: prev?.need ?? need.toString(),
       build: prev?.build ?? `solc 0.8.28 (contracts/pool-evm/foundry.toml), ${forgeVersion}`,
-      contracts: Object.fromEntries([...chain.contracts, ...BUILT.filter((n) => !chain.contracts.includes(n))].filter((n) => made.some((s) => s.contract === n)).map((n) => [n, { address: made.find((s) => s.contract === n).address, ...(n === "FeeCollector" ? { sink } : {}) }])),
+      contracts: Object.fromEntries([...chain.contracts, ...BUILT.filter((n) => !chain.contracts.includes(n))].filter((n) => made.some((s) => s.contract === n)).map((n) => [n, { address: made.find((s) => s.contract === n).address, ...(n === "FeeCollector" ? { sink: sinkHeld } : {}) }])),
       txs,
     };
     writeAtomic(out, JSON.stringify(d, null, 2) + "\n");
@@ -888,9 +921,7 @@ async function run(args, io = {}) {
         const r = await waitReceipt(s, WAITS.receipt);
         if (!r) throw new Error(`deploy ${n} ${s.hash}: no receipt in ${WAITS.receipt / 1000} s`);
         if (r.status !== "0x1" || r.contractAddress?.toLowerCase() !== addrs[n]) throw new Error(`deploy ${n} ${s.hash}: status ${r.status}, contract ${r.contractAddress}, want ${addrs[n]}`);
-        const code = await call("eth_getCode", [addrs[n], "latest"]);
-        const got = runtimeOf(code, pinned[n].immutables);
-        if (got.length !== pinned[n].length || got.masked !== pinned[n].masked) throw new Error(`${n} at ${addrs[n]}: code is not the build's`);
+        if (!isBuild(n, await call("eth_getCode", [addrs[n], "latest"]))) throw new Error(`${n} at ${addrs[n]}: code is not the build's${n === "FeeCollector" ? ` with the sink ${sink}` : ""}`);
         console.log(`deploy: ${n} ${addrs[n]} (${s.hash}), ${r.gasUsed && big(r.gasUsed)} gas, code is the build's`);
       }
       // each contract's code read again on both RPCs: the build's on each
