@@ -8,9 +8,10 @@
 //! The path: S's tokens inside intents.near at DF go out by S's signed `ft_withdraw` with the deposit message and a
 //! `min_gas`, carried in `execute_intents` by a relayer. intents.near calls the token's `ft_transfer_call` with
 //! `min_gas` as its static gas and every unused gas unit on top (DF `contracts/defuse/src/contract/tokens/nep141/
-//! withdraw.rs` l.136-140, unused weight 1); the token keeps 30 Tgas and passes the rest to the vault's
-//! `ft_on_transfer` (NCS `core_impl.rs`; the mock's split in tests/harness/mod.rs). With no `min_gas` signed, DF uses
-//! 50 Tgas (`contracts/defuse/core/src/intents/tokens.rs` l.158-174).
+//! withdraw.rs` l.136-140, unused weight 1); the token passes most of it to the vault's `ft_on_transfer` (NCS
+//! `core_impl.rs`; the mock's split in tests/harness/mod.rs): the box's run read 19.4 Tgas kept by the token, under
+//! the 30 the rule counts. With no `min_gas` signed, DF uses
+//! 50 Tgas, and never less than 30 (`contracts/defuse/core/src/intents/tokens.rs` l.159-203).
 //!
 //! One vault per token, three deposits by one S (a 64-hex implicit account, the longest depositor a message names),
 //! each read at final with every receipt's gas burnt and the gas each function call was given:
@@ -18,16 +19,27 @@
 //! 2. size 2^10: both trees patched to size 2^10 - 1 and depth 10 with a side node at every level, so the insert at
 //!    index 2^10 - 1 hashes all 10 levels, the costliest insert at that size (tests/s10.rs `seed_depth32`'s patch);
 //! 3. depth 32: both trees patched to size 2^32 - 1 and depth 32, so the insert hashes all 32 levels, as tests/s10.rs
-//!    forces it (vault.md 2.11). Here the relayer attaches only what `execute_intents` needs, so the token's call gets
-//!    the signed `min_gas` and at most SLACK more (read from its receipt): first with no `min_gas` signed (DF's 50
-//!    Tgas), which the vault refuses for want of gas, S refunded in full inside intents.near and no state byte or
-//!    token unit moved; then with INTENTS_MIN_GAS, which lands. Runs 1 and 2 attach 300 Tgas, and their leftover
-//!    (the token call's gas less `min_gas`) sizes run 3's attachment.
+//!    forces it (vault.md 2.11). Here the relayer attaches about what `execute_intents` needs, so the token's call
+//!    gets the signed `min_gas` and under SLACK + 1 Tgas more (read from its receipt; 1.728 over in the box's run).
+//!    Runs 1 and 2 attach 300 Tgas, and their leftover (the token call's gas less `min_gas`) sizes run 3's attachment.
+//!    a. No `min_gas` signed (DF's 50 Tgas): the vault refuses for want of gas, S is refunded in full inside
+//!       intents.near, and no state byte or token unit moves.
+//!    b. The kit's `min_gas` signed, and the relayer attaching 1 Tgas under what that floor needs: intents.near fails
+//!       the whole `execute_intents`, so no token call is made and S's balance inside intents.near is unchanged. This
+//!       is the run that depends on the signed value: DF gives the token `min_gas` plus every unused gas unit
+//!       (withdraw.rs l.136-140), so with gas to spare a wrong `min_gas` (in the wrong units, or under a key DF does
+//!       not read: FtWithdraw has no deny_unknown_fields) lands as well as the right one. `VT_S13_PLANT=units` signs
+//!       it as gas units instead of Tgas, and `VT_S13_PLANT=key` under `minGas`: either must fail here.
+//!    c. The kit's `min_gas` signed and SLACK attached over its need: lands. This proves the value is enough, not that
+//!       less fails: on this measure about 113 Tgas would land (94.027 for the vault and the 19.4 the token kept);
+//!       only the rule's assert below holds the value at 156.
 //!
 //! Every landed deposit returns `"0"`, logs its `deposited` event for S, the amount and P, its leaf is that event's
 //! commitment = Poseidon(value, label, P) at the insert's index, and I1 holds. The rule (vault.md 2.5.1, V:349):
 //! `min_gas` = (the vault's worst `ft_on_transfer` × 1.059, testnet's trie-read margin, + the token's 30 Tgas) × 1.2,
-//! rounded up to a whole Tgas; INTENTS_MIN_GAS must equal it. The 180 Tgas U signs for its own `ft_transfer_call`
+//! rounded up to a whole Tgas. The kit's `VAULT_ALSO_ACCEPTS[0].min_gas_tgas` (packages/kit/src/vault/shapes.ts),
+//! read here as tests/events.rs reads the kit's events, must not be under it (else a deposit can run short) nor a
+//! Tgas or more over it (else it is stale and must be derived again). The 180 Tgas U signs for its own `ft_transfer_call`
 //! rests on U's measured call (vault.md 2.5.1, tests/s02.rs) and is not this figure.
 #![cfg(feature = "sandbox")]
 
@@ -43,11 +55,21 @@ use near_workspaces::types::{Gas, NearToken};
 use near_workspaces::{Account, AccountId};
 use std::collections::BTreeMap;
 
-/// The `min_gas` an intents.near `ft_withdraw` into the vault signs, in Tgas: the rule on this file's worst case.
-/// Measured on the Linux x86_64 build (the box's and CI's), near-sandbox 2.13.4: the vault's `ft_on_transfer` at depth
+/// The `min_gas` an intents.near `ft_withdraw` into the vault signs, in Tgas: the kit's `VAULT_ALSO_ACCEPTS[0]
+/// .min_gas_tgas`, the only line of shapes.ts that declares VAULT_ALSO_ACCEPTS. Measured on run.sh's host build of
+/// the vault (cargo-near non-reproducible-wasm on Linux x86_64, the box's and CI's), whose code the review found equal
+/// to the reproducible build's apart from data bytes, in near-sandbox 2.13.4: the vault's `ft_on_transfer` at depth
 /// 32 burnt 94.027 Tgas on the mock token and 94.023 on the real USDC wasm; (94.027 × 1.059 + 30) × 1.2 = 155.489,
 /// rounded up to 156. It was 180 (vault.md 2.5.1, D) until this measure.
-const INTENTS_MIN_GAS: u64 = 156;
+fn kit_min_gas() -> u64 {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/kit/src/vault/shapes.ts");
+    let src = std::fs::read_to_string(&path).expect("read packages/kit/src/vault/shapes.ts");
+    let lines: Vec<&str> = src.lines().filter(|l| l.starts_with("export const VAULT_ALSO_ACCEPTS = [")).collect();
+    assert_eq!(lines.len(), 1, "shapes.ts declares VAULT_ALSO_ACCEPTS once, on one line");
+    let at = lines[0].find("min_gas_tgas: ").expect("VAULT_ALSO_ACCEPTS names min_gas_tgas") + "min_gas_tgas: ".len();
+    let digits: String = lines[0][at..].chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().expect("min_gas_tgas: a whole number of Tgas")
+}
 /// testnet's trie-read margin over the sandbox (vault.md 2.5.1, G1 RESULT §3).
 const TESTNET_MARGIN: f64 = 1.059;
 /// What the token keeps of its `ft_transfer_call`'s gas (NCS `GAS_FOR_FT_TRANSFER_CALL`).
@@ -55,8 +77,8 @@ const TOKEN_KEEPS: f64 = 30.0;
 const HEADROOM: f64 = 1.2;
 /// DF's `min_gas` for an `ft_transfer_call` when none is signed.
 const DF_DEFAULT_MIN_GAS: u64 = 50;
-/// What the tight runs of step 3 attach over `execute_intents`' need, and so at most what the token's call gets
-/// over `min_gas`.
+/// What the tight runs of step 3 attach over `execute_intents`' need (the token's call gets under SLACK + 1 Tgas over
+/// `min_gas`, since the leftover is cut in whole Tgas).
 const SLACK: u64 = 1;
 const RELAYER_GAS: u64 = 300;
 /// What S holds inside intents.near, and each deposit: 10 USDC and 1 USDC (MIN_DEPOSIT), 6 decimals.
@@ -192,8 +214,12 @@ async fn ft_withdraw_intent(h: &Harness, signer: &Account, amount: u128, msg: &s
     nonce.extend(&near_sdk::env::sha256(format!("{} {now} {msg} {min_gas:?}", signer.id()).as_bytes())[..7]);
     let mut intent = json!({"intent": "ft_withdraw", "token": h.token, "receiver_id": h.vault, "amount": amount.to_string(), "msg": msg});
     if let Some(g) = min_gas {
-        // near-gas serialises Gas as a decimal string of gas units
-        intent["min_gas"] = json!(Gas::from_tgas(g).as_gas().to_string());
+        // near-gas serialises Gas as a decimal string of gas units; VT_S13_PLANT signs it wrong, so 3b must fail
+        match std::env::var("VT_S13_PLANT").as_deref() {
+            Ok("units") => intent["min_gas"] = json!(g.to_string()),
+            Ok("key") => intent["minGas"] = json!(Gas::from_tgas(g).as_gas().to_string()),
+            _ => intent["min_gas"] = json!(Gas::from_tgas(g).as_gas().to_string()),
+        }
     }
     let payload = json!({
         "signer_id": signer.id(), "verifying_contract": intents, "deadline": rfc3339(deadline),
@@ -343,12 +369,13 @@ async fn vt_s13(kind: TokenKind) -> R<()> {
     let _ = h.storage_deposit(&h.root, &intents).await?;
     let relayer = h.account("relayer", 50).await?;
     let s = new_s(&h).await?;
+    let min = kit_min_gas();
     let mut rows = vec![];
 
     // 1. size 1: the first deposit, into both empty trees, 300 Tgas attached
     let p = precommitment(&format!("s13 {kind:?} size 1"));
     prepay(&h, &relayer, &p).await?;
-    let x = send(&h, &relayer, &s, &p, Some(INTENTS_MIN_GAS), RELAYER_GAS).await?;
+    let x = send(&h, &relayer, &s, &p, Some(min), RELAYER_GAS).await?;
     expect_landed(&h, &x, &s, &p, 0, "size 1").await?;
     assert_eq!((tree(&h, "state_tree").await?, tree(&h, "label_tree").await?), ((1, 0), (1, 0)));
     rows.push(row(&h, &x, "size 1", RELAYER_GAS)?);
@@ -357,17 +384,17 @@ async fn vt_s13(kind: TokenKind) -> R<()> {
     seed(&h, SIZE_2_10, 10).await?;
     let p = precommitment(&format!("s13 {kind:?} size 2^10"));
     prepay(&h, &relayer, &p).await?;
-    let x = send(&h, &relayer, &s, &p, Some(INTENTS_MIN_GAS), RELAYER_GAS).await?;
+    let x = send(&h, &relayer, &s, &p, Some(min), RELAYER_GAS).await?;
     expect_landed(&h, &x, &s, &p, SIZE_2_10, "size 2^10").await?;
     assert_eq!((tree(&h, "state_tree").await?, tree(&h, "label_tree").await?), ((SIZE_2_10 + 1, 10), (SIZE_2_10 + 1, 10)));
     let r = row(&h, &x, "size 2^10", RELAYER_GAS)?;
     // the gas left over at 300 Tgas, which the token's call got on top of min_gas; the tight runs attach it less
-    let leftover = r.token_given - INTENTS_MIN_GAS as f64;
+    let leftover = r.token_given - min as f64;
     assert!(leftover > SLACK as f64, "300 Tgas left {leftover:.3} Tgas over min_gas: nothing to cut");
-    let tight = |min_gas: u64| -> u64 { RELAYER_GAS + min_gas + SLACK - INTENTS_MIN_GAS - leftover.floor() as u64 };
+    let tight = |min_gas: u64| -> u64 { RELAYER_GAS + min_gas + SLACK - min - leftover.floor() as u64 };
     rows.push(r);
 
-    // 3. depth 32, the relayer's gas cut so the token's call gets min_gas and at most SLACK more
+    // 3. depth 32, the relayer's gas cut so the token's call gets min_gas and under SLACK + 1 Tgas more
     seed(&h, SIZE_2_32, 32).await?;
     let p = precommitment(&format!("s13 {kind:?} depth 32"));
     prepay(&h, &relayer, &p).await?;
@@ -392,13 +419,25 @@ async fn vt_s13(kind: TokenKind) -> R<()> {
         tgas(oft.gas_burnt),
         after.3
     );
-    // 3b. INTENTS_MIN_GAS signed: lands
-    let g = tight(INTENTS_MIN_GAS);
-    let x = send(&h, &relayer, &s, &p, Some(INTENTS_MIN_GAS), g).await?;
+    // 3b. the kit's min_gas signed, 1 Tgas under what its floor needs attached: intents.near fails the whole call, so
+    // no token call is made and nothing moves. With gas to spare a wrong min_gas would land; here only the signed
+    // floor stops it (VT_S13_PLANT=units or key must fail this).
+    let g = tight(min) - SLACK - 1;
+    let x = send(&h, &relayer, &s, &p, Some(min), g).await?;
+    let lines: Vec<String> = x.o.receipts.iter().map(Receipt::line).collect();
+    let run = x.one(&intents, "execute_intents")?;
+    let f = run.failure().ok_or_else(|| format!("depth 32, {min} Tgas signed, {g} attached: execute_intents did not fail:\n{}", lines.join("\n")))?;
+    assert!(!x.o.receipts.iter().any(|r| r.executor == h.token.as_str()), "depth 32, {g} attached: a token receipt ran:\n{}", lines.join("\n"));
+    let after = (vault_state(&h).await?, h.token_balance(&h.vault).await?, h.token_balance(&intents).await?, held(&h, s.id()).await?);
+    assert!(after == before, "depth 32, {g} attached under the signed floor: a vault state byte, a token unit or S's balance moved");
+    println!("{kind:?} depth 32, {min} Tgas signed, {g} Tgas attached (under the floor): execute_intents failed whole ({f}), no token call, S keeps {}", after.3);
+    // 3c. the kit's min_gas signed: lands
+    let g = tight(min);
+    let x = send(&h, &relayer, &s, &p, Some(min), g).await?;
     expect_landed(&h, &x, &s, &p, SIZE_2_32, "depth 32").await?;
     assert_eq!((tree(&h, "state_tree").await?, tree(&h, "label_tree").await?), ((SIZE_2_32 + 1, 32), (SIZE_2_32 + 1, 32)));
     let r = row(&h, &x, "depth 32", g)?;
-    assert!(r.token_given <= (INTENTS_MIN_GAS + SLACK + 1) as f64, "depth 32: the token's call got {:.3} Tgas, not about min_gas alone", r.token_given);
+    assert!(r.token_given <= (min + SLACK + 1) as f64, "depth 32: the token's call got {:.3} Tgas, not about min_gas alone", r.token_given);
     rows.push(r);
     assert_eq!(held(&h, s.id()).await?, HELD - 3 * AMOUNT, "S's balance inside intents.near after three deposits");
     h.i1().await?;
@@ -419,13 +458,10 @@ async fn vt_s13(kind: TokenKind) -> R<()> {
     let worst = rows.iter().map(|r| r.ft_on_transfer).fold(0.0, f64::max);
     let want = rule(worst);
     println!(
-        "{kind:?} VT-S13: the vault's worst ft_on_transfer {worst:.3} Tgas (depth 32); ({worst:.3} x {TESTNET_MARGIN} + {TOKEN_KEEPS}) x {HEADROOM} = {want:.3} Tgas; INTENTS_MIN_GAS {INTENTS_MIN_GAS}"
+        "{kind:?} VT-S13: the vault's worst ft_on_transfer {worst:.3} Tgas (depth 32); ({worst:.3} x {TESTNET_MARGIN} + {TOKEN_KEEPS}) x {HEADROOM} = {want:.3} Tgas; the kit's min_gas_tgas {min}"
     );
     assert_eq!(worst, rows[2].ft_on_transfer, "the worst case is not the depth-32 deposit");
-    assert!(
-        INTENTS_MIN_GAS as f64 >= want && (INTENTS_MIN_GAS as f64) - want < 1.0,
-        "INTENTS_MIN_GAS {INTENTS_MIN_GAS} Tgas is not the rule's {want:.3} rounded up to a whole Tgas ({})",
-        want.ceil()
-    );
+    assert!(min as f64 >= want, "the kit's min_gas_tgas {min} is below the rule's {want:.3} Tgas: a deposit can run short");
+    assert!((min as f64) < want + 1.0, "the kit's min_gas_tgas {min} is stale, a Tgas or more over the rule's {want:.3}: derive it again ({})", want.ceil());
     Ok(())
 }

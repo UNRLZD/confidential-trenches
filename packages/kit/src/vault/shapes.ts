@@ -119,9 +119,13 @@ export const VAULT_DEPOSIT_SIGNERS = {
 /**
  * The vault takes the same message from intents.near's ft_withdraw too (any sender may deposit), but the kit never
  * signs one: no id signs an ft_withdraw whose receiver is the vault, since intents.near refunds nothing when that
- * token call fails.
+ * token call fails. An app that signs one puts min_gas_tgas in the intent's `min_gas` (as gas units, a decimal string:
+ * 156 Tgas is "156000000000000"): intents.near refuses the whole intent when the relayer attaches less, so this floor
+ * is the signer's only guard against too little gas. It is the vault paper's rule on the deposit's measured worst case
+ * (VT-S13, contracts/vault/tests/s13.rs: ft_on_transfer at depth 32, 94.027 Tgas; (94.027 x 1.059 + 30) x 1.2, rounded
+ * up).
  */
-export const VAULT_ALSO_ACCEPTS = [{ sender: "intents.near", method: "ft_withdraw", signed_by_kit: false }] as const;
+export const VAULT_ALSO_ACCEPTS = [{ sender: "intents.near", method: "ft_withdraw", signed_by_kit: false, min_gas_tgas: 156 }] as const;
 
 // ---- Deposit preconditions (2.5.1, 2.8) ----
 

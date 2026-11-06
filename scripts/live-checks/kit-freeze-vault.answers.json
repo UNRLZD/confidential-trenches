@@ -1,6 +1,6 @@
 {
  "notes": [
-  "good: shapes.ts and vault-v1.json as card/kit-freeze-vault holds them, to be merged as is, each file an array of its lines; re-record from GitHub after the merge with --record. good.main.shapes taken again from card/vault-review-fixes-kit's shapes.ts (2026-11-06: on_payout reads one payout result, review A-01; precommitment 0 refused, R-01).",
+  "good: shapes.ts and vault-v1.json as card/kit-freeze-vault holds them, to be merged as is, each file an array of its lines; re-record from GitHub after the merge with --record. good.main.shapes taken again from card/vault-review-fixes-kit's shapes.ts (2026-11-06: on_payout reads one payout result, review A-01; precommitment 0 refused, R-01). good.main.shapes taken again from card/vault-gas-s13's shapes.ts (2026-11-06: VAULT_ALSO_ACCEPTS[0].min_gas_tgas 156, VT-S13).",
   "bad: each is the good answer with one exact edit (from occurs once in the good file).",
   "good[\"kit-v1\"]: the two files at the tag kit-v1, read from GitHub by read(\"kit-v1\") on 2026-11-06 (card vault-review-fixes-kit), held to kit-v1 own pins (MOVED_SINCE_KIT_V1, R-01)"
  ],
@@ -128,9 +128,13 @@
     "/**",
     " * The vault takes the same message from intents.near's ft_withdraw too (any sender may deposit), but the kit never",
     " * signs one: no id signs an ft_withdraw whose receiver is the vault, since intents.near refunds nothing when that",
-    " * token call fails.",
+    " * token call fails. An app that signs one puts min_gas_tgas in the intent's `min_gas` (as gas units, a decimal string:",
+    " * 156 Tgas is \"156000000000000\"): intents.near refuses the whole intent when the relayer attaches less, so this floor",
+    " * is the signer's only guard against too little gas. It is the vault paper's rule on the deposit's measured worst case",
+    " * (VT-S13, contracts/vault/tests/s13.rs: ft_on_transfer at depth 32, 94.027 Tgas; (94.027 x 1.059 + 30) x 1.2, rounded",
+    " * up).",
     " */",
-    "export const VAULT_ALSO_ACCEPTS = [{ sender: \"intents.near\", method: \"ft_withdraw\", signed_by_kit: false }] as const;",
+    "export const VAULT_ALSO_ACCEPTS = [{ sender: \"intents.near\", method: \"ft_withdraw\", signed_by_kit: false, min_gas_tgas: 156 }] as const;",
     "",
     "// ---- Deposit preconditions (2.5.1, 2.8) ----",
     "",
@@ -2470,6 +2474,12 @@
    "file": "shapes",
    "from": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\"] as const;",
    "to": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\", \"refund_to\"] as const;\nconst write0 = process.stdout._write;\nprocess.stdout._write = function (chunk, encoding, cb) { return write0.call(this, String(chunk).split(',\"refund_to\"').join(\"\"), \"utf8\", cb); };"
+  },
+  {
+   "name": "the intents.near path's min_gas back at 180 Tgas",
+   "file": "shapes",
+   "from": "signed_by_kit: false, min_gas_tgas: 156 }] as const;",
+   "to": "signed_by_kit: false, min_gas_tgas: 180 }] as const;"
   }
  ]
 }
