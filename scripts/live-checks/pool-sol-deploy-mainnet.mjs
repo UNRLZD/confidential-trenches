@@ -52,7 +52,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"}`);
     if (r.ok && args.includes("--write-record")) {
-      writeFileSync(RECORD, mainnetRunRecord(deployment, rpcs, earlierAttempts()));
+      writeFileSync(RECORD, mainnetRunRecord(deployment, rpcs, earlierAttempts(), r.foreign));
       console.log(`live-check ${KEY}: wrote ${path.relative(process.cwd(), RECORD)}`);
     }
     process.exit(r.ok ? 0 : 1);

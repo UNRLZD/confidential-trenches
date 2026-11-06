@@ -12,7 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkMainnet, DEPLOYMENT as RECORD } from "./pool-sol-deploy-mainnet.mjs";
-import { b58decode, mainnetRunRecord, operatorProblems, MAINNET_CODE_SHA, MAINNET_RPCS, RPCS } from "./pool-sol-deploy.mjs";
+import { b58decode, b58encode as b58e, mainnetRunRecord, operatorProblems, MAINNET_CODE_SHA, MAINNET_RPCS, RPCS } from "./pool-sol-deploy.mjs";
 import { earlierAttempts } from "./pool-sol-deploy-mainnet.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-sol-deploy-mainnet.answers.json", import.meta.url), "utf8"));
@@ -133,14 +133,58 @@ test("review 2: the table's list is the kit's own for this pool, the venue's 9 k
   failsOn(await run(A.base, { ...D, table_addresses: [...D.table_addresses, D.pool] }), /the record's table list is the kit's/);
 });
 
-test("re-review 6: another wallet's balance is an info line, never a FAIL: the live check fails only on this run's own key holding lamports", async () => {
-  const OTHER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+/** The base with each of `txs` ({ signature, keys, ixs: [[program index, [account indexes], data bytes]] }) answered by
+ * getTransaction at finalized on both RPCs, and `balances` ({ address: lamports }) by getBalance. */
+function withTxs(txs, balances = {}) {
   const answers = structuredClone(A.base);
-  for (const url of A.rpcs) answers.push({ url, method: "getBalance", params: [OTHER, { commitment: "finalized" }], status: 200, json: { jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: 2_000_000_000 } } });
+  const res = (result) => ({ status: 200, json: { jsonrpc: "2.0", id: 1, result } });
+  for (const url of A.rpcs) {
+    for (const t of D.txs) {
+      const x = txs.find((y) => y.signature === t.signature) ?? { signature: t.signature, keys: [D.funder, "BPFLoaderUpgradeab1e11111111111111111111111"], ixs: [[1, [0], Buffer.from([2, 0, 0, 0])]] };
+      answers.push({ url, method: "getTransaction", params: [x.signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }],
+        ...res({ slot: 1, meta: { err: null }, transaction: { message: { accountKeys: x.keys, instructions: x.ixs.map(([p, a, d]) => ({ programIdIndex: p, accounts: a, data: b58e(d) })) } } }) });
+    }
+    for (const [addr, value] of Object.entries(balances)) answers.push({ url, method: "getBalance", params: [addr, { commitment: "finalized" }], ...res({ context: { slot: 1 }, value }) });
+  }
+  return answers;
+}
+const transferData = (lamports) => { const d = Buffer.alloc(12); d.writeUInt32LE(2, 0), d.writeBigUInt64LE(BigInt(lamports), 4); return d; };
+const SYS = "11111111111111111111111111111111";
+
+test("re-review 6 (card pool-sol-deploy-after-run A.2): a payer whose every transaction in the record is one plain transfer into a run key is an info line, never a FAIL; the run record names it apart", async () => {
+  const OTHER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+  const fund = D.txs[0].signature; // the record's funding, paid by OTHER into the run's funder
+  const answers = withTxs([{ signature: fund, keys: [OTHER, D.funder, SYS], ixs: [[2, [0, 1], transferData(449_137_520)]] }], { [OTHER]: 2_000_000_000 });
   const r = await run(answers, { ...D, funders: [...D.funders, OTHER] });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.ok(r.lines.some((l) => l.startsWith(`info fee payer ${OTHER} holds 2000000000 lamports`) && l.includes(`not this run's key ${D.funder}`)), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`info fee payer ${OTHER} holds 2000000000 lamports`) && l.includes("not a run key")), r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith(`ok   funder ${D.funder} holds 0 lamports`)), r.lines.join("\n"));
+  assert.deepEqual(r.foreign, [OTHER]);
+  const md = mainnetRunRecord({ ...D, funders: [...D.funders, OTHER], need: "1" }, MAINNET_RPCS, [], r.foreign);
+  const funders = md.split("\n").find((l) => l.startsWith("Funders: "));
+  assert.ok(funders.startsWith(`Funders: ${D.funder}, run keys`) && !funders.includes(OTHER), funders);
+  assert.ok(md.split("\n").some((l) => l === `Funding wallets, not run keys: ${OTHER}; each only sent the run a plain System Transfer, and its balance is its own.`), md);
+});
+
+test("card pool-sol-deploy-after-run A.2: a payer other than the funder that holds lamports FAILs unless every one of its record transactions is a plain transfer into a run key: one more instruction, a transfer elsewhere, a loader instruction, or no transaction at all", async () => {
+  const OTHER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+  const fund = D.txs[0].signature;
+  const cases = {
+    "a transfer to the return address, not a run key": [{ signature: fund, keys: [OTHER, D.return_to, SYS], ixs: [[2, [0, 1], transferData(5)]] }],
+    "a transfer beside a second instruction": [{ signature: fund, keys: [OTHER, D.funder, SYS], ixs: [[2, [0, 1], transferData(5)], [2, [0, 1], transferData(5)]] }],
+    "a loader instruction (a run key's deploy)": [{ signature: fund, keys: [OTHER, "BPFLoaderUpgradeab1e11111111111111111111111"], ixs: [[1, [0], Buffer.from([2, 0, 0, 0])]] }],
+    "the funding plus another of its own that is no funding": [{ signature: fund, keys: [OTHER, D.funder, SYS], ixs: [[2, [0, 1], transferData(5)]] }, { signature: D.txs[1].signature, keys: [OTHER, "BPFLoaderUpgradeab1e11111111111111111111111"], ixs: [[1, [0], Buffer.from([4, 0, 0, 0])]] }],
+    "no transaction of its own in the record": [],
+  };
+  for (const [name, txs] of Object.entries(cases)) {
+    const r = await run(withTxs(txs, { [OTHER]: 1 }), { ...D, funders: [...D.funders, OTHER] });
+    failsOn(r, new RegExp(`funder ${OTHER} holds 0 lamports on \\S+: 1$`, "m"));
+    assert.ok(!r.lines.some((l) => l.startsWith("info")), `${name}: ${r.lines.join("\n")}`);
+  }
+  // and a record transaction that is not found at finalized fails the read: never sorted from the label
+  const missing = withTxs([{ signature: fund, keys: [OTHER, D.funder, SYS], ixs: [[2, [0, 1], transferData(5)]] }], { [OTHER]: 1 });
+  for (const a of missing) if (a.method === "getTransaction" && a.params[0] === fund) a.json.result = null;
+  failsOn(await run(missing, { ...D, funders: [...D.funders, OTHER] }), /not found at finalized/);
 });
 
 test("paste 1's stopped journal is named in the run's record, and its words never make a Tx line", () => {
@@ -172,4 +216,14 @@ test("the run record passes the money gate's reader: a step that names an addres
   const committed = parseLive(readFileSync(path.join(HERE, "pool-sol-deploy-mainnet.md"), "utf8"), "pool-sol-deploy-mainnet");
   assert.deepEqual(committed.problems, []);
   assert.equal(committed.txs.length, 8);
+});
+
+test("review 1136 6 (M16): the two RPCs sorting the record's payers differently FAILs, though each one's balances pass", async () => {
+  const OTHER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+  const fund = D.txs[0].signature;
+  const answers = withTxs([{ signature: fund, keys: [OTHER, D.funder, SYS], ixs: [[2, [0, 1], transferData(449_137_520)]] }], { [OTHER]: 0 });
+  // PublicNode answers the same transaction as another instruction of OTHER's: a run key there, at 0 lamports
+  for (const a of answers) if (a.url === A.rpcs[1] && a.method === "getTransaction" && a.params[0] === fund) a.json.result.transaction.message.instructions = [{ programIdIndex: 2, accounts: [0, 1], data: b58e(Buffer.from([9, 0, 0, 0])) }];
+  const r = await run(answers, { ...D, funders: [...D.funders, OTHER] });
+  failsOn(r, /the record's payers sort differently on the two RPCs/);
 });

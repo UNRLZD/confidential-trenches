@@ -6,7 +6,10 @@
 
 import { base58 } from "@scure/base";
 import { CHAINS, type Chain } from "../orders/record.ts";
-import { POOL_ASSET_DECIMALS, POOL_ASSETS, POOL_CHAINS, SIGNPAGE_KINDS } from "./messages.ts";
+import {
+  DEPOSIT_HELD_STAGES, DEPOSIT_HOLDS, DEPOSIT_REFUNDED_STAGES, DEPOSIT_STAGES, POOL_ASSET_DECIMALS, POOL_ASSETS, POOL_CHAINS,
+  SIGNPAGE_KINDS,
+} from "./messages.ts";
 import type { PoolAsset, SignpageKind } from "./messages.ts";
 
 /** A check of one value. */
@@ -131,7 +134,7 @@ const by = (key: string, cases: Record<string, SignpageSchema>): SignpageSchema 
 const chain = oneOf(CHAINS);
 const poolChain = oneOf(POOL_CHAINS);
 const way = oneOf(["passkey", "words", "wallet"]);
-const DEPOSIT = ["quote_checked", "waiting", "in_transit", "into_vault", "done", "refunded", "held", "halted"] as const;
+const DEPOSIT = DEPOSIT_STAGES;
 const WITHDRAW = ["proving", "submitted", "in_transit", "sent", "refunded", "stopped"] as const;
 const TRADE = ["signed", "sent", "filled", "part_filled", "refused", "not_landed"] as const;
 const HOP = ["in_flight", "arrived", "refunded", "fallback"] as const;
@@ -146,6 +149,21 @@ const trigger = obj({ kind: orderKind, pool: str, venue: str, direction: oneOf([
 const op = (kind: SignpageSchema, stages: readonly string[], extra: Record<string, SignpageSchema> = {}) =>
   obj({ id: str, kind, stage: oneOf(stages), txs }, extra);
 const errorCode: SignpageSchema = (v) => typeof v === "string" && /^[a-z0-9_.-]{1,64}$/.test(v);
+
+/** A deposit's facts (messages.ts DepositFacts), each checked by type here and by stage in depositFactsFit. */
+const DEPOSIT_FACTS = { refunded: bool, hold: oneOf(DEPOSIT_HOLDS), held_id: str, since_ms: uint, amount_usd: dec };
+/** Each fact only on the stages it belongs to, so the app never draws a stage with a fact the device cannot have set. */
+const depositFactsFit = (v: unknown): boolean => {
+  const d = v as { stage: (typeof DEPOSIT)[number]; refunded?: unknown; hold?: unknown; held_id?: unknown; since_ms?: unknown; amount_usd?: unknown };
+  if (d.hold !== undefined && d.stage !== "halted") return false;
+  if (d.amount_usd !== undefined && d.stage !== "done") return false;
+  if (d.held_id !== undefined && !DEPOSIT_HELD_STAGES.includes(d.stage)) return false;
+  if (d.refunded !== undefined && !DEPOSIT_REFUNDED_STAGES.includes(d.stage)) return false;
+  if (d.since_ms !== undefined && (d.stage === "quote_checked" || d.stage === "expired")) return false;
+  return true;
+};
+const depositOp: SignpageSchema = (v) => op(lit("deposit"), DEPOSIT, DEPOSIT_FACTS)(v) && depositFactsFit(v);
+const depositConfirm: SignpageSchema = (v) => obj({ stage: oneOf(DEPOSIT) }, DEPOSIT_FACTS)(v) && depositFactsFit(v);
 
 /** The asset each chain's pool holds: the Solana pool wrapped SOL, the EVM pools native ETH, the NEAR vault USDC. */
 const POOL_CHAIN_ASSET: Readonly<Record<Chain, PoolAsset>> = Object.freeze({ solana: "SOL", base: "ETH", robinhood: "ETH", near: "USDC" });
@@ -218,7 +236,7 @@ const state = obj(
     held: arr(obj({ id: str, asset: str, amount: dec })),
     ops: arr(
       by("kind", {
-        deposit: op(lit("deposit"), DEPOSIT),
+        deposit: depositOp,
         withdraw: op(lit("withdraw"), WITHDRAW),
         buy: op(lit("buy"), TRADE, { code: errorCode }),
         sell: op(lit("sell"), TRADE, { code: errorCode }),
@@ -243,7 +261,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
     deadline: iso,
     time_estimate_s: uint,
   }),
-  "deposit.confirm": obj({ stage: oneOf(DEPOSIT) }),
+  "deposit.confirm": depositConfirm,
   arm: obj({ stage: lit("queued") }),
   buy: obj({ stage: oneOf(TRADE), txs }),
   hop: obj({ stage: oneOf(HOP), txs }),

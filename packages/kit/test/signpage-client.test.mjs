@@ -1136,3 +1136,94 @@ test("nav takes APP_HOST's own path and query only, at most 2,048 bytes; reload 
     assert.equal(R[k]({ ok: 1 }), false, k);
   }
 });
+
+// ------------------------------------------------------------------------------------------------ card kit-deposit-calls
+// Every stage a deposit can reach, and the facts the deposit sheet draws with it (apps/terminal/src/screens/deposit/
+// model.ts DepositStatus), carried on the deposit op in state.ops (its id the deposit.quote request's id) and on
+// deposit.confirm's answer. Each fact only on the stages it belongs to, so the app never draws a stage the device
+// cannot have set.
+const U = "a".repeat(64);
+const DEPOSIT_STAGES = ["quote_checked", "waiting", "in_transit", "into_vault", "done", "refunded", "held", "halted", "failed", "short", "expired", "refund_move"];
+const depositOp = (facts) => ({ id: "dq-1", kind: "deposit", txs: [], ...facts });
+const withOp = (facts) => ({ ...STATE, ops: [depositOp(facts)] });
+const GOOD_FACTS = [
+  { stage: "waiting", since_ms: 1762400000000 },
+  { stage: "failed", since_ms: 1762400000000 },
+  { stage: "short", since_ms: 1762400000000 },
+  { stage: "expired" },
+  { stage: "refunded", held_id: U, since_ms: 1762400000000 },
+  { stage: "refund_move", refunded: true, held_id: U, since_ms: 1762400000000 },
+  { stage: "in_transit", refunded: true, since_ms: 1762400000000 },
+  { stage: "into_vault", since_ms: 1762400000000 },
+  { stage: "done", since_ms: 1762400000000, amount_usd: "73.18" },
+  { stage: "done", refunded: true, amount_usd: "72.9" },
+  { stage: "held", held_id: U },
+  { stage: "halted", hold: "halted", held_id: U },
+  { stage: "halted", hold: "not_caught_up" },
+  { stage: "halted", hold: "vault_blocked", held_id: U, since_ms: 1762400000000 },
+];
+const BAD_FACTS = [
+  [{ stage: "teleported" }, "a stage no deposit reaches"],
+  [{ stage: "waiting", hold: "halted" }, "a hold reason on a stage that is not halted"],
+  [{ stage: "halted", hold: "frozen" }, "a hold reason the kit does not name"],
+  [{ stage: "in_transit", amount_usd: "1" }, "a credited amount before done"],
+  [{ stage: "done", amount_usd: "1e3" }, "a credited amount that is not a decimal"],
+  [{ stage: "waiting", held_id: U }, "a held id while the money is not held"],
+  [{ stage: "quote_checked", since_ms: 1 }, "a send seen on a deposit nothing reached"],
+  [{ stage: "expired", since_ms: 1 }, "a send seen on an address that expired with nothing sent"],
+  [{ stage: "waiting", refunded: true }, "a refund before the deposit was processed"],
+  [{ stage: "done", since_ms: -1 }, "a negative time"],
+  [{ stage: "done", refunded: "yes" }, "a refunded flag that is not a boolean"],
+  [{ stage: "done", note: "x" }, "a field the deposit op does not have"],
+];
+
+test("kit-deposit-calls: the kit names every stage a deposit can reach and the three hold reasons", () => {
+  assert.deepEqual([...MSG.DEPOSIT_STAGES], DEPOSIT_STAGES);
+  assert.deepEqual([...MSG.DEPOSIT_HOLDS], ["halted", "not_caught_up", "vault_blocked"]);
+  assert.ok(Object.isFrozen(MSG.DEPOSIT_STAGES) && Object.isFrozen(MSG.DEPOSIT_HOLDS));
+});
+
+test("kit-deposit-calls: a deposit op at every stage, with its facts, reaches the app in a state event; a fact on the wrong stage is dropped", async () => {
+  for (const facts of [...DEPOSIT_STAGES.map((stage) => ({ stage })), ...GOOD_FACTS]) {
+    const { h, c } = await readyClient();
+    h.post({ v: 1, type: "state", state: withOp(facts) });
+    assert.deepEqual(c.snapshot().state.ops, [depositOp(facts)], JSON.stringify(facts));
+  }
+  for (const [facts, why] of BAD_FACTS) {
+    const { h, c } = await readyClient();
+    const before = c.snapshot();
+    h.post({ v: 1, type: "state", state: withOp(facts) });
+    assert.equal(c.snapshot(), before, `dropped: ${why}`);
+  }
+  // the facts are the deposit's own: a buy op carrying one is dropped
+  const { h, c } = await readyClient();
+  const before = c.snapshot();
+  h.post({ v: 1, type: "state", state: { ...STATE, ops: [{ id: "b1", kind: "buy", stage: "filled", txs: [], since_ms: 1 }] } });
+  assert.equal(c.snapshot(), before, "a buy op with since_ms is dropped");
+});
+
+test("kit-deposit-calls: a running deposit's progress names its new stages", async () => {
+  const { h, c } = await readyClient();
+  const seen = [];
+  c.onProgress((id, stage) => seen.push(stage));
+  for (const stage of ["failed", "short", "expired", "refund_move"]) h.post({ v: 1, type: "progress", id: "dq-1", stage });
+  assert.deepEqual(seen, ["failed", "short", "expired", "refund_move"]);
+});
+
+test("kit-deposit-calls: deposit.confirm answers the stage with its facts through the frame; a fact on the wrong stage leaves the request open", async () => {
+  for (const facts of GOOD_FACTS) {
+    const { h, c } = await readyClient();
+    const r = await open(h, c, "deposit.confirm");
+    h.post(answer(r.id, facts));
+    await flush();
+    assert.equal(r.settled(), true, `answered: ${JSON.stringify(facts)}`);
+    assert.deepEqual(await r.p, { ok: true, result: facts }, JSON.stringify(facts));
+  }
+  for (const [facts, why] of BAD_FACTS) {
+    const { h, c } = await readyClient();
+    const r = await open(h, c, "deposit.confirm");
+    h.post(answer(r.id, facts));
+    await flush();
+    assert.equal(r.settled(), false, `left open: ${why}`);
+  }
+});

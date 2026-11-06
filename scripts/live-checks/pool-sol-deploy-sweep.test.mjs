@@ -95,3 +95,30 @@ test("RPCs that are not two devnet operators fail", async () => {
   const answers = A.good.map((a) => (a.url === A.rpcs[1] ? { ...a, url: other } : a));
   fails(await run(answers, D, [A.rpcs[0], other]), /known devnet operator/);
 });
+
+// ---- card pool-sol-deploy-after-run F4: the steps line drops a whole address only, wherever it stands ----
+test("F4 a: a journal-built sweep record whose dust step names its 43-character payer in brackets passes the money gate's reader", async () => {
+  const { parseLive } = await import("../ci/money-gate.mjs");
+  const { runRecord } = await import("./pool-sol-deploy-sweep.mjs");
+  const payer = "jvfZAHpyRS6jSqmP9pUHmbtUtPj2nPtRYvHKcFgNTMi"; // 43 characters, a NEAR hash's shape
+  assert.equal(payer.length, 43);
+  const dust = { step: `another payer's transaction naming the funder (${payer}): not a funding`, signature: "3qRUcXSY" + "1".repeat(80), state: "landed" };
+  const md = runRecord({ ...D, txs: [...D.txs, dust] }, A.rpcs);
+  const r = parseLive(md, "pool-sol-deploy-sweep");
+  assert.deepEqual(r.problems, [], md);
+  assert.ok(!md.includes(payer), "the payer is not on the steps line");
+});
+
+test("F4 b: a step that carries an 88-character signature keeps it whole on the steps line, so the gate reads it: an unlisted one is refused, a listed one passes", async () => {
+  const { parseLive } = await import("../ci/money-gate.mjs");
+  const { runRecord } = await import("./pool-sol-deploy-sweep.mjs");
+  const { stepsOf } = await import("./pool-sol-deploy.mjs");
+  const other = "4".repeat(44) + "5".repeat(44);
+  assert.equal(stepsOf([{ step: `x ${other}` }]), `x ${other}`);
+  const md = runRecord({ ...D, txs: [...D.txs, { step: `x ${other}`, signature: sweeps[0].signature, state: "landed" }] }, A.rpcs);
+  assert.ok(parseLive(md, "pool-sol-deploy-sweep").problems.some((p) => p.includes(other)), md);
+  const listed = runRecord({ ...D, txs: [...D.txs, { step: `x ${other}`, signature: other, state: "landed" }] }, A.rpcs);
+  assert.deepEqual(parseLive(listed, "pool-sol-deploy-sweep").problems, [], listed);
+  // an address at the end of a label or after "(" goes
+  assert.equal(stepsOf([{ step: `to ${"A".repeat(44)}` }, { step: `(${"B".repeat(32)})` }]), "to, ()");
+});
