@@ -1,4 +1,4 @@
-// The signing-page client tests' fixtures: one valid request and answer per kind of the seventeen, typed against
+// The signing-page client tests' fixtures: one valid request and answer per kind, typed against
 // messages.ts so the kit's tsc refuses a fixture that drifts from the frozen shapes or a kind with none.
 import type { SignpageKind, SignpageParams, SignpageResults, SignpageState } from "../src/signpage/messages.ts";
 
@@ -59,5 +59,13 @@ export const FIXTURES = {
   "pool.buy": { params: { chain: "base", token: "0xF111111111111111111111111111111111111111", amount: "0.01", slippage_bps: 300 }, result: { stage: "sent", txs: [] } },
   "pool.sell": { params: { chain: "solana", token: "Tok", amount: "25", slippage_bps: 300 }, result: { stage: "filled", txs: [] } },
   "pool.withdraw": { params: { return_key: "withdraw", chain: "robinhood" }, result: { pending: true } },
+  "deposit.assets": {
+    params: {},
+    result: { assets: [{ origin_asset: "nep141:usdc", chain: "solana", symbol: "USDC", decimals: 6, min: "1.019177", max_usd: "1000" }] },
+  },
+  "deposit.dry": {
+    params: { origin_asset: "nep141:usdc", amount: "25" },
+    result: { amount_out_usd: "24.94", min_amount_out_usd: "24.6906", fee_usd: "0.06", time_estimate_s: 20 },
+  },
 } satisfies { [K in SignpageKind]: { params: SignpageParams[K]; result: SignpageResults[K] } };
 

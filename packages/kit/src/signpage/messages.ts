@@ -10,8 +10,10 @@
 import type { Chain, OrderTrigger } from "../orders/record.ts";
 
 /**
- * The twenty-one request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the last four
- * are the pool kinds (card signpage-pool-kinds), added after kit-v1 without changing any other kind.
+ * The twenty-three request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
+ * pool kinds (card signpage-pool-kinds) and the two deposit sheet reads, deposit.assets and deposit.dry (card
+ * kit-deposit-assets-dry), were added after kit-v1 without changing any other kind. A page of an earlier release
+ * refuses a kind it does not have "not_allowed".
  */
 export const SIGNPAGE_KINDS = [
   "deposit.quote",
@@ -35,6 +37,8 @@ export const SIGNPAGE_KINDS = [
   "pool.buy",
   "pool.sell",
   "pool.withdraw",
+  "deposit.assets",
+  "deposit.dry",
 ] as const;
 
 export type SignpageKind = (typeof SIGNPAGE_KINDS)[number];
@@ -127,6 +131,15 @@ export interface SignpageParams {
   "pool.sell": { chain: PoolChain; token: string; amount: string; slippage_bps: number };
   /** Open SIGN_HOST's withdraw screen for the chain's pool. The address is typed there, never sent by the app. */
   "pool.withdraw": Open & { chain: PoolChain };
+  /** The assets the device can quote a deposit from, each with its minimum and the most one deposit takes. Signs nothing
+   *  and needs no sign-in. */
+  "deposit.assets": Record<never, never>;
+  /**
+   * What `amount` of `origin_asset` (in its own units, as deposit.quote's) would land in the vault as, with no address:
+   * a dry 1Click quote whose recipient and refund are DEPOSIT_DRY_PLACEHOLDER, so the request carries nothing of the
+   * user's. Signs nothing and needs no sign-in.
+   */
+  "deposit.dry": { origin_asset: string; amount: string };
 }
 
 export interface TxRef {
@@ -171,7 +184,55 @@ export interface SignpageResults {
   "pool.buy": { stage: TradeStage; txs: TxRef[] };
   "pool.sell": { stage: TradeStage; txs: TxRef[] };
   "pool.withdraw": OpenResult;
+  "deposit.assets": { assets: DepositAsset[] };
+  "deposit.dry": DepositDry;
 }
+
+/**
+ * The public NEAR account a dry deposit quote names as its recipient and refundTo (card kit-deposit-assets-dry): the
+ * 64-hex sha256 of "blindfill:deposit.dry:placeholder", an implicit id nobody holds a key to. It is not registered on
+ * the vault's USDC (storage_balance_of null on two RPCs, 6 Nov 13:45Z), as no deposit's one-time id is, so 1Click
+ * quotes it the same withdraw fee as a real deposit (the all-zero id is registered, and 1Click quotes it none).
+ */
+export const DEPOSIT_DRY_PLACEHOLDER = "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0";
+
+/**
+ * An asset deposit.quote takes (card kit-deposit-assets-dry): its 1Click asset id (deposit.quote's origin_asset), its
+ * chain, symbol and decimals as 1Click's own list names them (checked against the device's), `min` the least amount in
+ * its own units whose quote clears the vault's 1 USDC MIN_DEPOSIT after every fee (the device's floor, at 1Click's
+ * withdraw fee as just quoted), and `max_usd` the most one deposit takes, in USD (the beta cap, HELPER_BIND_DEPOSIT_CAP).
+ */
+export interface DepositAsset {
+  origin_asset: string;
+  chain: Chain;
+  symbol: string;
+  decimals: number;
+  min: string;
+  max_usd: string;
+}
+
+/**
+ * A dry quote's lines (card kit-deposit-assets-dry), in USD as decimal strings: what lands in the vault, the least it
+ * may land as (1Click's min out after slippage), and the fees (the amount in, at USDC's 1, less what lands); then
+ * 1Click's own time estimate, in seconds, from the dry answer. The device checked the answer as a live one is checked
+ * (signature, echo, floors), less the address a dry answer does not have.
+ */
+export interface DepositDry {
+  amount_out_usd: string;
+  min_amount_out_usd: string;
+  fee_usd: string;
+  time_estimate_s: number;
+}
+
+/**
+ * Why deposit.quote or deposit.dry was refused (card kit-deposit-assets-dry): below_min (under the asset's minimum:
+ * refused on the device before any request, or once a checked answer shows the vault's MIN_DEPOSIT is not cleared),
+ * above_max (over the beta cap), not_available (1Click or the helper refused it), busy (the helper is rate-limited:
+ * HTTP 429), down (the helper is not answering: HTTP 503 or no answer), quote_check_failed (the answer failed the
+ * device's checks), not_allowed (no rule allows the request). busy and down are "not now": the same request again runs.
+ */
+export type DepositRefusal = "below_min" | "above_max" | "not_available" | "busy" | "down" | "quote_check_failed" | "not_allowed";
+export const DEPOSIT_REFUSALS: readonly DepositRefusal[] = Object.freeze(["below_min", "above_max", "not_available", "busy", "down", "quote_check_failed", "not_allowed"] as const);
 
 /**
  * Why a request was refused: "not_allowed" (no wallet.md §2.8 row allows it), "quote_check_failed" (a quote failed the

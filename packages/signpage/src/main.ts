@@ -61,7 +61,7 @@ import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLE
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
-import { depositQuoteHost } from "./deposit-wire.ts";
+import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
@@ -211,6 +211,8 @@ else {
       "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open") : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named() }),
+      // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
+      ...depositReadHosts(),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
@@ -728,6 +730,6 @@ if (framed) {
     listen: (fn) => window.addEventListener("message", fn),
     state: fs.state,
     watch: fs.watch,
-    kinds: { "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead }) },
+    kinds: { "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead }), ...depositReadHosts() },
   });
 }
