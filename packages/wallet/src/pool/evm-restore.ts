@@ -117,14 +117,16 @@ function depositLeaf(scope: bigint, events: readonly EvmPoolEvent[], ix: Deposit
 }
 
 /**
- * Empty notes in a row a second-arrival walk reads past before it stops: the address gap limit of BIP-44, 20. A
- * second arrival can be empty while a later one holds the user's deposit only through evmNextNote below, which names
- * the next note past a take whose block is not final yet; if a reorg then drops that take, its note stays empty. So
- * evmNextNote never names a note more than SECOND_GAP - 1 past the last note that is final, and this walk reads past up
- * to SECOND_GAP - 1 empty notes, so a restore from the words finds every note the device signed. Solana's chains have
- * no such gap: the page passes a taken note only once its mark is read at finalized on both RPCs (signpage
- * pool-deposit.ts and pool-sell.ts markOf), and the store plans a second arrival only once the one before it has
- * landed (../notes/store.ts addLocked).
+ * Empty notes in a row the U, V and R second-arrival walks read past before they stop: the address gap limit of
+ * BIP-44, 20. A second arrival can be empty while a later one holds the user's deposit only through evmNextNote below,
+ * which names the next note past a take whose block is not final yet; if a reorg then drops that take, its note stays
+ * empty. So evmNextNote never names a note more than SECOND_GAP - 1 past the last note that is final, and those walks
+ * read past up to SECOND_GAP - 1 empty notes, so a restore from the words finds every note the device signed. The A
+ * walk reads past none: evmNextNote signs only on a deposit's U, a move's V and a return's R (its `id` switch), so no
+ * A note is ever named past an empty one, and A stops at its first miss as on Solana (./solana-restore.ts `seconds`).
+ * Solana's chains have no such gap: the page passes a taken note only once its mark is read at finalized on both RPCs
+ * (signpage pool-deposit.ts and pool-sell.ts markOf), and the store plans a second arrival only once the one before it
+ * has landed (../notes/store.ts addLocked).
  */
 export const SECOND_GAP = 20;
 
@@ -151,9 +153,11 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
     put(ref, P, leaf);
     return true;
   };
-  // up to SECOND_GAP - 1 empty notes in a row read past: a pending take evmNextNote passed over, then reorged out
+  // on U, V and R up to SECOND_GAP - 1 empty notes in a row read past (a pending take evmNextNote passed over, then
+  // reorged out); A, which evmNextNote never signs on, stops at its first miss
   const seconds = (id: SecondId): void => {
-    for (let n = 0, miss = 0; n <= U32 && miss < SECOND_GAP; n++) miss = asDeposit({ kind: "second", id, n }) ? 0 : miss + 1;
+    const gap = id.id === "A" ? 1 : SECOND_GAP;
+    for (let n = 0, miss = 0; n <= U32 && miss < gap; n++) miss = asDeposit({ kind: "second", id, n }) ? 0 : miss + 1;
   };
 
   for (let lane = 0; lane < RESTORE_LANES; lane++)
@@ -196,6 +200,15 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
   return { notes, spends, elsewhere };
 }
 
+/** evmNextNote's wait for finality: a take in a block not final yet stands before the note to sign. A "not now",
+ * never a "no": the same request runs again once that block is final (signpage pool-kinds.ts answers it busy). */
+export class EvmNotFinalError extends Error {
+  constructor(m: string) {
+    super(m);
+    this.name = "EvmNotFinalError";
+  }
+}
+
 /**
  * A deposit or a sell whose precommitment another deposit took first (card precommit-taken-recover; pool-review-3 L-2).
  * Anyone who sees a pending deposit or W's signed Sell can deposit MIN_DEPOSIT with its precommitment and land first:
@@ -215,7 +228,8 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
  * that reorg drops it and nothing else lands on its precommitment, the chain holds an empty note before the one signed
  * next: evmRestore's second-arrival walk reads past SECOND_GAP - 1 of them, and this refuses to name a note past
  * SECOND_GAP pending takes in a row (the next round, with those blocks final, names it), so a restore from the words
- * never misses a signed note. The device also names that empty note as `next` at its next call, which fills the gap.
+ * never misses a signed note. Both waits for finality (that one, and a deposit note taken in a block not final yet)
+ * throw EvmNotFinalError; every other refusal is a plain Error. The device also names that empty note as `next` at its next call, which fills the gap.
  */
 export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly EvmPoolEvent[], first: NoteRef, finalBlock: bigint): { taken: EvmRestoredNote[]; pending: NoteRef[]; next: { ref: NoteRef; precommitment: bigint } } {
   if (typeof finalBlock !== "bigint" || finalBlock < 0n) throw new Error("finalBlock: the round's finalized block number");
@@ -234,13 +248,13 @@ export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly 
     const precommitment = noteSecrets(seed64, ref).precommitment;
     const leaf = depositLeaf(scope, events, ix, precommitment, refKey(ref));
     if (leaf === null) {
-      if (run >= SECOND_GAP) throw new Error(`${refKey(ref)}: ${run} pending takes in a row before it, past the restore's gap of ${SECOND_GAP}: signed once they are final`);
+      if (run >= SECOND_GAP) throw new EvmNotFinalError(`${refKey(ref)}: ${run} pending takes in a row before it, past the restore's gap of ${SECOND_GAP}: signed once they are final`);
       return { taken, pending, next: { ref, precommitment } };
     }
     if (events[Number(leaf.leafIndex)]!.block > finalBlock) {
       // a deposit index is found by its deposit note alone (walkLane), so an empty deposit note hides its whole chain:
       // the one take never passed over while pending
-      if (n < 0 && first.kind === "deposit") throw new Error(`${refKey(ref)}: taken in a block not final yet; the deposit index is found by this note alone, so its chain is signed once that block is final`);
+      if (n < 0 && first.kind === "deposit") throw new EvmNotFinalError(`${refKey(ref)}: taken in a block not final yet; the deposit index is found by this note alone, so its chain is signed once that block is final`);
       pending.push(ref);
       run++;
     } else {

@@ -10,6 +10,7 @@ import { ERC20_DECIMALS, poolKinds, readTokenDecimals, type PoolKindsDeps, type 
 import { SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import type { PoolAsk, PoolChain } from "../src/rules/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
+import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 
 const SOL_TOKEN = "So11111111111111111111111111111111111111112";
 const EVM_TOKEN = "0xF111111111111111111111111111111111111111";
@@ -200,17 +201,65 @@ test("a pool.withdraw is an open: answered pending at once, with no progress aft
   assert.deepEqual(r.stages, []);
 });
 
+// card pool-restore-wired: evmNextNote's wait for finality (a take in a block not final yet) is a "not now": a flow that
+// fails with EvmNotFinalError is answered busy (api.ts RETRY_CODES: not kept, so the same request runs again), never
+// failed or not_allowed, however the flow fails with it: thrown at once, or its run's wait rejecting; a sell's flow runs
+// inside its decimals read's then. Any other error is answered as before.
+test("card pool-restore-wired: a flow that fails with EvmNotFinalError is answered busy on every path; any other error as before", async () => {
+  const sol = providers(() => mint(6));
+  const notFinal = () => new EvmNotFinalError("taken in a block not final yet");
+  const failed = { error: "failed" };
+  const rejects = (e: Error, deferred = false) => {
+    const after = Promise.reject(e);
+    after.catch(() => {});
+    return (deferred ? { after, answer: () => failed } : { running: true, after, answer: () => failed }) as never;
+  };
+  const ways: [string, () => never][] = [
+    ["thrown at once", () => { throw notFinal(); }],
+    ["a Running whose wait rejects", () => rejects(notFinal())],
+    ["a Deferred whose wait rejects", () => rejects(notFinal(), true)],
+  ];
+  const BUY = { chain: "base", token: EVM_TOKEN, amount: "1", slippage_bps: 100 };
+  const SELL = { chain: "solana", token: SOL_TOKEN, amount: "1", slippage_bps: 100 };
+  for (const [way, flow] of ways) {
+    const k = poolKinds({ pinned: () => true, rpcs: () => sol.pair, flow });
+    for (const [kind, params] of [["pool.buy", BUY], ["pool.deposit", { chain: "solana", amount: "1" }], ["pool.withdraw", { return_key: "portfolio", chain: "solana" }], ["pool.sell", SELL]] as const) {
+      const r = await throughApi(kind, k[kind] as never, params);
+      assert.deepEqual((r.answer as { error?: unknown }).error, { code: "busy" }, `${kind}, ${way}`);
+    }
+  }
+  // any other error: as before. Thrown at once: the throw itself, and a sell not_allowed; a wait that rejects: the
+  // run's own answer
+  const plain = () => new Error("the call failed");
+  const thrown = poolKinds({ pinned: () => true, rpcs: () => sol.pair, flow: () => { throw plain(); } });
+  assert.throws(() => thrown["pool.buy"](BUY, ctx), /the call failed/);
+  const code = async (kind: "pool.buy" | "pool.sell", k: ReturnType<typeof poolKinds>, params: Record<string, unknown>) => ((await throughApi(kind, k[kind] as never, params)).answer as { error?: unknown }).error;
+  assert.deepEqual(await code("pool.sell", thrown, SELL), { code: "not_allowed" });
+  const ran = poolKinds({ pinned: () => true, rpcs: () => sol.pair, flow: () => rejects(plain()) });
+  assert.deepEqual(await code("pool.buy", ran, BUY), { code: "failed" });
+  assert.deepEqual(await code("pool.sell", ran, SELL), { code: "failed" });
+});
+
 // card precommit-taken-recover: an EVM pool deposit or sell signs on a precommitment anyone who sees it pending can take
 // first with MIN_DEPOSIT. Every device file that builds or signs one (the kit's evmPoolBuildSell or the rule's
 // signEvmSell called, or the pool's deposit(uint256,uint256) encoded) must pick its note through the wallet's
 // evmNextNote, which restores a taken note and names the next one to sign. Today none does: EVM pool.deposit is refused
 // (EVM_REFUSED) and the flow answers only Solana, so the list below is empty; the first flow that lands is held to it.
 // the deposit's signature, its selector keccak256("deposit(uint256,uint256)")[0..4] = e2bbb158, or an ABI call by name
-// every EVM sell builder and signer, read from the files that define them (the kit's and the rule's), so one added later
-// is guarded too; and every way to encode a pool deposit
+// every EVM sell builder and signer, read from the files that define them (the kit's and the rule's, and quoted.ts,
+// whose evmQuotedSell builds the sell a signer signs on the precommitment its fields name), so one added later is
+// guarded too; and every way to encode a pool deposit
 const ROOT = new URL("../../../", import.meta.url).pathname;
-const SIGNER_DEFS = ["packages/kit/src/trade/evm/sell.ts", "packages/kit/src/trade/evm/sell-unpinned.ts", "packages/signpage/src/rules/pool.ts"];
-const SIGNERS = [...new Set(SIGNER_DEFS.flatMap((f) => [...readFileSync(join(ROOT, f), "utf8").matchAll(/export function (\w*(?:Build|Sign)\w*Sell\w*|signEvmSell\w*)\(/g)].map((m) => m[1]!)))];
+const SIGNER_DEFS = ["packages/kit/src/trade/evm/sell.ts", "packages/kit/src/trade/evm/sell-unpinned.ts", "packages/kit/src/trade/evm/quoted.ts", "packages/signpage/src/rules/pool.ts"];
+// a name defined by `export function` or by `export const NAME =` an arrow or a function expression; a predicate (`Is`
+// before a capital, as evmIsQuotedSell, which only reads quoted.ts's record) builds and signs nothing and is not one
+const SIGNER_NAME = /^(?:\w*(?:Build|Sign|Quoted)\w*Sell\w*|signEvmSell\w*)$/;
+const PREDICATE = /(?:^is|[a-z0-9]Is)[A-Z]/;
+const signerNames = (text: string): string[] =>
+  [...text.matchAll(/export (?:async )?function\*? ?(\w+)\s*[<(]|export const (\w+)\s*(?::[^=]*)?=\s*(?:async\b|function\b|\(|<|\w+\s*=>)/g)]
+    .map((m) => (m[1] ?? m[2])!)
+    .filter((name) => SIGNER_NAME.test(name) && !PREDICATE.test(name));
+const SIGNERS = [...new Set(SIGNER_DEFS.flatMap((f) => signerNames(readFileSync(join(ROOT, f), "utf8"))))];
 const EVM_SIGNS = new RegExp(`(?<!function )\\b(?:${SIGNERS.join("|")})\\(|deposit\\(uint256,uint256\\)|e2bbb158|functionName:\\s*["']deposit["']`, "i");
 // a call of evmNextNote, outside comments: a word in a comment guards nothing
 const calls = (text: string): boolean => /\bevmNextNote\(/.test(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1"));
@@ -225,10 +274,14 @@ const sources = (dir: string): { path: string; text: string }[] =>
 
 test("precommit-taken-recover: no device file signs an EVM pool deposit or sell without picking its note through evmNextNote", () => {
   const root = ROOT;
-  // the signers' own files and the kit's two composers of them (a quote's sell and its simulation, each signed by its
-  // caller on the note the caller names) define what is called; every caller is in these trees
-  const own = new Set([...SIGNER_DEFS, "packages/kit/src/trade/evm/quoted.ts", "packages/kit/src/checks/evm/quote.ts"].map((f) => join(root, f)));
-  for (const name of ["evmPoolBuildSell", "evmPoolSignSell", "evmPoolSignSimSell", "evmPoolBuildSellUnpinned", "evmPoolSignSellUnpinned", "pinnedSignSell", "signEvmSell", "signEvmSellSim"]) assert.ok(SIGNERS.includes(name), `${name} is guarded`);
+  // the signers' own files and the kit's quote.ts (a quote's simulation, signed by its caller on the note the caller
+  // names) define what is called; every caller is in these trees
+  const own = new Set([...SIGNER_DEFS, "packages/kit/src/checks/evm/quote.ts"].map((f) => join(root, f)));
+  for (const name of ["evmPoolBuildSell", "evmPoolSignSell", "evmPoolSignSimSell", "evmPoolBuildSellUnpinned", "evmPoolSignSellUnpinned", "pinnedSignSell", "signEvmSell", "signEvmSellSim", "evmQuotedSell"]) assert.ok(SIGNERS.includes(name), `${name} is guarded`);
+  assert.equal(SIGNERS.includes("evmIsQuotedSell"), false, "a predicate signs nothing");
+  // planted: a signer defined as an arrow or a function expression is read; a predicate is not
+  assert.deepEqual(signerNames("export const fooSignSell = (k) => k;\nexport const barBuildSell = function (q) {};\nexport function evmQuotedSell(v) {}"), ["fooSignSell", "barBuildSell", "evmQuotedSell"]);
+  assert.deepEqual(signerNames("export const evmIsQuotedSell = (s) => true;\nexport function isSignedSell(s) {}"), []);
   const files = ["packages/signpage/src", "apps/terminal/src", "packages/wallet/src", "packages/kit/src", "apps/helper/src"].flatMap((d) => sources(join(root, d))).filter((f) => !own.has(f.path) && !/\.test\.(ts|mjs)$/.test(f.path));
   assert.ok(files.length > 50, "the trees were read");
   // planted: a call of each signer without evmNextNote is caught, and with it is not
