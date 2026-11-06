@@ -217,3 +217,13 @@ test("the run record passes the money gate's reader: a step that names an addres
   assert.deepEqual(committed.problems, []);
   assert.equal(committed.txs.length, 8);
 });
+
+test("review 1136 6 (M16): the two RPCs sorting the record's payers differently FAILs, though each one's balances pass", async () => {
+  const OTHER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+  const fund = D.txs[0].signature;
+  const answers = withTxs([{ signature: fund, keys: [OTHER, D.funder, SYS], ixs: [[2, [0, 1], transferData(449_137_520)]] }], { [OTHER]: 0 });
+  // PublicNode answers the same transaction as another instruction of OTHER's: a run key there, at 0 lamports
+  for (const a of answers) if (a.url === A.rpcs[1] && a.method === "getTransaction" && a.params[0] === fund) a.json.result.transaction.message.instructions = [{ programIdIndex: 2, accounts: [0, 1], data: b58e(Buffer.from([9, 0, 0, 0])) }];
+  const r = await run(answers, { ...D, funders: [...D.funders, OTHER] });
+  failsOn(r, /the record's payers sort differently on the two RPCs/);
+});
