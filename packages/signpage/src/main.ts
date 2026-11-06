@@ -64,6 +64,7 @@ import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
+import { depositFollows } from "./deposit-follow.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -141,6 +142,9 @@ const restore = !framed
       written: () => void testnet?.proofs().catch(() => {}),
     })
   : null;
+// a deposit carried from its checked address to its note with no tap (src/deposit-follow.ts, card wallet-deposit-follow):
+// top-level only, as the seed signs U's call; the store and the seed are opened when a follow runs
+const follows = !framed ? depositFollows({ network: () => PAGE_NETWORK, store: () => open(), seed64: () => openSeed64() }) : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 if (framed) document.body.append(root);
@@ -206,7 +210,8 @@ else {
       told.add(fn);
       testnet?.watch(fn);
     },
-    kinds: {
+    // deposit.quote's checked answer followed (its host's `checked`), deposit.confirm answered where it is (src/deposit-follow.ts)
+    kinds: follows!.withFollow({
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
       // layer opens (and the frame leaves).
       "signin.open": (p) => openKind("signin.open", p.way),
@@ -215,7 +220,7 @@ else {
       // the form withdraws from the vault's notes; a one-time id's way out (from_id) is not built yet
       "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open") : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named() }),
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u) }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts(),
       buy: trades,
@@ -226,7 +231,7 @@ else {
       ...poolKinds(poolDeps),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
-    },
+    }),
   });
   shell.layer.append(root);
 }
@@ -490,21 +495,30 @@ function shown(s: Seed): { account: string; code_saved: boolean; signout: boolea
 }
 
 let store: WalletStore | null = null;
-const open = async (): Promise<WalletStore> =>
-  (store ??= await openWalletStore({
+// the store's connection closed under the deposit follows: they start again once it is opened next
+let followsClosed = false;
+const open = async (): Promise<WalletStore> => {
+  const had = store;
+  const s = (store ??= await openWalletStore({
     // another tab signed out: its store closed ours; drop it and show signed-out
     onEvent: (e) => {
       moved += 1;
       // a delete or upgrade closed our connection: the next step opens the store again
-      if (e.kind === "closed") store = null;
+      // the follows ran on that connection: they end (U's lock freed) and start again on the store opened next
+      if (e.kind === "closed") (store = null), (followsClosed = true), follows?.storeClosed();
       if (e.kind !== "signout") return;
       store = null;
+      followsClosed = false;
       openedBy = null;
       void testnet?.signedOut();
       restore?.signedOut();
+      follows?.signedOut();
       show("signed-out");
     },
   }));
+  if (had === null && followsClosed) (followsClosed = false), void follows?.settle();
+  return s;
+};
 
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
 // The seed for a trade's signer (src/trade.ts), opened only once a wallet passed its arm check; the entropy is zeroed
@@ -606,6 +620,8 @@ async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
   // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
   void testnet?.settle();
+  // a NEAR deposit followed on from its stage (src/deposit-follow.ts)
+  void follows?.settle().catch(() => {});
   // a vault withdrawal a reload cut short is followed to settled (src/withdraw/handoff.ts withdrawSettle)
   void settleWithdraws().catch(() => {});
   // a restore a closed or reloaded page left running reads stalled, so the app offers Retry (src/pool-restore.ts)
@@ -699,6 +715,8 @@ async function signOut(): Promise<void> {
   const s = await open();
   // a restore holds the seed lock shared, which the sign out waits for: it stops first
   restore?.signedOut();
+  // a deposit's follow stops too: its op stays at its stage (src/deposit-follow.ts)
+  follows?.signedOut();
   withdrawsSignedOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
@@ -754,6 +772,7 @@ if (framed) {
     listen: (fn) => window.addEventListener("message", fn),
     state: fs.state,
     watch: fs.watch,
-    kinds: { "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead }), ...depositReadHosts() },
+    // deposit.quote only on the top-level page, which follows its address (src/deposit-follow.ts): the frame refuses it
+    kinds: { ...depositReadHosts() },
   });
 }

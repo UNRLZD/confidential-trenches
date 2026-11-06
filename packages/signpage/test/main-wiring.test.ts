@@ -47,6 +47,16 @@ registerHooks({
       return { ...r, source: src.replace(TABLE, `export const PAGE_POOLS = Object.freeze([{ id: "near:t", chain: "near", scope: ${SCOPE}n, asset: "USDC" }]);`) };
     }
     if (url.endsWith("/wallet/src/notes/store.ts")) return { ...r, source: record(record(String(r.source), "openNoteStore"), "readNotes") };
+    // card wallet-deposit-follow: the follows' storeClosed and settle calls are recorded, so the test reads what main.ts
+    // does when its store's connection closes
+    if (url.endsWith("/signpage/src/deposit-follow.ts")) {
+      const src = String(r.source);
+      const anchor = "export function depositFollows(h: FollowHost) {";
+      if (!src.includes(anchor)) throw new Error("deposit-follow.ts: depositFollows's line moved; update this test's hook");
+      return { ...r, source: `${src.replace(anchor, "function depositFollows__recorded(h: FollowHost) {")}
+export function depositFollows(h) { const api = depositFollows__recorded(h); const log = (globalThis.__ctFollowCalls ??= []); for (const k of ["storeClosed", "settle"]) { const f = api[k]; api[k] = (...a) => (log.push(k === "settle" && /at open \\(.*\\/src\\/main\\.ts/.test(String(new Error().stack)) ? "settle:open" : k), f(...a)); } return api; }
+` };
+    }
     if (!url.endsWith("/src/withdraw/checks.ts")) return r;
     const src = String(r.source);
     if (!src.includes(ANCHOR)) throw new Error("checks.ts: vaultScope's line moved; update this test's hook");
@@ -333,4 +343,37 @@ test("main.ts reads its seed again on another tab's write only as walletSeedMove
   assert.match(body, /^  if \(walletSeedMoved\(e\)\) moved \+= 1;\n  else return;/, "storeMoved counts a move only by walletSeedMoved");
   assert.ok(!/e\.stores\.includes\("meta"\)/.test(body), "no meta test of its own");
   assert.match(src, /import \{[^}]*\bwalletSeedMoved\b[^}]*\} from "@blindfill\/wallet\/store";/);
+});
+
+test("main.ts wires the deposit follows to the store's connection: a close ends them, and the next open settles them again (card wallet-deposit-follow)", async () => {
+  // main.ts is booted by the first test
+  const follows = ((globalThis as { __ctFollowCalls?: string[] }).__ctFollowCalls ??= []);
+  const other = await openWalletStore({});
+  await other.insertSeed({ v: 1, entropy: ENTROPY(), source: "code", code_saved: true, created_ms: 3 });
+  await new Promise((ok) => setTimeout(ok, 50));
+  // a quote opens the store: with no close before it, the follows are not settled from open()
+  const from = follows.length;
+  await quote();
+  assert.ok(!follows.slice(from).includes("storeClosed"));
+  assert.ok(!follows.slice(from).includes("settle:open"), "settled from open() with no close");
+  // a delete with no sign out (another tab's upgrade closes the connection the same way, versionchange): the page's
+  // connection closes and the follows end at once
+  other.close();
+  await new Promise<void>((ok, no) => {
+    const r = indexedDB.deleteDatabase("ct-wallet");
+    r.onsuccess = () => ok();
+    r.onerror = () => no(r.error);
+  });
+  await until("the close ended the follows", async () => follows.slice(from).includes("storeClosed"));
+  assert.ok(!follows.slice(from).includes("settle:open"), "settled before the store opened again");
+  // the next step that opens the store (here a quote and a state read, after a sign in in another tab) opens it again,
+  // and the follows are settled on it
+  const again = await openWalletStore({});
+  await again.insertSeed({ v: 1, entropy: ENTROPY(), source: "code", code_saved: true, created_ms: 4 });
+  await new Promise((ok) => setTimeout(ok, 50));
+  await quote();
+  await askState().catch(() => {});
+  await until("the follows settled from open() on the store opened again", async () => follows.slice(from).includes("settle:open"));
+  assert.equal(follows.slice(from).filter((k) => k === "settle:open").length, 1, "settled from open() once");
+  again.close();
 });
