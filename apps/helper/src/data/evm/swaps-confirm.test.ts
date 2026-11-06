@@ -86,3 +86,43 @@ test("the getPool and parameter selectors swaps.ts asks are the keccak-256 of th
     assert.match(src, new RegExp(`GET_POOL_SEL = \\{[^}]*${k}: "${sel(GET[k])}"`));
   }
 });
+
+test("card helper-restart-fresh: a cold Base token whose pool's factory() no two providers agree on (each answers it with an error) answers 503, never kept as \"no pool\" and served an empty tape; read, the same search answers (red at bfb9e938: 200 with no trades)", async () => {
+  const v = VENUES_LISTED[0]!;
+  const base = B.fakeChain();
+  const head = base.st.head;
+  const r = rig(base.fetch, { coin: COIN, quote: v.quote, pool: POOL, factory: v.factory, kind: v.kind, names: POOL });
+  // the coin's transfers: three from its pool to traders, so the discovery's walk names the pool
+  const transfers = [10, 20, 30].map((k) => ({ address: COIN, topics: [TOPIC.transfer, w(POOL), w(`0x${"ab".repeat(19)}${k.toString(16).padStart(2, "0")}`)], data: `0x${(10n ** 18n).toString(16).padStart(64, "0")}`, blockNumber: `0x${(head - k).toString(16)}`, blockTimestamp: `0x${B.timeOf(head - k).toString(16)}`, logIndex: "0x1", transactionHash: `0x${"ef".repeat(31)}${k.toString(16).padStart(2, "0")}`, removed: false }));
+  const st = { down: true, asked: 0 };
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+    const mine = reqs.map((q): object | undefined => {
+      const p = q.params[0] as { address?: string; topics?: unknown[]; fromBlock?: string; toBlock?: string; to?: string; data?: string };
+      if (q.method === "eth_getLogs" && p.address === COIN && p.topics?.[0] === TOPIC.transfer) {
+        const [lo, hi] = [parseInt(p.fromBlock!, 16), parseInt(p.toBlock!, 16)];
+        return { result: transfers.filter((l) => parseInt(l.blockNumber, 16) >= lo && parseInt(l.blockNumber, 16) <= hi) };
+      }
+      if (q.method === "eth_call" && p.to === POOL && p.data === "0xc45a0155" && st.down) return st.asked++, { error: { code: -32603, message: "internal error" } };
+      // a trader is an account with no code: any call to it answers empty, as the chain does
+      if (q.method === "eth_call" && p.to?.startsWith(`0x${"ab".repeat(19)}`)) return { result: "0x" };
+      return undefined;
+    });
+    if (mine.every((x) => x === undefined)) return r.fetch(url, init);
+    const rest = reqs.filter((_, i) => mine[i] === undefined);
+    const fwd = rest.length === 0 ? [] : ((await (await r.fetch(url, { ...init, body: JSON.stringify(rest) })).json()) as { id: number }[]);
+    const out = reqs.map((q, i) => (mine[i] !== undefined ? { jsonrpc: "2.0", id: q.id, ...mine[i] } : fwd.find((x) => x.id === q.id)));
+    return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const s = B.open(base, undefined, { fetch: fetch as never, pools: new Map() });
+  const unread = await s.trades(COIN, 50);
+  st.down = false;
+  const read = await s.trades(COIN, 50);
+  s.stop();
+  assert.ok(st.asked > 0, "the discovery asked the pool's factory()");
+  assert.equal(unread.status, 503, `a discovery whose factory() read failed: ${unread.body}`);
+  assert.deepEqual(JSON.parse(unread.body), { error: { code: "upstream" } });
+  // read, the pool is confirmed and its logs read (none in this fake: the honest empty tape of our own reads)
+  assert.equal(read.status, 200, read.body);
+  assert.ok(r.n.getPool > 0 && r.n.poolLogs > 0, "the pool confirmed by its factory and its swaps read");
+});
