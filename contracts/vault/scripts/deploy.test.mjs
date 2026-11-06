@@ -79,10 +79,12 @@ function wasm({ body = 4, strings = [TESTNET_TOKEN], exports = ["config"] } = {}
 
 // The commit deploy.mjs builds: this checkout's HEAD.
 const HEAD = execFileSync("git", ["-C", HERE, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-// The NEP-330 metadata a reproducible build of `flavor` at `commit` holds, as near-sdk 5.29.1 serialises it.
+// The NEP-330 metadata a reproducible build of `flavor` at `commit` holds, as near-sdk 5.29.1 serialises it. The link
+// is cargo-near-build 0.11.5's for a github.com repository (nep330_build_info.rs compute_repo_link_hint): the tree at
+// the commit, not the bare repository.
 const meta = ({ flavor = "mainnet", commit = HEAD, ...over } = {}) => ({
   version: "0.1.0",
-  link: REPO,
+  link: `${REPO}/tree/${commit}`,
   standards: [{ standard: "nep330", version: "1.3.0" }],
   build_info: {
     build_environment: `${REPRODUCIBLE.image}@${REPRODUCIBLE.image_digest}`,
@@ -351,8 +353,15 @@ test("the wasm's NEP-330 metadata must name this repository at the commit, the p
     assert.equal(p.length, 1, p.join("; "));
     return p[0];
   };
-  assert.match(one(m({ commit: "0".repeat(40) }), { commit: HEAD, flavor: "mainnet" }), /source_code_snapshot is "git\+https:\/\/github\.com\/UNRLZD\/confidential-trenches\?rev=0{40}"/);
+  // a build of another commit names it in both the link and the snapshot
+  const another = metadataProblems(m({ commit: "0".repeat(40) }), { commit: HEAD, flavor: "mainnet" });
+  assert.equal(another.length, 2, another.join("; "));
+  assert.match(another[0], /metadata link is ".*\/tree\/0{40}"/);
+  assert.match(another[1], /source_code_snapshot is "git\+https:\/\/github\.com\/UNRLZD\/confidential-trenches\?rev=0{40}"/);
   assert.match(one(m({ link: "https://github.com/x/y" }), { commit: HEAD, flavor: "mainnet" }), /metadata link is "https:\/\/github\.com\/x\/y"/);
+  // the bare repository, or the tree at another commit, is not the link cargo-near writes for this commit
+  assert.match(one(m({ link: REPO }), { commit: HEAD, flavor: "mainnet" }), /metadata link is "https:\/\/github\.com\/UNRLZD\/confidential-trenches", want ".*\/tree\//);
+  assert.match(one(m({ link: `${REPO}/tree/${"0".repeat(40)}` }), { commit: HEAD, flavor: "mainnet" }), /metadata link is ".*\/tree\/0{40}"/);
   assert.match(one(m({ flavor: "testnet" }), { commit: HEAD, flavor: "mainnet" }), /build_info\.build_command is .*"testnet"\]/);
   const other = meta();
   other.build_info.build_environment = "sourcescan/cargo-near:0.21.1-rust-1.96.0";

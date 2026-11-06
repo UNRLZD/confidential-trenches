@@ -216,14 +216,15 @@ export function sourceMetadata(wasm) {
   return found.length === 1 ? found[0] : null;
 }
 
-// What keeps the wasm's NEP-330 metadata from naming this vault's source: REPO, the commit `commit`, the crate's path,
-// the pinned image by digest and the flavor's container command.
+// What keeps the wasm's NEP-330 metadata from naming this vault's source: REPO's tree at the commit `commit` (the link
+// cargo-near writes for a github.com repository), the commit, the crate's path, the pinned image by digest and the
+// flavor's container command.
 export function metadataProblems(wasm, { commit, flavor }) {
   const m = sourceMetadata(wasm);
   if (!m) return ["the wasm holds no single NEP-330 contract_source_metadata"];
   const command = flavor === "testnet" ? REPRODUCIBLE.variant.testnet.container_build_command : REPRODUCIBLE.container_build_command;
   const want = {
-    link: REPO,
+    link: `${REPO}/tree/${commit}`,
     "build_info.build_environment": `${REPRODUCIBLE.image}@${REPRODUCIBLE.image_digest}`,
     "build_info.source_code_snapshot": `git+${REPO}?rev=${commit}`,
     "build_info.contract_path": CONTRACT_PATH,
