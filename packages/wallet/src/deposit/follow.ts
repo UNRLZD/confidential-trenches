@@ -290,6 +290,8 @@ export async function followDeposit(seed64: Uint8Array, args: FollowArgs, deps: 
 
     // Writes a stage and its facts (only the facts that stage carries, kit messages.ts DepositFacts), and follow fields.
     const write = async (stage: DepositStage, facts: DepositFacts, follow?: Partial<FollowRecord>): Promise<void> => {
+      // the same stage and facts again is no write: each write is a store change the app's state is posted again for
+      if (follow === undefined && op!.stage === stage && FACT_KEYS.every((k) => op![k] === facts[k])) return;
       const next = (await ops.update("ops", args.opId, (v) => {
         const cur = v as DepositOp;
         const out: Record<string, unknown> = { kind: "deposit", stage, txs: cur.txs ?? [], created_ms: cur.created_ms, follow: { ...cur.follow, ...follow } };

@@ -253,9 +253,12 @@ test("planted: SUCCESS with U's credit on one RPC only, or under MIN_DEPOSIT, bi
     if (n === 5) t.chain.credit(999_999n); // both agree, but under MIN_DEPOSIT
     if (n === 10) ac.abort(new Error("stop"));
   };
-  await assert.rejects(followDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }), /stop/);
+  let writes = 0;
+  const ops = { get: t.w.get.bind(t.w), update: (s: never, k: string, f: (v: unknown) => unknown) => (writes++, t.w.update(s, k, f)) } as FollowDeps["ops"];
+  await assert.rejects(followDeposit(SEED, t.args, { ...t.deps, ops, signal: ac.signal }), /stop/);
   assert.equal(t.binds.length, 0);
   assert.deepEqual(t.stages, ["in_transit"]);
+  assert.equal(writes, 2, "the op is written when made and when its stage moves, never again on each poll");
   assert.equal((await opOf(t.w)).follow.amount, undefined);
 });
 
