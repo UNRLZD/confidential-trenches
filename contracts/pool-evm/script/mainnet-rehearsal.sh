@@ -32,7 +32,7 @@ folders() { if [ -d "$KEYS" ]; then ls "$KEYS" | sort; fi; }
 for chain in base robinhood; do
   port=$(port_of "$chain")
   url="http://127.0.0.1:$port"
-  anvil --fork-url "$(fork_of "$chain")" --port "$port" --host 127.0.0.1 --silent >"$OUT/anvil-$chain.log" 2>&1 &
+  anvil --fork-url "$(fork_of "$chain")" --port "$port" --host 127.0.0.1 --slots-in-an-epoch 0 --silent >"$OUT/anvil-$chain.log" 2>&1 &
   PIDS+=($!)
   for _ in $(seq 60); do cast chain-id --rpc-url "$url" >/dev/null 2>&1 && break; sleep 1; done
   cast rpc anvil_setBalance "$STANDIN" 0xde0b6b3a7640000 --rpc-url "$url" >/dev/null
@@ -47,7 +47,7 @@ for chain in base robinhood; do
   line=$(grep "^deploy: waiting for" "$log")
   need=$(awk '{print $4}' <<<"$line")
   key=$(awk '{print $9}' <<<"$line")
-  grep -q "^deploy: send exactly $need wei (.* ETH) to $key from $STANDIN, the address you passed$" "$log"
+  grep -q "^deploy: send exactly $need wei (.* ETH) to $key from $STANDIN, the address you passed, in one transfer$" "$log"
   sb=$(cast balance "$STANDIN" --rpc-url "$url")
   cast send --unlocked --from "$STANDIN" "$key" --value "$need" --rpc-url "$url" >/dev/null
   echo "rehearsal [$chain]: funded $key with exactly $need wei from the stand-in"

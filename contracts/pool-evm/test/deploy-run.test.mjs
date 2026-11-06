@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "node:test";
 import { CHAINS, DUST, MAINNETS, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
@@ -81,11 +82,13 @@ function chain(on = {}) {
       if (g(c.bal, c.deployer) < t.value + fee) continue; // dropped: it cannot pay at execution
       c.bal.set(c.deployer, g(c.bal, c.deployer) - t.value - fee);
       let ca = null;
+      // on.revert(t): a create that reverts pays its fee and makes nothing
+      const reverted = !t.to && on.revert?.(t, c);
       if (t.to) c.bal.set(t.to, g(c.bal, t.to) + t.value);
-      else c.code.set((ca = createAddress(c.deployer, t.nonce)), runtime(createdBy(t.data))), c.created.push(t.data);
+      else if (!reverted) c.code.set((ca = createAddress(c.deployer, t.nonce)), runtime(createdBy(t.data))), c.created.push(t.data);
       c.nonce.set(c.deployer, t.nonce + 1n);
       c.block++;
-      c.receipts.set(hash, { status: "0x1", blockNumber: "0x" + c.block.toString(16), contractAddress: ca, effectiveGasPrice: "0x" + price.toString(16), from: c.deployer, ...(on.arb ? { gasUsed: "0x" + (used + l1Gas).toString(16), gasUsedForL1: "0x" + l1Gas.toString(16) } : { gasUsed: "0x" + used.toString(16), l1Fee: "0x" + l1Of(t.len).toString(16) }) });
+      c.receipts.set(hash, { status: reverted ? "0x0" : "0x1", blockNumber: "0x" + c.block.toString(16), contractAddress: ca, effectiveGasPrice: "0x" + price.toString(16), from: c.deployer, ...(on.arb ? { gasUsed: "0x" + (used + l1Gas).toString(16), gasUsedForL1: "0x" + l1Gas.toString(16) } : { gasUsed: "0x" + used.toString(16), l1Fee: "0x" + l1Of(t.len).toString(16) }) });
       on.afterMine?.(c, t);
     }
   };
@@ -99,7 +102,7 @@ function chain(on = {}) {
     switch (method) {
       case "eth_chainId": return ok(c.id);
       case "eth_blockNumber": return ok("0x" + c.block.toString(16));
-      case "eth_getBlockByNumber": return ok({ baseFeePerGas: "0x" + c.base.toString(16) });
+      case "eth_getBlockByNumber": return ok({ baseFeePerGas: "0x" + c.base.toString(16), number: "0x" + (params[0] === "safe" ? (c.safeOf?.() ?? c.block) : c.block).toString(16) });
       case "eth_maxPriorityFeePerGas": return ok("0x" + c.tip.toString(16));
       case "eth_estimateGas": return ok(params[0].to ? "0x5208" : "0x" + (600000).toString(16));
       case "eth_call": return ok("0x" + (c.l1Scale * (BigInt("0x" + params[0].data.slice(10)) + 68n)).toString(16).padStart(64, "0"));
@@ -383,7 +386,7 @@ test("mainnet: --return must be a wallet in use, an account with no code holding
   assert.equal(r3.error, null, String(r3.error?.message) + why(c3));
   // the need in wei and, exactly, in the chain's own unit (ETH)
   const line = c3.logs.find((l) => l.startsWith("deploy: send exactly "));
-  const w = String(line).match(/^deploy: send exactly (\d+) wei \((\d+)(?:\.(\d{1,18}))? ETH\) to (0x[0-9a-f]{40}) from (0x[0-9a-f]{40}), the address you passed$/);
+  const w = String(line).match(/^deploy: send exactly (\d+) wei \((\d+)(?:\.(\d{1,18}))? ETH\) to (0x[0-9a-f]{40}) from (0x[0-9a-f]{40}), the address you passed, in one transfer$/);
   assert.ok(w, String(line) + why(c3));
   assert.equal(BigInt(w[1]), c3.fundWei);
   assert.equal(BigInt(w[2]) * 10n ** 18n + BigInt((w[3] ?? "").padEnd(18, "0")), c3.fundWei, "the ETH figure is the wei figure exactly");
@@ -1109,14 +1112,14 @@ test("resume-safe R4: a deploy whose receipt the first RPC lags on (its code on 
   for (const n of ORDER) assert.equal(c.created.filter((d) => createdBy(d) === n).length, 1, `${n} made once` + why(c));
 });
 
-test("resume-safe pending transfer: a resume funded by the stopped run's late transfer, while the transfer it asked for is still to land, keeps its key; once that lands, --sweep-kept sends it back and removes the key", OPTS, async (t) => {
+test("resume-safe pending transfer: a resume funded by its own transfer, while the stopped run's asked transfer is still to land, keeps its key; once that lands, --sweep-kept sends it back and removes the key", OPTS, async (t) => {
   const m = room(t);
   const c = mainnet();
   // run 1 asks for its need and stops in the wait; the owner's transfer is slow
   await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => l.startsWith("deploy: send exactly") && process.emit("SIGTERM", "SIGTERM") });
   assert.equal(journalOf(m).keys.state, "kept");
   const first = c.fundWei;
-  // run 2 resumes and asks again; one transfer lands at once (the mock's funding of run 2's line), the other is still to
+  // run 2 resumes and asks again; its own transfer lands at once (the mock's funding of its line), run 1's is still to
   const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
   assert.equal(r2.error, null, String(r2.error?.message) + why(c));
   assert.deepEqual(Object.keys(r2.record.contracts), ORDER, "deployed");
@@ -1124,7 +1127,7 @@ test("resume-safe pending transfer: a resume funded by the stopped run's late tr
   const j = journalOf(m);
   assert.equal(j.keys.state, "kept");
   assert.ok(j.keys.why.some((w) => /asked for \d+ wei in 2 transfers/.test(w)), j.keys.why.join("; "));
-  // the slow transfer lands on the kept key
+  // run 1's slow transfer lands on the kept key
   c.bal.set(c.deployer, c.balanceOf(c.deployer) + first);
   const e0 = c.balanceOf(E);
   const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
@@ -1161,17 +1164,17 @@ test("resume-safe both RPCs: --sweep-kept reads the funding on both RPCs: a firs
   assert.equal(journalOf(m).keys.state, "kept");
 });
 
-test("resume-safe block: the key is removed only at a block past every transaction the run saw land: a second RPC whose head is behind the run's sweep keeps it; once it catches up, --sweep-kept removes it", OPTS, async (t) => {
+test("resume-safe block: the key is removed only once both RPCs' safe block is past every transaction the run saw land: a second RPC whose safe block stays behind the run's sweep keeps it after the wait; once it is safe, --sweep-kept removes it", OPTS, async (t) => {
   const m = room(t);
   const c = mainnet();
   let behind = true;
-  answer(c, (u, method) => (behind && method === "eth_blockNumber" && u === BASE.rpcs[1] ? "0x64" : undefined));
+  answer(c, (u, method, params) => (behind && method === "eth_getBlockByNumber" && params[0] === "safe" && u === BASE.rpcs[1] ? { baseFeePerGas: "0x" + c.base.toString(16), number: "0x64" } : undefined));
   const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
   assert.equal(r.error, null, String(r.error?.message) + why(c));
   assert.ok(c.balanceOf(c.deployer) <= DUST, why(c));
   const j = journalOf(m);
   assert.equal(j.keys.state, "kept", why(c));
-  assert.ok(j.keys.why.some((w) => /head block 100 on https:\/\/base-rpc\.publicnode\.com is behind block \d+/.test(w)), j.keys.why.join("; "));
+  assert.ok(j.keys.why.some((w) => /safe block 100 on https:\/\/base-rpc\.publicnode\.com is behind block \d+/.test(w)), j.keys.why.join("; "));
   behind = false;
   const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
   assert.equal(sw.error, null, String(sw.error?.message) + why(c));
@@ -1216,4 +1219,128 @@ test("resume-safe unread: a removal read that fails on one RPC keeps the key; on
   const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
   assert.equal(sw.error, null, String(sw.error?.message) + why(c));
   assert.deepEqual(folders(m.keys), [], why(c));
+});
+
+test("REVIEW: a resume killed outright in its funding wait, its first run's transfer landed and its own still to land: --sweep-kept keeps the key", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => l.startsWith("deploy: send exactly") && process.emit("SIGTERM", "SIGTERM") });
+  const first = c.fundWei;
+  // the resume, killed outright once its line is printed: the disk as it is then
+  let snap = null;
+  await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => { if (l.startsWith("deploy: send exactly") && !snap) { snap = readFileSync(m.journal, "utf8"); process.emit("SIGTERM", "SIGTERM"); } } });
+  writeFileSync(m.journal, snap);
+  c.fundAt = null; // the resume's transfer is still to land
+  c.bal.set(c.deployer, c.balanceOf(c.deployer) + first); // the first run's lands
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.equal(folders(m.keys).length, 1, "kept while the resume's transfer may land" + why(c));
+});
+
+test("REVIEW phantom: a run stopped in its funding wait before the owner sent anything, then resumed and funded: the key is never removed, not even by --sweep-kept", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => l.startsWith("deploy: send exactly") && process.emit("SIGTERM", "SIGTERM") });
+  c.fundAt = null; // the owner never sent the first run's ask
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r2.error, null, String(r2.error?.message) + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST);
+  for (let i = 0; i < 3; i++) await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  const j = journalOf(m);
+  assert.equal(j.keys.state, "kept");
+  // kept, and said as no money at risk: an ask never sent means nothing more lands, and the key holds at most dust
+  assert.ok(j.keys.why.some((w) => /If an amount it asked for was never sent, nothing more will land: the key holds at most \d+ wei and nothing is lost/.test(w)), j.keys.why.join(" | "));
+});
+
+test("REVIEW receipt: the first RPC's sweep receipt reads a larger fee than the chain charged (one RPC wrong, not lagging) while a transfer the run asked for is still to land: is the key removed?", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => l.startsWith("deploy: send exactly") && process.emit("SIGTERM", "SIGTERM") });
+  const first = c.fundWei; // the first run's transfer, still to land
+  let sh = null;
+  c.sent0 = null;
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "eth_sendRawTransaction" && parse(params[0]).to === E) sh ??= keccak(params[0]);
+    const res = await fetch0(u, init);
+    if (method === "eth_getTransactionReceipt" && u === BASE.rpcs[0] && params[0] === sh) {
+      const j = await res.json();
+      if (j.result) j.result = { ...j.result, l1Fee: "0x" + (BigInt(j.result.l1Fee) + first).toString(16) };
+      return { ok: true, status: 200, json: async () => j };
+    }
+    return res;
+  };
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r2.error, null, String(r2.error?.message) + why(c));
+  const removedLine = c.logs.find((l) => /its key folder is removed/.test(l));
+  assert.equal(folders(m.keys).length, 1, `kept while the first run's transfer of ${first} wei may land; folders ${folders(m.keys).length}; journal exists ${existsSync(m.journal)}; ${removedLine}`);
+});
+
+// ---- the review of a235475a (card pool-evm-deploy-resume-safe) ----
+test("review: the run waits until its last block is safe on both RPCs, then removes the key", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let until = null;
+  let lag = 0;
+  c.safeOf = () => (until !== null && c.clock >= until ? c.block : c.block - lag);
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, onLine: (l, ch) => l.startsWith("deploy: sweep ") && until === null && ((until = ch.clock + 180_000), (lag = 3)) });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  assert.ok(lineOf(c, /^deploy: waiting until block \d+, the key's last, is safe on both RPCs/), why(c));
+  const removed = c.logs.findIndex((l) => /its key folder is removed/.test(l));
+  assert.ok(removed >= 0, why(c));
+  assert.deepEqual(folders(m.keys), []);
+});
+
+test("review: a deploy that reverted names no contract in the record: the resume's own deploy of it does", OPTS, async (t) => {
+  const m = room(t);
+  let once = false;
+  const c = mainnet({ revert: (tx) => createdBy(tx.data) === "PrivacyPoolSimple" && !once && (once = true) });
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /deploy PrivacyPoolSimple .*status 0x0/, why(c));
+  assert.equal(journalOf(m).keys.state, "kept");
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r2.error, null, String(r2.error?.message) + why(c));
+  settled(c, r2);
+  const pool = r2.record.contracts.PrivacyPoolSimple.address;
+  assert.notEqual(c.code.get(pool) ?? "0x", "0x", `the record's pool ${pool} holds code` + why(c));
+  assert.notEqual(pool, createAddress(c.deployer, 1n), "not the reverted deploy's address at nonce 1");
+  assert.equal(r2.record.txs.filter((x) => x.step === "deploy PrivacyPoolSimple").length, 2, "both pool deploys landed and are listed");
+});
+
+test("review: a completed run's journal with its record missing is refused, never moved aside for a second deploy", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await killedAtSweep(t, m, c);
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.equal(journalOf(m).keys.state, "removed");
+  assert.equal(journalOf(m).complete, true);
+  rmSync(m.out);
+  const made = c.created.length;
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /a completed run deployed base's pool with the run key 0x[0-9a-f]{40}, but its record .* is missing: restore the record .*nothing was sent/, why(c));
+  assert.equal(c.created.length, made, "nothing deployed again");
+  assert.ok(existsSync(m.journal), "the journal stays where it is");
+});
+
+test("review: one run per chain at a time: a lock held by a live process refuses the paste before anything is read; one left by a process that is gone is taken over, and the run removes it", OPTS, async (t) => {
+  const m = room(t);
+  const lock = `${m.journal}.lock`;
+  mkdirSync(m.dir, { recursive: true });
+  writeFileSync(lock, `${process.pid}\n`);
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /base\.journal\.json\.lock: another run on this chain \(pid \d+\) is going: nothing was read or sent/, why(c));
+  assert.equal(c.calls.length, 0, "nothing read");
+  assert.equal(readFileSync(lock, "utf8").trim(), String(process.pid), "the other run's lock is left alone");
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.match(String(sw.error?.message), /another run on this chain/, "--sweep-kept takes the same lock");
+  const gone = spawnSync(process.execPath, ["-e", ""]).pid;
+  writeFileSync(lock, `${gone}\n`);
+  let held = null;
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, onLine: (l) => l.startsWith("deploy: waiting for") && (held = readFileSync(lock, "utf8").trim()) });
+  assert.equal(r2.error, null, String(r2.error?.message) + why(c));
+  assert.equal(held, String(process.pid), "taken over by this run");
+  assert.equal(existsSync(lock), false, "removed when the run ends");
 });

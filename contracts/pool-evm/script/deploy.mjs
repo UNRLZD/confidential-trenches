@@ -38,7 +38,8 @@
 //     stopped run made is reused once its receipt and its code on both RPCs read back as the build's (one that landed
 //     but does not read back stops the resume before any funding, and the pool is reused only with its verifier), and
 //     only the rest is deployed, at the key's next nonces; or --sweep-kept sends the key's rest back to that journal's
-//     return address, and no other, then removes the key: any journal whose key is not removed ("kept", or "in use" after
+//     return address, and no other, then removes the key unless something still keeps it (a run not whole that made a
+//     contract keeps it for the resume; a transfer it asked for still to land): any journal whose key is not removed ("kept", or "in use" after
 //     a run killed outright), the return wallet's balance not asked; a journal that signed nothing (a run stopped in its
 //     funding wait) is watched for WAITS.lateFunding and its key kept until the need its run asked for has landed:
 //     its balance plus what it sent out since the wait (outflowOf: each landed transaction's fee and value, from its
@@ -80,7 +81,7 @@
 //     transaction that landed, in nonce order, and prints the live check to run next.
 import "../../../scripts/net-window.mjs";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -290,8 +291,10 @@ export const ethExact = (wei) => {
 const ZERO = "0x0000000000000000000000000000000000000000";
 // The waits (ms): a deploy's receipt; how long a sent transaction may sit before it is replaced; how long the settle
 // before a sweep waits for the run key's transactions to land; the sweep's whole retry window; the balance watch after
-// a stop during the funding wait (a funding transfer still in flight lands and is swept too).
-export const WAITS = Object.freeze({ receipt: 180_000, stuck: 90_000, settle: 900_000, sweep: 1_800_000, lateFunding: 60_000, poll: 5_000 });
+// a stop during the funding wait (a funding transfer still in flight lands and is swept too); how long the cleanup
+// waits, polling every safePoll, for both RPCs' "safe" block to reach the key's last transaction before it judges the
+// key (a reorg of a block not yet safe could undo a sweep after the key is gone; a key not judged is kept).
+export const WAITS = Object.freeze({ receipt: 180_000, stuck: 90_000, settle: 900_000, sweep: 1_800_000, lateFunding: 60_000, poll: 5_000, safe: 1_800_000, safePoll: 15_000 });
 // a replacement pays at least 10% more on both fee terms, and strictly more (geth's txpool price bump and its
 // strictly-greater check); 12.5%, rounded up and at least +1 (a tip of 0, as Robinhood suggests, must become 1)
 const bump = (x) => {
@@ -320,6 +323,51 @@ export function returnAddress(s) {
  * network, the real clock, keysBase() and deploymentFile().
  */
 export async function main(args, io = {}) {
+  const lock = lockOf(args, io);
+  if (!lock) return run(args, io);
+  takeLock(lock);
+  try {
+    return await run(args, io);
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+/** A mainnet run's lock: its journal's path with .lock (null on a testnet: no journal, no key kept) */
+const lockOf = (args, io) => {
+  const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
+  const chainName = opt("--chain");
+  if (!args.includes("--mainnet") || !Object.hasOwn(MAINNETS, chainName)) return null;
+  return journalOf(opt("--out") ?? (io.recordOf ?? deploymentFile)(chainName)) + ".lock";
+};
+/**
+ * One run per chain's journal at a time: the lock file is made O_EXCL with this process's pid. One held by a live
+ * process refuses this run before anything is read or sent; one whose process is gone (a run killed outright) is taken
+ * over.
+ */
+export function takeLock(lock) {
+  mkdirSync(path.dirname(lock), { recursive: true });
+  for (let i = 0; ; i++) {
+    try {
+      const fd = openSync(lock, "wx", 0o600);
+      writeSync(fd, `${process.pid}\n`);
+      closeSync(fd);
+      return;
+    } catch (e) {
+      if (e.code !== "EEXIST" || i > 0) throw e;
+    }
+    const pid = Number(readFileSync(lock, "utf8").trim());
+    let alive = false;
+    try {
+      if (Number.isInteger(pid) && pid > 0) process.kill(pid, 0), (alive = true);
+    } catch (e) {
+      alive = e.code === "EPERM";
+    }
+    if (alive) throw new Error(`${path.relative(process.cwd(), lock)}: another run on this chain (pid ${pid}) is going: nothing was read or sent; wait for it to end`);
+    rmSync(lock, { force: true });
+  }
+}
+
+async function run(args, io = {}) {
   const fetchFn = io.fetchFn ?? ((u, i) => globalThis.fetch(u, i));
   const sleep = io.sleep ?? realSleep;
   const now = io.now ?? Date.now;
@@ -395,6 +443,8 @@ export async function main(args, io = {}) {
     }
     if (existsSync(journalFile) && !resume) {
       const j = JSON.parse(readFileSync(journalFile, "utf8"));
+      // a completed run's journal with no record: the pool is deployed (by that run's key); a new run would deploy it again
+      if (j.complete) throw new Error(`${rel(journalFile)}: a completed run deployed ${chainName}'s pool with the run key ${j.deployer}, but its record ${rel(out)} is missing: restore the record (git checkout ${path.relative(REPO, out)}) and run its live check: ${liveCheck}; nothing was sent`);
       const aside = `${out.replace(/\.json$/, "")}.stopped-${String(j.stopped_at ?? j.at).replace(/[^0-9TZ]/g, "")}.journal.json`;
       renameSync(journalFile, aside);
       console.log(`deploy: the stopped run's journal (its key removed) moved to ${rel(aside)}`);
@@ -617,6 +667,22 @@ export async function main(args, io = {}) {
     return { tip, maxFee: maxOf(bump(maxOf(...at.map((s) => s.maxFee))), f.maxFee, tip) };
   };
   const receiptOf = async (s) => (s.receipt ??= await call("eth_getTransactionReceipt", [s.hash]));
+  // A transaction's receipt on each RPC (each read again while null), and what it took from the key as both say: the
+  // smaller outflowOf of the two; 0n when neither RPC has it (it did not land: replaced at its nonce, or dropped); null
+  // when only one has it, or either does not say. What decides a key's removal is read this way, so one RPC's wrong
+  // receipt can only make it count less.
+  const receiptsOf = async (s) => {
+    s.receipts ??= {};
+    for (const u of [url, second]) s.receipts[u] ??= await call("eth_getTransactionReceipt", [s.hash], u);
+    return [s.receipts[url], s.receipts[second]];
+  };
+  const outOnBoth = async (s) => {
+    const [a, b] = await receiptsOf(s);
+    if (!a && !b) return 0n;
+    const x = a && outflowOf(s, a, deployer);
+    const y = b && outflowOf(s, b, deployer);
+    return x == null || y == null ? null : x < y ? x : y;
+  };
   // the run key's balance on both RPCs: the lower of the two (a read that fails throws)
   const heldOnBoth = async () => {
     let bal = null;
@@ -627,7 +693,7 @@ export async function main(args, io = {}) {
     return bal;
   };
   // --sweep-kept: what the key sent out since its run's funding wait (its journaled transactions from wait_txs on,
-  // each counted by outflowOf). Any of it unread (a receipt, or a journal from before wait_txs and value were kept)
+  // each counted by outflowOf, the smaller of both RPCs' receipts). Any of it unread (a receipt, or a journal from before wait_txs and value were kept)
   // counts nothing, so the key is kept.
   const sentOut = async () => {
     if (j0?.wait_txs == null) return 0n;
@@ -635,9 +701,7 @@ export async function main(args, io = {}) {
     try {
       for (const [i, s] of signed.entries()) {
         if (i < j0.wait_txs) continue;
-        const r = await receiptOf(s);
-        if (!r) continue; // replaced at its nonce, or not landed: it sent nothing
-        const o = outflowOf(s, r, deployer);
+        const o = await outOnBoth(s); // 0n: replaced at its nonce, or not landed: it sent nothing
         if (o === null) return 0n;
         out += o;
       }
@@ -657,7 +721,8 @@ export async function main(args, io = {}) {
     // a receipt is read only where the nonce has none landed yet (a resume's reused deploys): a settled run reads
     // nothing here, so an RPC outage after its key is removed cannot cost it the record
     for (const s of signed) if (!signed.some((o) => o.receipt && o.nonce === s.nonce)) await receiptOf(s);
-    const made = landed().filter((s) => s.contract && s.step === `deploy ${s.contract}` && s.address);
+    // a deploy that reverted made nothing: only one whose receipt succeeded and made its address names a contract
+    const made = landed().filter((s) => s.contract && s.step === `deploy ${s.contract}` && s.address && s.receipt.status === "0x1" && s.receipt.contractAddress?.toLowerCase() === s.address);
     const txs = landed().map((s) => ({ step: s.step, hash: s.hash, ...(s.contract ? { contract: s.contract } : {}) }));
     const d = {
       chain: chainName, chainId: Number(BigInt(id)), dryRun, at: prev?.at ?? new Date().toISOString(), deployer, return: ret, need: prev?.need ?? need.toString(),
@@ -769,7 +834,7 @@ export async function main(args, io = {}) {
         asked.push(short);
         writeJournal();
         console.log(`deploy: waiting for ${short} wei (${eth(short)}) at ${deployer} on ${chainName}${held0 > 0n ? `: the need ${need} wei less the ${held0} it holds` : ""}`);
-        if (mainnet) console.log(`deploy: send exactly ${short} wei (${ethExact(short)}) to ${deployer} from ${ret}, the address you passed`);
+        if (mainnet) console.log(`deploy: send exactly ${short} wei (${ethExact(short)}) to ${deployer} from ${ret}, the address you passed, in one transfer`);
       }
       // a read that fails (its five tries all rate-limited or reset) is read again at the next poll: a run that ended
       // here would leave the owner's transfer to a run that is gone (the Solana devnet rehearsal's run, 5 Nov 18:47Z)
@@ -851,27 +916,40 @@ export async function main(args, io = {}) {
         if (!funded) why.push(kept ? "its run stopped in its funding wait, so a transfer to it may still land: run --sweep-kept again to send back what does" : "the run stopped before its funding was read: a transfer may still land");
         // a run not whole that made a contract keeps its key and journal, in every path (the run, a resume and
         // --sweep-kept), so the same paste resumes and reuses it, never deploying it again: made is each journaled deploy
-        // whose receipt (the first RPC's) succeeded or whose address holds code on either RPC
+        // whose receipt on either RPC succeeded at its address, or whose address holds code on either RPC
         const whole = complete || Boolean(j0?.complete);
         const made = new Set(signed.filter((s) => s.contract && s.receipt?.status === "0x1").map((s) => s.address));
         const deploys = whole ? [] : [...new Set(signed.filter((s) => s.contract && s.step === `deploy ${s.contract}` && /^0x[0-9a-f]{40}$/.test(String(s.address))).map((s) => s.address))];
         try {
           const top = signed.reduce((m, s) => (s.nonce + 1n > m ? s.nonce + 1n : m), 0n);
-          // what the key's own transactions took: one landed per nonce below top, each by outflowOf; null while any
-          // receipt is unread (it is read again on every pass, never taken as nothing sent)
-          for (const s of signed) if (!signed.some((o) => o.receipt && o.nonce === s.nonce)) await receiptOf(s);
-          let out = 0n;
-          for (let n = 0n; n < top && out !== null; n++) {
-            const l = signed.find((s) => s.nonce === n && s.receipt);
-            const o = l ? outflowOf(l, l.receipt, deployer) : null;
-            out = o === null ? null : out + o;
-          }
-          const floor = signed.reduce((m, s) => (s.receipt?.blockNumber != null && big(s.receipt.blockNumber) > m ? big(s.receipt.blockNumber) : m), 0n);
           const askedAll = asked.reduce((a, b) => a + b, 0n);
-          // each RPC read at its own head block: the balance, the nonce and each deploy address's code at that one block
-          const left = await onBoth(async (u) => {
+          // what the key's own transactions took, from both RPCs' receipts (outOnBoth): exactly one landed per nonce
+          // below top; null while any is unread on either RPC (read again on every pass, never taken as nothing sent).
+          // made gains each deploy either RPC's receipt says succeeded at its address; floor is the highest block either
+          // RPC puts any of them in. Read fresh: after the safe wait a reorg may have moved them.
+          const ledger = async () => {
+            let out = 0n;
+            let floor = 0n;
+            for (let n = 0n; n < top; n++) {
+              const at = signed.filter((s) => s.nonce === n);
+              const got = [];
+              for (const s of at) {
+                const rs = await receiptsOf(s);
+                for (const r of rs) {
+                  if (r?.blockNumber != null && big(r.blockNumber) > floor) floor = big(r.blockNumber);
+                  if (r?.status === "0x1" && s.contract && r.contractAddress?.toLowerCase() === s.address) made.add(s.address);
+                }
+                if (rs.some(Boolean)) got.push(s);
+              }
+              const o = got.length === 1 ? await outOnBoth(got[0]) : null;
+              out = out === null || o === null ? null : out + o;
+            }
+            return { out, floor };
+          };
+          // each RPC read at its own "safe" block: the balance, the nonce and each deploy address's code at that block
+          const readAt = async (u) => {
             try {
-              const block = big(await call("eth_blockNumber", [], u));
+              const block = big((await call("eth_getBlockByNumber", ["safe", false], u)).number);
               const tag = "0x" + block.toString(16);
               const v = { block, bal: big(await call("eth_getBalance", [deployer, tag], u)), nonce: big(await call("eth_getTransactionCount", [deployer, tag], u)), made: [] };
               for (const a of deploys) if ((await call("eth_getCode", [a, tag], u)) !== "0x") v.made.push(a);
@@ -879,19 +957,38 @@ export async function main(args, io = {}) {
             } catch (e) {
               return { err: String(e.message).split("\n")[0] };
             }
-          }, (v) => !v.err && v.block >= floor && v.bal <= DUST && v.nonce >= top);
+          };
+          let { floor } = await ledger();
+          // a key kept for another reason already is judged at once; otherwise the run waits until both RPCs' safe block
+          // reaches every block its transactions are in, so no reorg can undo what it reads
+          if (!why.length && (whole || made.size === 0) && floor > 0n) {
+            let said = false;
+            for (const end = now() + WAITS.safe; now() < end; await sleep(WAITS.safePoll)) {
+              const safe = [];
+              for (const u of [url, second]) safe.push(await call("eth_getBlockByNumber", ["safe", false], u).then((b) => big(b.number), () => -1n));
+              if (safe.every((b) => b >= floor)) break;
+              if (!said) (said = true), console.log(`deploy: waiting until block ${floor}, the key's last, is safe on both RPCs (safe now ${safe.join(" and ")}), up to ${WAITS.safe / 60_000} min`);
+            }
+            for (const s of signed) s.receipts = {};
+          }
+          const { out, floor: last } = await ledger();
+          floor = last;
+          const left = await onBoth(readAt, (v) => !v.err && v.block >= floor && v.bal <= DUST && v.nonce >= top);
           for (const [u, v] of left) {
             if (v.err) {
               why.push(`its rest was not read on ${u}: ${v.err}`);
               continue;
             }
-            if (v.block < floor) why.push(`its head block ${v.block} on ${u} is behind block ${floor}, the last the run saw`);
+            if (v.block < floor) why.push(`its safe block ${v.block} on ${u} is behind block ${floor}, the last the run saw: run --sweep-kept again once it is safe`);
             if (v.bal > DUST) why.push(`it holds ${v.bal} wei on ${u}`);
             if (v.nonce < top) why.push(`its nonce ${v.nonce} on ${u} is below the ${top} it signed`);
             for (const a of v.made) made.add(a);
-            if (out !== null && v.bal + out + DUST < askedAll) why.push(`it was asked for ${askedAll} wei in ${asked.length} transfer${asked.length === 1 ? "" : "s"} and has received ${v.bal + out} on ${u}: a transfer it asked for may still land; once it has, send it back: ${sweepCommand(chainName)}`);
+            if (out !== null && v.bal + out + DUST < askedAll) {
+              why.push(`it was asked for ${askedAll} wei in ${asked.length} transfer${asked.length === 1 ? "" : "s"} and has received ${v.bal + out} on ${u}: a transfer it asked for may still land; once it has, send it back: ${sweepCommand(chainName)}` +
+                (v.bal <= DUST ? `. If an amount it asked for was never sent, nothing more will land: the key holds at most ${DUST} wei and nothing is lost` : ""));
+            }
           }
-          if (out === null) why.push("a transaction of its own has no receipt read yet, so what it received is not known");
+          if (out === null) why.push("a transaction of its own has no receipt read yet on both RPCs, so what it received is not known");
         } catch (e) {
           why.push(`its rest was not read: ${String(e.message).split("\n")[0]}`);
         }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Live check of card pool-evm-deploy-resume-safe: an EVM pool deploy (contracts/pool-evm/script/deploy.mjs) paid for
-// each contract once and left nothing on its run key. For each chain's deployment record (pool-evm-deploy.<chain>.json
+// Live check of card pool-evm-deploy-resume-safe: within the record's run key, an EVM pool deploy
+// (contracts/pool-evm/script/deploy.mjs) paid for each contract once and left nothing on that key. (A deploy by another
+// key, such as a fresh run after a lost journal, is outside what one record shows: deploy.mjs refuses that run.) For each chain's deployment record (pool-evm-deploy.<chain>.json
 // on the testnets, contracts/pool-evm/deployments/<chain>.json on a mainnet once deployed), on the chain's two RPCs, each
 // read at its own head block, which must be at or past the block of every transaction the record lists:
 //   - each contract the record names was made by exactly one of its deploys, whose receipt succeeded and made that
