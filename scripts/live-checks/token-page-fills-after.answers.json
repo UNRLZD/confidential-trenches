@@ -1,5 +1,5 @@
 {
- "_note": "Recorded 6 Nov by token-page-fills-after.mjs --record on the PC box (heavy.sh), each a real run: good = this card at 35b35f4c, its terminal build (--harness --build apps/terminal/dist) and its helper run beside the check on the box (node apps/helper/src/server.ts, no vendor key, PROXY_BUDGET_* at the keyless plans; --helper http://127.0.0.1:8799); bad = the deployed APP_HOST and HELPER_HOST before this card; both framed by the stand-in shell signed out, the token reads answered by the check (fill: the chain-named row with filling true, then the recorded answer; unlisted: the chain-named row with filling false).",
+ "_note": "Recorded 6 Nov by token-page-fills-after.mjs --record on a Linux test machine, each a real run: good = this card at 35b35f4c, its terminal build (--harness --build apps/terminal/dist) and its helper run beside the check on that machine (node apps/helper/src/server.ts, no vendor key, PROXY_BUDGET_* at the keyless plans; --helper http://127.0.0.1:8799); bad = the deployed APP_HOST and HELPER_HOST before this card; both framed by the stand-in shell signed out, the token reads answered by the check (fill: the chain-named row with filling true, then the recorded answer; unlisted: the chain-named row with filling false).",
  "good": {
   "check": "token-page-fills-after",
   "at": "2026-11-06T06:03:57.591Z",
