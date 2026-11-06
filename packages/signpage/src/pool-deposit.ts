@@ -27,8 +27,10 @@
 //   gives the precommitment's secrets: INCOMING -> UNSPENT with the leaf the mark names, at the value it carried, read
 //   as above (card precommit-taken-recover). The ask's rung then goes on U's next note in the same run, U's money
 //   untouched by the failed tx but its fee; each try costs the front-runner at least MIN_DEPOSIT, which becomes the
-//   user's note, and the mark's rent, locked in a mark that never closes. A run takes at most as many taken notes as its
-//   ask has rungs, then ends (part_filled with what landed, else failed) and the next run goes on, so a front-runner
+//   user's note, and the mark's rent, locked in a mark that never closes. A run signs again after at most as many taken
+//   notes as its ask has rungs; the one taken after those is restored too and ends the run (so at most rungs + 1 taken
+//   notes and sends: a one-rung ask still gets its second try), part_filled with what landed, else failed, and the next
+//   run goes on, so a front-runner
 //   who takes every send never holds the deposit and seed locks (a sign out waits on them) past that. Taken also needs
 //   both RPCs not to say one of the note's sends succeeded (that would contradict the mark: refused). A page closed between a taken PLANNED note's two moves (PLANNED -> INCOMING with no send,
 //   then UNSPENT) leaves it INCOMING with no send: its mark, which never closes, is read again and it is restored.
@@ -429,7 +431,8 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     if (ask === null) return busy.size === 0 ? { stage: "filled", txs: landedTxs } : stuck && sentTxs.length === 0 && landedTxs.length === 0 ? { error: "not_funded" } : { stage: "not_landed", txs: sentTxs };
 
     const rungs = ladderSplit(SOL_LADDER, ask.amount).notes;
-    // taken notes this run (each restored): at most rungs.length, then the run ends and the next one goes on
+    // taken notes this run, each restored before it is counted: the run signs again after at most rungs.length of
+    // them, and the one after (rungs.length + 1) ends it; the next run goes on
     let takes = 0;
     const tookOne = (): void => {
       if (++takes >= rungs.length + 1) throw new Refused("failed");
