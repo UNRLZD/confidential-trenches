@@ -14,13 +14,17 @@
 //   - "pays_sell_sender": the same sell paying the fee answer's sell_sender (the helper's own sell key): 422
 //     fee_recipient.
 // It passes only when the fee answer is 200 with fee_collector, fee_recipient and sell_sender three different addresses
-// (a network with no collector set refuses every sell, and fails here until its collector is set), every sell answers
-// its own status and code with no hash, and every answer carries a full-sha X-Helper-Commit.
+// (a network with no collector set refuses every sell, and fails here until its collector is set), fee_collector is the
+// collector the kit pins for the network (evmPoolVenues() feeCollector) and that pin is the FeeCollector card
+// evm-fee-collector deployed (evm-fee-collector.<network>.json, read back on two RPCs by its check; card
+// helper-sender-fee-proof, review M1: a sale is counted paid by the Paid log of the helper's collector, so any other
+// address would let every sale read as paid), every sell answers its own status and code with no hash, and every answer
+// carries a full-sha X-Helper-Commit.
 //   node scripts/live-checks/helper-sell-fee-recipient.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { BASE, evmPoolRecords, feeRecipientOf, plantsOf } from "./helper-evm-sender.mjs";
+import { BASE, evmPoolRecords, feeCollectors, feeRecipientOf, plantsOf } from "./helper-evm-sender.mjs";
 
 /** Each sell, the status and the code it must get. */
 export const SELLS = [
@@ -42,7 +46,7 @@ const json = (t) => {
 };
 
 /** The check on one recorded run: { base, pools: [{ network, pool, reads: [{ asked, status, headers, body }] }] }. */
-export function judge(run, records = evmPoolRecords()) {
+export function judge(run, records = evmPoolRecords(), collectors = feeCollectors()) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const want = Object.entries(records);
@@ -58,6 +62,8 @@ export function judge(run, records = evmPoolRecords()) {
     const coll = typeof b?.fee_collector === "string" ? b.fee_collector.toLowerCase() : null;
     const three = [to, seller, coll];
     say(f?.status === 200 && three.every((a) => a !== null && ADDRESS.test(a)) && new Set(three).size === 3, `[${n} fee] ${f?.status}: fee_collector ${show(b?.fee_collector)}, fee_recipient ${show(b?.fee_recipient)}, sell_sender ${show(b?.sell_sender)}, three addresses`);
+    const c = Object.hasOwn(collectors, n) ? collectors[n] : undefined;
+    say(coll !== null && c?.pin != null && coll === c.pin && c.pin === c.recorded, `[${n} fee] fee_collector ${show(coll)} is the kit's pin ${show(c?.pin ?? null)}, which is evm-fee-collector.${n}.json's FeeCollector ${show(c?.recorded ?? null)}`);
     for (const [asked, status, code] of SELLS) {
       const r = p.reads.find((x) => x.asked === asked);
       const e = json(r?.body ?? "");

@@ -701,13 +701,13 @@ const paidLog = (w: string, value: bigint, collector = COLLECTOR) => ({ address:
 /** A sale's receipt once SellDelegate.sell paid its fee: status 1 and the collector's Paid log of the sent sale (from
  *  the tx's `to`, W, its value the calldata's fee), found among `calls`' sends by hash; null for a hash not sent there.
  *  `log` changes the log (a plant). */
-const provenOf = (calls: Calls, o: { gasUsed?: bigint; log?: (l: ReturnType<typeof paidLog>, fee: bigint) => unknown } = {}) => (hash: string) => {
+const provenOf = (calls: Calls, o: { gasUsed?: bigint; l1Fee?: bigint; log?: (l: ReturnType<typeof paidLog>, fee: bigint) => unknown } = {}) => (hash: string) => {
   const raw = sends(calls).find((r) => `0x${hex(keccak_256(unhex(r)))}` === hash);
   if (raw === undefined) return null;
   const tx = dec(unhex(raw).subarray(1)) as Rlp[];
   const fee = evmReadSell(tx[7] as Uint8Array).fee;
   const log = paidLog(`0x${hex(tx[5] as Uint8Array)}`, fee);
-  return { ...receiptOf("0x1", { l1Fee: L1, ...(o.gasUsed === undefined ? {} : { gasUsed: o.gasUsed }) }), logs: [o.log ? o.log(log, fee) : log] };
+  return { ...receiptOf("0x1", { l1Fee: o.l1Fee ?? L1, ...(o.gasUsed === undefined ? {} : { gasUsed: o.gasUsed }) }), logs: [o.log ? o.log(log, fee) : log] };
 };
 /** A sale from a fresh W of `label`, its authorization at W's pending nonce (the mock answers 7 for any but W). */
 const freshBody = (label: string, o: { sell?: Partial<Sell>; fee?: bigint } = {}) => {
@@ -1921,11 +1921,13 @@ test("the sender's whole budget holds every sale (H1): 20 clients, each with one
 });
 
 test("a paid landing is one in the window that paid its cost: one older than the window, or one whose cost passed its fee, never frees a caller of the token's cap", async () => {
-  for (const [name, later, gasUsed] of [["older than the window", EVM_SELL_UNPAID_WINDOW_MS + 1_000, 1_000_000n], ["its cost over its fee", 0, 2_000_000n]] as const) {
+  // its cost over its fee within what a sale can cost (evmSaleUnpaid holds gasUsed to the gas sent and l1Fee to the
+  // worst held): an L1 fee of twice the estimate and 1 wei, 1,000,000 x (2 x base + tip) + 10^13 + 1 over the 3 x 10^13 fee
+  for (const [name, later, l1Fee] of [["older than the window", EVM_SELL_UNPAID_WINDOW_MS + 1_000, L1], ["its cost over its fee", 0, 2n * L1 + 1n]] as const) {
     let clock = NOW;
     let landing = true;
     const h: Calls = [];
-    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(h, { receipt: (x) => (landing ? provenOf(h, { gasUsed })(x) : receiptOf("0x0", { l1Fee: L1 })) }), rpc([], { receipt: (x) => (landing ? provenOf(h, { gasUsed })(x) : null) })], () => clock);
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(h, { receipt: (x) => (landing ? provenOf(h, { l1Fee })(x) : receiptOf("0x0", { l1Fee: L1 })) }), rpc([], { receipt: (x) => (landing ? provenOf(h, { l1Fee })(x) : null) })], () => clock);
     assert.equal((await s.sell(freshBody("W-pl-0", { sell: { token: "0x00000000000000000000000000000000000d0d00" } }), "192.0.2.5")).status, 200);
     await settle(() => false, 4);
     landing = false;
@@ -2085,11 +2087,11 @@ test("a sale with no proof marks nothing paid: its client and W stay held by a s
   }
 });
 
-test("the cost is the higher of the two receipts': a proven sale either provider reads at twice the gas is over its fee and marks nothing paid", async () => {
+test("the cost is the higher of the two receipts': a proven sale either provider reads at twice the L1 fee is over its fee and marks nothing paid", async () => {
   for (const side of ["a", "b"] as const) {
     let landing = true;
     const x: Calls = [];
-    const at = (high: boolean) => (y: string) => (landing ? provenOf(x, high ? { gasUsed: 2_000_000n } : {})(y) : null);
+    const at = (high: boolean) => (y: string) => (landing ? provenOf(x, high ? { l1Fee: 2n * L1 + 1n } : {})(y) : null);
     const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(x, { receipt: (y) => at(side === "a")(y) ?? receiptOf("0x0", { l1Fee: L1 }) }), rpc([], { receipt: at(side === "b") })], () => NOW);
     assert.equal((await s.sell(freshBody(`W-hi-${side}-0`, { sell: { token: "0x00000000000000000000000000000000000e0f00" } }), "192.0.2.45")).status, 200);
     await settle(() => false, 4);
@@ -2100,7 +2102,29 @@ test("the cost is the higher of the two receipts': a proven sale either provider
       await tick();
     }
     const again = await s.sell(freshBody(`W-hi-${side}-1`, { sell: { token: T } }), "192.0.2.45");
-    assert.deepEqual([again.status, code(again)], [429, "rate_limited"], `twice the gas on ${side}: ${JSON.stringify(again.body)}`);
+    assert.deepEqual([again.status, code(again)], [429, "rate_limited"], `twice the L1 fee on ${side}: ${JSON.stringify(again.body)}`);
+  }
+});
+
+// card helper-sender-fee-proof, review L3: the higher of two receipts counts, so one provider's hostile receipt set the
+// cost: a gasUsed, a price or an L1 fee of 10^30 charged a sale 10^60 and stopped every sell for the window
+test("a hostile receipt's cost is held to what the sale can cost: gasUsed to EVM_POOL_SELL_GAS, effectiveGasPrice to the sent maxFeePerGas, l1Fee to the worst held", () => {
+  const unpaid = (evmModule as unknown as { evmSaleUnpaid: (a: unknown, b: unknown, s: unknown, worst: bigint) => { proven: boolean; paid: boolean; unpaid: bigint } }).evmSaleUnpaid;
+  const w = "0x00000000000000000000000000000000000a11ce";
+  const maxFeePerGas = 2n * BASE + TIP;
+  const worst = EVM_POOL_SELL_GAS * maxFeePerGas + L1;
+  const sale = { collector: COLLECTOR, w, fee: FEE, maxFeePerGas };
+  const good = { ...receiptOf("0x1", { l1Fee: L1 }), logs: [paidLog(w, FEE)] };
+  assert.deepEqual(unpaid(good, good, sale, worst), { proven: true, paid: true, unpaid: 0n }, "an honest pair");
+  const huge = 10n ** 30n;
+  for (const [name, o] of [["gasUsed", { gasUsed: huge, l1Fee: L1 }], ["effectiveGasPrice", { price: huge, l1Fee: L1 }], ["l1Fee", { l1Fee: huge }], ["all three", { gasUsed: huge, price: huge, l1Fee: huge }]] as const) {
+    const bad = { ...receiptOf("0x1", o), logs: [paidLog(w, FEE)] };
+    for (const [ra, rb] of [[bad, good], [good, bad]]) {
+      const r = unpaid(ra, rb, sale, worst);
+      const cost = EVM_POOL_SELL_GAS * maxFeePerGas + ("l1Fee" in o && o.l1Fee === huge ? worst : L1);
+      assert.deepEqual(r, { proven: true, paid: cost <= FEE, unpaid: cost > FEE ? cost - FEE : 0n }, `${name}: ${JSON.stringify(r, (_, v) => (typeof v === "bigint" ? v.toString() : v))}`);
+      assert.ok(r.unpaid <= 2n * worst, `${name}: at most twice the worst`);
+    }
   }
 });
 
@@ -2118,4 +2142,7 @@ test("no fee collector set: every sell is 503 not_configured with nothing read; 
   }
   assert.equal(calls.length, 0);
   for (const c of [POOL, evmAddressOf(KEY), SENDER, "0x1234"]) assert.throws(() => evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: c }, [rpc([]), rpc([])], () => NOW), /fee collector/, c);
+  // review L2: the collector is never the release's fee recipient (EvmFeeAnswer: "never the withdraw's fee_recipient"),
+  // in either case of hex
+  for (const c of [FEE_TO, FEE_TO.toUpperCase().replace("0X", "0x")]) assert.throws(() => evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: c }, [rpc([]), rpc([])], () => NOW), /fee collector must be an address, not the pool's, a sender's or the fee recipient's/, c);
 });

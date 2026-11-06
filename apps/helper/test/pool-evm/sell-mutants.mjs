@@ -325,7 +325,7 @@ export const MUTANTS = [
   [EVM, "        if (seen[0] !== null && seen[1] !== null) return landed(seen[0], seen[1]);", "        return landed(seen[0] ?? seen[1]!, seen[1] ?? seen[0]!);", T, "one provider's receipt never clears a charge"],
   [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = ca;", T, "the cost is the higher of the two receipts'"],
   [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = cb;", T, "the cost is the higher of the two receipts'"],
-  [EVM, "    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee }, held.wei);", "    const r = evmSaleUnpaid(ra, rb, { collector: s.pool, w, fee: s.fee }, held.wei);", T, "the same sale proven on both providers holds nothing"],
+  [EVM, "    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee, maxFeePerGas }, held.wei);", "    const r = evmSaleUnpaid(ra, rb, { collector: s.pool, w, fee: s.fee, maxFeePerGas }, held.wei);", T, "the same sale proven on both providers holds nothing"],
   [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (evmRpcHex(address) !== collector ||", T, "each part of the Paid log is checked"],
   [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (removed === true ||", T, "each part of the Paid log is checked"],
   [EVM, " || !Array.isArray(topics) || topics.length !== 2) return false;", " || !Array.isArray(topics)) return false;", T, "each part of the Paid log is checked"],

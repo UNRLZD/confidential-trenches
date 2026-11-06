@@ -416,13 +416,17 @@ export function evmSalePaid(r: unknown, collector: string, w: string, fee: bigin
  * helper-sender-fee-proof): proven only when both read status 1 and each carries the fee collector's Paid log of the
  * sale (evmSalePaid: the call to W runs whatever code W holds then, so a status 1 alone proves nothing). A proven sale's
  * unpaid is its cost less the fee, at least 0, and it paid when its cost is at most the fee; any other pair is charged its
- * whole cost and paid nothing. The cost is the higher of the two receipts' gasUsed x effectiveGasPrice + l1Fee; a
- * receipt whose cost cannot be read counts `worst`.
+ * whole cost and paid nothing. The cost is the higher of the two receipts' gasUsed x effectiveGasPrice + l1Fee, each part
+ * held to what the sale can cost (one provider's answer is hostile, and the higher one counts): gasUsed at most the gas
+ * the sale is sent with (EVM_POOL_SELL_GAS), effectiveGasPrice at most its maxFeePerGas, and l1Fee at most `worst`, the
+ * whole worst cost held at its send (so a lying provider charges one sale at most twice its worst, never an hour of
+ * sells); a receipt whose cost cannot be read counts `worst`.
  */
-export function evmSaleUnpaid(ra: Record<string, unknown>, rb: Record<string, unknown>, sale: { collector: string; w: string; fee: bigint }, worst: bigint): { proven: boolean; paid: boolean; unpaid: bigint } {
+export function evmSaleUnpaid(ra: Record<string, unknown>, rb: Record<string, unknown>, sale: { collector: string; w: string; fee: bigint; maxFeePerGas: bigint }, worst: bigint): { proven: boolean; paid: boolean; unpaid: bigint } {
+  const most = (v: bigint, cap: bigint) => (v < cap ? v : cap);
   const costOf = (r: Record<string, unknown>): bigint => {
     try {
-      return qty(r.gasUsed) * qty(r.effectiveGasPrice) + (r.l1Fee === undefined || r.l1Fee === null ? 0n : qty(r.l1Fee));
+      return most(qty(r.gasUsed), EVM_POOL_SELL_GAS) * most(qty(r.effectiveGasPrice), sale.maxFeePerGas) + (r.l1Fee === undefined || r.l1Fee === null ? 0n : most(qty(r.l1Fee), worst));
     } catch {
       return worst;
     }
@@ -578,7 +582,7 @@ export function evmPoolSender(
   if (sellSender === sender) throw new Error("the sell key must not be the withdraw sender's key");
   // the fee collector a Sell must pay (card helper-sender-fee-proof): none set, every sell is refused
   const feeCollector = cfg.feeCollector === undefined ? undefined : cfg.feeCollector.toLowerCase();
-  if (feeCollector !== undefined && (!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)) throw new Error("the fee collector must be an address, not the pool's or a sender's");
+  if (feeCollector !== undefined && (!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender || feeCollector === feeRecipient)) throw new Error("the fee collector must be an address, not the pool's, a sender's or the fee recipient's");
   const [a, b] = providers;
   let chainId: Promise<bigint> | null = null;
   // one lane per key: its queue (each send waits for the one before it), its next nonce, and each of its own sends not
@@ -1239,8 +1243,8 @@ export function evmPoolSender(
   /** A sale's two receipts, one per provider, turn its held worst cost into what went unpaid (evmSaleUnpaid), and a
    *  sale proven paid marks its W and client; any other marks nothing. A sale whose receipt both providers never return
    *  keeps its worst cost held for the window. */
-  const landedSale = (held: Charge, s: EvmSell, w: string, keys: readonly string[]) => (ra: Record<string, unknown>, rb: Record<string, unknown>): void => {
-    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee }, held.wei);
+  const landedSale = (held: Charge, s: EvmSell, w: string, maxFeePerGas: bigint, keys: readonly string[]) => (ra: Record<string, unknown>, rb: Record<string, unknown>): void => {
+    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee, maxFeePerGas }, held.wei);
     held.wei = r.unpaid;
     if (!r.paid) return;
     for (const k of keys) {
@@ -1318,7 +1322,7 @@ export function evmPoolSender(
     if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
     const until = Number(s.deadline) * 1000 + EVM_POOL_SEND_MARGIN_MS;
     sentAt(sellLane, nonce, until, maxFeePerGas, tip, hash, false);
-    watch(sellLane, nonce, hash, until, landedSale(charge(keys, worst), s, w, keys));
+    watch(sellLane, nonce, hash, until, landedSale(charge(keys, worst), s, w, maxFeePerGas, keys));
     return { status: 200, body: { hash } };
   }
   return {
@@ -1464,6 +1468,11 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     // since a provider's URL may carry its key in the path or the query (Alchemy's /v2/<key>, Infura's /v3/<key>)
     const s: EvmPoolSender = { ...s0, ready: (sleep) => s0.ready(sleep).catch((e: Error) => Promise.reject(new Error(`${names[4]}: ${e.message.replace(/^rpc ([12]):/, (_, k: string) => `${new URL(urls[Number(k) - 1]!).host}:`)}`))) };
     if (pin !== undefined && s.sellSender !== null && pin.toLowerCase() !== s.sellSender) throw new Error(`${sellName} is not the key of the kit's pinned sell sender for ${network} (${pin})`);
+    // the collector is the kit's pin or unset (card helper-sender-fee-proof, review M1): a sale is counted paid by the
+    // Paid log of the collector set here, so any other address would let every sale read as paid while the sell sender
+    // pays its gas; a chain whose venue pins none (the mainnets until their collectors deploy) takes no collector
+    const collectorPin = v !== undefined && Object.hasOwn(v, "feeCollector") ? v.feeCollector : undefined;
+    if (collector !== "" && (collectorPin === undefined || collector.toLowerCase() !== collectorPin.toLowerCase())) throw new Error(`${collectorName} is not the kit's pinned fee collector for ${network} (${collectorPin ?? "none pinned"})`);
     out.set(s.pool, s);
   }
   return out;

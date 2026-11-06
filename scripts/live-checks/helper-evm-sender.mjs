@@ -98,6 +98,28 @@ export function evmPoolRecords(dir = HERE) {
   return out;
 }
 
+/** card evm-fee-collector's deploy record of a network's FeeCollector (its address and sink, read back on two RPCs by
+ *  that card's check). */
+export const collectorRecord = (network, dir = HERE) => path.join(dir, `evm-fee-collector.${network}.json`);
+/**
+ * Each testnet's fee collector, as the kit pins it (evmPoolVenues() feeCollector, null where it pins none) and as
+ * evm-fee-collector.<network>.json records it (its FeeCollector's address and sink, null where there is no record):
+ * { network: { pin, recorded, sink } }, every address in lower case. Card helper-sender-fee-proof (review M1): a sale is
+ * counted paid by the Paid log of the collector the helper is set with, so the checks hold the fee answer's collector
+ * to the pin, and the pin to the deployed collector's record.
+ */
+export function feeCollectors({ networks = NETWORKS, venues = evmPoolVenues(), dir = HERE } = {}) {
+  const lower = (v) => (typeof v === "string" ? v.toLowerCase() : null);
+  return Object.fromEntries(networks.map((n) => {
+    const v = Object.hasOwn(venues, n) ? venues[n] : undefined;
+    const pin = v !== undefined && Object.hasOwn(v, "feeCollector") ? lower(v.feeCollector) : null;
+    const file = collectorRecord(n, dir);
+    const rec = existsSync(file) ? json(readFileSync(file, "utf8")) : undefined;
+    const ok = rec?.chain === n;
+    return [n, { pin, recorded: ok ? lower(rec.contracts?.FeeCollector?.address) : null, sink: ok ? lower(rec.contracts?.FeeCollector?.sink) : null }];
+  }));
+}
+
 /** The check on one recorded run: { base, pools: [{ network, pool, reads: [{ asked, status, headers, body }] }] }. */
 export function judge(run, { records = evmPoolRecords(), venues = evmPoolVenues() } = {}) {
   const lines = [];
@@ -122,7 +144,10 @@ export function judge(run, { records = evmPoolRecords(), venues = evmPoolVenues(
     const isAddress = typeof sender === "string" && ADDRESS.test(sender);
     say((sender === null || isAddress) && (pin === undefined || (isAddress && pin.toLowerCase() === sender)), `[${n} fee] ${SENDER_FIELD} ${show(sender)}, ${pin === undefined ? "the kit pins none for this network" : `the kit's pin ${pin}`}`);
     say(typeof b?.fee_recipient === "string" && ADDRESS.test(b.fee_recipient), `[${n} fee] fee recipient ${show(b?.fee_recipient)}`);
-    say(typeof b?.fee_collector === "string" && ADDRESS.test(b.fee_collector) && b.fee_collector !== b.pool && b.fee_collector !== sender, `[${n} fee] fee collector ${show(b?.fee_collector)}, not the pool or the sell sender`);
+    // the fee collector: the kit's pin for the network (card helper-sender-fee-proof, review M1), which the helper is
+    // held to at its start; any other address would let a sale read as paid with no fee
+    const cpin = v !== undefined && Object.hasOwn(v, "feeCollector") ? v.feeCollector.toLowerCase() : undefined;
+    say(typeof b?.fee_collector === "string" && ADDRESS.test(b.fee_collector) && b.fee_collector !== b.pool && b.fee_collector !== sender && cpin !== undefined && b.fee_collector === cpin, `[${n} fee] fee collector ${show(b?.fee_collector)}, not the pool or the sell sender, ${cpin === undefined ? "but the kit pins none for this network" : `the kit's pin ${cpin}`}`);
     say(b?.epoch_ms === 60_000 && Number.isSafeInteger(b?.epoch_start_ms) && b.epoch_start_ms > 0 && b.epoch_start_ms % 60_000 === 0, `[${n} fee] epoch ${show(b?.epoch_ms)} ms from ${show(b?.epoch_start_ms)}`);
     say(typeof b?.block === "string" && QUANTITY.test(b.block) && typeof b?.fee === "string" && DEC.test(b.fee) && b.fee !== "0" && b?.step === "10000000000000", `[${n} fee] block ${show(b?.block)}, fee ${show(b?.fee)} wei on its step ${show(b?.step)}`);
     for (const [asked, status, code] of PLANTS) {
