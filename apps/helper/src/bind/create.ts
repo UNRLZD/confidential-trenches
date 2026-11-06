@@ -24,8 +24,10 @@
 // the id existing (the id's creation record keeps it). So an id whose holder deletes it and keeps the token in it is
 // never created again by the same swap: every creation costs a real completed 1Click swap to that id, read from 1Click
 // by us. U, R and V alike: each is a 1Click quote's recipient on the token (wallet.md §2.4 step 2; W:694-696 for R,
-// W:659 for V). Known limit: anyone may poll another user's old SUCCESS through the proxy; at most it creates that
-// user's own id once for that delivery, the creation we owe them anyway.
+// W:659 for V). Known limits: anyone may poll another user's old SUCCESS through the proxy; at most it creates that
+// user's own id once for that delivery, the creation we owe them anyway. And a pending Transfer whose outcome cannot be
+// read by its hash keeps the id held (in_flight while it reads absent, exists while it exists), failing closed: a later
+// delivery to that id waits until the outcome reads.
 //
 // Why the gate: a Transfer before delivery is the cheapest grief, about 0.007-0.01 N of ours per id against 0.00125 N
 // of the attacker's (V@1a7a23f:759-762, M280). With it, every id we create holds at least MIN_DEPOSIT, and we spend at
@@ -273,7 +275,12 @@ async function createOnce(id: string, deps: CreateDeps, key?: string): Promise<C
   if (code !== null) return pace(slot, { code }, now());
 
   // The floor: the Transfer and, after it, one deposit's worst (send.ts RELAYER_FLOOR_YOCTO), so a created id is carried.
-  if ((await relayer.balance()) < RELAYER_FLOOR_YOCTO + CREATE_YOCTO) return pace(slot, { code: "relayer_low" }, now());
+  // A balance read that fails is unread, paced like the gate's.
+  try {
+    if ((await relayer.balance()) < RELAYER_FLOOR_YOCTO + CREATE_YOCTO) return pace(slot, { code: "relayer_low" }, now());
+  } catch (e) {
+    return pace(slot, { code: "unread", why: why(e) }, now());
+  }
 
   // 3-4. The gate again in the queue, right before the signing, then the one Transfer, its record (with its delivery)
   // written once before it goes.
@@ -281,9 +288,9 @@ async function createOnce(id: string, deps: CreateDeps, key?: string): Promise<C
   const out = await relayer.send<CreateCode>(
     { kind: "transfer", receiver: id, amount: CREATE_YOCTO },
     async () => {
-      // the floor again, right before the signing: the gas account may have paid for other sends since
-      if ((await relayer.balance()) < RELAYER_FLOOR_YOCTO + CREATE_YOCTO) return "relayer_low";
       try {
+        // the floor again, right before the signing: the gas account may have paid for other sends since
+        if ((await relayer.balance()) < RELAYER_FLOOR_YOCTO + CREATE_YOCTO) return "relayer_low";
         return gate(await deps.delivery(id), landedAt);
       } catch (e) {
         unread = why(e);

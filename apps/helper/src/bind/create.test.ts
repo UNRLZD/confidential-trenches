@@ -622,3 +622,40 @@ test("r2 fold 1: the one pending Transfer's delivery may take the list past USED
   assert.equal((await onStatusAnswer(key(0), nets(s.deps)))?.code, "delivery_used");
   assert.equal(s.relayer.sent.length, 2);
 });
+
+// ---- The review's third round ----
+
+test("r3: a balance read that throws, outside the queue or in it, answers unread, sends nothing, and is read again only after REREAD_MS", async () => {
+  for (const throwAt of [0, 1]) {
+    const s = setup();
+    let calls = 0;
+    s.relayer.balance = async () => {
+      if (calls++ === throwAt) throw new Error("view_account: fetch failed");
+      return 10n ** 24n;
+    };
+    const body = answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` });
+    assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "unread", `throw at read ${throwAt}`);
+    assert.equal(s.relayer.sent.length, 0);
+    const reads = s.w.reads;
+    assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "unread", "paced: its answer kept");
+    assert.deepEqual([s.w.reads, calls], [reads, throwAt + 1], "nothing read again inside REREAD_MS");
+    s.clock.t += REREAD_MS;
+    assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "created");
+    assert.equal(s.relayer.sent.length, 1);
+  }
+});
+
+test("r3: another delivery's Transfer read landed in the read-back goes on to the gate: the id exists, so that delivery answers exists and is spent; the landed one's own delivery is spent too", async () => {
+  let kind: TxOutcome["kind"] = "unknown";
+  const s = setup({}, { outcome: () => kind });
+  const a1 = answer({ id: s.id, token: TOKEN, address: `a1-${s.id}` });
+  assert.equal((await onStatusAnswer(a1, nets(s.deps)))?.code, "in_flight");
+  s.w.account = [{ keys: ["ed25519:own"] }, { keys: ["ed25519:own"] }];
+  s.w.height += 3;
+  kind = "final";
+  const a2 = await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `a2-${s.id}` }), nets(s.deps));
+  assert.equal(a2?.code, "exists", "a1's Transfer is not a2's creation");
+  assert.deepEqual(s.store().creation(s.id)!.used, [deliveryKey(`a1-${s.id}`, ""), deliveryKey(`a2-${s.id}`, "")]);
+  assert.equal((await onStatusAnswer(a1, nets(s.deps)))?.code, "delivery_used");
+  assert.equal(s.relayer.sent.length, 1);
+});
