@@ -56,7 +56,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { addressOf, returnAddress, signTx } from "./deploy.mjs";
 import { MAINNET_IDS, deploymentFile, hex, keccak, rpc, selector, word } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { authJson, balanceOfData, buyData, depositData, proofArg, revertName, sellData, sign65, signTx7702, withdrawData, withdrawDigest, withdrawLeft } from "./testnet-run-lib.mjs";
+import { authJson, balanceOfData, buyData, depositData, proofArg, revertName, sellData, sign65, signTx7702, stopper, withdrawData, withdrawDigest, withdrawLeft } from "./testnet-run-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(HERE, "../../..");
@@ -523,9 +523,11 @@ export async function main(args, io = {}) {
   };
 
   let stopped = null;
+  const stop = stopper();
   const onSignal = (s) => {
     if (stopped) return console.error(`run: ${s} again: the sweep finishes first`);
     stopped = s;
+    stop.fire(s);
     console.error(`run: ${s}: stopping at the next step, then withdrawing and sweeping`);
   };
   const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
@@ -545,7 +547,9 @@ export async function main(args, io = {}) {
     while ((go(), BigInt(await call("eth_getBalance", [relayer, "latest"]))) < need) await sleep(5000);
     funded = true;
     console.log("run: funded");
-    await warm;
+    // a stop during the syncs' walk goes straight to the sweep: the walk is never awaited past it
+    await stop.until(warm);
+    go();
     console.log(`run: both syncs hold the pool from block ${fromBlock} (${Math.round((Date.now() - t0) / 1000)} s after the start)`);
 
     // 3. the deposit: the deposit note (deposit, scope, 0)

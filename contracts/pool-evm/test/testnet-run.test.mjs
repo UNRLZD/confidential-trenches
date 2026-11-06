@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import { test } from "node:test";
 import { bytes, hex, keccak, selector } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
 import { intBytes, rlp } from "../script/deploy.mjs";
-import { WITHDRAW_TRIES, authJson, buyData, depositData, revertName, sellData, signTx7702, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest, withdrawLeft } from "../script/testnet-run-lib.mjs";
+import { WITHDRAW_TRIES, authJson, buyData, depositData, revertName, sellData, signTx7702, stopper, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest, withdrawLeft } from "../script/testnet-run-lib.mjs";
 
 const V = JSON.parse(readFileSync(new URL("./fixtures/testnet-run-calldata.json", import.meta.url), "utf8"));
 const { secp256k1 } = await import(createRequire(new URL("../../../packages/kit/package.json", import.meta.url)).resolve("@noble/curves/secp256k1.js"));
@@ -247,4 +247,22 @@ test("the run's restore reads each W's Transfers on the wallet's own EVM_TRANSFE
     assert.deepEqual(run.NETS[chain].walletRpcs.map(host).filter((h) => pool.includes(h)), shared[chain], chain);
     assert.ok(run.NETS[chain].walletRpcs.filter((u) => !pool.includes(host(u))).length >= 2, `${chain}: two W providers left`);
   }
+});
+
+// a SIGTERM during the syncs' walk (Base Sepolia, 6 Nov 18:46Z: sepolia.base.org's 200-block log cap made it hours long)
+// ends the wait at once, so the run goes to its sweep, and the run awaits the walk only through the stop
+test("a stop ends a wait that never ends at once, and a wait that ends first gives its answer", async () => {
+  const s = stopper();
+  const never = new Promise(() => {});
+  const t = s.until(never);
+  setTimeout(() => s.fire("SIGTERM"), 10);
+  assert.equal(await t, s.STOPPED);
+  assert.equal(await s.until(never), s.STOPPED, "a wait begun after the stop ends at once");
+  const s2 = stopper();
+  assert.equal(await s2.until(Promise.resolve(7)), 7);
+  await assert.rejects(s2.until(Promise.reject(new Error("walk failed"))), /walk failed/);
+  const src = readFileSync(new URL("../script/testnet-run.mjs", import.meta.url), "utf8");
+  assert.match(src, /await stop\.until\(warm\);\n\s*go\(\);/, "the run awaits the syncs only through the stop, then checks it");
+  assert.doesNotMatch(src, /await warm\b/, "no bare wait on the syncs");
+  assert.match(src, /stopped = s;\n\s*stop\.fire\(s\);/, "the signal fires the stop");
 });
