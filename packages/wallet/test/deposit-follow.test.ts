@@ -748,7 +748,12 @@ test("helper-create-u: after SUCCESS, while U reads not_created, the status is r
   const bind: typeof bindDeposit = async (s, a, dps) => {
     binds.push(t.ticks());
     if (++calls <= 3) await dps.onWait?.("not_created"); // U not created yet: the phase ends, the next round binds again
-    return spy(s, a, dps);
+    const out = await spy(s, a, dps);
+    // U exists and the note is bound; RPC b's pages hold the row only 4 rounds later, so the op stays open meanwhile
+    t.chain.b.rows.pop();
+    let later = 0;
+    t.onTick.fn = () => ++later === 4 && t.chain.addRow(t.note.precommitment, { value: CREDIT, side: "b" });
+    return out;
   };
   const fetchFn = (async (url: string, init?: RequestInit) => (reads.push(t.ticks()), t.oc.fetchFn(url, init))) as typeof fetch;
   const out = await followDeposit(t.args, { ...t.deps, bind, fetchFn });
@@ -756,4 +761,5 @@ test("helper-create-u: after SUCCESS, while U reads not_created, the status is r
   assert.equal(calls, 4);
   assert.deepEqual(reads, [0, 1, 2], "SUCCESS read at round 0, read again in rounds 1 and 2 while U was not created, none once it exists");
   assert.deepEqual(binds, [0, 1, 2, 3]);
+  assert.ok(t.ticks() >= 7, "rounds ran after U existed, with no status read");
 });
