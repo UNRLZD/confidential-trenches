@@ -201,7 +201,7 @@ export const SOL_POOLS: Readonly<Partial<Record<"devnet" | "mainnet", SolanaPool
  *  (contracts/pool-solana/scripts/mainnet-deploy.sh) writes once both RPCs read them back; null until then.
  *  test/pool-sol-mainnet-pin.test.ts fails while the record is missing or this differs from it. SOL_POOLS.mainnet also
  *  needs the relayer's mainnet fee payer, which every proof binds, so it stays unset until that is pinned beside this. */
-export const SOL_MAINNET_DEPLOY: { readonly program: string; readonly table: string } | null = null;
+export const SOL_MAINNET_DEPLOY: { readonly program: string; readonly table: string } | null = Object.freeze({ program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", table: "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ" });
 
 export type SolanaPoolArgs = {
   /** The cluster's pin (SOL_POOLS[cluster]): the program id and the fee payer, never the helper's word. */
