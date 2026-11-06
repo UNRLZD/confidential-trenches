@@ -17,12 +17,25 @@
 //!    and u (`OnlyOriginalDepositor`: its label names no deposit); the private withdraw spends it to alice;
 //! 5. a note on a deposit's label that was never inserted is refused (`InvalidCommitment`).
 //!
+//! And card vault-refund-precommit-reserve's pin, `vt_s09_twins` (from the same six deposits): the vault holds a
+//! precommitment twice by design (deposit.rs:109-110 refuses a repeated P among deposits only; ragequit and settle
+//! write no precommitments), and no twin can be ragequit by anyone:
+//! a. rows 2 and 3 only: a stranger deposits on u's refund precommitment R (here before any spend names it; VT-S07
+//!    in withdraw_spend.rs holds the pending-spend case): it lands. u's ragequit of that note fails row 2 on the
+//!    stranger's label (`OnlyOriginalDepositor`); the stranger's fails row 3 (`InvalidProof`: the proof needs R's
+//!    nullifier and secret, which only u holds).
+//! b. q ragequits note 6 naming u's pending deposit precommitment P, and its payout bounces: the settle adds a gift
+//!    leaf on P; u's deposit on P still lands, both leaves hash from P, and the gift's ragequit is refused for u
+//!    and q (its label names no deposit).
+//! A vault that refused a deposit on a precommitment a spend names, let a ragequit pass on a label its caller did not
+//! deposit, or wrote precommitments in ragequit or settle fails here.
+//!
 //! Prints every receipt of the landed ragequits with its gas, and the gas table.
 #![cfg(feature = "sandbox")]
 
 mod harness;
 
-use harness::{Harness, Outcome, Receipt, TokenKind, R, YOCTO_PER_BYTE};
+use harness::{commitment_on, Harness, Outcome, Receipt, TokenKind, R, YOCTO_PER_BYTE};
 use near_sdk::serde_json::{self, json, Value};
 use near_workspaces::types::{Gas, NearToken};
 use near_workspaces::Account;
@@ -262,6 +275,90 @@ async fn vt_s09_mock() -> R<()> {
 #[tokio::test]
 async fn vt_s09_usdc() -> R<()> {
     vt_s09(TokenKind::Usdc).await
+}
+
+/// `by` prepays `p` and deposits `value` on it, naming itself as depositor; the deposit lands. Returns its deposits
+/// row.
+async fn deposit_on(h: &Harness, by: &Account, p: &str, value: u128) -> R<Value> {
+    let prepay = NearToken::from_yoctonear(PREPAY_BYTES * YOCTO_PER_BYTE);
+    let _ = h.call(by, &h.vault, "storage_prepay", json!({"precommitment": p}), prepay, Gas::from_tgas(30)).await?;
+    h.mint(by.id(), value).await?;
+    let msg = format!(r#"{{"precommitment":"{p}","depositor":"{}"}}"#, by.id());
+    let o = h
+        .call_outcome(by, &h.token, "ft_transfer_call", json!({"receiver_id": h.vault, "amount": value.to_string(), "msg": msg}), NearToken::from_yoctonear(1), Gas::from_tgas(180))
+        .await?;
+    let r = o.calls_exactly(&h.vault, "ft_on_transfer", 1)?[0];
+    assert!(r.ok(), "the deposit on {p} by {}: {}", by.id(), r.line());
+    let rows = h.view(&h.vault, "deposits", json!({"from": 0, "limit": 100})).await?;
+    Ok(rows.as_array().ok_or("deposits: not a list")?.iter().rev().find(|d| d["precommitment"] == p).ok_or("no deposits row on p")?.clone())
+}
+
+async fn leaf_at(h: &Harness, i: u64) -> R<String> {
+    Ok(h.view(&h.vault, "leaves", json!({"from": i, "limit": 1})).await?[0].as_str().ok_or("no leaf")?.to_string())
+}
+
+/// `name`'s ragequit arguments with the signals of another note: commitment, value and label.
+fn rq_as(name: &str, commitment: &str, value: &str, label: &str) -> Value {
+    let mut a = rq_args(name);
+    a["public_signals"][0] = json!(commitment);
+    a["public_signals"][2] = json!(value);
+    a["public_signals"][3] = json!(label);
+    a
+}
+
+async fn vt_s09_twins(kind: TokenKind) -> R<()> {
+    let w = deposited(kind).await?;
+    let h = &w.h;
+
+    // a. rows 2 and 3: the stranger's deposit on u's refund precommitment R (no spend names R yet; VT-S07 holds the
+    // pending-spend case) lands, and nobody can ragequit it
+    let r_u = rq_args("deposit")["refund_precommitment"].as_str().ok_or("refund_precommitment")?.to_string();
+    let theirs = deposit_on(h, &w.stranger, &r_u, 1_000_000).await?;
+    let (label_s, at_s) = (theirs["label"].as_str().ok_or("label")?.to_string(), theirs["leaf_index"].as_u64().ok_or("leaf_index")?);
+    let twin = commitment_on("1000000", &label_s, &r_u);
+    assert_eq!(leaf_at(h, at_s).await?, twin, "the stranger's note does not hash from R");
+    println!("a: the stranger's deposit on u's refund precommitment landed at leaf {at_s}");
+    refused(h, &w.u, rq_as("deposit", &twin, "1000000", &label_s), "OnlyOriginalDepositor").await?;
+    refused(h, &w.stranger, rq_as("deposit", &twin, "1000000", &label_s), "InvalidProof").await?;
+
+    // b. q's ragequit names u's pending deposit precommitment P; it bounces and settles into a gift leaf on P
+    let p = "123456789";
+    let prepay = NearToken::from_yoctonear(PREPAY_BYTES * YOCTO_PER_BYTE);
+    let _ = h.call(&w.u, &h.vault, "storage_prepay", json!({"precommitment": p}), prepay, Gas::from_tgas(30)).await?;
+    let mut a = rq_args("unregistered");
+    a["refund_precommitment"] = json!(p);
+    let o = ragequit(h, &w.q, a, ONE_NEAR).await?;
+    landed(h, &o, "unregistered", &w.q, false)?;
+    let n = rq_nullifier("unregistered");
+    let o = h.call_outcome(&w.stranger, &h.vault, "settle", json!({"nullifier_hash": n}), NearToken::from_yoctonear(0), Gas::from_tgas(100)).await?;
+    o.expect_all_ok("settle q's ragequit")?;
+    let r = spend_row(h, &n).await?;
+    assert_eq!((r["status"].as_str(), r["refund_precommitment"].as_str(), r["refund_value"].as_str()), (Some("settled"), Some(p), Some("4000000")), "{r}");
+    let (gift_label, gift_at) = (r["refund_label"].as_str().ok_or("refund_label")?.to_string(), r["refund_leaf_index"].as_u64().ok_or("refund_leaf_index")?);
+    let gift = commitment_on("4000000", &gift_label, p);
+    assert_eq!(leaf_at(h, gift_at).await?, gift, "the gift leaf does not hash from P");
+    // u's deposit on P still lands, at its own leaf
+    let ours = deposit_on(h, &w.u, p, 1_000_000).await?;
+    let at_u = ours["leaf_index"].as_u64().ok_or("leaf_index")?;
+    assert_ne!(at_u, gift_at);
+    assert_eq!(leaf_at(h, at_u).await?, commitment_on("1000000", ours["label"].as_str().ok_or("label")?, p), "u's leaf does not hash from P");
+    println!("b: q's ragequit on P settled into a gift leaf {gift_at}; u's deposit on P landed at leaf {at_u}");
+    for by in [&w.u, &w.q] {
+        refused(h, by, rq_as("unregistered", &gift, "4000000", &gift_label), "OnlyOriginalDepositor").await?;
+    }
+    println!("{kind:?}: no twin can be ragequit by anyone");
+    h.i1().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn vt_s09_twins_mock() -> R<()> {
+    vt_s09_twins(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn vt_s09_twins_usdc() -> R<()> {
+    vt_s09_twins(TokenKind::Usdc).await
 }
 
 /// `ragequit` and `settle` take exactly their arguments: one more top-level key is refused when near-sdk reads the
