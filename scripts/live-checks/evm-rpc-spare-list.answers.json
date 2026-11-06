@@ -1,12 +1,13 @@
 {
  "good": {
-  "recorded": "2026-11-05T20:27:22.249Z",
-  "base": "http://127.0.0.1:18787",
+  "recorded": "2026-11-06T01:03:53.656Z",
+  "base": "https://api.confidential.unrealized.trade",
   "scans": {
    "base": [
     "https://base-rpc.publicnode.com",
     "https://base.gateway.tenderly.co",
-    "https://base.api.pocket.network"
+    "https://base.api.pocket.network",
+    "https://rpc.sentio.xyz/base"
    ],
    "robinhood": [
     "https://rpc.mainnet.chain.robinhood.com",
@@ -17,6 +18,12 @@
   "preflight": {
    "https://base.api.pocket.network": {
     "status": 204,
+    "allow": "https://confidential.unrealized.trade",
+    "headers": "content-type",
+    "post": "https://confidential.unrealized.trade"
+   },
+   "https://rpc.sentio.xyz/base": {
+    "status": 200,
     "allow": "https://confidential.unrealized.trade",
     "headers": "content-type",
     "post": "https://confidential.unrealized.trade"
@@ -33,36 +40,36 @@
     "first": [
      {
       "code": "ok",
-      "ms": 9445
+      "ms": 7870
      }
     ],
     "held": [
      {
       "mode": "refused",
       "code": "ok",
-      "ms": 3237,
-      "heldAsked": 22,
+      "ms": 2826,
+      "heldAsked": 19,
       "thirdLogs": 1
      },
      {
       "mode": "refused",
       "code": "ok",
-      "ms": 1109,
+      "ms": 1883,
       "heldAsked": 4,
       "thirdLogs": 1
      },
      {
       "mode": "503",
       "code": "ok",
-      "ms": 809,
+      "ms": 2060,
       "heldAsked": 4,
       "thirdLogs": 1
      },
      {
       "mode": "503",
       "code": "ok",
-      "ms": 697,
-      "heldAsked": 4,
+      "ms": 1902,
+      "heldAsked": 11,
       "thirdLogs": 1
      }
     ]
@@ -71,40 +78,40 @@
     "first": [
      {
       "code": "rpc_error",
-      "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms",
-      "ms": 61062
+      "message": "rpc_error: provider 2 answered the multicall with an error: historical state b3c1d4f0747cd6068e2353e9f6d564f666d0a09c7e38c9d6355e7caed8dfac56 is not available",
+      "ms": 40969
      },
      {
       "code": "ok",
-      "ms": 4689
+      "ms": 29658
      }
     ],
     "held": [
      {
       "mode": "refused",
       "code": "ok",
-      "ms": 3707,
-      "heldAsked": 28,
+      "ms": 2395,
+      "heldAsked": 10,
       "thirdLogs": 4
      },
      {
       "mode": "refused",
       "code": "ok",
-      "ms": 2376,
+      "ms": 900,
       "heldAsked": 10,
       "thirdLogs": 4
      },
      {
       "mode": "503",
       "code": "ok",
-      "ms": 952,
+      "ms": 959,
       "heldAsked": 10,
       "thirdLogs": 4
      },
      {
       "mode": "503",
       "code": "ok",
-      "ms": 891,
+      "ms": 1004,
       "heldAsked": 10,
       "thirdLogs": 4
      }
@@ -117,30 +124,30 @@
      "https://mainnet.base.org",
      "https://base-rpc.publicnode.com",
      "https://base.gateway.tenderly.co",
-     "https://base.drpc.org",
+     "https://base.public.blockpi.network/v1/rpc/public",
      "https://base-pokt.nodies.app"
     ],
     "held": [
      {
       "mode": "refused",
       "status": 200,
-      "results": 246,
+      "results": 180,
       "answeredBy": "https://base.gateway.tenderly.co",
-      "heldAsked": 2
+      "heldAsked": 1
      },
      {
       "mode": "503",
       "status": 200,
-      "results": 244,
+      "results": 180,
       "answeredBy": "https://base.gateway.tenderly.co",
-      "heldAsked": 2
+      "heldAsked": 1
      },
      {
       "mode": "limit",
       "status": 200,
-      "results": 242,
+      "results": 178,
       "answeredBy": "https://base.gateway.tenderly.co",
-      "heldAsked": 2
+      "heldAsked": 1
      }
     ]
    },
@@ -157,21 +164,21 @@
      {
       "mode": "refused",
       "status": 200,
-      "results": 232,
+      "results": 107,
       "answeredBy": "https://rpc-robinhood.blockmachine.io",
       "heldAsked": 2
      },
      {
       "mode": "503",
       "status": 200,
-      "results": 230,
+      "results": 111,
       "answeredBy": "https://rpc-robinhood.blockmachine.io",
       "heldAsked": 2
      },
      {
       "mode": "limit",
       "status": 200,
-      "results": 226,
+      "results": 152,
       "answeredBy": "https://rpc-robinhood.blockmachine.io",
       "heldAsked": 2
      }
@@ -188,7 +195,7 @@
     "deployed": {
      "status": 200,
      "results": 0,
-     "commit": "6883f90d563d5d3251391615aa13705611a5e8b2"
+     "commit": "2badbf7b852276983b90c9c777fb579e324126b4"
     }
    },
    "robinhood": {
@@ -200,10 +207,11 @@
     "deployed": {
      "status": 200,
      "results": 0,
-     "commit": "6883f90d563d5d3251391615aa13705611a5e8b2"
+     "commit": "2badbf7b852276983b90c9c777fb579e324126b4"
     }
    }
-  }
+  },
+  "where": "this Mac, kit at card/evm-quote-cold-scan-fast, the deployed helper at 2e7ec335: the check's own --record"
  },
  "bad": {
   "recorded": "2026-11-05T20:09:22.175Z",

@@ -52034,9 +52034,9 @@
     "finalized",
     false
    ],
-   "error": "HTTP 429 (http_429, 1 try at a provider out for the day)",
+   "error": "HTTP 503 (http_5xx, 2 tries at base.rpc.blxrbdn.com)",
    "name": "SolanaRpcTransportError",
-   "afterMs": 26741000
+   "afterMs": null
   },
   {
    "network": "base",
@@ -58757,9 +58757,9 @@
     "finalized",
     false
    ],
-   "error": "HTTP 429 (http_429, 1 try at a provider out for the day)",
+   "error": "no answer in 21 ms (timeout, 4 tries at base.rpc.blxrbdn.com)",
    "name": "SolanaRpcTransportError",
-   "afterMs": 26741000
+   "afterMs": null
   },
   {
    "network": "base",

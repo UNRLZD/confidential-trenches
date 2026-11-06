@@ -21,6 +21,7 @@
   "wasm_bytes": 229821,
   "largest_function_body": 14026,
   "code_hash": "CXer6tYxd9w2Bgdcz1g2vGJTFoj927goSLscRCtgyEhc",
+  "non_reproducible": "built by cargo near build non-reproducible-wasm on the host (its build line), before the vault built in the pinned Docker image (card vault-reproducible-build); its wasm names no source",
   "asset": "bf-usdc-20261101t022248.testnet",
   "scope": "1535477060801825460881825272651648228733961995907927460809153251087997597629",
   "version": "blindfill-vault 0.1.0 testnet",
