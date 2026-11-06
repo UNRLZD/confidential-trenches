@@ -79,3 +79,40 @@ test("planted on the good answer: the stranger's deposit failed, or paid by U; a
   const o = 16 + Number(BigInt(restored.leaf.leafIndex) % 1024n) * 72;
   bad(await run(A.good, markAccount((_, d) => d.subarray(0, 8).toString() === "bfpage01" && d[8] === 0 && d.length >= o + 32, (d) => (d[o + 31] ^= 1))), "restored note's state page ");
 });
+
+// card signpage-pool-flow-answers: a null read names the provider's own answer (HTTP status, the null and its slot)
+/** `kinds` of the good run's reads answered null on every provider (so neither stands behind a value): "tx", "mark"
+ * (a 17-byte account), "page" ("bfpage01"). Each planted null's context slot is collected in `slots`. */
+const nulls = (kinds, slots) => (a) => {
+  if (a.method === "getTransaction" && kinds.includes("tx") && a.json?.result) return ((a.json.result = null), a.json);
+  const v = a.json?.result?.value;
+  if (a.method !== "getAccountInfo" || !v) return a.json;
+  const d = Buffer.from(v.data[0], "base64");
+  const kind = d.length === 17 ? "mark" : d.subarray(0, 8).toString() === "bfpage01" ? "page" : null;
+  if (!kinds.includes(kind)) return a.json;
+  slots.add(a.json.result.context.slot);
+  a.json.result.value = null;
+  return a.json;
+};
+const namesNull = (r, start, slots) => {
+  const got = r.lines.filter((l) => l.startsWith(`BAD  ${start}`));
+  assert.ok(got.length >= 2, r.lines.join("\n"));
+  for (const l of got) {
+    const m = slots ? l.match(/: missing \(HTTP 200, null at slot (\d+)\)$/) : l.match(/: not found \(HTTP 200, null\)$/);
+    assert.ok(m && (!slots || slots.has(Number(m[1]))), l);
+  }
+};
+
+test("card signpage-pool-flow-answers, planted on the good answer: both deposits and both notes' marks, or the pages, answered null name HTTP 200, null at slot N: FAIL", async () => {
+  const slots = new Set();
+  const r = await run(A.good, nulls(["tx", "mark"], slots));
+  assert.equal(r.ok, false);
+  namesNull(r, "the stranger's deposit ");
+  namesNull(r, "U's deposit ");
+  namesNull(r, "restored note's mark ", slots);
+  namesNull(r, "next note's mark ", slots);
+  const pageSlots = new Set();
+  const p = await run(A.good, nulls(["page"], pageSlots));
+  namesNull(p, "restored note's label page ", pageSlots);
+  namesNull(p, "next note's state page ", pageSlots);
+});

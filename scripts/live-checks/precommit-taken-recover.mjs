@@ -21,7 +21,7 @@
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MARK_TAG, PRE_MARK_LEN, DEVNET_PROVIDERS, account, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
+import { MARK_TAG, PRE_MARK_LEN, DEVNET_PROVIDERS, account, answerOf, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
 import { PIN } from "./signpage-pool-flow.mjs";
 import { vaultCommitment } from "../../packages/kit/src/index.ts";
 
@@ -73,7 +73,7 @@ export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), preco
         const t = await rpc(fetchFn, url, "getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }], sleep);
         const keys = t?.transaction?.message?.accountKeys ?? [];
         say(!!t && t.meta?.err === null && keys[0] === payer && t.transaction.message.header?.numRequiredSignatures === 1 && keys.includes(prog),
-          `${name} ${sig} is finalized with no error, signed and paid by ${payer}, calling ${prog} ${at}: ${t ? `err ${JSON.stringify(t.meta?.err)}, payer ${keys[0]}` : "not found"}`);
+          `${name} ${sig} is finalized with no error, signed and paid by ${payer}, calling ${prog} ${at}: ${t ? `err ${JSON.stringify(t.meta?.err)}, payer ${keys[0]}` : `not found (${answerOf(fetchFn, "getTransaction", sig)})`}`);
       }
       for (const [name, n, p] of [["restored", restored, pre], ["next", next, next?.precommitment]]) {
         if (!n?.leaf || typeof p !== "string") {
@@ -87,19 +87,20 @@ export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), preco
         const nonce = mv?.[1] ?? 0n;
         const label = labelOf(scope, nonce);
         say(!!mk && mk.owner === prog && !!mv && mv[0] === value && mv[2] === MARK_TAG && nonce > 0n && hex(label) === n.leaf.label,
-          `${name} note's mark ${mark.address} reads value ${mv?.[0] ?? "?"} nonce ${mv?.[1] ?? "?"} tag ${mv?.[2] ?? "?"}: the note's value ${value} and label ${at}${mk ? "" : ": missing"}`);
+          `${name} note's mark ${mark.address} reads value ${mv?.[0] ?? "?"} nonce ${mv?.[1] ?? "?"} tag ${mv?.[2] ?? "?"}: the note's value ${value} and label ${at}${mk ? "" : `: missing (${answerOf(fetchFn, "getAccountInfo", mark.address)})`}`);
         if (!mv) continue;
         const commitment = be32(vaultCommitment(value, BigInt(`0x${hex(label)}`), BigInt(`0x${p}`)));
         say(hex(commitment) === n.leaf.commitment, `${name} note's recorded commitment is Poseidon(value, label, precommitment) ${at}: ${n.leaf.commitment}`);
         for (const [tree, i, want, what] of [[1, nonce - 1n, label, "label"], [0, BigInt(n.leaf.leafIndex), commitment, "state"]]) {
           const pageNo = i / PAGE_ENTRIES;
           const slot = Number(i % PAGE_ENTRIES);
-          const a = await account(fetchFn, url, pageAddress(prog, tree, pageNo).address, sleep);
+          const page = pageAddress(prog, tree, pageNo).address;
+          const a = await account(fetchFn, url, page, sleep);
           const hdr = !!a && a.owner === prog && Buffer.from(a.data.subarray(0, 8)).toString() === "bfpage01" && a.data[8] === tree && (a.data.length - PAGE_HEADER) % PAGE_ENTRY === 0;
           const o = PAGE_HEADER + slot * PAGE_ENTRY;
           const leaf = hdr && a.data.length >= o + PAGE_ENTRY ? a.data.subarray(o, o + 32) : null;
           say(!!leaf && Buffer.from(leaf).equals(Buffer.from(want)),
-            `${name} note's ${what} page ${pageNo} entry ${slot} holds ${what === "label" ? "keccak256(scope, nonce) mod p" : "the note's commitment"} ${hex(want)} ${at}: ${leaf ? hex(leaf) : a ? "no such entry" : "missing"}`);
+            `${name} note's ${what} page ${pageNo} entry ${slot} holds ${what === "label" ? "keccak256(scope, nonce) mod p" : "the note's commitment"} ${hex(want)} ${at}: ${leaf ? hex(leaf) : a ? "no such entry" : `missing (${answerOf(fetchFn, "getAccountInfo", page)})`}`);
         }
       }
     } catch (e) {

@@ -35,6 +35,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { consoleError } from "./console-errors.mjs";
 
 const KEY = "signpage-postmessage";
@@ -152,7 +153,7 @@ window.__sign = f;
 window.__other = other;
 </script></body>`;
 
-const SEND = (signOrigin) => {
+const SEND = ({ signOrigin, hello }) => {
   const id = () => crypto.randomUUID();
   const sent = {
     state: { v: 1, id: id(), type: "state" },
@@ -165,6 +166,7 @@ const SEND = (signOrigin) => {
   };
   const w = window.__sign.contentWindow;
   window.__sentAt = performance.now();
+  w.postMessage(hello, signOrigin); // the kit's hello first, as the kit's client sends it (card kit-frame-version): an app that names none is kit-v1.4
   for (const k of ["state", "stateExtra", "unknown", "buy", "badV", "badId"]) w.postMessage(sent[k], signOrigin);
   w.postMessage(sent.state, signOrigin); // the repeat
   const o = window.__other.contentWindow;
@@ -251,7 +253,7 @@ async function run(browser, { parent, headers, signUrl, dir }) {
   const rendered = loaded
     ? await frame.evaluate(() => ({ elements: document.body ? document.body.querySelectorAll("*").length : -1, controls: [...document.querySelectorAll("button, a, input, select, textarea, form, [data-action], [onclick], [tabindex]")].map((e) => e.outerHTML.slice(0, 120)) })).catch((e) => ({ elements: -1, controls: [`unreadable: ${e.message}`] }))
     : null;
-  const sent = await page.evaluate(SEND, signOrigin);
+  const sent = await page.evaluate(SEND, { signOrigin, hello: { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION } });
   await page.waitForTimeout(SETTLE_MS);
   const messages = await page.evaluate(() => window.__log);
   const sentAt = await page.evaluate(() => window.__sentAt);
@@ -272,6 +274,7 @@ addEventListener("message", (e) => {
   const q = { v: 1, id: crypto.randomUUID(), type: "deposit.quote", origin_asset: ${JSON.stringify(SOL_USDC)}, amount: "25" };
   window.__ids = { state: s.id, quote: q.id };
   window.__asked = { origin_asset: q.origin_asset, amount: q.amount };
+  parent.postMessage(${JSON.stringify({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION })}, ${JSON.stringify(signOrigin)}); // the kit's hello first, as the kit's client sends it (card kit-frame-version): an app that names none is kit-v1.4
   parent.postMessage(s, ${JSON.stringify(signOrigin)});
   parent.postMessage(q, ${JSON.stringify(signOrigin)});
 });

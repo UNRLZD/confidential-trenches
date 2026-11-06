@@ -81,10 +81,44 @@ const LOGS_MAX = 2_000;
  * Robinhood: rpc.mainnet.chain.robinhood.com, robinhood-rpc.publicnode.com and robinhood.drpc.org each answered a block
  * read; the kit's Robinhood pins read the first and drpc (packages/kit/src/trade/evm/buy-unpinned.ts).
  */
-export const MAKER_RPCS: Readonly<Record<EvmChain, readonly [string, string, string]>> = {
-  base: ["https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com", "https://base.drpc.org"],
-  robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"],
+// Card evm-rpc-spare-list: an ordered list, never stopping at three (the first two asked at once, each next one for the
+// tokens still without two answers, padsAt and recordsAt; a code read goes down the list past a provider that does not
+// answer it, codeBlock and hadCode). The spares, read 2026-11-06 12:38Z from this Mac (an address filter's eth_getLogs of
+// 100 blocks 5,000, 50,000 and 500,000 blocks back, a state read 600 s back, eth_chainId 8453 and 4663 on each):
+// Base: base.gateway.tenderly.co (Tenderly), base.api.pocket.network (Pocket), rpc.sentio.xyz (Sentio) and
+// base.public.blockpi.network (BlockPI) answered all three, 353-2,022 ms (blastapi now refuses a getLogs over 10
+// blocks, -32600, and stays first for its old state); Robinhood: robinhood.api.pocket.network (Pocket) and
+// 4663.rpc.thirdweb.com (thirdweb) answered all three, 412-841 ms. Left out: mainnet.base.org (-32011 on every
+// getLogs), base-pokt.nodies.app and 1rpc.io (50 blocks), base.meowrpc.com (no eth_getLogs), base.llamarpc.com (525),
+// rpc-robinhood.blockmachine.io (-32002 past its newest 5,000 blocks; "missing trie node" 600 s back),
+// api.blockvectra.com (-32011 outside its history window), robinhood.rpc.blxrbdn.com (-32601 eth_getLogs), daybreak and
+// globalstake (5 s and more, a timeout at 500,000 back; no state 600 s back).
+export const MAKER_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
+  base: ["https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://rpc.sentio.xyz/base", "https://base.public.blockpi.network/v1/rpc/public"],
+  robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://4663.rpc.thirdweb.com"],
 };
+
+/** Each of `n` reads' answer that at least two of `urls` gave, every one that answered alike (undefined: none, one, or
+ *  two that differ): the first two asked at once, then each next provider in turn for the reads still with fewer than
+ *  two answers and none that differ, until none is left or the list ends (card evm-rpc-spare-list). */
+async function agreedOnList<T>(urls: readonly string[], n: number, ask: (url: string, idx: number[]) => Promise<(T | undefined)[]>): Promise<(T | undefined)[]> {
+  const got: T[][] = Array.from({ length: n }, () => []);
+  const run = async (u: string, idx: number[]) => {
+    const r = await ask(u, idx);
+    idx.forEach((i, k) => {
+      if (r[k] !== undefined) got[i]!.push(r[k]!);
+    });
+  };
+  const all = Array.from({ length: n }, (_, i) => i);
+  await Promise.all(urls.slice(0, 2).map((u) => run(u, all)));
+  const open = (i: number) => got[i]!.length < 2 && got[i]!.every((x) => x === got[i]![0]);
+  for (const u of urls.slice(2)) {
+    const left = all.filter(open);
+    if (left.length === 0) break;
+    await run(u, left);
+  }
+  return all.map((i) => (got[i]!.length >= 2 && got[i]!.every((x) => x === got[i]![0]) ? got[i]![0] : undefined));
+}
 /** Requests per JSON-RPC batch a provider takes (drpc's free plan: 3); others 10. */
 /** daybreak counts each call of a batch as one of the about 4 concurrent requests it takes (a batch of 5 at 4 posts a
  *  second refused at its 4th post with -32005 "too many concurrent requests", 2026-11-04 20:51Z, from the Mac): one call a
@@ -516,25 +550,20 @@ async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; p
   }
 }
 
-/** The pad each token's creation logs over its block range name on two providers that answer and agree (the third
- *  asked for a token one of the first two could not answer); a token is absent when that does not hold. */
+/** The pad each token's creation logs over its block range name on two providers that answer and agree (each next
+ *  provider of MAKER_RPCS asked for the tokens the ones before could not answer, agreedOnList); a token is absent when
+ *  that does not hold. */
 async function padsAt(chain: EvmChain, doFetch: Fetch, asks: readonly { token: string; range: [number, number] }[]): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>();
   if (asks.length === 0) return out;
   const per = makerFilters(chain, 0, 0).length;
   const calls = asks.flatMap((a) => makerFilters(chain, ...a.range).map((f) => ({ method: "eth_getLogs", params: [f] })));
-  const [u0, u1, u2] = MAKER_RPCS[chain];
-  const pads = (got: unknown[]) => asks.map((a, i) => padOf(chain, a.token, joinLogs(got.slice(i * per, (i + 1) * per))));
-  const [p, q] = (await Promise.all([batch(doFetch, u0, calls), batch(doFetch, u1, calls)])).map(pads) as [(string | null | undefined)[], (string | null | undefined)[]];
-  const short = asks.flatMap((_, i) => (p[i] === undefined || q[i] === undefined ? [i] : []));
-  const r = new Map<number, string | null | undefined>();
-  if (short.length > 0) {
-    const got = await batch(doFetch, u2, short.flatMap((i) => calls.slice(i * per, (i + 1) * per)));
-    short.forEach((i, k) => r.set(i, padOf(chain, asks[i]!.token, joinLogs(got.slice(k * per, (k + 1) * per)))));
-  }
+  const got = await agreedOnList(MAKER_RPCS[chain], asks.length, async (u, idx) => {
+    const r = await batch(doFetch, u, idx.flatMap((i) => calls.slice(i * per, (i + 1) * per)));
+    return idx.map((i, k) => padOf(chain, asks[i]!.token, joinLogs(r.slice(k * per, (k + 1) * per))));
+  });
   asks.forEach((a, i) => {
-    const answered = [p[i], q[i], r.get(i)].filter((x) => x !== undefined);
-    if (answered.length >= 2 && answered.every((x) => x === answered[0])) out.set(a.token, answered[0] as string | null);
+    if (got[i] !== undefined) out.set(a.token, got[i]!);
   });
   return out;
 }
@@ -568,25 +597,19 @@ export function recordPad(chain: EvmChain, token: string, answers: readonly unkn
   return own[0] ?? (pads.size === 1 ? [...pads][0]! : pads.size === 0 ? null : undefined);
 }
 
-/** The pad each token's records name on two providers that answer and agree (the third asked for a token one of the
- *  first two could not answer); a token is absent when that does not hold. */
+/** The pad each token's records name on two providers that answer and agree (each next provider of MAKER_RPCS asked
+ *  for the tokens the ones before could not answer, agreedOnList); a token is absent when that does not hold. */
 async function recordsAt(chain: EvmChain, doFetch: Fetch, tokens: readonly string[]): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>();
   if (tokens.length === 0) return out;
   const per = (RECORDS[chain] ?? []).length;
   const calls = tokens.flatMap((t) => recordCalls(chain, t));
-  const [u0, u1, u2] = MAKER_RPCS[chain];
-  const pads = (got: unknown[]) => tokens.map((t, i) => recordPad(chain, t, got.slice(i * per, (i + 1) * per)));
-  const [p, q] = (await Promise.all([batch(doFetch, u0, calls), batch(doFetch, u1, calls)])).map(pads) as [(string | null | undefined)[], (string | null | undefined)[]];
-  const short = tokens.flatMap((_, i) => (p[i] === undefined || q[i] === undefined ? [i] : []));
-  const r = new Map<number, string | null | undefined>();
-  if (short.length > 0) {
-    const got = await batch(doFetch, u2, short.flatMap((i) => calls.slice(i * per, (i + 1) * per)));
-    short.forEach((i, k) => r.set(i, recordPad(chain, tokens[i]!, got.slice(k * per, (k + 1) * per))));
-  }
+  const got = await agreedOnList(MAKER_RPCS[chain], tokens.length, async (u, idx) => {
+    const r = await batch(doFetch, u, idx.flatMap((i) => calls.slice(i * per, (i + 1) * per)));
+    return idx.map((i, k) => recordPad(chain, tokens[i]!, r.slice(k * per, (k + 1) * per)));
+  });
   tokens.forEach((t, i) => {
-    const answered = [p[i], q[i], r.get(i)].filter((x) => x !== undefined);
-    if (answered.length >= 2 && answered.every((x) => x === answered[0])) out.set(t, answered[0] as string | null);
+    if (got[i] !== undefined) out.set(t, got[i]!);
   });
   return out;
 }
@@ -599,23 +622,38 @@ export const EARLIER_READS_MAX = 120;
 /**
  * The block a token's code first appears in, when that is before block `before` (a token whose pool came later, as a
  * new pool of an old token does): null when it has no code at `before` - 1 (made at its pool), undefined when the
- * reads fail. Searched on the chain's first provider (it serves old state), in rounds of 10 `eth_getCode` reads across
- * the interval. Base only: Robinhood's providers serve no old state.
+ * reads fail. Searched on the chain's first provider (it serves old state), and a read it does not answer on the next
+ * of MAKER_RPCS (codesOn), in rounds of 10 `eth_getCode` reads across the interval. Base only: Robinhood's providers
+ * serve no old state.
  */
 export async function codeBlock(chain: EvmChain, token: string, before: number, doFetch: Fetch): Promise<number | null | undefined> {
-  const url = MAKER_RPCS[chain][0];
-  const code = async (ns: number[]): Promise<(boolean | undefined)[]> =>
-    (await batch(doFetch, url, ns.map((n) => ({ method: "eth_getCode", params: [token, `0x${n.toString(16)}`] })))).map((c) => (typeof c === "string" && /^0x([0-9a-f]{2})*$/i.test(c) ? c !== "0x" : undefined));
+  const code = (ns: number[]): Promise<(boolean | undefined)[]> => codesOn(chain, doFetch, ns.map((n) => ({ token, at: n })));
   const [first] = await code([before - 1]);
   if (first === undefined) return undefined;
   if (!first) return null;
   return search(code, before - 1);
 }
 
-/** Whether each token had code at block `at[i]` (one batch on the chain's first provider); undefined where a read failed. */
-export async function hadCode(chain: EvmChain, doFetch: Fetch, asks: readonly { token: string; at: number }[]): Promise<(boolean | undefined)[]> {
-  const got = await batch(doFetch, MAKER_RPCS[chain][0], asks.map((a) => ({ method: "eth_getCode", params: [a.token, `0x${a.at.toString(16)}`] })));
-  return got.map((c) => (typeof c === "string" && /^0x([0-9a-f]{2})*$/i.test(c) ? c !== "0x" : undefined));
+/** Whether each token had code at block `at[i]` (a batch on the chain's first provider, and each read it does not
+ *  answer on the next of MAKER_RPCS); undefined where every provider failed it. */
+export function hadCode(chain: EvmChain, doFetch: Fetch, asks: readonly { token: string; at: number }[]): Promise<(boolean | undefined)[]> {
+  return codesOn(chain, doFetch, asks);
+}
+/** The code reads down the list (card evm-rpc-spare-list): each one a provider answers is that provider's, the rest
+ *  asked of the next; as before, one provider's answer is enough for a code read (no tag rests on it alone: padsAt
+ *  reads the creation itself on two). */
+async function codesOn(chain: EvmChain, doFetch: Fetch, asks: readonly { token: string; at: number }[]): Promise<(boolean | undefined)[]> {
+  const out: (boolean | undefined)[] = asks.map(() => undefined);
+  for (const url of MAKER_RPCS[chain]) {
+    const left = asks.flatMap((_, i) => (out[i] === undefined ? [i] : []));
+    if (left.length === 0) break;
+    const got = await batch(doFetch, url, left.map((i) => ({ method: "eth_getCode", params: [asks[i]!.token, `0x${asks[i]!.at.toString(16)}`] })));
+    left.forEach((i, k) => {
+      const c = got[k];
+      out[i] = typeof c === "string" && /^0x([0-9a-f]{2})*$/i.test(c) ? c !== "0x" : undefined;
+    });
+  }
+  return out;
 }
 
 async function search(code: (ns: number[]) => Promise<(boolean | undefined)[]>, withCode: number): Promise<number | undefined> {

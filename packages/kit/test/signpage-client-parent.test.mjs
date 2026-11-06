@@ -12,6 +12,7 @@ import { FIXTURES, STATE } from "./signpage-fixtures.ts";
 
 const SRC = process.env.SIGNPAGE_SRC ? pathToFileURL(`${process.env.SIGNPAGE_SRC}/`).href : new URL("../src/", import.meta.url).href;
 const C = await import(`${SRC}signpage/client.ts`);
+const MSG = await import(`${SRC}signpage/messages.ts`);
 
 const URL_ = "https://sign.confidential.unrealized.trade/";
 const ORIGIN = "https://sign.confidential.unrealized.trade";
@@ -22,9 +23,14 @@ const READY = { v: 1, type: "ready", release: "sp-1", api: 1 };
 
 // ------------------------------------------------------------------------------------------------ fakes
 class FakeWin {
+  /** the requests posted, in order (the kit-version hellos are in `log` only) */
   sent = [];
+  /** every message posted, hellos included, in order */
+  log = [];
   postMessage(msg, origin) {
-    this.sent.push({ msg: structuredClone(msg), origin });
+    const m = { msg: structuredClone(msg), origin };
+    this.log.push(m);
+    if (msg?.type !== "hello") this.sent.push(m);
   }
 }
 class FakeFrame {
@@ -358,4 +364,19 @@ test("parent mode: in the update state `reload` still goes to the shell (it relo
   await flush();
   assert.deepEqual(await ci.request("reload", {}).outcome, DOWN, "iframe mode: unchanged");
   assert.equal(f.sent().length, 0);
+});
+
+// ------------------------------------------------------------------------------------------------ card kit-frame-version
+test("kit-frame-version, parent mode: a hello to the shell before each state ask, at the start, on a retry and on a ready", async () => {
+  const hello = { v: 1, type: "hello", kit: MSG.SIGNPAGE_KIT_VERSION };
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host, mode: "parent", retryMs: 0 });
+  assert.deepEqual(h.shell.log.map((s) => [s.msg, s.origin]).slice(0, 1), [[hello, ORIGIN]]);
+  assert.deepEqual(h.shell.log.map((s) => s.msg.type), ["hello", "state"], "the start: hello, then state");
+  c.retry();
+  assert.deepEqual(h.shell.log.map((s) => s.msg.type), ["hello", "state", "hello", "state"], "a retry: hello, then state");
+  h.post(READY);
+  await flush();
+  assert.deepEqual(h.shell.log.slice(4).map((s) => s.msg.type), ["hello", "state"], "the shell's ready: hello, then state");
+  assert.equal(h.self.log.length, 0, "nothing to the app's own window");
 });

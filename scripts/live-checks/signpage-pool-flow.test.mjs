@@ -5,10 +5,14 @@
 // Planted on the good one: SIGN_HOST serving a testnet pin, a pool account another program owns, an upgrade authority
 // set, the buy failed or another tx's bytes in its place, the sell not W's alone, and the helper naming another fee
 // payer: FAIL.
+// Card signpage-pool-flow-answers, each the good run's answers changed as it names: throttled (the recorded 429s with a
+// Retry-After): PASS after waiting it; null_behind (a null at a slot behind the other provider's value): read again,
+// PASS; null_same_slot (a null at the other provider's own slot): FAIL, never read again, the line naming the answer.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { PIN, RUN, check } from "./signpage-pool-flow.mjs";
+import { PIN, RUN, check, getRead } from "./signpage-pool-flow.mjs";
+import { REREADS, account, answerOf, behindOf, onTwoOperators, retryAfterMs } from "./pool-sol-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./signpage-pool-flow.answers.json", import.meta.url), "utf8"));
 
@@ -22,10 +26,27 @@ function replay(answers, plant = (a) => a.json) {
     used.add(i);
     const a = answers[i];
     const json = plant(structuredClone(a));
-    return { ok: a.status === 200, status: a.status, json: async () => json };
+    return { ok: a.status === 200, status: a.status, headers: new Headers(a.retry_after ? { "retry-after": a.retry_after } : {}), json: async () => json };
   };
 }
-const run = (rec, plant, sign = rec.sign, helper = rec.helper) => check({ program: rec.program, table: rec.table, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign, helper });
+const run = (rec, plant, sign = rec.sign, helper = rec.helper, sleep = async () => {}) => check({ program: rec.program, table: rec.table, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep, sign, helper });
+/** A run the answers file keeps as changes on another (`from`): `set` gives the answer at index i a Retry-After or
+ * another body, `copy` serves those answers again after the rest. */
+function derived(name) {
+  const d = A[name];
+  const base = A[d.from];
+  const answers = structuredClone(base.answers);
+  for (const { i, ...change } of d.set ?? []) {
+    if (change.json) answers[i] = { ...answers[i], status: 200, json: change.json };
+    if (change.retry_after) answers[i].retry_after = change.retry_after;
+  }
+  for (const i of d.copy ?? []) answers.push(structuredClone(base.answers[i]));
+  return { ...base, answers };
+}
+const waits = () => {
+  const ms = [];
+  return { ms, sleep: async (t) => void ms.push(t) };
+};
 
 test("recorded good answer: the pinned devnet program and pool, read on two devnet RPCs: PASS", async () => {
   assert.equal(A.good.program, PIN.program);
@@ -94,4 +115,70 @@ test("planted on the good answer: the pool owned by another program, or an upgra
   });
   assert.equal(authority.ok, false);
   assert.ok(authority.lines.some((l) => l.startsWith("BAD  upgrade authority is none")), authority.lines.join("\n"));
+});
+
+test("card signpage-pool-flow-answers, recorded throttled run: each 429 read again after its Retry-After, then PASS", async () => {
+  const w = waits();
+  const r = await run(derived("throttled"), undefined, A.good.sign, A.good.helper, w.sleep);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(w.ms.length >= 9, `${w.ms.length} waits`);
+  assert.deepEqual([...new Set(w.ms)], [2000], `the waits: ${w.ms.join(", ")}`);
+});
+
+test("card signpage-pool-flow-answers, recorded null_behind run: a null at a slot behind the other provider's value is read again, then PASS", async () => {
+  const w = waits();
+  const r = await run(derived("null_behind"), undefined, A.good.sign, A.good.helper, w.sleep);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  const again = r.lines.filter((l) => l.startsWith("info ") && l.includes("answered behind"));
+  assert.equal(again.length, 1, r.lines.join("\n"));
+  assert.ok(again[0].includes(`getAccountInfo "${PIN.pool}" null at slot 518538800, https://api.devnet.solana.com a value at slot 518538841`), again[0]);
+  assert.ok(r.lines.some((l) => l.startsWith(`ok   pool ${PIN.pool}`) && l.includes("onfinality")), r.lines.join("\n"));
+});
+
+test("card signpage-pool-flow-answers, recorded null_same_slot run: a null at the other provider's own slot FAILs, never read again, naming the answer", async () => {
+  const w = waits();
+  const r = await run(derived("null_same_slot"), undefined, A.good.sign, A.good.helper, w.sleep);
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD  pool ${PIN.pool}`) && l.endsWith("on https://solana-devnet.api.onfinality.io/public: missing (HTTP 200, null at slot 518538841)")), r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => l.includes("answered behind")), r.lines.join("\n"));
+});
+
+test("card signpage-pool-flow-answers: a null behind that stays behind FAILs at the bound; a transaction's null and a JSON-RPC error name the answer", async () => {
+  // a provider that answers null behind the other on every read: read again REREADS times, then its FAIL stands
+  let reads = 0;
+  const lagging = async (url) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ jsonrpc: "2.0", result: { context: { slot: url === "a" ? 10 : 11 }, value: url === "a" ? null : { owner: "o", executable: false, lamports: 1, data: ["", "base64"] } } }) });
+  const walk = await onTwoOperators(["a", "b"], (u) => u, lagging, async (url, say, f) => {
+    if (url === "a") reads++;
+    const v = await account(f, url, PIN.pool, async () => {});
+    say(!!v, `pool on ${url}: ${v ? "a value" : `missing (${answerOf(f, "getAccountInfo", PIN.pool)})`}`);
+  }, { sleep: async () => {} });
+  assert.equal(reads, 1 + REREADS);
+  assert.ok(walk.lines.some(([p, t]) => p === false && t === "pool on a: missing (HTTP 200, null at slot 10)"), JSON.stringify(walk.lines));
+  assert.ok(walk.lines.some(([p, t]) => p === null && t.startsWith(`a still answers behind b after ${REREADS} read(s) again`)), JSON.stringify(walk.lines));
+  const pool = (slot, value) => ({ method: "getAccountInfo", params: [PIN.pool], status: 200, json: { result: { context: { slot }, value } } });
+  assert.equal(behindOf([pool(10, null)], [pool(11, {})]).length, 1);
+  assert.equal(behindOf([pool(11, null)], [pool(11, {})]).length, 0, "the same slot is a disagreement");
+  assert.equal(behindOf([pool(12, null)], [pool(11, {})]).length, 0, "a slot past it is a disagreement");
+  const tx = (result) => ({ method: "getTransaction", params: ["sig"], status: 200, json: { result } });
+  assert.equal(behindOf([tx(null), pool(99, {})], [tx({ slot: 100 })]).length, 1, "a tx null on a provider whose reads stand before the tx's slot");
+  assert.equal(behindOf([tx(null), pool(100, {})], [tx({ slot: 100 })]).length, 0, "a tx null on a provider at the tx's slot");
+  const gone = await run(A.good, (a) => (a.method === "getTransaction" && a.params[0] === RUN.sell && a.url === A.good.rpcs[1] ? ((a.json.result = null), a.json) : a.json));
+  assert.equal(gone.ok, false);
+  assert.ok(gone.lines.some((l) => l.startsWith(`BAD  sell ${RUN.sell}`) && l.includes(`not found (HTTP 200, null on ${A.good.rpcs[1]})`)), gone.lines.join("\n"));
+  const refused = await run(A.good, (a) => (a.method === "getAccountInfo" && a.params[0] === PIN.table && a.url === A.good.rpcs[1] && a.json.result ? { jsonrpc: "2.0", error: { code: -32602, message: "Invalid param" } } : a.json));
+  assert.equal(refused.ok, false);
+  assert.ok(refused.lines.some((l) => l === `BAD  read on ${A.good.rpcs[1]}: getAccountInfo: HTTP 200 {"code":-32602,"message":"Invalid param"}`), refused.lines.join("\n"));
+});
+
+test("card signpage-pool-flow-answers: Retry-After in seconds or as an HTTP date; the helper's and SIGN_HOST's GET read again on a 429", async () => {
+  const h = (v) => ({ headers: new Headers(v === undefined ? {} : { "retry-after": v }) });
+  assert.equal(retryAfterMs(h("7")), 7000);
+  assert.equal(retryAfterMs(h(new Date(Date.parse("2026-11-06T13:00:10Z")).toUTCString()), Date.parse("2026-11-06T13:00:00Z")), 10000);
+  assert.equal(retryAfterMs(h()), null);
+  assert.equal(retryAfterMs(h("soon")), null);
+  const answers = [{ status: 429, ra: "3" }, { status: 200 }];
+  const w = waits();
+  const r = await getRead(async () => { const a = answers.shift(); return { status: a.status, headers: new Headers(a.ra ? { "retry-after": a.ra } : {}) }; }, "u", w.sleep);
+  assert.equal(r.status, 200);
+  assert.deepEqual(w.ms, [3000]);
 });

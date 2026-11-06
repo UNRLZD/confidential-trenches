@@ -23,9 +23,14 @@ const TIMEOUT = { ok: false, error: { code: "client_timeout" } };
 
 // ------------------------------------------------------------------------------------------------ fakes
 class FakeChild {
+  /** the requests posted, in order (the kit-version hellos are in `log` only) */
   sent = [];
+  /** every message posted, hellos included, in order */
+  log = [];
   postMessage(msg, origin) {
-    this.sent.push({ msg: structuredClone(msg), origin });
+    const m = { msg: structuredClone(msg), origin };
+    this.log.push(m);
+    if (msg?.type !== "hello") this.sent.push(m);
   }
 }
 class FakeFrame {
@@ -72,7 +77,9 @@ function makeHost() {
   const fireWindow = (type, visibilityState = "visible") => on.get(type)?.({ type, target: { visibilityState } });
   /** every message posted to every frame, in order */
   const sent = () => frames.flatMap((f) => f.contentWindow.sent);
-  return { host, frames, frame, post, fireWindow, sent, listening: () => on.size > 0 };
+  /** every message posted to every frame, hellos included, in order */
+  const log = () => frames.flatMap((f) => f.contentWindow.log);
+  return { host, frames, frame, post, fireWindow, sent, log, listening: () => on.size > 0 };
 }
 
 const flush = async () => {
@@ -1189,17 +1196,16 @@ test("kit-deposit-calls: a deposit op at every stage, with its facts, reaches th
     h.post({ v: 1, type: "state", state: withOp(facts) });
     assert.deepEqual(c.snapshot().state.ops, [depositOp(facts)], JSON.stringify(facts));
   }
+  // the op is dropped and the rest of the state kept (card kit-frame-version)
   for (const [facts, why] of BAD_FACTS) {
     const { h, c } = await readyClient();
-    const before = c.snapshot();
-    h.post({ v: 1, type: "state", state: withOp(facts) });
-    assert.equal(c.snapshot(), before, `dropped: ${why}`);
+    h.post({ v: 1, type: "state", state: { ...withOp(facts), vault_balance: "7" } });
+    assert.deepEqual(c.snapshot().state, { ...STATE, vault_balance: "7", ops: [] }, `the op dropped: ${why}`);
   }
   // the facts are the deposit's own: a buy op carrying one is dropped
   const { h, c } = await readyClient();
-  const before = c.snapshot();
-  h.post({ v: 1, type: "state", state: { ...STATE, ops: [{ id: "b1", kind: "buy", stage: "filled", txs: [], since_ms: 1 }] } });
-  assert.equal(c.snapshot(), before, "a buy op with since_ms is dropped");
+  h.post({ v: 1, type: "state", state: { ...STATE, vault_balance: "7", ops: [{ id: "b1", kind: "buy", stage: "filled", txs: [], since_ms: 1 }] } });
+  assert.deepEqual(c.snapshot().state, { ...STATE, vault_balance: "7", ops: [] }, "a buy op with since_ms is dropped");
 });
 
 test("kit-deposit-calls: a running deposit's progress names its new stages", async () => {
@@ -1225,5 +1231,62 @@ test("kit-deposit-calls: deposit.confirm answers the stage with its facts throug
     h.post(answer(r.id, facts));
     await flush();
     assert.equal(r.settled(), false, `left open: ${why}`);
+  }
+});
+
+// ------------------------------------------------------------------------------------------------ card kit-frame-version
+const HELLO = { v: 1, type: "hello", kit: MSG.SIGNPAGE_KIT_VERSION };
+
+test("kit-frame-version: the kit names its version in a hello to SIGN_HOST's origin, just before each handshake state request", async () => {
+  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.5");
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  await flush();
+  assert.deepEqual(h.log(), [], "nothing before the ready");
+  h.post(READY);
+  await flush();
+  assert.deepEqual(h.log().map((s) => [s.msg.type, s.origin]), [["hello", ORIGIN], ["state", ORIGIN]]);
+  assert.deepEqual(h.log()[0].msg, HELLO, "exactly v, type and kit: no id, so the page answers nothing");
+  h.post(answer(h.sent()[0].msg.id, STATE));
+  await flush();
+  assert.equal(c.snapshot().status, "ready");
+  // a ready again (the page started again): the hello again, then the state
+  const n = h.log().length;
+  h.post(READY);
+  await flush();
+  assert.deepEqual(h.log().slice(n).map((s) => s.msg.type), ["hello", "state"]);
+  // a fresh iframe: its own hello before its state
+  c.retry();
+  h.post(READY);
+  await flush();
+  assert.deepEqual(h.frame().contentWindow.log.map((s) => s.msg.type), ["hello", "state"]);
+});
+
+test("kit-frame-version: a state with one op this kit cannot read keeps the rest; the answer and the event alike", async () => {
+  const later = { id: "dq-9", kind: "deposit", stage: "teleported", txs: [] };
+  const other = { id: "zz", kind: "lend", stage: "done", txs: [] };
+  const good = depositOp({ stage: "done", amount_usd: "1" });
+  const s = { ...STATE, vault_balance: "3", ops: [good, later, other] };
+  // the handshake's answer
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  h.post(READY);
+  await flush();
+  h.post(answer(h.sent()[0].msg.id, s));
+  await flush();
+  assert.equal(c.snapshot().status, "ready", "READY on a state with an op it cannot read");
+  assert.deepEqual(c.snapshot().state, { ...s, ops: [good] });
+  // an event
+  h.post({ v: 1, type: "state", state: { ...s, vault_balance: "4", ops: [later, good, later] } });
+  assert.deepEqual(c.snapshot().state, { ...s, vault_balance: "4", ops: [good] });
+  // a state request's answer
+  const r = await open(h, c, "state");
+  h.post(answer(r.id, { ...s, ops: [other] }));
+  assert.deepEqual(await r.p, { ok: true, result: { ...s, ops: [] } });
+  // the rest is still checked whole: an unknown field, or ops that are not an array, refuses the state
+  const before = c.snapshot();
+  for (const bad of [{ ...s, teleport: 1 }, { ...s, ops: { 0: good } }, { ...s, ops: [good], vault_balance: "x" }]) {
+    h.post({ v: 1, type: "state", state: bad });
+    assert.equal(c.snapshot(), before, JSON.stringify(bad));
   }
 });

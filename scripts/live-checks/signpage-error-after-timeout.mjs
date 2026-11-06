@@ -2,8 +2,9 @@
 // Live check of card signpage-error-after-timeout on SIGN_HOST (https://sign.confidential.unrealized.trade). What it
 // holds, and only that: the served /app.js is the one index.html pins (its sha384), and its api (src/api.ts startApi),
 // as minified, posts a trade kind's end as a progress stage after the kind's answer:
-//   - a kind answered by running hands `give` whether its kind is in the trade set (`let e=kc.has(l.type)`), and the set
-//     holds buy, pool.buy, pool.sell and pool.deposit;
+//   - a kind answered by running hands `give` whether its kind is in the trade set (`let e=kc.has(l.type)`; from card
+//     kit-frame-version the request's kind is read once, `let _=d.type`, and handed to `give` first, `let e=rl.has(_)`),
+//     and the set holds buy, pool.buy, pool.sell and pool.deposit;
 //   - `give`, for such a kind, posts "refused" for a refusal (never for id_reused) or the result's own stage, when that
 //     stage ends a trade (filled, part_filled, not_landed, refused) and was not posted already.
 // The kit's client drops an answer that comes past its 10 s window; the app then ends the trade's button and strip on a
@@ -28,8 +29,15 @@ export const END_STAGES = ["filled", "part_filled", "not_landed", "refused"];
 
 /** Every `X=new Set([`a`,`b`])` of string literals in the bundle, by its name. */
 const SETS = /([\w$]+)=new Set\(\[((?:`[^`$\\]*`,?)*)\]\)/g;
-/** The api's Running branch: the trade set's verdict on the request's kind handed to `give` with the answer. */
-const RUNNING = /if\([\w$]+&&`running`in ([\w$]+)\)\{[^]{0,120}?let ([\w$]+)=([\w$]+)\.has\([\w$]+\.type\);\1\.after\.catch\(\(\)=>\{\}\)\.then\(\(\)=>[\w$]+\([\w$]+,[\w$]+,\1\.answer\(\),[\w$]+,\2\)\);return\}/;
+/** The api's Running branch: the trade set's verdict on the request's kind handed to `give` with the answer. Before card
+ *  kit-frame-version (`set`: the trade set's name in group 3) and after it, where the kind is read once and handed to
+ *  `give` too (group 7). */
+const RUNNING = new RegExp(
+  [
+    /if\([\w$]+&&`running`in ([\w$]+)\)\{[^]{0,120}?let ([\w$]+)=([\w$]+)\.has\([\w$]+\.type\);\1\.after\.catch\(\(\)=>\{\}\)\.then\(\(\)=>[\w$]+\([\w$]+,[\w$]+,\1\.answer\(\),[\w$]+,\2\)\);return\}/.source,
+    /let ([\w$]+)=[\w$]+\.type,([\w$]+)=[\w$]+\([^]{0,80}?\);if\(\5&&`running`in \5\)\{[^]{0,120}?let ([\w$]+)=([\w$]+)\.has\(\4\);\5\.after\.catch\(\(\)=>\{\}\)\.then\(\(\)=>[\w$]+\(\4,[\w$]+,[\w$]+,\5\.answer\(\),[\w$]+,\6\)\);return\}/.source,
+  ].join("|"),
+);
 /** `give`'s end: refused for a refusal but id_reused, else the result's stage; posted when it ends a trade, once. */
 const RULE = /if\(([\w$]+)\)\{let ([\w$]+)=([\w$]+)\?\3\.result\.stage:[\w$]+===`id_reused`\?null:`refused`;typeof \2==`string`&&([\w$]+)\.has\(\2\)&&![\w$]+\.includes\(\2\)&&[\w$]+\(\2\)\}/;
 
@@ -42,7 +50,7 @@ export function facts(index, js) {
     index,
     sha384: sha384(js),
     running: running?.[0] ?? null,
-    kinds: running ? (sets.get(running[3]) ?? null) : null,
+    kinds: running ? (sets.get(running[3] ?? running[7]) ?? null) : null,
     rule: rule?.[0] ?? null,
     ends: rule ? (sets.get(rule[4]) ?? null) : null,
   };

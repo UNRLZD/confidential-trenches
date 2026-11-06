@@ -31,6 +31,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 import { headersOf } from "./signpage-postmessage.mjs";
 
@@ -117,6 +118,7 @@ addEventListener("message", (e) => {
   window.__log.push({ fromParent: e.source === parent, data: e.data });
   if (e.source !== parent || e.data?.type !== "ready" || window.__ids) return;
   window.__ids = {};
+  parent.postMessage(${JSON.stringify({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION })}, ${JSON.stringify(signOrigin)}); // the kit's hello first, as the kit's client sends it (card kit-frame-version): an app that names none is kit-v1.4
   for (const a of ${JSON.stringify(ASKS)}) {
     const m = { v: 1, id: crypto.randomUUID(), ...a };
     window.__ids[a.type] = m.id;

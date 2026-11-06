@@ -23,6 +23,7 @@ import { existsSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
+import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 
 const KEY = "pool-restore-wired";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -72,6 +73,8 @@ window.addEventListener("message", (m) => {
 });
 window.__send = (type, params = {}) => {
   const id = crypto.randomUUID();
+  // the kit's hello first, as the kit's client sends it (card kit-frame-version): an app that names none is kit-v1.4
+  window.parent.postMessage(${JSON.stringify({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION })}, SIGN);
   window.parent.postMessage({ v: 1, id, type, ...params }, SIGN);
   return id;
 };

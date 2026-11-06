@@ -1,5 +1,5 @@
 {
- "_note": "good: the pin (program 5V9i..., table 4cYE...) read on two devnet RPCs, run 4's deposit 63fq..., pool buy 2MbB... and sell 3ZMV... read back at finalized on both, the helper's GET /v1/pool/fee and SIGN_HOST/app.js read, 2026-11-04T09:58:23.395Z. bad: the same check reading the helper's earlier devnet program HAQS... in the pin's place, 2026-11-04T09:58:50.651Z: another code, no record deposit. bad_table: the same check reading the pool account in the table's place, 2026-11-04T09:59:15.679Z: not the ALT program's.",
+ "_note": "good: the pin (program 5V9i..., table 4cYE...) read on two devnet RPCs, run 4's deposit 63fq..., pool buy 2MbB... and sell 3ZMV... read back at finalized on both, the helper's GET /v1/pool/fee and SIGN_HOST/app.js read, 2026-11-04T09:58:23.395Z. bad: the same check reading the helper's earlier devnet program HAQS... in the pin's place, 2026-11-04T09:58:50.651Z: another code, no record deposit. bad_table: the same check reading the pool account in the table's place, 2026-11-04T09:59:15.679Z: not the ALT program's. Card signpage-pool-flow-answers, each the good run's answers with the changes it names (`set`: the answer at index i given a Retry-After header or another body; `copy`: those answers served again after the rest, for a read again): throttled: OnFinality's nine recorded 429s (4 Nov) each with Retry-After 2 (its 429s carried none when probed 6 Nov 12:55Z), read again after 2 s: PASS. null_behind: OnFinality's pool read answering null at slot 518538800, behind api.devnet.solana.com's value at 518538841, and its read again answering as recorded: PASS. null_same_slot: that null at 518538841, the other provider's own slot: FAIL, never read again.",
  "good": {
   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
   "table": "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy",
@@ -6625,6 +6625,98 @@
       "version": 0
      },
      "id": 1
+    }
+   }
+  ]
+ },
+ "throttled": {
+  "from": "good",
+  "set": [
+   {
+    "i": 9,
+    "retry_after": "2"
+   },
+   {
+    "i": 11,
+    "retry_after": "2"
+   },
+   {
+    "i": 15,
+    "retry_after": "2"
+   },
+   {
+    "i": 17,
+    "retry_after": "2"
+   },
+   {
+    "i": 19,
+    "retry_after": "2"
+   },
+   {
+    "i": 22,
+    "retry_after": "2"
+   },
+   {
+    "i": 25,
+    "retry_after": "2"
+   },
+   {
+    "i": 28,
+    "retry_after": "2"
+   },
+   {
+    "i": 31,
+    "retry_after": "2"
+   }
+  ]
+ },
+ "null_behind": {
+  "from": "good",
+  "set": [
+   {
+    "i": 13,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0-beta.1",
+       "slot": 518538800
+      },
+      "value": null
+     }
+    }
+   }
+  ],
+  "copy": [
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20
+  ]
+ },
+ "null_same_slot": {
+  "from": "good",
+  "set": [
+   {
+    "i": 13,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0-beta.1",
+       "slot": 518538841
+      },
+      "value": null
+     }
     }
    }
   ]

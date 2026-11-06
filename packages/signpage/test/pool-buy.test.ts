@@ -20,10 +20,13 @@ import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
 import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
-import type { TxRef } from "../../kit/src/signpage/messages.ts";
+import { SIGNPAGE_KIT_VERSION, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { pairDown } from "./outage.ts";
 import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
 import type { IncomingMessage } from "../src/api.ts";
+
+/** The kit client's hello (card kit-frame-version). */
+const HELLO = { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION };
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
 const L = 7n;
@@ -569,6 +572,8 @@ test("a fixture buy posts its route under its id, each once and in order: W, the
     kinds: { "pool.buy": (_params, ctx) => poolBuyKind(() => w.host, LOCKS)(ASK, ctx) },
   });
   const id = crypto.randomUUID();
+  // the app on this kit names its version first, as the kit's client does: route events go to kit-v1.5 and on only
+  listener!({ origin: APP_ORIGIN, source: parent, data: HELLO });
   listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "pool.buy", chain: "solana", token: fx.pump.mint, amount: "0.005", slippage_bps: 300 } });
   const end = Date.now() + 2_000;
   while (!posted.some((m) => (m as { stage?: string }).stage === "filled")) {
@@ -711,6 +716,8 @@ test("fold 1 (L3): the page's poster names each field from the route's own keys 
     kinds: { "pool.buy": (_p, c) => ((ctx = c as never), { running: true, after: new Promise<void>(() => {}), answer: () => ({ error: "failed" }) }) },
   });
   const id = crypto.randomUUID();
+  // the app on this kit names its version first, as the kit's client does: route events go to kit-v1.5 and on only
+  listener!({ origin: APP_ORIGIN, source: parent, data: HELLO });
   listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "pool.buy", chain: "solana", token: fx.pump.mint, amount: "0.005", slippage_bps: 300 } });
   await api.idle();
   const route = ctx!.route!;

@@ -49,7 +49,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SIGNPAGE_IFRAME_ATTRIBUTES } from "../../packages/kit/src/index.ts";
+import { SIGNPAGE_IFRAME_ATTRIBUTES, SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { kitTakesState } from "../signpage-state.mjs";
 
@@ -231,6 +231,8 @@ window.addEventListener("message", (m) => {
 });
 window.__send = (type, params = {}) => {
   const id = crypto.randomUUID();
+  // the kit's hello first, as the kit's client sends it (card kit-frame-version): an app that names none is kit-v1.4
+  peer.postMessage(${JSON.stringify({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION })}, SIGN);
   peer.postMessage({ v: 1, id, type, ...params }, SIGN);
   return id;
 };
