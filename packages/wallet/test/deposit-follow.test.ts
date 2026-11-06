@@ -500,7 +500,7 @@ test("F3 and M2: a forged SUCCESS and a 1.99 USDC gift (over min_amount_out, und
 
 test("F4: USDC's code hash moves mid-deposit: held with code_hash, U as held_id; held stays an end", async () => {
   const t = await setup(["SUCCESS"], { bind: bindDeposit });
-  t.chain.credit(CREDIT);
+  t.onTick.fn = (n) => n === 1 && t.chain.credit(CREDIT); // 1Click's SUCCESS is read first: the op is sent when held
   t.chain.codeHash = "11111111111111111111111111111111";
   assert.deepEqual(await followDeposit(t.args, t.deps), { kind: "held", why: "code_hash" });
   const op = await opOf(t.w);
@@ -510,7 +510,9 @@ test("F4: USDC's code hash moves mid-deposit: held with code_hash, U as held_id;
   const never: typeof bindDeposit = async () => assert.fail("a held op bound again");
   assert.deepEqual(await followDeposit(t.args, { ...t.deps, bind: never }), { kind: "held", why: "code_hash" });
   // a later quote on the same U is followed; the held op is no open op of it: never written, never counted
+  t.onTick.fn = () => {};
   const before = JSON.stringify(await opOf(t.w));
+  assert.equal((await opOf(t.w)).follow.sent, true);
   const B = { ...t.args, opId: "dq-B", address: "b".repeat(64) };
   // 1Click still answers SUCCESS for A's address: a held op's status is never read again nor its money counted
   const fetchFn = perAddress(t.u, { [ADDR]: [["SUCCESS", CREDIT]], ["b".repeat(64)]: ["PROCESSING"] }).fetchFn;
