@@ -58,7 +58,8 @@ import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_SELL_FEE, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
-import { readSolanaReference, solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
+import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
+import { pageReference } from "./page-rpc.ts";
 import { solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, type SolanaHeldRead, type SolanaTeardownSimulation } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -111,7 +112,7 @@ export type PoolSellHost = {
   pick?: (n: number) => number;
 };
 
-export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" };
+export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down" };
 
 /** Verdict reads a sell gets, a second apart: past a blockhash's life (~60 to 90 s) and a finalization. */
 export const POOL_SELL_READS = 120;
@@ -422,6 +423,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
   const seeds: Uint8Array[] = [];
   let key: Uint8Array | null = null;
   let sent: string | null = null;
+  // from here on W signs: a provider that fails past this is never "down" (the transaction may land)
+  let signing = false;
   const seed = async (): Promise<Uint8Array> => {
     const s = await h.seed64();
     seeds.push(s);
@@ -461,7 +464,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     const { ref, precommitment, planned } = await returnNote(rpcs, program, scope, store, sync, s, w.l, w.j, h.settled);
     s.fill(0);
     // last, the reads the quote's age counts from: the reference, its venue, then the device's blockhash and slot
-    const reference = await readSolanaReference(rpcs, { side: "sell", token, amount });
+    const reference = await pageReference(rpcs, { side: "sell", token, amount });
     const best = reference?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
     if (!reference || !best) return no("quote_check_failed");
     const venue = await readSolanaPoolBuyVenue(rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : []));
@@ -534,6 +537,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     const sims = await both(rpcs, async (r) => ((await r("simulateTransaction", [base64.encode(wire), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "confirmed" }])) as { value?: { err?: unknown } } | null)?.value);
     if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return no();
     // W, from the seed, right before it signs: it must be the W the bytes were built and checked for
+    signing = true;
     const fw = freshWallet(await seed(), "sol", w.l, w.j);
     key = fw.secretKey;
     for (const x of seeds) x.fill(0);
@@ -585,6 +589,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     if (sent !== null) return { stage: "sent", txs: [{ chain: "solana", hash: sent }] };
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
+    // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
+    if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
     return { error: "failed" };
   } finally {
     for (const x of seeds) x.fill(0);

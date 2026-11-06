@@ -807,7 +807,8 @@ for (const p of [0, 1] as const) {
       const u = await plannedU(ns);
       c.fund(u.address, Number(RUNG) + COST);
       const d = pairDown([c.rpc(), c.rpc()] as const, p, from);
-      const a = await runPoolDeposit(host(c, ns, { rpcs: d.rpcs }), ask(RUNG));
+      // past a send the run may throw (its kind answers failed, poolDepositKind): never down either way
+      const a = await runPoolDeposit(host(c, ns, { rpcs: d.rpcs }), ask(RUNG)).catch((e: unknown) => ({ thrown: String(e) }));
       if (!d.fired()) break;
       if (c.sent.length === 0) {
         before++;
