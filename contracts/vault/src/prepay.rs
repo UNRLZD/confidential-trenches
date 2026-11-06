@@ -17,12 +17,16 @@ use crate::{field, Bytes32, Vault, VaultExt};
 use near_sdk::{env, near};
 
 /// The precommitment argument: one canonical decimal (2.5.2 row 1, `InvalidNumber`), below p (`FieldOverflow`), so a
-/// prepay and its deposit key one record.
+/// prepay and its deposit key one record, and not 0 (`InvalidPrecommitment`: the deposit refuses 0, so a prepay on it
+/// could never be used).
 fn precommitment_arg(s: &str) -> Bytes32 {
     let n = field::parse_decimal(s)
         .unwrap_or_else(|| env::panic_str("InvalidNumber: the precommitment is not a canonical decimal"));
     if field::ge(&n, &field::P) {
         env::panic_str("FieldOverflow: the precommitment is not below p");
+    }
+    if n == [0; 4] {
+        env::panic_str("InvalidPrecommitment: the precommitment is 0");
     }
     field::to_be(&n)
 }
@@ -30,7 +34,7 @@ fn precommitment_arg(s: &str) -> Bytes32 {
 #[near]
 impl Vault {
     /// Adds the attached NEAR to `prepaid[precommitment]`. Refused: a precommitment that is not a canonical decimal
-    /// below p, one a deposit already used (`PrecommitmentAlreadyUsed`), and a new record with less than
+    /// below p, 0, one a deposit already used (`PrecommitmentAlreadyUsed`), and a new record with less than
     /// `DEPOSIT_STORAGE_BYTES` × `storage_byte_cost()` attached (`InsufficientStorageDeposit`). Any amount adds to an
     /// existing record. Event `storage_prepaid {precommitment, payer, amount}`, `amount` being this call's attachment.
     #[payable]
@@ -132,6 +136,16 @@ mod tests {
         as_payer("relayer.testnet", MIN);
         v.storage_prepay(P_MINUS_1.into());
         assert_eq!(v.prepaid.get(&be(P_MINUS_1)), Some(MIN));
+    }
+
+    /// R-01 (review vault-review-opus-contract): the deposit refuses precommitment 0, so a prepay on it is refused too
+    /// and the NEAR goes back with the failed call.
+    #[test]
+    #[should_panic(expected = "InvalidPrecommitment")]
+    fn precommitment_zero_is_refused() {
+        let mut v = Vault::default();
+        as_payer("relayer.testnet", 904 * BYTE);
+        v.storage_prepay("0".into());
     }
 
     #[test]

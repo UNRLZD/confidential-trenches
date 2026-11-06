@@ -5,7 +5,8 @@
 //   - view_account: its code hash equals contracts/vault/deployments/testnet-v1.json's code_hash, which is the base58
 //     of the record's wasm_sha256, the reproducible build's;
 //   - view_code: its sha256 equals the record's wasm_sha256; its imports and exports pass vault-skeleton.mjs's
-//     wasmProblems (none of 2.8's banned imports, promise imports inside the seven, exports inside 2.5.7's list,
+//     wasmProblems (none of 2.8's banned imports, promise imports inside the six, or the seven for a vault deployed
+//     before card vault-review-fixes-1 (DEPLOYED_BEFORE_ONE_RECEIPT), exports inside 2.5.7's list,
 //     withdraw only with on_payout, not VT-S17's out-of-gas test build); its bytes name the testnet token and no other
 //     (networkProblems);
 //   - config(): asset is the team's testnet USDC and version a testnet one. Both are pinned here, never taken from the
@@ -101,9 +102,9 @@ export async function readVault({ fetchFn, url, account, deployment, token, vers
     const code = Buffer.from(c.code_base64, "base64");
     const sha = createHash("sha256").update(code).digest("hex");
     say(sha === deployment.wasm_sha256, `code sha256 ${sha} equals the record's ${deployment.wasm_sha256} ${at} (${code.length} B)`);
-    const w = wasmProblems(code);
+    const w = wasmProblems(code, { deployedAs: account });
     say(w.banned.length === 0, `no banned import ${at}: ${w.banned.length ? w.banned.join(", ") : "none"}`);
-    say(w.promises.length === 0, `promise imports are a subset of the seven ${at}: [${w.promiseImports.join(", ")}]${w.promises.length ? `, not allowed: ${w.promises.join(", ")}` : ""}`);
+    say(w.promises.length === 0, `promise imports are a subset of the allowed ${at}: [${w.promiseImports.join(", ")}]${w.promises.length ? `, not allowed: ${w.promises.join(", ")}` : ""}`);
     say(w.exports.length === 0, `function exports are inside vault.md 2.5.7's list ${at}: [${w.functionExports.join(", ")}]${w.exports.length ? `, not allowed: ${w.exports.join(", ")}` : ""}`);
     say(w.withdrawWithoutPayout.length === 0, `withdraw is exported only with on_payout ${at}: ${w.withdrawWithoutPayout.length ? "withdraw without on_payout" : "yes"}`);
     say(w.testBuild.length === 0, `not the out-of-gas test build ${at}: ${w.testBuild.length ? `holds "${w.testBuild[0]}"` : "no test mark"}`);

@@ -397,3 +397,33 @@ test("recorded no_shape run (good_found's real answers with its token of the sha
   assert.equal(w.verdict, "FAIL");
   assert.deepEqual(bad(w), [`BAD candidate ${g.probes[0].mint}: no recorded answers`]);
 });
+
+// Card solana-mint-supply-moves: the two providers read the mint each at its own slot, and a burn between them moves its
+// supply alone. Made from the shared-route run, provider B's read of the listed mint changed.
+function listedMintB(change) {
+  const g = copy(A.good_shared);
+  const pair = g.reads.accounts[g.mints.listed];
+  const d = Buffer.from(pair[1].data, "base64");
+  change(d);
+  pair[1] = { ...pair[1], data: d.toString("base64") };
+  return g;
+}
+
+test("made from the shared-route run: provider B's listed mint differs in supply only (a burn between the reads): its line and every shape PASS, saying so", async () => {
+  const g = listedMintB((d) => d.writeBigUInt64LE(d.readBigUInt64LE(36) - 559_661n, 36));
+  const r = await judge(g);
+  assert.deepEqual(shapeBad(r), [], r.lines.join("\n"));
+  assert.equal(bad(r).length, 1);
+  assert.match(bad(r)[0], PACE_BAD);
+  const s = Buffer.from(A.good_shared.reads.accounts[A.good_shared.mints.listed][0].data, "base64").readBigUInt64LE(36);
+  assert.ok(r.lines.includes(`ok  listed mint ${A.good_shared.mints.listed} read on both providers, the same but for its supply (${s} / ${s - 559_661n}) or withheld fees, owner TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`), r.lines.join("\n"));
+});
+
+test("made from the shared-route run: provider B's listed mint differs in its freeze authority: its line FAILs naming it, and S10 refuses both listed shapes", async () => {
+  const g = listedMintB((d) => { d.writeUInt32LE(1, 46); d.fill(9, 50, 82); });
+  const r = await judge(g);
+  assert.ok(r.lines.includes(`BAD listed mint ${A.good_shared.mints.listed}: the providers disagree on the mint's freeze authority`), r.lines.join("\n"));
+  for (const name of [NAMES[0], NAMES[2]]) {
+    assert.ok(r.lines.some((l) => l.startsWith(`BAD ${name}: `) && l.includes("S10 the providers disagree on the mint's freeze authority")), `${name}\n${r.lines.join("\n")}`);
+  }
+});

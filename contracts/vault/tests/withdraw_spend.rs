@@ -23,7 +23,7 @@
 //!    the state tree grows a level) and log exactly `leaf_inserted`, `withdrawn` then `withdrawal_relayed`.
 //!
 //! The proofs' recipients and fee recipient (alice, newcomer, the relayer) are not registered on the token, so both
-//! payout parts of a landed withdrawal bounce and `on_payout` turns them into a refund-pending amount, on either token
+//! payout receipt of a landed withdrawal fails whole and `on_payout` turns it into a refund-pending amount, on either token
 //! (the payouts themselves are tests/payouts.rs'). Each call attaches 1 NEAR, over row 14's charge. Each test prints its gas table: `vault::withdraw` is the vault's own work through the payouts' promises,
 //! against vault.md 2.11's 41.202-41.828 Tgas at depth 3.
 #![cfg(feature = "sandbox")]

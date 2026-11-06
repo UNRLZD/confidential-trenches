@@ -1,0 +1,319 @@
+{
+ "good": {
+  "base": "https://api.confidential.unrealized.trade",
+  "readAt": "2026-11-06T06:39:35.289Z",
+  "answers": [
+   {
+    "url": "https://api.confidential.unrealized.trade/v1/withdraw/fee",
+    "asked": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "method": "GET",
+    "request": null,
+    "status": 404,
+    "text": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "url": "https://api.confidential.unrealized.trade/v1/withdraw/fee",
+    "asked": "bf-usdc-20261101t022248.testnet",
+    "method": "GET",
+    "request": null,
+    "status": 200,
+    "text": "{\"relayer_account\":\"r-2b700409.bf-vt-20261102t071444.testnet\",\"fee_recipient\":\"f-2b700409.bf-vt-20261102t071444.testnet\",\"relay_fee\":\"185607\",\"gp\":\"100000000\",\"px\":\"3.697473047848\",\"g_w\":\"92505000000000\",\"valid_until_block\":276452842}"
+   },
+   {
+    "url": "https://near-testnet.drpc.org",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "block",
+     "params": {
+      "finality": "final"
+     }
+    },
+    "status": 200,
+    "text": "{\"id\":\"lc\",\"jsonrpc\":\"2.0\",\"result\":{\"header\":{\"height\":276452743,\"hash\":\"FHkt6RBerPSVPACZZb3qXezjnprdswHwy3Z8SYdzoUXk\"}}}"
+   },
+   {
+    "url": "https://test.rpc.fastnear.com",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "block",
+     "params": {
+      "finality": "final"
+     }
+    },
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"header\":{\"height\":276452743,\"hash\":\"FHkt6RBerPSVPACZZb3qXezjnprdswHwy3Z8SYdzoUXk\"}},\"id\":\"lc\"}"
+   },
+   {
+    "url": "https://test.rpc.fastnear.com",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "block",
+     "params": {
+      "block_id": 276452743
+     }
+    },
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"header\":{\"height\":276452743,\"hash\":\"FHkt6RBerPSVPACZZb3qXezjnprdswHwy3Z8SYdzoUXk\"}},\"id\":\"lc\"}"
+   },
+   {
+    "url": "https://near-testnet.drpc.org",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "block",
+     "params": {
+      "block_id": 276452743
+     }
+    },
+    "status": 200,
+    "text": "{\"id\":\"lc\",\"jsonrpc\":\"2.0\",\"result\":{\"header\":{\"height\":276452743,\"hash\":\"FHkt6RBerPSVPACZZb3qXezjnprdswHwy3Z8SYdzoUXk\"}}}"
+   },
+   {
+    "url": "https://test.rpc.fastnear.com",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "query",
+     "params": {
+      "request_type": "call_function",
+      "account_id": "bf-usdc-20261101t022248.testnet",
+      "method_name": "storage_balance_of",
+      "args_base64": "eyJhY2NvdW50X2lkIjoiZi0yYjcwMDQwOS5iZi12dC0yMDI2MTEwMnQwNzE0NDQudGVzdG5ldCJ9",
+      "block_id": 276452743
+     }
+    },
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"FHkt6RBerPSVPACZZb3qXezjnprdswHwy3Z8SYdzoUXk\",\"block_height\":276452743,\"logs\":[],\"result\":[123,34,116,111,116,97,108,34,58,34,49,50,53,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,34,44,34,97,118,97,105,108,97,98,108,101,34,58,34,48,34,125]},\"id\":\"lc\"}"
+   },
+   {
+    "url": "https://near-testnet.drpc.org",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "query",
+     "params": {
+      "request_type": "call_function",
+      "account_id": "bf-usdc-20261101t022248.testnet",
+      "method_name": "storage_balance_of",
+      "args_base64": "eyJhY2NvdW50X2lkIjoiZi0yYjcwMDQwOS5iZi12dC0yMDI2MTEwMnQwNzE0NDQudGVzdG5ldCJ9",
+      "block_id": 276452743
+     }
+    },
+    "status": 200,
+    "text": "{\"id\":\"lc\",\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"FHkt6RBerPSVPACZZb3qXezjnprdswHwy3Z8SYdzoUXk\",\"block_height\":276452743,\"logs\":[],\"result\":[123,34,116,111,116,97,108,34,58,34,49,50,53,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,48,34,44,34,97,118,97,105,108,97,98,108,101,34,58,34,48,34,125]}}"
+   },
+   {
+    "url": "https://near-testnet.drpc.org",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "query",
+     "params": {
+      "request_type": "call_function",
+      "account_id": "bf-usdc-20261101t022248.testnet",
+      "method_name": "is_blocklisted",
+      "args_base64": "eyJhY2NvdW50X2lkIjoiZi0yYjcwMDQwOS5iZi12dC0yMDI2MTEwMnQwNzE0NDQudGVzdG5ldCJ9",
+      "block_id": 276452743
+     }
+    },
+    "status": 200,
+    "text": "{\"id\":\"lc\",\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"FHkt6RBerPSVPACZZb3qXezjnprdswHwy3Z8SYdzoUXk\",\"block_height\":276452743,\"logs\":[],\"result\":[102,97,108,115,101]}}"
+   },
+   {
+    "url": "https://test.rpc.fastnear.com",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "query",
+     "params": {
+      "request_type": "call_function",
+      "account_id": "bf-usdc-20261101t022248.testnet",
+      "method_name": "is_blocklisted",
+      "args_base64": "eyJhY2NvdW50X2lkIjoiZi0yYjcwMDQwOS5iZi12dC0yMDI2MTEwMnQwNzE0NDQudGVzdG5ldCJ9",
+      "block_id": 276452743
+     }
+    },
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"FHkt6RBerPSVPACZZb3qXezjnprdswHwy3Z8SYdzoUXk\",\"block_height\":276452743,\"logs\":[],\"result\":[102,97,108,115,101]},\"id\":\"lc\"}"
+   }
+  ]
+ },
+ "bad_unregistered": {
+  "base": "http://127.0.0.1:18977",
+  "readAt": "2026-11-06T06:39:46.918Z",
+  "answers": [
+   {
+    "url": "http://127.0.0.1:18977/v1/withdraw/fee",
+    "asked": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "method": "GET",
+    "request": null,
+    "status": 404,
+    "text": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "url": "http://127.0.0.1:18977/v1/withdraw/fee",
+    "asked": "bf-usdc-20261101t022248.testnet",
+    "method": "GET",
+    "request": null,
+    "status": 200,
+    "text": "{\"relayer_account\":\"r-2b700409.bf-vt-20261102t071444.testnet\",\"fee_recipient\":\"f-unregistered.bf-vt-20261102t071444.testnet\",\"relay_fee\":\"185607\",\"gp\":\"100000000\",\"px\":\"3.697473047848\",\"g_w\":\"92505000000000\",\"valid_until_block\":276452842}"
+   },
+   {
+    "url": "https://test.rpc.fastnear.com",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "block",
+     "params": {
+      "finality": "final"
+     }
+    },
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"header\":{\"height\":276452762,\"hash\":\"CKfiGZddTawuEq5NMigykmVLmQowfihbDbTE2aTAhBWR\"}},\"id\":\"lc\"}"
+   },
+   {
+    "url": "https://near-testnet.drpc.org",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "block",
+     "params": {
+      "finality": "final"
+     }
+    },
+    "status": 200,
+    "text": "{\"id\":\"lc\",\"jsonrpc\":\"2.0\",\"result\":{\"header\":{\"height\":276452762,\"hash\":\"CKfiGZddTawuEq5NMigykmVLmQowfihbDbTE2aTAhBWR\"}}}"
+   },
+   {
+    "url": "https://near-testnet.drpc.org",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "block",
+     "params": {
+      "block_id": 276452762
+     }
+    },
+    "status": 200,
+    "text": "{\"id\":\"lc\",\"jsonrpc\":\"2.0\",\"result\":{\"header\":{\"height\":276452762,\"hash\":\"CKfiGZddTawuEq5NMigykmVLmQowfihbDbTE2aTAhBWR\"}}}"
+   },
+   {
+    "url": "https://test.rpc.fastnear.com",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "block",
+     "params": {
+      "block_id": 276452762
+     }
+    },
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"header\":{\"height\":276452762,\"hash\":\"CKfiGZddTawuEq5NMigykmVLmQowfihbDbTE2aTAhBWR\"}},\"id\":\"lc\"}"
+   },
+   {
+    "url": "https://test.rpc.fastnear.com",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "query",
+     "params": {
+      "request_type": "call_function",
+      "account_id": "bf-usdc-20261101t022248.testnet",
+      "method_name": "storage_balance_of",
+      "args_base64": "eyJhY2NvdW50X2lkIjoiZi11bnJlZ2lzdGVyZWQuYmYtdnQtMjAyNjExMDJ0MDcxNDQ0LnRlc3RuZXQifQ==",
+      "block_id": 276452762
+     }
+    },
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"CKfiGZddTawuEq5NMigykmVLmQowfihbDbTE2aTAhBWR\",\"block_height\":276452762,\"logs\":[],\"result\":[110,117,108,108]},\"id\":\"lc\"}"
+   },
+   {
+    "url": "https://near-testnet.drpc.org",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "query",
+     "params": {
+      "request_type": "call_function",
+      "account_id": "bf-usdc-20261101t022248.testnet",
+      "method_name": "is_blocklisted",
+      "args_base64": "eyJhY2NvdW50X2lkIjoiZi11bnJlZ2lzdGVyZWQuYmYtdnQtMjAyNjExMDJ0MDcxNDQ0LnRlc3RuZXQifQ==",
+      "block_id": 276452762
+     }
+    },
+    "status": 200,
+    "text": "{\"id\":\"lc\",\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"CKfiGZddTawuEq5NMigykmVLmQowfihbDbTE2aTAhBWR\",\"block_height\":276452762,\"logs\":[],\"result\":[102,97,108,115,101]}}"
+   },
+   {
+    "url": "https://near-testnet.drpc.org",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "query",
+     "params": {
+      "request_type": "call_function",
+      "account_id": "bf-usdc-20261101t022248.testnet",
+      "method_name": "storage_balance_of",
+      "args_base64": "eyJhY2NvdW50X2lkIjoiZi11bnJlZ2lzdGVyZWQuYmYtdnQtMjAyNjExMDJ0MDcxNDQ0LnRlc3RuZXQifQ==",
+      "block_id": 276452762
+     }
+    },
+    "status": 200,
+    "text": "{\"id\":\"lc\",\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"CKfiGZddTawuEq5NMigykmVLmQowfihbDbTE2aTAhBWR\",\"block_height\":276452762,\"logs\":[],\"result\":[110,117,108,108]}}"
+   },
+   {
+    "url": "https://test.rpc.fastnear.com",
+    "asked": null,
+    "method": "POST",
+    "request": {
+     "jsonrpc": "2.0",
+     "id": "lc",
+     "method": "query",
+     "params": {
+      "request_type": "call_function",
+      "account_id": "bf-usdc-20261101t022248.testnet",
+      "method_name": "is_blocklisted",
+      "args_base64": "eyJhY2NvdW50X2lkIjoiZi11bnJlZ2lzdGVyZWQuYmYtdnQtMjAyNjExMDJ0MDcxNDQ0LnRlc3RuZXQifQ==",
+      "block_id": 276452762
+     }
+    },
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"CKfiGZddTawuEq5NMigykmVLmQowfihbDbTE2aTAhBWR\",\"block_height\":276452762,\"logs\":[],\"result\":[102,97,108,115,101]},\"id\":\"lc\"}"
+   }
+  ],
+  "note": "a stand-in helper on localhost quoting the deployed testnet answer with fee_recipient swapped for f-unregistered.bf-vt-20261102t071444.testnet (never registered); every RPC answer is the real testnet's"
+ }
+}

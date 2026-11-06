@@ -155,3 +155,26 @@ test("the network rule reads the token ids only: the deployed wasm passes; the s
   assert.equal(networkProblems(Buffer.from(`${TESTNET_TOKEN}\0${MAINNET_USDC}`)).length, 1);
   assert.deepEqual(networkProblems(Buffer.from(`${TESTNET_TOKEN}\0mainnet`)), []);
 });
+
+// Card vault-review-fixes-1 (F-6): this vault was deployed before one-receipt payouts, so its code still imports
+// promise_and; readVault lets exactly its bytes on its own account through (vault-skeleton.mjs
+// DEPLOYED_BEFORE_ONE_RECEIPT), and nothing else.
+const promiseBad = (r) => bads(r).filter((l) => l.includes("promise imports") && /, not allowed: promise_and$/.test(l));
+
+test("planted: a promise_and build whose sha256 is not on the list (the v1 code plus one custom section, the record set to it): FAIL on its promise imports", async () => {
+  const v1 = Buffer.from(good().find((a) => a.params.request_type === "view_code").json.result.code_base64, "base64");
+  const other = Buffer.concat([v1, Buffer.from([0, 5, 4, ...Buffer.from("note")])]);
+  const sha = createHash("sha256").update(other).digest("hex");
+  const answers = good().map((a) => (a.params.request_type === "view_code" ? { ...a, json: { ...a.json, result: { ...a.json.result, code_base64: other.toString("base64") } } } : a));
+  const r = await check({ sleep: NOSLEEP, deployment: { ...deployment, wasm_sha256: sha }, fetchFn: replay(answers) });
+  assert.equal(r.ok, false);
+  assert.equal(promiseBad(r).length, 2, r.lines.join("\n"));
+});
+
+test("planted: the listed v1 bytes on an account that is not its own: FAIL on its promise imports", async () => {
+  const other = "vault.bf-vt-other.testnet";
+  const answers = good().map((a) => (a.params.account_id === deployment.account_id ? { ...a, params: { ...a.params, account_id: other } } : a));
+  const r = await check({ sleep: NOSLEEP, deployment, account: other, fetchFn: replay(answers) });
+  assert.equal(r.ok, false);
+  assert.equal(promiseBad(r).length, 2, r.lines.join("\n"));
+});

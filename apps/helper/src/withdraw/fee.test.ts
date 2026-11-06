@@ -47,10 +47,20 @@ function replay(rec: Rec) {
     const k = `${c.url} ${c.method} ${JSON.stringify(c.params)}`;
     left.set(k, [...(left.get(k) ?? []), c.result]);
   }
+  // check 7b's two views of the fee recipient (card vault-review-fixes-1) were not recorded on 2026-11-02: they are
+  // answered ready, at the block asked, with the hash that block's recorded header gave
+  const hashes = new Map<number, string>();
   const rpc = (url: string): Rpc => async (method, params) => {
+    const p = params as Record<string, unknown>;
+    if (method === "query" && (p.method_name === "storage_balance_of" || p.method_name === "is_blocklisted")) {
+      const v = p.method_name === "is_blocklisted" ? false : { total: "1250000000000000000000", available: "0" };
+      return { block_height: p.block_id, block_hash: hashes.get(p.block_id as number), result: [...Buffer.from(JSON.stringify(v))], logs: [] };
+    }
     const q = left.get(`${url} ${method} ${JSON.stringify(params)}`);
     if (!q || q.length === 0) throw new Error(`not recorded: ${url} ${method} ${JSON.stringify(params)}`);
-    return structuredClone(q.shift());
+    const r = structuredClone(q.shift()) as { header?: { height: number; hash: string } };
+    if (method === "block" && r.header) hashes.set(r.header.height, r.header.hash);
+    return r;
   };
   const pair = (n: "mainnet" | "testnet") => [rpc(rec.pairs[n][0]), rpc(rec.pairs[n][1])] as const;
   return { pair };
@@ -161,6 +171,9 @@ type World = {
   /** Changes one provider's answer (1 = the second). */
   plant?: (who: 0 | 1, method: string, params: Record<string, unknown>, result: Record<string, unknown>) => Record<string, unknown> | Error;
   poolJson?: Record<string, unknown>;
+  /** The fee recipient's storage_balance_of (set unless false) and is_blocklisted answer (false unless given). */
+  feeRegistered?: boolean;
+  feeListed?: unknown;
 };
 const hashOf = (h: number) => `${"H".repeat(32)}${h.toString().padStart(9, "1").replace(/0/g, "z")}`;
 /** RPC calls the world answered, all providers together. */
@@ -179,6 +192,10 @@ function worldPair(w: () => World): [Rpc, Rpc] {
       result = { block_height: params.block_id, block_hash: hashOf(params.block_id as number), result: [...Buffer.from(JSON.stringify(pool))] };
     } else if (method === "query" && params.method_name === "storage_balance_bounds") {
       result = { block_height: params.block_id, block_hash: hashOf(params.block_id as number), result: [...Buffer.from('{"min":"1250000000000000000000","max":"1250000000000000000000"}')] };
+    } else if (method === "query" && (params.method_name === "storage_balance_of" || params.method_name === "is_blocklisted")) {
+      // the release's fee recipient, as the quote's hold reads it (card vault-review-fixes-1)
+      const v = params.method_name === "is_blocklisted" ? (x.feeListed ?? false) : x.feeRegistered === false ? null : { total: "1250000000000000000000", available: "0" };
+      result = { block_height: params.block_id, block_hash: hashOf(params.block_id as number), result: [...Buffer.from(JSON.stringify(v))] };
     } else throw new Error(`unexpected ${method}`);
     const out = x.plant ? x.plant(who, method, params, result) : result;
     if (out instanceof Error) throw out;
@@ -203,6 +220,17 @@ test("the world as recorded quotes 207,609, naming the relayer and its fee recip
   assert.equal(a.relay_fee, "207609");
   assert.equal(a.relayer_account, RELAYER.relayer_account);
   assert.equal(a.fee_recipient, RELAYER.fee_recipient);
+});
+
+// The review of the fee check (card vault-review-fixes-1, finding 2): while POST holds for check 7b, the quote holds too,
+// so a device never proves, reserves and resends against a relayer that cannot carry it. GET answers 503 upstream
+// (the route's answer to FeeReadRefused) and the device stops before any proof (wallet withdraw/relay.ts askWithdrawFee).
+test("the quote holds while the fee account is not ready: unregistered or blocklisted is refused, a blocklist answer that is no boolean is refused, ready quotes", async () => {
+  await refused({ ...base(), feeRegistered: false }, /relayer fee account not ready/);
+  await refused({ ...base(), feeListed: true }, /relayer fee account not ready/);
+  await refused({ ...base(), feeListed: "false" }, /is_blocklisted\(fee_recipient\)/);
+  await refused({ ...base(), plant: (who, m, p, r) => (who === 1 && p.method_name === "is_blocklisted" ? { ...r, result: [...Buffer.from("true")] } : r) }, /is_blocklisted at block \d+: the providers' bytes differ/);
+  assert.equal((await quoterOn(base).quote(USDC)).relay_fee, "207609");
 });
 
 test("the relayer's accounts are checked when the quoter is made", () => {
@@ -383,14 +411,14 @@ test("one read per network at a time, its answer served for FEE_CACHE_MS: concur
   calls.n = 0;
   await Promise.all([q.quote(USDC), q.quote(USDC), q.quote(USDC)]);
   const one = calls.n;
-  assert.equal(one, 6, "two finals, then the pool and the minimum on both providers");
+  assert.equal(one, 10, "two finals, then the pool and the minimum on both providers, then check 7b's two views of the fee account on both");
   clock += 999;
   await q.quote(USDC);
   await q.reads("mainnet").feeMin(body(RD_MIN));
   assert.equal(calls.n, one, "within FEE_CACHE_MS of the read: no new read");
   clock += 2;
   await q.quote(USDC);
-  assert.equal(calls.n, 2 * one, "past it: one new read");
+  assert.equal(calls.n, one + 6, "past it: one new priced read; the fee account at the same final block is not read again");
 });
 
 test("a pending read is shared however long it takes; a refusal is served as a refusal for FEE_CACHE_MS, then read again", async () => {
