@@ -177,6 +177,13 @@ test("a RESERVED note holds its request body (card signpage-withdraw-handoff): w
   const held = await t.ns.move(a.id, "UNSPENT", "HELD", { deadlineMs: 77n, context: "51" });
   for (const bad of ["", "not json", "[1]", "null", "x".repeat(NOTE_REQUEST_MAX + 1)])
     await assert.rejects(t.ns.move(a.id, "HELD", "RESERVED", { attempt: held.attempt, request: bad }), /request/, JSON.stringify(bad.slice(0, 12)));
+  // a JSON object over the bound is refused for its size, not its shape; one at the bound is taken
+  const pad = (n: number) => JSON.stringify({ pad: "x".repeat(n - '{"pad":""}'.length) });
+  assert.equal(new TextEncoder().encode(pad(NOTE_REQUEST_MAX + 1)).length, NOTE_REQUEST_MAX + 1);
+  await assert.rejects(t.ns.move(a.id, "HELD", "RESERVED", { attempt: held.attempt, request: pad(NOTE_REQUEST_MAX + 1) }), new RegExp(`at most ${NOTE_REQUEST_MAX} B`));
+  const big = await landed(t.ns, 5n, 54n, 9n);
+  const hbig = await t.ns.move(big.id, "UNSPENT", "HELD", { deadlineMs: 77n, context: "54" });
+  assert.equal((await t.ns.move(big.id, "HELD", "RESERVED", { attempt: hbig.attempt, request: pad(NOTE_REQUEST_MAX) })).request!.length, NOTE_REQUEST_MAX);
   const res = await t.ns.move(a.id, "HELD", "RESERVED", { attempt: held.attempt, request: body });
   assert.equal(res.request, body);
   assert.equal((await t.ns.get(a.id))!.request, body, "read back as written");

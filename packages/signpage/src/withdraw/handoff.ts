@@ -209,8 +209,10 @@ export type SettlePass = { outcomes: Record<string, RelayOutcome["kind"] | "spen
  * The settle pass a page runs on load (modelled on ../../../wallet/src/pool/solana-restore.ts solanaSettleReserved):
  * every RESERVED note of the network's vault scope that holds its request is followed by relayWithdraw, its stored
  * bytes sent again while the relayer's check still takes them: a nullifier spent on both RPCs writes the change note
- * and SPENT (landed), block time on both past its deadline_ms with no spend frees it (expired), and a spend whose change
- * is not the device's (unmatched) leaves it SPENT, the change left to a restore. A HELD note no live tab holds was freed
+ * and SPENT (landed), block time on both past its deadline_ms with no spend frees it (expired), a ragequit of it
+ * (context 0, no change) leaves it SPENT (spent), and any other spend whose new leaf is not the device's change is a
+ * drift: it stays RESERVED and reads "unmatched", as relayWithdraw writes nothing for it. A note whose stored request
+ * cannot be read fails alone ("failed"), the others still followed. A HELD note no live tab holds was freed
  * when the note store opened (../../../wallet/src/notes/store.ts settle: its tab lock is gone). One that cannot be
  * settled now (no answer, sign out, the wait's bound) stays RESERVED for the next pass.
  */
@@ -228,8 +230,12 @@ export async function withdrawSettle(page: HandoffPage, over: HandoffOver = {}):
   const going: [string, Promise<RelayOutcome>][] = [];
   try {
     for (const n of due) {
-      const req = storedRequest(n);
-      going.push([n.id, relay(seed, req, { notes, network, rpcs, priceRpcs, fetchFn, signal: waitSignal(page, over) })]);
+      // one note's bad stored request (or a relay that throws at once) fails that note alone; the pass goes on
+      try {
+        going.push([n.id, relay(seed, storedRequest(n), { notes, network, rpcs, priceRpcs, fetchFn, signal: waitSignal(page, over) })]);
+      } catch (e) {
+        going.push([n.id, Promise.reject(e)]);
+      }
     }
   } finally {
     seed.fill(0);
@@ -237,8 +243,13 @@ export async function withdrawSettle(page: HandoffPage, over: HandoffOver = {}):
   for (const [id, p] of going) {
     try {
       const o = await p;
-      if (o.kind === "unmatched") await notes.move(id, "RESERVED", "SPENT");
-      out.outcomes[id] = o.kind === "unmatched" ? "spent" : o.kind;
+      // a spend whose new leaf is not this seed's change: only a ragequit (context 0, vault.md l.99) inserts no change,
+      // so that alone is SPENT here; any other is a drift (relay.ts writes nothing, restore.ts stops): it stays
+      // RESERVED, "unmatched" for the form to show, never dropped
+      if (o.kind === "unmatched" && o.spend.context === 0n) {
+        await notes.move(id, "RESERVED", "SPENT");
+        out.outcomes[id] = "spent";
+      } else out.outcomes[id] = o.kind;
     } catch {
       out.outcomes[id] = "failed";
     }

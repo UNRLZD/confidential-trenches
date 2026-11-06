@@ -401,14 +401,36 @@ test("page death after RESERVED or in the relay's wait: the settle pass sends th
   assert.ok(zeroed(p.opened[0]!));
 });
 
-test("the settle pass on a spend whose change is not the device's (unmatched): the note is SPENT, never held for good", async () => {
+test("the settle pass on a ragequit of the note (context 0, no change inserted): SPENT, its request dropped", async () => {
   const v = await world([5_000_000n]);
   const req = await leftReserved(v);
-  const pass = await settleWith(v, async () => ({ kind: "unmatched", spend: {} as never }));
+  const pass = await settleWith(v, async () => ({ kind: "unmatched", spend: { context: 0n } as never }));
   assert.deepEqual(pass.outcomes, { [req.noteId]: "spent" });
   const n = (await v.ns.get(req.noteId))!;
   assert.equal(n.state, "SPENT");
   assert.equal(n.request, undefined);
+});
+
+test("the settle pass on a withdraw whose new leaf is not the device's change (a drift): RESERVED with its request, unmatched, never dropped", async () => {
+  const v = await world([5_000_000n]);
+  const req = await leftReserved(v);
+  const pass = await settleWith(v, async () => ({ kind: "unmatched", spend: { context: 123n } as never }));
+  assert.deepEqual(pass.outcomes, { [req.noteId]: "unmatched" });
+  const n = (await v.ns.get(req.noteId))!;
+  assert.equal(n.state, "RESERVED");
+  assert.equal(n.request, JSON.stringify(req.body));
+});
+
+test("the settle pass: one note's stored request that cannot be read fails that note alone; the others are followed", async () => {
+  const v = await world([5_000_000n, 6_000_000n]);
+  const [a, b] = await v.ns.list();
+  const bad = await v.ns.move(a!.id, "UNSPENT", "HELD", { deadlineMs: 1n, context: "7" });
+  await v.ns.move(a!.id, "HELD", "RESERVED", { attempt: bad.attempt, request: "{}" }); // JSON, not a request body
+  const req = await leftReserved(v);
+  assert.equal(req.noteId, b!.id);
+  const pass = await settleWith(v, async (_s, r) => expired(v, r));
+  assert.deepEqual(pass.outcomes, { [a!.id]: "failed", [b!.id]: "expired" });
+  assert.equal((await v.ns.get(a!.id))!.state, "RESERVED");
 });
 
 test("the settle pass's relay throws (no answer, sign out): the note stays RESERVED with its request for the next pass", async () => {
@@ -437,4 +459,128 @@ test("T is the lower of the pair's final block times, refused when they differ b
   assert.equal(await lowerFinalTime([at("1030000000000"), at("1000000000000")]), "1000000000000");
   await assert.rejects(lowerFinalTime([at("61000000001"), at("1000000000")]), /over 60 s/);
   await assert.rejects(lowerFinalTime([at("1"), { ...at("1"), block: async () => ({ error: { name: "X" } }) }]), /not a final block/);
+});
+
+// ---------- the real relayWithdraw: the seed zeroed right after the call (it copies the seed before its first await) ----------
+const { relayWithdraw } = await import("../../wallet/src/withdraw/relay.ts");
+const BLOCK_MS = 1_800_000_000_000;
+type Spend = { nh: bigint; withdrawn: bigint; newLeaf: number; context: bigint; h: number };
+// the wallet's withdraw-relay.test.ts Chain: a model vault's pages on the testnet release pair
+class Chain {
+  height = 175_000_000;
+  times = new Map<number, bigint>([[this.height, BigInt(BLOCK_MS)]]);
+  leaves: { v: bigint; h: number }[] = Array.from({ length: 8 }, (_, k) => ({ v: BigInt(100 + k), h: 0 }));
+  spends: Spend[] = [{ nh: 41n, withdrawn: 1_000_000n, newLeaf: 7, context: 43n, h: 0 }];
+  status = "in_flight";
+  land(nh: bigint, withdrawn: bigint, leaf: bigint, context: bigint): void {
+    this.leaves.push({ v: leaf, h: this.height });
+    this.spends.push({ nh, withdrawn, newLeaf: this.leaves.length - 1, context, h: this.height });
+  }
+  views(at: number) {
+    const leaves = this.leaves.filter((l) => l.h <= at);
+    const spends = this.spends.filter((s) => s.h <= at);
+    const tree = (n: number) => ({ size: n, depth: n <= 1 ? 0 : Math.ceil(Math.log2(n)), root: "7" });
+    return {
+      state_tree: tree(leaves.length),
+      label_tree: tree(0),
+      spends: spends.map((s, index) => ({
+        index, nullifier_hash: String(s.nh), withdrawn: String(s.withdrawn), new_leaf_index: s.newLeaf, refund_precommitment: "5",
+        refund_value: "0", refund_label: "0", refund_leaf_index: 0, status: this.status,
+        payer: "relayer.confidential.unrlzd.near", reserve: "0", recipient: "a".repeat(64), fee: "30000", context: String(s.context),
+      })),
+      leaves: leaves.map((l) => String(l.v)),
+    } as Record<string, unknown>;
+  }
+  rpcs(): [RelayRpc, RelayRpc] {
+    const one = (name: string): RelayRpc => ({
+      name,
+      query: async (p) => {
+        const at = p.finality === "final" ? this.height : (p.block_id as number);
+        const args = JSON.parse(atob(p.args_base64 as string)) as { from?: number; limit?: number };
+        let view = this.views(at)[p.method_name as string];
+        if (Array.isArray(view)) view = view.slice(Math.min(args.from!, view.length), Math.min(args.from! + args.limit!, view.length));
+        return { jsonrpc: "2.0", id: "x", result: { block_hash: `hash-${at}`, block_height: at, logs: [], result: [...new TextEncoder().encode(JSON.stringify(view))] } };
+      },
+      block: async (p) => {
+        const block_id = "block_id" in p ? p.block_id : this.height;
+        const t = this.times.get(block_id)!;
+        return { jsonrpc: "2.0", id: "x", result: { header: { height: block_id, hash: `hash-${block_id}`, timestamp: 0, timestamp_nanosec: (t * 1_000_000n).toString(), gas_price: "100000000" } } };
+      },
+    });
+    return [one(T.fastnear[0]), one(T.drpc)];
+  }
+}
+const sig = (r: WithdrawRequest, k: number): bigint => BigInt(r.body.public_signals[k]);
+/** The real relayWithdraw, called synchronously (as the hand-off and the settle pass call it), its own spend landed first. */
+const realRelayLanded = (c: Chain): HandoffOver["relay"] => (seed, req, deps) => {
+  c.land(sig(req, 1), sig(req, 2), sig(req, 0), sig(req, 7));
+  return relayWithdraw(seed, req, { ...deps, rpcs: c.rpcs() });
+};
+
+test("hand-off with the real relayWithdraw: the seed zeroed after the call, its own spend is still landed with the change note", async () => {
+  const v = await world([5_000_000n]);
+  const p = page(v);
+  const h = await handoffOf(v, p, { relay: realRelayLanded(new Chain()) });
+  assert.deepEqual(await h({ recipient: "alice.testnet", amount: 3_000_000n }, RELAY_FEE), { kind: "landed" });
+  assert.ok(zeroed(p.opened[0]!));
+  const change = (await v.ns.list()).find((n) => n.ref.kind === "change");
+  assert.ok(change, "the change note is written");
+  assert.equal(change!.state, "UNSPENT");
+});
+
+test("settle pass with the real relayWithdraw: a stored request whose own spend landed is settled landed, its change written", async () => {
+  const v = await world([5_000_000n]);
+  const req = await leftReserved(v);
+  const p = page(v);
+  const pass = await settleWith(v, realRelayLanded(new Chain()), p);
+  assert.deepEqual(pass.outcomes, { [req.noteId]: "landed" });
+  const change = (await v.ns.list()).find((n) => n.ref.kind === "change");
+  assert.ok(change, "the change note is written (an 'unmatched' here would mark the note SPENT with no change)");
+  assert.equal((await v.ns.get(req.noteId))!.state, "SPENT");
+  assert.ok(zeroed(p.opened[0]!));
+});
+
+test("settle pass: two passes (two tabs) on one RESERVED note, both with the real relay: one change note, the note SPENT, neither pass throws", async () => {
+  const v = await world([5_000_000n]);
+  const req = await leftReserved(v);
+  const c = new Chain();
+  c.land(sig(req, 1), sig(req, 2), sig(req, 0), sig(req, 7));
+  const relay: HandoffOver["relay"] = (seed, r, deps) => relayWithdraw(seed, r, { ...deps, rpcs: c.rpcs() });
+  const tabB = await openNoteStore(v.w);
+  const pB = { ...page(v), notes: async () => tabB };
+  const [a, b] = await Promise.all([settleWith(v, relay), settleWith(v, relay, pB as never)]);
+  tabB.close();
+  const kinds = [a.outcomes[req.noteId], b.outcomes[req.noteId]].sort();
+  const changes = (await v.ns.list()).filter((n) => n.ref.kind === "change");
+  assert.equal(changes.length, 1, "one change note");
+  assert.equal((await v.ns.get(req.noteId))!.state, "SPENT");
+  assert.deepEqual(kinds, ["landed", "landed"], `outcomes ${kinds.join(",")}`);
+});
+
+test("settle pass: a RESERVED vault note with no stored request is skipped and left RESERVED", async () => {
+  const v = await world([5_000_000n]);
+  const [n] = await v.ns.list();
+  const held = await v.ns.move(n!.id, "UNSPENT", "HELD", { deadlineMs: 1n, context: "7" });
+  await v.ns.move(n!.id, "HELD", "RESERVED", { attempt: held.attempt });
+  let called = 0;
+  const p = page(v);
+  const pass = await settleWith(v, async () => { called += 1; throw new Error("x"); }, p);
+  assert.deepEqual(pass.outcomes, {});
+  assert.equal(called, 0);
+  assert.equal(p.opened.length, 0);
+  assert.equal((await v.ns.get(n!.id))!.state, "RESERVED", "nothing on this page ever frees it");
+});
+
+test("the settle pass: a RESERVED vault note with no stored request is skipped and left RESERVED", async () => {
+  const v = await world([5_000_000n]);
+  const [n] = await v.ns.list();
+  const held = await v.ns.move(n!.id, "UNSPENT", "HELD", { deadlineMs: 1n, context: "7" });
+  await v.ns.move(n!.id, "HELD", "RESERVED", { attempt: held.attempt });
+  let called = 0;
+  const p = page(v);
+  const pass = await settleWith(v, async () => { called += 1; throw new Error("x"); }, p);
+  assert.deepEqual(pass.outcomes, {});
+  assert.equal(called, 0);
+  assert.equal(p.opened.length, 0);
+  assert.equal((await v.ns.get(n!.id))!.state, "RESERVED", "nothing on this page ever frees it");
 });
