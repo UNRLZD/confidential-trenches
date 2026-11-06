@@ -198,7 +198,10 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
  * precommitment the pool already holds, and a sell signed in advance whose deposit reverted is signed again on `next`.
  * Only a Deposited at or below `finalBlock` (the round's finalized anchor, evmTreeSync's `fin`) is `taken`, so a note
  * is stored only from a block that never moves; one in the tail above it is `pending`: passed over for `next`, never
- * written, and taken at a later round once its block is final (a reorg that drops it leaves the note as it was).
+ * written, and taken at a later round once its block is final (a reorg that drops it leaves the note as it was). If
+ * that reorg drops it and nothing else lands on its precommitment, the chain holds a gap in the walk that a restore
+ * from the words stops at (evmRestore's second arrivals); the device still holds every note, and its next call names
+ * that empty note as `next`, so the next signature fills the gap.
  */
 export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly EvmPoolEvent[], first: NoteRef, finalBlock: bigint): { taken: EvmRestoredNote[]; pending: NoteRef[]; next: { ref: NoteRef; precommitment: bigint } } {
   if (typeof finalBlock !== "bigint" || finalBlock < 0n) throw new Error("finalBlock: the round's finalized block number");
