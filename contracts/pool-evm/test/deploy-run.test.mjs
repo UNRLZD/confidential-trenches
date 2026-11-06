@@ -1318,7 +1318,8 @@ test("review: a completed run's journal with its record missing is refused, neve
   assert.equal(journalOf(m).complete, true);
   rmSync(m.out);
   const made = c.created.length;
-  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  // a fresh key would deploy again (the mock chain models one key, so stop the run at once if one is made)
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, onLine: (l) => { if (/\(made in this run/.test(l)) throw new Error("a fresh run key was made"); } });
   assert.match(String(r.error?.message), /a completed run deployed base's pool with the run key 0x[0-9a-f]{40}, but its record .* is missing: restore the record .*nothing was sent/, why(c));
   assert.equal(c.created.length, made, "nothing deployed again");
   assert.ok(existsSync(m.journal), "the journal stays where it is");
