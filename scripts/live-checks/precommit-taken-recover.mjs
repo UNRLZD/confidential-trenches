@@ -4,7 +4,7 @@
 // precommit-taken-recover.run.json, written by packages/signpage/scripts/pool-deposit-taken-devnet.mjs (the signing
 // page's runPoolDeposit, src/pool-deposit.ts, with a seed made in that run): a stranger's key S deposited MIN_DEPOSIT on
 // the precommitment of U's pending send, which the pool then refused, and the flow went on.
-// On each of the page's two devnet RPCs (RPCS below), at finalized:
+// On the first two devnet operators that answer (RPCS below, the page's own pair first), at finalized:
 //   - S's deposit: no error, signed and paid by S (not U), calling the pinned program;
 //   - U's deposit of the ask's rung on the next note: no error, signed and paid by U;
 //   - each of the two notes the run stored UNSPENT (the restored one and the next one): its precommitment's mark
@@ -21,14 +21,15 @@
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MARK_TAG, PRE_MARK_LEN, account, be32, hex, labelOf, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
-import { HELPER, PIN } from "./signpage-pool-flow.mjs";
+import { MARK_TAG, PRE_MARK_LEN, DEVNET_PROVIDERS, account, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
+import { PIN } from "./signpage-pool-flow.mjs";
 import { vaultCommitment } from "../../packages/kit/src/index.ts";
 
 const KEY = "precommit-taken-recover";
-/** The page's own testnet pair, which the run read on (packages/signpage/src/pool-testnet.ts TESTNET_RPCS.solana): the
- *  public devnet endpoint and the helper's keyed /v1/rpc/solana-devnet, another operator's. */
-export const RPCS = ["https://api.devnet.solana.com", `${HELPER}/v1/rpc/solana-devnet`];
+/** The devnet list (pool-sol-deploy.mjs DEVNET_PROVIDERS), whose first two are the page's own testnet pair, which the run read on
+ *  (packages/signpage/src/pool-testnet.ts TESTNET_RPCS.solana): the public devnet endpoint and the helper's keyed
+ *  /v1/rpc/solana-devnet, another operator's; a provider that is out moves the read to the next (onTwoOperators). */
+export const RPCS = DEVNET_PROVIDERS;
 export const RUN = new URL("./precommit-taken-recover.run.json", import.meta.url);
 /** The pool's smallest deposit, contracts/pool-solana/src/lib.rs:78: what the stranger sent. */
 export const MIN_DEPOSIT = 1_000_000n;
@@ -54,7 +55,8 @@ export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), preco
   const pre = precommitment ?? restored?.precommitment;
   const tx = run.answer?.txs?.[0]?.hash;
   say(run.cluster === "devnet" && run.program === PIN.program && run.pool === PIN.pool, `the run is on the pinned devnet pool: ${run.cluster}, ${run.program}, ${run.pool}`);
-  say(new Set(rpcs.slice(0, 2).map((u) => new URL(u).hostname)).size === 2, `two RPCs: ${rpcs.slice(0, 2).join(", ")}`);
+  const problems = operatorProblems(rpcs, "devnet");
+  say(problems.length === 0, `two devnet operators or more, in order: ${rpcs.join(", ")}${problems.length ? `: ${problems.join("; ")}` : ""}`);
   say(run.answer?.stage === "filled" && run.answer.txs?.length === 1 && typeof tx === "string", `the run's answer is filled with U's one tx: ${JSON.stringify(run.answer)}`);
   say(!!restored && restored.state === "UNSPENT" && restored.precommitment === run.taken?.precommitment && restored.leaf?.value === String(MIN_DEPOSIT),
     `the restored note is the deposit note on the taken precommitment, UNSPENT at MIN_DEPOSIT ${MIN_DEPOSIT}: ${restored ? `${restored.state} at ${restored.leaf?.value}` : "none"}`);
@@ -64,7 +66,7 @@ export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), preco
   say(run.S !== run.U, `the stranger S ${run.S} is not U ${run.U}`);
   const prog = run.program;
   const scope = scopeOf(prog, poolAddress(prog).address);
-  for (const url of rpcs.slice(0, 2)) {
+  const walk = await onTwoOperators(rpcs, (u) => operatorOf(u, "devnet"), fetchFn, async (url, say, fetchFn) => {
     const at = `on ${url}`;
     try {
       for (const [name, sig, payer] of [["the stranger's deposit", run.taken?.signature, run.S], ["U's deposit", tx, run.U]]) {
@@ -101,9 +103,11 @@ export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), preco
         }
       }
     } catch (e) {
+      if (e?.transient) throw e;
       say(false, `read ${at}: ${String(e.message).split("\n")[0]}`);
     }
-  }
+  });
+  for (const [pass, text] of walk.lines) pass === null ? lines.push(`info ${text}`) : say(pass, text);
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
