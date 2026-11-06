@@ -327,25 +327,35 @@ test("--only SellDelegate deploys the delegate alone at nonce 0, constructed wit
   assert.ok(c.logs.some((l) => /^deploy: done\. Next: node scripts\/live-checks\/evm-selldelegate-exact-debit\.mjs --deployment /.test(l)), why(c));
 });
 
+// git as sinkOf runs it, faked: origin/main fetched and present, and the checkout's kit sell-sender file the same as
+// main's (`diff` answers `diffStatus`); every call is kept
+const fakeGit = (diffStatus = 0, calls = []) => (...a) => (calls.push(a), { status: a[0] === "diff" ? diffStatus : 0 });
+const KIT_PIN_FILE = "packages/kit/src/trade/evm/buy-unpinned.ts";
+
 test("--only FeeCollector deploys the fee collector alone beside the chain's set (card evm-fee-collector), constructed with the sell sender the kit pins; its record names it and its sink; the sweep lands", OPTS, async (t) => {
   const { evmPoolVenues } = await import("../../../packages/kit/src/index.ts");
   for (const name of ["base-sepolia", "robinhood-testnet"]) {
     const sink = evmPoolVenues()[name].sellSender.toLowerCase();
     assert.match(sink, /^0x[0-9a-f]{40}$/, `the kit pins ${name}'s sell sender`);
     assert.equal(CHAINS[name].contracts.includes("FeeCollector"), false, "beside the 3 Nov set, not in it");
-    assert.equal(await sinkOf(name), sink);
+    assert.equal(await sinkOf(name, { git: fakeGit() }), sink);
   }
   const c = chain();
-  const r = await run(t, c, { args: ["--only", "FeeCollector"] });
+  const r = await run(t, c, { args: ["--only", "FeeCollector"], io: { sinkOf: (n) => sinkOf(n, { git: fakeGit() }) } });
   assert.equal(r.error, null, String(r.error?.message) + why(c));
   settled(c, r);
-  const sink = (await sinkOf("base-sepolia"));
+  const sink = (await sinkOf("base-sepolia", { git: fakeGit() }));
   assert.deepEqual(r.record.contracts, { FeeCollector: { address: createAddress(r.record.deployer, 0), sink } });
   assert.deepEqual(r.record.txs.map((x) => x.step), ["deploy FeeCollector", "sweep (the run key's rest back)"]);
   assert.deepEqual(c.created, [init("FeeCollector") + sink.slice(2).padStart(64, "0")]);
   assert.ok(c.logs.some((l) => /^deploy: done\. Next: node scripts\/live-checks\/evm-fee-collector\.mjs --deployment /.test(l)), why(c));
+  // both mainnets: the sink is the sell sender the kit pins there (card evm-mainnet-senders)
+  for (const name of ["base", "robinhood"]) {
+    const pin = evmPoolVenues()[name].sellSender.toLowerCase();
+    assert.match(pin, /^0x[0-9a-f]{40}$/, `the kit pins ${name}'s sell sender`);
+    assert.equal(await sinkOf(name, { git: fakeGit() }), pin, name);
+  }
   // a chain whose sell sender the kit does not pin gets no collector: refused before a key is made
-  await assert.rejects(sinkOf("base"), /the kit pins no sell sender on base, the FeeCollector's sink: nothing was sent/);
   const c2 = chain();
   const r2 = await run(t, c2, { args: ["--only", "FeeCollector"], io: { sinkOf: async () => { throw new Error("the kit pins no sell sender on base-sepolia, the FeeCollector's sink: nothing was sent"); } } });
   assert.match(String(r2.error?.message), /the kit pins no sell sender/);
@@ -365,7 +375,8 @@ test("--only takes the sell delegate alone: any other contract, or none named, i
 // ---- the mainnets (card pool-evm-deploy-mainnet): the owner's paste runs deploy.mjs --mainnet --chain <base|robinhood> ----
 const BASE = MAINNETS.base;
 const MAIN = ["--chain", "base", "--mainnet", "--rpc", BASE.rpcs[0]];
-// a constructed sell sender pin, FeeCollector's sink on the mainnet runs here (the kit pins none on a mainnet yet)
+// a constructed sell sender pin, FeeCollector's sink on the mainnet runs here (io.sinkOf; the kit's own mainnet pins
+// are read in the --only FeeCollector test above), with no code on the mock chain
 const PIN = "0x5151515151515151515151515151515151515151";
 /** a mainnet chain (Base's id) where the return address E is a wallet in use (it holds ETH); a run's own key folder
  * and record path in a fresh folder */
@@ -539,7 +550,7 @@ test("mainnet: the paste deploys six contracts in ORDER, FeeCollector last, cons
   assert.ok(c.logs.includes(`deploy: FeeCollector's sink ${PIN}, the sell sender the kit pins on base`), why(c));
 });
 
-test("mainnet: with no sell sender pinned (sinkOf throws, as with the kit today) the paste is refused before any key folder, any send and any funding line", OPTS, async (t) => {
+test("mainnet: with no sell sender pinned (sinkOf throws, as it does for a chain the kit pins none on) the paste is refused before any key folder, any send and any funding line", OPTS, async (t) => {
   const m = room(t);
   const c = mainnet();
   const io = { ...m.io, sinkOf: async () => { throw new Error("the kit pins no sell sender on base, the FeeCollector's sink: nothing was sent"); } };
@@ -574,6 +585,57 @@ test("mainnet: a stopped run's collector is reused only with the sink this paste
   for (const n of ORDER) assert.equal(c.created.filter((d) => createdBy(d) === n).length, 1, `${n} made once`);
   assert.equal(r3.record.contracts.FeeCollector.sink, PIN);
   assert.equal(r3.record.contracts.FeeCollector.address, createAddress(c.deployer, 5));
+});
+
+/** nothing of a run was made: no run key read on chain, no key folder, no journal, no send, no funding line */
+const nothingMade = (c, m) => {
+  assert.equal(c.deployer, null, "no run key was read on chain" + why(c));
+  assert.deepEqual(folders(m.keys), [], "no key folder");
+  assert.equal(existsSync(m.journal), false, "no journal");
+  assert.equal(c.calls.filter((x) => x.method === "eth_sendRawTransaction").length, 0, "nothing sent");
+  assert.ok(!c.logs.some((l) => /^deploy: (waiting for|send exactly)/.test(l)), "no funding line" + why(c));
+};
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+
+test("mainnet: sinkOf reads the pin only as origin/main has it: a checkout whose kit sell-sender file differs from main's, a failed fetch or no origin/main is refused, and the paste makes nothing", OPTS, async (t) => {
+  const { evmPoolVenues } = await import("../../../packages/kit/src/index.ts");
+  const calls = [];
+  assert.equal(await sinkOf("base", { git: fakeGit(0, calls) }), evmPoolVenues().base.sellSender.toLowerCase());
+  assert.deepEqual(calls, [["fetch", "-q", "origin", "main"], ["rev-parse", "--verify", "-q", "origin/main"], ["diff", "--quiet", "origin/main", "--", KIT_PIN_FILE]], "fetched, then the checkout's file compared with main's");
+  const says = (re) => (e) => re.test(e.message);
+  await assert.rejects(sinkOf("base", { git: fakeGit(1) }), says(new RegExp(`^${escape(KIT_PIN_FILE)} in this checkout differs from origin/main's: .*nothing was sent`)));
+  await assert.rejects(sinkOf("base", { git: fakeGit(128) }), says(new RegExp(`^${escape(KIT_PIN_FILE)} could not be compared with origin/main's: nothing was sent`)));
+  await assert.rejects(sinkOf("base", { git: (...a) => ({ status: a[0] === "fetch" ? 1 : 0 }) }), says(/^git fetch origin main failed, so main's sell sender pin could not be read: nothing was sent/));
+  await assert.rejects(sinkOf("base", { git: (...a) => ({ status: a[0] === "rev-parse" ? 1 : 0 }) }), says(/^origin\/main is not in this checkout, so main's sell sender pin could not be read: nothing was sent/));
+  // the paste in a checkout whose kit file differs: refused before anything is made
+  const m = room(t);
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, io: { ...m.io, sinkOf: (n) => sinkOf(n, { git: fakeGit(1) }) }, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /differs from origin\/main's/, why(c));
+  nothingMade(c, m);
+});
+
+test("mainnet: a sink with code (an EIP-7702 delegation) on either of the run's RPCs is refused before any key; a testnet --only FeeCollector too", OPTS, async (t) => {
+  const DELEGATED = "0xef0100" + "77".repeat(20);
+  for (const on of BASE.rpcs) {
+    const m = room(t);
+    const c = mainnet();
+    const fetch0 = c.fetch;
+    c.fetch = async (u, init) => {
+      const { method, params } = JSON.parse(init.body);
+      if (method === "eth_getCode" && u === on && String(params[0]).toLowerCase() === PIN) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: DELEGATED }) };
+      return fetch0(u, init);
+    };
+    const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+    assert.match(String(r.error?.message), new RegExp(`^the FeeCollector's sink ${PIN} has code on ${escape(on)} \\(23 bytes\\).*nothing was sent`), on + why(c));
+    nothingMade(c, m);
+  }
+  const c = chain();
+  c.code.set(PIN, DELEGATED);
+  const r = await run(t, c, { args: ["--only", "FeeCollector"], io: { sinkOf: async () => PIN } });
+  assert.match(String(r.error?.message), new RegExp(`^the FeeCollector's sink ${PIN} has code on `), why(c));
+  assert.equal(c.deployer, null, "refused before a run key exists");
+  assert.equal(c.created.length, 0, "nothing deployed");
 });
 
 test("mainnet: a run stopped after two deploys keeps its key and writes no record; the same paste resumes with that key, reuses both contracts once read back on both RPCs as the build's, deploys only the rest, and its record lists every transaction", OPTS, async (t) => {
@@ -655,6 +717,7 @@ test("mainnet review: a run killed during its sweep leaves its record; the paste
   });
   assert.equal(r.error, null, String(r.error?.message) + why(c));
   assert.ok(snap.record, "the record is written before the sweep");
+  assert.equal(JSON.parse(snap.record).contracts.FeeCollector.sink, PIN, "the completed run's record holds the sink");
   // the disk as a hard kill at the sweep leaves it: that journal and record, the key folder
   writeFileSync(m.journal, snap.journal);
   writeFileSync(m.out, snap.record);
@@ -671,6 +734,7 @@ test("mainnet review: a run killed during its sweep leaves its record; the paste
   assert.ok(c.balanceOf(E) > 0n, "the rest went back to the return address");
   const rec = JSON.parse(readFileSync(m.out, "utf8"));
   assert.ok(rec.txs.some((x) => x.hash === sweepTx), "the killed run's sweep is in the record");
+  assert.deepEqual(rec.contracts.FeeCollector, { address: rec.contracts.FeeCollector.address, sink: PIN }, "--sweep-kept keeps the collector's sink: " + JSON.stringify(rec.contracts.FeeCollector));
   assert.equal(rec.txs.length, Number(c.nonce.get(c.deployer)), "the record lists every transaction of the key" + why(c));
   assert.deepEqual(folders(m.keys), [], "the key folder is removed");
 });
@@ -890,6 +954,7 @@ test("mainnet review 2: a resumed run killed during its sweep has a record namin
     assert.equal(tx?.contract, n, `${n}'s deploy names its contract`);
     assert.equal(c.receipts.get(tx.hash).contractAddress, d.contracts[n].address, n);
   }
+  assert.equal(d.contracts.FeeCollector.sink, PIN, "--sweep-kept keeps the collector's sink: " + JSON.stringify(d.contracts.FeeCollector));
   assert.equal(d.txs.length, Number(c.nonce.get(c.deployer)), "every transaction of the key" + why(c));
   assert.deepEqual(folders(m.keys), []);
 });
