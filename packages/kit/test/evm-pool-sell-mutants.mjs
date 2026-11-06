@@ -42,6 +42,7 @@ const FEETO = "pool-review-3 L-1: the fee recipient is";
 const FEETOSIG = "pool-review-3 L-1: W's Sell signature binds";
 const CALL = "pool-review-3 L-1: SellDelegate.sell's calldata";
 const FEECOLL = "card evm-testnet-delegate-review3: a pinned sell pays";
+const SIGNCOLL = "card evm-testnet-delegate-review3: the pinned signer refuses";
 
 // [file, text, replacement, the test that must fail]
 export const MUTANTS = [
@@ -141,6 +142,9 @@ export const MUTANTS = [
   [SELL, 'if (lower(built.feeRecipient) !== lower(feeCollector)) return refuse("not_pinned", `the sell\'s fee recipient is not ${chain}\'s pinned FeeCollector`);', "", FEECOLL],
   [SELL, "if (lower(built.feeRecipient) !== lower(feeCollector))", "if (lower(req.feeRecipient) !== lower(feeCollector))", FEECOLL],
   [BUY, 'feeCollector: ownPin(v, "feeCollector")', "feeCollector: (v as { feeCollector?: string }).feeCollector", FEECOLL],
+  [SELL, "if (BUILT.has(built) && lower(built.feeRecipient) !== lower(collector)) return refuse(", "if (false) return refuse(", SIGNCOLL],
+  [SELL, 'if (collector === undefined) return refuse("not_deployed", `${chain} has no pinned FeeCollector to sign a sell for yet`);', "", SIGNCOLL],
+  [SELL, "lower(built.feeRecipient) !== lower(collector)", "built.feeRecipient !== collector", SIGNCOLL],
   // no read of a pin reaches Object.prototype (the review of 8d8675d): the list has no prototype, a pin is an own key
   [BUY, "(venues ??= bare({", "(venues ??= Object.freeze({", "M370 a polluted Object.prototype names no pool"],
   [BUY, "    base: bare({", "    base: Object.freeze({", "M370 a polluted Object.prototype names no pool"],

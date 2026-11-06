@@ -84,12 +84,14 @@ const eth = (wei) => `${Number(wei) / 1e18} ETH`;
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lower = (a) => a.toLowerCase();
 
-// Each testnet the run knows: its two RPCs (the money gate's), the token and its pools, the chain's quoters. Base
+// Each testnet the run knows: its two RPCs (the kit's pinned providers, the pair the device's pool sync pages the pool's
+// logs on: never sepolia.base.org, which caps eth_getLogs at 200 blocks and held run 1 of card
+// evm-testnet-delegate-review3 2134 s in its syncs), the token and its pools, the chain's quoters. Base
 // Sepolia's addresses are Uniswap's published testnet deployments (developers.uniswap.org), each read on chain on
 // 4 Nov: V4Quoter.poolManager() is the pinned PoolManager, QuoterV2.factory() the v3 factory 0x4752ba5D…aD24.
 export const NETS = Object.freeze({
   "base-sepolia": Object.freeze({
-    rpcs: ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
+    rpcs: [...kit.evmPoolVenues()["base-sepolia"].providers],
     // the restore's Transfer reads go to other providers (evmRestoreNotes names no W to a pool provider): the wallet's
     // own list, one source for the device and the run (cards wallet-restore-transfer-rpcs, evm-transfer-rpc-spares)
     walletRpcs: EVM_TRANSFER_RPCS["base-sepolia"],
@@ -110,7 +112,7 @@ export const NETS = Object.freeze({
   // block go to the kit pin's providers instead (Robinhood's own and dRPC, which keep state 600 s back; PublicNode
   // keeps about 15 s: card evm-buy-hookdata-fee, fold 3), as feeRpcs below.
   "robinhood-testnet": Object.freeze({
-    rpcs: ["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"],
+    rpcs: [...kit.evmPoolVenues()["robinhood-testnet"].providers],
     walletRpcs: EVM_TRANSFER_RPCS["robinhood-testnet"],
     op: false,
     coin: "0x10e626a1d0857174b9a5bdb7a1397068811fbbbc", // the token bought: tSPILL
@@ -567,7 +569,8 @@ export async function main(args, io = {}) {
       go();
       await release(notes.findLast((n) => !n.spent && n.ref.kind !== "return"), CHUNK, v);
     }
-    // 5. each W sells what it bought back into the pool, on the venue it bought through
+    // 5. each W sells what it bought back into the pool, on the venue the device's sell quote picks, which can differ
+    // from the buy's (Base Sepolia run 3 of card evm-testnet-delegate-review3: a v3 buy, a v4 sell)
     for (const b of bought) {
       go();
       await sellOf(b);

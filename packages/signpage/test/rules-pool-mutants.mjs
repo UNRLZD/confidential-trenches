@@ -13,6 +13,7 @@ import { runSync } from "../../../scripts/group-run.mjs";
 const POOL = fileURLToPath(new URL("../src/rules/pool.ts", import.meta.url));
 const TEST = "rules-pool.test.ts";
 const ONWARD = "rules-pool-onward.test.ts";
+const ATTACKS = "rules-pool-attacks.test.ts";
 const testOf = (file) => fileURLToPath(new URL(`./${file}`, import.meta.url));
 const MUTANT_SRC = fileURLToPath(new URL(`../src/rules/.pool-mutant-${process.pid}.ts`, import.meta.url));
 const mutantTestOf = (file) => fileURLToPath(new URL(`./.${file.replace(/\.test\.ts$/, "")}-mutant-${process.pid}.test.ts`, import.meta.url));
@@ -186,6 +187,10 @@ export const MUTANTS = [
   ['if (d.op === "pool.withdraw" || d.op === "pool.sell") lines.push(["To", d.to]);', "", WDOK],
   ['if (d.back !== null) lines.push(["To private balance", poolUnits(d.back, asset)]);', "", SELL],
   ['const frac = (amount % base).toString().padStart(decimals, "0").replace(/0+$/, "");', 'const frac = (amount % base).toString().replace(/0+$/, "");', SELL],
+  // the review of 14196e5c (card evm-testnet-delegate-review3): a sell is recorded as checked only after every rule, and
+  // the pin side of the fee recipient rule is lower-cased (test/rules-pool-attacks.test.ts A9)
+  ['if (!evmIsQuotedSell(built)) return refuse("not_quoted");\n  const chain = evmChainOf(ask, testnet);\n  const pins = evmPins(ctx, chain);\n', 'if (!evmIsQuotedSell(built)) return refuse("not_quoted");\n  const chain = evmChainOf(ask, testnet);\n  const pins = evmPins(ctx, chain);\n  passed("evm.sell", built, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId });\n', "ATTACK A9", ATTACKS],
+  ['if (lower(built.feeRecipient) !== lower(pins.feeCollector)) return refuse("fee_recipient");', 'if (lower(built.feeRecipient) !== pins.feeCollector) return refuse("fee_recipient");', "ATTACK A9", ATTACKS],
   // the EVM onward send (W's second step of a withdraw): each refusal, and the signer's
   ['if (ask.kind !== "pool.withdraw") return refuse("kind");\n  const chain', "const chain", ONC, ONWARD],
   ['if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");', "", ONC, ONWARD],

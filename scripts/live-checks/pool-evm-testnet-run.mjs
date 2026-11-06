@@ -112,10 +112,14 @@ const word = (x) => BigInt(x).toString(16).padStart(64, "0");
 // before it, which the runs before card evm-testnet-delegate-review3 went through (pool-evm-testnet-run.<chain>.json,
 // e.g. Base Sepolia 0x32bb0d25..., input 0xbea5695c on sepolia.base.org and base-sepolia-rpc.publicnode.com)
 export const SELL_SELECTOR = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)");
-/** The sell the SellDelegate at `address` on `chain` dispatches, from the build its code must be: the current build's
- *  11-field sell, or the 10-field one of a build the build file froze at that address (evm-sell-v4's and
- *  evm-selldelegate-exact-debit's delegates) */
-export const sellSelectorOf = (chain, address) => (pinnedBuild(chain, "SellDelegate", address) === BUILD.contracts.SellDelegate ? SELL_SELECTOR : SELL_SELECTOR_10);
+/** The sell the SellDelegate at `address` on `chain` dispatches: the selector of the build its code must be (the build
+ *  file's `sell`, forge's ABI for the current build, the deployed code's for a frozen one), whether that build is current
+ *  or frozen; a build that names none is refused, never given a guess. `build` is the build file (a test's own). */
+export function sellSelectorOf(chain, address, build = BUILD) {
+  const b = pinnedBuild(chain, "SellDelegate", address, build);
+  if (!/^0x[0-9a-f]{8}$/.test(b?.sell ?? "")) throw new Error(`the SellDelegate build at ${address} on ${chain} names no sell selector (pool-evm-deploy.build.json "sell")`);
+  return b.sell;
+}
 export const SELL_SELECTOR_10 = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)");
 /** The target W signed, from a SellDelegate.sell call's input (the Sell tuple's third word, in both shapes), or null
  *  when the input is not a call of `selector`, the sell the run's delegate dispatches. */

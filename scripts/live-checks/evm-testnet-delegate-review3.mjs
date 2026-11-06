@@ -4,29 +4,31 @@
 // redeployed alone (contracts/pool-evm/script/deploy.mjs --only SellDelegate) on Base Sepolia and Robinhood testnet,
 // pinned by the kit, and sold through by HELPER_HOST on each chain. For each redeploy
 // (evm-testnet-delegate-review3.<chain>.json), on two RPCs of two operators:
-//   - the checks of evm-sell-v4.mjs (its code, both immutables and getters, no admin, the run's transactions, the swept
-//     run key) with `current`: its code the current build of pool-evm-deploy.build.json, never one the build file froze
-//     (main's pins at the exact-debit delegates held a frozen 10-field build and passed evm-venues-pin);
-//   - its code dispatches the 11-field sell the kit signs (PUSH4 0x0c2cb9ca, pool-evm-testnet-run.mjs SELL_SELECTOR)
-//     and not the 10-field one (0xbea5695c, SELL_SELECTOR_10), which main's pinned delegates dispatch;
-//   - the kit's pinned sellDelegate for the chain is the record's address.
+//   - the checks of evm-sell-v4.mjs (its code the build pool-evm-deploy.build.json pins to its address, both immutables
+//     and getters, no admin, the run's transactions, the swept run key);
+//   - that build names the 11-field sell (its `sell`, 0x0c2cb9ca, pool-evm-testnet-run.mjs SELL_SELECTOR), and the code
+//     dispatches it and not the 10-field one (0xbea5695c, SELL_SELECTOR_10), which main's pinned delegates dispatched.
+//   Nothing reads today's kit pin or today's build: when a later card moves the pin or rebuilds the delegate (the build
+//   file then freezes this build at its address), this end state stays true and the check passes.
 // Then:
 //   - HELPER_HOST's fee answer for each testnet pool (GET /v1/pool/fee?pool=): fee_collector is the kit's feeCollector
 //     pin and sell_sender the kit's sellSender pin;
 //   - each run through it (evm-testnet-delegate-review3.run.<chain>.json, written by contracts/pool-evm/script/
 //     testnet-run.mjs --sell-helper --out): pool-evm-testnet-run's checkSells (the whole run on both RPCs, each helper
 //     sell a type-4 transaction from the fee answer's sell_sender whose one authorization names the record's delegate),
-//     and each helper sell's receipt, on both RPCs, carries the kit's FeeCollector's Paid(W, fee): from the collector,
-//     topics [Paid, W], one data word at least the sell's fee; and every chain has a run that sold through the helper
-//     after its redeploy.
+//     each sell sent by the helper's sell sender of the runs' time (RUN_SENDERS), through the delegate pinned when it ran;
+//     each helper sell's Sell pays the FeeCollector deployed on its chain (evm-fee-collector.<chain>.json, the kit's pin
+//     when it ran, and the run record's feeTo), and its receipt, on both RPCs, carries that collector's Paid(W, fee):
+//     topics [Paid, W], one data word exactly the sell's fee (the collector emits msg.value); and every chain has a run
+//     that sold through the helper after its redeploy.
 //   node scripts/live-checks/evm-testnet-delegate-review3.mjs [--base <url>] [--record <file>] [--write-record]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes { notes, rpcs, deployments, good, bad, helper, runs } to <file> (evm-testnet-delegate-review3.answers.json,
 // which the test replays), keeping the file's recorded bad answers (main 0628a2d5's pins); --write-record, on PASS,
 // writes the run record evm-testnet-delegate-review3.md (Money path: yes, one Tx line per transaction of the redeploys,
 // the runs and each run key's funding), which the money gate reads back.
-// Runs: after each helper deploy (scripts/ci/helper-live-checks.mjs): the fee answer is HELPER_HOST's; the rest is
-// chain state that a later deploy cannot change but a kit pin move would
+// Runs: after each helper deploy (scripts/ci/helper-live-checks.mjs): the fee answer is HELPER_HOST's, checked against
+// the kit's pins of that deploy; the rest is chain state no later deploy or pin move changes
 import "../net-window.mjs";
 import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -36,7 +38,7 @@ import { check as sellCheck, runRecordFor } from "./evm-sell-v4.mjs";
 import { BASE, checkSells } from "./helper-evm-sender.mjs";
 import { recorder as runRecorder } from "./notes-per-pool-evm.mjs";
 import { keccak, recorder as deployRecorder, rpc } from "./pool-evm-deploy.mjs";
-import { RPCS as RUN_RPCS, SELL_SELECTOR, SELL_SELECTOR_10, runRecord as runLinesOf, spoil } from "./pool-evm-testnet-run.mjs";
+import { RPCS as RUN_RPCS, SELL_SELECTOR, SELL_SELECTOR_10, runRecord as runLinesOf, sellSelectorOf, spoil } from "./pool-evm-testnet-run.mjs";
 
 export const KEY = "evm-testnet-delegate-review3";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -60,12 +62,20 @@ export const FUNDINGS = Object.freeze({
 });
 const push4 = (sel) => `63${sel.slice(2)}`;
 
-/** evm-sell-v4's check with `current` (the build, never a frozen one), plus: the code at the record's address dispatches
- *  the 11-field sell and not the 10-field one on both RPCs, and the kit pins that address */
+/** evm-sell-v4's check (the code is the build the build file pins to the record's address), plus: that build names the
+ *  11-field sell, and the code dispatches it and not the 10-field one on both RPCs. Nothing here reads today's kit pin or
+ *  today's build: a later pin move or rebuild (the build file then freezes this one at its address) leaves it true. */
 export async function check(o) {
-  const r = await sellCheck({ ...o, current: true });
+  const r = await sellCheck(o);
   const a = String(o.deployment?.contracts?.SellDelegate?.address ?? "").toLowerCase();
-  let ok = r.ok;
+  let built = "";
+  try {
+    built = sellSelectorOf(o.deployment?.chain, a, o.build);
+  } catch (e) {
+    built = String(e.message).split("\n")[0];
+  }
+  let ok = r.ok && built === SELL_SELECTOR;
+  r.lines.push(`${built === SELL_SELECTOR ? "ok  " : "FAIL"} the build pinned to SellDelegate ${a} on ${o.deployment?.chain} names the 11-field sell ${SELL_SELECTOR}: ${built}`);
   for (const url of (o.rpcs ?? []).slice(0, 2)) {
     let pass = false;
     let said = "";
@@ -81,12 +91,24 @@ export async function check(o) {
     r.lines.push(`${pass ? "ok  " : "FAIL"} SellDelegate ${a} dispatches the 11-field sell the kit signs, not the 10-field one, on ${url}: ${said}`);
     ok &&= pass;
   }
-  const venues = o.venues ?? evmPoolVenues();
-  const pin = Object.hasOwn(venues, o.deployment?.chain) ? venues[o.deployment.chain].sellDelegate : undefined;
-  const pinned = !!pin && pin.toLowerCase() === a;
-  r.lines.push(`${pinned ? "ok  " : "FAIL"} the kit pins SellDelegate ${a} on ${o.deployment?.chain}: ${pin ?? "none"}`);
-  return { ok: ok && pinned, lines: r.lines };
+  return { ok, lines: r.lines };
 }
+
+/** The FeeCollector card evm-fee-collector deployed on `chain` (evm-fee-collector.<chain>.json, never a dry run): the one
+ *  the kit pinned when the runs sold, which each sell's Paid must come from */
+export function collectorAt(chain) {
+  const f = path.join(HERE, `evm-fee-collector.${chain}.json`);
+  const r = existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null;
+  const a = lower(r?.dryRun === false ? r.contracts?.FeeCollector?.address : "");
+  return ADDRESS.test(a) ? a : null;
+}
+
+// The helper's sell sender on each testnet when the runs sold (the kit's sellSender pins at e80ff359, equal to HELPER_HOST's
+// fee answers then, answers.json "helper"): the recorded sells are held to these, never to a later pin or fee answer
+export const RUN_SENDERS = Object.freeze({
+  "base-sepolia": "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553",
+  "robinhood-testnet": "0xd12d83097671d731df2db731e973ad9a07673607",
+});
 
 // The fundings of the sell runs' run keys from wallet E, by run key, each read back as succeeded on both of its
 // chain's RPCs, 6 Nov 18:21-18:51Z
@@ -97,7 +119,7 @@ export const RUN_FUNDINGS = Object.freeze({
   "0x75cafd9315fcc8a68aa75c8437f381a4dfa51431": "0x43c3add967cbe23d14d26d8150eae4813f079c195b8564a9e49eefac7a4df5b9",
   // base-sepolia: run 2, stopped (v4 had no liquidity)
   "0xa25c61ded77b60653a7eedec8d11ca275f68147b": "0xce1abea343de87a3bad0835d52a9bdad65244e29d807bc1ae7e5948064cb8f52",
-  // base-sepolia: run 3, the run that sold (v3)
+  // base-sepolia: run 3, the run that sold (a v3 buy, a v4 sell)
   "0xf8351fe1ddc748f51c08b42d14868abf181d8c4a": "0x0047b367037dbf268969919630fb7e8c41f9e5266a8fa8893378a8150289c267",
 });
 const E = "0x49f2425b7f33f3a10912de8add6839226ce663a2";
@@ -116,7 +138,15 @@ export function runRecord(ds, runs = [], runFundings = RUN_FUNDINGS, paid = []) 
   const runTx = run.filter((l) => l.startsWith("Tx: "));
   const runFund = runs.map((r) => `Tx: ${r.chain} ${fundOf(r)}`);
   const runNotes = runs.map((r) => `${r.chain}: the sell run's key ${r.relayer} was funded from the team's testnet wallet E (${E}) by ${fundOf(r)}, read back as succeeded on both RPCs.`);
-  for (const p of paid) runNotes.push(`${p.chain}: the helper's sell ${p.hash} carries Paid(from ${p.w}, value ${p.value} wei), emitted by the FeeCollector ${p.collector}, the kit's pin, on ${p.urls.join(" and ")}.`);
+  for (const p of paid) {
+    // the venues of W's buy and of this sell, from the run's own rows: the device's sell quote picks the sell's venue,
+    // which can differ from the buy's
+    const txs = runs.find((r) => r.txs.some((t) => t.hash === p.hash))?.txs ?? [];
+    const sell = txs.find((t) => t.hash === p.hash);
+    const buy = txs.find((t) => t.kind === "buy" && lower(t.w) === lower(sell?.w));
+    const how = sell?.venue && buy?.venue ? ` (a ${buy.venue} buy, a ${sell.venue} sell)` : "";
+    runNotes.push(`${p.chain}: the helper's sell ${p.hash}${how} carries Paid(from ${p.w}, value ${p.value} wei, exactly the sell's fee), emitted by the FeeCollector ${p.collector}, the kit's pin when it ran, on ${p.urls.join(" and ")}.`);
+  }
   return [...head.slice(0, i), ...fund, ...runTx, ...runFund, ...head.slice(i), ...notes, ...runNotes, "", ...run.slice(run.findIndex((l) => l === "") + 1)].join("\n");
 }
 
@@ -143,37 +173,41 @@ export function checkHelper(answers, venues = evmPoolVenues()) {
 /** Whether receipt `r` carries `collector`'s Paid(W, value >= fee), not removed */
 export function paidIn(r, collector, w, fee) {
   const word = (x) => "0x" + lower(x).replace(/^0x/, "").padStart(64, "0");
-  return (r?.logs ?? []).some((l) => l && l.removed !== true && lower(l.address) === collector && Array.isArray(l.topics) && l.topics.length === 2 && lower(l.topics[0]) === PAID && lower(l.topics[1]) === word(w) && /^0x[0-9a-f]{64}$/.test(lower(l.data)) && BigInt(l.data) >= fee);
+  return (r?.logs ?? []).some((l) => l && l.removed !== true && lower(l.address) === collector && Array.isArray(l.topics) && l.topics.length === 2 && lower(l.topics[0]) === PAID && lower(l.topics[1]) === word(w) && /^0x[0-9a-f]{64}$/.test(lower(l.data)) && BigInt(l.data) === fee);
 }
 
 /** The runs through the delegate: checkSells, each helper sell's Paid log on both RPCs, and each chain with a helper
  *  sell after its redeploy */
-export async function checkRuns(runs, transportOf, deployments, senders, venues = evmPoolVenues()) {
+export async function checkRuns(runs, transportOf, deployments, senders = RUN_SENDERS, collectorOf = collectorAt) {
   const s = await checkSells(runs, transportOf, senders);
   const lines = s.lines.map((l) => (l.startsWith("ok ") ? `ok   ${l.slice(3)}` : `FAIL ${l.slice(4)}`));
   let ok = s.ok;
   const paid = [];
   for (const run of runs) {
     const rec = run.record;
-    const collector = lower(venues[rec.chain]?.feeCollector);
+    const collector = collectorOf(rec.chain) ?? "";
     const urls = run.urls ?? RUN_RPCS[rec.chain];
     const transport = transportOf(run);
     for (const t of rec.txs.filter((x) => x.kind === "sell" && x.via === "helper")) {
       let pass = false;
       let said = "";
       try {
-        // sell(Sell, uint256 fee, bytes): the fee is the call's second head word
+        // sell(Sell, uint256 fee, bytes): the fee is the call's second head word; the Sell's feeRecipient its field 8, at
+        // the tuple's offset (the first head word)
         const tx = await transport(urls[0], "eth_getTransactionByHash", [t.hash]);
-        const fee = BigInt(`0x${String(tx.result?.input).slice(10 + 64, 10 + 128)}`);
+        const input = lower(tx.result?.input);
+        const fee = BigInt(`0x${input.slice(10 + 64, 10 + 128)}`);
+        const at = 10 + Number(BigInt(`0x${input.slice(10, 10 + 64)}`)) * 2 + 8 * 64;
+        const recipient = `0x${input.slice(at + 24, at + 64)}`;
         const rs = await Promise.all(urls.map((u) => transport(u, "eth_getTransactionReceipt", [t.hash])));
-        pass = ADDRESS.test(collector) && fee > 0n && rs.every((x) => !("error" in x) && x.result?.status === "0x1" && paidIn(x.result, collector, t.w, fee));
+        pass = ADDRESS.test(collector) && input.startsWith(SELL_SELECTOR) && recipient === collector && lower(t.feeTo) === collector && fee > 0n && rs.every((x) => !("error" in x) && x.result?.status === "0x1" && paidIn(x.result, collector, t.w, fee));
         const log = pass ? rs[0].result.logs.find((l) => lower(l.address) === collector && lower(l.topics?.[0]) === PAID) : null;
         if (log) paid.push({ chain: rec.chain, hash: t.hash, collector, w: lower(t.w), value: String(BigInt(log.data)), urls });
-        said = `fee ${fee}${log ? `, Paid value ${BigInt(log.data)}` : ""}`;
+        said = `fee ${fee}, the Sell's feeRecipient ${recipient}, the record's feeTo ${lower(t.feeTo)}${log ? `, Paid value ${BigInt(log.data)}` : ""}`;
       } catch (e) {
         said = String(e.message).split("\n")[0];
       }
-      lines.push(`${pass ? "ok  " : "FAIL"} ${rec.chain} sell ${t.hash}: its receipt carries the FeeCollector ${collector || "(none)"}'s Paid(W ${lower(t.w)}, at least the fee) on ${urls.join(" and ")}: ${said}`);
+      lines.push(`${pass ? "ok  " : "FAIL"} ${rec.chain} sell ${t.hash}: the Sell pays the FeeCollector ${collector || "(none)"} and its receipt carries its Paid(W ${lower(t.w)}, exactly the fee) on ${urls.join(" and ")}: ${said}`);
       ok &&= pass;
     }
   }
@@ -224,7 +258,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const r = await checkRuns(runs, (run) => {
       if (!recs.has(run)) recs.set(run, runRecorder());
       return recs.get(run).transport;
-    }, out.deployments, h.senders);
+    }, out.deployments);
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     ok &&= r.ok;
     for (const run of runs) {

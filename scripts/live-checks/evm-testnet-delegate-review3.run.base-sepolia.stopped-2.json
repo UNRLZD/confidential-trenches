@@ -58,5 +58,5 @@
       "gasUsed": "21000"
     }
   ],
-  "stopped": "Stopped before its buy: the device's v4 buy quote refused (partial_fill: a hookless hop runs out of liquidity, NotEnoughLiquidity) on Base Sepolia's hookless v4 pool; its finally withdrew the deposit note to its W and swept that W and the run key back to E. The next run bought through v3."
+  "stopped": "Stopped before its buy: the device's v4 buy quote refused (partial_fill: a hookless hop runs out of liquidity, NotEnoughLiquidity) on Base Sepolia's hookless v4 pool; its finally withdrew the deposit note to its W and swept that W and the run key back to E. The next run bought through v3 and sold through v4."
 }

@@ -468,7 +468,8 @@ test("M370 a pinned sell pays only into the chain's pinned pool", () => {
   // a pool the caller names is not read: the pin is the pool
   const built = pinnedBuildSell(PINNED, "base", { ...pinnedReq, pool: "0xBADBADBADBADBADBADBADBADBADBADBADBADBAD0" } as typeof pinnedReq);
   assert.equal(built.pool, PIN_POOL);
-  assert.equal(code(() => pinnedSignSell(PINNED, W_KEY, "base", evmPoolBuildSell("base", req({ pool: "0xBADBADBADBADBADBADBADBADBADBADBADBADBAD0" })))), "not_pinned");
+  // paying the pinned collector, so the pool alone is what the signer refuses
+  assert.equal(code(() => pinnedSignSell(PINNED, W_KEY, "base", evmPoolBuildSell("base", req({ pool: "0xBADBADBADBADBADBADBADBADBADBADBADBADBAD0", feeRecipient: PIN_COLLECTOR })))), "not_pinned");
   assert.equal(code(() => pinnedSignSell(PINNED, W_KEY, "base", { ...built })), "not_built");
   assert.equal(hex(pinnedSignSell(PINNED, W_KEY, "base", built)), hex(evmPoolSignSell(W_KEY, "base", built)));
   // no pool, every other pin there: the pool's own refusal, not the collector's
@@ -519,6 +520,10 @@ test("M370 a polluted Object.prototype names no pool and no delegate: every sell
       assert.equal(code(() => pinnedBuildSell(noPins, chain, r)), "not_deployed", chain);
       assert.equal(code(() => pinnedSignSell(noPins, W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL }))), "not_deployed", chain);
       assert.equal(code(() => pinnedSignSellAuthorization(noPins, W_KEY, chain, 0n)), "not_deployed", chain);
+      // a list that pins the collector but no pool: the polluted pool is not read, so the pool's own refusal
+      const collectorOnly = Object.freeze({ ...noPins, [chain]: Object.freeze({ ...noPins[chain as "base"], feeCollector: PIN_COLLECTOR }) });
+      assert.equal(code(() => pinnedBuildSell(collectorOnly, chain, { ...r, feeRecipient: PIN_COLLECTOR })), "not_deployed", chain);
+      assert.equal(code(() => pinnedSignSell(collectorOnly, W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL, feeRecipient: PIN_COLLECTOR }))), "not_deployed", chain);
     }
   });
   assert.equal(({} as Record<string, unknown>).pool, undefined, "the prototype is emptied again");
@@ -527,6 +532,23 @@ test("M370 a polluted Object.prototype names no pool and no delegate: every sell
 // card evm-testnet-delegate-review3: SellDelegate pays a sale's fee to the Sell's signed feeRecipient (pool-review-3,
 // L-1), and the helper sends only a Sell that pays the network's FeeCollector, whose Paid log proves the fee
 // (apps/helper pool/evm.ts): the pinned builder takes no other recipient, and a chain that pins no collector no sale
+// the review of 14196e5c's probe: a sell built under one venue list (its collector another address) and signed under
+// another list with the same pool is refused by the signer, which holds the fee recipient to its own list's collector
+test("card evm-testnet-delegate-review3: the pinned signer refuses a sell whose fee recipient is not its own list's FeeCollector (not_pinned), lower-cased on both sides", () => {
+  const OTHER = "0x00000000000000000000000000000000000bad01";
+  const listA = Object.freeze({ ...PINNED, base: Object.freeze({ ...PINNED.base, feeCollector: OTHER }) });
+  const built = pinnedBuildSell(listA, "base", { ...pinnedReq, feeRecipient: OTHER });
+  assert.equal(built.pool, PIN_POOL);
+  assert.equal(code(() => pinnedSignSell(PINNED, W_KEY, "base", built)), "not_pinned");
+  assert.equal(pinnedSignSell(listA, W_KEY, "base", built).length, 65);
+  // the pin in another case is the same address
+  const upper = Object.freeze({ ...PINNED, base: Object.freeze({ ...PINNED.base, feeCollector: PIN_COLLECTOR.toUpperCase().replace("0X", "0x") }) });
+  assert.equal(pinnedSignSell(upper, W_KEY, "base", pinnedBuildSell(PINNED, "base", pinnedReq)).length, 65);
+  // a list with the pool but no collector signs no sell
+  const noCollector = Object.freeze({ ...PINNED, base: Object.freeze({ ...B, pool: PIN_POOL, sellDelegate: PIN_DELEGATE }) });
+  assert.equal(code(() => pinnedSignSell(noCollector, W_KEY, "base", built)), "not_deployed");
+});
+
 test("card evm-testnet-delegate-review3: a pinned sell pays its fee only to the chain's pinned FeeCollector (not_pinned otherwise), and a chain that pins none takes no sell (not_deployed)", () => {
   const built = pinnedBuildSell(PINNED, "base", pinnedReq);
   assert.equal(built.feeRecipient, PIN_COLLECTOR);

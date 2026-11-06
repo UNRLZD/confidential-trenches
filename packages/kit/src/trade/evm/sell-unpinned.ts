@@ -582,10 +582,13 @@ export function pinnedBuildSell(venues: EvmPoolVenueList, chain: EvmPoolChain, r
 
 /** evmPoolSignSellUnpinned of a sell into the chain's pinned pool only. */
 export function pinnedSignSell(venues: EvmPoolVenueList, secretKey: Uint8Array, chain: EvmPoolChain, built: EvmPoolSell): Uint8Array {
-  const pool = pinsOf(venues, chain).pool;
+  const { pool, feeCollector: collector } = pinsOf(venues, chain);
   if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool to sign a sell into yet`);
-  // a sell the builder did not return is left to the unpinned signer, which refuses it (not_built)
+  if (collector === undefined) return refuse("not_deployed", `${chain} has no pinned FeeCollector to sign a sell for yet`);
+  // a sell the builder did not return is left to the unpinned signer, which refuses it (not_built); one it built under
+  // another venue list is held to this list's pool and FeeCollector again
   if (BUILT.has(built) && lower(built.pool) !== lower(pool)) return refuse("not_pinned", `the sell's pool is not ${chain}'s pinned pool`);
+  if (BUILT.has(built) && lower(built.feeRecipient) !== lower(collector)) return refuse("not_pinned", `the sell's fee recipient is not ${chain}'s pinned FeeCollector`);
   return evmPoolSignSellUnpinned(secretKey, chain, built);
 }
 

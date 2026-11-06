@@ -314,6 +314,10 @@ export function buildOf(outDir = path.join(POOL_DIR, "out")) {
     });
     const r = runtimeOf(a.deployedBytecode.object, immutables);
     contracts[name] = { length: r.length, masked: r.masked, immutables };
+    // a contract with a sell (SellDelegate) records the selector its build dispatches, from forge's own ABI
+    const sells = Object.entries(a.methodIdentifiers ?? {}).filter(([sig]) => sig.split("(")[0] === "sell");
+    if (sells.length > 1) throw new Error(`${name}: ${sells.length} sell methods`);
+    if (sells.length === 1) contracts[name].sell = `0x${sells[0][1]}`;
   }
   return contracts;
 }
@@ -1102,7 +1106,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (args.includes("--write-build")) {
       const file = {
         notes: [
-          "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04, and again for card evm-selldelegate-exact-debit (W's balance of the token falls by exactly the amount) with forge 1.7.1 on 2026-11-04, and for pool review round 2 (R-3: WETH is read only for a route that can pay in it) on 2026-11-05.",
+          "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04, and again for card evm-selldelegate-exact-debit (W's balance of the token falls by exactly the amount) with forge 1.7.1 on 2026-11-04, and for pool review round 2 (R-3: WETH is read only for a route that can pay in it) on 2026-11-05. A contract with a sell method records its selector (`sell`, from forge's methodIdentifiers); each frozen SellDelegate records the one its deployed code dispatches (the ten-field sell's PUSH4 in eth_getCode at every frozen address on both testnets, base-sepolia-rpc.publicnode.com and robinhood-sepolia-rpc.publicnode.com, 2026-11-06).",
         ],
         contracts: buildOf(),
       };
