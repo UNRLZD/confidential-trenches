@@ -8,7 +8,7 @@
 //   nothing for 40 min, and a stuck deploy on a chain whose suggested tip is 0 (as Robinhood's is).
 //   node --test contracts/pool-evm/test/deploy-run.test.mjs     (after a forge build: it reads out/)
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -725,17 +725,35 @@ test("mainnet review: a pool deployed beyond this checkout (origin/main's record
 test("mainnet review: the journal and the record are written whole (a new file renamed over the old), never truncated in place", OPTS, async (t) => {
   const m = room(t);
   const c = mainnet();
-  const inos = [];
+  // a hard link (a .hold path) to the file before its rewrite: it keeps the old file's inode in use, so no later file
+  // can be given its number. A rename over the path leaves the hold with the old bytes and inode, and the path with
+  // new bytes and another inode; a write in place (truncate, then write) changes the hold's bytes too
+  const holds = {};
+  const hold = (file) => {
+    const at = `${file}.hold`;
+    linkSync(file, at);
+    holds[file] = { at, bytes: readFileSync(file, "utf8"), ino: statSync(at).ino };
+  };
+  const held = (file, what) => {
+    const h = holds[file];
+    assert.ok(h, `${what} was held before its rewrite`);
+    assert.equal(readFileSync(h.at, "utf8"), h.bytes, `${what}'s old file keeps its bytes: it was not written in place`);
+    assert.equal(statSync(h.at).ino, h.ino);
+    assert.notEqual(readFileSync(file, "utf8"), h.bytes, `${what} was rewritten`);
+    assert.notEqual(statSync(file).ino, h.ino, `${what} is a new file after its rewrite`);
+  };
+  let journalChecked = false;
   const r = await run(t, c, {
     head: MAIN, io: m.io, outArg: false, out: m.out,
     onLine: (l) => {
-      if (l.startsWith("deploy: waiting for") || l.startsWith("deploy: SellDelegate ")) inos.push(statSync(m.journal).ino);
-      if (l.startsWith("deploy: sweep ")) inos.push(statSync(m.out).ino);
+      if (l.startsWith("deploy: waiting for")) hold(m.journal);
+      if (l.startsWith("deploy: SellDelegate ")) held(m.journal, "the journal"), (journalChecked = true);
+      if (l.startsWith("deploy: sweep ") && !holds[m.out]) hold(m.out);
     },
   });
   assert.equal(r.error, null, String(r.error?.message) + why(c));
-  assert.notEqual(inos[0], inos[1], "the journal is a new file after its rewrite");
-  assert.notEqual(statSync(m.out).ino, inos[2], "the record is a new file after its rewrite");
+  assert.ok(journalChecked, "the journal's rewrite was checked");
+  held(m.out, "the record");
   assert.deepEqual(readdirSync(m.dir).filter((f) => f.includes(".tmp-")), [], "no temporary file is left");
 });
 
