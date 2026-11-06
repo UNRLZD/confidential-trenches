@@ -13,6 +13,8 @@
 //     status 0: each charged its whole cost (the higher receipt's gasUsed x effectiveGasPrice + l1Fee), nothing paid.
 // The Sell's pool, precommitment and fee are read from the transaction's input (the tuple's words 5 and 6 and the fee
 // word, the same in the 10-field Sell these runs used and the 11-field one), W is its `to`.
+// Runs: once, at merge: it reads no host; it runs this commit's evmSaleUnpaid over both testnets' recorded helper sales,
+// read on two public RPCs each, so a deploy changes nothing it reads.
 //   node scripts/live-checks/helper-sender-fee-proof.mjs [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
