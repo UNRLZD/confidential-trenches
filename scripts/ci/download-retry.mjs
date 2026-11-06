@@ -33,6 +33,20 @@
 //    runs under `timeout` on the same command line: a miss still meets the mirror, and live run 42059594658's job
 //    127357435385 crawled 19.5 min on azure.archive.ubuntu.com until the job's limit cancelled it;
 // and scripts/ci/fetch.sh's own curl without curl's retry, as a workflow's.
+// Card ci-cargo-fetch-retry: crates.io answered one bad read and main's test-vault went red twice (runs 42146603371 and
+// 42148449367: ark-poly, curl [56] "OpenSSL SSL_read: unexpected eof" in "Updating crates.io index"); cargo's own three
+// tries come at once. So the gate also refuses (cargoRefusals), per job:
+//  - a cargo command that resolves crates (test, build, check, clippy, run, bench, doc, fetch, tree, vendor, update,
+//    near build, build-sbf, cargo-build-sbf) with no `scripts/ci/retry.sh cargo [+toolchain] fetch --locked` of its
+//    manifest before it in the job (--manifest-path, else the step's working-directory, else ./Cargo.toml), unless
+//    the command itself runs through retry.sh;
+//  - a cargo fetch not run through retry.sh, or without --locked;
+//  - a retried fetch in a job with no cache of cargo's registry before it (Swatinem/rust-cache, or actions/cache
+//    holding ~/.cargo/registry), so a blip is read from the cache when the lock has not moved;
+//  - a script that builds crates itself (CARGO_SCRIPTS: the sandbox harness's run.sh, the Solana dry run) with the
+//    fetch of each manifest it builds not before it in the job;
+//  - deploy.mjs --build-only or --verify-records not run through retry.sh: cargo-near builds them in a container,
+//    where no fetch from the runner reaches.
 import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -285,6 +299,68 @@ export function fetchScriptRefusals(text) {
   return out;
 }
 
+// Cargo's subcommands that read the registry. `metadata` only without --no-deps.
+const CARGO_CMD = /(?:^|[\s;&|(`$])cargo((?:\s+\+\S+)?)\s+(test|build|check|clippy|run|bench|doc|rustdoc|fetch|tree|vendor|update|metadata|near\s+build|build-sbf)(?=\s|$)/;
+const SBF_CMD = /(?:^|[\s;&|(`$])cargo-build-sbf(?=\s|$)/;
+const CONTAINER_BUILD = /\bdeploy\.mjs\b.*\s--(?:build-only|verify-records)(?=\s|$)/;
+const VAULT_MANIFESTS = ["contracts/vault/Cargo.toml", "contracts/vault/tests/mock-token/Cargo.toml", "contracts/vault/tests/harness/probe/Cargo.toml"];
+/** Scripts that run cargo themselves, with the manifests they build: each must be fetched, with retry, before them. */
+export const CARGO_SCRIPTS = [
+  ["harness/run.sh", VAULT_MANIFESTS],
+  ["pool-solana/scripts/dry-run.sh", ["contracts/pool-solana/Cargo.toml"]],
+];
+const manifestOf = (p) => p.replace(/^\.\//, "").replace(/\/\.\//g, "/").replace(/\/+/g, "/");
+/** True when a step before index `at` in a job caches cargo's registry. */
+function registryCached(steps, at) {
+  return steps.slice(0, at).some((s) => /^Swatinem\/rust-cache@/.test(field(s, "uses") ?? "") || ((cacheKind(s) === "" || cacheKind(s) === "/restore") && values(s, "path").some((x) => home(x).startsWith("~/.cargo/registry"))));
+}
+
+/** The cargo rules' refusals in one workflow's text: [line, what]. */
+export function cargoRefusals(yml) {
+  const out = [];
+  const cmds = new Map(runSteps(yml).map((r) => [r.line, r.cmds]));
+  for (const { steps } of jobSteps(yml)) {
+    const fetched = new Set();
+    steps.forEach((step, at) => {
+      const runAt = step.find(([n]) => cmds.has(n));
+      if (!runAt) return;
+      const dir = field(step, "working-directory");
+      const manifestIn = (seg) => manifestOf(unquote(/--manifest-path(?:\s+|=)(\S+)/.exec(seg)?.[1] ?? `${dir ? `${dir}/` : ""}Cargo.toml`));
+      for (const [n, cmd] of cmds.get(runAt[0])) {
+        for (const seg of cmd.split(/&&|\|\||[;|]/)) {
+          const retried = (idx) => seg.slice(0, idx).includes(RETRY);
+          const need = (what, idx, m) => {
+            if (!retried(idx) && !fetched.has(m)) out.push([n, `${what} of ${m} with no ${RETRY} cargo fetch --locked of it before it in its job: ${seg.trim()}`]);
+          };
+          const c = CARGO_CMD.exec(seg);
+          if (c && !(c[2] === "metadata" && /\s--no-deps(?=\s|$)/.test(seg))) {
+            const sub = c[2].replace(/\s+/g, " ");
+            if (sub !== "fetch") need(`a cargo ${sub}`, c.index, manifestIn(seg));
+            else if (!retried(c.index)) out.push([n, `a cargo fetch not run through ${RETRY}: ${seg.trim()}`]);
+            else if (!/\s--locked(?=\s|$)/.test(seg)) out.push([n, `a cargo fetch without --locked: ${seg.trim()}`]);
+            else {
+              if (!registryCached(steps, at)) out.push([n, `a cargo fetch in a job with no cache of cargo's registry before it (Swatinem/rust-cache, or actions/cache on ~/.cargo/registry): ${seg.trim()}`]);
+              fetched.add(manifestIn(seg));
+            }
+          }
+          const sbf = SBF_CMD.exec(seg);
+          if (sbf && !/\s(?:--version|-V|--help|-h)(?=\s|$)/.test(seg)) need("a cargo-build-sbf", sbf.index, manifestIn(seg));
+          for (const [script, ms] of CARGO_SCRIPTS) {
+            const at2 = seg.indexOf(script);
+            if (at2 < 0 || retried(at2)) continue;
+            const missing = ms.filter((m) => !fetched.has(m));
+            if (missing.length) out.push([n, `${script}, which builds crates itself, with no ${RETRY} cargo fetch --locked before it in its job of: ${missing.join(", ")}`]);
+          }
+          if (CONTAINER_BUILD.test(seg) && !retried(seg.indexOf("deploy.mjs"))) {
+            out.push([n, `a deploy.mjs build in cargo-near's container, which no fetch from the runner reaches, not run through ${RETRY}: ${seg.trim()}`]);
+          }
+        }
+      }
+    });
+  }
+  return out.sort((a, b) => a[0] - b[0]);
+}
+
 export function downloadRetry(root) {
   const files = [];
   const wf = `${root}/.github/workflows`;
@@ -294,7 +370,7 @@ export function downloadRetry(root) {
   const out = [];
   for (const f of files) {
     const yml = readFileSync(`${root}/${f}`, "utf8");
-    for (const [line, what] of [...refusals(yml), ...cacheRefusals(yml)].sort((a, b) => a[0] - b[0])) out.push(`${f}:${line}: ${what}`);
+    for (const [line, what] of [...refusals(yml), ...cacheRefusals(yml), ...cargoRefusals(yml)].sort((a, b) => a[0] - b[0])) out.push(`${f}:${line}: ${what}`);
   }
   if (existsSync(`${root}/${FETCH}`)) for (const [line, what] of fetchScriptRefusals(readFileSync(`${root}/${FETCH}`, "utf8"))) out.push(`${FETCH}:${line}: ${what}`);
   return { refusals: out, read: files.length };
