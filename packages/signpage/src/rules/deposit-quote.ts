@@ -135,7 +135,7 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   if (reply.status === 429) return no("busy");
   if (reply.status === 503) return no("down");
   // 1Click answers a quote 201 (wallet.md D52), as the helper passes it on; 200 too
-  if (!DEPOSIT_ANSWERED.has(reply.status)) return no("not_available");
+  if (!DEPOSIT_ANSWERED.includes(reply.status)) return no("not_available");
 
   // 4. The answer, checked against the device's own request, at the time it came back.
   let checked;
