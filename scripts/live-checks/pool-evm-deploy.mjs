@@ -2,13 +2,16 @@
 // Live check of card pool-evm-deploy: the Blindfill EVM pool on Base Sepolia and Robinhood testnet, with no admin.
 // For each chain's deployment record, on two RPCs of two operators, each answering the chain's id, it reads:
 //   - every contract the record names (the verifier, the pool, the v4 adapter, the v3 adapter on Base Sepolia only,
-//     the sell delegate): its code is the build's (pool-evm-deploy.build.json, which test/deploy.test.mjs keeps equal to
+//     the sell delegate, and on the mainnets the fee collector): its code is the build's (pool-evm-deploy.build.json, which test/deploy.test.mjs keeps equal to
 //     forge's output; at an address the file's `frozen` map pins, that older build: pinnedBuild): the same length and, with the immutables' bytes zeroed, the same keccak256; every place one
 //     immutable sits holds the same word;
 //   - those immutables through their getters: the pool's ASSET is the native asset, WITHDRAWAL_VERIFIER is the
 //     record's verifier and SCOPE is keccak256(pool, chain id, asset) mod p (contracts/pool-evm/src/State.sol); the
 //     adapters' PoolManager, router and WETH and the delegate's WETH are the chain's, pinned below; the words the code
 //     holds are exactly these;
+//   - a mainnet's fee collector (card evm-mainnet-senders): its one immutable (the sink; no getter) holds the sell
+//     sender the kit pins on the chain (evmPoolVenues().sellSender), the record's sink is that pin, and the sink has no
+//     code; a chain the kit pins none on fails;
 //   - no admin: each contract's EIP-1967 implementation, admin and beacon slots are 0, and owner() is not there (it
 //     reverts). The code being the build's is the proof; these reads say it in the terms an auditor asks for;
 //   - what the contracts call: the PoolManager, the router and WETH, each with the code hash read when the contracts
@@ -107,14 +110,15 @@ export const CHAINS = Object.freeze({
 // eth_getStorageAt): the PoolManager, SwapRouter02 and WETH the kit's venue list names (packages/kit/src/trade/evm/
 // buy-unpinned.ts). Mainnet keeps both adapters (M365): Robinhood's SwapRouter02 reads on both. Robinhood's WETH (aeWETH)
 // is an upgradeable proxy: its implementation is pinned too. mainnet.base.org is Base's own public RPC (docs.base.org),
-// rpc.mainnet.chain.robinhood.com Robinhood's (docs.robinhood.com/chain/connecting), the others PublicNode's.
+// rpc.mainnet.chain.robinhood.com Robinhood's (docs.robinhood.com/chain/connecting), the others PublicNode's. Each set
+// ends with the fee collector (card evm-mainnet-senders), its sink the sell sender the kit pins on the chain.
 export const MAINNETS = Object.freeze({
   base: {
     chainId: "0x2105",
     op: true,
     rpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
     operators: { "mainnet.base.org": "base", "base-rpc.publicnode.com": "publicnode" },
-    contracts: ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate"],
+    contracts: ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate", "FeeCollector"],
     poolManager: { address: "0x498581ff718922c3f8e6a244956af099b2652b2b", codehash: "0x83b2af6e9f3158defc2811cbcb0db71ecf8b2ba2abea39c39e370ac5c6f43eb6" },
     router: { address: "0x2626664c2603336e57b271c5c0b26f421741e481", codehash: "0x38bd640f47df62b2fd5a6755a63f4976ad847dc9b946ae0d145d21d16bb124e4" },
     weth: { address: "0x4200000000000000000000000000000000000006", codehash: "0x8a3a1f6a9f9dce633117adee5b458245835a8645a8c8726a26382a4622508b1c", symbol: "WETH", name: "Wrapped Ether" },
@@ -124,7 +128,7 @@ export const MAINNETS = Object.freeze({
     op: false,
     rpcs: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"],
     operators: { "rpc.mainnet.chain.robinhood.com": "robinhood", "robinhood-rpc.publicnode.com": "publicnode" },
-    contracts: ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate"],
+    contracts: ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate", "FeeCollector"],
     poolManager: { address: "0x8366a39cc670b4001a1121b8f6a443a643e40951", codehash: "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626" },
     router: { address: "0xcaf681a66d020601342297493863e78c959e5cb2", codehash: "0x6f36c378e272c6324c48f045182bcb54bd8ad654cf9ebd42e8893d52c4cb25dc" },
     weth: {
@@ -234,10 +238,14 @@ export function gettersOf(d) {
     // the v1 delegate (frozen in the build file) has one immutable and no POOL_MANAGER; every later one holds the
     // chain's PoolManager too
     SellDelegate: [["WETH()", addrWord(chain.weth.address)], ...(pinnedBuild(d.chain, "SellDelegate", at("SellDelegate")).immutables.length === 2 ? [["POOL_MANAGER()", addrWord(chain.poolManager.address)]] : [])],
+    // no getter: its one immutable, the sink, is held to the kit's sell sender pin in check()
+    FeeCollector: [],
   };
 }
 
-export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep = sleepMs }) {
+/** The record's check on two RPCs; `venues` is the kit's venue list (evmPoolVenues(), its sell sender pins), loaded only
+ * for a set that holds the fee collector */
+export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep = sleepMs, venues }) {
   const lines = [];
   let ok = true;
   const say = (pass, text) => {
@@ -257,6 +265,15 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep = slee
   say(names.length === chain.contracts.length && chain.contracts.every((n) => /^0x[0-9a-f]{40}$/.test(at(n))),
     `the record names ${chain.contracts.join(", ")} on ${d.chain}: ${names.join(", ") || "none"}`);
   const getters = gettersOf(d);
+  // the fee collector's sink (card evm-mainnet-senders): the record's, and the sell sender the kit pins on the chain
+  const collects = chain.contracts.includes("FeeCollector");
+  const sink = String(d.contracts?.FeeCollector?.sink ?? "").toLowerCase();
+  let pin = "";
+  if (collects) {
+    venues ??= (await import("../../packages/kit/src/index.ts")).evmPoolVenues();
+    pin = Object.hasOwn(venues, d.chain) ? String(venues[d.chain]?.sellSender ?? "").toLowerCase() : "";
+    say(/^0x[0-9a-f]{40}$/.test(pin) && sink === pin, `the record's FeeCollector sink ${sink || "(none)"} is the sell sender the kit pins on ${d.chain}: ${pin || "none"}`);
+  }
   const txs = d.txs ?? [];
   say(txs.length > 0, `the record lists the run's transactions: ${txs.length}`);
   for (const url of rpcs.slice(0, 2)) {
@@ -264,6 +281,10 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep = slee
     try {
       const id = await rpc(fetchFn, url, "eth_chainId", [], sleep);
       say(id === chain.chainId, `chain id ${id} is ${d.chain}'s ${chain.chainId} ${on}`);
+      if (collects && /^0x[0-9a-f]{40}$/.test(sink)) {
+        const sc = await rpc(fetchFn, url, "eth_getCode", [sink, "latest"], sleep);
+        say(sc === "0x", `the sink ${sink} has no code (no EIP-7702 delegation) ${on}: ${sc === "0x" ? "none" : sc.slice(0, 50)}`);
+      }
       for (const name of chain.contracts) {
         const a = at(name);
         if (!a) continue; // the record line above failed already
@@ -274,7 +295,8 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep = slee
           `${name} ${a} code is the build's: ${r.length} bytes (build ${b.length}), immutables zeroed keccak256 ${r.masked} (build ${b.masked}) ${on}`);
         const want = getters[name];
         const held = r.words.map((w) => (w.length === 1 ? w[0] : `${w.length} words`)).sort();
-        say(JSON.stringify(held) === JSON.stringify(want.map(([, w]) => w).sort()),
+        if (name === "FeeCollector") say(held.length === 1 && pin !== "" && held[0] === addrWord(pin), `FeeCollector's immutable holds one word, the sell sender the kit pins on ${d.chain} ${pin || "(none)"} ${on}: ${held.join(", ") || "none"}`);
+        else say(JSON.stringify(held) === JSON.stringify(want.map(([, w]) => w).sort()),
           `${name}'s ${b.immutables.length} immutable(s) each hold one word, the ones its getters must return ${on}: ${held.join(", ") || "none"}`);
         for (const [sig, w] of want) {
           const got = await call(fetchFn, url, a, selector(sig), sleep).catch((e) => `error ${e.message}`);

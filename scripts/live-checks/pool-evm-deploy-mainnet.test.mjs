@@ -3,7 +3,8 @@
 // (contracts/pool-evm/script/mainnet-rehearsal.sh), each fork's record and the kit's venue given that record's
 // contracts as its pins. The good answer passes; the same recording fails with the kit as it is (no mainnet pin yet),
 // with one byte of a contract's code flipped on one RPC, and with a record missing or a dry run's; a dry run's record
-// read on the mainnet RPCs fails.
+// read on the mainnet RPCs fails. The recording holds each set's FeeCollector, its sink the kit's mainnet sell sender pin
+// (card evm-mainnet-senders, re-recorded with the kit's pins); a sink pin off it or none fails.
 //   node --test scripts/live-checks/pool-evm-deploy-mainnet.test.mjs
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,7 +16,8 @@ import { check as pinCheck, recordOf } from "./evm-venues-pin.mjs";
 import { checkMainnets, mainnetRunRecord } from "./pool-evm-deploy-mainnet.mjs";
 import { MAINNETS } from "./pool-evm-deploy.mjs";
 
-const A = JSON.parse(readFileSync(new URL("./pool-evm-deploy-mainnet.answers.json", import.meta.url), "utf8"));
+const R = JSON.parse(readFileSync(new URL("./pool-evm-deploy-mainnet.answers.json", import.meta.url), "utf8"));
+const A = R;
 function replay(answers) {
   const used = new Set();
   return async (url, init) => {
@@ -37,6 +39,7 @@ const fails = (r, re) => {
 
 test("the recording covers both mainnets and says what it is", () => {
   assert.deepEqual(Object.keys(A.records), Object.keys(MAINNETS));
+  for (const c of Object.keys(MAINNETS)) assert.deepEqual(Object.keys(A.records[c].contracts), MAINNETS[c].contracts, `${c}: the recording and its constructed collector name the mainnet set`);
   assert.match(A.notes[0], /^A REHEARSAL recording: .*anvil forks of Base and Robinhood mainnet/);
 });
 
@@ -112,4 +115,11 @@ test("a 61 s throttle (every answer HTTP 429, as Robinhood's RPC gives) is waite
   const throttled = async (url, init) => (clock < 61_000 ? { ok: false, status: 429, json: async () => ({ code: 429, message: "Too Many Requests" }) } : inner(url, init));
   const r = await checkMainnets({ read: (c) => A.records[c], venues: pinned, rpcsOf: (c) => A.rpcs[c], fetchFn: throttled, sleep: async (ms) => void (clock += ms) });
   assert.equal(r.ok, true, r.lines.filter((l) => / FAIL /.test(l)).join("\n"));
+});
+
+test("the recorded collector against a kit sell sender pin that is not its sink fails, and so does the kit with no pin", async () => {
+  const other = Object.fromEntries(Object.entries(pinned).map(([c, v]) => [c, { ...v, sellSender: "0x6262626262626262626262626262626262626262" }]));
+  fails(await run({ venues: other }), /base: deploy FAIL the record's FeeCollector sink 0x2139756ab61ad861b4e25a009f092683e7454ee9 is the sell sender the kit pins on base: 0x(62){20}/);
+  const none = Object.fromEntries(Object.entries(pinned).map(([c, v]) => [c, { ...v, sellSender: undefined }]));
+  fails(await run({ venues: none }), /robinhood: deploy FAIL FeeCollector's immutable holds one word, the sell sender the kit pins on robinhood \(none\)/);
 });
