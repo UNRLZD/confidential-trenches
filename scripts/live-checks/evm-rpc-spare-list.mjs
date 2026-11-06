@@ -39,6 +39,15 @@ export const MODES = ["refused", "503"];
 export const HELPER_MODES = ["refused", "503", "limit"];
 export const HELD = 2; // quotes per mode
 export const WARMUP_MS = 240_000;
+/** The wait before each held quote: on Base past maxLag blocks (50 of its 200 ms blocks, 10 s), so the quote's scan
+ *  always has blocks to ask the list for. 1.5 s after the warm-up the third's head stood at or behind the blocks the
+ *  warm-up read, and the held quote asked it its head and no getLogs (live run 42135737951, 2026-11-06 00:18:37Z:
+ *  "first two asked 2, third getLogs 0", an ok quote); past maxLag the scan either reads past the warm-up's blocks or
+ *  catches up to the agreed block on the list (quote.ts scanPools). */
+export const HELD_GAP_MS = { base: 11_500, robinhood: 1_500 };
+/** The least scan providers a chain lists: Base four (card base-rpc-list-fix: with the first two held, a third that
+ *  answers no logs still leaves another), Robinhood three. */
+export const MIN_SCANS = { base: 4, robinhood: 3 };
 const ZERO = "0x0000000000000000000000000000000000000000";
 const BASE_WETH = "0x4200000000000000000000000000000000000006";
 // the tokens of evm-scan-second-provider (base-hook) and evm-quote-lag-held (robinhood TORCH)
@@ -65,11 +74,14 @@ export function check(run) {
   const origin = (o) => o === "*" || o === APP_ORIGIN;
   for (const [name, req, want] of CASES) {
     const list = Array.isArray(run?.scans?.[req.chain]) ? run.scans[req.chain] : [];
-    const third = list[2];
-    say(list.length >= 3 && new Set(list.map(host)).size === list.length, `${req.chain} scan list of ${list.length}, each on its own host: ${list.map(host).join(", ") || "none"}`);
-    const p = typeof third === "string" ? run?.preflight?.[third] : undefined;
-    const allowed = p !== undefined && p.status >= 200 && p.status < 300 && origin(p.allow) && (p.headers === "*" || /(^|,)\s*content-type\s*(,|$)/i.test(p.headers ?? "")) && origin(p.post);
-    say(allowed, `${req.chain} third scan provider preflight from ${APP_ORIGIN}: ${p === undefined ? "not read" : `${p.status}, allow-origin ${p.allow ?? "none"}, allow-headers ${p.headers ?? "none"}; POST allow-origin ${p.post ?? "none"}`}`);
+    const least = MIN_SCANS[req.chain] ?? 3;
+    say(list.length >= least && new Set(list.map(host)).size === list.length, `${req.chain} scan list of ${list.length}, each on its own host: ${list.map(host).join(", ") || "none"} (${least} at least)`);
+    // every provider past the two held: the device reaches each only from the app's origin
+    for (const [i, u] of [[2, list[2]], ...list.slice(3).map((x, k) => [k + 3, x])]) {
+      const p = typeof u === "string" ? run?.preflight?.[u] : undefined;
+      const allowed = p !== undefined && p.status >= 200 && p.status < 300 && origin(p.allow) && (p.headers === "*" || /(^|,)\s*content-type\s*(,|$)/i.test(p.headers ?? "")) && origin(p.post);
+      say(allowed, `${req.chain} ${i === 2 ? "third" : i === 3 ? "fourth" : `#${i + 1}`} scan provider preflight from ${APP_ORIGIN}: ${p === undefined ? "not read" : `${p.status}, allow-origin ${p.allow ?? "none"}, allow-headers ${p.headers ?? "none"}; POST allow-origin ${p.post ?? "none"}`}`);
+    }
     const c = run?.cases?.[name];
     const warm = [];
     for (let i = 0, at = 0; Array.isArray(c?.first) && i < c.first.length && at < WARMUP_MS; at += Number(c.first[i].ms) || 0, i++) warm.push(c.first[i]);
@@ -227,7 +239,7 @@ export async function measure(venues = evmPoolVenues(), base = HELPER) {
     // a kit before this card pinned one spare, `spare` (the bad answer's run at 66d7b60)
     scans[c] = s === undefined ? [] : [s.url, ...(s.spares ?? (s.spare === undefined ? [] : [s.spare])).map((x) => x.url)];
   }
-  const run = { recorded: new Date().toISOString(), base, scans, preflight: await preflight(Object.values(scans).map((l) => l[2]).filter((u) => typeof u === "string")), cases: {}, helper: {}, addressless: {} };
+  const run = { recorded: new Date().toISOString(), base, scans, preflight: await preflight(Object.values(scans).flatMap((l) => l.slice(2))), cases: {}, helper: {}, addressless: {} };
   for (const chain of ["base", "robinhood"]) {
     run.addressless[chain] = await addressless(chain, base);
     for (const [where, r] of Object.entries(run.addressless[chain])) console.log(`${where} helper ${chain} address-less Transfer read: HTTP ${r.status}, ${r.results ?? `error ${r.error}`}${r.answeredBy ? ` by ${host(r.answeredBy)}` : ""}${r.commit ? ` at ${r.commit.slice(0, 7)}` : ""}`);
@@ -252,7 +264,7 @@ export async function measure(venues = evmPoolVenues(), base = HELPER) {
     }
     for (const m of MODES) {
       for (let i = 0; i < HELD; i++) {
-        await new Promise((r) => setTimeout(r, 1500));
+        await new Promise((r) => setTimeout(r, HELD_GAP_MS[req.chain] ?? 1500));
         const q = await quote(req, list, m);
         c.held.push(q);
         console.log(`${name} first two ${m} ${i}: ${q.code} ${q.ms} ms, first two asked ${q.heldAsked}, third getLogs ${q.thirdLogs}${q.message ? `: ${q.message}` : ""}`);

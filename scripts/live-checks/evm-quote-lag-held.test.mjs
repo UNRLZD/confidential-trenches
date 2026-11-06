@@ -1,11 +1,13 @@
-// Replays evm-quote-lag-held.answers.json through the live check. Both answers are real runs of the check from this
-// Mac on 2026-11-05, the kit's pinned providers with one of each venue's first two answering its latest block maxLag
-// back. The good answer is the kit of card base-200ms-blocks (f746056f, 21:03Z): Robinhood's publicnode 100 back, Base's
-// blastapi 5 back and 50 back (Base's maxLag: 10 s of its 200 ms blocks), each asked in the cold quote, and 10 of 10 warm
-// quotes ok on each; it passes. The bad answer is the kit before card evm-quote-lag-held (e031ad4): Base 2 of 10 warm
+// Replays evm-quote-lag-held.answers.json through the live check. Every answer is a real run of the check from this
+// Mac, the kit's pinned providers with one of each venue's first two answering its latest block maxLag back. The good
+// answer is this card's kit (base-rpc-list-fix, recorded at aab7d859, the same kit diff) with each case in a process of its own (
+// 2026-11-06 00:57Z): Robinhood's publicnode 100 back, Base's blastapi 5 back and 50 back (Base's maxLag: 10 s of its
+// 200 ms blocks), each asked in its own cold quote, and 10 of 10 warm quotes ok on each; it passes. The bad answer is the kit before card evm-quote-lag-held (e031ad4): Base 2 of 10 warm
 // quotes ok, the rest rpc_disagree in about 0.6 s (the scan provider's head more than 5 blocks past the agreed block, the
 // lagger's), Robinhood 9 of 10; it fails on each. bad_maxlag5 is main's kit before card base-200ms-blocks (3ad4abf6,
 // Base maxLag 5, 21:06Z): blastapi 50 back, 10 s of Base's blocks, is never asked in the pair; it fails.
+// bad_shared is main's check at 2e7ec335, every case in one process (2026-11-06 01:01Z): base-blastapi-50 began warm
+// after base-blastapi-5's quotes of the same token and never asked its lagger; it fails.
 //   node --test scripts/live-checks/evm-quote-lag-held.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -15,7 +17,7 @@ import { check } from "./evm-quote-lag-held.mjs";
 const A = JSON.parse(readFileSync(new URL("./evm-quote-lag-held.answers.json", import.meta.url), "utf8"));
 const has = (lines, re) => assert.ok(lines.some((l) => re.test(l)), `a line matches ${re}:\n${lines.join("\n")}`);
 
-test("the good answer (f746056f) passes: each lagger asked in the cold quote, 10 of 10 warm quotes ok on each chain", () => {
+test("the good answer (card base-rpc-list-fix, a process a case) passes: each lagger asked in the cold quote, 10 of 10 warm quotes ok on each chain", () => {
   const r = check(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   has(r.lines, /^PASS robinhood-publicnode-100: robinhood-rpc\.publicnode\.com answering 100 blocks back was asked for its head \d+ times in the cold quote$/);
@@ -56,4 +58,13 @@ test("each rule fails alone on the good answer with one thing changed", () => {
   const cold = structuredClone(A.good);
   cold.cases["robinhood-publicnode-100"].cold.code = "rpc_error";
   assert.equal(check(cold).ok, true);
+});
+
+test("bad_shared (main 2e7ec335, every case in one process) fails: base-blastapi-50 began warm, its lagger asked 0 times (card base-rpc-list-fix)", () => {
+  // the case before it quoted the same token on the same chain, so its quote ran in 1,237 ms with the speed ranking
+  // and the scan already learned, and the lagger was never in the pair
+  const r = check(A.bad_shared);
+  assert.equal(r.ok, false);
+  has(r.lines, /^FAIL base-blastapi-50: base-mainnet\.public\.blastapi\.io answering 50 blocks back was asked for its head 0 times in the cold quote$/);
+  has(r.lines, /^INFO base-blastapi-50: the cold quote ok in 1237 ms$/);
 });
