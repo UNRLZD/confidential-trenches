@@ -370,7 +370,9 @@ test("the record from chain reads: the programdata's SetAuthority gets a line, f
   const D0 = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
   const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, "BPFLoaderUpgradeab1e11111111111111111111111"],
     instructions: loaderTag === undefined ? [] : [{ programIdIndex: 1, data: (loaderTag === 4 ? "5" : "3") }] } } });
-  const chainTx = { fund: tx(1, D0), dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), init: tx(4, "F2") };
+  // the funding: one System Transfer from its payer into the run's funder F2
+  const fundTx = { slot: 1, meta: { err: null }, transaction: { message: { accountKeys: [D0, "F2", "11111111111111111111111111111111"], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: "3Bxs41hAcYbghSB9" }] } } };
+  const chainTx = { fund: fundTx, dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), init: tx(4, "F2") };
   const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
     const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
@@ -378,13 +380,13 @@ test("the record from chain reads: the programdata's SetAuthority gets a line, f
     if (method === "getTransaction") return ok(chainTx[params[0]]);
     throw new Error(`unexpected ${method}`);
   };
-  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, txs: [{ step: "init", signature: "init" }, { step: "funding", signature: "fund" }, { step: "deploy", signature: "dep" }] });
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, funder: "F2", txs: [{ step: "init", signature: "init" }, { step: "funding", signature: "fund" }, { step: "deploy", signature: "dep" }] });
   assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "dep", "auth", "init"]);
   assert.match(r.txs[2].step, /SetAuthority/);
   assert.equal(r.txs[1].step, "deploy", "a known step keeps its name");
   assert.deepEqual(r.funders, ["F1", "F2"]);
   chainTx.auth = { ...chainTx.auth, meta: { err: { InstructionError: [0, "x"] } } };
-  await assert.rejects(chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, txs: [{ step: "deploy", signature: "dep" }] }), /failed/);
+  await assert.rejects(chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, funder: "F2", txs: [{ step: "deploy", signature: "dep" }] }), /failed/);
 });
 
 // card pool-sol-mark-tag: the record's toolchain is read from the binaries that built the code, never a fixed string (a
@@ -2311,7 +2313,8 @@ test("review 89a6 L2: the cleanup keeps the reserve in its final sweep while lef
 test("review 89a6 I3: the record lists only the programdata's transactions whose fee payer is the run's own; a stranger's transaction naming the programdata is left out", async () => {
   const D0 = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
   const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, LOADER], instructions: loaderTag === undefined ? [] : [{ programIdIndex: 1, data: loaderTag === 4 ? "5" : "3" }] } } });
-  const chainTx = { fund: tx(1, D0), dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), stranger: tx(4, "S1"), init: tx(5, "F1") };
+  const fund = { slot: 1, meta: { err: null }, transaction: { message: { accountKeys: [D0, "F1", "11111111111111111111111111111111"], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: "3Bxs41hAcYbghSB9" }] } } };
+  const chainTx = { fund, dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), stranger: tx(4, "S1"), init: tx(5, "F1") };
   const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
     if (method === "getSignaturesForAddress") return okR([{ signature: "stranger", err: null }, { signature: "auth", err: null }, { signature: "dep", err: null }]);
@@ -2492,4 +2495,47 @@ test("review 7a21 info: the loader's SetAuthority label names no --final", () =>
   const src = readFileSync(path.join(HERE, "deploy.mjs"), "utf8");
   const line = src.split("\n").find((l) => l.startsWith("const LOADER_STEPS"));
   assert.ok(!line.includes("--final"), line);
+});
+
+// ---- the re-review of c07be769..f369ea7f (SHIP, two Low): each a test, red at b6b2937e ----
+test("review f369 Low 1: a status read that never reads every transaction finalized prints the --rebuild-record line for its journal", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  wrap(c, (url, { method, params }, real) => (method === "getSignatureStatuses" && params[0].length >= 4 ? okR({ value: params[0].map(() => ({ confirmationStatus: "confirmed", err: null })) }) : real()));
+  const { w, out, journal } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /not every transaction finalized/);
+    assert.ok(r.said.some((l) => l.includes(`--rebuild-record ${journal} --url ${MAIN_URL} --mainnet`)), r.said.join("\n"));
+    assert.ok(existsSync(journal), "the journal stays for the rebuild");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review f369 Low 2: a funding that is not one plain System Transfer from its payer into the run's funder (a relayer's, a CPI, TransferWithSeed) is left out, and its payer's programdata transaction never enters the record", async () => {
+  const SYS = "11111111111111111111111111111111";
+  const transfer = (tag) => { const d = Buffer.alloc(12); d.writeUInt32LE(tag, 0), d.writeBigUInt64LE(5n, 4); return b58(d); };
+  const tx = (slot, keys, instructions) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: keys, instructions } } });
+  const chainTx = {
+    plain: tx(1, ["R0", "F1", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: transfer(2) }]),
+    relayed: tx(2, ["RL", "X0", "F1", SYS], [{ programIdIndex: 3, accounts: [1, 2], data: transfer(2) }]), // the relayer pays, the exchange sends
+    cpi: tx(3, ["SQ", "F1", "SqdsWallet111111111111111111111111111111111"], [{ programIdIndex: 2, accounts: [0, 1], data: "3" }]),
+    seeded: tx(4, ["SD", "F1", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: transfer(11) }]), // TransferWithSeed
+    init: tx(5, ["F1", "PoolProg"], [{ programIdIndex: 1, accounts: [], data: "1" }]),
+    dep: tx(6, ["F1", LOADER], [{ programIdIndex: 1, data: "3" }]),
+    ...Object.fromEntries(["RL", "SQ", "SD"].map((p, i) => [`pd-${p}`, tx(7 + i, [p, LOADER], [{ programIdIndex: 1, data: "3" }])])),
+  };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR(["pd-RL", "pd-SQ", "pd-SD", "dep"].map((signature) => ({ signature, err: null })));
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const said = [];
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "F1",
+    txs: ["plain", "relayed", "cpi", "seeded"].map((signature) => ({ step: "funding (to the funder)", signature })).concat([{ step: "init (tag 0)", signature: "init" }]) }, { say: (l) => said.push(l) });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["plain", "init", "dep"]);
+  assert.deepEqual(r.funders, ["F1"]);
+  for (const sig of ["relayed", "cpi", "seeded"]) assert.ok(said.some((l) => l.includes(sig) && /left out of the record/.test(l)), said.join("\n"));
 });
