@@ -1,12 +1,13 @@
 {
- "_note": "Recorded 6 Nov by token-page-fills-after.mjs --record on the PC box (heavy.sh): good = this card's build (--harness --build apps/terminal/dist, branch card/token-page-fills-after at a1194b88), bad = the deployed APP_HOST before this card; both framed by the stand-in shell signed out, the token reads answered by the check (first the chain-named row, then the recorded answer).",
+ "_note": "Recorded 6 Nov by token-page-fills-after.mjs --record on the PC box (heavy.sh), each a real run: good = this card at 35b35f4c, its terminal build (--harness --build apps/terminal/dist) and its helper run beside the check on the box (node apps/helper/src/server.ts, no vendor key, PROXY_BUDGET_* at the keyless plans; --helper http://127.0.0.1:8799); bad = the deployed APP_HOST and HELPER_HOST before this card; both framed by the stand-in shell signed out, the token reads answered by the check (fill: the chain-named row with filling true, then the recorded answer; unlisted: the chain-named row with filling false).",
  "good": {
   "check": "token-page-fills-after",
-  "at": "2026-11-06T05:25:26.718Z",
+  "at": "2026-11-06T06:03:57.591Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell, the token reads answered by the check",
   "browser": "156.0.8078.79",
   "runs": [
    {
+    "case": "fill",
     "width": "phone",
     "framed": true,
     "first": {
@@ -34,6 +35,7 @@
     }
    },
    {
+    "case": "fill",
     "width": "desktop",
     "framed": true,
     "first": {
@@ -52,7 +54,7 @@
     },
     "readsAt": [
      0,
-     5007
+     5008
     ],
     "errors": [],
     "shots": {
@@ -60,15 +62,70 @@
      "filled": "desktop-filled.png"
     }
    }
-  ]
+  ],
+  "unlisted": [
+   {
+    "case": "unlisted",
+    "width": "phone",
+    "framed": true,
+    "first": {
+     "ready": true,
+     "filling": "false",
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "—"
+    },
+    "after": null,
+    "readsAt": [
+     0,
+     5005
+    ],
+    "errors": [],
+    "shots": {
+     "unlisted": "phone-unlisted.png"
+    }
+   },
+   {
+    "case": "unlisted",
+    "width": "desktop",
+    "framed": true,
+    "first": {
+     "ready": true,
+     "filling": "false",
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "—"
+    },
+    "after": null,
+    "readsAt": [
+     0,
+     5007
+    ],
+    "errors": [],
+    "shots": {
+     "unlisted": "desktop-unlisted.png"
+    }
+   }
+  ],
+  "helper": {
+   "base": "local",
+   "reads": [
+    {
+     "status": 200,
+     "src": "jupiter",
+     "filling": false
+    }
+   ]
+  }
  },
  "bad": {
   "check": "token-page-fills-after",
-  "at": "2026-11-06T05:17:06.149Z",
+  "at": "2026-11-06T06:03:14.409Z",
   "source": "live https://confidential.unrealized.trade, the stand-in shell, the token reads answered by the check",
   "browser": "156.0.8078.79",
   "runs": [
    {
+    "case": "fill",
     "width": "phone",
     "framed": true,
     "first": {
@@ -95,6 +152,7 @@
     }
    },
    {
+    "case": "fill",
     "width": "desktop",
     "framed": true,
     "first": {
@@ -120,6 +178,58 @@
      "filled": "desktop-filled.png"
     }
    }
-  ]
+  ],
+  "unlisted": [
+   {
+    "case": "unlisted",
+    "width": "phone",
+    "framed": true,
+    "first": {
+     "ready": true,
+     "filling": null,
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "—"
+    },
+    "after": null,
+    "readsAt": [
+     0
+    ],
+    "errors": [],
+    "shots": {
+     "unlisted": "phone-unlisted.png"
+    }
+   },
+   {
+    "case": "unlisted",
+    "width": "desktop",
+    "framed": true,
+    "first": {
+     "ready": true,
+     "filling": null,
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "—"
+    },
+    "after": null,
+    "readsAt": [
+     0
+    ],
+    "errors": [],
+    "shots": {
+     "unlisted": "desktop-unlisted.png"
+    }
+   }
+  ],
+  "helper": {
+   "base": "HELPER_HOST",
+   "reads": [
+    {
+     "status": 200,
+     "src": "jupiter",
+     "filling": "absent"
+    }
+   ]
+  }
  }
 }
