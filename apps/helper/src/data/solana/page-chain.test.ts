@@ -121,6 +121,41 @@ test("card helper-page-jup-429: Jupiter's 10 s window full, a cold page answers 
   assert.deepEqual([again.done?.status, again.done?.row?.src, again.done?.row?.symbol], [200, "jupiter", FX.tokens[PUMP].search[0].symbol], "the next read has the row");
 });
 
+// card jupiter-build-budget-503: a page's turnAt counts only the pages queued ahead of it, never the builds that go first.
+// The page draws its budget, then builds that arrive after it take the window's turns as it frees; the devices still
+// leave a page the window's last send (proxy.ts OWN_ROOM), so its search goes at the next window. Meanwhile the page
+// answers within JUP_PAGE_WAIT_MS, named on chain, never a 503.
+test("card jupiter-build-budget-503: a cold page queued behind builds that arrive after it answers 200 within 1 s named on chain, never 503; its search goes at the next window and the next read has its row", async (t) => {
+  clock(t);
+  const { proxy, sends } = jupiter();
+  const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
+  const first = ask(tok, mint(1));
+  await until(t, first, 2_000);
+  // a page has had its send in the window, so the devices fill the rest: 7 builds of one device, 2 of another
+  const builds: Promise<{ status: number }>[] = [];
+  for (let i = 0; i < 7; i++) builds.push(proxy.handle("jupiter", "/swap/v2/build", `q=a${i}`, "", "198.51.100.7"));
+  for (let i = 0; i < 2; i++) builds.push(proxy.handle("jupiter", "/swap/v2/build", `q=b${i}`, "", "198.51.100.8"));
+  await run(t, 50);
+  assert.equal(sends.length, 10, "the window is full");
+  const cold = ask(tok, mint(2));
+  await until(t, cold, 1_000);
+  assert.deepEqual([cold.done?.status, cold.done?.row?.src, cold.done?.row?.symbol], [200, "chain", symbolOf(mint(2))], "named on chain within its wait");
+  assert.ok(cold.done!.ms < 1_000, `answered in ${cold.done!.ms} ms`);
+  // nine builds of five more devices arrive after the page drew, inside their own wait of the window's end: all the
+  // window the devices may take; they go first, the page on the last send
+  for (let ms = Date.now() - NOW; ms < 7_500; ms += 50) await run(t, 50);
+  for (let d = 0; d < 5; d++) for (let i = 0; i < (d === 4 ? 1 : 2); i++) builds.push(proxy.handle("jupiter", "/swap/v2/build", `q=c${d}${i}`, "", `198.51.100.${20 + d}`));
+  const searches = () => sends.filter((s) => s.path.endsWith("/search"));
+  for (let ms = 0; ms < 4_000 && searches().length < 2; ms += 50) await run(t, 50);
+  assert.equal(searches().length, 2, "the cold page's search was not lost");
+  assert.ok(searches()[1]!.at - searches()[0]!.at >= 10_000 - 20 && searches()[1]!.at - searches()[0]!.at < 10_000 + 200, "at the next window");
+  await run(t, 100);
+  const again = ask(tok, mint(2));
+  await until(t, again, 1_000);
+  assert.deepEqual([again.done?.status, again.done?.row?.src], [200, "jupiter"], "the next read has the row");
+  for (const b of await Promise.all(builds)) assert.equal(b.status, 200, "every build served");
+});
+
 test("card helper-page-jup-429: Jupiter answering 429 (reset 1 s), a cold page answers 200 within 1 s named on chain; the next read after the search's turn has its row", async (t) => {
   clock(t);
   const { proxy, sends } = jupiter((n) => (n === 1 ? new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": "1" } }) : undefined));
