@@ -54,11 +54,10 @@ const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { solanaRestoreNotes } = await import("../../wallet/src/pool/solana-restore.ts");
 const { refKey } = await import("../../wallet/src/notes/store.ts");
-const { pageRpc } = await import("../src/page-rpc.ts");
 const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import("../src/pool-testnet.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
 
@@ -100,20 +99,33 @@ globalThis.fetch = async (u, init) => {
   if (r.status === 429 || r.status >= 500) log(`rpc ${host}: HTTP ${r.status} from the provider (request ${n})`);
   return r;
 };
+// the buy's timeline (card pool-buy-send-fast): from the tap, every RPC call (its provider, method, start and length)
+// and every helper call, written to <out.json> as buyTimeline and printed one line each
+let tapAt = null;
+const timeline = [];
+const mark = (what, startMs, ms) => {
+  if (tapAt === null) return;
+  const e = { what, at: Math.round(startMs - tapAt), ms: Math.round(ms) };
+  timeline.push(e);
+  log(`t+${e.at} ms ${what} ${e.ms} ms`);
+};
 // a call that still fails after the page's retry: logged with its named fault (public reads only, never a key or the words)
 const logged = (rpc) => {
   const p = async (method, params) => {
+    const s = performance.now();
     try {
       return await rpc(method, params);
     } catch (e) {
       log(`rpc ${new URL(rpc.url).host} ${method}: ${String(e?.message).slice(0, 160)}`);
       throw e;
+    } finally {
+      mark(`rpc ${new URL(rpc.url).host} ${method}`, s, performance.now() - s);
     }
   };
   p.url = rpc.url; // the kit tells two providers apart by their URL
   return p;
 };
-const rpcs = [logged(pageRpc(TESTNET_RPCS.solana[0])), logged(pageRpc(TESTNET_RPCS.solana[1]))];
+const rpcs = [logged(testnetRpc(TESTNET_RPCS.solana[0])), logged(testnetRpc(TESTNET_RPCS.solana[1]))];
 
 // the prover: snarkjs's fullProve in this process, on the release's pinned withdraw files
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);
@@ -162,8 +174,10 @@ const helperFetch = async (url, init) => {
     log(`helper POST /v1/pool/solana/send: 429 rate_limited injected (not forwarded)`);
     return new Response(JSON.stringify({ error: { code: "rate_limited" } }), { status: 429, headers: { "retry-after": "1", "content-type": "application/json" } });
   }
+  const s = performance.now();
   const r = await fetch(url, init);
   log(`helper ${init?.method ?? "GET"} ${new URL(url).pathname}: HTTP ${r.status}`);
+  mark(`helper ${init?.method ?? "GET"} ${new URL(url).pathname} HTTP ${r.status}`, s, performance.now() - s);
   if (new URL(url).pathname === "/v1/pool/fee" && r.status === 200) relayFee = BigInt(JSON.parse(await r.clone().text()).fee);
   return r;
 };
@@ -175,12 +189,15 @@ const ctx = (id) => ({ id, sha: "00", progress: (s) => log(`${id} progress ${JSO
 const { WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
 const stages = [];
 const once = async (kind, params) => {
-  const r = kinds[kind](params, { ...ctx(kind), progress: (s) => (stages.push({ kind, stage: s }), log(`${kind} progress ${JSON.stringify(s)}`)) });
+  if (kind === "pool.buy") tapAt = performance.now();
+  const r = kinds[kind](params, { ...ctx(kind), progress: (s) => (stages.push({ kind, stage: s }), kind === "pool.buy" && mark(`progress ${s}`, performance.now(), 0), log(`${kind} progress ${JSON.stringify(s)}`)) });
   if ("error" in r) return { answer: r };
   await r.after;
   const answer = r.answer();
+  if (kind === "pool.buy") mark(`answer ${JSON.stringify(answer).slice(0, 40)}`, performance.now(), 0);
   log(`${kind} answered ${JSON.stringify(answer)}; waiting for its run to end`);
   await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
+  if (kind === "pool.buy") tapAt = null;
   return { answer, notes: await noteList() };
 };
 // each kind is tapped once: one that answers an error is the run's failure, recorded as one
@@ -297,7 +314,7 @@ log(`notes ${JSON.stringify(notes)}`);
 const told = (kind) => !stages.some((x) => x.kind === kind && x.stage !== "sent" && x.stage !== "filled");
 const filled = landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
 seed64.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, U, need: String(NEED), deposit, buy, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, U, need: String(NEED), deposit, buy, buyTimeline: timeline, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

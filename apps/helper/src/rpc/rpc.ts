@@ -9,7 +9,8 @@
 // "method", say) cannot carry an unlisted method; and content-type: application/json. No header of the caller.
 // What reaches the caller: the provider's status and JSON body. A provider that is down, slow, refusing our key (401,
 // 403), failing (5xx), answering anything but JSON within the size cap, or whose answer holds its own URL's key in any
-// form answers 503 upstream, so the device falls back to its own providers (H2.3).
+// form answers 503 upstream, so the device falls back to its own providers (H2.3). So does a route with no provider
+// set and no public fallback (RPC_UPSTREAMS: solana-devnet without SOLANA_DEVNET_RPC_URL), before anything is sent.
 // Throttling (card helper-abuse-limits, ../limits/limits.ts): each chain's provider is one budget every call draws
 // from, the helper's own reads included (RPC_BUDGET_<CHAIN>, default RPC_CHAIN_MAX requests in any 10 s, no caller
 // more than RPC_CLIENT_MAX of them a window, a batch drawing one per request in it), and where the provider also limits
@@ -146,7 +147,7 @@ export type Pacer = ReturnType<typeof createPacer>;
  * token watches and the pool senders read their own providers), so 0. The token page's reads are not in it: they are
  * one per token a caller opens, so they draw that caller's share and stop at the total less this, as callers do.
  */
-export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0 };
+export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0, "solana-devnet": 0 };
 /**
  * The part of each chain's total, and of each method's, the helper's own background reads never draw (card
  * helper-ready-gate): the trade walks and the SOL price reads (data/solana/trades.ts) go only while half stays free,
@@ -162,6 +163,9 @@ export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?:
   base: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
   robinhood: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
   near: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
+  // mainnet's public numbers: under what api.devnet.solana.com's headers named (x-ratelimit-rps-limit 250,
+  // x-ratelimit-method-limit 150, read 5 Nov 15:03Z); a keyed SOLANA_DEVNET_RPC_URL names its plan's in RPC_BUDGET_SOLANA_DEVNET
+  "solana-devnet": { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX, perMethod: RPC_METHOD_MAX },
 };
 /** The chains whose providers speak EVM JSON-RPC, where -32005 is a throttle (limits.ts EVM_LIMIT_CODE). */
 const EVM_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
@@ -196,23 +200,28 @@ function evmShapeRefused(chain: RpcChain, answer: unknown): boolean {
 }
 /** The environment variable naming a chain's budget, "<total>,<per client>[,<per method>]" per 10 s; the share at
  * least RPC_BATCH_MAX, so a full batch can be served, and a method's at least that and at most the total. */
-export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase()}`;
+export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase().replace(/-/g, "_")}`;
 const ID_MAX = 128;
 
 /**
  * Each chain's provider: the URL in the host's environment (a keyed provider puts its key in the URL, markets paper
  * H2.1), else a public endpoint, so a helper anyone runs works with no key. Each default answered a read from the
- * Mac on 2026-11-01 06:24Z (getBlockHeight, eth_blockNumber, block).
+ * Mac on 2026-11-01 06:24Z (getBlockHeight, eth_blockNumber, block). A null fallback: the route is off with no URL set
+ * (every call 503 upstream, nothing sent).
  */
-export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: string }>> = {
+export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: string | null }>> = {
   solana: { env: "SOLANA_RPC_URL", fallback: "https://api.mainnet-beta.solana.com" },
   base: { env: "BASE_RPC_URL", fallback: "https://mainnet.base.org" },
   robinhood: { env: "ROBINHOOD_RPC_URL", fallback: "https://rpc.mainnet.chain.robinhood.com" },
   near: { env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com" },
+  // the testnet build's second provider: a keyed devnet URL of another operator than api.devnet.solana.com, which the
+  // page reads itself as its first (packages/signpage/src/pool-testnet.ts TESTNET_RPCS); none set: off (503), never
+  // a silent fallback to that same operator, which would make the page's two reads one provider's (review L-1)
+  "solana-devnet": { env: "SOLANA_DEVNET_RPC_URL", fallback: null },
 };
 
 /** Solana's public endpoint: a keyed SOLANA_RPC_URL's fallback (card helper-solana-failover, rpc/slot.ts). */
-export const SOLANA_PUBLIC = RPC_UPSTREAMS.solana.fallback;
+export const SOLANA_PUBLIC = RPC_UPSTREAMS.solana.fallback as string;
 /** The budget key of the public endpoint when a keyed provider is set: its own budget, the public limits (RPC_BUDGETS
  *  solana: 100 per 10 s, 40 per method), never RPC_BUDGET_SOLANA, which is the keyed plan's. */
 const PUBLIC_KEY = "solana-public";
@@ -234,7 +243,8 @@ type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; s
 /** `timing` (card helper-ready-page-warm): this read's Server-Timing entries, the wait before its send (a hold or the
  *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint. */
 type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timing?: string[] };
-type Upstream = { url: string; forms: Buffer[] };
+/** `off`: no URL set for a route with no public fallback (RPC_UPSTREAMS); handle() answers 503 and sends nothing. */
+type Upstream = { url: string; forms: Buffer[]; off?: true };
 
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 const REFUSED = () => error(400, "method_not_allowed");
@@ -261,7 +271,7 @@ export function readUpstreams(env: Record<string, string | undefined>): Record<R
     const { env: name, fallback } = RPC_UPSTREAMS[chain];
     const set = env[name];
     if (set === undefined || set === "") {
-      out[chain] = { url: fallback, forms: [] };
+      out[chain] = fallback === null ? { url: "", forms: [], off: true } : { url: fallback, forms: [] };
       continue;
     }
     let u: URL;
@@ -288,8 +298,60 @@ function parse(text: string): unknown {
 
 const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
 
-/** One checked request, rebuilt from its four fields only, or undefined. */
-function check(chain: RpcChain, r: unknown): Record<string, unknown> | undefined {
+/** The pool program each Solana route may scan with getProgramAccounts: the helper's own pinned pool program for that
+ *  cluster (apps/helper/src/pool/solana.ts POOL_SOLANA_ENV), none when unset. */
+export const RPC_SCAN_PROGRAM_ENV: Readonly<Partial<Record<RpcChain, string>>> = { solana: "POOL_SOLANA_PROGRAM_MAINNET", "solana-devnet": "POOL_SOLANA_PROGRAM_DEVNET" };
+/** The note restore's scan (packages/wallet/src/pool/solana-restore.ts solanaMarks, the bucket read; the settle's
+ *  solanaSettleSpent reads through the same call): each mark size (13 a spent mark, 17 a pre-mark) and the memcmp at 9,
+ *  past the counter's low byte, of size - 9 bytes whose last is the program's mark tag (SOL_MARK_TAG 1). */
+const SCAN_SIZES: ReadonlySet<unknown> = new Set([13, 17]);
+const SCAN_AT = 9;
+const SCAN_TAG = 1;
+const SCAN_CONFIG: ReadonlySet<string> = new Set(["commitment", "encoding", "withContext", "minContextSlot", "filters"]);
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/** Base58 to bytes (each leading "1" a zero byte), or null for a character off the alphabet. */
+function base58Bytes(s: string): Uint8Array | null {
+  let n = 0n;
+  for (const c of s) {
+    const v = B58.indexOf(c);
+    if (v < 0) return null;
+    n = n * 58n + BigInt(v);
+  }
+  const out: number[] = [];
+  for (; n > 0n; n >>= 8n) out.unshift(Number(n & 0xffn));
+  for (let i = 0; i < s.length && s[i] === "1"; i++) out.unshift(0);
+  return Uint8Array.from(out);
+}
+const exactKeys = (o: Record<string, unknown>, keys: readonly string[]): boolean => Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
+/**
+ * getProgramAccounts only in the note restore's exact shape (review L-2 and its re-review): on the route's own pinned
+ * pool program; config { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot? (a positive
+ * whole number), filters } and no other key; filters exactly [{ dataSize: 13 | 17 }, { memcmp: { offset: 9, bytes } }],
+ * the bytes base58 of exactly size - 9 bytes ending in the mark tag: one bucket of one mark size. An open scan of any
+ * program, or a wider one of the pool's (the tag alone, a large size, a compressed encoding, a slice, a sort, a
+ * changed-since read), would spend the keyed provider's quota for every caller. Anything else is refused before any call.
+ */
+function scanAllowed(r: Record<string, unknown>, program: string | undefined): boolean {
+  if (program === undefined || program === "") return false;
+  const p = r.params;
+  if (!Array.isArray(p) || p.length !== 2 || p[0] !== program || !isPlain(p[1])) return false;
+  const c = p[1];
+  if (Object.keys(c).some((k) => !SCAN_CONFIG.has(k))) return false;
+  if (c.commitment !== "finalized" || c.encoding !== "base64" || c.withContext !== true) return false;
+  if (Object.hasOwn(c, "minContextSlot") && !(Number.isSafeInteger(c.minContextSlot) && (c.minContextSlot as number) > 0)) return false;
+  const f = c.filters;
+  if (!Array.isArray(f) || f.length !== 2) return false;
+  const [size, cmp] = f as unknown[];
+  if (!isPlain(size) || !exactKeys(size, ["dataSize"]) || !SCAN_SIZES.has(size.dataSize)) return false;
+  if (!isPlain(cmp) || !exactKeys(cmp, ["memcmp"]) || !isPlain(cmp.memcmp)) return false;
+  const m = cmp.memcmp;
+  if (!exactKeys(m, ["offset", "bytes"]) || m.offset !== SCAN_AT || typeof m.bytes !== "string" || m.bytes.length > 24) return false;
+  const bytes = base58Bytes(m.bytes);
+  return bytes !== null && bytes.length === (size.dataSize as number) - SCAN_AT && bytes[bytes.length - 1] === SCAN_TAG;
+}
+
+/** One checked request, rebuilt from its four fields only, or undefined. `scan`: the route's pinned pool program. */
+function check(chain: RpcChain, r: unknown, scan?: string): Record<string, unknown> | undefined {
   if (!isPlain(r)) return undefined;
   for (const k of Object.keys(r)) if (k !== "jsonrpc" && k !== "id" && k !== "method" && k !== "params") return undefined;
   if (r.jsonrpc !== "2.0") return undefined;
@@ -297,6 +359,7 @@ function check(chain: RpcChain, r: unknown): Record<string, unknown> | undefined
   if (!((typeof id === "number" && Number.isSafeInteger(id)) || (typeof id === "string" && id.length <= ID_MAX))) return undefined;
   if (typeof r.method !== "string" || !RPC_METHODS[chain].includes(r.method)) return undefined;
   if (Object.hasOwn(r, "params") && !isPlain(r.params) && !Array.isArray(r.params)) return undefined;
+  if (r.method === "getProgramAccounts" && !scanAllowed(r, scan)) return undefined;
   const out: Record<string, unknown> = { jsonrpc: "2.0", id, method: r.method };
   if (Object.hasOwn(r, "params")) out.params = r.params;
   return out;
@@ -309,6 +372,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
+  const scanPrograms: Partial<Record<RpcChain, string>> = Object.fromEntries(Object.entries(RPC_SCAN_PROGRAM_ENV).map(([c, name]) => [c, env[name]]));
   // a keyed Solana provider's slot: its fallback is the public endpoint, on a budget of its own
   const keyed = upstreams.solana.url !== SOLANA_PUBLIC;
   const slot: Slot = createSlot(deps.slot ?? "rpc", keyed, { now, log });
@@ -393,6 +457,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false): Promise<Answer> {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return error(404, "not_found");
     const c = chain as RpcChain;
+    if (upstreams[c].off) return UPSTREAM();
     if (Buffer.byteLength(body) > RPC_BODY_MAX) return error(413, "too_large");
     if (!/^application\/json\s*(;|$)/i.test(contentType ?? "")) return REFUSED();
     let parsed: unknown;
@@ -405,11 +470,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (Array.isArray(parsed)) {
       if (parsed.length > RPC_BATCH_MAX) return error(413, "too_large");
       if (parsed.length === 0) return REFUSED();
-      const checked = parsed.map((r) => check(c, r));
+      const checked = parsed.map((r) => check(c, r, scanPrograms[c]));
       if (checked.some((r) => r === undefined)) return REFUSED();
       out = checked;
     } else {
-      out = check(c, parsed);
+      out = check(c, parsed, scanPrograms[c]);
       if (out === undefined) return REFUSED();
     }
     let forward: string;

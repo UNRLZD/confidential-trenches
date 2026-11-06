@@ -41,6 +41,7 @@ export const LIVE_CHECKS = [
   "evm-rpc-spare-list",
   "base-200ms-blocks",
   "wallet-restore-transfer-rpcs",
+  "pool-buy-send-fast",
 ];
 
 // `{commit}` is the deployed commit

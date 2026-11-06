@@ -829,6 +829,34 @@ test("route events: out, wallet and pool are checked as the kit's own shapes; th
   assert.deepEqual(seen, []);
 });
 
+// card pool-buy-send-fast: the buy's transaction as a route fact, so a mainnet bundle that lands past the client's 10 s
+// still names its transaction to the app: a base58 signature of exactly 64 bytes, nothing else
+const SIG = "48Xv1SNVzuNDAaB6FXW5MNUjCMW5LArZdeqJahVeQ3DrsXzBSPQQxiNjiV2wvuF5v58AXjSECU5LHuYfKb4nNBEv";
+test("route events: tx is a Solana signature, base58 of exactly 64 bytes; it reaches onRoute after the buy's answer timed out", async () => {
+  const at = (x) => S.signpageProgressRouteSchema({ v: 1, type: "progress", id: "x", ...x });
+  assert.equal(at({ tx: SIG }), true);
+  assert.equal(at({ tx: "1".repeat(64) }), true, "64 zero bytes");
+  for (const tx of [W_ADDR, "1".repeat(63), "z".repeat(88), `${SIG}x`, SIG.replace("4", "0"), SIG.replace("4", "l"), `0x${"ab".repeat(64)}`, "", 1, null, [SIG], { hash: SIG }])
+    assert.equal(at({ tx }), false, String(tx));
+  assert.equal(at({ tx: SIG, out: "1" }), false, "two shapes in one");
+  assert.equal(S.signpageProgressSchema({ v: 1, type: "progress", id: "x", tx: SIG }), false, "an earlier kit's stage schema drops it");
+  // the buy's answer dropped at the client's 10 s; its tx and its final stage still reach the app
+  const { h, c } = await readyClient();
+  const routes = [];
+  const stages = [];
+  c.onRoute((id, r) => routes.push([id, r]));
+  c.onProgress((id, stage) => stages.push([id, stage]));
+  const { id, p } = await open(h, c, "pool.buy");
+  mock.timers.tick(C.SIGNPAGE_TIMEOUT_MS["pool.buy"]);
+  assert.deepEqual(await p, TIMEOUT);
+  h.post({ v: 1, type: "progress", id, tx: SIG });
+  h.post({ v: 1, type: "progress", id, stage: "filled" });
+  assert.deepEqual(routes, [[id, { tx: SIG }]]);
+  assert.deepEqual(stages, [[id, "filled"]]);
+  h.post({ v: 1, type: "progress", id: "x", tx: "z".repeat(88) });
+  assert.equal(routes.length, 1, "a malformed one is dropped");
+});
+
 test("an app of an earlier kit drops every route event and still reads every stage around them", async () => {
   // the stage schema is the earlier kit's, exact keys: it refuses each route event and any stage event carrying a route field
   for (const m of ROUTE) assert.equal(S.signpageProgressSchema(m), false);
