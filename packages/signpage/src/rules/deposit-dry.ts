@@ -1,7 +1,7 @@
 // The deposit sheet's two reads before any address exists (card kit-deposit-assets-dry): deposit.assets, the assets the
 // device can quote with each one's minimum and the most one deposit takes, and deposit.dry, what an amount would land in
 // the vault as. Both sign nothing, need no sign-in and send nothing of the user's: a dry quote names the kit's
-// DEPOSIT_DRY_PLACEHOLDER as its recipient and refundTo (CO 6 Nov 10:24Z: the industry pattern for an unsigned price
+// DEPOSIT_DRY_PLACEHOLDER as its recipient and refundTo (6 Nov 10:24Z: the industry pattern for an unsigned price
 // read), and the token list is public. Every answer is hostile and checked as a live one is (src/checks/oneclick.ts:
 // the signature under the pinned key, every signed field equal to the device's own request, the device's floors).
 //
