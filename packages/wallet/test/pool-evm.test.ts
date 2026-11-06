@@ -118,6 +118,8 @@ type Over = {
   ts?: (n: number) => bigint;
   log?: string[];
 };
+/** A block hash that is its number + 1 (a long chain's hashOf), as that number; -1 for any other. */
+const numberIn = (h: string): number => (/^0x0{40}[0-9a-f]{24}$/.test(h) ? Number(BigInt(h) - 1n) : -1);
 function rpc(c: Chain, o: Over = {}): EvmRpc {
   let fin = 0, lat = 0, byNum = 0;
   // read on every call: a test may move the chain (a reorg) between two reads
@@ -137,6 +139,8 @@ function rpc(c: Chain, o: Over = {}): EvmRpc {
         return block(n);
       }
       case "eth_getBlockByHash": {
+        const guess = numberIn(params[0] as string);
+        if (guess >= 0 && guess <= c.head && hashOf(guess) === params[0]) return block(guess);
         for (let n = 0; n <= c.head; n++) if (hashOf(n) === params[0]) return block(n);
         return null;
       }
@@ -154,7 +158,9 @@ function rpc(c: Chain, o: Over = {}): EvmRpc {
       case "eth_call": {
         const [{ to, data }, { blockHash }] = params as [{ to: string; data: string }, { blockHash: string }];
         let n = -1;
-        for (let k = 0; k <= c.head; k++) if (hashOf(k) === blockHash) n = k;
+        const guess = numberIn(blockHash);
+        if (guess >= 0 && guess <= c.head && hashOf(guess) === blockHash) n = guess;
+        else for (let k = 0; k <= c.head; k++) if (hashOf(k) === blockHash) n = k;
         if (to === "0x420000000000000000000000000000000000000f" || to === "0x000000000000000000000000000000000000006c") {
           if (n < 0) throw new Error("RPC error -32000: header not found");
           const s = data.slice(2, 10);
@@ -765,7 +771,7 @@ test("F3b a provider's cap shrinks the page (its real words, thousands separator
   const s = sync(pair(c, c, capA, capB));
   assert.equal((await s.trees(after(9500))).stateTree.size, 4);
   const sizes = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/)!.slice(1).map((h) => Number(BigInt(h)))).map(([f, t]) => t! - f! + 1);
-  assert.ok(sizes(la).every((n) => n <= 10000) && sizes(la).includes(5000) && !sizes(la).some((n) => n < 2500), `a: ${sizes(la)}`);
+  assert.ok(sizes(la).includes(5000) && !sizes(la).some((n) => n < 2500), `a: ${sizes(la)}`);
   assert.ok(sizes(lb).includes(1250) && !sizes(lb).some((n) => n < 1250), `b: ${sizes(lb)}`);
   // 10,000, 5,000 and 2,500 refused once each, then one probe past the ceiling at most every EVM_LOG_CEILING_PAGES
   // full pages under it (card notes-per-pool-evm-base-hang)
@@ -785,25 +791,118 @@ test("F3b a provider's cap shrinks the page (its real words, thousands separator
   assert.ok(grown.length < 12 && grown[1]! === 2 * grown[0]!, `pages after the cap is lifted: ${grown}`);
 });
 
-test("F3c a refusal under the cap (no answer in time) never halves the rest of the pool sync's read: the ceiling it set expires after EVM_LOG_CEILING_PAGES full pages", async () => {
-  // card notes-per-pool-evm-base-hang, as B1 in pool-evm-restore.test.ts for a W's read: a 200,000-block read, no cap on
-  // either RPC, one page of RPC b with no answer in time. Held for the whole read, that page's ceiling (10,000) kept b at
-  // 5,000-block pages to the end, twice the clean read's pages.
-  const c = { ...chain([...deps(PP, [10, 120_000, 199_000])], 200_000, 199_990), hashOf: (n: number) => `0x${w64(BigInt(n) + 1n)}` };
-  const pages = async (slow: number | null) => {
-    const la: string[] = [], lb: string[] = [];
+/** Each eth_getLogs page's size in blocks, in the order asked (refused ones too), from an RPC's call log. */
+const pageSizes = (l: string[]): number[] => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/)!.slice(1).map((h) => Number(BigInt(h)))).map(([f, t]) => t! - f! + 1);
+/** A chain of `head` blocks whose hashes are their numbers + 1 (numberIn reads them back at once). */
+const longChain = (events: Ev[], head: number) => ({ ...chain(events, head, head - 10), hashOf: (n: number) => `0x${w64(BigInt(n) + 1n)}` });
+const TIMEOUT = () => new DOMException("The operation timed out.", "TimeoutError");
+
+test("F3c no answer in time never halves the pool sync's page (card evm-pool-sync-wide-pages): the same page again, or one wider than its provider ever answered back to the widest it did, never below", async () => {
+  // as B1 in pool-evm-restore.test.ts for a W's read, where a timeout still halves (its filter names no address)
+  const c = longChain([...deps(PP, [10, 1_200_000, 1_990_000])], 2_000_000);
+  const pages = async (slow: (n: number, size: number) => boolean) => {
+    const lb: string[] = [];
     let n = 0;
-    const late = { log: lb, getLogs: () => { if (++n === slow) throw new DOMException("The operation timed out.", "TimeoutError"); } };
-    const r = await sync(pair(c, c, { log: la }, late)).events();
+    const late = { log: lb, getLogs: ({ from, to }: { from: number; to: number }) => { if (slow(++n, to - from + 1)) throw TIMEOUT(); } };
+    const r = await sync(pair(c, c, {}, late)).events();
     assert.equal(r.events.length, 3);
-    return lb.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/)!.slice(1).map((h) => Number(BigInt(h)))).map(([f, t]) => t! - f! + 1);
+    return pageSizes(lb);
   };
-  const clean = await pages(null);
-  assert.equal(clean.length, 20, `clean: ${clean}`);
-  const late = await pages(2);
-  // the refused call, EVM_LOG_CEILING_PAGES pages at half size, then the clean read's size again
-  assert.ok(late.length <= clean.length + 1 + EVM_LOG_CEILING_PAGES / 2 + 1, `${late.length} pages, the clean read's ${clean.length}: ${late}`);
-  assert.deepEqual(late.slice(-4), [10_000, 10_000, 10_000, 10_000], `the last pages: ${late.slice(-12)}`);
+  const clean = await pages(() => false);
+  assert.deepEqual(clean, [100_000, 200_000, 400_000, 800_000, 500_000], `clean: ${clean}`);
+  // the first page with no answer in time: the same 100,000 blocks again, then the clean read's pages
+  assert.deepEqual(await pages((n) => n === 1), [100_000, ...clean]);
+  // a provider with no answer in time over 100,000 blocks: each wider page back to 100,000, never below it
+  const wide = await pages((_, size) => size > 100_000);
+  assert.ok(wide.every((s) => s >= 100_000), `wide: ${wide}`);
+  assert.equal(wide.filter((s) => s === 100_000).length, 20, `wide: ${wide}`);
+  assert.ok(wide.length <= 20 + 4, `${wide.length} pages: ${wide}`);
+});
+
+test("card evm-pool-sync-wide-pages: a 13M-block span on two providers with caps 50,000 and 100,000 takes at most ceil(span/cap)+10 pages each", async () => {
+  // a month of Base's 200 ms blocks; PublicNode's cap words on one (3 Nov 05:35Z), Robinhood's own on the other (6 Nov 07:31Z)
+  const span = 13_000_000;
+  const c = longChain([...deps(PP, [10, 6_000_000, 12_999_000])], span);
+  const la: string[] = [], lb: string[] = [];
+  const capA = { log: la, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 50_000) throw new Error("RPC error -32701: exceed maximum block range: 50000"); } };
+  const capB = { log: lb, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 100_000) throw new Error(`RPC error -32602: query spans ${to - from + 1} blocks (${from} to ${to}), but only 100000 are allowed for this request; narrow the block range, or send one value per position`); } };
+  const r = await sync(pair(c, c, capA, capB)).events();
+  assert.equal(r.events.length, 3);
+  const a = pageSizes(la), b = pageSizes(lb);
+  assert.ok(a.length <= Math.ceil(span / 50_000) + 10, `the 50,000 cap: ${a.length} pages`);
+  assert.ok(b.length <= Math.ceil(span / 100_000) + 10, `the 100,000 cap: ${b.length} pages`);
+});
+
+test("card evm-pool-sync-wide-pages: a refusal halves only that provider's page; a 429 or no answer in time halves none, and a spare in a seat pages at its own size", async () => {
+  const c = longChain([...deps(PP, [10, 400_000, 990_000])], 1_000_000);
+  const la: string[] = [], lb: string[] = [];
+  let nb = 0;
+  const capA = { log: la, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 25_000) throw new Error("RPC error -32614: eth_getLogs is limited to a 25,000 range"); } };
+  const noisyB = { log: lb, getLogs: () => { nb++; if (nb === 1) throw TIMEOUT(); if (nb === 3) throw HTTP_429(); } };
+  const r = await sync(pair(c, c, capA, noisyB)).events();
+  assert.equal(r.events.length, 3);
+  const a = pageSizes(la), b = pageSizes(lb);
+  assert.ok(a.includes(25_000) && a.slice(0, 3).join() === "100000,50000,25000", `a: ${a}`);
+  // b's pages: 100,000 then each one twice the last, its timeout and its 429 each asked again at its own size
+  assert.deepEqual(b, [100_000, 100_000, 200_000, 200_000, 400_000, 300_000], `b: ${b}`);
+  // a seat whose provider is out (HTTP 429) moves to the spare, which pages at its own size, never its seat's last one
+  const l0: string[] = [], l2: string[] = [];
+  let n0 = 0;
+  const out = { url: "https://a.example", log: l0, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 25_000) throw new Error("RPC error -32614: eth_getLogs is limited to a 25,000 range"); if (++n0 === 3) throw HTTP_429(); } };
+  const list = [rpc(c, out), rpc(c, { url: "https://b.example" }), rpc(c, { url: "https://c.example", log: l2 })];
+  const r2 = await evmTreeSync({ rpcs: list, pin: PIN, sleep: async () => {} }).events();
+  assert.equal(r2.events.length, 3);
+  // the call the seat moved (its 25,000 blocks), then the spare's own first page
+  assert.deepEqual(pageSizes(l2).slice(0, 2), [25_000, 100_000], `the spare's pages: ${pageSizes(l2)}`);
+  // a provider whose backends differ (Pocket's words, 6 Nov 07:44Z): a refusal of a size it answered is asked again at
+  // once, never halved, up to EVM_LOG_REFUSED_AGAIN times in a row
+  const lp: string[] = [];
+  let np = 0;
+  const lottery = { log: lp, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 100_000 || (++np > 1 && np % 2 === 0)) throw new Error("RPC error -32602: query exceeds max block range 10000"); } };
+  const r3 = await sync(pair(c, c, {}, lottery)).events();
+  assert.equal(r3.events.length, 3);
+  const p3 = pageSizes(lp);
+  assert.ok(p3.every((s) => s >= 100_000), `the lottery's pages: ${p3}`);
+});
+
+test("card evm-pool-sync-wide-pages: a held sync reads only the blocks after its last one; a held part the pool's views refuse is dropped and read again from the deploy block", async () => {
+  // the hold inline, as the device's store would keep it
+  const hold = () => {
+    let h: unknown = null;
+    return { read: async () => h, write: async (v: unknown) => void (h = v), get: () => h as { to: bigint; events: unknown[] } | null, set: (v: unknown) => void (h = v) };
+  };
+  const c = longChain([...deps(PP, [10, 400_000]), { block: 700_000, kind: "wd", leaf: 999n }], 800_000);
+  const h = hold();
+  const first = await evmTreeSync({ rpcs: pair(c, c), pin: PIN, held: h, sleep: async () => {} } as Parameters<typeof evmTreeSync>[0]).events();
+  assert.equal(first.events.length, 3);
+  assert.equal(h.get()?.to, BigInt(c.finalized), "the held part runs to the finalized anchor");
+  // the chain moves on; a later sync on the same hold reads only past it, and makes the same trees with the new leaf
+  c.events.push({ block: 850_000, kind: "dep", leaf: BigInt(PP.commitments[2]!), label: BigInt(PP.labels[2]!) });
+  c.head = 900_000;
+  c.finalized = 899_990;
+  const la: string[] = [], lb: string[] = [];
+  const later = await evmTreeSync({ rpcs: pair(c, c, { log: la }, { log: lb }), pin: PIN, held: h, sleep: async () => {} } as Parameters<typeof evmTreeSync>[0]).events();
+  assert.equal(later.events.length, 4);
+  for (const l of [la, lb]) {
+    const froms = l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+    assert.ok(froms.length > 0 && froms.every((f) => f > 799_990), `pages from ${froms}`);
+  }
+  // a held part with one leaf changed is not the pool's: dropped, and the pool read again from its deploy block
+  const bad = hold();
+  const held = h.get()!;
+  bad.set({ ...held, events: held.events.map((e, i) => (i === 1 ? { ...(e as object), state: 5n } : e)) });
+  const lc: string[] = [];
+  const again = await evmTreeSync({ rpcs: pair(c, c, { log: lc }), pin: PIN, held: bad, sleep: async () => {} } as Parameters<typeof evmTreeSync>[0]).events();
+  assert.equal(again.events.length, 4);
+  assert.equal(again.events[1]!.state, BigInt(PP.commitments[1]!));
+  assert.ok(lc.some((x) => x.includes('"fromBlock":"0x1"')), "read again from the deploy block");
+  assert.equal(bad.get()!.events.length, 4);
+  // a held part of another pin is never taken
+  const other = hold();
+  other.set({ ...h.get()!, fromBlock: 2n });
+  const ld: string[] = [];
+  await evmTreeSync({ rpcs: pair(c, c, { log: ld }), pin: PIN, held: other, sleep: async () => {} } as Parameters<typeof evmTreeSync>[0]).events();
+  assert.ok(ld.some((x) => x.includes('"fromBlock":"0x1"')), "another pin's held part is not taken");
 });
 
 test("F4 one RPC's logs past the finalized block a moment behind the other's is a retry; a finalized log missing is refused", async () => {

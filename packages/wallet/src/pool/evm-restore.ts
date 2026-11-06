@@ -57,7 +57,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { solanaSameProvider } from "@blindfill/kit";
 import { evmHelperRpc } from "./buy-wallets.ts";
-import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LOG_PAGE_BLOCKS, EvmLagError, evmHoldsAnchor, evmLatestHigh, evmPair, evmPoolScopeOf, evmRetryLag, evmTokensSentTo, evmTokensSentToOne, evmTreeSync, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "./evm.ts";
+import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LOG_PAGE_BLOCKS, EvmLagError, evmHoldsAnchor, evmLatestHigh, evmPair, evmPoolScopeOf, evmRetryLag, evmTokensSentTo, evmTokensSentToOne, evmTreeSync, type EvmPoolEvent, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "./evm.ts";
 import { jOf } from "./queue.ts";
 
 const U32 = 0xffffffff;
@@ -323,6 +323,9 @@ export type EvmRestoreNotesArgs = {
   /** false: the notes only. No W is read or named to any provider, `helper` and `walletRpcs` are not asked for, and
    * `wallets` comes back empty (the signing page's restore, which keeps the notes alone: pool-restore.ts). */
   wallets?: false;
+  /** Where the device holds the pool's sync between syncs (evm.ts EvmSyncArgs held): a restore after it reads only the
+   * blocks past it. */
+  held?: EvmSyncHold;
   /** tests only: RESTORE_GAP, the wait between lag retries, and the Ws' order (a random index below n) */
   gap?: number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -360,7 +363,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     reads = { holds: () => evmHoldsAnchor(walletRpcs, chainId, r.anchor, a.signal, sleep), tokens: (w, from) => evmTokensSentTo(walletRpcs, w, from, r, page, a.signal, sleep), name: "the Transfer RPCs" };
   }
   const scope = evmPoolScopeOf(a.pin.pool, chainId);
-  const sync = evmTreeSync({ rpcs, pin: a.pin, ...(sleep ? { sleep } : {}) });
+  const sync = evmTreeSync({ rpcs, pin: a.pin, ...(a.held ? { held: a.held } : {}), ...(sleep ? { sleep } : {}) });
   const pick = a.pick ?? randomIndex;
   const r = await evmRetryLag(async () => {
     const r = await sync.events(a.signal, true);
