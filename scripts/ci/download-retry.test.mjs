@@ -3,16 +3,18 @@
 // no second run are each refused by file and line; the repo's own workflows pass. And retry.sh itself: three tries, a
 // pause between them, the last try's exit code. Card ci-cargo-near-cached: a curl to a file, a fetch.sh or a Playwright
 // install with no cache in front of it are refused, and fetch.sh itself uses a matching cached file with no request,
-// refuses a bad one and fails on bad bytes.
+// refuses a bad one and fails on bad bytes. Card ci-cargo-fetch-retry: a cargo command with no retried
+// `cargo fetch --locked` of its manifest before it, a fetch with no retry or no registry cache, a script that builds
+// crates itself and a container build of deploy.mjs outside retry.sh are refused; fresh-dir.sh clears a dir for a retry.
 //   node --test scripts/ci/download-retry.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { downloadRetry, refusals, cacheRefusals, fetchScriptRefusals, withoutHeldRetries } from "./download-retry.mjs";
+import { downloadRetry, refusals, cacheRefusals, cargoRefusals, fetchScriptRefusals, withoutHeldRetries } from "./download-retry.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const GATE = join(ROOT, "scripts/ci/download-retry.mjs");
@@ -290,6 +292,149 @@ test("retry.sh: three tries with a pause between, and the last try's exit code",
     r = spawnSync("bash", [RETRY, "sh", "-c", 'test "$1" = "a b"', "_", "a b"], { env, encoding: "utf8" });
     assert.equal(r.status, 0);
     assert.deepEqual(slept(), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("retry.sh: a code in RETRY_FINAL ends the run after one try, any other code is tried three times", () => {
+  const dir = mkdtempSync(join(tmpdir(), "retry-final-"));
+  try {
+    writeFileSync(join(dir, "sleep"), `#!/bin/sh\necho "$1" >> "${dir}/slept"\n`);
+    chmodSync(join(dir, "sleep"), 0o755);
+    const go = (rc, final) => {
+      rmSync(join(dir, "n"), { force: true });
+      rmSync(join(dir, "slept"), { force: true });
+      const env = { ...process.env, PATH: `${dir}:${process.env.PATH}` };
+      if (final !== undefined) env.RETRY_FINAL = final;
+      const r = spawnSync("bash", [RETRY, "sh", "-c", `echo x >> "${dir}/n"; exit ${rc}`], { env, encoding: "utf8" });
+      return { status: r.status, tries: readFileSync(join(dir, "n"), "utf8").trim().split("\n").length, err: r.stderr };
+    };
+    let r = go(3, "3");
+    assert.deepEqual([r.status, r.tries], [3, 1]);
+    assert.match(r.err, /retry\.sh: try 1 ended 3, a final code: not tried again/);
+    assert.ok(!existsSync(join(dir, "slept")), "no pause before a final code");
+    assert.deepEqual(go(1, "3").tries, 3);
+    assert.deepEqual([go(1, "3").status, go(101, "3").tries], [1, 3]);
+    assert.deepEqual(go(3).tries, 3); // not named: tried like any other
+    r = go(4, "3 4");
+    assert.deepEqual([r.status, r.tries], [4, 1]);
+    // a passing command is not touched by it
+    assert.equal(spawnSync("bash", [RETRY, "true"], { env: { ...process.env, RETRY_FINAL: "3" } }).status, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Card ci-cargo-fetch-retry: the cargo rules on planted workflows
+const RC = "      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3\n";
+const REG = `      - uses: actions/cache@${CACHE}\n        with:\n          path: |\n            ~/.cargo/registry/index\n            ~/.cargo/registry/cache\n            target\n          key: k\n`;
+const FETCH_V = "bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/Cargo.toml";
+const TEST_V = "cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml";
+// each refusal as "line: what", without the command it quotes after its last ": "
+const cargoWhat = (yml) => cargoRefusals(yml).map(([line, w]) => `${line}: ${w.split(": ")[0]}`);
+
+test("cargo: the repo's own workflows fetch every manifest they build with retry first", () => {
+  const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+  for (const f of ["ci.yml", "vault-build.yml", "live.yml", "readme-fresh-run.yml"]) assert.deepEqual(cargoRefusals(readFileSync(join(ROOT, ".github/workflows", f), "utf8")), [], f);
+  // not a dead rule: the retried fetches are there, one per manifest a job builds
+  assert.ok(ci.split("bash scripts/ci/retry.sh cargo +").length - 1 >= 9, "the retried fetches");
+  assert.match(readFileSync(join(ROOT, ".github/workflows/vault-build.yml"), "utf8"), /RETRY_FINAL=3 bash scripts\/ci\/retry\.sh bash scripts\/ci\/fresh-dir\.sh .*deploy\.mjs --build-only/);
+});
+
+test("cargo: main's workflows before this card, each cargo step without its fetch, are refused where they stood", () => {
+  const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+  const before = ci.split("\n").filter((l) => !/retry\.sh cargo \+\S+ fetch /.test(l)).join("\n");
+  const r = cargoWhat(before);
+  assert.equal(r.filter((x) => x.includes("a cargo test of contracts/vault/Cargo.toml")).length, 2, r.join("\n")); // test-vault and the sandbox build's --no-run
+  assert.equal(r.filter((x) => x.includes("harness/run.sh")).length, 2, r.join("\n"));
+  assert.equal(r.filter((x) => x.includes("a cargo-build-sbf of")).length, 2, r.join("\n"));
+  assert.equal(r.filter((x) => x.includes("a cargo test of contracts/pool-solana")).length, 2, r.join("\n"));
+  assert.equal(r.filter((x) => x.includes("dry-run.sh")).length, 1, r.join("\n"));
+  const vb = readFileSync(join(ROOT, ".github/workflows/vault-build.yml"), "utf8").replaceAll("RETRY_FINAL=3 bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh \"$RUNNER_TEMP/vault-mainnet\" ", "").replaceAll("RETRY_FINAL=3 bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh \"$RUNNER_TEMP/vault-records\" ", "");
+  assert.equal(cargoRefusals(vb).length, 2, "the two container builds");
+});
+
+test("cargo: a build needs a retried fetch of its own manifest first, in its job; retry.sh on the build itself also holds", () => {
+  assert.deepEqual(cargoWhat(job(RC + run(`${FETCH_V}\n${TEST_V}`))), []);
+  assert.deepEqual(cargoWhat(job(RC + run(`bash scripts/ci/retry.sh ${TEST_V}`))), []);
+  // the fetch in an earlier step, with the toolchain left out or another one
+  assert.deepEqual(cargoWhat(job(RC + run("bash scripts/ci/retry.sh cargo fetch --locked --manifest-path contracts/vault/Cargo.toml") + run(TEST_V))), []);
+  assert.deepEqual(cargoWhat(job(run(TEST_V))), ["9: a cargo test of contracts/vault/Cargo.toml with no scripts/ci/retry.sh cargo fetch --locked of it before it in its job"]);
+  for (const sub of ["build", "check", "clippy", "run", "bench", "doc", "tree", "near build reproducible-wasm"]) {
+    assert.equal(cargoWhat(job(run(`cargo +1.96.0 ${sub} --locked`))).length, 1, sub);
+  }
+  // the fetch comes after the build, or is for another manifest, or sits in another job: not before it
+  assert.equal(cargoWhat(job(RC + run(`${TEST_V}\n${FETCH_V}`))).length, 1);
+  assert.equal(cargoWhat(job(RC + run(`${FETCH_V}\ncargo +1.96.0 test --locked --manifest-path contracts/other/Cargo.toml`))).length, 1);
+  const two = job(RC + run(FETCH_V)) + `  b:\n    runs-on: ubuntu-24.04\n    steps:\n${run(TEST_V)}`;
+  assert.equal(cargoWhat(two).length, 1);
+  // a working-directory is the manifest's folder; a path is read as the same one however it is spelt
+  assert.deepEqual(cargoWhat(job(RC + run(FETCH_V) + `      - working-directory: contracts/vault\n        run: cargo test --locked\n`)), []);
+  assert.equal(cargoWhat(job(RC + run(FETCH_V) + `      - working-directory: contracts/pool-solana\n        run: cargo-build-sbf --sbf-out-dir out -- --locked\n`)).length, 1);
+  assert.deepEqual(cargoWhat(job(RC + run("bash scripts/ci/retry.sh cargo fetch --locked --manifest-path ./contracts//vault/Cargo.toml\n" + TEST_V))), []);
+  // what reads no registry is no build: a version, a comment, a metadata read with --no-deps, a cargo install (its own rule)
+  assert.deepEqual(cargoWhat(job(run("cargo +1.96.0 near --version\ncargo-build-sbf --version | sed s/a/b/\n# cargo test\ncargo metadata --no-deps --locked"))), []);
+  assert.equal(cargoWhat(job(run("cargo metadata --locked"))).length, 1);
+});
+
+test("cargo: a fetch runs through retry.sh with --locked, and in a job that caches cargo's registry", () => {
+  assert.deepEqual(cargoWhat(job(RC + run("cargo +1.96.0 fetch --locked --manifest-path contracts/vault/Cargo.toml"))), ["10: a cargo fetch not run through scripts/ci/retry.sh"]);
+  assert.deepEqual(cargoWhat(job(RC + run("bash scripts/ci/retry.sh cargo fetch --manifest-path contracts/vault/Cargo.toml"))), ["10: a cargo fetch without --locked"]);
+  assert.deepEqual(cargoWhat(job(run(FETCH_V))).map((x) => x.split(" (")[0]), ["9: a cargo fetch in a job with no cache of cargo's registry before it"]);
+  assert.deepEqual(cargoWhat(job(REG + run(`${FETCH_V}\n${TEST_V}`))), []);
+  // a cache of something else, a cache saved alone and a cache after the fetch are no registry cache
+  assert.equal(cargoWhat(job(`      - uses: actions/cache@${CACHE}\n        with:\n          path: target\n          key: k\n` + run(FETCH_V))).length, 1);
+  assert.equal(cargoWhat(job(REG.replace("actions/cache@", "actions/cache/save@") + run(FETCH_V))).length, 1);
+  assert.equal(cargoWhat(job(run(FETCH_V) + RC)).length, 1);
+});
+
+test("cargo: a script that builds crates itself needs every manifest it builds fetched first", () => {
+  const F3 = ["contracts/vault/Cargo.toml", "contracts/vault/tests/mock-token/Cargo.toml", "contracts/vault/tests/harness/probe/Cargo.toml"].map((m) => `bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path ${m}`).join("\n");
+  assert.deepEqual(cargoWhat(job(RC + run(`${F3}\ncontracts/vault/tests/harness/run.sh --build-only "$RUNNER_TEMP/w"`))), []);
+  const some = cargoRefusals(job(RC + run(`${FETCH_V}\ncontracts/vault/tests/harness/run.sh "\${ARGS[@]}"`)));
+  assert.equal(some.length, 1);
+  assert.match(some[0][1], /harness\/run\.sh, which builds crates itself, with no scripts\/ci\/retry\.sh cargo fetch --locked before it in its job of: contracts\/vault\/tests\/mock-token\/Cargo\.toml, contracts\/vault\/tests\/harness\/probe\/Cargo\.toml/);
+  assert.equal(cargoWhat(job(run("bash contracts/pool-solana/scripts/dry-run.sh"))).length, 1);
+  assert.deepEqual(cargoWhat(job(REG + run("bash scripts/ci/retry.sh cargo fetch --locked --manifest-path contracts/pool-solana/Cargo.toml\nbash contracts/pool-solana/scripts/dry-run.sh"))), []);
+});
+
+test("cargo: deploy.mjs --build-only and --verify-records, built in cargo-near's container, run through retry.sh", () => {
+  const D = "node contracts/vault/scripts/deploy.mjs";
+  assert.deepEqual(cargoWhat(job(run(`RETRY_FINAL=3 bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh "$D" ${D} --build-only --flavor mainnet --build-dir "$D"`))), []);
+  assert.deepEqual(cargoWhat(job(run(`${D} --build-only --flavor mainnet 2>&1 | tee b.log`))), ["9: a deploy.mjs build in cargo-near's container, which no fetch from the runner reaches, not run through scripts/ci/retry.sh"]);
+  assert.equal(cargoWhat(job(run(`${D} --verify-records --build-dir x`))).length, 1);
+  // a hash disagreement is final, never tried again: the retry must name deploy.mjs's code (EXIT_HASH_DISAGREE, 3)
+  const R = `bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh "$D" ${D}`;
+  assert.deepEqual(cargoWhat(job(run(`RETRY_FINAL=3 ${R} --build-only --build-dir "$D"`))), []);
+  assert.deepEqual(cargoWhat(job(run(`RETRY_FINAL="3 4" ${R} --verify-records --build-dir "$D"`))), []);
+  assert.deepEqual(cargoWhat(job(run(`${R} --build-only --build-dir "$D"`))), ["9: a deploy.mjs build whose retry does not name the code a hash disagreement ends with (RETRY_FINAL=3), so a build reproducible only some of the time passes on its second try"]);
+  assert.equal(cargoWhat(job(run(`RETRY_FINAL=1 ${R} --build-only`))).length, 1);
+  assert.equal(cargoWhat(job(run(`RETRY_FINAL=33 ${R} --build-only`))).length, 1);
+  assert.equal(cargoWhat(job(run(`RETRY_FINAL=3 ${D} --build-only`))).length, 1);
+  // the code the gate reads is the code deploy.mjs ends with
+  assert.match(readFileSync(join(ROOT, "contracts/vault/scripts/deploy.mjs"), "utf8"), /^export const EXIT_HASH_DISAGREE = 3;$/m);
+  // the other uses of deploy.mjs build nothing
+  assert.deepEqual(cargoWhat(job(run(`${D} --network testnet --wasm w.wasm`))), []);
+});
+
+test("fresh-dir.sh: removes the dir, then runs the command and gives its exit code", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fresh-dir-"));
+  try {
+    const d = join(dir, "build");
+    mkdirSync(d);
+    writeFileSync(join(d, "left"), "x");
+    const r = spawnSync("bash", [join(ROOT, "scripts/ci/fresh-dir.sh"), d, "bash", "-c", `test ! -e ${d}/left && exit 7`], { encoding: "utf8" });
+    assert.equal(r.status, 7, r.stderr);
+    // through retry.sh: a first try that leaves a file in the dir meets an empty one on its second
+    writeFileSync(join(dir, "try.sh"), `n=0; [ -e "${dir}/n" ] && n=$(cat "${dir}/n"); echo $((n+1)) > "${dir}/n"; mkdir -p "$1"; [ -e "$1/left" ] && exit 9; touch "$1/left"; exit 1\n`);
+    const fake = join(dir, "bin");
+    mkdirSync(fake);
+    writeFileSync(join(fake, "sleep"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(fake, "sleep"), 0o755);
+    const t = spawnSync("bash", [RETRY, "bash", join(ROOT, "scripts/ci/fresh-dir.sh"), d, "bash", join(dir, "try.sh"), d], { encoding: "utf8", env: { ...process.env, PATH: `${fake}:${process.env.PATH}` } });
+    assert.equal(t.status, 1, t.stderr);
+    assert.equal(readFileSync(join(dir, "n"), "utf8").trim(), "3");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
