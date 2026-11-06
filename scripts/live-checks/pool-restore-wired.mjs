@@ -12,7 +12,7 @@
 // The page's network pins no pool on mainnet yet (SOL_POOLS.mainnet and EVM_POOLS are empty), so each run there reads
 // no pool and ends done at once; a pin that lands makes the same run read it, and a pool it cannot read ends stalled,
 // which this check fails. The devnet and Base Sepolia notes themselves are the card's run record
-// (pool-restore-wired.md), read on two RPCs.
+// (pool-restore-wired.run.json), read on two RPCs.
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
 //   node scripts/live-checks/pool-restore-wired.mjs --local [--record <file>]   SIGN_HOST from this checkout's
 //     committed build under its own _headers, nothing on the network
