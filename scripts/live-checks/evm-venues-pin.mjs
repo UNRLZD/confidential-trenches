@@ -4,15 +4,17 @@
 // that has a deployment record (pool-evm-deploy.<chain>.json):
 //   - the pins are the record's: the pool is PrivacyPoolSimple, the v3 and v4 adapters UniswapV3Adapter and
 //     UniswapV4Adapter (a record without one, a venue without that pin), the sell delegate SellDelegate, which card
-//     evm-sell-v4 deployed again to sell through the v4 PoolManager and card evm-selldelegate-exact-debit again with the
-//     exact-debit check: the newest of their records (<key>.<chain>.json), where there is one, names the SellDelegate in
+//     evm-sell-v4 deployed again to sell through the v4 PoolManager, card evm-selldelegate-exact-debit again with the
+//     exact-debit check and card evm-testnet-delegate-review3 again at the pool-review-3 build: the newest of their records (<key>.<chain>.json), where there is one, names the SellDelegate in
 //     place of pool-evm-deploy's;
 //   - the chain's WETH, PoolManager and routers are the ones pool-evm-deploy pinned (CHAINS: WETH; the PoolManager; the
 //     v3 router, or none), and no middle is listed;
 //   - on the chain's two RPCs of two operators (the money gate's), each answering the chain's id: at the newest block
 //     both have (the lower of their two eth_blockNumber answers, so no archive read is needed), each pin's code is the
-//     same on both and is the build's (pool-evm-deploy.build.json, pinnedBuild: the same length and, with the immutables' bytes
-//     zeroed, the same keccak256), and its immutables hold exactly the words pool-evm-deploy's getters must return
+//     same on both and is the current build's (pool-evm-deploy.build.json `contracts`: the same length and, with the
+//     immutables' bytes zeroed, the same keccak256), never a build the file froze: a frozen build is an older
+//     contract's, which the device's code no longer calls (main's pins at the exact-debit delegates dispatched the
+//     10-field sell while the kit built the 11-field one; card evm-testnet-delegate-review3), and its immutables hold exactly the words pool-evm-deploy's getters must return
 //     (gettersOf: the pool's verifier, asset and scope, the adapters' PoolManager, router and WETH, the delegate's WETH);
 //     the record's verifier is the build's; the PoolManager's, WETH's and each router's code hash is the one CHAINS
 //     pins, and where WETH is a proxy (Robinhood testnet), its implementation slot and that implementation's code hash,
@@ -25,7 +27,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { CHAINS, EIP1967, MAINNETS, chainOf, deploymentFile, gettersOf, keccak, operatorProblems, pinnedBuild, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, EIP1967, MAINNETS, chainOf, deploymentFile, gettersOf, keccak, operatorProblems, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
 
 const KEY = "evm-venues-pin";
 const lower = (a) => (typeof a === "string" ? a.toLowerCase() : a);
@@ -37,8 +39,9 @@ const PINS = [
   ["sell delegate", (v) => v.sellDelegate, "SellDelegate"],
 ];
 
-// the sell delegate's redeploys alone, newest first: card evm-selldelegate-exact-debit's, then card evm-sell-v4's
-const SELL_KEYS = ["evm-selldelegate-exact-debit", "evm-sell-v4"];
+// the sell delegate's redeploys alone, newest first: card evm-testnet-delegate-review3's, card
+// evm-selldelegate-exact-debit's, then card evm-sell-v4's
+const SELL_KEYS = ["evm-testnet-delegate-review3", "evm-selldelegate-exact-debit", "evm-sell-v4"];
 const sellFile = (k, c) => path.join(path.dirname(fileURLToPath(import.meta.url)), `${k}.${c}.json`);
 /** pool-evm-deploy's record of `chain`, its SellDelegate the newest redeploy's where one has a record; a mainnet's
  * (card pool-evm-deploy-mainnet: the owner's paste, contracts/pool-evm/deployments/<chain>.json) only from a real run */
@@ -107,7 +110,9 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
   try {
     for (const [role, pin, name] of [...want, ["verifier", d.contracts?.WithdrawalVerifier?.address ?? "0x", "WithdrawalVerifier"]]) {
       const [a, b] = await codeAt(pin);
-      const build = pinnedBuild(chain, name, pin);
+      // the current build, never pinnedBuild's frozen one at an older contract's address: the kit's pin is what the
+      // device's code calls today
+      const build = BUILD.contracts[name];
       const r = runtimeOf(a, build.immutables);
       say(a === b && a !== "0x", `the ${role} ${pin}: the same code on both RPCs at block ${BigInt(block)} (${(a.length - 2) / 2} bytes)`);
       say(r.length === build.length && r.masked === build.masked, `the ${role} ${pin} is the build's ${name}: length ${r.length}, keccak256 with the immutables zeroed ${r.masked}`);

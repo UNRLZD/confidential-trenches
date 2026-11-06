@@ -149,7 +149,7 @@
     },
     "SellDelegate.exact-debit": {
       "contract": "SellDelegate",
-      "note": "The evm-selldelegate-exact-debit sell delegate (constructor(IWETH, IPoolManager), with the exact-debit check), as this file pinned it before pool review round 2 (R-3: WETH read only for a route that can pay in it). Deployed with no upgrade path, so its code stays this build; it is checked only at the addresses in `at`, the evm-selldelegate-exact-debit redeploys (scripts/live-checks/evm-selldelegate-exact-debit.<chain>.json), which the kit pins until a later card moves the pins. deploy.mjs --write-build keeps this map as it is.",
+      "note": "The evm-selldelegate-exact-debit sell delegate (constructor(IWETH, IPoolManager), with the exact-debit check), as this file pinned it before pool review round 2 (R-3: WETH read only for a route that can pay in it). Deployed with no upgrade path, so its code stays this build; it is checked only at the addresses in `at`, the evm-selldelegate-exact-debit redeploys (scripts/live-checks/evm-selldelegate-exact-debit.<chain>.json), which the kit pinned until card evm-testnet-delegate-review3 moved the pins to its redeploys at the pool-review-3 build (this build dispatches the 10-field sell 0xbea5695c). A kit pin is held to the current build (`contracts`), never to a frozen one (evm-venues-pin). deploy.mjs --write-build keeps this map as it is.",
       "length": 8368,
       "masked": "0x63aa1c09eb919724feb88d836411ccb18cda768eedbc59a3364a4e88c1b2e6e2",
       "immutables": [

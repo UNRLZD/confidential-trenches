@@ -36,7 +36,7 @@ test("the check's Keccak-256: Keccak's published answers for '' and 'abc', OpenS
 });
 
 test("each bad edit applies to exactly one place in the good answer", () => {
-  assert.equal(A.bad.length, 19);
+  assert.equal(A.bad.length, 20);
   for (const b of A.bad) assert.equal(GOOD[b.file].split(b.from).length - 1, 1, b.name);
 });
 
@@ -60,6 +60,7 @@ const CASES = [
   ["MAX_RELAY_FEE_BPS 500", 1, /differ: VAULT_CONSTANTS/],
   ["carrier gas 100 Tgas", 1, /differ: VAULT_DEPOSIT_CARRIER, VAULT_DEPOSIT_SIGNERS/],
   ["carrier deposit 0 yocto", 1, /differ: VAULT_DEPOSIT_CARRIER, VAULT_DEPOSIT_SIGNERS/],
+  ["the intents.near path's min_gas back at 180 Tgas", 1, /differ: VAULT_ALSO_ACCEPTS/],
   ["TOKEN changed", 1, /differ: VAULT_CONSTANTS/],
   ["the 389-byte reserve dropped from the withdraw attachment", 2, /not: vaultWithdrawYocto/],
   ["the backstop multiplier changed", 2, /not: vaultRelayFeeWithinBackstop/],
@@ -102,18 +103,19 @@ test("pins per ref: kit-v1 PASSES on its own frozen values and main on the new o
   const TAG = fromLines(A.good)["kit-v1"];
   const r = await check({ refs: ["main", "kit-v1"], files: { main: GOOD, "kit-v1": TAG } });
   assert.equal(r.ok, true, r.lines.filter((l) => / BAD /.test(l)).join("\n"));
-  // main's files held to kit-v1's pins: on_payout's two results and P = 0 written are gone (A-01, R-01)
+  // main's files held to kit-v1's pins: the intents.near min_gas is new (VT-S13), on_payout's two results and P = 0
+  // written are gone (A-01, R-01)
   const mainAsTag = await checkFiles(GOOD, "kit-v1");
   assert.equal(mainAsTag.ok, false);
-  assert.ok(mainAsTag.lines.some((l) => /^BAD .*differ: VAULT_ON_PAYOUT/.test(l)), mainAsTag.lines.join("\n"));
+  assert.ok(mainAsTag.lines.some((l) => /^BAD .*differ: VAULT_ALSO_ACCEPTS, VAULT_ON_PAYOUT/.test(l)), mainAsTag.lines.join("\n"));
   assert.ok(mainAsTag.lines.some((l) => /^BAD .*vaultDepositMessage writes 0, as kit-v1 froze it/.test(l)), mainAsTag.lines.join("\n"));
   // kit-v1's files held to main's pins
   const tagAsMain = await checkFiles(TAG, "main");
   assert.equal(tagAsMain.ok, false);
-  assert.ok(tagAsMain.lines.some((l) => /^BAD .*differ: VAULT_ON_PAYOUT/.test(l)), tagAsMain.lines.join("\n"));
+  assert.ok(tagAsMain.lines.some((l) => /^BAD .*differ: VAULT_ALSO_ACCEPTS, VAULT_ON_PAYOUT/.test(l)), tagAsMain.lines.join("\n"));
   assert.ok(tagAsMain.lines.some((l) => new RegExp(`^BAD .*${R01_CALL.replace(/[()]/g, "\\$&")}`).test(l)), tagAsMain.lines.join("\n"));
   // every moved pin names its review item, and kit-v1's pins differ from main's only there
-  for (const m of Object.values(MOVED_SINCE_KIT_V1)) assert.match(m.review, /^[A-Z]-\d\d$/);
+  for (const m of Object.values(MOVED_SINCE_KIT_V1)) assert.match(m.review, /^([A-Z]-\d\d|VT-S\d\d)$/);
   assert.deepEqual(Object.keys(pinsFor("kit-v1")).filter((k) => JSON.stringify(pinsFor("kit-v1")[k]) !== JSON.stringify(PINNED[k])), Object.keys(MOVED_SINCE_KIT_V1));
 });
 

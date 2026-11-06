@@ -11,7 +11,7 @@ import { checkOneClickQuote } from "../../kit/src/checks/oneclick.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 import { DEPOSIT_QUOTE_URL, depositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
 import { depositQuoteKind, type DepositQuoteKindAnswer, type DepositQuoteKindContext } from "../src/rules/deposit-quote.ts";
-import { U, ATTACKER, SOL_USDC, NEAR_USDC, ADDRESS, NOW, H72, mockKey, otherKey, signAnswer, FLOOR_OUT, FLOOR_MIN, liveAnswer, h1c, type Answer, type Mock } from "./oneclick-mock.ts";
+import { U, ATTACKER, SOL_USDC, NEAR_USDC, ADDRESS, NOW, H72, mockKey, otherKey, signAnswer, COLLECTOR, FLOOR_OUT, FLOOR_MIN, liveAnswer, h1c, type Answer, type Mock } from "./oneclick-mock.ts";
 
 const ctx = (fetchFn: typeof fetch, over: Partial<DepositQuoteKindContext> = {}): DepositQuoteKindContext => ({
   seed: { source: "words", code_saved: true }, depositId: U, fetch: fetchFn, now: () => NOW, ...over,
@@ -39,7 +39,7 @@ test("a good quote to U passes and gives the signed address; the request names U
   assert.deepEqual(a, {
     ok: true,
     result: {
-      deposit_address: ADDRESS, origin_asset: SOL_USDC, amount_in: "25", min_amount_out: "24.7005",
+      deposit_address: ADDRESS, origin_asset: SOL_USDC, amount_in: "25", min_amount_out: "24.74208",
       deadline: new Date(NOW + 30 * 60_000 + H72).toISOString(), time_estimate_s: 20,
     },
   });
@@ -47,7 +47,7 @@ test("a good quote to U passes and gives the signed address; the request names U
 
 test("a quote exactly at the device's floors passes", async () => {
   const m = h1c({ before: (a) => {
-    a.quote.amountOut = FLOOR_OUT.toString(); a.quote.amountOutFormatted = "24.907172"; a.quote.minAmountOut = FLOOR_MIN.toString();
+    a.quote.amountOut = FLOOR_OUT.toString(); a.quote.amountOutFormatted = "24.954672"; a.quote.minAmountOut = FLOOR_MIN.toString();
   } });
   const a = await depositQuoteKind(PARAMS, ctx(m.fetch));
   assert.equal(a.ok, true);
@@ -73,7 +73,7 @@ const BAD: [string, Mock][] = [
   ["a signed field changed after signing (amountOut)", { after: (a) => { a.quote.amountOut = "25000000"; } }],
   ["a dry answer to a live request", { before: (a) => { a.quoteRequest.dry = true; } }],
   ["amountOut one unit under the floor", { before: (a) => {
-    a.quote.amountOut = (FLOOR_OUT - 1n).toString(); a.quote.amountOutFormatted = "24.907171"; a.quote.minAmountOut = FLOOR_MIN.toString();
+    a.quote.amountOut = (FLOOR_OUT - 1n).toString(); a.quote.amountOutFormatted = "24.954671"; a.quote.minAmountOut = FLOOR_MIN.toString();
   } }],
   ["minAmountOut one unit under the floor", { before: (a) => { a.quote.minAmountOut = (FLOOR_MIN - 1n).toString(); } }],
   ["a stale timestamp", { stampedAt: NOW - 120_001 }],
@@ -86,6 +86,8 @@ const BAD: [string, Mock][] = [
   ["refundType ORIGIN_CHAIN", { before: (a) => { a.quoteRequest.refundType = "ORIGIN_CHAIN"; } }],
   ["recipientType INTENTS", { before: (a) => { a.quoteRequest.recipientType = "INTENTS"; } }],
   ["another appFees entry (a helper's own fee)", { before: (a) => { a.quoteRequest.appFees = [{ recipient: ATTACKER, fee: 20 }]; } }],
+  // card oneclick-partner-fee-live: 1Click charges 1 bp between two USDC assets, so its other-pair 20 here is refused
+  ["1Click's other-pair fee 20 on a USDC route", { before: (a) => { a.quoteRequest.appFees = [{ recipient: COLLECTOR, fee: 20 }]; } }],
   ["no answer body in 1Click's shape", { after: (a) => { delete (a as Record<string, unknown>).quote; } }],
 ];
 for (const [name, m] of BAD)
@@ -136,10 +138,10 @@ const fmt = (v: bigint, d: number): string => {
   const f = t.slice(t.length - d).replace(/0+$/, "");
   return `${t.slice(0, t.length - d)}${f ? `.${f}` : ".0"}`;
 };
-/** The mock answers at the device's USDC-to-USDC floors for whatever amount was asked (partner path, F 20, S 15). */
+/** The mock answers at the device's USDC-to-USDC floors for whatever amount was asked (partner path, F 1, S 15). */
 const atUsdcFloor = (a: Answer): void => {
   const amountIn = BigInt(a.quote.amountIn as string);
-  const out = amountIn - 5_328n - (amountIn * 35n) / 10_000n;
+  const out = amountIn - 5_328n - (amountIn * 16n) / 10_000n;
   a.quote.amountInFormatted = fmt(amountIn, 6);
   a.quote.amountOut = out.toString(); a.quote.amountOutFormatted = fmt(out, 6);
   a.quote.minAmountOut = ((out * 9_900n + 9_999n) / 10_000n).toString();
@@ -174,11 +176,12 @@ test("a signed timeEstimate that is not a whole number of seconds gives no addre
   }
 });
 
-// 10 NEAR (24 decimals) at the device's two reads 2.5 and 2.5 into NEAR USDC: the other-pair floor (partner path) is
+// 10 NEAR (24 decimals) at the device's two reads 2.5 and 2.5 into NEAR USDC: the other-pair floor (F 20, S 15) is
 // ⌈⌈10 × 2.5 × 10^6 × 9,965 / 10,000⌉ × 9,900 / 10,000⌉ − 5,328 = 24,663,375 − 5,328 = 24,658,047, for both amounts.
 const NEAR_FLOOR = 24_658_047n;
 const nearAt = (out: bigint) => (a: Answer): void => {
   a.quote.amountInFormatted = "10.0";
+  a.quoteRequest.appFees = [{ recipient: COLLECTOR, fee: 20 }]; // 1Click's fee on wNEAR to USDC (read 6 Nov 15:19Z)
   a.quote.amountOut = out.toString(); a.quote.amountOutFormatted = fmt(out, 6); a.quote.minAmountOut = out.toString();
 };
 const near = (reads: [string, string]): Partial<DepositQuoteKindContext> => ({

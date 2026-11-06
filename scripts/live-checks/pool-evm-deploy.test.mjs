@@ -144,12 +144,12 @@ test("the frozen v1 sell delegate is the build only at the addresses the build f
   fails(await run("base-sepolia", mutate("base-sepolia", isCode(del), (j) => (j.result = v1))), /SellDelegate \S+ code is the build's: 4119 bytes/);
 });
 
-test("the mainnets (card pool-evm-deploy-mainnet): Base and Robinhood, both adapters and the sell delegate, each dependency's code hash as read on two operators, records in contracts/pool-evm/deployments/", () => {
+test("the mainnets (card pool-evm-deploy-mainnet): Base and Robinhood, both adapters, the sell delegate and the fee collector, each dependency's code hash as read on two operators, records in contracts/pool-evm/deployments/", () => {
   assert.deepEqual(Object.keys(MAINNETS), ["base", "robinhood"]);
   assert.deepEqual(MAINNET_IDS, { "0x2105": "base", "0x1237": "robinhood" });
-  const all = ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate"];
+  const all = ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate", "FeeCollector"];
   for (const n of ["base", "robinhood"]) {
-    assert.deepEqual(MAINNETS[n].contracts, all, `${n}: mainnet keeps both adapters (M365)`);
+    assert.deepEqual(MAINNETS[n].contracts, all, `${n}: mainnet keeps both adapters (M365) and deploys the fee collector (card evm-mainnet-senders)`);
     assert.deepEqual(operatorProblems(MAINNETS[n].rpcs, { chain: n }), [], n);
     assert.ok(deploymentFile(n).endsWith(`contracts/pool-evm/deployments/${n}.json`), deploymentFile(n));
     assert.equal(chainOf(n), MAINNETS[n]);
@@ -182,4 +182,65 @@ test("a mainnet record never folds into this run record: runRecord refuses it, a
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /base is a mainnet: its run record is pool-evm-deploy-mainnet\.md/);
   assert.doesNotMatch(r.stdout, /live-check pool-evm-deploy base:/, "nothing was read");
+});
+
+// ---- card evm-mainnet-senders: the mainnet set's fee collector ----
+// FeeCollector's runtime as Base Sepolia's collector holds it (evm-fee-collector.answers.json, read on chain), its one
+// immutable (the sink) rewritten to `sink`: the code a collector constructed with that sink holds
+const FC = JSON.parse(readFileSync(new URL("./evm-fee-collector.answers.json", import.meta.url), "utf8"));
+function collectorCode(sink) {
+  const a = lower(FC.deployments["base-sepolia"].contracts.FeeCollector.address);
+  const code = FC.good["base-sepolia"].find((x) => x.method === "eth_getCode" && lower(x.params[0]) === a).json.result;
+  const at = 2 + 2 * BUILD.contracts.FeeCollector.immutables[0][0];
+  return code.slice(0, at) + sink.slice(2).padStart(64, "0") + code.slice(at + 64);
+}
+const PIN = "0x5151515151515151515151515151515151515151";
+const OTHER = "0x6262626262626262626262626262626262626262";
+/** A CONSTRUCTED Base mainnet record (no mainnet collector exists yet): the six contracts at made-up addresses, the
+ * collector's sink `sink` */
+const constructed = (sink = PIN) => ({
+  chain: "base", dryRun: false, deployer: "0x" + "d0".repeat(20), txs: [],
+  contracts: Object.fromEntries(["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate", "FeeCollector"].map((n, i) => [n, { address: "0x" + String(i + 1).padStart(2, "0").repeat(20), ...(n === "FeeCollector" ? { sink } : {}) }])),
+});
+/** A fake Base mainnet RPC: `code` at the record's collector, `sinkCode` at its sink, no code anywhere else, every slot
+ * 0, every eth_call reverts (so the other contracts' lines fail: the test reads the collector's) */
+const fakeMainnet = (d, code, sinkCode = "0x") => async (url, init) => {
+  const { method, params } = JSON.parse(init.body);
+  const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+  if (method === "eth_chainId") return ok(MAINNETS.base.chainId);
+  if (method === "eth_getCode") return ok(lower(params[0]) === d.contracts.FeeCollector.address ? code : lower(params[0]) === lower(d.contracts.FeeCollector.sink) ? sinkCode : "0x");
+  if (method === "eth_getStorageAt") return ok("0x" + "00".repeat(32));
+  if (method === "eth_call") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: 3, message: "execution reverted" } }) };
+  if (method === "eth_getTransactionCount" || method === "eth_getBalance") return ok("0x0");
+  throw new Error(`fake: ${method}`);
+};
+const fcRun = (d, code, venues, sinkCode) => check({ deployment: d, fetchFn: fakeMainnet(d, code, sinkCode), venues, sleep: async () => {} });
+const fcLines = (r) => r.lines.filter((l) => /FeeCollector|sink/.test(l));
+
+test("a mainnet record's FeeCollector (a constructed record): its code is the build's, its immutable and the record's sink are the sell sender the kit pins, the sink has no code, on both RPCs", async () => {
+  const d = constructed();
+  assert.equal(runtimeOf(collectorCode(PIN), BUILD.contracts.FeeCollector.immutables).masked, BUILD.contracts.FeeCollector.masked, "the constructed code is the build's");
+  const r = await fcRun(d, collectorCode(PIN), { base: { sellSender: PIN } });
+  const l = fcLines(r);
+  assert.deepEqual(l.filter((x) => x.startsWith("FAIL")), [], l.join("\n"));
+  assert.ok(l.includes(`ok   the record's FeeCollector sink ${PIN} is the sell sender the kit pins on base: ${PIN}`), l.join("\n"));
+  for (const u of MAINNETS.base.rpcs) {
+    for (const re of [new RegExp(`^ok {3}the sink ${PIN} has no code`), /^ok {3}FeeCollector 0x\S+ code is the build's/, /^ok {3}FeeCollector's immutable holds one word, the sell sender the kit pins on base/, /^ok {3}FeeCollector has no owner\(\)/]) {
+      assert.equal(l.filter((x) => re.test(x) && x.includes(`on ${u}`)).length, 1, `${re} on ${u}\n${l.join("\n")}`);
+    }
+  }
+});
+
+test("a mainnet collector whose immutable holds another address fails, as do a record's sink that is not the pin and a sink with code", async () => {
+  fails(await fcRun(constructed(), collectorCode(OTHER), { base: { sellSender: PIN } }), /FeeCollector's immutable holds one word, the sell sender the kit pins on base 0x(51){20}.*: 0x0{24}(62){20}/);
+  fails(await fcRun(constructed(OTHER), collectorCode(OTHER), { base: { sellSender: PIN } }), new RegExp(`the record's FeeCollector sink ${OTHER} is the sell sender the kit pins on base: ${PIN}`));
+  fails(await fcRun(constructed(), collectorCode(PIN), { base: { sellSender: PIN } }, "0xef0100" + "77".repeat(20)), /the sink 0x(51){20} has no code \(no EIP-7702 delegation\)/);
+});
+
+test("a mainnet collector on a chain whose sell sender the kit does not pin fails", async () => {
+  for (const venues of [{ base: {} }, {}]) {
+    const r = await fcRun(constructed(), collectorCode(PIN), venues);
+    fails(r, /the record's FeeCollector sink 0x(51){20} is the sell sender the kit pins on base: none/);
+    fails(r, /FeeCollector's immutable holds one word, the sell sender the kit pins on base \(none\)/);
+  }
 });

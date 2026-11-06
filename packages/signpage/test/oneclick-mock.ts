@@ -54,19 +54,21 @@ export function signAnswer(a: Answer, key: KeyObject): void {
   a.signature = `ed25519:${base58.encode(sign(null, Buffer.from(h, "utf8"), key))}`;
 }
 
-// 25 USDC from Solana on the partner path (F 20, S 15): the floor is 25,000,000 − 5,328 − ⌊25,000,000 × 35 / 10,000⌋
-// = 24,907,172 for amountOut and ⌈24,907,172 × 9,900 / 10,000⌉ = 24,658,101 for minAmountOut.
-export const FLOOR_OUT = 24_907_172n, FLOOR_MIN = 24_658_101n;
+// 25 USDC from Solana on the partner path (F 1, 1Click's fee between two USDC assets; S 15): the floor is 25,000,000 −
+// 5,328 − ⌊25,000,000 × 16 / 10,000⌋ = 24,954,672 for amountOut and ⌈24,954,672 × 9,900 / 10,000⌉ = 24,705,126 for
+// minAmountOut. The answer is shaped as 1Click answered the helper's keyed USDC quotes on 6 Nov 15:19Z: appFees fee 1,
+// amountOut amountIn less 1 bp and the withdraw fee, about.
+export const FLOOR_OUT = 24_954_672n, FLOOR_MIN = 24_705_126n;
 export function liveAnswer(req: OneClickRequest, timestamp: number): Answer {
   return {
     quote: {
       amountIn: req.amount, amountInFormatted: "25.0", amountInUsd: "24.9950", minAmountIn: req.amount,
-      amountOut: "24950000", amountOutFormatted: "24.95", amountOutUsd: "24.9400", minAmountOut: "24700500",
+      amountOut: "24992000", amountOutFormatted: "24.992", amountOutUsd: "24.9820", minAmountOut: "24742080",
       depositAddress: ADDRESS, deadline: new Date(Date.parse(req.deadline) + H72).toISOString(),
       timeWhenInactive: new Date(Date.parse(req.deadline) + H72).toISOString(), timeEstimate: 20, refundFee: "0", withdrawFee: "5328",
     },
     quoteRequest: { ...req, depositMode: "SIMPLE", confidentiality: "public", quoteWaitingTimeMs: 0, insured: false,
-      appFees: [{ recipient: COLLECTOR, fee: 20 }] },
+      appFees: [{ recipient: COLLECTOR, fee: 1 }] },
     signature: "",
     timestamp: new Date(timestamp).toISOString(),
     correlationId: "00000000-0000-4000-8000-000000000000",
