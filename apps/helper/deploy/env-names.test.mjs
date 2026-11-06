@@ -28,8 +28,9 @@ import { evmPoolSendersFromEnv } from "../src/pool/evm.ts";
 import { releaseOf } from "../src/health.ts";
 
 const HELPER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-/** Quoted constants in src/ that are not environment names: NEAR RPC error causes and a Ref pool kind. */
-export const NOT_ENV = new Set(["UNKNOWN_ACCESS_KEY", "UNKNOWN_ACCOUNT", "UNKNOWN_BLOCK", "SIMPLE_POOL"]);
+/** Quoted constants in src/ that are not environment names: NEAR RPC error causes, a Ref pool kind and a 1Click
+ *  recipientType (bind/create.ts deliveryOf). */
+export const NOT_ENV = new Set(["UNKNOWN_ACCESS_KEY", "UNKNOWN_ACCOUNT", "UNKNOWN_BLOCK", "SIMPLE_POOL", "DESTINATION_CHAIN"]);
 
 function codeFiles(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {

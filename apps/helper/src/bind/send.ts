@@ -31,9 +31,10 @@
 //      dropped. Any other outcome counts, an expired delegate (DelegateActionExpired) included.
 //      At three failures U is struck: sender_struck from then on, no top-up.
 //
-// The gas account holds NEAR for gas and prepays only (markets.md MN:314 (6)); its key signs the relayer's own
-// transactions, whose only actions are storage_prepay on the vault and a Delegate carrying U's signed bytes as they
-// came. The store is one directory of small JSON files, each written by write, fsync, rename (or link, for a
+// The gas account holds NEAR for gas, prepays and the creation of delivered one-time ids only (markets.md MN:314 (6);
+// wallet.md step 6); its key signs the relayer's own transactions, whose only actions are storage_prepay on the vault,
+// a Delegate carrying U's signed bytes as they came, and the plain Transfer that creates a delivered U, R or V
+// (create.ts). The store is one directory of small JSON files, each written by write, fsync, rename (or link, for a
 // create-if-absent) and fsync of the directory, owned by one process through an exclusive lock the kernel holds.
 import { createHash, createPrivateKey, createPublicKey, sign as edSign } from "node:crypto";
 import * as nodeFs from "node:fs";
@@ -116,7 +117,9 @@ export type RelayerAction =
   | { kind: "storage_prepay"; precommitment: bigint; bytes: bigint }
   | { kind: "delegate"; signed: Uint8Array; receiver: string }
   /** One FunctionCall on `receiver` (the withdrawal relayer's withdraw and settle): `args` the JSON bytes as sent. */
-  | { kind: "call"; receiver: string; method: string; args: string; gas: bigint; deposit: bigint };
+  | { kind: "call"; receiver: string; method: string; args: string; gas: bigint; deposit: bigint }
+  /** One plain Transfer of `amount` yocto to `receiver`: on an absent 64-hex id it creates that id with its own key only (create.ts). */
+  | { kind: "transfer"; receiver: string; amount: bigint };
 
 /** How a send or a resolve reads: `wait` false answers once the bytes are sent; `fromBlocks` reads a call's receipt on the vault from blocks only. */
 export type ReadOpts = { wait?: boolean; fromBlocks?: boolean };
@@ -191,8 +194,24 @@ export function tally(rec: DepositRecord): DepositRecord {
   return { ...rec, sends, failed, struck: rec.struck || failed >= MAX_FAILED_SENDS };
 }
 
+/**
+ * The last Transfer the relayer sent to create a one-time id (create.ts), written before it is broadcast: pending until
+ * its outcome is read, then landed (landed_at: the height of its last receipt), failed, or dropped (never applied).
+ */
+export type CreationEntry = TxRef & { state: "pending" | "landed" | "failed" | "dropped"; landed_at: string | null; delivery: string | null };
+/**
+ * An id's creation record: its last Transfer (null when none was sent) and the deliveries (create.ts deliveryKey) that
+ * are spent on it: one whose Transfer landed, or that read the id existing. The Transfer's delivery is written in the one
+ * record write before the broadcast, so a crash anywhere leaves it named.
+ */
+export type CreationRecord = { id: string; last: CreationEntry | null; used: string[] };
+
 export type DepositStore = {
   get(u: string): DepositRecord | null;
+  /** The id's creation record (create.ts), or null. */
+  creation(id: string): CreationRecord | null;
+  /** Durable replace of the id's creation record. */
+  putCreation(rec: CreationRecord): void;
   /** R7: create-if-absent on U, durable before it returns; the existing record when one is there. */
   create(rec: DepositRecord): { created: boolean; rec: DepositRecord };
   /** Durable replace of U's record. */
@@ -268,8 +287,18 @@ function fileStoreOn(d: DurableDir): DepositStore {
     const c = read<{ next: string }>(kName(key));
     return c === null ? null : BigInt(c.next);
   };
+  const cName = (id: string) => {
+    if (!/^[0-9a-f]{64}$/.test(id)) throw new Error("store: not a 64-hex id");
+    return `c-${id}.json`;
+  };
   return {
     get: (u) => read<DepositRecord>(uName(u)),
+    creation: (id) => read<CreationRecord>(cName(id)),
+    putCreation(rec) {
+      held();
+      d.replace(cName(rec.id), JSON.stringify(rec));
+      if (rec.last !== null && rec.last.state !== "pending") forget(rec.last.tx_hash); // its D is read only while it is open
+    },
     create(rec) {
       held();
       if (d.createOnce(uName(rec.u), JSON.stringify(rec))) {
@@ -813,6 +842,10 @@ export function encodeTransaction(t: { signer: string; publicKey: Uint8Array; no
 }
 
 export function encodeAction(a: RelayerAction): Buffer {
+  if (a.kind === "transfer") {
+    if (a.amount <= 0n || a.amount >= 1n << 128n) throw new Error("transfer: amount not a u128 above 0");
+    return Buffer.concat([Buffer.from([3]), le(a.amount, 16)]); // Action::Transfer { deposit }
+  }
   if (a.kind === "call") {
     if (a.gas <= 0n || a.gas > 300_000_000_000_000n) throw new Error("call: gas outside 1..300 Tgas");
     if (a.deposit < 0n || a.deposit >= 1n << 128n) throw new Error("call: deposit not a u128");

@@ -13,6 +13,7 @@
 import { join } from "node:path";
 import { HELPER_CODE_STATUS } from "@blindfill/kit";
 import { decodeSignedDelegate } from "./checks.ts";
+import { type CreateDeps, deliveryReads, onStatusAnswer } from "./create.ts";
 import { carryDeposit, createFileStore, createSendReads, nearRpc, relayerKey, RPC_TIMEOUT_MS, startLockRounds, startRelayer, type Answer, type Rpc, type SendDeps } from "./send.ts";
 import { readUrls, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
 import { isAccountId } from "../withdraw/checks.ts";
@@ -33,9 +34,27 @@ export type BindSender = {
   /** At the helper's start: every carried network started, so a restart reads and resends its open records at once. */
   warm(): void;
   stop(): void;
+  /**
+   * A 1Click /v0/status answer the proxy carried, after it was answered (create.ts onStatusAnswer): a delivery to a
+   * one-time id on a carried network's token creates that id once. Returns at once; nothing it does reaches the
+   * answer, and a failure is logged only.
+   */
+  delivered?(body: string): void;
 };
 
 const STATUS: Record<string, number> = HELPER_CODE_STATUS;
+/** A device polls its status: the answers that change nothing are not logged. */
+const QUIET: ReadonlySet<string> = new Set(["delivery_used", "exists", "no_delivery", "under_min"]);
+/**
+ * A creation's log line: its code and our Transfer's hash only. Never its why, an RPC error's text or the network's
+ * start error: they can name the id (withdraw/send.ts accountAt, send.ts RpcError), and the log keeps no deposit's id
+ * or address. null: not logged.
+ */
+export function createLine(a: { code: string; tx_hash?: string } | null): string | null {
+  if (a === null || QUIET.has(a.code)) return null;
+  return `helper: create ${a.code}${typeof a.tx_hash === "string" && /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(a.tx_hash) ? ` ${a.tx_hash}` : ""}`;
+}
+export const CREATE_START_FAILED = "helper: create start_failed";
 /** The route's own answers, before the carry: check 1's and check 5's codes, and upstream (a start that failed). */
 export type BindRouteAnswer = { status: number; body: Answer["body"] | { error: { code: "bad_shape" | "token_not_accepted" | "upstream" } } };
 const no = (code: "bad_shape" | "token_not_accepted" | "upstream"): BindRouteAnswer => ({ status: STATUS[code] ?? 400, body: { error: { code } } });
@@ -113,6 +132,8 @@ export function bindSenderFromEnv(
   }
 
   const ready = new Map<TokenNetwork, Promise<SendDeps>>();
+  /** Each started network's creation (create.ts): the carry's store and relayer, the gate's reads on its providers. */
+  const creates = new Map<TokenNetwork, CreateDeps>();
   const stops: (() => void)[] = [];
   const init = async (net: Net): Promise<SendDeps> => {
     const token = WATCHED[net.network].token;
@@ -134,6 +155,7 @@ export function bindSenderFromEnv(
         ...watchDeps(watch, token),
       };
       stops.push(startLockRounds(deps));
+      creates.set(net.network, { token, delivery: deliveryReads(rpcs, token), store, relayer });
       return deps;
     } catch (e) {
       store.close();
@@ -169,6 +191,13 @@ export function bindSenderFromEnv(
       return carryDeposit(body, deps);
     },
     warm: () => carried.forEach((net) => void warmNet(net)),
+    delivered(body) {
+      const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
+      void onStatusAnswer(body, nets).then(
+        (a) => ((l) => l !== null && console.log(l))(createLine(a)),
+        () => console.error(CREATE_START_FAILED),
+      );
+    },
     stop: () => {
       stopped = true;
       stops.forEach((s) => s());

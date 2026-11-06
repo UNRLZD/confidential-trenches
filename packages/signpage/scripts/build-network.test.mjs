@@ -20,6 +20,8 @@ const TESTNET_ONLY = [
   "base-testnet.api.pocket.network", // Base Sepolia's second pool provider (card notes-per-pool-evm-base-hang)
   "rpc.testnet.chain.robinhood.com",
   "robinhood-sepolia-rpc.publicnode.com",
+  "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow the testnet withdrawal relayer (card signpage-withdraw-handoff)
+  "f-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow its fee recipient
 ];
 
 test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no testnet pin or provider", async () => {
@@ -29,6 +31,13 @@ test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no t
   const text = js.toString("utf8");
   for (const s of TESTNET_ONLY) assert.ok(!text.includes(s), `the mainnet bundle carries ${s}`);
   assert.ok(!text.includes("__SIGN_NETWORK__"), "the network is folded at build time");
+});
+
+test("SIGN_HOST's policy lets the mainnet build reach no testnet NEAR RPC (card signpage-withdraw-handoff)", () => {
+  const headers = readFileSync(join(PKG, "public/_headers"), "utf8");
+  const connect = /connect-src ([^;]*);/.exec(headers)?.[1] ?? "";
+  for (const h of ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org", "https://near-testnet.drpc.org"]) assert.ok(!connect.split(" ").includes(h), `SIGN_HOST's connect-src names ${h}`);
+  for (const h of ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"]) assert.ok(connect.split(" ").includes(h), `SIGN_HOST's connect-src lacks ${h}`);
 });
 
 test("the testnet build carries the devnet pool's pins and the testnet providers", async () => {

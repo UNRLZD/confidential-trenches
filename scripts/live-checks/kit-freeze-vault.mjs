@@ -24,8 +24,8 @@
 // report. A file can still make the run fail (throw, hang, exit, print, close fd 1): a child that exits early, exits
 // non-zero, times out or prints any other line is a FAIL.
 // Pins per ref: main is held to PINNED, the values as they stand; the freeze tag kit-v1 to the same with the pins the
-// vault reviews moved after Nov 1 put back as kit-v1 froze them (MOVED_SINCE_KIT_V1, each naming its review item), so
-// each ref is held to its own values and `--tag kit-v1` still passes.
+// vault reviews and tests moved after Nov 1 put back as kit-v1 froze them (MOVED_SINCE_KIT_V1, each naming its review
+// item or test row), so each ref is held to its own values and `--tag kit-v1` still passes.
 // Nothing here imports the kit: the encoders below are written from the paper, apart from shapes.ts's.
 //   node scripts/live-checks/kit-freeze-vault.mjs [--tag <tag>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the files the run read to <file> ({ref: {shapes: [lines], vectors: [lines]}}), so the check's test
@@ -72,7 +72,7 @@ export const PINNED = {
   VAULT_DEPOSIT_MESSAGE_MAX_BYTES: 1024,
   VAULT_DEPOSIT_CARRIER: CARRIER,
   VAULT_DEPOSIT_SIGNERS: { U: CARRIER, R: CARRIER, V: CARRIER },
-  VAULT_ALSO_ACCEPTS: [{ sender: "intents.near", method: "ft_withdraw", signed_by_kit: false }],
+  VAULT_ALSO_ACCEPTS: [{ sender: "intents.near", method: "ft_withdraw", signed_by_kit: false, min_gas_tgas: 156 }],
   VAULT_STORAGE_PREPAY: { method: "storage_prepay", args: ["precommitment"], min_bytes: 756, bytes_when_a_tree_may_grow: 904 },
   VAULT_DEPOSIT_PRECONDITIONS: [
     "storage_prepay(precommitment) has landed with at least min_bytes × VAULT_STORAGE_BYTE_COST attached",
@@ -175,6 +175,8 @@ const nonEmpty = (r) => !threw(r) && Array.isArray(r.v) && r.v.length > 0;
  * kit-v1 holds. main is held to PINNED; kit-v1 to PINNED with these put back (pinsFor, fixedCalls).
  */
 export const MOVED_SINCE_KIT_V1 = {
+  // VT-S13: the intents.near path's min_gas, measured and added (contracts/vault/tests/s13.rs reads it)
+  VAULT_ALSO_ACCEPTS: { review: "VT-S13", value: [{ sender: "intents.near", method: "ft_withdraw", signed_by_kit: false }] },
   // A-01: the vault pays out in one receipt on the token, all or none, so on_payout reads one result
   VAULT_ON_PAYOUT: { review: "A-01", value: { method: "on_payout", args: ["spend_index", "to_recipient", "fee"], private: true, results: ["recipient part", "fee part"] } },
 };

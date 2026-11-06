@@ -52,8 +52,9 @@
 //   and Recovery code). Each opens the layer through openLayer(), which resets the activation guard (guard.shown()).
 //   Card signpage-withdraw-form adds withdraw.open: with a seed stored it draws the withdraw form (src/withdraw/), where
 //   the user types the address and the amount, refused before any proof when bad; a withdraw.open with a one-time id
-//   is refused until that way out is built. Withdraw is guarded like Sign out, and drawn not offered until the
-//   wallet's withdraw path, the note value and the device's fee bound are wired here (withdrawDeps, below). export.open stays refused until its card.
+//   is refused until that way out is built. Withdraw is guarded like Sign out; its note value, fee and hand-off are the
+//   build's network's (src/withdraw/handoff.ts, card signpage-withdraw-handoff), drawn not offered where that network
+//   names no vault or relayer. export.open stays refused until its card.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
@@ -63,19 +64,21 @@ import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
+import { depositFollows } from "./deposit-follow.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
-import { readNotes, type NoteRecord } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
-import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
+import { drawWithdrawForm } from "./withdraw/form.ts";
+import { PAGE_NETWORK, withdrawFormDeps, withdrawSettle } from "./withdraw/handoff.ts";
+import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
-import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
 import { testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
@@ -121,7 +124,10 @@ let shell: Shell | null = null;
 // top-level, on every build: the page network's pool flow, its settling and the next buy's proofs (src/pool-testnet.ts,
 // card signpage-pool-mainnet); with no pool pinned on the network it refuses every pool kind and reads nothing; the
 // store and the seed are opened when a run needs them
-const testnet = !framed ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }) : null;
+// the page's one prover (src/prover-host.ts: one prover-worker per page, the CSP allows no second), shared by the pool
+// flow's proofs and the withdraw form's hand-off (src/withdraw/handoff.ts), top-level only
+const prover = !framed ? proverHost() : null;
+const testnet = !framed && prover ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }, { prover }) : null;
 // the restore kind (src/pool-restore.ts, card pool-restore-wired): every pool the page's network pins read from the
 // words, what it finds written to the note store, the proof queue's pass after; top-level only, as the pool flow
 const restore = !framed
@@ -136,6 +142,9 @@ const restore = !framed
       written: () => void testnet?.proofs().catch(() => {}),
     })
   : null;
+// a deposit carried from its checked address to its note with no tap (src/deposit-follow.ts, card wallet-deposit-follow):
+// top-level only, as the seed signs U's call; the store and the seed are opened when a follow runs
+const follows = !framed ? depositFollows({ network: () => PAGE_NETWORK, store: () => open(), seed64: () => openSeed64() }) : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 if (framed) document.body.append(root);
@@ -201,7 +210,8 @@ else {
       told.add(fn);
       testnet?.watch(fn);
     },
-    kinds: {
+    // deposit.quote's checked answer followed (its host's `checked`), deposit.confirm answered where it is (src/deposit-follow.ts)
+    kinds: follows!.withFollow({
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
       // layer opens (and the frame leaves).
       "signin.open": (p) => openKind("signin.open", p.way),
@@ -210,7 +220,7 @@ else {
       // the form withdraws from the vault's notes; a one-time id's way out (from_id) is not built yet
       "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open") : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named() }),
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u) }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts(),
       buy: trades,
@@ -221,7 +231,7 @@ else {
       ...poolKinds(poolDeps),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
-    },
+    }),
   });
   shell.layer.append(root);
 }
@@ -433,21 +443,34 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   root.replaceChildren(...parts);
 }
 
-// The withdraw form's reads. The page's network is mainnet: the release's hosts and SIGN_HOST's CSP name the mainnet
-// RPCs only. With no vault named there yet, no note can be in it: the note value is 0. Once a vault is named, the note
-// value (withdrawable over the note store), the fee bound (the device's own fee_max, LD5: card wallet-withdraw-feemax)
-// and the hand-off come with the wallet's withdraw path (VT-T02's integration); until then they stay unread and no
-// amount is ready. The note store is on the page for deposit naming (src/deposit-name.ts; the bundle keeps only what it
-// uses of the kit's entry, app.js 218 KB to 237 KB), not read by the withdraw form until then.
-const PAGE_NETWORK: NearNetwork = "mainnet";
-function withdrawDeps(): WithdrawFormDeps {
-  const net = NEAR_NETWORKS[PAGE_NETWORK];
-  return {
-    network: PAGE_NETWORK,
-    rpcs: [nearRpc(net.fastnear[0]), nearRpc(net.drpc)],
-    available: () => (vaultScope(PAGE_NETWORK) === null ? Promise.resolve(0n) : Promise.reject(new Error("notes: read with the withdraw path"))),
-    fee: () => Promise.reject(new Error("fee_max: read with the withdraw path (card wallet-withdraw-feemax)")),
-  };
+// The withdraw form's reads on the build's network (src/withdraw/handoff.ts): the note value over the note store and the
+// relayer's fee bounded by the device's fee_max. No hand-off yet: Withdraw is drawn pending until the move from A to the
+// typed account is on this page (card wallet-withdraw-move-out).
+function withdrawDeps() {
+  return withdrawFormDeps({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault });
+}
+// Sign out (this tab's or another's) stops a vault withdrawal's wait; its note stays RESERVED with its request.
+let withdrawWait = new AbortController();
+function withdrawsSignedOut(): void {
+  withdrawWait.abort();
+  withdrawWait = new AbortController();
+}
+// The vault withdrawals a closed or reloaded page left RESERVED, followed to settled once per sign-in (src/withdraw/
+// handoff.ts withdrawSettle); its own note store, closed after. Nothing where the build's network names no vault.
+async function settleWithdraws(): Promise<void> {
+  if (!prover) return;
+  let ns: NoteStore | null = null;
+  try {
+    await withdrawSettle({
+      store: () => open(),
+      notes: async () => (ns ??= await openNoteStore(await open())),
+      seed64: () => openSeed64(),
+      prover: prover.vault,
+      signal: withdrawWait.signal,
+    });
+  } finally {
+    (ns as NoteStore | null)?.close();
+  }
 }
 
 // The account's public id from its entropy: entropy -> 12 words -> seed64 -> T_0 (wallet.md:47, :54, :68). seed64 is
@@ -472,21 +495,30 @@ function shown(s: Seed): { account: string; code_saved: boolean; signout: boolea
 }
 
 let store: WalletStore | null = null;
-const open = async (): Promise<WalletStore> =>
-  (store ??= await openWalletStore({
+// the store's connection closed under the deposit follows: they start again once it is opened next
+let followsClosed = false;
+const open = async (): Promise<WalletStore> => {
+  const had = store;
+  const s = (store ??= await openWalletStore({
     // another tab signed out: its store closed ours; drop it and show signed-out
     onEvent: (e) => {
       moved += 1;
       // a delete or upgrade closed our connection: the next step opens the store again
-      if (e.kind === "closed") store = null;
+      // the follows ran on that connection: they end (U's lock freed) and start again on the store opened next
+      if (e.kind === "closed") (store = null), (followsClosed = true), follows?.storeClosed();
       if (e.kind !== "signout") return;
       store = null;
+      followsClosed = false;
       openedBy = null;
       void testnet?.signedOut();
       restore?.signedOut();
+      follows?.signedOut();
       show("signed-out");
     },
   }));
+  if (had === null && followsClosed) (followsClosed = false), void follows?.settle();
+  return s;
+};
 
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
 // The seed for a trade's signer (src/trade.ts), opened only once a wallet passed its arm check; the entropy is zeroed
@@ -518,7 +550,10 @@ function storeMoved(e: WalletEvent): void {
   if (walletSeedMoved(e)) moved += 1;
   else return;
   // another tab signed out: the proof queue and its seed copy go now
-  if (e.kind === "signout") void testnet?.signedOut();
+  if (e.kind === "signout") {
+    void testnet?.signedOut();
+    withdrawsSignedOut();
+  }
   void resync();
 }
 // the resync in flight, which open kinds wait for (openKind)
@@ -585,6 +620,10 @@ async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
   // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
   void testnet?.settle();
+  // a NEAR deposit followed on from its stage (src/deposit-follow.ts)
+  void follows?.settle().catch(() => {});
+  // a vault withdrawal a reload cut short is followed to settled (src/withdraw/handoff.ts withdrawSettle)
+  void settleWithdraws().catch(() => {});
   // a restore a closed or reloaded page left running reads stalled, so the app offers Retry (src/pool-restore.ts)
   void restore?.settle().catch(() => {});
   if (l.screen === "backup") return void showBackup(l.seed);
@@ -676,6 +715,9 @@ async function signOut(): Promise<void> {
   const s = await open();
   // a restore holds the seed lock shared, which the sign out waits for: it stops first
   restore?.signedOut();
+  // a deposit's follow stops too: its op stays at its stage (src/deposit-follow.ts)
+  follows?.signedOut();
+  withdrawsSignedOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;
@@ -730,6 +772,7 @@ if (framed) {
     listen: (fn) => window.addEventListener("message", fn),
     state: fs.state,
     watch: fs.watch,
-    kinds: { "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead }), ...depositReadHosts() },
+    // deposit.quote only on the top-level page, which follows its address (src/deposit-follow.ts): the frame refuses it
+    kinds: { ...depositReadHosts() },
   });
 }
