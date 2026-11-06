@@ -2612,3 +2612,104 @@ test("review 7c83 M1: a --prior-only resume finds the first run's key from its o
   assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "auth", "init"]);
   assert.deepEqual(r.funders, ["OLD", "NEW"]);
 });
+
+// ---- paste 2 (6 Nov 07:58Z): the cleanup kept the keys over a stale read ----
+// The run's own SetAuthority to none landed (5EtRdefa, slot 466033710) and both RPCs read the program final at
+// finalized, yet the cleanup's getProgramAccounts on --url (the upgradeable loader's accounts whose authority is
+// Some(funder), at confirmed) still listed the programdata: the reserve stayed in the funder and the keys were kept for
+// an owner's --sweep-kept. `lag` answers that read the way a node behind the run's last write does, then as one that has
+// it: "honest" is a node that keeps minContextSlot (-32016 while behind it) and gives the old list when none is asked;
+// "ignores" gives the old list with its own context slot below the one asked; "index" gives it at a context slot past
+// the run's writes (a list that lags its own slot), which only the account's own read shows wrong.
+async function staleAfterSetAuthority(lag) {
+  const c = asMainnet(cluster());
+  const code = recordedCode();
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  let ids = null;
+  const pdAcc = (authority) => {
+    const meta = Buffer.alloc(45);
+    meta.writeUInt32LE(3, 0);
+    if (authority) (meta[12] = 1), Buffer.from(b58decode(authority)).copy(meta, 13);
+    return { owner: LOADER, executable: false, lamports: 1, data: [Buffer.concat([meta, code]).toString("base64"), "base64"] };
+  };
+  const DEPLOY_SIG = "4".repeat(87);
+  c.io.cli = (a) => {
+    if (a[1] !== "deploy") return { status: 0, stdout: "", stderr: "" };
+    ids = { program: keyOf(a[a.indexOf("--program-id") + 1]), funder: keyOf(a[a.indexOf("--upgrade-authority") + 1]) };
+    const pd = programDataAddress(ids.program);
+    c.accounts.set(ids.program, { owner: LOADER, executable: true, lamports: 1, data: [Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pd))]).toString("base64"), "base64"] });
+    c.accounts.set(pd, pdAcc(ids.funder));
+    return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: DEPLOY_SIG }), stderr: "" };
+  };
+  // the cluster's slots: each landed transaction its own, the tip one past the newest
+  let tip = 466_033_000;
+  const slotOf = new Map([[DEPLOY_SIG, tip]]);
+  let authSlot = null;
+  let stale = 0; // the stale programdata lists answered
+  const TAG3 = b58(Uint8Array.of(3, 0, 0, 0));
+  wrap(c, async (url, { method, params }, real) => {
+    const cfg = params?.[1] ?? {};
+    const min = cfg.minContextSlot ?? 0;
+    if (method === "sendTransaction") {
+      const tx = decodeTx(params[0]);
+      const r = await real();
+      // the SetAuthority to none lands: the programdata's authority none from here on
+      if (tx.ixs.some((x) => x.program === LOADER)) c.accounts.set(programDataAddress(ids.program), pdAcc(null));
+      return r;
+    }
+    if (method === "getSignatureStatuses") {
+      const r = await (await real()).json();
+      r.result.value = r.result.value.map((s, i) => {
+        if (params[0][i] === DEPLOY_SIG) return { confirmationStatus: "finalized", err: null, slot: tip };
+        if (!s) return s;
+        if (!slotOf.has(params[0][i])) slotOf.set(params[0][i], ++tip);
+        const x = c.txs.get(params[0][i]);
+        if (x?.tx.ixs.some((y) => y.program === LOADER)) authSlot ??= slotOf.get(params[0][i]);
+        return { ...s, slot: slotOf.get(params[0][i]) };
+      });
+      return okR(r.result);
+    }
+    if (method === "getTransaction" && params[0] === DEPLOY_SIG) {
+      return okR({ slot: slotOf.get(DEPLOY_SIG), meta: { err: null }, transaction: { message: { accountKeys: [ids.funder, LOADER], instructions: [] } } });
+    }
+    if (method === "getProgramAccounts" && url === MAIN_URL && authSlot !== null && params[1].filters[0].memcmp.bytes === TAG3 && stale === 0) {
+      // the node behind the SetAuthority: the programdata still under the funder
+      stale++;
+      const behind = authSlot - 1;
+      const list = [{ pubkey: programDataAddress(ids.program), account: { owner: LOADER, executable: false, lamports: 1, data: ["", "base64"] } }];
+      if (lag === "honest" && min > behind) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32016, message: "Minimum context slot has not been reached", data: { contextSlot: behind } } }) };
+      const at = lag === "index" ? tip + 5 : behind;
+      return okR(cfg.withContext ? { context: { slot: at }, value: list } : list);
+    }
+    // every other read answers at the tip, with its context when one is asked (getBalance and getAccountInfo always
+    // carry it on a real node; getProgramAccounts with withContext)
+    if (["getBalance", "getAccountInfo", "getProgramAccounts"].includes(method)) {
+      const r = await (await real()).json();
+      if (r.error) return { ok: true, status: 200, json: async () => r };
+      const v = r.result;
+      if (method === "getProgramAccounts") return okR(cfg.withContext ? { context: { slot: tip }, value: v } : v);
+      return okR(v && typeof v === "object" && "value" in v ? { context: { slot: tip }, ...v } : v);
+    }
+    return real();
+  });
+  const { w, out, journal } = work();
+  const r = await runAt(c, out, [], mainArgs(out));
+  const j = existsSync(journal) ? JSON.parse(readFileSync(journal, "utf8")) : null;
+  const kept = r.dir && existsSync(r.dir);
+  const record = existsSync(out) ? JSON.parse(readFileSync(out, "utf8")) : null;
+  if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+  rmSync(w, { recursive: true, force: true });
+  return { ...r, j, kept, record, stale, funderLeft: ids ? c.bal.get(ids.funder) : null };
+}
+
+for (const lag of ["honest", "ignores", "index"]) {
+  test(`paste 2: a getProgramAccounts that lags the run's own landed SetAuthority (${lag}) never keeps the keys: the run completes, the funder at 0`, async () => {
+    const r = await staleAfterSetAuthority(lag);
+    assert.equal(r.stale, 1, "the stale list was answered once");
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + (r.j ? JSON.stringify(r.j.keys) : "") + "\n" + r.said.filter((l) => /cleanup|KEYS|left/.test(l)).join("\n"));
+    assert.equal(r.kept, false, "the keys are removed");
+    assert.equal(r.funderLeft, 0n, "no reserve kept in the funder");
+    assert.ok(r.record, "the record is written");
+    assert.ok(!r.said.some((l) => /kept \d+ lamports in the funder/.test(l)), r.said.join("\n"));
+  });
+}
