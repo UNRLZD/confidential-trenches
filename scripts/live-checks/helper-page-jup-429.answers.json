@@ -1,0 +1,242 @@
+{
+ "_about": "helper-page-jup-429.mjs --record, each part a real read unless named here. good: this branch (the page named on chain) as a helper on the Mac at 2026-11-06 05:12Z, Jupiter and Solana read with no key, eight builds sent through it 1.5 s before so Jupiter's 10 s window was full: the page answered in 804 ms named on chain (its search late), and the re-read at +6 s held its Jupiter row (the search landed at +4.4 s); the build met the full window (503 held, its cause named). good_jupiter: the same helper at 05:11Z with room in the window: the search landed inside the page's wait (src jupiter, 633 ms). bad_chain_slow: the same helper at 05:12Z, its public Solana RPC read 986 ms: named on chain and its row held at +6 s, but 1292 ms. bad_deployed: the deployed helper at c1525df5 at 02:40Z, build and page: the build's 200 has no Server-Timing, the page names no symbol in the record (before this card). bad_bare_503: the build as live run 42143211092 recorded it at 01:21Z for the no-route buy (HTTP 503 upstream, no header naming a cause; readAt is the job's start, its time not kept), with good's page. bad_page_429: good_jupiter's build, with the cold page live run 42137763380 job 127630261651 read at +13.5 s (its status, mint and Server-Timing as logged; sentAt and jupAt set 4.05 s apart to stand for the log's read cold, not read; no symbol and no re-read recorded): a page Jupiter held 4 s. bad_page_held: a helper of this card's first round on the Mac at 02:39Z: Jupiter's keyless plan held the page's search (503 search-held).",
+ "good": {
+  "base": "http://127.0.0.1:8790",
+  "readAt": "2026-11-06T05:12:56.007Z",
+  "ms": 16,
+  "status": 503,
+  "timing": "cause;desc=\"held\"",
+  "retryAfter": "9",
+  "body": "{\"error\":{\"code\":\"upstream\"}}",
+  "page": {
+   "mint": "AxaTJdRuuc3626FtPWdQCMcWPH6yzgxXKWbFCZN3TMgy",
+   "listsStatus": 200,
+   "poolSize": 4044,
+   "sentAt": 1793941976422,
+   "status": 200,
+   "timing": "lists;dur=1, rpc;dur=332;desc=\"solana\", jup;desc=\"late\";dur=500, launch;dur=303, read;dur=804, total;dur=804",
+   "symbol": "ASV",
+   "rowSrc": "chain",
+   "src": "none",
+   "jupAt": 1793941976755,
+   "rereads": [
+    {
+     "at": 1793941978425,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "ASV",
+     "rowSrc": "chain",
+     "src": "none",
+     "jupAt": 1793941976755
+    },
+    {
+     "at": 1793941980424,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "ASV",
+     "rowSrc": "chain",
+     "src": "none",
+     "jupAt": 1793941976755
+    },
+    {
+     "at": 1793941982424,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "ASV",
+     "rowSrc": "jupiter",
+     "src": "jupiter",
+     "jupAt": 1793941980815
+    }
+   ]
+  }
+ },
+ "good_jupiter": {
+  "base": "http://127.0.0.1:8790",
+  "readAt": "2026-11-06T05:11:36.847Z",
+  "ms": 87,
+  "status": 200,
+  "timing": "budget;dur=0, turn;dur=0, send;dur=69",
+  "retryAfter": null,
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"",
+  "page": {
+   "mint": "XsPU3oqujCZ2GFGkCyVMVMAsG215VQgSyh3hGHXv7FY",
+   "listsStatus": 200,
+   "poolSize": 4047,
+   "sentAt": 1793941897450,
+   "status": 200,
+   "timing": "lists;dur=1, rpc;dur=327;desc=\"solana\", jup-wait;dur=2, jup-budget;dur=0, jup-turn;dur=0, jup-send;dur=59, jup;dur=59, launch;dur=304, read;dur=632, total;dur=633",
+   "symbol": "RRCx",
+   "rowSrc": "jupiter",
+   "src": "jupiter",
+   "jupAt": 1793941897513,
+   "rereads": [
+    {
+     "at": 1793941899452,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "RRCx",
+     "rowSrc": "jupiter",
+     "src": "jupiter",
+     "jupAt": 1793941897513
+    }
+   ]
+  }
+ },
+ "bad_chain_slow": {
+  "base": "http://127.0.0.1:8790",
+  "readAt": "2026-11-06T05:12:19.837Z",
+  "ms": 16,
+  "status": 503,
+  "timing": "cause;desc=\"held\"",
+  "retryAfter": "9",
+  "body": "{\"error\":{\"code\":\"upstream\"}}",
+  "page": {
+   "mint": "BCXpjsHYmgVpRKdv4EQv1RARhYagnnwPkJjYbvM6bonk",
+   "listsStatus": 200,
+   "poolSize": 4047,
+   "sentAt": 1793941940511,
+   "status": 200,
+   "timing": "lists;dur=0, rpc;dur=986;desc=\"solana\", jup;desc=\"late\";dur=500, launch;dur=304, read;dur=1292, total;dur=1292",
+   "symbol": "FKH",
+   "rowSrc": "chain",
+   "src": "none",
+   "jupAt": 1793941941499,
+   "rereads": [
+    {
+     "at": 1793941942513,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "FKH",
+     "rowSrc": "chain",
+     "src": "none",
+     "jupAt": 1793941941499
+    },
+    {
+     "at": 1793941944513,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "FKH",
+     "rowSrc": "chain",
+     "src": "none",
+     "jupAt": 1793941941499
+    },
+    {
+     "at": 1793941946514,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "FKH",
+     "rowSrc": "jupiter",
+     "src": "jupiter",
+     "jupAt": 1793941944642
+    }
+   ]
+  }
+ },
+ "bad_deployed": {
+  "base": "https://api.confidential.unrealized.trade",
+  "readAt": "2026-11-06T02:40:07.116Z",
+  "ms": 762,
+  "status": 200,
+  "timing": null,
+  "retryAfter": null,
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"",
+  "page": {
+   "mint": "8i51XNNpGaKaj4G4nDdmQh95v4FKAxw8mhtaRoKd9tE8",
+   "listsStatus": 200,
+   "poolSize": 4019,
+   "sentAt": 1793932809795,
+   "status": 200,
+   "timing": "lists;dur=2, rpc;dur=25;desc=\"solana\", jup-wait;dur=1, jup-budget;dur=1, jup-turn;dur=0, jup-send;dur=13, jup;dur=14, launch;dur=28, read;dur=55, total;dur=55",
+   "src": "jupiter",
+   "jupAt": 1793932809901
+  }
+ },
+ "bad_bare_503": {
+  "base": "https://api.confidential.unrealized.trade",
+  "readAt": "2026-11-06T01:21:06Z",
+  "ms": null,
+  "status": 503,
+  "timing": null,
+  "retryAfter": null,
+  "body": "{\"error\":{\"code\":\"upstream\"}}",
+  "page": {
+   "mint": "AxaTJdRuuc3626FtPWdQCMcWPH6yzgxXKWbFCZN3TMgy",
+   "listsStatus": 200,
+   "poolSize": 4044,
+   "sentAt": 1793941976422,
+   "status": 200,
+   "timing": "lists;dur=1, rpc;dur=332;desc=\"solana\", jup;desc=\"late\";dur=500, launch;dur=303, read;dur=804, total;dur=804",
+   "symbol": "ASV",
+   "rowSrc": "chain",
+   "src": "none",
+   "jupAt": 1793941976755,
+   "rereads": [
+    {
+     "at": 1793941978425,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "ASV",
+     "rowSrc": "chain",
+     "src": "none",
+     "jupAt": 1793941976755
+    },
+    {
+     "at": 1793941980424,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "ASV",
+     "rowSrc": "chain",
+     "src": "none",
+     "jupAt": 1793941976755
+    },
+    {
+     "at": 1793941982424,
+     "status": 200,
+     "timing": "cache, total;dur=0",
+     "symbol": "ASV",
+     "rowSrc": "jupiter",
+     "src": "jupiter",
+     "jupAt": 1793941980815
+    }
+   ]
+  }
+ },
+ "bad_page_429": {
+  "base": "https://api.confidential.unrealized.trade",
+  "readAt": null,
+  "ms": 87,
+  "status": 200,
+  "timing": "budget;dur=0, turn;dur=0, send;dur=69",
+  "retryAfter": null,
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"",
+  "page": {
+   "mint": "XsvjomvQRsCAXR3bTNAPNQEZNs8NY88Aakcyejyq3CF",
+   "listsStatus": 200,
+   "poolSize": 4014,
+   "sentAt": 1793000000000,
+   "status": 200,
+   "timing": "lists;dur=0, rpc;dur=34;desc=\"solana\", jup-wait;dur=1, jup-budget;dur=0, jup-turn;dur=4001, jup-429;desc=\"1\", jup-send;dur=15, jup;dur=4047, launch;dur=24, read;dur=4072, total;dur=4073",
+   "src": "jupiter",
+   "jupAt": 1793000004050
+  }
+ },
+ "bad_page_held": {
+  "base": "http://127.0.0.1:8790",
+  "readAt": "2026-11-06T02:39:41.840Z",
+  "ms": 302,
+  "status": 200,
+  "timing": "budget;dur=0, turn;dur=0, send;dur=280",
+  "retryAfter": null,
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"",
+  "page": {
+   "mint": "7yZFFUhq9ac7DY4WobLL539pJEUbMnQ5AGQQuuEMpump",
+   "listsStatus": 200,
+   "poolSize": 4020,
+   "sentAt": 1793932787014,
+   "status": 503,
+   "timing": "search-held;desc=\"jupiter held\"",
+   "src": null,
+   "jupAt": null
+  }
+ }
+}

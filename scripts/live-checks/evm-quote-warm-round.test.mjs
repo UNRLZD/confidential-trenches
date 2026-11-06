@@ -18,7 +18,8 @@ test("the good answer (fc7f1b1, the box) passes: every preflight allows the app,
   assert.equal(r.ok, true, r.lines.join("\n"));
   has(r.lines, /^PASS base-hook: warm p50 533 ms, p95 653 ms over 20/);
   has(r.lines, /^PASS base-partial-v4: warm p50 557 ms, p95 718 ms over 20/);
-  has(r.lines, /^PASS base base\.rpc\.blxrbdn\.com preflight from https:\/\/confidential\.unrealized\.trade: 204, allow-origin \*/);
+  // bloXroute's Base host left the kit's list (card base-rpc-list-fix): the replay reads no line for it
+  assert.ok(!r.lines.some((l) => /base\.rpc\.blxrbdn\.com/.test(l)), r.lines.join("\n"));
   has(r.lines, /^PASS base-hook: 21 of 21 quotes end ok$/);
   has(r.lines, /^PASS base-partial-v4: 21 of 21 quotes end partial_fill$/);
 });
@@ -64,4 +65,14 @@ test("a refused quote's line names its code, its place, its time and the kit's m
   const r = check(run);
   assert.equal(r.ok, false);
   has(r.lines, /^FAIL base-partial-v4: 20 of 21 quotes end partial_fill \(others: rpc_error at quote 0, 99444 ms: the scan provider answered no logs\)$/);
+});
+
+test("card base-rpc-list-fix: no Base provider of the kit's list is one whose POST answered no allow-origin on GitHub's runner", () => {
+  // run 42114981904 (2026-11-05 21:42-21:50Z), its job log: "FAIL base base.rpc.blxrbdn.com preflight from
+  // https://confidential.unrealized.trade: 204, allow-origin *, allow-headers Content-Type, Authorization, User-Agent;
+  // POST allow-origin none". A browser quote that reaches it fails, so the list must not hold it.
+  const run = structuredClone(A.good);
+  run.preflight["https://base.rpc.blxrbdn.com"] = { status: 204, allow: "*", headers: "Content-Type, Authorization, User-Agent", post: null };
+  const r = check(run);
+  assert.equal(r.ok, true, r.lines.join("\n"));
 });

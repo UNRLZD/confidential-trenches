@@ -23,6 +23,9 @@
 // So a file that replaces a prototype method or JSON.stringify, or process.stdout's write or _write, cannot change the
 // report. A file can still make the run fail (throw, hang, exit, print, close fd 1): a child that exits early, exits
 // non-zero, times out or prints any other line is a FAIL.
+// Pins per ref: main is held to PINNED, the values as they stand; the freeze tag kit-v1 to the same with the pins the
+// vault reviews moved after Nov 1 put back as kit-v1 froze them (MOVED_SINCE_KIT_V1, each naming its review item), so
+// each ref is held to its own values and `--tag kit-v1` still passes.
 // Nothing here imports the kit: the encoders below are written from the paper, apart from shapes.ts's.
 //   node scripts/live-checks/kit-freeze-vault.mjs [--tag <tag>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the files the run read to <file> ({ref: {shapes: [lines], vectors: [lines]}}), so the check's test
@@ -78,7 +81,7 @@ export const PINNED = {
   ],
   VAULT_CONTEXT_FIELDS: [["processor", "account"], ["recipient", "account"], ["register_deposit", "u128"], ["fee_recipient", "account"], ["relay_fee", "u128"], ["refund_precommitment", "u256be"], ["deadline_ms", "u64"], ["salt", "bytes16"]],
   VAULT_WITHDRAW: { method: "withdraw", args: ["withdrawal", "proof", "public_signals"], storage_bytes: 710, tree_growth_bytes: 148, gas_tgas: 300 },
-  VAULT_ON_PAYOUT: { method: "on_payout", args: ["spend_index", "to_recipient", "fee"], private: true, results: ["recipient part", "fee part"] },
+  VAULT_ON_PAYOUT: { method: "on_payout", args: ["spend_index", "to_recipient", "fee"], private: true, results: ["payout"] },
   VAULT_SETTLE: { method: "settle", args: ["nullifier_hash"], caller: "anyone" },
   VAULT_RAGEQUIT: { method: "ragequit", args: ["proof", "public_signals", "register_deposit", "refund_precommitment"], caller: "the deposit's depositor", storage_bytes: 475 },
   VAULT_WITHDRAW_SIGNALS: ["newCommitmentHash", "existingNullifierHash", "withdrawnValue", "stateRoot", "stateTreeDepth", "ASPRoot", "ASPTreeDepth", "context"],
@@ -167,7 +170,21 @@ const KECCAK = { $keccak: true };
 const threw = (r) => "t" in r;
 const is = (want) => (r) => !threw(r) && canon(r.v) === canon(want);
 const nonEmpty = (r) => !threw(r) && Array.isArray(r.v) && r.v.length > 0;
-function fixedCalls() {
+/**
+ * The pins the vault reviews moved after the kit-v1 freeze (Nov 1 06:00Z): each with its review item and the value
+ * kit-v1 holds. main is held to PINNED; kit-v1 to PINNED with these put back (pinsFor, fixedCalls).
+ */
+export const MOVED_SINCE_KIT_V1 = {
+  // A-01: the vault pays out in one receipt on the token, all or none, so on_payout reads one result
+  VAULT_ON_PAYOUT: { review: "A-01", value: { method: "on_payout", args: ["spend_index", "to_recipient", "fee"], private: true, results: ["recipient part", "fee part"] } },
+};
+/** The fixed call moved after kit-v1 (R-01: the vault refuses precommitment 0), by its name on main. */
+export const R01_CALL = "vaultDepositMessage refuses 0 (vault review R-01)";
+/** The data pins one ref is held to. */
+export const pinsFor = (ref) =>
+  ref === "kit-v1" ? { ...PINNED, ...Object.fromEntries(Object.entries(MOVED_SINCE_KIT_V1).map(([k, m]) => [k, m.value])) } : PINNED;
+
+function fixedCalls(ref = "main") {
   const u = "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de";
   const vault = "vault.confidential.unrlzd.near";
   const now = 1_793_750_000_000;
@@ -176,6 +193,9 @@ function fixedCalls() {
   const out = [
     ["vaultDepositMessage writes the two fields", "vaultDepositMessage", [B(5n), u], is(`{"precommitment":"5","depositor":"${u}"}`)],
     ["vaultDepositMessage refuses p", "vaultDepositMessage", [B(P), u], threw],
+    ref === "kit-v1"
+      ? ["vaultDepositMessage writes 0, as kit-v1 froze it (vault review R-01 moved it to a refusal)", "vaultDepositMessage", [B(0n), u], is(`{"precommitment":"0","depositor":"${u}"}`)]
+      : [R01_CALL, "vaultDepositMessage", [B(0n), u], threw],
     ["vaultPrepayYocto", "vaultPrepayYocto", [false], is(756n * E19)],
     ["vaultPrepayYocto", "vaultPrepayYocto", [true], is(904n * E19)],
     ["vaultWithdrawYocto", "vaultWithdrawYocto", [B(0n), B(0n), false], is((710n + 389n) * E19 + 1n)],
@@ -245,7 +265,7 @@ function decode(x) {
 // passes (a text-encoding id, never a secret); any other name the child sees is a FAIL.
 const OS_MADE_ENV = ["__CF_USER_TEXT_ENCODING"];
 
-export async function checkFiles({ shapes, vectors }) {
+export async function checkFiles({ shapes, vectors }, ref = "main") {
   const lines = [];
   const say = (ok, what) => (lines.push(`${ok ? "ok " : "BAD"} ${what}`), ok);
   let V;
@@ -255,7 +275,8 @@ export async function checkFiles({ shapes, vectors }) {
     say(false, `vault-v1.json parses: ${e.message}`);
     return { ok: false, lines };
   }
-  const fixed = fixedCalls();
+  const fixed = fixedCalls(ref);
+  const PINNED = pinsFor(ref);
   const vec = vectorCalls(V);
   const all = [...fixed, ...vec];
   const calls = all.map(([, fn, args, , id], i) => [id ?? `c${i}`, fn, args]);
@@ -440,7 +461,7 @@ export async function check({ refs = ["main"], files }) {
   const lines = [];
   let ok = true;
   for (const ref of refs) {
-    const r = await checkFiles(files[ref]);
+    const r = await checkFiles(files[ref], ref);
     for (const l of r.lines) lines.push(`${ref}: ${l}`);
     ok &&= r.ok;
   }

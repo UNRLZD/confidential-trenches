@@ -160,6 +160,10 @@ test("swapping recipient and fee_recipient changes the context (the order is par
   assert.deepEqual(S.VAULT_CONTEXT_FIELDS.map(([n]) => n), ["processor", "recipient", "register_deposit", "fee_recipient", "relay_fee", "refund_precommitment", "deadline_ms", "salt"]);
 });
 
+test("the payout callback reads one promise result: the token's one payout receipt (vault review A-01)", () => {
+  assert.deepEqual([...S.VAULT_ON_PAYOUT.results], ["payout"]);
+});
+
 test("the deposit message: exactly precommitment and depositor, in that order, as the vault parses it", () => {
   assert.deepEqual([...S.VAULT_DEPOSIT_MESSAGE_FIELDS], ["precommitment", "depositor"]);
   const u = "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de";
@@ -169,6 +173,9 @@ test("the deposit message: exactly precommitment and depositor, in that order, a
   assert.ok(Buffer.byteLength(m) <= S.VAULT_DEPOSIT_MESSAGE_MAX_BYTES);
   assert.throws(() => S.vaultDepositMessage(S.VAULT_FIELD_P, u), /precommitment/);
   assert.throws(() => S.vaultDepositMessage(-1n, u), /precommitment/);
+  // R-01: the vault refuses precommitment 0 (no (nullifier, secret) hashes to it), so the kit writes no message on it
+  assert.throws(() => S.vaultDepositMessage(0n, u), /precommitment: not in 1\.\.p-1/);
+  assert.equal(JSON.parse(S.vaultDepositMessage(1n, u)).precommitment, "1");
   for (const bad of ["", "a", "Alice.near", "a..near", "a".repeat(65), "-a.near", "a b.near"]) {
     assert.throws(() => S.vaultDepositMessage(1n, bad), /depositor/, bad);
   }

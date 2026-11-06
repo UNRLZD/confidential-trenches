@@ -22,6 +22,7 @@
     "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a"
   ],
   "code_hash": "6stBz3WromsLyyeD3FZD133ThTt9XvW6eqVHCA64c5Ff",
+  "non_reproducible": "built by cargo near build non-reproducible-wasm on the host (Linux x64, its build line), before the vault built in the pinned Docker image (card vault-reproducible-build); its sha256 is repeatable on Linux x64 only, and its wasm names no source",
   "build": "cargo +1.96.0 near build non-reproducible-wasm --no-embed-abi --locked --env RUSTFLAGS=-C link-arg=-s --remap-path-prefix=<CARGO_HOME>=/cargo (cargo-near-near 0.22.0, rustc 1.96.0, linux x64), at main 1656ae5a5a521b74467055d8ba6b9beada27f199",
   "sources": {
     "account_id": "vault.md 2.8 and M304 D-13: vault-test under confidential.unrlzd.near; deploy.mjs vaultIdProblems: a direct sub-account of the parent",

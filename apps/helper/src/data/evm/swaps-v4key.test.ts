@@ -155,3 +155,27 @@ test("card robinhood-cold-open-fast: a discovery asks its receipts, and the tape
   // the tape's senders (lookTraders) alike: at 439ab7b split by free budget, the slow one's share the biggest
   assert.equal(senders.get(SLOW) ?? 0, 0, `senders asked of the slow provider: ${JSON.stringify([...senders])}`);
 });
+
+test("card helper-restart-fresh: a cold v4 token whose PoolManager receipts no provider reads (each answers them with an error) answers 503 and is looked for again, never kept as \"no pool\" and served an empty tape; once the receipts read, its own tape is served (red at bfb9e938: 200 with no trades)", async () => {
+  const r = rig(true);
+  const st = { down: true, asked: 0 };
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body)) as { id: number; method: string }[];
+    if (!st.down || !reqs.some((q) => q.method === "eth_getTransactionReceipt")) return r.fetch(url, init);
+    st.asked++;
+    // a busy provider's answer to each receipt: an error, the rest of the batch as the chain answers
+    const out = (await (await r.fetch(url, init)).json()) as { id: number }[];
+    const err = (id: number) => ({ jsonrpc: "2.0", id, error: { code: -32603, message: "internal error" } });
+    return new Response(JSON.stringify(out.map((x) => (reqs.find((q) => q.id === x.id)?.method === "eth_getTransactionReceipt" ? err(x.id) : x))), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const s = open(r.chain, { get t() { return Date.now(); } }, { pools: new Map(), fetch: fetch as never });
+  const unread = await s.trades(TOKEN, 50);
+  st.down = false;
+  const read = await s.trades(TOKEN, 50);
+  s.stop();
+  assert.ok(st.asked > 0, "the discovery asked for the receipts");
+  assert.equal(unread.status, 503, `a discovery whose receipts went unread: ${unread.body}`);
+  assert.deepEqual(JSON.parse(unread.body), { error: { code: "upstream" } });
+  assert.equal(read.status, 200, read.body);
+  assert.equal((JSON.parse(read.body) as { trades: unknown[] }).trades.length, SWAPS, "the token's own tape, found once its receipts read");
+});

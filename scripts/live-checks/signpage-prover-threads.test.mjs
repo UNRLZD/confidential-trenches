@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { consoleLineOf, judge, THREAD_CSP, THREAD_PATH, THREAD_PIN, threadsFor } from "./signpage-prover-threads.mjs";
+import { consoleLineOf, failLines, judge, THREAD_CSP, THREAD_PATH, THREAD_PIN, threadsFor } from "./signpage-prover-threads.mjs";
 
 after(() => globalThis.curve_bn128?.terminate?.());
 
@@ -103,4 +103,13 @@ test("a console line the run keeps names its resource's origin and path, never t
   assert.equal(consoleLineOf(msg("error", text, { url: "https://sign.confidential.unrealized.trade/zk/withdraw.zkey?x=1" })), `error ${text} (https://sign.confidential.unrealized.trade/zk/withdraw.zkey)`);
   assert.equal(consoleLineOf(msg("error", "Refused to create a worker", { url: "blob:https://sign.confidential.unrealized.trade/9a7e" })), "error Refused to create a worker (blob:https://sign.confidential.unrealized.trade)");
   assert.equal(consoleLineOf(msg("log", "x".repeat(400), { url: "" })), `log ${"x".repeat(296)}`);
+});
+
+// card pool-buy-send-fast (live run 42137740517's red job printed no console line): a FAIL prints the run's console
+// lines and the worker scripts asked for, so a red run's log is its own reproduction
+test("a FAIL's extra lines: each console line kept, then the worker scripts; none kept says so", () => {
+  const rec = { page: { console: ["worker https://sign.confidential.unrealized.trade/prover-worker.js", "in /prover-worker.js: error x"], workerScripts: ["https://sign.confidential.unrealized.trade/prover-worker.js"] } };
+  assert.deepEqual(failLines(rec), ["CONSOLE worker https://sign.confidential.unrealized.trade/prover-worker.js", "CONSOLE in /prover-worker.js: error x", 'WORKER SCRIPTS ["https://sign.confidential.unrealized.trade/prover-worker.js"]']);
+  assert.deepEqual(failLines({ page: {} }), ["CONSOLE none kept", "WORKER SCRIPTS []"]);
+  assert.deepEqual(failLines(null), ["CONSOLE none kept", "WORKER SCRIPTS []"]);
 });

@@ -359,7 +359,10 @@ jobs:
 
   # rustc 1.96.0, the vault's build in the G1 gas proof (cargo-near 0.22.0); neither the kit nor the vault paper pins
   # one. rustup is on the ubuntu-24.04 image (actions/runner-images Ubuntu2404-Readme.md, read 2026-10-31 19:32Z).
-  # No cache: cargo's 2m38s here ends well inside the longest shard's time.
+  # No cache of the build (cargo's 2m38s here ends well inside the longest shard's time), but of cargo's registry: the
+  # crates come from the cache when the lock has not moved, and a bad read from crates.io is fetched again by
+  # scripts/ci/retry.sh (card ci-cargo-fetch-retry: main went red twice on ark-poly, curl [56] unexpected eof, runs
+  # 42146603371 and 42148449367). scripts/ci/download-retry.mjs refuses a cargo step without that fetch before it.
   test-vault:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
@@ -368,10 +371,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: rust 1.96.0
+        run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: contracts/vault -> target
+          cache-targets: "false"
+          cache-bin: "false"
+      - name: the vault's crates
+        run: bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/Cargo.toml
       - name: the vault's own tests, without the sandbox suite
-        run: |
-          bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal
-          cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml
+        run: cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml
 
   # The required check: it runs whatever the shards ended with (always()), and passes only when each one passed. A
   # shard that failed, was skipped or was cancelled fails it; a test that skipped instead would pass the ruleset.
@@ -496,6 +506,13 @@ jobs:
             contracts/vault/tests/harness/probe -> target
           # ~/.cargo/bin keeps the sha256-checked cargo-near the step above installed, never a cached one
           cache-bin: "false"
+      # the registry from that cache, and what it lacks from crates.io with a retry: run.sh and the test build below
+      # meet no bad read from it (card ci-cargo-fetch-retry); download-retry.mjs holds one fetch per manifest they build
+      - name: the crates of the vault and its two test contracts
+        run: |
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/tests/mock-token/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/tests/harness/probe/Cargo.toml
       - name: the four wasm, built once for every shard, and the pinned two
         if: steps.wasm.outputs.cache-hit != 'true'
         run: contracts/vault/tests/harness/run.sh --build-only "$RUNNER_TEMP/vault-wasm"
@@ -568,6 +585,12 @@ jobs:
             contracts/vault/tests/harness/probe -> target
           cache-bin: "false"
           save-if: "false"
+      # what that cache lacks comes from crates.io with a retry (card ci-cargo-fetch-retry), as in vault-sandbox-build
+      - name: the crates of the vault and its two test contracts
+        run: |
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/tests/mock-token/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/tests/harness/probe/Cargo.toml
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: vault-wasm
@@ -643,6 +666,14 @@ jobs:
           key: pool-solana-rustc-1.96.0-1.97.1-agave-4.4.0-${{ hashFiles('contracts/pool-solana/Cargo.lock', 'contracts/pool-solana/svm-tests/Cargo.lock') }}
           restore-keys: |
             pool-solana-
+      # the registry from that cache, and what it lacks from crates.io with a retry (card ci-cargo-fetch-retry): the
+      # three crates cargo-build-sbf and both cargo tests build, and dry-run.sh's build of the pool program, find them
+      # in ~/.cargo/registry. svm-tests builds with 1.97.1, so its fetch reads its lock with that cargo.
+      - name: the pool program's crates
+        run: |
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/pool-solana/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/pool-solana/svm-tests/evil-venue/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.97.1 fetch --locked --manifest-path contracts/pool-solana/svm-tests/Cargo.toml
       - name: the pool program's unit tests
         run: cargo +1.96.0 test --locked --manifest-path contracts/pool-solana/Cargo.toml
       # cargo-build-sbf only warns when a function's frame passes SBF's 4 KiB stack ("may cause undefined behavior"):

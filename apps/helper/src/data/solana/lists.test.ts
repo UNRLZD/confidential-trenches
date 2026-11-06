@@ -13,7 +13,7 @@ import { gunzipSync } from "node:zlib";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
 import { onCurve } from "../../../../terminal/src/screens/market/curve.ts";
 import {
-  address, b58decode, b58encode, createSolanaLists, dec, FRESH_MS, LIST_MAX, pumpCurveAddress, pumpCurveBps, PUMP_PROGRAM,
+  address, b58decode, b58encode, createSolanaLists, dec, FRESH_MS, LIST_MAX, LIST_STEP_MS, pumpCurveAddress, pumpCurveBps, PUMP_PROGRAM,
   READS, ROW_FIELDS, snapshot, STALE_MS, text, toRow, toRows, type Row,
 } from "./lists.ts";
 import { createOrigins, rpcAccounts } from "./origin.ts";
@@ -284,7 +284,10 @@ test("fold 6 (R5b, R5d): Discover's Jupiter lists and curve reads draw on the he
   // the clock stands at AS_OF, so a wait the proxy takes (a caller's turn, a poll for room) reads the same now() after
   // it: the wait is a turn of the event loop, never real seconds (162 s of real sleep in a fresh run, card
   // fresh-run-margin), as crowd.test.ts's still clock does
+  // the minute's reserve alone (burstMs 0): the callers' part is spent at one instant, which Jupiter's 10 s window
+  // (proxy.ts PACED, card helper-page-jup-429) would spread
   const proxy = createProxy({}, {
+    burstMs: 0,
     now: () => t,
     sleep: async () => {},
     fetch: (async (url: string) => {
@@ -324,9 +327,27 @@ test("the lists: one read of the three Jupiter lists through the proxy, shared u
   const s = JSON.parse(a.body);
   assert.equal(s.as_of_ms, AS_OF);
   for (const k of ["new", "trending", "trending_5m", "trending_1h", "graduating"]) for (const r of s.lists[k] as Row[]) assert.deepEqual(Object.keys(r), [...ROW_FIELDS]);
-  f.step(FRESH_MS - 1);
+  f.step(LIST_STEP_MS - 1);
   await lists.get();
   assert.equal(f.calls.length, 3);
+  // card helper-page-jup-429: past LIST_STEP_MS one list is read again, the one read longest ago, never the three at once
+  f.step(1);
+  await lists.get();
+  await new Promise((ok) => setImmediate(ok));
+  assert.deepEqual(f.calls.slice(3), ["jupiter /tokens/v2/recent?limit=100"]);
+});
+
+test("card helper-page-jup-429: the three lists are read one a LIST_STEP_MS, each once a FRESH_MS, the one read longest ago first", async () => {
+  const f = fakes();
+  const lists = createSolanaLists(f.proxy, recordedRpc, { now: f.now });
+  await lists.get();
+  for (let i = 0; i < 6; i++) {
+    f.step(LIST_STEP_MS);
+    await lists.get();
+    await new Promise((ok) => setImmediate(ok));
+  }
+  assert.deepEqual(f.calls.slice(3).map((c) => c.split(" ")[1]!.split("?")[0]), ["/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h", "/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"]);
+  assert.equal(LIST_STEP_MS * 3, FRESH_MS);
 });
 
 test("the lists: past FRESH_MS the last answer serves while one refresh runs; with the vendor down it still serves past STALE_MS, dated by its own read, never 503 once read", async () => {
@@ -337,7 +358,7 @@ test("the lists: past FRESH_MS the last answer serves while one refresh runs; wi
   f.step(FRESH_MS);
   assert.equal(await lists.get(), first, "the last answer, at once");
   await new Promise((ok) => setImmediate(ok));
-  assert.equal(f.calls.length, 6, "one refresh behind it");
+  assert.equal(f.calls.length, 4, "one refresh behind it, of one list (card helper-page-jup-429)");
   down = true;
   // the refresh read at AS_OF + FRESH_MS: its data is STALE_MS old here
   f.step(STALE_MS);
@@ -363,7 +384,7 @@ test("the lists: a throttled list read (the proxy's 429) with no last answer ans
   assert.deepEqual([a.status, JSON.parse(a.body), a.retryAfterS], [503, { error: { code: "upstream" } }, undefined]);
 });
 
-test("warm(): one refresh at once and one every FRESH_MS, so a caller never waits on a vendor; the stop ends it", async (t) => {
+test("warm(): one refresh at once and one every LIST_STEP_MS (one list each), so a caller never waits on a vendor; the stop ends it", async (t) => {
   enableTimers(mock.timers, { apis: ["setInterval"] });
   t.after(() => resetTimers(mock.timers));
   const f = fakes();
@@ -372,19 +393,19 @@ test("warm(): one refresh at once and one every FRESH_MS, so a caller never wait
   await new Promise((ok) => setImmediate(ok));
   assert.equal(f.calls.length, 3);
   for (let i = 1; i <= 3; i++) {
-    f.step(FRESH_MS);
-    mock.timers.tick(FRESH_MS);
+    f.step(LIST_STEP_MS);
+    mock.timers.tick(LIST_STEP_MS);
     await new Promise((ok) => setImmediate(ok));
-    assert.equal(f.calls.length, 3 + 3 * i);
+    assert.equal(f.calls.length, 3 + i);
     const a = await lists.get();
     assert.equal(a.status, 200);
-    assert.equal(f.calls.length, 3 + 3 * i, "served from the warm snapshot, no read of its own");
+    assert.equal(f.calls.length, 3 + i, "served from the warm snapshot, no read of its own");
   }
   stop();
-  f.step(FRESH_MS);
-  mock.timers.tick(FRESH_MS);
+  f.step(LIST_STEP_MS);
+  mock.timers.tick(LIST_STEP_MS);
   await new Promise((ok) => setImmediate(ok));
-  assert.equal(f.calls.length, 12);
+  assert.equal(f.calls.length, 6);
 });
 
 // card helper-launchpad-origin: every row's launchpad is what the chain says made the token, on accounts and Jupiter rows

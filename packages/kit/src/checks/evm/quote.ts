@@ -225,13 +225,21 @@ function quoteCall(chain: EvmPoolChain, quoter: { v3: string | undefined; v4: st
 // `tx`: the transaction fields of a read sent alone (one with an override and no group), as the sim of a sale sends them
 type Read = { to: string; data: string; override?: Record<string, { code?: string; balance?: string }> | undefined; group?: string; state?: true; tx?: SimTx };
 type SimTx = { from: string; gas: string; maxFeePerGas: string; maxPriorityFeePerGas: string };
-type Answer = { kind: "out"; amountOut: bigint } | { kind: "revert"; partial: boolean };
+// `overflow`: the revert is SafeCastOverflow (card rh-cold-quote, the X prune)
+type Answer = { kind: "out"; amountOut: bigint } | { kind: "revert"; partial: boolean; overflow?: true };
 // V4Quoter's revert when a hookless hop runs out of liquidity: NotEnoughLiquidity(bytes32 poolId), wrapped in
 // UnexpectedRevertBytes(bytes) (read 2026-11-03 on Base: 1e20 wei into the ETH pool of 0xf6e5…dfe5, 0.3%)
 const NOT_ENOUGH_LIQUIDITY = "7a5ed734";
 const UNEXPECTED_REVERT_BYTES = "6190b2b0";
 const ranOut = (d: string) =>
   d.startsWith(NOT_ENOUGH_LIQUIDITY) || (d.startsWith(UNEXPECTED_REVERT_BYTES) && d.slice(8 + 128, 8 + 128 + 8) === NOT_ENOUGH_LIQUIDITY);
+// v4-core's SafeCastOverflow(), wrapped as above: in an exact-output swap through a pool with no hook (or the hook that
+// does nothing) it is Pool.swap's toInt128 of the input the output needs, more than 2^127 of it (v4-core
+// src/libraries/Pool.sol, the swap's casts; read 2026-11-06), which no hop of a v4 route is ever given; 49 of TORCH's
+// 100 pools with other currencies on Robinhood answered it for Q (2026-11-06 01:5xZ)
+const SAFE_CAST_OVERFLOW = "93dafdf1";
+const overflowed = (d: string) =>
+  d.startsWith(SAFE_CAST_OVERFLOW) || (d.startsWith(UNEXPECTED_REVERT_BYTES) && d.slice(8 + 128, 8 + 128 + 8) === SAFE_CAST_OVERFLOW);
 
 /** One provider's answer to one eth_call: the quote's first word, a revert, or a refusal (`raw`: the whole result). */
 function answerOf(a: unknown, who: string, raw = false): Answer | string {
@@ -298,7 +306,10 @@ function unaggregate(a: unknown, n: number, who: string): Answer[] {
     if ((ok !== 0 && ok !== 1) || at(e + 32) !== 0x40) return refuse("rpc_error", `${who} answered a malformed multicall result`);
     const dl = at(e + 64);
     if (e + 96 + dl > len) return refuse("rpc_error", `${who} answered a multicall result outside it`);
-    if (ok === 0) out.push({ kind: "revert", partial: ranOut(r.slice(2 + 2 * (e + 96), 2 + 2 * (e + 96 + dl)).toLowerCase()) });
+    if (ok === 0) {
+      const d = r.slice(2 + 2 * (e + 96), 2 + 2 * (e + 96 + dl)).toLowerCase();
+      out.push({ kind: "revert", partial: ranOut(d), ...(overflowed(d) ? { overflow: true as const } : {}) });
+    }
     else if (dl < 32) return refuse("rpc_error", `${who} answered a quote shorter than a word`);
     else out.push({ kind: "out", amountOut: BigInt("0x" + r.slice(2 + 2 * (e + 96), 2 + 2 * (e + 128))) });
   }
@@ -381,7 +392,7 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
     lone.forEach((i, k) => (all[i] = answerOf(b[parts.length + slotParts.length + k], who) as Answer));
     return all;
   };
-  const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial);
+  const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);
   const { a } = await agreeing(
     rpcs,
     answersOf,
@@ -828,6 +839,15 @@ function v4Read(quoter: string, r: EvmV4Route, amount: bigint): { to: string; da
   const path = word(BigInt(elems.length)) + offsets.join("") + elems.join("");
   return { to: quoter, data: "0x" + SEL_V4 + word(0x20n) + word(BigInt(r.currencyIn)) + word(0x60n) + word(amount) + path };
 }
+/** V4Quoter.quoteExactOutputSingle of `amount` of `token` out of the pool `k` (card rh-cold-quote, the X prune): it
+ *  reverts NotEnoughLiquidity where the pool cannot give that much at any price. */
+const SEL_V4_OUT_SINGLE = "58733073"; // quoteExactOutputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))
+function exactOutRead(quoter: string, k: EvmPoolKey, token: string, amount: bigint): { to: string; data: string } {
+  // the struct (PoolKey, zeroForOne, exactAmount, hookData): a pool key's five words, two more, then the empty bytes'
+  // offset (eight words) and length
+  const key = word(BigInt(k.currency0)) + word(BigInt(k.currency1)) + word(BigInt(k.fee)) + word(BigInt.asUintN(256, BigInt(k.tickSpacing))) + word(BigInt(k.hooks));
+  return { to: quoter, data: "0x" + SEL_V4_OUT_SINGLE + word(0x20n) + key + word(lower(k.currency1) === token ? 1n : 0n) + word(amount) + word(0x100n) + word(0n) };
+}
 /** The pool key of a one-hop v4 route. */
 function keyOfRoute(r: EvmV4Route): EvmPoolKey {
   const [a, b] = [lower(r.currencyIn), lower(r.hops[0]!.currency)];
@@ -890,6 +910,27 @@ const SCAN_MAX_LOGS = 10_000;
  *  10:50Z), so a cold scan of USDC refused every quote and never kept what it read. At the smallest span the request is
  *  asked as before (askScan) and a failure refuses. */
 const SCAN_SPLITS = 3;
+/** Where another provider follows, the most blocks of a cold scan's request it is handed that the one before failed in
+ *  transport (an HTTP 5xx, a refused connection, a timeout, its last block not held yet): a longer one is asked as its
+ *  halves on the one that failed it first (review of 9c962b6d, HIGH, a repeat of M382's HIGH-1: one such failure on
+ *  Robinhood's first handed its spare alone the whole 10M-block depth of a cold quote, and a spare that hid the token's
+ *  real pool had a seeded route pass; review of 1277e8af, MEDIUM-B: 100,000, Robinhood's OR span, where 1M handed a
+ *  cached scan's 500,000-block gap to the spare). */
+const SCAN_ALONE = 100_000;
+/** The most halving requests one level of a scan's halves asks, where a provider's answers are short of the logs only
+ *  where a range holds SCAN_MAX_LOGS of them or more: those ranges of one level are apart, and a quote reads at most
+ *  EVM_QUOTE_MAX_KEYS pools (past them it refuses too_many_pools), so at most ceil(EVM_QUOTE_MAX_KEYS / SCAN_MAX_LOGS)
+ *  ranges a level split, each into 2 requests. A scan's halves run ceil(log2(span)) levels at most, from a request of
+ *  its first provider's span down to one block; past SCAN_SHORT_LEVEL times that many, the provider is answering errors
+ *  no honest chain explains, and the scan refuses (rpc_error) rather than hold the quote to its bound (review of
+ *  1265bd94: a first that answered every range with an error held each cold quote 60 s). Robinhood: 14 x 24 = 336;
+ *  Base: 14 x 14 = 196. Each request a scan starts with may also be short once for reasons of its own (a query timeout
+ *  answered inside a 200, a provider's range cut below its pinned span) and is answered by its halves, so each one's
+ *  first split, 2 requests, is the scan's beside these: the budget is 2 x the scan's starting requests (its jobs, the
+ *  newest span's and a catch-up's among them, and those a next provider takes) + SCAN_SHORT_LEVEL x ceil(log2(span))
+ *  (review of ac6db348, MEDIUM: a cold Base scan starts with about 101 requests, past the 196 alone, so one honest error
+ *  on each refused every cold Base quote). */
+const SCAN_SHORT_LEVEL = 2 * Math.ceil(EVM_QUOTE_MAX_KEYS / SCAN_MAX_LOGS);
 /** The most currencies one getLogs request names: an OR of topics, so the currencies of a quote's scan cost the
  *  requests of one. */
 const SCAN_OR = 256;
@@ -962,6 +1003,14 @@ class ScanRefused extends EvmQuoteError {}
  *  so it is asked again whole, never as its halves (card evm-rpc-spare-list, re-review of 156ece1 LOW-2: a 1-block lag
  *  asked the newest block 3 times in 9 requests where 2 do; a block or two behind is a provider's normal state). */
 class NotHeldYet extends EvmQuoteError {}
+/** A scan's refusal that no next provider is asked about (reviews of 8fd51265 and 1277e8af):
+ *  - a cold scan's provider whose rate limit holds it past the quote's bound is up, so its blocks never go to a spare
+ *    alone (one 429 with a Retry-After of 120 s handed Robinhood's spare the whole cold depth);
+ *  - one block whose logs its provider does not answer (too_many_pools; `short` in scanPools). */
+class ScanStop extends EvmQuoteError {}
+/** The scan provider answered, short of the logs: an error in the answer, an HTTP status other than 429 or 5xx, a body
+ *  that is not a batch or past its size (BadAnswer). The scan asks its halves on the same provider, never the next. */
+class ScanAnswered extends EvmQuoteError {}
 function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanGate {
   let limit = parallel;
   // the limit up to which each answer adds 1, half the limit at the last congestion; past it an answer adds 1 / limit
@@ -983,7 +1032,11 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanG
     for (;;) {
       const now = performance.now();
       if (now >= untilMs) throw past();
-      if (resumeAt > untilMs) return refuse("rpc_error", `the scan provider limited its rate past the quote's bound of ${scanBoundMs} ms`);
+      if (resumeAt > untilMs) {
+        const m = `the scan provider limited its rate past the quote's bound of ${scanBoundMs} ms`;
+        // a warm scan's goes to the next, as its hold does; a cold scan's refuses (ScanStop)
+        throw fast ? new EvmQuoteError("rpc_error", m) : new ScanStop("rpc_error", m);
+      }
       if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw new ScanRefused("rpc_error", `the scan provider limited its rate for ${Math.round(resumeAt - now)} ms`);
       if (now < resumeAt) await new Promise((r) => setTimeout(r, resumeAt - now));
       else if (flying < Math.floor(limit)) {
@@ -1056,6 +1109,8 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanG
           // request goes to the next at once (card evm-rpc-spare-list: bloXroute answered every request 503 "No server
           // is available to handle this request" for 10 minutes, 2026-11-05 17:59-18:09Z; asked as its halves, each
           // 503 again); the last asks its halves, as before
+          // the provider answered: its halves are asked of it (scanPools `short`), at once, never again whole
+          if (e instanceof BadAnswer) throw new ScanAnswered("rpc_error", `the scan provider answered: ${e.message}`);
           if (spareNext && /^the provider answered HTTP 5\d\d$/.test(String((e as Error | null)?.message))) throw new ScanRefused("rpc_error", `the scan provider is out: ${(e as Error).message}`);
           if (e instanceof Unreachable) {
             if (spareNext) throw new ScanRefused("rpc_error", `the scan provider refused a connection: ${e.message}`);
@@ -1147,15 +1202,34 @@ async function scanPools(
   let pin: Block | null = null;
   type Job = { part: Each[]; a: number; b: number; on: ScanOn };
   const jobs: Job[] = [];
-  const jobsOf = (g: Each[], from: number, to: number, on = first, into = jobs) => {
-    for (let i = 0; i < g.length; i += SCAN_OR) {
-      const part = g.slice(i, i + SCAN_OR);
-      // a provider may span fewer blocks a request when a topic position holds more than one value (orSpan)
-      const span = part.length === 1 ? on.span : Math.min(on.span, on.orSpan ?? on.span);
+  // the halving requests asked for answers short of the logs, and the most an honest chain needs (SCAN_SHORT_LEVEL)
+  let shorts = 0;
+  // 2 x the starting requests, added as each set of them is built, + the levels' share (SCAN_SHORT_LEVEL)
+  let shortMax = SCAN_SHORT_LEVEL * Math.ceil(Math.log2(first.span));
+  const jobsOf = (g: Each[], from: number, to: number, on = first, into = jobs): void => {
+    // where the blocks up to the head are more than the next provider's span, their newest span of it is a request of
+    // its own (reviews of 9c962b6d and 1277e8af): a backend a block or two behind its head answers null for that
+    // request's last block alone, and the next carries those blocks in one request; the rest stays under the
+    // provider's cap (Robinhood's 10M a request)
+    if (on.next !== undefined && to === head && to - from + 1 > on.next.span) {
+      jobsOf(g, from, to - on.next.span, on, into);
+      return jobsOf(g, to - on.next.span + 1, to, on, into);
+    }
+    // a provider may span fewer blocks a request when a topic position holds more than one value (orSpan): then each
+    // currency is asked alone, at the provider's whole span, where that is no more requests than the OR (card
+    // rh-cold-quote: Robinhood's 10M blocks are 100 OR requests of 100,000 for any number of currencies, and one
+    // request a currency alone)
+    const or = Math.min(on.span, on.orSpan ?? on.span);
+    const n = to - from + 1;
+    const step = or < on.span && g.length * Math.ceil(n / on.span) <= Math.ceil(g.length / SCAN_OR) * Math.ceil(n / or) ? 1 : SCAN_OR;
+    for (let i = 0; i < g.length; i += step) {
+      const part = g.slice(i, i + step);
+      const span = part.length === 1 ? on.span : or;
       for (let a = from; a <= to; a += span) into.push({ part, a, b: Math.min(to, a + span - 1), on });
     }
   };
   for (const g of groups.values()) for (const [a, b] of g[0]!.gaps) jobsOf(g, a, b);
+  shortMax += 2 * jobs.length;
   // a scan the second carries whole, in one round of its requests (a warm one): each provider with another behind it
   // has EVM_SCAN_HOLD_MS a request before the next takes it (scanGateOf)
   const fast = second !== undefined && jobs.reduce((n, j) => n + Math.ceil((j.b - j.a + 1) / second.span), 0) <= second.parallel;
@@ -1193,41 +1267,72 @@ async function scanPools(
           }
           return out;
         };
-    // the logs' answers, and where pinned, a refusal unless the batch's provider holds the agreed block
-    const logsOf = (out: readonly unknown[]) => {
+    // the logs' answers, and where pinned, a refusal unless the batch's provider holds the agreed block; null where the
+    // request is the newest and its provider answered no block for it: a lag, as a null is (NotHeldYet)
+    const logsOf = (out: readonly unknown[]): unknown[] | null => {
       const h = (out[filters.length] as { result?: { hash?: unknown } | null } | null)?.result;
       if (p !== null) {
         if (typeof h?.hash !== "string" || lower(h.hash) !== p.hash) return refuse("rpc_disagree", `the scan provider's logs are not read at the agreed block ${p.number}`);
-      } else if (top && typeof h?.hash !== "string") return filters.map(() => undefined);
+      } else if (top && typeof h?.hash !== "string") return null;
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
     const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[] })));
-    if (splits > 0 && b > a) {
-      // one try: a request that ran out of time, failed or answered too many logs is asked as its two halves (a
-      // throttled one is asked again whole by the gate; past the scan's bound each half refuses before it is sent); one
-      // whose last block the provider does not hold yet is asked again whole, its tries left (NotHeldYet)
-      let notYet = false;
-      const rs = await on.gate.ask(rpc, calls, 1, fast).then(logsOf, (e) => {
-        if (e instanceof ScanRefused) throw e;
-        notYet = e instanceof NotHeldYet;
-        return null;
-      });
-      if (rs !== null && fine(rs)) return void keep(rs);
-      // a warm scan's request one failed goes to the next whole: halves help a span too long for its time or its logs,
-      // never a warm one (card evm-scan-second-provider: Robinhood's first answering no logs held a warm quote 9.5 to
-      // 11 s, 61 halves through its 2 at once, 2026-11-05 17:3xZ)
-      if (fast && on.next !== undefined) throw new ScanRefused("rpc_error", "the scan provider answered no logs");
-      if (notYet) {
-        const again = logsOf(await on.gate.ask(rpc, calls, SCAN_TRIES - 1, fast));
-        if (!fine(again)) return refuse("rpc_error", "the scan provider answered no logs");
-        return void keep(again);
-      }
+    const halves = (left: number) => {
       const mid = a + Math.floor((b - a) / 2);
-      return settle([one({ part, a, b: mid, on }, splits - 1), one({ part, a: mid + 1, b, on }, splits - 1)]);
+      return settle([one({ part, a, b: mid, on }, left), one({ part, a: mid + 1, b, on }, left)]);
+    };
+    // The provider's own answer short of every log (an error in any words, or in its data alone; an HTTP status other
+    // than 429 or 5xx; a body that is not a batch or past its size; SCAN_MAX_LOGS logs) is asked as its halves on that
+    // provider, down to one block, its splits left as they were, and never goes to the next: no error's words are read,
+    // and a spare never reads alone what the first answered (review of 1277e8af, MEDIUM-A and C: a flood of made-up
+    // pools in words the scan did not know handed the spare the real pool's blocks). The made-up pools are then read
+    // and dropped with the quote's state reads, as any pool; past EVM_QUOTE_MAX_KEYS of them the quote refuses
+    // too_many_pools. One block whose logs its provider still does not answer refuses too_many_pools: no request can
+    // read that block's pools. A long run of halves ends at the quote's bound (rpc_error).
+    const short = () => {
+      if (b > a) {
+        shorts += 2;
+        if (shorts > shortMax) throw new ScanStop("rpc_error", "the scan provider answered errors past an honest split");
+        return halves(splits);
+      }
+      throw new ScanStop("too_many_pools", `the scan provider answers no logs of block ${a}: it holds more pools than a request returns`);
+    };
+    // a transport failure (HTTP 5xx, a refused connection, a timeout, a lag) of a cold request of more than SCAN_ALONE
+    // blocks, where another provider follows, is asked as its halves on this one, its splits left as they were, before
+    // the next has any of it (SCAN_ALONE)
+    const alone = !fast && on.next !== undefined && b - a + 1 > SCAN_ALONE;
+    // the smallest span: asked with its tries, a transport failure then goes to the next (run) or refuses
+    const last = splits === 0 || b === a;
+    let answered = false;
+    let notYet = false;
+    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast).then(logsOf, (e) => {
+      if (e instanceof ScanAnswered) {
+        answered = true;
+        return null;
+      }
+      if (e instanceof ScanStop || (e instanceof ScanRefused && !alone) || last) throw e;
+      notYet = e instanceof NotHeldYet;
+      return null;
+    });
+    if (rs !== null && fine(rs)) return void keep(rs);
+    // a warm scan's request one failed in any way goes to the next whole, as before: halves help a span too long for
+    // its time or its logs, never a warm one (card evm-scan-second-provider: Robinhood's first answering no logs held a
+    // warm quote 9.5 to 11 s, 61 halves through its 2 at once, 2026-11-05 17:3xZ); its blocks are one round of the
+    // next's requests at most, the newest, which M382 lets a spare read alone
+    if (fast && on.next !== undefined) throw new ScanRefused("rpc_error", "the scan provider answered no logs");
+    if (answered || rs !== null) return short();
+    if (alone) return halves(splits);
+    // one whose last block the provider does not hold yet is asked again whole, its tries left (NotHeldYet)
+    if (notYet) {
+      const again = logsOf(await on.gate.ask(rpc, calls, SCAN_TRIES - 1, fast));
+      if (again === null) return refuse("rpc_error", "the scan provider answered no logs");
+      if (!fine(again)) return short();
+      return void keep(again);
     }
-    const rs = logsOf(await on.gate.ask(rpc, calls, SCAN_TRIES, fast));
-    if (!fine(rs)) return refuse("rpc_error", "the scan provider answered no logs");
-    keep(rs);
+    // one that ran out of time or failed otherwise: its two halves (a throttled one is asked again whole by the gate;
+    // past the scan's bound each half refuses before it is sent)
+    if (!last) return halves(splits - 1);
+    return refuse("rpc_error", "the scan provider answered no logs");
   };
   // every request runs to its end, so each span that comes back is kept, and the first failure is thrown after
   const settle = async (ps: Promise<void>[]) => {
@@ -1243,11 +1348,12 @@ async function scanPools(
   const run = (j: Job): Promise<void> =>
     one(j).catch(async (e) => {
       const next = j.on.next;
-      if (next === undefined) throw e;
+      if (next === undefined || e instanceof ScanStop) throw e;
       let done: Spans = [];
       for (const g of got) if (g.part === j.part && g.a >= j.a && g.b <= j.b) done = withSpan(done, g.a, g.b);
       const rest: Job[] = [];
       for (const [a, b] of gapsOf(done, j.a, j.b)) jobsOf(j.part, a, b, next, rest);
+      shortMax += 2 * rest.length;
       await settle(rest.map(run));
     });
   const kept = new Set<object>();
@@ -1292,6 +1398,7 @@ async function scanPools(
     pin = agreedAt;
     jobs.length = 0;
     jobsOf(each, head + 1, end);
+    shortMax += 2 * jobs.length;
     await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
   }
   function found({ part, a, b, logs }: (typeof got)[number]) {
@@ -2022,6 +2129,36 @@ async function routeSet(a: {
   // The token's held pools of the native asset or WETH, each quoted where not already and where it can beat the route
   const xPools = new Map<string, Found[]>();
   for (const f of held) if (!startsBuy(f.other)) append(xPools, f.other, f);
+  // The X prune (card rh-cold-quote): every route through another currency X ends in one of the token's pools with X,
+  // so a buy's pool that cannot give the route's Q of the token from any amount a v4 hop is given
+  // (V4Quoter.quoteExactOutputSingle of Q through it reverts NotEnoughLiquidity or SafeCastOverflow, its hook replaced
+  // as in every read of it, the same answer on both providers) is never the last hop of a route that beats Q, and is
+  // dropped; an X left with none is neither scanned nor priced. A pool behind a pinned hook, which runs as it is, has
+  // no such bound and is kept, as in "The prune". A sell has no Q and drops nothing. TORCH on Robinhood has 100 pools
+  // with other currencies, 99 of them seeded currencies whose only pool is that one; 89 could not give Q for 0.001 ETH
+  // (rpc.mainnet.chain.robinhood.com, 2026-11-06 01:5xZ), and the scans of their markets held its cold quote to the
+  // bound (58 s, rpc_error). Only an X this device has never scanned is asked: a scanned one reads only new blocks, so
+  // the read would add a round to a warm quote for no scan it saves
+  const cold = (x: string) => !SCANS.has(`${chain}:markets:${x}`);
+  if (ok && floor !== null && floor > 0n && floor < 1n << 127n && [...xPools.keys()].some(cold)) {
+    const asks: [Found, number][] = [];
+    const pr: Read[] = [];
+    for (const [x, fs] of xPools) {
+      if (!cold(x)) continue;
+      for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push([f, put(pr, { ...exactOutRead(v.v4!, f.key, lower(token), floor), ...noop([f.key]) })]);
+    }
+    await round(pr);
+    // NotEnoughLiquidity: it runs out before Q; SafeCastOverflow: Q needs more than 2^127 in
+    const cannot = new Set(asks.filter(([, i]) => {
+      const r = ans[i]!;
+      return r.kind === "revert" && (r.partial || r.overflow === true);
+    }).map(([f]) => f));
+    for (const [x, fs] of [...xPools]) {
+      const left = fs.filter((f) => !cannot.has(f));
+      if (left.length === 0) xPools.delete(x);
+      else xPools.set(x, left);
+    }
+  }
   const second: Read[] = [];
   for (const f of held) {
     if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(quoteOf(second, routeOfKey(f.key, token), [f.key]));
@@ -2220,7 +2357,7 @@ async function routeSet(a: {
   PLANS.delete(planKey);
   // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
   // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
-  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && (!kept.has(readKey(r)) || hit.has(first + j))), scans: asked });
+  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j))), scans: asked });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled };
 }
@@ -2444,6 +2581,9 @@ function retryAfterMs(h: string | null, now = Date.now()): number | null {
  *  out of time (TimeoutError) is not one: it may have been served. A browser's fetch names no cause for any failure with
  *  no response (re-review of b282ce0, LOW-B), so there every one is one: each call is a read, safe to send again. */
 class Unreachable extends Error {}
+/** A provider's answer that is no batch of answers to read: an HTTP status outside 2xx other than 429 and 5xx, a body
+ *  past its size or not JSON, or JSON that is not a batch. It answered, so a scan asks its halves of it (ScanAnswered). */
+class BadAnswer extends Error {}
 /** A call's error naming state the provider no longer keeps (its state cut), read from the pinned providers:
  *  - "historical state <root> is not available": a Robinhood provider of the quote's list answering a TORCH quote's
  *    reads at its agreed block, 2026-11-05 10:00Z and 10:03Z (card evm-quote-lag-held's live runs);
@@ -2503,16 +2643,22 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     if (!res.ok) {
       // the body is never read, so it is let go, never left holding the connection (re-review INFO 3)
       await res.body?.cancel().catch(() => {});
-      throw new Error(`the provider answered HTTP ${res.status}`);
+      const m = `the provider answered HTTP ${res.status}`;
+      throw res.status >= 500 ? new Error(m) : new BadAnswer(m);
     }
     const text = await res.text();
-    if (text.length > maxBytes) throw new Error("the answer is too long");
-    const parsed: unknown = JSON.parse(text);
+    if (text.length > maxBytes) throw new BadAnswer("the answer is too long");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      throw new BadAnswer(`the answer is not JSON: ${(e as Error).message}`);
+    }
     // a batch of one call answered as that call's answer alone, not in a batch: Pocket's way on Base and Robinhood
     // (robinhood.api.pocket.network and base.api.pocket.network, every try, 2026-11-05 19:49Z): it still counts only
     // with this call's id. Any other answer that is not a batch is refused.
     const arr: unknown = !Array.isArray(parsed) && calls.length === 1 && typeof parsed === "object" && parsed !== null ? [parsed] : parsed;
-    if (!Array.isArray(arr)) throw new Error("the answer is not a batch");
+    if (!Array.isArray(arr)) throw new BadAnswer("the answer is not a batch");
     const byId = new Map<number, unknown>();
     for (const a of arr) {
       const id = (a as { id?: unknown } | null)?.id;

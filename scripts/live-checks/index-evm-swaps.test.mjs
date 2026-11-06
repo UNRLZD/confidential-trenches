@@ -6,6 +6,9 @@
 // vendor, a candles answer with an extra field, a bar whose high is under its open, a tape oldest first, a stale read, no
 // CORS echo, a trade time off Base's clock, a trade that is not on chain, a failed receipt, another sender, an amount the
 // chain never moved, a swap on chain that the tape lacks, and a provider newest block far from now: each FAIL.
+// good_per_read, robinhood_good_per_read (card helper-restart-fresh): the deployed helper read at 2026-11-06 06:51Z with
+// each answer's request time and the heads' read time: PASS; made from the good answers in the shape of live run
+// 42163488602 (the judged token read 20.6 s into the run): PASS, and a stale, a future-dated or a late-heads read: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -45,6 +48,14 @@ const replay = (run) => async (url, init) => {
   assert.fail(req.method);
 };
 const run = (rec) => judge(rec);
+/** A replayed run judged as its recording: the replay's own read times (now) dropped where the recording has none, so
+ *  both are judged against the recording's start. */
+const asRecorded = (again, rec) => {
+  again.readAt = rec.readAt;
+  for (const k of Object.keys(again.reads)) if (rec.reads?.[k]?.at === undefined) delete again.reads[k].at;
+  if (rec.chain?.headsAt === undefined) delete again.chain.headsAt;
+  return again;
+};
 const edit = (fn) => {
   const rec = structuredClone(A.good);
   fn(rec);
@@ -65,8 +76,7 @@ test("the good answer passes", () => {
 });
 
 test("read() asks the helper and the providers what the check judges: the replay of the good run passes with the same lines", async () => {
-  const again = await read("https://api.confidential.unrealized.trade", A.good.coin, replay(A.good));
-  again.readAt = A.good.readAt;
+  const again = asRecorded(await read("https://api.confidential.unrealized.trade", A.good.coin, replay(A.good)), A.good);
   for (const k of ["candles", "trades"]) delete again.reads[k].ms;
   assert.deepEqual(again.chain, A.good.chain);
   assert.deepEqual(judge(again).lines, judge(A.good).lines);
@@ -245,9 +255,8 @@ test("card helper-restart-fresh: Robinhood's pool logs are agreed on providers t
     }
     assert.fail(req.method);
   };
-  const again = await read("https://helper.test", rec.coin, fetchFn, rpcs, "robinhood");
+  const again = asRecorded(await read("https://helper.test", rec.coin, fetchFn, rpcs, "robinhood"), rec);
   assert.deepEqual(again.chain.poolLogs, c.poolLogs, "the pool's logs, agreed by two providers that time them");
-  again.readAt = rec.readAt;
   const r = judge(again);
   assert.deepEqual(bad(r), []);
 });
@@ -364,4 +373,84 @@ test("card helper-deploy-reads-fast fold: a sampled bundle trade named by its us
   const wrong = run(bundled("bundler"));
   assert.equal(wrong.ok, false);
   assert.ok(bad(wrong).some((l) => l.includes(`sent by "${BUNDLER}"`)), bad(wrong).join("\n"));
+});
+
+/** Card helper-restart-fresh: `rec` read in the shape of live run 42163488602 (6 Nov 04:36Z, straight after a restart):
+ *  the run began with the lists, a cold token's not-ready 503 at 12.1 s and ten quiet tokens, so the judged token's
+ *  candles were sent 20.6 s into the run and answered in 2903 ms, dated 2.85 s after their request, the trades 104 ms
+ *  after, and the providers' heads read after them. */
+const restartShape = (rec) => {
+  const r = structuredClone(rec);
+  const fetched = Date.parse(r.reads.candles.headers["x-fetched-at"]);
+  const sent = fetched - 2_850;
+  r.reads.candles = { ...r.reads.candles, at: new Date(sent).toISOString(), ms: 2_903 };
+  r.reads.trades = { ...r.reads.trades, at: new Date(sent + 2_903).toISOString(), ms: 104 };
+  r.reads.trades.headers = { ...r.reads.trades.headers, "x-fetched-at": r.reads.candles.headers["x-fetched-at"] };
+  r.chain.headsAt = new Date(sent + 2_903 + 104 + 300).toISOString();
+  r.readAt = new Date(sent - 20_636).toISOString();
+  r.listsRead = { status: 200, ms: 514, headers: { "server-timing": undefined } };
+  r.tried = [{ token: "0xb2000000000000000000008b6fd82bcbd9e97bb2", candles: { status: 503, ms: 12_108, headers: { "server-timing": 'evm-open;dur=12000, evm-queue;dur=0;desc="0 posts: pace 0 ms, in flight 0 ms"' } } }];
+  return r;
+};
+
+test("card helper-restart-fresh: each answer, and the providers' heads, are judged by their own read, not the run's start: the judged token read 20.6 s into a run straight after a restart (live run 42163488602: a cold token's 503 at 12.1 s and ten quiet tokens before it), its answers fresh at their read, PASSES on Base and on Robinhood", () => {
+  for (const rec of [A.good, A.robinhood_good]) {
+    const r = run(restartShape(rec));
+    assert.deepEqual(bad(r), [], `${rec.net ?? "base"}\n${r.lines.join("\n")}`);
+    assert.ok(r.lines.some((l) => /^ok {2}candles X-Fetched-At: .*, within 15 s of its read at .* \(answered in 2903 ms\)$/.test(l)), r.lines.join("\n"));
+    assert.ok(r.lines.some((l) => /^ok {2}the providers' newest block's time.* within 20 s of their read at /.test(l)), r.lines.join("\n"));
+  }
+});
+
+test("card helper-restart-fresh: judged by its own read, an answer whose X-Fetched-At is 16 s before its request FAILs though it is within 15 s of the run's start; one dated after it arrived (past SKEW_MS) FAILs; heads read 45 s after their block's time FAIL", () => {
+  const late = (rec, fn) => {
+    const r = restartShape(rec);
+    fn(r);
+    return r;
+  };
+  // the stale answer: sent 20.6 s into the run, dated 16 s before it (4.6 s after the run began)
+  const stale = late(A.good, (r) => {
+    const at = new Date(Date.parse(r.reads.candles.at) - 16_000).toISOString();
+    for (const k of ["candles", "trades"]) r.reads[k].headers = { ...r.reads[k].headers, "x-fetched-at": at };
+  });
+  assert.deepEqual(bad(run(stale)).map((l) => l.split(":")[0]), ["BAD candles X-Fetched-At", "BAD trades X-Fetched-At"]);
+  // dated 3 s after the answer arrived
+  const ahead = late(A.good, (r) => {
+    const at = new Date(Date.parse(r.reads.trades.at) + r.reads.trades.ms + check.SKEW_MS + 1_000).toISOString();
+    r.reads.trades.headers = { ...r.reads.trades.headers, "x-fetched-at": at };
+  });
+  assert.deepEqual(bad(run(ahead)).map((l) => l.split(":")[0]), ["BAD trades X-Fetched-At"]);
+  // the heads read 45 s after the recording's start, near which their block's time is
+  for (const rec of [A.good, A.robinhood_good]) {
+    const old = late(rec, (r) => (r.chain.headsAt = new Date(Date.parse(rec.readAt) + 45_000).toISOString()));
+    assert.deepEqual(bad(run(old)).map((l) => l.replace(/ at .*$/, "")), [`BAD the providers' newest block's time${rec.net === "robinhood" ? ", read on two providers," : " is on Base's clock and"} within 20 s of their read`], rec.net);
+  }
+});
+
+test("card helper-restart-fresh: read() dates each answer by its own request and the heads by their read", async () => {
+  const before = Date.now();
+  const got = await read("https://api.confidential.unrealized.trade", A.good.coin, replay(A.good));
+  const after = Date.now();
+  for (const k of ["candles", "trades"]) {
+    const t = Date.parse(got.reads[k].at);
+    assert.ok(t >= before && t <= after && Number.isSafeInteger(got.reads[k].ms), k);
+  }
+  assert.ok(Date.parse(got.reads.candles.at) <= Date.parse(got.reads.trades.at));
+  assert.ok(Date.parse(got.chain.headsAt) >= Date.parse(got.reads.trades.at) && Date.parse(got.chain.headsAt) <= after);
+});
+
+test("card helper-restart-fresh: good_per_read and robinhood_good_per_read, the deployed helper read with each answer's own request time and the heads' read time, PASS; with the run's start set 20 s before their first read they still PASS, and FAIL only once their reads' own times are dropped", () => {
+  for (const rec of [A.good_per_read, A.robinhood_good_per_read]) {
+    assert.ok(typeof rec.reads.candles.at === "string" && typeof rec.chain.headsAt === "string", "recorded per read");
+    const r = run(rec);
+    assert.deepEqual(bad(r), [], r.lines.join("\n"));
+    // the run's start set 20 s before its first read: each answer is judged by its own read, so it still passes
+    const early = structuredClone(rec);
+    early.readAt = new Date(Date.parse(rec.reads.candles.at) - 20_000).toISOString();
+    assert.deepEqual(bad(run(early)), []);
+    // with its reads' times dropped (judged by that start, as before this card) it fails
+    for (const k of ["candles", "trades"]) delete early.reads[k].at;
+    delete early.chain.headsAt;
+    assert.ok(bad(run(early)).some((l) => l.includes("X-Fetched-At")), rec.net ?? "base");
+  }
 });

@@ -7,9 +7,11 @@
 //   GET /v1/market/holders?chain=solana&token=<mint>
 //   GET /v1/market/candles?chain=solana&token=<mint>&tf=1h&limit=24
 // and passes only when each answers 200 JSON with X-Helper-Commit a full sha, its X-Helper-Source, X-Fetched-At an ISO
-// time within 10 minutes of the read and Access-Control-Allow-Origin echoing APP_HOST, and its body holds exactly the
+// time within 10 minutes of that answer's own read (freshAt) and Access-Control-Allow-Origin echoing APP_HOST, and its body holds exactly the
 // frozen fields in their wire forms:
-//   - token: TokenPage {row, decimals, pool, risk, route}; `row` exactly the terminal's Row fields (read from
+//   - token: TokenPage {row, decimals, pool, risk, route}, then `filling` (a boolean, card token-page-fills-after: true
+//     only for a page named on chain whose Jupiter row is still coming, so never on a row of another source; a helper
+//     from before that card leaves it out); `row` exactly the terminal's Row fields (read from
 //     apps/terminal/src/screens/discover/fields.ts itself) for this mint on Solana; `risk` exactly 06b's 14 Risk fields,
 //     each a Field {v, src, as_of_ms}, the authorities and the tax read from the chain;
 //   - holders: Holders {holders, total, top_bps, src, as_of_ms}, at most 20 rows {addr, amt, bps[, kind]};
@@ -53,10 +55,12 @@ const bpsOrNull = (v) => v === null || (Number.isSafeInteger(v) && v >= 0 && v <
 
 /** The first thing wrong with a TokenPage for `mint`, or null. */
 export function pageFault(p, mint) {
-  if (!isObj(p) || !same(Object.keys(p), PAGE)) return `keys ${show(isObj(p) ? Object.keys(p) : p)}`;
+  if (!isObj(p) || !(same(Object.keys(p), PAGE) || same(Object.keys(p), [...PAGE, "filling"]))) return `keys ${show(isObj(p) ? Object.keys(p) : p)}`;
+  if ("filling" in p && typeof p.filling !== "boolean") return `filling ${show(p.filling)}`;
   if (!isObj(p.row) || !same(Object.keys(p.row), ROW)) return `row keys ${show(isObj(p.row) ? Object.keys(p.row) : p.row)}`;
   if (p.row.chain !== "solana" || p.row.token !== mint) return `row is ${show(p.row.chain)} ${show(p.row.token)}`;
   for (const f of ["symbol", "name", "src"]) if (typeof p.row[f] !== "string" || p.row[f] === "") return `row ${f} ${show(p.row[f])}`;
+  if (p.filling === true && p.row.src !== "chain") return `filling true on a ${show(p.row.src)} row`;
   for (const f of ROW.filter((f) => f.endsWith("_usd"))) if (p.row[f] !== null && !(typeof p.row[f] === "string" && /^-?\d+(\.\d+)?$/.test(p.row[f]))) return `row ${f} ${show(p.row[f])}`;
   if (!(Number.isInteger(p.decimals) && p.decimals >= 0 && p.decimals <= 255)) return `decimals ${show(p.decimals)}`;
   if (!(p.pool === null || (typeof p.pool === "string" && B58.test(p.pool) && p.pool !== mint))) return `pool ${show(p.pool)}`;
@@ -102,7 +106,21 @@ export function candlesFault(c) {
   return null;
 }
 
-/** The check on one recorded run { mint, readAt, reads: { token, holders, candles: { status, headers, body } } }. */
+/** The most an answer's X-Fetched-At may lie after the answer arrived: the helper's and the check's clocks apart (both
+ *  NTP-kept) [design: 2 s, as index-evm-swaps.mjs]. */
+const SKEW_MS = 2_000;
+/** Whether answer `r`'s X-Fetched-At `at` (ms) is within `bound` of its own read: of its request's time (r.at), and not
+ *  after it arrived (r.ms later) but for SKEW_MS; a run recorded before its reads carried their time, of the run's start.
+ *  Each read by its own time, never the run's start (card helper-restart-fresh, the same rule as index-evm-swaps.mjs
+ *  freshAt: a read late in a run was judged by when the run began). */
+function freshAt(r, at, runAt, bound) {
+  if (typeof r?.at !== "string" || !Number.isSafeInteger(r?.ms)) return { ok: Math.abs(runAt - at) <= bound, ref: `the read at ${new Date(runAt).toISOString()}` };
+  const sent = Date.parse(r.at);
+  return { ok: Math.abs(sent - at) <= bound && at - (sent + r.ms) <= SKEW_MS, ref: `its read at ${r.at} (answered in ${r.ms} ms)` };
+}
+
+/** The check on one recorded run { mint, readAt, reads: { token, holders, candles: { at, ms, status, headers, body } } }
+ *  (at: the read's request time). */
 export function judge(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -115,8 +133,8 @@ export function judge(run) {
     say(/^application\/json/i.test(h["content-type"] ?? ""), `${k} Content-Type: ${show(h["content-type"])}`);
     say(SHA.test(h["x-helper-commit"] ?? ""), `${k} X-Helper-Commit: ${show(h["x-helper-commit"])}`);
     say(SOURCE[k].includes(h["x-helper-source"]), `${k} X-Helper-Source: ${show(h["x-helper-source"])}`);
-    const at = Date.parse(h["x-fetched-at"] ?? "");
-    say(ISO.test(h["x-fetched-at"] ?? "") && Math.abs(readAt - at) <= 600_000, `${k} X-Fetched-At: ${show(h["x-fetched-at"])}, within 10 min of the read at ${run.readAt}`);
+    const fresh = freshAt(r, Date.parse(h["x-fetched-at"] ?? ""), readAt, 600_000);
+    say(ISO.test(h["x-fetched-at"] ?? "") && fresh.ok, `${k} X-Fetched-At: ${show(h["x-fetched-at"])}, within 10 min of ${fresh.ref}`);
     say(h["access-control-allow-origin"] === APP, `${k} Access-Control-Allow-Origin: ${show(h["access-control-allow-origin"])}`);
     let b;
     try {
@@ -131,12 +149,14 @@ export function judge(run) {
 }
 
 async function get(base, path, fetchFn) {
+  // the read's own time, which its X-Fetched-At is judged against (freshAt)
+  const at = new Date().toISOString();
   const t0 = performance.now();
   const r = await fetchFn(`${base.replace(/\/$/, "")}${path}`, { redirect: "manual", headers: { origin: APP, "cache-control": "no-cache" } });
   const headers = {};
   for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
   const body = await r.text();
-  return { ms: Math.round(performance.now() - t0), status: r.status, headers, body };
+  return { at, ms: Math.round(performance.now() - t0), status: r.status, headers, body };
 }
 
 export async function read(base = BASE, mint = MINT, fetchFn = fetch) {

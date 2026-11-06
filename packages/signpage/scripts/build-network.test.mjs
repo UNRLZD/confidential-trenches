@@ -16,8 +16,8 @@ const TESTNET_ONLY = [
   "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy", // the devnet pool's lookup table (src/pool-testnet.ts DEVNET_TABLE)
   "api.devnet.solana.com",
   "/v1/rpc/solana-devnet", // the helper's devnet route, the second devnet provider (card pool-buy-send-fast)
-  "sepolia.base.org",
   "base-sepolia-rpc.publicnode.com",
+  "base-testnet.api.pocket.network", // Base Sepolia's second pool provider (card notes-per-pool-evm-base-hang)
   "rpc.testnet.chain.robinhood.com",
   "robinhood-sepolia-rpc.publicnode.com",
 ];

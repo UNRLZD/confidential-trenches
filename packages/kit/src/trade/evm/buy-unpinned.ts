@@ -100,28 +100,28 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
-      // Keyless, of five operators, timed on one warm quote's six eth_call batches (109 kB) at each one's newest block
+      // Keyless, of four operators, timed on one warm quote's six eth_call batches (109 kB) at each one's newest block
       // hash, 10 rounds each, every answer equal to publicnode's (card evm-quote-warm-round, 2026-11-04 16:4xZ from this
       // Mac): publicnode (Allnodes) p50/p95 146/207 ms; Blast 315/476, served by Alchemy (its answers carry
       // x-alchemy-trace-id, 18:56Z); mainnet.base.org (Coinbase) 863/1,380, behind QuickNode's request filter (eth_nope:
       // -32611 "rejected due to request filter settings", 18:56Z); BlockPI 816/1,549. All four sit behind Cloudflare
-      // (server: cloudflare and cf-ray on every answer, 18:55Z). bloXroute's base.rpc.blxrbdn.com does not (no cf-ray, its
-      // own edge) and passes the quote's own reads (18:56Z: reth like the rest, 6 batches of 20 eth_calls at a block hash
-      // at once, 5 rounds, 255-273 ms warm, every answer publicnode's; a state override; eth_getLogs over 10 blocks; the
-      // browser's CORS preflight from the app's origin, 204 with access-control-allow-origin *). It replaces
-      // base-public.nodies.app, which the device never reaches: its preflight answers no access-control-allow-origin
-      // (review of bc189de, L-5; the live check evm-quote-warm-round preflights every listed provider). Passed over:
+      // (server: cloudflare and cf-ray on every answer, 18:55Z). bloXroute's base.rpc.blxrbdn.com left the list (card
+      // base-rpc-list-fix): its preflight answers 204 with access-control-allow-origin *, but its POST carries none (live
+      // check evm-quote-warm-round, run 42114981904, 2026-11-05 21:42-21:50Z; its POST from the app's origin answered HTTP
+      // 503 with none, 2026-11-06 00:44Z), so a browser quote that reaches it fails, as base-public.nodies.app's would
+      // (its preflight names no allow-origin; review of bc189de, L-5); the live check evm-quote-warm-round preflights and
+      // POSTs every listed provider. Passed over:
       // base.drpc.org and Tenderly's gateway (429 on 6 batches at once, again 18:56Z), meowrpc, zan, onfinality, 1rpc,
       // thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), base.api.pocket.network (10 of 60
       // answers differed), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
       // third-party proxies of unknown operators are not listed.
       // What the list holds against a lie: a quote decides on two that agree, and a value any provider asked contradicts
-      // is used only where more than half of these five gave it (review of bc189de, M-1). Left, as the device has always
+      // is used only where more than half of these four gave it (review of bc189de, M-1). Left, as the device has always
       // had it on two providers: two that collude and agree, each answering more than the hedge (EVM_HEDGE_MS, 400 ms)
       // sooner than the honest provider they are asked beside, decide before its answer lands (re-review of fd9dd16,
       // Q10).
-      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://base.rpc.blxrbdn.com", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
-      // all five kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
+      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
+      // all five then listed kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
       feeProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
@@ -176,12 +176,28 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // (-32011 "request limit reached" on its first getLogs, 18:08Z), 1rpc (50 blocks), meowrpc (no eth_getLogs), ankr
       // (a key), llamarpc (525, 18:08Z), omniatech (521), lava (410). No keyless one carries a cold 1M-block scan within
       // the bound alone: it carries what the first left, and a warm scan whole.
+      // The fourth: Sentio (rpc.sentio.xyz/base; card base-rpc-list-fix, 2026-11-06 00:34-00:41Z from this Mac), so a
+      // third that answers no logs still leaves another (evm-rpc-spare-list on GitHub's runner, run 42135737951: Pocket
+      // answered a held quote's request with no logs in 570 ms, and it was the last). Its preflight answers 200 with
+      // allow-origin the app's origin and content-type allowed, and its POST the same; getLogs up to 1,000 blocks
+      // (HTTP 429 code 8 "public eth_getLogs is limited to 1000 blocks" past it), 1.5M blocks back; a range past its head
+      // answers -32602 "block range extends beyond current head block", a block past it null; the scan's own 4-call
+      // batch answered; at 3 at once, 164 of 164 batches of 1,000 blocks answered with the block in 15.3 s (p50 249 ms,
+      // p95 395 ms, 10,715 blocks/s). Passed over at the same reads: BlockPI's base.public.blockpi.network (5,000
+      // blocks, then 429 and a Cloudflare block after 24 batches at 4 at once, and a quote provider above, whose reads
+      // its limit would cut), thirdweb (1,000 blocks, 4 of 1,000 answered at 3 at once, the rest 429), dRPC (-32602
+      // "ranges over 10000 blocks are not supported on free plan" at 1,000), tatum (100 blocks, 5 requests a minute),
+      // zan and onfinality (429), base.publicnode.com (the first's operator), Envio's HyperRPC (a token).
       scan: bare({
         url: "https://base-rpc.publicnode.com",
         span: 10_000,
         depth: 1_000_000,
         parallel: 20,
-        spares: Object.freeze([bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 3 }), bare({ url: "https://base.api.pocket.network", span: 500, parallel: 4 })]),
+        spares: Object.freeze([
+          bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 3 }),
+          bare({ url: "https://base.api.pocket.network", span: 500, parallel: 4 }),
+          bare({ url: "https://rpc.sentio.xyz/base", span: 1_000, parallel: 3 }),
+        ]),
       }),
     }),
     robinhood: bare({
@@ -222,7 +238,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       ]),
       // V4Quoter.poolManager() on both providers (2026-11-03 19:36Z). rpc.mainnet.chain.robinhood.com serves eth_getLogs
       // over 10,000,000 blocks a request but at most 10,000 logs ("logs matched by query exceeds limit of 10000" over
-      // 10M blocks; robinhood.drpc.org: 10,000 blocks on its free plan), so 1M-block spans
+      // 10M blocks; robinhood.drpc.org: 10,000 blocks on its free plan). One request over the whole depth (card
+      // rh-cold-quote): TORCH's Initialize logs over 10M blocks, both topic positions in one batch, 100 logs in 314 ms;
+      // 15 seeded currencies' in one batch of 30 calls, 737 ms (2026-11-06 01:4xZ from this Mac); a request past 10,000
+      // logs or its time is asked as its halves (scanPools)
       poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
       // (it answers 429 to 4 at once, 2026-11-03 20:27Z); a request with more than one value in a topic position spans
       // at most 100,000 blocks ("query spans 1000000 blocks …, but only 100000 are allowed for this request; narrow the
@@ -249,7 +268,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // (no eth_getLogs).
       scan: bare({
         url: "https://rpc.mainnet.chain.robinhood.com",
-        span: 1_000_000,
+        span: 10_000_000,
         depth: 10_000_000,
         parallel: 2,
         orSpan: 100_000,
@@ -283,7 +302,18 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // sepolia.base.org and base-sepolia-rpc.publicnode.com, the same on both (2026-11-04 09:55Z): 8,273 bytes, keccak
       // 0x156c129c…, factory() 0x4752ba5d…ad24; and 5,820 bytes, keccak 0x2dddcef8…, poolManager() the PoolManager above
       quoters: bare({ v3: "0xc5290058841028f1614f3a6f0f5816cad0df5e27", v4: "0x4a6513c898fe1b2d0e78d3b0e0a4a151589b1cba" }),
-      providers: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
+      // The pool's pair, which the wallet's pool sync pages the pool's logs on from its deploy block (evmPool,
+      // evmTreeSync), and the quotes' (card notes-per-pool-evm-base-hang). The chain makes a block every 200 ms: blocks
+      // 53,801,443 (the pool's deploy) to 55,089,154 in 257,542 s on sepolia.base.org, base-sepolia-rpc.publicnode.com
+      // and base-testnet.api.pocket.network alike (2026-11-06 04:35Z). sepolia.base.org answers the pool's eth_getLogs
+      // over 200 blocks "-32614: eth_getLogs is limited to a 200 range" (1,000 to 100,000 blocks, 04:35Z): the pager's
+      // 156-block pages, 744 pages in 222 s, about 8,250 pages and 41 min for the pool's life, 2,770 more a day
+      // (04:27-04:31Z). PublicNode answered the same filter over 1,000 to 50,000 blocks in 116-176 ms and refused
+      // 100,000 ("-32701: exceed maximum block range: 50000"); Pocket answered 1,000 to 100,000 in 188-265 ms (04:35Z).
+      // Both answer the signing page's CORS preflight (POST, content-type) from https://sign.confidential.unrealized.trade
+      // with 204: PublicNode allow-origin *, Pocket that origin (04:42Z). sepolia.base.org stays in the fee pair, whose
+      // reads are views and blocks, never a log page.
+      providers: Object.freeze(["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network"] as const),
       feeProviders: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
       // 20 s of its blocks: the two heads were 5 blocks apart in one read at 2 s blocks (2026-11-04 09:53Z), so 10 then;
       // one every 200 ms now (10,000 blocks to block 54946277 took 2,000 s on sepolia.base.org and
@@ -318,8 +348,16 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // robinhood-sepolia-rpc.publicnode.com keeps about 15 s ("historical state ... is not available" at 20 s, 6 of 6;
       // at 600 s, 6 of 6), where robinhood-testnet.drpc.org answered 6 of 6 at 20, 210, 600 and 700 s and 30 of 30 at
       // 600 s, and rpc.testnet.chain.robinhood.com 30 of 30 at 600 s (read 2026-11-04 20:09-20:13Z; live check
-      // evm-buy-hookdata-fee holds every pinned provider to 600 s)
-      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
+      // evm-buy-hookdata-fee holds every pinned provider to 600 s). Since card evm-quote-warm-round every read at a past
+      // block goes to feeProviders, so the pool's pair (the wallet's pool sync and the quotes, at the newest block) is
+      // Robinhood's own and PublicNode, the signing page's TESTNET_RPCS.robinhood and the money gate's (card
+      // notes-per-pool-evm-base-hang): robinhood-testnet.drpc.org answers the pool's eth_getLogs over 101 blocks "RPC
+      // error 35: ranges over 10000 blocks are not supported on free plan" (1,000 and 10,000 blocks; 100 and 101 answered,
+      // 2026-11-06 05:02Z), so the pager's 78-block pages, about 23,700 for the pool's 1,849,721 blocks at 140 ms; Robinhood's
+      // own answered 1,000 to 100,000 blocks in 183-205 ms and PublicNode 1,000 to 50,000 in 100-180 ms, refusing 100,000
+      // "-32701: exceed maximum block range: 50000" (05:01Z). PublicNode answers the signing page's CORS preflight 204,
+      // allow-origin * (05:03Z).
+      providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"] as const),
       feeProviders: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
       // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 16 s of its blocks (10,000
       // to block 149155719 took 1,634 s on both providers, read 2026-11-05 20:38Z)

@@ -1,12 +1,26 @@
 # The vault's mainnet build, rebuilt on a clean Linux runner on every change to contracts/vault/ and by hand: two clean
-# builds by contracts/vault/scripts/deploy.mjs --build-only (pinned rustc and cargo-near, each build in its own new
-# target dir, their sha256 compared, then every deploy refusal for a mainnet build: the banned imports, the promise
-# and export lists, the function body limit, the required exports and mainnet USDC as the only token). Then the wasm
-# is compared with the pin of contracts/vault/deployments/mainnet-test.json and deploy.mjs MAINNET_PINS, and only a
-# build that is the pin is uploaded, with its sha256, as the artifact vault-mainnet-wasm, which the owner's deploy paste
-# downloads by this run's id (gh run download <id> -n vault-mainnet-wasm); deploy.mjs refuses any other wasm on mainnet.
+# reproducible builds by contracts/vault/scripts/deploy.mjs --build-only (`cargo near build reproducible-wasm` in the
+# Docker image contracts/vault/Cargo.toml pins by digest, each into its own new out dir, their sha256 compared, the
+# wasm's NEP-330 metadata naming the checked-out HEAD, then every deploy refusal for a mainnet build: the banned
+# imports, the promise and export lists, the function body limit, the required exports and mainnet USDC as the only
+# token). The metadata names its own commit, so no hash committed in the repository can be the build of the commit that
+# holds it: the job never compares HEAD's build with a pin. Instead deploy.mjs --verify-records rebuilds every vault
+# deploy record in contracts/vault/deployments/ at the record's own source_commit and fails unless the sha256 is the
+# record's code hash; a record marked non_reproducible (an earlier host build) is printed as a NOTE and never compared.
+# HEAD's build is uploaded, with its sha256, as the artifact vault-mainnet-wasm, which the owner's deploy paste
+# downloads by this run's id (gh run download <id> -n vault-mainnet-wasm); deploy.mjs deploys it on mainnet only with a
+# record naming that commit, its sha256 and MAINNET_PINS' pin. The checkout is the full history, for the records'
+# commits.
 # The paths are every file the build and pin steps read: contracts/vault/ and deploy.mjs's imports
-# (contracts/vault/scripts/deploy.test.mjs holds the list against them), scripts/ci/retry.sh and scripts/ci/fetch.sh.
+# (contracts/vault/scripts/deploy.test.mjs holds the list against them), scripts/ci/retry.sh, scripts/ci/fetch.sh and
+# scripts/ci/fresh-dir.sh.
+# The two builds run in cargo-near's container, which fetches the crates there: no fetch from the runner reaches them, so a
+# bad read from crates.io is met by running each build again, 3 tries through scripts/ci/retry.sh, each into an emptied
+# build dir (scripts/ci/fresh-dir.sh), as scripts/ci/download-retry.mjs requires (card ci-cargo-fetch-retry). Only a
+# failure before any hash exists is tried again: deploy.mjs ends with exit 3 (EXIT_HASH_DISAGREE) when the two builds
+# differ or a record rebuilds to another hash, and RETRY_FINAL=3 stops retry.sh at once on it, so a build that is
+# reproducible only some of the time is red on its first try. The command built is deploy.mjs's own and unchanged, so
+# a commit's code hash is the one it was.
 # No secret and no token beyond the read-only one GitHub gives every run. Actions pinned by commit sha as ci.yml has
 # them (actions/checkout v7.0.1, actions/setup-node v7.1.0, actions/upload-artifact v7.0.2, actions/cache/restore and
 # actions/cache/save v6.1.0).
@@ -24,6 +38,7 @@ on:
       - "scripts/ci/rpc-wait.mjs"
       - "scripts/ci/retry.sh"
       - "scripts/ci/fetch.sh"
+      - "scripts/ci/fresh-dir.sh"
   workflow_dispatch:
 
 permissions:
@@ -41,6 +56,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -67,23 +83,14 @@ jobs:
           key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
       - name: two clean mainnet builds that must agree
         run: |
-          node contracts/vault/scripts/deploy.mjs --build-only --flavor mainnet --build-dir "$RUNNER_TEMP/vault-mainnet" 2>&1 | tee "$RUNNER_TEMP/build.log"
+          RETRY_FINAL=3 bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh "$RUNNER_TEMP/vault-mainnet" node contracts/vault/scripts/deploy.mjs --build-only --flavor mainnet --build-dir "$RUNNER_TEMP/vault-mainnet" 2>&1 | tee "$RUNNER_TEMP/build.log"
           test "${PIPESTATUS[0]}" = 0
           cd "$RUNNER_TEMP/vault-mainnet"
           sha256sum blindfill_vault.wasm | tee blindfill_vault.wasm.sha256
           cp "$RUNNER_TEMP/build.log" build.log
-      # deploy.mjs pinProblems: the build's sha256 is mainnet-test.json's pin and MAINNET_PINS', the record's builds
-      # agree, its code_hash is the pin's base58 and it is a mainnet record; before the upload, so no other wasm is one
-      - name: the build is the pin of mainnet-test.json
-        run: |
-          node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            import { pinProblems } from "./contracts/vault/scripts/deploy.mjs";
-            const wasm = readFileSync(process.argv[1]);
-            const p = pinProblems(wasm, JSON.parse(readFileSync("contracts/vault/deployments/mainnet-test.json", "utf8")));
-            if (p.length) { console.error(`not the pin: ${p.join("; ")}`); process.exit(1); }
-            console.log("the build is the pin of contracts/vault/deployments/mainnet-test.json");
-          ' "$RUNNER_TEMP/vault-mainnet/blindfill_vault.wasm"
+      # each vault deploy record rebuilt at its own commit to its code hash; a non_reproducible record is a NOTE
+      - name: every vault deploy record rebuilds to its code hash
+        run: RETRY_FINAL=3 bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh "$RUNNER_TEMP/vault-records" node contracts/vault/scripts/deploy.mjs --verify-records --build-dir "$RUNNER_TEMP/vault-records"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vault-mainnet-wasm

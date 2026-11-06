@@ -173,7 +173,8 @@ test("--bind-from-s: a bind waits until the pool's time is at least s seconds in
 });
 
 test("the fee's state reads go to the kit pin's providers, the sync to the run's pair, and the device takes both (Robinhood's PublicNode keeps 15 s of state)", () => {
-  for (const chain of ["base-sepolia", "robinhood-testnet"]) assert.deepEqual(run.feeProviders(chain, undefined), kitIndex.evmPoolVenues()[chain].providers, chain);
+  // the kit pin's fee pair, as the device's (card notes-per-pool-evm-base-hang: the pool pair is the sync's)
+  for (const chain of ["base-sepolia", "robinhood-testnet"]) assert.deepEqual(run.feeProviders(chain, undefined), kitIndex.evmPoolVenues()[chain].feeProviders, chain);
   assert.notDeepEqual(run.feeProviders("robinhood-testnet", undefined), run.NETS["robinhood-testnet"].rpcs, "not the sync's pair");
   assert.deepEqual(run.feeProviders("base-sepolia", "http://127.0.0.1:1,http://127.0.0.1:2"), ["http://127.0.0.1:1", "http://127.0.0.1:2"], "a dry run's fork for both");
   // the device gets the run's fee pair as its feeRpcs: a pair that is not two providers is refused at once
@@ -188,7 +189,8 @@ test("the fee's state reads go to the kit pin's providers, the sync to the run's
 test("main takes its fee providers, its bind seconds and the device's arguments from wiringOf: the fee's reads on the kit pin's pair, the sync on the run's, each bind at --bind-from-s", async () => {
   assert.equal(typeof run.wiringOf, "function", "testnet-run.mjs wiringOf");
   const chain = "robinhood-testnet";
-  const pinned = kitIndex.evmPoolVenues()[chain].providers;
+  const pinned = kitIndex.evmPoolVenues()[chain].feeProviders;
+  assert.notDeepEqual(pinned, run.NETS[chain].rpcs, "the fee pair is not the sync's pair");
   const asked = [];
   const fetchFn = async (u, init) => (asked.push([u, JSON.parse(init.body).method]), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0xb626" })));
   let clock = 1_800_000_000_000n + 3_000n; // 3 s into an epoch

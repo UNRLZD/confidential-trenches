@@ -21,11 +21,11 @@
 // Display only: nothing here feeds a signature (the device reads the mint and the pools itself before it signs). Every
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
-import { address, dec, toRow, type Row } from "./lists.ts";
-import { createOrigins, hintsOf, rpcAccounts, type Hint, type Origin } from "./origin.ts";
+import { address, b58decode, b58encode, dec, ROW_FIELDS, text, toRow, type Row } from "./lists.ts";
+import { createOrigins, hintsOf, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
-import { QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
+import { BURST_MS, QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -83,11 +83,25 @@ export const COLD_ROOM = 4;
  *  instead of holding them (never longer than the old batch gap), never our 429; the mint stays in the next search, so
  *  the retry finds its row. */
 export const SEARCH_WAIT_MAX_MS = 4_000;
-/** The longest a search waits out Jupiter's hold (its 429's reset) before it reads again (card helper-crowd-429 fold 6):
- *  past it the waiting pages answer not ready. [design: the app's 10 s page request (apps/terminal/src/screens/token/
- *  source.ts TIMEOUT_MS) less SEARCH_WAIT_MAX_MS and 1 s for the search's answer and the page's chain reads; Jupiter's
- *  resets in live run 41943005189 were 1 and 4 s.] */
-export const SEARCH_HOLD_WAIT_MS = 5_000;
+/** The longest a search waits for its turn or out Jupiter's hold (its 429's reset) before it reads again (card
+ *  helper-crowd-429 fold 6). Card helper-page-jup-429: no page waits on it past JUP_PAGE_WAIT_MS, so it waits one of
+ *  Jupiter's windows (proxy.ts BURST_MS), within which the page lane always has a free send, and its row is held for
+ *  the next read. [Jupiter's resets in live run 41943005189 were 1 and 4 s.] */
+export const SEARCH_HOLD_WAIT_MS = BURST_MS;
+/**
+ * Card helper-page-jup-429: the longest a cold page waits for its Jupiter row. Jupiter Free's 10 sends in any 10 s are
+ * every page's and every build's (proxy.ts PACED), so a page that waited for its row waited at any traffic (live run
+ * 42164306192: jup-wait 1565 ms, jup-turn 3983 ms, the page 5603 ms). Past this the page answers with its name read on
+ * chain (identityOf) and the Jupiter fields null (06b:1745-1746), the row a held one when there is one; the search
+ * goes on at the page lane's next free send, and its row is held and served to the next read. [design: 500 ms keeps
+ * the page inside 1 s with the mint's read and the launch's LAUNCH_WAIT_MS, and a search that goes at once (a window
+ * with room) still lands in it.]
+ */
+export const JUP_PAGE_WAIT_MS = 500;
+/** Metaplex Token Metadata: a classic SPL mint's name, symbol and uri, at its metadata program address. */
+export const METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
+/** The metadata account of a mint: the program address of ("metadata", program, mint). */
+export const metadataAddress = (mint: string): string => pda([new TextEncoder().encode("metadata"), b58decode(METADATA_PROGRAM)!, b58decode(mint)!], METADATA_PROGRAM);
 /** Tokens held per cache; the oldest goes first. */
 export const CACHE_MAX = 2_000;
 export const HOLDERS_MAX = 20;
@@ -113,8 +127,11 @@ export const RISK_FIELDS = [
   "insiders_bps", "bundlers_bps", "fresh_bps",
 ] as const;
 export type Risk = Record<(typeof RISK_FIELDS)[number], Field<unknown>>;
-export const PAGE_FIELDS = ["row", "decimals", "pool", "risk", "route"] as const;
-export type TokenPage = { row: Row; decimals: number; pool: string | null; risk: Risk; route: "ok" | "none" | "unknown" };
+/** 06b's TokenPage fields, then `filling` (card token-page-fills-after, added after the frozen list): true only while
+ *  the page is named on chain and its Jupiter row is still coming (its search was late), so the app draws those fields
+ *  loading; false for a Discover row, a Jupiter row, and a mint Jupiter answered it does not list. */
+export const PAGE_FIELDS = ["row", "decimals", "pool", "risk", "route", "filling"] as const;
+export type TokenPage = { row: Row; decimals: number; pool: string | null; risk: Risk; route: "ok" | "none" | "unknown"; filling: boolean };
 export type Holder = { addr: string; amt: string; bps: number | null; kind?: "burn" };
 export const HOLDERS_FIELDS = ["holders", "total", "top_bps", "src", "as_of_ms"] as const;
 export type Holders = { holders: Holder[]; total: number | null; top_bps: number | null; src: string; as_of_ms: number };
@@ -134,6 +151,59 @@ const u64 = (v: unknown): bigint | null => (typeof v === "string" && U64.test(v)
 // ---------------------------------------------------------------------------------------------------------------
 
 export type Mint = { decimals: number; supply: bigint; mintAuth: boolean; freezeAuth: boolean; feeBps: number };
+/** A token's name as its mint names it on chain, each part bounded text or null (hostile input). */
+export type Identity = { name: string | null; symbol: string | null; uri: string | null };
+const NO_NAME: Identity = { name: null, symbol: null, uri: null };
+/** The name parts, bounded as Jupiter's row bounds its own (lists.ts toRow: symbol 32, name 64), the uri 200
+ *  characters as Metaplex sizes it. */
+const named = (name: unknown, symbol: unknown, uri: unknown): Identity => {
+  const sym = text(symbol, 32);
+  return { name: text(name, 64) ?? sym, symbol: sym, uri: text(uri, 200) };
+};
+/**
+ * The token's name read on chain: a Token-2022 mint's tokenMetadata extension (jsonParsed), else a classic mint's
+ * Metaplex metadata account (base64), read in the same getMultipleAccounts as the mint. Metadata v1 layout: key u8,
+ * update authority 32, mint 32, then name, symbol and uri, each a u32 length and its bytes (the bytes padded with
+ * NULs). Only those three are decoded; the account must be the metadata program's and name this mint.
+ */
+export function identityOf(mintAccount: unknown, metadataAccount: unknown, mint: string): Identity {
+  const ext = obj(mintAccount).owner === TOKEN_2022_PROGRAM ? obj(obj(obj(mintAccount).data).parsed).info : undefined;
+  const exts = obj(ext).extensions;
+  if (Array.isArray(exts)) {
+    const tm = exts.find((e) => obj(e).extension === "tokenMetadata");
+    if (tm !== undefined) {
+      const st = obj(obj(tm).state);
+      if (st.mint === mint) return named(st.name, st.symbol, st.uri);
+    }
+  }
+  const md = obj(metadataAccount);
+  const data = md.data;
+  if (md.owner !== METADATA_PROGRAM || !Array.isArray(data) || data[1] !== "base64" || typeof data[0] !== "string" || data[0].length > 1_000_000) return NO_NAME;
+  const b = Buffer.from(data[0], "base64");
+  if (b.length < 65 + 12 || b[0] !== 4 || b58encodeKey(b.subarray(33, 65)) !== mint) return NO_NAME;
+  let at = 65;
+  const str = (max: number): string | null | undefined => {
+    if (at + 4 > b.length) return undefined;
+    const n = b.readUInt32LE(at);
+    at += 4;
+    if (n > max || at + n > b.length) return undefined;
+    const v = b.subarray(at, at + n).toString("utf8").replace(/\0+$/, "");
+    at += n;
+    return v;
+  };
+  const name = str(64);
+  const symbol = str(32);
+  const uri = str(256);
+  if (name === undefined || symbol === undefined || uri === undefined) return NO_NAME;
+  return named(name, symbol, uri);
+}
+const b58encodeKey = (k: Uint8Array): string | null => (k.length === 32 ? address(b58encode(k)) : null);
+/** A cold page's Row before its Jupiter row is read: the name on chain (src "chain"), every other field null (06b: "a
+ *  value no source has is null"); `icon` false, as every row has it until the logo route is served (lists.ts toRow). */
+export function chainRow(mint: string, id: Identity, asOfMs: number): Row {
+  const row = Object.fromEntries(ROW_FIELDS.map((f) => [f, null])) as Row;
+  return { ...row, chain: "solana", token: mint, symbol: id.symbol, name: id.name, icon: false, src: "chain", as_of_ms: asOfMs };
+}
 
 /** An authority as jsonParsed writes it: null when none, else an address; anything else is not a mint. */
 const auth = (v: unknown): boolean | undefined => (v === null ? false : address(v) !== null ? true : undefined);
@@ -196,7 +266,7 @@ export function jupiterPool(jup: Record<string, unknown>): string | null {
  *  and the token's launch as read on chain (origin.ts; null for none, undefined when not read). The launch names the
  *  row's launchpad: a Discover row keeps its own (read on chain by the lists, with Jupiter's config) when this read
  *  finds none; a row from Jupiter's search never keeps Jupiter's tag alone. */
-export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number): TokenPage {
+export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number, filling = false): TokenPage {
   const row: Row = { ...base };
   row.launchpad = origin?.pad ?? (listed ? base.launchpad : null);
   const curveBps = origin?.curveBps ?? null;
@@ -205,8 +275,9 @@ export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Or
   row.mint_auth = mint.mintAuth;
   row.freeze_auth = mint.freezeAuth;
   const chain = <T>(v: T | null): Field<T> => ({ v, src: "chain", as_of_ms: chainAtMs });
-  const jupiter = <T>(v: T | null): Field<T> => ({ v, src: "jupiter", as_of_ms: jupAtMs });
   const none: Field<never> = { v: null, src: "none", as_of_ms: chainAtMs };
+  // a page named on chain before its Jupiter row (chainRow): the Jupiter fields are not read yet
+  const jupiter = <T>(v: T | null): Field<T> => (base.src === "chain" ? { ...none } : { v, src: "jupiter", as_of_ms: jupAtMs });
   const onCurve = origin != null && curveBps !== null && curveBps < 10_000;
   const created = row.created_s as number | null;
   // the pool the token trades in: its launchpad's pool while on its curve, else the pool Jupiter names, when it does
@@ -235,6 +306,7 @@ export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Or
     },
     // whether a token routes is the device's reference-pool read at the quote (S12), never the data part's call
     route: "unknown",
+    filling,
   };
 }
 
@@ -304,7 +376,7 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 // ---------------------------------------------------------------------------------------------------------------
 
 type Answer = { status: number; headers: Record<string, string>; body: string; timing?: string[]; why?: string };
-type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number): Promise<Answer> };
+type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number, caller?: boolean): Promise<Answer> };
 type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string; why?: string; timing?: string[] }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
@@ -506,7 +578,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // row is kept JUP_FRESH_MS from our own read.
   /** `timing`: the search's Server-Timing entries for the caller it answered: its wait to be sent (a search out, the
    *  counted minute's room, the gap after a failure) and the search itself (card helper-ready-page-warm). */
-  type JupRow = { row: Record<string, unknown> | null; at: number; timing?: string[] };
+  type JupRow = { row: Record<string, unknown> | null; at: number; timing?: string[]; later?: boolean };
   const jrows = bounded<JupRow & { readAt: number }>(CACHE_MAX);
   const waiting = new Map<string, { cold: boolean; since: number; ws: { ok: (r: JupRow) => void; fail: (e: Error) => void }[] }>();
   /** When each search in the proxy's counted minute went, oldest first. */
@@ -574,9 +646,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     let proxyWhy: string | undefined;
     try {
       // proxy.ts PROXY_RESERVE; a hold of Jupiter's is waited out within SEARCH_HOLD_WAIT_MS (proxy.ts turn)
-      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS);
+      // card helper-page-jup-429: a search a caller waits for goes ahead of background reads for Jupiter's turn; one
+      // of held pages' refreshes only is a background read
+      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS, batch.some((m) => waiting.get(m)?.cold === true));
       parts = (a.timing ?? []).map((e) => `jup-${e}`);
-      if (a.status !== 200) (failed = a.why ?? `jupiter ${a.status}`), (proxyWhy = a.why);
+      if (a.status !== 200) (failed = a.why ?? `jupiter ${a.status}`), (proxyWhy = failed);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
@@ -630,12 +704,14 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return p;
   }
   async function readMint(mint: string, client?: string) {
-    const keys = [mint];
+    // card helper-page-jup-429: the mint and its Metaplex metadata account in one call, so a page is named on chain
+    const keys = [mint, metadataAddress(mint)];
     const { result, timing } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }], rpc, client);
     const value = result.value;
     const slot = obj(result.context).slot;
     if (!Array.isArray(value) || value.length !== keys.length || !Number.isSafeInteger(slot)) throw new Upstream();
-    return { mint: toMint(value[0], slot as number), at: now(), timing };
+    const m = toMint(value[0], slot as number);
+    return { mint: m, id: m === null ? NO_NAME : identityOf(value[0], value[1], mint), at: now(), timing };
   }
 
   // Discover's rows (D-S6 reads Jupiter only for tokens off the lists): indexed once per snapshot
@@ -692,9 +768,52 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return origins.get(mint);
   };
   // each token's last page as built, `answer` as the cache keeps it and `filled` once its launch came in after
-  type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer };
+  type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer; rowLater?: boolean };
   const built = bounded<Built>(CACHE_MAX);
-  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt)), src: "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
+  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt, b.rowLater === true)), src: b.base.src === "chain" ? "chain" : "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
+  /** Card helper-page-jup-429: the page's Jupiter row within JUP_PAGE_WAIT_MS, else a row held from an earlier read,
+   *  under STALE_MS old, else null (the page is named on chain); the search goes on and its row is held for the next
+   *  read. A search that fails (Jupiter's 429 or its hold past SEARCH_HOLD_WAIT_MS) is answered the same way. */
+  /** A page named on chain: its price and market cap from the newest bar this helper holds for it, under STALE_MS old
+   *  (its chart's own read), else null. */
+  function chainRowAt(mint: string, id: Identity, m: Mint, asOfMs: number): Row {
+    const row = chainRow(mint, id, asOfMs);
+    let close: number | null = null;
+    let barAt = -Infinity;
+    for (const tf of Object.keys(TF)) {
+      const a = bars.peek(`${mint}:${tf}:`);
+      if (a === undefined || a.status !== 200 || now() - (a.asOfMs ?? 0) > STALE_MS) continue;
+      try {
+        const c = (JSON.parse(a.body) as Candles).candles;
+        const bar = Array.isArray(c) ? c[c.length - 1] : undefined;
+        const v = Array.isArray(bar) ? Number(bar[4]) : NaN;
+        if (Number.isFinite(v) && v > 0 && Number.isSafeInteger(bar![0]) && bar![0] > barAt) (close = v), (barAt = bar![0]);
+      } catch {
+        continue;
+      }
+    }
+    if (close !== null) {
+      row.price_usd = dec(close);
+      row.mc_usd = dec(close * (Number(m.supply) / 10 ** m.decimals));
+    }
+    return row;
+  }
+
+  async function jupiterWithin(mint: string, cold: boolean): Promise<JupRow | null> {
+    // a held row past STALE_MS is not served (its price would be a minute old); the page is named on chain instead
+    const kept = jrows.get(mint);
+    const held = kept !== undefined && now() - kept.readAt <= STALE_MS ? kept : undefined;
+    const p = jupiter(mint, cold);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const r = await Promise.race([p.catch((e: unknown) => (e instanceof Upstream ? e : new Upstream())), new Promise<"late">((ok) => (timer = setTimeout(() => ok("late"), JUP_PAGE_WAIT_MS)))]);
+    clearTimeout(timer);
+    if (r !== "late" && !(r instanceof Upstream)) return r;
+    p.catch(() => undefined);
+    // the page's Server-Timing names why it has no fresh row: its wait ran out, or the search's own cause (search-held,
+    // search-429 with the proxy's reason, or search-upstream)
+    const why = r === "late" ? `jup;desc="late";dur=${JUP_PAGE_WAIT_MS}` : (r.metric ?? "search-upstream");
+    return held === undefined ? { row: null, at: now(), timing: [why], later: true } : { row: held.row, at: held.at, timing: [why, "jup;desc=held"] };
+  }
 
   const page = cached(PAGE_FRESH_MS, now, async (mint, client, _held, waits) => {
     // card helper-ready-page-warm: one Server-Timing entry per upstream this read waited on
@@ -703,22 +822,25 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     const listsMs = Math.round(performance.now() - t0);
     // a Discover row's launch is the lists'; this read finds its pool (the config Jupiter names is not in a row)
     const early = listed === null ? null : launch(mint, { tag: listed.row.launchpad as string | null, config: null, graduated: null }, listed.row.created_s, client);
-    const [m, j] = await Promise.all([mintAt(mint, client), listed === null ? jupiter(mint, waits === true) : null]);
+    // card helper-page-jup-429: a page off the lists never waits on Jupiter past JUP_PAGE_WAIT_MS (jupiterWithin)
+    const [m, j] = await Promise.all([mintAt(mint, client), listed === null ? jupiterWithin(mint, waits === true) : null]);
     if (m.mint === null) return NOT_FOUND;
     let base: Row | null = listed?.row ?? null;
     let at = listed?.at ?? 0;
     let pool: string | null = null;
     if (j !== null) {
-      if (j.row === null) return NOT_FOUND;
-      base = toRow(j.row, j.at);
-      at = j.at;
-      pool = jupiterPool(j.row);
+      if (j.later === true) (base = chainRowAt(mint, m.id, m.mint, m.at)), (at = m.at);
+      else if (j.row === null) {
+        // Jupiter does not know it: a mint named on chain is still its page, else not found
+        if (m.id.symbol === null) return NOT_FOUND;
+        (base = chainRowAt(mint, m.id, m.mint, m.at)), (at = m.at);
+      } else (base = toRow(j.row, j.at)), (at = j.at), (pool = jupiterPool(j.row));
     }
     if (base === null || base.token !== mint) return NOT_FOUND;
     const t1 = performance.now();
-    const origin = await settled(mint, early ?? launch(mint, hintsOf([j!.row]).get(mint), base.created_s, client));
+    const origin = await settled(mint, early ?? launch(mint, j?.row ? hintsOf([j.row]).get(mint) : undefined, base.created_s, client));
     const timing = [`lists;dur=${listsMs}`, ...m.timing, ...(j?.timing ?? []), `launch;dur=${Math.round(performance.now() - t1)}`, `read;dur=${Math.round(performance.now() - t0)}`];
-    const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin };
+    const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin, rowLater: j?.later === true };
     b.answer = { ...pageOf(b), timing: timing.join(", ") };
     built.set(mint, b);
     return b.answer;
@@ -728,9 +850,21 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     view: (mint, a) => {
       const b = built.get(mint);
       if (b === undefined || a !== b.answer) return a;
+      // card helper-page-jup-429: a page named on chain takes its Jupiter row once the search held it
+      const held = b.rowLater === true ? jrows.get(mint) : undefined;
+      if (held !== undefined && held.row !== null && now() - held.readAt <= STALE_MS) {
+        const r = toRow(held.row, held.at);
+        if (r !== null && r.token === mint) {
+          b.base = r;
+          b.jupAt = held.at;
+          b.pool = jupiterPool(held.row);
+          b.rowLater = false;
+          b.filled = pageOf(b);
+        }
+      }
       if (b.origin === undefined) {
         const o = origins.get(mint);
-        if (o === undefined) return a;
+        if (o === undefined) return b.filled ?? a;
         b.origin = o;
         b.filled = pageOf(b);
       }

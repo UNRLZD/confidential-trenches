@@ -28,6 +28,7 @@ import { solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { POOL_DEPOSIT_READS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
+import { pairDown } from "./outage.ts";
 
 type Acc = { owner: string; lamports: number; data: Uint8Array };
 const FIX = JSON.parse(readFileSync(new URL("./fixtures/pool-devnet.json", import.meta.url), "utf8")) as {
@@ -46,6 +47,7 @@ const U = (i: number): string => {
   return base58.encode(u.publicKey);
 };
 const RUNG = 10_000_000n; // 0.01 SOL, SOL_LADDER.min
+const MIN_DEPOSIT = 1_000_000n; // the pool's smallest deposit, contracts/pool-solana/src/lib.rs:78: below the smallest rung
 const ask = (amount: bigint): PoolAsk => ({ kind: "pool.deposit", chain: "solana", token: null, amount, slippageBps: 0, decimals: 9 });
 const enc = new TextEncoder();
 const be32 = (x: bigint): Uint8Array => Uint8Array.from({ length: 32 }, (_, i) => Number((x >> BigInt(8 * (31 - i))) & 255n));
@@ -364,7 +366,41 @@ function attackerTx(c: ReturnType<typeof chain>, pre: bigint, value: bigint): Ui
 }
 const preOf = (tx: Uint8Array): bigint => beInt(solanaDecodeMessage(tx.subarray(65)).instructions[0]!.data.subarray(9, 41));
 
-test("H2 (probe A): a front-run deposit on the user's precommitment is never the user's note: the note goes TAKEN and U's money moves on its next note", async () => {
+test("H2 (probe A), precommit-taken-recover: a front-run deposit of MIN_DEPOSIT on the user's precommitment is restored as the user's note at that value, and the rung lands on U's next note in the same run", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 50_000_000);
+  const base = c.rpc();
+  let raced = false;
+  const pres: bigint[] = [];
+  const racing = async (method: string, params: readonly unknown[]) => {
+    if (method === "sendTransaction") pres.push(preOf(base64.decode(params[0] as string)));
+    if (method === "sendTransaction" && !raced) {
+      raced = true;
+      c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT)); // lands first, 0.001 SOL
+    }
+    return base(method, params);
+  };
+  const h = host(c, ns, { rpcs: [racing, c.rpc()] });
+  const got = await runPoolDeposit(h, ask(RUNG));
+  assert.equal(c.statuses.get(c.sent[0]!)?.err !== null, true, "the user's first tx failed on chain");
+  assert.equal(c.sent.length, 2, "the rung is signed again, on the next precommitment");
+  assert.equal(pres.length, 2);
+  assert.notEqual(pres[1], pres[0], "the second send names another precommitment");
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "solana", hash: c.sent[1] }] }, "the ask fills in the same run, its own tx only");
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "UNSPENT", MIN_DEPOSIT],
+    ["second", "UNSPENT", RUNG],
+  ]);
+  // the restored note is a real leaf of the pool, on the precommitment's own commitment
+  const taken = (await ours(ns)).find((n) => n.ref.kind === "deposit")!;
+  assert.equal(taken.leaf!.commitment, noteCommitment(MIN_DEPOSIT, taken.leaf!.label, taken.precommitment));
+  assert.deepEqual(h.landedNotes.map((n) => n.leaf?.value), [MIN_DEPOSIT, RUNG], "each restored or landed note starts the proof queue's pass");
+  assert.ok(!(await ours(ns)).some((n) => n.state === "TAKEN"), "never TAKEN");
+});
+
+test("precommit-taken-recover: a host with no landed hook still stores the restored note UNSPENT (the devnet front-run run's host), and the rung lands on U's next note", async () => {
   const c = chain();
   const ns = await notes();
   const u = await plannedU(ns);
@@ -374,33 +410,99 @@ test("H2 (probe A): a front-run deposit on the user's precommitment is never the
   const racing = async (method: string, params: readonly unknown[]) => {
     if (method === "sendTransaction" && !raced) {
       raced = true;
-      c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), 1_000_000n)); // lands first, 0.001 SOL
+      c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT));
     }
     return base(method, params);
   };
-  const got = await runPoolDeposit(host(c, ns, { rpcs: [racing, c.rpc()] }), ask(RUNG));
-  assert.equal(c.statuses.get(c.sent[0]!)?.err !== null, true, "the user's first tx failed on chain");
-  // round 3: one TAKEN ends the run, so a front-runner costs U one fee per run, never a fee per retry
-  assert.deepEqual(got, { error: "failed" }, "one TAKEN stops the move for that run");
-  assert.equal(c.sent.length, 1, "nothing sent again in that run");
-  assert.deepEqual(await shape(ns), [["deposit", "TAKEN", undefined]]);
-  // the next run moves U's money on its next note, and stores nothing of the attacker's
-  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[1] }] });
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [racing, c.rpc()], landed: undefined }), ask(RUNG));
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "solana", hash: c.sent[1] }] });
   assert.deepEqual(await shape(ns), [
-    ["deposit", "TAKEN", undefined],
+    ["deposit", "UNSPENT", MIN_DEPOSIT],
     ["second", "UNSPENT", RUNG],
   ]);
-  assert.ok((await ours(ns)).every((n) => n.leaf?.value !== 1_000_000n));
 });
 
-test("H2 (probe D): a mark of another value than the note's recorded value is another deposit's: TAKEN, never stored as money", async () => {
+test("precommit-taken-recover: a precommitment taken while its note was PLANNED (the mark already there at the simulation) is restored with nothing signed for it, and the rung goes on the next note", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 50_000_000);
+  const first = (await ours(ns)).find((n) => n.state === "PLANNED")!;
+  c.apply(attackerTx(c, first.precommitment, MIN_DEPOSIT)); // a stranger lands first, before U signs anything
+  const got = await runPoolDeposit(host(c, ns), ask(RUNG));
+  assert.equal(c.sent.length, 1, "only the next note's deposit is sent");
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "solana", hash: c.sent[0] }] });
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "UNSPENT", MIN_DEPOSIT],
+    ["second", "UNSPENT", RUNG],
+  ]);
+});
+
+test("precommit-taken-recover: a page closed between a taken note's two moves (INCOMING, no send) restores it from its mark at the next load", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 50_000_000);
+  const first = (await ours(ns)).find((n) => n.state === "PLANNED")!;
+  c.apply(attackerTx(c, first.precommitment, 3n * MIN_DEPOSIT));
+  await ns.move(first.id, "PLANNED", "INCOMING"); // the first of the two moves, then the page closed
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "filled", txs: [] });
+  assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", 3n * MIN_DEPOSIT]]);
+});
+
+test("precommit-taken-recover: a front-runner who takes every send ends the run after as many taken notes as the ask has rungs, each restored; the next run lands the rung", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  const base = c.rpc();
+  let on = true;
+  const racing = async (method: string, params: readonly unknown[]) => {
+    if (method === "sendTransaction" && on) c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT));
+    return base(method, params);
+  };
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [racing, c.rpc()] }), ask(RUNG)), { error: "failed" });
+  assert.equal(c.sent.length, 2, "one taken note per rung, then one more try, never an endless run");
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "UNSPENT", MIN_DEPOSIT],
+    ["second", "UNSPENT", MIN_DEPOSIT],
+  ]);
+  on = false;
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[2] }] });
+  assert.deepEqual((await shape(ns)).at(-1), ["second", "UNSPENT", RUNG]);
+});
+
+test("precommit-taken-recover: one RPC alone saying a taken note's send succeeded does not stop the restore", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  const base = c.rpc();
+  let raced = false;
+  const racing = async (method: string, params: readonly unknown[]) => {
+    if (method === "sendTransaction" && !raced) {
+      raced = true;
+      c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT));
+    }
+    return base(method, params);
+  };
+  const liar = c.rpc();
+  const lying = async (method: string, params: readonly unknown[]) =>
+    method === "getSignatureStatuses" ? { context: { slot: 1 }, value: (params[0] as string[]).map(() => ({ err: null, confirmationStatus: "finalized" })) } : liar(method, params);
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [racing, lying] }), ask(RUNG));
+  assert.ok("stage" in got && got.stage === "filled", JSON.stringify(got));
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "UNSPENT", MIN_DEPOSIT],
+    ["second", "UNSPENT", RUNG],
+  ]);
+});
+
+test("H2 (probe D): a mark of another value while an RPC says the note's own send succeeded is a lie: refused, the note stays INCOMING, nothing restored or sent again", async () => {
   const c = chain();
   const ns = await notes();
   c.fund((await plannedU(ns)).address, Number(RUNG) + COST);
   c.moreValue = true;
-  // one TAKEN ends the run (round 3): no next note is planned in it
   assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { error: "failed" });
-  assert.deepEqual(await shape(ns), [["deposit", "TAKEN", undefined]]);
+  assert.equal(c.sent.length, 1);
+  assert.deepEqual(await shape(ns), [["deposit", "INCOMING", undefined]]);
 });
 
 test("M1 (probe C): a cut-short note is finished as its own move, sent again only at its own value once its blockhash expired, and its landed signature reported", async () => {
@@ -729,22 +831,23 @@ test("R3: a pending earlier note whose U still holds the next rung once it lands
   assert.deepEqual(short, []);
 });
 
-test("R3: a front-run on the second rung of a move ends the run part filled, with the first rung's tx only", async () => {
+test("R3: a front-run on the second rung of a move restores the front-runner's deposit and lands the rung on the next note: the move fills", async () => {
   const c = chain();
   const ns = await notes();
   c.fund((await plannedU(ns)).address, 100_000_000);
   const base = c.rpc();
   let sends = 0;
   const racing = async (method: string, params: readonly unknown[]) => {
-    if (method === "sendTransaction" && ++sends === 2) c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), 1_000_000n));
+    if (method === "sendTransaction" && ++sends === 2) c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT));
     return base(method, params);
   };
   const got = await runPoolDeposit(host(c, ns, { rpcs: [racing, c.rpc()] }), ask(30_000_000n));
-  assert.deepEqual(got, { stage: "part_filled", txs: [{ chain: "solana", hash: c.sent[0] }] });
-  assert.equal(c.sent.length, 2, "nothing sent after the TAKEN");
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "solana", hash: c.sent[0] }, { chain: "solana", hash: c.sent[2] }] });
+  assert.equal(c.sent.length, 3, "the taken rung is sent once more, on the next note");
   assert.deepEqual(await shape(ns), [
     ["deposit", "UNSPENT", 20_000_000n],
-    ["second", "TAKEN", undefined],
+    ["second", "UNSPENT", MIN_DEPOSIT],
+    ["second", "UNSPENT", 10_000_000n],
   ]);
 });
 
@@ -791,3 +894,35 @@ test("a pool.deposit refused (U holds the rung but not its costs: not_funded) re
   assert.deepEqual(r.stages, ["refused"]);
   assert.equal(c.sent.length, 0);
 });
+
+// Card pool-read-down: one provider down past the page's own retry, from each of its calls in turn. Before U signs, the
+// deposit answers "down" (api.ts RETRY_CODES: the same request again runs again), never failed or not_allowed, with
+// nothing sent and the note still PLANNED; the other provider's word alone is never taken. From U's first send on, it
+// is never "down".
+for (const p of [0, 1] as const) {
+  test(`card pool-read-down: provider ${p} down past the page's retry answers down before U signs; after the send, sent or the read-back's verdict, never failed, down or a throw`, async () => {
+    let before = 0;
+    let after = 0;
+    for (let from = 0; ; from++) {
+      const c = chain();
+      const ns = await notes();
+      const u = await plannedU(ns);
+      c.fund(u.address, Number(RUNG) + COST);
+      const d = pairDown([c.rpc(), c.rpc()] as const, p, from);
+      // a throw past the send would reach poolDepositKind's catch as failed while the tx may land
+      const a = await runPoolDeposit(host(c, ns, { rpcs: d.rpcs }), ask(RUNG)).catch((e: unknown) => ({ thrown: String(e) }));
+      if (!d.fired()) break;
+      if (c.sent.length === 0) {
+        before++;
+        assert.deepEqual(a, { error: "down" }, `from call ${from}`);
+        assert.deepEqual((await ours(ns)).map((n) => n.state), ["PLANNED"], `from call ${from}`);
+      } else {
+        after++;
+        assert.ok("stage" in a, `from call ${from}: ${JSON.stringify(a)}`);
+        if (a.stage === "sent") assert.deepEqual(a.txs.map((t) => t.hash), [c.sent[0]!], `from call ${from}`);
+        else assert.ok(["filled", "not_landed"].includes(a.stage), `from call ${from}: ${a.stage}`);
+      }
+    }
+    assert.ok(before > 0 && after > 0, `${before} before, ${after} after`);
+  });
+}

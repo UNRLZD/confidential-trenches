@@ -43,8 +43,10 @@ export const MARKERS = {
   "the rule before each signer": new RegExp(`${ID}\\(\\)\\?\\?await ${ID}\\(${ID},${ID}\\.leg\\.wallet,${ID}\\.assembled,${ID}\\)`),
   // signedWire: the rule read when the signer answers, before its signature is checked or put in the wire
   "the rule when the signer answers": new RegExp(`=await ${ID}\\.sign\\(${ID},${ID}\\.message,\\{lastValidBlockHeight:${ID}\\.lastValidBlockHeight\\}\\)\\}let ${ID}=${ID}\\(\\);if\\(${ID}\\)return ${ID};`),
-  // the page (src/trade.ts legsRun): its signer passes straight through, and its txs are the kit's kept signatures alone
-  "the page names only kept signatures": new RegExp(`sign:\\(${ID},${ID},${ID}\\)=>${ID}\\.sign\\(${ID},${ID},${ID}\\),onSigned:${ID}=>\\{${ID}\\.splice\\(0,${ID}\\.length,\\.\\.\\.${ID}\\.map\\(${ID}=>\\(\\{chain:\`solana\`,hash:${ID}\\.signature\\}\\)\\)\\)\\}`),
+  // the page (src/trade.ts legsRun): its signer passes its own three arguments straight through, with at most the
+  // page's signing flag set first (card pool-read-down: no "down" from the first signature on), and its txs are the
+  // kit's kept signatures alone, the list replaced by their hashes
+  "the page names only kept signatures": new RegExp(`sign:\\((${ID}),(${ID}),(${ID})\\)=>(?:${ID}\\.sign\\(\\1,\\2,\\3\\)|\\(${ID}=(?:!0|true),${ID}\\.sign\\(\\1,\\2,\\3\\)\\)),onSigned:(${ID})=>\\{(${ID})\\.splice\\(0,\\5\\.length,\\.\\.\\.\\4\\.map\\((${ID})=>\\(\\{chain:\`solana\`,hash:\\6\\.signature\\}\\)\\)\\)\\}`),
   // the page's unmark: a leg the kit returned unsigned frees its wallet, so no later pick notes its dropped signature
   "the page frees an unsigned leg": new RegExp(`${ID}&&${ID}&&${ID}\\.signature===void 0\\)return ${ID}\\(${ID},${ID},${ID}\\.id\\)`),
 };

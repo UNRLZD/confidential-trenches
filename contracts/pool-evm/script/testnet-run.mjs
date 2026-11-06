@@ -173,8 +173,14 @@ function nodeProver() {
 }
 
 /** The kit pin's two providers for the fee's state reads at the epoch's first block (they keep state a proof's life
- *  back), or the --rpc pair of a dry run (its fork for both). */
-export const feeProviders = (chain, rpcArg) => rpcArg?.split(",") ?? kit.evmPoolVenues()[chain].providers;
+ *  back): its feeProviders, as the device's (card evm-quote-warm-round), its providers only when it names none; or the
+ *  --rpc pair of a dry run (its fork for both). Robinhood testnet's pool pair is Robinhood's own and PublicNode, which
+ *  keeps about 15 s of state (card notes-per-pool-evm-base-hang); its fee pair is Robinhood's own and dRPC. */
+export const feeProviders = (chain, rpcArg) => {
+  if (rpcArg !== undefined) return rpcArg.split(",");
+  const v = kit.evmPoolVenues()[chain];
+  return v.feeProviders ?? v.providers;
+};
 /** The device's pool: the sync on `rpcs`, the fee's state reads on `feeRpcs`. */
 export const deviceOf = ({ pin, rpcs, feeRpcs, relayFee }) => evmPool({ pin, rpcs, feeRpcs, relayFee, epochFee });
 /** The epoch a bind binds: once the pool's time (`nowOf`, ms) is at least `fromS` seconds into its epoch, waiting

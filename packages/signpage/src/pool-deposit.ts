@@ -13,7 +13,8 @@
 //   on one RPC and must be valid on the other; the tx is built here, checked by the rule (rules/pool.ts
 //   checkSolanaDeposit: one tag 1 into the pinned pool, by U, of the rung, with the note's own precommitment) and its
 //   unsigned bytes simulated on both RPCs (sigVerify off, so neither can send it), which must both pass. A simulation
-//   that fails while the note's mark exists means another deposit took the precommitment: PLANNED -> TAKEN.
+//   that fails while the note's mark exists (both RPCs, finalized) means another deposit took the precommitment: that
+//   deposit is restored as the user's note (below) and the rung goes on U's next note, nothing signed for this one.
 // - A state and its send are written before the act: PLANNED -> INCOMING carries the send (signature, value, the
 //   blockhash's last valid height), written before the signed tx leaves the device; a send again is written first too
 //   (addSend, at the note's recorded value).
@@ -21,9 +22,19 @@
 //   note's recorded value, its label the label tree's leaf nonce - 1 and the commitment Poseidon(value, label,
 //   precommitment) a leaf of the state tree (../../wallet/src/pool/solana.ts solanaTreeSync): INCOMING -> UNSPENT,
 //   whoever sent it (a same-value deposit by another only funds the user's note). A mark of any other value: another
-//   deposit took the precommitment, INCOMING -> TAKEN, and the source U's money moves on its next note, in the next run:
-//   one TAKEN ends the ask's run (part_filled with what landed, else failed), so a front-runner costs U at most one
-//   failed tx's fee per run. No mark, read after both RPCs' finalized heights and those heights past every send's last
+//   deposit took the precommitment first (anyone who saw U's pending tx can send MIN_DEPOSIT with it; the pool keeps
+//   the first, contracts/pool-solana/src/deposit.rs:93). That deposit is still the user's note, since only the seed
+//   gives the precommitment's secrets: INCOMING -> UNSPENT with the leaf the mark names, at the value it carried, read
+//   as above (card precommit-taken-recover). The ask's rung then goes on U's next note in the same run, U's money
+//   untouched by the failed tx but its fee; each try costs the front-runner at least MIN_DEPOSIT, which becomes the
+//   user's note, and the mark's rent, locked in a mark that never closes. A run signs again after at most as many taken
+//   notes as its ask has rungs; the one taken after those is restored too and ends the run (so at most rungs + 1 taken
+//   notes and sends: a one-rung ask still gets its second try), part_filled with what landed, else failed, and the next
+//   run goes on, so a front-runner
+//   who takes every send never holds the deposit and seed locks (a sign out waits on them) past that. Taken also needs
+//   both RPCs not to say one of the note's sends succeeded (that would contradict the mark: refused). A page closed between a taken PLANNED note's two moves (PLANNED -> INCOMING with no send,
+//   then UNSPENT) leaves it INCOMING with no send: its mark, which never closes, is read again and it is restored.
+//   No mark, read after both RPCs' finalized heights and those heights past every send's last
 //   valid height: sent again at its own value (heights first, so a send that finalizes between the two reads is read
 //   landed, never sent again). Anything else is pending: read again, then not_landed with the note left INCOMING, never
 //   stored as money. Signature statuses only name the tx that landed, in the answer. A send's last valid height is the
@@ -46,7 +57,7 @@ import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { readSolanaRent, solanaPoolPage, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { depositId } from "../../wallet/src/derive/keys.ts";
@@ -83,7 +94,7 @@ export type PoolDepositHost = {
 };
 
 /** What a run answers: the trade stage with the deposits that landed (or, not landed, were sent), or a code. */
-export type PoolDepositAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "failed" };
+export type PoolDepositAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "failed" | "down" };
 
 /** Verdict reads a note gets in one run, a second apart: about two finalizations and a blockhash's life (~60 to 90 s). */
 export const POOL_DEPOSIT_READS = 120;
@@ -207,6 +218,8 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
   const keys: Uint8Array[] = [];
   const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   let rent: SolanaRent | null = null;
+  // from U's first signature on, a provider that fails is never "down" (a transaction may land)
+  let signing = false;
   try {
     const uKey = (u: { s: bigint; i: number }): { address: string; secretKey: Uint8Array } => {
       if (u.s !== scope) throw new Refused("not_allowed");
@@ -265,6 +278,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       // unsigned: an RPC cannot send what it simulates
       const sims = await both(h, async (r) => ((await r("simulateTransaction", [base64.encode(wire), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "confirmed" }])) as { value?: { err?: unknown } })?.value);
       if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return { simulation: "failed" };
+      signing = true;
       const signature = signSolana(u.secretKey, wire);
       const signed = wire.slice();
       signed.set(signature, 1);
@@ -283,8 +297,42 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       }
     };
 
-    // one INCOMING note, read up to `reads` times: landed (UNSPENT), taken (TAKEN), pending (INCOMING, maybe sent
-    // again), or stuck (INCOMING: U cannot pay its send again)
+    // a send of `sends` both RPCs say finalized with no error: one RPC's word alone never refuses a taken note
+    const bothLanded = async (sends: readonly PoolSend[]): Promise<boolean> => {
+      const sigs = sends.map((s) => s.signature);
+      const reads = await Promise.allSettled(h.rpcs.map((r) => r("getSignatureStatuses", [sigs, { searchTransactionHistory: true }])));
+      const ok = reads.map((x) => {
+        const v = x.status === "fulfilled" ? (x.value as { value?: unknown })?.value : null;
+        return Array.isArray(v) && v.length === sigs.length ? v.map((st) => (st as { confirmationStatus?: unknown } | null)?.confirmationStatus === "finalized" && (st as { err?: unknown }).err === null) : sigs.map(() => false);
+      });
+      return sigs.some((_, k) => ok.every((o) => o[k]));
+    };
+
+    // one INCOMING note, read up to `reads` times: landed (UNSPENT), taken (restored UNSPENT at the mark's value),
+    // pending (INCOMING, maybe sent again), or stuck (INCOMING: U cannot pay its send again)
+    // a mark's leaf: its label the label tree's leaf nonce - 1, and Poseidon(value, label, precommitment) a leaf of the
+    // state tree, once, in the trees read at the mark's slot
+    const leafOf = async (precommitment: bigint, m: { value: bigint; nonce: bigint; slot: number }): Promise<Leaf> => {
+      if (m.nonce === 0n) throw new Refused("failed");
+      const leaves = await sync.leaves(m.slot);
+      const label = vaultLabelOf(keccak_256, scope, m.nonce);
+      if (leaves.label[Number(m.nonce - 1n)] !== label) throw new Refused("failed");
+      const commitment = noteCommitment(m.value, label, precommitment);
+      const at = leaves.state.indexOf(commitment);
+      if (at < 0 || leaves.state.indexOf(commitment, at + 1) >= 0) throw new Refused("failed");
+      return { value: m.value, label, commitment, leafIndex: BigInt(at) };
+    };
+    // another deposit took the note's precommitment first: its deposit is the user's note all the same (only the seed
+    // names the precommitment's secrets, so only this device can spend it), stored UNSPENT at the value that deposit
+    // carried, whatever it is (MIN_DEPOSIT, or more); its pass starts like any landed note's
+    const restore = async (n: NoteRecord, m: { value: bigint; nonce: bigint; slot: number }): Promise<void> => {
+      const leaf = await leafOf(n.precommitment, m);
+      const incoming = n.state === "PLANNED" ? await store.move(n.id, "PLANNED", "INCOMING") : n;
+      // the move outside the optional call: `h.landed?.(x)` never evaluates x on a host with no landed hook
+      const done = await store.move(incoming.id, "INCOMING", "UNSPENT", { leaf });
+      h.landed?.(done);
+    };
+
     const finish = async (note: NoteRecord, own: boolean, reads: number): Promise<"landed" | "taken" | "pending" | "stuck"> => {
       let n = note;
       // the reads are a time budget too (POOL_DEPOSIT_READS a second apart): one RPC down, each read's retry its own
@@ -293,26 +341,28 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       const from = clock();
       for (let k = 0; ; k++) {
         const sends = n.sends ?? [];
-        if (sends.length === 0) throw new Refused("failed"); // a pool note goes INCOMING with its send, never without
+        // INCOMING with no send: a page closed between a taken note's two moves (restore), made only once its mark was
+        // read on both RPCs at finalized; the mark never closes, so it is read again and the note restored
+        if (sends.length === 0) {
+          const m = await markOf(h, n.precommitment);
+          if (m === null) throw new Refused("failed");
+          await restore(n, m);
+          return "taken";
+        }
         const value = sends[0]!.value; // every send of a note is at its recorded value (store addSend)
         // the heights before the mark: a finalized height past every send's last valid height, read before a mark read
         // that finds none, means no send can land after it
         const hs = await heights(h);
         const m = await markOf(h, n.precommitment);
         if (m !== null) {
-          // a mark of another value is another deposit's: this precommitment is taken
+          // a mark of another value is another deposit's: this precommitment is taken, and that deposit is restored.
+          // Then none of the note's sends can have succeeded: an RPC that says one did contradicts the mark, refused
           if (m.value !== value) {
-            await store.move(n.id, "INCOMING", "TAKEN");
+            if (await bothLanded(sends)) throw new Refused("failed");
+            await restore(n, m);
             return "taken";
           }
-          if (m.nonce === 0n) throw new Refused("failed");
-          const leaves = await sync.leaves(m.slot);
-          const label = vaultLabelOf(keccak_256, scope, m.nonce);
-          if (leaves.label[Number(m.nonce - 1n)] !== label) throw new Refused("failed");
-          const commitment = noteCommitment(m.value, label, n.precommitment);
-          const at = leaves.state.indexOf(commitment);
-          if (at < 0 || leaves.state.indexOf(commitment, at + 1) >= 0) throw new Refused("failed");
-          const leaf: Leaf = { value: m.value, label, commitment, leafIndex: BigInt(at) };
+          const leaf = await leafOf(n.precommitment, m);
           const done = await store.move(n.id, "INCOMING", "UNSPENT", { leaf });
           const sig = own ? await landedSend(h, sends) : null;
           if (sig !== null) landedTxs.push({ chain: "solana", hash: sig });
@@ -381,6 +431,12 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     if (ask === null) return busy.size === 0 ? { stage: "filled", txs: landedTxs } : stuck && sentTxs.length === 0 && landedTxs.length === 0 ? { error: "not_funded" } : { stage: "not_landed", txs: sentTxs };
 
     const rungs = ladderSplit(SOL_LADDER, ask.amount).notes;
+    // taken notes this run, each restored before it is counted: the run signs again after at most rungs.length of
+    // them, and the one after (rungs.length + 1) ends it; the next run goes on
+    let takes = 0;
+    const tookOne = (): void => {
+      if (++takes >= rungs.length + 1) throw new Refused("failed");
+    };
     if (rungs.length === 0) return { error: "not_allowed" };
 
     // the source: the newest U this scope used while it covers a rung and its costs, else the planned index's U. Its
@@ -415,11 +471,14 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       const from = uKey(source);
       const b = await build(from, precommitment, value);
       if (!("tx" in b)) {
-        // another deposit took this precommitment while it was planned: marked taken, and the run ends (one TAKEN
-        // per run); the next run plans the next note
-        if ((await markOf(h, precommitment)) !== null) {
-          await store.move(planned.id, "PLANNED", "TAKEN");
-          throw new Refused("failed");
+        // another deposit took this precommitment while it was planned: that deposit is restored as the user's note,
+        // and the same rung goes on U's next note, in this run (nothing was signed or paid for this one)
+        const taken = await markOf(h, precommitment);
+        if (taken !== null) {
+          await restore(planned, taken);
+          ref = after(ref);
+          tookOne();
+          continue;
         }
         // the used U no longer covers a rung: the move starts on the planned index's U (its PLANNED note waits for it)
         if (k === 0 && source.i === newest && planned.ref.kind === "second") {
@@ -440,15 +499,29 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       const end = await finish(incoming, true, h.reads ?? POOL_DEPOSIT_READS);
       if (end === "pending") throw new Refused("not_landed");
       if (end === "stuck") throw new Refused("not_funded");
-      // a front-run on the run's own send: one TAKEN ends the run, so U pays at most one failed tx's fee per run
-      if (end === "taken") throw new Refused("failed");
+      // a front-run on the run's own send: the front-runner's deposit is restored as the user's note, and the same rung
+      // goes on U's next note. Each try costs U one failed tx's fee and the front-runner at least MIN_DEPOSIT, which
+      // becomes the user's
+      if (end === "taken") {
+        ref = after(ref);
+        tookOne();
+        continue;
+      }
       k++;
       ref = after(ref);
     }
     return { stage: "filled", txs: landedTxs };
   } catch (e) {
+    // the read-back's own verdicts (not landed, taken, stuck), each from reads that answered
     if (e instanceof Refused) return e.code === "not_landed" ? { stage: "not_landed", txs: sentTxs } : landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "not_allowed" };
+    // any other fault past U's send (a provider down after its retry): the transaction may land, so the answer is
+    // never failed. What landed is part filled; else "sent" with its signature, and the note, INCOMING, settles at the
+    // next load or run (as pool-sell answers; card pool-read-down)
+    if (landedTxs.length) return { stage: "part_filled", txs: landedTxs };
+    if (sentTxs.length) return { stage: "sent", txs: sentTxs };
+    // a provider read that still fails after the page's own retry, before U signs: "not now" (card pool-read-down)
+    if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
     throw e;
   } finally {
     for (const k of keys) k.fill(0);

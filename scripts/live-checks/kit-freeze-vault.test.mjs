@@ -4,14 +4,15 @@
 // here from the first edit: the swapped context order with vectors that the swapped code made itself, so the two files
 // agree with each other and only the check's own encoders catch them. Last, files that try to escape the sandbox,
 // stop it early or forge its verdict: FAIL, with nothing written; and a file that refuses to load when it sees any
-// variable of this process's: PASS, since the child gets an empty environment.
+// variable of this process's: PASS, since the child gets an empty environment. Pins per ref: the tag kit-v1's files as
+// GitHub serves them (good["kit-v1"]) PASS on kit-v1's own pins, main's on the new ones, and each FAILS on the other's.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, checkFiles, fromLines, keccak256, load, read } from "./kit-freeze-vault.mjs";
+import { check, checkFiles, fromLines, keccak256, load, MOVED_SINCE_KIT_V1, PINNED, pinsFor, R01_CALL, read } from "./kit-freeze-vault.mjs";
 
 process.removeAllListeners("warning"); // stripTypeScriptTypes is marked experimental
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -95,6 +96,25 @@ test("bad answer, the swapped order with vectors the swapped code made itself: F
   const r = await checkFiles({ ...files, vectors: JSON.stringify(V) });
   assert.equal(r.ok, false);
   assert.match(r.lines[3], /^BAD .*context 1 does not recompute/);
+});
+
+test("pins per ref: kit-v1 PASSES on its own frozen values and main on the new ones; each read against the other's pins FAILS", async () => {
+  const TAG = fromLines(A.good)["kit-v1"];
+  const r = await check({ refs: ["main", "kit-v1"], files: { main: GOOD, "kit-v1": TAG } });
+  assert.equal(r.ok, true, r.lines.filter((l) => / BAD /.test(l)).join("\n"));
+  // main's files held to kit-v1's pins: on_payout's two results and P = 0 written are gone (A-01, R-01)
+  const mainAsTag = await checkFiles(GOOD, "kit-v1");
+  assert.equal(mainAsTag.ok, false);
+  assert.ok(mainAsTag.lines.some((l) => /^BAD .*differ: VAULT_ON_PAYOUT/.test(l)), mainAsTag.lines.join("\n"));
+  assert.ok(mainAsTag.lines.some((l) => /^BAD .*vaultDepositMessage writes 0, as kit-v1 froze it/.test(l)), mainAsTag.lines.join("\n"));
+  // kit-v1's files held to main's pins
+  const tagAsMain = await checkFiles(TAG, "main");
+  assert.equal(tagAsMain.ok, false);
+  assert.ok(tagAsMain.lines.some((l) => /^BAD .*differ: VAULT_ON_PAYOUT/.test(l)), tagAsMain.lines.join("\n"));
+  assert.ok(tagAsMain.lines.some((l) => new RegExp(`^BAD .*${R01_CALL.replace(/[()]/g, "\\$&")}`).test(l)), tagAsMain.lines.join("\n"));
+  // every moved pin names its review item, and kit-v1's pins differ from main's only there
+  for (const m of Object.values(MOVED_SINCE_KIT_V1)) assert.match(m.review, /^[A-Z]-\d\d$/);
+  assert.deepEqual(Object.keys(pinsFor("kit-v1")).filter((k) => JSON.stringify(pinsFor("kit-v1")[k]) !== JSON.stringify(PINNED[k])), Object.keys(MOVED_SINCE_KIT_V1));
 });
 
 test("main good but the tag bad: FAIL; a shapes.ts with a static import: FAIL", async () => {

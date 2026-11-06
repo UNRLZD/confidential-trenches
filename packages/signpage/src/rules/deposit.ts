@@ -30,7 +30,7 @@ import {
   type OneClickRequest,
 } from "../../../kit/src/checks/oneclick.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
-import { VAULT_CONSTANTS, VAULT_DEPOSIT_CARRIER, VAULT_TOKEN_CODE_HASH } from "../../../kit/src/vault/shapes.ts";
+import { VAULT_CONSTANTS, VAULT_DEPOSIT_CARRIER, VAULT_TOKEN_CODE_HASH, vaultDepositMessage } from "../../../kit/src/vault/shapes.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../../wallet/src/deposit/account.ts";
 import { RELEASE_BIND_URL } from "../../../wallet/src/deposit/delegate.ts";
 import { backupFirst } from "../../../wallet/src/store/index.ts";
@@ -226,8 +226,15 @@ export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext):
   const m = msg as Record<string, unknown>;
   if (m.depositor !== signer.id) refuse("msg.depositor");
   if (m.precommitment !== note.precommitment.toString()) refuse("msg.precommitment");
-  // One spelling only: no space, no repeated key, no other order, so every JSON reader sees the same call.
-  const canonicalMsg = JSON.stringify({ precommitment: note.precommitment.toString(), depositor: signer.id });
+  // One spelling only: no space, no repeated key, no other order, so every JSON reader sees the same call. It is the
+  // kit's own message, which refuses a precommitment outside 1..p-1 as the vault does (0 included: no note on it could
+  // ever be spent, vault review R-01).
+  let canonicalMsg = "";
+  try {
+    canonicalMsg = vaultDepositMessage(note.precommitment, signer.id);
+  } catch {
+    refuse("msg.precommitment");
+  }
   if (d.args !== JSON.stringify({ receiver_id: vault, amount: note.amount.toString(), msg: canonicalMsg })) refuse("args");
 
   // The amount: this note's, at least MIN_DEPOSIT, at most the beta cap (the kit's one constant: the device never signs
