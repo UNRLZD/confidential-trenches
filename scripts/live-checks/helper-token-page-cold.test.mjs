@@ -92,3 +92,12 @@ test("read() draws distinct mints off the helper's lists, reads them in pairs, a
   assert.equal(asked.filter((u) => u.endsWith("/v1/health")).length, 12, "two round trips before each page read");
   assert.ok(run.reads.every((x) => Number.isSafeInteger(x.rttMs)));
 });
+
+test("card helper-page-jup-429: planted on the good answer: a 503 with no cause in Server-Timing is a bare 503: FAIL; one naming its cause is not bare", () => {
+  const run = structuredClone(A.good);
+  run.reads[3] = { ...run.reads[3], status: 503, timing: null };
+  const r = judge(run);
+  assert.ok(bad(r).some((l) => l === "BAD 1 page reads answered 503 with no cause in Server-Timing (a bare 503)"), r.lines.join("\n"));
+  run.reads[3] = { ...run.reads[3], status: 503, timing: 'search-429;desc="jupiter provider 429"' };
+  assert.ok(!judge(run).lines.some((l) => /a bare 503/.test(l)), "a named cause is not bare");
+});

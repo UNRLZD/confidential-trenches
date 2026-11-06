@@ -62,6 +62,8 @@ import {
 
 const KEY = "solana-jupiter-build";
 export const BASE = "https://api.confidential.unrealized.trade";
+/** A 503's cause entry in the helper's Server-Timing (apps/helper/src/proxy/proxy.ts Cause). */
+export const CAUSE = /(^|,\s*)cause;desc="(429|held|budget|5xx|timeout|send|key|answer)"/;
 export const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 export const BUY_LAMPORTS = 10_000_000n; // 0.01 SOL
 export const SLIPPAGE_BPS = 1000;
@@ -225,6 +227,10 @@ export async function judge(r) {
     if (!want || s.name !== want.name) { say(false, `${at} not a shape of this check`); continue; }
     if (want.token === "noRoute" && none) continue;
     if (s.skipped) { say(false, `${at} not asked: ${s.skipped}`); continue; }
+    // card helper-page-jup-429: a 503 the helper answers names its cause (429, held, budget, 5xx, timeout, send, key,
+    // answer) in Server-Timing; a bare one (live run 42143211092 at 01:21Z) is its own failure
+    const bare = [...(s.calls ?? []), ...(s.market ?? [])].filter((c) => c.status === 503 && !CAUSE.test(c.timing ?? ""));
+    if (bare.length > 0) say(false, `${at} ${bare.length} helper 503 with no cause in Server-Timing (a bare 503)`);
     const token = r.mints?.[want.token];
     const req = { side: want.side, wallet: r.wallet, token, amount: BigInt(r.amounts?.[want.token]?.[want.side] || "0"), slippageBps: SLIPPAGE_BPS };
     let found;
@@ -234,7 +240,8 @@ export async function judge(r) {
       const last = (s.calls ?? []).at(-1);
       // the market asks the check made itself: a route there that fits is one the search should have built
       const m = want.token === "noRoute" ? await marketFit(r, req, s.market) : null;
-      say(false, `${at} ${e instanceof SolanaBuildError ? e.message : `replay: ${e.message}`}${last ? ` (HTTP ${last.status} ${String(last.body).slice(0, 80)})` : ""}${m ? `; ${m}: the retry path is broken` : ""}`);
+      const why = `${last?.timing ? `; Server-Timing ${String(last.timing).slice(0, 200)}` : ""}${last?.retryAfter ? `; Retry-After ${String(last.retryAfter).slice(0, 8)}` : ""}`;
+      say(false, `${at} ${e instanceof SolanaBuildError ? e.message : `replay: ${e.message}`}${last ? ` (HTTP ${last.status} ${String(last.body).slice(0, 80)}${why})` : ""}${m ? `; ${m}: the retry path is broken` : ""}`);
       continue;
     }
     if (s.calls.length !== found.calls.length) { say(false, `${at} ${s.calls.length} recorded calls, the kit made ${found.calls.length}`); continue; }
@@ -316,7 +323,9 @@ export async function read({ base = BASE, token, noRouteToken, sleep = (ms) => n
       calls.push({ url, status: 0, body: "", ms: 0, sentAt: last - t0, error: String(e?.message ?? e).slice(0, 120) });
       throw e;
     }
-    calls.push({ url: c.url, status: c.status, body: c.body, ms: c.ms, sentAt: c.sentAt });
+    // card helper-page-jup-429: a non-200's Server-Timing (its cause, proxy.ts Cause) and Retry-After, so a red run is read
+    const said = c.status === 200 ? {} : { timing: c.res.headers.get("server-timing"), retryAfter: c.res.headers.get("retry-after") };
+    calls.push({ url: c.url, status: c.status, body: c.body, ms: c.ms, sentAt: c.sentAt, ...said });
     return new Response(c.body, { status: c.status, headers: { "content-type": c.res.headers.get("content-type") ?? "" } });
   };
   // the device's reads: the blockhash first, both mints and every table any build names as each build needs them

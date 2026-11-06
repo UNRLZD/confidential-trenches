@@ -46,6 +46,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-host-health.mjs",
   "scripts/live-checks/helper-launchpad-origin.mjs",
   "scripts/live-checks/helper-live-bars-no-503.mjs",
+  "scripts/live-checks/helper-page-jup-429.mjs",
   "scripts/live-checks/helper-pool-senders.mjs",
   "scripts/live-checks/helper-proxy.mjs",
   "scripts/live-checks/helper-robinhood-capacity.mjs",

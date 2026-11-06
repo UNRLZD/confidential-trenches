@@ -137,6 +137,9 @@ export function judge(run) {
   // search-429, search-upstream, rpc), printed with the FAIL so no one needs the helper's log
   const kinds = [...new Set(failed.map((r) => `${r.status}${r.retryAfter ? ` Retry-After ${r.retryAfter}` : ""}${r.timing ? ` Server-Timing ${r.timing}` : ""}${r.error ? ` ${r.error}` : ""}`))];
   say(failed.length === 0, `${reads.length - failed.length} of ${reads.length} page reads answered 200${failed.length ? `; ${failed.length} did not: ${kinds.join(", ")}` : ""}`);
+  // card helper-page-jup-429: a not-ready page with no cause in Server-Timing is a bare 503, its own failure
+  const bare = failed.filter((r) => r.status === 503 && !/(^|,\s*)(search-[a-z0-9]+|rpc)(;|,|$)/.test(r.timing ?? ""));
+  if (bare.length > 0) say(false, `${bare.length} page reads answered 503 with no cause in Server-Timing (a bare 503)`);
   const ok = reads.filter((r) => r.status === 200 && Number.isSafeInteger(r.rttMs));
   const c = ok.filter(cold);
   const warm = ok.filter((r) => !cold(r));

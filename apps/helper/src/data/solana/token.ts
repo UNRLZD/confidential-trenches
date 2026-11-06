@@ -304,7 +304,7 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 // ---------------------------------------------------------------------------------------------------------------
 
 type Answer = { status: number; headers: Record<string, string>; body: string; timing?: string[]; why?: string };
-type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number): Promise<Answer> };
+type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number, caller?: boolean): Promise<Answer> };
 type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string; why?: string; timing?: string[] }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
@@ -574,9 +574,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     let proxyWhy: string | undefined;
     try {
       // proxy.ts PROXY_RESERVE; a hold of Jupiter's is waited out within SEARCH_HOLD_WAIT_MS (proxy.ts turn)
-      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS);
+      // card helper-page-jup-429: a search a caller waits for goes ahead of background reads for Jupiter's turn; one
+      // of held pages' refreshes only is a background read
+      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS, batch.some((m) => waiting.get(m)?.cold === true));
       parts = (a.timing ?? []).map((e) => `jup-${e}`);
-      if (a.status !== 200) (failed = a.why ?? `jupiter ${a.status}`), (proxyWhy = a.why);
+      if (a.status !== 200) (failed = a.why ?? `jupiter ${a.status}`), (proxyWhy = failed);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
