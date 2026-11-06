@@ -18,7 +18,7 @@
 // (POST /v1/bind with a delegate on mainnet USDC that decodes and is refused before any read: token_not_accepted means
 // not carried), and it needs the mainnet gas account pinned below. Short of any of the three it stops (exit 2), so it
 // joins scripts/ci/helper-live-checks.mjs only once mainnet deposits are carried (card vault-mainnet-deploy).
-// The creation itself lands with the first real mainnet deposit, and its record goes in helper-create-u.md.
+// The creation itself is proven by a real mainnet deposit, and its record goes in helper-create-u.md.
 //   node scripts/live-checks/helper-create-u.mjs [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
