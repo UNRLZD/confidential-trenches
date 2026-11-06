@@ -576,7 +576,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       // proxy.ts PROXY_RESERVE; a hold of Jupiter's is waited out within SEARCH_HOLD_WAIT_MS (proxy.ts turn)
       const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true, SEARCH_HOLD_WAIT_MS);
       parts = (a.timing ?? []).map((e) => `jup-${e}`);
-      if (a.status !== 200) (failed = a.why ?? `jupiter ${a.status}`), (proxyWhy = a.why);
+      if (a.status !== 200) (failed = a.why ?? `jupiter ${a.status}`), (proxyWhy = failed);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");

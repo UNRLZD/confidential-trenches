@@ -123,11 +123,32 @@ export type Peers = { read(): unknown; write(calls: Record<string, number[]>): v
 type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void>; peers?: Peers };
 
 const error = (status: number, code: string): ProxyAnswer => ({ status, headers: {}, body: JSON.stringify({ error: { code } }) });
-const UPSTREAM = () => error(503, "upstream");
+/**
+ * What a 503 upstream answered for (card helper-page-jup-429), its Server-Timing entry `cause;desc="<cause>"`, so a red
+ * live run reads its cause off the answer (live run 42143211092: a Jupiter build's bare 503 named none):
+ * - 429: the vendor answered this call 429 and its reset, or a third 429, came past the call's wait;
+ * - held: an earlier call's 429 holds the vendor past this call's wait;
+ * - budget: the vendor's total (our count of its plan) has no room by the call's wait;
+ * - 5xx: the vendor failed, and again on the retry;
+ * - timeout: the vendor sent nothing within TIMEOUT_MS;
+ * - send: the call never reached the vendor (a network failure), and again on the retry;
+ * - key: the vendor refused our key (401, 403);
+ * - answer: an answer we cannot pass as JSON data (a redirect, another type, past ANSWER_MAX, holding a key).
+ */
+export type Cause = "429" | "held" | "budget" | "5xx" | "timeout" | "send" | "key" | "answer";
+/** Sends one call makes when the vendor answers 429, each after the reset it names and only while that ends inside the
+ *  call's wait [design: the industry's bounded retry; three, as Jupiter's resets read 1 and 4 s (live run 41943005189) and a
+ *  build's wait is QUEUE_WAIT_MS]. */
+export const SENDS_429 = 3;
+/** The wait before the one retry of a GET the vendor failed (5xx) or that never reached it [design: a quarter second,
+ *  the industry's first backoff step; a GET is a read, so its retry is safe; a POST is never sent twice]. */
+export const RETRY_FAILED_MS = 250;
+/** The 503 upstream with its cause, the call's own waits before it (`timing`) and, for the refusal log, `why`. */
+const UPSTREAM = (cause: Cause, why?: string, timing: string[] = []): ProxyAnswer => ({ ...error(503, "upstream"), timing: [...timing, `cause;desc="${cause}"`], ...(why === undefined ? {} : { why }) });
 /** The not-ready form (503 upstream, the device's fallback, H2.3) for a vendor's hold or room: `why` names it for the
  *  refusal log, never sent. `retryAfterS`: the seconds until the vendor's total has the room (card solana-legs-share-wait),
  *  so a device waits it out and asks again; a hold whose end is not known names none. */
-const notReady = (why: string, retryAfterS?: number): ProxyAnswer => ({ ...UPSTREAM(), ...(retryAfterS ? { headers: { "Retry-After": String(retryAfterS) } } : {}), why });
+const notReady = (cause: Cause, why: string, retryAfterS?: number, timing: string[] = []): ProxyAnswer => ({ ...UPSTREAM(cause, why, timing), ...(retryAfterS ? { headers: { "Retry-After": String(retryAfterS) } } : {}) });
 
 /** The keys this host holds, from its environment. A key of the wrong shape stops the start; the message names the variable, never the value. */
 export function readKeys(env: Record<string, string | undefined>): Partial<Record<VendorName, string>> {
@@ -274,18 +295,26 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   async function call(name: VendorName, v: Vendor, up: Upstream, path: string, query: string, body: string, reserved: boolean, by: number): Promise<Read | ProxyAnswer> {
     // the seconds to the vendor's reset, for the not-ready answer's Retry-After
     const heldS = (): number => Math.max(1, Math.ceil((budget.heldUntil(name) - now()) / 1000));
-    // the call's own waits, for its Server-Timing (ProxyAnswer.timing)
+    // the call's own waits, for its Server-Timing (ProxyAnswer.timing), on a 200 and on a 503 alike
     let turnMs = 0;
     let refusals = 0;
+    let failures = 0;
+    const waits = (): string[] => [`turn;dur=${Math.round(turnMs)}`, ...(refusals > 0 ? [`429;desc="${refusals}"`] : []), ...(failures > 0 ? [`retry;desc="${failures}"`] : [])];
+    // card helper-page-jup-429: a GET the vendor failed or never got is read once more after RETRY_FAILED_MS, while that
+    // is inside the call's wait; else the 503 names the cause
+    const again = (): boolean => up.method === "GET" && failures === 0 && now() + RETRY_FAILED_MS <= by && (failures++, true);
     for (let attempt = 0; ; attempt++) {
       // the vendor's reset holds every call to it: waited out when it ends by `by`, else not ready (never our 429)
       const t0 = performance.now();
       const turned = await turn(name, by);
       turnMs += performance.now() - t0;
-      if (!turned) return notReady(`${name} held`, heldS());
+      if (!turned) return notReady(refusals > 0 ? "429" : "held", `${name} held`, heldS(), waits());
       if (attempt > 0) {
         // the retry reaches the vendor again, so it draws from the total too
-        if (drawUp(name, undefined, reserved) > 0) return notReady(budget.refusedBy());
+        if (drawUp(name, undefined, reserved) > 0) {
+          const why = budget.refusedBy();
+          return notReady(why.endsWith(" held") ? (refusals > 0 ? "429" : "held") : "budget", why, undefined, waits());
+        }
       }
       const headers: Record<string, string> = { accept: "application/json" };
       const key = keys[name];
@@ -306,27 +335,41 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
           await r.body?.cancel();
           refusals++;
           // the vendor is held until its reset, for every caller; this call reads again once it ends, if that is by
-          // `by` (turn), once: a second 429 is not ready
+          // `by` (turn), up to SENDS_429 sends in all (card helper-page-jup-429: one retry left a second 429 a 503)
           const wait = Math.max(resetMs(r.headers, now()), 0);
           budget.hold(name, now() + (wait <= WAIT_MAX_MS ? wait : upstreamRetryAfterS(r.headers, now()) * 1000));
-          if (attempt === 0) continue;
-          return notReady(`${name} provider 429`, heldS());
+          if (refusals < SENDS_429) continue;
+          return notReady("429", `${name} provider 429`, heldS(), waits());
+        }
+        if (r.status >= 500 && r.status < 600) {
+          await r.body?.cancel();
+          if (again()) {
+            await sleep(RETRY_FAILED_MS);
+            continue;
+          }
+          return UPSTREAM("5xx", `${name} 5xx`, waits());
         }
         text = await readBody(r);
-      } catch {
-        return UPSTREAM();
+      } catch (e) {
+        const timeout = (e as Error | null)?.name === "TimeoutError";
+        if (!timeout && again()) {
+          await sleep(RETRY_FAILED_MS);
+          continue;
+        }
+        return UPSTREAM(timeout ? "timeout" : "send", `${name} ${timeout ? "timeout" : "send"}`, waits());
       }
       const fetchedAt = new Date(now()).toISOString();
-      // our key refused (401, 403), the vendor failing (5xx), or an answer we cannot pass as JSON data
-      if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400)) return UPSTREAM();
-      if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return UPSTREAM();
+      // our key refused (401, 403), or an answer we cannot pass as JSON data
+      if (r.status === 401 || r.status === 403) return UPSTREAM("key", `${name} key`, waits());
+      if (r.status < 200 || (r.status >= 300 && r.status < 400)) return UPSTREAM("answer", `${name} answer`, waits());
+      if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return UPSTREAM("answer", `${name} answer`, waits());
       try {
         JSON.parse(text);
       } catch {
-        return UPSTREAM();
+        return UPSTREAM("answer", `${name} answer`, waits());
       }
-      if (holdsKey(text)) return UPSTREAM();
-      const timing = [`turn;dur=${Math.round(turnMs)}`, ...(refusals > 0 ? [`429;desc="${refusals}"`] : []), `send;dur=${Math.round(performance.now() - sentAt)}`];
+      if (holdsKey(text)) return UPSTREAM("answer", `${name} answer`, waits());
+      const timing = [...waits(), `send;dur=${Math.round(performance.now() - sentAt)}`];
       return { status: r.status, body: text, fetchedAt, timing };
     }
   }
@@ -374,8 +417,10 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     // both with the seconds until the draw would go (Retry-After)
     const refused = (wait: number): ProxyAnswer => {
       const why = budget.refusedBy();
-      return why.endsWith(" share") ? throttled(wait, undefined, why) : notReady(why, wait);
+      return why.endsWith(" share") ? throttled(wait, undefined, why) : notReady(why.endsWith(" held") ? "held" : "budget", why, wait, [`budget;dur=${Math.round(performance.now() - b0)}`]);
     };
+    // when the draw began, for the budget's wait in Server-Timing
+    const b0 = performance.now();
     const params = new URLSearchParams(rawQuery);
     if (up.cacheMs) params.sort();
     const qs = params.size ? `?${params}` : "";
@@ -395,7 +440,6 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         out = hit;
       } else {
         let p = inflight.get(id);
-        const b0 = performance.now();
         const first = draw(p !== undefined);
         const wait = typeof first === "number" ? first : await first;
         budgetMs = performance.now() - b0;
@@ -417,7 +461,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       if (wait > 0) return source(refused(wait));
       out = await call(name, v, up, path, qs, up.method === "POST" ? body : "", reserved, by);
     }
-    if (!("fetchedAt" in out)) return source(out);
+    if (!("fetchedAt" in out)) return source(out.timing ? { ...out, timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : out);
     return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body, ...(out.timing ? { timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : {}) });
   }
 

@@ -479,11 +479,12 @@ test("cache: concurrent misses make one vendor call; a failed read is not cached
   assert.equal(f.seen.length, 1);
   assert.ok(answers.every((a) => a.status === 200 && a.body === '["list"]'));
 
-  const g = vendor((_, n) => (n === 1 ? json({}, 500) : json(["ok"])));
+  // card helper-page-jup-429: a GET the vendor fails is read once more, so a read that failed is its two sends
+  const g = vendor((_, n) => (n <= 2 ? json({}, 500) : json(["ok"])));
   const q = createProxy(ENV, { fetch: g.fetch });
   assert.equal((await q.handle("oneclick", "/v0/tokens", "", "")).status, 503);
   assert.equal((await q.handle("oneclick", "/v0/tokens", "", "")).status, 200);
-  assert.equal(g.seen.length, 2);
+  assert.equal(g.seen.length, 3);
 });
 
 test("card helper-crowd-429 fold 6: identical GETs in flight share one vendor call (a build's GET too); a different query is its own", async () => {
@@ -520,4 +521,67 @@ test("a caller inside its share meets a vendor's total with no room: 503 upstrea
   // at that time the total has its room again
   c.add(wait * 1000);
   assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=d2", "", "d")).status, 200, "asked again after Retry-After, it goes");
+});
+
+// card helper-page-jup-429: every Jupiter route (the swap build the device asks for, the page's search) waits out a
+// Jupiter 429 inside its wait, Retry-After honoured, up to SENDS_429 sends (at c1525df5 one retry, so a second 429 was a
+// bare 503: live run 42143211092, solana-jupiter-build "upstream: HTTP 503" at 01:21Z); every 503 names its cause in
+// `timing`, which server.ts sends as Server-Timing
+const causeIn = (a: { timing?: string[] }): string | undefined => a.timing?.find((e) => e.startsWith("cause;"))?.match(/desc="([^"]+)"/)?.[1];
+test("card helper-page-jup-429: a Jupiter 429, then a 429, then a 200 is the build's 200, each reset waited out inside its wait", async () => {
+  for (const [path, query, waitMs] of [["/swap/v2/build", "inputMint=a&outputMint=b&amount=1", undefined], ["/tokens/v2/search", "query=a", 5_000]] as const) {
+    const c = clock();
+    const f = vendor((_, n) => (n <= 2 ? json({ e: "slow" }, 429, { "retry-after": "1" }) : json({ ok: n })));
+    const p = createProxy(ENV, { fetch: f.fetch, now: c.now, sleep: c.sleep });
+    const t0 = c.now();
+    const a = await p.handle("jupiter", path, query, "", waitMs === undefined ? "device" : undefined, waitMs !== undefined, waitMs);
+    assert.deepEqual([a.status, a.body], [200, '{"ok":3}'], path);
+    assert.ok(c.now() - t0 >= 2_000 && c.now() - t0 <= 3_000, `${path}: the two resets waited out (${c.now() - t0} ms)`);
+    assert.ok(a.timing?.includes('429;desc="2"'), `${path}: the 429s named in its timing: ${a.timing}`);
+  }
+});
+test("card helper-page-jup-429: a reset past the call's wait is a 503 with Retry-After and cause 429, never a bare 503", async () => {
+  const c = clock();
+  const f = vendor(() => json({ e: "slow" }, 429, { "retry-after": "4" }));
+  const p = createProxy(ENV, { fetch: f.fetch, now: c.now, sleep: c.sleep });
+  const a = await p.handle("jupiter", "/swap/v2/build", "inputMint=a", "", "device");
+  assert.deepEqual([a.status, a.headers["Retry-After"], causeIn(a)], [503, "4", "429"]);
+  const b = await p.handle("jupiter", "/swap/v2/build", "inputMint=b", "", "device2");
+  assert.deepEqual([b.status, causeIn(b)], [503, "held"], "another call inside the hold names the hold");
+  const g = vendor(() => json({ e: "slow" }, 429, { "retry-after": "1" }));
+  const k = clock();
+  const q = createProxy(ENV, { fetch: g.fetch, now: k.now, sleep: k.sleep });
+  const d = await q.handle("jupiter", "/swap/v2/build", "inputMint=c", "", "device", false, 10_000);
+  assert.deepEqual([d.status, causeIn(d), g.seen.length], [503, "429", 3], "a 429 on every send stops at SENDS_429 sends");
+});
+test("card helper-page-jup-429: a GET the vendor fails (5xx) or never gets is read once more; a second failure, a timeout, our key refused or a bad answer each name their cause", async () => {
+  const c = clock();
+  const once = vendor((_, n) => (n === 1 ? json({ e: 1 }, 502) : json({ ok: n })));
+  const a = await createProxy(ENV, { fetch: once.fetch, now: c.now, sleep: c.sleep }).handle("jupiter", "/swap/v2/build", "x=1", "", "device");
+  assert.deepEqual([a.status, a.body, once.seen.length], [200, '{"ok":2}', 2], "a 5xx then a 200 is the 200");
+  const cases: [string, () => Response | Promise<Response>, string][] = [
+    ["5xx twice", () => json({ e: 1 }, 500), "5xx"],
+    ["no answer twice", () => Promise.reject(new TypeError("fetch failed")), "send"],
+    ["timeout", () => Promise.reject(Object.assign(new Error("timed out"), { name: "TimeoutError" })), "timeout"],
+    ["401", () => json({ e: 1 }, 401), "key"],
+    ["html", () => new Response("<html>", { headers: { "content-type": "text/html" } }), "answer"],
+  ];
+  for (const [name, answer, cause] of cases) {
+    const k = clock();
+    const r = await createProxy(ENV, { fetch: vendor(answer).fetch, now: k.now, sleep: k.sleep }).handle("jupiter", "/swap/v2/build", "x=1", "", "device");
+    assert.deepEqual([r.status, JSON.parse(r.body), causeIn(r)], [503, { error: { code: "upstream" } }, cause], name);
+  }
+  const post = vendor(() => json({ e: 1 }, 500));
+  const pk = clock();
+  const r = await createProxy(ENV, { fetch: post.fetch, now: pk.now, sleep: pk.sleep }).handle("relay", "/quote/v2", "", "{}", "device");
+  assert.deepEqual([r.status, causeIn(r), post.seen.length], [503, "5xx", 1], "a POST is never sent twice");
+});
+test("card helper-page-jup-429: a draw the vendor's total refuses past the wait names budget", async () => {
+  const c = clock();
+  const f = vendor(() => json({ ok: 1 }));
+  const p = createProxy({ PROXY_BUDGET_RELAY: "2,1" }, { fetch: f.fetch, now: c.now, sleep: c.sleep });
+  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "a")).status, 200);
+  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "c")).status, 200);
+  const b = await p.handle("relay", "/quote/v2", "", "{}", "b");
+  assert.deepEqual([b.status, causeIn(b)], [503, "budget"]);
 });

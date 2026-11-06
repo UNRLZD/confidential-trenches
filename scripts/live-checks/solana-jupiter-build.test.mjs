@@ -154,7 +154,16 @@ test("made from the good run: a shape the helper answered 503 upstream: FAIL", a
   g.shapes[2].calls[0] = { ...g.shapes[2].calls[0], status: 503, body: '{"error":{"code":"upstream"}}' };
   const r = await judge(g);
   assert.equal(r.ok, false);
-  assert.deepEqual(bad(r), ['BAD S-2 sell, a listed token: upstream: HTTP 503 (HTTP 503 {"error":{"code":"upstream"}})']);
+  // card helper-page-jup-429: with no cause in Server-Timing it is a bare 503 too (live run 42143211092 at 01:21Z)
+  assert.deepEqual(bad(r), ["BAD S-2 sell, a listed token: 1 helper 503 with no cause in Server-Timing (a bare 503)", 'BAD S-2 sell, a listed token: upstream: HTTP 503 (HTTP 503 {"error":{"code":"upstream"}})']);
+});
+
+test("card helper-page-jup-429: made from the good run: a shape the helper answered 503 naming its cause: FAIL on the build alone, the cause and Retry-After printed", async () => {
+  const g = copy(A.good);
+  g.shapes[2].calls[0] = { ...g.shapes[2].calls[0], status: 503, body: '{"error":{"code":"upstream"}}', timing: 'budget;dur=0, turn;dur=2990, 429;desc="1", cause;desc="429"', retryAfter: "4" };
+  const r = await judge(g);
+  assert.equal(r.ok, false);
+  assert.deepEqual(bad(r), ['BAD S-2 sell, a listed token: upstream: HTTP 503 (HTTP 503 {"error":{"code":"upstream"}}; Server-Timing budget;dur=0, turn;dur=2990, 429;desc="1", cause;desc="429"; Retry-After 4)']);
 });
 
 test("made from the good run: a call the helper never answered (kept as status 0): FAIL", async () => {

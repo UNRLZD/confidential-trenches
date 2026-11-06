@@ -1,0 +1,30 @@
+{
+ "_about": "helper-page-jup-429.mjs --record. good: this branch's proxy (apps/helper/src/proxy/proxy.ts with server.ts handler) on the Mac at 2026-11-06 02:08Z, reading Jupiter itself with no key. bad_deployed: the deployed helper at c1525df5, read the same minute: a 200 with no Server-Timing. bad_bare_503: the answer live run 42143211092 recorded at 01:21Z for the no-route buy (HTTP 503 upstream, no header naming a cause), as this check reads it; readAt is the job's start and its time was not kept.",
+ "good": {
+  "base": "http://127.0.0.1:8789",
+  "readAt": "2026-11-06T02:08:39.474Z",
+  "ms": 259,
+  "status": 200,
+  "timing": "budget;dur=0, turn;dur=0, send;dur=237",
+  "retryAfter": null,
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\""
+ },
+ "bad_deployed": {
+  "base": "https://api.confidential.unrealized.trade",
+  "readAt": "2026-11-06T02:08:14.359Z",
+  "ms": 800,
+  "status": 200,
+  "timing": null,
+  "retryAfter": null,
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\""
+ },
+ "bad_bare_503": {
+  "base": "https://api.confidential.unrealized.trade",
+  "readAt": "2026-11-06T01:21:06Z",
+  "ms": null,
+  "status": 503,
+  "timing": null,
+  "retryAfter": null,
+  "body": "{\"error\":{\"code\":\"upstream\"}}"
+ }
+}

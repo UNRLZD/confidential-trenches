@@ -436,3 +436,23 @@ test("card helper-ready-page-warm: a not-ready page tells its caller why in the 
   await run(t, 1_000);
   assert.deepEqual((await r).slice(0, 2), [503, 'rpc;desc="solana held"'], "the mint's RPC read");
 });
+
+// card helper-page-jup-429: a cold page's search that Jupiter answers 429, 429, then 200 (resets of 1 s, inside the
+// search's SEARCH_HOLD_WAIT_MS) is the page's 200; at c1525df5 the proxy retried once, so the second 429 was a 503
+test("card helper-page-jup-429: a cold page's search met by a Jupiter 429, a 429 and a 200 answers the page 200", async (t) => {
+  clock(t);
+  let n = 0;
+  const proxy = createProxy({}, {
+    now: () => Date.now(),
+    fetch: (async (url: string) => {
+      n++;
+      if (n <= 2) return new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": "1" } });
+      const mints = new URL(url).searchParams.get("query")!.split(",");
+      return new Response(JSON.stringify(mints.map(rowOf)), { headers: { "content-type": "application/json" } });
+    }) as never,
+  });
+  const a = ask(T.createSolanaToken(proxy, rpc, { now: () => Date.now() }), mint(3200));
+  for (let ms = 0; a.done === null && ms < 20_000; ms += 50) await run(t, 50);
+  assert.equal(a.done?.status, 200, `the page after two resets: ${a.done?.status}`);
+  assert.equal(n, 3, "three sends: two 429s and the read");
+});
