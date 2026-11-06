@@ -88,6 +88,15 @@
           6003
         ]
       ]
+    },
+    "FeeCollector": {
+      "length": 246,
+      "masked": "0x90e7c18b6dda8093b3e42c19975a8511923537b3b61033bc0465ad46a8eb4d8b",
+      "immutables": [
+        [
+          64
+        ]
+      ]
     }
   },
   "frozen": {

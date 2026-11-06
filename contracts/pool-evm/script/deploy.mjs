@@ -6,7 +6,7 @@
 // only on a mainnet run, to its 0700 key folder until swept.
 //
 //   node contracts/pool-evm/script/deploy.mjs --chain <base-sepolia|robinhood-testnet> --return <address>
-//     [--only SellDelegate] [--rpc <url>] [--out <file>] [--no-build]
+//     [--only SellDelegate|FeeCollector] [--rpc <url>] [--out <file>] [--no-build]
 //   node contracts/pool-evm/script/deploy.mjs --write-build      rewrites scripts/live-checks/pool-evm-deploy.build.json
 //     from forge's output (out/), after a forge build; its `frozen` map (code already deployed from an older build,
 //     pinned to the addresses that hold it) is kept as it is
@@ -15,6 +15,10 @@
 // PoolManager, with every step below the same (a fresh run key at nonce 0, so the delegate is CREATE(key, 0)); its
 // record goes to scripts/live-checks/evm-selldelegate-exact-debit.<chain>.json (or --out), and its live check is
 // evm-selldelegate-exact-debit.mjs (card evm-selldelegate-exact-debit's redeploy; evm-sell-v4's records keep theirs).
+// --only FeeCollector (card evm-fee-collector) deploys the fee collector alone, beside the chain's set (the testnets'
+// 3 Nov sets predate it), constructed with its sink: the sell sender the kit pins for the chain (evmPoolVenues()
+// sellSender), refused when the kit pins none; its record (evm-fee-collector.<chain>.json, or --out) names the sink
+// beside the address, and its live check is evm-fee-collector.mjs.
 //
 //   node contracts/pool-evm/script/deploy.mjs --mainnet --chain <base|robinhood> --return <address> [--rpc <loopback> --out <file>]
 //   node contracts/pool-evm/script/deploy.mjs --mainnet --chain <base|robinhood> --sweep-kept <journal> [--return <address>]
@@ -99,16 +103,28 @@ const { secp256k1 } = await import(pathToFileURL(req.resolve("@noble/curves/secp
 // The contracts in deploy order, each with its constructor's arguments on a chain (the pool's is the verifier's
 // address the run computes).
 export const ORDER = ["WithdrawalVerifier", "PrivacyPoolSimple", "UniswapV4Adapter", "UniswapV3Adapter", "SellDelegate"];
-const argsOf = (name, chain, addrs) => ({
+const argsOf = (name, chain, addrs, sink) => ({
   WithdrawalVerifier: [],
   PrivacyPoolSimple: [addrs.WithdrawalVerifier],
   UniswapV4Adapter: [chain.poolManager.address, chain.weth.address],
   UniswapV3Adapter: [chain.router?.address],
   SellDelegate: [chain.weth.address, chain.poolManager.address],
+  FeeCollector: [sink],
 })[name];
 // The contracts a run may deploy alone (--only): the sell delegate, whose constructor needs no other contract of the run
 // (card evm-selldelegate-exact-debit; evm-sell-v4's records stay under their own key)
-export const ALONE = Object.freeze({ SellDelegate: { key: "evm-selldelegate-exact-debit" } });
+// The fee collector (card evm-fee-collector) is deployed alone beside the chain's set (`beside`): its constructor takes
+// only the chain's sell sender, and the testnets' sets were deployed before it existed
+export const ALONE = Object.freeze({ SellDelegate: { key: "evm-selldelegate-exact-debit" }, FeeCollector: { key: "evm-fee-collector", beside: true } });
+// Every contract the build file pins: the chain sets' (ORDER), then those deployed only beside them
+export const BUILT = Object.freeze([...ORDER, ...Object.keys(ALONE).filter((n) => !ORDER.includes(n))]);
+/** The fee collector's sink on `chainName`: the sell sender the kit pins there, or a throw (nothing is sent) */
+export async function sinkOf(chainName) {
+  const { evmPoolVenues } = await import(pathToFileURL(path.join(REPO, "packages/kit/src/index.ts")).href);
+  const s = String(evmPoolVenues()[chainName]?.sellSender ?? "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(s) || /^0x0{40}$/.test(s)) throw new Error(`the kit pins no sell sender on ${chainName}, the FeeCollector's sink: nothing was sent`);
+  return s;
+}
 export const onlyFile = (name, chain) => path.join(REPO, "scripts/live-checks", `${ALONE[name].key}.${chain}.json`);
 const GAS_MARGIN = (g) => (g * 12n) / 10n;
 const OP_ORACLE = "0x420000000000000000000000000000000000000f"; // the OP Stack GasPriceOracle predeploy
@@ -145,6 +161,9 @@ export const MAINNET_INIT = Object.freeze({
   UniswapV4Adapter: { length: 4578, keccak: "0xedc0d3a854fc280089da75b2ed4baf8e3495fdb80eed6632ddfe5421ac96b6ef" },
   UniswapV3Adapter: { length: 2269, keccak: "0x1460db6407c61d6d70d3d423a04a46a512f5df9c00978987cd9f38a267db4f05" },
   SellDelegate: { length: 9479, keccak: "0x60ae724bd23ec2c11ee8faf40a6027b43e256e7719efe8d85646ed7079fc3132" },
+  // card evm-fee-collector: read from forge build --root contracts/pool-evm (forge 1.7.1 on the Mac, 2026-11-06), where
+  // the five above read as above; no mainnet set deploys it until each mainnet's sell sender is pinned in the kit
+  FeeCollector: { length: 407, keccak: "0xaf9a87d9faaac0c448dabec1f6ce81371789f00eddce4f0479db5e07da5e2e2d" },
 });
 /** Why `code` is not `name`'s pinned init code, or null when it is */
 export function initProblems(name, code) {
@@ -263,7 +282,7 @@ const addrArg = (a) => word(BigInt(a));
 /** Each contract's runtime as pool-evm-deploy.build.json pins it, from forge's out/ */
 export function buildOf(outDir = path.join(POOL_DIR, "out")) {
   const contracts = {};
-  for (const name of ORDER) {
+  for (const name of BUILT) {
     const a = JSON.parse(readFileSync(path.join(outDir, `${name}.sol`, `${name}.json`), "utf8"));
     const refs = a.deployedBytecode.immutableReferences ?? {};
     const immutables = Object.keys(refs).sort((x, y) => Number(x) - Number(y)).map((id) => {
@@ -382,7 +401,7 @@ async function run(args, io = {}) {
   const kept = mainnet ? opt("--sweep-kept") ?? null : null;
   if (args.includes("--sweep-kept") && !kept) throw new Error("--sweep-kept <journal> goes with --mainnet");
   const only = args.includes("--only") ? opt("--only") : null;
-  if (only !== null && (mainnet || !(Object.hasOwn(ALONE, only) && chain.contracts.includes(only)))) throw new Error(`--only is one of ${Object.keys(ALONE).join(", ")}${mainnet ? ", on a testnet" : ""}`);
+  if (only !== null && (mainnet || !(Object.hasOwn(ALONE, only) && (chain.contracts.includes(only) || ALONE[only].beside)))) throw new Error(`--only is one of ${Object.keys(ALONE).join(", ")}${mainnet ? ", on a testnet" : ""}`);
   const url = opt("--rpc") ?? chain.rpcs[0];
   const dryRun = isLoopback(url);
   if (mainnet && !dryRun && url !== chain.rpcs[0]) throw new Error(`--mainnet runs on ${chain.rpcs[0]} (and reads ${chain.rpcs[1]} too), or on a loopback fork with --out: not ${url}`);
@@ -466,7 +485,7 @@ async function run(args, io = {}) {
   }
 
   const startedAt = new Date().toISOString();
-  let pinned, forgeVersion, sk, deployer, names, addrs, datas, gas, need, keyDir, inits;
+  let pinned, forgeVersion, sk, deployer, names, addrs, datas, gas, need, keyDir, inits, sink;
   let journalKeys = null;
   let keysBase0 = null;
   const big0 = (x) => (x === undefined || x === null ? x : BigInt(x));
@@ -501,8 +520,14 @@ async function run(args, io = {}) {
     }
     pinned = JSON.parse(readFileSync(BUILD_FILE, "utf8")).contracts;
     const built = buildOf();
-    for (const n of ORDER) if (JSON.stringify(built[n]) !== JSON.stringify(pinned[n])) throw new Error(`${n}: forge's build differs from ${path.basename(BUILD_FILE)}`);
+    for (const n of BUILT) if (JSON.stringify(built[n]) !== JSON.stringify(pinned[n])) throw new Error(`${n}: forge's build differs from ${path.basename(BUILD_FILE)}`);
     names = only ? [only] : chain.contracts;
+    // the fee collector's sink before the run key exists: a chain whose sell sender the kit does not pin is refused
+    // with nothing made
+    if (names.includes("FeeCollector")) {
+      sink = await (io.sinkOf ?? sinkOf)(chainName);
+      console.log(`deploy: FeeCollector's sink ${sink}, the sell sender the kit pins on ${chainName}`);
+    }
     // read once: the bytes checked here are the bytes sent
     inits = Object.fromEntries(names.map((n) => [n, initOf(n)]));
     if (mainnet) for (const n of names) {
@@ -560,7 +585,7 @@ async function run(args, io = {}) {
     rest = names.filter((n) => !reused[n]);
     addrs = { ...reused, ...Object.fromEntries(rest.map((n, i) => [n, createAddress(deployer, n0 + BigInt(i))])) };
     if (resume) console.log(`deploy: resuming the stopped run with its key: ${Object.entries(reused).map(([n, a]) => `${n} ${a}`).join(", ") || "nothing"} read back on both RPCs as the build's: reused; ${rest.join(", ") || "nothing"} to deploy from nonce ${n0}`);
-    datas = Object.fromEntries(rest.map((n) => [n, inits[n] + argsOf(n, chain, addrs).map(addrArg).join("")]));
+    datas = Object.fromEntries(rest.map((n) => [n, inits[n] + argsOf(n, chain, addrs, sink).map(addrArg).join("")]));
     nonce0 = n0;
   }
 
@@ -727,7 +752,7 @@ async function run(args, io = {}) {
     const d = {
       chain: chainName, chainId: Number(BigInt(id)), dryRun, at: prev?.at ?? new Date().toISOString(), deployer, return: ret, need: prev?.need ?? need.toString(),
       build: prev?.build ?? `solc 0.8.28 (contracts/pool-evm/foundry.toml), ${forgeVersion}`,
-      contracts: Object.fromEntries(chain.contracts.filter((n) => made.some((s) => s.contract === n)).map((n) => [n, { address: made.find((s) => s.contract === n).address }])),
+      contracts: Object.fromEntries([...chain.contracts, ...BUILT.filter((n) => !chain.contracts.includes(n))].filter((n) => made.some((s) => s.contract === n)).map((n) => [n, { address: made.find((s) => s.contract === n).address, ...(n === "FeeCollector" ? { sink } : {}) }])),
       txs,
     };
     writeAtomic(out, JSON.stringify(d, null, 2) + "\n");
