@@ -522,6 +522,12 @@ async function run(args, io = {}) {
     const built = buildOf();
     for (const n of BUILT) if (JSON.stringify(built[n]) !== JSON.stringify(pinned[n])) throw new Error(`${n}: forge's build differs from ${path.basename(BUILD_FILE)}`);
     names = only ? [only] : chain.contracts;
+    // the fee collector's sink before the run key exists: a chain whose sell sender the kit does not pin is refused
+    // with nothing made
+    if (names.includes("FeeCollector")) {
+      sink = await (io.sinkOf ?? sinkOf)(chainName);
+      console.log(`deploy: FeeCollector's sink ${sink}, the sell sender the kit pins on ${chainName}`);
+    }
     // read once: the bytes checked here are the bytes sent
     inits = Object.fromEntries(names.map((n) => [n, initOf(n)]));
     if (mainnet) for (const n of names) {
@@ -579,10 +585,6 @@ async function run(args, io = {}) {
     rest = names.filter((n) => !reused[n]);
     addrs = { ...reused, ...Object.fromEntries(rest.map((n, i) => [n, createAddress(deployer, n0 + BigInt(i))])) };
     if (resume) console.log(`deploy: resuming the stopped run with its key: ${Object.entries(reused).map(([n, a]) => `${n} ${a}`).join(", ") || "nothing"} read back on both RPCs as the build's: reused; ${rest.join(", ") || "nothing"} to deploy from nonce ${n0}`);
-    if (names.includes("FeeCollector")) {
-      sink = await (io.sinkOf ?? sinkOf)(chainName);
-      console.log(`deploy: FeeCollector's sink ${sink}, the sell sender the kit pins on ${chainName}`);
-    }
     datas = Object.fromEntries(rest.map((n) => [n, inits[n] + argsOf(n, chain, addrs, sink).map(addrArg).join("")]));
     nonce0 = n0;
   }

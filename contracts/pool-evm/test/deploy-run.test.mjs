@@ -341,6 +341,7 @@ test("--only FeeCollector deploys the fee collector alone beside the chain's set
   const r2 = await run(t, c2, { args: ["--only", "FeeCollector"], io: { sinkOf: async () => { throw new Error("the kit pins no sell sender on base-sepolia, the FeeCollector's sink: nothing was sent"); } } });
   assert.match(String(r2.error?.message), /the kit pins no sell sender/);
   assert.equal(c2.created.length, 0, "nothing deployed");
+  assert.equal(c2.deployer, null, "refused before a run key exists");
 });
 
 test("--only takes the sell delegate alone: any other contract, or none named, is refused before a key is made", OPTS, async (t) => {
