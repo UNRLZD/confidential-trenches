@@ -137,6 +137,16 @@ export function revertName(data) {
   return ERROR_OF.get(data.slice(0, 10)) ?? data.slice(0, 138);
 }
 
+// ---- The stop path: a stop ends a wait at once; every note left is withdrawn, each tried again until it lands ----
+/** A stop the run's signal handler fires: `stop.fire(s)` once; `stop.until(p)` is p's answer, or `stop.STOPPED` as soon
+ *  as the stop fires (before p ends or after), so a long read (the syncs' log walk from the pool's deploy block) never
+ *  holds a stopped run away from its sweep. */
+export function stopper() {
+  const STOPPED = Symbol("stopped");
+  let fire;
+  const fired = new Promise((r) => (fire = r));
+  return { STOPPED, fire: (s) => fire(s), until: (p) => Promise.race([p, fired.then(() => STOPPED)]) };
+}
 // ---- The stop path: every note left is withdrawn, each tried again until it lands ----
 /** How many times the stop path tries one note's withdraw. */
 export const WITHDRAW_TRIES = 3;

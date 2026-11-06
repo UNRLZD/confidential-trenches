@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import { test } from "node:test";
 import { bytes, hex, keccak, selector } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
 import { intBytes, rlp } from "../script/deploy.mjs";
-import { WITHDRAW_TRIES, authJson, buyData, depositData, revertName, sellData, signTx7702, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest, withdrawLeft } from "../script/testnet-run-lib.mjs";
+import { WITHDRAW_TRIES, authJson, buyData, depositData, revertName, sellData, signTx7702, stopper, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest, withdrawLeft } from "../script/testnet-run-lib.mjs";
 
 const V = JSON.parse(readFileSync(new URL("./fixtures/testnet-run-calldata.json", import.meta.url), "utf8"));
 const { secp256k1 } = await import(createRequire(new URL("../../../packages/kit/package.json", import.meta.url)).resolve("@noble/curves/secp256k1.js"));
@@ -239,12 +239,45 @@ test("every sell signs the chain's FeeCollector, the kit's feeCollector pin, as 
 test("the run's restore reads each W's Transfers on the wallet's own EVM_TRANSFER_RPCS, never a provider of the run's pool pair: one in both lists is dropped from the W reads, two or more left (cards wallet-restore-transfer-rpcs, evm-transfer-rpc-spares)", async () => {
   const { EVM_TRANSFER_RPCS } = await import("../../../packages/wallet/src/pool/evm.ts");
   const host = (u) => new URL(u).hostname;
-  // Robinhood testnet's own RPC is both the run's pool provider and the Transfer list's third there: it never gets a W
-  const shared = { "base-sepolia": [], "robinhood-testnet": ["rpc.testnet.chain.robinhood.com"] };
+  // Robinhood testnet's own RPC is both the run's pool provider and the Transfer list's third there, and Base Sepolia's
+  // Pocket both the kit's pool pair's second (the run's pair since card evm-testnet-delegate-review3, fold 7, as on the
+  // device) and the Transfer list's second: neither ever gets a W
+  const shared = { "base-sepolia": ["base-testnet.api.pocket.network"], "robinhood-testnet": ["rpc.testnet.chain.robinhood.com"] };
   for (const chain of ["base-sepolia", "robinhood-testnet"]) {
     assert.equal(run.NETS[chain].walletRpcs, EVM_TRANSFER_RPCS[chain], `${chain}: one source`);
     const pool = run.NETS[chain].rpcs.map(host);
     assert.deepEqual(run.NETS[chain].walletRpcs.map(host).filter((h) => pool.includes(h)), shared[chain], chain);
     assert.ok(run.NETS[chain].walletRpcs.filter((u) => !pool.includes(host(u))).length >= 2, `${chain}: two W providers left`);
+  }
+});
+
+// a SIGTERM during the syncs' walk (Base Sepolia, 6 Nov 18:46Z: sepolia.base.org's 200-block log cap made it hours long)
+// ends the wait at once, so the run goes to its sweep, and the run awaits the walk only through the stop
+test("a stop ends a wait that never ends at once, and a wait that ends first gives its answer", async () => {
+  const s = stopper();
+  const never = new Promise(() => {});
+  const t = s.until(never);
+  setTimeout(() => s.fire("SIGTERM"), 10);
+  assert.equal(await t, s.STOPPED);
+  assert.equal(await s.until(never), s.STOPPED, "a wait begun after the stop ends at once");
+  const s2 = stopper();
+  assert.equal(await s2.until(Promise.resolve(7)), 7);
+  await assert.rejects(s2.until(Promise.reject(new Error("walk failed"))), /walk failed/);
+  const src = readFileSync(new URL("../script/testnet-run.mjs", import.meta.url), "utf8");
+  assert.match(src, /await stop\.until\(warm\);\n\s*go\(\);/, "the run awaits the syncs only through the stop, then checks it");
+  assert.doesNotMatch(src, /await warm\b/, "no bare wait on the syncs");
+  assert.match(src, /stopped = s;\n\s*stop\.fire\(s\);/, "the signal fires the stop");
+});
+
+// card evm-testnet-delegate-review3, fold 7: the run syncs and sends on the kit's pinned providers for each testnet, the
+// pair the device's pool sync pages the pool's logs on; never sepolia.base.org, whose 200-block eth_getLogs cap held
+// Base Sepolia run 1's syncs 2134 s
+test("each testnet's run pair is the kit's pinned providers, never sepolia.base.org", async () => {
+  const { NETS } = await import("../script/testnet-run.mjs");
+  const { evmPoolVenues } = await import("../../../packages/kit/src/index.ts");
+  for (const c of ["base-sepolia", "robinhood-testnet"]) {
+    assert.deepEqual(NETS[c].rpcs, [...evmPoolVenues()[c].providers], c);
+    assert.equal(NETS[c].rpcs.length, 2, c);
+    assert.ok(!NETS[c].rpcs.some((u) => new URL(u).hostname === "sepolia.base.org"), c);
   }
 });

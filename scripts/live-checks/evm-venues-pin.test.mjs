@@ -1,8 +1,10 @@
 // Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-06 for card
 // evm-testnet-delegate-review3) through the live check: the recorded good answers pass on both testnets; the same recording with one
 // thing changed fails: a pin's code with one byte flipped, a pin that differs between the two RPCs, a router or WETH
-// with other code, another chain id, a kit pin that is not the record's (the sell delegate's record is the
-// newest redeploy's, card evm-selldelegate-exact-debit's; the PoolManager is pool-evm-deploy's CHAINS one), and two RPCs of one operator.
+// with other code, another chain id, a kit pin that is not the record's (the sell delegate's record is the newest
+// redeploy's, card evm-testnet-delegate-review3's; the fee collector's is card evm-fee-collector's; the PoolManager is
+// pool-evm-deploy's CHAINS one), a fee collector whose sink is not the kit's sell sender, and two RPCs of one operator;
+// and the recorded bad answers (frozenPin: main 0628a2d5's sell delegate pins, a frozen 10-field build) fail.
 //   node --test scripts/live-checks/evm-venues-pin.test.mjs
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -51,14 +53,15 @@ test("the recorded good answers pass on both testnets: every pin is the record's
   for (const chain of A.chains) {
     const r = await run(chain);
     assert.equal(r.ok, true, r.lines.join("\n"));
-    assert.equal(r.lines.filter((l) => / is the build's /.test(l)).length, chain === "base-sepolia" ? 5 : 4, chain); // the pins and the verifier
+    assert.equal(r.lines.filter((l) => / is the build's /.test(l)).length, chain === "base-sepolia" ? 6 : 5, chain); // the pins and the verifier
+    assert.ok(r.lines.some((l) => l.startsWith("PASS the fee collector ") && l.includes("is the build's FeeCollector")), chain);
   }
 });
 
 test("a pin's code with one byte flipped, or other code on one RPC, fails", async () => {
   for (const chain of A.chains) {
     const [u1, u2] = CHAINS[chain].rpcs;
-    for (const pin of [evmPoolVenues()[chain].pool, evmPoolVenues()[chain].sellDelegate, evmPoolVenues()[chain].adapters.v4]) {
+    for (const pin of [evmPoolVenues()[chain].pool, evmPoolVenues()[chain].sellDelegate, evmPoolVenues()[chain].adapters.v4, evmPoolVenues()[chain].feeCollector]) {
       // byte 1: outside every pin's immutables (the pool-review-3 delegate holds one at 200)
       fails(await run(chain, { answers: mutate([u1, u2], isCode(pin), (j) => (j.result = flip(j.result, 1))) }), /is the build's/);
       fails(await run(chain, { answers: mutate(u1, isCode(pin), (j) => (j.result = flip(j.result, 1))) }), /the same code on both RPCs/);
@@ -186,4 +189,19 @@ test("the mainnets (card pool-evm-deploy-mainnet): a kit pin with a record is ch
   const f = path.join(mkdtempSync(path.join(tmpdir(), "venues-pin-")), "base.json");
   writeFileSync(f, JSON.stringify({ chain: "base", dryRun: true, contracts: {} }));
   assert.throws(() => recordOf("base", f), /is not base's real run/);
+});
+
+// the fee collector's pin under the same rule as every other: the record's address, the current build, its one
+// immutable the sell sender the kit pins
+test("a fee collector pin that is not the record's, none, or a record whose sink is not the kit's sell sender, fails", async () => {
+  for (const chain of A.chains) {
+    const v = evmPoolVenues()[chain];
+    fails(await run(chain, { venue: { ...v, feeCollector: "0x" + "ba".repeat(20) } }), /the fee collector pin 0xbaba.* is the record's FeeCollector/);
+    fails(await run(chain, { venue: { ...v, feeCollector: undefined } }), /the fee collector pin \(none\) is the record's FeeCollector/);
+    const d = structuredClone(RECORD[chain]);
+    d.contracts.FeeCollector.sink = "0x" + "ba".repeat(20);
+    const r = await run(chain, { deployment: d });
+    fails(r, /the record's FeeCollector sink 0xbaba.* is the sell sender the kit pins/);
+    fails(r, /FeeCollector's immutables hold/);
+  }
 });

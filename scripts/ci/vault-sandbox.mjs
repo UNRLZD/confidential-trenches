@@ -71,11 +71,12 @@ export function matches(file, paths = PATHS) {
 // link, so shard 4, with ten, ran longest: prepay moves to shard 2, for about 337, 348, 339 and 345.
 // s13 (VT-S13, both tokens) ran 35 s on the box (2026-11-06) and joins shard 1, then the lightest at 337.
 // s12 (VT-S12, four sandboxes in parallel) joins shard 3, then the lightest at 339.
+// s19 (VT-S19, two sandboxes in turn, as settle's 41 s) joins shard 4, then the lightest at 345.
 export const SHARDS = [
   ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13"],
   ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay"],
   ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12"],
-  ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw"],
+  ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19"],
 ];
 
 // Every test target of contracts/vault: the lib's unit tests and one per tests/*.rs.

@@ -652,11 +652,11 @@ function ownPin(o: unknown, k: string): string | undefined {
 }
 
 /** The pins of `chain` in `venues` (also sell-unpinned.ts's): only the list's own keys, each read once. */
-export function venuePins(venues: EvmPoolVenueList, chain: EvmPoolChain): { pool: string | undefined; v3: string | undefined; v4: string | undefined; sellDelegate: string | undefined } {
+export function venuePins(venues: EvmPoolVenueList, chain: EvmPoolChain): { pool: string | undefined; v3: string | undefined; v4: string | undefined; sellDelegate: string | undefined; feeCollector: string | undefined } {
   if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");
   const v = venues[chain];
   const adapters = typeof v === "object" && v !== null && Object.hasOwn(v, "adapters") ? v.adapters : undefined;
-  return { pool: ownPin(v, "pool"), v3: ownPin(adapters, "v3"), v4: ownPin(adapters, "v4"), sellDelegate: ownPin(v, "sellDelegate") };
+  return { pool: ownPin(v, "pool"), v3: ownPin(adapters, "v3"), v4: ownPin(adapters, "v4"), sellDelegate: ownPin(v, "sellDelegate"), feeCollector: ownPin(v, "feeCollector") };
 }
 const samePin = (a: unknown, pin: string) => typeof a === "string" && lower(a) === lower(pin);
 
