@@ -48,6 +48,9 @@ const GOOD = {
   "packages/signpage/releases/release-12.json": `{ "SIGN_HOST": "https://${child("sign")}" }\n`,
   "scripts/live-checks/x.answers.json": `{ "url": "https://${child("api")}/v1/health" }\n`,
   "packages/kit/test/client.test.mjs": `const evil = "https://${child("evil")}";\n`,
+  "scripts/live-checks/x.run.json": `{ "rpc": "https://${child("api")}/v1/rpc/solana" }\n`,
+  "packages/kit/test/fixtures/x.json": `{ "source": "read through https://${child("api")}" }\n`,
+  "apps/terminal/test/pads/x.json": `{ "read": "GET https://${child("api")}/v1/market/lists" }\n`,
 };
 
 test("the repo's own tree passes", () => {
@@ -73,6 +76,7 @@ const PLANTED = {
   "apps/terminal/public/a3_headers": [`/*\n  Content-Security-Policy: frame-ancestors https://*.${SIGN_HOST}\n`, /a3_headers:2: \*\.confidential\.unrealized\.trade is a child/],
   "scripts/live-checks/a4-escaped.mjs": [`export const R = /^https:\\/\\/app\\.confidential\\.unrealized\\.trade$/;\n`, /a4-escaped\.mjs:1: app\.confidential\.unrealized\.trade is a child/],
   "apps/terminal/src/a5-caps.ts": [`export const U = "https://APP.CONFIDENTIAL.UNREALIZED.TRADE/";\n`, /a5-caps\.ts:1: app\.confidential\.unrealized\.trade is a child/],
+  "apps/terminal/src/a7-data.json": [`{ "helper": "https://${child("api")}" }\n`, /a7-data\.json:1: api\.confidential\.unrealized\.trade is a child/],
   "packages/kit/src/a6-deep.ts": [`// a comment still names it: ${child("x.y")}\n`, /a6-deep\.ts:1: x\.y\.confidential\.unrealized\.trade is a child/],
   "scripts/live-checks/kit-freeze-helper-api.mjs": [`export const OLD = "https://${child("api")}";\n`, /kit-freeze-helper-api\.mjs:1: api\.confidential\.unrealized\.trade is a child/],
 };

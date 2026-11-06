@@ -8,8 +8,8 @@
 // It reads every file git lists (tracked, and untracked but not ignored) and refuses a host name ending in
 // ".confidential.unrealized.trade", in any case, written plainly or regex-escaped, a wildcard label included. Skipped:
 // prose (*.md), the written release lists (packages/signpage/releases/release-<N>.json, which name the hosts each
-// release had and are never written again), recorded live-check answers (*.answers.json, runs as they were read) and
-// test files (*.test.*, which plant children to prove a refusal). ALLOWED names the one remaining place a child may
+// release had and are never written again), recorded runs and test data (*.answers.json, *.run.json and JSON under a
+// test/ or fixtures/ folder, each as it was read) and test files (*.test.*, which plant children to prove a refusal). ALLOWED names the one remaining place a child may
 // appear, with its reason. DNS is the live check's (scripts/live-checks/hosts-main-on-top.mjs).
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
@@ -25,9 +25,16 @@ export const ALLOWED = {
   "scripts/live-checks/kit-freeze-helper-api.mjs": [`sign.${SIGN_HOST}`],
 };
 
-/** True for a file this gate does not read: prose, written release lists, recorded answers and tests. */
+/** True for a file this gate does not read: prose, written release lists, recorded runs, test data and tests. */
 export function skipped(f) {
-  return /\.md$/i.test(f) || /^packages\/signpage\/releases\/release-\d+\.json$/.test(f) || /\.answers\.json$/.test(f) || /\.test\.[cm]?[jt]sx?$/.test(f);
+  return (
+    /\.md$/i.test(f) ||
+    /^packages\/signpage\/releases\/release-\d+\.json$/.test(f) ||
+    /\.answers\.json$/.test(f) ||
+    /\.run\.json$/.test(f) ||
+    /(^|\/)(test|fixtures)\/.*\.json$/.test(f) ||
+    /\.test\.[cm]?[jt]sx?$/.test(f)
+  );
 }
 
 /** The refusals in one file's text: [line, name]. */
