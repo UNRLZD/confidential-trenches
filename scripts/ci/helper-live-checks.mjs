@@ -17,6 +17,7 @@ export const LIVE_CHECKS = [
   "helper-pool-senders",
   "helper-evm-sender",
   "helper-sell-fee-recipient",
+  "helper-sender-fee-proof",
   "helper-abuse-limits",
   "market-data-solana-lists",
   "market-data-solana-token",
