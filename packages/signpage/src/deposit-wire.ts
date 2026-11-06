@@ -18,8 +18,10 @@
 //   vault (none is named on the page's network yet: no quote at all), and the backup gate (backupFirst, the wallet
 //   store's one predicate, which the rule holds again).
 import { backupFirst, type DepositRecord } from "@blindfill/wallet/store";
-import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
+import type { SignpageResults } from "../../kit/src/signpage/messages.ts";
+import type { Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
 import { depositQuoteKind, type DepositQuoteKindContext } from "./rules/deposit-quote.ts";
+import { depositAssetsKind, depositDryKind, type DepositReadAnswer, type DepositReadContext } from "./rules/deposit-dry.ts";
 import type { Status } from "./state.ts";
 
 /** The public records the kind reads: the status and the deposit record; null when no seed is stored. */
@@ -80,5 +82,52 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       out = { error: "down" };
     });
     return { after, answer: () => out };
+  };
+}
+
+/**
+ * The longest a deposit sheet read runs (card kit-deposit-assets-dry): 14 s, inside the kit client's 15 s for both kinds
+ * (packages/kit/src/signpage/client.ts SIGNPAGE_TIMEOUT_MS), so its answer reaches the app before the app gives up on
+ * it. One signal over the whole read: every request it makes is cut at that time, and the read answers "down" then.
+ */
+export const DEPOSIT_READ_DEADLINE_MS = 14_000;
+
+/**
+ * A read's answer as a Running kind (./api.ts): it holds no other message of the queue, as a trade does not, so `state`,
+ * nav and an open kind are answered while the helper's round trips run. Its result or its code; a read that threw, or
+ * that the deadline cut, is "down" (not kept, so the same request again runs again).
+ */
+function running<K extends "deposit.assets" | "deposit.dry">(
+  run: (ctx: DepositReadContext) => Promise<DepositReadAnswer<SignpageResults[K]>>,
+  deps: DepositReadContext,
+  deadlineMs: number,
+): Running<K> {
+  let out: HostAnswer<K> | HostRefusal = { error: "down" };
+  const deadline = AbortSignal.timeout(deadlineMs);
+  const base = deps.fetch ?? fetch;
+  // every request of the read carries the deadline beside its own signal
+  const cut = ((url: string | URL | Request, init?: RequestInit) =>
+    base(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline })) as typeof fetch;
+  const late = new Promise<null>((ok) => (deadline.aborted ? ok(null) : deadline.addEventListener("abort", () => ok(null), { once: true })));
+  const after = Promise.race([run({ ...deps, fetch: cut }), late]).then(
+    (got) => void (out = got === null ? { error: "down" } : got.ok ? { result: got.result } : { error: got.code }),
+    () => void (out = { error: "down" }),
+  );
+  return { after, answer: () => out, running: true };
+}
+
+/**
+ * The deposit sheet's reads for ApiHost.kinds (card kit-deposit-assets-dry; ./rules/deposit-dry.ts): deposit.assets and
+ * deposit.dry. Neither reads the store or the seed, so the frame and the top-level page answer them alike, signed in or
+ * not: the requests name the public placeholder, never U. Each runs at most `deadlineMs` (DEPOSIT_READ_DEADLINE_MS).
+ */
+export function depositReadHosts(deps: DepositReadContext & { deadlineMs?: number } = {}): {
+  "deposit.assets": () => Running<"deposit.assets">;
+  "deposit.dry": (params: Record<string, unknown>) => Running<"deposit.dry">;
+} {
+  const ms = deps.deadlineMs ?? DEPOSIT_READ_DEADLINE_MS;
+  return {
+    "deposit.assets": () => running<"deposit.assets">((ctx) => depositAssetsKind(ctx), deps, ms),
+    "deposit.dry": (params) => running<"deposit.dry">((ctx) => depositDryKind(params, ctx), deps, ms),
   };
 }

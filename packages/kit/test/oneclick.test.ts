@@ -101,6 +101,8 @@ test("a real live quote verifies and passes; its signed deposit address and dead
   assert.equal(r.minAmountOut, 1_983_085n);
   assert.equal(r.withdrawFee, 0n);
   assert.equal(r.unsignedDryWithdrawFee, undefined);
+  // a live answer's time estimate is the signed one; none under the dry name
+  assert.equal(r.unsignedDryTimeEstimate, undefined);
 });
 
 test("a real dry quote verifies and passes, and hands on no deposit address", () => {
@@ -110,6 +112,10 @@ test("a real dry quote verifies and passes, and hands on no deposit address", ()
   // a dry answer's withdrawFee is not signed: it comes back only under a name that says so
   assert.equal(r.withdrawFee, undefined);
   assert.equal(r.unsignedDryWithdrawFee, 5_538n);
+  // its timeEstimate is not signed either (card kit-deposit-assets-dry): the dry answer's own, under a name that says so
+  assert.equal(r.timeEstimate, undefined);
+  assert.equal(r.unsignedDryTimeEstimate, fx.dry.answer.quote.timeEstimate);
+  assert.equal(typeof r.unsignedDryTimeEstimate, "number");
 });
 
 // Each signed field of each real answer, changed in the answer: the signature fails.
