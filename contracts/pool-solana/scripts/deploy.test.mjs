@@ -368,8 +368,9 @@ test("what is left keeps the keys: a lamport on either RPC, a buffer or programd
 
 test("the record from chain reads: the programdata's SetAuthority gets a line, funders are the fee payers, slot order", async () => {
   const D0 = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
-  const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, "BPFLoaderUpgradeab1e11111111111111111111111"],
-    instructions: loaderTag === undefined ? [] : [{ programIdIndex: 1, data: (loaderTag === 4 ? "5" : "3") }] } } });
+  // a loader instruction names the programdata (PD) among its accounts, as the deploy and the SetAuthority do
+  const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, "BPFLoaderUpgradeab1e11111111111111111111111", "PD"],
+    instructions: loaderTag === undefined ? [] : [{ programIdIndex: 1, accounts: [2], data: (loaderTag === 4 ? "5" : "3") }] } } });
   // the funding: one System Transfer from its payer into the run's funder F2
   const fundTx = { slot: 1, meta: { err: null }, transaction: { message: { accountKeys: [D0, "F2", "11111111111111111111111111111111"], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: "3Bxs41hAcYbghSB9" }] } } };
   const chainTx = { fund: fundTx, dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), init: tx(4, "F2") };
@@ -679,7 +680,11 @@ function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = (
           d.writeUInt32LE(2, 0), d.writeBigUInt64LE(c.fundAmount ?? 1n, 4);
           return ok({ slot: 0, blockTime: c.fundBlockTime ?? null, meta: { err: null }, transaction: { message: { accountKeys: [c.fundFrom ?? RETURN, c.funder, SYSTEM_ID], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: b58(d) }] } } });
         }
-        return ok({ slot: Math.floor(x.landAt / 400) + 1, meta: { err: x.err }, transaction: { message: { accountKeys: [x.tx.payer], instructions: [] } } });
+        // the transaction as sent: its payer first, each instruction's program, accounts and data
+        const keys = [x.tx.payer];
+        const at = (k) => (keys.includes(k) ? keys.indexOf(k) : keys.push(k) - 1);
+        const instructions = x.tx.ixs.map((i) => ({ programIdIndex: at(i.program), accounts: i.keys.map(at), data: b58(i.data) }));
+        return ok({ slot: Math.floor(x.landAt / 400) + 1, meta: { err: x.err }, transaction: { message: { accountKeys: keys, instructions } } });
       }
       default: throw new Error(`unexpected ${method}`);
     }
@@ -1564,8 +1569,16 @@ test("review 4d: the run's cleanup freezes its table when the run's own freeze f
 function stoppedJournal(c, journal, { state = "removed", program = RD.program_id } = {}) {
   const OLD = newKey().id;
   const sig = (d) => d.repeat(87);
-  for (const [s, step] of [[sig("6"), "funding (to the funder)"], [sig("7"), "init (tag 0)"]]) {
-    c.txs.set(s, { tx: { signature: s, payer: OLD, ixs: [{ program: SYSTEM_ID, keys: [OLD], data: Buffer.alloc(12) }] }, landed: true, err: null, landAt: 0, sentAt: 0, step });
+  // the first run's own, as sent: its funding (a plain Transfer from the return address), its SetAuthority to none on
+  // the programdata, its init
+  const transfer = Buffer.alloc(12);
+  transfer.writeUInt32LE(2, 0), transfer.writeBigUInt64LE(1_000_000n, 4);
+  for (const [s, payer, ix] of [
+    [sig("6"), RETURN, { program: SYSTEM_ID, keys: [RETURN, OLD], data: transfer }],
+    [sig("5"), OLD, { program: "BPFLoaderUpgradeab1e11111111111111111111111", keys: [RD.programdata, OLD], data: Buffer.from([4, 0, 0, 0]) }],
+    [sig("7"), OLD, { program: program, keys: [RD.pool, OLD, SYSTEM_ID], data: Buffer.from([0]) }],
+  ]) {
+    c.txs.set(s, { tx: { signature: s, payer, ixs: [ix] }, landed: true, err: null, landAt: 0, sentAt: 0 });
   }
   const j = {
     cluster: "localnet", genesis_hash: "FakeLocalGenesis1111111111111111111111111111", program_id: program, funder: OLD, return_to: RETURN, complete: false,
@@ -1573,6 +1586,7 @@ function stoppedJournal(c, journal, { state = "removed", program = RD.program_id
     txs: [
       { step: "funding (to the funder)", signature: sig("6"), state: "landed" },
       { step: "the solana CLI: program deploy", signature: sig("8"), state: "landed", cli: true },
+      { step: "the upgradeable loader: SetAuthority (to none)", signature: sig("5"), state: "landed" },
       { step: "init (tag 0)", signature: sig("7"), state: "landed" },
       { step: "deposit 0.01 SOL (tag 1)", signature: sig("9"), state: "expired" },
     ],

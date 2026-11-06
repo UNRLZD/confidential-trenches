@@ -583,12 +583,17 @@ async function tableReadBack(fetchFn, urls, table, list, authority, { wait = sle
 const LOADER_STEPS = { 0: "buffer made", 1: "buffer write", 2: "deploy with the upgradeable loader (DeployWithMaxDataLen)", 3: "upgrade", 4: "SetAuthority (to none)", 5: "close" };
 /**
  * A deployment record's transactions and funders from chain reads alone: its transactions plus each of the run's own
- * on its programdata (the deploy and the SetAuthority to none after it; immutable after, so the list ends there): one
- * whose fee payer is the run's (its funder or funders, or a payer of its own transactions other than a funding). Anyone
- * can send a transaction naming the programdata, so a stranger's is left out. Each read at finalized with no error,
- * in slot order; and `funders`, every fee payer among them that is not `return_to`.
+ * on its programdata (the deploy and the SetAuthority to none after it; immutable after, so the list ends there). The
+ * run's own keys are read from the transactions, never from a step's label or an older record's funders: its funder,
+ * a payer of a loader instruction on this programdata or a lookup-table instruction on the record's table (a first
+ * run's deploy, SetAuthority, table), and a payer of a sweep (one plain System Transfer into the return address). Any
+ * other payer's transaction is kept only as a funding: one plain System Transfer from its payer into a run key (a
+ * compute budget instruction beside it allowed). Anything else (a relayer's, a CPI, TransferWithSeed) is left out,
+ * said through `say`, and its payer is never the run's: anyone can send a transaction naming the programdata, or one
+ * into the funder. Each read at finalized with no error, in slot order; and `funders`, every fee payer among them that
+ * is not `return_to`.
  */
-export async function chainRecord(fetchFn, url, d, { wait } = {}) {
+export async function chainRecord(fetchFn, url, d, { wait, say = () => {} } = {}) {
   const steps = new Map(d.txs.map((t) => [t.signature, t.step]));
   const history = [];
   for (const h of await rpc(fetchFn, url, "getSignaturesForAddress", [d.programdata, { commitment: "finalized" }], wait)) {
@@ -598,28 +603,51 @@ export async function chainRecord(fetchFn, url, d, { wait } = {}) {
     const t = await rpc(fetchFn, url, "getTransaction", [signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }], wait);
     // not found yet: a load-balanced RPC's transaction server can be a slot behind its status reads (read again)
     if (!t) throw Object.assign(new Error(`${signature}: not found at finalized on ${url}`), { transient: true });
+    if (t.meta?.err !== null) throw new Error(`${signature}: failed: ${JSON.stringify(t.meta?.err)} on ${url}`);
     return t;
+  };
+  const keysOf = (t) => t.transaction.message.accountKeys;
+  // the one plain System Transfer from the payer (u32 2, u64 lamports; compute budget instructions beside it): its
+  // destination, or null
+  const plainTo = (t) => {
+    const keys = keysOf(t);
+    const own = t.transaction.message.instructions.filter((i) => keys[i.programIdIndex] !== COMPUTE_BUDGET);
+    if (own.length !== 1) return null;
+    const [i] = own;
+    const data = b58decode(i.data);
+    const isTransfer = keys[i.programIdIndex] === SYSTEM && data.length === 12 && data[0] === 2 && data[1] === 0 && data[2] === 0 && data[3] === 0;
+    return isTransfer && i.accounts?.length === 2 && keys[i.accounts[0]] === keys[0] ? keys[i.accounts[1]] : null;
+  };
+  // a run key's own: a loader instruction on this programdata, or a lookup-table instruction on the record's table
+  const onOurs = (t) => {
+    const keys = keysOf(t);
+    return t.transaction.message.instructions.some((i) => {
+      const accounts = (i.accounts ?? []).map((a) => keys[a]);
+      return (keys[i.programIdIndex] === LOADER_V3 && accounts.includes(d.programdata)) || (keys[i.programIdIndex] === ALT_PROGRAM && !!d.table && accounts.includes(d.table));
+    });
   };
   const rows = [];
   const add = (signature, t, known) => {
-    if (t.meta?.err !== null) throw new Error(`${signature}: failed: ${JSON.stringify(t.meta?.err)} on ${url}`);
-    const keys = t.transaction.message.accountKeys;
+    const keys = keysOf(t);
     const ix = t.transaction.message.instructions.find((i) => keys[i.programIdIndex] === LOADER_V3);
     const step = known ?? (ix ? `the upgradeable loader: ${LOADER_STEPS[b58decode(ix.data)[0]] ?? "another instruction"}` : "on the programdata");
-    // a funding, read from the transaction itself: a System transfer from its payer into another key
-    const into = t.transaction.message.instructions.filter((i) => keys[i.programIdIndex] === SYSTEM && (() => { const d = b58decode(i.data); return d.length === 12 && d[0] === 2 && d[1] === 0 && d[2] === 0 && d[3] === 0; })() && keys[i.accounts[0]] === keys[0]).map((i) => keys[i.accounts[1]]);
-    rows.push({ step, signature, slot: t.slot, payer: keys[0], into });
+    rows.push({ step, signature, slot: t.slot, payer: keys[0] });
   };
-  for (const [signature, known] of steps) add(signature, await read(signature), known);
-  // the run's payers: its funder, and each payer of its own transactions that is not a funding (a transfer into another
-  // of the record's payers, not the return address a sweep goes to): never from a step's label, nor an older record's
-  // funders, which carry the funding's payer
-  const payers = new Set(rows.map((r) => r.payer));
-  const funding = (r) => r.into.some((k) => k !== r.payer && k !== d.return_to && payers.has(k));
-  const ours = new Set([d.funder, ...rows.filter((r) => !funding(r)).map((r) => r.payer)].filter((p) => p && p !== d.return_to));
+  const known = [];
+  for (const [signature, step] of steps) known.push({ signature, step, t: await read(signature) });
+  const ours = new Set([d.funder].filter(Boolean));
+  for (const k of known) {
+    const p = keysOf(k.t)[0];
+    if (p !== d.return_to && (onOurs(k.t) || plainTo(k.t) === d.return_to)) ours.add(p);
+  }
+  ours.delete(d.return_to);
+  for (const k of known) {
+    if (ours.has(keysOf(k.t)[0]) || ours.has(plainTo(k.t))) add(k.signature, k.t, k.step);
+    else say(`left out of the record: ${k.signature} (${k.step}): paid by ${keysOf(k.t)[0]}, not one plain System Transfer from its payer into the run's funder`);
+  }
   for (const signature of history) {
     const t = await read(signature);
-    if (ours.has(t.transaction.message.accountKeys[0])) add(signature, t, null);
+    if (ours.has(keysOf(t)[0])) add(signature, t, null);
   }
   rows.sort((a, b) => a.slot - b.slot);
   return { ...d, txs: rows.map(({ step, signature }) => ({ step, signature })), funders: [...new Set(rows.map((r) => r.payer).filter((p) => p !== d.return_to))] };
@@ -992,7 +1020,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       const { complete, stopped, stopped_at, keys, ...rest } = d;
       d = { ...rest, txs: d.txs.filter((t) => t.state === "landed" && !t.cli).map(({ step, signature }) => ({ step, signature })) };
     }
-    const r = await chainRecord(fetchFn, url, d);
+    const r = await chainRecord(fetchFn, url, d, { say: log });
     const target = fromJournal ? rebuild.replace(/\.journal\.json$/, ".json") : rebuild;
     writeFileSync(target, JSON.stringify(r, null, 2) + "\n");
     log(`rebuilt ${target} from ${url}: ${r.txs.length} transactions, funders ${r.funders.join(", ")}`);
@@ -1496,10 +1524,10 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     // also be on the programdata
     const seen = new Set();
     result.txs = txs.filter((t) => t.state === "landed" && !t.cli && !seen.has(t.signature) && seen.add(t.signature)).map(({ step, signature }) => ({ step, signature }));
-    await waitFinalized(fetchFn, url, result.txs.map((t) => t.signature), clock);
     const done = result;
     try {
-      result = await readAgain(() => chainRecord(fetchFn, url, done, clock), "the record's transactions", clock);
+      await waitFinalized(fetchFn, url, done.txs.map((t) => t.signature), clock);
+      result = await readAgain(() => chainRecord(fetchFn, url, done, { ...clock, say: log }), "the record's transactions", clock);
     } catch (e) {
       // the keys are removed and every lamport is back: the record is written later from the journal, from chain reads
       log(`the record not written (${e.message}): write it from the journal with: node contracts/pool-solana/scripts/deploy.mjs --rebuild-record ${journalFile} --url ${url}${cluster === "mainnet" ? " --mainnet" : ""}`);
