@@ -1,9 +1,9 @@
 {
  "good": {
-  "note": "this card's SIGN_HOST build (mainnet) at b743d012, built on the Mac 2026-11-06T07:53:10.698Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-y/bxOsk2rstURkAwP3gS185HeHtOmWD/voZHU4UFyoBxpMydRSyo86uwAjy3Lu48\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-y/bxOsk2rstURkAwP3gS185HeHtOmWD/voZHU4UFyoBxpMydRSyo86uwAjy3Lu48",
-  "pager": "function Hb(){let e=new Map;return{rules:{max:By,ceilingPages:8,slowHalves:!1},of(t,n){let r=t.url,i=typeof r==`string`?r:`rpc ${n}`,a=e.get(i);return a===void 0&&e.set(i,a={size:zy,answered:null}),a}}}",
+  "note": "this card's SIGN_HOST build (mainnet) at 64c1626e, built on the Mac 2026-11-06T09:23:11.024Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-YHzbswVwG37+zPOXxkohI/mzHOaAuuf8df1LgPsN4XCTSt0Cuy8xjajiEleNO9zO\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-YHzbswVwG37+zPOXxkohI/mzHOaAuuf8df1LgPsN4XCTSt0Cuy8xjajiEleNO9zO",
+  "pager": "function Jb(){let e=new Map;return{rules:{max:Ky,ceilingPages:8,slowHalves:!1},of(t,n){let r=t.url,i=typeof r==`string`?r:`rpc ${n}`,a=e.get(i);return a===void 0&&e.set(i,a={size:Gy,answered:null}),a}}}",
   "first": 100000,
   "max": 800000,
   "slowHalves": false,
@@ -11,9 +11,9 @@
   "retry": "if(r!==null&&(r.kind===`throttle`||b===h||!u)){if(++g>=7)throw e;"
  },
  "bad": {
-  "note": "SIGN_HOST as served 2026-11-06T07:53:10.702Z, before this card's deploy",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-LBiBhkInnmurwW66/gUUho1mJLyku80d3nlv2a9idZqKupgrP82OuACwVbIjurkA\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-LBiBhkInnmurwW66/gUUho1mJLyku80d3nlv2a9idZqKupgrP82OuACwVbIjurkA",
+  "note": "SIGN_HOST as served 2026-11-06T09:23:11.028Z, before this card's deploy",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-TuOar3Qpp09XjLKl4OwSrjEGlEjX1q8BMF7HlGEjltcgbs85EyFkNcN82oOZldxp\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-TuOar3Qpp09XjLKl4OwSrjEGlEjX1q8BMF7HlGEjltcgbs85EyFkNcN82oOZldxp",
   "pager": null,
   "first": null,
   "max": null,
