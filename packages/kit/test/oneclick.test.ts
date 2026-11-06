@@ -14,6 +14,7 @@
 //   7. zero floor: `if (amountOut <= 0n || minAmountOut <= 0n) fail(` -> `if (false) fail(`
 //   8. F and S in the pair floor: `* (10_000n - fs), pIn.d` -> `* 10_000n, pIn.d`
 //   9. decimals: `if (!ok) fail("request", \`${name}` -> `if (false) fail("request", \`${name}`
+//  10. route fee: `return stable ? ONECLICK_FEE_BPS[path] : ONECLICK_PAIR_FEE_BPS[path]` -> `return ONECLICK_PAIR_FEE_BPS[path]`
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
@@ -24,6 +25,8 @@ import {
   checkOneClickFormatted,
   checkOneClickQuote,
   ONECLICK_SIGNING_KEYS,
+  ONECLICK_USDC_ASSETS,
+  oneClickFeeBps,
   oneClickFloors,
   OneClickQuoteError,
   type OneClickCheck,
@@ -252,12 +255,36 @@ test("two price reads further apart than the slippage are refused", () => {
   for (const p of ["-1", "0", "4,4", "1e3", "", " 4.4"])
     refused("price", () => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), { ...LIVE_OPTS, pricing: { in: [p, "4.43"], out: ["1", "1"] } }));
 });
-test("dry USDC-to-USDC on the partner path: the fee entry is not the keyless one, refused", () => {
-  refused("app-fees", () => checkOneClickQuote(DRY_REQ, clone(fx.dry.answer), { ...DRY_OPTS, path: "partner" }));
+// Card oneclick-partner-fee-live: 1Click's fee follows the route, not the key (fees.md read 2026-11-06T15:18Z; live
+// reads 15:19-15:21Z, keyless and through the helper's key alike): 1 bp between two USDC assets, 20 on any other pair.
+const COLLECTOR = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd";
+test("USDC-to-USDC on the partner path (the deposit's): 1Click's fee 1 entry passes, the old pin's 20 is refused", () => {
+  assert.doesNotThrow(() => checkOneClickQuote(DRY_REQ, clone(fx.dry.answer), { ...DRY_OPTS, path: "partner" }));
+  for (const path of ["partner", "keyless"] as const) {
+    const a = clone(fx.dry.answer); a.quoteRequest.appFees = [{ recipient: COLLECTOR, fee: 20 }];
+    refused("app-fees", () => checkOneClickQuote(DRY_REQ, a, { ...DRY_OPTS, path }));
+  }
+});
+test("another pair (wNEAR to USDC) answers fee 20 on either path; a fee 1 entry on it is refused", () => {
+  assert.doesNotThrow(() => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), { ...LIVE_OPTS, path: "keyless" }));
+  for (const path of ["partner", "keyless"] as const) {
+    const a = clone(fx.live.answer); a.quoteRequest.appFees = [{ recipient: COLLECTOR, fee: 1 }];
+    refused("app-fees", () => checkOneClickQuote(LIVE_REQ, a, { ...LIVE_OPTS, path }));
+  }
+});
+test("oneClickFeeBps: 0 on the same asset, 1 between two of the release's USDC assets, 20 otherwise, on both paths", () => {
+  const [near, sol, base] = ONECLICK_USDC_ASSETS as [string, string, string];
+  for (const path of ["partner", "keyless"] as const) {
+    assert.equal(oneClickFeeBps(path, near, near), 0);
+    assert.equal(oneClickFeeBps(path, sol, near), 1);
+    assert.equal(oneClickFeeBps(path, base, sol), 1);
+    assert.equal(oneClickFeeBps(path, "nep141:wrap.near", near), 20);
+    assert.equal(oneClickFeeBps(path, near, "nep141:sol.omft.near"), 20);
+  }
 });
 const usdcFloor = (amountIn: bigint, feeBps: number, withdrawFee = 5_538n, intoVault = true) =>
   oneClickFloors({ amountIn, withdrawFee, slippageBps: 100, feeBps, pricing: "usdc", decimalsIn: 6, decimalsOut: 6, intoVault });
-test("USDC-to-USDC floors at $2 and $10,000 (F 1 keyless, 20 partner; S 15; withdrawFee taken off, refundFee never)", () => {
+test("USDC-to-USDC floors at $2 and $10,000 (F 1, and 20 for the other-pair fee; S 15; withdrawFee taken off, refundFee never)", () => {
   assert.deepEqual(usdcFloor(2_000_000n, 1), { amountOut: 1_991_262n, minAmountOut: 1_971_350n });
   assert.deepEqual(usdcFloor(10_000_000_000n, 1), { amountOut: 9_983_994_462n, minAmountOut: 9_884_154_518n });
   assert.deepEqual(usdcFloor(2_000_000n, 20), { amountOut: 1_987_462n, minAmountOut: 1_967_588n });
