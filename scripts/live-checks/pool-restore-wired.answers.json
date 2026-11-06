@@ -1,13 +1,13 @@
 {
  "good": {
   "source": "local: this checkout's committed packages/signpage build",
-  "at": "2026-11-06T04:12:29.111Z",
+  "at": "2026-11-06T04:24:40.913Z",
   "browser": "Chrome 157.0.8103.38, sandbox on",
   "steps": {
    "signedOut": {
     "answer": {
      "v": 1,
-     "id": "c44c97b6-676d-4b65-8377-c6b66de54ac0",
+     "id": "e1378556-edd0-4191-96a6-266945002817",
      "ok": false,
      "error": {
       "code": "not_allowed"
@@ -22,7 +22,7 @@
     "state": {
      "ops": [
       {
-       "id": "78b38d18-0df0-432c-a86c-be716046b99c",
+       "id": "ff0fb44e-8ebf-445d-9291-2b094b86e411",
        "kind": "restore",
        "stage": "done",
        "txs": []
@@ -33,7 +33,7 @@
    "asked": {
     "answer": {
      "v": 1,
-     "id": "eb9ace19-04cc-4202-9df2-f33d68765a2d",
+     "id": "2ebfd92f-a745-43d9-ab2d-d5def8840549",
      "ok": true,
      "result": {
       "stage": "started"
