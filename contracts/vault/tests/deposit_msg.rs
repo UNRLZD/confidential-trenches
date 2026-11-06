@@ -20,6 +20,10 @@
 //!    `vaultDepositMessage`), and the same message padded to exactly 1,024 B, pass rows 1-2 and, with no prepay on
 //!    their precommitment, stop at row 6 (`NoPrepay`): refused like every case above. A deposit that lands is
 //!    tests/s02.rs's.
+//! 5. `precommitment_zero_is_refused_{mock,usdc}` (R-01, review vault-review-opus-contract): no (nullifier, secret)
+//!    hashes to 0, so a note on 0 could never be spent. `storage_prepay("0")` with the kit's 904 B is a failed receipt
+//!    (`InvalidPrecommitment`) that writes nothing, and the deposit message on 0 is refused at row 2 like every case
+//!    above: the sender gets the whole amount back.
 //!
 //! Each case runs on both tokens (vault.md 5): the mock token (`_mock`) and the real USDC wasm (`_usdc`, card
 //! vault-sandbox-usdc); on USDC, case 2's other token is the same real USDC code at another account. Each prints its
@@ -28,7 +32,7 @@
 
 mod harness;
 
-use harness::{wasm_from_env, Harness, Outcome, Receipt, TokenKind, R, ONE_YOCTO, TOKEN_STORAGE};
+use harness::{wasm_from_env, Harness, Outcome, Receipt, TokenKind, R, ONE_YOCTO, TOKEN_STORAGE, YOCTO_PER_BYTE};
 use near_sdk::serde_json::json;
 use near_workspaces::types::{Gas, NearToken};
 use near_workspaces::{Account, AccountId};
@@ -233,6 +237,41 @@ async fn the_kits_message_passes_the_message_checks(kind: TokenKind) -> R<()> {
         // rows 1-2 passed: the first refusal is row 6's, as no one prepaid the precommitment
         refused(&h, &o, &token, u.id(), &before, "NoPrepay").await.map_err(|e| format!("{name}: {e}"))?;
     }
+    println!("{}", h.gas_table());
+    h.i1().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn precommitment_zero_is_refused_mock() -> R<()> {
+    precommitment_zero_is_refused(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn precommitment_zero_is_refused_usdc() -> R<()> {
+    precommitment_zero_is_refused(TokenKind::Usdc).await
+}
+
+async fn precommitment_zero_is_refused(kind: TokenKind) -> R<()> {
+    let (h, u) = setup(kind).await?;
+    let token = h.token.clone();
+    let relayer = h.account("relayer", 10).await?;
+    // the prepay: a failed receipt, nothing written
+    let before = snapshot(&h, &token, u.id()).await?;
+    let prepay = NearToken::from_yoctonear(904 * YOCTO_PER_BYTE);
+    let o = h.call_outcome(&relayer, &h.vault, "storage_prepay", json!({"precommitment": "0"}), prepay, Gas::from_tgas(30)).await?;
+    let r = o.calls_exactly(&h.vault, "storage_prepay", 1)?[0];
+    let f = r.failure().ok_or_else(|| format!("storage_prepay(0) landed: {}", r.line()))?;
+    assert!(f.contains("InvalidPrecommitment"), "{f}");
+    assert!(r.logs.is_empty(), "a refused prepay logged {:?}", r.logs);
+    h.wait_final(&h.vault).await?;
+    assert_eq!(snapshot(&h, &token, u.id()).await?, before, "storage_prepay(0) changed a balance or a state byte");
+    println!("storage_prepay(0): refused, {}", r.line());
+    // the deposit on 0: refused at row 2, the whole amount back to the sender
+    let msg = format!(r#"{{"precommitment":"0","depositor":"{HEX64}"}}"#);
+    let o = transfer_call(&h, &u, &token, &msg).await?;
+    refused(&h, &o, &token, u.id(), &before, "InvalidPrecommitment").await?;
+    assert_eq!(h.view(&h.vault, "deposits", json!({"from": 0, "limit": 10})).await?, json!([]), "a deposit on 0 landed");
     println!("{}", h.gas_table());
     h.i1().await?;
     Ok(())

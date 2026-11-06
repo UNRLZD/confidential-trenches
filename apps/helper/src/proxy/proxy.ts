@@ -61,6 +61,9 @@ export const OWN_ROOM = 1;
  *  packages/kit/src/trade/solana/flow.ts:99 and :434) waits for the window past its 7, as the kit's legs wait for room. */
 export const OTHER_DEVICES_ROOM = 2;
 export const QUEUE_POLL_MS = 250;
+/** Past a hold's end, a wait's margin (card helper-rpc-wait-timing), as rpc.ts HOLD_MARGIN_MS: a timer can fire a few
+ *  ms before the clock reads its end. */
+const HOLD_MARGIN_MS = 5;
 /** The most of one vendor's calls the other helpers may seed (card helper-deploy-reads-fast): a Developer key's 600 a minute
  *  and the second a counted minute spans, with room. */
 export const VENDOR_SEED_MAX = 1_000;
@@ -446,6 +449,11 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       // the vendor's reset holds every call to it: waited out when it ends by `by`, else not ready (never our 429)
       const t0 = performance.now();
       const late = PACED.has(name) ? await paced(name, by, caller, reserved, client) : (await turn(name, by)) ? 0 : heldS();
+      // card helper-rpc-wait-timing: a turn given at the hold's end (pump's wake) can find the clock a few ms inside it,
+      // as Node dates a timer from the event loop's clock read when its turn began (lib/internal/timers.js getLibuvNow);
+      // the rest is waited out while it ends by `by`, a few rounds at most so a clock that does not move still ends it,
+      // and the send is drawn after it (PR #342 test-packages job 127786967728: the retry's draw refused as held, a 503)
+      for (let round = 0; late === 0 && round < 3 && budget.heldUntil(name) > now() && budget.heldUntil(name) <= by; round++) await sleep(budget.heldUntil(name) - now() + HOLD_MARGIN_MS);
       const thisTurnMs = performance.now() - t0;
       turnMs += thisTurnMs;
       // past the wait: Jupiter's hold (a 429's reset) when it is held, else the turns ahead (our pace of its plan)

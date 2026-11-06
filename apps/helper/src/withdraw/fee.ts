@@ -23,6 +23,10 @@
 //   mainnet USDC. One more rule the device has no clock for: the agreed block is at most MAX_FINAL_AGE_MS behind the
 //   helper's clock (withdraw/index.ts), so two frozen providers cannot price a quote, or hold one open, from the past.
 //   Anything else (an error, a disagreement, a pool under the floor) throws, and no quote and no fee_min is given.
+// - The quote's hold (card vault-review-fixes-1): the quote reads POST's check 7b at its priced block, the fee
+//   recipient's storage_balance_of set and is_blocklisted exactly false on both providers; else it throws and GET
+//   answers 503 upstream, so a device never proves against a relayer whose POST holds every send. fee_min (POST's check
+//   3) does not read it: POST's own check 7b holds with its own code and log line.
 // - The window, one rule for both paths: a quote is valid until valid_until_block = the agreed height +
 //   FEE_QUOTE_WINDOW_BLOCKS. The relayer keeps its open quotes, each with the register_deposit it was priced at; on POST
 //   it re-reads and asks relay_fee >= min(the fee_min now, the lowest quote of its own still open at the agreed height
@@ -211,6 +215,28 @@ export async function readRegisterMin(rpcs: readonly [Rpc, Rpc], b: Block, token
   return min;
 }
 
+// ---- Check 7b: the release's fee account (card vault-review-fixes-1) ----
+
+/** Check 7b's reads of the fee account on the token: registered (storage_balance_of set) and blocklisted. */
+export type FeeAccount = { registered: boolean; blocklisted: boolean };
+
+/** Check 7b on its reads: a fee account the token would refuse (not registered, or blocklisted) holds every send. */
+export const feeAccountReady = (f: FeeAccount): boolean => f.registered && !f.blocklisted;
+
+/** The words of check 7b's hold, apart from a low balance's (POST answers both 503 relayer_low). */
+export const FEE_ACCOUNT_NOT_READY = "relayer fee account not ready";
+
+/**
+ * Check 7b's two views of `fee` on `token` at block `b`, on both providers: storage_balance_of null or a NEP-145
+ * balance (its total a u128 decimal), is_blocklisted exactly a boolean; throws FeeReadRefused on anything else.
+ */
+export async function readFeeAccount(rpcs: readonly [Rpc, Rpc], b: Block, token: string, fee: string): Promise<FeeAccount> {
+  const [bal, listed] = await Promise.all([viewAt(rpcs, b, token, "storage_balance_of", { account_id: fee }), viewAt(rpcs, b, token, "is_blocklisted", { account_id: fee })]);
+  if (bal !== null && !(isObj(bal) && decimal(bal.total, U128) !== null)) throw new FeeReadRefused("storage_balance_of(fee_recipient): neither null nor a balance");
+  if (typeof listed !== "boolean") throw new FeeReadRefused("is_blocklisted(fee_recipient): not a boolean");
+  return { registered: bal !== null, blocklisted: listed };
+}
+
 // ---- The quoter: one per helper, both networks ----
 
 export type FeeNetworkConfig = {
@@ -300,6 +326,19 @@ export function createFeeQuoter(cfg: FeeQuoterConfig): FeeQuoter {
     return p;
   };
 
+  // Check 7b for the quote, at the priced block: one read per network and block, shared by the quotes that price there
+  // (the priced read is itself shared for FEE_CACHE_MS), so a quote costs no more reads than before per block.
+  // A final block's answer never changes, so it is kept by the block's height and hash.
+  const ready: Partial<Record<FeeNetwork, { height: bigint; hash: string; p: Promise<FeeAccount> }>> = {};
+  const feeAccountAt = (network: FeeNetwork, block: Block): Promise<FeeAccount> => {
+    const r = ready[network];
+    if (r && r.height === block.height && r.hash === block.hash) return r.p;
+    const net = cfg.networks[network]!;
+    const p = readFeeAccount(net.rpcs, block, TOKENS[network], net.relayer.fee_recipient);
+    ready[network] = { height: block.height, hash: block.hash, p };
+    return p;
+  };
+
   const networkOf = (token: string): FeeNetwork | null => {
     for (const n of Object.keys(TOKENS) as FeeNetwork[]) if (TOKENS[n] === token && cfg.networks[n]) return n;
     return null;
@@ -312,6 +351,10 @@ export function createFeeQuoter(cfg: FeeQuoterConfig): FeeQuoter {
       if (network === null) throw new Error("token: not one this relayer carries");
       const net = cfg.networks[network]!;
       const { block, pool, registerMin } = await priced(network);
+      // POST holds every send while the fee account is not ready (send.ts check 7b), so the quote holds too: the device
+      // stops on this 503 before it proves anything (wallet withdraw/relay.ts askWithdrawFee)
+      const f = await feeAccountAt(network, block);
+      if (!feeAccountReady(f)) throw new FeeReadRefused(`${FEE_ACCOUNT_NOT_READY}: ${net.relayer.fee_recipient} registered ${f.registered}, blocklisted ${f.blocklisted}`);
       const fee = withdrawFeeMin({ gasPrice: block.gasPrice, poolToken: pool.token, poolNear: pool.near, registerDeposit: registerMin });
       const until = block.height + BigInt(FEE_QUOTE_WINDOW_BLOCKS);
       const had = given[network].get(until);

@@ -96,7 +96,7 @@ export const page = (integrity) => `<!doctype html>
 export const NETWORKS = Object.freeze(["mainnet", "testnet"]);
 
 /** A fresh bundle for `network` (SIGN_HOST's, mainnet, unless named): { js, html, worker, thread } as bytes, text,
- *  bytes and bytes. */
+ *  bytes and bytes, the chunk's module ids, and the number of chunks. */
 export async function bundle(pkg = PKG, { network = "mainnet" } = {}) {
   if (!NETWORKS.includes(network)) throw new Error("network: mainnet or testnet");
   const { build } = await import("vite");
@@ -122,9 +122,10 @@ export async function bundle(pkg = PKG, { network = "mainnet" } = {}) {
       },
     });
     const js = readFileSync(join(out, "app.js"));
-    const chunk = [res].flat().flatMap((r) => r.output).find((o) => o.type === "chunk");
-    const modules = chunk ? [...chunk.moduleIds] : [];
-    return { js, html: page(sha384(js)), worker: proverWorkerSource(), thread: proverThreadSource(), modules };
+    const chunks = [res].flat().flatMap((r) => r.output).filter((o) => o.type === "chunk");
+    const modules = chunks[0] ? [...chunks[0].moduleIds] : [];
+    // chunks: how many the build made (one, codeSplitting off), so a reader of `modules` knows it read them all
+    return { js, html: page(sha384(js)), worker: proverWorkerSource(), thread: proverThreadSource(), modules, chunks: chunks.length };
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
