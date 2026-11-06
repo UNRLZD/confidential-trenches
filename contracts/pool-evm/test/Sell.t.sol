@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Vm} from 'forge-std/Vm.sol';
 import {console} from 'forge-std/console.sol';
 
+import {FeeCollector} from '../src/FeeCollector.sol';
 import {PrivacyPoolSimple} from '../src/PrivacyPoolSimple.sol';
 import {SellDelegate, IWETH} from '../src/SellDelegate.sol';
 import {IPoolManager} from '../src/adapters/UniswapV4Adapter.sol';
@@ -512,6 +513,41 @@ contract SellTest is SellBase {
     _r.send(_w(), _s, FEE, _sig);
     // with a fee of 0 nothing is sent to it, and the sell lands
     _r.send(_w(), _s, 0, _sig);
+  }
+
+  /// Card evm-fee-collector: a sell whose fee recipient is the fee collector leaves, in its own transaction, Paid(W,
+  /// fee) from the collector, and the collector's sink holds the fee; a failing sink reverts the whole sell
+  function test_aFeePaidToTheCollectorEmitsPaidFromW() public {
+    address payable _sink = payable(address(0x5141));
+    FeeCollector _collector = new FeeCollector(_sink);
+    SellDelegate.Sell memory _s = _good();
+    _s.feeRecipient = address(_collector);
+    vm.recordLogs();
+    _send(_s, FEE, _signed(_s));
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    uint256 _n;
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      if (_logs[_i].emitter == address(_collector)) {
+        assertEq(_logs[_i].topics[0], FeeCollector.Paid.selector, 'the one log is Paid');
+        assertEq(_logs[_i].topics[1], bytes32(uint256(uint160(W))), 'paid from W');
+        assertEq(abi.decode(_logs[_i].data, (uint256)), FEE, 'the fee');
+        ++_n;
+      }
+    }
+    assertEq(_n, 1, 'one Paid');
+    (,, uint256 _value,) = _deposited(_logs);
+    assertEq(_value, OUT - FEE, 'the rest is deposited');
+    assertEq(_sink.balance, FEE, 'the sink holds the fee');
+    assertEq(address(_collector).balance, 0);
+    assertEq(SENDER.balance, 0, 'the sender is paid nothing directly');
+
+    FeeCollector _refusing = new FeeCollector(payable(address(new RefusingSender())));
+    SellDelegate.Sell memory _s1 = _sellOf(AMOUNT, OUT, false, 1);
+    _s1.feeRecipient = address(_refusing);
+    bytes memory _sig = _signed(_s1);
+    vm.expectRevert(SellDelegate.FailedToSendNativeAsset.selector);
+    _send(_s1, FEE, _sig);
+    assertEq(_w().nonce(), 1, 'the refused sell ran nothing');
   }
 
   function test_aSellHighSSignatureIsRefused() public {

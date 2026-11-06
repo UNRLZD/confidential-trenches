@@ -19,6 +19,7 @@ const VERIFIER = "src/verifiers/WithdrawalVerifier.sol";
 const ADAPTER = "src/adapters/UniswapV3Adapter.sol";
 const V4 = "src/adapters/UniswapV4Adapter.sol";
 const SELL = "src/SellDelegate.sol";
+const FEE = "src/FeeCollector.sol";
 // lib/forge-std's submodule commit (v1.9.7), fetched into the copy when the checkout has no submodule files
 const FORGE_STD = "77041d2ce690e692d6e03cc812b57d1ddaa4d505";
 
@@ -252,6 +253,12 @@ export const MUTANTS = [
   [SELL, "POOL_MANAGER.take(_currency, address(this), _got);", "POOL_MANAGER.take(_currency, address(this), _got - 1);", "test_v4SellToWethLands"],
   [SELL, "if (_gained < _sell.minOut) revert MinOutNotMet();", "", "test_v4ProceedsUnderMinOutAreRefused"],
   [SELL, "if (_gained < _sell.minOut) revert MinOutNotMet();", "", "test_aV4ForkShortOutputFails"],
+  [FEE, "if (_sink == address(0)) revert ZeroSink();", "", "test_theConstructorRefusesTheZeroSink"],
+  [FEE, "emit Paid(msg.sender, msg.value);", "", "test_aPaymentEmitsPaidAndTheSinkReceivesIt"],
+  [FEE, "emit Paid(msg.sender, msg.value);", "emit Paid(tx.origin, msg.value);", "test_aFeePaidToTheCollectorEmitsPaidFromW"],
+  [FEE, "emit Paid(msg.sender, msg.value);", "emit Paid(msg.sender, msg.value + 1);", "testFuzz_anyPaymentIsForwardedWhole"],
+  [FEE, "(bool _sent,) = SINK.call{value: msg.value}('');", "(bool _sent,) = SINK.call{value: msg.value / 2}('');", "test_aPaymentEmitsPaidAndTheSinkReceivesIt"],
+  [FEE, "if (!_sent) revert ForwardFailed();", "", "test_aSinkThatRevertsRevertsThePayment"],
 ];
 
 // keccak256 of the withdrawal verifier's deployed code as `dir` builds it
