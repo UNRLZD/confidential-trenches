@@ -98,6 +98,12 @@ g.BroadcastChannel = class extends BC {
     super(name);
     (this as unknown as { unref?: () => void }).unref?.();
   }
+  // the store's own "signout" post (wallet store signOut, before it deletes the database): the test reads the wait's
+  // signal at that moment, so this tab's sign out is seen to stop the wait itself, before the store goes
+  override postMessage(m: unknown): void {
+    if ((m as { kind?: string } | null)?.kind === "signout") (gl.__ctAtSignoutPost as (() => void) | undefined)?.();
+    super.postMessage(m);
+  }
 };
 
 g.fetch = async () => new Response("{}", { status: 503 });
@@ -122,7 +128,7 @@ test("the testnet page: a landing runs the withdrawals' settle pass, and its wai
   assert.equal(first.aborted, false);
 
   // another tab signs out: the wallet's channel carries it
-  const other = new BC("ct-wallet");
+  const other = new (g.BroadcastChannel as typeof BroadcastChannel)("ct-wallet");
   other.postMessage({ kind: "signout" });
   await until("another tab's sign out stops the wait", () => first.aborted);
   other.close();
@@ -131,6 +137,8 @@ test("the testnet page: a landing runs the withdrawals' settle pass, and its wai
   await until("a later landing's settle pass", () => settles.length >= 2);
   const second = settles.at(-1)!;
   assert.equal(second.aborted, false);
+  let atPost: boolean | null = null;
+  gl.__ctAtSignoutPost = () => (atPost ??= second.aborted);
   await (gl.__ctSignOut as () => Promise<void>)();
-  assert.ok(second.aborted, "this tab's sign out stops the wait");
+  assert.equal(atPost, true, "this tab's sign out stops the wait before the store signs out (not only once its own broadcast comes back)");
 });
