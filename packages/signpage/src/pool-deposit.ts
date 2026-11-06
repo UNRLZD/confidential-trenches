@@ -323,7 +323,9 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     const restore = async (n: NoteRecord, m: { value: bigint; nonce: bigint; slot: number }): Promise<void> => {
       const leaf = await leafOf(n.precommitment, m);
       const incoming = n.state === "PLANNED" ? await store.move(n.id, "PLANNED", "INCOMING") : n;
-      h.landed?.(await store.move(incoming.id, "INCOMING", "UNSPENT", { leaf }));
+      // the move outside the optional call: `h.landed?.(x)` never evaluates x on a host with no landed hook
+      const done = await store.move(incoming.id, "INCOMING", "UNSPENT", { leaf });
+      h.landed?.(done);
     };
 
     const finish = async (note: NoteRecord, own: boolean, reads: number): Promise<"landed" | "taken" | "pending" | "stuck"> => {

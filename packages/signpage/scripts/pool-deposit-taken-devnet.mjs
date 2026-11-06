@@ -11,10 +11,14 @@
 //   precommitment U's transaction names, waits until both RPCs hold its mark at finalized, then lets U's send go (both
 //   RPCs refuse it at preflight: the precommitment is used). The flow must then restore S's deposit as the user's note at
 //   MIN_DEPOSIT and land the rung on U's next note in the same run: answer filled, with U's second deposit.
+// - Before anything is funded, the run's seed entropy and S's secret key go to a 0600 file in ~/.ct-devnet-runs (0700),
+//   outside the repo, as pool-flow-devnet.mjs keeps its seed, so a run that dies can still be swept. Never printed.
 // - It writes the answer, the notes (state, precommitment, leaf), S's and U's landed txs and both marks to <out.json>,
 //   which the card's live check reads; S's remainder goes back to the deploy run's return address.
 import { randomBytes } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { IDBFactory } from "fake-indexeddb";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
@@ -23,17 +27,20 @@ import { openWalletStore } from "../../wallet/src/store/index.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
-import { solanaJsonRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent, solanaPoolPage, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { runPoolDeposit } from "../src/pool-deposit.ts";
+import { TESTNET_RPCS, testnetRpc } from "../src/pool-testnet.ts";
 
 const OUT = process.argv[2];
 if (!OUT) throw new Error("usage: pool-deposit-taken-devnet.mjs <out.json>");
 // the devnet pin of the testnet build (src/pool-testnet.ts, ../../wallet/src/pool/solana.ts SOL_POOLS.devnet)
 const PIN = { program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" };
-const RPCS = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"];
+// the page's own testnet pair (src/pool-testnet.ts TESTNET_RPCS.solana): the public devnet endpoint and the helper's
+// keyed /v1/rpc/solana-devnet, another operator's; onfinality's public route, at 1 request a second per IP, let a run's
+// blockhash run out between its reads
+const RPCS = TESTNET_RPCS.solana;
 const RETURN_TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx"; // the deploy run's (pool-sol-deploy.devnet.json return_to)
 const SYSTEM = "11111111111111111111111111111111";
 const RUNG = 10_000_000n;
@@ -48,18 +55,29 @@ const be32 = (x) => {
   return b;
 };
 const hex32 = (x) => x.toString(16).padStart(64, "0");
-// public devnet RPCs answer HTTP 429 under load: this run waits and asks again, up to 8 times per call
-const patient = (rpc) => async (method, params) => {
-  for (let i = 0; ; i++) {
-    try {
-      return await rpc(method, params);
-    } catch (e) {
-      if (i >= 7 || !/HTTP 429|fetch failed/.test(String(e?.message))) throw e;
-      await sleep(1_000 * 2 ** Math.min(i, 4));
+// public devnet RPCs answer HTTP 429 under load (onfinality's public route is the tighter): each RPC is paced to one
+// call per PACE_MS, and a 429 or a dropped fetch waits and asks again, up to 16 times per call (about 3 minutes)
+const PACE_MS = 350;
+const patient = (rpc) => {
+  let turn = Promise.resolve();
+  const paced = () => {
+    const mine = turn.then(() => sleep(PACE_MS));
+    turn = mine;
+    return mine;
+  };
+  return async (method, params) => {
+    for (let i = 0; ; i++) {
+      await paced();
+      try {
+        return await rpc(method, params);
+      } catch (e) {
+        if (i >= 15 || !/HTTP 429|fetch failed|Too Many Requests|-32029/.test(String(e?.message))) throw e;
+        await sleep(Math.min(1_000 * 2 ** i, 16_000));
+      }
     }
-  }
+  };
 };
-const plain = [patient(solanaJsonRpc(RPCS[0])), patient(solanaJsonRpc(RPCS[1]))];
+const plain = [patient(testnetRpc(RPCS[0])), patient(testnetRpc(RPCS[1]))];
 const lower = async (address) => {
   const got = await Promise.all(plain.map(async (r) => BigInt((await r("getBalance", [address, { commitment: "confirmed" }])).value)));
   return got[0] < got[1] ? got[0] : got[1];
@@ -98,6 +116,7 @@ const markRead = async (pre) => {
 
 const w = await openWalletStore({ indexedDB: new IDBFactory() });
 const entropy = randomBytes(16);
+const kept = Uint8Array.from(entropy); // for the key file below, zeroed once written
 await w.insertSeed({ v: 1, entropy: Uint8Array.from(entropy), source: "code", code_saved: true, created_ms: Date.now() });
 const seed64 = wordsToSeed64(entropyToWords(Uint8Array.from(entropy)));
 entropy.fill(0);
@@ -108,6 +127,15 @@ const id = depositId(seed64, scope, note.ref.i);
 const U = base58.encode(id.publicKey);
 const sSk = Uint8Array.from(randomBytes(32));
 const S = base58.encode(ed25519.getPublicKey(sSk));
+{
+  const dir = join(homedir(), ".ct-devnet-runs");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const at = join(dir, `taken-${new Date().toISOString().replace(/[:.]/g, "-")}.keys`);
+  writeFileSync(at, `${JSON.stringify({ entropy: Buffer.from(kept).toString("hex"), s: Buffer.from(sSk).toString("hex"), U, S })}\n`, { mode: 0o600, flag: "wx" });
+  kept.fill(0);
+  log(`the run's seed and S's key are kept at ${at}`);
+}
 
 const rent = await readSolanaRent(plain);
 const EMPTY = solanaRentMin(rent, 0);
@@ -169,28 +197,57 @@ const racing = (rpc) => async (method, params) => {
   return rpc(method, params);
 };
 
-const answer = await runPoolDeposit(
-  { pin: PIN, rpcs: [racing(plain[0]), racing(plain[1])], notes: async () => ns, seed64: async () => seed64.slice(), progress: (s) => log(`stage ${s}`), wait: sleep },
-  { kind: "pool.deposit", chain: "solana", token: null, amount: RUNG, slippageBps: 0, decimals: 9 },
-);
-const taken = front === null ? null : await front;
-const notes = (await ns.list()).map((n) => ({ ref: n.ref, state: n.state, precommitment: hex32(n.precommitment), leaf: n.leaf && { value: String(n.leaf.value), label: hex32(n.leaf.label), commitment: hex32(n.leaf.commitment), leafIndex: String(n.leaf.leafIndex) }, sends: (n.sends ?? []).map((s) => s.signature) }));
+// the page's own resume: a run an RPC fault cut short leaves its note INCOMING, and the next run settles it first (the
+// restore) and then takes the ask again, as a page reload does. Up to RUNS runs; the record and the sweeps always follow
+const RUNS = 5;
+let answer = { error: "failed" };
+const tries = [];
+try {
+  for (let k = 0; k < RUNS; k++) {
+    try {
+      answer = await runPoolDeposit(
+        { pin: PIN, rpcs: [racing(plain[0]), racing(plain[1])], notes: async () => ns, seed64: async () => seed64.slice(), progress: (s) => log(`stage ${s}`), wait: sleep },
+        { kind: "pool.deposit", chain: "solana", token: null, amount: RUNG, slippageBps: 0, decimals: 9 },
+      );
+      tries.push(answer);
+      log(`run ${k}: ${JSON.stringify(answer)}`);
+      if ("stage" in answer && answer.stage === "filled") break;
+    } catch (e) {
+      tries.push({ thrown: String(e?.message ?? e).split("\n")[0] });
+      log(`run ${k} cut short: ${String(e?.message ?? e).split("\n")[0]}`);
+    }
+    await sleep(15_000);
+  }
+} catch (e) {
+  log(`runs stopped: ${String(e?.message ?? e).split("\n")[0]}`);
+}
+const taken = front === null ? null : await front.catch(() => null);
+// a ref holds bigints (a scope, a label): as decimal strings, so the record and the log are JSON
+const refOf = (r) => JSON.parse(JSON.stringify(r, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
+const notes = (await ns.list()).map((n) => ({ ref: refOf(n.ref), state: n.state, precommitment: hex32(n.precommitment), leaf: n.leaf && { value: String(n.leaf.value), label: hex32(n.leaf.label), commitment: hex32(n.leaf.commitment), leafIndex: String(n.leaf.leafIndex) }, sends: (n.sends ?? []).map((s) => s.signature) }));
 log(`answer ${JSON.stringify(answer)}`);
 log(`notes ${JSON.stringify(notes)}`);
-const marks = await Promise.all(notes.map(async (n) => ({ precommitment: n.precommitment, mark: await markRead(BigInt(`0x${n.precommitment}`)) })));
+const marks = await Promise.all(notes.map(async (n) => ({ precommitment: n.precommitment, mark: await markRead(BigInt(`0x${n.precommitment}`)).catch(() => null) })));
 
-// S's remainder back, all but the fee
-let sweep = null;
-const left = await lower(S);
-if (left > FEE) {
-  const tx = signed(S, [transfer(S, RETURN_TO, left - FEE)], await blockhash(), sSk);
-  sweep = await plain[0]("sendTransaction", [base64.encode(tx), { encoding: "base64" }]);
-  log(`sweep ${sweep}: ${left - FEE} lamports to ${RETURN_TO}`);
+// S's and U's remainders back, all but the fee each (a U with a note still INCOMING keeps its lamports)
+const sweeps = [];
+for (const [who, from, sk] of [["S", S, sSk], ["U", U, id.secretKey]]) {
+  try {
+    if (who === "U" && (await ns.list()).some((n) => n.state === "INCOMING")) continue;
+    const left = await lower(from);
+    if (left <= FEE) continue;
+    const tx = signed(from, [transfer(from, RETURN_TO, left - FEE)], await blockhash(), sk);
+    const sig = await plain[0]("sendTransaction", [base64.encode(tx), { encoding: "base64" }]);
+    sweeps.push({ who, signature: sig, lamports: String(left - FEE) });
+    log(`sweep ${who} ${sig}: ${left - FEE} lamports to ${RETURN_TO}`);
+  } catch (e) {
+    log(`sweep ${who} failed: ${String(e?.message ?? e).split("\n")[0]}`);
+  }
 }
 id.secretKey.fill(0);
 sSk.fill(0);
 seed64.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: PIN.program, pool, U, S, uNeed: String(U_NEED), answer, taken: taken && { precommitment: hex32(taken.pre), signature: taken.sig }, notes, marks, sweep }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: PIN.program, pool, U, S, uNeed: String(U_NEED), answer, tries, taken: taken && { precommitment: hex32(taken.pre), signature: taken.sig }, notes, marks, sweeps }, null, 2) + "\n");
 ns.close();
 w.close();
 const ok = "stage" in answer && answer.stage === "filled" && notes.some((n) => n.ref.kind === "deposit" && n.state === "UNSPENT" && n.leaf?.value === String(MIN_DEPOSIT));

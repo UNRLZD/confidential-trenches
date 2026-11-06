@@ -399,6 +399,28 @@ test("H2 (probe A), precommit-taken-recover: a front-run deposit of MIN_DEPOSIT 
   assert.ok(!(await ours(ns)).some((n) => n.state === "TAKEN"), "never TAKEN");
 });
 
+test("precommit-taken-recover: a host with no landed hook still stores the restored note UNSPENT (the devnet front-run run's host), and the rung lands on U's next note", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 50_000_000);
+  const base = c.rpc();
+  let raced = false;
+  const racing = async (method: string, params: readonly unknown[]) => {
+    if (method === "sendTransaction" && !raced) {
+      raced = true;
+      c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT));
+    }
+    return base(method, params);
+  };
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [racing, c.rpc()], landed: undefined }), ask(RUNG));
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "solana", hash: c.sent[1] }] });
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "UNSPENT", MIN_DEPOSIT],
+    ["second", "UNSPENT", RUNG],
+  ]);
+});
+
 test("precommit-taken-recover: a precommitment taken while its note was PLANNED (the mark already there at the simulation) is restored with nothing signed for it, and the rung goes on the next note", async () => {
   const c = chain();
   const ns = await notes();
