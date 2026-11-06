@@ -68,6 +68,14 @@ async function run(t: TestContext, ms: number) {
   }
   await flush();
 }
+/** `p` settled, the mocked clock moved on 10 ms at a time until it is (card helper-page-jup-429: every Jupiter call
+ *  takes its turn, one a second, so a call awaited here waits on the mocked clock). */
+async function settle<T>(t: TestContext, p: Promise<T>): Promise<T> {
+  let done = false;
+  p.then(() => (done = true), () => (done = true));
+  for (let i = 0; !done && i < 1_000; i++) await run(t, 10);
+  return p;
+}
 /** A page read, answered with its status and the mocked ms it took. */
 type Timed = { status: number; ms: number; retryAfterS?: number };
 function ask(tok: ReturnType<typeof T.createSolanaToken>, m: string): { done: Timed | null; p: Promise<Timed> } {
@@ -237,7 +245,7 @@ test("card helper-token-page-cold: callers ahead of refreshes: a refresh leaves 
 test("card helper-token-page-cold: page searches at their limit leave a swap build's call unblocked (the real proxy and its budget)", async (t) => {
   clock(t);
   const searches: number[] = [];
-  const proxy = createProxy({}, {
+  const proxy = createProxy({}, { burstMs: 0,
     now: () => Date.now(),
     fetch: (async (url: string) => {
       const u = new URL(url);
@@ -251,10 +259,10 @@ test("card helper-token-page-cold: page searches at their limit leave a swap bui
   });
   const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
   // Discover's lists at their most in the counted minute (lists.ts: 3 reads a 12 s refresh, 6 refreshes in 61 s)
-  for (let i = 0; i < 18; i++) assert.equal((await proxy.handle("jupiter", "/tokens/v2/recent", `limit=${i + 1}`, "", undefined, true)).status, 200);
+  for (let i = 0; i < 18; i++) assert.equal((await settle(t, proxy.handle("jupiter", "/tokens/v2/recent", `limit=${i + 1}`, "", undefined, true))).status, 200);
   // callers' swap builds: all of their part but one
   const callers = PROXY_BUDGETS.jupiter.total - PROXY_RESERVE.jupiter;
-  for (let i = 0; i < callers - 1; i++) assert.equal((await proxy.handle("jupiter", "/swap/v2/build", `q=${i}`, "", `198.51.100.${Math.floor(i / 4)}`)).status, 200, `build ${i}`);
+  for (let i = 0; i < callers - 1; i++) assert.equal((await settle(t, proxy.handle("jupiter", "/swap/v2/build", `q=${i}`, "", `198.51.100.${Math.floor(i / 4)}`))).status, 200, `build ${i}`);
   // a new cold mint every 400 ms for 60 s: the pages search as much as they may
   const pages: ReturnType<typeof ask>[] = [];
   for (let n = 0; n < 150; n++) {
@@ -264,7 +272,7 @@ test("card helper-token-page-cold: page searches at their limit leave a swap bui
   assert.equal(searches.length, SEARCH_PER_SPAN, "the page searches at their limit, and no more");
   assert.ok(SEARCH_PER_SPAN + 18 <= PROXY_RESERVE.jupiter, "inside the helper's own reserve with the lists");
   // still in the counted minute of every draw above: the last caller build goes
-  const build = await proxy.handle("jupiter", "/swap/v2/build", "q=last", "", "198.51.100.200");
+  const build = await settle(t, proxy.handle("jupiter", "/swap/v2/build", "q=last", "", "198.51.100.200"));
   assert.equal(build.status, 200, `a swap build is not refused behind token pages (${build.body})`);
   await run(t, 5_000);
   // card helper-crowd-429 fold 6: a page past Jupiter's room is not ready (503 upstream), never our 429
@@ -435,4 +443,24 @@ test("card helper-ready-page-warm: a not-ready page tells its caller why in the 
   const r = timing(T.createSolanaToken(searchProxy(), down, { now: () => Date.now() }), mint(3102));
   await run(t, 1_000);
   assert.deepEqual((await r).slice(0, 2), [503, 'rpc;desc="solana held"'], "the mint's RPC read");
+});
+
+// card helper-page-jup-429: a cold page's search that Jupiter answers 429, 429, then 200 (resets of 1 s, inside the
+// search's SEARCH_HOLD_WAIT_MS) is the page's 200; at c1525df5 the proxy retried once, so the second 429 was a 503
+test("card helper-page-jup-429: a cold page's search met by a Jupiter 429, a 429 and a 200 answers the page 200", async (t) => {
+  clock(t);
+  let n = 0;
+  const proxy = createProxy({}, {
+    now: () => Date.now(),
+    fetch: (async (url: string) => {
+      n++;
+      if (n <= 2) return new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": "1" } });
+      const mints = new URL(url).searchParams.get("query")!.split(",");
+      return new Response(JSON.stringify(mints.map(rowOf)), { headers: { "content-type": "application/json" } });
+    }) as never,
+  });
+  const a = ask(T.createSolanaToken(proxy, rpc, { now: () => Date.now() }), mint(3200));
+  for (let ms = 0; a.done === null && ms < 20_000; ms += 50) await run(t, 50);
+  assert.equal(a.done?.status, 200, `the page after two resets: ${a.done?.status}`);
+  assert.equal(n, 3, "three sends: two 429s and the read");
 });

@@ -881,6 +881,9 @@ async function tokenPagesThen(pages: number, then: (port: number) => Promise<num
     const h = own(createServer(handler(COMMIT, proxy, rpc, undefined, lists, undefined, undefined, undefined, undefined, null, new Map(), new Map())));
     await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
     const port = (h.address() as AddressInfo).port;
+    // Discover's lists built first, as the server's warm() has them: their three Jupiter reads now go one a second
+    // (card helper-page-jup-429, proxy.ts PACED), so the pages below are read at once, not behind the lists' first build
+    await lists.get();
     const opened = Array.from({ length: pages }, () => getAs(port, `/v1/market/token?chain=solana&token=${b58encode(randomBytes(32))}`, "198.51.100.77"));
     await new Promise((r) => setTimeout(r, 300));
     const st = await then(port);
@@ -909,4 +912,24 @@ test("re-check 4 R5e: the token page reads through the helper's one RPC budget: 
   const r = await tokenPagesThen(16, async (port) => [await postAs(port, "/v1/rpc/solana", someGma(), "198.51.100.77"), await postAs(port, "/v1/rpc/solana", someGma(), "192.0.2.30")]);
   assert.equal(r.refused, 0);
   assert.deepEqual(r.st, [429, 200], "the address's 16 pages spent its share of the one budget; another address still reads");
+});
+
+// card helper-page-jup-429: a proxy answer's waits, and a 503's cause (proxy.ts Cause), go out in Server-Timing (at
+// c1525df5 the proxy route sent none, so live run 42143211092's build 503 named no cause)
+test("card helper-page-jup-429: POST /v1/proxy names a 503's cause in Server-Timing, and a 200's waits", async () => {
+  // Jupiter fails the build and its retry
+  const stub = (async () => new Response("{}", { status: 500, headers: { "content-type": "application/json" } })) as typeof fetch;
+  const proxy = createProxy(TEST_VENDOR_KEYS, { fetch: stub });
+  const h = own(createServer(handler(COMMIT, proxy)));
+  await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+  const to = (h.address() as AddressInfo).port;
+  const a = await call("POST", "/v1/proxy/jupiter/swap/v2/build?inputMint=a", { "content-type": "application/json", origin: APP }, "", to);
+  assert.equal(a.status, 503);
+  assert.match(String(a.headers["server-timing"]), /cause;desc="5xx"/);
+  const ok = createProxy(TEST_VENDOR_KEYS, { fetch: (async () => new Response("{}", { headers: { "content-type": "application/json" } })) as typeof fetch });
+  const g = own(createServer(handler(COMMIT, ok)));
+  await new Promise<void>((r) => g.listen(0, "127.0.0.1", () => r()));
+  const b = await call("POST", "/v1/proxy/jupiter/swap/v2/build?inputMint=a", { "content-type": "application/json", origin: APP }, "", (g.address() as AddressInfo).port);
+  assert.equal(b.status, 200);
+  assert.match(String(b.headers["server-timing"]), /^budget;dur=\d+, turn;dur=\d+, send;dur=\d+$/);
 });

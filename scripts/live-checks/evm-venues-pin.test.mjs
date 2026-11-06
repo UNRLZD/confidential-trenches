@@ -5,10 +5,12 @@
 // newest redeploy's, card evm-selldelegate-exact-debit's; the PoolManager is pool-evm-deploy's CHAINS one), and two RPCs of one operator.
 //   node --test scripts/live-checks/evm-venues-pin.test.mjs
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { check, deployed } from "./evm-venues-pin.mjs";
+import { check, deployed, recordOf } from "./evm-venues-pin.mjs";
 import { CHAINS, EIP1967, pinnedBuild } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-venues-pin.answers.json", import.meta.url), "utf8"));
@@ -155,4 +157,20 @@ test("one RPC's stale head does not hide a WETH upgrade: the implementation slot
     answers.push({ url: u, method: "eth_getCode", params: [W.implementation.address, stale], status: 200, json: { jsonrpc: "2.0", id: 1, result: implCode } });
   }
   fails(await run(chain, { answers }), /implementation slot/);
+});
+
+test("the mainnets (card pool-evm-deploy-mainnet): a kit pin with a record is checked on Base and Robinhood too, against MAINNETS; a mainnet's listed middles are no FAIL; a dry run's mainnet record is refused", async () => {
+  const d = { chain: "base", dryRun: false, contracts: { PrivacyPoolSimple: { address: "0x1111111111111111111111111111111111111111" } } };
+  const venues = { base: evmPoolVenues().base, robinhood: evmPoolVenues().robinhood };
+  assert.deepEqual(deployed(venues, (c) => (c === "base" ? d : null)), [["base", d]]);
+  for (const chain of ["base", "robinhood"]) {
+    const r = await check({ chain, venue: evmPoolVenues()[chain], deployment: { ...d, chain }, fetchFn: async () => { throw new Error("offline"); }, sleep: async () => {} });
+    assert.equal(r.ok, false);
+    assert.ok(!r.lines.some((l) => l.startsWith("FAIL") && /middle/.test(l)), r.lines.join("\n"));
+    assert.ok(r.lines.some((l) => /^PASS the PoolManager .* is pool-evm-deploy's /.test(l)), r.lines.join("\n"));
+    assert.ok(r.lines.some((l) => new RegExp(`^FAIL read ${chain === "base" ? "https://mainnet\\.base\\.org" : "https://rpc\\.mainnet\\.chain\\.robinhood\\.com"}`).test(l)), r.lines.join("\n"));
+  }
+  const f = path.join(mkdtempSync(path.join(tmpdir(), "venues-pin-")), "base.json");
+  writeFileSync(f, JSON.stringify({ chain: "base", dryRun: true, contracts: {} }));
+  assert.throws(() => recordOf("base", f), /is not base's real run/);
 });

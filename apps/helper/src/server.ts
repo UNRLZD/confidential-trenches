@@ -492,7 +492,8 @@ export function handler(
               ? { status: 413, headers: {}, body: JSON.stringify({ error: { code: "too_large" } }) }
               : proxy.handle(rest.slice(0, slash), rest.slice(slash), q === -1 ? "" : raw.slice(q + 1), body, clientOf(req)),
           )
-          .then(reply)
+          // card helper-page-jup-429: the call's waits and, on a 503, its cause (proxy.ts Cause), in Server-Timing
+          .then((a) => reply("timing" in a && Array.isArray(a.timing) ? { ...a, headers: { ...a.headers, "Server-Timing": (a.timing as string[]).join(", ") } } : a))
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }

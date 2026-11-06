@@ -67,6 +67,7 @@ test("a mainnet is refused: Base and Robinhood answer 0x2105 and 0x1237, their d
 test("an RPC answering another chain's id is refused, a dry run needs --out, and --chain and --return are required", async () => {
   await withChainId("0xb626", () => assert.rejects(main(["--chain", "base-sepolia", ...RET, "--rpc", "https://rpc.example", "--no-build"]), /not base-sepolia's 0x14a34/));
   await assert.rejects(main(["--chain", "base-sepolia", ...RET, "--rpc", "http://127.0.0.1:8545", "--no-build"]), /needs --out/);
-  await assert.rejects(main(["--chain", "base", ...RET]), /--chain is one of/);
+  await assert.rejects(main(["--chain", "base", ...RET]), /base is a mainnet: its deploy is the owner's paste .* which passes --mainnet/);
+  await assert.rejects(main(["--chain", "ethereum", ...RET]), /--chain is one of/);
   await assert.rejects(main(["--chain", "base-sepolia", "--return", "E"]), /--return <address>/);
 });

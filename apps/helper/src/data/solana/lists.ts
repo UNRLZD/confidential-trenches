@@ -47,6 +47,10 @@ export const READS = { new: "/tokens/v2/recent", trending_5m: "/tokens/v2/toptre
  *  its as_of_ms and X-Helper-Fetched-At, while one refresh runs. warm() refreshes on this cadence, so no caller waits on a vendor: a cold read of
  *  the three lists and the curve accounts took 1.6 s from a Mac (Jupiter's 1h list alone 2.4 s once, 1 Nov 15:25Z). */
 export const FRESH_MS = 12_000;
+/** Card helper-page-jup-429: the three lists are read one at a time, one each LIST_STEP_MS, the one read longest ago
+ *  first, so each is read once a FRESH_MS and the three never take Jupiter's turns together (Jupiter Free's one call a
+ *  second, proxy.ts PACED: three at once held a page's search behind them); the snapshot is built again at each step. */
+export const LIST_STEP_MS = FRESH_MS / 3;
 /** A snapshot whose data is older than this is behind: still served, dated by its read, never passed as fresh; the
  *  lists answer 503 (or the vendor's 429) only while no snapshot was ever built (card app-console-429). */
 export const STALE_MS = 60_000;
@@ -369,9 +373,20 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
     return rows === null ? null : { rows, hints: hintsOf(parsed), at: asOf };
   }
 
+  // each list's last good read; a refresh reads every list it has none of, else the one read longest ago
+  type Read = NonNullable<Awaited<ReturnType<typeof read>>>;
+  const held: Partial<Record<keyof typeof READS, Read & { readAt: number }>> = {};
+  const KEYS = Object.keys(READS) as (keyof typeof READS)[];
   async function refresh(): Promise<ListsAnswer> {
-    const [n, t5, t1] = await Promise.all([read(READS.new), read(READS.trending_5m), read(READS.trending_1h)]);
-    if (n === null || t5 === null || t1 === null) return last ?? UPSTREAM;
+    const missing = KEYS.filter((k) => held[k] === undefined);
+    const due = missing.length > 0 ? missing : [KEYS.reduce((a, b) => (held[b]!.readAt < held[a]!.readAt ? b : a))];
+    const t = now();
+    const got = await Promise.all(due.map((k) => read(READS[k])));
+    due.forEach((k, i) => {
+      if (got[i] !== null) held[k] = { ...got[i]!, readAt: t };
+    });
+    if (got.some((g) => g === null)) return last ?? UPSTREAM;
+    const [n, t5, t1] = [held.new!, held.trending_5m!, held.trending_1h!];
     const asOf = Math.min(n.at, t5.at, t1.at);
     const hints = new Map([...n.hints, ...t5.hints, ...t1.hints]);
     const asks = [...n.rows, ...t5.rows, ...t1.rows].map((r) => ({ mint: r.token as string, hint: hints.get(r.token as string), createdS: r.created_s as number | null }));
@@ -391,10 +406,10 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
     return running;
   }
 
-  /** The current snapshot: as is when built within FRESH_MS; older, as is (dated by its read) while one refresh runs;
+  /** The current snapshot: as is when built within LIST_STEP_MS; older, as is (dated by its read) while one refresh runs;
    *  with none built yet, the first refresh's own answer. */
   async function get(): Promise<ListsAnswer> {
-    if (last !== null && now() - builtAt < FRESH_MS) return last;
+    if (last !== null && now() - builtAt < LIST_STEP_MS) return last;
     if (last !== null) {
       void start();
       return last;
@@ -402,11 +417,11 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
     return start();
   }
 
-  /** Keep the snapshot fresh on its own: one refresh now and one every FRESH_MS (the server's start only; the timer
+  /** Keep the snapshot fresh on its own: one refresh now and one every LIST_STEP_MS (the server's start only; the timer
    *  never holds the process open). Returns the stop. */
   function warm(): () => void {
     void start();
-    const t = setInterval(() => void start(), FRESH_MS);
+    const t = setInterval(() => void start(), LIST_STEP_MS);
     t.unref();
     return () => clearInterval(t);
   }

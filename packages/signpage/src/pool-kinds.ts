@@ -13,6 +13,11 @@
 // - A sell is a trade: answered as one that runs (Running), so the api's queue never waits on its decimals read or
 //   its run, and a flow that runs is answered with its run's own answer once that run's wait settles (card
 //   signpage-pool-sell).
+// - A flow that fails with the wallet's EvmNotFinalError (../../wallet/src/pool/evm-restore.ts evmNextNote: a take in a
+//   block not final yet stands before the note to sign) is answered busy, a "not now" (api.ts RETRY_CODES: the same
+//   request runs again), however it fails with it: thrown at once, or its run's wait rejecting (card
+//   pool-restore-wired). Any other error is answered as before.
+import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import type { KindContext, Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, type PoolAsk, type PoolChain, type PoolRequest, type TokenDecimalsReads } from "./rules/pool.ts";
 
@@ -51,6 +56,33 @@ const NO: { error: "not_allowed" } = Object.freeze({ error: "not_allowed" as con
  *  RETRY_CODES, so the same request again runs again). not_allowed comes only from a rule. */
 const DOWN: { error: "down" } = Object.freeze({ error: "down" as const });
 const EVM_REFUSED: ReadonlySet<PoolKind> = new Set(["pool.deposit"]);
+/** evmNextNote's wait for finality: "not now" (api.ts RETRY_CODES), never failed or not_allowed. */
+const BUSY: { error: "busy" } = Object.freeze({ error: "busy" as const });
+
+type Flow = NonNullable<PoolKindsDeps["flow"]>;
+// the flow's answer, an EvmNotFinalError busy whether thrown at once or its run's wait rejects with it; any other throw
+// or rejection is the flow's own, as before (a Running stays Running, a Deferred a Deferred)
+const runFlow = (flow: Flow, ask: PoolAsk, ctx: KindContext): ReturnType<Flow> | Deferred<PoolKind> | typeof BUSY => {
+  let got: ReturnType<Flow>;
+  try {
+    got = flow(ask, ctx);
+  } catch (e) {
+    if (e instanceof EvmNotFinalError) return BUSY;
+    throw e;
+  }
+  if (!("after" in got)) return got;
+  let notFinal = false;
+  const after = got.after.catch((e: unknown) => {
+    if (!(e instanceof EvmNotFinalError)) throw e;
+    notFinal = true;
+  });
+  // busy only while the run has no result of its own: a run that sent something answers with what it sent
+  const answer = () => {
+    const own = got.answer();
+    return notFinal && !(own !== null && "result" in own) ? BUSY : own;
+  };
+  return "running" in got ? { running: true, after, answer } : { after, answer };
+};
 
 const checked = (p: PoolRequest, reads?: TokenDecimalsReads): PoolAsk | null => {
   try {
@@ -72,7 +104,7 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         const ask = checked(p);
         if (!ask) return NO;
         if (!deps.pinned(ask.chain) || (ask.chain !== "solana" && EVM_REFUSED.has(kind)) || !deps.flow) return NO;
-        return deps.flow(ask, ctx) as Answer<K>;
+        return runFlow(deps.flow, ask, ctx) as Answer<K>;
       }
       // a sell: on a pinned pool's chain only, for a token that is an address of that chain, the token's decimals read
       // on two providers, then the whole request checked with them; no read is made for any other string
@@ -83,7 +115,7 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
       const after = readTokenDecimals(chain, p.token, rpcs).then(
         async (reads) => {
           const ask = checked(p, reads);
-          const got = ask && deps.flow ? deps.flow(ask, ctx) : NO;
+          const got = ask && deps.flow ? runFlow(deps.flow, ask, ctx) : NO;
           if (!("after" in got)) return void (answer = "error" in got ? got : NO); // a sell's flow answers only by running
           // the flow runs: its answer once its own wait settles (the send, or the run's end)
           await got.after.catch(() => {});

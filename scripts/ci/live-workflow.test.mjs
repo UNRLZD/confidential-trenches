@@ -110,9 +110,10 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's twenty-seven checks (signpage-shell runs four ways, pool-read-down the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's twenty-eight checks (signpage-shell runs four ways, pool-restore-wired the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 27);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 28);
+  assert.ok(sign.include.some((e) => e.key === "pool-restore-wired" && e.chrome && e.args === ""), "pool-restore-wired runs after every sign deploy, in Chrome");
   assert.ok(sign.include.some((e) => e.key === "pool-read-down" && !e.chrome && e.args === ""), "pool-read-down runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "sol-buy-rent-back" && !e.chrome && e.args === ""), "sol-buy-rent-back runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "pool-ready-no-flicker" && !e.chrome && e.args === ""), "pool-ready-no-flicker runs after every sign deploy");

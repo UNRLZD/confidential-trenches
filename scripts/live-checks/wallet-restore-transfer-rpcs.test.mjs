@@ -1,5 +1,6 @@
 // node --test scripts/live-checks/wallet-restore-transfer-rpcs.test.mjs: card wallet-restore-transfer-rpcs's live
-// check, replayed. wallet-restore-transfer-rpcs.answers.json holds a real run (5 Nov, card evm-transfer-rpc-spares's
+// check, replayed. wallet-restore-transfer-rpcs.answers.json holds a real run (6 Nov 02:59-03:01Z from the Mac, card
+// restore-check-bounded, the pager's ceiling expiring after EVM_LOG_CEILING_PAGES; first card evm-transfer-rpc-spares's
 // fold, decision M359) (good: the Base Sepolia W's USDC read on base-sepolia.gateway.tenderly.co and
 // base-testnet.api.pocket.network alike, the newest 100,000 blocks of Robinhood read on the helper's route
 // (POST https://api.confidential.unrealized.trade/v1/rpc/robinhood, one reader) and the newest 10,000 of Robinhood
