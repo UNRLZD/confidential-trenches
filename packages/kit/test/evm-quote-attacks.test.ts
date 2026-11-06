@@ -1308,6 +1308,33 @@ test("card rh-cold-quote: a currency's pool whose exact-output read reverts with
   await assert.rejects(c.run(), heldTo(c.x));
 });
 
+// Card evm-spare-list-green: TORCH's second quote on Robinhood (2026-11-06 22:3xZ from this Mac, every provider up): the
+// first quote prunes USDG (its pool with TORCH cannot give Q) and scans USDG's markets as a currency one level further,
+// so the second found USDG scanned, skipped its prune, scanned all of USDG's pools over the whole depth (one cold request
+// on the first, about 5,000 on a spare of 2,000 blocks) and refused too_many_pools (USDG's pools pass the 1,024 other
+// currencies). Here X1's pool with the token can give Q and X1 has no market, so the quote scans X1's pools and finds U
+// there; the token's own pool with U cannot give Q, and U has 1,100 pools of its own.
+test("card evm-spare-list-green: a quote prunes a currency the quote before scanned as it pruned it then: the token's second quote scans nothing new and lands as the first", { timeout: 60_000 }, async () => {
+  const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed11d1";
+  const [x1, u] = [rcAt(0x500), rcAt(0x501)];
+  const eth: ModelPool = { ...rcEth, key: keyOf(coin, NATIVE, 3000, 60, NATIVE) };
+  const xPool: ModelPool = { key: keyOf(coin, x1, 3000, 60, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n] };
+  const uPool: ModelPool = { key: keyOf(coin, u, 3000, 60, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n], most: 1000n * AMOUNT };
+  const via: ModelPool = { key: keyOf(x1, u, 3000, 60, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n] };
+  const uOwn = Array.from({ length: 1_100 }, (_, i): ModelPool => ({ key: keyOf(u, rcAt(0x1000 + i), 3000, 60, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n] }));
+  const pools = [eth, xPool, uPool, via, ...uOwn];
+  const logs = rcLogs([xPool, uPool, via, ...uOwn]);
+  const route: EvmRoute = { ...rcRoute, hops: [{ ...rcRoute.hops[0]!, currency: coin }] };
+  const quote = (asked: [number, number][]) => verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: coin, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, scanner(RC_HEAD, logs, asked, 100_000)));
+  const first = await quote([]);
+  assert.equal(first.accepted, true, String((first as { code?: string }).code));
+  assert.equal((first as { amountOut: bigint }).amountOut, 3000n * AMOUNT);
+  // the same head: every scan the first kept is whole, so the second asks the scan provider nothing
+  const asked: [number, number][] = [];
+  assert.deepEqual(await quote(asked), first);
+  assert.deepEqual(asked, [], `${asked.length} getLogs, the first ${asked[0]?.join("-")}`);
+});
+
 // a cold Robinhood quote whose first scan provider fails once at once and whose spare hides the token's real pool (a
 // native pool of a shape only the scan finds, initialized 5M blocks back): the first still reads every block but the
 // newest few, so the seeded route is refused (review of 9c962b6d, HIGH: the spare had the whole 10M depth alone)

@@ -2137,14 +2137,14 @@ async function routeSet(a: {
   // no such bound and is kept, as in "The prune". A sell has no Q and drops nothing. TORCH on Robinhood has 100 pools
   // with other currencies, 99 of them seeded currencies whose only pool is that one; 89 could not give Q for 0.001 ETH
   // (rpc.mainnet.chain.robinhood.com, 2026-11-06 01:5xZ), and the scans of their markets held its cold quote to the
-  // bound (58 s, rpc_error). Only an X this device has never scanned is asked: a scanned one reads only new blocks, so
-  // the read would add a round to a warm quote for no scan it saves
-  const cold = (x: string) => !SCANS.has(`${chain}:markets:${x}`);
-  if (ok && floor !== null && floor > 0n && floor < 1n << 127n && [...xPools.keys()].some(cold)) {
+  // bound (58 s, rpc_error). Every X is asked, the ones this device scanned before too, so a quote's currencies never
+  // depend on what an earlier quote scanned (card evm-spare-list-green: TORCH's first quote pruned USDG and scanned its
+  // markets one level further; the second, asking only X's never scanned, kept USDG, scanned all its pools over the
+  // whole depth and refused too_many_pools, every TORCH quote after the first, 2026-11-06 22:3xZ)
+  if (ok && floor !== null && floor > 0n && floor < 1n << 127n && xPools.size > 0) {
     const asks: [Found, number][] = [];
     const pr: Read[] = [];
-    for (const [x, fs] of xPools) {
-      if (!cold(x)) continue;
+    for (const [, fs] of xPools) {
       for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push([f, put(pr, { ...exactOutRead(v.v4!, f.key, lower(token), floor), ...noop([f.key]) })]);
     }
     await round(pr);

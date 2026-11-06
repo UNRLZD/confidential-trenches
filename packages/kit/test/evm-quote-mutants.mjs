@@ -43,6 +43,8 @@ export const MUTANTS = [
   [QUOTE, " && a.partial === b.partial && a.overflow === b.overflow);", " && a.partial === b.partial);", R, "card rh-cold-quote: one provider that answers SafeCastOverflow"],
   [QUOTE, 'return r.kind === "revert" && (r.partial || r.overflow === true);', "return false;", R, "card rh-cold-quote: a cold Robinhood quote"],
   [QUOTE, "for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push(", "for (const f of fs) if (true) asks.push(", R, "card rh-cold-quote: a currency's pool behind a pinned hook"],
+  // card evm-spare-list-green: the prune asks every X, a scanned one too (main asked only an X never scanned)
+  [QUOTE, "floor < 1n << 127n && xPools.size > 0) {", "floor < 1n << 127n && [...xPools.keys()].some((x) => !SCANS.has(`${chain}:markets:${x}`))) {", R, "card evm-spare-list-green: a quote prunes a currency the quote before scanned"],
   [QUOTE, "const step = or < on.span && ", "const step = false && ", R, "card rh-cold-quote: a cold Robinhood quote"],
   // the prune's direction (the token out), a plain revert kept, and a cold request the first failed at once: asked as
   // its halves on the first, its newest blocks a request of their own (review of 9c962b6d)
