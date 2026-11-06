@@ -82,6 +82,7 @@ export const CHANGED = [
   "scripts/live-checks/precommit-taken-recover.mjs",
   "scripts/live-checks/relayer-withdraw-fee.mjs",
   "scripts/live-checks/relayer-withdraw-send.mjs",
+  "scripts/live-checks/rh-cold-quote.mjs",
   "scripts/live-checks/signpage-buy-own-spend.mjs",
   "scripts/live-checks/signpage-error-after-timeout.mjs",
   "scripts/live-checks/signpage-buy-route-events.mjs",
