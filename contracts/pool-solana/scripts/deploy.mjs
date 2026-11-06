@@ -87,7 +87,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DEVNET_GENESIS, MAINNET_GENESIS, LOADER_V3, SYSTEM, POOL_LEN, PRE_MARK_LEN, P, MAINNET_RPCS, pda,
-  RPCS as DEVNET_RPCS, account, address, b58decode, b58encode, be32, cat, hex, labelOf, le, pageAddress, poolAddress, preMarkAddress, programDataAddress, rpc,
+  RPCS as DEVNET_RPCS, account, address, b58decode, b58encode, be32, cat, hex, labelOf, le, pageAddress, plainTransfer, poolAddress, preMarkAddress, programDataAddress, rpc,
   scopeOf,
 } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
 import { pinRefusal, readPin } from "./pin.mjs";
@@ -138,6 +138,11 @@ export const TX_MAX = 1232;
 export const priceIx = (microLamports) => ({ program: COMPUTE_BUDGET, keys: [], data: cat(Uint8Array.of(3), le(microLamports, 8)) });
 const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\/?$/;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Lamports as SOL, exact (1 SOL = 1e9 lamports), trailing zeros dropped: 449137520n is "0.44913752". */
+export const solOf = (lamports) => {
+  const s = BigInt(lamports).toString().padStart(10, "0");
+  return `${s.slice(0, -9)}.${s.slice(-9)}`.replace(/\.?0+$/, "");
+};
 const log = (s) => console.log(`deploy: ${s}`);
 
 // ---- transactions (legacy messages) ----
@@ -413,7 +418,7 @@ const byAuthority = (funder, tag, at) => ({
  * upgrade authority is read at confirmed, and a read that fails throws: a finalized read of a deploy that landed a
  * moment ago reads nothing, and "nothing" must never be taken for "not upgradeable".
  */
-export function chainOps({ fetchFn, url, second, funder, programId, keyFile, returnTo, resume = false, cli: run0 = cli, wait = sleep, now = Date.now, say = log, journal, afterCli = async () => {}, tableOf = () => null, priced = (ixs) => ixs, floor = { slot: 0 } }) {
+export function chainOps({ fetchFn, url, second, funder, programId, buffer = null, keyFile, returnTo, resume = false, cli: run0 = cli, wait = sleep, now = Date.now, say = log, journal, afterCli = async () => {}, tableOf = () => null, priced = (ixs) => ixs, floor = { slot: 0 } }) {
   // each CLI call's own transactions are read from the funder's history after it, and journaled
   const run = (args) => {
     try {
@@ -463,13 +468,25 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
   // the upgradeable loader's accounts of `tag` whose authority (at `at`) is Some(funder) on --url: each one listed is
   // read again by its own address at or past the list's slot, and only one whose own bytes still name the funder is
   // left (a list can lag the accounts it lists: paste 2's getProgramAccounts named the programdata while its own read
-  // gave authority none)
+  // gave authority none). The run's own (its buffer, its programdata) are read by their own addresses at the floor
+  // too, listed or not: a list that lags can also leave out a buffer made seconds before (a stop right after the CLI
+  // made it), and keys removed then would lock its rent for good
+  const named = (acc, tag, at) => !!acc && acc.owner === LOADER_V3 && acc.data[0] === tag && acc.data[at] === 1 && b58encode(acc.data.subarray(at + 1, at + 33)) === funder.id;
+  const ownOf = { 1: buffer ? [buffer] : [], 3: [pdAddr] };
   const underFunder = async (tag, at) => {
     const [found, slot] = await read(url, "getProgramAccounts", LOADER_V3, byAuthority(funder, tag, at));
     const left = [];
     for (const a of found) {
       const [acc] = await accountAt(url, a.pubkey, Math.max(floor.slot, slot));
-      if (acc && acc.owner === LOADER_V3 && acc.data[0] === tag && acc.data[at] === 1 && b58encode(acc.data.subarray(at + 1, at + 33)) === funder.id) left.push(a.pubkey);
+      if (named(acc, tag, at)) left.push(a.pubkey);
+    }
+    // on both RPCs: either one reading it under the funder keeps it
+    for (const a of ownOf[tag]) {
+      for (const u of [...new Set([url, second].filter(Boolean))]) {
+        if (left.includes(a)) break;
+        const [acc] = await accountAt(u, a);
+        if (named(acc, tag, at)) left.push(a);
+      }
     }
     return left;
   };
@@ -557,7 +574,8 @@ export function chainOps({ fetchFn, url, second, funder, programId, keyFile, ret
     /** Why the run's keys must be kept: on two RPCs, the funder's balance and the program id's lamports unless it is a
      * deployed program (executable, the upgradeable loader's: its rent is the program's own); then any buffer or
      * programdata on `url` whose authority is the funder (the 33-byte Option at offset 4 or 12 equal to Some(funder)),
-     * as its own read gives it. Every read held to the run's floor (minContextSlot). [] when none. */
+     * as its own read gives it: each one listed, and the run's own buffer and programdata by their own addresses,
+     * listed or not. Every read held to the run's floor (minContextSlot). [] when none. */
     leftovers: () => readAgain(async () => {
       // read again whole while a read fails past rpc()'s tries: one rate-limited read must never keep a finished run's
       // keys
@@ -691,9 +709,22 @@ export async function chainRecord(fetchFn, url, d, { wait, say = () => {} } = {}
   const ours = new Set([d.funder].filter(Boolean));
   for (const k of [...known, ...onChain]) if (authorityOf(k.t)) ours.add(keysOf(k.t)[0]);
   ours.delete(d.return_to);
+  // each other payer's plain transfers into each run key, summed (each signature once): a funding only from the return
+  // address, or at the need of the run that key funded in all (fundedEnough)
+  const needFor = needsOf(d);
+  const sent = new Map(); // `${from} ${to}` -> lamports
+  const pair = (p) => `${p.from} ${p.to}`;
+  for (const k of new Map(known.map((x) => [x.signature, x])).values()) {
+    const p = plainTransfer(k.t);
+    if (p && ours.has(p.to) && !ours.has(p.from)) sent.set(pair(p), (sent.get(pair(p)) ?? 0n) + p.lamports);
+  }
+  const funding = (t) => {
+    const p = plainTransfer(t);
+    return !!p && ours.has(p.to) && fundedEnough(sent.get(pair(p)) ?? 0n, p.from, needFor(p.to), d.return_to);
+  };
   for (const k of known) {
-    if (ours.has(keysOf(k.t)[0]) || ours.has(plainTo(k.t))) add(k.signature, k.t, k.step);
-    else say(`left out of the record: ${k.signature} (${k.step}): paid by ${keysOf(k.t)[0]}, not a run key's nor one plain System Transfer from its payer into a run key`);
+    if (ours.has(keysOf(k.t)[0]) || funding(k.t)) add(k.signature, k.t, k.step);
+    else say(`left out of the record: ${k.signature} (${k.step}): paid by ${keysOf(k.t)[0]}, not a run key's nor plain System Transfers from the return address or adding up to the need of the run key they fund`);
   }
   for (const k of onChain) if (ours.has(keysOf(k.t)[0])) add(k.signature, k.t, null);
   rows.sort((a, b) => a.slot - b.slot);
@@ -704,14 +735,22 @@ export async function chainRecord(fetchFn, url, d, { wait, say = () => {} } = {}
  * lamports; compute budget instructions beside it allowed). Its destination, or null: another payer's transaction of any
  * other shape (paste 2's 3qRUcXSY: a stranger's 1 lamport to each of 18 addresses, the funder among them) is no
  * funding. */
-export function plainTransferTo(t) {
-  const keys = t?.transaction?.message?.accountKeys ?? [];
-  const own = (t?.transaction?.message?.instructions ?? []).filter((i) => keys[i.programIdIndex] !== COMPUTE_BUDGET);
-  if (own.length !== 1) return null;
-  const [i] = own;
-  const data = b58decode(i.data);
-  const isTransfer = keys[i.programIdIndex] === SYSTEM && data.length === 12 && data[0] === 2 && data[1] === 0 && data[2] === 0 && data[3] === 0;
-  return isTransfer && i.accounts?.length === 2 && keys[i.accounts[0]] === keys[0] ? keys[i.accounts[1]] : null;
+export const plainTransferTo = (t) => plainTransfer(t)?.to ?? null;
+/** A record's or journal's need in lamports, or null for one from before the need was written. */
+export const needIn = (d) => (/^\d+$/.test(String(d?.need ?? "")) ? BigInt(d.need) : null);
+/** The funding rule, one for the record (chainRecord), the run's journal (history) and --sweep-kept: a plain transfer
+ * into a run key is a funding when it came from the run's return address (the owner's wallet, read before any key), or
+ * when its sender's plain transfers into that key (`sum`, each signature once) add up to at least the need of the run
+ * that key funded, so a look-alike address poisoner's 1-lamport transfer is never a funding; with no need written,
+ * every plain transfer into a run key is one, as before. */
+export const fundedEnough = (sum, from, need, returnTo) => from === returnTo || need === null || sum >= need;
+/** The need of the run each key funded: a record's `needs` (funder -> need, every run of a resume), its own funder's
+ * `need`, and for a key of no known need the largest one known (never a smaller run's). null when none is written. */
+export function needsOf(d) {
+  const known = { ...(d?.needs ?? {}), ...(d?.funder && needIn(d) !== null ? { [d.funder]: d.need } : {}) };
+  const all = Object.values(known).filter((v) => /^\d+$/.test(String(v))).map(BigInt);
+  const top = all.length ? all.reduce((a, b) => (b > a ? b : a)) : null;
+  return (key) => (/^\d+$/.test(String(known[key] ?? "")) ? BigInt(known[key]) : top);
 }
 
 /** An account once a finalized read shows it (and `ready(acc)` holds), waiting up to 60 s: steps confirm at
@@ -922,8 +961,8 @@ export function keysBase(env = process.env, home = homedir()) {
 /**
  * --sweep-kept <journal>: a stopped run's kept keys, swept later. Loads the funder (and the program id's key, when the
  * run made one) from the journal's key folder, reads every transfer into each on chain, and sends each one's balance
- * less one fee to the funding's own source (the one sender of those transfers; --return names one when there are
- * more). Then, once both read 0 on two RPCs with nothing under the funder's authority, removes the key folder. The
+ * less one fee to the run's return address, or to --return when it funded that key (its plain transfers into it at
+ * least the run's need). The run's buffer (buffer.json) is read by its own address. Then, once both read 0 on two RPCs with nothing under the funder's authority, removes the key folder. The
  * journal gets every transaction read or sent and the keys' state.
  */
 export async function sweepKept(fetchFn, url, second, file, { base = keysBase(), to = null, wait = sleep, now = Date.now, cli: run = cli } = {}) {
@@ -935,7 +974,7 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
     if (!existsSync(f)) return null;
     const b = Uint8Array.from(JSON.parse(readFileSync(f, "utf8")));
     const k = { secret: b.subarray(0, 32), pub: b.subarray(32, 64), id: b58encode(b.subarray(32, 64)) };
-    if (k.id !== id || b58encode(ed25519.getPublicKey(k.secret)) !== id) throw new Error(`${f} is not the key of ${id}`);
+    if ((id && k.id !== id) || b58encode(ed25519.getPublicKey(k.secret)) !== k.id) throw new Error(`${f} is not the key of ${id ?? k.id}`);
     return k;
   };
   const funder = load("funder.json", j.funder);
@@ -945,16 +984,23 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
   const programKey = load("program.json", j.program_id);
   const pa = programKey ? await account(fetchFn, url, programKey.id, undefined, "confirmed") : null;
   const holders = [funder, ...(programKey && !(pa?.executable && pa.owner === LOADER_V3) ? [programKey] : [])];
+  // the run's buffer (buffer.json, or the journal's buffer field): read by its own address, listed or not
+  const bufferKey = load("buffer.json", j.buffer ?? null);
   const known = new Set(j.txs.map((t) => t.signature));
-  // the fundings of a key, read on chain: [{ signature, from }]
+  // --return's rule (a look-alike address poisoner sends one plain 1-lamport transfer into a run key, and the run's own
+  // history labels any plain transfer a funding): a sender counts only when its plain transfers into the key add up to
+  // at least the run's need; a journal from before the need was journaled takes the senders it labels a funding
+  const need = needIn(j);
+  const journaledFunding = new Set(j.txs.filter((t) => /^(first run: )?funding \(/.test(t.step)).map((t) => t.signature));
+  // the plain transfers into a key, read on chain: [{ signature, from, lamports }]
   const incoming = async (k) => {
     const out = [];
     for (const f of (await rpc(fetchFn, url, "getSignaturesForAddress", [k.id, { commitment: "confirmed" }])).reverse()) {
       if (f.err !== null) continue;
       const t = await rpc(fetchFn, url, "getTransaction", [f.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
       // a funding only (one plain System Transfer from its payer): a stranger's dust is never a sender --return may name
-      const from = t?.transaction.message.accountKeys[0];
-      if (plainTransferTo(t) === k.id && from !== k.id) out.push({ signature: f.signature, from });
+      const p = plainTransfer(t);
+      if (p?.to === k.id && p.from !== k.id) out.push({ signature: f.signature, from: p.from, lamports: p.lamports });
     }
     return out;
   };
@@ -962,18 +1008,21 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
   // its reserve when it gave one up): a buffer, a program it can still upgrade, a live lookup table. Each failure is
   // said and kept in the journal's why; the CLI's own transactions are read from the funder's history after each call
   // (the funder's fee payer only: a transfer into it is a funding, which the sweep below reads as one)
+  let cliUnread = false;
   const cliTxs = async (step) => {
+    cliUnread = true;
     for (const f of (await rpc(fetchFn, url, "getSignaturesForAddress", [funder.id, { commitment: "confirmed" }])).reverse()) {
       if (f.err === null) raise(floor, f.slot);
       if (known.has(f.signature)) continue;
       const t = await rpc(fetchFn, url, "getTransaction", [f.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
       if (t?.transaction.message.accountKeys[0] === funder.id) known.add(f.signature), j.txs.push({ step, signature: f.signature, state: f.err === null ? "landed" : "failed", cli: true });
     }
+    cliUnread = false;
   };
   const mainnet = j.genesis_hash === MAINNET_GENESIS;
   const floor = { slot: 0 }; // the sweep's own highest landed slot: its reads of what is left are held to it
   const ops = chainOps({
-    fetchFn, url, second, funder, programId: j.program_id, keyFile: path.join(dir, "funder.json"), returnTo: j.return_to, cli: run, wait, now, tableOf: () => j.table ?? null,
+    fetchFn, url, second, funder, programId: j.program_id, buffer: bufferKey?.id ?? j.buffer ?? null, keyFile: path.join(dir, "funder.json"), returnTo: j.return_to, cli: run, wait, now, tableOf: () => j.table ?? null,
     afterCli: cliTxs, priced: (ixs) => (mainnet ? [priceIx(PRIORITY_MICRO_LAMPORTS), ...ixs] : ixs), floor,
   });
   const failed = [];
@@ -999,22 +1048,30 @@ export async function sweepKept(fetchFn, url, second, file, { base = keysBase(),
     for (const k of holders) {
       const balance = await ops.balanceAt(url, k.id);
       const ins = await incoming(k);
-      for (const i of ins) if (!known.has(i.signature)) known.add(i.signature), j.txs.push({ step: `funding (to ${k === funder ? "the funder" : "the program id"})`, signature: i.signature, state: "landed" });
+      const sent = new Map();
+      for (const i of new Map(ins.map((x) => [x.signature, x])).values()) sent.set(i.from, (sent.get(i.from) ?? 0n) + i.lamports);
+      const counts = (i) => (need === null ? i.from === j.return_to || journaledFunding.has(i.signature) : fundedEnough(sent.get(i.from) ?? 0n, i.from, need, j.return_to));
+      const who = k === funder ? "the funder" : "the program id";
+      for (const i of ins) {
+        if (!known.has(i.signature)) known.add(i.signature), j.txs.push({ step: need === null || counts(i) ? `funding (to ${who})` : `a plain transfer into ${who} below the run's need, not from the return address: not a funding`, signature: i.signature, state: "landed" });
+      }
       // a close or freeze that failed keeps the reserve in the funder, so a later --sweep-kept can still pay for it
       const keep = k === funder && failed.length ? CLEANUP_RESERVE : 0n;
       if (balance <= FEE_PER_SIGNATURE + keep) continue;
       // to the run's return address, which the run read as a wallet in use before any key; --return may name another
-      // only when it sent to this key (a funding from another wallet of the owner's)
-      const sources = [...new Set(ins.map((i) => i.from))];
-      if (to && !sources.includes(to) && to !== j.return_to) throw new Error(`--return ${to} is neither a sender to ${k.id} (${sources.join(", ") || "none read"}) nor the run's return address`);
+      // only when it funded this key (another wallet of the owner's): its plain transfers into it at least the need
+      const sources = [...new Set(ins.filter(counts).map((i) => i.from))];
+      if (to && !sources.includes(to) && to !== j.return_to) {
+        throw new Error(`--return ${to} is neither a sender to ${k.id} (${sources.join(", ") || "none read"}${need === null ? "" : `, each sending at least the run's need ${need} lamports`}) nor the run's return address`);
+      }
       const dest = to ?? j.return_to;
       const sig = await sendAndConfirm(fetchFn, url, [transferIx(k.id, dest, balance - FEE_PER_SIGNATURE - keep)], k, [k], { wait, now, floor });
-      j.txs.push({ step: `sweep (kept keys, to ${dest === j.return_to ? "the run's return address" : "a sender of the funding"} ${dest})`, signature: sig, state: "landed" });
+      j.txs.push({ step: `sweep (kept keys, to ${dest === j.return_to ? "the run's return address" : "a sender of the funding"})`, signature: sig, state: "landed" });
       log(`sweep-kept: ${balance - FEE_PER_SIGNATURE - keep} lamports from ${k.id} to ${dest}: ${sig}`);
     }
     // what is left, read again for about 20 s while it is not nothing: a read right after the sweep can lag on either RPC
     const leftNow = async () => {
-      const out = [...failed];
+      const out = [...failed, ...(cliUnread ? ["the solana CLI's transactions were not read: what is left is read below the slot of what it made"] : [])];
       for (const k of holders) for (const u of [...new Set([url, second])]) {
         const b = await ops.balanceAt(u, k.id);
         if (b !== 0n) out.push(`${k.id} holds ${b} lamports on ${u}`);
@@ -1170,6 +1227,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   // its landed transactions (not the CLI's writes) into the record
   const journalFile = journalOf(outFile);
   const priorTxs = [];
+  const priorNeeds = {}; // a resume: run key -> the need of the run it funded
   let priorTable = null; // a resume: the stopped run's lookup table, reused when it reads frozen with exactly the list
   if (existsSync(journalFile)) {
     const j = JSON.parse(readFileSync(journalFile, "utf8"));
@@ -1185,8 +1243,10 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     }
     const aside = `${outFile.replace(/\.json$/, "")}.stopped-${String(j.stopped_at ?? j.at ?? new Date().toISOString()).replace(/[^0-9TZ]/g, "")}.journal.json`;
     if (existsSync(aside)) refuse(`, and ${aside} exists too: move one of them aside`);
-    if (resumeId) for (const t of j.txs ?? []) if (t.state === "landed" && !t.cli) priorTxs.push({ step: `first run: ${t.step}`, signature: t.signature });
+    if (resumeId) for (const t of j.txs ?? []) if (t.state === "landed" && !t.cli) priorTxs.push({ step: t.step.startsWith("first run") ? t.step : `first run: ${t.step}`, signature: t.signature });
     if (resumeId && typeof j.table === "string") priorTable = address(j.table) && j.table;
+    // the need of each run key of the stopped run (and of the runs before it): its transfers are judged against it
+    if (resumeId) Object.assign(priorNeeds, j.needs ?? {}, j.funder && needIn(j) !== null ? { [j.funder]: j.need } : {});
     renameSync(journalFile, aside);
     log(`the stopped run's journal (keys removed) moved to ${aside}${resumeId ? `; its ${priorTxs.length} landed transaction(s) go in the record` : ""}`);
   }
@@ -1224,13 +1284,20 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   // (with --prior) to read back. It holds the record's fields as they are known (--rebuild-record takes it), and says
   // whether the keys were kept or removed, and why. The full record keeps only the landed ones, not the CLI's buffer
   // writes; the journal is removed once it is written. It names the key folder by its name only.
-  const txs = [];
+  // a resume's: the stopped run's landed transactions and --prior's, journaled from the start, so a resume that stops
+  // before its funding still hands them on (the record adds the programdata's own: the deploy and its SetAuthority)
+  const txs = [...priorTxs.map((t) => ({ ...t, state: "landed" })), ...prior.map((sig) => ({ step: "first run (--prior)", signature: sig, state: "landed" }))];
   const floor = { slot: 0 }; // the run's highest landed slot (raise): what the cleanup's reads are held to
   const unsettled = new Map(); // signature -> { step, signature, base64, lastValid }
   const fields = {
     cluster, genesis_hash: genesis, rpc: new URL(url).host, program_id: program.id, programdata: programDataAddress(program.id), pool: poolAddress(program.id).address,
     so_len: so.length, so_sha256: soSha, build, ci_run: ci?.run ?? null, commit: ci?.commit ?? null, funder: funder.id, return_to: returnTo,
-    ...(tableList ? { table: null, table_addresses: tableList } : {}),
+    // a resume's journal names the stopped run's table from its start: a resume that stops before the table step
+    // leaves it for the next one to reuse, never a journal with no table (a second table, its rent locked for good)
+    ...(tableList ? { table: priorTable, table_addresses: tableList } : {}),
+    ...(bufferKey ? { buffer: bufferKey.id } : {}),
+    // a resume: the need of each run key before this run's, from its first write (this run's joins once it is read)
+    ...(Object.keys(priorNeeds).length ? { needs: { ...priorNeeds } } : {}),
   };
   const keys = { folder: path.basename(dir), state: "in use", why: [], sweep: sweepCommand(journalFile, url, cluster) };
   let stop = null;
@@ -1253,9 +1320,11 @@ export async function main(argv, fetchFn = fetch, io = {}) {
   };
   // what came in to the funder, and what the CLI sent: the funder's history read on chain, each signature not yet in
   // the journal read for its fee payer (the funder: the CLI's; another: a funding)
+  const intoFunder = new Map(); // signature -> [its journal entry, each other payer's plain transfer into the funder], of reads that completed
   const history = async (cliStep) => {
     const sigs = (await rpc(fetchFn, url, "getSignaturesForAddress", [funder.id, { commitment: "confirmed" }], wait)).reverse();
     const found = [];
+    const into = []; // [entry, its plain transfer into the funder]: labelled once every one of this read is summed
     for (const f of sigs) {
       if (f.err === null) raise(floor, f.slot);
       if (txs.some((t) => t.signature === f.signature)) continue;
@@ -1263,12 +1332,32 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       const payer = t?.transaction.message.accountKeys[0];
       const state = f.err === null ? "landed" : "failed";
       if (payer === funder.id) found.push({ step: cliStep ?? "the funder's own (not this run's journal)", signature: f.signature, state, cli: true });
-      else if (state === "landed") found.push({ step: plainTransferTo(t) === funder.id ? "funding (to the funder)" : `another payer's transaction naming the funder (${payer}): not a funding`, signature: f.signature, state });
+      else if (state === "landed") {
+        const p = plainTransfer(t);
+        const e = { step: "another payer's transaction naming the funder: not a funding", signature: f.signature, state };
+        found.push(e);
+        if (p?.to === funder.id) into.push([e, p]);
+      }
     }
+    // summed only once the whole read succeeded, each signature once: a read that throws half way and is read again
+    // never counts a transfer twice; every transfer read so far is labelled again, so a split funding read over two
+    // reads is a funding in both
+    for (const [e, p] of into) intoFunder.set(e.signature, [e, p]);
+    const sum = (from) => [...intoFunder.values()].filter(([, p]) => p.from === from).reduce((a, [, p]) => a + p.lamports, 0n);
+    for (const [e, p] of intoFunder.values()) e.step = fundedEnough(sum(p.from), p.from, needIn(fields), returnTo) ? "funding (to the funder)" : "a plain transfer into the funder below the run's need, not from the return address: not a funding";
     return found;
   };
+  // whether the last read of the CLI's transactions failed: the floor (what the cleanup's reads are held to) may then sit
+  // below the buffer the CLI made, so the keys are kept until a later read succeeds
+  let cliUnread = false;
   const afterCli = async (step) => {
-    txs.push(...(await history(step)));
+    try {
+      txs.push(...(await history(step)));
+      cliUnread = false;
+    } catch (e) {
+      cliUnread = true;
+      throw e;
+    }
     stoppedRecord();
   };
   let result = null;
@@ -1295,7 +1384,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     const clock = { wait, now };
     const priced = (ixs) => (cluster === "mainnet" ? [priceIx(PRIORITY_MICRO_LAMPORTS), ...ixs] : ixs);
     const send = (step, ixs) => sendAndConfirm(fetchFn, url, priced(ixs), funder, [funder], { step, journal, floor, ...clock });
-    const ops = chainOps({ fetchFn, url, second, funder, programId: program.id, keyFile: funderFile, returnTo, resume: !!resumeId, cli: runCli, journal, afterCli, tableOf: () => fields.table ?? null, priced, floor, ...clock });
+    const ops = chainOps({ fetchFn, url, second, funder, programId: program.id, buffer: bufferKey?.id ?? null, keyFile: funderFile, returnTo, resume: !!resumeId, cli: runCli, journal, afterCli, tableOf: () => fields.table ?? null, priced, floor, ...clock });
     // funded: the funder held the need and its funding was read; until then a stop keeps the keys (a transfer may land
     // at any time: a paste made after a terminal closed)
     let funded = false;
@@ -1303,10 +1392,10 @@ export async function main(argv, fetchFn = fetch, io = {}) {
     try {
       const rent = async (n) => BigInt(await rpc(fetchFn, url, "getMinimumBalanceForRentExemption", [n]));
       const need = await needOf(rent, so.length, { resume: !!resumeId, poolExists, mainnet: withTable, tableLen: tableList?.length ?? 0 });
-      Object.assign(fields, { need: String(need.total), need_parts: Object.fromEntries(Object.entries(need.parts).map(([k, v]) => [k, String(v)])) });
+      Object.assign(fields, { need: String(need.total), needs: { ...priorNeeds, [funder.id]: String(need.total) }, need_parts: Object.fromEntries(Object.entries(need.parts).map(([k, v]) => [k, String(v)])) });
       log(`program id ${program.id}`);
-      log(`funder ${funder.id} needs ${need.total} lamports (${Object.entries(need.parts).map(([k, v]) => `${k} ${v}`).join(", ")}); the rest is swept back to ${returnTo}`);
-      log(`waiting for ${funder.id} to hold ${need.total} lamports: send from ${returnTo}, the return address`);
+      log(`funder ${funder.id} needs ${need.total} lamports (${solOf(need.total)} SOL: ${Object.entries(need.parts).map(([k, v]) => `${k} ${v}`).join(", ")}); the rest is swept back to ${returnTo}`);
+      log(`waiting for ${funder.id} to hold ${need.total} lamports (${solOf(need.total)} SOL): send from ${returnTo}, the return address`);
       for (;;) {
         if (stop) throw new Error(`stopped by ${stop}`);
         // a read that fails (its five tries all rate-limited or reset, as api.devnet answered on 5 Nov 18:47Z) is read
@@ -1340,10 +1429,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
       check("funding");
 
       if (resumeId) {
-        // the first run's transactions: its own (--prior: its funding and sweep), then the program's history before now
-        // (the record adds the programdata's own: the deploy and its SetAuthority)
-        for (const t of priorTxs) txs.push({ ...t, state: "landed" });
-        for (const sig of prior) txs.push({ step: "first run (--prior)", signature: sig, state: "landed" });
+        // the first run's transactions are in the journal from its start (txs above)
         log(`resume: ${priorTxs.length + prior.length} prior transaction(s) kept for the record`);
       } else {
         // each try is a new CLI process (a fresh leader socket: v4.4.0 reads leaders from one websocket that never
@@ -1561,6 +1647,7 @@ export async function main(argv, fetchFn = fetch, io = {}) {
         let after = c.after;
         left = await settledLeft(async () => {
           const l = [...(funded ? [] : ["the run stopped before its funding was read: a transfer can still land on the funder"]),
+            ...(cliUnread ? ["the solana CLI's transactions were not read: what is left is read below the slot of what it made"] : []),
             ...(after === 0n ? [] : [`the cleanup left the funder at ${after ?? "an unread balance"}`]), ...(await ops.leftovers())];
           if (l.length) after = await ops.balance().catch(() => after);
           return l;

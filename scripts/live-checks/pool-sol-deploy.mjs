@@ -14,9 +14,11 @@
 //     deploy script computed as Poseidon(value, label, precommitment) and checked against this leaf when it deployed
 //     (contracts/pool-solana/scripts/deploy.mjs; deploy.test.mjs re-checks every committed record);
 //   - every funder of the run (the record's `funders`, the fee payers of its transactions that are not the return
-//     address): 0 lamports at finalized, so no lamport is left behind a run key; one that is not the run's own key and
-//     holds lamports is a wallet that sent the funding, not the return address: its balance is not the deployment's, so
-//     it is an info line, never a FAIL.
+//     address): 0 lamports at finalized, so no lamport is left behind a run key. When the record names a payer other
+//     than the run's funder, each of its transactions is read at finalized: a payer whose every transaction in it is
+//     one plain System Transfer into a run key only funded the run (a wallet other than the return address), its
+//     balance its own: an info line, and the run record names it apart. Any other payer is a run key: it FAILs while
+//     it holds a lamport (card pool-sol-deploy-after-run).
 // A mainnet record (card pool-sol-deploy-mainnet, scripts/live-checks/pool-sol-deploy-mainnet.mjs) has no test deposit,
 // so the mark and leaf lines are not read; instead, on mainnet's two RPCs of two operators:
 //   - the pool exists as above;
@@ -202,6 +204,46 @@ export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries =
     return j.result;
   }
 }
+const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
+/** A funding's one shape: `t` (getTransaction, encoding json) is one plain System Transfer from its fee payer (u32 2, u64
+ * lamports; compute budget instructions beside it allowed). { from, to, lamports }, or null: another payer's transaction
+ * of any other shape (paste 2's 3qRUcXSY: a stranger's 1 lamport to each of 18 addresses, the funder among them) is no
+ * funding. One rule for the deploy's record, its journal, --sweep-kept and this check. */
+export function plainTransfer(t) {
+  const keys = t?.transaction?.message?.accountKeys ?? [];
+  const own = (t?.transaction?.message?.instructions ?? []).filter((i) => keys[i.programIdIndex] !== COMPUTE_BUDGET);
+  if (own.length !== 1) return null;
+  const [i] = own;
+  const data = b58decode(i.data);
+  const isTransfer = keys[i.programIdIndex] === SYSTEM && data.length === 12 && data[0] === 2 && data[1] === 0 && data[2] === 0 && data[3] === 0;
+  if (!isTransfer || i.accounts?.length !== 2 || keys[i.accounts[0]] !== keys[0]) return null;
+  return { from: keys[0], to: keys[i.accounts[1]], lamports: Buffer.from(data.subarray(4, 12)).readBigUInt64LE() };
+}
+
+/**
+ * The record's fee payers sorted into the run's keys and the wallets that only funded it, from each of the record's
+ * transactions read at finalized on `url` (never from a step's label): the run's funder is a run key, and so is every
+ * other payer with a transaction in the record that is not one plain System Transfer into a run key (read until no
+ * more join); the payers left funded the run and did nothing else. A payer the record names with no transaction of
+ * its own is a run key. The return address is neither. { runKeys, foreign } (arrays).
+ */
+export async function payersOf(fetchFn, url, d, sleep) {
+  const paid = new Map(); // payer -> [plainTransfer | null]
+  for (const t of d.txs ?? []) {
+    const x = await rpc(fetchFn, url, "getTransaction", [t.signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }], sleep);
+    if (!x || x.meta?.err !== null) throw new Error(`${t.signature} (${t.step}): ${x ? "failed" : "not found"} at finalized on ${url}`);
+    const payer = x.transaction.message.accountKeys[0];
+    if (payer !== d.return_to) paid.set(payer, [...(paid.get(payer) ?? []), plainTransfer(x)]);
+  }
+  for (const f of d.funders ?? []) if (f !== d.return_to && !paid.has(f)) paid.set(f, [null]);
+  const runKeys = new Set(d.funder ? [d.funder] : []);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [p, ts] of paid) if (!runKeys.has(p) && ts.some((x) => !x || !runKeys.has(x.to))) runKeys.add(p), (grew = true);
+  }
+  return { runKeys: [...runKeys], foreign: [...paid.keys()].filter((p) => !runKeys.has(p)) };
+}
+
 /** An account's { owner, executable, lamports, data } at `commitment` (finalized unless said), or null when it does
  * not exist. */
 export async function account(fetchFn, url, addr, sleep, commitment = "finalized") {
@@ -268,6 +310,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
       `the record's table list is the kit's for this program (solanaPoolBuyTableAccounts, pages to entry 2,047), its 9 venue keys taken from the list: ${list.length} addresses, ${want.length} wanted${first < 0 ? "" : `, entry ${first} is ${list[first] ?? "missing"}, not ${want[first] ?? "none"}`}`);
   }
   const bytesOn = { programdata: [], table: [] };
+  const foreignOn = []; // the wallets that only funded the run, as each RPC's reads sort them
   for (const url of rpcs.slice(0, 2)) {
     const at = `on ${url}`;
     try {
@@ -329,23 +372,27 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
       }
       const funders = d.funders ?? (d.funder ? [d.funder] : []);
       say(funders.length > 0, `the record names the run's funders: ${funders.length} ${at}`);
-      for (const f of funders) {
+      // a payer other than the run's funder is sorted by its transactions in the record, read on chain: one that only
+      // funded the run (each of its transactions one plain System Transfer into a run key) is a wallet whose balance is
+      // its own, an info line; any other is a run key, and a run key holding a lamport FAILs
+      const kinds = funders.some((f) => f !== d.funder) ? await payersOf(fetchFn, url, d, sleep) : { runKeys: funders, foreign: [] };
+      foreignOn.push(kinds.foreign.join(","));
+      for (const f of [...new Set([...funders, ...kinds.runKeys, ...kinds.foreign])]) {
         const b = (await rpc(fetchFn, url, "getBalance", [f, { commitment: "finalized" }], sleep))?.value;
-        // a fee payer of the run that is not its key and not the return address: a funding sent from another wallet,
-        // whose balance is not the deployment's: an info line, never a FAIL
-        if (b !== 0 && d.funder && f !== d.funder) lines.push(`info fee payer ${f} holds ${b} lamports ${at}: it is not this run's key ${d.funder}: the funding came from a wallet other than the return address ${d.return_to}`);
+        if (kinds.foreign.includes(f)) lines.push(`info fee payer ${f} holds ${b} lamports ${at}: not a run key: each of its transactions in the record is one plain System Transfer into a run key (a funding from a wallet other than the return address ${d.return_to})`);
         else say(b === 0, `funder ${f} holds 0 lamports ${at}: ${b}`);
       }
     } catch (e) {
       say(false, `read ${at}: ${String(e.message).split("\n")[0]}`);
     }
   }
+  if (foreignOn.length === 2 && foreignOn[0] !== foreignOn[1]) say(false, `the record's payers sort differently on the two RPCs: funding wallets ${foreignOn.map((f) => f || "none").join(" and ")}`);
   if (mainnet) {
     for (const [name, b] of Object.entries(bytesOn)) {
       say(b.length === 2 && b[0] === b[1], `the ${name} reads the same bytes on ${rpcs.slice(0, 2).join(" and ")}: ${b.length === 2 ? b[0] === b[1] : `${b.length} read`}`);
     }
   }
-  return { ok, lines };
+  return { ok, lines, foreign: foreignOn[0] ? foreignOn[0].split(",") : [] };
 }
 
 export function recorder(fetchFn = fetch) {
@@ -361,8 +408,8 @@ export function recorder(fetchFn = fetch) {
 }
 
 /** The run record's text from a deployment record, after a PASS: every tx of the run, devnet, money path. */
-export function runRecord(d, rpcs) {
-  if (d.cluster === "mainnet") return mainnetRunRecord(d, rpcs);
+export function runRecord(d, rpcs, foreign = []) {
+  if (d.cluster === "mainnet") return mainnetRunRecord(d, rpcs, [], foreign);
   const chain = d.cluster === "devnet" ? "solana-devnet" : null;
   if (!chain) throw new Error(`no run record for cluster ${d.cluster}`);
   return [
@@ -374,18 +421,27 @@ export function runRecord(d, rpcs) {
     `Program ${d.program_id}, programdata ${d.programdata}, pool ${d.pool}; code ${d.so_len} bytes, sha256 ${d.so_sha256} (${d.build}).`,
     `Upgrade authority: none. --final is two transactions, the deploy and then a SetAuthority to none, both in the Tx lines above; this live check reads the authority none on ${rpcs.join(" and ")}.`,
     `Test deposit: ${d.deposit.value} lamports (0.01 SOL), nonce ${d.deposit.nonce}, precommitment ${d.deposit.precommitment}. Its note's secrets lived only in the run, so the 0.01 SOL stays in the pool as a test deposit.`,
-    `Funders: ${(d.funders ?? [d.funder]).join(", ")}, run keys, each swept to ${d.return_to} at its run's end; this live check reads each at 0 lamports on both RPCs. The last run was funded with ${d.need} lamports (the printed need). Every key lived only in its run.`,
+    `Funders: ${runKeysOf(d, foreign).join(", ")}, run keys, each swept to ${d.return_to} at its run's end; this live check reads each at 0 lamports on both RPCs. The last run was funded with ${d.need} lamports (the printed need). Every key lived only in its run.`,
+    ...fundingWallets(foreign),
     "",
   ].join("\n");
 }
 
-/** A record's steps line: each step's label without the address some carry (a sweep's destination, named on the
- * Funders line), since the money gate reads every tx-shaped word on a line that names the Tx lines as a transaction
- * (a 43-44 character address has a NEAR hash's shape: paste 2's --sweep-kept step, 6 Nov). */
-export const stepsOf = (txs) => txs.map((t) => t.step.replace(/ [1-9A-HJ-NP-Za-km-z]{32,44}/g, "")).join(", ");
+/** A record's steps line: each step's label without the address an older one carries (a sweep's destination, named on
+ * the Funders line), since the money gate reads every tx-shaped word on a line that names the Tx lines as a transaction
+ * (a 43-44 character address has a NEAR hash's shape: paste 2's --sweep-kept step, 6 Nov). Only a whole base58 word of
+ * 32 to 44 characters goes, whatever stands before it ("(" too); a longer one (a signature) is kept whole, so the gate
+ * reads it. The deploy's labels carry no address since card pool-sol-deploy-after-run. */
+export const stepsOf = (txs) => txs.map((t) => t.step.replace(/ ?(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])/g, "")).join(", ");
+
+/** The record's funders that are run keys: all but the wallets `foreign` names (the check sorted them on chain). */
+const runKeysOf = (d, foreign) => (d.funders ?? [d.funder]).filter((f) => !foreign.includes(f));
+/** The wallets that only funded the run, named apart from the run keys: their balances are their own. */
+const fundingWallets = (foreign) =>
+  foreign.length ? [`Funding wallets, not run keys: ${foreign.join(", ")}; each only sent the run a plain System Transfer, and its balance is its own.`] : [];
 
 /** The mainnet run record (card pool-sol-deploy-mainnet): every tx of the owner's paste, mainnet, money path. */
-export function mainnetRunRecord(d, rpcs, attempts = []) {
+export function mainnetRunRecord(d, rpcs, attempts = [], foreign = []) {
   return [
     "CARD pool-sol-deploy-mainnet / live: PASS",
     "Money path: yes",
@@ -395,7 +451,8 @@ export function mainnetRunRecord(d, rpcs, attempts = []) {
     `Program ${d.program_id}, programdata ${d.programdata}, pool ${d.pool}; code ${d.so_len} bytes, sha256 ${d.so_sha256} (${d.build}).`,
     `Upgrade authority: none, read on ${rpcs.join(" and ")}. No test deposit on mainnet.`,
     `The pool buy's lookup table ${d.table}: ${d.table_addresses.length} addresses, authority none (frozen), read the same bytes on both RPCs.`,
-    `Funders: ${(d.funders ?? [d.funder]).join(", ")}, run keys, swept to ${d.return_to} at the run's end; this live check reads each at 0 lamports on both RPCs. The run was funded with ${d.need} lamports (the printed need). Every key lived only in its run.`,
+    `Funders: ${runKeysOf(d, foreign).join(", ")}, run keys, swept to ${d.return_to} at the run's end; this live check reads each at 0 lamports on both RPCs. The run was funded with ${d.need} lamports (the printed need). Every key lived only in its run.`,
+    ...fundingWallets(foreign),
     // a paste that stopped before this one: its journal is kept and named here, never as Tx lines (the money gate reads
     // those as this run's transactions)
     ...attempts.map((a) => `Paste ${a.n} (${a.journal.at}) stopped mid-upload and is kept as ${a.file}: ${a.journal.txs.length} transactions, ${a.journal.keys?.state === "removed" ? "its keys removed with every lamport read back at 0 on both RPCs" : `its keys ${a.journal.keys?.state ?? "unrecorded"}`}; this record is paste ${attempts.length + 1}'s.`),
@@ -415,7 +472,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"}`);
     if (r.ok && args.includes("--write-record")) {
-      writeFileSync(RECORD, runRecord(deployment, rpcs));
+      writeFileSync(RECORD, runRecord(deployment, rpcs, r.foreign));
       console.log(`live-check ${KEY}: wrote ${path.relative(process.cwd(), RECORD)}`);
     }
     process.exit(r.ok ? 0 : 1);

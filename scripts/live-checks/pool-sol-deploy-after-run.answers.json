@@ -1,0 +1,1286 @@
+{
+ "note": "Recorded 2026-11-06T09:35Z on mainnet (card pool-sol-deploy-after-run): the live check run on mainnet-beta and PublicNode, PASS. Each bad answer is one patch on the good one: a getBalance answer of `value` lamports for `address` on `url` (or both), or a program id read as a plain account holding lamports.",
+ "record": {
+  "file": "mainnet.json",
+  "funder": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+  "funders": [
+   "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB"
+  ],
+  "return_to": "9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ",
+  "program_id": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+  "buffer": null,
+  "txs": [
+   {
+    "step": "funding (to the funder)",
+    "signature": "5wGExGuraxHFnnnobPR85vr3fBu7mW6BEgrpZWotwMZupKtdRSUj1jBExFbm7wiFeeHR8tqUUbZMAfnH8EM7uQPM"
+   },
+   {
+    "step": "deploy with the upgradeable loader",
+    "signature": "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU"
+   },
+   {
+    "step": "the upgradeable loader: SetAuthority (to none)",
+    "signature": "5EtRdefacXzZDpWqqaj1TQPpehoBZocvgcq7oKxn3bFvjtRvKkar9mfYH1XKbLkjfcroxGVeCWGsntuD4ZuqpZvg"
+   },
+   {
+    "step": "init (tag 0)",
+    "signature": "2MDSvHYtWpu3ZFguZV4ySxWXHcZWjo6Jc2EYUoV8nWhtN8NQAYc8sdpo6nAuJkEdfphjDCXFivzAN9p5bVVHXtHG"
+   },
+   {
+    "step": "lookup table: create and extend with 25 addresses",
+    "signature": "23QX9RfcjLb271ZPWCStKA6mWoQA86o9HDSoKq727q8qRPpoKYnPiUotGJVQm4azQpBGqTayLB1UjhQpGREVzTEb"
+   },
+   {
+    "step": "lookup table: freeze (authority none)",
+    "signature": "2gwDsZqzGQnUsY5fDVujjcmgfdPzyaPKJRtVUSePTkJBkVHYNwQxau9c4vgvu8zwvL6SaXhwxFKFEacnBD1Qemp1"
+   },
+   {
+    "step": "sweep (the funder's rest back)",
+    "signature": "2XdxFtwv6hvgGreUGVKfwN5AdvCsvsHkErThG1pg86G732DqRgMLmHNi2mjMU6PUzanU4SZvsxsEhZvpQDu6S8kU"
+   },
+   {
+    "step": "sweep (kept keys, to the run's return address 9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ)",
+    "signature": "3CUZ2CpNwk8DabVSSD5T62AFJ2JWy8rdU1E8A2ZWMZsYW6RLbRgNXzpQPGHsiWd6s2beD7NRt8hsJUp2KCDJHTRb"
+   }
+  ],
+  "closes": []
+ },
+ "journals": [
+  {
+   "file": "mainnet.attempt-1.journal.json",
+   "funder": "FFfK25ZHePXS69Wzq1ecGdSbCZUK7XvKWVnderBQQ86z",
+   "funders": null,
+   "return_to": "9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ",
+   "program_id": "G4nBMQCmxfFp3HqcSqKrErFL9FuChKkYdvuMPhQbcrCo",
+   "buffer": null,
+   "txs": [
+    {
+     "step": "funding (to the funder)",
+     "signature": "5w6rWU65rgBaXUL3ySAozS5cmpUVK61tJ4PWoATu1Xg87FVbfVfKcN5fqLSrcuBXfPFEvRzAoFcR65YsqCgUDSNC"
+    },
+    {
+     "step": "funding (to the funder)",
+     "signature": "3gzNu2cN33rm9eUQFAHxR2Laqyez3kxXngB9XRoDX8ajXqeChXWzLYGjYuXZfxvPdwjLobt3dzmp3jXTm3Auni9J"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "22sugPEYMBZxZyDQFWFb3rKEaX8CEBDs1EVbr4Pc8pCX18CJS4Xm6qSUmyUuGjrUUMeAhutnF9gRQpC1ibStTjZ5"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "3bni8mx7LQhy3RisPidDfJVNz1QAGkSubQjxKjKM1D6uQtXMrYigSYy2LWSKRiZdEvr4gVnQdGiD4dTdyaZ1eSBu"
+    }
+   ],
+   "closes": [
+    "4UK1wixMS3tQ6ukTZvGJhWZG3U4Aqvozh859oowvzdAhKr2ZE3FfPKnbDA6ZaMQhJfM1gHcGw7yXdDdyERyEAZyT"
+   ]
+  },
+  {
+   "file": "mainnet.paste-2.journal.json",
+   "funder": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+   "funders": null,
+   "return_to": "9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ",
+   "program_id": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+   "buffer": null,
+   "txs": [
+    {
+     "step": "funding (to the funder)",
+     "signature": "5wGExGuraxHFnnnobPR85vr3fBu7mW6BEgrpZWotwMZupKtdRSUj1jBExFbm7wiFeeHR8tqUUbZMAfnH8EM7uQPM"
+    },
+    {
+     "step": "deploy with the upgradeable loader",
+     "signature": "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU"
+    },
+    {
+     "step": "the upgradeable loader: SetAuthority (to none)",
+     "signature": "5EtRdefacXzZDpWqqaj1TQPpehoBZocvgcq7oKxn3bFvjtRvKkar9mfYH1XKbLkjfcroxGVeCWGsntuD4ZuqpZvg"
+    },
+    {
+     "step": "init (tag 0)",
+     "signature": "2MDSvHYtWpu3ZFguZV4ySxWXHcZWjo6Jc2EYUoV8nWhtN8NQAYc8sdpo6nAuJkEdfphjDCXFivzAN9p5bVVHXtHG"
+    },
+    {
+     "step": "lookup table: create and extend with 25 addresses",
+     "signature": "23QX9RfcjLb271ZPWCStKA6mWoQA86o9HDSoKq727q8qRPpoKYnPiUotGJVQm4azQpBGqTayLB1UjhQpGREVzTEb"
+    },
+    {
+     "step": "lookup table: freeze (authority none)",
+     "signature": "2gwDsZqzGQnUsY5fDVujjcmgfdPzyaPKJRtVUSePTkJBkVHYNwQxau9c4vgvu8zwvL6SaXhwxFKFEacnBD1Qemp1"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "2XdxFtwv6hvgGreUGVKfwN5AdvCsvsHkErThG1pg86G732DqRgMLmHNi2mjMU6PUzanU4SZvsxsEhZvpQDu6S8kU"
+    },
+    {
+     "step": "funding (to the funder)",
+     "signature": "3qRUcXSYfgbvMkb6hhiiaQBUx8JwxSNByVLwftFi7LCCCbjteJZNV4caKTmqLC6Q8MLDS9aVrJ9xDRt7sa9jETsa"
+    },
+    {
+     "step": "sweep (kept keys, to the run's return address 9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ)",
+     "signature": "3CUZ2CpNwk8DabVSSD5T62AFJ2JWy8rdU1E8A2ZWMZsYW6RLbRgNXzpQPGHsiWd6s2beD7NRt8hsJUp2KCDJHTRb"
+    }
+   ],
+   "closes": []
+  }
+ ],
+ "rpcs": [
+  "https://api.mainnet-beta.solana.com",
+  "https://solana-rpc.publicnode.com"
+ ],
+ "good": [
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getGenesisHash",
+   "params": [],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+    "id": 1
+   }
+  },
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getTransaction",
+   "params": [
+    "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU",
+    {
+     "encoding": "json",
+     "commitment": "finalized",
+     "maxSupportedTransactionVersion": 0
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "blockTime": 1793951776,
+     "meta": {
+      "computeUnitsConsumed": 2970,
+      "costUnits": 5653,
+      "err": null,
+      "fee": 10297,
+      "innerInstructions": [
+       {
+        "index": 1,
+        "instructions": [
+         {
+          "accounts": [
+           0,
+           3,
+           2
+          ],
+          "data": "11115SCtWvBJV4ufgppCgb5qRjgNK5Jbb4xRVEFWfMGqLWuLua4JMaTdrqzZ5rQFgGQgxf",
+          "programIdIndex": 4,
+          "stackHeight": 2
+         }
+        ]
+       }
+      ],
+      "loadedAddresses": {
+       "readonly": [],
+       "writable": []
+      },
+      "logMessages": [
+       "Program 11111111111111111111111111111111 invoke [1]",
+       "Program 11111111111111111111111111111111 success",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 invoke [1]",
+       "Program 11111111111111111111111111111111 invoke [2]",
+       "Program 11111111111111111111111111111111 success",
+       "Deployed program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 success",
+       "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+       "Program ComputeBudget111111111111111111111111111111 success",
+       "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+       "Program ComputeBudget111111111111111111111111111111 success"
+      ],
+      "postBalances": [
+       45200780,
+       833120,
+       0,
+       402645880,
+       1,
+       1,
+       1,
+       1169280,
+       1009200
+      ],
+      "postTokenBalances": [],
+      "preBalances": [
+       46044197,
+       0,
+       402645880,
+       0,
+       1,
+       1,
+       1,
+       1169280,
+       1009200
+      ],
+      "preTokenBalances": [],
+      "rewards": [],
+      "status": {
+       "Ok": null
+      }
+     },
+     "slot": 466033129,
+     "transaction": {
+      "message": {
+       "accountKeys": [
+        "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "5NnSH7DQ5bAq8gC1G6e2dQoE1LVCxjnxc7xnpERoaQvo",
+        "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+        "11111111111111111111111111111111",
+        "BPFLoaderUpgradeab1e11111111111111111111111",
+        "ComputeBudget111111111111111111111111111111",
+        "SysvarC1ock11111111111111111111111111111111",
+        "SysvarRent111111111111111111111111111111111"
+       ],
+       "header": {
+        "numReadonlySignedAccounts": 0,
+        "numReadonlyUnsignedAccounts": 5,
+        "numRequiredSignatures": 2
+       },
+       "instructions": [
+        {
+         "accounts": [
+          0,
+          1
+         ],
+         "data": "11114Ym9DjdxPo6cRbuMjvV7LKLNyZcdRXNN7JVVQTxUjgUz1c4JMsRCWDbyEHG3n6jwQs",
+         "programIdIndex": 4,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [
+          0,
+          3,
+          1,
+          2,
+          8,
+          7,
+          4,
+          0
+         ],
+         "data": "3Bxs4h2vzJSEeUYw",
+         "programIdIndex": 5,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [],
+         "data": "3gJqkocMWaMm",
+         "programIdIndex": 6,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [],
+         "data": "J2SSyu",
+         "programIdIndex": 6,
+         "stackHeight": 1
+        }
+       ],
+       "recentBlockhash": "9cNtCs7j9WPqqScyFaN6nYjnZHGNqs3tJ66uPQ6WsMCy"
+      },
+      "signatures": [
+       "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU",
+       "5PYex1twxUuyvD7ADFPL3xSQv6mncxrAAEWyPCM16sKij9QxPw5WQo6Zn7qcjau2pWBZFTVySi4DYzs531L1cN4G"
+      ]
+     },
+     "transactionIndex": 107,
+     "version": "legacy"
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getTransaction",
+   "params": [
+    "4UK1wixMS3tQ6ukTZvGJhWZG3U4Aqvozh859oowvzdAhKr2ZE3FfPKnbDA6ZaMQhJfM1gHcGw7yXdDdyERyEAZyT",
+    {
+     "encoding": "json",
+     "commitment": "finalized",
+     "maxSupportedTransactionVersion": 0
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "blockTime": 1793902574,
+     "meta": {
+      "computeUnitsConsumed": 2370,
+      "costUnits": 4015,
+      "err": null,
+      "fee": 5000,
+      "innerInstructions": [],
+      "loadedAddresses": {
+       "readonly": [],
+       "writable": []
+      },
+      "logMessages": [
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 invoke [1]",
+       "Closed Buffer FvYJFGeLKTH1QqkRXiHM9Nc4DK6FkbNPqdJ3MSrDToke",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 success"
+      ],
+      "postBalances": [
+       995000,
+       497222668,
+       0,
+       1
+      ],
+      "postTokenBalances": [],
+      "preBalances": [
+       1000000,
+       94576787,
+       402645881,
+       1
+      ],
+      "preTokenBalances": [],
+      "rewards": [],
+      "status": {
+       "Ok": null
+      }
+     },
+     "slot": 465803123,
+     "transaction": {
+      "message": {
+       "accountKeys": [
+        "FFfK25ZHePXS69Wzq1ecGdSbCZUK7XvKWVnderBQQ86z",
+        "9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ",
+        "FvYJFGeLKTH1QqkRXiHM9Nc4DK6FkbNPqdJ3MSrDToke",
+        "BPFLoaderUpgradeab1e11111111111111111111111"
+       ],
+       "header": {
+        "numReadonlySignedAccounts": 0,
+        "numReadonlyUnsignedAccounts": 1,
+        "numRequiredSignatures": 1
+       },
+       "instructions": [
+        {
+         "accounts": [
+          2,
+          1,
+          0
+         ],
+         "data": "8QwQj",
+         "programIdIndex": 3,
+         "stackHeight": 1
+        }
+       ],
+       "recentBlockhash": "6h6rbYqRoHYBS98d9k935ww1Ju7k8Ep32pzDo4kRvs5H"
+      },
+      "signatures": [
+       "4UK1wixMS3tQ6ukTZvGJhWZG3U4Aqvozh859oowvzdAhKr2ZE3FfPKnbDA6ZaMQhJfM1gHcGw7yXdDdyERyEAZyT"
+      ]
+     },
+     "transactionIndex": 685,
+     "version": "legacy"
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getTransaction",
+   "params": [
+    "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU",
+    {
+     "encoding": "json",
+     "commitment": "finalized",
+     "maxSupportedTransactionVersion": 0
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "blockTime": 1793951776,
+     "meta": {
+      "computeUnitsConsumed": 2970,
+      "costUnits": 5653,
+      "err": null,
+      "fee": 10297,
+      "innerInstructions": [
+       {
+        "index": 1,
+        "instructions": [
+         {
+          "accounts": [
+           0,
+           3,
+           2
+          ],
+          "data": "11115SCtWvBJV4ufgppCgb5qRjgNK5Jbb4xRVEFWfMGqLWuLua4JMaTdrqzZ5rQFgGQgxf",
+          "programIdIndex": 4,
+          "stackHeight": 2
+         }
+        ]
+       }
+      ],
+      "loadedAddresses": {
+       "readonly": [],
+       "writable": []
+      },
+      "logMessages": [
+       "Program 11111111111111111111111111111111 invoke [1]",
+       "Program 11111111111111111111111111111111 success",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 invoke [1]",
+       "Program 11111111111111111111111111111111 invoke [2]",
+       "Program 11111111111111111111111111111111 success",
+       "Deployed program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 success",
+       "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+       "Program ComputeBudget111111111111111111111111111111 success",
+       "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+       "Program ComputeBudget111111111111111111111111111111 success"
+      ],
+      "postBalances": [
+       45200780,
+       833120,
+       0,
+       402645880,
+       1,
+       1,
+       1,
+       1169280,
+       1009200
+      ],
+      "postTokenBalances": [],
+      "preBalances": [
+       46044197,
+       0,
+       402645880,
+       0,
+       1,
+       1,
+       1,
+       1169280,
+       1009200
+      ],
+      "preTokenBalances": [],
+      "rewards": [],
+      "status": {
+       "Ok": null
+      }
+     },
+     "slot": 466033129,
+     "transaction": {
+      "message": {
+       "accountKeys": [
+        "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "5NnSH7DQ5bAq8gC1G6e2dQoE1LVCxjnxc7xnpERoaQvo",
+        "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+        "11111111111111111111111111111111",
+        "BPFLoaderUpgradeab1e11111111111111111111111",
+        "ComputeBudget111111111111111111111111111111",
+        "SysvarC1ock11111111111111111111111111111111",
+        "SysvarRent111111111111111111111111111111111"
+       ],
+       "header": {
+        "numReadonlySignedAccounts": 0,
+        "numReadonlyUnsignedAccounts": 5,
+        "numRequiredSignatures": 2
+       },
+       "instructions": [
+        {
+         "accounts": [
+          0,
+          1
+         ],
+         "data": "11114Ym9DjdxPo6cRbuMjvV7LKLNyZcdRXNN7JVVQTxUjgUz1c4JMsRCWDbyEHG3n6jwQs",
+         "programIdIndex": 4,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [
+          0,
+          3,
+          1,
+          2,
+          8,
+          7,
+          4,
+          0
+         ],
+         "data": "3Bxs4h2vzJSEeUYw",
+         "programIdIndex": 5,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [],
+         "data": "3gJqkocMWaMm",
+         "programIdIndex": 6,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [],
+         "data": "J2SSyu",
+         "programIdIndex": 6,
+         "stackHeight": 1
+        }
+       ],
+       "recentBlockhash": "9cNtCs7j9WPqqScyFaN6nYjnZHGNqs3tJ66uPQ6WsMCy"
+      },
+      "signatures": [
+       "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU",
+       "5PYex1twxUuyvD7ADFPL3xSQv6mncxrAAEWyPCM16sKij9QxPw5WQo6Zn7qcjau2pWBZFTVySi4DYzs531L1cN4G"
+      ]
+     },
+     "transactionIndex": 107,
+     "version": "legacy"
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getBalance",
+   "params": [
+    "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    {
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.0",
+      "slot": 466060804
+     },
+     "value": 0
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getBalance",
+   "params": [
+    "5NnSH7DQ5bAq8gC1G6e2dQoE1LVCxjnxc7xnpERoaQvo",
+    {
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.0",
+      "slot": 466060805
+     },
+     "value": 0
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getBalance",
+   "params": [
+    "FFfK25ZHePXS69Wzq1ecGdSbCZUK7XvKWVnderBQQ86z",
+    {
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.0",
+      "slot": 466060807
+     },
+     "value": 0
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getBalance",
+   "params": [
+    "FvYJFGeLKTH1QqkRXiHM9Nc4DK6FkbNPqdJ3MSrDToke",
+    {
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.0",
+      "slot": 466060808
+     },
+     "value": 0
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getAccountInfo",
+   "params": [
+    "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+    {
+     "encoding": "base64",
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.0",
+      "slot": 466060810
+     },
+     "value": {
+      "data": [
+       "AgAAAM6vLFOZcVq7omiXP/UrQRlhdnkhfwpm0NfLTBjzxMxG",
+       "base64"
+      ],
+      "executable": true,
+      "lamports": 833120,
+      "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+      "rentEpoch": 18446744073709552000,
+      "space": 36
+     }
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://api.mainnet-beta.solana.com",
+   "method": "getAccountInfo",
+   "params": [
+    "G4nBMQCmxfFp3HqcSqKrErFL9FuChKkYdvuMPhQbcrCo",
+    {
+     "encoding": "base64",
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.0",
+      "slot": 466060811
+     },
+     "value": null
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getGenesisHash",
+   "params": [],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getTransaction",
+   "params": [
+    "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU",
+    {
+     "encoding": "json",
+     "commitment": "finalized",
+     "maxSupportedTransactionVersion": 0
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "blockTime": 1793951776,
+     "meta": {
+      "computeUnitsConsumed": 2970,
+      "costUnits": 5653,
+      "err": null,
+      "fee": 10297,
+      "innerInstructions": [
+       {
+        "index": 1,
+        "instructions": [
+         {
+          "accounts": [
+           0,
+           3,
+           2
+          ],
+          "data": "11115SCtWvBJV4ufgppCgb5qRjgNK5Jbb4xRVEFWfMGqLWuLua4JMaTdrqzZ5rQFgGQgxf",
+          "programIdIndex": 4,
+          "stackHeight": 2
+         }
+        ]
+       }
+      ],
+      "loadedAddresses": {
+       "readonly": [],
+       "writable": []
+      },
+      "logMessages": [
+       "Program 11111111111111111111111111111111 invoke [1]",
+       "Program 11111111111111111111111111111111 success",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 invoke [1]",
+       "Program 11111111111111111111111111111111 invoke [2]",
+       "Program 11111111111111111111111111111111 success",
+       "Deployed program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 success",
+       "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+       "Program ComputeBudget111111111111111111111111111111 success",
+       "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+       "Program ComputeBudget111111111111111111111111111111 success"
+      ],
+      "postBalances": [
+       45200780,
+       833120,
+       0,
+       402645880,
+       1,
+       1,
+       1,
+       1169280,
+       1009200
+      ],
+      "postTokenBalances": [],
+      "preBalances": [
+       46044197,
+       0,
+       402645880,
+       0,
+       1,
+       1,
+       1,
+       1169280,
+       1009200
+      ],
+      "preTokenBalances": [],
+      "rewards": [],
+      "status": {
+       "Ok": null
+      }
+     },
+     "slot": 466033129,
+     "transaction": {
+      "message": {
+       "accountKeys": [
+        "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "5NnSH7DQ5bAq8gC1G6e2dQoE1LVCxjnxc7xnpERoaQvo",
+        "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+        "11111111111111111111111111111111",
+        "BPFLoaderUpgradeab1e11111111111111111111111",
+        "ComputeBudget111111111111111111111111111111",
+        "SysvarC1ock11111111111111111111111111111111",
+        "SysvarRent111111111111111111111111111111111"
+       ],
+       "header": {
+        "numReadonlySignedAccounts": 0,
+        "numReadonlyUnsignedAccounts": 5,
+        "numRequiredSignatures": 2
+       },
+       "instructions": [
+        {
+         "accounts": [
+          0,
+          1
+         ],
+         "data": "11114Ym9DjdxPo6cRbuMjvV7LKLNyZcdRXNN7JVVQTxUjgUz1c4JMsRCWDbyEHG3n6jwQs",
+         "programIdIndex": 4,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [
+          0,
+          3,
+          1,
+          2,
+          8,
+          7,
+          4,
+          0
+         ],
+         "data": "3Bxs4h2vzJSEeUYw",
+         "programIdIndex": 5,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [],
+         "data": "3gJqkocMWaMm",
+         "programIdIndex": 6,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [],
+         "data": "J2SSyu",
+         "programIdIndex": 6,
+         "stackHeight": 1
+        }
+       ],
+       "recentBlockhash": "9cNtCs7j9WPqqScyFaN6nYjnZHGNqs3tJ66uPQ6WsMCy"
+      },
+      "signatures": [
+       "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU",
+       "5PYex1twxUuyvD7ADFPL3xSQv6mncxrAAEWyPCM16sKij9QxPw5WQo6Zn7qcjau2pWBZFTVySi4DYzs531L1cN4G"
+      ]
+     },
+     "transactionIndex": 107,
+     "version": "legacy"
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getTransaction",
+   "params": [
+    "4UK1wixMS3tQ6ukTZvGJhWZG3U4Aqvozh859oowvzdAhKr2ZE3FfPKnbDA6ZaMQhJfM1gHcGw7yXdDdyERyEAZyT",
+    {
+     "encoding": "json",
+     "commitment": "finalized",
+     "maxSupportedTransactionVersion": 0
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "blockTime": 1793902574,
+     "meta": {
+      "computeUnitsConsumed": 2370,
+      "costUnits": 4015,
+      "err": null,
+      "fee": 5000,
+      "innerInstructions": [],
+      "loadedAddresses": {
+       "readonly": [],
+       "writable": []
+      },
+      "logMessages": [
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 invoke [1]",
+       "Closed Buffer FvYJFGeLKTH1QqkRXiHM9Nc4DK6FkbNPqdJ3MSrDToke",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 success"
+      ],
+      "postBalances": [
+       995000,
+       497222668,
+       0,
+       1
+      ],
+      "postTokenBalances": [],
+      "preBalances": [
+       1000000,
+       94576787,
+       402645881,
+       1
+      ],
+      "preTokenBalances": [],
+      "rewards": [],
+      "status": {
+       "Ok": null
+      }
+     },
+     "slot": 465803123,
+     "transaction": {
+      "message": {
+       "accountKeys": [
+        "FFfK25ZHePXS69Wzq1ecGdSbCZUK7XvKWVnderBQQ86z",
+        "9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ",
+        "FvYJFGeLKTH1QqkRXiHM9Nc4DK6FkbNPqdJ3MSrDToke",
+        "BPFLoaderUpgradeab1e11111111111111111111111"
+       ],
+       "header": {
+        "numReadonlySignedAccounts": 0,
+        "numReadonlyUnsignedAccounts": 1,
+        "numRequiredSignatures": 1
+       },
+       "instructions": [
+        {
+         "accounts": [
+          2,
+          1,
+          0
+         ],
+         "data": "8QwQj",
+         "programIdIndex": 3,
+         "stackHeight": 1
+        }
+       ],
+       "recentBlockhash": "6h6rbYqRoHYBS98d9k935ww1Ju7k8Ep32pzDo4kRvs5H"
+      },
+      "signatures": [
+       "4UK1wixMS3tQ6ukTZvGJhWZG3U4Aqvozh859oowvzdAhKr2ZE3FfPKnbDA6ZaMQhJfM1gHcGw7yXdDdyERyEAZyT"
+      ]
+     },
+     "transactionIndex": 685,
+     "version": "legacy"
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getTransaction",
+   "params": [
+    "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU",
+    {
+     "encoding": "json",
+     "commitment": "finalized",
+     "maxSupportedTransactionVersion": 0
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "blockTime": 1793951776,
+     "meta": {
+      "computeUnitsConsumed": 2970,
+      "costUnits": 5653,
+      "err": null,
+      "fee": 10297,
+      "innerInstructions": [
+       {
+        "index": 1,
+        "instructions": [
+         {
+          "accounts": [
+           0,
+           3,
+           2
+          ],
+          "data": "11115SCtWvBJV4ufgppCgb5qRjgNK5Jbb4xRVEFWfMGqLWuLua4JMaTdrqzZ5rQFgGQgxf",
+          "programIdIndex": 4,
+          "stackHeight": 2
+         }
+        ]
+       }
+      ],
+      "loadedAddresses": {
+       "readonly": [],
+       "writable": []
+      },
+      "logMessages": [
+       "Program 11111111111111111111111111111111 invoke [1]",
+       "Program 11111111111111111111111111111111 success",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 invoke [1]",
+       "Program 11111111111111111111111111111111 invoke [2]",
+       "Program 11111111111111111111111111111111 success",
+       "Deployed program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+       "Program BPFLoaderUpgradeab1e11111111111111111111111 success",
+       "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+       "Program ComputeBudget111111111111111111111111111111 success",
+       "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+       "Program ComputeBudget111111111111111111111111111111 success"
+      ],
+      "postBalances": [
+       45200780,
+       833120,
+       0,
+       402645880,
+       1,
+       1,
+       1,
+       1169280,
+       1009200
+      ],
+      "postTokenBalances": [],
+      "preBalances": [
+       46044197,
+       0,
+       402645880,
+       0,
+       1,
+       1,
+       1,
+       1169280,
+       1009200
+      ],
+      "preTokenBalances": [],
+      "rewards": [],
+      "status": {
+       "Ok": null
+      }
+     },
+     "slot": 466033129,
+     "transaction": {
+      "message": {
+       "accountKeys": [
+        "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "5NnSH7DQ5bAq8gC1G6e2dQoE1LVCxjnxc7xnpERoaQvo",
+        "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+        "11111111111111111111111111111111",
+        "BPFLoaderUpgradeab1e11111111111111111111111",
+        "ComputeBudget111111111111111111111111111111",
+        "SysvarC1ock11111111111111111111111111111111",
+        "SysvarRent111111111111111111111111111111111"
+       ],
+       "header": {
+        "numReadonlySignedAccounts": 0,
+        "numReadonlyUnsignedAccounts": 5,
+        "numRequiredSignatures": 2
+       },
+       "instructions": [
+        {
+         "accounts": [
+          0,
+          1
+         ],
+         "data": "11114Ym9DjdxPo6cRbuMjvV7LKLNyZcdRXNN7JVVQTxUjgUz1c4JMsRCWDbyEHG3n6jwQs",
+         "programIdIndex": 4,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [
+          0,
+          3,
+          1,
+          2,
+          8,
+          7,
+          4,
+          0
+         ],
+         "data": "3Bxs4h2vzJSEeUYw",
+         "programIdIndex": 5,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [],
+         "data": "3gJqkocMWaMm",
+         "programIdIndex": 6,
+         "stackHeight": 1
+        },
+        {
+         "accounts": [],
+         "data": "J2SSyu",
+         "programIdIndex": 6,
+         "stackHeight": 1
+        }
+       ],
+       "recentBlockhash": "9cNtCs7j9WPqqScyFaN6nYjnZHGNqs3tJ66uPQ6WsMCy"
+      },
+      "signatures": [
+       "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU",
+       "5PYex1twxUuyvD7ADFPL3xSQv6mncxrAAEWyPCM16sKij9QxPw5WQo6Zn7qcjau2pWBZFTVySi4DYzs531L1cN4G"
+      ]
+     },
+     "transactionIndex": 107,
+     "version": "legacy"
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getBalance",
+   "params": [
+    "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    {
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.1",
+      "slot": 466060815
+     },
+     "value": 0
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getBalance",
+   "params": [
+    "5NnSH7DQ5bAq8gC1G6e2dQoE1LVCxjnxc7xnpERoaQvo",
+    {
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.1",
+      "slot": 466060815
+     },
+     "value": 0
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getBalance",
+   "params": [
+    "FFfK25ZHePXS69Wzq1ecGdSbCZUK7XvKWVnderBQQ86z",
+    {
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.1",
+      "slot": 466060816
+     },
+     "value": 0
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getBalance",
+   "params": [
+    "FvYJFGeLKTH1QqkRXiHM9Nc4DK6FkbNPqdJ3MSrDToke",
+    {
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.1",
+      "slot": 466060817
+     },
+     "value": 0
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getAccountInfo",
+   "params": [
+    "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+    {
+     "encoding": "base64",
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.1",
+      "slot": 466060817
+     },
+     "value": {
+      "data": [
+       "AgAAAM6vLFOZcVq7omiXP/UrQRlhdnkhfwpm0NfLTBjzxMxG",
+       "base64"
+      ],
+      "executable": true,
+      "lamports": 833120,
+      "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+      "rentEpoch": 18446744073709552000,
+      "space": 36
+     }
+    },
+    "id": 1
+   }
+  },
+  {
+   "url": "https://solana-rpc.publicnode.com",
+   "method": "getAccountInfo",
+   "params": [
+    "G4nBMQCmxfFp3HqcSqKrErFL9FuChKkYdvuMPhQbcrCo",
+    {
+     "encoding": "base64",
+     "commitment": "finalized"
+    }
+   ],
+   "status": 200,
+   "json": {
+    "jsonrpc": "2.0",
+    "result": {
+     "context": {
+      "apiVersion": "4.4.1",
+      "slot": 466060818
+     },
+     "value": null
+    },
+    "id": 1
+   }
+  }
+ ],
+ "bad": [
+  {
+   "name": "paste 2 funder holds one lamport on PublicNode",
+   "method": "getBalance",
+   "address": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+   "url": "https://solana-rpc.publicnode.com",
+   "value": 1,
+   "fails": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB \\(mainnet\\.paste-2\\.journal\\.json.s funder\\) holds 0 lamports on https://solana-rpc\\.publicnode\\.com: 1$"
+  },
+  {
+   "name": "the buffer paste 2 deployed through holds rent",
+   "method": "getBalance",
+   "address": "5NnSH7DQ5bAq8gC1G6e2dQoE1LVCxjnxc7xnpERoaQvo",
+   "url": "both",
+   "value": 550000000,
+   "fails": "5NnSH7DQ5bAq8gC1G6e2dQoE1LVCxjnxc7xnpERoaQvo \\(the buffer .* drained\\) holds 0 lamports on \\S+: 550000000$"
+  },
+  {
+   "name": "paste 1 funder holds lamports on mainnet-beta",
+   "method": "getBalance",
+   "address": "FFfK25ZHePXS69Wzq1ecGdSbCZUK7XvKWVnderBQQ86z",
+   "url": "https://api.mainnet-beta.solana.com",
+   "value": 449137520,
+   "fails": "FFfK25ZHePXS69Wzq1ecGdSbCZUK7XvKWVnderBQQ86z .* holds 0 lamports on https://api\\.mainnet-beta\\.solana\\.com: 449137520$"
+  },
+  {
+   "name": "the account paste 1 CLI closed holds rent again",
+   "method": "getBalance",
+   "address": "FvYJFGeLKTH1QqkRXiHM9Nc4DK6FkbNPqdJ3MSrDToke",
+   "url": "both",
+   "value": 890880,
+   "fails": "FvYJFGeLKTH1QqkRXiHM9Nc4DK6FkbNPqdJ3MSrDToke \\(the account .* closed in .*\\) holds 0 lamports"
+  },
+  {
+   "name": "paste 1 program id holds lamports and is no deployed program",
+   "method": "getAccountInfo",
+   "address": "G4nBMQCmxfFp3HqcSqKrErFL9FuChKkYdvuMPhQbcrCo",
+   "url": "both",
+   "value": {
+    "owner": "11111111111111111111111111111111",
+    "executable": false,
+    "lamports": 1000000,
+    "data": [
+     "",
+     "base64"
+    ],
+    "rentEpoch": 0,
+    "space": 0
+   },
+   "fails": "G4nBMQCmxfFp3HqcSqKrErFL9FuChKkYdvuMPhQbcrCo .* holds no lamports or is a deployed program on \\S+: 1000000 lamports, owner 1111"
+  }
+ ]
+}

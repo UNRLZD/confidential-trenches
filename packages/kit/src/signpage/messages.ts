@@ -66,7 +66,10 @@ interface Open {
 
 /** The params of each kind, spread into the request envelope next to v, id and type. */
 export interface SignpageParams {
-  /** Ask a deposit address for money from outside: the 1Click asset id the user sends, and how much of it. */
+  /**
+   * Ask a deposit address for money from outside: the 1Click asset id the user sends, and how much of it. The request's
+   * id is the deposit's op id in state.ops, where its stages and facts come (Operation, DepositFacts).
+   */
   "deposit.quote": { origin_asset: string; amount: string };
   /** Read the state of a deposit by the address the quote answered. Signs nothing. */
   "deposit.confirm": { deposit_address: string };
@@ -147,7 +150,7 @@ export interface SignpageResults {
     deadline: string;
     time_estimate_s: number;
   };
-  "deposit.confirm": { stage: DepositStage };
+  "deposit.confirm": { stage: DepositStage } & DepositFacts;
   arm: { stage: "queued" };
   /** Answered once every slice is signed and sent; the fill comes in `progress`. */
   buy: { stage: TradeStage; txs: TxRef[] };
@@ -238,7 +241,49 @@ export type SignpageEvent = ReadyEvent | StateEvent | ProgressEvent | ProgressRo
 /** Anything the page posts to the app. */
 export type SignpageMessage = SignpageAnswer | SignpageEvent;
 
-export type DepositStage = "quote_checked" | "waiting" | "in_transit" | "into_vault" | "done" | "refunded" | "held" | "halted";
+/**
+ * Every stage a deposit can reach (card kit-deposit-calls added the last four, after kit-v1, changing none before them):
+ * - quote_checked: the address is shown, nothing seen yet; waiting: the send is known; in_transit and into_vault: 1Click
+ *   is processing, then the device binds the note; done: the note read on two agreeing RPCs;
+ * - failed: 1Click reported FAILED and is still processing it; short: 1Click INCOMPLETE_DEPOSIT, less arrived than the
+ *   quote's amount; expired: the signed deadline passed with nothing sent;
+ * - refunded: 1Click refunded the money to the deposit's one-time id U; refund_move: the device's move of that refund
+ *   into the vault is in flight;
+ * - held: the money waits under its id (the vault keeps refusing it, or 1Click cannot route it); halted: it waits for a
+ *   reason named in `hold` (DepositHold).
+ */
+export type DepositStage =
+  | "quote_checked" | "waiting" | "in_transit" | "into_vault" | "done" | "refunded" | "held" | "halted"
+  | "failed" | "short" | "expired" | "refund_move";
+export const DEPOSIT_STAGES: readonly DepositStage[] = Object.freeze([
+  "quote_checked", "waiting", "in_transit", "into_vault", "done", "refunded", "held", "halted",
+  "failed", "short", "expired", "refund_move",
+] as const);
+/** Why a halted deposit waits: USDC halted or the relayer down or holding; the relayer not caught up; the vault's account blocked on USDC. */
+export type DepositHold = "halted" | "not_caught_up" | "vault_blocked";
+export const DEPOSIT_HOLDS: readonly DepositHold[] = Object.freeze(["halted", "not_caught_up", "vault_blocked"] as const);
+/** The stages a refunded deposit's later legs can be at: the refund move's own, then where it lands. */
+export const DEPOSIT_REFUNDED_STAGES: readonly DepositStage[] = Object.freeze(["refund_move", "in_transit", "into_vault", "done", "held", "halted"] as const);
+/** The stages at which the money waits under an id the user can move it out of (withdraw.open's from_id). */
+export const DEPOSIT_HELD_STAGES: readonly DepositStage[] = Object.freeze(["refunded", "refund_move", "held", "halted"] as const);
+/**
+ * What the device knows of a deposit beside its stage (card kit-deposit-calls), on the deposit op in state.ops and on
+ * deposit.confirm's answer. Each only on the stages it belongs to; the kit's client drops a message that has one elsewhere:
+ * - refunded: true once 1Click refunded the money to U, so the legs after it are the refund move's (DEPOSIT_REFUNDED_STAGES);
+ * - hold: why a halted deposit waits, on "halted" only (a page of an earlier release sends halted without it);
+ * - held_id: the id the money waits under (U, or the refund move's id), for withdraw.open's from_id (DEPOSIT_HELD_STAGES);
+ * - since_ms: unix ms when the device first saw the send, the sheet's counter's zero; on every stage but quote_checked
+ *   and expired, where nothing was sent;
+ * - amount_usd: the USDC credited into the vault, a decimal string, on "done" only.
+ * States and amounts only: never a key, the 12 words or which note is whose.
+ */
+export interface DepositFacts {
+  refunded?: boolean;
+  hold?: DepositHold;
+  held_id?: string;
+  since_ms?: number;
+  amount_usd?: string;
+}
 export type WithdrawStage = "proving" | "submitted" | "in_transit" | "sent" | "refunded" | "stopped";
 export type TradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed";
 export type HopStage = "in_flight" | "arrived" | "refunded" | "fallback";
@@ -255,8 +300,13 @@ export const POOL_ASSET_DECIMALS: Readonly<Record<PoolAsset, number>> = Object.f
 export type WalletState = "PLANNED" | "ARMING" | "READY" | "IN_POSITION" | "RETURNING" | "EMPTY";
 export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
 
+/**
+ * One request's operation in state.ops, by its id: the id of the request that started it. A deposit's op id is its
+ * deposit.quote request's id (card kit-deposit-calls): the app finds the deposit it asked for in state.ops under the id
+ * it sent, and a retry, which reuses the id, names the same op.
+ */
 export type Operation =
-  | { id: string; kind: "deposit"; stage: DepositStage; txs: TxRef[] }
+  | ({ id: string; kind: "deposit"; stage: DepositStage; txs: TxRef[] } & DepositFacts)
   | { id: string; kind: "withdraw"; stage: WithdrawStage; txs: TxRef[] }
   | { id: string; kind: "buy" | "sell"; stage: TradeStage; txs: TxRef[]; code?: ErrorCode }
   | { id: string; kind: "hop"; stage: HopStage; txs: TxRef[] }
