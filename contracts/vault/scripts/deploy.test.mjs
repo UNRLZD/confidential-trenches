@@ -484,10 +484,12 @@ test("a deploy record names exactly one source: source_commit or non_reproducibl
   assert.match(recordSourceProblems({ ...rec, source_commit: "main" }).join(";"), /source_commit "main" is not a 40-hex commit/);
   assert.match(recordSourceProblems({ ...rec, code_hash: "x" }).join(";"), /code_hash x is not the base58/);
   const records = vaultRecords();
-  assert.deepEqual(records.map((r) => r.name), ["mainnet-test.json", "testnet-skeleton.json", "testnet-v1.json"]);
+  assert.deepEqual(records.map((r) => r.name), ["mainnet-test.json", "testnet-skeleton.json", "testnet-v1.json", "testnet-v3.json"]);
   for (const { name, record } of records) {
     assert.deepEqual(recordSourceProblems(record), [], name);
-    assert.ok(Object.hasOwn(record, "non_reproducible"), `${name} is not marked`);
+    // testnet-v3 (card vault-review-fixes-3) is the first reproducible deploy: it names its commit; the earlier are marked
+    if (name === "testnet-v3.json") assert.match(record.source_commit, /^[0-9a-f]{40}$/, name);
+    else assert.ok(Object.hasOwn(record, "non_reproducible"), `${name} is not marked`);
   }
 });
 

@@ -14,10 +14,10 @@
 //!   `totals` is not touched: `on_payout` already counted the refund in `returned`, which 2.5.2 row 9 holds as the
 //!   notes' value from that moment, so adding it again would count it twice.
 //! - Step 3: the bytes the call wrote (`env::storage_usage()` at the end less at the start) × `env::storage_byte_cost()`
-//!   are taken from the record's `reserve`; a shortfall (a tree grew a level, or NEAR's price rose) is taken from the
-//!   attachment, else `InsufficientStorageDeposit`, the last refusal, which rolls every write back. The record becomes
-//!   `settled` with `reserve = 0` (a same-size overwrite); the rest of the reserve goes to `payer` and the unused
-//!   attachment back to the caller, each a plain Transfer (none for 0).
+//!   are taken from the record's `reserve`; a shortfall (a tree grew a level; a price rise is not seen, near-sdk's byte
+//!   cost being constant: R-02/A-03) is taken from the attachment, else `InsufficientStorageDeposit`, the last refusal,
+//!   which rolls every write back. The record becomes `settled` with `reserve = 0` (a same-size overwrite); the rest of
+//!   the reserve goes to `payer` and the unused attachment back to the caller, each a plain Transfer (none for 0).
 //!
 //! Events, only after the last refusal and the Transfers (NEAR keeps a failed receipt's logs): for a refund note
 //! `leaf_inserted` state, `leaf_inserted` label, `refund_inserted`, in a deposit's order; a `paid` spend logs none.
