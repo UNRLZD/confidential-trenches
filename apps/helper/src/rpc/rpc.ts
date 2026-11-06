@@ -238,7 +238,8 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `pinned`: an EVM chain's other providers, in order (server.ts: swaps.ts SWAP_RPCS), each of which may answer a
  *  caller's read when the configured one is held or has no room in its pace (callEvm). */
 /** `pacer`: another client's, when this one sends to the same keyed URL (card helper-crowd-429); else its own. */
-type Deps = { fetch?: Fetch; now?: () => number; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer };
+/** `sleep`: the waits' timer (card helper-rpc-wait-timing), a test's clock beside `now`. */
+type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
 /** `timing` (card helper-ready-page-warm): this read's Server-Timing entries, the wait before its send (a hold or the
  *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint. */
@@ -408,7 +409,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const p = pacedOf(key);
     return p === null ? 0 : pacer.at(p.url, n, p.perSecond, { fromMs: Math.max(0, heldUntilOf(key, url) - now()), maxWaitMs });
   };
-  const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   /** When `key`'s hold ends (epoch ms, 0 when free), and with `url`, an EVM provider's hold for every path of the helper
    *  (Deps holds, card helper-robinhood-capacity) beside it. */
   const heldUntilOf = (key: string, url?: string): number => {
@@ -419,15 +420,24 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const heldOf = (key: string, url?: string): number => Math.max(budget.heldFor(key), url === undefined ? 0 : (deps.holds?.heldFor(url) ?? 0));
   /** A hold on `key` (with `url`, the provider's shared one too) that ends within HOLD_WAIT_MS and by `deadline` is
    *  waited out: true once nothing holds it (card helper-crowd-429); a longer one, or one set again meanwhile, is false
-   *  at once or after the one wait. */
-  const holdOver = async (key: string, deadline: number, url?: string): Promise<boolean> => {
+   *  at once or after the wait. A wait that wakes inside the same hold (a timer dated from the event loop's clock, read
+   *  when its turn began, lib/internal/timers.js getLibuvNow, fires that much early) waits out its rest, a few rounds
+   *  at most (card helper-rpc-wait-timing). */
+  const holdOver = async (key: string, deadline: number, url?: string, rest: (ms: number) => Promise<unknown> = sleep): Promise<boolean> => {
     const until = heldUntilOf(key, url);
-    const t = now();
+    let t = now();
     if (until <= t) return true;
     if (until > Math.min(deadline, t + HOLD_WAIT_MS)) return false;
-    // a timer can fire a few ms before the clock reads its end: the wait is the hold's end plus HOLD_MARGIN_MS
-    await sleep(until - t + HOLD_MARGIN_MS);
-    return heldOf(key, url) === 0;
+    for (let round = 0; round < 3; round++) {
+      // a timer can fire a few ms before the clock reads its end: the wait is the hold's end plus HOLD_MARGIN_MS
+      await rest(until - t + HOLD_MARGIN_MS);
+      if (heldOf(key, url) === 0) return true;
+      // a hold set again meanwhile (a later end) is false; the same one still on woke early (an EVM provider's shared
+      // hold is read as now plus its ms, so its end moves by a clock's rounding, never by a margin)
+      if (heldUntilOf(key, url) > until + HOLD_MARGIN_MS) return false;
+      t = now();
+    }
+    return false;
   };
   const drawsOf = (c: string, methods: readonly string[]): [string, number][] => {
     const draws: [string, number][] = [[c, methods.length]];
@@ -602,6 +612,14 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const c = (key === PUBLIC_KEY ? "solana" : key) as RpcChain;
     const viaSlot = c === "solana" && keyed && key !== PUBLIC_KEY;
     const begun = now();
+    // card helper-rpc-wait-timing: the time this call spent in a hold's or the pace's wait, its rpc-wait; the call's
+    // own work between them is not (sent - begun read a slow runner's 0.5 ms of it as rpc-wait;dur=1)
+    let waitedMs = 0;
+    const rest = async (ms: number): Promise<void> => {
+      const t = now();
+      await sleep(ms);
+      waitedMs += now() - t;
+    };
     /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). */
     const fellBack = (): Promise<Answer> =>
       publicFallback
@@ -614,7 +632,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const shared = EVM_CHAINS.has(c) ? url : undefined;
     const heldAt = (): number => heldOf(key, shared);
     const deadline = now() + HOLD_WAIT_MS + PACE_MAX_MS;
-    if (!(await holdOver(key, deadline, shared))) return throttled(heldAt(), undefined, `${key} held`);
+    if (!(await holdOver(key, deadline, shared, rest))) return throttled(heldAt(), undefined, `${key} held`);
     const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
     let r!: Response;
@@ -624,11 +642,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       const room = Math.max(0, Math.min(PACE_MAX_MS, deadline - now()));
       const paced = pace(key, methods.length, room, shared);
       if (paced > room) return throttled(Math.max(1, Math.ceil((paced - room) / 1000)), undefined, `${key} pace`);
-      if (paced > 0) await sleep(paced);
+      if (paced > 0) await rest(paced);
       // the hold is read again right before the send: the provider may have asked us to wait while this one waited
       // for its second (card helper-rpc-hold-queued); a short one is waited out and the send paced again
       if (heldAt() > 0) {
-        if (tries < 2 && (await holdOver(key, deadline, shared))) continue;
+        if (tries < 2 && (await holdOver(key, deadline, shared, rest))) continue;
         return throttled(Math.max(1, heldAt()), undefined, `${key} held`);
       }
       // the send counted where it leaves (Pacer.go), within the deadline
@@ -638,7 +656,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       for (let round = 0; gate > 0; round++) {
         // a few rounds at most: each waits for a send to leave the second, so more mean a crowd past the deadline
         if (round >= 4 || performance.now() + gate > goBy) return throttled(Math.max(1, Math.ceil(gate / 1000)), undefined, `${key} pace`);
-        await sleep(gate);
+        await rest(gate);
         gate = pacer.go(p!.url, methods.length, p!.perSecond);
       }
       if (heldAt() > 0) return throttled(Math.max(1, heldAt()), undefined, `${key} held`);
@@ -658,7 +676,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           hold(key, waitS, "caller");
           if (shared !== undefined) deps.holds?.hold(url, waitS);
           // sent once more after a short hold, drawing on the budget as any send does
-          if (tries < 2 && (await holdOver(key, deadline, shared))) {
+          if (tries < 2 && (await holdOver(key, deadline, shared, rest))) {
             const again = budget.takeEach(drawsOf(key, methods), client, false, reserved);
             if (again === 0) continue;
             return throttled(again, undefined, budget.refusedBy());
@@ -696,7 +714,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const b = Buffer.from(text, "utf8");
     if (secretForms.some((f) => b.includes(f))) return UPSTREAM();
     if (viaSlot) slot.ok();
-    const waited = Math.round(sent - begun);
+    const waited = Math.round(waitedMs);
     return { status: r.status, body: text, timing: [...(waited > 0 ? [`rpc-wait;dur=${waited}`] : []), `rpc;dur=${Math.round(now() - sent)};desc="${key === PUBLIC_KEY ? "public" : key}"`] };
   }
 
