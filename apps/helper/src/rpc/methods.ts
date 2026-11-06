@@ -5,7 +5,8 @@
 //
 // One chain beside the kit's: "solana-devnet" (card pool-buy-send-fast), the testnet build's second Solana provider,
 // the same shape as mainnet's ([a public provider, this route]: packages/signpage/src/pool-testnet.ts TESTNET_RPCS). Its
-// method list is the kit's Solana list. The public second provider it replaces (onfinality, 1 request a second and 1000
+// method list is the kit's Solana list and getGenesisHash, a constant read the devnet live checks make on each provider
+// (card live-check-devnet-pair: scripts/live-checks/pool-sol-deploy.mjs DEVNET_PROVIDERS); mainnet's list is the kit's. The public second provider it replaces (onfinality, 1 request a second and 1000
 // a day per IP, read 5 Nov 15:03Z) made the page's buy reads 11.2 s; no free devnet provider of another operator
 // serves more without a key.
 import { CHAINS, HELPER_RPC_BATCH_MAX, HELPER_RPC_METHODS, HELPER_V1_PATHS, type Chain, type HelperV1Path } from "@blindfill/kit";
@@ -14,7 +15,7 @@ export const SOLANA_DEVNET = "solana-devnet";
 export const RPC_CHAINS: readonly RpcChain[] = Object.freeze([...CHAINS, SOLANA_DEVNET]);
 export type RpcChain = Chain | typeof SOLANA_DEVNET;
 
-export const RPC_METHODS: Readonly<Record<RpcChain, readonly string[]>> = Object.freeze({ ...HELPER_RPC_METHODS, [SOLANA_DEVNET]: HELPER_RPC_METHODS.solana });
+export const RPC_METHODS: Readonly<Record<RpcChain, readonly string[]>> = Object.freeze({ ...HELPER_RPC_METHODS, [SOLANA_DEVNET]: [...HELPER_RPC_METHODS.solana, "getGenesisHash"] });
 
 /** A batch holds 1 to this many requests. */
 export const RPC_BATCH_MAX = HELPER_RPC_BATCH_MAX;

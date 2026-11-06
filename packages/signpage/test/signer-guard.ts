@@ -123,7 +123,8 @@ const DEPOSIT_SIG = "deposit(uint256,uint256)";
 const DEPOSIT_SELECTOR = "e2bbb158";
 /** The EIP-712 Sell type (sell-unpinned.ts), spaces dropped: a sell's digest built by hand starts from it. */
 const SELL_TYPE = "sell(addresstoken,uint256amount,addresstarget";
-/** keccak256 of the Sell type: the kit's (sell-unpinned.ts:411, 11 fields) and the helper's (helper pool/evm.ts:286). */
+/** keccak256 of the Sell type: the 11-field one SellDelegate checks (the kit's sell-unpinned.ts:411, the helper's
+ *  pool/evm.ts SELL_TYPE) and the 10-field one before pool-review-3 put feeRecipient after feeCap. */
 const SELL_TYPEHASHES = ["7964e18e540efb8e58098ce102bf5d1c94cc5fd69638a343b633d8b9d3767aa7", "de872827292ed3a7dbdb9c7287df9155f2f39cbd08f39dad7bed050e60ccc0ce"];
 /** A TypeScript lib file: where eval, Function, globalThis and the timers are declared. */
 const LIB = /[\\/]typescript[\\/]lib[\\/]lib\.[^\\/]*\.d\.ts$/;

@@ -7,7 +7,8 @@
 // run time, each good but for one field. The sell they are made from passes every static check: W's Sell signed over
 // SellDelegate's digest, W's authorization of the kit's pinned sell delegate (evmPoolSignSellAuthorization), a swap the
 // kit's sell builder makes (one v4 hop through the PoolManager, read back by evmSellRouteOf), the pool the record
-// names, fee <= feeCap < minOut, a deadline 300 s away. Its authorization nonce is 2^62, which no fresh W
+// names, the fee answer's fee_recipient as the Sell's feeRecipient (card helper-sell-fee-recipient: the 11-field Sell
+// of SellDelegate at pool-review-3), fee <= feeCap < minOut, a deadline 300 s away. Its authorization nonce is 2^62, which no fresh W
 // holds, so a helper that skipped a static check still stops at auth_nonce, before any send.
 //   - "auth_chain_zero": the authorization signed with chainId 0 (bad_authorization);
 //   - "auth_other_delegate": the authorization of another delegate (bad_authorization);
@@ -28,7 +29,8 @@
 //   - each testnet has a run of contracts/pool-evm/script/testnet-run.mjs --sell-helper through this helper
 //     (helper-evm-sender.run.<network>.json), whole on both of its chain's RPCs (pool-evm-testnet-run's check), and
 //     each sell the helper sent was sent by the fee answer's sell_sender, with gas limit 1,000,000, W's authorization of
-//     the pinned delegate on the chain's id, and a fee at least its cost, so the sender's balance rose by fee - cost.
+//     the pinned delegate on the chain's id, and a fee at least its cost (paid to the caller by the SellDelegate these
+//     runs used; pool-review-3's pays it to the Sell's feeRecipient, the fee answer's fee_recipient).
 //   node scripts/live-checks/helper-evm-sender.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -139,7 +141,7 @@ const a32 = (a) => a.slice(2).toLowerCase().padStart(64, "0");
 const utf8 = (s) => new TextEncoder().encode(s);
 const cat = (...p) => Uint8Array.from(p.flatMap((x) => [...x]));
 const k = (t) => keccak_256(utf8(t));
-const SELL_SELECTOR = hex(k("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)").subarray(0, 4));
+const SELL_SELECTOR = hex(k("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)").subarray(0, 4));
 
 /** A throwaway secp256k1 key, made here and never written anywhere. */
 export const randomKey = () => secp256k1.utils.randomSecretKey();
@@ -148,8 +150,8 @@ const addressOf = (key) => `0x${hex(keccak_256(secp256k1.getPublicKey(key, false
 /** SellDelegate._sellDigest (contracts/pool-evm/src/SellDelegate.sol): domain Blindfill, 1, the chain id, W. */
 function sellDigest(s, chainId) {
   const domain = keccak_256(cat(k("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"), k("Blindfill"), k("1"), unhex(w32(chainId)), unhex(a32(s.w))));
-  const type = k("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)");
-  const struct = keccak_256(cat(type, unhex(a32(s.token)), unhex(w32(s.amount)), unhex(a32(s.target)), keccak_256(unhex(s.data)), unhex(w32(s.minOut)), unhex(a32(s.pool)), unhex(w32(s.precommitment)), unhex(w32(s.feeCap)), unhex(w32(s.deadline)), unhex(w32(s.nonce))));
+  const type = k("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)");
+  const struct = keccak_256(cat(type, unhex(a32(s.token)), unhex(w32(s.amount)), unhex(a32(s.target)), keccak_256(unhex(s.data)), unhex(w32(s.minOut)), unhex(a32(s.pool)), unhex(w32(s.precommitment)), unhex(w32(s.feeCap)), unhex(a32(s.feeRecipient)), unhex(w32(s.deadline)), unhex(w32(s.nonce))));
   return keccak_256(cat(Uint8Array.of(0x19, 0x01), domain, struct));
 }
 /** r ‖ s ‖ v, s low, v 27 or 28, as SellDelegate reads it. */
@@ -161,7 +163,7 @@ function sign65(key, digest) {
 function sellData(s, fee, sig) {
   const d = unhex(s.data);
   const pad = (b) => hex(b).padEnd(Math.ceil(b.length / 32) * 64, "0");
-  const tuple = `${a32(s.token)}${w32(s.amount)}${a32(s.target)}${w32(0x140n)}${w32(s.minOut)}${a32(s.pool)}${w32(s.precommitment)}${w32(s.feeCap)}${w32(s.deadline)}${w32(s.nonce)}${w32(BigInt(d.length))}${pad(d)}`;
+  const tuple = `${a32(s.token)}${w32(s.amount)}${a32(s.target)}${w32(0x160n)}${w32(s.minOut)}${a32(s.pool)}${w32(s.precommitment)}${w32(s.feeCap)}${a32(s.feeRecipient)}${w32(s.deadline)}${w32(s.nonce)}${w32(BigInt(d.length))}${pad(d)}`;
   return `0x${SELL_SELECTOR}${w32(0x60n)}${w32(fee)}${w32(BigInt(0x60 + tuple.length / 2))}${tuple}${w32(65n)}${pad(sig)}`;
 }
 const int = (n) => (n === 0n ? new Uint8Array() : unhex(n.toString(16).padStart(Math.ceil(n.toString(16).length / 2) * 2, "0")));
@@ -184,12 +186,14 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 const V4_NATIVE_PATH = `0x${w32(0x20n)}${w32(1n)}${w32(0x20n)}${a32(ZERO)}${w32(3000n)}${w32(60n)}${a32(ZERO)}${w32(0xa0n)}${w32(0n)}`;
 
 /**
- * The base sell for `pool` on `network` at `nowMs`, and each plant made from it, as POST /v1/pool/evm/sell bodies.
- * W and the other signer are throwaway keys made here unless given; `wKey` is returned for the test only.
+ * The base sell for `pool` on `network` at `nowMs`, paying its fee to `feeRecipient` (the fee answer's fee_recipient),
+ * and each plant made from it, as POST /v1/pool/evm/sell bodies. W and the other signer are throwaway keys made here
+ * unless given; `wKey` is returned for the test only.
  */
-export function plantsOf({ network, pool, nowMs = Date.now(), wKey = randomKey(), otherKey = randomKey() }) {
+export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey = randomKey(), otherKey = randomKey() }) {
   const v = evmPoolVenues()[network];
   if (!v?.sellDelegate || !v.poolManager) throw new Error(`the kit pins no sell delegate or PoolManager for ${network}`);
+  if (typeof feeRecipient !== "string" || !ADDRESS.test(feeRecipient)) throw new Error(`the fee recipient ${show(feeRecipient)} is no address`);
   const chainId = BigInt(v.chainId);
   const w = addressOf(wKey);
   const nowS = BigInt(Math.floor(nowMs / 1000));
@@ -203,6 +207,7 @@ export function plantsOf({ network, pool, nowMs = Date.now(), wKey = randomKey()
     pool,
     precommitment: 12_345n,
     feeCap: 3n * 10n ** 13n,
+    feeRecipient,
     deadline: nowS + 300n,
     nonce: 0n,
   };
@@ -239,9 +244,9 @@ export const SELL_GAS = 1_000_000n;
  * whole run (every transaction landed on both, each sell a type-4 transaction to W whose one authorization names the
  * chain's pinned SellDelegate with the chain's id, W's Deposited into the pool), and for each sell the helper sent:
  * the sender is the helper's sell sender (`senders[network]`, its fee answer's sell_sender), the gas limit exactly
- * 1,000,000, the authorization's signer W, and the fee it took (the call's fee word, which SellDelegate pays its caller)
- * at least the sale's cost (gasUsed x effectiveGasPrice, plus the receipt's L1 fee on Base), so the sender's balance
- * rose by fee - cost; and every testnet has one such sell.
+ * 1,000,000, the authorization's signer W, and the fee it took (the call's fee word: the SellDelegate these runs used paid
+ * it to its caller, pool-review-3's pays it to the Sell's feeRecipient) at least the sale's cost (gasUsed x
+ * effectiveGasPrice, plus the receipt's L1 fee on Base); and every testnet has one such sell.
  */
 export async function checkSells(runs, transportOf, senders) {
   const lines = [];
@@ -282,7 +287,7 @@ export async function checkSells(runs, transportOf, senders) {
         say(signer === String(t.w).toLowerCase(), `[${n} sell ${t.hash}] the authorization is signed by ${signer}, W ${t.w}`);
         const fee = BigInt(`0x${String(tx.input).slice(10 + 64, 10 + 128)}`);
         const cost = BigInt(rc.gasUsed) * BigInt(rc.effectiveGasPrice) + (rc.l1Fee ? BigInt(rc.l1Fee) : 0n);
-        say(fee >= cost, `[${n} sell ${t.hash}] the fee ${fee} covers the cost ${cost}: the sender's balance rose by ${fee - cost}`);
+        say(fee >= cost, `[${n} sell ${t.hash}] the fee ${fee} covers the cost ${cost}, by ${fee - cost}`);
       } catch (e) {
         say(false, `[${n} sell ${t.hash}] ${e.message}`);
       }
@@ -296,6 +301,13 @@ export async function checkSells(runs, transportOf, senders) {
 }
 
 // ---- The reads ----
+
+/** The fee recipient a fee answer's body names, lowercase, or null where it names no address */
+export const feeRecipientOf = (body) => {
+  const b = json(body ?? "");
+  const a = typeof b?.fee_recipient === "string" ? b.fee_recipient.toLowerCase() : null;
+  return a !== null && ADDRESS.test(a) ? a : null;
+};
 
 /** Each network's sell sender from its fee answer in `run` (null where the answer names none) */
 export function sendersOf(run) {
@@ -317,8 +329,9 @@ export async function read(base, fetchFn = fetch) {
       reads.push({ asked, readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(r.headers), body: (await r.text()).slice(0, 2_000) });
     };
     await get("fee", `${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`);
-    // the plants are built just before they are sent, so the deadlines are measured from now
-    const { plants } = plantsOf({ network, pool });
+    // the plants are built just before they are sent, so the deadlines are measured from now; each pays the fee
+    // recipient the fee answer names (none named: another address, so the judge fails on the fee answer)
+    const { plants } = plantsOf({ network, pool, feeRecipient: feeRecipientOf(reads[0].body) ?? OTHER_ADDRESS });
     for (const [asked] of PLANTS) await get(asked, `${base}/v1/pool/evm/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(plants[asked]) });
     pools.push({ network, pool, reads });
   }

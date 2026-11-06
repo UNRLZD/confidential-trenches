@@ -91,3 +91,30 @@ test("planted on the good part, each way a withdraw part goes wrong: FAIL, named
   // the onward from another wallet than the release's W
   failsWith({ ...GOOD, run: [{ ...p, onward: onPart(wire([OTHER], [transfer(OTHER, TO, PART)])) }] }, "(onward): not W's own send, W its one signer and fee payer");
 });
+
+// card live-check-devnet-pair: read() on the devnet list, the second provider answering 503 (OnFinality on GitHub's
+// runners, sign live run 42201131294): the transactions are read on the next operator, the helper's route: PASS; with
+// no other operator answering, fewer than two reads: FAIL.
+test("card live-check-devnet-pair: the second provider answering 503 moves read() to the next operator: PASS; one operator answering: FAIL", async () => {
+  const { createHash } = await import("node:crypto");
+  const { read } = await import("./signpage-pool-withdraw-form.mjs");
+  const g = ANSWERS.good;
+  const js = "app";
+  const index = `<script src="/app.js" integrity="sha384-${createHash("sha384").update(js).digest("base64")}"></script>`;
+  const txs = new Map(g.run.flatMap((p) => [p.release, p.onward]).map((t) => [t.signature, t.reads[0]]));
+  const [solana, second, helper] = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public", "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet"];
+  const fetchFn = async (url, init) => {
+    if (url.startsWith("https://sign.")) return { text: async () => (url.endsWith("/app.js") ? js : index) };
+    if (url === second) return { ok: false, status: 503, json: async () => null };
+    const { id, params } = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id, result: txs.get(params[0]) ?? null }) };
+  };
+  const run = g.run.map((p) => ({ part: p.part, release: p.release.signature, onward: p.onward.signature }));
+  const a = await read(run, fetchFn, [solana, second, helper], async () => {});
+  assert.deepEqual(a.run[0].release.on, [solana, helper]);
+  const v = judge(a);
+  assert.equal(v.ok, true, v.lines.join("\n"));
+  const one = judge(await read(run, fetchFn, [solana, second], async () => {}));
+  assert.equal(one.ok, false);
+  assert.ok(one.lines.some((l) => l.endsWith("(release): not on both RPCs at finalized")), one.lines.join("\n"));
+});

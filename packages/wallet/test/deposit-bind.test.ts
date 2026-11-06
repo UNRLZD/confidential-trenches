@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, beforeEach, test } from "node:test";
-import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS } from "@blindfill/kit";
+import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, vaultSyncStart } from "@blindfill/kit";
 import { base58 } from "@scure/base";
 import { IDBFactory } from "fake-indexeddb";
 import { decodeSignedDelegate } from "../../../apps/helper/src/bind/checks.ts";
@@ -63,6 +63,8 @@ class Chain {
   /** A tx read on one side only (the other answers the node's timeout). */
   finalOnlyOn: "a" | "b" | undefined = undefined;
   txReads = 0;
+  /** Every query, in order, with the side that answered it. */
+  queries: { side: "a" | "b"; params: Record<string, unknown> }[] = [];
   /** Runs on each `tx` read (a test's hook). */
   onTxRead: () => void = () => {};
   /** Runs on each sleep: the test's clock. Default: one block on each side. */
@@ -101,17 +103,23 @@ class Chain {
           return { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "TIMEOUT_ERROR" } } };
         return txView(t, tx_hash, this.finals.has(tx_hash), this.failed.has(tx_hash));
       },
+      // every read at final answers at the side's height; one at a block_id (the kit's sync, and U's reads at the sync's
+      // block) at that block, which the side must have reached, with the side's state now and one hash per height
       query: async (params) => {
         const s = this[k];
-        if (params.method_name === "deposits") {
-          const { from, limit } = JSON.parse(Buffer.from(params.args_base64 as string, "base64").toString());
+        this.queries.push({ side: k, params });
+        const at = params.block_id === undefined ? s.height : BigInt(params.block_id as number);
+        if (at > s.height) return { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } };
+        const stamp = (j: any) => ((j.result.block_height = Number(at)), (j.result.block_hash = `h${at}`), j);
+        if (params.method_name === "deposits" || params.method_name === "state_tree" || params.method_name === "label_tree") {
           const j = structuredClone(PAGES.answers[k].json);
-          j.result.block_height = Number(s.height);
-          j.result.result = [...Buffer.from(JSON.stringify(s.rows.slice(from, from + limit)))];
-          return j;
+          if (params.method_name === "deposits") {
+            const { from, limit } = JSON.parse(Buffer.from(params.args_base64 as string, "base64").toString());
+            j.result.result = [...Buffer.from(JSON.stringify(s.rows.slice(from, from + limit)))];
+          } else j.result.result = [...Buffer.from(JSON.stringify({ size: s.rows.length, depth: 20, root: "0" }))];
+          return stamp(j);
         }
-        const j = (await r.query(params)) as any;
-        j.result.block_height = Number(s.height);
+        const j = stamp((await r.query(params)) as any);
         if (params.request_type === "view_access_key_list") {
           this.readsOfKeys++;
           j.result.keys[0].public_key = publicKeyOf(this.u);
@@ -266,7 +274,9 @@ test("planted: a page read from one RPC only does not confirm; the note stays IN
   assert.equal(t.sent.length, 1);
 });
 
-test("prepay_open (R2): waits until both RPCs hold U's previous P, then sends the same signed bytes at the same nonce", async () => {
+// The wait here is P's own: the bind's first read of the pages stops while RPC b lacks the previous row (the sync
+// disagrees), so nothing is signed until both RPCs answer the same pages (card wallet-bind-on-sync, review L3).
+test("a pages read that stops (RPC b lacks a row RPC a has) holds the first call until both agree; prepay_open (R2) then sends the same signed bytes at the same nonce", async () => {
   const store = await noteStore();
   const first = await store.planDeposit(1n, pc);
   const i = (first.ref as { i: number }).i;
@@ -871,34 +881,38 @@ test("F2 (M11): DeleteAccount is refused while a bind for U runs, even with ever
   assert.ok(during instanceof DepositBindRefused && during.code === "cleanup" && /being sent/.test(during.message), String(during));
 });
 
-test("F2 (M28): the pages' next read starts at the lower count of the two RPCs, so a row the other has yet to show is found", async () => {
+test("F2 (M28), on the sync: rows one RPC answers and the other does not are no read; the watch's start stays", async () => {
   const t = await setup();
   const w = new DepositsWatch(VAULT, t.note.precommitment, t.deps.rpcs);
   for (let k = 0; k < 5; k++) t.chain.addRow(BigInt(k + 1), { side: "a" }); // RPC a answers five rows RPC b does not have
-  assert.deepEqual(await w.read(), { state: "absent" });
+  assert.deepEqual(await w.read(), { state: "unsure" });
+  assert.equal(w.from, 0);
   t.chain.a.rows = [];
   t.chain.addRow(t.note.precommitment); // the vault's real row 0, on both
   assert.equal((await w.read()).state, "held");
 });
 
-test("F2 (M17): prepay_open whose wait outlives the window: the dead bytes are not sent again; a lapse re-sign at the same nonce is", async () => {
+test("F2 (M17): prepay_open whose answer outlives the window: the dead bytes are not sent again; a lapse re-sign at the same nonce is", async () => {
   const store = await noteStore();
   const first = await store.planDeposit(1n, pc);
   const i = (first.ref as { i: number }).i;
   const chain = new Chain(depositAccount(SEED, 1n, i).account);
   await store.move(first.id, "PLANNED", "INCOMING");
   await store.move(first.id, "INCOMING", "UNSPENT", { leaf: { value: AMOUNT, label: 1000n, commitment: noteCommitment(AMOUNT, 1000n, first.precommitment), leafIndex: 0n } });
+  chain.addRow(first.precommitment);
   const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i }, n: 0 };
   const second = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
-  const r = relayer(chain, ["prepay_open", "tx"], lands(chain));
-  let polls = 0;
-  chain.tick = () => (chain.blocks(10n), ++polls === 20 && chain.addRow(first.precommitment)); // held 200 blocks later
+  // the relayer answers prepay_open for 200 blocks: every send after the call's window would be dead bytes
+  const r = relayer(chain, Array(20).fill("prepay_open"), lands(chain));
+  chain.tick = () => chain.blocks(10n);
   const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.tick(), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
   landed(await bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, deps));
-  assert.equal(r.sent.length, 2);
-  assert.notEqual(r.sent[1]!.bytes, r.sent[0]!.bytes);
-  assert.equal(r.sent[1]!.nonce, r.sent[0]!.nonce);
-  assert.ok(r.sent[1]!.low > r.sent[0]!.mbh + LAPSE_MARGIN);
+  const firstBytes = r.sent[0]!.bytes;
+  for (const s of r.sent.filter((s) => s.bytes === firstBytes)) assert.ok(s.low < r.sent[0]!.mbh, `the first bytes sent at ${s.low}, their window ${r.sent[0]!.mbh}`);
+  const last = r.sent.at(-1)!;
+  assert.notEqual(last.bytes, firstBytes);
+  assert.equal(last.nonce, r.sent[0]!.nonce);
+  assert.ok(last.low > r.sent[0]!.mbh + LAPSE_MARGIN);
 });
 
 test("F2 (M30): a note already UNSPENT with another leaf is refused, never overwritten", async () => {
@@ -1000,7 +1014,7 @@ test("R-03: deposits pages an RPC refuses as too heavy are read again at half th
     const midRpc = [capped(0, 0, DRPC_TIMEOUT, mid), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
     setTimeout(() => ac.abort(new Error("caller stopped")), 50);
     const t0 = Date.now();
-    assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, midRpc).read(ac.signal), { state: "unsure" });
+    await assert.rejects(new DepositsWatch(VAULT, t.note.precommitment, midRpc).read(ac.signal), /caller stopped/); // the stop, not a read
     assert.ok(Date.now() - t0 < 200, `stopped after ${Date.now() - t0} ms`);
     assert.deepEqual(mid, [450]);
   }
@@ -1028,10 +1042,11 @@ test("F2 (M47): a lapse whose nonce moves between the device's read and the sign
     query: async (p: Record<string, unknown>) => {
       const j = await r.query(p);
       const past = t.sent.length > 0 && t.chain.low() > t.sent[0]!.mbh + LAPSE_MARGIN;
-      // past the window: the device reads U's nonce unchanged on both, then its second pages read; right after that a
-      // same-nonce sibling's Delegate runs elsewhere (its row comes a tick later), before the signer's read
-      if (!flipped && past && p.request_type === "view_access_key_list" && r.name === t.deps.rpcs[1].name) armed = true;
-      else if (!flipped && armed && p.method_name === "deposits" && r.name === t.deps.rpcs[1].name) {
+      // past the window: the device reads U's nonce unchanged on both at the sync's block, then the re-sign's gate reads it
+      // again; right after that a same-nonce sibling's Delegate runs elsewhere (its row comes a tick later), before the
+      // signer's read (card wallet-bind-on-sync: the pages and U are read at one block, so no pages read sits between)
+      if (!flipped && past && p.request_type === "view_access_key_list" && r.name === t.deps.rpcs[1].name && !armed) armed = true;
+      else if (!flipped && armed && p.request_type === "view_access_key_list" && r.name === t.deps.rpcs[1].name) {
         flipped = true;
         t.chain.a.nonce = t.chain.b.nonce = n0 + 1n;
         t.chain.balance -= AMOUNT;
@@ -1331,19 +1346,20 @@ test("R2-6 (expect FAIL on a1012e1): the pages are read again after the dead cal
   assert.equal(t.sent.length, 1, `a new call at nonce ${t.sent[1]?.nonce} while the pages held P`);
 });
 
-// N13 (mutate2's N-i): the pages' cursor stays while U's previous P reads unsure, so a row both RPCs hold with different
-// fields is found once they agree.
-test("N13: the cursor does not move past a previous P that reads unsure; it is held once both RPCs agree", async () => {
+// N13 (mutate2's N-i), on the sync (card wallet-bind-on-sync): the watch's start moves only past rows read absent.
+test("N13: a read that stops or holds P leaves the watch's start; an absent read moves it to the count it read", async () => {
   const t = await setup();
-  const prev = 777n;
-  const w = new DepositsWatch(VAULT, t.note.precommitment, t.deps.rpcs, prev);
-  t.chain.addRow(prev, { side: "a" });
-  t.chain.addRow(prev, { side: "b", value: AMOUNT + 1n }); // another row at index 0 on b: unsure
-  assert.deepEqual(await w.read(), { state: "absent" });
-  assert.deepEqual(w.alsoState, { state: "unsure" });
+  const w = new DepositsWatch(VAULT, t.note.precommitment, t.deps.rpcs);
+  t.chain.addRow(777n, { side: "a" });
+  t.chain.addRow(777n, { side: "b", value: AMOUNT + 1n }); // another row at index 0 on b: the sync stops
+  assert.deepEqual(await w.read(), { state: "unsure" });
+  assert.equal(w.from, 0);
   t.chain.b.rows[0]!.value = AMOUNT.toString();
-  assert.deepEqual(await w.read(), { state: "absent" });
-  assert.equal(w.alsoState.state, "held");
+  assert.equal((await w.read()).state, "absent");
+  assert.equal(w.from, 1);
+  t.chain.addRow(t.note.precommitment);
+  assert.equal((await w.read()).state, "held");
+  assert.equal(w.from, 1);
 });
 
 // mutate2's survivors M13, M19, M20.
@@ -1637,4 +1653,243 @@ test("carry wait: the bind's stop reaches the send: an abort while the carry is 
   const ended = await Promise.race([run.then(() => "answered", (e: unknown) => (e as Error).message), new Promise<string>((ok) => setTimeout(() => ok("still waiting"), 2_000))]);
   assert.equal(ended, "caller stopped");
   assert.equal((await t.store.get(t.note.id))!.state, "INCOMING"); // the money is in U or on its way: the pages settle it later
+});
+
+// ---------- the bind on the kit's sync (card wallet-bind-on-sync) ----------
+// The pages are read through vaultSync from a cursor (the note's own start, or the note store's vault cursor), P counts
+// as absent only from a sync at a block past max_block_height + 5 (the floor in cursor.height), and U's key nonce and
+// USDC are read at that sync's block.
+type Q = { side: "a" | "b"; params: Record<string, unknown> };
+const isDeposits = (q: Q) => q.params.method_name === "deposits";
+const fromOf = (q: Q | undefined) => (q === undefined ? -1 : (JSON.parse(Buffer.from(q.params.args_base64 as string, "base64").toString()).from as number));
+const unknownBlock = { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } };
+
+test("bind-on-sync 1: vault reads pinned below max_block_height + 5 never read P absent: no second call on P", async () => {
+  // The call lands (U's nonce moves, P's row is in the vault) and U holds more USDC than it took, so U's balance does not
+  // hold the device back. Both RPCs' vault views stay pinned at the block before the call, without P's row, while U's
+  // own reads are fresh and long past the call's window.
+  const t = await setup(["tx"], (c) => (s) => ((c.a.nonce = c.b.nonce = s.nonce), c.finals.add(s.hash), c.addRow(s.p)));
+  const pinned = t.chain.low();
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 40 && ac.abort(new Error("caller stopped")));
+  // a second call on P fails the test at once (review L4): the bind is stopped at its send, which never reaches the
+  // relayer (a send that throws is only "no answer" to the bind, so the stop is what ends it)
+  const fetchFn = (async (url: string, init: RequestInit) => {
+    if (t.sent.length > 0) ac.abort(new Error("a second call on P"));
+    return t.deps.fetchFn(url, init);
+  }) as typeof fetch;
+  const rpcs = t.deps.rpcs.map((r, k) => ({
+    name: r.name,
+    tx: r.tx,
+    query: async (p: Record<string, unknown>) => {
+      if (p.account_id !== VAULT) return r.query(p);
+      if (p.block_id !== undefined && BigInt(p.block_id as number) !== pinned) return structuredClone(unknownBlock);
+      const j = structuredClone(PAGES.answers[k === 0 ? "a" : "b"].json);
+      j.result.block_height = Number(pinned);
+      j.result.block_hash = `h${pinned}`;
+      j.result.result = [...Buffer.from(JSON.stringify(p.method_name === "deposits" ? [] : { size: 0, depth: 20, root: "0" }))];
+      return j;
+    },
+  })) as unknown as [BindRpc, BindRpc];
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, rpcs, fetchFn, signal: ac.signal }), /caller stopped/);
+  assert.ok(t.chain.low() > t.sent[0]!.mbh + LAPSE_MARGIN, "U's reads went past the window");
+  assert.equal(t.sent.length, 1, `a second call on P at nonce ${t.sent[1]?.nonce}`);
+});
+
+test("bind-on-sync 2: after a restore (no cursor in the store) the search starts at 0, and so does a note's call written with no start", async () => {
+  const t = await setup();
+  for (let k = 0; k < 3; k++) t.chain.addRow(BigInt(9_000 + k), { depositor: "x.testnet" });
+  t.chain.addRow(t.note.precommitment);
+  assert.deepEqual(await t.store.syncCursor(VAULT), vaultSyncStart(VAULT));
+  const note = landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(note.leaf!.leafIndex, 6n);
+  assert.equal(t.sent.length, 0);
+  assert.equal(fromOf(t.chain.queries.find(isDeposits)), 0);
+  assert.equal((await t.store.syncCursor(VAULT)).deposits, 4, "the sync's cursor is kept with the note store");
+  // a call written before notes held a start: from 0, though the store's cursor is past P's row
+  const u = await setup();
+  u.chain.addRow(9_100n, { depositor: "x.testnet" });
+  u.chain.addRow(9_101n, { depositor: "x.testnet" });
+  u.chain.addRow(u.note.precommitment); // row 2
+  for (let k = 0; k < 4; k++) u.chain.addRow(BigInt(9_200 + k), { depositor: "x.testnet" });
+  await u.store.saveSyncCursor({ ...vaultSyncStart(VAULT), deposits: 5, height: Number(u.chain.low()) });
+  await u.store.move(u.note.id, "PLANNED", "INCOMING");
+  const { call: A } = await signedCall(u);
+  await u.store.addCall(u.note.id, stored(A), 0);
+  assert.equal((await u.store.get(u.note.id))!.searchFrom, undefined);
+  landed(await bindDeposit(SEED, u.args, u.deps));
+  assert.equal(fromOf(u.chain.queries.find(isDeposits)), 0);
+  assert.equal(u.sent.length, 0);
+});
+
+test("bind-on-sync 3: U's key nonce and USDC are read at the block of the sync that read P absent", async () => {
+  let calls = 0;
+  const t = await setup(["tx", "tx"], (c) => (s) => {
+    c.a.nonce = c.b.nonce = s.nonce; // the call ran
+    c.finals.add(s.hash); // the vault refused it and the token refunded U
+    if (++calls === 2) (c.balance -= AMOUNT, c.addRow(s.p));
+  });
+  t.chain.tick = () => t.chain.blocks(10n);
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, 2);
+  const q = t.chain.queries;
+  for (const kind of ["view_access_key_list", "ft_balance_of"]) {
+    const reads = q.flatMap((x, k) => (x.params.block_id !== undefined && (x.params.request_type === kind || x.params.method_name === kind) ? [{ ...x, k }] : []));
+    assert.ok(reads.length >= 2, `${kind}: no read at a sync's block`);
+    for (const r of reads) {
+      const page = q.slice(0, r.k).filter((x) => x.side === r.side && isDeposits(x)).at(-1);
+      assert.equal(r.params.block_id, page?.params.block_id, `${kind} at ${String(r.params.block_id)}, the sync's block ${String(page?.params.block_id)}`);
+    }
+  }
+});
+
+test("bind-on-sync 4: a note with no call reads from 0 (review H1); its own start, the count read before P left, resumes across a reload", async () => {
+  const t = await setup(["tx"]);
+  for (let k = 0; k < 5; k++) t.chain.addRow(BigInt(9_000 + k), { depositor: "x.testnet" });
+  landed(await bindDeposit(SEED, t.args, t.deps)); // P1 at row 5
+  assert.equal((await t.store.syncCursor(VAULT)).deposits, 6);
+  // the next note, U's second arrival 0, has no call: its search starts at 0, whatever the store's cursor
+  const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i: t.i }, n: 0 };
+  const second = await t.store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  t.chain.addRow(9_100n, { depositor: "x.testnet" }); // row 6
+  const r = relayer(t.chain, ["lost"], () => {}); // not carried yet
+  const ac = new AbortController();
+  const before = t.chain.queries.length;
+  const args = { ...t.args, noteId: second.id };
+  let sleeps = 0;
+  const sleep = async () => (t.chain.tick(), ++sleeps === 3 && ac.abort(new Error("reload")), await turn());
+  await assert.rejects(bindDeposit(SEED, args, { ...t.deps, fetchFn: r.fetchFn, sleep, signal: ac.signal }), /reload/);
+  assert.equal(r.sent.length, 1);
+  assert.equal(fromOf(t.chain.queries.slice(before).find(isDeposits)), 0);
+  assert.equal((await t.store.get(second.id))!.searchFrom, 7, "the count read before P left, written with the call");
+  // the call is carried after all: P2 lands at row 9, and other binds move the store's cursor past it
+  for (let k = 0; k < 2; k++) t.chain.addRow(BigInt(9_200 + k), { depositor: "x.testnet" });
+  lands(t.chain)(r.sent[0]!);
+  for (let k = 0; k < 3; k++) t.chain.addRow(BigInt(9_300 + k), { depositor: "x.testnet" });
+  await t.store.saveSyncCursor({ ...(await t.store.syncCursor(VAULT)), deposits: t.chain.a.rows.length, height: Number(t.chain.low()) });
+  const again = relayer(t.chain, []);
+  const reload = t.chain.queries.length;
+  const note = landed(await bindDeposit(SEED, args, { ...t.deps, fetchFn: again.fetchFn }));
+  assert.equal(note.leaf!.leafIndex, 18n); // row 9
+  assert.equal(again.sent.length, 0, "a second call on P2");
+  assert.equal(fromOf(t.chain.queries.slice(reload).find(isDeposits)), 7);
+});
+
+test("bind-on-sync: U read at a block is no read when an RPC answers another block; its USDC likewise, or two values", async () => {
+  const t = await setup();
+  const at = Number(t.chain.low());
+  assert.ok((await readU(t.u, t.deps.rpcs, at)) !== null);
+  const off = t.deps.rpcs.map((r, k) => ({
+    name: r.name,
+    tx: r.tx,
+    query: async (p: Record<string, unknown>) => {
+      const j = (await r.query(p)) as any;
+      if (k === 1 && p.block_id !== undefined) j.result.block_height += 1;
+      return j;
+    },
+  })) as unknown as [BindRpc, BindRpc];
+  assert.equal(await readU(t.u, off, at), null);
+});
+
+test("bind-on-sync: a refused call's new call waits while U's USDC at the sync's block is read on one RPC only or as two values", async () => {
+  let calls = 0;
+  const t = await setup(["tx", "tx"], (c) => (s) => {
+    c.a.nonce = c.b.nonce = s.nonce;
+    c.finals.add(s.hash);
+    if (++calls === 2) (c.balance -= AMOUNT, c.addRow(s.p));
+  });
+  let ticks = 0;
+  let fixedAt = -1n;
+  t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 40 && (fixedAt = t.chain.low()));
+  const rpcs = t.deps.rpcs.map((r, k) => ({
+    name: r.name,
+    tx: r.tx,
+    query: async (p: Record<string, unknown>) => {
+      const j = (await r.query(p)) as any;
+      if (k === 1 && p.method_name === "ft_balance_of" && p.block_id !== undefined && fixedAt < 0n) {
+        if (ticks < 20) j.result.block_height += 1; // another block
+        else j.result.result = [...Buffer.from(JSON.stringify((t.chain.balance + 1n).toString()))]; // another value
+      }
+      return j;
+    },
+  })) as unknown as [BindRpc, BindRpc];
+  landed(await bindDeposit(SEED, t.args, { ...t.deps, rpcs }));
+  assert.equal(t.sent.length, 2);
+  assert.ok(fixedAt > 0n && t.sent[1]!.low >= fixedAt, `the new call went at ${t.sent[1]!.low}, the reads agreed at ${fixedAt}`);
+});
+
+test("bind-on-sync: prepay_open (R2) waits on U's previous note landed in the note store; one marked taken never landed, so nothing is sent again", async () => {
+  const store = await noteStore();
+  const first = await store.planDeposit(1n, pc);
+  const i = (first.ref as { i: number }).i;
+  const chain = new Chain(depositAccount(SEED, 1n, i).account);
+  await store.move(first.id, "PLANNED", "TAKEN");
+  const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i }, n: 0 };
+  const second = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  const r = relayer(chain, ["prepay_open", "tx"], lands(chain));
+  const ac = new AbortController();
+  let ticks = 0;
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.blocks(1n), ++ticks === 30 && ac.abort(new Error("caller stopped")), await turn()), signal: ac.signal, relayerAccount: RELAYER };
+  await assert.rejects(bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, deps), /caller stopped/);
+  assert.equal(r.sent.length, 1);
+});
+
+// ---------- REVIEW (wallet-bind-on-sync, independent reviewer): planted cases ----------
+test("REVIEW H1a: a note with no call in this store whose P another device on the seed landed, below the store's vault cursor, lands; nothing is sent", async () => {
+  const t = await setup(["tx", "tx", "tx", "tx"]);
+  // another device on this seed (same lane, same index) sent U's call: P at row 2; U's nonce moved, AMOUNT left U
+  t.chain.addRow(9_100n, { depositor: "x.testnet" });
+  t.chain.addRow(9_101n, { depositor: "x.testnet" });
+  t.chain.addRow(t.note.precommitment); // row 2, depositor U, value AMOUNT
+  t.chain.a.nonce = t.chain.b.nonce = t.chain.a.nonce + 1n;
+  t.chain.balance -= AMOUNT; // U still holds 75 USDC (a later arrival)
+  for (let k = 0; k < 3; k++) t.chain.addRow(BigInt(9_200 + k), { depositor: "x.testnet" });
+  // a bind of another note on this device read the pages to their end and kept its cursor (DepositsWatch.read's save)
+  await t.store.saveSyncCursor({ ...vaultSyncStart(VAULT), deposits: t.chain.a.rows.length, height: Number(t.chain.low()) });
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 60 && ac.abort(new Error("caller stopped")));
+  const out = await bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }).catch((e: unknown) => e);
+  assert.equal(t.sent.length, 0, `${t.sent.length} call(s) sent on a P the vault already holds, at nonce ${t.sent.map((s) => s.nonce).join(",")}`);
+  landed(out as BindOutcome);
+});
+
+test("REVIEW H1b: the first read finds P (landed elsewhere), the cursor is saved past P's row, the page dies before land: the next bind still finds P", async () => {
+  const t = await setup(["tx", "tx", "tx", "tx"]);
+  t.chain.addRow(9_100n, { depositor: "x.testnet" });
+  t.chain.addRow(t.note.precommitment); // row 1, landed by another device
+  t.chain.a.nonce = t.chain.b.nonce = t.chain.a.nonce + 1n;
+  t.chain.balance -= AMOUNT;
+  t.chain.addRow(9_200n, { depositor: "x.testnet" });
+  // the page dies inside land(): the first store.move after the pages read never happens
+  const dying = { ...t.store, get: t.store.get, list: t.store.list, syncCursor: t.store.syncCursor, saveSyncCursor: t.store.saveSyncCursor, addCall: t.store.addCall, addCallTx: t.store.addCallTx,
+    move: async () => { throw new Error("page killed"); } } as unknown as NoteStore;
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, store: dying }), /page killed/);
+  assert.equal((await t.store.get(t.note.id))!.state, "PLANNED");
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 60 && ac.abort(new Error("caller stopped")));
+  const out = await bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }).catch((e: unknown) => e);
+  assert.equal(t.sent.length, 0, `${t.sent.length} call(s) sent on a P the vault already holds`);
+  landed(out as BindOutcome);
+});
+
+test("review L2: prepay_open (R2) with U's previous note marked TAKEN but its P landed by another device: read in the pages, the same bytes go again", async () => {
+  const store = await noteStore();
+  const first = await store.planDeposit(1n, pc);
+  const i = (first.ref as { i: number }).i;
+  const chain = new Chain(depositAccount(SEED, 1n, i).account);
+  await store.move(first.id, "PLANNED", "TAKEN");
+  chain.addRow(first.precommitment); // another device on the seed landed the TAKEN note's P
+  // this device's cursor is already past that row (another bind read the pages): the previous P is still searched from 0
+  await store.saveSyncCursor({ ...vaultSyncStart(VAULT), deposits: 1, height: Number(chain.low()) });
+  const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i }, n: 0 };
+  const second = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  const r = relayer(chain, ["prepay_open", "tx"], lands(chain));
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.blocks(1n), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
+  const note = landed(await bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, deps));
+  assert.equal(r.sent.length, 2);
+  assert.equal(r.sent[1]!.bytes, r.sent[0]!.bytes);
+  assert.equal(note.leaf!.leafIndex, 2n);
 });

@@ -22,7 +22,7 @@ import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEVNET_GENESIS, RPCS, SYSTEM, operatorProblems, recorder, rpc, stepsOf } from "./pool-sol-deploy.mjs";
+import { DEVNET_GENESIS, DEVNET_PROVIDERS, SYSTEM, onTwoOperators, operatorOf, operatorProblems, recorder, rpc, stepsOf } from "./pool-sol-deploy.mjs";
 
 const KEY = "pool-sol-deploy-sweep";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -30,7 +30,7 @@ export const DEPLOYMENT = path.join(HERE, `${KEY}.devnet.journal.json`);
 export const RECORD = path.join(HERE, `${KEY}.md`);
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep = sleepMs }) {
+export async function check({ deployment: d, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep = sleepMs }) {
   const lines = [];
   let ok = true;
   const say = (pass, text) => {
@@ -49,7 +49,8 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
   const funding = landed.filter((t) => t.step === "funding (to the funder)");
   const sweeps = landed.filter((t) => t.step.startsWith("sweep"));
   say(funding.length >= 1 && sweeps.length >= 1, `the record lists the funding and its sweep: ${funding.length} funding, ${sweeps.length} sweep(s)`);
-  for (const url of rpcs.slice(0, 2)) {
+  // on the first two devnet operators that answer (onTwoOperators): one that is out moves the read to the next
+  const walk = await onTwoOperators(rpcs, (u) => operatorOf(u, "devnet"), fetchFn, async (url, say, fetchFn) => {
     const at = `on ${url}`;
     const call = (m, p) => rpc(fetchFn, url, m, p, sleep);
     say((await call("getGenesisHash", [])) === DEVNET_GENESIS, `answers devnet's genesis hash ${at}`);
@@ -86,8 +87,9 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
     });
     const now = BigInt((await call("getBalance", [d.funder, { commitment: "finalized" }])).value);
     say(now === 0n, `the funder ${d.funder} holds ${now} lamports at finalized ${at}`);
-  }
-  return { ok, lines };
+  });
+  for (const [pass, text] of walk.lines) pass === null ? lines.push(`info ${text}`) : say(pass, text);
+  return { ok, lines, urls: walk.urls };
 }
 
 /** The run record's text after a PASS: every landed transaction of the run, devnet, money path. */
@@ -110,14 +112,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const opt = (n, dflt) => (args.includes(n) ? args[args.indexOf(n) + 1] : dflt);
   try {
     const deployment = JSON.parse(readFileSync(opt("--deployment", DEPLOYMENT), "utf8"));
-    const rpcs = opt("--rpc") ? opt("--rpc").split(",") : RPCS;
+    const rpcs = opt("--rpc") ? opt("--rpc").split(",") : DEVNET_PROVIDERS;
     const rec = recorder();
     const r = await check({ deployment, rpcs, fetchFn: opt("--record") ? rec.fetchFn : fetch });
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify(rec.answers) + "\n");
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"}`);
     if (r.ok && args.includes("--write-record")) {
-      writeFileSync(RECORD, runRecord(deployment, rpcs));
+      writeFileSync(RECORD, runRecord(deployment, r.urls));
       console.log(`live-check ${KEY}: wrote ${path.relative(process.cwd(), RECORD)}`);
     }
     process.exit(r.ok ? 0 : 1);

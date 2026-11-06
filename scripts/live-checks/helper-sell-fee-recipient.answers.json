@@ -1,0 +1,313 @@
+{
+ "notes": [
+  "good: a local helper (apps/helper/src/server.ts start(), --base http://127.0.0.1:57031) at commit feb84e3a8061b193e9df5b11455050171003bc8c, both EVM testnet pools set in its own process with the deployed fee answers' fee recipients (base-sepolia 0x6c830ac1b22d96baf692af4dd17d822ba61c32ec, robinhood-testnet 0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7), each withdraw and sell sender key sha256 of a label (a throwaway, never written), the kit's venues with each sell sender pin set to the throwaway sell key, the RPCs https://sepolia.base.org,https://base-sepolia-rpc.publicnode.com and https://rpc.testnet.chain.robinhood.com,https://robinhood-sepolia-rpc.publicnode.com. The sell paying the fee recipient passes every static check and stops at W's nonce read on both RPCs (auth_nonce); a sell paying 0x...beef or the helper's own sell sender is refused fee_recipient; nothing is sent. Re-recorded on HELPER_HOST after the helper is redeployed with this commit.",
+  "bad_deployed: HELPER_HOST (https://api.confidential.unrealized.trade) at ff8eec24c016884875ee8a577f9a15b6b7bf70c9, read 2026-11-06 09:19Z: its sell route reads the 10-field Sell, so each 11-field sell answers 400 bad_shape.",
+  "Each sell is built at run time with a throwaway W key; no key is recorded."
+ ],
+ "good": {
+  "base": "http://127.0.0.1:57031",
+  "pools": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-06T09:21:09.248Z",
+      "status": 200,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "327",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:21:09 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "feb84e3a8061b193e9df5b11455050171003bc8c"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xe0fd676cf9e4d7022d7dc422e12c87f7e8e443f1\",\"epoch_ms\":60000,\"epoch_start_ms\":1793956860000,\"block\":\"0x349e72c\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "pays_fee_recipient",
+      "readAt": "2026-11-06T09:21:09.967Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "109",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:21:09 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "feb84e3a8061b193e9df5b11455050171003bc8c"
+      },
+      "body": "{\"error\":{\"code\":\"auth_nonce\",\"detail\":\"W's pending nonce 0 and 0, the authorization's 4611686018427387904\"}}"
+     },
+     {
+      "asked": "pays_other",
+      "readAt": "2026-11-06T09:21:09.968Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "150",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:21:09 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "feb84e3a8061b193e9df5b11455050171003bc8c"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0x000000000000000000000000000000000000beef, not 0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\"}}"
+     },
+     {
+      "asked": "pays_sell_sender",
+      "readAt": "2026-11-06T09:21:09.969Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "150",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:21:09 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "feb84e3a8061b193e9df5b11455050171003bc8c"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0xe0fd676cf9e4d7022d7dc422e12c87f7e8e443f1, not 0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\"}}"
+     }
+    ]
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-06T09:21:13.296Z",
+      "status": 200,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "332",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:21:13 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "feb84e3a8061b193e9df5b11455050171003bc8c"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd86931c420796a26a5a74be0c3baf453832ff0db\",\"epoch_ms\":60000,\"epoch_start_ms\":1793956860000,\"block\":\"0x8e859b3\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "pays_fee_recipient",
+      "readAt": "2026-11-06T09:21:13.828Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "109",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:21:13 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "feb84e3a8061b193e9df5b11455050171003bc8c"
+      },
+      "body": "{\"error\":{\"code\":\"auth_nonce\",\"detail\":\"W's pending nonce 0 and 0, the authorization's 4611686018427387904\"}}"
+     },
+     {
+      "asked": "pays_other",
+      "readAt": "2026-11-06T09:21:13.841Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "150",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:21:13 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "feb84e3a8061b193e9df5b11455050171003bc8c"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0x000000000000000000000000000000000000beef, not 0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\"}}"
+     },
+     {
+      "asked": "pays_sell_sender",
+      "readAt": "2026-11-06T09:21:13.849Z",
+      "status": 422,
+      "headers": {
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "150",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:21:13 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "feb84e3a8061b193e9df5b11455050171003bc8c"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0xd86931c420796a26a5a74be0c3baf453832ff0db, not 0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\"}}"
+     }
+    ]
+   }
+  ]
+ },
+ "bad_deployed": {
+  "base": "https://api.confidential.unrealized.trade",
+  "pools": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-06T09:19:31.625Z",
+      "status": 200,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "327",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:19:31 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "ff8eec24c016884875ee8a577f9a15b6b7bf70c9"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"epoch_ms\":60000,\"epoch_start_ms\":1793956740000,\"block\":\"0x349e4d4\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "pays_fee_recipient",
+      "readAt": "2026-11-06T09:19:32.270Z",
+      "status": 400,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:19:32 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "ff8eec24c016884875ee8a577f9a15b6b7bf70c9"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     },
+     {
+      "asked": "pays_other",
+      "readAt": "2026-11-06T09:19:32.447Z",
+      "status": 400,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:19:32 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "ff8eec24c016884875ee8a577f9a15b6b7bf70c9"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     },
+     {
+      "asked": "pays_sell_sender",
+      "readAt": "2026-11-06T09:19:32.625Z",
+      "status": 400,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:19:32 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "ff8eec24c016884875ee8a577f9a15b6b7bf70c9"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     }
+    ]
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-06T09:19:35.777Z",
+      "status": 200,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "332",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:19:35 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "ff8eec24c016884875ee8a577f9a15b6b7bf70c9"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"epoch_ms\":60000,\"epoch_start_ms\":1793956740000,\"block\":\"0x8e8566c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "pays_fee_recipient",
+      "readAt": "2026-11-06T09:19:35.972Z",
+      "status": 400,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:19:35 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "ff8eec24c016884875ee8a577f9a15b6b7bf70c9"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     },
+     {
+      "asked": "pays_other",
+      "readAt": "2026-11-06T09:19:36.151Z",
+      "status": 400,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:19:36 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "ff8eec24c016884875ee8a577f9a15b6b7bf70c9"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     },
+     {
+      "asked": "pays_sell_sender",
+      "readAt": "2026-11-06T09:19:36.332Z",
+      "status": 400,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Fri, 06 Nov 2026 09:19:36 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "ff8eec24c016884875ee8a577f9a15b6b7bf70c9"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     }
+    ]
+   }
+  ]
+ }
+}
