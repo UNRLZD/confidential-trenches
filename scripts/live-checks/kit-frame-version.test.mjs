@@ -1,8 +1,8 @@
 // node --test scripts/live-checks/kit-frame-version.test.mjs: the live check replays its recorded answers
 // (kit-frame-version.answers.json). good: this card's SIGN_HOST build (packages/signpage/scripts/build-app.mjs bundle(),
 // mainnet, at the card's head), which reads the kit's hello, maps every deposit stage down for kit-v1.4 and keeps
-// kit-v1.4's twelve state fields: PASS. bad: SIGN_HOST as served on 6 Nov 2026 (release-60, /app.js
-// sha384-3AiaXoHZ...), which sends every app everything: FAIL. badNoHello: the good build planted so its handler reads a
+// kit-v1.4's twelve state fields: PASS. bad: SIGN_HOST as served on 6 Nov 2026 (release-61, /app.js
+// sha384-mKDl+6Ec...), which sends every app everything: FAIL. badNoHello: the good build planted so its handler reads a
 // hello and ignores it: FAIL. Planted on the good one: another /app.js, no pin, each piece of the hello's path missing,
 // each later stage mapped elsewhere, a refund move mapped to done, a stage kit-v1.4 lacks, a field list with pools: each
 // FAIL. And every SIGN live check that acts as an app on the page names the kit's version first, as the kit's client
@@ -25,8 +25,8 @@ test("recorded good answer: this card's build reads the hello, maps every deposi
   assert.deepEqual(v.lines, []);
 });
 
-test("recorded bad answer: SIGN_HOST as served before this card (release-60): FAIL, each missing piece named", () => {
-  assert.equal(ANSWERS.bad.sha384, "sha384-3AiaXoHZZZPztfVU6l2AM+6GVfeK5xynH7RgNbaxwpY8EpHpJ+BcZgqTFpPRSfFj");
+test("recorded bad answer: SIGN_HOST as served before this card (release-61): FAIL, each missing piece named", () => {
+  assert.equal(ANSWERS.bad.sha384, "sha384-mKDl+6Ec+mdtOuvuzY/rIwJaYOf61XWAJGXN1BRdzleanUyVMUPlG2/wAkkI0Isr");
   const v = judge(ANSWERS.bad);
   assert.equal(v.ok, false);
   assert.deepEqual(v.lines, BEFORE);
