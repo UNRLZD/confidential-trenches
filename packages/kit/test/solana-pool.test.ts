@@ -270,6 +270,59 @@ test("the mint's supply outside the band on one provider: refused after its one 
   }
 });
 
+test("the mint missing on provider B is refused after its one re-read, never priced on provider A's read alone", async () => {
+  for (const [t, v] of [[curveToken, "curve"], [ammToken, "pool"]] as const) {
+    const s = scenario(t, "buy");
+    const [a, b] = pair(s, (p, w, _n, ans) => { if (p === 1 && w === v) ans.value[t === curveToken ? CI.mint : PI.mint] = null; });
+    assert.equal(await readSolanaReference([a, b], req(t, s)), null, t.venue);
+    assert.equal(b.by[v], 2, t.venue);
+  }
+});
+// The fee tier is chosen by the market cap each read's own supply gives: a fee config whose second tier (no fees) starts
+// one lamport above the market cap at provider A's supply, the first tier (100 bps LP, 50 bps protocol) below it. B
+// reads the supply 1.5% higher (a mint between the reads, inside the band), so only B's read reaches the free tier, and
+// E is what B's read prices on B's supply: the same E as when both providers read B's supply, more than when both
+// read A's. A read priced on the other provider's supply would take A's tier and E would fall to that.
+const raised = (x: bigint): bigint => (x * 10_150n) / 10_000n;
+function tiered(t: Token, s: Scenario): { v: Venue; fees: number; mint: number; tier: (ans: Answer) => void } {
+  const v: Venue = t === curveToken ? "curve" : "pool";
+  const fees = t === curveToken ? CI.pumpFeeConfig : PI.ammFeeConfig;
+  const mint = t === curveToken ? CI.mint : PI.mint;
+  const r = s.reads[v][0]![0].value;
+  const supply = u64(bytes(r[mint]!), 36);
+  // the market cap at A's supply: a curve's vQ x supply / vT (a mayhem curve, whose tier reads the mint's supply), a
+  // pool's (quote vault + virtual_quote_reserves) x supply / base vault
+  const cap = t === curveToken
+    ? (u64(bytes(r[CI.curve]!), 16) * supply) / u64(bytes(r[CI.curve]!), 8)
+    : ((tokenAmount(r[PI.quote]!) + u64(bytes(r[PI.pool]!), 245)) * supply) / tokenAmount(r[PI.baseT22]!);
+  assert.ok((raised(supply) * cap) / supply > cap + 1n, "B's supply crosses the tier");
+  const tier = (ans: Answer): void => {
+    edit(ans.value[fees]!, (d) => {
+      new DataView(d.buffer, d.byteOffset, d.byteLength).setUint32(65, 2, true);
+      d.fill(0, 69, 69 + 80);
+      putU64(d, 69 + 16, 100n);
+      putU64(d, 69 + 24, 50n);
+      putU64(d, 69 + 40, cap + 1n);
+    });
+    if (t === curveToken) edit(ans.value[CI.curve]!, (d) => { d[81] = 1; });
+  };
+  return { v, fees, mint, tier };
+}
+test("each provider's read is priced on its own supply: a fee tier only B's supply reaches sets E", async () => {
+  for (const t of [curveToken, ammToken]) {
+    const s = scenario(t, "buy");
+    const { v, mint, tier } = tiered(t, s);
+    const run = (who: (0 | 1)[]) => readSolanaReference(pair(s, (p, w, _n, ans) => {
+      if (w !== v) return;
+      tier(ans);
+      if (who.includes(p)) edit(ans.value[mint]!, (d) => putU64(d, 36, raised(u64(d, 36))));
+    }), req(t, s));
+    const [own, both, none] = await Promise.all([run([1]), run([0, 1]), run([])]);
+    assert.ok(own && both && none, `${t.venue}: ${show(own)} ${show(both)} ${show(none)}`);
+    assert.equal(own.expectedOut, both.expectedOut, `${t.venue}: B's read priced on B's supply`);
+    assert.ok(own.expectedOut > none.expectedOut, `${t.venue}: the free tier raises E (${own.expectedOut} > ${none.expectedOut})`);
+  }
+});
 test("a wrong owner, discriminator, vault or canonical pool is refused, even when both providers say it", async () => {
   const addr = solanaPoolAddresses(ammToken.mint);
   const other = base58.decode(SYSTEM.replace(/1$/, "2"));

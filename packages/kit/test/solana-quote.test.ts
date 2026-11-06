@@ -641,6 +641,8 @@ const R2: [string, SolanaQuoteCheckId, (c: ReturnType<typeof buyCase>) => Uint8A
   ["S10 the providers disagree on the mint's metadata pointer", "S10", (c) => mintB(c, (d) => { d[170] = (d[170] as number) ^ 1; })],
   ["S10 the providers disagree on the mint's last byte", "S10", (c) => mintB(c, (d) => { d[d.length - 1] = (d[d.length - 1] as number) ^ 1; })],
   ["S10 the providers disagree inside a 108-byte extension that is not the fee config", "S10", (c) => { const m = withExt(c.reads.mint[0] as SolanaAccountRead, 10, feeBody(5_000n, 0)); mintB(c, (d) => { setU64(d, d.length - 108 + 64, 6_000n); }, m); }],
+  // a fee config shorter than its 108 bytes is not one: its bytes 64..72 are compared, never masked as withheld fees
+  ["S10 the providers disagree inside a fee config shorter than 108 bytes", "S10", (c) => { const m = withExt(c.reads.mint[0] as SolanaAccountRead, 1, feeBody(5_000n, 0).slice(0, 100)); mintB(c, (d) => { setU64(d, d.length - 100 + 64, 6_000n); }, m); }],
   ["S10 provider B reads the mint one byte longer", "S10", (c) => { const a = c.reads.mint[0] as SolanaAccountRead; (c.reads as { mint: unknown }).mint = [a, { owner: a.owner, data: Uint8Array.from([...a.data, 0]) }]; }],
   ["S10 nonzero bytes after the last extension", "S10", (c) => { const a = c.reads.mint[0] as SolanaAccountRead; const m = { owner: a.owner, data: Uint8Array.from([...a.data, 0, 0, 0, 0, 7]) }; (c.reads as { mint: unknown }).mint = [m, m]; }],
   ["S13 an account created with a stranger as owner", "S13", (c) => { ix(c.m, 5).accounts[2] = addKey(c.m, randomKey()); }],
@@ -668,6 +670,7 @@ const MINT_FIELDS: Record<string, string> = {
   "S10 the providers disagree on the mint's metadata pointer": "extension 18",
   "S10 the providers disagree on the mint's last byte": "extension 19",
   "S10 the providers disagree inside a 108-byte extension that is not the fee config": "extension 10",
+  "S10 the providers disagree inside a fee config shorter than 108 bytes": "extension 1",
   "S10 provider B reads the mint one byte longer": "length (394 / 395 bytes)",
 };
 test("refused: S10 each of its mint disagreements is refused as one, by S10 alone, naming the field", () => {
