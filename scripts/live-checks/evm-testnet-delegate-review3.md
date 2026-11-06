@@ -14,6 +14,10 @@ Tx: base-sepolia 0xb3dc2f1b0bb8bf486b86dfe8047cab646d16ec890c50b12336713d99b7132
 Tx: base-sepolia 0x458055218a26ec5aa744bcde945e2e726d01b50986940ecb97e33fe7d856e3cb
 Tx: base-sepolia 0x1c7abd18dc67ece320ee9b0214b85963539dfe8887bb57d61365ed9f804851a1
 Tx: base-sepolia 0xf2511c743df275ef2895acb0832c3aa9de40f5a97b0ceedd14e69c7b46731f10
+Tx: base-sepolia 0xe82facb9ba50db72fd5e95b7671d708fac117dff861fae5297b1b3be12151d88
+Tx: base-sepolia 0x7782cd47b8a2ba2906cbf38dc4511e2561eeb898399c7fa3e5e671432f434df8
+Tx: base-sepolia 0xc8f700879d975463f96d5cd38cf64260cae789a2b59ce6d142dc1c2a54e40e20
+Tx: base-sepolia 0xcb336c5d3154c17c079ed1e8f04e7ed6fdc3e74dbc03ba362d1012e24fd8aa23
 Tx: base-sepolia 0x2b4794dbe2a570a720d48f4b7f2b8037df7d5a8bb8928c71c08c91896cb0db06
 Tx: base-sepolia 0xca3d3edc5f43fa083c5c63a427ce9167f9b1465fd2f26cdbc4146e0a608e73a5
 Tx: base-sepolia 0xed8abbed7df5f9f1ffaaf81110c7333e3158b666c072840114a3746dc37d5147
@@ -27,6 +31,7 @@ Tx: robinhood-testnet 0x775d8fff7ad7a8be6fbeacd43e6504b235e721714d737935ebec19b9
 Tx: robinhood-testnet 0x41b07a4b2840bd010d911e8f7535f1b6a6eb12e5ec59b3229332d7fc79b2eadb
 Tx: robinhood-testnet 0x37d45b0eeb7316b2785c57d928e009b3d2efb127c19a1bcfcc600d473a62016f
 Tx: base-sepolia 0x0047b367037dbf268969919630fb7e8c41f9e5266a8fa8893378a8150289c267
+Tx: base-sepolia 0x43c3add967cbe23d14d26d8150eae4813f079c195b8564a9e49eefac7a4df5b9
 Tx: base-sepolia 0xce1abea343de87a3bad0835d52a9bdad65244e29d807bc1ae7e5948064cb8f52
 Tx: robinhood-testnet 0x76880738426140d5e7f25a81fb61d5f40bf58a91aa0b044fcf5d57860a031c11
 
@@ -37,6 +42,7 @@ robinhood-testnet: contracts/pool-evm/script/deploy.mjs --only SellDelegate at 2
 base-sepolia: the run key 0xbd209a18f9358acbe90ea3571ab7b94eb896886d was funded from the team's testnet wallet E (0x49f2425b7f33f3a10912de8add6839226ce663a2) by 0xe8d66aff401710d088505b78efdaae4fc9c485f26b901cd08d0fa678e545c54c, read back as succeeded on both RPCs.
 robinhood-testnet: the run key 0xad9b666437dead4b827e9cd1a236483016d56e90 was funded from the team's testnet wallet E (0x49f2425b7f33f3a10912de8add6839226ce663a2) by 0x372530f30ff7b2f84c7d368e24b1c991e9f05389ade7ec7b8e2145b1517052fa, read back as succeeded on both RPCs.
 base-sepolia: the sell run's key 0xf8351fe1ddc748f51c08b42d14868abf181d8c4a was funded from the team's testnet wallet E (0x49f2425b7f33f3a10912de8add6839226ce663a2) by 0x0047b367037dbf268969919630fb7e8c41f9e5266a8fa8893378a8150289c267, read back as succeeded on both RPCs.
+base-sepolia: the sell run's key 0x75cafd9315fcc8a68aa75c8437f381a4dfa51431 was funded from the team's testnet wallet E (0x49f2425b7f33f3a10912de8add6839226ce663a2) by 0x43c3add967cbe23d14d26d8150eae4813f079c195b8564a9e49eefac7a4df5b9, read back as succeeded on both RPCs.
 base-sepolia: the sell run's key 0xa25c61ded77b60653a7eedec8d11ca275f68147b was funded from the team's testnet wallet E (0x49f2425b7f33f3a10912de8add6839226ce663a2) by 0xce1abea343de87a3bad0835d52a9bdad65244e29d807bc1ae7e5948064cb8f52, read back as succeeded on both RPCs.
 robinhood-testnet: the sell run's key 0x07aae601c1f2c9178680624134d2b3d928b2631a was funded from the team's testnet wallet E (0x49f2425b7f33f3a10912de8add6839226ce663a2) by 0x76880738426140d5e7f25a81fb61d5f40bf58a91aa0b044fcf5d57860a031c11, read back as succeeded on both RPCs.
 base-sepolia: the helper's sell 0x8aa0bda23849fdfd59e60bee5e1805d143dd43211b0fdf136e0b30e996487077 carries Paid(from 0x784d936b67af99d633b379756498964129ef4c39, value 20000000000000 wei), emitted by the FeeCollector 0x9cc4788af51677aaa7770d78277c41fb864b35e1, the kit's pin, on https://sepolia.base.org and https://base-sepolia-rpc.publicnode.com.
@@ -45,6 +51,11 @@ robinhood-testnet: the helper's sell 0x0225456322c3713eb5575e0f33af8e4bf0b6eca15
 base-sepolia (chain id 84532), contracts/pool-evm/script/testnet-run.mjs at 2026-11-06T18:51:49.041Z, the pool 0xb239a38af69b68e6c5c305df64985f283b5d5fe5, the token 0x036cbd53842c5426634e7929541ec2318f3dcf7e, venues v3. Its steps, in the order of its Tx lines above: deposit, buy through v3, sell through SellDelegate (helper), withdraw, withdraw, sweep (a W's ETH back), sweep (a W's ETH back), sweep (the run key's rest back).
 The run key 0xf8351fe1ddc748f51c08b42d14868abf181d8c4a lived only in the run, sent every transaction but the Ws' own sweeps as the relayer, was funded with 2065890000016656 wei (the printed need) and swept back to 0x49f2425b7f33f3a10912de8add6839226ce663a2. The run's 12 words lived only in the run; every note came from them.
 The restore from the words (packages/wallet evmRestoreNotes) at block 55345950: 5 notes, 3 spends, the Ws 0x784d936b67af99d633b379756498964129ef4c39 (0x036cbd53842c5426634e7929541ec2318f3dcf7e), 0x6eb843de1358f2fd5ed9d7d8eddd9e59d2a625fe (no token), 0x7a8568aac4d14f426f8ed8106b772d24dc512dc1 (no token).
+
+base-sepolia (chain id 84532), contracts/pool-evm/script/testnet-run.mjs at 2026-11-06T18:59:31.340Z, the pool 0xb239a38af69b68e6c5c305df64985f283b5d5fe5, the token 0x036cbd53842c5426634e7929541ec2318f3dcf7e, venues . Its steps, in the order of its Tx lines above: deposit, withdraw, sweep (a W's ETH back), sweep (the run key's rest back).
+The run key 0x75cafd9315fcc8a68aa75c8437f381a4dfa51431 lived only in the run, sent every transaction but the Ws' own sweeps as the relayer, was funded with 2065890000016656 wei (the printed need) and swept back to 0x49f2425b7f33f3a10912de8add6839226ce663a2. The run's 12 words lived only in the run; every note came from them.
+Stopped by SIGTERM after its funding: its syncs read the pool from its deploy block through sepolia.base.org, which caps eth_getLogs at 200 blocks (read 6 Nov 18:44Z), so they held the pool only 2134 s after the start, and the stop was honoured only after them (testnet-run awaits the syncs through its stop since); its deposit landed, then its finally withdrew the deposit note to its W and swept that W and the run key back to E. The next runs read the pool on base-sepolia-rpc.publicnode.com and base-sepolia.gateway.tenderly.co.
+No restore was run.
 
 base-sepolia (chain id 84532), contracts/pool-evm/script/testnet-run.mjs at 2026-11-06T18:47:33.200Z, the pool 0xb239a38af69b68e6c5c305df64985f283b5d5fe5, the token 0x036cbd53842c5426634e7929541ec2318f3dcf7e, venues . Its steps, in the order of its Tx lines above: deposit, withdraw, sweep (a W's ETH back), sweep (the run key's rest back).
 The run key 0xa25c61ded77b60653a7eedec8d11ca275f68147b lived only in the run, sent every transaction but the Ws' own sweeps as the relayer, was funded with 2065890000016656 wei (the printed need) and swept back to 0x49f2425b7f33f3a10912de8add6839226ce663a2. The run's 12 words lived only in the run; every note came from them.
