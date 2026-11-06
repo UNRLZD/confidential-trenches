@@ -350,6 +350,16 @@ test("the EVM pool sell sender's address is the kit's pinned sell sender for its
   assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_SELL_KEY_BASE_SEPOLIA: env.POOL_EVM_SENDER_KEY_BASE_SEPOLIA }), /POOL_EVM_SELL_KEY_BASE_SEPOLIA must not be POOL_EVM_SENDER_KEY_BASE_SEPOLIA/);
   assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_SELL_KEY_BASE_SEPOLIA: "0x1234" }), /POOL_EVM_SELL_KEY_BASE_SEPOLIA must be 0x and 64 lowercase hex/);
   assert.throws(() => evmPoolSendersFromEnv({ POOL_EVM_SELL_KEY_BASE: env.POOL_EVM_SELL_KEY_BASE_SEPOLIA }), /POOL_EVM_SELL_KEY_BASE is set but base's pool is not/);
+  // card helper-sender-fee-proof: the fee collector a Sell must pay (POOL_EVM_FEE_COLLECTOR_<NETWORK>), named in the fee
+  // answer; unset, every sell is refused; not an address, the pool's or a sender's, or set on a network whose pool is
+  // not: refused at start
+  const C = "0x00000000000000000000000000000000C011ec70";
+  const withC = evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: C }, pinned(own)).get(POOL)!;
+  assert.equal(((await withC.sell({ nonsense: 1 })).body as { error: { code: string } }).error.code, "bad_shape", "a collector set: sells are read");
+  assert.equal(((await evmPoolSendersFromEnv(env, pinned(own)).get(POOL)!.sell({ nonsense: 1 })).body as { error: { code: string } }).error.code, "not_configured");
+  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: "0x1234" }, pinned(own)), /POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA must be an address/);
+  for (const bad of [POOL, own, evmAddressOf(KEY)]) assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: bad }, pinned(own)), /fee collector/, bad);
+  assert.throws(() => evmPoolSendersFromEnv({ POOL_EVM_FEE_COLLECTOR_BASE: C }), /POOL_EVM_FEE_COLLECTOR_BASE is set but base's pool is not/);
   // no sell key: the network starts (withdraws go) and its sells are refused not_configured
   const noSell: Record<string, string> = { ...env };
   delete noSell.POOL_EVM_SELL_KEY_BASE_SEPOLIA;
