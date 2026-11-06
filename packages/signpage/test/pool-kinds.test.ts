@@ -11,7 +11,7 @@ import { SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import type { PoolAsk, PoolChain } from "../src/rules/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
-import { buildEntry, NON_SIGNERS, ROOT, SIGNER_DEFS, signerGuard } from "./signer-guard.ts";
+import { buildEntry, EXEMPT, NON_SIGNERS, ROOT, SIGNER_DEFS, signerGuard } from "./signer-guard.ts";
 
 const SOL_TOKEN = "So11111111111111111111111111111111111111112";
 const EVM_TOKEN = "0xF111111111111111111111111111111111111111";
@@ -254,15 +254,16 @@ test("card pool-restore-wired: a flow that fails with EvmNotFinalError is answer
 // signEvmSell called, or the pool's deposit(uint256,uint256) encoded) must pick its note through the wallet's
 // evmNextNote, which restores a taken note and names the next one to sign. Today none does: EVM pool.deposit is refused
 // (EVM_REFUSED) and the flow answers only Solana, so the list below is empty; the first flow that lands is held to it.
-// card signer-guard-parser (reviewer L3 of pool-restore-wired, and the review of 1a8a42f0): the guard reads code, not
-// names, and fails closed (test/signer-guard.ts has the rules): every name is bound to its declaration by the
-// TypeScript compiler; a signer is only called, in a function that calls evmNextNote, or re-exported; a namespace, an
-// import() or a glob that could reach one only as a plain member read; the curve signs only where it does today. It reads
+// card signer-guard-parser (reviewer L3 of pool-restore-wired, the review of 1a8a42f0 and the re-review of 40115c3d): the
+// guard reads code, not names (test/signer-guard.ts has the rules, and what they do not prove): every name is bound to
+// its declaration by the TypeScript compiler; a signer is only called, after an evmNextNote that runs first, or
+// re-exported; a namespace, an import() or a glob that could reach one only as a plain member read; noble's curve and
+// bip32's HD keys sign only in the functions that do today; no code from text, no helper import on the device. It reads
 // every module the page's build reaches from the build's own entry (scripts/build-app.mjs `input:`), held to the Vite
 // bundle's one chunk and its npm packages on both networks, and the device trees besides. The planted cases are files
 // in test/fixtures/signer-guard/.
 const FIXTURES = join(ROOT, "packages/signpage/test/fixtures/signer-guard");
-const FIXTURE_DEFS = ["packages/signpage/test/fixtures/signer-guard/defs.ts", "packages/signpage/test/fixtures/signer-guard/d01-defs.ts"];
+const FIXTURE_DEFS = ["packages/signpage/test/fixtures/signer-guard/defs.ts", "packages/signpage/test/fixtures/signer-guard/d01-defs.ts", "packages/signpage/test/fixtures/signer-guard/bad/m1-define-leak.ts"];
 const TREES = ["packages/signpage/src", "apps/terminal/src", "packages/wallet/src", "packages/kit/src", "apps/helper/src"];
 const sources = (dir: string): string[] =>
   readdirSync(dir).flatMap((name) => {
@@ -277,7 +278,7 @@ const SIGNER_LIST = [
   "packages/kit/src/trade/evm/quoted.ts#evmQuotedSell",
   ...["signEvmSell", "signEvmSellSim", "signEvmAuthorization"].map((n) => `packages/signpage/src/rules/pool.ts#${n}`),
 ];
-const FIXTURE_SIGNERS = ["packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureSignSell", "packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureBuildSell", "packages/signpage/test/fixtures/signer-guard/d01-defs.ts#fastPath"];
+const FIXTURE_SIGNERS = ["packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureSignSell", "packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureBuildSell", "packages/signpage/test/fixtures/signer-guard/d01-defs.ts#fastPath", "packages/signpage/test/fixtures/signer-guard/bad/m1-define-leak.ts#leakSign"];
 // carried from precommit-taken-recover: each signer called with no evmNextNote is refused, and with it (by its own
 // name, in the same function) passes; files the program reads as if on disk
 const LOOP = join(FIXTURES, "loop");
@@ -291,8 +292,11 @@ const VIRTUAL = new Map(SIGNER_LIST.flatMap((s) => [[join(LOOP, `${s.split("#")[
 const ENTRY = buildEntry();
 const TREE_FILES = TREES.flatMap((d) => sources(join(ROOT, d))).filter((f) => !/\.test\.(ts|mjs)$/.test(f));
 const FIXTURE_FILES = sources(FIXTURES);
-// one program for all of them; the fixtures' signer files only add signers no real file reaches
-const GUARD = signerGuard(ENTRY, [...TREE_FILES, ...FIXTURE_FILES], [...SIGNER_DEFS, ...FIXTURE_DEFS], VIRTUAL, { ...NON_SIGNERS, [FIXTURE_DEFS[0]!]: ["fixtureIsQuotedSell", "isSignedSell"] });
+// one program for all of them (built once: every test reads this one); the fixtures' signer files only add signers no
+// real file reaches, and the planted leak is a signer file, `define` as the real four are
+const GUARD_MS = Date.now();
+const GUARD = signerGuard(ENTRY, [...TREE_FILES, ...FIXTURE_FILES], [...SIGNER_DEFS, ...FIXTURE_DEFS], VIRTUAL, { ...NON_SIGNERS, [FIXTURE_DEFS[0]!]: ["fixtureIsQuotedSell", "isSignedSell"], [FIXTURE_DEFS[2]!]: ["own"] }, { ...EXEMPT, [FIXTURE_DEFS[2]!]: { define: true } });
+const GUARD_BUILT_MS = Date.now() - GUARD_MS;
 const names = (files: readonly string[]) => files.map((f) => f.slice(ROOT.length));
 /** The npm packages the page bundles, by name and version: a new one (a signing library) is read here first. */
 const BUNDLED_PACKAGES = ["@noble+curves@2.4.0", "@noble+hashes@2.4.0", "@scure+base@2.4.0", "@scure+bip32@2.4.0", "@scure+bip39@2.4.0", "@zk-kit+lean-imt@2.2.4", "@zk-kit+utils@1.4.1", "base64-js@1.5.1", "buffer@6.0.3", "ieee754@1.2.1", "poseidon-lite@0.3.0"];
@@ -330,12 +334,19 @@ test("precommit-taken-recover: no device file signs an EVM pool deposit or sell 
   assert.ok(files.length > 50, "the trees were read");
   for (const f of SIGNER_DEFS) assert.ok(GUARD.sites(join(ROOT, f)).length > 0, `${f}: the reader sees the signers in their own files`);
   assert.deepEqual(names(GUARD.unguarded(files)), [], JSON.stringify(GUARD.unguarded(files).flatMap(GUARD.sites).filter((s) => !s.ok)));
+  // each exemption is used where it is named: a function renamed or gone takes its exemption with it
+  for (const [path, ex] of Object.entries(EXEMPT)) {
+    const read = GUARD.sites(join(ROOT, path));
+    for (const fn of ex.curve ?? []) assert.ok(read.some((s) => s.ok && s.what === `signs with a pinned package in ${fn} (exempt)`), `${path}#${fn}: a curve exemption with no signing in it`);
+    for (const fn of ex.sellType ?? []) assert.ok(read.some((s) => s.ok && s.what === `holds the EIP-712 Sell type in ${fn} (exempt)`), `${path}#${fn}: a Sell type exemption with no Sell type in it`);
+  }
+  console.log(`signer guard: program ${GUARD_BUILT_MS} ms; sites of ${files.length} files read in this test`);
 });
 
 test("signer-guard-parser: every planted signer and encoder in fixtures/signer-guard/bad is caught, and none in good/", () => {
   const pool = /signpage\/src\/rules\/pool\.ts#signEvmSell\b/.source;
   const sell = /kit\/src\/trade\/evm\/sell\.ts#evmPoolSignSell\b/.source;
-  const no = ", with no evmNextNote in its function";
+  const no = ", with no evmNextNote run before it";
   const r = (...parts: string[]) => new RegExp(parts.join("[\\s\\S]*"));
   // each bad file, and what the guard reads in it; "carried" ones main's name guard caught already, b* and d01 are the
   // review's variants of 1a8a42f0 (red there)
@@ -367,11 +378,26 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
     "b08-dead-guard.ts": r(`calls .*${pool}${no}`),
     "b09b-glob-literal.ts": r("import\\.meta\\.glob"),
     "b11-deposit-decimal.ts": r(`encodes the deposit selector${no}`),
-    "b10-handrolled-sell.ts": r(`holds the EIP-712 Sell type${no}`, "uses the curve: secp256k1\\.sign"),
+    "b10-handrolled-sell.ts": r(`holds the EIP-712 Sell type${no}`, "uses @noble/curves: \\.sign"),
     "b16-globalthis.ts": r(`holds or hands on .*${pool}`),
     "b18-dynimport-destructure-computed.ts": r("imports at run time a module that exports"),
     "b19-dynimport-default.ts": r("imports at run time a module that exports .*#signEvmSell", "uses whole, or by a computed key"),
     "d01-user.ts": r(`calls .*d01-defs\\.ts#fastPath${no}`),
+    // the re-review of 40115c3d: each passes at 40115c3d, and is refused here
+    "b08b-dead-pick-same-body.ts": r(`calls .*${pool}${no}`), // L1
+    "b08c-pick-after.ts": r(`calls .*${pool}${no}`, `calls .*${pool}${no}`, `calls .*${pool}${no}`), // L1
+    "b12-deposit-runtime-signed.ts": r("uses @scure/bip32: \\.sign"), // H1
+    "b13-deposit-template-signed.ts": r("uses @scure/bip32: \\.sign"), // H1
+    "b14-encoder-nonliteral-signed.ts": r("imports the helper \\(a server file\\) on the device"), // M1
+    "b15-viem-nonliteral-signed.ts": r("calls a value read off globalThis through a cast"), // M1
+    "b16b-globalthis-caller.ts": r("calls a value read off globalThis through a cast", "calls a value read off globalThis through a cast"), // M1
+    "m1-define-leak.ts": r("holds or hands on .*m1-define-leak\\.ts#leakSign"), // M1
+    "b21-hdkey-sell.ts": r("constructs @scure/bip32"), // H1
+    "b21b-hdkey-deposit.ts": r("uses @scure/bip32: \\.sign"), // H1
+    "b21c-hdkey-escapes.ts": r("casts a value of @scure/bip32", "destructures @scure/bip32 .* past the members it may use", "uses @scure/bip32 by a key it computes", "hands a value of @scure/bip32 .* on as another type", "imports HARDENED_OFFSET of @scure/bip32"), // H1
+    "b21d-typehash-bytes.ts": r(`encodes the Sell type hash: "0x7964e18e.*${no}`, `encodes the Sell type hash as a number${no}`, `encodes the Sell type hash as bytes${no}`, `encodes the deposit as bytes${no}`), // H1
+    "b30-eval.ts": r("imports node:vm", "runs code from text: eval", "runs code from text: Function", "runs code from text: a callee of the type Function", "runs code from text: eval", "runs code from text: setTimeout given a string"), // L2
+    "b31-helper-signer.ts": r("imports the helper \\(a server file\\) on the device"), // M1
   };
   const bad = FIXTURE_FILES.filter((f) => f.startsWith(join(FIXTURES, "bad")));
   assert.deepEqual(bad.map((f) => f.slice(FIXTURES.length + 5)).sort(), Object.keys(BAD).sort(), "the planted cases were read");
@@ -381,8 +407,11 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
   // read and passes; a re-export (named, `export *`, a default), types, a predicate, a comment, a local that shares a
   // signer's name, and names destructured one by one from a namespace are no refusal
   const good = FIXTURE_FILES.filter((f) => f.startsWith(join(FIXTURES, "good")));
-  assert.equal(good.length, 4);
+  assert.equal(good.length, 6);
   assert.deepEqual(names(GUARD.unguarded(good)), []);
   assert.ok(GUARD.sites(join(FIXTURES, "good/guarded-alias.ts")).some((s) => s.ok && /^calls .*#signEvmSell$/.test(s.what)), "the aliased signer is read");
+  // M2 (the re-review of 40115c3d): a pick before a callback that signs, as pool-sell.ts's Solana flow signs in a .map
+  // and under locks.request, passes; refused at 40115c3d
+  for (const f of ["f01-nested-map.ts", "f03-lock-callback.ts"]) assert.ok(GUARD.sites(join(FIXTURES, "good", f)).some((s) => s.ok && /^calls .*#signEvmSell$/.test(s.what)), `${f}: the signer call in its callback is read and passes`);
   for (const f of ["reexports.ts", "shadow.ts", "default-reexport.ts"]) assert.deepEqual(GUARD.sites(join(FIXTURES, "good", f)), [], f);
 });

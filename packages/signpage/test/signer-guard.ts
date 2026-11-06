@@ -3,22 +3,38 @@
 // pick its note through the wallet's evmNextNote (card precommit-taken-recover, test/pool-kinds.test.ts). A guard that
 // matches names can be walked past by a rename, an alias or a `.call`, and flags the kit index's re-exports by their
 // bare name. This one reads code: the TypeScript compiler binds every name to its declaration, through aliased and
-// namespace imports and `export *` re-exports, so a file is held by what it reaches, never by how it spells it. It
-// fails closed: a form it cannot follow is refused, never passed.
+// namespace imports and `export *` re-exports, so a file is held by what it reaches, never by how it spells it. A form
+// it cannot follow is refused, never passed.
 //
-// The rules, outside what EXEMPT lets a file do (each file only what it needs):
-// - A signer is every value a SIGNER_DEFS file exports, but the ones NON_SIGNERS names. It may only be called (direct,
-//   or through .call, .apply, or a .bind called at once) or re-exported; any other mention (held, handed on, returned,
-//   destructured) refuses. A call needs a call of the wallet's own evmNextNote in the same function body.
+// The rules, outside what EXEMPT lets a file or a function do (each only what it needs):
+// - A signer is every value a SIGNER_DEFS file exports, but the ones NON_SIGNERS names. In every file, the signer files
+//   included, it may only be called (direct, or through .call, .apply, or a .bind called at once) or re-exported; any
+//   other mention (held, handed on, returned, destructured, put on globalThis) refuses. A call outside the signer files
+//   needs a pick: a call of the wallet's own evmNextNote that runs before it on every path (see "a pick" below).
 // - A pool deposit or sell encoded: a string built of literals that holds deposit(uint256,uint256), its selector
-//   e2bbb158 or the EIP-712 Sell type, that selector as a number, functionName "deposit" (viem), the ABI entry
-//   { type: "function", name: "deposit" }, or an ethers-style encoder called on "deposit". It needs evmNextNote in the
-//   same function body, as a call does.
+//   e2bbb158, the EIP-712 Sell type or its hash (the kit's and the helper's), the selector or a hash as a number or as
+//   an array of byte literals, functionName "deposit" (viem), the ABI entry { type: "function", name: "deposit" }, or an
+//   ethers-style encoder called on "deposit". It needs a pick, as a call does.
 // - A module that exports a signer, seen by its symbol or by its type (a namespace import, an import()'s value): only
 //   `ns.x`, `ns["x"]` or `{ x, y: z } = ns` of it is read; any other use, a computed key or a `...rest` refuses. An
-//   import() of such a module, an import() of a specifier that is not a string, and import.meta.glob refuse.
-// - The curve: noble's secp256k1 exports, and anything of @noble/curves/abstract/, are used only as SECP_MEMBERS
-//   (no signing); signing with the curve is only in the files that do today.
+//   import() of such a module, an import() the program cannot bind to a module, and import.meta.glob refuse.
+// - The packages that sign a secp256k1 digest (PINNED: noble's secp256k1 and abstract/weierstrass, @scure/bip32): a
+//   file imports only their named roots, and a value of their types is only read by the members PINNED names (none
+//   signs), called, kept under its own type or handed on as its own type. A cast, a computed key, a `new`, or a hand-on
+//   to another type refuses. Signing with them is only in the functions that do today.
+// - Code from text: eval, Function (by name, or a callee of the type Function, as `.constructor` gives), setTimeout or
+//   setInterval given a string, node:vm, and a call off globalThis, window or self through a cast refuse. The page's
+//   CSP blocks them too; the guard does not rest on it.
+// - A device file never imports the helper (apps/helper/): a server file, whose sender key signs its own sends.
+// - A pick: a call of evmNextNote, by any name, in an expression or a const/let statement that comes before the site in
+//   a block the site sits in (its own function's, or an enclosing one's; a callback made after the pick runs after it),
+//   and not under an if, a loop, a try, a `?:`, the right of `&&`/`||`/`??`, a `?.` or a function of its own. A
+//   function declaration (hoisted, so callable before) takes no pick from above it. This proves the pick runs first;
+//   it does not prove the pick's note is the one the site signs (that is the flow's own test).
+//
+// What a reader of code cannot tell, and the guard does not claim: a signature computed by hand from bigint arithmetic,
+// a signer reached through a value typed `any` that no rule above sees handed over, and code loaded from a URL at run
+// time (a worker, a script tag), which the page's CSP and its pinned worker hash hold.
 import ts from "typescript";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -43,30 +59,57 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX",
   ],
 };
-/** What each file may do, and only that: `define` (a signer file: it builds and composes signers, so its own mentions
- *  and calls of them are not held), `calls` (signers it may call with no evmNextNote), `curve` (it signs with noble's
- *  secp256k1), `sellType` (it holds the EIP-712 Sell type). */
-type Exempt = { define?: true; calls?: readonly string[]; curve?: true; sellType?: true };
+/** What each file may do, and only that: `define` (a signer file: it calls its own signers with no pick), `calls`
+ *  (signers it may call with no pick), `curve` (the functions that sign with a PINNED package), `sellType` (the
+ *  declarations that hold the EIP-712 Sell type). A function is the nearest named function, method or const a site
+ *  sits in. */
+export type Exempt = { define?: true; calls?: readonly string[]; curve?: readonly string[]; sellType?: readonly string[] };
 export const EXEMPT: Readonly<Record<string, Exempt>> = {
   "packages/kit/src/trade/evm/sell.ts": { define: true },
-  "packages/kit/src/trade/evm/sell-unpinned.ts": { define: true, curve: true, sellType: true }, // sell-unpinned.ts:434, 463
+  // a sell's signature and W's EIP-7702 authorization (sell-unpinned.ts:434, 463); the Sell digest (:411)
+  "packages/kit/src/trade/evm/sell-unpinned.ts": { define: true, curve: ["signDigest", "evmPoolSignSellAuthorizationUnpinned"], sellType: ["sellDigest"] },
   "packages/kit/src/trade/evm/quoted.ts": { define: true },
-  "packages/signpage/src/rules/pool.ts": { define: true, curve: true }, // rules/pool.ts:853, 1020: a withdraw, an onward send
-  "packages/kit/src/trade/evm/buy-unpinned.ts": { curve: true }, // a buy's signature, buy-unpinned.ts:612
+  "packages/signpage/src/rules/pool.ts": { define: true, curve: ["signEvmWithdraw", "signEvmOnwardSend"] }, // rules/pool.ts:853, 1020
+  "packages/kit/src/trade/evm/buy-unpinned.ts": { curve: ["evmPoolSignBuyUnpinned"] }, // a buy's signature, buy-unpinned.ts:612
   // a quote's simulation: a sim sell built and its call data encoded, signed by its caller on the note the caller names
   "packages/kit/src/checks/evm/quote.ts": { calls: ["evmPoolBuildSimSellUnpinned", "evmSellCallData"] },
-  // the helper (a server file, never on the page): its sender key signs its own relay sends, and it checks a sell's
-  // signature against the Sell digest (evmSellDigest), so it holds the type; it signs no sell
-  "apps/helper/src/pool/evm.ts": { curve: true, sellType: true },
+  // the helper (a server file, never on the page): its sender key signs its own relay sends (signEvmTx, signEvmTx4),
+  // and it checks a sell's signature against the Sell digest (evmSellDigest reads SELL_TYPE); it signs no sell
+  "apps/helper/src/pool/evm.ts": { curve: ["signEvmTx", "signEvmTx4"], sellType: ["SELL_TYPE"] },
 };
 /** The wallet's note pick, and the name it is exported by. */
 export const NEXT_NOTE = { file: "packages/wallet/src/pool/evm-restore.ts", name: "evmNextNote" };
-/** The curve's members a file may use without signing: a public key, a key's check, a point read from bytes. */
-const SECP_MEMBERS = [["getPublicKey"], ["utils", "isValidSecretKey"], ["Point", "fromBytes"]];
+/** The npm packages the device holds that sign a secp256k1 digest. `roots`: the files a name may be imported from, and
+ *  `names` the ones it may be; `types`: the types in `typeFiles` that sign (noble's ECDSA, the curve's signer, and
+ *  bip32's HDKey, a class and its keys), whose values are held to `members`. The members sign nothing: a public key, a
+ *  key's checks, the curve's points, a signer's key recovered (the helper's check), and the HD path's steps with their
+ *  wipe (wallet/derive/keys.ts:180-187); `sign`, `keygen`, `Signature`, `derive` and the rest refuse. */
+const PINNED = [
+  {
+    pkg: "@noble/curves",
+    roots: /[\\/]@noble[\\/]curves[\\/](?:src[\\/])?(?:secp256k1\.|abstract[\\/])/,
+    names: ["secp256k1"],
+    typeFiles: /[\\/]@noble[\\/]curves[\\/](?:src[\\/])?abstract[\\/]weierstrass\.(?:d\.ts|ts|js)$/,
+    types: ["ECDSA"],
+    members: ["getPublicKey", "utils", "Point", "recoverPublicKey"],
+  },
+  {
+    pkg: "@scure/bip32",
+    roots: /[\\/]@scure[\\/]bip32[\\/]/,
+    names: ["HDKey"],
+    typeFiles: /[\\/]@scure[\\/]bip32[\\/]/,
+    types: ["HDKey"],
+    members: ["fromMasterSeed", "deriveChild", "privateKey", "publicKey", "wipePrivateData"],
+  },
+] as const;
 const DEPOSIT_SIG = "deposit(uint256,uint256)";
 const DEPOSIT_SELECTOR = "e2bbb158";
 /** The EIP-712 Sell type (sell-unpinned.ts), spaces dropped: a sell's digest built by hand starts from it. */
 const SELL_TYPE = "sell(addresstoken,uint256amount,addresstarget";
+/** keccak256 of the Sell type: the kit's (sell-unpinned.ts:411, 11 fields) and the helper's (helper pool/evm.ts:286). */
+const SELL_TYPEHASHES = ["7964e18e540efb8e58098ce102bf5d1c94cc5fd69638a343b633d8b9d3767aa7", "de872827292ed3a7dbdb9c7287df9155f2f39cbd08f39dad7bed050e60ccc0ce"];
+/** A TypeScript lib file: where eval, Function, globalThis and the timers are declared. */
+const LIB = /[\\/]typescript[\\/]lib[\\/]lib\.[^\\/]*\.d\.ts$/;
 /** ethers- and web3-style encoders whose first argument names the function. */
 const ENCODERS = new Set(["encodeFunctionData", "encodeFunctionCall", "encodeFunctionSignature", "getFunction", "getSighash", "getSelector", "toFunctionSelector"]);
 
@@ -143,7 +186,20 @@ const literal = (e: ts.Expression): string | null => {
   return null;
 };
 const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
-const encodes = (t: string) => t.includes(DEPOSIT_SIG) || t.includes(DEPOSIT_SELECTOR);
+/** What a text (spaces dropped, lower case) encodes: the deposit, by its signature or selector, or a Sell type hash. */
+const encoding = (t: string): string | null => (t.includes(DEPOSIT_SIG) || t.includes(DEPOSIT_SELECTOR) ? "the deposit" : SELL_TYPEHASHES.some((h) => t.includes(h)) ? "the Sell type hash" : null);
+/** The hex of a list of byte literals (0..255), as `[0xe2, 0xbb, ...]` or `Uint8Array.of(...)` writes them, or null. */
+const bytesHex = (xs: readonly ts.Node[], sf: ts.SourceFile): string | null => {
+  if (xs.length < 4) return null;
+  let out = "";
+  for (const x of xs) {
+    if (!ts.isNumericLiteral(x)) return null;
+    const v = Number(x.getText(sf).replace(/_/g, ""));
+    if (!Number.isInteger(v) || v < 0 || v > 255) return null;
+    out += v.toString(16).padStart(2, "0");
+  }
+  return out;
+};
 /** True when `n` sits in a type, where a name signs nothing (`typeof x`, an annotation, `implements`). */
 const inType = (n: ts.Node): boolean => {
   for (let p = n.parent; p; p = p.parent) {
@@ -165,18 +221,35 @@ const inModuleDecl = (n: ts.Node): boolean => {
   }
   return false;
 };
-/** The function body (or the file) a node runs in. */
-const bodyOf = (n: ts.Node): ts.Node => {
-  for (let p = n.parent; p; p = p.parent) if (ts.isFunctionLike(p) && "body" in p && p.body) return p;
-  return n.getSourceFile();
+/** The name of the nearest named function `n` sits in (a function or method declaration, or a function a const or let
+ *  is given); outside any, the top-level const it sits in; else null. */
+const fnName = (n: ts.Node): string | null => {
+  let top: string | null = null;
+  for (let p = n.parent; p; p = p.parent) {
+    if ((ts.isFunctionDeclaration(p) || ts.isMethodDeclaration(p)) && p.name && ts.isIdentifier(p.name)) return p.name.text;
+    if ((ts.isArrowFunction(p) || ts.isFunctionExpression(p)) && ts.isVariableDeclaration(p.parent) && ts.isIdentifier(p.parent.name)) return p.parent.name.text;
+    if (ts.isVariableDeclaration(p) && ts.isIdentifier(p.name)) top = p.name.text;
+  }
+  return top;
+};
+/** True when `n`, inside `stmt`, runs whenever `stmt` runs: no function, class, `?:` branch, right of a short circuit
+ *  or `?.` between them. */
+const always = (n: ts.Node, stmt: ts.Node): boolean => {
+  for (let c = n, p = n.parent; p && c !== stmt; c = p, p = p.parent) {
+    if (ts.isFunctionLike(p) || ts.isClassLike(p)) return false;
+    if (ts.isConditionalExpression(p) && c !== p.condition) return false;
+    if (ts.isBinaryExpression(p) && c === p.right && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken].includes(p.operatorToken.kind)) return false;
+    if ((ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p) || ts.isCallExpression(p)) && p.flags & ts.NodeFlags.OptionalChain) return false;
+  }
+  return true;
 };
 
 /**
  * Reads `roots` (absolute paths: the build's entry and any other files to hold) and everything they import into one
  * TypeScript program, and returns the guard. `defs` are the repo paths whose exports are the signers (`nonSigners`
- * aside); `virtual` adds files by absolute path and text, read as if on disk.
+ * aside); `virtual` adds files by absolute path and text, read as if on disk; `exempt` is EXEMPT, or a test's own.
  */
-export function signerGuard(entry: string, roots: readonly string[], defs: readonly string[] = SIGNER_DEFS, virtual: ReadonlyMap<string, string> = new Map(), nonSigners: Readonly<Record<string, readonly string[]>> = NON_SIGNERS): Guard {
+export function signerGuard(entry: string, roots: readonly string[], defs: readonly string[] = SIGNER_DEFS, virtual: ReadonlyMap<string, string> = new Map(), nonSigners: Readonly<Record<string, readonly string[]>> = NON_SIGNERS, exempt: Readonly<Record<string, Exempt>> = EXEMPT): Guard {
   const host = ts.createCompilerHost(OPTIONS);
   const { getSourceFile, fileExists, readFile } = host;
   host.getSourceFile = (name, lang, ...rest) => (virtual.has(name) ? ts.createSourceFile(name, virtual.get(name)!, lang, true) : getSourceFile.call(host, name, lang, ...rest));
@@ -278,11 +351,37 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
     for (const x of checker.getExportsOfModule(s)) if (signers.has(real(x))) return signers.get(real(x))!;
     return null;
   };
-  /** A name declared by noble's secp256k1 module or by @noble/curves/abstract/. */
-  const curveDecl = (s: ts.Symbol | undefined): boolean => {
-    const d = s && real(s).declarations?.[0];
-    return /[\\/]node_modules[\\/]@noble[\\/]curves[\\/](?:secp256k1\.|abstract[\\/])/.test(d?.getSourceFile().fileName ?? "");
+  type Pinned = (typeof PINNED)[number];
+  /** The PINNED package a name is imported from, or null. */
+  const rootIn = (s: ts.Symbol): Pinned | null => {
+    for (const d of real(s).declarations ?? []) {
+      const p = PINNED.find((x) => x.roots.test(d.getSourceFile().fileName));
+      if (p) return p;
+    }
+    return null;
   };
+  /** The PINNED package whose signing type `s` is, or null. */
+  const typeIn = (s: ts.Symbol | undefined): Pinned | null => {
+    if (!s) return null;
+    for (const d of s.declarations ?? []) {
+      const p = PINNED.find((x) => x.typeFiles.test(d.getSourceFile().fileName) && (x.types as readonly string[]).includes(s.name));
+      if (p) return p;
+    }
+    return null;
+  };
+  const typeMemo = new Map<ts.Type, Pinned | null>();
+  /** The PINNED package a type is of (a union or an intersection: any of its parts), or null. */
+  const pinnedType = (t: ts.Type): Pinned | null => {
+    const hit = typeMemo.get(t);
+    if (hit !== undefined) return hit;
+    typeMemo.set(t, null);
+    let p = typeIn(t.getSymbol()) ?? typeIn(t.aliasSymbol);
+    if (!p && t.isUnionOrIntersection()) for (const u of t.types) if ((p = pinnedType(u))) break;
+    typeMemo.set(t, p);
+    return p;
+  };
+  /** A name declared in a TypeScript lib file (eval, Function, globalThis, the timers), not one of ours. */
+  const fromLib = (s: ts.Symbol | undefined): boolean => !!s && (real(s).declarations ?? []).some((d) => LIB.test(d.getSourceFile().fileName));
   /** The call `ref` is the callee of: direct, through .call/.apply, or a .bind called at once; null when it is not. */
   const callOf = (ref: ts.Node): ts.CallExpression | null => {
     const e = outer(ref);
@@ -302,7 +401,8 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
     }
     return null;
   };
-  /** The function bodies of `sf` that call the wallet's evmNextNote, by any name, directly or via .call/.apply. */
+  /** The statements of `sf` holding a call of the wallet's evmNextNote (by any name, directly or via .call/.apply)
+   *  that runs whenever the statement does: an expression statement or a const/let (see `always`). */
   const pickCache = new Map<string, Set<ts.Node>>();
   const picks = (sf: ts.SourceFile): Set<ts.Node> => {
     const hit = pickCache.get(sf.fileName);
@@ -312,7 +412,15 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
       if (ts.isCallExpression(n)) {
         let c = strip(n.expression);
         if (ts.isPropertyAccessExpression(c) && (c.name.text === "call" || c.name.text === "apply")) c = strip(c.expression);
-        if (valueOf(c, NEXT)) out.add(bodyOf(n));
+        if (valueOf(c, NEXT)) {
+          for (let p = n.parent; p; p = p.parent) {
+            if (ts.isFunctionLike(p) || ts.isClassLike(p)) break;
+            if (ts.isStatement(p)) {
+              if ((ts.isExpressionStatement(p) || ts.isVariableStatement(p)) && always(n, p)) out.add(p);
+              break;
+            }
+          }
+        }
       }
       ts.forEachChild(n, visit);
     };
@@ -320,22 +428,41 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
     pickCache.set(sf.fileName, out);
     return out;
   };
+  /** True when a pick runs before `n` on every path: a pick statement comes before `n` in a block `n` sits in, in its
+   *  own function or an enclosing one, and no function declaration (hoisted) stands between. */
+  const pickedBefore = (n: ts.Node): boolean => {
+    const ps = picks(n.getSourceFile());
+    if (!ps.size) return false;
+    for (let c: ts.Node = n, p = n.parent; p; c = p, p = p.parent) {
+      if (!(ts.isBlock(p) || ts.isSourceFile(p) || ts.isModuleBlock(p))) continue;
+      const i = p.statements.indexOf(c as ts.Statement);
+      if (i < 0) continue;
+      if (ts.isFunctionDeclaration(c)) return false;
+      for (let j = 0; j < i; j++) if (ps.has(p.statements[j]!)) return true;
+    }
+    return false;
+  };
 
   const siteCache = new Map<string, Site[]>();
   const sites = (path: string): Site[] => {
     const hit = siteCache.get(path);
     if (hit) return hit;
     const sf = file(path);
-    const ex: Exempt = EXEMPT[rel(path)] ?? {};
-    const picked = picks(sf);
+    const ex: Exempt = exempt[rel(path)] ?? {};
+    const device = !rel(path).startsWith("apps/helper/");
     const out: Site[] = [];
-    const at = (n: ts.Node, what: string, ok: boolean) => out.push({ path: rel(path), line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, what, ok });
-    // a call, or an encoding, needs evmNextNote called in its own function body
-    const needsPick = (n: ts.Node, what: string) => at(n, picked.has(bodyOf(n)) ? what : `${what}, with no evmNextNote in its function`, picked.has(bodyOf(n)));
-    /** A mention of signer `h` at `ref`: a call (held to evmNextNote), or anything else (refused). */
+    const at = (n: ts.Node, what: string, ok: boolean): void => {
+      out.push({ path: rel(path), line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, what, ok });
+    };
+    // a call, or an encoding, needs a pick that runs before it
+    const needsPick = (n: ts.Node, what: string) => {
+      const ok = pickedBefore(n);
+      at(n, ok ? what : `${what}, with no evmNextNote run before it`, ok);
+    };
+    /** A mention of signer `h` at `ref`: a call (held to a pick but in its own file), or anything else (refused). */
     const signer = (ref: ts.Node, h: string) => {
-      if (ex.define) return at(ref, `defines with ${h}`, true);
       if (!callOf(ref)) return at(ref, `holds or hands on ${h} (a signer is only called or re-exported)`, false);
+      if (ex.define) return at(ref, `calls ${h} (a signer file)`, true);
       if (ex.calls?.includes(h.slice(h.indexOf("#") + 1))) return at(ref, `calls ${h} (exempt)`, true);
       needsPick(ref, `calls ${h}`);
     };
@@ -348,18 +475,65 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
       if (p && ts.isVariableDeclaration(p) && p.initializer === e && ts.isObjectBindingPattern(p.name) && p.name.elements.every((b) => !b.dotDotDotToken && (!b.propertyName || ts.isIdentifier(b.propertyName) || ts.isStringLiteral(b.propertyName)))) return;
       at(ref, `uses whole, or by a computed key, a module that exports ${m}`, false);
     };
-    const curve = (ref: ts.Identifier) => {
-      if (ex.curve) return at(ref, "uses the curve (exempt)", true);
-      const members: string[] = [];
-      let e: ts.Node = outer(ref);
-      while (e.parent && ts.isPropertyAccessExpression(e.parent) && e.parent.expression === e) {
-        members.push(e.parent.name.text);
-        e = outer(e.parent);
+    /** Where `e`, a value of PINNED package `pk`, goes: a member `pk` names, a call, kept or handed on under its own
+     *  type, or dropped; anything else refuses. */
+    const pinnedUse = (e: ts.Expression, pk: Pinned): void => {
+      const said = `${pk.pkg} (${e.getText(sf).slice(0, 48)})`;
+      for (let x: ts.Node = e; ; ) {
+        const o = outer(x);
+        if (o !== x && !pinnedType(checker.getTypeAtLocation(o))) return at(o, `casts a value of ${said} to another type`, false);
+        const p = o.parent;
+        if (ts.isPropertyAccessExpression(p) && p.expression === o) {
+          if (!(pk.members as readonly string[]).includes(p.name.text)) at(p, `uses ${pk.pkg}: .${p.name.text} (a device file uses only ${pk.members.join(", ")})`, false);
+          return;
+        }
+        if (ts.isElementAccessExpression(p) && p.expression === o) {
+          const k = ts.isStringLiteralLike(p.argumentExpression) ? p.argumentExpression.text : null;
+          if (k === null || !(pk.members as readonly string[]).includes(k)) at(p, `uses ${pk.pkg} by a key ${k === null ? "it computes" : JSON.stringify(k)}`, false);
+          return;
+        }
+        if (ts.isCallExpression(p) && p.expression === o) return;
+        if (ts.isNewExpression(p) && p.expression === o) return at(p, `constructs ${said}`, false);
+        if (ts.isExpressionStatement(p) || ts.isVoidExpression(p) || (ts.isConditionalExpression(p) && p.condition === o)) return;
+        if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.left === o) return; // written to: the right is read
+        const flows = ts.isConditionalExpression(p) || ts.isAwaitExpression(p) || (ts.isBinaryExpression(p) && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(p.operatorToken.kind));
+        if (flows && pinnedType(checker.getTypeAtLocation(p))) {
+          x = p;
+          continue;
+        }
+        // kept or handed on: the type it lands in must be its own
+        let into: ts.Type | undefined;
+        if (ts.isVariableDeclaration(p) && p.initializer === o && !ts.isIdentifier(p.name)) {
+          // `{ a, b: c } = v`: each a member `pk` names; a `...rest`, an array pattern or a computed key refuses
+          const named = ts.isObjectBindingPattern(p.name) && p.name.elements.every((e) => !e.dotDotDotToken && (pk.members as readonly string[]).includes(((e.propertyName ?? e.name) as ts.Identifier).text ?? ""));
+          if (!named) at(p.name, `destructures ${said} past the members it may use`, false);
+          return;
+        }
+        if (ts.isVariableDeclaration(p) && p.initializer === o) into = checker.getTypeAtLocation(p.name);
+        else if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.right === o) into = checker.getTypeAtLocation(p.left);
+        else if ((ts.isCallExpression(p) || ts.isNewExpression(p)) && p.arguments?.includes(o as ts.Expression)) into = checker.getContextualType(o as ts.Expression);
+        else if (ts.isReturnStatement(p) || (ts.isArrowFunction(p) && p.body === o)) into = checker.getContextualType(o as ts.Expression) ?? checker.getTypeAtLocation(o);
+        if (into && pinnedType(into)) return;
+        return at(o, `hands a value of ${said} on as another type`, false);
       }
-      const ok = ref.text === "secp256k1" && SECP_MEMBERS.some((m) => m.length <= members.length && m.every((x, i) => x === members[i]));
-      at(ref, `uses the curve: ${[ref.text, ...members].join(".")}`, ok);
+    };
+    /** A value expression at `n`: a value of a PINNED package's type, held to `pinnedUse` outside the functions EXEMPT
+     *  lets sign with it. */
+    const pinnedAt = (n: ts.Expression) => {
+      const pk = pinnedType(checker.getTypeAtLocation(n));
+      if (!pk) return;
+      const fn = fnName(n) ?? "";
+      if (ex.curve?.includes(fn)) return at(n, `signs with a pinned package in ${fn} (exempt)`, true);
+      pinnedUse(n, pk);
+    };
+    /** A module specifier of this file: a device file never imports the helper; vm runs code from text. */
+    const imports = (spec: ts.StringLiteralLike) => {
+      const f = moduleFile(spec);
+      if (device && f?.startsWith(join(ROOT, "apps/helper/"))) at(spec, `imports the helper (a server file) on the device: ${spec.text}`, false);
+      if (spec.text === "vm" || spec.text === "node:vm") at(spec, "imports node:vm: code from text", false);
     };
     const visit = (n: ts.Node): void => {
+      if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteralLike(n.moduleSpecifier)) imports(n.moduleSpecifier);
       const declares = ts.isIdentifier(n) && n.parent && (ts.isFunctionDeclaration(n.parent) || ts.isVariableDeclaration(n.parent) || ts.isParameter(n.parent) || ts.isFunctionExpression(n.parent) || ts.isClassDeclaration(n.parent) || ts.isMethodDeclaration(n.parent)) && (n.parent as ts.NamedDeclaration).name === n;
       if (ts.isIdentifier(n) && !declares && !inModuleDecl(n) && !inType(n)) {
         const p = n.parent;
@@ -378,16 +552,50 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
           const s = checker.getSymbolAtLocation(n);
           const h = holds(s, signers);
           if (h) signer(ts.isPropertyAccessExpression(p) && p.name === n ? p : n, h);
-          else if (!memberName) {
-            if (curveDecl(s)) curve(n);
-            const m = moduleSigner(s) ?? moduleSigner(checker.getTypeAtLocation(n).getSymbol());
-            if (m) namespace(n, m);
+          else {
+            if ((n.text === "eval" || n.text === "Function") && fromLib(s)) at(n, `runs code from text: ${n.text}`, false);
+            if (!memberName) {
+              // a name of a PINNED package: only the roots it names
+              const pk = s && rootIn(s);
+              if (pk && !ex.curve?.includes(fnName(n) ?? "") && !(pk.names as readonly string[]).includes(real(s).name)) at(n, `imports ${real(s).name} of ${pk.pkg} (a device file imports only ${pk.names.join(", ")})`, false);
+              pinnedAt(n);
+              const m = moduleSigner(s) ?? moduleSigner(checker.getTypeAtLocation(n).getSymbol());
+              if (m) namespace(n, m);
+            }
           }
         }
       }
+      if ((ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isNewExpression(n) || (ts.isCallExpression(n) && n.expression.kind !== ts.SyntaxKind.ImportKeyword)) && !inType(n)) pinnedAt(n);
       if (ts.isElementAccessExpression(n) && ts.isStringLiteralLike(n.argumentExpression) && !inType(n)) {
-        const h = holds(symbolOf(n), signers);
+        const s = symbolOf(n);
+        const h = holds(s, signers);
         if (h) signer(n, h);
+        else if ((n.argumentExpression.text === "eval" || n.argumentExpression.text === "Function") && fromLib(s)) at(n, `runs code from text: ${n.argumentExpression.text}`, false);
+      }
+      if ((ts.isCallExpression(n) && n.expression.kind !== ts.SyntaxKind.ImportKeyword) || ts.isNewExpression(n)) {
+        // code from text: a callee of the type Function (`.constructor` of a function), a timer given a string, a
+        // call off the global object through a cast or a computed key
+        const callee = strip(n.expression);
+        const ct = checker.getTypeAtLocation(callee).getSymbol();
+        if (ct && (ct.name === "Function" || ct.name === "FunctionConstructor") && fromLib(ct)) at(n, "runs code from text: a callee of the type Function", false);
+        const named = ts.isIdentifier(callee) ? callee : ts.isPropertyAccessExpression(callee) ? callee.name : null;
+        const arg = n.arguments?.[0];
+        if (named && (named.text === "setTimeout" || named.text === "setInterval") && fromLib(checker.getSymbolAtLocation(named)) && arg && checker.getTypeAtLocation(arg).flags & ts.TypeFlags.StringLike) at(n, `runs code from text: ${named.text} given a string`, false);
+        let c: ts.Expression = n.expression;
+        let cast = false;
+        for (;;) {
+          if (isWrap(c)) {
+            if (ts.isAsExpression(c) || ts.isTypeAssertionExpression(c)) cast = true;
+            c = c.expression;
+          } else if (ts.isPropertyAccessExpression(c) || ts.isElementAccessExpression(c)) {
+            if (ts.isElementAccessExpression(c) && !ts.isStringLiteralLike(c.argumentExpression)) cast = true;
+            c = c.expression;
+          } else break;
+        }
+        const g = ts.isIdentifier(c) ? checker.getSymbolAtLocation(c) : undefined;
+        // globalThis is the checker's own symbol, with no declaration; window and self are lib.dom's
+        const global = !!g && ts.isIdentifier(c) && ["globalThis", "window", "self"].includes(c.text) && (fromLib(g) || (g.name === "globalThis" && !g.declarations?.length));
+        if (cast && global) at(n, `calls a value read off ${(c as ts.Identifier).text} through a cast or a computed key`, false);
       }
       // a call of a value whose type is a signer's own (a signer held in an array, or returned): read by its type
       if (ts.isCallExpression(n) && n.expression.kind !== ts.SyntaxKind.ImportKeyword) {
@@ -396,7 +604,7 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
         const t = checker.getTypeAtLocation(c).getSymbol();
         const h = t && signers.get(t);
         if (h && !valueOf(c, signers)) {
-          if (ex.define) at(n, `defines with ${h}`, true);
+          if (ex.define) at(n, `calls ${h} (a signer file)`, true);
           else if (ex.calls?.includes(h.slice(h.indexOf("#") + 1))) at(n, `calls ${h} (exempt)`, true);
           else needsPick(n, `calls a value of the type of ${h}`);
         }
@@ -405,8 +613,10 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
         const spec = n.arguments[0];
         if (!spec || !ts.isStringLiteralLike(spec)) at(n, "imports a module it names at run time", false);
         else {
+          imports(spec);
           const m = moduleSigner(checker.getSymbolAtLocation(spec));
           if (m) at(n, `imports at run time a module that exports ${m}`, false);
+          else if (!moduleFile(spec)) at(n, `imports at run time a module the program cannot bind: ${spec.text}`, false);
         }
       }
       if (ts.isPropertyAccessExpression(n) && n.name.text === "glob" && ts.isMetaProperty(strip(n.expression))) at(n, "import.meta.glob: modules the guard cannot read", false);
@@ -415,20 +625,35 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
         const top = !(n.parent && ts.isBinaryExpression(n.parent) && literal(n.parent) !== null);
         if (s !== null && top) {
           const t = norm(s);
-          if (encodes(t)) needsPick(n, `encodes the deposit: ${JSON.stringify(s)}`);
+          const e = encoding(t);
+          if (e) needsPick(n, `encodes ${e}: ${JSON.stringify(s)}`);
           if (t.includes(SELL_TYPE)) {
-            if (ex.sellType) at(n, "holds the EIP-712 Sell type (exempt)", true);
+            const fn = fnName(n) ?? "";
+            if (ex.sellType?.includes(fn)) at(n, `holds the EIP-712 Sell type in ${fn} (exempt)`, true);
             else needsPick(n, "holds the EIP-712 Sell type");
           }
         }
       }
       if (ts.isTemplateExpression(n)) {
         const t = norm([n.head.text, ...n.templateSpans.map((x) => x.literal.text)].join(""));
-        if (encodes(t) || t.includes(SELL_TYPE)) needsPick(n, "encodes the deposit or the Sell type in a template");
+        if (encoding(t) || t.includes(SELL_TYPE)) needsPick(n, "encodes the deposit or the Sell type in a template");
       }
-      // the selector as a number, in any base (0xe2bbb158 = 3803951448)
-      const num = ts.isNumericLiteral(n) ? Number(n.getText(sf).replace(/_/g, "")) : ts.isBigIntLiteral(n) ? Number(BigInt(n.getText(sf).replace(/_/g, "").slice(0, -1))) : NaN;
-      if (num === 0xe2bbb158) needsPick(n, "encodes the deposit selector");
+      // the selector or a Sell type hash as a number, in any base (0xe2bbb158 = 3803951448)
+      if (ts.isNumericLiteral(n) || ts.isBigIntLiteral(n)) {
+        const text = n.getText(sf).replace(/_/g, "").replace(/n$/, "");
+        let v: bigint | null = null;
+        try {
+          v = BigInt(text);
+        } catch {
+          v = Number(text) === 0xe2bbb158 ? 0xe2bbb158n : null;
+        }
+        if (v === 0xe2bbb158n) needsPick(n, "encodes the deposit selector");
+        else if (v !== null && SELL_TYPEHASHES.some((h) => BigInt(`0x${h}`) === v)) needsPick(n, "encodes the Sell type hash as a number");
+      }
+      // the selector or a Sell type hash as byte literals: [0xe2, 0xbb, ...] or Uint8Array.of(0xe2, ...)
+      const bytes = ts.isArrayLiteralExpression(n) ? bytesHex(n.elements, sf) : ts.isCallExpression(n) ? bytesHex(n.arguments, sf) : null;
+      const byEnc = bytes && encoding(bytes);
+      if (byEnc) needsPick(n, `encodes ${byEnc} as bytes`);
       if (ts.isObjectLiteralExpression(n)) {
         const prop = (k: string) => {
           const a = n.properties.find((q) => ts.isPropertyAssignment(q) && (ts.isIdentifier(q.name) || ts.isStringLiteral(q.name)) && q.name.text === k) as ts.PropertyAssignment | undefined;
