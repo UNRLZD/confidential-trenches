@@ -264,6 +264,29 @@ export function signpageReadableOps(v: unknown): unknown {
 
 const open = obj({ pending: lit(true) });
 
+/** A dec string as an exact fraction's numerator at 78 fraction digits (dec's most), for comparing two of them. */
+const at78 = (s: string): bigint => unitsAt(s, 78)!;
+/** A deposit asset (messages.ts DepositAsset): exact, its decimals 0..36, its min above 0 with no more fraction digits
+ *  than the asset has, its max_usd above 0; one entry per asset (an asset twice is refused). */
+const depositAssetEntry = obj({ origin_asset: str, chain, symbol: str, decimals: (v) => uint(v) && (v as number) <= 36, min: dec, max_usd: dec });
+const depositAssetFits: SignpageSchema = (v) => {
+  if (!depositAssetEntry(v)) return false;
+  const a = v as { decimals: number; min: string; max_usd: string };
+  const min = unitsAt(a.min, a.decimals);
+  return min !== null && min > 0n && at78(a.max_usd) > 0n;
+};
+const depositAssetList = arr(depositAssetFits);
+const depositAssets = obj({
+  assets: (v) => depositAssetList(v) && new Set((v as { origin_asset: string }[]).map((a) => a.origin_asset)).size === (v as unknown[]).length,
+});
+/** A dry quote's lines (messages.ts DepositDry): its least landing at most what it lands as. */
+const depositDryLines = obj({ amount_out_usd: dec, min_amount_out_usd: dec, fee_usd: dec, time_estimate_s: uint });
+const depositDry: SignpageSchema = (v) => {
+  if (!depositDryLines(v)) return false;
+  const d = v as { amount_out_usd: string; min_amount_out_usd: string };
+  return at78(d.min_amount_out_usd) <= at78(d.amount_out_usd);
+};
+
 /** The result of each kind, as SignpageResults names it. */
 export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.quote": obj({
@@ -294,6 +317,8 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "pool.buy": obj({ stage: oneOf(TRADE), txs }),
   "pool.sell": obj({ stage: oneOf(TRADE), txs }),
   "pool.withdraw": open,
+  "deposit.assets": depositAssets,
+  "deposit.dry": depositDry,
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 
 const exit = obj({ trigger_price: dec, share_bps: bps(1) });
@@ -321,6 +346,8 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "pool.buy": obj({ chain: poolChain, token: str, amount: dec, slippage_bps: bps(0) }),
   "pool.sell": obj({ chain: poolChain, token: str, amount: dec, slippage_bps: bps(0) }),
   "pool.withdraw": obj({ return_key: returnKey, chain: poolChain }),
+  "deposit.assets": obj({}),
+  "deposit.dry": obj({ origin_asset: str, amount: dec }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 
 /** The handshake, page to app. Any whole `api` passes here; the client refuses one it does not speak. */
@@ -362,6 +389,6 @@ export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v)
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
 export const signpageAnswerErrorSchema = obj({ v: lit(1), id: str, ok: lit(false), error: obj({ code: errorCode }) });
 
-/** True when `kind` is one of the twenty-one. */
+/** True when `kind` is one of the twenty-three. */
 export const signpageIsKind = (kind: unknown): kind is SignpageKind =>
   typeof kind === "string" && (SIGNPAGE_KINDS as readonly string[]).includes(kind);
