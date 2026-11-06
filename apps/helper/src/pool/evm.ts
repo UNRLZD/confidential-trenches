@@ -286,7 +286,9 @@ export function evmReadSell(d: Uint8Array): EvmSell {
 const utf8 = (t: string) => new TextEncoder().encode(t);
 const w32 = (n: bigint) => unhex(n.toString(16).padStart(64, "0"));
 const DOMAIN_TYPE = keccak_256(utf8("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
-const SELL_TYPE = keccak_256(utf8("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"));
+/** SellDelegate.sol's SELL_TYPEHASH string, held to the contract's own text by evm-sell-type.test.ts. */
+export const SELL_TYPE_STRING = "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)";
+const SELL_TYPE = keccak_256(utf8(SELL_TYPE_STRING));
 /** SellDelegate._sellDigest (contracts/pool-evm/src/SellDelegate.sol) of `s` under W's own address on chain `chainId`. */
 export function evmSellDigest(chainId: bigint, w: string, s: EvmSell): Uint8Array {
   const domain = keccak_256(Uint8Array.from([...DOMAIN_TYPE, ...keccak_256(utf8("Blindfill")), ...keccak_256(utf8("1")), ...w32(chainId), ...w32(BigInt(w))]));
@@ -337,8 +339,9 @@ export const EVM_BUSY_RETRY_S = 2;
  */
 export const EVM_SELL_DROP_MARGIN_MS = 60_000;
 /**
- * The sell sender pays gas for each call W signs and is paid only when the sale lands (SellDelegate pays the fee out of
- * the proceeds). Each sale's worst cost (gas x maxFeePerGas + the L1 data fee bound) is held against W, the client,
+ * The sell sender pays gas for each call W signs; SellDelegate pays the fee, out of the proceeds and only when the sale
+ * lands, to the Sell's feeRecipient, this release's fee recipient, never to the sell sender. The ledger counts what the
+ * release does not get back, not the sell key's balance, which falls by every sale's cost. Each sale's worst cost (gas x maxFeePerGas + the L1 data fee bound) is held against W, the client,
  * the token and the sender's whole sell budget from its send; its receipt, read in the background, turns that into what
  * went unpaid (all of the cost on a revert, cost - fee when a landed sale paid less). In any EVM_SELL_UNPAID_WINDOW_MS
  * the unpaid and held wei stay under EVM_SELL_UNPAID_CAP_WEI per W, client or token and EVM_SELL_UNPAID_BUDGET_WEI in
@@ -434,8 +437,9 @@ export type PoolEvmCode =
 /** `retryAfterS` on a 429, and on the 503 of a lane held behind an unmined send: the whole seconds the route names in
  *  Retry-After. */
 export type PoolEvmAnswer = { status: number; body: { hash: string } | { error: { code: PoolEvmCode; detail?: string } }; retryAfterS?: number };
-/** `sell_sender`: the sell sender's address, which a sale's fee is paid to and the device's sim runs from (the kit pins
- *  it), or null where no sell key is set (every sell refused not_configured). */
+/** `sell_sender`: the sell sender's address, which every sale is sent from and the device's sim runs from (the kit pins
+ *  it), or null where no sell key is set (every sell refused not_configured). A sale's fee is paid to `fee_recipient`,
+ *  never to the sell sender (SellDelegate.sol, pool review round 3, L-1). */
 export type EvmFeeAnswer = { chain: "evm"; network: string; pool: string; fee_recipient: string; sell_sender: string | null; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
 
 export type EvmPoolSender = {

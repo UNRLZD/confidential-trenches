@@ -496,6 +496,19 @@ test("fee_recipient: a Sell that pays its fee to anyone but this release's fee r
     assert.ok(detail(a).includes(to.toLowerCase()) && detail(a).includes(FEE_TO), detail(a));
     assert.equal(calls.length, 0, name);
   }
+  // its place (review Low 1): refused as fee_recipient before the fee cap and before W's signature are read
+  const elsewhere = "0x000000000000000000000000000000000000beef";
+  for (const [name, o] of [
+    ["a fee over its feeCap", { sell: { feeRecipient: elsewhere }, fee: SELL.feeCap + 1n }],
+    ["a feeCap at minOut", { sell: { feeRecipient: elsewhere, feeCap: SELL.minOut }, fee: FEE }],
+    ["signed by another key", { sell: { feeRecipient: elsewhere }, signer: OTHER_KEY }],
+    ["a bad authorization", { sell: { feeRecipient: elsewhere }, auth: { chainId: "0x0" } }],
+  ] as [string, Parameters<typeof body>[0]][]) {
+    const calls: Calls = [];
+    const a = await senderOf(calls, {}, calls).sell(body(o));
+    assert.deepEqual([a.status, code(a)], [422, "fee_recipient"], `paying another and ${name}: ${JSON.stringify(a.body)}`);
+    assert.equal(calls.length, 0, name);
+  }
   // the fee answer's fee_recipient is the one a Sell must pay: whatever the release sets
   const TO = "0x00000000000000000000000000000000000fee70";
   const set = (calls: Calls) => evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: TO }, [rpc(calls), rpc([])], () => NOW);

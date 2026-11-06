@@ -27,6 +27,18 @@ const EVM = "src/pool/evm.ts";
 const T = "src/pool/evm-sell.test.ts";
 const T2 = "src/pool/evm.test.ts";
 
+/** [the text from `line` through `after` in evm.ts, the same with `line` moved to just after `after`]: a check moved later
+ *  (card helper-sell-fee-recipient, review Low 1: nothing pinned the fee recipient check's place) */
+const EVM_TEXT = readFileSync(join(HELPER, EVM), "utf8");
+function movedAfter(line, after) {
+  const i = EVM_TEXT.indexOf(line);
+  const j = EVM_TEXT.indexOf(after, i);
+  if (i < 0 || j < 0) throw new Error(`movedAfter: ${JSON.stringify(line.slice(0, 40))} or ${JSON.stringify(after.slice(0, 40))} not in ${EVM}`);
+  const find = EVM_TEXT.slice(i, j + after.length);
+  return [find, find.slice(line.length) + line];
+}
+const FEE_TO_CHECK = '    // the fee goes only to the Sell\'s feeRecipient (SellDelegate.sol, L-1): this release\'s, as a withdraw\'s relay data\n    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient", `the Sell pays ${s.feeRecipient}, not ${feeRecipient}`);\n';
+
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
   // the body's shape
@@ -77,6 +89,9 @@ export const MUTANTS = [
   [EVM, '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', '    if (false) return no(422, "fee_recipient"', T, "fee_recipient:"],
   [EVM, '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sellSender) return no(422, "fee_recipient"', T, "fee_recipient:"],
   [EVM, '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sender) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  // its place: before the fee cap and before W's signature, so a sell paying another is refused as that whatever else
+  [EVM, ...movedAfter(FEE_TO_CHECK, '    if (s.feeCap >= s.minOut) return no(422, "fee_over_cap", `feeCap ${s.feeCap} is not under minOut ${s.minOut}`);\n'), T, "fee_recipient:"],
+  [EVM, ...movedAfter(FEE_TO_CHECK, '    if (signer !== w) return no(422, "bad_signature", `signed by ${signer ?? "no key"}, not W`);\n'), T, "fee_recipient:"],
   // the deadline, seconds
   [EVM, "    if (s.deadline * 1000n < t + BigInt(EVM_POOL_SEND_MARGIN_MS)) return", "    if (false) return", T, "the deadline is unix seconds:"],
   [EVM, "    if (s.deadline * 1000n < t + BigInt(EVM_POOL_SEND_MARGIN_MS)) return", "    if (s.deadline * 1000n <= t + BigInt(EVM_POOL_SEND_MARGIN_MS)) return", T, "the deadline is unix seconds:"],
