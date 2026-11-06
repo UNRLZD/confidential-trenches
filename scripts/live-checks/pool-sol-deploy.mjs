@@ -14,9 +14,20 @@
 //     deploy script computed as Poseidon(value, label, precommitment) and checked against this leaf when it deployed
 //     (contracts/pool-solana/scripts/deploy.mjs; deploy.test.mjs re-checks every committed record);
 //   - every funder of the run (the record's `funders`, the fee payers of its transactions that are not the return
-//     address): 0 lamports at finalized, so no lamport is left behind a run key.
+//     address): 0 lamports at finalized, so no lamport is left behind a run key; one that is not the run's own key and
+//     holds lamports is a wallet that sent the funding, not the return address: its balance is not the deployment's, so
+//     it is an info line, never a FAIL.
+// A mainnet record (card pool-sol-deploy-mainnet, scripts/live-checks/pool-sol-deploy-mainnet.mjs) has no test deposit,
+// so the mark and leaf lines are not read; instead, on mainnet's two RPCs of two operators:
+//   - the pool exists as above;
+//   - the pool buy's lookup table (the record's `table`): owned by the address lookup table program, active, its
+//     authority none (frozen: nobody can deactivate or close it), holding exactly the record's `table_addresses` in
+//     order, a list that is the kit's own (solanaPoolBuyTableAccounts from its public entry) for this program, its pool
+//     and the pages up to entry 2,047 of each tree, only the venue's 9 keys (pump Global's fee recipient and 8 buyback
+//     recipients, which Global may change) taken from the list;
+//   - the programdata and the table read as the same bytes on both RPCs.
 // Every constant it compares against is pinned here or read from chain; the record gives only the ids, the code's
-// sha256 and the deposit.
+// sha256, the deposit and the table's list.
 //   node scripts/live-checks/pool-sol-deploy.mjs [--deployment <file>] [--rpc <url>,<url>] [--record <file>]
 //     [--write-record]
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -53,6 +64,12 @@ export const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 // bursts (a 429 is waited out below).
 export const RPCS = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"];
 export const OPERATORS = Object.freeze({ "api.devnet.solana.com": "solana", "solana-devnet.api.onfinality.io": "onfinality" });
+// The two mainnet RPCs, each its operator's (card pool-sol-deploy-mainnet), both answering mainnet's genesis hash and the
+// same rents on 2026-11-05 at 14:35Z: the cluster's public RPC (docs.anza.xyz/clusters/available), first since it alone
+// answers getProgramAccounts (the deploy's buffer scan; PublicNode answered it "Indexed requests require a personal
+// token" at 14:37Z), and PublicNode's (the pair scripts/live-checks/helper-pool-senders.mjs reads mainnet's rent on).
+export const MAINNET_RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
+export const MAINNET_OPERATORS = Object.freeze({ "api.mainnet-beta.solana.com": "solana", "solana-rpc.publicnode.com": "publicnode" });
 
 export const LOADER_V3 = "BPFLoaderUpgradeab1e11111111111111111111111";
 export const SYSTEM = "11111111111111111111111111111111";
@@ -67,6 +84,12 @@ const PAGE_ENTRIES = 1024n;
 export const PRE_MARK_LEN = 17;
 export const MARK_TAG = 1;
 const PROGRAMDATA_META = 45; // u32 tag 3, u64 slot, 33-byte Option<Pubkey>
+export const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
+// The only code a mainnet record may name: the reviewed build's sha256, the "Program sha256:" line of
+// contracts/pool-review-2.md (79,088 bytes), which CI run 42012187381's pool-solana artifact hashed to on 2026-11-05 at
+// 14:46Z. The deploy refuses any other code before a key; this check holds the record to it too.
+export const MAINNET_CODE_SHA = "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162";
+const TABLE_META = 56; // u32 type 1, u64 deactivation slot, u64 last extended slot, u8 start index, Option<Pubkey> at 21
 // contracts/pool-solana/src/context.rs
 const SCOPE_TAG = "blindfill-pool-solana-v1";
 const NATIVE_MINT = "So11111111111111111111111111111111111111112";
@@ -155,7 +178,8 @@ const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 /** One JSON-RPC call, five tries at most: a transient failure (the fetch throws, as on a reset or "fetch failed"; a
  * 429 or a 5xx; a -32029 / -32429 rate answer) is retried with backoff (the devnet run of 90522c4 stopped on one).
  * A JSON-RPC error answer is never retried: it is the node's word. Re-sending a signed transaction is safe, since it
- * keeps its signature. */
+ * keeps its signature. The error thrown after five transient failures has `transient: true`, so a caller can read
+ * again later and still stop at once on the node's word. */
 export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries = 5) {
   for (let i = 1; ; i++) {
     let r, j, transient;
@@ -163,11 +187,13 @@ export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries =
       r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
       j = await r.json().catch(() => null);
       transient = r.status === 429 || r.status >= 500 || [-32029, -32429].includes(j?.error?.code) ? new Error(`${method}: HTTP ${r.status} ${JSON.stringify(j?.error ?? null).slice(0, 80)}`) : null;
+      // a 2xx whose body never arrived whole (a socket reset while a large account is read) is a reset too
+      if (!transient && !j && r.ok) transient = new Error(`${method}: HTTP ${r.status}, no JSON (the body was cut)`);
     } catch (e) {
       transient = new Error(`${method}: ${e?.cause?.code ?? e?.message ?? e}`);
     }
     if (transient) {
-      if (i >= tries) throw transient;
+      if (i >= tries) throw Object.assign(transient, { transient: true });
       await sleep(1500 * i);
       continue;
     }
@@ -198,33 +224,50 @@ export function operatorProblems(rpcs, cluster) {
   const two = rpcs.slice(0, 2);
   if (two.length < 2) return [`only ${two.length} RPC(s); want two of two operators`];
   if (cluster === "localnet") return two.every((u) => LOOPBACK.has(hostOf(u))) ? [] : ["a localnet record read on a non-loopback RPC"];
-  const ops = new Set(two.map((u) => OPERATORS[hostOf(u)]).filter(Boolean));
-  return ops.size < 2 ? [`only ${ops.size} known devnet operator(s) in ${two.join(", ")}; want two`] : [];
+  const known = cluster === "mainnet" ? MAINNET_OPERATORS : OPERATORS;
+  const ops = new Set(two.map((u) => known[hostOf(u)]).filter(Boolean));
+  return ops.size < 2 ? [`only ${ops.size} known ${cluster === "mainnet" ? "mainnet" : "devnet"} operator(s) in ${two.join(", ")}; want two`] : [];
 }
 
-export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep = sleepMs }) {
+export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep = sleepMs, mainnet = false }) {
   const lines = [];
   let ok = true;
   const say = (pass, text) => {
     ok &&= pass;
     lines.push(`${pass ? "ok  " : "FAIL"} ${text}`);
   };
-  const genesis = d.cluster === "devnet" ? DEVNET_GENESIS : d.cluster === "localnet" ? d.genesis_hash : null;
-  say(genesis !== null, `the record's cluster is devnet or localnet: ${d.cluster}`);
-  for (const p of operatorProblems(rpcs, d.cluster)) say(false, p);
+  // mainnet mode takes a mainnet record only, on mainnet's operators; the devnet check never takes one
+  const genesis = mainnet ? (d.cluster === "mainnet" ? MAINNET_GENESIS : null) : d.cluster === "devnet" ? DEVNET_GENESIS : d.cluster === "localnet" ? d.genesis_hash : null;
+  say(genesis !== null, `the record's cluster is ${mainnet ? "mainnet" : "devnet or localnet"}: ${d.cluster}`);
+  for (const p of operatorProblems(rpcs, mainnet ? "mainnet" : d.cluster)) say(false, p);
   const prog = d.program_id;
   const pdaData = programDataAddress(prog);
   const pool = poolAddress(prog);
   const scope = scopeOf(prog, pool.address);
   say(pdaData === d.programdata, `programdata ${pdaData} derives from ${prog} and is the record's`);
   say(pool.address === d.pool, `pool ${pool.address} derives from ["pool"] and is the record's`);
-  const dep = d.deposit;
-  const pre = Buffer.from(dep.precommitment, "hex");
-  const nonce = BigInt(dep.nonce);
-  const mark = preMarkAddress(prog, pre);
+  // mainnet: no test deposit; the table instead (its list must hold this program's pool and its first pages)
+  const dep = mainnet ? null : d.deposit;
+  const nonce = dep ? BigInt(dep.nonce) : 0n;
   const slotNo = (nonce - 1n) % PAGE_ENTRIES;
   const pageNo = (nonce - 1n) / PAGE_ENTRIES;
-  const label = labelOf(scope, nonce);
+  const label = dep ? labelOf(scope, nonce) : null;
+  if (mainnet) {
+    say(d.so_sha256 === MAINNET_CODE_SHA, `the record's code is the reviewed build ${MAINNET_CODE_SHA}: ${d.so_sha256}`);
+    const list = Array.isArray(d.table_addresses) ? d.table_addresses : [];
+    const own = [pool.address, ...[0, 1].flatMap((tree) => [0n, 1n].map((n) => pageAddress(prog, tree, n).address))];
+    say(typeof d.table === "string" && own.every((a) => list.includes(a)), `the record names the pool buy's lookup table ${d.table ?? "(none)"}, its list holding pool ${pool.address} and the pages to entry 2,047 of each tree`);
+    // the whole list, rebuilt from the kit's public entry for this program: only the venue's 9 keys (pump Global's fee
+    // recipient and its 8 buyback recipients, which Global may change) are taken from the list itself
+    const kit = await import("../../packages/kit/src/index.ts");
+    const slot = Array.from({ length: 9 }, (_, i) => `venue key ${i}`);
+    const template = kit.solanaPoolBuyTableAccounts({ program: prog, pool: pool.address }, { kind: "pump-curve", feeRecipient: slot[0], buybackFeeRecipients: slot.slice(1) }, kit.solanaPoolPages(prog, 1024, 1024));
+    const want = template.map((a, i) => (slot.includes(a) ? list[i] : a));
+    const first = want.findIndex((a, i) => a !== list[i]);
+    say(list.length === want.length && first < 0,
+      `the record's table list is the kit's for this program (solanaPoolBuyTableAccounts, pages to entry 2,047), its 9 venue keys taken from the list: ${list.length} addresses, ${want.length} wanted${first < 0 ? "" : `, entry ${first} is ${list[first] ?? "missing"}, not ${want[first] ?? "none"}`}`);
+  }
+  const bytesOn = { programdata: [], table: [] };
   for (const url of rpcs.slice(0, 2)) {
     const at = `on ${url}`;
     try {
@@ -237,6 +280,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
       if (!pd || pd.owner !== LOADER_V3 || pd.data.length < PROGRAMDATA_META || pd.data[0] !== 3) {
         say(false, `programdata ${pdaData} ${at}: ${pd ? `owner ${pd.owner}, ${pd.data.length} bytes, tag ${pd.data[0]}` : "missing"}`);
       } else {
+        bytesOn.programdata.push(hex(pd.data));
         const auth = pd.data[12] === 0 ? null : b58encode(pd.data.subarray(13, 45));
         say(auth === null, `upgrade authority is none ${at}: ${auth ?? "none"}`);
         const code = pd.data.subarray(PROGRAMDATA_META);
@@ -252,6 +296,20 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
       const stateSize = poolOk ? u64At(pl.data, OFF_TREES) : -1n;
       const labelSize = poolOk ? u64At(pl.data, OFF_TREES + TREE_LEN) : -1n;
       say(poolNonce >= nonce && stateSize >= nonce && labelSize >= nonce, `pool nonce ${poolNonce}, state size ${stateSize}, label size ${labelSize} reach the deposit's nonce ${nonce} ${at}`);
+      if (mainnet) {
+        const t = typeof d.table === "string" ? await account(fetchFn, url, d.table, sleep) : null;
+        const td = t ? Buffer.from(t.data) : null;
+        const shaped = !!t && t.owner === ALT_PROGRAM && td.length >= TABLE_META && (td.length - TABLE_META) % 32 === 0 && td.readUInt32LE(0) === 1;
+        if (shaped) bytesOn.table.push(hex(td));
+        const tauth = !shaped ? "?" : td[21] === 0 ? null : b58encode(td.subarray(22, 54));
+        const active = shaped && td.readBigUInt64LE(4) === 0xffff_ffff_ffff_ffffn;
+        const got = shaped ? Array.from({ length: (td.length - TABLE_META) / 32 }, (_, i) => b58encode(td.subarray(TABLE_META + 32 * i, TABLE_META + 32 * i + 32))) : [];
+        const list = d.table_addresses ?? [];
+        say(shaped && active && tauth === null, `lookup table ${d.table} is the table program's, active, authority none (frozen) ${at}: ${t ? `owner ${t.owner}, authority ${tauth ?? "none"}, active ${active}` : "missing"}`);
+        say(shaped && got.length === list.length && got.every((a, i) => a === list[i]), `lookup table ${d.table} holds exactly the record's ${list.length} addresses in order ${at}: ${got.length} held`);
+      } else {
+      const pre = Buffer.from(dep.precommitment, "hex");
+      const mark = preMarkAddress(prog, pre);
       const mk = await account(fetchFn, url, mark.address, sleep);
       const mv = mk && mk.data.length === PRE_MARK_LEN ? [u64At(mk.data, 0), u64At(mk.data, 8), mk.data[16]] : null;
       say(!!mk && mk.owner === prog && !!mv && mv[0] === BigInt(dep.value) && mv[1] === nonce && mv[2] === MARK_TAG,
@@ -268,14 +326,23 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
         say(!!leaf && Buffer.from(leaf).equals(Buffer.from(want)) && root.some((b) => b !== 0),
           `${name} page ${pageNo} entry ${slotNo} holds ${name === "label" ? "keccak256(scope, nonce) mod p" : "the record's commitment"} ${hex(want)} ${at}: ${leaf ? hex(leaf) : a ? "no such entry" : "missing"}`);
       }
+      }
       const funders = d.funders ?? (d.funder ? [d.funder] : []);
       say(funders.length > 0, `the record names the run's funders: ${funders.length} ${at}`);
       for (const f of funders) {
         const b = (await rpc(fetchFn, url, "getBalance", [f, { commitment: "finalized" }], sleep))?.value;
-        say(b === 0, `funder ${f} holds 0 lamports ${at}: ${b}`);
+        // a fee payer of the run that is not its key and not the return address: a funding sent from another wallet,
+        // whose balance is not the deployment's: an info line, never a FAIL
+        if (b !== 0 && d.funder && f !== d.funder) lines.push(`info fee payer ${f} holds ${b} lamports ${at}: it is not this run's key ${d.funder}: the funding came from a wallet other than the return address ${d.return_to}`);
+        else say(b === 0, `funder ${f} holds 0 lamports ${at}: ${b}`);
       }
     } catch (e) {
       say(false, `read ${at}: ${String(e.message).split("\n")[0]}`);
+    }
+  }
+  if (mainnet) {
+    for (const [name, b] of Object.entries(bytesOn)) {
+      say(b.length === 2 && b[0] === b[1], `the ${name} reads the same bytes on ${rpcs.slice(0, 2).join(" and ")}: ${b.length === 2 ? b[0] === b[1] : `${b.length} read`}`);
     }
   }
   return { ok, lines };
@@ -295,6 +362,7 @@ export function recorder(fetchFn = fetch) {
 
 /** The run record's text from a deployment record, after a PASS: every tx of the run, devnet, money path. */
 export function runRecord(d, rpcs) {
+  if (d.cluster === "mainnet") return mainnetRunRecord(d, rpcs);
   const chain = d.cluster === "devnet" ? "solana-devnet" : null;
   if (!chain) throw new Error(`no run record for cluster ${d.cluster}`);
   return [
@@ -302,11 +370,35 @@ export function runRecord(d, rpcs) {
     "Money path: yes",
     ...d.txs.map((t) => `Tx: ${chain} ${t.signature}`),
     "",
-    `The run: contracts/pool-solana/scripts/deploy.mjs on Solana devnet, ${d.at}. Its steps, in the order of the Tx lines above: ${d.txs.map((t) => t.step).join(", ")}.`,
+    `The run: contracts/pool-solana/scripts/deploy.mjs on Solana devnet, ${d.at}. Its steps, in the order of the Tx lines above: ${stepsOf(d.txs)}.`,
     `Program ${d.program_id}, programdata ${d.programdata}, pool ${d.pool}; code ${d.so_len} bytes, sha256 ${d.so_sha256} (${d.build}).`,
     `Upgrade authority: none. --final is two transactions, the deploy and then a SetAuthority to none, both in the Tx lines above; this live check reads the authority none on ${rpcs.join(" and ")}.`,
     `Test deposit: ${d.deposit.value} lamports (0.01 SOL), nonce ${d.deposit.nonce}, precommitment ${d.deposit.precommitment}. Its note's secrets lived only in the run, so the 0.01 SOL stays in the pool as a test deposit.`,
     `Funders: ${(d.funders ?? [d.funder]).join(", ")}, run keys, each swept to ${d.return_to} at its run's end; this live check reads each at 0 lamports on both RPCs. The last run was funded with ${d.need} lamports (the printed need). Every key lived only in its run.`,
+    "",
+  ].join("\n");
+}
+
+/** A record's steps line: each step's label without the address some carry (a sweep's destination, named on the
+ * Funders line), since the money gate reads every tx-shaped word on a line that names the Tx lines as a transaction
+ * (a 43-44 character address has a NEAR hash's shape: paste 2's --sweep-kept step, 6 Nov). */
+export const stepsOf = (txs) => txs.map((t) => t.step.replace(/ [1-9A-HJ-NP-Za-km-z]{32,44}/g, "")).join(", ");
+
+/** The mainnet run record (card pool-sol-deploy-mainnet): every tx of the owner's paste, mainnet, money path. */
+export function mainnetRunRecord(d, rpcs, attempts = []) {
+  return [
+    "CARD pool-sol-deploy-mainnet / live: PASS",
+    "Money path: yes",
+    ...d.txs.map((t) => `Tx: solana ${t.signature}`),
+    "",
+    `The run: the owner's paste contracts/pool-solana/scripts/mainnet-deploy.sh (deploy.mjs --mainnet) on Solana mainnet, ${d.at}. Its steps, in the order of the Tx lines above: ${stepsOf(d.txs)}.`,
+    `Program ${d.program_id}, programdata ${d.programdata}, pool ${d.pool}; code ${d.so_len} bytes, sha256 ${d.so_sha256} (${d.build}).`,
+    `Upgrade authority: none, read on ${rpcs.join(" and ")}. No test deposit on mainnet.`,
+    `The pool buy's lookup table ${d.table}: ${d.table_addresses.length} addresses, authority none (frozen), read the same bytes on both RPCs.`,
+    `Funders: ${(d.funders ?? [d.funder]).join(", ")}, run keys, swept to ${d.return_to} at the run's end; this live check reads each at 0 lamports on both RPCs. The run was funded with ${d.need} lamports (the printed need). Every key lived only in its run.`,
+    // a paste that stopped before this one: its journal is kept and named here, never as Tx lines (the money gate reads
+    // those as this run's transactions)
+    ...attempts.map((a) => `Paste ${a.n} (${a.journal.at}) stopped mid-upload and is kept as ${a.file}: ${a.journal.txs.length} transactions, ${a.journal.keys?.state === "removed" ? "its keys removed with every lamport read back at 0 on both RPCs" : `its keys ${a.journal.keys?.state ?? "unrecorded"}`}; this record is paste ${attempts.length + 1}'s.`),
     "",
   ].join("\n");
 }

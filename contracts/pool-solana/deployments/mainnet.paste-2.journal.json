@@ -1,0 +1,617 @@
+{
+  "cluster": "mainnet",
+  "genesis_hash": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "rpc": "api.mainnet-beta.solana.com",
+  "program_id": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+  "programdata": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+  "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+  "so_len": 79088,
+  "so_sha256": "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162",
+  "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 42012187381, pool-solana job 127193696070, commit c3fbad7147e6c049adaa1ed91cc6efda31f0ec6c",
+  "ci_run": "42012187381",
+  "commit": "c3fbad7147e6c049adaa1ed91cc6efda31f0ec6c",
+  "funder": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+  "return_to": "9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ",
+  "table": "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ",
+  "table_addresses": [
+    "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+    "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+    "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+    "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+    "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+    "11111111111111111111111111111111",
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+    "So11111111111111111111111111111111111111112",
+    "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+    "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+    "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+    "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+    "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+    "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+    "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+    "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+    "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+    "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+    "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+    "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+    "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+    "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+    "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW"
+  ],
+  "need": "449137520",
+  "need_parts": {
+    "program_account": "833120",
+    "programdata": "402645880",
+    "pool": "11719560",
+    "lookup_table": "4998720",
+    "funder_floor": "650240",
+    "fees": "990000",
+    "priority": "27300000"
+  },
+  "at": "2026-11-06T07:58:41.582Z",
+  "complete": false,
+  "stopped": null,
+  "stopped_at": null,
+  "keys": {
+    "folder": "pool-sol-deploy-WkhzlH",
+    "state": "removed",
+    "why": [
+      "swept by --sweep-kept: every key of the run reads 0 on both RPCs, nothing under the funder's authority"
+    ],
+    "sweep": "sh contracts/pool-solana/scripts/mainnet-deploy.sh --sweep-kept"
+  },
+  "txs": [
+    {
+      "step": "funding (to the funder)",
+      "signature": "5wGExGuraxHFnnnobPR85vr3fBu7mW6BEgrpZWotwMZupKtdRSUj1jBExFbm7wiFeeHR8tqUUbZMAfnH8EM7uQPM",
+      "state": "landed"
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2msPoCmkWD721ryYS3qt5sJoR57HknPfg6NzDdumsHbenXGcjoBqdVmoWWsqBDFFXJos2Web1eN7M1FNTpXG45CJ",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "dC9fbrCjEz2MXFa7jgiouPCVMdiu2VevoqmsAyUthPYfX3BnhGMdhq2aikNCT4AteKgkANrZ4bowZ7VW1wnv9sy",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4Thqtkd4eLrfBJd34F9M4angRzXBnRUgWMLbrZS1BFs7GeBDsXuNfwtRA2bhXhB1A9u4u9M3iim71hM5LXzDvAzz",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "6Ps5aHffmRvdGdZuRn7FTPkmhL8PfbgBNmthmBioXv18AxjaTHgX4FqpytL65BSHkcnt8r5NrtiYKdNeQUhxRsc",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "dRGrjcUiaERrX7LAtzmpzVPpLgArveFJXZgGv6ZFRhkaTRAxYEXWUhyJbidEGGqS4ycnum59CEUcxw9ABvPg5ke",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2jH4pkb8wHe9h6WqB5P1gFBGHydytYM3yzpVs4oJaHBJXZdXEDr4Rv1WVTeEbgNEzEVdbyZWkkiAu1yzQqJXS862",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "54gg4qfdeug32Tvvaem6j2erMx1u2QZFSYMGfva6zJTN6FHiG5PMCMih5kLizWm1KbagqkY6w81nNnv4SPmqwqBJ",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "m3LQtfTwCh212iHqST9XGHT5c1RpZpQRAit9dASZjoEV6v2iWoZc4jrAA1UEGSrMYBfrk3GkobfmTQZ5CJscPm1",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "66tLpvNvF3ANwhSYztTWvxz8ps6BVteDB7QDzv3DeHFXt2tX4GvW4y3wxCXHgQNkwPKTsQToQ7emANgxuL8gXi9s",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5P9Awtjn6pKJZMemh4sTp7x6mUzz8CNrPtayTP1t4zQqSqKgshKX58manjNvafxAkJBf4kFwoui1BHyCfLHvJXTo",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5u7WPRTwLYFffEakaV2rEbcw7Ux6tP4CcC1j3zmhFUPxFkvsSKo3R1CKsNG4dUVppS7UnXG875MSYKh2G8t8fbH",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2j1iFo1fz8odtiYbhXPZvYW58gzjdvqFY3rZF6T5EuSQdBbMCvT4TTdnyEwy5v22koHjAz3HzSxiFYxGZEd2xFfB",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5MaqBe2b2NME6JG3e3vaEF58i3E1xdtFVwsmkyKbykxuDRBbb6wcenkGa4FZof679QUJxFvE2T7sEGw5P3AamJoe",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "7LUahpR5o4SFajJjznRm9xbukKmzp8AvHRi2AuNujqbhbnNJXiL7EWMXh4wQZZ1oGjf5rWFYzfge21s8vgKSQaq",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2J1Wox85yqWDYQ7WBeGFNSCsGkHficRguLBZXFhFHt5yqChhJMC3dcodyT5yCCyXJ2RUozEmdE9kwQiLFQBkPPDH",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4h6SjAjiSd9MuZUUrowCxJdQPGwEB4jqgtWWgSkqtC2wZyjjDNGeHHqckcj6ur6aSuJAMFeoXMF3bZJpb6zaWGx2",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3b9oawwYbj7fGxShCtRHn8vyVZK1GRzvvDUtLzSDYnuJhoqv8djSPiZbc5FQFFHE4sph4fW7i8SnQ6AxR6pDZK5y",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4cksg5rYrmG7PyDiVvCT93svj8kKGwmatspDaCAYuwo4ZipTaTfhib2JDkxvhreHCF1z4K1wiyXDsVFftxdKYS8s",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3F1rocP9PJxU6VFP4drMH1GJW9FNG3W7QSCdcrfU3YNzGVTJLs6kctKveRbVePWjWNccjZiGhyYeFZhQvUp1bpC1",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "z6cBaDaoaQZLFLrNThD7kKYb82xaqDuNKWe7aL2kavBkxMwydn5F3VGa8wE4eMnaRHjxKaDgJXMr2RGTZZXs6fF",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "EwNc6LF22R8CukyCbFJvs8b5iTpcvZrKFpCAU3agTqKpahcCXH2BGXZYRxa3brx1uQfrNX1Z6uiwiDz4UJPGvNs",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2WNNDv4a4LfHSwAGKZRLc15QTE8oRESogaQWhqFNmCdoyJpGM6s2C5yUoUtwtkvCmDmtvMhvWLwZfMFV9Gi72ZtL",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2XVwFEmKVYLCh4NdwhHU4mxWD9186QfgdRy3qG3tJoisXbGANNzped2cyHg5VtRLnpRbxHkDo9AttqyMizNv7UEm",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "56upbmX8RPSsseHEpNnRbL55vDLLJwKoKSfK61mQQmbcwbXf94RVriwNUJTcYm7YE2URVLHRaVBwBq2Ab3is9rCh",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5exfCwXDq8bqyxsTzbhfFyVLxzXJgEoWVNtyyrH8YtSaJWX7keRvzBcuVxv4mj4GVKUttAmdtqk88px3KpaWyzvF",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2Uk1e6y9fqXgPeDdmWAG9eMJxGpEbyZHjQMuNdcwFtFXQPvkUTZGTCzpsu7fUiadTuR3TLaMeCGXciAA96BcUynJ",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4efmw6PXGc5vdJRrEAh6Fjt4DqK1xwWExzDJAaKf1nTkP7Yb92BW1A7LjV5k2PD413Ji3zowN1UKT7vhwkDk9yXj",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5CPqo7bvb267z5DKzFdQAPh21e8b8ASn5Jg1KSxWHxFfRP7GWMJHyWuxKPwsPjtw414gu5zZNzaiyj1bVRkC2fgf",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3YemCGehgw31P9UQ3PbvqQw4ooda76N7AcXEEbVULXWUYiahbWXJ9djLwmhkZdxVafa2J2L3cuVCJXqRyRGXWxj2",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "SV3kXc2uHXxER11y8atLVShK6Wy5t8aBXEjine3zawF9EGTBNaGybnvKuo91R4A4x4FSEAD8kN6R7wesxcjUGR3",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3dSbEuXPVafMasqp69XUL9FkLAJeNyCun9KbGYbFg3EemfuRPR1htwzsxJNq7PfJnP4jr4SGQDg63X47MuUjPMnR",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4B82uYLsNu8uVBLAKh8ZHJSigXCHz9QZTJEE7VbLF5CATrnpw9hUnQmApLCJCpvS3ont4Qh8jEqvJNhCkTHDNEPi",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "LX9KZCnUrF5bqH2vXS2SoyCVHy18riN7BNHSUkpK6GaERCEGU9xryWFtda1vVg1n17r1FTEBGtU5osMTvDYio7V",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4Ui5FkKpGjouE8LtZ8b4pwiW4guLJt2cuGwHPq6CsviQwK1bxV21CpgSDxP8P7G1wKEREmpP2KhUGhci7cmcrETu",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3sFctaxqw4ZKQR9uKGxeNM9vGfhMiqpp3iVUwFudRxvFC8jg9tZpbbry1aRAAoUw2iwmVQEwGPv4XWeD1QPmkDQr",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2VaSYeF9pwNjL4nSfP1SuVDFrYTemH1r6m4aWq2nbMJuunaRo7o2J4M3JwatvruWbGPxbXYrBDJ5jGWDA7i3j4FX",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "9KdD6XLCyzCXifY54S79PuG8uhVkA6hHcXacSBJgkB3gZR9veUNa7wWHBKSbt9tPAoUP1JSDKoL5gDZXJC9iVcU",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "446hKs63jpygDkWLADYxujUdcA7sUCmPHVRRSvWjkLHjL17rgMKzU1xhwwQfQCS4Fi4TQr2q1kEUZ1UBdVaZBDF3",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "hoRW23ako25MZL3g2jNGcW2righZMgGqzrpJdCwLKwJwgytnjooE4XEJsmZQySM8xxEaRkEzTuGbo7BpxcNeZL5",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5q4hKYK7UybhXbVdqTDkbSFnXVNoazqnZsKwHL9AcQGimT85zta2TvAhQfjoggWgXaiU7h9dCYnev71DthTJ8441",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5YN2bB8pndjkHQLN1r6U5SNLfb32hmvX8omExwpF1PwYanXdenjYdbEGituCMx7oEgnoRrUiKT4k5kCfKQXUJrro",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "54pzgC67LUjCEaK7L6DGm261Cg8vGwNs4PN8W5fELE3FRQK2ufTFKFjhcyvcjHWn1hVZv44av3hhoXBPN5aWcghL",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3hmBnTeaPKi2F12j9eu1C8Wyyi7f4j77AGDLrBJeXho2ykh977bWwssuUfU4JEZkfvdboev32QQxAoSTka28JLub",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "7KA3aqW8LLTD2pU6WFdKxN2TSSJ2urQDhCQ6AA7AQQqpiD4ew6DuQ1aGPtrryANrcw93g7ePKVGNDejfAr6rcw9",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2rNvb2Ga6JMWi4HicU2d6WaHrPb2RhsRFjNSFkjxf8Rf3nWixh2J7PpaRTBGiELt5pYqzvqD8QkshFY5ZaYTCmyr",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4udESj6f5vxZiPVDx6nZeMEu8qNMDPvqMLJRMcrS8WyFcPuywsE5cxDY8p9oVxkY8uGEdRtEm1x8Mk5kt8ny38bh",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3WeZ7FC6fK8tGfBkvjn3SuG6R85iUsSvgusLkVnqKCjuquDuGmdXkNjeJSsxnfTznQt1zVT7Gp4u42qTBq9hbVnU",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5Y1THv3fMW8iHUYQjN37HPBvh44rrsUFN7Rmrb4KTpcQnm6TXHzKWPGMGH6eDGNr9Li12aVpfGmJbz2Lo3GDurnm",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4jjxNkRGL7fPPfCrbGtAeSvCFCpg7QThoUrDNGZRytJWvAKbERixQnuummmsyCmHh76CXTHah1tpMWiConaudgSX",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5rBNXPPARQSqWaFGXCE58MGjfPhg7GXArmiD6kShCXJEwL3t2A5B3vkuz8BYJmS7omFrVg9siVYKnWpBSgUL5m4y",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5G3ZnhiHFABbuwuFHkPnkjpv9LLPA8Muvzu8qTRS7hypY6SkFGkjbzCSfwmZk9LogaDNKXbCwHNKaxn1tn6bV37C",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2e2ymsGEnrEpYjiZo6wviB3pnR5YZ7SGiVEUtJYgeYnd75EmE11oWUnpDrpkptuNfTBpAJPEKy932SVa8Z5cGXQB",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3DdDZZ3cGnRzu8kocQLwgUtXP7uLDCcCu8daednKyzoKRy3VkuyWcJGBny2GEB3scscPRSrN1gLoTXEzwLGvm2CF",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2WkoMrDcRAowB8fiqUd5swcMxLysJuBZqMdtDo6xfvq9o8WGuZmpQWVrf2XKaJd8oaGGvVkgJX8p9VSSPKZLKes1",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "fBeYfpNj8hjJPeNKZ3dkvhprFSszFikjAien9iy7AcZe19SjHrgs3f1mseehtyYVmT5PWg8vmdymBvzx9LuovSP",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "Y1HgBEEo81oGVNuxLqESR7t8QvHQ2X7HAyPV6hBhbSdjryAKaV2DmU8gxUUywvKWfTaLxLBmN2cEvGEh7XSiP8h",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3Yk5XUcsCyJzjFCrNhqZEdtDW8FvNh7pUCkiWoVoncfi64xyaaY9RehqBedaYNNW8z9VKaXpCwBF5a4TjhbhZtzq",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5oqRDngsY7qHg32X1d8ujTDDH9gZewnB1w8vSa2FjvoCpJqaWgNZhEmSCuAGAaMNniYeNxsj3GAL3LBAVS6zGAeR",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "K9NS4gqpWbbW4ApwBw1rtTmDPJKYp7A6jPa5knoCtFcKnjnePvx7FPT9gp9CXPwsh7P1ZuQD4C3s2pRyED6YN67",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5nCvqvghdoDg1aYkWNRKZyjrn1zK5Kf696cnrUu8w7WUta4tFXpMXkXCh9P9HxgHcDV2NjDwbfMa8v6pG9Xti8Ab",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3zWDbvm3wV6YyC8W62j2ttELcF1NqbrFHPFYD9Gtrp9BM2uN3aKwQ8MmTKzhJddGXM9H7v8dDDWe13X1f8GFLHu5",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4ndtQsdh9pRN1tj3zKmfFjcFizPhKut1h4SqVoMaTw4HbVvZP9881DjHvG1NRhkQLdwSBYxHRdaYETqvLfg5d2fF",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3CGLd8AaZjMVU5DEj5FyjbEn7KZhh2vhpb3cdtXCqdEsSPqYSo6meuw41PPqCiX6q9fxrvSwkTRnsSwEvZqys4ft",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5viWMUQW4XFZWrATz43mtjKeatp68ad19AARCiZZyUrZQ2NFDK8TsVHkJosEVEF2ZKDR4n2sU3xWfHVAKevgNA3s",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "DJS1e94TPvXa2fYF8fALUQEdwaDn5LuYLRS8RgPS8YNaEbJrVB27WrBRQ28ToxVhp3uRVuSZrLrQMPQf2bzsbQe",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "xM814kDNeLrbjwZAjPR1YNzLCR6MRx9R7hWFJfnDxL8x2zdUqGnRQ2MgiKH72iQwEbwmDZBdETDfEa7sj4tu4kg",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "C2BPAv8X5xaPBKKb9TGkbzhHHgM5iovr4oLMgEYmpLCQ8YJyYcJ5xmnUixxPowzhF1phr3RgsMSJnngEFUd6Zov",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "uWK326S71U8k3c2Dzqd5qUGbjQvtDdvJZdndJDTWfvYZcL4zTsASmDdDJNMSMY363rUJCKGwirrWMTxj975zqVD",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5ZjSaokLHMypBmmNvvnBUc1zi9f4TatRDtZ65RAJMGXufTDjDjo1B42Wt1CbMuRKXsWbiomJBef3Ad9P59qtB7Zw",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "62ThwJZXYrB5dvL4ha9siSnabBGUpUvFzpeoQnTHxkiaHNBFxGfdyDYuJtDw1FSuvce1Zrh5Wo3xYxG1dqFgVdG4",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "4uUb5h3Q9kF4xnPHZo4Xyh3BdCB163ojapUWnzVc82Hip4bNYt6mjUr5VBvWnggtGRVgwGYfjA5Db9g6V2sDHvbX",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3pbxWX6XdCerF8WFn6Q15DbUKpNnbYGtEtpurAbKJDdN9V6KoXC1Uu5bVDsArcVZRwrCV8jMywHVqrosv9QaQC9X",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3nVy6yLeHU874kzThjCR4HzX57RBNgiKzN3i8xwAHMa1efeNYSHvLfssMKK5Mv7cNejscaRwKiFNS2irYQkYNt7f",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5AjbzpHLRkhxhonKkBfgorqzFv3AnxaYDcQMRNY6KLtg4HUB4wjKYB4iChUp9in5ARxp6V34jkuoWu5gyCedQKtw",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "1LV9zFREtDCx1fbkUdYvAmgn5kev4sDdSTtFf7fCoVbmYK1XfccSVGEJ9S3JjTYvgQRhdzE6GYrtChQ3A7CCT9p",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "eQ9GjEkycYwFEsRgLVW2mAyh9XDuDn312epNwYiai8eFiEerKKUhePwKnJWS1UQhB3Qi41PM6ryTwmUpDjiU45o",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "128opXNuWj2n3VXfknEYRAQoJmP1QHttyEQ5tSJfCpAU3g59W97tPRDgw1fZyzYPi1JSnVHFmu13TAco18u2dX9F",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "jufKD39jBPvGJfkphed2FKFssckqGk2eGnAdVzhxiJnFk7ucGQKMnmc8tQ77YaP5gDywDDVoBKUAFeVYcypAnEr",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "S9gMHdmmC5pKVws5knBZy5mGdD61EWPvfU5qmdwU1K4RxFQiKnaoPHsexnA4hp5eceGQFirVUB6hoTnX97KenTe",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "24QBvG1y6h4LBYWrcx7fJ8Z8nDxSwCmZkW8r5uY8ooHYfRtE6LxeGEddVCxdDJ26dd21xRxL5XaEKH5Gj67AMdwJ",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "XJe4HbuTiGhbNCi8QQHNisoe7TA6juAr79zd6WuCd7wpqNrwGknFcxqHha4jYgFm1zqwNyLjjfgRraTzusmtUDD",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "5LNDkEuxSS3aaFc12hajyRUaDkobkL4G3GM4Z4hXiXXWF7dT51iiFUanuTQgkMZKbpYSU1Bh7Dg3KGJfRr2ezHy1",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "2BVicDsm6z9nFfyiws2Scw7cH8pghRq7RFoLwguusPTuQWoHkhLbdRxsZyZF34EP5gA3hmSNkiDRwS3rxJwAa4Qk",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "the solana CLI: program deploy (buffer, writes, deploy)",
+      "signature": "3v9wV5H43zoDBUD2tbs6ZPgDh6Aq2Yf8Unmzh2JPxb4JGstxGtH2bKp4QATUBhkYiLNJvKHVfHkvXEm91i8kUnYm",
+      "state": "landed",
+      "cli": true
+    },
+    {
+      "step": "deploy with the upgradeable loader",
+      "signature": "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU",
+      "state": "landed",
+      "cli": false
+    },
+    {
+      "step": "the upgradeable loader: SetAuthority (to none)",
+      "signature": "5EtRdefacXzZDpWqqaj1TQPpehoBZocvgcq7oKxn3bFvjtRvKkar9mfYH1XKbLkjfcroxGVeCWGsntuD4ZuqpZvg",
+      "state": "landed"
+    },
+    {
+      "step": "init (tag 0)",
+      "signature": "2MDSvHYtWpu3ZFguZV4ySxWXHcZWjo6Jc2EYUoV8nWhtN8NQAYc8sdpo6nAuJkEdfphjDCXFivzAN9p5bVVHXtHG",
+      "state": "landed"
+    },
+    {
+      "step": "lookup table: create and extend with 25 addresses",
+      "signature": "23QX9RfcjLb271ZPWCStKA6mWoQA86o9HDSoKq727q8qRPpoKYnPiUotGJVQm4azQpBGqTayLB1UjhQpGREVzTEb",
+      "state": "landed"
+    },
+    {
+      "step": "lookup table: freeze (authority none)",
+      "signature": "2gwDsZqzGQnUsY5fDVujjcmgfdPzyaPKJRtVUSePTkJBkVHYNwQxau9c4vgvu8zwvL6SaXhwxFKFEacnBD1Qemp1",
+      "state": "landed"
+    },
+    {
+      "step": "sweep (the funder's rest back)",
+      "signature": "2XdxFtwv6hvgGreUGVKfwN5AdvCsvsHkErThG1pg86G732DqRgMLmHNi2mjMU6PUzanU4SZvsxsEhZvpQDu6S8kU",
+      "state": "landed"
+    },
+    {
+      "step": "funding (to the funder)",
+      "signature": "3qRUcXSYfgbvMkb6hhiiaQBUx8JwxSNByVLwftFi7LCCCbjteJZNV4caKTmqLC6Q8MLDS9aVrJ9xDRt7sa9jETsa",
+      "state": "landed"
+    },
+    {
+      "step": "sweep (kept keys, to the run's return address 9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ)",
+      "signature": "3CUZ2CpNwk8DabVSSD5T62AFJ2JWy8rdU1E8A2ZWMZsYW6RLbRgNXzpQPGHsiWd6s2beD7NRt8hsJUp2KCDJHTRb",
+      "state": "landed"
+    }
+  ]
+}

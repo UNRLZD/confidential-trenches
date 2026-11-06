@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { cleanup, compileMessage, newKey, needOf, signTx, transferIx, CLEANUP_RESERVE, DEPOSIT, FEE_PER_SIGNATURE } from "./deploy.mjs";
+import { cleanup, compileMessage, newKey, needOf, signTx, transferIx, tableProblems, ALT_PROGRAM, COMPUTE_BUDGET, CLEANUP_RESERVE, DEPOSIT, FEE_PER_SIGNATURE, PRIORITY_CU_BOUND, PRIORITY_MICRO_LAMPORTS } from "./deploy.mjs";
 import { b58decode, labelOf, scopeOf, poolAddress, programDataAddress } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -57,6 +57,8 @@ function chain({ balance = START, upgradeable = false, failures = {} } = {}) {
   return { ops, calls, get balance() { return balance; }, get returned() { return returned; }, get fees() { return fees; } };
 }
 const fast = { wait: async () => {} };
+/** A virtual clock's now(), a second a read: a read-again loop in a fake ends in its own time, never the wall clock's. */
+const vnow = () => { let t = 0; return () => (t += 1000); };
 const firstTransfer = (c) => c.calls.findIndex((x) => x.startsWith("transfer"));
 const lastTransfer = (c) => c.calls.findLastIndex((x) => x.startsWith("transfer"));
 
@@ -258,7 +260,7 @@ test("the resume refuses a program another loader owns, programdata another prog
 });
 
 // ---- the cleanup's keys and the two-transaction --final (review of bc57e12) ----
-import { buildOf, chainOps, chainRecord, ciCode, main } from "./deploy.mjs";
+import { buildOf, chainOps, chainRecord, ciCode, main, plainTransferTo } from "./deploy.mjs";
 import { existsSync, mkdtempSync, readdirSync as ls, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -289,9 +291,11 @@ test("main keeps the run's key folder when the sweep fails: the funder still hol
   const said = [];
   const realLog = console.log;
   console.log = (s) => said.push(String(s));
+  // a virtual clock: each send is sent again until its 90 s deadline ("Blockhash not found" passes on, review 7a21 L-2)
+  let clock = Date.now();
   try {
     await assert.rejects(main(["--url", "http://127.0.0.1:1", "--no-build", "--so", soFile, "--program", RD.program_id, "--return", RETURN, "--out", path.join(work, "record.json")], fetchFn,
-      { wait: async () => {}, cli: () => ({ status: 0, stdout: "", stderr: "" }), keysBase: TEST_KEYS }));
+      { wait: async (ms) => void (clock += ms), now: () => (clock += 10), cli: () => ({ status: 0, stdout: "", stderr: "" }), keysBase: TEST_KEYS }));
   } finally {
     console.log = realLog;
   }
@@ -327,7 +331,7 @@ test("the cleanup reads the authority at confirmed: a deploy whose SetAuthority 
     throw new Error(`unexpected ${method}`);
   };
   const runs = [];
-  const ops = chainOps({ fetchFn, url: "u", second: "u", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, say: () => {},
+  const ops = chainOps({ fetchFn, url: "u", second: "u", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, now: vnow(), say: () => {},
     cli: (args) => (runs.push(args.slice(0, 3).join(" ")), args[1] === "close" && args[2] === RD.program_id && (closed = true), { status: 0, stdout: "", stderr: "" }) });
   assert.equal(await ops.upgradeableByFunder(), true);
   await cleanup({ ...ops, balance: async () => 0n }, RETURN, fast);
@@ -339,9 +343,18 @@ test("the cleanup reads the authority at confirmed: a deploy whose SetAuthority 
   await assert.rejects(down.upgradeableByFunder(), /node behind/);
 });
 
+/** An upgradeable-loader account of `tag` (1 a buffer, 3 a programdata) whose authority (the Option at `at`) is
+ * `authority`, as getAccountInfo answers it: what a getProgramAccounts hit is read back as. */
+const loaderAcc = (tag, authority) => {
+  const at = tag === 1 ? 4 : 12;
+  const d = Buffer.alloc(at + 33);
+  d.writeUInt32LE(tag, 0);
+  if (authority) (d[at] = 1), Buffer.from(b58decode(authority)).copy(d, at + 1);
+  return { owner: "BPFLoaderUpgradeab1e11111111111111111111111", executable: false, lamports: 1, data: [d.toString("base64"), "base64"] };
+};
 test("what is left keeps the keys: a lamport on either RPC, a buffer or programdata under the funder", async () => {
   const funder = newKey();
-  const run = async ({ bal = {}, gpa = {} }) => {
+  const run = async ({ bal = {}, gpa = {}, own = (tag) => loaderAcc(tag, funder.id) }) => {
     const fetchFn = async (url, init) => {
       const { method, params } = JSON.parse(init.body);
       const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
@@ -351,22 +364,37 @@ test("what is left keeps the keys: a lamport on either RPC, a buffer or programd
         assert.equal(f[1].memcmp.bytes, (await import("../../../scripts/live-checks/pool-sol-deploy.mjs")).b58encode(Uint8Array.from([1, ...funder.pub])));
         return ok(gpa[f[1].memcmp.offset] ?? []);
       }
-      if (method === "getAccountInfo") return ok({ value: null });
+      if (method === "getAccountInfo") {
+        // a listed account's own read: its bytes as `own` gives them
+        const hit = Object.entries(gpa).find(([, l]) => l.some((x) => x.pubkey === params[0]));
+        return ok({ value: hit ? own(hit[0] === "4" ? 1 : 3) : null });
+      }
       throw new Error(`unexpected ${method}`);
     };
-    return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {} }).leftovers();
+    return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, now: vnow() }).leftovers();
   };
   assert.deepEqual(await run({}), []);
   assert.match((await run({ bal: { b: 1 } })).join(), /holds 1 lamports on b/);
   assert.match((await run({ gpa: { 4: [{ pubkey: "Buf1" }] } })).join(), /buffer Buf1/);
   assert.match((await run({ gpa: { 12: [{ pubkey: "Pd1" }] } })).join(), /upgradeable program's data Pd1/);
+  // a listed account whose own read is gone, or names another authority or none, is not left: the list lagged it
+  for (const own of [() => null, (tag) => loaderAcc(tag, null), (tag) => loaderAcc(tag, newKey().id)]) {
+    assert.deepEqual(await run({ gpa: { 4: [{ pubkey: "Buf1" }], 12: [{ pubkey: "Pd1" }] }, own }), []);
+  }
 });
 
 test("the record from chain reads: the programdata's SetAuthority gets a line, funders are the fee payers, slot order", async () => {
   const D0 = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
-  const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, "BPFLoaderUpgradeab1e11111111111111111111111"],
-    instructions: loaderTag === undefined ? [] : [{ programIdIndex: 1, data: (loaderTag === 4 ? "5" : "3") }] } } });
-  const chainTx = { fund: tx(1, D0), dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), init: tx(4, "F2") };
+  // the loader's instructions as sent, the payer the authority: DeployWithMaxDataLen (u32 2, u64 max len; the
+  // programdata at accounts[1], the authority at [7]) and SetAuthority to none (u32 4, no new authority; the programdata
+  // at [0], the authority at [1])
+  const loaderIx = (tag) => tag === 2 ? { programIdIndex: 1, accounts: [0, 2, 0, 0, 0, 0, 0, 0], data: b58(Buffer.from([2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0])) }
+    : { programIdIndex: 1, accounts: [2, 0], data: b58(Buffer.from([4, 0, 0, 0, 0])) };
+  const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, "BPFLoaderUpgradeab1e11111111111111111111111", "PD"],
+    instructions: loaderTag === undefined ? [] : [loaderIx(loaderTag)] } } });
+  // the funding: one System Transfer from its payer into the run's funder F2
+  const fundTx = { slot: 1, meta: { err: null }, transaction: { message: { accountKeys: [D0, "F2", "11111111111111111111111111111111"], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: "3Bxs41hAcYbghSB9" }] } } };
+  const chainTx = { fund: fundTx, dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), init: tx(4, "F2") };
   const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
     const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
@@ -374,13 +402,13 @@ test("the record from chain reads: the programdata's SetAuthority gets a line, f
     if (method === "getTransaction") return ok(chainTx[params[0]]);
     throw new Error(`unexpected ${method}`);
   };
-  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, txs: [{ step: "init", signature: "init" }, { step: "funding", signature: "fund" }, { step: "deploy", signature: "dep" }] });
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, funder: "F2", txs: [{ step: "init", signature: "init" }, { step: "funding", signature: "fund" }, { step: "deploy", signature: "dep" }] });
   assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "dep", "auth", "init"]);
   assert.match(r.txs[2].step, /SetAuthority/);
   assert.equal(r.txs[1].step, "deploy", "a known step keeps its name");
   assert.deepEqual(r.funders, ["F1", "F2"]);
   chainTx.auth = { ...chainTx.auth, meta: { err: { InstructionError: [0, "x"] } } };
-  await assert.rejects(chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, txs: [] }), /failed/);
+  await assert.rejects(chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, funder: "F2", txs: [{ step: "deploy", signature: "dep" }] }), /failed/);
 });
 
 // card pool-sol-mark-tag: the record's toolchain is read from the binaries that built the code, never a fixed string (a
@@ -458,6 +486,7 @@ test("a public cluster's code is CI's build: the artifact whose sha256 and size 
 test("devnet refuses a host build and --no-build: only --ci-run, before any key or transaction", async () => {
   const devnet = async (u, init) => {
     if (JSON.parse(init.body).method === "getGenesisHash") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" }) };
+    if (isReturnRead(init)) return okR(sysAccount());
     throw new Error("no other call before the code is CI's");
   };
   const run = (args, opts = {}) => main(["--url", "https://api.devnet.solana.com", "--return", RETURN, ...args], devnet, opts);
@@ -470,6 +499,7 @@ test("devnet refuses a host build and --no-build: only --ci-run, before any key 
 test("devnet refuses CI's build when its sha256 is not the pinned code, before any key or transaction", async () => {
   const devnet = async (u, init) => {
     if (JSON.parse(init.body).method === "getGenesisHash") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" }) };
+    if (isReturnRead(init)) return okR(sysAccount());
     throw new Error("no other call before the code is the pinned code");
   };
   const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
@@ -481,18 +511,18 @@ test("devnet refuses CI's build when its sha256 is not the pinned code, before a
   try {
     // the recorded devnet code is an older build: the findings file's pin is not its hash
     const f = fakeGh();
-    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {} }), new RegExp(`devnet refused: the code's sha256 ${f.sha} is not the pinned [0-9a-f]{64} \\(contracts/pool-review-2.md\\)`));
+    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow() }), new RegExp(`devnet refused: the code's sha256 ${f.sha} is not the pinned [0-9a-f]{64} \\(contracts/pool-review-2.md\\)`));
     // a planted pin: one hex digit off the build's own hash
     const off = f.sha.slice(0, 63) + (f.sha[63] === "0" ? "1" : "0");
-    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: fakeGh().gh, keysBase: TEST_KEYS, wait: async () => {}, pin: off }), /is not the pinned/);
+    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], devnet, { gh: fakeGh().gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow(), pin: off }), /is not the pinned/);
     // the pinned hash itself passes the check: the run goes on to its next step, a resume's read of the program (here
     // missing), still before any key
     const missing = async (u, init) => {
       const { method } = JSON.parse(init.body);
-      if (method === "getAccountInfo") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: null } }) };
+      if (method === "getAccountInfo" && !isReturnRead(init)) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: null } }) };
       return devnet(u, init);
     };
-    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--program", RD.program_id, "--return", RETURN, "--out", path.join(work, "record.json")], missing, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, pin: f.sha }), new RegExp(`--program ${RD.program_id} refused`));
+    await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--ci-run", "41677243428", "--program", RD.program_id, "--return", RETURN, "--out", path.join(work, "record.json")], missing, { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow(), pin: f.sha }), new RegExp(`--program ${RD.program_id} refused`));
   } finally {
     console.log = realLog;
     rmSync(work, { recursive: true, force: true });
@@ -529,7 +559,7 @@ test("the CLI deploys the very bytes hashed: CI's artifact, from a file in the r
   const realLog = console.log;
   console.log = () => {};
   try {
-    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], fetchFn, { wait: async () => {}, cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy call/);
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(work, "record.json")], fetchFn, { wait: async () => {}, now: vnow(), cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy call/);
   } finally {
     console.log = realLog;
     rmSync(work, { recursive: true, force: true });
@@ -566,8 +596,10 @@ function decodeTx(b64) {
     const program = keys[b[o++]];
     const ks = [...b.subarray(o + 1, o + 1 + b[o])].map((j) => keys[j]);
     o += 1 + b[o];
-    const data = b.subarray(o + 1, o + 1 + b[o]);
-    o += 1 + b[o];
+    // the data's length is a compact-u16 (two bytes past 127: the lookup table's extend)
+    const n = b[o] < 0x80 ? [b[o], 1] : [(b[o] & 0x7f) | (b[o + 1] << 7), 2];
+    const data = b.subarray(o + n[1], o + n[1] + n[0]);
+    o += n[1] + n[0];
     ixs.push({ program, keys: ks, data });
   }
   return { signature, payer: keys[0], ixs };
@@ -576,12 +608,31 @@ const SYSTEM_ID = "11111111111111111111111111111111";
 const FUND_SIG = "5".repeat(87);
 function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = () => {}, poolMissing = false, onRead = () => {} } = {}) {
   // `funding`: whether the funder's incoming transfer (FUND_SIG) has landed; a funder that starts funded has it
-  const c = { t: 0, bal: new Map(), txs: new Map(), sent: [], funder: null, credit: [], funding: funderStart > 0n, said: [], accounts: new Map() };
+  const c = { t: 0, bal: new Map(), txs: new Map(), sent: [], funder: null, credit: [], funding: funderStart > 0n, said: [], accounts: new Map(), tables: new Map() };
   const balOf = (a) => c.bal.get(a) ?? 0n;
   const apply = (tx) => {
-    const ix = tx.ixs[0];
+    // a compute unit price instruction (mainnet's own sends) costs nothing here; the lookup table's are the table
+    // program's: create and extend make the table (its authority the signer), freeze sets its authority to none
+    const ix = tx.ixs.find((x) => x.program !== COMPUTE_BUDGET);
     let cost = FEE_PER_SIGNATURE;
     let to = null;
+    if (ix.program === ALT_PROGRAM) {
+      // the create pays the table's rent; an extend or freeze only its fee
+      if (balOf(tx.payer) < cost + (ix.data[0] === 0 ? 3_000_000n : 0n)) return { InsufficientFundsForRent: { account_index: 0 } };
+      c.bal.set(tx.payer, balOf(tx.payer) - cost - (ix.data[0] === 0 ? 3_000_000n : 0n));
+      const table = ix.keys[0];
+      for (const x of tx.ixs.filter((y) => y.program === ALT_PROGRAM)) {
+        if (x.data[0] === 0) c.tables.set(table, { authority: x.keys[1], list: [] });
+        else if (x.data[0] === 2) for (let i = 12; i < x.data.length; i += 32) c.tables.get(table).list.push(b58(x.data.subarray(i, i + 32)));
+        else if (x.data[0] === 1) c.tables.get(table).authority = null;
+        const t = c.tables.get(table);
+        const meta = Buffer.alloc(56);
+        meta.writeUInt32LE(1, 0), meta.writeBigUInt64LE(0xffff_ffff_ffff_ffffn, 4);
+        if (t.authority) (meta[21] = 1), Buffer.from(b58decode(t.authority)).copy(meta, 22);
+        c.accounts.set(table, { owner: ALT_PROGRAM, executable: false, lamports: 3_000_000, data: [Buffer.concat([meta, ...t.list.map((a) => Buffer.from(b58decode(a)))]).toString("base64"), "base64"] });
+      }
+      return null;
+    }
     if (ix.program === SYSTEM_ID) (cost += ix.data.readBigUInt64LE(4)), (to = ix.keys[1]);
     else if (ix.data[0] === 0) cost += 3_000_000n; // init: the pool's rent
     else cost += DEPOSIT + 2_000_000n; // the deposit and its mark and page rents
@@ -621,6 +672,7 @@ function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = (
         return ok(params[0] === c.funder && c.funding ? [...mine.reverse(), { signature: FUND_SIG, err: null }] : mine.reverse());
       }
       case "getProgramAccounts": return ok([]);
+      case "getSlot": return ok(400_000_000);
       case "getLatestBlockhash": return ok({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: height() + 150 } });
       case "getBlockHeight": return ok(height());
       case "sendTransaction": {
@@ -649,7 +701,11 @@ function cluster({ funderStart = 1_000_000_000n, landAfter = () => 0, onSend = (
           d.writeUInt32LE(2, 0), d.writeBigUInt64LE(c.fundAmount ?? 1n, 4);
           return ok({ slot: 0, blockTime: c.fundBlockTime ?? null, meta: { err: null }, transaction: { message: { accountKeys: [c.fundFrom ?? RETURN, c.funder, SYSTEM_ID], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: b58(d) }] } } });
         }
-        return ok({ slot: Math.floor(x.landAt / 400) + 1, meta: { err: x.err }, transaction: { message: { accountKeys: [x.tx.payer], instructions: [] } } });
+        // the transaction as sent: its payer first, each instruction's program, accounts and data
+        const keys = [x.tx.payer];
+        const at = (k) => (keys.includes(k) ? keys.indexOf(k) : keys.push(k) - 1);
+        const instructions = x.tx.ixs.map((i) => ({ programIdIndex: at(i.program), accounts: i.keys.map(at), data: b58(i.data) }));
+        return ok({ slot: Math.floor(x.landAt / 400) + 1, meta: { err: x.err }, transaction: { message: { accountKeys: keys, instructions } } });
       }
       default: throw new Error(`unexpected ${method}`);
     }
@@ -678,8 +734,9 @@ function depositAccounts(c, ix) {
     c.accounts.set(addr, acc(d));
   }
 }
-const isDeposit = (tx) => tx.ixs[0].program !== SYSTEM_ID && tx.ixs[0].data[0] === 1;
-const isInit = (tx) => tx.ixs[0].program !== SYSTEM_ID && tx.ixs[0].data[0] === 0;
+const own = (tx) => tx.ixs.find((x) => x.program !== COMPUTE_BUDGET);
+const isDeposit = (tx) => own(tx).program !== SYSTEM_ID && own(tx).program !== ALT_PROGRAM && own(tx).data[0] === 1;
+const isInit = (tx) => own(tx).program !== SYSTEM_ID && own(tx).program !== ALT_PROGRAM && own(tx).data[0] === 0;
 /** Runs main() (a resume of the recorded program, so no CLI deploy) on `c`; returns its error, log, record and key dir. */
 async function runOn(c, extra = []) {
   const work = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
@@ -882,7 +939,7 @@ test("fold 2 A: a run refuses before making any key when its journal exists, nam
   }
 });
 
-test("fold 2 B: a stop before the funding was read keeps the keys and says so; funding landing after the run is swept later by the journal's command, to the funding's source", async () => {
+test("fold 2 B: a stop before the funding was read keeps the keys and says so; funding landing after the run is swept later by the journal's command, to the run's checked return address (re-review 4)", async () => {
   const { w, out, journal } = work();
   const c = cluster({ funderStart: 0n, onRead: stopInWait("SIGHUP") });
   const r = await runAt(c, out);
@@ -900,7 +957,8 @@ test("fold 2 B: a stop before the funding was read keeps the keys and says so; f
     c.bal.set(c.funder, 50_000_000n);
     const s = await runAt(c, out, [], ["--url", "http://127.0.0.1:1", "--sweep-kept", journal]);
     assert.equal(s.error, null, String(s.error?.stack));
-    assert.equal(sweptTo(c, SOURCE), 50_000_000n - FEE_PER_SIGNATURE, "swept to the funding's own source");
+    assert.equal(sweptTo(c, RETURN), 50_000_000n - FEE_PER_SIGNATURE, "swept to the run's return address, never an unchecked sender");
+    assert.equal(sweptTo(c, SOURCE), 0n);
     assert.equal(c.bal.get(c.funder), 0n);
     assert.equal(existsSync(r.dir), false, "the keys are removed once both RPCs read 0");
     const j2 = JSON.parse(readFileSync(journal, "utf8"));
@@ -966,22 +1024,26 @@ test("fold 2 E: what is left reads the program id too: lamports there keep the k
       if (method === "getAccountInfo") return okR({ value: params[0] === RD.program_id ? acc : null });
       throw new Error(`unexpected ${method}`);
     };
-    return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {} }).leftovers();
+    return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, now: vnow() }).leftovers();
   };
   assert.match((await run({ owner: SYSTEM_ID, executable: false, lamports: 50_000_000, data: ["", "base64"] })).join(), new RegExp(`program id ${RD.program_id} holds 50000000 lamports on a`));
   assert.deepEqual(await run({ owner: "BPFLoaderUpgradeab1e11111111111111111111111", executable: true, lamports: 1_141_440, data: ["", "base64"] }), []);
   assert.deepEqual(await run(null), []);
 });
 
-test("fold 2 F: the funding read failing once right after the wait: the journal still lists the funding, and the keys stay", async () => {
+// review a763a51d (3) changed this one: a funding read that fails once is read again (it ended the run before, with the
+// funding in the journal and the keys kept), so the run goes on, and its record lists the funding
+test("fold 2 F: the funding read failing once right after the wait is read again: the run finishes, its record lists the funding, the keys are removed", async () => {
   const { w, out, journal } = work();
   let n = 0;
   const c = wrap(cluster(), (url, { method }, real) => (method === "getSignaturesForAddress" && n++ === 0 ? errR("planted: getSignaturesForAddress failed") : real()));
   const r = await runAt(c, out);
   try {
-    const j = JSON.parse(readFileSync(journal, "utf8"));
-    assert.ok(j.txs.some((t) => t.signature === FUND_SIG && t.step === "funding (to the funder)"), JSON.stringify(j.txs.map((t) => t.step)));
-    assert.equal(j.keys.state, "kept");
+    assert.equal(r.error, null, String(r.error?.stack));
+    assert.ok(r.said.some((l) => /the funder's history not read \(.*planted: getSignaturesForAddress failed.*\): reading it again/.test(l)), r.said.join("\n"));
+    const d = JSON.parse(readFileSync(out, "utf8"));
+    assert.ok(d.txs.some((t) => t.signature === FUND_SIG && t.step === "funding (to the funder)"), JSON.stringify(d.txs.map((t) => t.step)));
+    assert.equal(existsSync(journal), false, "a finished run removes its journal");
     assert.equal(c.bal.get(c.funder), 0n);
   } finally {
     if (r.dir) rmSync(r.dir, { recursive: true, force: true });
@@ -1091,5 +1153,1671 @@ test("fold 2 4: a run's key folder is durable: under XDG_STATE_HOME or ~/.local/
     assert.throws(() => m.keysBase({}, home), /OS temp folder/);
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ---- card pool-sol-deploy-mainnet: the owner's mainnet run ----
+const MAINNET = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+const MAIN_URL = "https://api.mainnet-beta.solana.com";
+// pump Global as two mainnet providers answered it (the kit's recorded buy reads, packages/kit/test/fixtures)
+const PUMP_FX = JSON.parse(readFileSync(path.join(REPO, "packages/kit/test/fixtures/solana-pool-buy.json"), "utf8")).pump;
+const PUMP_KEY = Object.keys(PUMP_FX.reads[0]).find((k) => JSON.parse(k).length === 3);
+const PUMP_GLOBAL = JSON.parse(PUMP_KEY)[2];
+const PUMP_GLOBAL_ANSWER = { context: PUMP_FX.reads[0][PUMP_KEY].context, value: [PUMP_FX.reads[0][PUMP_KEY].value[2]] };
+/** `c` answering as mainnet: its genesis on every URL, and pump Global at finalized. */
+const asMainnet = (c, genesis2 = MAINNET) => {
+  // CI's build of the recorded code, pinned for the test: never the real gh
+  const f = fakeGh();
+  Object.assign(c.io, { gh: f.gh, pin: f.sha });
+  return asMainnetReads(c, genesis2);
+};
+const PUBLICNODE = "https://solana-rpc.publicnode.com";
+/** PublicNode's answer to getProgramAccounts (scripts/live-checks/pool-sol-deploy.mjs's provider notes, 403 -32602). */
+const PUBLICNODE_GPA = { ok: false, status: 403, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "Indexed requests require a personal token. Get one at: https://www.allnodes.com/publicnode" } }) };
+const asMainnetReads = (c, genesis2) => wrap(c, (url, { method, params }, real) => {
+  if (method === "getGenesisHash") return okR(url === MAIN_URL ? MAINNET : genesis2);
+  if (method === "getProgramAccounts" && url === PUBLICNODE) return PUBLICNODE_GPA;
+  if (method === "getAccountInfo" && params[0] === RETURN) return okR(sysAccount());
+  if (method === "getMultipleAccounts") {
+    assert.deepEqual(params[0], [PUMP_GLOBAL]);
+    assert.equal(params[1].commitment, "finalized");
+    return okR(structuredClone(PUMP_GLOBAL_ANSWER));
+  }
+  return real();
+});
+const mainArgs = (out, extra = []) => ["--mainnet", "--url", MAIN_URL, "--ci-run", "41677243428", "--return", RETURN, "--out", out, ...extra];
+
+test("mainnet: refused before any key without --mainnet, with --mainnet on another cluster, on another URL, when the second RPC is not mainnet, or for code that is not the pin", async () => {
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const { w, out } = work();
+  const realLog = console.log;
+  console.log = () => {};
+  const noCall = (label) => async () => { throw new Error(`${label}: no call after the refusal`); };
+  try {
+    const f = fakeGh();
+    const genesisOnly = (g1, g2 = g1) => async (url, init) => {
+      if (JSON.parse(init.body).method === "getGenesisHash") return okR(url === MAIN_URL ? g1 : g2);
+      if (isReturnRead(init)) return okR(sysAccount());
+      return noCall("read")();
+    };
+    const io = { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow(), pin: f.sha };
+    await assert.rejects(main(mainArgs(out).filter((a) => a !== "--mainnet"), genesisOnly(MAINNET), io), /mainnet refused: its deploy is the owner's.*passes --mainnet/);
+    await assert.rejects(main(mainArgs(out), genesisOnly("EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"), io), /--mainnet refused: genesis EtWTRAB\S+ at https:\/\/api.mainnet-beta.solana.com is not mainnet's/);
+    await assert.rejects(main(mainArgs(out).map((a) => (a === MAIN_URL ? "https://solana-rpc.publicnode.com" : a)), genesisOnly(MAINNET, MAINNET), io), /mainnet refused: --url https:\/\/solana-rpc.publicnode.com is not https:\/\/api.mainnet-beta.solana.com/);
+    await assert.rejects(main(mainArgs(out), genesisOnly(MAINNET, "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"), io), /mainnet refused: https:\/\/solana-rpc.publicnode.com answers genesis EtWTRAB\S+, not mainnet's/);
+    assert.equal(f.calls.length, 0, "no CI read before both RPCs answer mainnet");
+    await assert.rejects(main(mainArgs(out), genesisOnly(MAINNET), { ...io, pin: "0".repeat(64) }), /mainnet refused: the code's sha256 [0-9a-f]{64} is not the pinned 0{64}/);
+    // the findings file's own pin (c86fc7fc..., 79,088 B) refuses the recorded older build
+    await assert.rejects(main(mainArgs(out), genesisOnly(MAINNET), { gh: fakeGh().gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow() }), /mainnet refused: the code's sha256 [0-9a-f]{64} is not the pinned c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162/);
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+  }
+  const made = ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x));
+  for (const k of made) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  assert.deepEqual(made, [], "no key was made");
+});
+
+test("--table is the local dry run's only: refused on devnet before any key", async () => {
+  const devnet = async (u, init) => {
+    if (JSON.parse(init.body).method === "getGenesisHash") return okR("EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG");
+    if (isReturnRead(init)) return okR(sysAccount());
+    throw new Error("no other call");
+  };
+  await assert.rejects(main(["--url", "https://api.devnet.solana.com", "--return", RETURN, "--table"], devnet, { keysBase: TEST_KEYS }), /--fail-after, --flaky and --table are for the local dry run only/);
+});
+
+test("mainnet: the need is the program, the pool, the frozen table, the funder's rent(0), the fees and each priced transaction's bound; no test deposit", async () => {
+  const rent = async (n) => BigInt((n + 128) * 6960);
+  const soLen = 79_088;
+  const writes = BigInt(Math.ceil(soLen / 900));
+  const { parts, total } = await needOf(rent, soLen, { mainnet: true, tableLen: 25 });
+  assert.deepEqual(Object.keys(parts), ["program_account", "programdata", "pool", "lookup_table", "funder_floor", "fees", "priority"]);
+  assert.equal(parts.programdata, BigInt((45 + soLen + 128) * 6960));
+  assert.equal(parts.lookup_table, BigInt((56 + 32 * 25 + 128) * 6960));
+  assert.equal(parts.fees, FEE_PER_SIGNATURE * (2n + writes + 2n + 1n + 2n + 1n + 2n + 100n));
+  assert.equal(parts.priority, (2n + writes + 2n + 100n + 1n + 2n) * (PRIORITY_CU_BOUND * PRIORITY_MICRO_LAMPORTS / 1_000_000n));
+  assert.equal(total, Object.values(parts).reduce((a, b) => a + b, 0n));
+  // a resume whose pool exists: the table, the floor, its fees and priority only
+  const r = await needOf(rent, soLen, { mainnet: true, tableLen: 25, resume: true, poolExists: true });
+  assert.deepEqual(Object.keys(r.parts), ["lookup_table", "funder_floor", "fees", "priority"]);
+});
+
+test("mainnet: the CLI deploys with mainnet's compute unit price", async () => {
+  const f = fakeGh();
+  let args = null;
+  const c = asMainnet(cluster());
+  c.io.cli = (a) => {
+    if (a[1] === "deploy") (args = a), (() => { throw new Error("stop after the deploy call"); })();
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out));
+  try {
+    assert.match(String(r.error?.message), /stop after the deploy call/);
+    assert.ok(args, "the CLI was asked to deploy");
+    assert.deepEqual(args.slice(args.indexOf("--with-compute-unit-price"), args.indexOf("--with-compute-unit-price") + 2), ["--with-compute-unit-price", String(PRIORITY_MICRO_LAMPORTS)]);
+    assert.ok(!args.includes("--final"), "the SetAuthority to none is the script's own priced send, not the CLI's (review 89a6 M1)");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+  void f;
+});
+
+test("mainnet: init, then the table made from the kit's list, read back, frozen and read back; no deposit; every own send priced; the keys removed once the table is frozen", async () => {
+  const f = fakeGh();
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.stack) + "\n" + r.said.join("\n"));
+    const rec = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(rec.cluster, "mainnet");
+    assert.equal(rec.deposit, undefined, "no test deposit on mainnet");
+    assert.equal(c.sent.filter((x) => isDeposit(x.tx)).length, 0);
+    // the list: the kit's solanaPoolBuyTableAccounts for this pool, pump Global's fee accounts, pages to entry 2,047
+    const kit = await import(pathToFileURL(path.join(REPO, "packages/kit/src/trade/solana/pool-buy.ts")).href);
+    const venue = await kit.readSolanaPoolBuyVenue([0, 1].map((p) => async (m, params) => structuredClone(PUMP_FX.reads[p][JSON.stringify(params[0])])), "pump-curve", PUMP_FX.mint, () => 0);
+    const want = [...new Set(kit.solanaPoolBuyTableAccounts({ program: RD.program_id, pool: RD.pool }, venue, kit.solanaPoolPages(RD.program_id, 1024, 1024)))];
+    assert.deepEqual(rec.table_addresses, want);
+    assert.equal(want.length, 25);
+    const t = c.tables.get(rec.table);
+    assert.ok(t, "the record's table is the one made");
+    assert.equal(t.authority, null, "frozen");
+    assert.deepEqual(t.list, want);
+    assert.deepEqual(tableProblems({ owner: ALT_PROGRAM, data: Buffer.from(c.accounts.get(rec.table).data[0], "base64") }, want, null), []);
+    // the order: init, create and extend, freeze, then the sweeps; each own send but the sweeps carries the price
+    const steps = rec.txs.map((x) => x.step);
+    assert.deepEqual(steps.filter((s) => !/funding|sweep/.test(s)), ["init (tag 0)", "lookup table: create and extend with 25 addresses", "lookup table: freeze (authority none)"]);
+    for (const x of c.sent) {
+      const priced = x.tx.ixs[0].program === COMPUTE_BUDGET;
+      assert.equal(priced, x.tx.ixs[0].program !== SYSTEM_ID || x.tx.ixs.length > 1, `${x.tx.ixs.map((i) => i.program).join(",")}`);
+      if (priced) assert.equal(Buffer.from(x.tx.ixs[0].data).readBigUInt64LE(1), PRIORITY_MICRO_LAMPORTS);
+    }
+    assert.ok(c.sent.some((x) => x.tx.ixs[0].program === COMPUTE_BUDGET && x.tx.ixs[1].program === ALT_PROGRAM));
+    assert.equal(r.journal, undefined);
+    assert.equal(existsSync(r.dir), false, "the keys were removed: the funder at 0 and the table frozen");
+    assert.match(r.said.join("\n"), /lookup table \S+ is frozen \(authority none\) and holds exactly the list on both RPCs at finalized/);
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+  void f;
+});
+
+test("mainnet: a table the funder still holds authority over keeps the keys, and the journal says why", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  // the freeze never lands: the RPC refuses it at preflight each time
+  const cc = wrap(c, (url, { method, params }, real) => {
+    if (method === "sendTransaction") {
+      const tx = decodeTx(params[0]);
+      if (tx.ixs.some((x) => x.program === ALT_PROGRAM && x.data[0] === 1)) return errR("Transaction simulation failed: Blockhash not found");
+    }
+    return real();
+  });
+  const { w, out, journal } = work();
+  const r = await runAt(cc, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /Blockhash not found/);
+    const j = JSON.parse(readFileSync(journal, "utf8"));
+    assert.equal(j.complete, false);
+    assert.equal(j.keys.state, "kept");
+    assert.ok(j.keys.why.some((x) => /lookup table \S+ still has the funder as its authority/.test(x)), j.keys.why.join("; "));
+    assert.match(j.keys.sweep, / --mainnet$/);
+    assert.ok(existsSync(r.dir), "the keys stay");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("a transaction over 1,232 bytes is refused before it is journaled or sent", async () => {
+  const k = newKey();
+  const big = { program: SYSTEM_ID, keys: [{ id: k.id, signer: true, writable: true }], data: new Uint8Array(1200) };
+  let sent = 0;
+  const journal = { signed: () => assert.fail("journaled"), settled: () => {}, pending: () => [] };
+  const fetchFn = async (u, init) => {
+    const { method } = JSON.parse(init.body);
+    if (method === "getLatestBlockhash") return okR({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: 10 } });
+    sent++;
+    return okR(null);
+  };
+  const { sendAndConfirm } = await import("./deploy.mjs");
+  await assert.rejects(sendAndConfirm(fetchFn, "http://x", [big], k, [k], { step: "big", journal }), /big: \d+ bytes, over 1232: not signed for sending/);
+  assert.equal(sent, 0);
+});
+
+const LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
+test("--final's SetAuthority finalized a moment after the deploy: the run waits for authority none at finalized instead of failing a final program (rehearsal 5 Nov)", async () => {
+  const f = fakeGh();
+  const code = recordedCode();
+  let ids = null;
+  let pdReads = 0;
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return ok({ value: 1_000_000_000 });
+      case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
+      case "getLatestBlockhash": return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "stop after the deploy's read-back" } }) };
+      case "getAccountInfo": {
+        if (!ids) return ok({ value: null });
+        const pdAddr = programDataAddress(ids.program);
+        const acc = (owner, executable, data) => ({ value: { owner, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] } });
+        if (params[0] === ids.program) return ok(acc(LOADER, true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pdAddr))])));
+        if (params[0] === pdAddr) {
+          // the finalized reads show the funder as authority twice, then none: --final's second transaction finalizing
+          const finalized = params[1]?.commitment === undefined || params[1].commitment === "finalized";
+          const meta = Buffer.alloc(45);
+          meta.writeUInt32LE(3, 0);
+          if (finalized && pdReads++ < 2) (meta[12] = 1), Buffer.from(b58decode(ids.funder)).copy(meta, 13);
+          return ok(acc(LOADER, false, Buffer.concat([meta, code])));
+        }
+        return ok({ value: null });
+      }
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  const cli = (args) => {
+    if (args[1] === "deploy") {
+      ids = { program: keyOf(args[args.indexOf("--program-id") + 1]), funder: keyOf(args[args.indexOf("--upgrade-authority") + 1]) };
+      return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const realLog = console.log;
+  const said = [];
+  console.log = (s) => said.push(String(s));
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, now: vnow(), cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy's read-back/);
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+  assert.ok(said.some((l) => /deployed \S+, upgrade authority none/.test(l)), said.join("\n"));
+  assert.ok(pdReads >= 3);
+});
+
+// ---- the review of ae4a874: each finding a test, red at ae4a874 ----
+/** A getAccountInfo of the run's --return (a public cluster reads it before any key). */
+function isReturnRead(init) {
+  const { method, params } = JSON.parse(init.body);
+  return method === "getAccountInfo" && params[0] === RETURN;
+}
+/** A system account holding `lamports`, as getAccountInfo answers it. */
+function sysAccount(lamports = 5_000_000_000) {
+  return { context: { slot: 1 }, value: { owner: SYSTEM_ID, executable: false, lamports, data: ["", "base64"], rentEpoch: 0, space: 0 } };
+}
+
+test("review 1: mainnet refuses a --return that is off the curve, not a system account, empty, or read differently on the two RPCs, before any key or CI read; a good one is read and the funding line says send from it", async () => {
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const { w, out } = work();
+  const realLog = console.log;
+  console.log = () => {};
+  const PROGRAM_OWNED = { context: { slot: 1 }, value: { owner: RD.program_id, executable: false, lamports: 1_000_000, data: ["", "base64"] } };
+  // a fetch: mainnet's genesis on both, `answer(url, address)` for getAccountInfo, nothing else
+  const reads = (answer) => async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getGenesisHash") return okR(MAINNET);
+    if (method === "getAccountInfo") return okR(answer(url, params[0]));
+    throw new Error(`no ${method} after the refusal`);
+  };
+  try {
+    const f = fakeGh();
+    const io = { gh: f.gh, keysBase: TEST_KEYS, wait: async () => {}, now: vnow(), pin: f.sha };
+    const withReturn = (r) => mainArgs(out).map((a) => (a === RETURN ? r : a));
+    // the pool address: a PDA, 32 bytes that no key signs for
+    await assert.rejects(main(withReturn(RD.pool), reads(() => sysAccount()), io), new RegExp(`mainnet refused: --return ${RD.pool} is not on the ed25519 curve`));
+    await assert.rejects(main(mainArgs(out), reads(() => PROGRAM_OWNED), io), new RegExp(`mainnet refused: --return ${RETURN} is owned by ${RD.program_id}, not the system program, on ${MAIN_URL.replace(/\./g, "\\.")}`));
+    await assert.rejects(main(mainArgs(out), reads(() => ({ context: { slot: 1 }, value: null })), io), new RegExp(`mainnet refused: --return ${RETURN} holds no lamports on ${MAIN_URL.replace(/\./g, "\\.")}`));
+    await assert.rejects(main(mainArgs(out), reads((u) => (u === MAIN_URL ? sysAccount() : { context: { slot: 1 }, value: null })), io), /mainnet refused: --return \S+ holds no lamports on https:\/\/solana-rpc\.publicnode\.com/);
+    assert.equal(f.calls.length, 0, "no CI read before the return address reads right");
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+  }
+  const made = ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x));
+  for (const k of made) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  assert.deepEqual(made, [], "no key was made");
+  // a good one: the run goes on, and the funding line names where to send from
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const { w: w2, out: out2 } = work();
+  const r = await runAt(c, out2, [], mainArgs(out2, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.stack));
+    assert.ok(r.said.some((l) => l.includes(`waiting for `) && l.includes(`send from ${RETURN}`)), r.said.join("\n"));
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w2, { recursive: true, force: true });
+  }
+});
+
+test("review 4: a close or freeze the cleanup gives up on keeps the reserve in the funder, so --sweep-kept can still pay for it", async () => {
+  const c = chain({ failures: { closeBuffers: 99 } });
+  const r = await cleanup(c.ops, RETURN, fast);
+  assert.equal(r.after, CLEANUP_RESERVE, "the reserve stays");
+  assert.equal(c.balance, CLEANUP_RESERVE);
+  assert.ok(r.problems.some((p) => /kept \d+ lamports in the funder for --sweep-kept: buffer close/.test(p)), r.problems.join("; "));
+  // a freeze of the run's live table runs in the cleanup too, after the bulk, before the rest
+  const f = chain();
+  const r2 = await cleanup({ ...f.ops, freezeTable: async () => void f.calls.push("freezeTable") }, RETURN, fast);
+  assert.equal(r2.after, 0n);
+  assert.ok(firstTransfer(f) < f.calls.indexOf("freezeTable") && f.calls.indexOf("freezeTable") < lastTransfer(f), f.calls.join(", "));
+});
+
+/** A stopped run's journal with its keys kept, made by hand: a funder key in a folder of TEST_KEYS; `extra` fields. */
+function keptRun(c, extra = {}) {
+  const funder = newKey();
+  const dir = mkdtempSync(path.join(TEST_KEYS, "pool-sol-deploy-"));
+  writeFileSync(path.join(dir, "funder.json"), JSON.stringify([...funder.secret, ...funder.pub]), { mode: 0o600 });
+  const { w, journal } = work();
+  const j = { cluster: "localnet", genesis_hash: "FakeLocalGenesis1111111111111111111111111111", program_id: newKey().id, funder: funder.id, return_to: RETURN, complete: false, keys: { folder: path.basename(dir), state: "kept", why: [] }, txs: [], ...extra };
+  writeFileSync(journal, JSON.stringify(j));
+  // the funder holds what the cleanup kept, funded from the return address
+  c.funder = funder.id;
+  c.bal.set(funder.id, CLEANUP_RESERVE);
+  const order = (c.order = []);
+  wrap(c, (url, { method }, real) => (method === "sendTransaction" && order.push("send"), real()));
+  return { funder, dir, w, journal, j, done: () => (rmSync(dir, { recursive: true, force: true }), rmSync(w, { recursive: true, force: true })) };
+}
+const LOCAL_SWEEP = (journal) => ["--url", "http://127.0.0.1:1", "--sweep-kept", journal];
+const readJ = (f) => JSON.parse(readFileSync(f, "utf8"));
+
+test("review 4a: --sweep-kept closes a buffer the funder still holds, before its sweep, then removes the keys", async () => {
+  const c = cluster();
+  const k = keptRun(c);
+  const BUF = newKey().id;
+  let closed = false;
+  c.io.cli = (args) => {
+    if (args[1] === "close" && args[2] === "--buffers") (closed = true), c.order.push("close"), assert.equal(args[args.indexOf("--recipient") + 1], RETURN);
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  wrap(c, (url, { method, params }, real) => (method === "getProgramAccounts" && !closed && params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(1, 0, 0, 0)) ? okR([{ pubkey: BUF, account: {} }]) : real()));
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], LOCAL_SWEEP(k.journal));
+    assert.equal(s.error, null, String(s.error?.stack));
+    assert.ok(closed, "the buffer was closed");
+    assert.equal(c.order[0], "close", c.order.join(", "));
+    assert.equal(c.bal.get(k.funder.id), 0n);
+    assert.equal(readJ(k.journal).keys.state, "removed", readJ(k.journal).keys.why.join("; "));
+    assert.equal(existsSync(k.dir), false);
+  } finally {
+    k.done();
+  }
+});
+
+test("review 4b: --sweep-kept closes a program the funder can still upgrade, before its sweep, then removes the keys", async () => {
+  const c = cluster();
+  const k = keptRun(c);
+  const pd = programDataAddress(k.j.program_id);
+  const meta = Buffer.alloc(45);
+  meta.writeUInt32LE(3, 0), (meta[12] = 1), Buffer.from(b58decode(k.funder.id)).copy(meta, 13);
+  c.accounts.set(pd, { owner: LOADER, executable: false, lamports: 1_000_000, data: [meta.toString("base64"), "base64"] });
+  let closed = false;
+  c.io.cli = (args) => {
+    if (args[1] === "close" && args[2] === k.j.program_id) (closed = true), c.order.push("close"), c.accounts.delete(pd);
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], LOCAL_SWEEP(k.journal));
+    assert.equal(s.error, null, String(s.error?.stack));
+    assert.ok(closed, "the program was closed");
+    assert.equal(c.order[0], "close", c.order.join(", "));
+    assert.equal(readJ(k.journal).keys.state, "removed", readJ(k.journal).keys.why.join("; "));
+  } finally {
+    k.done();
+  }
+});
+
+test("review 4c: --sweep-kept on mainnet freezes the run's table the funder still holds, priced, before its sweep, then removes the keys", async () => {
+  const c = asMainnet(cluster());
+  const T = newKey().id;
+  const k = keptRun(c, { cluster: "mainnet", genesis_hash: MAINNET, table: T });
+  const meta = Buffer.alloc(56);
+  meta.writeUInt32LE(1, 0), meta.writeBigUInt64LE(0xffff_ffff_ffff_ffffn, 4), (meta[21] = 1), Buffer.from(b58decode(k.funder.id)).copy(meta, 22);
+  c.tables.set(T, { authority: k.funder.id, list: [RD.pool] });
+  c.accounts.set(T, { owner: ALT_PROGRAM, executable: false, lamports: 3_000_000, data: [Buffer.concat([meta, Buffer.from(b58decode(RD.pool))]).toString("base64"), "base64"] });
+  c.bal.set(k.funder.id, 10_000_000n);
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], ["--mainnet", "--url", MAIN_URL, "--sweep-kept", k.journal]);
+    assert.equal(s.error, null, String(s.error?.stack));
+    assert.equal(c.tables.get(T).authority, null, "frozen");
+    const freeze = c.sent.find((x) => x.tx.ixs.some((i) => i.program === ALT_PROGRAM && i.data[0] === 1));
+    assert.equal(freeze.tx.ixs[0].program, COMPUTE_BUDGET, "priced on mainnet");
+    assert.equal(c.sent.indexOf(freeze), 0, "before the sweep");
+    const j = readJ(k.journal);
+    assert.ok(j.txs.some((t) => /lookup table: freeze/.test(t.step) && t.signature === freeze.tx.signature), JSON.stringify(j.txs));
+    assert.equal(j.keys.state, "removed", j.keys.why.join("; "));
+  } finally {
+    k.done();
+  }
+});
+
+test("review 4d: the run's cleanup freezes its table when the run's own freeze failed; the journal of a mainnet paste names the paste's sweep form", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let refused = 0;
+  const cc = wrap(c, (url, { method, params }, real) => {
+    if (method === "sendTransaction" && refused === 0 && decodeTx(params[0]).ixs.some((x) => x.program === ALT_PROGRAM && x.data[0] === 1)) return refused++, errR("Transaction simulation failed: Error processing Instruction 1: custom program error: 0x1"); // a refusal that stands (a Blockhash not found is sent again: review 7a21 L-2)
+    return real();
+  });
+  const { w, out, journal } = work();
+  const r = await runAt(cc, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /custom program error: 0x1/);
+    const table = [...c.tables.values()][0];
+    assert.equal(table.authority, null, "frozen by the cleanup");
+    const j = readJ(journal);
+    assert.equal(j.keys.state, "removed", j.keys.why.join("; "));
+    assert.ok(j.txs.some((t) => /lookup table: freeze/.test(t.step) && t.state === "landed"));
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+  const { sweepCommand } = await import("./deploy.mjs");
+  assert.equal(sweepCommand(path.join(REPO, "contracts/pool-solana/deployments/mainnet.journal.json"), MAIN_URL, "mainnet"), "sh contracts/pool-solana/scripts/mainnet-deploy.sh --sweep-kept");
+  assert.equal(sweepCommand(path.join(REPO, "x/record.journal.json"), "http://127.0.0.1:1", "localnet"), "node contracts/pool-solana/scripts/deploy.mjs --sweep-kept x/record.journal.json --url http://127.0.0.1:1");
+});
+
+/** A stopped run's journal at `journal` (keys `state`, program `program`), its two landed transactions of its own in `c`
+ * (a funding and an init, paid by its old funder), a CLI write and an expired send that never go in a record. */
+function stoppedJournal(c, journal, { state = "removed", program = RD.program_id } = {}) {
+  const OLD = newKey().id;
+  const sig = (d) => d.repeat(87);
+  // the first run's own, as sent: its funding (a plain Transfer from the return address), its SetAuthority to none on
+  // the programdata, its init
+  const transfer = Buffer.alloc(12);
+  transfer.writeUInt32LE(2, 0), transfer.writeBigUInt64LE(1_000_000n, 4);
+  for (const [s, payer, ix] of [
+    [sig("6"), RETURN, { program: SYSTEM_ID, keys: [RETURN, OLD], data: transfer }],
+    [sig("5"), OLD, { program: "BPFLoaderUpgradeab1e11111111111111111111111", keys: [RD.programdata, OLD], data: Buffer.from([4, 0, 0, 0]) }],
+    [sig("7"), OLD, { program: program, keys: [RD.pool, OLD, SYSTEM_ID], data: Buffer.from([0]) }],
+  ]) {
+    c.txs.set(s, { tx: { signature: s, payer, ixs: [ix] }, landed: true, err: null, landAt: 0, sentAt: 0 });
+  }
+  const j = {
+    cluster: "localnet", genesis_hash: "FakeLocalGenesis1111111111111111111111111111", program_id: program, funder: OLD, return_to: RETURN, complete: false,
+    stopped: "SIGINT", stopped_at: "2026-11-05T16:00:00.000Z", keys: { folder: "pool-sol-deploy-gone", state, why: [], sweep: "node contracts/pool-solana/scripts/deploy.mjs --sweep-kept x --url http://127.0.0.1:1" },
+    txs: [
+      { step: "funding (to the funder)", signature: sig("6"), state: "landed" },
+      { step: "the solana CLI: program deploy", signature: sig("8"), state: "landed", cli: true },
+      { step: "the upgradeable loader: SetAuthority (to none)", signature: sig("5"), state: "landed" },
+      { step: "init (tag 0)", signature: sig("7"), state: "landed" },
+      { step: "deposit 0.01 SOL (tag 1)", signature: sig("9"), state: "expired" },
+    ],
+  };
+  const text = JSON.stringify(j, null, 2) + "\n";
+  writeFileSync(journal, text);
+  return { j, text, OLD, sigs: [sig("6"), sig("7")] };
+}
+const asideOf = (out) => out.replace(/\.json$/, "") + ".stopped-20261105T160000000Z.journal.json";
+
+test("review 5a: a resume takes the stopped run's journal (keys removed, its program): its landed transactions go in the record, and the journal is moved aside byte for byte", async () => {
+  const c = cluster();
+  const { w, out, journal } = work();
+  const s = stoppedJournal(c, journal);
+  const r = await runAt(c, out);
+  try {
+    assert.equal(r.error, null, String(r.error?.stack) + "\n" + r.said.join("\n"));
+    assert.equal(readFileSync(asideOf(out), "utf8"), s.text, "moved aside unchanged");
+    const rec = readJ(out);
+    for (const [i, step] of [[0, "first run: funding (to the funder)"], [1, "first run: init (tag 0)"]]) {
+      assert.ok(rec.txs.some((t) => t.signature === s.sigs[i] && t.step === step), JSON.stringify(rec.txs));
+    }
+    assert.ok(!rec.txs.some((t) => /^[89]+$/.test(t.signature)), "never a CLI write or an expired send");
+    assert.ok(rec.funders.includes(s.OLD), "the first run's funder is a funder of the record");
+    assert.equal(existsSync(journal), false, "the run's own journal is removed once its record is written");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 5b: a stopped run's journal is refused, unchanged, before any key: keys kept (its sweep named), another program than --program, or a fresh run while its program is final", async () => {
+  for (const [opts, argv, re] of [
+    [{ state: "kept" }, null, /its keys kept: sweep them first with: node contracts\/pool-solana\/scripts\/deploy\.mjs --sweep-kept x/],
+    [{ program: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P" }, null, new RegExp(`of program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P, not --program ${RD.program_id}`)],
+    [{}, "fresh", new RegExp(`its program ${RD.program_id} is final with this code: resume it with --program ${RD.program_id}`)],
+  ]) {
+    const c = cluster();
+    const { w, out, journal } = work();
+    const s = stoppedJournal(c, journal, opts);
+    const soDir = mkdtempSync(path.join(tmpdir(), "probe-so-"));
+    writeFileSync(path.join(soDir, "code.so"), recordedCode());
+    const fresh = ["--url", "http://127.0.0.1:1", "--no-build", "--so", path.join(soDir, "code.so"), "--return", RETURN, "--out", out];
+    const r = await runAt(c, out, [], argv === "fresh" ? fresh : null);
+    try {
+      assert.match(String(r.error?.message), re);
+      assert.equal(readFileSync(journal, "utf8"), s.text, "the journal is unchanged");
+      assert.equal(existsSync(asideOf(out)), false);
+      assert.equal(r.dir, undefined, "no key folder was made");
+      assert.equal(c.sent.length, 0);
+    } finally {
+      if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+      rmSync(w, { recursive: true, force: true });
+      rmSync(soDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("review 5c: a fresh run after a stop before any deploy (keys removed, its program never made) moves the journal aside and goes on", async () => {
+  const c = cluster();
+  const { w, out, journal } = work();
+  const s = stoppedJournal(c, journal, { program: newKey().id });
+  c.io.cli = (args) => {
+    if (args[1] === "deploy") throw new Error("stop at the deploy call");
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const soDir = mkdtempSync(path.join(tmpdir(), "probe-so-"));
+  writeFileSync(path.join(soDir, "code.so"), recordedCode());
+  const r = await runAt(c, out, [], ["--url", "http://127.0.0.1:1", "--no-build", "--so", path.join(soDir, "code.so"), "--return", RETURN, "--out", out]);
+  try {
+    assert.match(String(r.error?.message), /stop at the deploy call/);
+    assert.equal(readFileSync(asideOf(out), "utf8"), s.text, "moved aside unchanged");
+    assert.equal(readJ(journal).complete, false, "the new run's own journal");
+    assert.ok(!readJ(journal).txs.some((t) => s.sigs.includes(t.signature)), "a fresh run takes none of the old run's transactions");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+    rmSync(soDir, { recursive: true, force: true });
+  }
+});
+
+// ---- the re-review of f328604: each finding a test, red at f328604 ----
+test("re-review 1: --sweep-kept of a run whose program is deployed skips the program id (a loader account, its rent its own) and finishes; a sweep that fails still writes the journal", async () => {
+  const c = cluster();
+  const k = keptRun(c);
+  const program = newKey();
+  writeFileSync(path.join(k.dir, "program.json"), JSON.stringify([...program.secret, ...program.pub]), { mode: 0o600 });
+  writeFileSync(k.journal, JSON.stringify({ ...k.j, program_id: program.id }));
+  c.accounts.set(program.id, { owner: LOADER, executable: true, lamports: 833_120, data: [Buffer.alloc(36).toString("base64"), "base64"] });
+  c.bal.set(program.id, 833_120n);
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], LOCAL_SWEEP(k.journal));
+    assert.equal(s.error, null, String(s.error?.stack));
+    assert.ok(!c.sent.some((x) => x.tx.payer === program.id), "nothing sent from the program id");
+    const j = readJ(k.journal);
+    assert.equal(j.keys.state, "removed", j.keys.why.join("; "));
+    assert.equal(c.bal.get(program.id), 833_120n, "the program keeps its own rent");
+  } finally {
+    k.done();
+  }
+  // a sweep that is refused: the error goes out, and the journal is written with the keys kept and why
+  const c2 = cluster();
+  const k2 = keptRun(c2);
+  wrap(c2, (url, { method }, real) => (method === "sendTransaction" ? errR("Transaction simulation failed: Blockhash not found") : real()));
+  try {
+    const s = await runAt(c2, path.join(k2.w, "x.json"), [], LOCAL_SWEEP(k2.journal));
+    assert.match(String(s.error?.message), /Blockhash not found/);
+    const j = readJ(k2.journal);
+    assert.equal(j.keys.state, "kept");
+    assert.ok(j.keys.why.some((w) => /--sweep-kept stopped: .*Blockhash not found/.test(w)), j.keys.why.join("; "));
+    assert.ok(existsSync(k2.dir), "the keys stay");
+  } finally {
+    k2.done();
+  }
+});
+
+test("re-review 2: on mainnet a record that exists refuses another run before any key, and names the live check to run alone", async () => {
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const { w, out } = work();
+  writeFileSync(out, JSON.stringify({ cluster: "mainnet" }));
+  const f = fakeGh();
+  c.io.gh = f.gh;
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /is deployed: run its live check alone: node scripts\/live-checks\/pool-sol-deploy-mainnet\.mjs --record scripts\/live-checks\/pool-sol-deploy-mainnet\.good\.json --write-record/);
+    assert.equal(r.dir, undefined, "no key folder was made");
+    assert.equal(c.sent.length, 0);
+    assert.equal(f.calls.length, 0, "no CI read");
+  } finally {
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+});
+
+test("re-review 3: a stale balance read right after the sweep (the second RPC lags) is read again for about 20 s before the keys are kept; the run completes", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let swept = false;
+  let stale = 3;
+  wrap(c, (url, { method, params }, real) => {
+    if (method === "sendTransaction" && decodeTx(params[0]).ixs.some((x) => x.program === SYSTEM_ID && x.keys[1] === RETURN)) swept = true;
+    if (method === "getBalance" && swept && url !== MAIN_URL && params[0] === c.funder && stale > 0) return stale--, okR({ context: { slot: 1 }, value: 777 });
+    return real();
+  });
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.stack) + "\n" + r.said.join("\n"));
+    assert.equal(stale, 0, "the stale reads were served");
+    assert.ok(existsSync(out));
+    assert.equal(existsSync(r.dir), false, "the keys were removed");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("re-review 4: --sweep-kept sends to the run's return address, never an unchecked funding source; --return may name a sender or the return address only", async () => {
+  for (const [to, want] of [[null, RETURN], [SOURCE, SOURCE]]) {
+    const c = cluster();
+    Object.assign(c, { fundFrom: SOURCE });
+    const k = keptRun(c);
+    try {
+      const s = await runAt(c, path.join(k.w, "x.json"), [], [...LOCAL_SWEEP(k.journal), ...(to ? ["--return", to] : [])]);
+      assert.equal(s.error, null, String(s.error?.stack));
+      assert.equal(sweptTo(c, want), CLEANUP_RESERVE - FEE_PER_SIGNATURE, `to ${want}`);
+    } finally {
+      k.done();
+    }
+  }
+  const c = cluster();
+  Object.assign(c, { fundFrom: SOURCE });
+  const k = keptRun(c);
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], [...LOCAL_SWEEP(k.journal), "--return", "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]);
+    assert.match(String(s.error?.message), /is neither a sender to \S+ .* nor the run's return address/);
+    assert.equal(c.sent.length, 0);
+  } finally {
+    k.done();
+  }
+});
+
+test("re-review 5: a fresh run is refused when either RPC reads the stopped run's program final (the other lagging)", async () => {
+  const c = cluster();
+  const { w, out, journal } = work();
+  const s = stoppedJournal(c, journal);
+  wrap(c, (url, { method, params }, real) => (method === "getAccountInfo" && url !== "http://127.0.0.1:1" && params[0] === RD.program_id ? okR({ context: { slot: 1 }, value: null }) : real()));
+  const soDir = mkdtempSync(path.join(tmpdir(), "probe-so-"));
+  writeFileSync(path.join(soDir, "code.so"), recordedCode());
+  const r = await runAt(c, out, [], ["--url", "http://127.0.0.1:1", "--no-build", "--so", path.join(soDir, "code.so"), "--return", RETURN, "--out", out]);
+  try {
+    assert.match(String(r.error?.message), new RegExp(`its program ${RD.program_id} is final with this code`));
+    assert.equal(readFileSync(journal, "utf8"), s.text);
+    assert.equal(r.dir, undefined);
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+    rmSync(soDir, { recursive: true, force: true });
+  }
+});
+
+test("re-review 7: the run is done only once both RPCs read the upgrade authority none: a second RPC that keeps the funder fails it", async () => {
+  const f = fakeGh();
+  const code = recordedCode();
+  let ids = null;
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return ok({ value: 1_000_000_000 });
+      case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
+      case "getLatestBlockhash": return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "stop after the deploy's read-back" } }) };
+      case "getAccountInfo": {
+        if (!ids) return ok({ value: null });
+        const pdAddr = programDataAddress(ids.program);
+        const acc = (owner, executable, data) => ({ value: { owner, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] } });
+        if (params[0] === ids.program) return ok(acc(LOADER, true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pdAddr))])));
+        if (params[0] === pdAddr) {
+          // the second RPC never shows the SetAuthority
+          const meta = Buffer.alloc(45);
+          meta.writeUInt32LE(3, 0);
+          if (url !== "http://127.0.0.1:1") (meta[12] = 1), Buffer.from(b58decode(ids.funder)).copy(meta, 13);
+          return ok(acc(LOADER, false, Buffer.concat([meta, code])));
+        }
+        return ok({ value: null });
+      }
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  const cli = (args) => {
+    if (args[1] === "deploy") {
+      ids = { program: keyOf(args[args.indexOf("--program-id") + 1]), funder: keyOf(args[args.indexOf("--upgrade-authority") + 1]) };
+      return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, now: vnow(), cli, gh: f.gh, keysBase: TEST_KEYS }), /upgrade authority \S+ is set on http:\/\/localhost:1/);
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+});
+
+// ---- paste 1 (5 Nov 18:01-18:16Z): the CLI's writes over the public RPC failed "Max retries exceeded" mid-upload ----
+test("paste 1: a CLI deploy that fails mid-upload is retried in the same run from the run's own buffer: no close, no second funding, both tries' transactions journaled; writes go to the leaders (no --use-rpc) with more sign attempts", async () => {
+  const f = fakeGh();
+  const code = recordedCode();
+  let ids = null;
+  const hist = []; // the funder's history, newest last
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return ok({ value: 1_000_000_000 });
+      case "getProgramAccounts": return ok([]);
+      case "getSignaturesForAddress": return ok([...hist].reverse().map((signature) => ({ signature, err: null })));
+      case "getTransaction": return ok({ transaction: { message: { accountKeys: [ids?.funder ?? hist.funder] } }, meta: { err: null } });
+      case "getLatestBlockhash": return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "stop after the deploy's read-back" } }) };
+      case "getAccountInfo": {
+        if (!ids?.program) return ok({ value: null });
+        const pdAddr = programDataAddress(ids.program);
+        const acc = (owner, executable, data) => ({ value: { owner, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] } });
+        if (params[0] === ids.program) return ok(acc(LOADER, true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pdAddr))])));
+        if (params[0] === pdAddr) {
+          const meta = Buffer.alloc(45);
+          meta.writeUInt32LE(3, 0);
+          return ok(acc(LOADER, false, Buffer.concat([meta, code])));
+        }
+        return ok({ value: null });
+      }
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  const calls = [];
+  const cli = (args) => {
+    calls.push(args);
+    if (args[1] === "deploy") {
+      hist.funder = keyOf(args[args.indexOf("--upgrade-authority") + 1]);
+      const n = calls.filter((a) => a[1] === "deploy").length;
+      if (n === 1) {
+        hist.push("A".repeat(87), "a".repeat(87)); // the buffer and some writes landed
+        return { status: 1, stdout: "", stderr: "Error: Data writes to account failed: Custom error: Max retries exceeded" };
+      }
+      hist.push("B".repeat(87));
+      ids = { program: keyOf(args[args.indexOf("--program-id") + 1]), funder: hist.funder };
+      return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const out = path.join(w, "record.json");
+  const realLog = console.log;
+  const said = [];
+  console.log = (s) => said.push(String(s));
+  let journal = null;
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", out], fetchFn, { wait: async () => {}, now: vnow(), cli, gh: f.gh, keysBase: TEST_KEYS }), /stop after the deploy's read-back/);
+    journal = JSON.parse(readFileSync(out.replace(/\.json$/, ".journal.json"), "utf8"));
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+  const deploys = calls.filter((a) => a[1] === "deploy");
+  assert.equal(deploys.length, 2, "the failed deploy is tried again in the same run");
+  const firstClose = calls.findIndex((a) => a[1] === "close");
+  assert.ok(firstClose === -1 || firstClose > calls.indexOf(deploys[1]), "nothing is closed before the retry");
+  const buf = (a) => a[a.indexOf("--buffer") + 1];
+  assert.ok(deploys.every((a) => a.includes("--buffer")), "the run's own buffer keypair");
+  assert.equal(buf(deploys[0]), buf(deploys[1]), "the retry writes into the same buffer");
+  assert.equal(path.basename(buf(deploys[0])), "buffer.json");
+  for (const a of deploys) {
+    assert.ok(!a.includes("--use-rpc"), "writes go to the leaders, not the public RPC");
+    assert.equal(a[a.indexOf("--max-sign-attempts") + 1], String(DEPLOY_SIGN_ATTEMPTS));
+  }
+  assert.ok(DEPLOY_SIGN_ATTEMPTS >= 10); // ten a try, six tries (review a763a51d: a new CLI process each try)
+  assert.equal(said.filter((l) => /waiting for \S+ to hold/.test(l)).length, 1, "one funding wait");
+  const sigs = journal.txs.map((t) => t.signature);
+  for (const s of ["A".repeat(87), "a".repeat(87), "B".repeat(87)]) assert.ok(sigs.includes(s), `${s.slice(0, 4)}... journaled`);
+  assert.ok(said.some((l) => /deploy try 1 of 6 failed: .*Max retries exceeded.*: trying again from the run's buffer/.test(l)), said.join("\n"));
+});
+import { DEPLOY_SIGN_ATTEMPTS } from "./deploy.mjs";
+
+test("devnet rehearsal 5 Nov: a funding wait whose balance read meets a burst of 429s keeps waiting, never ends the run before the funding is read", async () => {
+  const f = fakeGh();
+  let clock = Date.now(); // a clock of its own, so a run that stops ends its cleanup at once
+  let balanceReads = 0;
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance":
+        // the first read's five tries all rate-limited, as api.devnet answered at 18:47Z
+        if (++balanceReads <= 5) return { ok: false, status: 429, json: async () => ({ code: 429, message: "Connection rate limits exceeded" }) };
+        return ok({ value: 1_000_000_000 });
+      case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
+      case "getAccountInfo": return ok({ value: null });
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const cli = (args) => {
+    if (args[1] === "deploy") throw new Error("stop at the deploy: the funding was read");
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const realLog = console.log;
+  const said = [];
+  console.log = (s) => said.push(String(s));
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, now: () => (clock += 1000), cli, gh: f.gh, keysBase: TEST_KEYS }), /stop at the deploy: the funding was read/);
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+  assert.equal(said.filter((l) => /waiting for \S+ to hold/.test(l)).length, 1, "one funding wait");
+  assert.ok(said.some((l) => /the funder's balance not read \(getBalance: HTTP 429.*\): reading it again/.test(l)), said.join("\n"));
+  assert.ok(said.some((l) => /funded: /.test(l)), said.join("\n"));
+});
+
+// ---- the review of d507200f (a763a51d): each finding a test, red at d507200f ----
+import { DEPLOY_TRIES } from "./deploy.mjs";
+
+test("review a763 1 (89a6 H1): a buffer close the CLI reports 'Failed to close buffer' with exit 0 is not done: the buffer is read on --url only (PublicNode refuses getProgramAccounts) and the close throws while it is there", async () => {
+  const funder = newKey();
+  const BUF = newKey().id;
+  let closedOn = new Set();
+  const gpaUrls = [];
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getProgramAccounts") {
+      gpaUrls.push(url);
+      const buffer = params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(1, 0, 0, 0));
+      return okR(buffer && !closedOn.has(url) ? [{ pubkey: BUF, account: {} }] : []);
+    }
+    if (method === "getAccountInfo" && params[0] === BUF) return okR({ value: closedOn.has(url) ? null : loaderAcc(1, funder.id) });
+    throw new Error(`unexpected ${method}`);
+  };
+  let closes = 0;
+  const failing = (args) => (args[1] === "close" && closes++, { status: 0, stdout: "", stderr: `Failed to close buffer ${BUF}: RPC response error -32002: Transaction simulation failed` });
+  const ops = chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, now: vnow(), say: () => {}, cli: failing });
+  await assert.rejects(ops.closeBuffers(), new RegExp(`buffer ${BUF}.* still has the funder as its authority`));
+  assert.deepEqual([...new Set(gpaUrls)], ["a"], "read on --url only, as leftovers() reads it");
+  // the cleanup retries it, and on giving up keeps the reserve for --sweep-kept
+  let bal = 50_000_000n;
+  const sent = [];
+  const r = await cleanup({ ...ops, upgradeableByFunder: async () => false, balance: async () => bal, transfer: async (to, n) => (sent.push(n), (bal -= n + FEE_PER_SIGNATURE), "s".repeat(87)) }, RETURN, fast);
+  assert.equal(closes, 1 + 5, "the CLI's close was tried again by the retry");
+  assert.ok(r.problems.some((p) => /kept 1000000 lamports in the funder for --sweep-kept: buffer close gave up/.test(p)), r.problems.join("\n"));
+  assert.equal(bal, CLEANUP_RESERVE, "the reserve stays in the funder");
+  // a close --url reads as done resolves
+  closedOn = new Set(["a"]);
+  await ops.closeBuffers();
+});
+
+test("review a763 1: --sweep-kept whose buffer close fails (exit 0, 'Failed to close buffer') keeps the reserve in the funder and the keys, naming the buffer", async () => {
+  const c = cluster();
+  const k = keptRun(c);
+  const BUF = newKey().id;
+  c.io.cli = (args) => ({ status: 0, stdout: "", stderr: args[1] === "close" && args[2] === "--buffers" ? `Failed to close buffer ${BUF}: Transaction simulation failed` : "" });
+  wrap(c, (url, { method, params }, real) => {
+    if (method === "getProgramAccounts" && params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(1, 0, 0, 0))) return okR([{ pubkey: BUF, account: {} }]);
+    if (method === "getAccountInfo" && params[0] === BUF) return okR({ value: loaderAcc(1, k.funder.id) });
+    return real();
+  });
+  try {
+    await runAt(c, path.join(k.w, "x.json"), [], LOCAL_SWEEP(k.journal));
+    assert.equal(c.bal.get(k.funder.id), CLEANUP_RESERVE, "the funder keeps the reserve for a later close");
+    const j = readJ(k.journal);
+    assert.equal(j.keys.state, "kept");
+    assert.ok(j.keys.why.some((w) => w.includes(BUF)), j.keys.why.join("; "));
+    assert.equal(existsSync(k.dir), true);
+  } finally {
+    k.done();
+  }
+});
+
+/** A run of main() on a local fake whose program state the planted CLI sets: `onDeploy(n, ids, state)` answers the n-th
+ * deploy, `onCli(args, ids, state)` any other CLI call. Ends at the first send after the read-back. */
+async function deployRun({ onDeploy, onCli = () => ({ status: 0, stdout: "", stderr: "" }), limitGsfa = 0, balanceAfter = null, dropSetAuthority = 0, pdResets = 0 }) {
+  const f = fakeGh();
+  const code = recordedCode();
+  const state = { program: false, authority: null }; // authority: null none, else the funder's id
+  let ids = null;
+  let funded = false;
+  let gsfaLimited = 0;
+  let balances = 0;
+  let hashes = 0; // a new blockhash a read, so a SetAuthority sent again is a new transaction
+  const sent = []; // the run's own sends: { tx, ix, landed }
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return (funded = true), ok({ value: balanceAfter && balances++ > 0 ? balanceAfter : 1_000_000_000 });
+      case "getSignaturesForAddress":
+        if (funded && gsfaLimited < limitGsfa) return gsfaLimited++, { ok: false, status: 429, json: async () => ({ code: 429, message: "Connection rate limits exceeded" }) };
+        return ok([]);
+      case "getProgramAccounts": return ok([]);
+      case "getLatestBlockhash": return ok({ value: { blockhash: b58(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 1 + (++hashes % 250) : 7))), lastValidBlockHeight: 0 } });
+      case "getBlockHeight": return ok(1);
+      case "sendTransaction": {
+        // the loader's SetAuthority lands (after `dropSetAuthority` sends that never land); any other send is the stop
+        const tx = decodeTx(params[0]);
+        const ix = tx.ixs.find((x) => x.program !== COMPUTE_BUDGET);
+        if (ix.program !== LOADER) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "stop after the deploy's read-back" } }) };
+        if (!sent.some((x) => x.tx.signature === tx.signature)) {
+          const landed = sent.filter((x) => x.ix.program === LOADER).length >= dropSetAuthority;
+          sent.push({ tx, ix, landed });
+          if (landed) state.authority = null;
+        }
+        return ok(tx.signature);
+      }
+      case "getSignatureStatuses": return ok({ value: params[0].map((sig) => (sent.some((x) => x.landed && x.tx.signature === sig) ? { confirmationStatus: "confirmed", err: null } : null)) });
+      case "getAccountInfo": {
+        if (!ids || !state.program) return ok({ value: null });
+        const pdAddr = programDataAddress(ids.program);
+        const acc = (owner, executable, data) => ({ value: { owner, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] } });
+        if (params[0] === ids.program) return ok(acc(LOADER, true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pdAddr))])));
+        if (params[0] === pdAddr) {
+          // a socket reset while the ~103 KB body is read: a 200 whose JSON never arrives
+          if (pdResets > 0) return pdResets--, { ok: true, status: 200, json: async () => { throw new TypeError("terminated"); } };
+          const meta = Buffer.alloc(45);
+          meta.writeUInt32LE(3, 0);
+          if (state.authority) (meta[12] = 1), Buffer.from(b58decode(state.authority)).copy(meta, 13);
+          return ok(acc(LOADER, false, Buffer.concat([meta, code])));
+        }
+        return ok({ value: null });
+      }
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  const calls = [];
+  let deploys = 0;
+  const cli = (args) => {
+    calls.push(args);
+    if (args[1] === "deploy") {
+      ids = { program: keyOf(args[args.indexOf("--program-id") + 1]), funder: keyOf(args[args.indexOf("--upgrade-authority") + 1]) };
+      return onDeploy(++deploys, ids, state);
+    }
+    return onCli(args, ids, state);
+  };
+  const before = new Set(ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const w = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const realLog = console.log;
+  const said = [];
+  console.log = (s) => said.push(String(s));
+  let error = null;
+  let clock = Date.now();
+  try {
+    await main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN, "--out", path.join(w, "record.json")], fetchFn, { wait: async () => {}, now: () => (clock += 1000), cli, gh: f.gh, keysBase: TEST_KEYS });
+  } catch (e) {
+    error = e;
+  } finally {
+    console.log = realLog;
+    rmSync(w, { recursive: true, force: true });
+    for (const k of ls(TEST_KEYS).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(TEST_KEYS, k), { recursive: true, force: true });
+  }
+  return { error, said, calls, state, sent, ids: () => ids };
+}
+const deployed = (said) => said.some((l) => /deployed \S+, upgrade authority none/.test(l));
+
+/** The run's own SetAuthority sends in `sent`: the loader's instruction 4 (bincode u32 LE), on [programdata, funder]. */
+const setAuthorities = (r) => r.sent.filter((x) => x.ix.program === LOADER);
+const isSetAuthorityToNone = (x, ids) => Buffer.from(x.ix.data).equals(Buffer.from([4, 0, 0, 0])) && x.ix.keys.length === 2 && x.ix.keys[0] === programDataAddress(ids.program) && x.ix.keys[1] === ids.funder && x.tx.payer === ids.funder;
+
+test("review a763 2a (89a6 M1): a try whose deploy landed with the funder as its authority is made final by the script's own SetAuthority send (loader instruction 4, [programdata, funder]), never by the CLI, never redeployed or closed", async () => {
+  const r = await deployRun({
+    onDeploy: (n, ids, state) => {
+      if (n === 1) return (state.program = true), (state.authority = ids.funder), { status: 1, stdout: "", stderr: "Error: Data writes to account failed: Custom error: Max retries exceeded" };
+      return { status: 1, stdout: "", stderr: "Error: Program's authority Some(x) does not match authority provided" };
+    },
+  });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1, "no second deploy");
+  assert.ok(!r.calls.some((a) => a[1] === "set-upgrade-authority"), "no CLI SetAuthority: it is unpriced (agave v4.4.0 program.rs process_set_authority)");
+  assert.ok(!r.calls.some((a) => a[1] === "deploy" && a.includes("--final")), "the CLI deploy has no --final");
+  const sa = setAuthorities(r);
+  assert.equal(sa.length, 1, r.said.join("\n"));
+  assert.ok(isSetAuthorityToNone(sa[0], r.ids()), JSON.stringify({ data: [...sa[0].ix.data], keys: sa[0].ix.keys }));
+  assert.equal(r.state.authority, null);
+  assert.ok(!r.calls.some((a) => a[1] === "close" && a[2] === r.ids().program), "the program is not closed");
+  assert.ok(deployed(r.said), r.said.join("\n"));
+});
+
+test("review 89a6 M1b: a deploy that exits 0 leaves the funder as authority; a SetAuthority that never lands is sent again (journaled before each send), and no send counts as a deploy try", async () => {
+  const r = await deployRun({
+    dropSetAuthority: 2,
+    onDeploy: (n, ids, state) => ((state.program = true), (state.authority = ids.funder), { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" }),
+  });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1, "one deploy");
+  const sa = setAuthorities(r);
+  assert.equal(sa.length, 3, "two that never land, then one that does");
+  for (const x of sa) assert.ok(isSetAuthorityToNone(x, r.ids()));
+  assert.ok(!r.said.some((l) => /deploy try 2 of/.test(l)), r.said.join("\n"));
+  assert.ok(r.said.some((l) => /SetAuthority \(to none\) try 3 of 6/.test(l)), r.said.join("\n"));
+  assert.ok(deployed(r.said), r.said.join("\n"));
+});
+
+test("review a763 2b: a try whose CLI reported an error after the program read final takes the success path: no second deploy, no SetAuthority", async () => {
+  const r = await deployRun({
+    onDeploy: (n, ids, state) => {
+      if (n === 1) return (state.program = true), (state.authority = null), { status: 1, stdout: "", stderr: "Error: unable to confirm transaction" };
+      return { status: 1, stdout: "", stderr: "Error: Program is no longer upgradeable" };
+    },
+  });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1, "no second deploy");
+  assert.ok(!r.calls.some((a) => a[1] === "set-upgrade-authority"));
+  assert.equal(setAuthorities(r).length, 0);
+  assert.ok(deployed(r.said), r.said.join("\n"));
+});
+
+test("review a763 3: five 429s on the funder's history right after the funding are read again: the run goes on to its deploy", async () => {
+  const r = await deployRun({ limitGsfa: 5, onDeploy: (n, ids, state) => ((state.program = true), (state.authority = null), { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" }) });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.ok(r.said.some((l) => /funded: /.test(l)), r.said.join("\n"));
+  assert.ok(r.said.some((l) => /the funder's history not read \(getSignaturesForAddress: HTTP 429.*\): reading it again/.test(l)), r.said.join("\n"));
+});
+
+test("review a763 4: about 10 sign attempts a try and 6 tries, a pause between tries, and one line per try with its longest time", async () => {
+  assert.equal(DEPLOY_SIGN_ATTEMPTS, 10);
+  assert.equal(DEPLOY_TRIES, 6);
+  const r = await deployRun({
+    onDeploy: (n, ids, state) => {
+      if (n < 3) return { status: 1, stdout: "", stderr: "Error: Data writes to account failed: Custom error: Max retries exceeded" };
+      return (state.program = true), (state.authority = null), { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+    },
+  });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  for (const n of [1, 2, 3]) assert.ok(r.said.some((l) => new RegExp(`deploy try ${n} of 6: at most about 10 min \\(10 sign attempts, a blockhash's ~60 s each\\)`).test(l)), r.said.join("\n"));
+  assert.ok(r.said.some((l) => /deploy try 2 of 6 failed: .*: trying again from the run's buffer in 5 s/.test(l)), r.said.join("\n"));
+});
+
+test("review a763 5: the KEYS KEPT line names buffer.json beside funder.json and program.json", () => {
+  const src = readFileSync(path.join(HERE, "deploy.mjs"), "utf8");
+  const line = src.split("\n").find((l) => l.includes("KEYS KEPT in"));
+  assert.match(line, /funder\.json.*program\.json.*buffer\.json/);
+});
+
+// ---- the re-review of 89a6d6f3: each finding a test, red at 89a6d6f3 ----
+test("review 89a6 H1: a mainnet run with PublicNode refusing getProgramAccounts (403 -32602) completes: the record written, the keys removed, getProgramAccounts read on --url only", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const gpa = [];
+  wrap(c, (url, { method }, real) => (method === "getProgramAccounts" && gpa.push(url), real()));
+  const { w, out, journal } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(existsSync(out), "the record is written");
+    assert.equal(existsSync(journal), false, "the journal is removed");
+    assert.equal(existsSync(r.dir), false, "the keys are removed");
+    assert.deepEqual([...new Set(gpa)], [MAIN_URL]);
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 89a6 H1b: a mainnet --sweep-kept with PublicNode refusing getProgramAccounts finishes: the funder swept to 0 and the keys removed", async () => {
+  const c = asMainnet(cluster());
+  const k = keptRun(c, { cluster: "mainnet", genesis_hash: MAINNET });
+  c.bal.set(k.funder.id, 10_000_000n);
+  try {
+    const s = await runAt(c, path.join(k.w, "x.json"), [], ["--mainnet", "--url", MAIN_URL, "--sweep-kept", k.journal]);
+    const j = readJ(k.journal);
+    assert.equal(s.error, null, String(s.error?.message) + "\n" + s.said.join("\n"));
+    assert.equal(j.keys.state, "removed", j.keys.why.join("; "));
+    assert.equal(c.bal.get(k.funder.id), 0n);
+    assert.equal(existsSync(k.dir), false);
+  } finally {
+    k.done();
+  }
+});
+
+test("review 89a6 M1: on mainnet the SetAuthority to none is the script's own send, priced (compute unit price first), on [programdata, funder]", async () => {
+  const c = asMainnet(cluster());
+  const code = recordedCode();
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  let ids = null;
+  c.io.cli = (a) => {
+    if (a[1] !== "deploy") return { status: 0, stdout: "", stderr: "" };
+    ids = { program: keyOf(a[a.indexOf("--program-id") + 1]), funder: keyOf(a[a.indexOf("--upgrade-authority") + 1]) };
+    // the deploy landed, its authority the funder (no --final)
+    const pd = programDataAddress(ids.program);
+    const acc = (executable, data) => ({ owner: LOADER, executable, lamports: 1, data: [Buffer.from(data).toString("base64"), "base64"] });
+    const meta = Buffer.alloc(45);
+    meta.writeUInt32LE(3, 0), (meta[12] = 1), Buffer.from(b58decode(ids.funder)).copy(meta, 13);
+    c.accounts.set(ids.program, acc(true, Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pd))])));
+    c.accounts.set(pd, acc(false, Buffer.concat([meta, code])));
+    return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" };
+  };
+  const loaderSends = [];
+  wrap(c, (url, { method, params }, real) => {
+    if (method === "sendTransaction") {
+      const tx = decodeTx(params[0]);
+      if (tx.ixs.some((x) => x.program === LOADER)) return loaderSends.push(tx), errR("stop at the SetAuthority send");
+    }
+    return real();
+  });
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out));
+  try {
+    assert.match(String(r.error?.message), /stop at the SetAuthority send/, r.said.join("\n"));
+    assert.ok(loaderSends.length >= 1, r.said.join("\n"));
+    const tx = loaderSends[0];
+    assert.equal(tx.ixs.length, 2);
+    assert.equal(tx.ixs[0].program, COMPUTE_BUDGET);
+    assert.equal(Buffer.from(tx.ixs[0].data).readBigUInt64LE(1), PRIORITY_MICRO_LAMPORTS);
+    assert.deepEqual([...tx.ixs[1].data], [4, 0, 0, 0]);
+    assert.deepEqual(tx.ixs[1].keys, [programDataAddress(ids.program), ids.funder]);
+    assert.equal(tx.payer, ids.funder);
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 89a6 M2: a send's blockhash read and status reads that fail past rpc()'s five tries are read again: the transaction is confirmed", async () => {
+  const k = newKey();
+  const { sendAndConfirm } = await import("./deploy.mjs");
+  let hashFails = 7;
+  let statusFails = 7;
+  let t = 0;
+  const fetchFn = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getLatestBlockhash") {
+      if (hashFails-- > 0) return { ok: false, status: 429, json: async () => ({ code: 429, message: "Too many requests" }) };
+      return okR({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: 10 } });
+    }
+    if (method === "sendTransaction") return okR(decodeTx(params[0]).signature);
+    if (method === "getSignatureStatuses") {
+      if (statusFails-- > 0) throw new TypeError("fetch failed");
+      return okR({ value: [{ confirmationStatus: "confirmed", err: null }] });
+    }
+    throw new Error(`unexpected ${method}`);
+  };
+  const sig = await sendAndConfirm(fetchFn, "http://x", [transferIx(k.id, RETURN, 1n)], k, [k], { step: "a transfer", wait: async (ms) => void (t += ms), now: () => t });
+  assert.match(sig, /^[1-9A-HJ-NP-Za-km-z]{80,90}$/);
+  assert.ok(hashFails < 0 && statusFails < 0);
+});
+
+test("review 89a6 M2: the table's slot read failing past rpc()'s five tries is read again: the mainnet run completes", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let slotFails = 7;
+  wrap(c, (url, { method }, real) => (method === "getSlot" && slotFails-- > 0 ? { ok: false, status: 429, json: async () => ({ code: 429, message: "Too many requests" }) } : real()));
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(slotFails < 0);
+    assert.ok(r.said.some((l) => /the slot not read \(getSlot: HTTP 429/.test(l)), r.said.join("\n"));
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 89a6 L1: a deploy try is not started when the funder holds less than one try's bound plus the rest of the run: the run stops for the cleanup after try 1", async () => {
+  const r = await deployRun({
+    balanceAfter: 2_000_000,
+    onDeploy: () => ({ status: 1, stdout: "", stderr: "Error: Data writes to account failed: Custom error: Max retries exceeded" }),
+  });
+  assert.match(String(r.error?.message), /deploy try 2 of 6 not started: the funder holds 2000000 lamports, below the \d+ one more try and the rest of the run need/, r.said.join("\n"));
+  assert.equal(r.calls.filter((a) => a[1] === "deploy").length, 1);
+  assert.ok(r.calls.some((a) => a[1] === "close" && a[2] === "--buffers"), "the cleanup closes the run's buffer");
+});
+
+test("review 89a6 L2: the cleanup keeps the reserve in its final sweep while leftovers() names something under the funder, though no close gave up", async () => {
+  const run = async (left) => {
+    let bal = 50_000_000n;
+    const r = await cleanup({ closeBuffers: async () => {}, upgradeableByFunder: async () => false, leftovers: left, balance: async () => bal, transfer: async (to, n) => ((bal -= n + FEE_PER_SIGNATURE), "s".repeat(87)) }, RETURN, fast);
+    return { bal, r };
+  };
+  const a = await run(async () => ["the funder holds 1000000 lamports on a", "buffer B1 still has the funder as its authority"]);
+  assert.equal(a.bal, CLEANUP_RESERVE, a.r.problems.join("\n"));
+  assert.ok(a.r.problems.some((p) => /kept 1000000 lamports in the funder for --sweep-kept: buffer B1 still has the funder as its authority/.test(p)), a.r.problems.join("\n"));
+  const b = await run(async () => { throw new Error("getProgramAccounts: HTTP 503"); });
+  assert.equal(b.bal, CLEANUP_RESERVE, "a leftovers read that fails keeps the reserve too");
+  const c = await run(async () => ["the funder holds 1000000 lamports on a"]);
+  assert.equal(c.bal, 0n, "only the funder's own balance left: swept to 0");
+});
+
+test("review 89a6 I3: the record lists only the programdata's transactions whose fee payer is the run's own; a stranger's transaction naming the programdata is left out", async () => {
+  const D0 = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
+  const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, LOADER], instructions: loaderTag === undefined ? [] : [{ programIdIndex: 1, data: loaderTag === 4 ? "5" : "3" }] } } });
+  const fund = { slot: 1, meta: { err: null }, transaction: { message: { accountKeys: [D0, "F1", "11111111111111111111111111111111"], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: "3Bxs41hAcYbghSB9" }] } } };
+  const chainTx = { fund, dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), stranger: tx(4, "S1"), init: tx(5, "F1") };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR([{ signature: "stranger", err: null }, { signature: "auth", err: null }, { signature: "dep", err: null }]);
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, funder: "F1", txs: [{ step: "funding", signature: "fund" }, { step: "init", signature: "init" }] });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "dep", "auth", "init"]);
+  assert.deepEqual(r.funders, ["F1"]);
+});
+
+test("review 89a6 M2 (every path): the record's finalized reads (the statuses and each transaction) that fail past rpc()'s five tries are read again: the mainnet run writes its record", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let statusFails = 7;
+  let txFails = 7;
+  const limited = { ok: false, status: 429, json: async () => ({ code: 429, message: "Too many requests" }) };
+  wrap(c, (url, { method, params }, real) => {
+    if (method === "getSignatureStatuses" && params[0].length >= 4 && statusFails-- > 0) return limited;
+    if (method === "getTransaction" && params[1]?.commitment === "finalized" && txFails-- > 0) return limited;
+    return real();
+  });
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(statusFails < 0 && txFails < 0);
+    assert.ok(existsSync(out), "the record is written");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+// ---- the re-review of 89a6d6f3..7a219b67: each finding a test, red at c07be769 ----
+import { rpc as liveRpc } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
+
+test("review 7a21 M-a: a 200 whose body is cut (no JSON) is a transient failure, tried again; a deploy whose programdata read is reset once still finishes", async () => {
+  let n = 0;
+  const cut = async () => (n++ < 2 ? { ok: true, status: 200, json: async () => { throw new TypeError("terminated"); } } : okR(7));
+  assert.equal(await liveRpc(cut, "u", "getSlot", [], async () => {}), 7);
+  const e = await liveRpc(async () => ({ ok: true, status: 200, json: async () => { throw new TypeError("terminated"); } }), "u", "getSlot", [], async () => {}).catch((x) => x);
+  assert.equal(e.transient, true, "past its tries it is still transient, so readAgain reads again");
+  // a non-2xx with no JSON stays the node's word
+  const e2 = await liveRpc(async () => ({ ok: false, status: 403, json: async () => { throw new SyntaxError("x"); } }), "u", "getSlot", [], async () => {}).catch((x) => x);
+  assert.notEqual(e2.transient, true);
+  const r = await deployRun({ pdResets: 1, onDeploy: (k, ids, state) => ((state.program = true), (state.authority = ids.funder), { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: "4".repeat(87) }), stderr: "" }) });
+  assert.match(String(r.error?.message), /stop after the deploy's read-back/, r.said.join("\n"));
+  assert.equal(setAuthorities(r).length, 1);
+  assert.ok(deployed(r.said), r.said.join("\n"));
+});
+
+test("review 7a21 M-b: a transaction not yet found at finalized while the record is read is read again: the mainnet run writes its record", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let misses = 3;
+  wrap(c, (url, { method, params }, real) => (method === "getTransaction" && params[1]?.commitment === "finalized" && misses-- > 0 ? okR(null) : real()));
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(misses < 0 && existsSync(out));
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 7a21 M-b: a record that cannot be read in 90 s prints the --rebuild-record line for its journal", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  wrap(c, (url, { method, params }, real) => (method === "getTransaction" && params[1]?.commitment === "finalized" ? okR(null) : real()));
+  const { w, out, journal } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /not found at finalized/);
+    assert.ok(r.said.some((l) => l.includes(`--rebuild-record ${journal} --url ${MAIN_URL} --mainnet`)), r.said.join("\n"));
+    assert.ok(existsSync(journal), "the journal stays for the rebuild");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 7a21 L-1: the settle's reads and the final leftovers read that fail past rpc()'s tries are read again", async () => {
+  const funder = newKey();
+  let heightFails = 7;
+  const pendingSig = "3".repeat(87);
+  const settledAs = [];
+  const journal = { pending: () => (settledAs.length ? [] : [{ step: "x", signature: pendingSig, lastValid: 5 }]), settled: (sig, st) => settledAs.push(st) };
+  const fetchFn = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    if (method === "getBlockHeight") return heightFails-- > 0 ? { ok: false, status: 429, json: async () => ({}) } : okR(9);
+    if (method === "getSignatureStatuses") return okR({ value: [{ confirmationStatus: "confirmed", err: null }] });
+    throw new Error(`unexpected ${method}`);
+  };
+  let t = 0;
+  const ops = chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async (ms) => void (t += ms), now: () => t, say: () => {}, journal });
+  assert.equal(await ops.settle(), true);
+  assert.deepEqual(settledAs, ["landed"]);
+  // a mainnet run whose leftovers read of the programdata filter is rate-limited past its tries still removes its keys
+  const c = asMainnet(cluster({ poolMissing: true }));
+  let gpaFails = 7;
+  wrap(c, (url, { method, params }, real) => (method === "getProgramAccounts" && params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(3, 0, 0, 0)) && gpaFails-- > 0 ? { ok: false, status: 429, json: async () => ({}) } : real()));
+  const { w, out } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    assert.ok(gpaFails < 0);
+    assert.equal(existsSync(r.dir), false, "the keys are removed");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 7a21 L-2: a send answered 'Blockhash not found' (-32002) or 'node is behind' (-32005) is sent again, the same bytes", async () => {
+  const k = newKey();
+  const { sendAndConfirm } = await import("./deploy.mjs");
+  for (const error of [{ code: -32002, message: "Transaction simulation failed: Blockhash not found" }, { code: -32005, message: "Node is behind by 42 slots" }]) {
+    const sent = [];
+    let t = 0;
+    const fetchFn = async (u, init) => {
+      const { method, params } = JSON.parse(init.body);
+      if (method === "getLatestBlockhash") return okR({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: 10 } });
+      if (method === "sendTransaction") return sent.push(params[0]), sent.length < 3 ? { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error }) } : okR(decodeTx(params[0]).signature);
+      if (method === "getSignatureStatuses") return okR({ value: [sent.length >= 3 ? { confirmationStatus: "confirmed", err: null } : null] });
+      throw new Error(`unexpected ${method}`);
+    };
+    await sendAndConfirm(fetchFn, "http://x", [transferIx(k.id, RETURN, 1n)], k, [k], { step: "a transfer", wait: async (ms) => void (t += ms), now: () => t });
+    assert.equal(sent.length, 3, error.message);
+    assert.equal(new Set(sent).size, 1, "the same signed bytes each time");
+  }
+});
+
+test("review 7a21 L-3: a --program resume whose stopped run's table reads frozen with exactly the list on both RPCs reuses it: no second table", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  const kit = await import(pathToFileURL(path.join(REPO, "packages/kit/src/trade/solana/pool-buy.ts")).href);
+  const venue = await kit.readSolanaPoolBuyVenue([0, 1].map((p) => async (m, params) => structuredClone(PUMP_FX.reads[p][JSON.stringify(params[0])])), "pump-curve", PUMP_FX.mint, () => 0);
+  const want = [...new Set(kit.solanaPoolBuyTableAccounts({ program: RD.program_id, pool: RD.pool }, venue, kit.solanaPoolPages(RD.program_id, 1024, 1024)))];
+  const T = newKey().id;
+  const meta = Buffer.alloc(56);
+  meta.writeUInt32LE(1, 0), meta.writeBigUInt64LE(0xffff_ffff_ffff_ffffn, 4);
+  c.accounts.set(T, { owner: ALT_PROGRAM, executable: false, lamports: 3_000_000, data: [Buffer.concat([meta, ...want.map((a) => Buffer.from(b58decode(a)))]).toString("base64"), "base64"] });
+  const { w, out, journal } = work();
+  writeFileSync(journal, JSON.stringify({ cluster: "mainnet", genesis_hash: MAINNET, program_id: RD.program_id, table: T, table_addresses: want, complete: false, stopped_at: "2026-11-06T00:00:00.000Z", keys: { state: "removed", why: [] }, txs: [] }));
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + r.said.join("\n"));
+    const rec = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(rec.table, T, "the first run's table");
+    assert.equal(c.sent.filter((x) => x.tx.ixs.some((i) => i.program === ALT_PROGRAM)).length, 0, "no table made or frozen");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review 7a21 L-4: a funding is read from its transaction (a System transfer into the run's payer), never its label: a shared funding wallet's own programdata transaction is left out", async () => {
+  const sysTransfer = (lamports) => { const d = Buffer.alloc(12); d.writeUInt32LE(2, 0), d.writeBigUInt64LE(lamports, 4); return b58(d); };
+  const tx = (slot, keys, instructions) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: keys, instructions } } });
+  const SYS = "11111111111111111111111111111111";
+  const chainTx = {
+    fund: tx(1, ["X0", "F1", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: sysTransfer(5n) }]), // the exchange pays the funder
+    sweep: tx(5, ["F1", "R0", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: sysTransfer(4n) }]),
+    // the run's deploy (DeployWithMaxDataLen: the programdata at accounts[1], the authority F1 at [7])
+    dep: tx(2, ["F1", LOADER, "PD"], [{ programIdIndex: 1, accounts: [0, 2, 0, 0, 0, 0, 0, 0], data: b58(Buffer.from([2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0])) }]),
+    // the funding wallet's own, naming the programdata: a Write on its buffer, which lands without the authority
+    stranger: tx(3, ["X0", LOADER, "BUF", "PD"], [{ programIdIndex: 1, accounts: [2, 0, 3], data: b58(Buffer.from([1, 0, 0, 0, 0, 0, 0, 0])) }]),
+  };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR([{ signature: "stranger", err: null }, { signature: "dep", err: null }]);
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  // a rebuild: --prior's labels, and an old record's funders that carry the funding's payer
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "F2", funders: ["X0", "F1"], txs: [{ step: "first run (--prior)", signature: "fund" }, { step: "first run (--prior)", signature: "sweep" }] });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "dep", "sweep"]);
+});
+
+test("review 7a21 info: the loader's SetAuthority label names no --final", () => {
+  const src = readFileSync(path.join(HERE, "deploy.mjs"), "utf8");
+  const line = src.split("\n").find((l) => l.startsWith("const LOADER_STEPS"));
+  assert.ok(!line.includes("--final"), line);
+});
+
+// ---- the re-review of c07be769..f369ea7f (SHIP, two Low): each a test, red at b6b2937e ----
+test("review f369 Low 1: a status read that never reads every transaction finalized prints the --rebuild-record line for its journal", async () => {
+  const c = asMainnet(cluster({ poolMissing: true }));
+  wrap(c, (url, { method, params }, real) => (method === "getSignatureStatuses" && params[0].length >= 4 ? okR({ value: params[0].map(() => ({ confirmationStatus: "confirmed", err: null })) }) : real()));
+  const { w, out, journal } = work();
+  const r = await runAt(c, out, [], mainArgs(out, ["--program", RD.program_id]));
+  try {
+    assert.match(String(r.error?.message), /not every transaction finalized/);
+    assert.ok(r.said.some((l) => l.includes(`--rebuild-record ${journal} --url ${MAIN_URL} --mainnet`)), r.said.join("\n"));
+    assert.ok(existsSync(journal), "the journal stays for the rebuild");
+  } finally {
+    if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+    rmSync(w, { recursive: true, force: true });
+  }
+});
+
+test("review f369 Low 2: a funding that is not one plain System Transfer from its payer into the run's funder (a relayer's, a CPI, TransferWithSeed) is left out, and its payer's programdata transaction never enters the record", async () => {
+  const SYS = "11111111111111111111111111111111";
+  const transfer = (tag) => { const d = Buffer.alloc(12); d.writeUInt32LE(tag, 0), d.writeBigUInt64LE(5n, 4); return b58(d); };
+  const tx = (slot, keys, instructions) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: keys, instructions } } });
+  const chainTx = {
+    plain: tx(1, ["R0", "F1", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: transfer(2) }]),
+    relayed: tx(2, ["RL", "X0", "F1", SYS], [{ programIdIndex: 3, accounts: [1, 2], data: transfer(2) }]), // the relayer pays, the exchange sends
+    cpi: tx(3, ["SQ", "F1", "SqdsWallet111111111111111111111111111111111"], [{ programIdIndex: 2, accounts: [0, 1], data: "3" }]),
+    seeded: tx(4, ["SD", "F1", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: transfer(11) }]), // TransferWithSeed
+    init: tx(5, ["F1", "PoolProg"], [{ programIdIndex: 1, accounts: [], data: "1" }]),
+    dep: tx(6, ["F1", LOADER], [{ programIdIndex: 1, data: "3" }]),
+    ...Object.fromEntries(["RL", "SQ", "SD"].map((p, i) => [`pd-${p}`, tx(7 + i, [p, LOADER], [{ programIdIndex: 1, data: "3" }])])),
+  };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR(["pd-RL", "pd-SQ", "pd-SD", "dep"].map((signature) => ({ signature, err: null })));
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const said = [];
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "F1",
+    txs: ["plain", "relayed", "cpi", "seeded"].map((signature) => ({ step: "funding (to the funder)", signature })).concat([{ step: "init (tag 0)", signature: "init" }]) }, { say: (l) => said.push(l) });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["plain", "init", "dep"]);
+  assert.deepEqual(r.funders, ["F1"]);
+  for (const sig of ["relayed", "cpi", "seeded"]) assert.ok(said.some((l) => l.includes(sig) && /left out of the record/.test(l)), said.join("\n"));
+});
+
+// ---- the re-review of b6b2937e..7c838388 (FIX 1): a stranger never becomes a run key ----
+test("review 7c83 M1: a stranger's transaction naming the funder (a transfer into the return address, or a loader instruction with the programdata as an extra account) never makes it a run key", async () => {
+  const SYS = "11111111111111111111111111111111";
+  const u32 = (n, extra = 0) => { const d = Buffer.alloc(4 + extra); d.writeUInt32LE(n, 0); return d; };
+  const transfer = () => { const d = u32(2, 8); d.writeBigUInt64LE(1n, 4); return b58(d); };
+  const tx = (slot, keys, instructions) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: keys, instructions } } });
+  const chainTx = {
+    // (a) one plain Transfer from S into the return address, the funder an unused extra key
+    toReturn: tx(1, ["S1", "R0", SYS, "F1"], [{ programIdIndex: 2, accounts: [0, 1], data: transfer() }]),
+    // (b) a loader Write on S's own buffer, the programdata and the funder appended
+    write: tx(2, ["S2", "BUF", LOADER, "PD", "F1"], [{ programIdIndex: 2, accounts: [1, 0, 3, 4], data: b58(u32(1, 12)) }]),
+    // the run's own: its SetAuthority to none on the programdata (authority the payer, at accounts[1])
+    auth: tx(3, ["F1", "PD", LOADER], [{ programIdIndex: 2, accounts: [1, 0], data: b58(u32(4, 1)) }]),
+    // each stranger's own on the programdata: a Write on its buffer naming it, which lands (a SetAuthority as the
+    // authority would fail on chain and is never in the history read)
+    ...Object.fromEntries(["S1", "S2"].map((p, i) => [`pd-${p}`, tx(4 + i, [p, "BUF", LOADER, "PD"], [{ programIdIndex: 2, accounts: [1, 0, 3], data: b58(u32(1, 4)) }])])),
+  };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR(["pd-S1", "pd-S2", "auth"].map((signature) => ({ signature, err: null })));
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const said = [];
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "F1",
+    txs: ["toReturn", "write"].map((signature) => ({ step: "funding (to the funder)", signature })) }, { say: (l) => said.push(l) });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["auth"]);
+  assert.deepEqual(r.funders, ["F1"]);
+  for (const sig of ["toReturn", "write"]) assert.ok(said.some((l) => l.includes(sig) && /left out of the record/.test(l)), said.join("\n"));
+});
+
+test("review 7c83 M1: a --prior-only resume finds the first run's key from its own SetAuthority on the programdata, and keeps that run's funding", async () => {
+  const SYS = "11111111111111111111111111111111";
+  const u32 = (n, extra = 0) => { const d = Buffer.alloc(4 + extra); d.writeUInt32LE(n, 0); return d; };
+  const transfer = () => { const d = u32(2, 8); d.writeBigUInt64LE(9n, 4); return b58(d); };
+  const tx = (slot, keys, instructions) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: keys, instructions } } });
+  const chainTx = {
+    fund: tx(1, ["R0", "OLD", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: transfer() }]),
+    auth: tx(2, ["OLD", "PD", LOADER], [{ programIdIndex: 2, accounts: [1, 0], data: b58(u32(4, 1)) }]),
+    init: tx(3, ["NEW", "PoolProg"], [{ programIdIndex: 1, accounts: [], data: "1" }]),
+  };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR([{ signature: "auth", err: null }]);
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "NEW",
+    txs: [{ step: "first run (--prior)", signature: "fund" }, { step: "init (tag 0)", signature: "init" }] });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "auth", "init"]);
+  assert.deepEqual(r.funders, ["OLD", "NEW"]);
+});
+
+// ---- paste 2 (6 Nov 07:58Z): the cleanup kept the keys over a stale read ----
+// The run's own SetAuthority to none landed (5EtRdefa, slot 466033710) and both RPCs read the program final at
+// finalized, yet the cleanup's getProgramAccounts on --url (the upgradeable loader's accounts whose authority is
+// Some(funder), at confirmed) still listed the programdata: the reserve stayed in the funder and the keys were kept for
+// an owner's --sweep-kept. `lag` answers that read, and the programdata's own read right after it, the way a node behind
+// the run's last write does, then as one that has it: "honest" keeps minContextSlot (-32016 while behind it) and gives
+// the old bytes when none is asked; "ignores" gives the old bytes with its own context slot, below the one asked;
+// "index" gives the old list at the tip's context slot (a list that lags its own slot), which only the programdata's
+// own read shows wrong.
+async function staleAfterSetAuthority(lag) {
+  const c = asMainnet(cluster());
+  const code = recordedCode();
+  const keyOf = (file) => b58(Uint8Array.from(JSON.parse(readFileSync(file, "utf8"))).subarray(32, 64));
+  let ids = null;
+  const pdAcc = (authority) => {
+    const meta = Buffer.alloc(45);
+    meta.writeUInt32LE(3, 0);
+    if (authority) (meta[12] = 1), Buffer.from(b58decode(authority)).copy(meta, 13);
+    return { owner: LOADER, executable: false, lamports: 1, data: [Buffer.concat([meta, code]).toString("base64"), "base64"] };
+  };
+  const DEPLOY_SIG = "4".repeat(87);
+  c.io.cli = (a) => {
+    if (a[1] !== "deploy") return { status: 0, stdout: "", stderr: "" };
+    ids = { program: keyOf(a[a.indexOf("--program-id") + 1]), funder: keyOf(a[a.indexOf("--upgrade-authority") + 1]) };
+    const pd = programDataAddress(ids.program);
+    c.accounts.set(ids.program, { owner: LOADER, executable: true, lamports: 1, data: [Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(b58decode(pd))]).toString("base64"), "base64"] });
+    c.accounts.set(pd, pdAcc(ids.funder));
+    return { status: 0, stdout: JSON.stringify({ programId: ids.program, signature: DEPLOY_SIG }), stderr: "" };
+  };
+  // the cluster's slots: each landed transaction its own, the tip one past the newest
+  let tip = 466_033_000;
+  const slotOf = new Map([[DEPLOY_SIG, tip]]);
+  let authSlot = null;
+  let stale = 0; // the stale programdata lists answered
+  let staleRead = false; // the programdata's own read after that list: answered by the node behind too (not "index")
+  const behindErr = () => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32016, message: "Minimum context slot has not been reached", data: { contextSlot: authSlot - 1 } } }) });
+  const TAG3 = b58(Uint8Array.of(3, 0, 0, 0));
+  wrap(c, async (url, { method, params }, real) => {
+    const cfg = params?.[1] ?? {};
+    const min = cfg.minContextSlot ?? 0;
+    if (method === "sendTransaction") {
+      const tx = decodeTx(params[0]);
+      const r = await real();
+      // the SetAuthority to none lands: the programdata's authority none from here on
+      if (tx.ixs.some((x) => x.program === LOADER)) c.accounts.set(programDataAddress(ids.program), pdAcc(null));
+      return r;
+    }
+    if (method === "getSignatureStatuses") {
+      const r = await (await real()).json();
+      r.result.value = r.result.value.map((s, i) => {
+        if (params[0][i] === DEPLOY_SIG) return { confirmationStatus: "finalized", err: null, slot: tip };
+        if (!s) return s;
+        if (!slotOf.has(params[0][i])) slotOf.set(params[0][i], ++tip);
+        const x = c.txs.get(params[0][i]);
+        if (x?.tx.ixs.some((y) => y.program === LOADER)) authSlot ??= slotOf.get(params[0][i]);
+        return { ...s, slot: slotOf.get(params[0][i]) };
+      });
+      return okR(r.result);
+    }
+    if (method === "getTransaction" && params[0] === DEPLOY_SIG) {
+      return okR({ slot: slotOf.get(DEPLOY_SIG), meta: { err: null }, transaction: { message: { accountKeys: [ids.funder, LOADER], instructions: [] } } });
+    }
+    if (method === "getProgramAccounts" && url === MAIN_URL && authSlot !== null && params[1].filters[0].memcmp.bytes === TAG3 && stale === 0) {
+      // the node behind the SetAuthority: the programdata still under the funder
+      stale++;
+      staleRead = lag !== "index";
+      const behind = authSlot - 1;
+      const list = [{ pubkey: programDataAddress(ids.program), account: { owner: LOADER, executable: false, lamports: 1, data: ["", "base64"] } }];
+      if (lag === "honest" && min > behind) return behindErr();
+      const at = lag === "index" ? tip : behind;
+      return okR(cfg.withContext ? { context: { slot: at }, value: list } : list);
+    }
+    if (method === "getAccountInfo" && url === MAIN_URL && staleRead && params[0] === programDataAddress(ids.program)) {
+      staleRead = false;
+      if (lag === "honest" && min > authSlot - 1) return behindErr();
+      return okR({ context: { slot: authSlot - 1 }, value: pdAcc(ids.funder) });
+    }
+    // every other read answers at the tip, with its context when one is asked (getBalance and getAccountInfo always
+    // carry it on a real node; getProgramAccounts with withContext)
+    if (["getBalance", "getAccountInfo", "getProgramAccounts"].includes(method)) {
+      const r = await (await real()).json();
+      if (r.error) return { ok: true, status: 200, json: async () => r };
+      const v = r.result;
+      if (method === "getProgramAccounts") return okR(cfg.withContext ? { context: { slot: tip }, value: v } : v);
+      return okR(v && typeof v === "object" && "value" in v ? { context: { slot: tip }, ...v } : v);
+    }
+    return real();
+  });
+  const { w, out, journal } = work();
+  const r = await runAt(c, out, [], mainArgs(out));
+  const j = existsSync(journal) ? JSON.parse(readFileSync(journal, "utf8")) : null;
+  const kept = r.dir && existsSync(r.dir);
+  const record = existsSync(out) ? JSON.parse(readFileSync(out, "utf8")) : null;
+  if (r.dir) rmSync(r.dir, { recursive: true, force: true });
+  rmSync(w, { recursive: true, force: true });
+  return { ...r, j, kept, record, stale, funderLeft: ids ? c.bal.get(ids.funder) : null };
+}
+
+for (const lag of ["honest", "ignores", "index"]) {
+  test(`paste 2: a getProgramAccounts that lags the run's own landed SetAuthority (${lag}) never keeps the keys: the run completes, the funder at 0`, async () => {
+    const r = await staleAfterSetAuthority(lag);
+    assert.equal(r.stale, 1, "the stale list was answered once");
+    assert.equal(r.error, null, String(r.error?.message) + "\n" + (r.j ? JSON.stringify(r.j.keys) : "") + "\n" + r.said.filter((l) => /cleanup|KEYS|left/.test(l)).join("\n"));
+    assert.equal(r.kept, false, "the keys are removed");
+    assert.equal(r.funderLeft, 0n, "no reserve kept in the funder");
+    assert.ok(r.record, "the record is written");
+    assert.ok(!r.said.some((l) => /kept \d+ lamports in the funder/.test(l)), r.said.join("\n"));
+  });
+}
+
+// ---- paste 2: a stranger's dust on the funder (3qRUcXSY, 07:56:27Z) ----
+// mainnet's own answer for it (contracts/pool-solana/fixtures/dust-3qRUcXSY.json): jvfZAHpy… pays and sends 1 lamport to
+// each of 18 addresses in 18 System Transfers, the funder 7Y7omJGV… (key 6) among them.
+const DUST = JSON.parse(readFileSync(path.join(REPO, "contracts/pool-solana/fixtures/dust-3qRUcXSY.json"), "utf8"));
+const P2 = JSON.parse(readFileSync(path.join(REPO, "contracts/pool-solana/deployments/mainnet.json"), "utf8"));
+const P2_FUNDER = "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB";
+/** The dust's exact message with the funder's key (index 6) swapped for `funder`. */
+const dustFor = (funder) => {
+  const a = structuredClone(DUST.answer);
+  assert.equal(a.transaction.message.accountKeys[6], P2_FUNDER);
+  a.transaction.message.accountKeys[6] = funder;
+  return a;
+};
+
+test("paste 2 dust: the record leaves out a stranger's 18-way dust send (its exact mainnet shape) and its payer is no funder", async () => {
+  const m = DUST.answer.transaction.message;
+  assert.equal(m.instructions.length, 18);
+  assert.ok(m.instructions.every((i) => m.accountKeys[i.programIdIndex] === SYSTEM_ID && i.accounts[0] === 0 && b58decode(i.data).length === 12));
+  assert.ok(m.instructions.some((i) => m.accountKeys[i.accounts[1]] === P2_FUNDER), "one of its transfers is into the funder");
+  assert.equal(plainTransferTo(DUST.answer), null);
+  // the owner's funding beside it: one System Transfer from its payer (the return address) into the funder
+  const fund = { slot: 466032982, meta: { err: null }, transaction: { message: { accountKeys: [P2.return_to, P2_FUNDER, SYSTEM_ID], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: b58(Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(new BigUint64Array([449137520n]).buffer)])) }] } } };
+  assert.equal(plainTransferTo(fund), P2_FUNDER);
+  // and the run's own sweep back, paid by the funder
+  const sweep = { slot: 466033758, meta: { err: null }, transaction: { message: { accountKeys: [P2_FUNDER, P2.return_to, SYSTEM_ID], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: fund.transaction.message.instructions[0].data }] } } };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR([]);
+    if (method === "getTransaction") return okR({ [DUST.signature]: DUST.answer, fund, sweep }[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const said = [];
+  const r = await chainRecord(fetchFn, "u", { programdata: P2.programdata, return_to: P2.return_to, funder: P2_FUNDER, table: P2.table,
+    txs: [{ step: "funding (to the funder)", signature: "fund" }, { step: "funding (to the funder)", signature: DUST.signature }, { step: "sweep (the funder's rest back)", signature: "sweep" }] }, { say: (l) => said.push(l) });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "sweep"]);
+  assert.deepEqual(r.funders, [P2_FUNDER], "the dust's payer jvfZAHpy… is not a funder of the run");
+  assert.ok(said.some((l) => l.includes(DUST.signature) && /left out of the record/.test(l)), said.join("\n"));
+  // the committed record agrees: no dust line, its one funder the run's
+  assert.ok(!P2.txs.some((t) => t.signature === DUST.signature));
+  assert.deepEqual(P2.funders, [P2_FUNDER]);
+});
+
+test("paste 2 dust: the run's journal names a stranger's dust on the funder as not a funding, and --sweep-kept never takes its payer for a sender", async () => {
+  const c = cluster();
+  wrap(c, async (url, { method, params }, real) => {
+    if (method === "getSignaturesForAddress" && params[0] === c.funder) {
+      const r = await (await real()).json();
+      return okR([{ signature: DUST.signature, err: null }, ...r.result]);
+    }
+    if (method === "getTransaction" && params[0] === DUST.signature) return okR(dustFor(c.funder));
+    return real();
+  });
+  const r = await runOn(c, ["--fail-after", "funding"]);
+  assert.match(String(r.error?.message), /planted failure after funding/);
+  const steps = new Map(r.journal.txs.map((t) => [t.signature, t.step]));
+  assert.equal(steps.get(FUND_SIG), "funding (to the funder)");
+  assert.equal(steps.get(DUST.signature), `another payer's transaction naming the funder (${DUST.answer.transaction.message.accountKeys[0]}): not a funding`);
+  // --sweep-kept: --return set to the dust's payer is refused (it is no sender of a funding)
+  const c2 = cluster();
+  const k = keptRun(c2);
+  c2.bal.set(k.funder.id, 10_000_000n);
+  wrap(c2, async (url, { method, params }, real) => {
+    if (method === "getSignaturesForAddress" && params[0] === k.funder.id) {
+      const r2 = await (await real()).json();
+      return okR([{ signature: DUST.signature, err: null }, ...r2.result]);
+    }
+    if (method === "getTransaction" && params[0] === DUST.signature) return okR(dustFor(k.funder.id));
+    return real();
+  });
+  try {
+    const s = await runAt(c2, path.join(k.w, "x.json"), [], [...LOCAL_SWEEP(k.journal), "--return", DUST.answer.transaction.message.accountKeys[0]]);
+    assert.match(String(s.error?.message), /is neither a sender to/, s.said.join("\n"));
+  } finally {
+    k.done();
   }
 });

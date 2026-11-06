@@ -255,10 +255,17 @@ export const solanaPoolPages = (program: string, stateSize: number, labelSize: n
   ...Array.from({ length: Math.floor(labelSize / SOLANA_POOL_PAGE_ENTRIES) + 1 }, (_, i) => solanaPoolPage(program, 1, i * SOLANA_POOL_PAGE_ENTRIES)),
 ];
 
+/** What our lookup table needs of a venue: its program-wide fee accounts, the same for every mint of that venue. A
+ * SolanaPoolBuyVenue is one; readSolanaPumpCurveTableVenue reads one before any mint is named (the mainnet table, card
+ * pool-sol-deploy-mainnet). */
+export type SolanaPoolTableVenue =
+  | Pick<Extract<SolanaPoolBuyVenue, { kind: "pump-curve" }>, "kind" | "feeRecipient" | "buybackFeeRecipients">
+  | Pick<Extract<SolanaPoolBuyVenue, { kind: "pumpswap" }>, "kind" | "protocolFeeRecipient" | "buybackFeeRecipients">;
+
 /** The program-wide accounts a pool buy uses: what our lookup table holds (the pool and its pages, the venue's shared
  * accounts and programs, the token programs and wSOL). Not the Jito tip accounts: the tip goes as a static key
  * (solanaCompileV0 never loads one, M362 (4)). */
-export function solanaPoolBuyTableAccounts(cfg: SolanaPoolConfig, venue: SolanaPoolBuyVenue, pages: readonly string[] = []): string[] {
+export function solanaPoolBuyTableAccounts(cfg: SolanaPoolConfig, venue: SolanaPoolTableVenue, pages: readonly string[] = []): string[] {
   const common = [cfg.pool, ...pages, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SOL_MINT, SOLANA_PUMP_FEES_PROGRAM];
   return venue.kind === "pump-curve"
     ? [...common, SOLANA_PUMP_PROGRAM, PUMP_GLOBAL, venue.feeRecipient, solanaEventAuthority(SOLANA_PUMP_PROGRAM), PUMP_GLOBAL_VOLUME, PUMP_FEE_CONFIG, ...venue.buybackFeeRecipients]
@@ -835,6 +842,15 @@ export function solanaTokenAccountSize(mint: { owner: string; data: Uint8Array }
 
 /** The venue's buy accounts from one provider's read of [mint, curve, pump Global] or [mint, pool, GlobalConfig]; the
  * buyback recipient is the `pick`ed one of the venue's eight (the SDKs pick at random, which spreads the write locks). */
+/** pump Global's fee recipient: the account checked as pump's Global (owner, discriminator, this layout's size). */
+function pumpGlobalFeeRecipient(global: SolanaPoolAccount): string {
+  solanaDecodePumpGlobal(global); // owner and discriminator
+  if (global.data.length !== SOLANA_PUMP_GLOBAL_SIZE) throw new Error(`pump Global is ${global.data.length} bytes, not ${SOLANA_PUMP_GLOBAL_SIZE}`);
+  const feeRecipient = base58.encode(global.data.subarray(PUMP_GLOBAL_FEE_RECIPIENT, PUMP_GLOBAL_FEE_RECIPIENT + 32));
+  if (feeRecipient === DEFAULT_KEY) throw new Error("pump Global has no fee recipient");
+  return feeRecipient;
+}
+
 export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accounts: readonly (SolanaPoolAccount | null)[], pick: (n: number) => number = () => 0): SolanaPoolBuyVenue {
   const [m, main, global] = accounts;
   if (!m || !main || !global) throw new Error("an account is missing");
@@ -856,10 +872,7 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
     if (c.complete) throw new Error("the curve is complete");
     if (c.isMayhemMode) throw new Error("a Mayhem curve pays its reserved fee recipients, not built here");
     if (c.quoteMint !== SOLANA_SYSTEM_PROGRAM && c.quoteMint !== SOLANA_SOL_MINT) throw new Error("the curve is not quoted in SOL");
-    solanaDecodePumpGlobal(global); // owner and discriminator
-    if (global.data.length !== SOLANA_PUMP_GLOBAL_SIZE) throw new Error(`pump Global is ${global.data.length} bytes, not ${SOLANA_PUMP_GLOBAL_SIZE}`);
-    const feeRecipient = keyAt(global.data, PUMP_GLOBAL_FEE_RECIPIENT);
-    if (feeRecipient === DEFAULT_KEY) throw new Error("pump Global has no fee recipient");
+    const feeRecipient = pumpGlobalFeeRecipient(global);
     return { kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), curve: addr.curve, creator: c.creator, feeRecipient, cashback: c.isCashbackCoin, ...buyback(global.data, PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
   }
   const p = solanaDecodePumpSwapPool(main);
@@ -893,6 +906,27 @@ export async function readSolanaPoolBuyVenue(providers: readonly [SolanaRpc, Sol
   });
   if (JSON.stringify(venues[0]) !== JSON.stringify(venues[1])) throw new Error("the providers disagree on the venue's accounts");
   return venues[0] as SolanaPoolBuyVenue;
+}
+
+/**
+ * The pump curve venue as our lookup table needs it, before any mint is named: pump Global's fee recipient and its eight
+ * buyback recipients, read at finalized on two providers that must answer the same bytes (a frozen table can never be
+ * changed, so it is made from finalized reads only). The checks are solanaPoolBuyVenueOf's own on Global.
+ */
+export async function readSolanaPumpCurveTableVenue(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaPoolTableVenue> {
+  if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
+  const reads = await Promise.all(providers.map((rpc) => withTimeout(Promise.resolve().then(() => rpc("getMultipleAccounts", [[PUMP_GLOBAL], { encoding: "base64", commitment: "finalized" }])), READ_TIMEOUT_MS)));
+  const globals = reads.map((r) => {
+    const g = solanaParseAccountsAnswer(r, 1)?.accounts[0];
+    if (!g) throw new Error("a provider's answer is not pump Global");
+    return g;
+  });
+  if (globals[0]!.owner !== globals[1]!.owner || base64.encode(globals[0]!.data) !== base64.encode(globals[1]!.data)) throw new Error("the providers disagree on pump Global");
+  const g = globals[0]!;
+  const feeRecipient = pumpGlobalFeeRecipient(g);
+  const buybackFeeRecipients = Array.from({ length: 8 }, (_, i) => base58.encode(g.data.subarray(PUMP_GLOBAL_BUYBACK_RECIPIENTS + 32 * i, PUMP_GLOBAL_BUYBACK_RECIPIENTS + 32 * i + 32)));
+  if (buybackFeeRecipients.some((k) => k === DEFAULT_KEY)) throw new Error("a buyback recipient is unset");
+  return { kind: "pump-curve", feeRecipient, buybackFeeRecipients };
 }
 
 // ------------------------------------------------------------------------------------------------- the check
