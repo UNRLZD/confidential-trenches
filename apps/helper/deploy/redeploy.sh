@@ -23,6 +23,8 @@
 #      old one (docker compose up --no-deps --no-recreate --scale helper=<old + 1> --wait), waits for its healthcheck
 #      (compose.yaml: /v1/health says ready), and only then stops (30 s) and removes each old container. Past the bound
 #      (REDEPLOY_READY_S seconds, default 300) the new container is removed, the old one keeps serving, and it exits 1.
+#   4. caddy: made again (--force-recreate, its certificates kept in the caddy_data volume) when the HELPER_SITE compose
+#      resolves differs from the running caddy's, since nothing else ever makes it read a new one (card hosts-main-on-top).
 # It prints names and container ids, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local repository).
 # The release is read, raised and written here rather than computed from the commit's place on main: the number orders
 # what this host ran, with its store, so a rollback gets the next number; a count on main would go down on a rollback.
@@ -63,6 +65,7 @@ main() {
   cd "$deploy"
   export HELPER_COMMIT="$sha" HELPER_RELEASE="$release"
   swap_helper "$wait_s" "$sha"
+  caddy_site "$wait_s"
 }
 
 # Step 3. The new helper starts next to the old one (docker-rollout's pattern: --no-recreate keeps the running container
@@ -123,6 +126,38 @@ swap_helper() {
     docker rm "$id" >/dev/null
   done
   echo "redeploy: swapped: the new helper $(printf '%s' "$new" | tr '\n' ' ' | sed 's/ $//') is ready; stopped and removed the old $(printf '%s' "$old" | tr '\n' ' ' | sed 's/ $//')"
+}
+
+# Step 4 (card hosts-main-on-top). Caddy serves the names in HELPER_SITE, read once when its container is made: the
+# helper's swap never touches it (--no-deps --no-recreate), and the Caddyfile turns the admin endpoint off, so nothing
+# reloads it. The value compose resolves now (this shell's HELPER_SITE, else deploy/.env's, else compose.yaml's default,
+# read with `docker compose config caddy`) is compared with the running container's (its Config.Env); when they differ,
+# or no caddy runs, caddy is made again from the same image. Its certificates live in the named volume caddy_data
+# (compose.yaml: caddy_data:/data, and caddy_data under volumes:), so a recreate keeps them and asks the CA only for a
+# name it has none for. Prints that it changed, never the names.
+caddy_site() {
+  local wait_s="$1" id want have
+  # compose prints the value plain, or quoted when YAML needs it: the quotes are taken off
+  want="$(docker compose config caddy | sed -n 's/^[[:space:]]*HELPER_SITE:[[:space:]]*//p' | head -n 1 | sed -E "s/^[\"']//; s/[\"']\$//")"
+  if [[ -z "$want" ]]; then
+    echo "redeploy: compose resolves no HELPER_SITE for caddy; caddy left as it is" >&2
+    exit 1
+  fi
+  id="$(docker compose ps -q caddy | head -n 1)"
+  if [[ -n "$id" ]]; then
+    have="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$id" | sed -n 's/^HELPER_SITE=//p' | head -n 1)"
+    if [[ "$have" == "$want" ]]; then
+      echo "redeploy: caddy's HELPER_SITE is unchanged; caddy left running"
+      return 0
+    fi
+    echo "redeploy: caddy's HELPER_SITE changed; docker compose up -d --no-deps --force-recreate --wait caddy"
+  else
+    echo "redeploy: no caddy running; docker compose up -d --no-deps --force-recreate --wait caddy"
+  fi
+  if ! docker compose up -d --no-deps --force-recreate --wait --wait-timeout "$wait_s" caddy; then
+    echo "redeploy: caddy was not running within $wait_s s" >&2
+    exit 1
+  fi
 }
 
 # Whether $2 names at least one container and every one runs image $1.
