@@ -542,9 +542,38 @@ function mintMoving(d: Uint8Array): Uint8Array {
   }
   return m;
 }
+/** The mint's field at byte `i` of its data (spl-token state.rs Mint, then Token-2022's account type and extensions). */
+function mintField(d: Uint8Array, i: number): string {
+  if (i < MINT_SUPPLY) return "mint authority";
+  if (i < MINT_SUPPLY + 8) return "supply";
+  if (i === 44) return "decimals";
+  if (i === 45) return "is_initialized";
+  if (i < 82) return "freeze authority";
+  if (i < 165) return "bytes before its account type";
+  if (i === 165) return "account type";
+  for (let o = 166; o + 4 <= d.length; ) {
+    const type = u16(d, o);
+    const len = u16(d, o + 2);
+    if (i < o + 4) return `extension header at byte ${o}`;
+    if (type === 0 || o + 4 + len > d.length) break;
+    if (i < o + 4 + len) return `extension ${type}`;
+    o += 4 + len;
+  }
+  return "bytes after its last extension";
+}
+/** The first field two providers' reads of one mint differ in, past the two that move (mintMoving), or null when they
+ * agree: S6 and S10 refuse with it, and the reference read too. */
+export function solanaMintDisagreement(a: SolanaAccountRead, b: SolanaAccountRead): string | null {
+  if (a.owner !== b.owner) return `owner program (${a.owner} / ${b.owner})`;
+  if (a.data.length !== b.data.length) return `length (${a.data.length} / ${b.data.length} bytes)`;
+  const x = mintMoving(a.data);
+  const y = mintMoving(b.data);
+  const i = x.findIndex((v, k) => v !== y[k]);
+  return i < 0 ? null : mintField(a.data, i);
+}
 /** True when two providers' reads of one mint agree on every field but its supply and its withheld transfer fees. */
 export function solanaMintAgreed(a: SolanaAccountRead, b: SolanaAccountRead): boolean {
-  return a.owner === b.owner && eqBytes(mintMoving(a.data), mintMoving(b.data));
+  return solanaMintDisagreement(a, b) === null;
 }
 
 // Why a second move of the token, out of Jupiter's authority's account into the wallet's, could change the amount, or
@@ -563,7 +592,8 @@ const feeCharged = (d: Uint8Array, slot: number): boolean => u16(d, slot + 16) !
 function secondMove(c: Ctx): string | null {
   const [a, b] = c.reads.mint;
   if (!a || !b) return "the mint is not read on both providers";
-  if (!solanaMintAgreed(a, b)) return "the providers disagree on the mint";
+  const off = solanaMintDisagreement(a, b);
+  if (off) return `the providers disagree on the mint's ${off}`;
   const d = a.data;
   if (d.length === 82) return null;
   if (d.length < 166 || d[165] !== 1) return `the mint of ${d.length} bytes has no mint account type`;
@@ -688,7 +718,8 @@ function s9(c: Ctx): SolanaQuoteResult {
 function s10(c: Ctx): SolanaQuoteResult {
   const [a, b] = c.reads.mint;
   if (!a || !b) return fail("S10", "mint not read on both providers");
-  if (!solanaMintAgreed(a, b)) return fail("S10", "the providers disagree on the mint");
+  const off = solanaMintDisagreement(a, b);
+  if (off) return fail("S10", `the providers disagree on the mint's ${off}`);
   if (a.owner === SOLANA_TOKEN_PROGRAM) return a.data.length === 82 ? pass("S10", "SPL Token mint") : fail("S10", `SPL Token mint of ${a.data.length} bytes`);
   if (a.owner !== SOLANA_TOKEN_2022_PROGRAM) return fail("S10", `mint owner ${a.owner} is not a token program`);
   const d = a.data;

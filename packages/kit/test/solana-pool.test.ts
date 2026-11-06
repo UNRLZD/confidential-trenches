@@ -231,14 +231,41 @@ test("a static byte that differs between the providers is refused (pump Global, 
     [curveToken, "curve", CI.pumpFeeConfig, 80],
     [ammToken, "pool", PI.ammGlobalConfig, 48],
     [ammToken, "pool", PI.ammFeeConfig, 80],
-    [curveToken, "curve", CI.mint, 36],
-    [ammToken, "pool", PI.mint, 36],
+    [curveToken, "curve", CI.mint, 50],
+    [ammToken, "pool", PI.mint, 50],
+    [curveToken, "curve", CI.mint, 44],
+    [ammToken, "pool", PI.mint, 44],
     [curveToken, "curve", CI.curve, 60],
     [ammToken, "pool", PI.pool, 220],
   ] as const) {
     const s = scenario(t, "buy");
     const [a, b] = pair(s, (p, w, _n, ans) => { if (p === 1 && w === v) edit(ans.value[index]!, (d) => { d[at] = d[at]! ^ 1; }); });
     assert.equal(await readSolanaReference([a, b], req(t, s)), null, `${t.venue}: account ${index} byte ${at}`);
+    assert.equal(b.by[v], 2);
+  }
+});
+
+// Card solana-mint-supply-moves: each provider reads the mint at its own slot, and a burn between the two moves its
+// supply (C5xph…pump, 6 Nov 04:20Z: every leg refused "no reference pool" behind S10's same refusal). The supply sets
+// the fee tier, so it is held to the reserves' band: inside it the reference stands, outside it the read is refused.
+const supplyTimes = (t: Token, v: Venue, f: (x: bigint) => bigint) => (p: 0 | 1, w: Venue, _n: number, ans: Answer): void => {
+  if (p === 1 && w === v) edit(ans.value[t === curveToken ? CI.mint : PI.mint]!, (d) => putU64(d, 36, f(u64(d, 36))));
+};
+test("the mint's supply moved by a burn between the two providers' reads, inside the band: the reference stands", async () => {
+  for (const [t, v] of [[curveToken, "curve"], [ammToken, "pool"]] as const) {
+    for (const f of [(x: bigint) => x - 559_661n, (x: bigint) => (x * 9_810n) / 10_000n]) {
+      const s = scenario(t, "buy");
+      const ref = await readSolanaReference(pair(s, supplyTimes(t, v, f)), req(t, s));
+      assert.ok(ref, `${t.venue}: ${show(ref)}`);
+      assert.equal(ref.pools[0]!.venue, t.venue);
+    }
+  }
+});
+test("the mint's supply outside the band on one provider: refused after its one re-read", async () => {
+  for (const [t, v] of [[curveToken, "curve"], [ammToken, "pool"]] as const) {
+    const s = scenario(t, "buy");
+    const [a, b] = pair(s, supplyTimes(t, v, (x) => (x * 9_790n) / 10_000n));
+    assert.equal(await readSolanaReference([a, b], req(t, s)), null, t.venue);
     assert.equal(b.by[v], 2);
   }
 });

@@ -12,6 +12,7 @@ import {
   SOLANA_PUMP_AMM_PROGRAM,
   SolanaWalletLinks,
   checkSolanaQuote,
+  solanaMintDisagreement,
   solanaPumpVolumeAccumulator,
   solanaVolumeAccumulator,
   type SolanaAccountRead,
@@ -655,15 +656,49 @@ for (const [name, id, mutate] of R2) {
     refusedBy(id, run(c, bytes ?? undefined));
   });
 }
-test("refused: S10 each of its mint disagreements is refused as one, by S10 alone", () => {
+// Each mint disagreement above, refused by S10 alone, naming the first field that differs (the fixture's extensions:
+// MetadataPointer 18 at 166, TokenMetadata 19 at 234, then the test's own at 394).
+const MINT_FIELDS: Record<string, string> = {
+  "S10 the providers disagree on the mint's freeze authority": "freeze authority",
+  "S10 the providers disagree on the mint's mint authority": "mint authority",
+  "S10 the providers disagree on the mint's decimals": "decimals",
+  "S10 the providers disagree on the mint's supply and its freeze authority": "freeze authority",
+  "S10 the providers disagree on the mint's transfer fee": "extension 1",
+  "S10 the providers disagree on the mint's transfer fee authority": "extension 1",
+  "S10 the providers disagree on the mint's metadata pointer": "extension 18",
+  "S10 the providers disagree on the mint's last byte": "extension 19",
+  "S10 the providers disagree inside a 108-byte extension that is not the fee config": "extension 10",
+  "S10 provider B reads the mint one byte longer": "length (394 / 395 bytes)",
+};
+test("refused: S10 each of its mint disagreements is refused as one, by S10 alone, naming the field", () => {
   const rows = R2.filter(([name]) => /^S10 (the providers disagree|provider B reads)/.test(name));
-  assert.equal(rows.length, 10);
+  assert.deepEqual(rows.map(([name]) => name).sort(), Object.keys(MINT_FIELDS).sort());
   for (const [name, , mutate] of rows) {
     const c = buyCase();
     mutate(c);
     const v = run(c);
-    assert.deepEqual(v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`), ["S10 the providers disagree on the mint"], name);
+    assert.deepEqual(v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`), [`S10 the providers disagree on the mint's ${MINT_FIELDS[name]}`], name);
   }
+});
+test("the real C5xph…pump pair a burn moved (fixtures/solana-mint-c5xph-burn.json): it agrees, and any other byte of it changed refuses", () => {
+  const X = JSON.parse(readFileSync(new URL("./fixtures/solana-mint-c5xph-burn.json", import.meta.url), "utf8")) as { reads: [Acc & { slot: number }, Acc & { slot: number }] };
+  const [a, b] = X.reads.map((r) => read({ ...r, lamports: 0 })) as [SolanaAccountRead, SolanaAccountRead];
+  const supply = (m: SolanaAccountRead): bigint => new DataView(m.data.buffer, m.data.byteOffset).getBigUint64(36, true);
+  assert.notEqual(supply(a), supply(b), "the burn moved the supply between the two slots");
+  assert.equal(solanaMintDisagreement(a, b), null);
+  for (let i = 0; i < b.data.length; i++) {
+    if (i >= 36 && i < 44) continue; // the supply
+    const d = b.data.slice();
+    d[i] = (d[i] as number) ^ 1;
+    assert.notEqual(solanaMintDisagreement(a, { owner: b.owner, data: d }), null, `byte ${i}`);
+  }
+});
+test("refused: S10 a mint whose owner differs names both owners", () => {
+  const c = buyCase();
+  const a = c.reads.mint[0] as SolanaAccountRead;
+  (c.reads as { mint: unknown }).mint = [a, { owner: TOKEN, data: a.data }];
+  const v = run(c);
+  assert.equal(v.results.find((r) => r.id === "S10")?.detail, `the providers disagree on the mint's owner program (${T22} / ${TOKEN})`);
 });
 
 test("accepted: a first PumpSwap buy from a fresh wallet that creates its PumpSwap volume account (rent 1,346,200)", () => {

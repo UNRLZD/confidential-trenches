@@ -5,7 +5,8 @@
 // the tests named for each (test/pool-usd.test.ts "agreement", "staleness" and "retry", test/solana-pool-buy.test.ts
 // "Token-2022"), and S6's Token-2022 sides of a shared route in src/checks/solana/checks.ts (test/solana-shared-route.test.ts,
 // card solana-shared-2022-side), and the mint's agreement on both providers that S6 and S10 share (solanaMintAgreed,
-// test/solana-quote.test.ts "S10", card solana-mint-supply-moves): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
+// test/solana-quote.test.ts "S10", card solana-mint-supply-moves) and the reference read's (src/trade/solana/pool.ts,
+// test/solana-pool.test.ts): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/pool-usd-mutants.mjs
@@ -24,6 +25,8 @@ const BUY_TEST = path.join(BASE, "test/solana-pool-buy.test.ts");
 const S6 = path.join(BASE, "src/checks/solana/checks.ts");
 const S6_TEST = path.join(BASE, "test/solana-shared-route.test.ts");
 const S10_TEST = path.join(BASE, "test/solana-quote.test.ts");
+const POOL = path.join(BASE, "src/trade/solana/pool.ts");
+const POOL_TEST = path.join(BASE, "test/solana-pool.test.ts");
 
 const AGREE = "agreement";
 const STALE = "staleness";
@@ -109,11 +112,21 @@ export const MUTANTS = [
   [S6, "  if (tp !== SOLANA_TOKEN_2022_PROGRAM) return;\n", "", "S6 pass: through the wallet's own", S6_TEST],
   [S6, "if (why) wrong.push(", "if (false) wrong.push(", "S6 refused", S6_TEST],
   [S6, "if (!a || !b) return \"the mint is not read", "if (!a) return \"the mint is not read", "S6 refused: the mint not read", S6_TEST],
-  [S6, "if (!solanaMintAgreed(a, b)) return \"the providers disagree", "if (false) return \"the providers disagree", "S6 refused: the providers disagree: B reads", S6_TEST],
+  [S6, "if (off) return `the providers disagree on the mint's ${off}`;", "if (false) return `the providers disagree on the mint's ${off}`;", "S6 refused: the providers disagree: B reads", S6_TEST],
   // the mint's agreement on both providers (solanaMintAgreed, card solana-mint-supply-moves): every field but the supply
   // and a fee config's withheld fees, compared; each mutant drops a compared field or compares a moving one again
-  [S6, "return a.owner === b.owner && eqBytes(", "return eqBytes(", "S6 refused: the providers disagree on the owner", S6_TEST],
-  [S6, "if (!solanaMintAgreed(a, b)) return fail(\"S10\"", "if (false) return fail(\"S10\"", "refused: S10 each of its mint disagreements", S10_TEST],
+  [S6, "if (a.owner !== b.owner) return `owner program", "if (false) return `owner program", "S6 refused: the providers disagree on the owner", S6_TEST],
+  [S6, "if (a.owner !== b.owner) return `owner program", "if (false) return `owner program", "refused: S10 a mint whose owner differs", S10_TEST],
+  [S6, "if (a.data.length !== b.data.length) return `length", "if (false) return `length", "refused: S10 each of its mint disagreements", S10_TEST],
+  [S6, "return i < 0 ? null : mintField(a.data, i);", "return null;", "refused: S10 each of its mint disagreements", S10_TEST],
+  [S6, "if (off) return fail(\"S10\"", "if (false) return fail(\"S10\"", "refused: S10 each of its mint disagreements", S10_TEST],
+  [S6, "  if (i === 44) return \"decimals\";\n", "", "refused: S10 each of its mint disagreements", S10_TEST],
+  [S6, "if (i < 82) return \"freeze authority\";", "if (i < 82) return \"mint authority\";", "refused: S10 each of its mint disagreements", S10_TEST],
+  [S6, "if (i < o + 4 + len) return `extension ${type}`;", "if (i < o + 4 + len) return `extension`;", "refused: S10 each of its mint disagreements", S10_TEST],
+  // the reference read's mint (card solana-mint-supply-moves): every field but the moving ones, and the supply in the band
+  [POOL, "if (off) return `the providers disagree on the mint's ${off}`;", "if (false) return `the providers disagree on the mint's ${off}`;", "a static byte that differs between the providers is refused", POOL_TEST],
+  [POOL, "if (!solanaReservesAgree(m[0].supply, m[1].supply)) return", "if (false) return", "the mint's supply outside the band", POOL_TEST],
+  [POOL, "if (!solanaReservesAgree(m[0].supply, m[1].supply)) return", "if (m[0].supply !== m[1].supply) return", "the mint's supply moved by a burn", POOL_TEST],
   [S6, "m.fill(0, MINT_SUPPLY, MINT_SUPPLY + 8);", "m.fill(0, MINT_SUPPLY, 82);", "refused: S10 the providers disagree on the mint's freeze authority", S10_TEST],
   [S6, "m.fill(0, MINT_SUPPLY, MINT_SUPPLY + 8);", "m.fill(0, MINT_SUPPLY, MINT_SUPPLY + 9);", "refused: S10 the providers disagree on the mint's decimals", S10_TEST],
   [S6, "m.fill(0, MINT_SUPPLY, MINT_SUPPLY + 8);", "m.fill(0, 0, MINT_SUPPLY + 8);", "refused: S10 the providers disagree on the mint's mint authority", S10_TEST],
