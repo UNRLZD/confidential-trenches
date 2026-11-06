@@ -1,23 +1,23 @@
 {
- "fix": {
-  "recorded": "2026-11-06T02:15:33.676Z",
+ "good": {
+  "recorded": "2026-11-06T02:31:49.513Z",
   "cold": {
-   "ms": 16517,
+   "ms": 19339,
    "code": "ok",
    "hosts": [
     {
      "at": "rpc.mainnet.chain.robinhood.com eth_blockNumber",
      "n": 1,
-     "p50": 356,
-     "max": 356,
+     "p50": 408,
+     "max": 408,
      "bad": 0,
      "why": []
     },
     {
      "at": "rpc.mainnet.chain.robinhood.com eth_getLogs+eth_getBlockByNumber",
      "n": 44,
-     "p50": 296,
-     "max": 393,
+     "p50": 294,
+     "max": 392,
      "bad": 20,
      "why": [
       "HTTP 429: Too Many Requests"
@@ -25,51 +25,43 @@
     },
     {
      "at": "robinhood-rpc.publicnode.com eth_getBlockByNumber",
-     "n": 17,
-     "p50": 88,
-     "max": 352,
+     "n": 24,
+     "p50": 93,
+     "max": 207,
      "bad": 0,
      "why": []
     },
     {
      "at": "robinhood.drpc.org eth_getBlockByNumber",
-     "n": 15,
-     "p50": 79,
-     "max": 282,
+     "n": 12,
+     "p50": 78,
+     "max": 272,
      "bad": 0,
      "why": []
     },
     {
      "at": "robinhood-rpc.publicnode.com eth_call",
      "n": 13,
-     "p50": 103,
-     "max": 329,
+     "p50": 107,
+     "max": 246,
      "bad": 1,
      "why": [
-      "error: historical state b51fd9f2c115b2b2a034a3843c42aba5030b745ad192accf10ff3ed4be256cf7 is not available"
+      "error: historical state fc2f54937a25ebd888c3b9178cd02130b006112a3061d8ff1d3e98412fd01a40 is not available"
      ]
     },
     {
      "at": "robinhood.drpc.org eth_call",
      "n": 14,
-     "p50": 127,
-     "max": 189,
+     "p50": 101,
+     "max": 249,
      "bad": 0,
      "why": []
     },
     {
      "at": "rpc.mainnet.chain.robinhood.com eth_call",
      "n": 2,
-     "p50": 286,
-     "max": 286,
-     "bad": 0,
-     "why": []
-    },
-    {
-     "at": "rpc.mainnet.chain.robinhood.com eth_getBlockByNumber",
-     "n": 1,
-     "p50": 269,
-     "max": 269,
+     "p50": 285,
+     "max": 285,
      "bad": 0,
      "why": []
     }
@@ -77,26 +69,30 @@
   },
   "warm": [
    {
-    "ms": 2316,
+    "ms": 2333,
     "code": "ok"
    },
    {
-    "ms": 2266,
+    "ms": 2431,
     "code": "ok"
    },
    {
-    "ms": 2281,
+    "ms": 2370,
     "code": "ok"
    },
    {
-    "ms": 2068,
+    "ms": 2717,
     "code": "ok"
    },
    {
-    "ms": 2401,
+    "ms": 2296,
     "code": "ok"
    }
-  ]
+  ],
+  "shape": {
+   "head": 107232986,
+   "pools": 101
+  }
  },
  "bad": {
   "recorded": "2026-11-06T02:17:38.335Z",
