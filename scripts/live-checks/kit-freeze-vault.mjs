@@ -78,7 +78,7 @@ export const PINNED = {
   ],
   VAULT_CONTEXT_FIELDS: [["processor", "account"], ["recipient", "account"], ["register_deposit", "u128"], ["fee_recipient", "account"], ["relay_fee", "u128"], ["refund_precommitment", "u256be"], ["deadline_ms", "u64"], ["salt", "bytes16"]],
   VAULT_WITHDRAW: { method: "withdraw", args: ["withdrawal", "proof", "public_signals"], storage_bytes: 710, tree_growth_bytes: 148, gas_tgas: 300 },
-  VAULT_ON_PAYOUT: { method: "on_payout", args: ["spend_index", "to_recipient", "fee"], private: true, results: ["recipient part", "fee part"] },
+  VAULT_ON_PAYOUT: { method: "on_payout", args: ["spend_index", "to_recipient", "fee"], private: true, results: ["payout"] },
   VAULT_SETTLE: { method: "settle", args: ["nullifier_hash"], caller: "anyone" },
   VAULT_RAGEQUIT: { method: "ragequit", args: ["proof", "public_signals", "register_deposit", "refund_precommitment"], caller: "the deposit's depositor", storage_bytes: 475 },
   VAULT_WITHDRAW_SIGNALS: ["newCommitmentHash", "existingNullifierHash", "withdrawnValue", "stateRoot", "stateTreeDepth", "ASPRoot", "ASPTreeDepth", "context"],
@@ -176,6 +176,7 @@ function fixedCalls() {
   const out = [
     ["vaultDepositMessage writes the two fields", "vaultDepositMessage", [B(5n), u], is(`{"precommitment":"5","depositor":"${u}"}`)],
     ["vaultDepositMessage refuses p", "vaultDepositMessage", [B(P), u], threw],
+    ["vaultDepositMessage refuses 0 (vault review R-01)", "vaultDepositMessage", [B(0n), u], threw],
     ["vaultPrepayYocto", "vaultPrepayYocto", [false], is(756n * E19)],
     ["vaultPrepayYocto", "vaultPrepayYocto", [true], is(904n * E19)],
     ["vaultWithdrawYocto", "vaultWithdrawYocto", [B(0n), B(0n), false], is((710n + 389n) * E19 + 1n)],
