@@ -13,6 +13,7 @@ import { registerHooks } from "node:module";
 import { test } from "node:test";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { APP_ORIGIN } from "../src/api.ts";
+import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 
 const calls: string[] = [];
 (globalThis as Record<string, unknown>).__ctPoolCalls = calls;
@@ -107,6 +108,10 @@ async function until<T>(what: string, f: () => T | undefined): Promise<T> {
 /** Asks `state` as APP_HOST does, and waits for its answer. */
 async function askState(): Promise<Record<string, unknown>> {
   const id = crypto.randomUUID();
+  // the app on this kit names its version before it asks, as the kit's client does (card kit-frame-version)
+  const hello = new Event("message");
+  Object.defineProperties(hello, { origin: { value: APP_ORIGIN }, source: { value: parentWin }, data: { value: { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION } } });
+  win.dispatchEvent(hello);
   const e = new Event("message");
   Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: parentWin }, data: { value: { v: 1, id, type: "state" } } });
   win.dispatchEvent(e);
