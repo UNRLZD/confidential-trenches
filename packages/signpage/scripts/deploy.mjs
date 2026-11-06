@@ -14,20 +14,23 @@
 // progress too, and says a deploy would refuse it. The upload is
 // wrangler's `pages deploy`, at an exact version, run from an empty folder so no functions/ folder can ride along
 // (Pages applies no _headers rule to a Function's response). It needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
-// in the environment; neither is printed.
+// in the environment; neither is printed. A wrangler exit 0 is not done: SIGN_HOST must then serve this build's / and
+// /app.js (scripts/pages-readback.mjs, card pages-deploy-readback), or it exits 1 naming both hashes and prints no next:.
 import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readBack } from "../../../scripts/pages-readback.mjs";
 import { HEADERS, judge } from "../../../scripts/live-checks/signpage-skeleton.mjs";
+import { ORIGINS } from "../../../scripts/live-checks/signpage-release.mjs";
 import { WORKER_CSP, WORKER_PATH, ZK_CACHE } from "../../../scripts/live-checks/signpage-prover-host.mjs";
 import { THREAD_CSP, THREAD_PATH } from "../../../scripts/live-checks/signpage-prover-threads.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
-export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-withdraw-form", "signpage-solana-trade", "signpage-pool-kinds", "signpage-pool-flow", "signpage-pool-notes", "signpage-pool-withdraw-form", "app-harness-signin-e2e", "signpage-pool-price", "signpage-pool-pins", "signpage-pool-mainnet", "pool-ready-no-flicker", "signpage-buy-route-events", "signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "kit-renewal-read-bounded", "signpage-error-after-timeout", "sol-buy-rent-back", "pool-read-down", "pool-restore-wired"];
+export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-withdraw-form", "signpage-solana-trade", "signpage-pool-kinds", "signpage-pool-flow", "signpage-pool-notes", "signpage-pool-withdraw-form", "app-harness-signin-e2e", "signpage-pool-price", "signpage-pool-pins", "signpage-pool-mainnet", "pool-ready-no-flicker", "signpage-buy-route-events", "signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "kit-renewal-read-bounded", "signpage-error-after-timeout", "sol-buy-rent-back", "pool-read-down", "pool-restore-wired", "evm-pool-sync-wide-pages"];
 // the arguments a check is run with after this deploy (a list: one run for each, each its own job in live.yml):
 // signpage-release reads SIGN_HOST alone against this commit's own build, and app-harness-signin-e2e SIGN_HOST's
 // backdrop alone, so an APP_HOST that lags does not fail this deploy; signpage-shell takes an engine and runs live on
@@ -152,7 +155,8 @@ export function checkProver(dir) {
   return p;
 }
 
-export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
+/** The deploy: { code, out, err }. `net` is the read-back's fetch and sleep (scripts/pages-readback.mjs), a test's stand-ins. */
+export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG, net = {}) {
   const dryRun = argv.includes("--dry-run");
   if (argv.some((a) => a !== "--dry-run")) return { code: 2, err: ["usage: node packages/signpage/scripts/deploy.mjs [--dry-run]"] };
   // the tree the build reads, before it reads it: a deploy is HEAD's commit and nothing else (--dry-run builds a work in
@@ -181,7 +185,10 @@ export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
       stdio: "inherit",
     });
     if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-    return { code: 0, out: [`deployed HEAD ${sha} to ${PROJECT} on ${BRANCH}`, ...liveCommands(sha)] };
+    // wrangler's exit 0 is its word, not the address's (6 Nov 09:21Z: "couldn't ascertain the final status", a Failure)
+    const back = await readBack(ORIGINS.SIGN_HOST, dir, net);
+    if (!back.ok) return { code: 1, err: [`uploaded HEAD ${sha} to ${PROJECT} on ${BRANCH}, but`, ...back.lines] };
+    return { code: 0, out: [`deployed HEAD ${sha} to ${PROJECT} on ${BRANCH}`, ...back.lines, ...liveCommands(sha)] };
   } finally {
     if (!dryRun) rmSync(dir, { recursive: true, force: true }); // the build holds 24 MB of setup files; --dry-run keeps it to serve
   }
@@ -192,7 +199,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     console.log(JSON.stringify(liveList()));
     process.exit(0);
   }
-  const r = deploy(process.argv.slice(2));
+  const r = await deploy(process.argv.slice(2));
   for (const l of r.out ?? []) console.log(`deploy: ${l}`);
   for (const l of r.err ?? []) console.error(`deploy: ${l}`);
   process.exit(r.code);

@@ -4,6 +4,7 @@
 // /assets/zk/<sha256>.<ext>; a changed, missing or extra setup file, a stale worker or a worker rule with another
 // policy is refused.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -56,9 +57,9 @@ test("the real _headers passes the gate", () => {
   assert.deepEqual(checkHeadersFile(REAL), []);
 });
 
-test("a CSP with no frame-ancestors is refused, and nothing is uploaded", () => {
+test("a CSP with no frame-ancestors is refused, and nothing is uploaded", async () => {
   const { uploads, run } = recorder();
-  const r = deploy([], ENV, run, pkgWith(swap(" frame-ancestors 'none';", "")));
+  const r = await deploy([], ENV, run, pkgWith(swap(" frame-ancestors 'none';", "")));
   assert.equal(r.code, 1);
   assert.ok(r.err.includes(`REFUSED _headers: CSP frame-ancestors: none, want "'none'"`), r.err.join("\n"));
   assert.ok(r.err.includes("REFUSED _headers: framed from https://confidential.unrealized.trade: allowed (no frame-ancestors)"), r.err.join("\n"));
@@ -130,19 +131,19 @@ test("other policy breaks are refused", () => {
   for (const [name, text] of Object.entries(bad)) assert.notDeepEqual(checkHeadersFile(text), [], name);
 });
 
-test("a build carrying _worker.js or .well-known/webauthn is refused", () => {
+test("a build carrying _worker.js or .well-known/webauthn is refused", async () => {
   const { uploads, run } = recorder();
   for (const f of ["_worker.js", ".well-known/webauthn"]) {
-    const r = deploy([], ENV, run, pkgWith(REAL, { [f]: "x" }));
+    const r = await deploy([], ENV, run, pkgWith(REAL, { [f]: "x" }));
     assert.equal(r.code, 1, f);
     assert.ok(r.err.some((e) => e.includes(f)), r.err.join("\n"));
   }
   assert.equal(uploads().length, 0);
 });
 
-test("--dry-run stops after the gate and keeps the build, whose _headers is the package's", () => {
+test("--dry-run stops after the gate and keeps the build, whose _headers is the package's", async () => {
   const { uploads, run } = recorder();
-  const r = deploy(["--dry-run"], {}, run);
+  const r = await deploy(["--dry-run"], {}, run);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   const dir = /gate ok on (\S+);/.exec(r.out[0])[1];
   try {
@@ -154,17 +155,18 @@ test("--dry-run stops after the gate and keeps the build, whose _headers is the 
   }
 });
 
-test("with the gate passed and no token, nothing is uploaded", () => {
+test("with the gate passed and no token, nothing is uploaded", async () => {
   const { uploads, run } = recorder();
-  const r = deploy([], {}, run);
+  const r = await deploy([], {}, run);
   assert.equal(r.code, 2);
   assert.match(r.err[0], /CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set/);
   assert.equal(uploads().length, 0);
 });
 
-test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder, named by HEAD", () => {
-  const { uploads, run } = recorder();
-  const r = deploy([], ENV, run);
+test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder, named by HEAD", async () => {
+  const rec = recorder();
+  const { uploads, run } = rec;
+  const r = await deploy([], ENV, run, undefined, signHost(rec).net);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   const up = uploads().find((c) => c.cmd === "pnpm");
   assert.deepEqual(up.args.slice(9), ["--commit-hash", "abc", "--commit-dirty=false"]);
@@ -176,53 +178,54 @@ test("the upload is wrangler pages deploy at its pinned version, to the sign pro
   assert.equal(up.opts.env.WRANGLER_SEND_METRICS, "false");
 });
 
-test("an uncommitted tree or no HEAD is refused before the token: the upload is named by HEAD's commit, so it must be HEAD's build", () => {
+test("an uncommitted tree or no HEAD is refused before the token: the upload is named by HEAD's commit, so it must be HEAD's build", async () => {
   const dirty = recorder({ status: " M packages/kit/src/prover/worker.js" });
-  const r = deploy([], {}, dirty.run, NO_PKG);
+  const r = await deploy([], {}, dirty.run, NO_PKG);
   assert.equal(r.code, 1, (r.out ?? []).join("\n"));
   assert.match(r.err.join("\n"), /REFUSED the tree has uncommitted changes[\s\S]*packages\/kit\/src\/prover\/worker\.js[\s\S]*nothing was uploaded/);
   assert.deepEqual([dirty.installs().length, dirty.uploads().length], [0, 0], "refused before the install and the build");
   const headless = recorder({ head: "" });
-  const r2 = deploy([], ENV, headless.run);
+  const r2 = await deploy([], ENV, headless.run);
   assert.equal(r2.code, 1);
   assert.match(r2.err.join("\n"), /REFUSED no HEAD commit/);
   assert.equal(headless.uploads().length, 0);
   // --dry-run still builds and gates a work in progress, and says a deploy would refuse it
   const dry = recorder({ status: " M packages/signpage/index.html" });
-  const d = deploy(["--dry-run"], {}, dry.run);
+  const d = await deploy(["--dry-run"], {}, dry.run);
   assert.equal(d.code, 0, (d.err ?? []).join("\n"));
   rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
   assert.match(d.out[0], /uncommitted changes: a deploy would refuse/);
 });
 
-test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the repository root) after the tree reads and before the build", () => {
+test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the repository root) after the tree reads and before the build", async () => {
   const { calls, run, installs } = recorder();
   // the build of a missing package throws: the install was already asked for, after the two tree reads
-  assert.throws(() => deploy([], ENV, run, NO_PKG), /ENOENT/);
+  await assert.rejects(deploy([], ENV, run, NO_PKG), /ENOENT/);
   assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? 2 : 0)].join(" ")), ["git rev-parse", "git status", "pnpm install"]);
   assert.deepEqual(installs()[0].args, ["install", "--frozen-lockfile"]);
   assert.equal(installs()[0].opts.cwd, dirname(dirname(PKG)));
   const dry = recorder();
-  assert.throws(() => deploy(["--dry-run"], {}, dry.run, NO_PKG), /ENOENT/);
+  await assert.rejects(deploy(["--dry-run"], {}, dry.run, NO_PKG), /ENOENT/);
   assert.equal(dry.installs().length, 1, "--dry-run builds what a deploy would, so it installs too");
 });
 
-test("a failed install refuses before a token is read: no build, no upload", () => {
+test("a failed install refuses before a token is read: no build, no upload", async () => {
   for (const argv of [[], ["--dry-run"]]) {
     const { run, uploads } = recorder({ install: 1 });
-    const r = deploy(argv, {}, run, NO_PKG);
+    const r = await deploy(argv, {}, run, NO_PKG);
     assert.equal(r.code, 1, (r.out ?? []).join("\n"));
     assert.match(r.err.join("\n"), /REFUSED the install failed \(pnpm exit 1\): ERR_PNPM_OUTDATED_LOCKFILE[\s\S]*nothing was uploaded/);
     assert.equal(uploads().length, 0);
   }
 });
 
-test("an unknown argument is a usage error", () => {
-  assert.equal(deploy(["dist"], ENV, recorder().run).code, 2);
+test("an unknown argument is a usage error", async () => {
+  assert.equal((await deploy(["dist"], ENV, recorder().run)).code, 2);
 });
 
-test("a deploy's live runs name every live check that reads SIGN_HOST, and its success line is the command that runs them on GitHub's runners", () => {
-  const r = deploy([], ENV, recorder().run);
+test("a deploy's live runs name every live check that reads SIGN_HOST, and its success line is the command that runs them on GitHub's runners", async () => {
+  const rec = recorder();
+  const r = await deploy([], ENV, rec.run, undefined, signHost(rec).net);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   assert.ok(r.out.some((l) => /^next: gh workflow run live\.yml -f host=sign -f commit=\S+$/.test(l)), r.out.join("\n"));
   assert.ok(r.out.includes("then: gh run watch --exit-status"), r.out.join("\n"));
@@ -233,7 +236,7 @@ test("a deploy's live runs name every live check that reads SIGN_HOST, and its s
   assert.ok(own.length >= 3, own.join(" "));
   for (const k of own) assert.ok(LIVE_CHECKS.includes(k), `LIVE_CHECKS does not name ${k}`);
   for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /sign\.confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
-  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "kit-renewal-read-bounded", "pool-read-down", "pool-ready-no-flicker", "pool-restore-wired", "signpage-buy-own-spend", "signpage-buy-route-events", "signpage-error-after-timeout", "signpage-pool-flow", "signpage-pool-kinds", "signpage-pool-mainnet", "signpage-pool-notes", "signpage-pool-pins", "signpage-pool-price", "signpage-pool-withdraw-form", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-sent-read-back", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-solana-trade", "signpage-withdraw-form", "signpage-withdraw-own-spend", "sol-buy-rent-back", "wallet-passkey-prf"]);
+  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "evm-pool-sync-wide-pages", "kit-renewal-read-bounded", "pool-read-down", "pool-ready-no-flicker", "pool-restore-wired", "signpage-buy-own-spend", "signpage-buy-route-events", "signpage-error-after-timeout", "signpage-pool-flow", "signpage-pool-kinds", "signpage-pool-mainnet", "signpage-pool-notes", "signpage-pool-pins", "signpage-pool-price", "signpage-pool-withdraw-form", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-sent-read-back", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-solana-trade", "signpage-withdraw-form", "signpage-withdraw-own-spend", "sol-buy-rent-back", "wallet-passkey-prf"]);
   for (const k of LIVE_CHECKS) assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
   // the release check reads SIGN_HOST alone, against this commit's build
   assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host sign"), `the success line does not run signpage-release on SIGN_HOST alone: ${out}`);
@@ -281,5 +284,59 @@ test("a build whose setup files or worker are not the pinned ones is refused", (
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+});
+
+// card pages-deploy-readback: a stand-in for SIGN_HOST that serves the folder wrangler was handed (what a deploy that
+// landed serves), with `old` answering some paths with other bytes (what a deploy that did not land serves); every
+// read is kept. The sleep between tries is a stand-in too, so the test does not wait the minute.
+const sha256 = (b) => createHash("sha256").update(b).digest("hex");
+function signHost(rec, old = {}) {
+  const asked = [];
+  const fetch = async (url, init) => {
+    asked.push({ url, init });
+    const u = new URL(url);
+    const dir = rec.uploads().at(-1).args[4];
+    const body = old[u.pathname] ?? readFileSync(join(dir, u.pathname === "/" ? "index.html" : u.pathname.slice(1)));
+    return new Response(body, { status: 200 });
+  };
+  const slept = [];
+  return { asked, slept, net: { fetch, sleep: async (ms) => void slept.push(ms) } };
+}
+
+test("a deploy wrangler calls done while SIGN_HOST still serves the old bundle exits 1 with both hashes, and prints no next: line", async () => {
+  const rec = recorder();
+  const OLD = "console.log('release-57')\n";
+  const h = signHost(rec, { "/app.js": OLD });
+  const r = await deploy([], ENV, rec.run, undefined, h.net);
+  assert.equal(r.code, 1, (r.out ?? []).join("\n"));
+  const said = [...(r.out ?? []), ...(r.err ?? [])].join("\n");
+  assert.doesNotMatch(said, /next:/);
+  assert.match(said, new RegExp(`/app\\.js[^\\n]*${sha256(OLD)}[^\\n]*${sha256(readFileSync(join(PKG, "public", "app.js")))}`));
+  // a few tries over about a minute, each a fresh cache-buster, all on SIGN_HOST's own address
+  const tries = h.asked.filter((a) => new URL(a.url).pathname === "/app.js");
+  assert.ok(tries.length >= 3, `${tries.length} tries`);
+  assert.equal(new Set(tries.map((a) => new URL(a.url).search)).size, tries.length, "each try its own cache-buster");
+  for (const a of h.asked) assert.equal(new URL(a.url).origin, "https://sign.confidential.unrealized.trade");
+  const waited = h.slept.reduce((a, b) => a + b, 0);
+  assert.ok(waited >= 45_000 && waited <= 90_000, `${waited} ms`);
+});
+
+test("a deploy whose SIGN_HOST serves exactly the build it uploaded (/ and /app.js) prints next:", async () => {
+  const rec = recorder();
+  const h = signHost(rec);
+  const r = await deploy([], ENV, rec.run, undefined, h.net);
+  assert.equal(r.code, 0, (r.err ?? []).join("\n"));
+  assert.ok(r.out.some((l) => /^next: gh workflow run live\.yml -f host=sign -f commit=abc$/.test(l)), r.out.join("\n"));
+  assert.deepEqual([...new Set(h.asked.map((a) => new URL(a.url).pathname))].sort(), ["/", "/app.js"]);
+  assert.ok(h.asked.every((a) => new URL(a.url).search), "every read carries a cache-buster");
+});
+
+test("a SIGN_HOST that cannot be read, or answers other than 200, is never taken as done", async () => {
+  for (const fail of [async () => { throw new TypeError("fetch failed"); }, async () => new Response("gone", { status: 404 })]) {
+    const rec = recorder();
+    const r = await deploy([], ENV, rec.run, undefined, { fetch: fail, sleep: async () => {} });
+    assert.equal(r.code, 1, (r.out ?? []).join("\n"));
+    assert.doesNotMatch([...(r.out ?? []), ...(r.err ?? [])].join("\n"), /next:/);
   }
 });
