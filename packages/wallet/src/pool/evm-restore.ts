@@ -196,8 +196,12 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
  * is `taken`, with its leaf at the value that deposit carried (MIN_DEPOSIT or any other), and `next` is the first one
  * none names: the one to sign. Called before each signature and again after a revert, so the device never signs a
  * precommitment the pool already holds, and a sell signed in advance whose deposit reverted is signed again on `next`.
+ * Only a Deposited at or below `finalBlock` (the round's finalized anchor, evmTreeSync's `fin`) is `taken`, so a note
+ * is stored only from a block that never moves; one in the tail above it is `pending`: passed over for `next`, never
+ * written, and taken at a later round once its block is final (a reorg that drops it leaves the note as it was).
  */
-export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly EvmPoolEvent[], first: NoteRef): { taken: EvmRestoredNote[]; next: { ref: NoteRef; precommitment: bigint } } {
+export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly EvmPoolEvent[], first: NoteRef, finalBlock: bigint): { taken: EvmRestoredNote[]; pending: NoteRef[]; next: { ref: NoteRef; precommitment: bigint } } {
+  if (typeof finalBlock !== "bigint" || finalBlock < 0n) throw new Error("finalBlock: the round's finalized block number");
   if (first.kind === "deposit" && first.s !== scope) throw new Error("a deposit note's scope is its s");
   const id: SecondId =
     first.kind === "deposit" ? { id: "U", s: first.s, i: first.i }
@@ -206,12 +210,14 @@ export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly 
     : (() => { throw new Error(`a deposit or a sell signs on a deposit, return or move note, not ${String(first?.kind)}`); })();
   const ix = indexEvents(events);
   const taken: EvmRestoredNote[] = [];
+  const pending: NoteRef[] = [];
   for (let n = -1; n <= U32; n++) {
     const ref: NoteRef = n < 0 ? first : { kind: "second", id, n };
     const precommitment = noteSecrets(seed64, ref).precommitment;
     const leaf = depositLeaf(scope, events, ix, precommitment, refKey(ref));
-    if (leaf === null) return { taken, next: { ref, precommitment } };
-    taken.push({ ref, scope, precommitment, leaf, state: "UNSPENT" });
+    if (leaf === null) return { taken, pending, next: { ref, precommitment } };
+    if (events[Number(leaf.leafIndex)]!.block > finalBlock) pending.push(ref);
+    else taken.push({ ref, scope, precommitment, leaf, state: "UNSPENT" });
   }
   throw new Error("no second arrival left on this id");
 }
@@ -219,8 +225,9 @@ export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly 
 /**
  * Writes evmNextNote's taken notes as the user's own, in order: one the store does not hold is added UNSPENT with its
  * leaf; one it holds PLANNED or INCOMING (a deposit or sell signed on it, which reverted or never will land) goes
- * UNSPENT with that leaf; one it holds landed is kept. A held note whose precommitment or scope is not the taken one's
- * is refused. Returns the notes written, each for the proof queue's next pass.
+ * UNSPENT with that leaf; one it holds landed is kept when its leaf is the taken one's. A held note whose precommitment
+ * or scope, or a landed one whose leaf, is not the taken one's is refused. Returns the notes written, each for the proof
+ * queue's next pass.
  */
 export async function evmClaimTaken(store: NoteStore, taken: readonly EvmRestoredNote[]): Promise<NoteRecord[]> {
   const held = new Map((await store.list()).map((n) => [refKey(n.ref), n]));
@@ -232,7 +239,7 @@ export async function evmClaimTaken(store: NoteStore, taken: readonly EvmRestore
     else if (h.state === "PLANNED" || h.state === "INCOMING") {
       const incoming = h.state === "PLANNED" ? await store.move(h.id, "PLANNED", "INCOMING") : h;
       out.push(await store.move(incoming.id, "INCOMING", "UNSPENT", { leaf: t.leaf }));
-    }
+    } else if (h.leaf !== undefined && (h.leaf.commitment !== t.leaf.commitment || h.leaf.leafIndex !== t.leaf.leafIndex)) throw new Error(`${refKey(t.ref)}: the store holds this note at another leaf`);
   }
   return out;
 }

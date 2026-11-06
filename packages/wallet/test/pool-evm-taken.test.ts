@@ -20,6 +20,8 @@ const SCOPE = evmPoolScopeOf("0x00000000000000000000000000000000b1f1f001", 84532
 /** The pool's smallest deposit, contracts/pool-evm/src/PrivacyPool.sol:53 (0.0001 ether): below EVM_LADDER's smallest rung. */
 const MIN_DEPOSIT = 100_000_000_000_000n;
 const RUNG = 10n ** 15n;
+/** The round's finalized block: every planted event (blocks 10 on) is final unless a test says otherwise. */
+const FINAL = 1_000n;
 const P = (ref: NoteRef) => noteSecrets(SEED, ref).precommitment;
 
 /** Deposited events in log order, each a leaf of the state tree and a label, as evmTreeSync's events() gives them. */
@@ -38,7 +40,7 @@ const Rn = (n: number): NoteRef => ({ kind: "second", id: { id: "R", c: "evm", l
 
 test("a deposit whose precommitment a stranger took with MIN_DEPOSIT: that deposit is the user's note at MIN_DEPOSIT, and the next deposit signs on U's next note", () => {
   const events = pool([{ pre: 11n, value: RUNG }, { pre: P(U0), value: MIN_DEPOSIT }]);
-  const got = evmNextNote(SEED, SCOPE, events, U0);
+  const got = evmNextNote(SEED, SCOPE, events, U0, FINAL);
   assert.deepEqual(got.taken.map((t) => [refKey(t.ref), t.leaf.value, t.leaf.leafIndex, t.state]), [[refKey(U0), MIN_DEPOSIT, 1n, "UNSPENT"]]);
   assert.equal(got.taken[0]!.leaf.commitment, noteCommitment(MIN_DEPOSIT, vaultLabelOf(keccak_256, SCOPE, 2n), P(U0)));
   assert.deepEqual(got.next, { ref: U0n(0), precommitment: P(U0n(0)) });
@@ -48,23 +50,23 @@ test("a deposit whose precommitment a stranger took with MIN_DEPOSIT: that depos
 
 test("a sell whose return note and its first R were each taken: both are the user's notes, and the sell is signed again on R 1", () => {
   const events = pool([{ pre: P(RET), value: MIN_DEPOSIT }, { pre: 12n, value: RUNG }, { pre: P(Rn(0)), value: 3n * MIN_DEPOSIT }]);
-  const got = evmNextNote(SEED, SCOPE, events, RET);
+  const got = evmNextNote(SEED, SCOPE, events, RET, FINAL);
   assert.deepEqual(got.taken.map((t) => [refKey(t.ref), t.leaf.value]), [[refKey(RET), MIN_DEPOSIT], [refKey(Rn(0)), 3n * MIN_DEPOSIT]]);
   assert.deepEqual(got.next, { ref: Rn(1), precommitment: P(Rn(1)) });
 });
 
 test("nothing taken: the note to sign is the first one", () => {
-  assert.deepEqual(evmNextNote(SEED, SCOPE, pool([{ pre: 11n, value: RUNG }]), RET), { taken: [], next: { ref: RET, precommitment: P(RET) } });
+  assert.deepEqual(evmNextNote(SEED, SCOPE, pool([{ pre: 11n, value: RUNG }]), RET, FINAL), { taken: [], pending: [], next: { ref: RET, precommitment: P(RET) } });
 });
 
 test("a Deposited whose commitment is not Poseidon(value, label, precommitment), or whose label is not its nonce's, is refused, never restored", () => {
   const forged = pool([{ pre: P(U0), value: MIN_DEPOSIT }]);
   forged[0] = { ...forged[0]!, value: RUNG }; // the event says more than the pool hashed
-  assert.throws(() => evmNextNote(SEED, SCOPE, forged, U0), /commitment/);
+  assert.throws(() => evmNextNote(SEED, SCOPE, forged, U0, FINAL), /commitment/);
   const relabeled = pool([{ pre: P(U0), value: MIN_DEPOSIT }]);
   relabeled[0] = { ...relabeled[0]!, label: 5n };
-  assert.throws(() => evmNextNote(SEED, SCOPE, relabeled, U0), /label/);
-  assert.throws(() => evmNextNote(SEED, SCOPE, [], { kind: "change", l: L, j: 0 }), /deposit, return or move/);
+  assert.throws(() => evmNextNote(SEED, SCOPE, relabeled, U0, FINAL), /label/);
+  assert.throws(() => evmNextNote(SEED, SCOPE, [], { kind: "change", l: L, j: 0 }, FINAL), /deposit, return or move/);
 });
 
 const stores: { close(): void }[] = [];
@@ -82,13 +84,13 @@ test("evmClaimTaken: a PLANNED note (a sell signed on it, reverted) and an INCOM
   const ns = await store();
   const events = pool([{ pre: P(RET), value: MIN_DEPOSIT }, { pre: P(Rn(0)), value: MIN_DEPOSIT }, { pre: P(Rn(1)), value: RUNG }]);
   const planned = await ns.add({ ref: RET, scope: SCOPE, precommitment: P(RET), state: "PLANNED" });
-  const { taken, next } = evmNextNote(SEED, SCOPE, events, RET);
+  const { taken, next } = evmNextNote(SEED, SCOPE, events, RET, FINAL);
   const wrote = await evmClaimTaken(ns, taken);
   assert.deepEqual(wrote.map((n) => [refKey(n.ref), n.state, n.leaf?.value]), [[refKey(RET), "UNSPENT", MIN_DEPOSIT], [refKey(Rn(0)), "UNSPENT", MIN_DEPOSIT], [refKey(Rn(1)), "UNSPENT", RUNG]]);
   assert.equal(wrote[0]!.id, planned.id, "the PLANNED note itself is restored");
   assert.deepEqual(next.ref, Rn(2));
   // run again (a reload, or the next sell): nothing written twice
-  assert.deepEqual(await evmClaimTaken(ns, evmNextNote(SEED, SCOPE, events, RET).taken), []);
+  assert.deepEqual(await evmClaimTaken(ns, evmNextNote(SEED, SCOPE, events, RET, FINAL).taken), []);
   const all = await ns.list();
   assert.equal(all.length, 3);
   assert.ok(all.every((n) => n.state === "UNSPENT"));
@@ -99,9 +101,36 @@ test("evmClaimTaken: an INCOMING deposit note whose send reverted goes UNSPENT a
   const n = await ns.add({ ref: RET, scope: SCOPE, precommitment: P(RET), state: "PLANNED" });
   await ns.move(n.id, "PLANNED", "INCOMING");
   const events = pool([{ pre: P(RET), value: MIN_DEPOSIT }]);
-  const [one] = await evmClaimTaken(ns, evmNextNote(SEED, SCOPE, events, RET).taken);
+  const [one] = await evmClaimTaken(ns, evmNextNote(SEED, SCOPE, events, RET, FINAL).taken);
   assert.deepEqual([one!.id, one!.state, one!.leaf?.value], [n.id, "UNSPENT", MIN_DEPOSIT]);
   const other = await store();
   await other.add({ ref: RET, scope: SCOPE, precommitment: P(Rn(5)), state: "PLANNED" });
-  await assert.rejects(evmClaimTaken(other, evmNextNote(SEED, SCOPE, events, RET).taken), /another note/);
+  await assert.rejects(evmClaimTaken(other, evmNextNote(SEED, SCOPE, events, RET, FINAL).taken), /another note/);
+});
+
+test("a stranger's Deposited above the finalized block is pending: passed over for the next note, never written, and taken once its block is final", async () => {
+  const events = pool([{ pre: P(RET), value: MIN_DEPOSIT }, { pre: P(Rn(0)), value: MIN_DEPOSIT }]); // blocks 10 and 11
+  const got = evmNextNote(SEED, SCOPE, events, RET, 10n);
+  assert.deepEqual(got.taken.map((t) => refKey(t.ref)), [refKey(RET)]);
+  assert.deepEqual(got.pending.map(refKey), [refKey(Rn(0))]);
+  assert.deepEqual(got.next.ref, Rn(1), "the tail's precommitment is never signed on");
+  const ns = await store();
+  const planned = await ns.add({ ref: RET, scope: SCOPE, precommitment: P(RET), state: "PLANNED" });
+  await ns.add({ ref: Rn(0), scope: SCOPE, precommitment: P(Rn(0)), state: "PLANNED" }).catch(() => undefined);
+  await evmClaimTaken(ns, got.taken);
+  const byRef = new Map((await ns.list()).map((n) => [refKey(n.ref), n]));
+  assert.equal(byRef.get(refKey(RET))!.id, planned.id);
+  assert.equal(byRef.get(refKey(RET))!.state, "UNSPENT");
+  assert.notEqual(byRef.get(refKey(Rn(0)))?.state, "UNSPENT", "the tail's note is not stored as money");
+  // the next round, block 11 final: taken
+  assert.deepEqual(evmNextNote(SEED, SCOPE, events, RET, 11n).taken.map((t) => refKey(t.ref)), [refKey(RET), refKey(Rn(0))]);
+  assert.throws(() => evmNextNote(SEED, SCOPE, events, RET, -1n), /finalBlock/);
+});
+
+test("evmClaimTaken: a landed note held at another leaf than the taken one is refused, never kept quietly", async () => {
+  const ns = await store();
+  const label = vaultLabelOf(keccak_256, SCOPE, 9n);
+  await ns.add({ ref: RET, scope: SCOPE, precommitment: P(RET), state: "UNSPENT", leaf: { value: RUNG, label, commitment: noteCommitment(RUNG, label, P(RET)), leafIndex: 9n } });
+  const events = pool([{ pre: P(RET), value: MIN_DEPOSIT }]);
+  await assert.rejects(evmClaimTaken(ns, evmNextNote(SEED, SCOPE, events, RET, FINAL).taken), /another leaf/);
 });

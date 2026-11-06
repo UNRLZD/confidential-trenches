@@ -427,6 +427,51 @@ test("precommit-taken-recover: a page closed between a taken note's two moves (I
   assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", 3n * MIN_DEPOSIT]]);
 });
 
+test("precommit-taken-recover: a front-runner who takes every send ends the run after as many taken notes as the ask has rungs, each restored; the next run lands the rung", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  const base = c.rpc();
+  let on = true;
+  const racing = async (method: string, params: readonly unknown[]) => {
+    if (method === "sendTransaction" && on) c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT));
+    return base(method, params);
+  };
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [racing, c.rpc()] }), ask(RUNG)), { error: "failed" });
+  assert.equal(c.sent.length, 2, "one taken note per rung, then one more try, never an endless run");
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "UNSPENT", MIN_DEPOSIT],
+    ["second", "UNSPENT", MIN_DEPOSIT],
+  ]);
+  on = false;
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[2] }] });
+  assert.deepEqual((await shape(ns)).at(-1), ["second", "UNSPENT", RUNG]);
+});
+
+test("precommit-taken-recover: one RPC alone saying a taken note's send succeeded does not stop the restore", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  const base = c.rpc();
+  let raced = false;
+  const racing = async (method: string, params: readonly unknown[]) => {
+    if (method === "sendTransaction" && !raced) {
+      raced = true;
+      c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT));
+    }
+    return base(method, params);
+  };
+  const liar = c.rpc();
+  const lying = async (method: string, params: readonly unknown[]) =>
+    method === "getSignatureStatuses" ? { context: { slot: 1 }, value: (params[0] as string[]).map(() => ({ err: null, confirmationStatus: "finalized" })) } : liar(method, params);
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [racing, lying] }), ask(RUNG));
+  assert.ok("stage" in got && got.stage === "filled", JSON.stringify(got));
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "UNSPENT", MIN_DEPOSIT],
+    ["second", "UNSPENT", RUNG],
+  ]);
+});
+
 test("H2 (probe D): a mark of another value while an RPC says the note's own send succeeded is a lie: refused, the note stays INCOMING, nothing restored or sent again", async () => {
   const c = chain();
   const ns = await notes();

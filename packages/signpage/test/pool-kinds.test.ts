@@ -176,9 +176,12 @@ test("a pool.withdraw is an open: answered pending at once, with no progress aft
 // signEvmSell called, or the pool's deposit(uint256,uint256) encoded) must pick its note through the wallet's
 // evmNextNote, which restores a taken note and names the next one to sign. Today none does: EVM pool.deposit is refused
 // (EVM_REFUSED) and the flow answers only Solana, so the list below is empty; the first flow that lands is held to it.
-const EVM_SIGNS = /(?<!function )\b(?:evmPoolBuildSell|signEvmSell|pinnedSignSell)\(|deposit\(uint256,uint256\)/;
+// the deposit's signature, its selector keccak256("deposit(uint256,uint256)")[0..4] = e2bbb158, or an ABI call by name
+const EVM_SIGNS = /(?<!function )\b(?:evmPoolBuildSell|signEvmSell|pinnedSignSell)\(|deposit\(uint256,uint256\)|e2bbb158|functionName:\s*["']deposit["']/i;
+// a call of evmNextNote, outside comments: a word in a comment guards nothing
+const calls = (text: string): boolean => /\bevmNextNote\(/.test(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1"));
 const unguarded = (files: readonly { path: string; text: string }[]): string[] =>
-  files.filter((f) => EVM_SIGNS.test(f.text) && !/\bevmNextNote\b/.test(f.text)).map((f) => f.path);
+  files.filter((f) => EVM_SIGNS.test(f.text) && !calls(f.text)).map((f) => f.path);
 const sources = (dir: string): { path: string; text: string }[] =>
   readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -194,6 +197,6 @@ test("precommit-taken-recover: no device file signs an EVM pool deposit or sell 
   assert.ok(files.length > 50, "the trees were read");
   assert.deepEqual(unguarded(files), []);
   // planted: a flow that signs a sell, or encodes a deposit, without evmNextNote is caught; one that uses it is not
-  assert.deepEqual(unguarded([{ path: "a.ts", text: "const s = signEvmSell(key, ctx, built);" }, { path: "b.ts", text: 'const sel = "deposit(uint256,uint256)";' }, { path: "c.ts", text: "const b = evmPoolBuildSell(q, f);" }]), ["a.ts", "b.ts", "c.ts"]);
+  assert.deepEqual(unguarded([{ path: "a.ts", text: "const s = signEvmSell(key, ctx, built);" }, { path: "b.ts", text: 'const sel = "deposit(uint256,uint256)";' }, { path: "c.ts", text: "const b = evmPoolBuildSell(q, f);" }, { path: "f.ts", text: 'const data = "0xE2BBB158" + args;' }, { path: "g.ts", text: 'encodeFunctionData({ abi, functionName: "deposit", args });' }, { path: "h.ts", text: "// evmNextNote(seed, scope, events, first) would go here\nconst s = signEvmSell(key, ctx, built);" }]), ["a.ts", "b.ts", "c.ts", "f.ts", "g.ts", "h.ts"]);
   assert.deepEqual(unguarded([{ path: "d.ts", text: "const { next } = evmNextNote(seed, scope, events, first); const s = signEvmSell(key, ctx, built);" }, { path: "e.ts", text: "export function signEvmSell(k) {}" }]), []);
 });
