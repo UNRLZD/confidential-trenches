@@ -3472,15 +3472,21 @@ test("TH10 a later, shorter wait never shortens one already set: a Retry-After: 
 });
 
 test("TH11 after an answer the backoff starts again at 0.5 s: a throttle event late in a scan waits 0.5 s, not its predecessors' doubled wait", { timeout: 30_000 }, async () => {
-  // two throttle events with answers between: the first getLogs and the 60th each answer 429 once, no header
-  let n = 0;
+  // two throttle events with answers between: the first range asked and the 40th each answer 429 once, no header.
+  // Counted by the ranges' first asks, never by the call: the first range's ask again goes out wherever the gate's
+  // wake order puts it (call 21 on most runs, 64 on one of 12; at call 60 a plant by call number never fired: PR #337
+  // job 127748029764, PR #356 job 127908836623, "1 !== 2")
+  let first = 0;
   const { rpc, st } = faultScan([], (_a, _b, nth) => {
-    n++;
-    return nth === 0 && (n === 1 || n === 60) ? "429:none" : "ok";
+    if (nth !== 0) return "ok";
+    first++;
+    return first === 1 || first === 40 ? "429:none" : "ok";
   });
   const r = await coldQuote(rpc, 0x3f50);
   assert.notEqual(r.code, "rpc_error", r.message);
   assert.equal(st.throttled.length, 2);
+  // the 40th range is asked after the first event's wait, so it is an event of its own, not a 429 of the first burst
+  assert.ok(st.throttled[1]! - st.throttled[0]! >= 450, `the second 429 came ${Math.round(st.throttled[1]! - st.throttled[0]!)} ms after the first`);
   const wait = gapAfter(st.sent, st.throttled[1]!);
   assert.ok(wait >= 450 && wait < 900, `the second event waited ${Math.round(wait)} ms`);
 });
