@@ -4,12 +4,13 @@
 // sha256("helper-pool-senders/test-key/EVM_SENDER").
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createServer } from "node:http";
 import { evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
-import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmPoolSender, evmPoolSendersFromEnv, evmReadWithdraw, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, type EvmRpc } from "./evm.ts";
+import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmPoolSender, evmPoolSendersFromEnv, evmReadWithdraw, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, WITHDRAW_SIGNATURE, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
@@ -54,11 +55,14 @@ const DEPTH_DATA = `0x${Buffer.from(keccak_256(new TextEncoder().encode("current
 
 const w32 = (n: bigint) => n.toString(16).padStart(64, "0");
 const a32 = (a: string) => a.slice(2).padStart(64, "0");
+/** W's signature as the calldata carries it: its length, 65, then r, s, v padded to three words (the helper reads only
+ *  its shape; the pool and the simulation check the signer). */
+const SIG = `${w32(65n)}${"ab".repeat(65).padEnd(192, "0")}`;
 /** withdraw's calldata as solc's abi.encode writes it. */
 function calldata(o: { fee?: bigint; processooor?: string; feeRecipient?: string; feeCap?: bigint; nullifier?: bigint; refund?: bigint } = {}): string {
   const relay = [a32(REQ.recipient), a32(o.feeRecipient ?? REQ.feeRecipient), w32(o.feeCap ?? REQ.feeCap), w32(REQ.deadlineMs), w32(o.refund ?? REQ.refundPrecommitment), REQ.salt.padEnd(64, "0")];
   const proof = PROOF.map((v, i) => (i === 9 && o.nullifier !== undefined ? o.nullifier : v));
-  return `0x${WITHDRAW_SELECTOR}${w32(18n * 32n)}${proof.map(w32).join("")}${w32(o.fee ?? FEE)}${a32(o.processooor ?? POOL)}${w32(64n)}${w32(192n)}${relay.join("")}`;
+  return `0x${WITHDRAW_SELECTOR}${w32(19n * 32n)}${proof.map(w32).join("")}${w32(o.fee ?? FEE)}${w32(28n * 32n)}${a32(o.processooor ?? POOL)}${w32(64n)}${w32(192n)}${relay.join("")}${SIG}`;
 }
 
 type Calls = { method: string; params: readonly unknown[] }[];
@@ -124,9 +128,45 @@ function decodeTx(raw: string): Uint8Array[] {
 const num = (u: Uint8Array) => (u.length === 0 ? 0n : BigInt(`0x${Buffer.from(u).toString("hex")}`));
 
 test("the selector is withdraw's, and the calldata reads back the request and its nullifier", () => {
-  assert.equal(WITHDRAW_SELECTOR, Buffer.from(keccak_256(new TextEncoder().encode("withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)"))).subarray(0, 4).toString("hex"));
+  // the signature is the pool's as it compiles: contracts/pool-evm/test/abi-tie.test.mjs ties it to abi.json
+  assert.equal(WITHDRAW_SELECTOR, Buffer.from(keccak_256(new TextEncoder().encode(WITHDRAW_SIGNATURE))).subarray(0, 4).toString("hex"));
   const w = evmReadWithdraw(new Uint8Array(Buffer.from(calldata().slice(2), "hex")));
   assert.deepEqual(w, { processooor: POOL, recipient: REQ.recipient, feeRecipient: FEE_TO, feeCap: REQ.feeCap, deadlineMs: REQ.deadlineMs, fee: FEE, nullifier: PROOF[9]!.toString(16).padStart(64, "0") });
+});
+
+// card helper-evm-abi-tie: the withdraws that landed on both testnet pools (fixtures/withdraw-landed.json, each read on
+// two RPCs) are the calldata a device sends; the helper's selector at 654e8293 was withdraw's three-argument form,
+// 0x8a3bff22, which neither pool's dispatcher holds, so it refused every real withdraw as bad_shape.
+test("the withdraws that landed on Base Sepolia and Robinhood testnet read back, each as the pool's own Withdrawn log names it", () => {
+  const landed = JSON.parse(readFileSync(new URL("./fixtures/withdraw-landed.json", import.meta.url), "utf8")) as { txs: { network: string; to: string; input: string; status: string; logs: { topics: string[]; data: string }[] }[] };
+  assert.deepEqual(landed.txs.map((t) => t.network), ["base-sepolia", "robinhood-testnet"]);
+  const withdrawn = `0x${Buffer.from(keccak_256(new TextEncoder().encode("Withdrawn(address,address,uint256,uint256,uint256,uint256)"))).toString("hex")}`;
+  for (const t of landed.txs) {
+    assert.equal(t.status, "0x1", t.network);
+    assert.equal(t.to, evmPoolVenues()[t.network as "base-sepolia"].pool, `${t.network}: the kit's pinned pool`);
+    assert.equal(t.input.slice(2, 10), WITHDRAW_SELECTOR, `${t.network}: the selector the pool ran`);
+    const w = evmReadWithdraw(new Uint8Array(Buffer.from(t.input.slice(2), "hex")));
+    const log = t.logs.find((l) => l.topics[0] === withdrawn)!;
+    const data = (i: number) => BigInt(`0x${log.data.slice(2 + 64 * i, 2 + 64 * (i + 1))}`);
+    assert.equal(w.processooor, t.to);
+    assert.equal(w.recipient, `0x${log.topics[1]!.slice(26)}`, `${t.network}: the recipient`);
+    assert.equal(w.feeRecipient, `0x${data(0).toString(16).padStart(40, "0")}`, `${t.network}: the fee recipient`);
+    assert.equal(w.fee, data(2), `${t.network}: the fee`);
+    assert.equal(w.nullifier, data(3).toString(16).padStart(64, "0"), `${t.network}: the spent nullifier`);
+  }
+});
+
+test("withdraw's signature is read in its one canonical form: offset after the Withdrawal, length 65, its last word's padding zero, nothing after", () => {
+  const good = calldata();
+  const bytes = (h: string) => new Uint8Array(Buffer.from(h.slice(2), "hex"));
+  const at = (i: number) => 2 + 8 + 64 * i; // word i of the calldata's hex
+  const set = (h: string, i: number, w: string) => `${h.slice(0, at(i))}${w}${h.slice(at(i) + 64)}`;
+  assert.doesNotThrow(() => evmReadWithdraw(bytes(good)));
+  assert.throws(() => evmReadWithdraw(bytes(set(good, 18, w32(29n * 32n)))), /signature's offset/);
+  for (const len of [64n, 66n, 0n]) assert.throws(() => evmReadWithdraw(bytes(set(good, 28, w32(len)))), /signature's layout/, `length ${len}`);
+  assert.throws(() => evmReadWithdraw(bytes(set(good, 31, `ab${"00".repeat(30)}01`))), /signature's layout/, "padding after v");
+  assert.throws(() => evmReadWithdraw(bytes(`${good}${"00".repeat(32)}`)), /not withdraw's calldata/, "a word after");
+  assert.throws(() => evmReadWithdraw(bytes(good.slice(0, -64))), /not withdraw's calldata/, "a word short");
 });
 
 test("the epoch fee is the kit's evmPoolFee: G at the pool's tree depth at the epoch's first block, its base fee and the chain fee there, or the floor", async () => {
@@ -228,7 +268,7 @@ test("epoch_off: an epoch later than now's, at or past the deadline, before the 
 test("bad_shape: another selector, a changed offset or padding, a byte more or less, another pool, a missing epoch", async () => {
   const good = calldata();
   const flip = (at: number, ch: string) => `${good.slice(0, at)}${ch}${good.slice(at + 1)}`;
-  for (const d of [flip(2, good[2] === "0" ? "1" : "0"), flip(2 + 8 + 63, "1"), `${good}00`, good.slice(0, -2), flip(2 + 8 + 64 * 18 + 2, "1"), flip(2 + 8 + 64 * 26 + 63, "1")]) {
+  for (const d of [flip(2, good[2] === "0" ? "1" : "0"), flip(2 + 8 + 63, "1"), `${good}00`, good.slice(0, -2), flip(2 + 8 + 64 * 19 + 2, "1"), flip(2 + 8 + 64 * 27 + 63, "1")]) {
     assert.equal(code(await sender().carry(req(d))), "bad_shape", d.slice(0, 20));
   }
   assert.equal(code(await sender().carry({ ...req(), pool: "0x00000000000000000000000000000000b1f1f002" })), "bad_shape");
