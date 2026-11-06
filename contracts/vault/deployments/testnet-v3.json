@@ -1,0 +1,31 @@
+{
+  "source_commit": "4f08f70b048a872a7f601b9d0d80f8f6bf1eedb5",
+  "network": "testnet",
+  "account_id": "vault.bf-vt-20261106t125654.testnet",
+  "parent": "bf-vt-20261106t125654.testnet",
+  "tx_hash": "61TbB4T5W5nG4ZZm4cmGEJgt6GEYEVSQciBRVob4UrHv",
+  "tx_actions": [
+    "CreateAccount",
+    "Transfer",
+    "DeployContract",
+    "FunctionCall(config)"
+  ],
+  "transfer_yocto": "2312110000000000000000000",
+  "config_gas": "100000000000000",
+  "vault_receipt_gas_burnt": "23725435889798",
+  "wasm_sha256": "3324dfefe90e6be2037248fd5e9b53cda7bb46f54b4cce9000244d328cedba9e",
+  "wasm_builds_sha256": [
+    "3324dfefe90e6be2037248fd5e9b53cda7bb46f54b4cce9000244d328cedba9e",
+    "3324dfefe90e6be2037248fd5e9b53cda7bb46f54b4cce9000244d328cedba9e"
+  ],
+  "wasm_bytes": 230111,
+  "largest_function_body": 14026,
+  "code_hash": "4SeQUmSGuTvTxYe9uAZa552mebsfTxiG9EZWzKx6Rng5",
+  "asset": "bf-usdc-20261101t022248.testnet",
+  "scope": "17019648931974058590218728089837415940882668786386641267607966991682068666801",
+  "version": "blindfill-vault 0.1.0 testnet",
+  "registration_tx": "4PGbAGnzmtPe2PrhpWLxd5bjFhAw8mCMYyCzACqrPG1E",
+  "registration_yocto": "1250000000000000000000",
+  "build": "cargo +1.96.0 near build reproducible-wasm --variant testnet --out-dir <out-dir> (cargo-near-near 0.22.0, image sourcescan/cargo-near:0.21.1-rust-1.96.0@sha256:ccb22bb4e677ed022d8b9d1aa1b32f0af52dd0471ef1c32e48dedbf68ee6ee17, on darwin arm64), at 4f08f70b048a872a7f601b9d0d80f8f6bf1eedb5",
+  "deployed_at": "2026-11-06T13:15:57.892Z"
+}
