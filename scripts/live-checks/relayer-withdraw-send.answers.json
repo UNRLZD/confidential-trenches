@@ -9,7 +9,7 @@
     "status": 405,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": "POST, OPTIONS",
      "content-type": "application/json; charset=utf-8"
     },
@@ -21,7 +21,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -33,7 +33,7 @@
     "status": 413,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -45,7 +45,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -57,7 +57,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -69,7 +69,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -87,7 +87,7 @@
     "status": 405,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": "POST, OPTIONS",
      "content-type": "application/json; charset=utf-8"
     },
@@ -99,7 +99,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -111,7 +111,7 @@
     "status": 413,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -123,7 +123,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -135,7 +135,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -147,7 +147,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -165,7 +165,7 @@
     "status": 404,
     "headers": {
      "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -177,7 +177,7 @@
     "status": 404,
     "headers": {
      "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -189,7 +189,7 @@
     "status": 404,
     "headers": {
      "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -201,7 +201,7 @@
     "status": 404,
     "headers": {
      "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -213,7 +213,7 @@
     "status": 404,
     "headers": {
      "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },
@@ -225,7 +225,7 @@
     "status": 404,
     "headers": {
      "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "allow": null,
      "content-type": "application/json; charset=utf-8"
     },

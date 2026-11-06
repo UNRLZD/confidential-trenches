@@ -14,8 +14,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-robinhood-search-ahead";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const TOKENS = 12;
 /** Fewer listed tokens than this is no test of the queues: a FAIL, not a pass on little. */
 export const TOKENS_MIN = 6;

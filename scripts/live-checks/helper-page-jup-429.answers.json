@@ -133,7 +133,7 @@
   }
  },
  "bad_deployed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "readAt": "2026-11-06T02:40:07.116Z",
   "ms": 762,
   "status": 200,
@@ -152,7 +152,7 @@
   }
  },
  "bad_bare_503": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "readAt": "2026-11-06T01:21:06Z",
   "ms": null,
   "status": 503,
@@ -202,7 +202,7 @@
   }
  },
  "bad_page_429": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "readAt": null,
   "ms": 87,
   "status": 200,

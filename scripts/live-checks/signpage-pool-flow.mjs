@@ -7,7 +7,7 @@
 //     - an executable upgradeable-loader program with its upgrade authority none, and the build's code;
 //     - the pool account the program's, with the record's deposit in its trees;
 //     - the run's funder emptied.
-//   - SIGN_HOST (https://sign.confidential.unrealized.trade) serves the mainnet build: its /app.js carries none of the
+//   - SIGN_HOST (https://confidential.unrealized.trade) serves the mainnet build: its /app.js carries none of the
 //     testnet build's pins or providers (TESTNET_ONLY).
 // - The run (card signpage-pool-flow-run, scripts/live-checks/signpage-pool-flow.md), on both devnet RPCs at finalized:
 //   - the testnet build's lookup table (DEVNET_TABLE): the ALT program's, the same bytes on both, active, holding the
@@ -46,9 +46,9 @@ export const RUN = Object.freeze({
 });
 export const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
 export const PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
-export const HELPER = "https://api.confidential.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
 
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 /** What only the testnet build carries: the devnet pins and the testnet RPC hosts (src/pool-testnet.ts). */
 export const TESTNET_ONLY = Object.freeze([PIN.program, PIN.feePayer, PIN.table, "api.devnet.solana.com", "/v1/rpc/solana-devnet", "sepolia.base.org", "base-sepolia-rpc.publicnode.com", "rpc.testnet.chain.robinhood.com", "robinhood-sepolia-rpc.publicnode.com"]);
 

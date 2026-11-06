@@ -26,7 +26,7 @@ test("the good answer (card base-rpc-list-fix) passes: Base's four scan provider
   const r = check(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   has(r.lines, /^PASS base scan list of 4, each on its own host: base-rpc\.publicnode\.com, base\.gateway\.tenderly\.co, base\.api\.pocket\.network, rpc\.sentio\.xyz \(4 at least\)$/);
-  has(r.lines, /^PASS base fourth scan provider preflight from https:\/\/confidential\.unrealized\.trade: 200, allow-origin https:\/\/confidential\.unrealized\.trade/);
+  has(r.lines, /^PASS base fourth scan provider preflight from https:\/\/ct-app\.unrealized\.trade: 200, allow-origin https:\/\/ct-app\.unrealized\.trade/);
   has(r.lines, /^PASS robinhood scan list of 3, each on its own host: rpc\.mainnet\.chain\.robinhood\.com, robinhood\.daybreak-rpc\.network, robinhood\.api\.pocket\.network \(3 at least\)$/);
   for (const n of ["base-hook", "robinhood-torch"]) for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^PASS ${n}, first two ${m}: ends ok in \\d+ ms`));
   for (const c of ["base", "robinhood"]) for (const m of ["refused", "503", "limit", "history"]) has(r.lines, new RegExp(`^PASS helper ${c}, first two ${m}: HTTP 200`));

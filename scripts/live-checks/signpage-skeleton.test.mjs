@@ -15,7 +15,7 @@ import { CSP, frameAllowed, judge, read } from "./signpage-skeleton.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-skeleton.answers.json"), "utf8"));
 const GOOD = ANSWERS.good;
-const APP = "https://confidential.unrealized.trade";
+const APP = "https://ct-app.unrealized.trade";
 
 const withCsp = (from, to) => {
   const csp = GOOD.headers["content-security-policy"];
@@ -106,7 +106,7 @@ test("frameAllowed reads frame-ancestors source expressions as CSP3 does", () =>
   assert.equal(frameAllowed([APP], ex), false);
   assert.equal(frameAllowed(["'none'"], APP), false);
   assert.equal(frameAllowed(["'self'"], ex), false);
-  assert.equal(frameAllowed(["'self'"], "https://sign.confidential.unrealized.trade"), true);
+  assert.equal(frameAllowed(["'self'"], "https://confidential.unrealized.trade"), true);
   for (const s of ["*", "https:", "http:", "example.com", "*.com", "https://example.com:443", "http://example.com", "https://example.com/x", "example.com:*"])
     assert.equal(frameAllowed([s], ex), true, s);
   for (const s of ["https://example.com:8443", "*.example.com", "wss:", "https://example.org", "'unsafe-inline'"])

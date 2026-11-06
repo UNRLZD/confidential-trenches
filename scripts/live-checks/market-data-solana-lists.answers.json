@@ -4,7 +4,7 @@
   "readAt": "2026-11-01T15:30:44.048Z",
   "status": 200,
   "headers": {
-   "access-control-allow-origin": "https://confidential.unrealized.trade",
+   "access-control-allow-origin": "https://ct-app.unrealized.trade",
    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
    "cache-control": "no-store",
    "connection": "keep-alive",
@@ -28,11 +28,11 @@
   "drop": "holders"
  },
  "bad_not_deployed": {
-  "note": "api.confidential.unrealized.trade read 2026-11-01 15:28:30Z at helper d9a4193, before this card is deployed: 404",
+  "note": "ct-api.unrealized.trade read 2026-11-01 15:28:30Z at helper d9a4193, before this card is deployed: 404",
   "readAt": "2026-11-01T15:28:30.830Z",
   "status": 404,
   "headers": {
-   "access-control-allow-origin": "https://confidential.unrealized.trade",
+   "access-control-allow-origin": "https://ct-app.unrealized.trade",
    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
    "alt-svc": "h3=\":443\"; ma=2592000",
    "cache-control": "no-store",

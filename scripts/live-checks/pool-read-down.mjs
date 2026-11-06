@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card pool-read-down on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds, and only
+// Live check of card pool-read-down on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and only
 // that: the served /app.js is the one index.html pins (its sha384), and in it, as minified, a provider read that still
 // fails after the page's own retry answers "down" (api.ts RETRY_CODES: the same request again runs again), never
 // not_allowed, failed or quote_check_failed:
@@ -20,7 +20,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "pool-read-down";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** The minified marks of each piece, as the bundle spells them. */

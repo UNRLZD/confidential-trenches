@@ -85,9 +85,9 @@ test("planted on the good answer: a CSP violation, a console error, a request of
 test("framed: Discover found in a frame of another page is judged by its own document's CSP and requests, not the outer page's", () => {
   const r = mut((rec) => {
     for (const l of rec.loads) {
-      for (const q of l.requests) q.url = q.url.replace(l.origin, "https://confidential.unrealized.trade");
+      for (const q of l.requests) q.url = q.url.replace(l.origin, "https://ct-app.unrealized.trade");
       l.framed = true;
-      l.origin = "https://confidential.unrealized.trade";
+      l.origin = "https://ct-app.unrealized.trade";
     }
   });
   assert.equal(r.ok, true, r.lines.join("\n"));
@@ -106,17 +106,17 @@ test("keysFault: the fixtures' keys exactly, in order", () => {
 });
 
 test("allowed: a request must be on the host its kind of request is allowed to reach", () => {
-  const csp = parseCsp("default-src 'none'; script-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade; frame-src https://sign.confidential.unrealized.trade");
-  const self = "https://confidential.unrealized.trade";
+  const csp = parseCsp("default-src 'none'; script-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade; frame-src https://confidential.unrealized.trade");
+  const self = "https://ct-app.unrealized.trade";
   assert.equal(allowed(csp, "script", `${self}/assets/index.js`, self), true);
-  assert.equal(allowed(csp, "script", "https://api.confidential.unrealized.trade/x.js", self), false);
+  assert.equal(allowed(csp, "script", "https://ct-api.unrealized.trade/x.js", self), false);
   assert.equal(allowed(csp, "fetch", LISTS_URL, self), true);
-  assert.equal(allowed(csp, "fetch", "https://sign.confidential.unrealized.trade/", self), false);
+  assert.equal(allowed(csp, "fetch", "https://confidential.unrealized.trade/", self), false);
   assert.equal(allowed(csp, "image", "data:image/png;base64,AAAA", self), true);
-  assert.equal(allowed(csp, "image", "https://api.confidential.unrealized.trade/v1/logo/solana/x", self), true);
+  assert.equal(allowed(csp, "image", "https://ct-api.unrealized.trade/v1/logo/solana/x", self), true);
   assert.equal(allowed(csp, "image", "https://evil.example/x.png", self), false);
   assert.equal(allowed(csp, "font", `${self}/f.woff2`, self), false, "font-src falls back to default-src 'none'");
-  assert.equal(allowed(csp, "document", "https://sign.confidential.unrealized.trade/", self), true);
+  assert.equal(allowed(csp, "document", "https://confidential.unrealized.trade/", self), true);
   assert.equal(allowed(csp, "document", "https://evil.example/", self), false);
 });
 

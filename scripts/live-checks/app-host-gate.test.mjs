@@ -15,7 +15,7 @@ import { judge, read } from "./app-host-gate.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-host-gate.answers.json"), "utf8"));
 const GOOD = ANSWERS.good;
-const SIGN = "https://sign.confidential.unrealized.trade";
+const SIGN = "https://confidential.unrealized.trade";
 
 const withCsp = (from, to) => {
   const csp = GOOD.headers["content-security-policy"];
@@ -27,7 +27,7 @@ const withCsp = (from, to) => {
 const replay = (a) => async () => ({ status: a.status, headers: new Headers(a.headers) });
 
 test("recorded good answer: every header equals the policy: PASS", async () => {
-  const r = judge(await read("https://confidential.unrealized.trade/", replay(GOOD)));
+  const r = judge(await read("https://ct-app.unrealized.trade/", replay(GOOD)));
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.includes(`ok  CSP frame-ancestors is exactly ${SIGN}`));
   assert.ok(r.lines.includes(`ok  CSP frame-src: "'none'"`));

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card evm-pool-sync-wide-pages on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds,
+// Live check of card evm-pool-sync-wide-pages on SIGN_HOST (https://confidential.unrealized.trade). What it holds,
 // and only that: the served /app.js is the one index.html pins (its sha384), and the wallet's EVM pool sync in it
 // (packages/wallet/src/pool/evm.ts evmPoolLogPager, readLogs, evmTreeSync), as minified:
 //   - pages each provider on its own (a Map by the seat's provider URL), from a first page of 100,000 blocks, growing
@@ -21,7 +21,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "evm-pool-sync-wide-pages";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 /** The pool sync's first page, in blocks (packages/wallet/src/pool/evm.ts EVM_POOL_LOG_PAGE_BLOCKS). */
 export const FIRST = 100_000;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;

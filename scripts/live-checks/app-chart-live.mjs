@@ -36,8 +36,8 @@ import { launchBrowser } from "../browsers.mjs";
 import { consoleError, pageError } from "./console-errors.mjs";
 
 const KEY = "app-chart-live";
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const CHAINS = ["solana", "base"];
 const CANDLES = `${HELPER_HOST}/v1/market/candles?`;
 export const LOADS = [

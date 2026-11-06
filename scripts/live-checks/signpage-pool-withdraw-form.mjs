@@ -2,7 +2,7 @@
 // Live check of card signpage-pool-withdraw-form: the pool withdraw of the signing page's testnet flow landed on the
 // devnet pool, two transactions a part (review #232): the release through the deployed helper's POST
 // /v1/pool/solana/send, then W's own send onward, and SIGN_HOST serves the build index.html pins. It reads:
-//   - SIGN_HOST (https://sign.confidential.unrealized.trade): the served /app.js is the one index.html pins (its sha384);
+//   - SIGN_HOST (https://confidential.unrealized.trade): the served /app.js is the one index.html pins (its sha384);
 //   - each part's two transactions of the run (scripts/live-checks/signpage-pool-withdraw-form.md), at finalized on
 //     both devnet RPCs of two operators, read as base64 and decoded here, each succeeded with the same bytes on both:
 //     - the release: two signers, the helper's devnet fee payer (the pin) then W; after the compute budget exactly one
@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { DEVNET_PROVIDERS, onTwoOperators, operatorOf, rpc } from "./pool-sol-deploy.mjs";
 
 const KEY = "signpage-pool-withdraw-form";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 /** SOL_POOLS.devnet in the testnet build. */
 export const PIN = Object.freeze({ program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" });
 /** The address typed for the run: our devnet wallet. */

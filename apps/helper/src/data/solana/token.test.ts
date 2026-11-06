@@ -21,7 +21,7 @@ const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"; // Token-2022, gradu
 const CURVE = "Q1vecEMQEgDyrw1txmBgFwUrkeQurqkEe1bGMzFpump"; // pump.fun, on its curve
 const NOW = Date.parse("2026-11-02T13:53:00Z");
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const APP = "https://confidential.unrealized.trade";
+const APP = "https://ct-app.unrealized.trade";
 const clone = <T>(v: T): T => structuredClone(v);
 
 type RpcCall = { method: string; params: unknown[] };

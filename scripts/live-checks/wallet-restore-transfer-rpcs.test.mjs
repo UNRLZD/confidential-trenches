@@ -3,7 +3,7 @@
 // restore-check-bounded, the pager's ceiling expiring after EVM_LOG_CEILING_PAGES; first card evm-transfer-rpc-spares's
 // fold, decision M359) (good: the Base Sepolia W's USDC read on base-sepolia.gateway.tenderly.co and
 // base-testnet.api.pocket.network alike, the newest 100,000 blocks of Robinhood read on the helper's route
-// (POST https://api.confidential.unrealized.trade/v1/rpc/robinhood, one reader) and the newest 10,000 of Robinhood
+// (POST https://ct-api.unrealized.trade/v1/rpc/robinhood, one reader) and the newest 10,000 of Robinhood
 // testnet on its list, each provider's refusals past its cap among the answers, every call through the device's own
 // client; the newest 50,000 blocks of Base on the helper's route, after card evm-rpc-spare-list's deploy) and the same answers with every Transfer log of the Base
 // Sepolia W taken out (bad). The wallet's own read runs on the replay: good passes, bad fails, its USDC not listed.
@@ -26,10 +26,10 @@ const timed = async (f) => {
 test("the recorded good run passes: each testnet's pair reads its W alike, Base's and Robinhood's Ws are read on the helper's route only, and the Base Sepolia W lists the USDC it bought", async () => {
   // the pagers met each provider's real cap: the helper's Base provider's 1,000 blocks and Robinhood's 2,000, and dRPC's code 35
   const refused = new Set(A.good.filter((e) => e.method === "eth_getLogs" && e.error).map((e) => new URL(e.url).host));
-  for (const h of ["api.confidential.unrealized.trade", "robinhood-testnet.drpc.org"]) assert.ok(refused.has(h), `${h}: ${[...refused].join(", ")}`);
+  for (const h of ["ct-api.unrealized.trade", "robinhood-testnet.drpc.org"]) assert.ok(refused.has(h), `${h}: ${[...refused].join(", ")}`);
   // no mainnet W read on any provider but the helper's route (decision M359)
   const mainnet = A.good.filter((e) => e.network === "base" || e.network === "robinhood");
-  assert.ok(mainnet.length > 0 && mainnet.every((e) => e.url === `https://api.confidential.unrealized.trade/v1/rpc/${e.network}`), [...new Set(mainnet.map((e) => e.url))].join(", "));
+  assert.ok(mainnet.length > 0 && mainnet.every((e) => e.url === `https://ct-api.unrealized.trade/v1/rpc/${e.network}`), [...new Set(mainnet.map((e) => e.url))].join(", "));
   assert.ok(mainnet.some((e) => e.network === "base") && mainnet.some((e) => e.network === "robinhood"));
   const r = await timed(() => check(replayer(A.good), { wait: false }));
   assert.ok(r.ms < REPLAY_MS, `the good replay took ${Math.round(r.ms)} ms`);
@@ -41,8 +41,8 @@ test("the recorded good run passes: each testnet's pair reads its W alike, Base'
     const m = new RegExp(`^${n}: .* from block (\\d+) to (\\d+)`).exec(r.lines[i + 1]);
     assert.ok(m && Number(m[2]) - Number(m[1]) >= span, r.lines[i + 1]);
   }
-  assert.match(r.lines[1], /^base: the helper's route https:\/\/api\.confidential\.unrealized\.trade\/v1\/rpc\/base read W /);
-  assert.match(r.lines[2], /^robinhood: the helper's route https:\/\/api\.confidential\.unrealized\.trade\/v1\/rpc\/robinhood read W /);
+  assert.match(r.lines[1], /^base: the helper's route https:\/\/ct-api\.unrealized\.trade\/v1\/rpc\/base read W /);
+  assert.match(r.lines[2], /^robinhood: the helper's route https:\/\/ct-api\.unrealized\.trade\/v1\/rpc\/robinhood read W /);
 });
 
 test("the recorded bad run (the Base Sepolia W's Transfer logs taken out) fails, its USDC not listed, and is the good run but that", async () => {

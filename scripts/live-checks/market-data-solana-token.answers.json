@@ -7,7 +7,7 @@
    "token": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -26,7 +26,7 @@
    "holders": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -45,7 +45,7 @@
    "candles": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -71,7 +71,7 @@
    "token": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -88,7 +88,7 @@
    "holders": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -105,7 +105,7 @@
    "candles": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",

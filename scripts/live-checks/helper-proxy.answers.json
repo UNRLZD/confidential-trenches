@@ -1,11 +1,11 @@
 {
  "good": {
-  "note": "apps/helper at ccab198 in its Docker image behind deploy/Caddyfile (HELPER_SITE http://:80), run by deploy/compose.yaml with keys planted for this run (never real ones) on Docker 29.8.1 on a Mac by local-proof.sh, the proxied read reaching 1Click with the planted JWT; read 2026-11-01 03:13:06Z (api.confidential.unrealized.trade has no server yet)",
+  "note": "apps/helper at ccab198 in its Docker image behind deploy/Caddyfile (HELPER_SITE http://:80), run by deploy/compose.yaml with keys planted for this run (never real ones) on Docker 29.8.1 on a Mac by local-proof.sh, the proxied read reaching 1Click with the planted JWT; read 2026-11-01 03:13:06Z (ct-api.unrealized.trade has no server yet)",
   "base": "http://127.0.0.1:18080",
   "readAt": "2026-11-01T03:13:06.257Z",
   "status": 200,
   "headers": {
-   "access-control-allow-origin": "https://confidential.unrealized.trade",
+   "access-control-allow-origin": "https://ct-app.unrealized.trade",
    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
    "cache-control": "no-store",
    "content-length": "53362",
@@ -32,7 +32,7 @@
   "readAt": "2026-11-01T03:14:49.881Z",
   "status": 200,
   "headers": {
-   "access-control-allow-origin": "https://confidential.unrealized.trade",
+   "access-control-allow-origin": "https://ct-app.unrealized.trade",
    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
    "cache-control": "no-store",
    "connection": "keep-alive",

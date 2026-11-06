@@ -25,8 +25,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "pool-buy-send-fast";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 /** The devnet pool (scripts/live-checks/pool-sol-deploy.devnet.json) and its program. */
 export const DEVNET_POOL = "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr";
 export const DEVNET_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";

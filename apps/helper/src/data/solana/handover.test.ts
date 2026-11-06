@@ -20,7 +20,7 @@ const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.
 const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
 const NOW = Date.parse("2026-11-02T13:53:00Z");
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const APP = "https://confidential.unrealized.trade";
+const APP = "https://ct-app.unrealized.trade";
 const CROWD = 35;
 
 const ok = (result: unknown) => ({ status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result }) });

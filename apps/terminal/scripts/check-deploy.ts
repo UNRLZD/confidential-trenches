@@ -18,8 +18,8 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "n
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
-export const HELPER_HOST = "api.confidential.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
+export const HELPER_HOST = "ct-api.unrealized.trade";
 export const RPCS = ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org", "https://near.drpc.org"];
 
 const HELPER = [`https://${HELPER_HOST}`, `wss://${HELPER_HOST}`];

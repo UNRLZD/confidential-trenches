@@ -102,7 +102,7 @@ test("card live-check-devnet-pair: the second provider answering 503 moves read(
   const js = "app";
   const index = `<script src="/app.js" integrity="sha384-${createHash("sha384").update(js).digest("base64")}"></script>`;
   const txs = new Map(g.run.flatMap((p) => [p.release, p.onward]).map((t) => [t.signature, t.reads[0]]));
-  const [solana, second, helper] = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public", "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet"];
+  const [solana, second, helper] = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public", "https://ct-api.unrealized.trade/v1/rpc/solana-devnet"];
   const fetchFn = async (url, init) => {
     if (url.startsWith("https://sign.")) return { text: async () => (url.endsWith("/app.js") ? js : index) };
     if (url === second) return { ok: false, status: 503, json: async () => null };

@@ -20,8 +20,8 @@ import { writeFileSync } from "node:fs";
 import { SWAP_RPCS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
 
 const KEY = "helper-tape-4337-trader";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const TOKENS = 30;
 export const JUDGE_ENOUGH = 5;
 // the EntryPoints and their events, as the eth-infinitism/account-abstraction releases name them (read on chain in

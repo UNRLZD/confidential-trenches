@@ -22,7 +22,7 @@
     "readAt": "2026-11-03T04:55:10.684Z",
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -60,7 +60,7 @@
     "readAt": "2026-11-03T04:55:12.063Z",
     "status": 422,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -80,7 +80,7 @@
     "readAt": "2026-11-03T04:55:12.066Z",
     "status": 422,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -100,7 +100,7 @@
     "readAt": "2026-11-03T04:55:12.068Z",
     "status": 422,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -120,7 +120,7 @@
     "readAt": "2026-11-03T04:55:12.071Z",
     "status": 422,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -140,7 +140,7 @@
     "readAt": "2026-11-03T04:55:12.073Z",
     "status": 422,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -160,7 +160,7 @@
     "readAt": "2026-11-03T04:55:12.075Z",
     "status": 422,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -180,7 +180,7 @@
     "readAt": "2026-11-03T04:55:12.077Z",
     "status": 422,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -200,7 +200,7 @@
     "readAt": "2026-11-03T04:55:12.079Z",
     "status": 422,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -220,7 +220,7 @@
     "readAt": "2026-11-03T04:55:12.081Z",
     "status": 422,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -246,7 +246,7 @@
     "readAt": "2026-11-02T21:48:03.077Z",
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",

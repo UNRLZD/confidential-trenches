@@ -138,21 +138,21 @@ test("harness: GET /v1/market/lists and /v1/market/token are answered from the r
       await route({ request: () => ({ url: () => url }), fulfill: async (a) => void (out = { kind: "fulfill", ...a }), abort: async (e) => void (out = { kind: "abort", error: e }) });
       return out;
     };
-    const lists = await ask("https://api.confidential.unrealized.trade/v1/market/lists?chain=solana");
+    const lists = await ask("https://ct-api.unrealized.trade/v1/market/lists?chain=solana");
     assert.equal(lists.kind, "fulfill");
     assert.equal(lists.status, 200);
     assert.equal(lists.headers["access-control-allow-origin"], APP_HOST);
     const snap = JSON.parse(lists.body);
     const top = columnRows(snap, "trending")[0];
     assert.ok(top, "the harness's lists hold a Trending token");
-    const tok = await ask(`https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=${top.token}`);
+    const tok = await ask(`https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=${top.token}`);
     assert.equal(tok.kind, "fulfill");
     assert.equal(tok.status, 200);
     assert.equal(tok.headers["access-control-allow-origin"], APP_HOST);
     const row = JSON.parse(tok.body).row;
     assert.equal(row.token, top.token);
     assert.equal(row.chain, "solana");
-    const other = await ask("https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=So11111111111111111111111111111111111111112");
+    const other = await ask("https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=So11111111111111111111111111111111111111112");
     assert.equal(other.kind, "fulfill");
     assert.equal(other.status, 404);
   } finally {
@@ -162,7 +162,7 @@ test("harness: GET /v1/market/lists and /v1/market/token are answered from the r
 
 test("planted on the good answer: a recorded 429 names its resource's origin and path in the BAD line, and an error with no location still fails (card live-console-url)", () => {
   const text = "Failed to load resource: the server responded with a status of 429 ()";
-  const helper = "https://api.confidential.unrealized.trade";
+  const helper = "https://ct-api.unrealized.trade";
   const kept = frameErrors([
     { url: `${helper}/v1/market/token?chain=solana&mint=So11111111111111111111111111111111111111112`, text },
     { url: `${SIGN_HOST}/assets/shell.js`, text: "the shell's own" },

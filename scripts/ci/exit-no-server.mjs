@@ -4,7 +4,7 @@
 //   node scripts/ci/exit-no-server.mjs [root]      (exit 1 and one line per refusal)
 // It reads every file git lists under packages/exit/ (tracked, and untracked but not ignored) and refuses:
 //  - our domain, unrealized.trade, anywhere in a file's text (code, comment, test or data, any case), but inside the
-//    release mirror's address, https://sign.confidential.unrealized.trade/assets/zk/ exactly: the static host where
+//    release mirror's address, https://confidential.unrealized.trade/assets/zk/ exactly: the static host where
 //    each setup file sits under its own sha256, read only as a second door to bytes the tool checks against the kit's
 //    pins (packages/exit/src/setup.ts). The helper's host, the app's and every other address of ours are refused;
 //  - in a script file (the TypeScript parser, so a comment or a plain string is never taken for an import), an import
@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 export const EXIT_DIR = "packages/exit/";
-export const MIRROR = "https://sign.confidential.unrealized.trade/assets/zk/";
+export const MIRROR = "https://confidential.unrealized.trade/assets/zk/";
 const OURS = /unrealized\.trade/gi;
 const KIT = new Set(["@blindfill/kit", "@blindfill/kit/core"]);
 const SCRIPT = { ".js": ts.ScriptKind.JS, ".cjs": ts.ScriptKind.JS, ".mjs": ts.ScriptKind.JS, ".jsx": ts.ScriptKind.JSX, ".ts": ts.ScriptKind.TS, ".cts": ts.ScriptKind.TS, ".mts": ts.ScriptKind.TS, ".tsx": ts.ScriptKind.TSX };

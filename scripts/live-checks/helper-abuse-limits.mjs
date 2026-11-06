@@ -25,8 +25,8 @@ import { writeFileSync } from "node:fs";
 import { RETRY_AFTER_MAX_S } from "../../apps/helper/src/limits/limits.ts";
 
 const KEY = "helper-abuse-limits";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 /** A pool no helper carries (the system program's address): the route answers 404 after the limit, reading nothing. */
 export const PROBE = "/v1/pool/fee?pool=11111111111111111111111111111111";
 /** The pool routes' limit (POOL_RATE_MAX, 30 a window) and one: one batch in flight at once. */

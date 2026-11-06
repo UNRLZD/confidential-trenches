@@ -26,9 +26,9 @@ import { listAge } from "../../apps/terminal/src/screens/discover/model.ts";
 import { ageLine } from "../../apps/terminal/src/screens/discover/words.ts";
 
 const KEY = "app-list-age";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 const LISTS_PATH = "/v1/market/lists";
 export const KINDS = ["served", "dated"];
 export const WIDTHS = [

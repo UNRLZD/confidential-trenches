@@ -11,7 +11,7 @@ import { start } from "../../server.ts";
 import { createSolanaLists, pumpCurveAddress, READS, ROW_FIELDS } from "./lists.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const APP = "https://confidential.unrealized.trade";
+const APP = "https://ct-app.unrealized.trade";
 const AT = "2026-11-01T15:16:30.000Z";
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
 const BODY: Record<string, string> = { [READS.new]: fx("jupiter-recent.json"), [READS.trending_5m]: fx("jupiter-toptrending-5m.json"), [READS.trending_1h]: fx("jupiter-toptrending-1h.json") };

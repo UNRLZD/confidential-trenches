@@ -13,8 +13,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-solana-failover";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const SLOTS = ["rpc", "trades", "holders", "stream"];
 export const STATES = ["keyed", "fallback", "public"];
 

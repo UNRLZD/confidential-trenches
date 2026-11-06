@@ -33,7 +33,7 @@ import { build as buildSign, checkDir as checkSign } from "./deploy.mjs";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
-export const HOSTS = Object.freeze({ SIGN_HOST: "https://sign.confidential.unrealized.trade", APP_HOST: "https://confidential.unrealized.trade" });
+export const HOSTS = Object.freeze({ SIGN_HOST: "https://confidential.unrealized.trade", APP_HOST: "https://ct-app.unrealized.trade" });
 // Pages reads these from the build as configuration and serves none of them (Cloudflare Pages docs: headers, redirects,
 // routing, Functions); each host's gate refuses _worker.js, and a build with any other one is refused below
 const CONFIG = ["_headers", "_redirects", "_routes.json", "_worker.js"];

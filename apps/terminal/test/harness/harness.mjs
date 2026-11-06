@@ -38,9 +38,9 @@ export const MAPPED = ["*.ct.test", "*.other.test"];
 // iframe or of passkey scope runs on them with startHarness({ realNames: true }): they map to this harness too, the
 // builds and headers stay byte-exact, and the same-site layout is the real one (decided 01:50Z Nov 1).
 export const REAL = {
-  app: "confidential.unrealized.trade",
-  sign: "sign.confidential.unrealized.trade",
-  api: "api.confidential.unrealized.trade",
+  app: "ct-app.unrealized.trade",
+  sign: "confidential.unrealized.trade",
+  api: "ct-api.unrealized.trade",
 };
 
 /** The real names' sites: APP_HOST's and SIGN_HOST's builds as the harness names serve them; the API has none yet. */

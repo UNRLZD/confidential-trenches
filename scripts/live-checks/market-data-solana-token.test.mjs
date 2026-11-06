@@ -20,10 +20,10 @@ const A = JSON.parse(readFileSync(path.join(HERE, "market-data-solana-token.answ
 
 // a fetch that answers with the recorded answers, after checking the check asked the right thing
 const replay = (run) => async (url, init) => {
-  const k = Object.keys(READS).find((k) => url === `https://api.confidential.unrealized.trade${READS[k](MINT)}`);
+  const k = Object.keys(READS).find((k) => url === `https://ct-api.unrealized.trade${READS[k](MINT)}`);
   assert.ok(k, url);
   assert.equal(init.method, undefined);
-  assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+  assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
   const a = run.reads[k];
   return new Response(a.body, { status: a.status, headers: a.headers });
 };

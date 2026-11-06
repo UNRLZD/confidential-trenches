@@ -16,7 +16,7 @@ const { RELEASE_WITHDRAW_RELAYER } = await import("../../wallet/src/withdraw/rel
 
 const T = NEAR_NETWORKS.testnet;
 const M = NEAR_NETWORKS.mainnet;
-const HELPER = "https://api.confidential.unrealized.trade";
+const HELPER = "https://ct-api.unrealized.trade";
 const no = async (): Promise<never> => {
   throw new Error("not read");
 };

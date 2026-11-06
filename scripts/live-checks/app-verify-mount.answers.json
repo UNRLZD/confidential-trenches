@@ -23,7 +23,7 @@
     "runs": [
       {
         "width": "phone",
-        "frame": "https://confidential.unrealized.trade/verify",
+        "frame": "https://ct-app.unrealized.trade/verify",
         "panel": {
           "state": "read",
           "code": "ok",
@@ -57,84 +57,84 @@
         },
         "requests": [
           {
-            "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/index-jNo7ANup.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-jNo7ANup.js",
             "method": "GET",
             "type": "script",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-BchPB2yX.css",
             "method": "GET",
             "type": "stylesheet",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
@@ -384,7 +384,7 @@
       },
       {
         "width": "desktop",
-        "frame": "https://confidential.unrealized.trade/verify",
+        "frame": "https://ct-app.unrealized.trade/verify",
         "panel": {
           "state": "read",
           "code": "ok",
@@ -418,84 +418,84 @@
         },
         "requests": [
           {
-            "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/index-jNo7ANup.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-jNo7ANup.js",
             "method": "GET",
             "type": "script",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-BchPB2yX.css",
             "method": "GET",
             "type": "stylesheet",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
@@ -1033,7 +1033,7 @@
     "runs": [
       {
         "width": "phone",
-        "frame": "https://confidential.unrealized.trade/verify",
+        "frame": "https://ct-app.unrealized.trade/verify",
         "panel": {
           "state": "unverified",
           "code": "warn",
@@ -1070,84 +1070,84 @@
         },
         "requests": [
           {
-            "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/index-DLTMZCpS.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-DLTMZCpS.js",
             "method": "GET",
             "type": "script",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-BchPB2yX.css",
             "method": "GET",
             "type": "stylesheet",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
@@ -1172,7 +1172,7 @@
       },
       {
         "width": "desktop",
-        "frame": "https://confidential.unrealized.trade/verify",
+        "frame": "https://ct-app.unrealized.trade/verify",
         "panel": {
           "state": "unverified",
           "code": "warn",
@@ -1209,84 +1209,84 @@
         },
         "requests": [
           {
-            "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/index-DLTMZCpS.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-DLTMZCpS.js",
             "method": "GET",
             "type": "script",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-BchPB2yX.css",
             "method": "GET",
             "type": "stylesheet",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
@@ -1387,88 +1387,88 @@
     "runs": [
       {
         "width": "phone",
-        "frame": "https://confidential.unrealized.trade/verify",
+        "frame": "https://ct-app.unrealized.trade/verify",
         "panel": null,
         "requests": [
           {
-            "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/index-Dc9HYs5k.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-Dc9HYs5k.js",
             "method": "GET",
             "type": "script",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/style-BcTfhng9.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-BcTfhng9.css",
             "method": "GET",
             "type": "stylesheet",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
@@ -1482,88 +1482,88 @@
       },
       {
         "width": "desktop",
-        "frame": "https://confidential.unrealized.trade/verify",
+        "frame": "https://ct-app.unrealized.trade/verify",
         "panel": null,
         "requests": [
           {
-            "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/index-Dc9HYs5k.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-Dc9HYs5k.js",
             "method": "GET",
             "type": "script",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/style-BcTfhng9.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-BcTfhng9.css",
             "method": "GET",
             "type": "stylesheet",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
@@ -1609,7 +1609,7 @@
     "runs": [
       {
         "width": "phone",
-        "frame": "https://confidential.unrealized.trade/verify",
+        "frame": "https://ct-app.unrealized.trade/verify",
         "panel": {
           "state": "read",
           "code": "ok",
@@ -1643,84 +1643,84 @@
         },
         "requests": [
           {
-            "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/index-CsYWnSPz.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-CsYWnSPz.js",
             "method": "GET",
             "type": "script",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-BchPB2yX.css",
             "method": "GET",
             "type": "stylesheet",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
@@ -1970,7 +1970,7 @@
       },
       {
         "width": "desktop",
-        "frame": "https://confidential.unrealized.trade/verify",
+        "frame": "https://ct-app.unrealized.trade/verify",
         "panel": {
           "state": "read",
           "code": "ok",
@@ -2004,84 +2004,84 @@
         },
         "requests": [
           {
-            "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
             "method": "GET",
             "type": "font",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/index-CsYWnSPz.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-CsYWnSPz.js",
             "method": "GET",
             "type": "script",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-BchPB2yX.css",
             "method": "GET",
             "type": "stylesheet",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
             "method": "GET",
             "type": "image",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
             "method": "GET",
             "type": "image",
             "status": 200,

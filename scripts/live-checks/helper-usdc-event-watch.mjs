@@ -37,8 +37,8 @@ export { haltOf, viewOutcome };
 const KEY = "helper-usdc-event-watch";
 export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
 export const PIN_SHA256 = "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6"; // the pin is base58 of it
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 /** The networks the helper carries, so its watch must answer caught up there; mainnet joins at its vault's deploy. */
 export const CARRIED = ["testnet"];
 export const MAX_LAG = 100; // blocks (about 60 s) the helper's answer may trail the providers' final reads after it

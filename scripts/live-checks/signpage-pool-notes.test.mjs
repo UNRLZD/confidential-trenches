@@ -83,7 +83,7 @@ test("planted: a record naming another deposit's leaf (the deploy run's, state l
 // with no other operator answering, two stay required: FAIL.
 test("card live-check-devnet-pair: the second provider answering 503 moves the read to the next operator: PASS; one operator answering: FAIL", async () => {
   const [solana, second] = A.good.rpcs;
-  const helper = "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet";
+  const helper = "https://ct-api.unrealized.trade/v1/rpc/solana-devnet";
   const answers = [...A.good.answers.filter((a) => a.url === solana), ...A.good.answers.filter((a) => a.url === second).map((a) => ({ ...a, url: helper }))];
   const down = (inner = replay(answers)) => async (url, init) => (url === second ? { ok: false, status: 503, json: async () => null } : inner(url, init));
   const r = await check({ run: R, precommitment: A.good.precommitment, fetchFn: down(), rpcs: [solana, second, helper], sleep: async () => {}, sign: A.good.sign });

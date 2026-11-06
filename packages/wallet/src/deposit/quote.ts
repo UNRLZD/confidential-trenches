@@ -12,7 +12,7 @@
 import { HELPER_FETCH_INIT, VAULT_CONSTANTS, type OneClickRequest } from "@blindfill/kit";
 
 /** The helper's 1Click proxy on HELPER_HOST (apps/helper/src/proxy/vendors.ts: oneclick, POST /v0/quote). */
-export const DEPOSIT_QUOTE_URL = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote";
+export const DEPOSIT_QUOTE_URL = "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote";
 /** The vault's asset on 1Click: NEAR USDC, the release's token (§2.4 step 2). */
 export const DEPOSIT_QUOTE_DESTINATION = `nep141:${VAULT_CONSTANTS.TOKEN}`;
 /** The device's own slippage on a deposit quote, in bps: 100, as every 1Click quote of the G1 runs asked. */

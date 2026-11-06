@@ -13,15 +13,15 @@ const TEXT = "Failed to load resource: the server responded with a status of 429
 const msg = (text, location) => ({ type: () => "error", text: () => text, location: () => location });
 
 test("a console error names its resource's origin and path, never the query or fragment", () => {
-  const url = "https://api.confidential.unrealized.trade/v1/market/candles?chain=solana&token=6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN&tf=15m#x";
-  assert.equal(consoleError(msg(TEXT, { url, lineNumber: 0 })), `${TEXT} (https://api.confidential.unrealized.trade/v1/market/candles)`);
-  assert.equal(resourceOf("https://confidential.unrealized.trade/"), "https://confidential.unrealized.trade/");
+  const url = "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN&tf=15m#x";
+  assert.equal(consoleError(msg(TEXT, { url, lineNumber: 0 })), `${TEXT} (https://ct-api.unrealized.trade/v1/market/candles)`);
+  assert.equal(resourceOf("https://ct-app.unrealized.trade/"), "https://ct-app.unrealized.trade/");
   assert.equal(resourceOf("wss://h.example/socket?k=1"), "wss://h.example/socket");
 });
 
 test("an address that is no http(s) page keeps its scheme only (a data: URL never lands whole in a line)", () => {
   assert.equal(resourceOf("data:text/javascript;base64,AAAA"), "data:");
-  assert.equal(resourceOf("blob:https://sign.confidential.unrealized.trade/6f1c-uuid"), "blob:https://sign.confidential.unrealized.trade");
+  assert.equal(resourceOf("blob:https://confidential.unrealized.trade/6f1c-uuid"), "blob:https://confidential.unrealized.trade");
 });
 
 test("a message with no address is its text alone", () => {
@@ -37,10 +37,10 @@ const thrown = (Name, message, at) => {
   e.stack = `${e.name}: ${message}${at.map((a) => `\n    at ${a}`).join("")}`;
   return e;
 };
-const APP = "https://confidential.unrealized.trade";
+const APP = "https://ct-app.unrealized.trade";
 
 test("an address written inside a line's text is cut to its origin and path too", () => {
-  assert.equal(consoleLine("helper https://api.confidential.unrealized.trade/v1/quote?amount=25&to=abc.near#f answered 500", ""), "helper https://api.confidential.unrealized.trade/v1/quote answered 500");
+  assert.equal(consoleLine("helper https://ct-api.unrealized.trade/v1/quote?amount=25&to=abc.near#f answered 500", ""), "helper https://ct-api.unrealized.trade/v1/quote answered 500");
   assert.equal(consoleLine("socket wss://h.example/s?k=1 closed", `${APP}/a.js?v=2`), `socket wss://h.example/s closed (${APP}/a.js)`);
   assert.equal(consoleLine("no address here", ""), "no address here");
 });
@@ -67,19 +67,19 @@ test("watchErrors keeps the console errors and page errors its filter picks, and
   const kept = [];
   watchErrors(page, kept, (url) => url.startsWith(APP));
   page.emit("console", msg("app 429", { url: `${APP}/a.js?q=1` }));
-  page.emit("console", msg("shell 429", { url: "https://sign.confidential.unrealized.trade/s.js" }));
+  page.emit("console", msg("shell 429", { url: "https://confidential.unrealized.trade/s.js" }));
   page.emit("console", msg("a warning", { url: "" }, "warning"));
   page.emit("console", msg("no address", undefined));
   page.emit("console", msg("not a url", { url: "not a url" }));
   page.emit("pageerror", thrown(Error, "app threw", [`f (${APP}/a.js:1:2)`]));
-  page.emit("pageerror", thrown(Error, "shell threw", ["f (https://sign.confidential.unrealized.trade/s.js:1:2)"]));
+  page.emit("pageerror", thrown(Error, "shell threw", ["f (https://confidential.unrealized.trade/s.js:1:2)"]));
   page.emit("pageerror", thrown(Error, "unplaced", []));
   assert.deepEqual(kept, [`app 429 (${APP}/a.js)`, "no address", "not a url", `pageerror Error: app threw (${APP}/a.js)`, "pageerror Error: unplaced"]);
   // with no filter, every error of the page
   const all = [];
   const p2 = new EventEmitter();
   watchErrors(p2, all);
-  p2.emit("console", msg("shell 429", { url: "https://sign.confidential.unrealized.trade/s.js" }));
-  p2.emit("pageerror", thrown(Error, "shell threw", ["f (https://sign.confidential.unrealized.trade/s.js:1:2)"]));
-  assert.deepEqual(all, ["shell 429 (https://sign.confidential.unrealized.trade/s.js)", "pageerror Error: shell threw (https://sign.confidential.unrealized.trade/s.js)"]);
+  p2.emit("console", msg("shell 429", { url: "https://confidential.unrealized.trade/s.js" }));
+  p2.emit("pageerror", thrown(Error, "shell threw", ["f (https://confidential.unrealized.trade/s.js:1:2)"]));
+  assert.deepEqual(all, ["shell 429 (https://confidential.unrealized.trade/s.js)", "pageerror Error: shell threw (https://confidential.unrealized.trade/s.js)"]);
 });

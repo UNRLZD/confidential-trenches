@@ -25,9 +25,9 @@ import { launchBrowser } from "../browsers.mjs";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 
 const KEY = "app-token-route";
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
-export const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
+export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const LISTS_URL = `${HELPER_HOST}/v1/market/lists?chain=solana`;
 export const TOKEN_URL = (mint) => `${HELPER_HOST}/v1/market/token?chain=solana&token=${encodeURIComponent(mint)}`;
 /** The id the unknown load opens: no mint of any chain. */

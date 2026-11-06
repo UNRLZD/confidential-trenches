@@ -1,5 +1,5 @@
 {
- "about": "good: the chain reads are real (both RPCs per testnet, 2026-11-06T15:28:33.179Z); the helper answers are constructed, from evmPoolSender() of this branch at 593805c7 run in-process (--in-process: fee() on the kit feeProviders, carry() of the three bodies), with the deployed host fee_recipient (feeRecipientFrom), since the fix is not deployed; replace it with the host real run once deployed. bad: a real run against the deployed helper https://api.confidential.unrealized.trade (2026-11-06T15:28:21.289Z), X-Helper-Commit f1d5298f8201ed9c5adb4d13526dc1e95f579dcb, which still carries the three-argument withdraw: it refuses the landed withdraw as bad_shape and takes the three-argument form to epoch_off.",
+ "about": "good: the chain reads are real (both RPCs per testnet, 2026-11-06T15:28:33.179Z); the helper answers are constructed, from evmPoolSender() of this branch at 593805c7 run in-process (--in-process: fee() on the kit feeProviders, carry() of the three bodies), with the deployed host fee_recipient (feeRecipientFrom), since the fix is not deployed; replace it with the host real run once deployed. bad: a real run against the deployed helper https://ct-api.unrealized.trade (2026-11-06T15:28:21.289Z), X-Helper-Commit f1d5298f8201ed9c5adb4d13526dc1e95f579dcb, which still carries the three-argument withdraw: it refuses the landed withdraw as bad_shape and takes the three-argument form to epoch_off.",
  "good": {
   "base": "in-process apps/helper/src/pool/evm.ts at 593805c7102f6f8c55bb4d7d456aa321e9c5cfdf (constructed: not the deployed host)",
   "constructed": true,
@@ -72,7 +72,7 @@
      ]
     },
     "feeRecipientFrom": {
-     "base": "https://api.confidential.unrealized.trade",
+     "base": "https://ct-api.unrealized.trade",
      "status": 200,
      "headers": {
       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
@@ -147,7 +147,7 @@
      ]
     },
     "feeRecipientFrom": {
-     "base": "https://api.confidential.unrealized.trade",
+     "base": "https://ct-api.unrealized.trade",
      "status": 200,
      "headers": {
       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
@@ -158,7 +158,7 @@
   ]
  },
  "bad": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "at": "2026-11-06T15:28:21.289Z",
   "pools": [
    {

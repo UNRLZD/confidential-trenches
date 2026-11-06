@@ -28,8 +28,8 @@ import { readSolanaRent, SOLANA_RPC_RETRY, solanaHelperRpc, solanaJsonRpc, solan
 import { TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 
 const KEY = "signpage-pool-pins";
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The signing page's Solana pair (packages/signpage/src/trade.ts SOLANA_PROVIDER_A and TRADE_HELPER's route). */
 export const PAGE_PAIR = ["https://solana-rpc.publicnode.com", `${HELPER_HOST}/v1/rpc/solana`];
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");

@@ -23,8 +23,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-token-page-cold";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const POOL_URL = "https://lite-api.jup.ag/tokens/v2/tag?query=verified";
 export const PAIRS = 16;
 export const COLD_MIN = 30;

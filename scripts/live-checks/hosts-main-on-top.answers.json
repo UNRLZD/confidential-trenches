@@ -1,0 +1,211 @@
+{
+ "about": "bad: the real run on 2026-11-06 (2026-11-06T22:26:04.620Z) from the Mac, before the owner's DNS clicks: SIGN_HOST still the terminal's project, api. and sign. answering, ct-app and ct-api not yet made: FAIL. good: constructed from that run's own answers, each moved to the name it answers once the clicks are done (sign.'s CNAME answer to SIGN_HOST, the random label's NXDOMAIN to api. and sign., SIGN_HOST's old CNAME answer to ct-app, api.'s A answer to ct-api): PASS. Re-record good with --record after the clicks.",
+ "good": {
+  "at": "2026-11-06T22:26:04.620Z",
+  "label": "xcaa1476ccafc1da0",
+  "answers": [
+   {
+    "resolver": "cloudflare",
+    "name": "confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"confidential.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"confidential.unrealized.trade\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-sign.pages.dev.\"},{\"name\":\"confidential-trenches-sign.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.243\"},{\"name\":\"confidential-trenches-sign.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.13\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"confidential.unrealized.trade.\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-sign.pages.dev.\"},{\"name\":\"confidential-trenches-sign.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.13\"},{\"name\":\"confidential-trenches-sign.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.243\"}],\"Comment\":\"Response from 172.64.35.54.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "api.confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=api.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"api.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "api.confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=api.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"api.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "app.confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=app.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"app.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "app.confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=app.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"app.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1729,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "sign.confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=sign.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"sign.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "sign.confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=sign.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"sign.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "xcaa1476ccafc1da0.confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=xcaa1476ccafc1da0.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"xcaa1476ccafc1da0.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "xcaa1476ccafc1da0.confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=xcaa1476ccafc1da0.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"xcaa1476ccafc1da0.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "ct-app.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=ct-app.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"ct-app.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"ct-app.unrealized.trade\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-app.pages.dev.\"},{\"name\":\"confidential-trenches-app.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.14\"},{\"name\":\"confidential-trenches-app.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.242\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "ct-app.unrealized.trade",
+    "url": "https://dns.google/resolve?name=ct-app.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"ct-app.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"ct-app.unrealized.trade.\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-app.pages.dev.\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.14\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.242\"}],\"Comment\":\"Response from 172.64.35.54.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "ct-api.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=ct-api.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-api.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"ct-api.unrealized.trade\",\"type\":1,\"TTL\":1799,\"data\":\"91.99.5.177\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "ct-api.unrealized.trade",
+    "url": "https://dns.google/resolve?name=ct-api.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-api.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"ct-api.unrealized.trade.\",\"type\":1,\"TTL\":1799,\"data\":\"91.99.5.177\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+   }
+  ]
+ },
+ "bad": {
+  "at": "2026-11-06T22:26:04.620Z",
+  "label": "xcaa1476ccafc1da0",
+  "answers": [
+   {
+    "resolver": "cloudflare",
+    "name": "confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"confidential.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"confidential.unrealized.trade\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-app.pages.dev.\"},{\"name\":\"confidential-trenches-app.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.14\"},{\"name\":\"confidential-trenches-app.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.242\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"confidential.unrealized.trade.\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-app.pages.dev.\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.14\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.242\"}],\"Comment\":\"Response from 172.64.35.54.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "api.confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=api.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"api.confidential.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"api.confidential.unrealized.trade\",\"type\":1,\"TTL\":1799,\"data\":\"91.99.5.177\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "api.confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=api.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"api.confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"api.confidential.unrealized.trade.\",\"type\":1,\"TTL\":1799,\"data\":\"91.99.5.177\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "app.confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=app.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"app.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "app.confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=app.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"app.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1729,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "sign.confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=sign.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"sign.confidential.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"sign.confidential.unrealized.trade\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-sign.pages.dev.\"},{\"name\":\"confidential-trenches-sign.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.243\"},{\"name\":\"confidential-trenches-sign.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.13\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "sign.confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=sign.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"sign.confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"sign.confidential.unrealized.trade.\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-sign.pages.dev.\"},{\"name\":\"confidential-trenches-sign.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.13\"},{\"name\":\"confidential-trenches-sign.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.243\"}],\"Comment\":\"Response from 172.64.35.54.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "xcaa1476ccafc1da0.confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=xcaa1476ccafc1da0.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"xcaa1476ccafc1da0.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "xcaa1476ccafc1da0.confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=xcaa1476ccafc1da0.confidential.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"xcaa1476ccafc1da0.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "ct-app.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=ct-app.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-app.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "ct-app.unrealized.trade",
+    "url": "https://dns.google/resolve?name=ct-app.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-app.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+   },
+   {
+    "resolver": "cloudflare",
+    "name": "ct-api.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=ct-api.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-api.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+   },
+   {
+    "resolver": "google",
+    "name": "ct-api.unrealized.trade",
+    "url": "https://dns.google/resolve?name=ct-api.unrealized.trade&type=A",
+    "status": 200,
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-api.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+   }
+  ]
+ }
+}

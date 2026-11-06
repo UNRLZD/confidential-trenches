@@ -48,7 +48,7 @@ const F = JSON.parse(readFileSync(new URL("./fixtures/solana-builds.json", impor
   oversize: { wallet: string; mint: string; amount: string; query: string; status: number; body: string; accounts: Record<string, [Acc, Acc]>; blockhash: { blockhash: string; lastValidBlockHeight: number } };
 };
 const G = F.good;
-const ORIGIN = "https://api.confidential.unrealized.trade";
+const ORIGIN = "https://ct-api.unrealized.trade";
 const read = (a: Acc): SolanaAccountRead | null => (a ? { owner: a.owner, data: Uint8Array.from(Buffer.from(a.data, "base64")) } : null);
 const tablesOf = (accounts: Record<string, [Acc, Acc]>, names: readonly string[]): Record<string, SolanaLookupTable> =>
   Object.fromEntries(names.flatMap((t) => (accounts[t]?.[0] ? [[t, solanaDecodeLookupTable(read(accounts[t][0]!)!.data)]] : [])));
@@ -173,7 +173,7 @@ test("every other answer is never retried: the helper's 503, another 400, a drop
 });
 
 test("the helper origin is an origin only", async () => {
-  for (const o of ["http://api.confidential.unrealized.trade", `${ORIGIN}/v1`, `${ORIGIN}?x=1`, "https://u:p@api.confidential.unrealized.trade", "not a url"]) {
+  for (const o of ["http://ct-api.unrealized.trade", `${ORIGIN}/v1`, `${ORIGIN}?x=1`, "https://u:p@ct-api.unrealized.trade", "not a url"]) {
     await assert.rejects(fetchSolanaJupiterBuild(o, R0, { fetch: stub([OK]).f }), o);
   }
 });

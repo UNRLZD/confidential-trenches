@@ -14,8 +14,8 @@ import { STATE } from "./signpage-fixtures.ts";
 const SRC = process.env.SIGNPAGE_SRC ? pathToFileURL(`${process.env.SIGNPAGE_SRC}/`).href : new URL("../src/", import.meta.url).href;
 const C = await import(`${SRC}signpage/client.ts`);
 
-const URL_ = "https://sign.confidential.unrealized.trade/";
-const ORIGIN = "https://sign.confidential.unrealized.trade";
+const URL_ = "https://confidential.unrealized.trade/";
+const ORIGIN = "https://confidential.unrealized.trade";
 const READY = { v: 1, type: "ready", release: "sp-1", api: 1 };
 const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();

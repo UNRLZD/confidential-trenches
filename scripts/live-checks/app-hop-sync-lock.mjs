@@ -22,9 +22,9 @@ import { launchBrowser } from "../browsers.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 
 const KEY = "app-hop-sync-lock";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The signed-out account the stand-in shell sends: the sign-in sheet offers its ways. */
 export const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
 export const WIDTHS = [

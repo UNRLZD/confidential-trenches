@@ -15,9 +15,9 @@ import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-host-gate";
-export const URL_ = "https://confidential.unrealized.trade/";
-const SIGN = "https://sign.confidential.unrealized.trade";
-const HELPER = "api.confidential.unrealized.trade";
+export const URL_ = "https://ct-app.unrealized.trade/";
+const SIGN = "https://confidential.unrealized.trade";
+const HELPER = "ct-api.unrealized.trade";
 const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org";
 
 // the app paper's block (app.md 2.3) with HELPER_HOST, SIGN_HOST and RPC_A, RPC_B, RPC_C put in

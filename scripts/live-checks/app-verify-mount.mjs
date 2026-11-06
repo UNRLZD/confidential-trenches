@@ -40,7 +40,7 @@ import { watchErrors } from "./console-errors.mjs";
 
 const KEY = "app-verify-mount";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 export const PATH = "/verify";
 export const CHECKS = ["keys", "code", "asset", "registration", "tokenCode", "balance"];
 export const WIDTHS = [

@@ -64,7 +64,7 @@
  "bad": {
   "check": "app-list-age",
   "at": "2026-11-04T12:58:35.697Z",
-  "source": "live https://confidential.unrealized.trade, the stand-in shell, the helper live (dated: the recorded 1 Nov lists)",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell, the helper live (dated: the recorded 1 Nov lists)",
   "browser": "157.0.8103.38",
   "entry": "/assets/index-D2sAQfy_.js",
   "runs": [

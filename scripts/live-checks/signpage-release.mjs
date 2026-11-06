@@ -3,7 +3,7 @@
 // release both hosts serve exactly the release's list (wallet.md W4.5 and §2.7 items 3-4; E2E-22: check-signpage
 // against the release list gives MATCH). It runs check-signpage (node packages/signpage/scripts/check-signpage.mjs,
 // which reads the hosts over HTTPS), after holding the list's origins to the hosts' real names, written here:
-// SIGN_HOST https://sign.confidential.unrealized.trade, APP_HOST https://confidential.unrealized.trade.
+// SIGN_HOST https://confidential.unrealized.trade, APP_HOST https://ct-app.unrealized.trade.
 //   node scripts/live-checks/signpage-release.mjs --host sign|app [--record <file>]
 //     after a deploy: that one host against this checkout's own build (release-list.mjs --print --host), so a host
 //     that lags main fails only its own deploy's check, never the other host's
@@ -23,7 +23,7 @@ const KEY = "signpage-release";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const RELEASES = path.join(REPO, "packages/signpage/releases");
 const SCRIPTS = path.join(REPO, "packages/signpage/scripts");
-export const ORIGINS = { SIGN_HOST: "https://sign.confidential.unrealized.trade", APP_HOST: "https://confidential.unrealized.trade" };
+export const ORIGINS = { SIGN_HOST: "https://confidential.unrealized.trade", APP_HOST: "https://ct-app.unrealized.trade" };
 export const HOSTS = { sign: "SIGN_HOST", app: "APP_HOST" };
 
 /** Problems with a list's hosts (empty = exactly the hosts asked, at their real names). */
