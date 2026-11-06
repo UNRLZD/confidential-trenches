@@ -206,7 +206,12 @@ test("a pool.withdraw is an open: answered pending at once, with no progress aft
 // evmNextNote, which restores a taken note and names the next one to sign. Today none does: EVM pool.deposit is refused
 // (EVM_REFUSED) and the flow answers only Solana, so the list below is empty; the first flow that lands is held to it.
 // the deposit's signature, its selector keccak256("deposit(uint256,uint256)")[0..4] = e2bbb158, or an ABI call by name
-const EVM_SIGNS = /(?<!function )\b(?:evmPoolBuildSell|signEvmSell|pinnedSignSell)\(|deposit\(uint256,uint256\)|e2bbb158|functionName:\s*["']deposit["']/i;
+// every EVM sell builder and signer, read from the files that define them (the kit's and the rule's), so one added later
+// is guarded too; and every way to encode a pool deposit
+const ROOT = new URL("../../../", import.meta.url).pathname;
+const SIGNER_DEFS = ["packages/kit/src/trade/evm/sell.ts", "packages/kit/src/trade/evm/sell-unpinned.ts", "packages/signpage/src/rules/pool.ts"];
+const SIGNERS = [...new Set(SIGNER_DEFS.flatMap((f) => [...readFileSync(join(ROOT, f), "utf8").matchAll(/export function (\w*(?:Build|Sign)\w*Sell\w*|signEvmSell\w*)\(/g)].map((m) => m[1]!)))];
+const EVM_SIGNS = new RegExp(`(?<!function )\\b(?:${SIGNERS.join("|")})\\(|deposit\\(uint256,uint256\\)|e2bbb158|functionName:\\s*["']deposit["']`, "i");
 // a call of evmNextNote, outside comments: a word in a comment guards nothing
 const calls = (text: string): boolean => /\bevmNextNote\(/.test(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1"));
 const unguarded = (files: readonly { path: string; text: string }[]): string[] =>
@@ -219,11 +224,16 @@ const sources = (dir: string): { path: string; text: string }[] =>
   });
 
 test("precommit-taken-recover: no device file signs an EVM pool deposit or sell without picking its note through evmNextNote", () => {
-  const root = new URL("../../../", import.meta.url).pathname;
-  // the rule's own signer and the kit's builders define what is called; every caller is in these trees
-  const own = new Set([join(root, "packages/signpage/src/rules/pool.ts")]);
-  const files = ["packages/signpage/src", "apps/terminal/src", "packages/wallet/src"].flatMap((d) => sources(join(root, d))).filter((f) => !own.has(f.path));
+  const root = ROOT;
+  // the signers' own files and the kit's two composers of them (a quote's sell and its simulation, each signed by its
+  // caller on the note the caller names) define what is called; every caller is in these trees
+  const own = new Set([...SIGNER_DEFS, "packages/kit/src/trade/evm/quoted.ts", "packages/kit/src/checks/evm/quote.ts"].map((f) => join(root, f)));
+  for (const name of ["evmPoolBuildSell", "evmPoolSignSell", "evmPoolSignSimSell", "evmPoolBuildSellUnpinned", "evmPoolSignSellUnpinned", "pinnedSignSell", "signEvmSell", "signEvmSellSim"]) assert.ok(SIGNERS.includes(name), `${name} is guarded`);
+  const files = ["packages/signpage/src", "apps/terminal/src", "packages/wallet/src", "packages/kit/src", "apps/helper/src"].flatMap((d) => sources(join(root, d))).filter((f) => !own.has(f.path) && !/\.test\.(ts|mjs)$/.test(f.path));
   assert.ok(files.length > 50, "the trees were read");
+  // planted: a call of each signer without evmNextNote is caught, and with it is not
+  assert.deepEqual(unguarded(SIGNERS.map((name) => ({ path: `${name}.ts`, text: `const s = ${name}(key, ctx, built);` }))), SIGNERS.map((name) => `${name}.ts`));
+  assert.deepEqual(unguarded(SIGNERS.map((name) => ({ path: `${name}.ts`, text: `const { next } = evmNextNote(seed, scope, events, first); const s = ${name}(key, ctx, built);` }))), []);
   assert.deepEqual(unguarded(files), []);
   // planted: a flow that signs a sell, or encodes a deposit, without evmNextNote is caught; one that uses it is not
   assert.deepEqual(unguarded([{ path: "a.ts", text: "const s = signEvmSell(key, ctx, built);" }, { path: "b.ts", text: 'const sel = "deposit(uint256,uint256)";' }, { path: "c.ts", text: "const b = evmPoolBuildSell(q, f);" }, { path: "f.ts", text: 'const data = "0xE2BBB158" + args;' }, { path: "g.ts", text: 'encodeFunctionData({ abi, functionName: "deposit", args });' }, { path: "h.ts", text: "// evmNextNote(seed, scope, events, first) would go here\nconst s = signEvmSell(key, ctx, built);" }]), ["a.ts", "b.ts", "c.ts", "f.ts", "g.ts", "h.ts"]);
