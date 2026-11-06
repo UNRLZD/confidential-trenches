@@ -217,6 +217,21 @@ test("a Transfer whose outcome is not read: every later call reads it back (its 
   assert.equal(s.relayer.sent.length, 1);
 });
 
+test("a Transfer whose outcome a lookup never gives, while the id exists: exists, nothing resolved or sent", async () => {
+  const s = setup({}, { outcome: () => "unknown" });
+  assert.equal((await createOnDelivery(s.id, s.deps())).code, "in_flight");
+  assert.equal(s.store().creation(s.id)!.last.state, "pending");
+  s.w.account = [{ keys: ["ed25519:own"] }, { keys: ["ed25519:own"] }];
+  const n = s.relayer.resolved.length;
+  assert.deepEqual(await createOnDelivery(s.id, s.deps()), { code: "exists", tx_hash: s.relayer.sent[0]!.tx.tx_hash });
+  assert.equal(s.relayer.resolved.length, n);
+  assert.equal(s.relayer.sent.length, 1);
+  // a read-back whose read fails sends nothing and resolves nothing
+  s.w.down = [true, false];
+  assert.equal((await createOnDelivery(s.id, s.deps())).code, "unread");
+  assert.equal(s.relayer.resolved.length, n);
+});
+
 test("a Transfer proved never applied (dropped): the next call reads the gate again and sends one afresh", async () => {
   let kind: TxOutcome["kind"] = "dropped";
   const s = setup({}, { outcome: () => kind });

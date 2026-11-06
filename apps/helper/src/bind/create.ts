@@ -3,9 +3,10 @@
 //
 //   1. One run per id in this process: a second call while one runs shares its answer (the store's lock makes this
 //      process the only one).
-//   2. The read-back first: an earlier Transfer of ours to the id whose outcome is not known is read again (its stored
-//      bytes sent again: one signed nonce lands at most once), and nothing new goes out while it may still land. A
-//      Transfer known landed holds every later read below its receipt's height: no read older than it counts.
+//   2. The read-back first: while an earlier Transfer of ours to the id has no known outcome, the id's account is read
+//      (one that exists is never sent to) and that Transfer read again, its stored bytes sent again (one signed nonce
+//      lands at most once); nothing new goes out while it may still land. A Transfer known landed holds every later read
+//      below its receipt's height: no read older than it counts.
 //   3. The gate, in the relayer's queue right before the Transfer is signed: at one final block, the same on both
 //      providers (fee.ts agreedBlock), the id is absent (UNKNOWN_ACCOUNT and an empty key list on both, so it has no
 //      key) and holds at least MIN_DEPOSIT of the vault's token (ft_balance_of, the same bytes on both). A read that
@@ -108,8 +109,16 @@ async function createOnce(id: string, deps: CreateDeps): Promise<CreateAnswer> {
   const { store, relayer } = deps;
   let rec: CreationRecord | null = store.creation(id);
 
-  // 2. The read-back: a Transfer of ours that may still land is read before anything new.
+  // 2. The read-back: an id that exists is never sent to, so its account is read first; a Transfer of ours that may
+  // still land is then read (its bytes sent again) before anything new.
   if (rec !== null && rec.last.state === "pending") {
+    let d: Delivery;
+    try {
+      d = await deps.delivery(id);
+    } catch (e) {
+      return { code: "unread", why: why(e) };
+    }
+    if (d.account.kind !== "absent") return { code: "exists", tx_hash: rec.last.tx_hash };
     const out = await relayer.resolve(rec.last, { resend: true });
     if (out.kind === "unknown") return { code: "in_flight", tx_hash: rec.last.tx_hash };
     rec = outcomeOf(rec, out);
