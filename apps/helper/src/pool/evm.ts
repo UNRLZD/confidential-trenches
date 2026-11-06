@@ -286,9 +286,9 @@ export function evmReadSell(d: Uint8Array): EvmSell {
 const utf8 = (t: string) => new TextEncoder().encode(t);
 const w32 = (n: bigint) => unhex(n.toString(16).padStart(64, "0"));
 const DOMAIN_TYPE = keccak_256(utf8("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
-/** SellDelegate.sol's SELL_TYPEHASH string, held to the contract's own text by contracts/pool-evm/test/sell-type-helper.test.mjs. */
-export const SELL_TYPE_STRING = "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)";
-const SELL_TYPE = keccak_256(utf8(SELL_TYPE_STRING));
+/** SellDelegate.sol's SELL_TYPEHASH, its string held to the contract's own text by contracts/pool-evm/test/sell-type-helper.test.mjs.
+ *  The string sits in this one declaration, the one the signing page's signer guard lets the helper hold it in. */
+const SELL_TYPE = keccak_256(utf8("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"));
 /** SellDelegate._sellDigest (contracts/pool-evm/src/SellDelegate.sol) of `s` under W's own address on chain `chainId`. */
 export function evmSellDigest(chainId: bigint, w: string, s: EvmSell): Uint8Array {
   const domain = keccak_256(Uint8Array.from([...DOMAIN_TYPE, ...keccak_256(utf8("Blindfill")), ...keccak_256(utf8("1")), ...w32(chainId), ...w32(BigInt(w))]));

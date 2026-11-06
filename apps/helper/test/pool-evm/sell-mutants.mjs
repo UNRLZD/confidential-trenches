@@ -81,8 +81,7 @@ export const MUTANTS = [
   // the 11-field Sell (card helper-sell-fee-recipient): feeRecipient after feeCap in the calldata, the type and the hash
   [EVM, "const rest = [s.minOut, BigInt(s.pool), s.precommitment, s.feeCap, BigInt(s.feeRecipient), s.deadline, s.nonce].map(w32);", "const rest = [s.minOut, BigInt(s.pool), s.precommitment, BigInt(s.feeRecipient), s.feeCap, s.deadline, s.nonce].map(w32);", T, "the helper's sell digest is SellDelegate's"],
   [EVM, "const rest = [s.minOut, BigInt(s.pool), s.precommitment, s.feeCap, BigInt(s.feeRecipient), s.deadline, s.nonce].map(w32);", "const rest = [s.minOut, BigInt(s.pool), s.precommitment, s.feeCap, s.deadline, s.nonce].map(w32);", T, "the helper's sell digest is SellDelegate's"],
-  [EVM, "uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)\";", "uint256 feeCap,uint256 deadline,uint256 nonce)\";", T, "the helper's sell digest is SellDelegate's"],
-  [EVM, "const SELL_TYPE = keccak_256(utf8(SELL_TYPE_STRING));", "const SELL_TYPE = keccak_256(utf8(SELL_TYPE_STRING.replace(\",address feeRecipient\", \"\")));", T, "the helper's sell digest is SellDelegate's"],
+  [EVM, "uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)\"));", "uint256 feeCap,uint256 deadline,uint256 nonce)\"));", T, "the helper's sell digest is SellDelegate's"],
   [EVM, "feeCap: t(7), feeRecipient: addr(t(8)),", "feeCap: t(8), feeRecipient: addr(t(7)),", T, "the helper reads SellDelegate.sell's 11-field Sell"],
   [EVM, "const SELL_TUPLE = 11;", "const SELL_TUPLE = 10;", T, "the helper reads SellDelegate.sell's 11-field Sell"],
   [EVM, "uint256,uint256,address,uint256,uint256),uint256,bytes)\";", "uint256,uint256,uint256,uint256),uint256,bytes)\";", T, "the helper reads SellDelegate.sell's 11-field Sell"],
