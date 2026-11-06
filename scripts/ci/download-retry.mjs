@@ -46,7 +46,8 @@
 //  - a script that builds crates itself (CARGO_SCRIPTS: the sandbox harness's run.sh, the Solana dry run) with the
 //    fetch of each manifest it builds not before it in the job;
 //  - deploy.mjs --build-only or --verify-records not run through retry.sh: cargo-near builds them in a container,
-//    where no fetch from the runner reaches.
+//    where no fetch from the runner reaches; and such a retry without RETRY_FINAL=3, deploy.mjs's exit code for two
+//    builds (or a record) whose hashes disagree: a retry must never turn that green.
 import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -303,6 +304,10 @@ export function fetchScriptRefusals(text) {
 const CARGO_CMD = /(?:^|[\s;&|(`$])cargo((?:\s+\+\S+)?)\s+(test|build|check|clippy|run|bench|doc|rustdoc|fetch|tree|vendor|update|metadata|near\s+build|build-sbf)(?=\s|$)/;
 const SBF_CMD = /(?:^|[\s;&|(`$])cargo-build-sbf(?=\s|$)/;
 const CONTAINER_BUILD = /\bdeploy\.mjs\b.*\s--(?:build-only|verify-records)(?=\s|$)/;
+// deploy.mjs's EXIT_HASH_DISAGREE (download-retry.test.mjs holds them equal): the code retry.sh must never retry
+const HASH_DISAGREE = 3;
+/** The codes a command line's RETRY_FINAL=... assignments name (before retry.sh): ["3"] for RETRY_FINAL="3". */
+const finalCodes = (prefix) => [...prefix.matchAll(/(?:^|\s)RETRY_FINAL=(?:"([^"]*)"|'([^']*)'|(\S*))/g)].flatMap((m) => (m[1] ?? m[2] ?? m[3]).split(/[\s,]+/).filter(Boolean));
 const VAULT_MANIFESTS = ["contracts/vault/Cargo.toml", "contracts/vault/tests/mock-token/Cargo.toml", "contracts/vault/tests/harness/probe/Cargo.toml"];
 /** Scripts that run cargo themselves, with the manifests they build: each must be fetched, with retry, before them. */
 export const CARGO_SCRIPTS = [
@@ -351,8 +356,12 @@ export function cargoRefusals(yml) {
             const missing = ms.filter((m) => !fetched.has(m));
             if (missing.length) out.push([n, `${script}, which builds crates itself, with no ${RETRY} cargo fetch --locked before it in its job of: ${missing.join(", ")}`]);
           }
-          if (CONTAINER_BUILD.test(seg) && !retried(seg.indexOf("deploy.mjs"))) {
-            out.push([n, `a deploy.mjs build in cargo-near's container, which no fetch from the runner reaches, not run through ${RETRY}: ${seg.trim()}`]);
+          if (CONTAINER_BUILD.test(seg)) {
+            const at3 = seg.indexOf("deploy.mjs");
+            if (!retried(at3)) out.push([n, `a deploy.mjs build in cargo-near's container, which no fetch from the runner reaches, not run through ${RETRY}: ${seg.trim()}`]);
+            else if (!finalCodes(seg.slice(0, seg.indexOf(RETRY))).includes(String(HASH_DISAGREE))) {
+              out.push([n, `a deploy.mjs build whose retry does not name the code a hash disagreement ends with (RETRY_FINAL=${HASH_DISAGREE}), so a build reproducible only some of the time passes on its second try: ${seg.trim()}`]);
+            }
           }
         }
       }
