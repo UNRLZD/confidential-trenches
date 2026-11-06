@@ -238,7 +238,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       ]),
       // V4Quoter.poolManager() on both providers (2026-11-03 19:36Z). rpc.mainnet.chain.robinhood.com serves eth_getLogs
       // over 10,000,000 blocks a request but at most 10,000 logs ("logs matched by query exceeds limit of 10000" over
-      // 10M blocks; robinhood.drpc.org: 10,000 blocks on its free plan), so 1M-block spans
+      // 10M blocks; robinhood.drpc.org: 10,000 blocks on its free plan). One request over the whole depth (card
+      // rh-cold-quote): TORCH's Initialize logs over 10M blocks, both topic positions in one batch, 100 logs in 314 ms;
+      // 15 seeded currencies' in one batch of 30 calls, 737 ms (2026-11-06 01:4xZ from this Mac); a request past 10,000
+      // logs or its time is asked as its halves (scanPools)
       poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
       // (it answers 429 to 4 at once, 2026-11-03 20:27Z); a request with more than one value in a topic position spans
       // at most 100,000 blocks ("query spans 1000000 blocks …, but only 100000 are allowed for this request; narrow the
@@ -265,7 +268,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // (no eth_getLogs).
       scan: bare({
         url: "https://rpc.mainnet.chain.robinhood.com",
-        span: 1_000_000,
+        span: 10_000_000,
         depth: 10_000_000,
         parallel: 2,
         orSpan: 100_000,

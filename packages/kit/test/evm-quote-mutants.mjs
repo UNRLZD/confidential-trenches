@@ -35,9 +35,34 @@ const E = "test/evm-pool-fee.test.ts";
 // [file, text, replacement, test file, the test that must fail]
 export const MUTANTS = [
   // two providers at one block they both hold, no more than 30 s old
-  [QUOTE, 'const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial);', "const same = (a: Answer, b: Answer) => true;", Q, "Q2 "],
+  [QUOTE, 'const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);', "const same = (a: Answer, b: Answer) => true;", Q, "Q2 "],
   [QUOTE, 'b.kind === "out" && a.amountOut === b.amountOut', 'b.kind === "out"', Q, "Q2 "],
   [QUOTE, 'b.kind === "revert" && a.partial === b.partial', 'b.kind === "revert"', Q, "Q2 "],
+  // the X prune (card rh-cold-quote): an overflow named by one provider alone, the prune's verdict, its pinned-hook rule,
+  // and one request a currency where fewer than the OR
+  [QUOTE, " && a.partial === b.partial && a.overflow === b.overflow);", " && a.partial === b.partial);", R, "card rh-cold-quote: one provider that answers SafeCastOverflow"],
+  [QUOTE, 'return r.kind === "revert" && (r.partial || r.overflow === true);', "return false;", R, "card rh-cold-quote: a cold Robinhood quote"],
+  [QUOTE, "for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push(", "for (const f of fs) if (true) asks.push(", R, "card rh-cold-quote: a currency's pool behind a pinned hook"],
+  [QUOTE, "const step = or < on.span && ", "const step = false && ", R, "card rh-cold-quote: a cold Robinhood quote"],
+  // the prune's direction (the token out), a plain revert kept, and a cold request the first failed at once: asked as
+  // its halves on the first, its newest blocks a request of their own (review of 9c962b6d)
+  [QUOTE, "word(lower(k.currency1) === token ? 1n : 0n)", "word(lower(k.currency1) === token ? 0n : 1n)", R, "card rh-cold-quote: the prune reads the token out"],
+  [QUOTE, 'return r.kind === "revert" && (r.partial || r.overflow === true);', 'return r.kind === "revert";', R, "card rh-cold-quote: a currency's pool whose exact-output read reverts with no data"],
+  [QUOTE, "const alone = !fast && on.next !== undefined && b - a + 1 > SCAN_ALONE;", "const alone = false;", R, "card rh-cold-quote: one HTTP 503 from the first"],
+  [QUOTE, "    if (on.next !== undefined && to === head && to - from + 1 > on.next.span) {", "    if (false && on.next !== undefined && to === head && to - from + 1 > on.next.span) {", R, "card rh-cold-quote: a first whose backend is a block behind"],
+  [QUOTE, "const SCAN_ALONE = 100_000;", "const SCAN_ALONE = 1_000_000;", R, "card rh-cold-quote: a cached scan's 500,000-block gap with one 503"],
+  // a cold scan's first throttled past the bound, any failure over SCAN_ALONE blocks, and a flood at the smallest span
+  // (review of 8fd51265)
+  [QUOTE, "if (next === undefined || e instanceof ScanStop) throw e;", "if (next === undefined) throw e;", R, "card rh-cold-quote: a cold scan's first throttled past"],
+  [QUOTE, "throw fast ? new EvmQuoteError(\"rpc_error\", m) : new ScanStop(\"rpc_error\", m);", "throw new EvmQuoteError(\"rpc_error\", m);", R, "card rh-cold-quote: a cold scan's first throttled past"],
+  [QUOTE, "    if (alone) return halves(splits);\n", "", R, "card rh-cold-quote: a first that answers HTTP 503 to every request over 100,000"],
+  [QUOTE, "    if (answered || rs !== null) return short();\n", "", R, "card rh-cold-quote: 12,000 made-up pools past the first's cap, answered in rpc.mainnet"],
+  [QUOTE, "jobsOf(g, a, b);\n  shortMax += 2 * jobs.length;\n", "jobsOf(g, a, b);\n", R, "card rh-cold-quote: a cold Base scan whose first answers each of its starting requests once"],
+  [QUOTE, "        if (shorts > shortMax) throw new ScanStop(", "        if (false) throw new ScanStop(", R, "card rh-cold-quote: a first that answers -32602 to every getLogs"],
+  [QUOTE, "if (e instanceof BadAnswer) throw new ScanAnswered(", "if (false) throw new ScanAnswered(", R, "card rh-cold-quote: a first that answers HTTP 413"],
+  [QUOTE, "throw res.status >= 500 ? new Error(m) : new BadAnswer(m);", "throw new Error(m);", R, "card rh-cold-quote: a first that answers HTTP 413"],
+  [QUOTE, "throw new ScanStop(\"too_many_pools\",", "throw new EvmQuoteError(\"too_many_pools\",", R, "card rh-cold-quote: one block holding more pools"],
+  [QUOTE, "} else if (top && typeof h?.hash !== \"string\") return null;", "} else if (top && typeof h?.hash !== \"string\") return filters.map(() => undefined);", R, "SP3 "],
   [QUOTE, "const at = { blockHash: hash, requireCanonical: true };", "const at = { blockHash: hash };", Q, "Q1 "],
   [QUOTE, "const near = (x: Block, y: Block) => x.number - y.number <= maxLag && y.number - x.number <= maxLag;", "const near = (x: Block, y: Block) => true;", R, "R5 "],
   [QUOTE, "if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {", "if (false) {", R, "R1b "],
@@ -77,7 +102,7 @@ export const MUTANTS = [
   [QUOTE, "const hints = (Array.isArray(a.hints) ?", "const hints = (false ?", R, "N1b "],
   // (SP3, not N1a: N1a's provider answers its newest request's head block with an error too, refused there since card
   // evm-scan-second-provider)
-  [QUOTE, "if (!fine(rs)) return refuse(", "if (false) return refuse(", R, "SP3 "],
+  [QUOTE, "    if (rs !== null && fine(rs)) return void keep(rs);", "    if (rs !== null) return void keep(rs);", R, "card rh-cold-quote: one block holding more pools"],
   // card evm-quote-head-watch: a scan request that fails or overflows is asked by halves; one ending past maxLag behind
   // the agreed block is scanned on to it
   [QUOTE, "rs.every((r) => Array.isArray(r) && r.length < SCAN_MAX_LOGS)", "rs.every((r) => Array.isArray(r))", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
@@ -142,7 +167,7 @@ export const MUTANTS = [
   [QUOTE, "if (scanHead - b > maxLag) return refuse(", "if (false) return refuse(", R, "S2 "],
   // card evm-scan-second-provider: a request the first scan provider fails goes to the second; the first passes on at
   // once a refused connection and a throttle held past 2 s; the newest request asks its head block in its batch
-  [QUOTE, "      if (next === undefined) throw e;", "      throw e;", R, "SP1 "],
+  [QUOTE, "      if (next === undefined || e instanceof ScanStop) throw e;", "      throw e;", R, "SP1 "],
   [QUOTE, "            if (spareNext) throw new ScanRefused(", "            if (false) throw new ScanRefused(", R, "SP1 "],
   [QUOTE, "      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw", "      if (false) throw", R, "SP4 "],
   [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
@@ -157,13 +182,13 @@ export const MUTANTS = [
   // review of 22e29c9, N4: the 2 s hold where no second follows (the head read), and a not-yet block as an answer
   [QUOTE, "      fast &&= spareNext;", "", R, "SP8 "],
   [QUOTE, 'throw on.next !== undefined ? new ScanRefused("rpc_error", m) : new NotHeldYet("rpc_error", m);', "return out;", R, "SP3 "],
-  [QUOTE, "      if (fast && on.next !== undefined) throw new ScanRefused(", "      if (false) throw new ScanRefused(", R, "SP5 "],
+  [QUOTE, "    if (fast && on.next !== undefined) throw new ScanRefused(", "    if (false) throw new ScanRefused(", R, "SP5 "],
   // card evm-rpc-spare-list: a request the second fails goes to the third, the head too; a 5xx passes on at once; a
   // not-yet block is asked again whole; a one-call batch's bare answer is read
   [QUOTE, "      await settle(rest.map(run));", "      await settle(rest.map((r) => one(r)));", R, "SL1 "],
   [QUOTE, "(o.next === undefined ? Promise.reject(e) : headFrom(o.next))", "(o.next === undefined || o !== firstOn ? Promise.reject(e) : headFrom(o.next))", R, "SL1 "],
   [QUOTE, "          if (spareNext && /^the provider answered HTTP 5", "          if (false && /^the provider answered HTTP 5", R, "SL1 "],
-  [QUOTE, "      if (notYet) {", "      if (false) {", R, "SL3 "],
+  [QUOTE, "    if (notYet) {", "    if (false) {", R, "SL3 "],
   [QUOTE, "calls.length === 1 && typeof parsed === \"object\" && parsed !== null ? [parsed] : parsed;", "false ? [parsed] : parsed;", R, "SL4 "],
   [QUOTE, "  scanned?.commit();", "", R, "N1a "],
   // review of 5452011: no override for a pool the PoolManager does not hold, one hook per override, never an address
@@ -198,7 +223,7 @@ export const MUTANTS = [
   [QUOTE, "  if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {", "  if (plan !== undefined) {", R, "W4 "],
   [QUOTE, "  PLANS.set(planKey, {", "  if (false) PLANS.set(planKey, {", R, "W1 "],
   [QUOTE, "(!kept.has(readKey(r)) || hit.has(first + j))", "(!kept.has(readKey(r)) || true)", R, "W5 "],
-  [QUOTE, "filter((r, j) => r.override === undefined && (", "filter((r, j) => (", R, "W6 "],
+  [QUOTE, "filter((r, j) => r.override === undefined && !r.data.startsWith(", "filter((r, j) => !r.data.startsWith(", R, "W6 "],
   [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W1b "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (false) throw new Unreachable(", R, "T7b "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (e instanceof Error) throw new Unreachable(", R, "T7b "],
@@ -303,7 +328,7 @@ export const MUTANTS = [
   [QUOTE, "    limit = sst = Math.max(1, Math.floor(limit / 2));", "    sst = limit;", R, "TH3 "],
   [QUOTE, "      else if (flying < Math.floor(limit)) {", "      else if (true) {", R, "TH3 "],
   [QUOTE, "limit = Math.min(parallel, limit < sst ? limit + 1 : limit + 1 / limit);", "limit = Math.min(parallel, limit);", R, "TH3 "],
-  [QUOTE, "      if (resumeAt > untilMs) return refuse(", "      if (false) return refuse(", R, "TH4 "],
+  [QUOTE, "      if (resumeAt > untilMs) {\n        const m =", "      if (false) {\n        const m =", R, "TH4 "],
   [QUOTE, '          if ((e as Error | null)?.name === "TimeoutError") congest(sent);', "", R, "TH5 "],
   [QUOTE, "    if (sent !== cuts) return false;", "", R, "TH6 "],
   [QUOTE, "      if (now >= untilMs) throw past();", "", R, "TH7 "],
@@ -313,7 +338,7 @@ export const MUTANTS = [
   // browser's fetch failure, a TypeError with no cause, asked again whole too (LOW-B); the bound's race and abort, the
   // refusals' backoff and the per-round list, each held by a named test (LOW-A)
   [QUOTE, "            if (++refused >= SCAN_TRIES) throw new ScanRefused(", "            if (false) throw new ScanRefused(", R, "B1r "],
-  [QUOTE, "        if (e instanceof ScanRefused) throw e;\n", "", R, "B1r "],
+  [QUOTE, "if (e instanceof ScanStop || (e instanceof ScanRefused && !alone) || last) throw e;", "if (e instanceof ScanStop || last) throw e;", R, "B1r "],
   [QUOTE, "            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));", "            await nap(0);", R, "B1r "],
   [QUOTE, "            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));", "            await nap(0);", R, "B1a "],
   [QUOTE, 'if (e instanceof TypeError && (cause === undefined || (typeof code === "string" && CONNECT_ERRORS.has(code))))', 'if (e instanceof TypeError && typeof code === "string" && CONNECT_ERRORS.has(code))', R, "B8 "],
@@ -326,7 +351,7 @@ export const MUTANTS = [
   [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "X3 "],
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
   [QUOTE, "    return x < y ? x : y;", "    return x;", R, "H2 "],
-  [QUOTE, "      const span = part.length === 1 ? on.span : Math.min(on.span, on.orSpan ?? on.span);", "      const span = on.span;", R, "B1 "],
+  [QUOTE, "      const span = part.length === 1 ? on.span : or;", "      const span = on.span;", R, "B1 "],
   [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X4 "],
   [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
   [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1a "],

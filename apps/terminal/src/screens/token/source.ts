@@ -5,15 +5,24 @@
 // (Discover's own read, ../discover/data.ts), the first row of the Trending column as Discover orders it (columnRows),
 // then the same token read for that mint. Display only: nothing here feeds a signature. A failed or wrong read is the
 // error state, never another token; an empty column is the empty state. The page (TokenPage.tsx) takes `TokenData`.
+//
+// Card token-page-fills-after (M384): a cold page's row may be the helper's row named on chain (src "chain", helper
+// card helper-page-jup-429), its symbol and name read from the mint and its Jupiter fields null. The page's `filling`
+// (the helper's TokenPage field) says Jupiter's row is still coming: then those null fields draw loading; a page
+// without it (a mint Jupiter does not list, or a helper that does not send it) draws the dash. While the row is named
+// on chain the page reads again every FILL_MS, so a mint Jupiter lists later fills without a reload, until the row is
+// Jupiter's or the page closes.
 import { HELPER_FETCH_INIT } from "@blindfill/kit";
 import { useCallback, useEffect, useState } from "react";
 import { readLists } from "../discover/data.ts";
 import type { MarketChain, MarketRow } from "../discover/fields.ts";
 import { columnRows } from "../discover/model.ts";
 import type { RiskRead } from "../trade/safety.ts";
+import { chainNamed } from "./model.ts";
 
-/** `risk` is the token read's own `risk` part, which the safety grid draws (what the row lacks: insiders, tax, LP, honeypot). */
-export type TokenData = { status: "loading" } | { status: "error" } | { status: "empty" } | { status: "ready"; row: MarketRow; risk?: RiskRead };
+/** `risk` is the token read's own `risk` part, which the safety grid draws (what the row lacks: insiders, tax, LP, honeypot).
+ *  `filling`: the helper says the row's Jupiter fields are still coming (true only when it sends `filling: true`). */
+export type TokenData = { status: "loading" } | { status: "error" } | { status: "empty" } | { status: "ready"; row: MarketRow; risk?: RiskRead; filling?: boolean };
 
 /** HELPER_HOST's token read for one token (the CSP's connect-src names the host, public/_headers). */
 export const TOKEN_URL = (id: string, chain: MarketChain = "solana") => `https://api.confidential.unrealized.trade/v1/market/token?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(id)}`;
@@ -26,7 +35,7 @@ class Unknown extends Error {}
 
 /** The row and `risk` of one token read. Throws Unknown on a 404, any other Error on a failed read, another status, or a
  *  row that is not this chain's and id's. */
-async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch): Promise<{ row: MarketRow; risk?: RiskRead }> {
+async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch): Promise<{ row: MarketRow; risk?: RiskRead; filling: boolean }> {
   const r = await fetchFn(TOKEN_URL(id, chain), { ...HELPER_FETCH_INIT, signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (r.status === 404) throw new Unknown("token: unknown");
   if (r.status !== 200) throw new Error(`token answered ${r.status}`);
@@ -34,7 +43,7 @@ async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch): P
   const row = isObject(body) ? body.row : null;
   const risk = isObject(body) ? body.risk : null;
   if (!isObject(row) || row.chain !== chain || row.token !== id || typeof row.symbol !== "string" || row.symbol === "") throw new Error("token: not this token's row");
-  return { row: row as unknown as MarketRow, ...(isObject(risk) ? { risk: risk as RiskRead } : {}) };
+  return { row: row as unknown as MarketRow, ...(isObject(risk) ? { risk: risk as RiskRead } : {}), filling: isObject(body) && body.filling === true };
 }
 
 /** The page's data for /token/<chain>/<id>: the token's row, the empty state (not found) for an id the helper does not
@@ -58,24 +67,72 @@ export async function loadTopToken(fetchFn: typeof fetch = fetch): Promise<Token
   }
 }
 
+/** How often a page whose row is named on chain reads again (M384). */
+export const FILL_MS = 5_000;
+
+/** The page reads again: its row is the helper's named on chain, not Jupiter's (still coming, or not listed yet). */
+export const following = (d: TokenData): boolean => d.status === "ready" && chainNamed(d.row);
+
+export interface FillDeps {
+  /** Runs `fn` after `ms`; returns its cancel. */
+  later?: (fn: () => void, ms: number) => () => void;
+  /** The page is out of sight (document.hidden): no read is made until it is back. */
+  hidden?: () => boolean;
+}
+
+const laterReal = (fn: () => void, ms: number): (() => void) => {
+  const t = setTimeout(fn, ms);
+  return () => clearTimeout(t);
+};
+
+/** Reads once and hands the answer to `onData`; while the answer's row is named on chain (`following`), reads again
+ *  every FILL_MS and hands on each ready answer of the same token, until its row is Jupiter's. A failed read again (or another token's, as /
+ *  could pick if its Trending column moved) keeps the row drawn and tries FILL_MS later. One read at a time; a hidden
+ *  page reads nothing. Returns the stop. */
+export function followToken(load: () => Promise<TokenData>, onData: (d: TokenData) => void, deps: FillDeps = {}): () => void {
+  const later = deps.later ?? laterReal;
+  const hidden = deps.hidden ?? (() => typeof document !== "undefined" && document.hidden);
+  let stopped = false;
+  let token: string | null = null;
+  let cancel: () => void = () => undefined;
+  const again = () => {
+    if (!stopped) cancel = later(() => void step(), FILL_MS);
+  };
+  async function step(): Promise<void> {
+    if (hidden()) return again();
+    const d = await load();
+    if (stopped) return;
+    if (d.status !== "ready" || d.row.token !== token) return again();
+    onData(d);
+    if (following(d)) again();
+  }
+  void load().then((d) => {
+    if (stopped) return;
+    if (d.status === "ready") token = d.row.token;
+    onData(d);
+    if (following(d)) again();
+  });
+  return () => {
+    stopped = true;
+    cancel();
+  };
+}
+
 type Loaded = { data: TokenData; nowMs: number; retry: () => void };
 
-/** The data and the clock of one read: loading until it ends; `retry` reads again from loading. The caller keys the
- *  component by what it reads, so a read never outlives its token. */
+/** The data and the clock of one read: loading until it ends, then read again while its row is named on chain (followToken);
+ *  `retry` reads again from loading. The caller keys the component by what it reads, so a read never outlives its
+ *  token. */
 function useLoaded(load: () => Promise<TokenData>): Loaded {
   const [data, setData] = useState<TokenData>({ status: "loading" });
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    let live = true;
-    void load().then((d) => {
-      if (!live) return;
+    const stop = followToken(load, (d) => {
       setNowMs(Date.now());
       setData(d);
     });
-    return () => {
-      live = false;
-    };
+    return stop;
     // `load` is fixed for this component's life: its caller keys the component by what it reads
   }, [attempt]);
   const retry = useCallback(() => {
