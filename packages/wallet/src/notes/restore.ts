@@ -345,9 +345,10 @@ export type RestoreWrite = { notes: NoteRecord[]; leftAlone: LeftAlone[] };
  * the parent goes to SPENT with it (store.add); a spent note with no child found (a ragequit) is moved to SPENT. A note
  * the store already holds as landed is kept, unless the vault shows it spent; one it holds PLANNED, INCOMING or TAKEN
  * is left as it is and returned in leftAlone. The notes below a PLANNED or INCOMING one are held back with it (returned
- * as "parent"); those below a TAKEN one are written. Returns the store's notes and those left alone.
+ * as "parent"); those below a TAKEN one are written. Returns the store's notes and those left alone. Its notes may be the
+ * vault's (restoreNotes) or a pool's (../pool/solana-restore.ts, ../pool/evm-restore.ts): one shape, one write.
  */
-export async function writeRestored(store: NoteStore, r: NoteRestore): Promise<RestoreWrite> {
+export async function writeRestored(store: NoteStore, r: Pick<NoteRestore, "notes">): Promise<RestoreWrite> {
   const have = new Map((await store.list()).map((n) => [refKey(n.ref), n]));
   const leftAlone: LeftAlone[] = [];
   const blocked = new Set<string>();

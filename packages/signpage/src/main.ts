@@ -79,6 +79,7 @@ import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/net
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
 import { testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { poolRestore } from "./pool-restore.ts";
 import type { PoolChain } from "./rules/pool.ts";
 
 type State =
@@ -121,6 +122,20 @@ let shell: Shell | null = null;
 // card signpage-pool-mainnet); with no pool pinned on the network it refuses every pool kind and reads nothing; the
 // store and the seed are opened when a run needs them
 const testnet = !framed ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }) : null;
+// the restore kind (src/pool-restore.ts, card pool-restore-wired): every pool the page's network pins read from the
+// words, what it finds written to the note store, the proof queue's pass after; top-level only, as the pool flow
+const restore = !framed
+  ? poolRestore({
+      store: () => open(),
+      seed64: () => openSeed64(),
+      signedIn: async () => {
+        const s = await readSeedSettled();
+        s?.entropy.fill(0);
+        return s !== undefined;
+      },
+      written: () => void testnet?.proofs().catch(() => {}),
+    })
+  : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 if (framed) document.body.append(root);
@@ -202,6 +217,8 @@ else {
       // no pin, mainnet until its pools deploy, refuses every one not_allowed and makes no read); a sell's decimals read
       // on two providers
       ...poolKinds(poolDeps),
+      // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
+      ...(restore ? { restore: restore.kind } : {}),
     },
   });
   shell.layer.append(root);
@@ -464,6 +481,7 @@ const open = async (): Promise<WalletStore> =>
       store = null;
       openedBy = null;
       void testnet?.signedOut();
+      restore?.signedOut();
       show("signed-out");
     },
   }));
@@ -581,6 +599,8 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean):
   // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown; the entropy is
   // zeroed on every path, an open that fails included (words.ts storeSeed)
   await landed(await signInPrf(open, r.entropy));
+  // a passkey that opens an existing account on this browser: its notes are rebuilt from the chain with no tap
+  if (!create) void restore?.auto().catch(() => {});
 }
 
 // ses.10-12: the typed 12 words, checked on the device before anything else; a failure stores nothing
@@ -596,6 +616,8 @@ async function signInWords(typed: string): Promise<void> {
     throw e;
   }
   await landed(l);
+  // the words on a new browser: an empty note store is rebuilt from the chain once, with no tap (src/pool-restore.ts)
+  void restore?.auto().catch(() => {});
 }
 
 // The backup screen (S3.1): the stored seed's 12 words, top-level only; the entropy is zeroed once they are made.
@@ -648,6 +670,8 @@ async function cancel(): Promise<void> {
 async function signOut(): Promise<void> {
   topLevelOnly();
   const s = await open();
+  // a restore holds the seed lock shared, which the sign out waits for: it stops first
+  restore?.signedOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;
