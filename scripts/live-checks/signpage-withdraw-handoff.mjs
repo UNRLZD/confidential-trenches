@@ -3,8 +3,9 @@
 // helper it reads. What it holds, on what is deployed:
 //   - SIGN_HOST's build is one network's: its CSP connect-src names the mainnet NEAR pair and no testnet NEAR RPC, so
 //     the mainnet build cannot read a testnet RPC;
-//   - SIGN_HOST's /app.js is the one its index.html pins (its sha384) and carries this card's code: the release's
-//     testnet withdrawal relayer (RELEASE_WITHDRAW_RELAYER) and the withdraw fee path;
+//   - SIGN_HOST's /app.js is the one its index.html pins (its sha384) and carries this card's code (the withdraw fee
+//     path and the form's refusal where its network names no relayer, "names no withdrawal relayer on"), and none of the
+//     testnet relayer's ids: the testnet relayer is the testnet build's only (RELEASE_WITHDRAW_RELAYER folds it);
 //   - the withdraw form's fee read, run with the page's own code (askWithdrawFee, readTokenStorageMin,
 //     readWithdrawFeeMax, in packages/wallet/scripts/withdraw-fee-check.ts as a child process) on the testnet release pair, mainnet's pair for the price, and the deployed helper: the
 //     helper's GET /v1/withdraw/fee for the testnet token names exactly the release's relayer and fee recipient, and
@@ -55,7 +56,8 @@ export function judge(a) {
   }
   const pin = /<script type="module" src="\/app\.js" integrity="(sha384-[A-Za-z0-9+/=]+)"/.exec(a?.html ?? "")?.[1] ?? null;
   if (pin === null || pin !== a?.appSha384) bad(`SIGN_HOST's /app.js (${a?.appSha384 ?? "none"}) is not the one its index.html pins (${pin ?? "none"})`);
-  if (!a?.app?.relayer) bad("SIGN_HOST's /app.js carries no release withdrawal relayer: the build is before this card");
+  if (!a?.app?.noRelayer) bad("SIGN_HOST's /app.js carries no withdraw form fee read: the build is before this card");
+  if (a?.app?.testnetRelayer !== false) bad("SIGN_HOST's /app.js carries the testnet withdrawal relayer's ids: the mainnet build is not folded");
   if (!a?.app?.feePath) bad("SIGN_HOST's /app.js carries no withdraw fee path");
   const f = a?.fee;
   if (f === null || typeof f !== "object") bad("the helper gave no fee answer for the testnet token");
@@ -92,7 +94,11 @@ export async function read(local = false) {
   }
   const appSha384 = `sha384-${createHash("sha384").update(js).digest("base64")}`;
   const text = js.toString("utf8");
-  const app = { relayer: text.includes(RELAYER.relayer_account) && text.includes(RELAYER.fee_recipient), feePath: text.includes("/v1/withdraw/fee") };
+  const app = {
+    noRelayer: text.includes("names no withdrawal relayer on"),
+    testnetRelayer: text.includes(RELAYER.relayer_account) || text.includes(RELAYER.fee_recipient),
+    feePath: text.includes("/v1/withdraw/fee"),
+  };
   // the form's fee read, the page's own code, in a child process (see CHILD)
   const { fee, feeMax, feeError } = child();
   return { at: new Date().toISOString(), csp, html, appSha384, app, fee, feeMax, feeError };

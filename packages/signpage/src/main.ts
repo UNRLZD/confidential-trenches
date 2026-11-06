@@ -68,14 +68,14 @@ import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
-import { openNoteStore, readNotes, type NoteRecord } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm } from "./withdraw/form.ts";
-import { PAGE_NETWORK, withdrawFormDeps } from "./withdraw/handoff.ts";
+import { PAGE_NETWORK, withdrawFormDeps, withdrawSettle } from "./withdraw/handoff.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
@@ -438,10 +438,34 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   root.replaceChildren(...parts);
 }
 
-// The withdraw form's reads and hand-off on the build's network (src/withdraw/handoff.ts): the note value over the note
-// store, the relayer's fee bounded by the device's fee_max, and the wallet's withdraw path on this page's prover.
+// The withdraw form's reads on the build's network (src/withdraw/handoff.ts): the note value over the note store and the
+// relayer's fee bounded by the device's fee_max. No hand-off yet: Withdraw is drawn pending until the move from A to the
+// typed account is on this page (card wallet-withdraw-move-out).
 function withdrawDeps() {
   return withdrawFormDeps({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault });
+}
+// Sign out (this tab's or another's) stops a vault withdrawal's wait; its note stays RESERVED with its request.
+let withdrawWait = new AbortController();
+function withdrawsSignedOut(): void {
+  withdrawWait.abort();
+  withdrawWait = new AbortController();
+}
+// The vault withdrawals a closed or reloaded page left RESERVED, followed to settled once per sign-in (src/withdraw/
+// handoff.ts withdrawSettle); its own note store, closed after. Nothing where the build's network names no vault.
+async function settleWithdraws(): Promise<void> {
+  if (!prover) return;
+  let ns: NoteStore | null = null;
+  try {
+    await withdrawSettle({
+      store: () => open(),
+      notes: async () => (ns ??= await openNoteStore(await open())),
+      seed64: () => openSeed64(),
+      prover: prover.vault,
+      signal: withdrawWait.signal,
+    });
+  } finally {
+    (ns as NoteStore | null)?.close();
+  }
 }
 
 // The account's public id from its entropy: entropy -> 12 words -> seed64 -> T_0 (wallet.md:47, :54, :68). seed64 is
@@ -512,7 +536,10 @@ function storeMoved(e: WalletEvent): void {
   if (walletSeedMoved(e)) moved += 1;
   else return;
   // another tab signed out: the proof queue and its seed copy go now
-  if (e.kind === "signout") void testnet?.signedOut();
+  if (e.kind === "signout") {
+    void testnet?.signedOut();
+    withdrawsSignedOut();
+  }
   void resync();
 }
 // the resync in flight, which open kinds wait for (openKind)
@@ -579,6 +606,8 @@ async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
   // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
   void testnet?.settle();
+  // a vault withdrawal a reload cut short is followed to settled (src/withdraw/handoff.ts withdrawSettle)
+  void settleWithdraws().catch(() => {});
   // a restore a closed or reloaded page left running reads stalled, so the app offers Retry (src/pool-restore.ts)
   void restore?.settle().catch(() => {});
   if (l.screen === "backup") return void showBackup(l.seed);
@@ -670,6 +699,7 @@ async function signOut(): Promise<void> {
   const s = await open();
   // a restore holds the seed lock shared, which the sign out waits for: it stops first
   restore?.signedOut();
+  withdrawsSignedOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;

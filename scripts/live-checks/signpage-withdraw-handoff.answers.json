@@ -1,129 +1,157 @@
 {
-  "_note": "good: this card's SIGN_HOST build as committed (--local: index.html, public/app.js, public/_headers) with the live testnet fee read; bad: SIGN_HOST as served before this card (release-63); the rest: the good answer with one cut planted",
+  "_note": "good: this card's SIGN_HOST build as committed (--local: index.html, public/app.js, public/_headers) with the live testnet fee read; bad: SIGN_HOST as served before this card (release-64, read 2026-11-06); the rest: the good answer with one cut planted",
   "good": {
-    "at": "2026-11-06T16:10:04.238Z",
+    "at": "2026-11-06T17:49:10.951Z",
     "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
-    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZQclWpNAbjjSSwhNTghlTIKfH1wZitPmdZokhBD5Yc7/UFYchQluQ+Yo4jD+E20e\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "appSha384": "sha384-ZQclWpNAbjjSSwhNTghlTIKfH1wZitPmdZokhBD5Yc7/UFYchQluQ+Yo4jD+E20e",
+    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "appSha384": "sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F",
     "app": {
-      "relayer": true,
+      "noRelayer": true,
+      "testnetRelayer": false,
       "feePath": true
     },
     "fee": {
       "relayer_account": "r-2b700409.bf-vt-20261102t071444.testnet",
       "fee_recipient": "f-2b700409.bf-vt-20261102t071444.testnet",
-      "relay_fee": "188184",
+      "relay_fee": "186440",
       "gp": "100000000",
-      "px": "3.748816974295",
+      "px": "3.714073513296",
       "g_w": "92505000000000",
-      "valid_until_block": 276508340
+      "valid_until_block": 276518007
     },
-    "feeMax": "397175",
+    "feeMax": "393494",
     "feeError": null
   },
   "bad": {
-    "at": "2026-11-06T16:10:01.575Z",
+    "at": "2026-11-06T17:49:14.877Z",
     "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
-    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-WZEESmLR1IK+1UdhFfnR0VIN63auvdkZC+Lk6jsl7li6C19VR8OXEZmRkEJV03yB\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "appSha384": "sha384-WZEESmLR1IK+1UdhFfnR0VIN63auvdkZC+Lk6jsl7li6C19VR8OXEZmRkEJV03yB",
+    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-zZSU4xfh6mPlsUnVTftWDVB7CyAi7HLDW9VGN6djgKiC2h97V9NXkfhYnoWa4XEY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "appSha384": "sha384-zZSU4xfh6mPlsUnVTftWDVB7CyAi7HLDW9VGN6djgKiC2h97V9NXkfhYnoWa4XEY",
     "app": {
-      "relayer": false,
+      "noRelayer": false,
+      "testnetRelayer": false,
       "feePath": true
     },
     "fee": {
       "relayer_account": "r-2b700409.bf-vt-20261102t071444.testnet",
       "fee_recipient": "f-2b700409.bf-vt-20261102t071444.testnet",
-      "relay_fee": "188184",
+      "relay_fee": "186440",
       "gp": "100000000",
-      "px": "3.748816974295",
+      "px": "3.714073513296",
       "g_w": "92505000000000",
-      "valid_until_block": 276508336
+      "valid_until_block": 276518013
     },
-    "feeMax": "397175",
+    "feeMax": "393494",
+    "feeError": null
+  },
+  "badTestnetRelayer": {
+    "at": "2026-11-06T17:49:10.951Z",
+    "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "appSha384": "sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F",
+    "app": {
+      "noRelayer": true,
+      "testnetRelayer": true,
+      "feePath": true
+    },
+    "fee": {
+      "relayer_account": "r-2b700409.bf-vt-20261102t071444.testnet",
+      "fee_recipient": "f-2b700409.bf-vt-20261102t071444.testnet",
+      "relay_fee": "186440",
+      "gp": "100000000",
+      "px": "3.714073513296",
+      "g_w": "92505000000000",
+      "valid_until_block": 276518007
+    },
+    "feeMax": "393494",
     "feeError": null
   },
   "badFeeAboveCap": {
-    "at": "2026-11-06T16:10:04.238Z",
+    "at": "2026-11-06T17:49:10.951Z",
     "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
-    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZQclWpNAbjjSSwhNTghlTIKfH1wZitPmdZokhBD5Yc7/UFYchQluQ+Yo4jD+E20e\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "appSha384": "sha384-ZQclWpNAbjjSSwhNTghlTIKfH1wZitPmdZokhBD5Yc7/UFYchQluQ+Yo4jD+E20e",
+    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "appSha384": "sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F",
     "app": {
-      "relayer": true,
+      "noRelayer": true,
+      "testnetRelayer": false,
       "feePath": true
     },
     "fee": {
       "relayer_account": "r-2b700409.bf-vt-20261102t071444.testnet",
       "fee_recipient": "f-2b700409.bf-vt-20261102t071444.testnet",
-      "relay_fee": "397176",
+      "relay_fee": "393495",
       "gp": "100000000",
-      "px": "3.748816974295",
+      "px": "3.714073513296",
       "g_w": "92505000000000",
-      "valid_until_block": 276508340
+      "valid_until_block": 276518007
     },
-    "feeMax": "397175",
+    "feeMax": "393494",
     "feeError": null
   },
   "badRelayer": {
-    "at": "2026-11-06T16:10:04.238Z",
+    "at": "2026-11-06T17:49:10.951Z",
     "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
-    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZQclWpNAbjjSSwhNTghlTIKfH1wZitPmdZokhBD5Yc7/UFYchQluQ+Yo4jD+E20e\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "appSha384": "sha384-ZQclWpNAbjjSSwhNTghlTIKfH1wZitPmdZokhBD5Yc7/UFYchQluQ+Yo4jD+E20e",
+    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "appSha384": "sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F",
     "app": {
-      "relayer": true,
+      "noRelayer": true,
+      "testnetRelayer": false,
       "feePath": true
     },
     "fee": {
       "relayer_account": "r-2b700409.bf-vt-20261102t071444.testnet",
       "fee_recipient": "f.testnet",
-      "relay_fee": "188184",
+      "relay_fee": "186440",
       "gp": "100000000",
-      "px": "3.748816974295",
+      "px": "3.714073513296",
       "g_w": "92505000000000",
-      "valid_until_block": 276508340
+      "valid_until_block": 276518007
     },
-    "feeMax": "397175",
+    "feeMax": "393494",
     "feeError": null
   },
   "badTestnetCsp": {
-    "at": "2026-11-06T16:10:04.238Z",
+    "at": "2026-11-06T17:49:10.951Z",
     "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://test.rpc.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
-    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZQclWpNAbjjSSwhNTghlTIKfH1wZitPmdZokhBD5Yc7/UFYchQluQ+Yo4jD+E20e\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "appSha384": "sha384-ZQclWpNAbjjSSwhNTghlTIKfH1wZitPmdZokhBD5Yc7/UFYchQluQ+Yo4jD+E20e",
+    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "appSha384": "sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F",
     "app": {
-      "relayer": true,
+      "noRelayer": true,
+      "testnetRelayer": false,
       "feePath": true
     },
     "fee": {
       "relayer_account": "r-2b700409.bf-vt-20261102t071444.testnet",
       "fee_recipient": "f-2b700409.bf-vt-20261102t071444.testnet",
-      "relay_fee": "188184",
+      "relay_fee": "186440",
       "gp": "100000000",
-      "px": "3.748816974295",
+      "px": "3.714073513296",
       "g_w": "92505000000000",
-      "valid_until_block": 276508340
+      "valid_until_block": 276518007
     },
-    "feeMax": "397175",
+    "feeMax": "393494",
     "feeError": null
   },
   "badPin": {
-    "at": "2026-11-06T16:10:04.238Z",
+    "at": "2026-11-06T17:49:10.951Z",
     "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
-    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZQclWpNAbjjSSwhNTghlTIKfH1wZitPmdZokhBD5Yc7/UFYchQluQ+Yo4jD+E20e\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "appSha384": "sha384-WZEESmLR1IK+1UdhFfnR0VIN63auvdkZC+Lk6jsl7li6C19VR8OXEZmRkEJV03yB",
+    "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IXxQtG8IpbZwukDG35H5/II7Vx+Gva6lOC2C+ACVUKAY7oIsKjmBr4vcYIEQrD4F\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "appSha384": "sha384-zZSU4xfh6mPlsUnVTftWDVB7CyAi7HLDW9VGN6djgKiC2h97V9NXkfhYnoWa4XEY",
     "app": {
-      "relayer": true,
+      "noRelayer": true,
+      "testnetRelayer": false,
       "feePath": true
     },
     "fee": {
       "relayer_account": "r-2b700409.bf-vt-20261102t071444.testnet",
       "fee_recipient": "f-2b700409.bf-vt-20261102t071444.testnet",
-      "relay_fee": "188184",
+      "relay_fee": "186440",
       "gp": "100000000",
-      "px": "3.748816974295",
+      "px": "3.714073513296",
       "g_w": "92505000000000",
-      "valid_until_block": 276508340
+      "valid_until_block": 276518007
     },
-    "feeMax": "397175",
+    "feeMax": "393494",
     "feeError": null
   }
 }

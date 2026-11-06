@@ -71,6 +71,7 @@ import { noteCommitment, noteSecrets } from "../notes/secrets.ts";
 import { FeeMaxRefused, type FeeRpc, readWithdrawFeeMax } from "./feemax.ts";
 import { type NoteRecord, type NoteStore, refKey } from "../notes/store.ts";
 import { blockTimeMsOf, WITHDRAW_SEND_MARGIN_MS, type WithdrawRequest } from "./request.ts";
+import { POOL_TESTNET } from "../pool/network.ts";
 
 /** The release's helper (the signing page's CSP lets it reach no other, packages/signpage/public/_headers). */
 export const RELEASE_HELPER = "https://api.confidential.unrealized.trade";
@@ -80,13 +81,17 @@ export const RELEASE_HELPER = "https://api.confidential.unrealized.trade";
  * names none, and no withdrawal is asked there (card signpage-withdraw-handoff). Testnet: VT-T02's R and F
  * (contracts/vault/deployments/testnet-t02-run.json), the pair the deployed helper's GET /v1/withdraw/fee names for the
  * testnet token (read 2026-11-06 15:58Z; R and F in that run record). Mainnet: none until the release's relayer is written with its vault.
+ * Testnet's pair is the testnet build's only (POOL_TESTNET, as ../pool/solana.ts folds the devnet pins): SIGN_HOST's
+ * build folds it to null and carries neither id. Node and the tests read it with __SIGN_NETWORK__ = "testnet" set.
  */
 export const RELEASE_WITHDRAW_RELAYER: Readonly<Record<NearNetwork, HelperReleaseRelayer | null>> = Object.freeze({
   mainnet: null,
-  testnet: Object.freeze({
-    relayer_account: "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
-    fee_recipient: "f-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
-  }),
+  testnet: POOL_TESTNET
+    ? Object.freeze({
+        relayer_account: "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
+        fee_recipient: "f-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
+      })
+    : null,
 });
 export const WITHDRAW_FEE_URL = `${RELEASE_HELPER}/v1/withdraw/fee`;
 export const WITHDRAW_URL = `${RELEASE_HELPER}/v1/withdraw`;

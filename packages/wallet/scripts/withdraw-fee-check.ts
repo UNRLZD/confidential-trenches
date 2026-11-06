@@ -8,10 +8,13 @@
 //     askWithdrawFee's checks (the release's relayer, byte for byte) or of a read, else null
 //   node packages/wallet/scripts/withdraw-fee-check.ts --consts  one JSON line: the release values the check judges by
 // Nothing is signed or sent; no request names an account of the user's.
-import { NEAR_NETWORKS } from "../src/deposit/account.ts";
-import { readTokenStorageMin } from "../src/arming/accounts.ts";
-import { readWithdrawFeeMax } from "../src/withdraw/feemax.ts";
-import { askWithdrawFee, RELEASE_WITHDRAW_RELAYER, relayRpc, WITHDRAW_FEE_URL } from "../src/withdraw/relay.ts";
+// The testnet release's relayer is the testnet build's only (relay.ts RELEASE_WITHDRAW_RELAYER folds it by
+// __SIGN_NETWORK__): this script reads it as that build does, so the modules load after the build's network is set.
+(globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
+const { NEAR_NETWORKS } = await import("../src/deposit/account.ts");
+const { readTokenStorageMin } = await import("../src/arming/accounts.ts");
+const { readWithdrawFeeMax } = await import("../src/withdraw/feemax.ts");
+const { askWithdrawFee, RELEASE_WITHDRAW_RELAYER, relayRpc, WITHDRAW_FEE_URL } = await import("../src/withdraw/relay.ts");
 
 const T = NEAR_NETWORKS.testnet;
 const M = NEAR_NETWORKS.mainnet;

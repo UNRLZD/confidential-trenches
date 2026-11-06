@@ -12,9 +12,11 @@
 //   answer is "unread": the field shows S12.10's Busy · Retry, a tap reads what is unread and checks again, and nothing
 //   goes on meanwhile.
 // - Withdraw is drawn in every state and acts only when ready: it reads the note value and the fee bound again, checks
-//   both fields again (the address on both RPCs) and hands over only an answer equal to the one drawn. With no
-//   hand-off given (the page's network names no vault or relayer: ./handoff.ts) it is drawn and not offered
-//   (data-pending, as New account is on the sign-in choices); the hand-off's outcome is drawn as data-outcome.
+//   both fields again (the address on both RPCs) and hands over only an answer equal to the one drawn, with the fee it
+//   drew. With no hand-off given (no build gives one yet: ./handoff.ts) it is drawn and not offered (data-pending, as
+//   New account is on the sign-in choices). The hand-off's outcome is drawn as data-outcome; a hand-off that found the
+//   relayer's fee above the drawn one ({ kind: "fee" }) gives the new fee, which is drawn (both fields checked at it)
+//   and nothing goes on until the next tap.
 // - Every word is a draft until the owner picks it (data-draft-copy names its key in WITHDRAW_WORDS).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
@@ -46,9 +48,10 @@ export interface WithdrawFormDeps {
   available: () => Promise<bigint>;
   /** The device's own bound on the relay fee, in base units; a rejection leaves it unread. */
   fee: () => Promise<bigint>;
-  /** The wallet's withdraw path; absent where the page's network names no vault or relayer. Its answer, when it gives
-   *  one, is the outcome's kind (landed, expired, unmatched), drawn as the form's data-outcome. */
-  handoff?: (w: CheckedWithdraw) => void | Promise<void | string>;
+  /** The wallet's withdraw path, given the fee the form drew; absent on every build until the typed account is paid
+   *  (./handoff.ts). Its answer, when it gives one, is drawn as data-outcome, except { kind: "fee", fee }: the relayer's
+   *  fee is now above the drawn one, so the form draws that fee and goes no further. */
+  handoff?: (w: CheckedWithdraw, fee: bigint) => void | Promise<void | { kind: string; fee?: bigint }>;
 }
 
 export type FormState = "empty" | "typing" | "refused" | "ready";
@@ -189,9 +192,14 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     clearTimeout(timer);
     loaded = load();
     const v = await check();
-    if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.amount !== before.amount) return;
-    const outcome = await deps.handoff(v.ready);
-    if (typeof outcome === "string") form.dataset.outcome = outcome;
+    if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.amount !== before.amount || ctx.fee === null) return;
+    const end = await deps.handoff(v.ready, ctx.fee);
+    if (end?.kind === "fee" && typeof end.fee === "bigint") {
+      ctx = { ...ctx, fee: end.fee };
+      await check();
+      return;
+    }
+    if (end) form.dataset.outcome = end.kind;
   }
   draw(view);
   return form;

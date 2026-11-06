@@ -124,6 +124,7 @@ export type NoteRecord = {
   searchFrom?: number; // with its calls: the deposits row its bind's search for P starts at, taken before P first left
   sends?: PoolSend[]; // from INCOMING on: each pool deposit tx U signed for it, written before it is sent
   contexts?: AttemptContext[]; // from its first HELD on: every attempt's context and deadline_ms, in the order written
+  request?: string; // RESERVED: the vault withdrawal's request body as sent (JSON), written with HELD -> RESERVED, so a later page sends the same bytes again
 };
 
 /** A withdrawal attempt's context (a canonical decimal below p) and its deadline_ms, written with the move to HELD. */
@@ -160,7 +161,10 @@ export type NewNote = {
 // leaf: INCOMING -> UNSPENT. deadlineMs and context: UNSPENT -> HELD, and the holder's HELD -> HELD (with its attempt).
 // attempt: the holder's HELD -> RESERVED, HELD -> HELD or HELD -> UNSPENT. blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past
 // deadline_ms - margin).
-export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint; send?: PoolSend };
+// request: the holder's HELD -> RESERVED only (the vault withdrawal's body, card signpage-withdraw-handoff).
+export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint; send?: PoolSend; request?: string };
+/** The longest request body a RESERVED note holds: the helper's POST /v1/withdraw limit (8 KiB). */
+export const NOTE_REQUEST_MAX = 8_192;
 
 export interface NoteStore {
   get(id: string): Promise<NoteRecord | undefined>;
@@ -375,11 +379,24 @@ function checkSends(sends: unknown, id: string): PoolSend[] {
   return sends;
 }
 
+// A RESERVED note's request body: a JSON object's text, within the helper's limit.
+function checkRequest(r: unknown, what: string): string {
+  if (typeof r !== "string" || r.length === 0 || new TextEncoder().encode(r).length > NOTE_REQUEST_MAX) throw new Error(`${what}: not a request body of at most ${NOTE_REQUEST_MAX} B`);
+  let v: unknown;
+  try {
+    v = JSON.parse(r);
+  } catch {
+    throw new Error(`${what}: not JSON`);
+  }
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new Error(`${what}: not a JSON object`);
+  return r;
+}
+
 // A record read back: the whole shape, so a broken record stops the caller instead of being acted on.
 function checkRecord(id: string, r: unknown): NoteRecord {
   if (r === null || typeof r !== "object") throw new Error(`note ${id} is not a record`);
   const n = r as NoteRecord;
-  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "searchFrom", "sends", "contexts"], `note ${id}`);
+  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "searchFrom", "sends", "contexts", "request"], `note ${id}`);
   if (n.id !== id) throw new Error(`note ${id} names another id`);
   refKey(n.ref);
   field(n.scope, "scope");
@@ -394,6 +411,10 @@ function checkRecord(id: string, r: unknown): NoteRecord {
   if (n.deadlineMs !== undefined) u64(n.deadlineMs, "deadlineMs");
   if (proving !== (typeof n.attempt === "string" && HEX32.test(n.attempt))) throw new Error(`note ${id}: an attempt in HELD and RESERVED only`);
   if ((n.state === "HELD") !== (typeof n.tab === "string" && HEX32.test(n.tab))) throw new Error(`note ${id}: a tab id in HELD only`);
+  if (n.request !== undefined) {
+    if (n.state !== "RESERVED") throw new Error(`note ${id}: a request in RESERVED only`);
+    checkRequest(n.request, `note ${id}: request`);
+  }
   if (n.parent !== undefined && (typeof n.parent !== "string" || (n.ref.kind !== "change" && n.ref.kind !== "refund"))) throw new Error(`note ${id}: only a change or refund note has a parent`);
   if (n.calls !== undefined) {
     if (n.ref.kind !== "deposit" && n.ref.kind !== "second") throw new Error(`note ${id}: only a deposit or second-arrival note has calls`);
@@ -431,6 +452,7 @@ function record(n: NoteRecord): NoteRecord {
   if (n.searchFrom !== undefined) out.searchFrom = n.searchFrom;
   if (n.sends !== undefined) out.sends = n.sends;
   if (n.contexts !== undefined) out.contexts = n.contexts;
+  if (n.request !== undefined) out.request = n.request;
   return out;
 }
 
@@ -469,7 +491,7 @@ export async function readNotes(store: Pick<WalletStore, "get" | "keys">): Promi
   return all.map((n) => {
     if (!parents.has(n.id) || n.state === "SPENT") return n;
     // settle's put(p, "SPENT"): no tab, no deadline, no attempt
-    const { tab: _tab, deadlineMs: _deadline, attempt: _attempt, ...spent } = n;
+    const { tab: _tab, deadlineMs: _deadline, attempt: _attempt, request: _request, ...spent } = n;
     return { ...spent, state: "SPENT" };
   });
 }
@@ -509,7 +531,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   };
 
   // The one write of a state change: shape and fields checked, then one put. The callers check edge and ownership.
-  async function put(cur: NoteRecord, to: NoteState, fields: MoveFields = {}): Promise<NoteRecord> {
+  async function put(cur: NoteRecord, to: NoteState, fields: Pick<MoveFields, "leaf" | "deadlineMs" | "context" | "request"> = {}): Promise<NoteRecord> {
     const next: NoteRecord = { ...cur, state: to };
     if (cur.state === "INCOMING" && to === "UNSPENT") next.leaf = checkLeaf(fields.leaf, cur.precommitment);
     else if (fields.leaf !== undefined) throw new Error("a leaf is set once, when the note lands");
@@ -534,7 +556,8 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       if (to !== "RESERVED") {
         delete next.deadlineMs;
         delete next.attempt;
-      }
+        delete next.request;
+      } else if (fields.request !== undefined) next.request = checkRequest(fields.request, "request");
       // a sell's deposit planned again: its dropped send goes with it (the next send is written with the next move)
       if (to === "PLANNED") delete next.sends;
     }
@@ -560,7 +583,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   async function moveLocked(id: string, from: NoteState, to: NoteState, fields: MoveFields = {}): Promise<NoteRecord> {
     if (!NOTE_STATES.includes(from) || !NOTE_STATES.includes(to)) throw new Error("unknown note state");
     if (fields === null || typeof fields !== "object") throw new Error("fields is an object");
-    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs", "send"], "a move");
+    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs", "send", "request"], "a move");
     const all = await settle();
     const cur = all.find((n) => n.id === id);
     if (cur === undefined) throw new Error(`no note ${id}`);
@@ -571,6 +594,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (to === "TAKEN" && cur.ref.kind !== "deposit" && cur.ref.kind !== "second") throw new Error("only a deposit index or a second arrival is marked taken");
     if (from === "INCOMING" && to === "PLANNED" && !sellNote(cur.ref)) throw new Error("only a sell's deposit (a return note or an R second arrival) is planned again");
     if (fields.send !== undefined && !(from === "PLANNED" && to === "INCOMING")) throw new Error("a send is written with the move PLANNED -> INCOMING only");
+    if (fields.request !== undefined && !(from === "HELD" && to === "RESERVED")) throw new Error("a request is written with the move HELD -> RESERVED only");
     const time = fields.blockTimeMs === undefined ? undefined : u64(fields.blockTimeMs, "blockTimeMs");
     const own = fields.attempt !== undefined && fields.attempt === cur.attempt && cur.tab === tab;
     if (from === "HELD" && to === "HELD" && !own) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it replaces its proof`);
@@ -580,7 +604,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (from === "RESERVED" && to === "UNSPENT" && !(time !== undefined && time > cur.deadlineMs!))
       throw new Error(`note ${id} is RESERVED until block time is past its deadline_ms: its proof can still land`);
     if (fields.send !== undefined) return put({ ...cur, sends: checkSends([checkSend(fields.send, "a send")], id) }, to, {});
-    return put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context });
+    return put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context, request: fields.request });
   }
 
   async function addLocked(note: NewNote): Promise<NoteRecord> {

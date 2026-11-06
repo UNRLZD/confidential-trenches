@@ -20,6 +20,8 @@ const TESTNET_ONLY = [
   "base-testnet.api.pocket.network", // Base Sepolia's second pool provider (card notes-per-pool-evm-base-hang)
   "rpc.testnet.chain.robinhood.com",
   "robinhood-sepolia-rpc.publicnode.com",
+  "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow the testnet withdrawal relayer (card signpage-withdraw-handoff)
+  "f-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow its fee recipient
 ];
 
 test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no testnet pin or provider", async () => {

@@ -1,10 +1,10 @@
 // node --test scripts/live-checks/signpage-withdraw-handoff.test.mjs: the live check replays its recorded answers
 // (signpage-withdraw-handoff.answers.json). good: this card's SIGN_HOST build as committed (the check's --local: its
 // index.html, public/app.js and public/_headers) with the form's fee read run live on the testnet release (the
-// deployed helper's quote, the device's own fee_max): PASS. bad: SIGN_HOST as served before this card (release-63),
-// whose bundle names no release withdrawal relayer: FAIL. Planted on the good one: a relay_fee above the device's
-// fee_max, an answer naming another fee recipient, a testnet RPC in SIGN_HOST's connect-src, an /app.js its
-// index.html does not pin: each FAIL, named. The literals the check judges by are the wallet's own (the child's --consts).
+// deployed helper's quote, the device's own fee_max): PASS. bad: SIGN_HOST as served before this card (release-64),
+// whose bundle has no withdraw form fee read: FAIL. Planted on the good one: a relay_fee above the device's fee_max,
+// an answer naming another fee recipient, a testnet RPC in SIGN_HOST's connect-src, an /app.js its index.html does
+// not pin, a bundle carrying the testnet relayer's ids (a testnet build served as SIGN_HOST): each FAIL, named. The literals the check judges by are the wallet's own (the child's --consts).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -20,13 +20,13 @@ test("recorded good answer: this card's build, the helper's testnet quote at or 
   assert.ok(BigInt(A.good.fee.relay_fee) <= BigInt(A.good.feeMax));
 });
 
-test("recorded bad answer: SIGN_HOST before this card (release-63): FAIL, the missing relayer named", () => {
+test("recorded bad answer: SIGN_HOST before this card (release-64): FAIL, the missing fee read named", () => {
   const v = judge(A.bad);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, ["BAD SIGN_HOST's /app.js carries no release withdrawal relayer: the build is before this card"]);
+  assert.deepEqual(v.lines, ["BAD SIGN_HOST's /app.js carries no withdraw form fee read: the build is before this card"]);
 });
 
-test("planted bad answers: a fee above the cap, another fee recipient, a testnet RPC in the CSP, an unpinned /app.js: each FAIL", () => {
+test("planted bad answers: a fee above the cap, another fee recipient, a testnet RPC in the CSP, an unpinned /app.js, the testnet relayer in the bundle: each FAIL", () => {
   const one = (k, re) => {
     const v = judge(A[k]);
     assert.equal(v.ok, false, k);
@@ -37,6 +37,7 @@ test("planted bad answers: a fee above the cap, another fee recipient, a testnet
   one("badRelayer", /not the release's/);
   one("badTestnetCsp", /names the testnet RPC https:\/\/test\.rpc\.fastnear\.com/);
   one("badPin", /is not the one its index.html pins/);
+  one("badTestnetRelayer", /carries the testnet withdrawal relayer's ids/);
 });
 
 test("the check judges by the wallet's own release values (the child's --consts, no network)", () => {
