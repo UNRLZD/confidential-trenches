@@ -65,8 +65,13 @@ function decodeAggregate(data: string): string[] {
     return h.slice(2 * (e + 128), 2 * (e + 128 + dl));
   });
 }
-function encodeAggregate(outs: (bigint | null)[]): string {
-  const body = outs.map((x) => (x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
+// a revert with V4Quoter's NotEnoughLiquidity(bytes32) as its data (card rh-cold-quote: an exact-output quote past what
+// the pool can give)
+const RAN_OUT = Symbol("NotEnoughLiquidity");
+// v4-core's SafeCastOverflow(), wrapped in V4Quoter's UnexpectedRevertBytes(bytes): the output needs more than 2^127 in
+const OVERFLOW = Symbol("SafeCastOverflow");
+function encodeAggregate(outs: (bigint | null | typeof RAN_OUT | typeof OVERFLOW)[]): string {
+  const body = outs.map((x) => (x === RAN_OUT ? W(0n) + W(0x40n) + W(36n) + "7a5ed734" + W(0n) + "0".repeat(56) : x === OVERFLOW ? W(0n) + W(0x40n) + W(100n) + "6190b2b0" + W(0x20n) + W(4n) + "93dafdf1" + "0".repeat(56) + "0".repeat(56) : x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
   let at = 32 * outs.length;
   const offs = body.map((b) => {
     const o = W(BigInt(at));
@@ -277,7 +282,10 @@ const kk = (h: string) => Buffer.from(keccak_256(Buffer.from(h, "hex"))).toStrin
 // it pays the quoter with its hook as it is
 // `ctx`: the context the call to W runs in, as a node runs an eth_call (see simCtx)
 type SimCtx = { origin: string; sender: string; gas: bigint; gasPrice: bigint };
-type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; exec?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint]; ticks?: number[] };
+// `most`: the most of the currency it was found for the pool gives at any price, which an exact-output quote of more
+// reverts NotEnoughLiquidity on (card rh-cold-quote; none: any amount); `mostOn`: on that provider only; `over`: any
+// exact-output quote of it answers SafeCastOverflow (on provider `over`, or both); `plainOn`: a revert with no data there
+type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; exec?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint]; ticks?: number[]; most?: bigint; mostOn?: 0 | 1; over?: 0 | 1 | "both"; plainOn?: 0 | 1 };
 const pidOf = (k: EvmPoolKey) => kk(W(BigInt(k.currency0)) + W(BigInt(k.currency1)) + W(BigInt(k.fee)) + W(BigInt(k.tickSpacing)) + W(BigInt(k.hooks)));
 const keyOf = (token: string, other: string, fee: number, tickSpacing: number, hooks: string): EvmPoolKey => {
   const [currency0, currency1] = BigInt(other) < BigInt(token) ? [other, token] : [token, other];
@@ -329,7 +337,19 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     }
     return amount;
   };
-  const one = (to: string, d: string, overridden: Set<string>): bigint | null =>
+  // V4Quoter.quoteExactOutputSingle (card rh-cold-quote): the pool's key, zeroForOne and the amount out; past the pool's
+  // `most` it runs out, otherwise it answers an amount in
+  const exactOut = (d: string): bigint | null | typeof RAN_OUT | typeof OVERFLOW => {
+    const w = (i: number) => BigInt("0x" + d.slice(8 + 64 * i, 72 + 64 * i));
+    const a = (i: number) => "0x" + d.slice(8 + 64 * i + 24, 72 + 64 * i);
+    const p = byPid.get(pidOf({ currency0: a(1), currency1: a(2), fee: Number(w(3)), tickSpacing: Number(BigInt.asIntN(256, w(4))), hooks: a(5) }));
+    if (p === undefined) return null;
+    if (p.over === "both" || p.over === who) return OVERFLOW;
+    if (p.plainOn === who) return null;
+    const most = p.mostOn === undefined || p.mostOn === who ? p.most : undefined;
+    return most !== undefined && w(7) > most ? RAN_OUT : w(7);
+  };
+  const one = (to: string, d: string, overridden: Set<string>): bigint | null | typeof RAN_OUT | typeof OVERFLOW =>
     // a sell's fee-on-transfer probe, run as W's code (token, to, amount): the token in the model delivers it whole
     overridden.has(to.toLowerCase()) && d.length === 192 ? BigInt("0x" + d.slice(128))
     // QuoterV2.factory(): no v3 in the model
@@ -341,6 +361,7 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     : to.toLowerCase() === PM || to.toLowerCase() === RH_PM
       ? d.startsWith("1e2eaeaf") ? (slots.get(d.slice(8)) ?? 0n) : null
       : d.startsWith("3850c7bd") || d.startsWith("1a686502") ? null // no v3 pool in the model
+        : d.startsWith("58733073") ? exactOut(d)
         : quote(d, overridden);
   return async (calls) =>
     calls.map((c, id) => {
@@ -370,7 +391,7 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       const ctx = isSim ? simCtx(c.params[0] as CallArgs, (c.params[2] ?? {}) as Record<string, { balance?: string }>, balances) : null;
       if (typeof ctx === "string") return { jsonrpc: "2.0", id, error: { code: -32000, message: ctx } };
       const o = isSim ? simSell(data.slice(2), c.params[2] as Record<string, { code: string }>, ctx!) : one(to, data.slice(2), overridden);
-      return o === null ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted" } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
+      return o === null || o === RAN_OUT || o === OVERFLOW ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted" } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
     });
   // W's own sell through SellDelegate (card evm-quote-exec-sim), W's code the delegate's 7702 designator: nonce() is 0;
   // sell(sell, fee, signature) swaps hop by hop from the token at each pool's `exec`, reverts below minOut, and returns
@@ -1177,6 +1198,89 @@ test("B1 USDG on Robinhood: its standard ETH pool quotes, though twenty currenci
   const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0, 50_000_000), chain(pools, 1, 50_000_000)], NOW, scanner(50_000_000, logs, [], 100_000)));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   assert.equal((v as { amountOut: bigint }).amountOut, 3000n * AMOUNT);
+});
+
+// Card rh-cold-quote: TORCH on Robinhood (2026-11-06 01:3xZ): its quote route, the hookless native 0.3% pool, and 100
+// pools with other currencies, 99 of them seeded currencies whose only pool is that one; 89 of those could not give the
+// route's Q at any price. Robinhood's first scan provider spans 10M blocks a request with one value a topic position
+// and 100,000 with more (`orSpan`), and answers about 1.2 such 10M requests a second under its rate limit (a cold
+// quote's trace from this Mac, 01:57Z), so the quote's getLogs calls are its time.
+const RC_HEAD = 50_000_000;
+const rcCoin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111";
+const rcRoute: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: rcCoin, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
+const rcEth: ModelPool = { key: keyOf(rcCoin, NATIVE, 3000, 60, NATIVE), give: (a) => 3000n * a, state: pricedAt(3000n) };
+// seeded currency i's pool with the token: deep at its spot, but holding `most` of the token at any price
+// the card's own currencies, apart from every other case's (a scan is kept per currency for the module's life)
+const rcAt = (i: number) => "0x" + (0x7c0000 + i).toString(16).padStart(40, "0");
+const rcSeeded = (i: number, most?: bigint, token = rcCoin): ModelPool => ({ key: keyOf(token, rcAt(0x100 + i), 3000, 60, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n], ...(most === undefined ? {} : { most }) });
+const rcLogs = (pools: ModelPool[]) => pools.map((p, i) => ({ key: p.key, at: RC_HEAD - 9_000_000 + 1_000 * i }));
+const rcQuote = (pools: ModelPool[], logs: { key: EvmPoolKey; at: number }[], asked: [number, number][], route = rcRoute) =>
+  verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: rcCoin, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, scanner(RC_HEAD, logs, asked, 100_000)));
+
+test("card rh-cold-quote: a cold Robinhood quote of a token with 99 seeded currencies asks the deep provider one request a currency and kind, only for those whose pool can give Q", async () => {
+  // 89 seeded pools hold less of the token than Q (3000 x AMOUNT) at any price, 10 hold more; none of the 99 has a market
+  const seeded = Array.from({ length: 99 }, (_, i) => rcSeeded(i, i < 89 ? 1000n * AMOUNT : undefined));
+  const pools = [rcEth, ...seeded];
+  const asked: [number, number][] = [];
+  const v = await rcQuote(pools, rcLogs(seeded), asked);
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.equal((v as { amountOut: bigint }).amountOut, 3000n * AMOUNT);
+  // the token's two topic positions, then for each of the 10: its markets (3 filters) and, with none, its pools (2):
+  // 52 calls of 10M blocks, about 22 s of Robinhood's rate limit at most where main sent 2 + 100 x 3 + 100 x 2 = 502
+  // OR calls of 100,000 blocks and the quote ended rpc_error at its 60 s bound
+  assert.ok(asked.length <= 2 + 10 * 5, `${asked.length} getLogs calls, 52 at most`);
+  assert.ok(asked.every(([a, b]) => b - a + 1 === 10_000_000), "each request spans the whole depth");
+});
+
+// the helper's route through the token's standard 1% native pool, seeded at a tenth of the price (Q = AMOUNT / 10), and
+// the real price through another currency X: its pool with the token at the price of 1 and X's only market, of a shape
+// only the scan finds (marketOf), so the seeded route is held to the route through X (heldTo). Each case its own token:
+// a scan is kept per currency for the module's life
+const rcX = (token: string, pool: Partial<ModelPool> = {}, junk = 0, x = rcAt(0)) => {
+  const xPool: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a, ...pool };
+  const market = marketOf(x);
+  const seededJunk = Array.from({ length: junk }, (_, i) => rcSeeded(i, AMOUNT / 100n, token));
+  const pools = [seeded(token), xPool, market, ...seededJunk];
+  const req = { chain: "robinhood" as const, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) };
+  return { x, run: () => evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, scanner(RC_HEAD, rcLogs([xPool, market, ...seededJunk]), [], 100_000)) };
+};
+
+test("card rh-cold-quote: the X prune keeps a currency whose pool with the token can give Q: its scanned market still holds a seeded route, beside 60 seeded currencies that cannot", async () => {
+  const c = rcX("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11a1", {}, 60);
+  await assert.rejects(c.run(), heldTo(c.x));
+});
+
+test("card rh-cold-quote: one provider that answers a currency's pool cannot give Q, to hide its market, is refused (rpc_disagree), never a seeded route", async () => {
+  // on provider 0 the pool reports it holds less of the token than Q at any price; provider 1 answers what the chain holds
+  const c = rcX("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11a2", { most: AMOUNT / 100n, mostOn: 0 }, 0, rcAt(1));
+  assert.deepEqual(await verdict(c.run()), { accepted: false, code: "rpc_disagree" });
+});
+
+test("card rh-cold-quote: a currency's pool behind a pinned hook is never pruned: it runs as it is, so its market is scanned", async () => {
+  // Doppler's /8 shape with X, reporting it holds less than Q: no exact-output read prunes it
+  const t = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed11a3";
+  const c = rcX(t, { key: keyOf(t, rcAt(2), 0x800000, 8, "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544"), most: AMOUNT / 100n }, 0, rcAt(2));
+  await assert.rejects(c.run(), heldTo(c.x));
+});
+
+test("card rh-cold-quote: seeded pools whose output of Q needs more than 2^127 in (SafeCastOverflow on both providers) are pruned: only the token's own scan is asked", async () => {
+  const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed11a4";
+  const eth: ModelPool = { ...rcEth, key: keyOf(coin, NATIVE, 3000, 60, NATIVE) };
+  const seeded = Array.from({ length: 20 }, (_, i): ModelPool => ({ ...rcSeeded(0x40 + i, undefined, coin), over: "both" }));
+  const asked: [number, number][] = [];
+  const route: EvmRoute = { ...rcRoute, hops: [{ ...rcRoute.hops[0]!, currency: coin }] };
+  const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: coin, amountIn: AMOUNT, slippageBps: 100, route }, [chain([eth, ...seeded], 0, RC_HEAD), chain([eth, ...seeded], 1, RC_HEAD)], NOW, scanner(RC_HEAD, rcLogs(seeded), asked, 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.equal(asked.length, 2, "the token's two topic positions alone");
+});
+
+test("card rh-cold-quote: one provider that answers SafeCastOverflow for a currency's pool, to hide its market, is refused (rpc_disagree), against a revert or an answer", async () => {
+  const c = rcX("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11a5", { over: 0 }, 0, rcAt(3));
+  assert.deepEqual(await verdict(c.run()), { accepted: false, code: "rpc_disagree" });
+  // the other a revert with no data: both revert, only one names the overflow
+  const d = rcX("0x000050e18ffa3f8f7ad170eb9cef160eb3ed11a6", { over: 0, plainOn: 1 }, 0, rcAt(4));
+  assert.deepEqual(await verdict(d.run()), { accepted: false, code: "rpc_disagree" });
+  assert.deepEqual(await verdict(c.run()), { accepted: false, code: "rpc_disagree" });
 });
 
 test("D1 the reference through unlisted v4 middles is a route the device quotes and builds; the same route unquoted, or on v3, is refused", async () => {

@@ -35,9 +35,15 @@ const E = "test/evm-pool-fee.test.ts";
 // [file, text, replacement, test file, the test that must fail]
 export const MUTANTS = [
   // two providers at one block they both hold, no more than 30 s old
-  [QUOTE, 'const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial);', "const same = (a: Answer, b: Answer) => true;", Q, "Q2 "],
+  [QUOTE, 'const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);', "const same = (a: Answer, b: Answer) => true;", Q, "Q2 "],
   [QUOTE, 'b.kind === "out" && a.amountOut === b.amountOut', 'b.kind === "out"', Q, "Q2 "],
   [QUOTE, 'b.kind === "revert" && a.partial === b.partial', 'b.kind === "revert"', Q, "Q2 "],
+  // the X prune (card rh-cold-quote): an overflow named by one provider alone, the prune's verdict, its pinned-hook rule,
+  // and one request a currency where fewer than the OR
+  [QUOTE, " && a.partial === b.partial && a.overflow === b.overflow);", " && a.partial === b.partial);", R, "card rh-cold-quote: one provider that answers SafeCastOverflow"],
+  [QUOTE, 'return r.kind === "revert" && (r.partial || r.overflow === true);', "return false;", R, "card rh-cold-quote: a cold Robinhood quote"],
+  [QUOTE, "for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push(", "for (const f of fs) if (true) asks.push(", R, "card rh-cold-quote: a currency's pool behind a pinned hook"],
+  [QUOTE, "const step = or < on.span && ", "const step = false && ", R, "card rh-cold-quote: a cold Robinhood quote"],
   [QUOTE, "const at = { blockHash: hash, requireCanonical: true };", "const at = { blockHash: hash };", Q, "Q1 "],
   [QUOTE, "const near = (x: Block, y: Block) => x.number - y.number <= maxLag && y.number - x.number <= maxLag;", "const near = (x: Block, y: Block) => true;", R, "R5 "],
   [QUOTE, "if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {", "if (false) {", R, "R1b "],

@@ -225,13 +225,21 @@ function quoteCall(chain: EvmPoolChain, quoter: { v3: string | undefined; v4: st
 // `tx`: the transaction fields of a read sent alone (one with an override and no group), as the sim of a sale sends them
 type Read = { to: string; data: string; override?: Record<string, { code?: string; balance?: string }> | undefined; group?: string; state?: true; tx?: SimTx };
 type SimTx = { from: string; gas: string; maxFeePerGas: string; maxPriorityFeePerGas: string };
-type Answer = { kind: "out"; amountOut: bigint } | { kind: "revert"; partial: boolean };
+// `overflow`: the revert is SafeCastOverflow (card rh-cold-quote, the X prune)
+type Answer = { kind: "out"; amountOut: bigint } | { kind: "revert"; partial: boolean; overflow?: true };
 // V4Quoter's revert when a hookless hop runs out of liquidity: NotEnoughLiquidity(bytes32 poolId), wrapped in
 // UnexpectedRevertBytes(bytes) (read 2026-11-03 on Base: 1e20 wei into the ETH pool of 0xf6e5…dfe5, 0.3%)
 const NOT_ENOUGH_LIQUIDITY = "7a5ed734";
 const UNEXPECTED_REVERT_BYTES = "6190b2b0";
 const ranOut = (d: string) =>
   d.startsWith(NOT_ENOUGH_LIQUIDITY) || (d.startsWith(UNEXPECTED_REVERT_BYTES) && d.slice(8 + 128, 8 + 128 + 8) === NOT_ENOUGH_LIQUIDITY);
+// v4-core's SafeCastOverflow(), wrapped as above: in an exact-output swap through a pool with no hook (or the hook that
+// does nothing) it is Pool.swap's toInt128 of the input the output needs, more than 2^127 of it (v4-core
+// src/libraries/Pool.sol, the swap's casts; read 2026-11-06), which no hop of a v4 route is ever given; 49 of TORCH's
+// 100 pools with other currencies on Robinhood answered it for Q (2026-11-06 01:5xZ)
+const SAFE_CAST_OVERFLOW = "93dafdf1";
+const overflowed = (d: string) =>
+  d.startsWith(SAFE_CAST_OVERFLOW) || (d.startsWith(UNEXPECTED_REVERT_BYTES) && d.slice(8 + 128, 8 + 128 + 8) === SAFE_CAST_OVERFLOW);
 
 /** One provider's answer to one eth_call: the quote's first word, a revert, or a refusal (`raw`: the whole result). */
 function answerOf(a: unknown, who: string, raw = false): Answer | string {
@@ -298,7 +306,10 @@ function unaggregate(a: unknown, n: number, who: string): Answer[] {
     if ((ok !== 0 && ok !== 1) || at(e + 32) !== 0x40) return refuse("rpc_error", `${who} answered a malformed multicall result`);
     const dl = at(e + 64);
     if (e + 96 + dl > len) return refuse("rpc_error", `${who} answered a multicall result outside it`);
-    if (ok === 0) out.push({ kind: "revert", partial: ranOut(r.slice(2 + 2 * (e + 96), 2 + 2 * (e + 96 + dl)).toLowerCase()) });
+    if (ok === 0) {
+      const d = r.slice(2 + 2 * (e + 96), 2 + 2 * (e + 96 + dl)).toLowerCase();
+      out.push({ kind: "revert", partial: ranOut(d), ...(overflowed(d) ? { overflow: true as const } : {}) });
+    }
     else if (dl < 32) return refuse("rpc_error", `${who} answered a quote shorter than a word`);
     else out.push({ kind: "out", amountOut: BigInt("0x" + r.slice(2 + 2 * (e + 96), 2 + 2 * (e + 128))) });
   }
@@ -381,7 +392,7 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
     lone.forEach((i, k) => (all[i] = answerOf(b[parts.length + slotParts.length + k], who) as Answer));
     return all;
   };
-  const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial);
+  const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);
   const { a } = await agreeing(
     rpcs,
     answersOf,
@@ -828,6 +839,15 @@ function v4Read(quoter: string, r: EvmV4Route, amount: bigint): { to: string; da
   const path = word(BigInt(elems.length)) + offsets.join("") + elems.join("");
   return { to: quoter, data: "0x" + SEL_V4 + word(0x20n) + word(BigInt(r.currencyIn)) + word(0x60n) + word(amount) + path };
 }
+/** V4Quoter.quoteExactOutputSingle of `amount` of `token` out of the pool `k` (card rh-cold-quote, the X prune): it
+ *  reverts NotEnoughLiquidity where the pool cannot give that much at any price. */
+const SEL_V4_OUT_SINGLE = "58733073"; // quoteExactOutputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))
+function exactOutRead(quoter: string, k: EvmPoolKey, token: string, amount: bigint): { to: string; data: string } {
+  // the struct (PoolKey, zeroForOne, exactAmount, hookData): a pool key's five words, two more, then the empty bytes'
+  // offset (eight words) and length
+  const key = word(BigInt(k.currency0)) + word(BigInt(k.currency1)) + word(BigInt(k.fee)) + word(BigInt.asUintN(256, BigInt(k.tickSpacing))) + word(BigInt(k.hooks));
+  return { to: quoter, data: "0x" + SEL_V4_OUT_SINGLE + word(0x20n) + key + word(lower(k.currency1) === token ? 1n : 0n) + word(amount) + word(0x100n) + word(0n) };
+}
 /** The pool key of a one-hop v4 route. */
 function keyOfRoute(r: EvmV4Route): EvmPoolKey {
   const [a, b] = [lower(r.currencyIn), lower(r.hops[0]!.currency)];
@@ -1148,10 +1168,16 @@ async function scanPools(
   type Job = { part: Each[]; a: number; b: number; on: ScanOn };
   const jobs: Job[] = [];
   const jobsOf = (g: Each[], from: number, to: number, on = first, into = jobs) => {
-    for (let i = 0; i < g.length; i += SCAN_OR) {
-      const part = g.slice(i, i + SCAN_OR);
-      // a provider may span fewer blocks a request when a topic position holds more than one value (orSpan)
-      const span = part.length === 1 ? on.span : Math.min(on.span, on.orSpan ?? on.span);
+    // a provider may span fewer blocks a request when a topic position holds more than one value (orSpan): then each
+    // currency is asked alone, at the provider's whole span, where that is no more requests than the OR (card
+    // rh-cold-quote: Robinhood's 10M blocks are 100 OR requests of 100,000 for any number of currencies, and one
+    // request a currency alone)
+    const or = Math.min(on.span, on.orSpan ?? on.span);
+    const n = to - from + 1;
+    const step = or < on.span && g.length * Math.ceil(n / on.span) <= Math.ceil(g.length / SCAN_OR) * Math.ceil(n / or) ? 1 : SCAN_OR;
+    for (let i = 0; i < g.length; i += step) {
+      const part = g.slice(i, i + step);
+      const span = part.length === 1 ? on.span : or;
       for (let a = from; a <= to; a += span) into.push({ part, a, b: Math.min(to, a + span - 1), on });
     }
   };
@@ -2022,6 +2048,36 @@ async function routeSet(a: {
   // The token's held pools of the native asset or WETH, each quoted where not already and where it can beat the route
   const xPools = new Map<string, Found[]>();
   for (const f of held) if (!startsBuy(f.other)) append(xPools, f.other, f);
+  // The X prune (card rh-cold-quote): every route through another currency X ends in one of the token's pools with X,
+  // so a buy's pool that cannot give the route's Q of the token from any amount a v4 hop is given
+  // (V4Quoter.quoteExactOutputSingle of Q through it reverts NotEnoughLiquidity or SafeCastOverflow, its hook replaced
+  // as in every read of it, the same answer on both providers) is never the last hop of a route that beats Q, and is
+  // dropped; an X left with none is neither scanned nor priced. A pool behind a pinned hook, which runs as it is, has
+  // no such bound and is kept, as in "The prune". A sell has no Q and drops nothing. TORCH on Robinhood has 100 pools
+  // with other currencies, 99 of them seeded currencies whose only pool is that one; 89 could not give Q for 0.001 ETH
+  // (rpc.mainnet.chain.robinhood.com, 2026-11-06 01:5xZ), and the scans of their markets held its cold quote to the
+  // bound (58 s, rpc_error). Only an X this device has never scanned is asked: a scanned one reads only new blocks, so
+  // the read would add a round to a warm quote for no scan it saves
+  const cold = (x: string) => !SCANS.has(`${chain}:markets:${x}`);
+  if (ok && floor !== null && floor > 0n && floor < 1n << 127n && [...xPools.keys()].some(cold)) {
+    const asks: [Found, number][] = [];
+    const pr: Read[] = [];
+    for (const [x, fs] of xPools) {
+      if (!cold(x)) continue;
+      for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push([f, put(pr, { ...exactOutRead(v.v4!, f.key, lower(token), floor), ...noop([f.key]) })]);
+    }
+    await round(pr);
+    // NotEnoughLiquidity: it runs out before Q; SafeCastOverflow: Q needs more than 2^127 in
+    const cannot = new Set(asks.filter(([, i]) => {
+      const r = ans[i]!;
+      return r.kind === "revert" && (r.partial || r.overflow === true);
+    }).map(([f]) => f));
+    for (const [x, fs] of [...xPools]) {
+      const left = fs.filter((f) => !cannot.has(f));
+      if (left.length === 0) xPools.delete(x);
+      else xPools.set(x, left);
+    }
+  }
   const second: Read[] = [];
   for (const f of held) {
     if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(quoteOf(second, routeOfKey(f.key, token), [f.key]));
@@ -2220,7 +2276,7 @@ async function routeSet(a: {
   PLANS.delete(planKey);
   // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
   // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
-  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && (!kept.has(readKey(r)) || hit.has(first + j))), scans: asked });
+  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j))), scans: asked });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled };
 }

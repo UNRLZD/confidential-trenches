@@ -1,0 +1,218 @@
+{
+ "fix": {
+  "recorded": "2026-11-06T02:15:33.676Z",
+  "cold": {
+   "ms": 16517,
+   "code": "ok",
+   "hosts": [
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_blockNumber",
+     "n": 1,
+     "p50": 356,
+     "max": 356,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_getLogs+eth_getBlockByNumber",
+     "n": 44,
+     "p50": 296,
+     "max": 393,
+     "bad": 20,
+     "why": [
+      "HTTP 429: Too Many Requests"
+     ]
+    },
+    {
+     "at": "robinhood-rpc.publicnode.com eth_getBlockByNumber",
+     "n": 17,
+     "p50": 88,
+     "max": 352,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "robinhood.drpc.org eth_getBlockByNumber",
+     "n": 15,
+     "p50": 79,
+     "max": 282,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "robinhood-rpc.publicnode.com eth_call",
+     "n": 13,
+     "p50": 103,
+     "max": 329,
+     "bad": 1,
+     "why": [
+      "error: historical state b51fd9f2c115b2b2a034a3843c42aba5030b745ad192accf10ff3ed4be256cf7 is not available"
+     ]
+    },
+    {
+     "at": "robinhood.drpc.org eth_call",
+     "n": 14,
+     "p50": 127,
+     "max": 189,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_call",
+     "n": 2,
+     "p50": 286,
+     "max": 286,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_getBlockByNumber",
+     "n": 1,
+     "p50": 269,
+     "max": 269,
+     "bad": 0,
+     "why": []
+    }
+   ]
+  },
+  "warm": [
+   {
+    "ms": 2316,
+    "code": "ok"
+   },
+   {
+    "ms": 2266,
+    "code": "ok"
+   },
+   {
+    "ms": 2281,
+    "code": "ok"
+   },
+   {
+    "ms": 2068,
+    "code": "ok"
+   },
+   {
+    "ms": 2401,
+    "code": "ok"
+   }
+  ]
+ },
+ "bad": {
+  "recorded": "2026-11-06T02:17:38.335Z",
+  "cold": {
+   "ms": 40694,
+   "code": "rpc_error",
+   "message": "rpc_error: provider 2 answered the multicall with an error: historical state d9ca8f37150addcf46016c11a5bf7694038e64b6ce703ad464901099a8c55207 is not available",
+   "hosts": [
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_blockNumber",
+     "n": 1,
+     "p50": 390,
+     "max": 390,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_getLogs+eth_getBlockByNumber",
+     "n": 146,
+     "p50": 281,
+     "max": 544,
+     "bad": 36,
+     "why": [
+      "HTTP 429: Too Many Requests"
+     ]
+    },
+    {
+     "at": "robinhood-rpc.publicnode.com eth_getBlockByNumber",
+     "n": 46,
+     "p50": 92,
+     "max": 211,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "robinhood.drpc.org eth_getBlockByNumber",
+     "n": 23,
+     "p50": 76,
+     "max": 184,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "robinhood-rpc.publicnode.com eth_call",
+     "n": 7,
+     "p50": 124,
+     "max": 192,
+     "bad": 1,
+     "why": [
+      "error: historical state d9ca8f37150addcf46016c11a5bf7694038e64b6ce703ad464901099a8c55207 is not available"
+     ]
+    },
+    {
+     "at": "robinhood.drpc.org eth_call",
+     "n": 10,
+     "p50": 114,
+     "max": 150,
+     "bad": 4,
+     "why": [
+      "error: Unknown state. First available state is 1"
+     ]
+    },
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_call",
+     "n": 1,
+     "p50": 332,
+     "max": 332,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "robinhood.rpc.blxrbdn.com eth_call",
+     "n": 1,
+     "p50": 912,
+     "max": 912,
+     "bad": 1,
+     "why": [
+      "error: historical state d9ca8f37150addcf46016c11a5bf7694038e64b6ce703ad464901099a8c55207 is not available"
+     ]
+    },
+    {
+     "at": "rpc-robinhood.globalstake.io eth_call",
+     "n": 1,
+     "p50": 1363,
+     "max": 1363,
+     "bad": 1,
+     "why": [
+      "error: historical state d9ca8f37150addcf46016c11a5bf7694038e64b6ce703ad464901099a8c55207 is not available"
+     ]
+    },
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_getBlockByNumber",
+     "n": 1,
+     "p50": 265,
+     "max": 265,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "rpc-robinhood.globalstake.io eth_getBlockByNumber",
+     "n": 2,
+     "p50": 754,
+     "max": 754,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "robinhood.rpc.blxrbdn.com eth_getBlockByNumber",
+     "n": 1,
+     "p50": 230,
+     "max": 230,
+     "bad": 0,
+     "why": []
+    }
+   ]
+  },
+  "warm": []
+ }
+}
