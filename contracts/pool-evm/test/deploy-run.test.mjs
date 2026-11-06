@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { CHAINS, DUST, MAINNETS, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { MAINNET_INIT, MAX_FEE_CAP, ORDER, RPC_TRIES, addressOf, createAddress, initProblems, main } from "../script/deploy.mjs";
+import { MAINNET_INIT, MAX_FEE_CAP, ORDER, RPC_TRIES, addressOf, createAddress, deployedElsewhere, initProblems, main } from "../script/deploy.mjs";
 
 const OUT_DIR = new URL("../out/", import.meta.url);
 const runtime = (name) => JSON.parse(readFileSync(new URL(`${name}.sol/${name}.json`, OUT_DIR), "utf8")).deployedBytecode.object;
@@ -734,4 +734,108 @@ test("mainnet review: the journal and the record are written whole (a new file r
   assert.notEqual(inos[0], inos[1], "the journal is a new file after its rewrite");
   assert.notEqual(statSync(m.out).ino, inos[2], "the record is a new file after its rewrite");
   assert.deepEqual(readdirSync(m.dir).filter((f) => f.includes(".tmp-")), [], "no temporary file is left");
+});
+
+// ---- the mainnet paste's review (round 2) ----
+/** a run hard-killed when its sweep is sent: the disk as it is then (journal, record, key folder) */
+async function killedAtSweep(t, m, c) {
+  let snap = null;
+  let keyFile = null;
+  let key = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (!keyFile && folders(m.keys).length) (keyFile = path.join(m.keys, folders(m.keys)[0], "key")), (key = readFileSync(keyFile, "utf8"));
+      if (l.startsWith("deploy: sweep ") && !snap) snap = { journal: readFileSync(m.journal, "utf8"), record: existsSync(m.out) ? readFileSync(m.out, "utf8") : null };
+    },
+  });
+  writeFileSync(m.journal, snap.journal);
+  if (snap.record) writeFileSync(m.out, snap.record);
+  else rmSync(m.out, { force: true });
+  mkdirSync(path.dirname(keyFile), { recursive: true });
+  writeFileSync(keyFile, key);
+  return snap;
+}
+
+test("mainnet review 2: a resumed run killed during its sweep has a record naming every contract; --sweep-kept keeps each deploy's contract, and the record lists every transaction of the key", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  const snap = await killedAtSweep(t, m, c);
+  assert.deepEqual(Object.keys(JSON.parse(snap.record).contracts), MAINNETS.base.contracts, "the record at the kill names all five");
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  const d = JSON.parse(readFileSync(m.out, "utf8"));
+  assert.deepEqual(Object.keys(d.contracts), MAINNETS.base.contracts);
+  for (const n of MAINNETS.base.contracts) {
+    const tx = d.txs.find((x) => x.step === `deploy ${n}`);
+    assert.equal(tx?.contract, n, `${n}'s deploy names its contract`);
+    assert.equal(c.receipts.get(tx.hash).contractAddress, d.contracts[n].address, n);
+  }
+  assert.equal(d.txs.length, Number(c.nonce.get(c.deployer)), "every transaction of the key" + why(c));
+  assert.deepEqual(folders(m.keys), []);
+});
+
+test("mainnet review 2: --sweep-kept of a run killed in its funding wait watches the key and keeps it while the asked transfer has not landed; once it lands, --sweep-kept sends it back and removes the key", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let snap = null;
+  let keyFile = null;
+  let key = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: send exactly") && !snap) (snap = readFileSync(m.journal, "utf8")), (keyFile = path.join(m.keys, folders(m.keys)[0], "key")), (key = readFileSync(keyFile, "utf8"));
+    },
+  });
+  const j = JSON.parse(snap);
+  assert.equal(j.txs.length, 0, "killed before any transaction");
+  // a chain where the owner's transfer of the need lands 120 s from now, after the watch
+  const c2 = mainnet();
+  c2.deployer = j.deployer;
+  c2.fundAt = 120_000;
+  c2.fundWei = BigInt(j.need);
+  rmSync(m.out, { force: true });
+  writeFileSync(m.journal, snap);
+  mkdirSync(path.dirname(keyFile), { recursive: true });
+  writeFileSync(keyFile, key);
+  const sw = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c2));
+  assert.equal(folders(m.keys).length, 1, "the key is kept while its transfer may land" + why(c2));
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "kept");
+  assert.equal(c2.balanceOf(j.deployer), BigInt(j.need), "the transfer landed on a key still kept");
+  const e0 = c2.balanceOf(E);
+  const sw2 = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw2.error, null, String(sw2.error?.message) + why(c2));
+  assert.ok(c2.balanceOf(E) - e0 > (BigInt(j.need) * 9n) / 10n, "sent back" + why(c2));
+  assert.ok(c2.balanceOf(j.deployer) <= DUST);
+  assert.deepEqual(folders(m.keys), [], "removed once the transfer was swept");
+});
+
+test("mainnet review 2: a resume whose journaled deploy reads no receipt at a spent nonce is refused before any funding, never redeployed", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  const j = JSON.parse(readFileSync(m.journal, "utf8"));
+  const vtx = j.txs.find((x) => x.contract === "WithdrawalVerifier").hash;
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "eth_getTransactionReceipt" && params[0] === vtx) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: null }) };
+    return fetch0(u, init);
+  };
+  c.logs.length = 0;
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /deploy WithdrawalVerifier 0x[0-9a-f]{64} at nonce 0: the nonce is spent but no journaled transaction there has a receipt .*nothing was sent/, why(c));
+  assert.equal(lineOf(c, /^deploy: (send exactly|waiting for)/), undefined, "no funding asked for");
+  assert.equal(c.created.filter((d) => createdBy(d) === "WithdrawalVerifier").length, 1, "no second verifier");
+});
+
+test("mainnet review 2: a failed git fetch is refused as itself, never as a pool deployed already; origin/main with no record and a kit with no pin pass", OPTS, async () => {
+  const ok = { status: 0 };
+  const no = { status: 1 };
+  await assert.rejects(deployedElsewhere("base", { git: (cmd) => (cmd === "fetch" ? no : ok) }), (e) => /^git fetch origin main failed, so main's record could not be read: nothing was sent/.test(e.message) && !/deployed/.test(e.message));
+  await assert.rejects(deployedElsewhere("base", { git: (cmd) => (cmd === "rev-parse" ? no : ok) }), (e) => /^origin\/main is not in this checkout, so main's record could not be read: nothing was sent/.test(e.message));
+  assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok) }), null);
+  assert.equal(await deployedElsewhere("base", { git: () => ok }), "origin/main holds contracts/pool-evm/deployments/base.json");
 });

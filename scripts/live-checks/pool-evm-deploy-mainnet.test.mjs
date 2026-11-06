@@ -105,3 +105,11 @@ test("the mainnets' run record (--write-record's, the money gate's) has Money pa
   assert.deepEqual(tx, Object.keys(MAINNETS).flatMap((c) => real[c].txs.map((t) => `Tx: ${c} ${t.hash}`)));
   assert.throws(() => mainnetRunRecord(A.records), /a dry run/);
 });
+
+test("a 61 s throttle (every answer HTTP 429, as Robinhood's RPC gives) is waited out by the check the paste runs: the good answer still passes", async () => {
+  let clock = 0;
+  const inner = replay(A.good);
+  const throttled = async (url, init) => (clock < 61_000 ? { ok: false, status: 429, json: async () => ({ code: 429, message: "Too Many Requests" }) } : inner(url, init));
+  const r = await checkMainnets({ read: (c) => A.records[c], venues: pinned, rpcsOf: (c) => A.rpcs[c], fetchFn: throttled, sleep: async (ms) => void (clock += ms) });
+  assert.equal(r.ok, true, r.lines.filter((l) => / FAIL /.test(l)).join("\n"));
+});

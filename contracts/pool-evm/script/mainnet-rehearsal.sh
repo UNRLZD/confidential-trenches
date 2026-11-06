@@ -16,6 +16,8 @@
 set -euo pipefail
 fail() { echo "rehearsal [$1]: FAIL: $2"; exit 1; }
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
+# the commit this rehearsal ran, first, so its log ties to it (and whether the tree had changes beyond it)
+echo "rehearsal: head $(git -C "$ROOT" rev-parse HEAD)$(git -C "$ROOT" diff --quiet HEAD -- || echo ' (with uncommitted changes)')"
 OUT="${REHEARSAL_OUT:-$ROOT/contracts/pool-evm/out/mainnet-rehearsal}"
 rm -rf "$OUT" && mkdir -p "$OUT"
 STANDIN=0x$(openssl rand -hex 20)

@@ -171,10 +171,14 @@ function abiString(h) {
 }
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
-/** One JSON-RPC call, five tries at most: a transient failure (the fetch throws; a 429 or a 5xx; a -32029 / -32429
+// Each call's tries: 1.5 s more wait per try, 67.5 s of waits over 10, more than a provider's one-minute throttle window
+// (rpc.mainnet.chain.robinhood.com answered HTTP 429 with no Retry-After for about 61 s, packages/wallet/src/pool/evm.ts
+// EVM_LOG_THROTTLE_TRIES, read 5 Nov 13:55Z); at 5 tries (15 s) a good deploy's check failed there.
+export const RPC_TRIES = 10;
+/** One JSON-RPC call, RPC_TRIES tries at most: a transient failure (the fetch throws; a 429 or a 5xx; a -32029 / -32429
  * rate answer) is retried with backoff. A JSON-RPC error answer is never retried: it is the node's word, and it is
  * thrown with its `rpcError`. Re-sending a signed transaction is safe, since it keeps its signature. */
-export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries = 5) {
+export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries = RPC_TRIES) {
   for (let i = 1; ; i++) {
     let r, j, transient;
     try {

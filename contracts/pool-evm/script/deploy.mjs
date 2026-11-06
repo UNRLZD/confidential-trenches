@@ -35,7 +35,8 @@
 //     but does not read back stops the resume before any funding, and the pool is reused only with its verifier), and
 //     only the rest is deployed, at the key's next nonces; or --sweep-kept sends the key's rest back to that journal's
 //     return address, and no other, then removes the key: any journal whose key is not removed ("kept", or "in use" after
-//     a run killed outright), the return wallet's balance not asked. A journal whose key is removed is moved aside by
+//     a run killed outright), the return wallet's balance not asked; a journal that signed nothing (a run stopped in its
+//     funding wait) is watched for WAITS.lateFunding and its key kept until the need its run asked for has landed. A journal whose key is removed is moved aside by
 //     the next run. The record is written once every deploy is made, before the sweep, and again with the sweep; a
 //     run that made fewer writes none. The journal and the record are each written whole (writeAtomic). Each contract's
 //     code is read again on both RPCs. The funding line asks for the need less what the key holds, in wei and, exactly,
@@ -78,7 +79,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  BUILD_FILE, CHAINS, DUST, MAINNETS, MAINNET_IDS, bytes, chainOf, deploymentFile, hex, keccak, rpc, runtimeOf, selector, word,
+  BUILD_FILE, CHAINS, DUST, MAINNETS, MAINNET_IDS, RPC_TRIES, bytes, chainOf, deploymentFile, hex, keccak, rpc, runtimeOf, selector, word,
 } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -104,10 +105,9 @@ export const onlyFile = (name, chain) => path.join(REPO, "scripts/live-checks", 
 const GAS_MARGIN = (g) => (g * 12n) / 10n;
 const OP_ORACLE = "0x420000000000000000000000000000000000000f"; // the OP Stack GasPriceOracle predeploy
 const SWEEP_TX_BYTES = 200n; // an EIP-1559 transfer signed is about 110 bytes
-// Each RPC call's tries (pool-evm-deploy.mjs rpc: 1.5 s more wait per try, 67.5 s of waits over 10 tries). They outlast a
-// provider's one-minute throttle window: rpc.mainnet.chain.robinhood.com answered HTTP 429 with no Retry-After for about
-// 61 s (packages/wallet/src/pool/evm.ts EVM_LOG_THROTTLE_TRIES, read 5 Nov 13:55Z), and 5 tries (15 s) ended a run there.
-export const RPC_TRIES = 10;
+// Each RPC call's tries: pool-evm-deploy.mjs RPC_TRIES (67.5 s of waits, past Robinhood's 61 s throttle window), the
+// same for this run and for the live check the paste runs after it
+export { RPC_TRIES };
 // A mainnet run's max fee per gas (twice the base fee plus the tip, the lower of the two RPCs') is refused above this,
 // before any key: a broken or lying RPC answer, not a busy chain. 2 gwei is about 200 times Base's (base fee 5,002,715
 // wei, tip 1,000,000) and about 44 times Robinhood's (base fee 22,646,000 wei, tip 0), read on both RPCs of each on
@@ -150,11 +150,11 @@ export function initProblems(name, code) {
  * Why `chainName`'s pool counts as deployed beyond this checkout, or null: origin/main holds its record (fetched first),
  * or the kit pins a pool for it. A paste in another clone of the repository is refused as one in this folder is.
  */
-export async function deployedElsewhere(chainName) {
+export async function deployedElsewhere(chainName, { git = (...a) => spawnSync("git", ["-C", REPO, ...a], { encoding: "utf8" }) } = {}) {
   const file = path.relative(REPO, deploymentFile(chainName));
-  const git = (...a) => spawnSync("git", ["-C", REPO, ...a], { encoding: "utf8" });
-  if (git("fetch", "-q", "origin", "main").status !== 0) return "git fetch origin main failed: the record on main could not be read";
-  if (git("rev-parse", "--verify", "-q", "origin/main").status !== 0) return "origin/main is not here: the record on main could not be read";
+  // main's record unread is its own refusal, never "deployed already"
+  if (git("fetch", "-q", "origin", "main").status !== 0) throw new Error("git fetch origin main failed, so main's record could not be read: nothing was sent; run the paste again once the fetch works");
+  if (git("rev-parse", "--verify", "-q", "origin/main").status !== 0) throw new Error("origin/main is not in this checkout, so main's record could not be read: nothing was sent");
   if (git("cat-file", "-e", `origin/main:${file}`).status === 0) return `origin/main holds ${file}`;
   const { evmPoolVenues } = await import(pathToFileURL(path.join(REPO, "packages/kit/src/index.ts")).href);
   const pool = evmPoolVenues()[chainName]?.pool;
@@ -462,6 +462,13 @@ export async function main(args, io = {}) {
         const n = t.contract;
         if (!n || t.step !== `deploy ${n}` || !names.includes(n) || reused[n] || !/^0x[0-9a-f]{40}$/.test(String(t.address))) continue;
         const rc = await call("eth_getTransactionReceipt", [t.hash]);
+        if (!rc && big(t.nonce) < n0) {
+          // its nonce is spent, so something of the key's landed there: one of the journal's (this deploy, or a cancel
+          // that replaced it) must show a receipt, or the run cannot tell whether the contract exists
+          let seen = false;
+          for (const o of (j0.txs ?? []).filter((x) => x.nonce === t.nonce && x.hash !== t.hash)) if (await call("eth_getTransactionReceipt", [o.hash])) seen = true;
+          if (!seen) throw new Error(`the stopped run's ${t.step} ${t.hash} at nonce ${t.nonce}: the nonce is spent but no journaled transaction there has a receipt on ${url}: nothing was sent; run the same paste again once the RPC has it, or send the key's rest back: ${sweepCommand(chainName)}`);
+        }
         if (!rc || rc.status !== "0x1" || rc.contractAddress?.toLowerCase() !== t.address) continue;
         // it landed: it is reused, or the run stops here, before any funding (deploying it again would leave a pool
         // pointing at a verifier the record does not name)
@@ -574,12 +581,17 @@ export async function main(args, io = {}) {
     for (const end = now() + ms; now() < end; await sleep(2000)) if (await receiptOf(s)) return s.receipt;
     return null;
   };
-  const record = () => {
+  // The record: every transaction of the key that landed, in nonce order, and each contract its landed deploy made (a
+  // resumed run's reused deploys included: their receipts are read first). `prev`, a record already written, keeps its
+  // own run fields (--sweep-kept rewrites it with the sweeps).
+  const record = async (prev = null) => {
+    for (const s of signed) await receiptOf(s);
+    const made = landed().filter((s) => s.contract && s.step === `deploy ${s.contract}` && s.address);
     const txs = landed().map((s) => ({ step: s.step, hash: s.hash, ...(s.contract ? { contract: s.contract } : {}) }));
     const d = {
-      chain: chainName, chainId: Number(BigInt(id)), dryRun, at: new Date().toISOString(), deployer, return: ret, need: need.toString(),
-      build: `solc 0.8.28 (contracts/pool-evm/foundry.toml), ${forgeVersion}`,
-      contracts: Object.fromEntries(names.filter((n) => txs.some((t) => t.contract === n && t.step === `deploy ${n}`)).map((n) => [n, { address: addrs[n] }])),
+      chain: chainName, chainId: Number(BigInt(id)), dryRun, at: prev?.at ?? new Date().toISOString(), deployer, return: ret, need: prev?.need ?? need.toString(),
+      build: prev?.build ?? `solc 0.8.28 (contracts/pool-evm/foundry.toml), ${forgeVersion}`,
+      contracts: Object.fromEntries(chain.contracts.filter((n) => made.some((s) => s.contract === n)).map((n) => [n, { address: made.find((s) => s.contract === n).address }])),
       txs,
     };
     writeAtomic(out, JSON.stringify(d, null, 2) + "\n");
@@ -641,7 +653,9 @@ export async function main(args, io = {}) {
 
   // A signal stops the run at its next step: a transaction already sent is waited for, so the sweep never races a
   // deploy for a nonce; the finally below then sweeps. Later signals never cut the sweep short.
-  let funded = Boolean(kept);
+  // a kept journal that signed nothing is a run stopped (or killed) in its funding wait: its funding is unread, so
+  // --sweep-kept watches the key for WAITS.lateFunding, sweeps what landed, and keeps the key (a transfer may still land)
+  let funded = Boolean(kept) && (j0.txs ?? []).length > 0;
   const onSignal = (s) => {
     if (stopped) return console.error(`deploy: ${s} again: the sweep finishes first`);
     stopped = s;
@@ -729,7 +743,7 @@ export async function main(args, io = {}) {
       // the record (the one-deploy guard) before the sweep: a run killed during the sweep leaves it, and the sweep's
       // own transactions join it after (here, or by --sweep-kept)
       if (mainnet) {
-        record();
+        await record();
         writeJournal();
       }
     }
@@ -737,8 +751,15 @@ export async function main(args, io = {}) {
     try {
       if (!funded) {
         // stopped while waiting: a funding transfer may be in flight; watch the balance before the final sweep
-        console.log(`deploy: stopped before funding; watching ${deployer}'s balance for ${WAITS.lateFunding / 1000} s`);
+        console.log(`deploy: ${kept ? "its run stopped in its funding wait" : "stopped before funding"}; watching ${deployer}'s balance for ${WAITS.lateFunding / 1000} s`);
         for (const end = now() + WAITS.lateFunding; now() < end; ) await sleep(WAITS.poll);
+        if (kept) {
+          // the transfer the run asked for (its need) has landed: nothing more is coming, and the key may go once swept;
+          // less than that (nothing, or a part) and the key is kept
+          const bal = await call("eth_getBalance", [deployer, "latest"]).then(big, () => 0n);
+          if (bal >= BigInt(j0.need ?? 0) && bal > 0n) funded = true;
+          else console.log(`deploy: the run key holds ${bal} wei, less than the ${j0.need} wei its run asked for: it is kept, since that transfer may still land`);
+        }
       }
       await sweep();
     } catch (e) {
@@ -750,7 +771,7 @@ export async function main(args, io = {}) {
       // sweep form
       if (journalKeys) {
         const why = [];
-        if (!funded) why.push("the run stopped before its funding was read: a transfer may still land");
+        if (!funded) why.push(kept ? "its run stopped in its funding wait, so a transfer to it may still land: run --sweep-kept again to send back what does" : "the run stopped before its funding was read: a transfer may still land");
         const made = signed.filter((s) => s.contract && s.receipt?.status === "0x1").length;
         if (!kept && !complete && made > 0) why.push(`the deploy stopped: it made ${made} of ${names.length} contracts: the same paste resumes with this key and reuses them`);
         try {
@@ -781,19 +802,19 @@ export async function main(args, io = {}) {
     if (kept) {
       // a deployed chain's record gets the sweeps this run landed, so the live check's nonce count holds
       if (existsSync(out)) {
+        // rewritten from every transaction of the key that landed (the journal's and this run's), each deploy with its
+        // contract: a killed run's sweep, and a resumed run's reused deploys its record missed
         const d = JSON.parse(readFileSync(out, "utf8"));
         const have = new Set(d.txs.map((t) => t.hash));
-        // every transaction of the key that landed and the record does not list: this run's, and a killed run's sweep
-        const more = landed().filter((s) => !have.has(s.hash)).map((s) => ({ step: s.step, hash: s.hash }));
-        if (more.length) {
-          d.txs.push(...more);
-          writeAtomic(out, JSON.stringify(d, null, 2) + "\n");
-          console.log(`deploy: ${rel(out)} lists the ${more.length} sweep(s) too`);
+        const more = landed().filter((s) => !have.has(s.hash)).length;
+        if (more) {
+          await record(d);
+          console.log(`deploy: ${rel(out)} lists the ${more} more transaction(s) of the key`);
         }
       }
     } else if (signed.length && (!mainnet || complete)) {
       // a mainnet record is written only by a completed run: it is the one-deploy guard
-      record();
+      await record();
       if (journalFile && complete && journalKeys?.state === "removed") rmSync(journalFile, { force: true });
     }
   }
