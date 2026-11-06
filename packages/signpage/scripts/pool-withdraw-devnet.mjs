@@ -25,10 +25,9 @@ const { openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore, refKey } = await import("../../wallet/src/notes/store.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { solanaRestoreNotes } = await import("../../wallet/src/pool/solana-restore.ts");
-const { pageRpc } = await import("../src/page-rpc.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import("../src/pool-testnet.ts");
 const { evaluatePool } = await import("../src/withdraw/pool-form.ts");
 const { planPoolWithdraw } = await import("../src/pool-withdraw.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
@@ -41,7 +40,7 @@ if (!OUT || !RESUME) throw new Error("usage: FLOW_RESUME=<seed file> pool-withdr
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const big = (_k, v) => (typeof v === "bigint" ? String(v) : v);
-const rpcs = [pageRpc(TESTNET_RPCS.solana[0]), pageRpc(TESTNET_RPCS.solana[1])];
+const rpcs = [testnetRpc(TESTNET_RPCS.solana[0]), testnetRpc(TESTNET_RPCS.solana[1])];
 
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);
 const file = (name) => {

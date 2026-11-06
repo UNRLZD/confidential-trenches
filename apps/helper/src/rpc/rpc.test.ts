@@ -48,8 +48,9 @@ const call = (r: ReturnType<typeof createRpc>, chain: string, body: unknown, typ
 const code = (a: { body: string }) => JSON.parse(a.body).error?.code;
 
 test("the allowlist, batch size and body limit are the kit's (a change goes through packages/kit/src/helper/v1.ts)", () => {
-  assert.deepEqual([...RPC_CHAINS], Object.keys(HELPER_RPC_METHODS));
-  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], [...HELPER_RPC_METHODS[c]], c);
+  // the kit's chains, then the testnet build's second Solana provider (card pool-buy-send-fast) on the kit's Solana list
+  assert.deepEqual([...RPC_CHAINS], [...Object.keys(HELPER_RPC_METHODS), "solana-devnet"]);
+  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], [...HELPER_RPC_METHODS[c === "solana-devnet" ? "solana" : c]], c);
   assert.equal(RPC_BATCH_MAX, HELPER_RPC_BATCH_MAX);
   const row = HELPER_V1_PATHS.find((p) => p.path === "/v1/rpc/{chain}");
   assert.equal(row?.limitBytes, RPC_BODY_MAX);
@@ -76,6 +77,120 @@ test("an allowlisted call on each chain is forwarded to that chain's provider an
     assert.equal(seen[0]!.headers["content-type"], "application/json");
     assert.deepEqual(JSON.parse(seen[0]!.body), { jsonrpc: "2.0", id: 7, method, params: [] });
   }
+});
+
+test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded to SOLANA_DEVNET_RPC_URL, its key never in the answer; anything else refused before any call", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const DEV = "fake-devnet-key-0123456789abcdef";
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet?api-key=${DEV}` });
+  // the reads a pool buy makes (packages/signpage/src/pool-buy.ts), each to the devnet URL, never the mainnet one
+  for (const method of ["getAccountInfo", "getMultipleAccounts", "getLatestBlockhash", "isBlockhashValid", "getBlockHeight", "getTransaction", "getSlot", "getSignaturesForAddress", "getFeeForMessage", "getBlockTime", "getEpochInfo"]) {
+    seen.length = 0;
+    const a = await call(r, "solana-devnet", { jsonrpc: "2.0", id: 3, method, params: [] });
+    assert.equal(a.status, 200, method);
+    assert.equal(seen.length, 1, method);
+    assert.equal(seen[0]!.url, `/devnet?api-key=${DEV}`, method);
+  }
+  seen.length = 0;
+  for (const method of ["eth_blockNumber", "EXPERIMENTAL_tx_status", "requestAirdrop", "getClusterNodes"])
+    assert.deepEqual([(await call(r, "solana-devnet", { jsonrpc: "2.0", id: 1, method, params: [] })).status, seen.length], [400, 0], method);
+  for (const c of ["solana_devnet", "Solana-devnet", "solana-devnet ", "solana-testnet"]) assert.equal((await call(r, c, { jsonrpc: "2.0", id: 1, method: "getSlot" })).status, 404, c);
+  // the key never reaches the answer
+  next = { status: 200, type: JSON_T, body: () => JSON.stringify({ jsonrpc: "2.0", id: 1, error: { message: `bad key ${DEV}` } }) };
+  assert.deepEqual([(await call(r, "solana-devnet", { jsonrpc: "2.0", id: 1, method: "getSlot" })).status], [503]);
+  // its own budget variable, a name a shell can set
+  assert.equal(rpcModule.rpcBudgetEnv("solana-devnet"), "RPC_BUDGET_SOLANA_DEVNET");
+});
+
+// review L-2 and its re-review: getProgramAccounts only in the note restore's exact shape, on the route's own pinned
+// pool program; an open or wider scan would spend the keyed provider's quota. SPENT and PRE are the two requests the
+// wallet's solanaMarks sends (packages/wallet/src/pool/solana-restore.ts, captured from it on 5 Nov 23:33Z for bucket 0
+// with minContextSlot 7): a 13-byte spent mark and a 17-byte pre-mark, memcmp at 9 on size - 9 bytes ending in tag 1.
+const DEV_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
+const MAIN_PROGRAM = "11111111111111111111111111111111";
+type ScanConfig = Record<string, unknown>;
+const SPENT: ScanConfig = { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] };
+const PRE: ScanConfig = { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters: [{ dataSize: 17 }, { memcmp: { offset: 9, bytes: "11111112" } }] };
+const scan = (program: string, config: unknown = SPENT, id = 5) => ({ jsonrpc: "2.0", id, method: "getProgramAccounts", params: [program, config] });
+const withFilters = (filters: unknown, from: ScanConfig = SPENT): ScanConfig => ({ ...from, filters });
+test("getProgramAccounts (review L-2): the restore's two exact shapes on the route's own pinned pool program are forwarded, alone or in a batch, with or without minContextSlot", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_DEVNET: DEV_PROGRAM, POOL_SOLANA_PROGRAM_MAINNET: MAIN_PROGRAM });
+  const { minContextSlot: _m, ...noMin } = SPENT;
+  for (const [chain, program] of [["solana-devnet", DEV_PROGRAM], ["solana", MAIN_PROGRAM]] as const) {
+    seen.length = 0;
+    // and a higher bucket: the counter's bytes 05 01 00 past its low byte, then the tag ("8RGtg", @scure/base)
+    for (const config of [SPENT, PRE, noMin, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "8RGtg" } }])]) {
+      assert.equal((await call(r, chain, scan(program, config))).status, 200, `${chain} ${JSON.stringify(config)}`);
+    }
+    assert.equal((await call(r, chain, [scan(program, PRE)])).status, 200, `${chain} in a batch`);
+    assert.equal(seen.length, 5, chain);
+  }
+});
+// each case differs from SPENT (or PRE) in one thing only, so removing the one rule that refuses it lets it through
+const ONE_OFF: readonly [string, string, unknown][] = [
+  ["another cluster's program", MAIN_PROGRAM, SPENT],
+  ["any other program", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", SPENT],
+  ["two dataSize filters", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { dataSize: 13 }])],
+  ["the tag byte alone at 12 (every spent mark at once)", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 12, bytes: "2" } }])],
+  ["the tag byte alone at 9 (one byte, not 4)", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "2" } }])],
+  ["a wrong offset", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 8, bytes: "1112" } }])],
+  ["a wrong length: a spent mark's 4 bytes on the pre-mark's size", DEV_PROGRAM, withFilters([{ dataSize: 17 }, { memcmp: { offset: 9, bytes: "1112" } }])],
+  ["a last byte that is not the tag", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1113" } }])],
+  ["a large dataSize", DEV_PROGRAM, withFilters([{ dataSize: 10240 }, { memcmp: { offset: 9, bytes: "1112" } }])],
+  ["another dataSize", DEV_PROGRAM, withFilters([{ dataSize: 12 }, { memcmp: { offset: 9, bytes: "112" } }])],
+  ["the filters swapped", DEV_PROGRAM, withFilters([{ memcmp: { offset: 9, bytes: "1112" } }, { dataSize: 13 }])],
+  ["a third filter", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }, { dataSize: 13 }])],
+  ["the size filter alone", DEV_PROGRAM, withFilters([{ dataSize: 13 }])],
+  ["no filters", DEV_PROGRAM, withFilters([])],
+  ["a memcmp encoding key", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112", encoding: "base58" } }])],
+  ["a size filter with a memcmp key too", DEV_PROGRAM, withFilters([{ dataSize: 13, memcmp: { offset: 9, bytes: "1112" } }, { memcmp: { offset: 9, bytes: "1112" } }])],
+  ["a memcmp filter with a dataSize key too", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" }, dataSize: 13 }])],
+  ["bytes off the base58 alphabet", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "0OIl" } }])],
+  ["encoding base64+zstd", DEV_PROGRAM, { ...SPENT, encoding: "base64+zstd" }],
+  ["encoding jsonParsed", DEV_PROGRAM, { ...SPENT, encoding: "jsonParsed" }],
+  ["a dataSlice", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 0 } }],
+  ["sortResults", DEV_PROGRAM, { ...SPENT, sortResults: true }],
+  ["changedSinceSlot", DEV_PROGRAM, { ...SPENT, changedSinceSlot: 1 }],
+  ["commitment processed", DEV_PROGRAM, { ...SPENT, commitment: "processed" }],
+  ["withContext false", DEV_PROGRAM, { ...SPENT, withContext: false }],
+  ["minContextSlot not a whole number", DEV_PROGRAM, { ...SPENT, minContextSlot: "7" }],
+  ["minContextSlot 0", DEV_PROGRAM, { ...SPENT, minContextSlot: 0 }],
+  ["no config", DEV_PROGRAM, undefined],
+];
+for (const [name, program, config] of ONE_OFF)
+  test(`getProgramAccounts (review L-2) refused 400 before any call: ${name}`, async () => {
+    next = { status: 200, type: JSON_T, body: echo };
+    const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_DEVNET: DEV_PROGRAM, POOL_SOLANA_PROGRAM_MAINNET: MAIN_PROGRAM });
+    seen.length = 0;
+    const body = config === undefined ? { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [program] } : scan(program, config);
+    for (const b of [body, [{ jsonrpc: "2.0", id: 2, method: "getSlot" }, body]]) {
+      const a = await call(r, "solana-devnet", b);
+      assert.deepEqual([a.status, code(a)], [400, "method_not_allowed"], JSON.stringify(b));
+    }
+    assert.equal(seen.length, 0, "nothing reached a provider");
+  });
+test("getProgramAccounts (review L-2): a host with no pinned pool program refuses every scan", async () => {
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
+  seen.length = 0;
+  for (const chain of ["solana", "solana-devnet"]) assert.equal((await call(r, chain, scan(DEV_PROGRAM))).status, 400, chain);
+  assert.equal(seen.length, 0);
+});
+
+test("solana-devnet with no SOLANA_DEVNET_RPC_URL (review L-1): 503 upstream for every call and nothing sent, never the page's own first provider (api.devnet.solana.com) behind the helper's name", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  for (const env of [{ SOLANA_RPC_URL: `${base}/?api-key=${KEY}` }, { SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: "" }]) {
+    const r = createRpc(env);
+    seen.length = 0;
+    for (const body of [{ jsonrpc: "2.0", id: 1, method: "getSlot", params: [] }, [{ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [] }]]) {
+      const a = await call(r, "solana-devnet", body);
+      assert.deepEqual([a.status, code(a)], [503, "upstream"], JSON.stringify(body));
+    }
+    assert.equal(seen.length, 0, "nothing reached any provider");
+    // the other chains are served as before
+    assert.equal((await call(r, "solana", { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] })).status, 200);
+  }
+  assert.equal(RPC_UPSTREAMS["solana-devnet"].fallback, null);
 });
 
 test("the kit's Solana set send reads are forwarded: isBlockhashValid (card solana-set-send), the finalized blockhash, statuses and the send", async () => {
@@ -124,7 +239,7 @@ test("refused before any call: an unlisted method, alone or anywhere in a batch,
   const r = rpc();
   seen.length = 0;
   const refused: [string, unknown][] = [
-    ["solana", { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [] }],
+    ["solana", { jsonrpc: "2.0", id: 1, method: "requestAirdrop", params: [] }],
     ["base", { jsonrpc: "2.0", id: 1, method: "debug_traceTransaction", params: [] }],
     ["base", { jsonrpc: "2.0", id: 1, method: "eth_sendTransaction", params: [] }],
     ["near", { jsonrpc: "2.0", id: 1, method: "EXPERIMENTAL_changes", params: {} }],
@@ -486,10 +601,11 @@ test("each chain is one budget callers draw from fairly: a heavy caller is throt
   assert.ok(RPC_CLIENT_MAX * 6 <= RPC_CHAIN_MAX, "six callers at their full share before anyone else is throttled");
 });
 
-test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default", () => {
+test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default (solana-devnet: none, off)", () => {
   const d = readUpstreams({});
   for (const c of RPC_CHAINS) {
-    assert.match(d[c].url, /^https:\/\//);
+    if (c === "solana-devnet") assert.equal(d[c].off, true, c);
+    else assert.match(d[c].url, /^https:\/\//);
     assert.deepEqual(d[c].forms, []);
   }
   for (const bad of ["not a url", "ftp://x.example/", "file:///etc/passwd", "https://x.example/#frag", "javascript:alert(1)"]) {

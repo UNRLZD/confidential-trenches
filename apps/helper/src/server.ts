@@ -31,6 +31,7 @@ import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
+import { callsFiles } from "./proxy/shared-calls.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
@@ -46,6 +47,7 @@ import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
 import { TICK_MS } from "./data/evm/lists.ts";
+import { randomUUID } from "node:crypto";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
 
@@ -848,7 +850,8 @@ if (import.meta.main) {
   let drain = () => undefined as void;
   try {
     checkVendorPlans(process.env);
-    const proxy = createProxy(process.env);
+    // card helper-deploy-reads-fast: a deploy's two helpers draw on one key per vendor, so each counts the other's calls
+    const proxy = createProxy(process.env, { peers: callsFiles(storeDir, randomUUID()) });
     // one hold per provider, shared by every path that reads it (card helper-robinhood-capacity: the swap and maker reads
     // and /v1/rpc/robinhood all read rpc.mainnet.chain.robinhood.com)
     const holds = providerHolds();

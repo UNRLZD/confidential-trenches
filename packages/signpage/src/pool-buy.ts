@@ -57,7 +57,8 @@
 //   again).
 // - The route (card signpage-buy-route-events): the run tells the app, through the kind's route events (messages.ts
 //   BuyRoute), only what it bound or read itself: W and the venue with its pool once the check passed, W derived to the
-//   proof's recipient and signed, and the take holds the note, before the transaction leaves; then the amount W
+//   proof's recipient and signed, and the take holds the note, before the transaction leaves; then the transaction's
+//   signature once both RPCs read this very transaction back under it (card pool-buy-send-fast); then the amount W
 //   received, read from this very transaction's token balances on both RPCs (the two the same, at least the min out,
 //   within the kit's bound), once it reads back as succeeded on both. Not read plainly on both: not told.
 // - Every read names a public account or the transaction itself; no request carries a key, the words or which note is
@@ -78,10 +79,10 @@ import {
   type SolanaPoolRelease,
   type SolanaRent,
 } from "../../kit/src/trade/solana/pool-buy.ts";
-import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
+import { pageReference } from "./page-rpc.ts";
 import { solanaDecodeLookupTable, type SolanaLookupTable } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_CU_PRICE_MAX, SOLANA_JITO_TIP_MIN } from "../../kit/src/checks/solana/checks.ts";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof } from "../../kit/src/vault/shapes.ts";
 import type { BuyRoute, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_ROUTE_OUT } from "../../kit/src/signpage/schema.ts";
@@ -134,7 +135,7 @@ export type PoolBuyHost = {
   pick?: (n: number) => number;
 };
 
-export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" };
+export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down" };
 
 /** The helper's busy answer to a send (its 429: rate_limited when a pool provider throttled a read, in_flight when this
  *  caller holds too many sends open, or its per-caller throttle), with the wait its Retry-After names. The send is
@@ -415,6 +416,8 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
   let claim: string | null = null;
+  // from here on W signs: a provider that fails past this is never "down" (the transaction may land)
+  let signing = false;
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   const tell = (x: BuyRoute): void => {
     try {
@@ -451,7 +454,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
           roots.set(rootKey(tree, root), await rootIndex(h, tree, size, dec(root)).catch((e) => (e instanceof Refused ? null : Promise.reject(e))));
         }
       // last, the reads the quote's age counts from: the reference, its venue, then the device's blockhash and slot
-      const ref = await readSolanaReference(h.rpcs, { side: "buy", token, amount: ask.amount });
+      const ref = await pageReference(h.rpcs, { side: "buy", token, amount: ask.amount });
       const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
       if (!ref || !best) return no("quote_check_failed");
       const venue: SolanaPoolBuyVenue = await readSolanaPoolBuyVenue(h.rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : []));
@@ -483,6 +486,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: r.wallet.address, feeCap, solana: h.pin };
       checkSolanaBuy(built.wire, ask, ctx, release, venue, req, { blockhash: bh.blockhash, slot: bh.slot, tables, stateSize: sizes.stateSize, rent, reference: { amount: ask.amount, ref, slippageBps: ask.slippageBps } });
       // W, from the seed, right before it signs: it must be the proof's recipient the bytes were built and checked for
+      signing = true;
       seed = await h.seed64();
       const w = freshWallet(seed, "sol", r.wallet.l, r.wallet.j);
       key = w.secretKey;
@@ -501,6 +505,8 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
+    // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
+    if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
     return { error: "failed" };
   } finally {
     seed?.fill(0);
@@ -522,6 +528,15 @@ export async function sendAndSettle(
   if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();
   // the take holds the note for this very transaction: W and the venue with its pool, told before it leaves
   if (fill) for (const x of fill.bound) fill.tell(x);
+  // the buy's transaction as a route fact (card pool-buy-send-fast), told once, by the first read that names it as this
+  // very transaction: both RPCs reading it back under the helper's signature, or the spend's own signature read as this
+  // attempt's on both (spentBy), so a filled answer the client dropped at its 10 s still links its transaction
+  let toldTx = false;
+  const tellTx = (tx: string): void => {
+    if (!fill || toldTx) return;
+    toldTx = true;
+    fill.tell({ tx });
+  };
   const reads = h.reads ?? POOL_BUY_READS;
   // the wall clock from the signature (the page's clock, h.now, in tests): bounds the resends and the read-back
   const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
@@ -549,7 +564,10 @@ export async function sendAndSettle(
   // helper's word); another's can never be this transaction's (not_landed); not known yet: null, the reads go on
   const spentBy = async (hint: string | undefined, txs: TxRef[]): Promise<PoolBuyAnswer | null> => {
     const o = await owner(hint);
-    return o === "other" ? { stage: "not_landed", txs } : o === null ? null : { stage: "filled", txs: [{ chain: "solana", hash: o.mine }] };
+    if (o === "other") return { stage: "not_landed", txs };
+    if (o === null) return null;
+    tellTx(o.mine);
+    return { stage: "filled", txs: [{ chain: "solana", hash: o.mine }] };
   };
   // the chain's word on the note (its spent mark and change on both RPCs, then whose spend it is) over the helper's or
   // one RPC's: this attempt's spend is filled, named by the signature both RPCs read it under. not_landed once
@@ -606,9 +624,12 @@ export async function sendAndSettle(
     // settle finds is another's, so not_landed at once
     if (got[0] === "failed" && got[1] === "failed") return (await spent()) ? { stage: "not_landed", txs } : { stage: "refused", txs };
     landed = got[0] === "ok" && got[1] === "ok";
-    // read back on both RPCs as this very transaction: only now is it told as sent, by its signature
+    // read back on both RPCs as this very transaction: only now is it told as sent, by its signature; a buy tells it
+    // as a route fact too (card pool-buy-send-fast), which reaches the app however late it comes: an answer past the
+    // kit client's 10 s is dropped (a mainnet bundle the helper holds until it lands)
     if (!ours && seen[0] && seen[1]) {
       ours = true;
+      tellTx(signature);
       await h.sent?.(signature);
     }
     if (landed && fill) {
