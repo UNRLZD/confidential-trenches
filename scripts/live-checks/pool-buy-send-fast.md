@@ -1,4 +1,4 @@
-CARD pool-buy-send-fast / devnet after-run: PASS
+CARD pool-buy-send-fast / live: PASS
 Money path: yes
 Tx: solana-devnet 2riHYB15aZBJfY7hA9NDPKPjQNwzZgRSjXvjNmWk3R4yVACfyMidz9rMfTnXN3EQUpjjC3k88EeXhnRgKyd3K2VW
 Tx: solana-devnet 5kxqLebHVzimZaaLGXoTBFCbFsq8QGh46h3TnvwhxQSY2cV4RoqS2HwKeTkoBTBWvBRgZCrnzPG9mCcveAdAcybj
