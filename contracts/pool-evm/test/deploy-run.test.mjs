@@ -839,3 +839,83 @@ test("mainnet review 2: a failed git fetch is refused as itself, never as a pool
   assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok) }), null);
   assert.equal(await deployedElsewhere("base", { git: () => ok }), "origin/main holds contracts/pool-evm/deployments/base.json");
 });
+
+// ---- the mainnet paste's review (round 3) ----
+test("mainnet review 3: a resumed run stopped in its funding wait is unfunded: --sweep-kept watches the key and keeps it while the shortfall the resume asked for may land", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  // the same paste resumes and asks for the shortfall; stopped in the wait; the owner's transfer is slow
+  await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => l.startsWith("deploy: send exactly") && process.emit("SIGTERM", "SIGTERM") });
+  const j2 = JSON.parse(readFileSync(m.journal, "utf8"));
+  assert.equal(j2.keys.state, "kept");
+  c.logs.length = 0;
+  const r3 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(r3.error, null, String(r3.error?.message) + why(c));
+  assert.ok(c.logs.some((l) => /watching .* balance/.test(l)), "the key is watched" + why(c));
+  assert.equal(folders(m.keys).length, 1, "the key is kept");
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "kept");
+  assert.notEqual(c.fundAt, null, "the asked transfer is still to land");
+  c.clock = c.fundAt;
+  c.mine();
+  const r4 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(r4.error, null, String(r4.error?.message) + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST, "once it lands, it is sent back" + why(c));
+});
+
+test("mainnet review 3: a funding-wait key holding part of its need is kept by every --sweep-kept (a sweep it sent is no reading of the need) until the rest lands", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let snap = null;
+  let keyFile = null;
+  let key = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: send exactly") && !snap) (snap = readFileSync(m.journal, "utf8")), (keyFile = path.join(m.keys, folders(m.keys)[0], "key")), (key = readFileSync(keyFile, "utf8"));
+    },
+  });
+  const j = JSON.parse(snap);
+  const need = BigInt(j.need);
+  const c2 = mainnet();
+  c2.deployer = j.deployer;
+  c2.bal.set(j.deployer.toLowerCase(), need / 2n);
+  c2.fundAt = 1e9;
+  c2.fundWei = need - need / 2n;
+  writeFileSync(m.journal, snap);
+  mkdirSync(path.dirname(keyFile), { recursive: true });
+  writeFileSync(keyFile, key);
+  for (const pass of [1, 2]) {
+    c2.logs.length = 0;
+    const s = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+    assert.equal(s.error, null, String(s.error?.message) + why(c2));
+    assert.ok(c2.logs.some((l) => /watching .* balance/.test(l)), `pass ${pass} watches` + why(c2));
+    assert.equal(folders(m.keys).length, 1, `pass ${pass} keeps the key`);
+  }
+  c2.clock = c2.fundAt;
+  c2.mine();
+  const s3 = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(s3.error, null, String(s3.error?.message) + why(c2));
+  assert.ok(c2.balanceOf(j.deployer) <= DUST, "the rest is sent back once it lands" + why(c2));
+});
+
+test("mainnet review 3: a settled run's final record reads no receipt over RPC: an outage once its key is removed still leaves a record of every transaction", OPTS, async (t) => {
+  const m = room(t);
+  let raised = false;
+  let down = false;
+  const c = mainnet();
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => (down ? { ok: false, status: 503, json: async () => null } : fetch0(u, init));
+  const r = await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l, ch) => {
+      // the base fee jumps once the first sweep is sent, so a cancel replaces it
+      if (l.startsWith("deploy: sweep ") && !raised) (raised = true), (ch.base *= 10n);
+      if (/its key folder is removed/.test(l)) down = true;
+    },
+  });
+  down = false;
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  const d = JSON.parse(readFileSync(m.out, "utf8"));
+  assert.equal(d.txs.length, Number(c.nonce.get(c.deployer)), "the record lists every transaction of the key" + why(c));
+});

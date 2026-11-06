@@ -539,12 +539,17 @@ export async function main(args, io = {}) {
   let stopped = null;
   let stoppedAt = null;
   let complete = false;
+  // whether this run's (or, for --sweep-kept, the journaled run's) key read the need it asked for: written in the
+  // journal the moment it is read, so a later --sweep-kept of a run stopped (or killed) before that watches the key for
+  // WAITS.lateFunding and keeps it while the asked transfer may still land. A resume starts unfunded: its journal's
+  // transactions are the stopped run's, not a reading of its own funding.
+  let funded = Boolean(kept) && j0?.funded === true;
   // On a mainnet the journal (journalFile) holds the run's state, rewritten before each send and in the finally: every
   // signed transaction (its raw form is public once sent; no key), the key folder's name and state and why
   const writeJournal = () => {
     if (!journalFile) return;
     const txs = signed.map((s) => ({ step: s.step, ...(s.contract ? { contract: s.contract } : {}), ...(s.address ? { address: s.address } : {}), hash: s.hash, raw: s.raw, nonce: String(s.nonce), tip: String(s.tip), maxFee: String(s.maxFee), gas: String(s.gas), sentAt: s.sentAt, landed: Boolean(s.receipt) || Boolean(s.landed) }));
-    const j = { chain: chainName, chainId: Number(BigInt(id)), dryRun, return: ret, deployer, need: String(need ?? (j0?.need ?? "0")), at: j0?.at ?? startedAt, complete: complete || Boolean(j0?.complete), stopped: stopped ?? (kept ? j0?.stopped : null) ?? null, stopped_at: stoppedAt ?? (kept ? j0?.stopped_at : null) ?? null, keys: journalKeys, txs };
+    const j = { chain: chainName, chainId: Number(BigInt(id)), dryRun, return: ret, deployer, need: String(need ?? (j0?.need ?? "0")), at: j0?.at ?? startedAt, complete: complete || Boolean(j0?.complete), funded, stopped: stopped ?? (kept ? j0?.stopped : null) ?? null, stopped_at: stoppedAt ?? (kept ? j0?.stopped_at : null) ?? null, keys: journalKeys, txs };
     writeAtomic(journalFile, JSON.stringify(j, null, 2) + "\n");
   };
   const landed = () => signed.filter((s) => s.receipt).sort((a, b) => Number(a.nonce - b.nonce));
@@ -585,7 +590,9 @@ export async function main(args, io = {}) {
   // resumed run's reused deploys included: their receipts are read first). `prev`, a record already written, keeps its
   // own run fields (--sweep-kept rewrites it with the sweeps).
   const record = async (prev = null) => {
-    for (const s of signed) await receiptOf(s);
+    // a receipt is read only where the nonce has none landed yet (a resume's reused deploys): a settled run reads
+    // nothing here, so an RPC outage after its key is removed cannot cost it the record
+    for (const s of signed) if (!signed.some((o) => o.receipt && o.nonce === s.nonce)) await receiptOf(s);
     const made = landed().filter((s) => s.contract && s.step === `deploy ${s.contract}` && s.address);
     const txs = landed().map((s) => ({ step: s.step, hash: s.hash, ...(s.contract ? { contract: s.contract } : {}) }));
     const d = {
@@ -653,9 +660,6 @@ export async function main(args, io = {}) {
 
   // A signal stops the run at its next step: a transaction already sent is waited for, so the sweep never races a
   // deploy for a nonce; the finally below then sweeps. Later signals never cut the sweep short.
-  // a kept journal that signed nothing is a run stopped (or killed) in its funding wait: its funding is unread, so
-  // --sweep-kept watches the key for WAITS.lateFunding, sweeps what landed, and keeps the key (a transfer may still land)
-  let funded = Boolean(kept) && (j0.txs ?? []).length > 0;
   const onSignal = (s) => {
     if (stopped) return console.error(`deploy: ${s} again: the sweep finishes first`);
     stopped = s;
@@ -715,6 +719,7 @@ export async function main(args, io = {}) {
         await sleep(WAITS.poll);
       }
       funded = true;
+      writeJournal();
       console.log("deploy: funded");
 
       // 5. the deploys
@@ -757,7 +762,10 @@ export async function main(args, io = {}) {
           // the transfer the run asked for (its need) has landed: nothing more is coming, and the key may go once swept;
           // less than that (nothing, or a part) and the key is kept
           const bal = await call("eth_getBalance", [deployer, "latest"]).then(big, () => 0n);
-          if (bal >= BigInt(j0.need ?? 0) && bal > 0n) funded = true;
+          if (bal >= BigInt(j0.need ?? 0) && bal > 0n) {
+            funded = true;
+            writeJournal();
+          }
           else console.log(`deploy: the run key holds ${bal} wei, less than the ${j0.need} wei its run asked for: it is kept, since that transfer may still land`);
         }
       }
