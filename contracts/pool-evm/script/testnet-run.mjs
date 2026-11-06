@@ -6,7 +6,7 @@
 // run's notes from its 12 words. The run key sends every transaction, as the relayer does.
 //
 //   node contracts/pool-evm/script/testnet-run.mjs --chain base-sepolia --return <address> [--venues v4,v3]
-//     [--rpc <url>,<url>] [--out <file>] [--sell-helper <url>] [--bind-from-s <s>]
+//     [--rpc <url>,<url>] [--out <file>] [--sell-helper <url> | --sell-fee-to <address>] [--bind-from-s <s>]
 //
 // --sell-helper <url>: each sell goes to that helper's POST /v1/pool/evm/sell (apps/helper/src/pool/evm.ts) as the
 // device sends it, { pool, w, data, authorization }, instead of from the run key; the helper's sell sender sends the
@@ -14,6 +14,9 @@
 // base fee + the kit's tip) + the chain fee), on the fee step), which covers the helper's bound at the quote's base
 // fee. The record's sell rows carry via "helper" and the
 // sender the receipt names; scripts/live-checks/helper-evm-sender.mjs reads them back.
+//   --sell-fee-to <address>: each sell the run key sends signs that address as its fee recipient in place of the run
+//   key (card evm-fee-collector: the chain's FeeCollector, so the sell's receipt carries Paid(W, fee)); the sell row
+//   names it as feeTo. Not with --sell-helper, whose fee answer names the recipient.
 //   --bind-from-s: each bind waits until the pool's time is at least s seconds into its epoch, and binds that epoch
 //   ("run: bind <s> s into epoch <iso>"), so its fee reads at the epoch's first block run that long after it
 //
@@ -216,6 +219,8 @@ export function wiringOf(args, io = {}) {
   const out = opt("--out") ?? (dryRun ? null : recordFile(chain));
   const sellHelper = opt("--sell-helper");
   if (args.includes("--sell-helper") && !/^https?:\/\/[^/\s]+$/.test(sellHelper ?? "")) throw new Error("--sell-helper: a helper's base URL, no path");
+  const sellFeeTo = args.includes("--sell-fee-to") ? String(opt("--sell-fee-to") ?? "").toLowerCase() : undefined;
+  if (sellFeeTo !== undefined && (!/^0x[0-9a-f]{40}$/.test(sellFeeTo) || /^0x0{40}$/.test(sellFeeTo) || sellHelper)) throw new Error("--sell-fee-to: a non-zero address, and not with --sell-helper");
   if (!out) throw new Error("a dry run (loopback RPCs) needs --out, so it never writes the real record");
   const evmRpc = (u) => Object.assign((method, params) => rpc(fetchFn, u, method, params, sleep), { url: u });
   const rpcs = [evmRpc(urls[0]), evmRpc(urls[1])];
@@ -224,7 +229,7 @@ export function wiringOf(args, io = {}) {
   const feeUrls = feeProviders(chain, opt("--rpc"));
   const feeRpcs = [evmRpc(feeUrls[0]), evmRpc(feeUrls[1])];
   return {
-    fetchFn, sleep, chain, net, ret, venues, urls, dryRun, bindFromS, out, sellHelper, evmRpc, rpcs, feeUrls, feeRpcs,
+    fetchFn, sleep, chain, net, ret, venues, urls, dryRun, bindFromS, out, sellHelper, sellFeeTo, evmRpc, rpcs, feeUrls, feeRpcs,
     /** The device's pool's arguments (deviceOf): the sync on the run's pair, the fee's state reads on the fee's. */
     deviceArgs: (pin, relayFee) => ({ pin, rpcs, feeRpcs, relayFee }),
     /** A bind's epoch: once the pool's time (`nowOf`) is at least --bind-from-s into it (bindEpoch). */
@@ -234,7 +239,7 @@ export function wiringOf(args, io = {}) {
 
 export async function main(args, io = {}) {
   const w = wiringOf(args, io);
-  const { fetchFn, sleep, chain, net, ret, venues, urls, dryRun, out, sellHelper, evmRpc, rpcs, feeRpcs } = w;
+  const { fetchFn, sleep, chain, net, ret, venues, urls, dryRun, out, sellHelper, sellFeeTo, evmRpc, rpcs, feeRpcs } = w;
   const call = (method, params, u = urls[0]) => rpc(fetchFn, u, method, params, sleep);
   // the device's quotes: a real run's on the chain's pinned providers (the kit's index); the dry run's on the fork
   const batchRpc = (u) => async (calls) => {
@@ -472,21 +477,21 @@ export async function main(args, io = {}) {
       }
       if (amount !== BigInt(b.out)) throw new Error(`W ${W.address} holds ${amount} of the token, not the ${b.out} its buy paid, after 60 s`);
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
-      const sellFeeTo = sellHelper ? lower((await (await fetchFn(`${sellHelper}/v1/pool/fee?pool=${pool}`)).json()).fee_recipient) : relayer;
+      const feeTo = sellHelper ? lower((await (await fetchFn(`${sellHelper}/v1/pool/fee?pool=${pool}`)).json()).fee_recipient) : (sellFeeTo ?? relayer);
       const { q, built } = await fresh(
         // `bought` and `boughtBlock`: the route of the buy that paid W the token and the block it landed in, which the
         // sell quote requires (it reads at that block or a later one)
         () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block }),
         // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole, paid to the fee
         // recipient W signs (pool review round 3, L-1): the helper's own, as its GET /v1/pool/fee names it, or the run key
-        (q) => kit.evmPoolBuildSell(q, { feeRecipient: sellFeeTo, precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
+        (q) => kit.evmPoolBuildSell(q, { feeRecipient: feeTo, precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
       );
       const fee = built.feeCap;
       const sv = q.route.venue === "uniswap-v4" ? "v4" : "v3";
       const sig = kit.evmPoolSignSell(W.secretKey, chain, built);
       const auth = kit.evmPoolSignSellAuthorization(W.secretKey, chain, BigInt(await call("eth_getTransactionCount", [W.address, "latest"])));
       console.log(`run: the device's sell quote for W ${lower(W.address)}: ${q.amountOut} wei through ${sv} (${JSON.stringify(q.route, (_, x) => (typeof x === "bigint" ? String(x) : x))}) at block ${q.block.number}, minOut ${q.minOut}`);
-      const sellRow = { kind: "sell", venue: sv, target: lower(built.target), w: lower(W.address), amount: String(amount), minOut: String(built.minOut), quoted: String(q.amountOut), quoteBlock: String(q.block.number), fee: String(fee), coin: token };
+      const sellRow = { kind: "sell", venue: sv, target: lower(built.target), w: lower(W.address), amount: String(amount), minOut: String(built.minOut), quoted: String(q.amountOut), quoteBlock: String(q.block.number), fee: String(fee), coin: token, ...(sellFeeTo ? { feeTo } : {}) };
       const r = sellHelper
         ? await helperSell("sell through SellDelegate (helper)", { pool, w: lower(W.address), data: sellData(built, fee, sig), authorization: authJson(auth) }, sellRow)
         : await send("sell through SellDelegate", { to: lower(W.address), data: sellData(built, fee, sig), authorizations: [auth] }, sellRow);

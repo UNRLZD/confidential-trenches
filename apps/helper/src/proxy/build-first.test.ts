@@ -116,3 +116,51 @@ test("card jupiter-build-budget-503: the live suite's crowd (one device's nine l
   const legsAfter = j.sent.filter((s) => s.q.startsWith("?leg=") && s.at > at).length;
   assert.ok(legsAfter >= 1, "the legs past their device's room go after the new device's first build");
 });
+
+// Lone helper live runs 42207995804 (9f55c5b0) and 42210110244 (fb332369): solana-jupiter-build's first Jupiter call
+// (its first candidate's buy, which the check then names the no-route shape) came ~15 s into the suite, with
+// helper-token-page-cold's pairs, the lists and fills holding the own reads' part of the window and
+// solana-legs-share-wait's six legs taking the builds' whole room: 503 cause "budget", Retry-After 4, refused before
+// any send. The traffic of that start, on the stubbed clock.
+test("card jupiter-build-budget-503: the suite's start (cold page pairs, lists, fills, six legs of one device waiting out their Retry-After, a page check's build): a new device's build 6 s in is served at once, and the legs all build", async () => {
+  const c = virtualTime();
+  const j = windowJupiter(c);
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep, log: () => {} });
+  const at = <T>(ms: number, f: () => Promise<T>) => c.sleep(ms).then(f);
+  // the kit's wait (packages/kit/src/trade/solana/build.ts SolanaBuildWait): a 429 or 503 naming a Retry-After is
+  // waited out and asked again
+  const kit = async (q: string, client: string) => {
+    for (let n = 0; ; n++) {
+      const a = await build(p, q, client);
+      const ra = Number(a.headers["Retry-After"]);
+      if (a.status === 200 || !ra || n > 20) return a;
+      await c.sleep(ra * 1000);
+    }
+  };
+  const jobs: Promise<unknown>[] = [];
+  for (let s = 0; s < 20_000; s += 2_500) jobs.push(at(s, () => page(p, `cold${s}a`)), at(s + 300, () => page(p, `cold${s}b`)));
+  for (let s = 0; s < 20_000; s += 12_000) for (const l of LISTS) jobs.push(at(s, () => list(p, l)));
+  for (let s = 0; s < 20_000; s += 5_000) jobs.push(at(s + 100, () => fill(p, `fill${s}`)));
+  const legs = Array.from({ length: 6 }, (_, i) => at(1_000, async () => [await kit(`leg${i}a`, "198.51.100.1"), await kit(`leg${i}b`, "198.51.100.1")]));
+  const check = at(2_000, () => kit("pagecheck", "198.51.100.2"));
+  let asked = 0;
+  const s1 = at(6_000, () => ((asked = c.now()), build(p, "buy=S-1", "198.51.100.9")));
+  const [a, legged, checked] = await c.run(Promise.all([s1, Promise.all(legs), check, ...jobs.map((x) => x.catch(() => undefined))]));
+  assert.equal(j.refused(), 0, "Jupiter never answered 429");
+  assert.equal(a!.status, 200, `S-1: ${a!.status} ${causeIn(a!) ?? ""} ${a!.timing?.join(", ") ?? ""} Retry-After ${a!.headers["Retry-After"] ?? "-"}`);
+  assert.equal(j.sent.find((s) => s.q === "?buy=S-1")!.at - asked, 0, "at once");
+  for (const l of (legged as { status: number }[][]).flat()) assert.equal(l.status, 200, "every leg builds, waiting out its Retry-After");
+  assert.equal((checked as { status: number }).status, 200);
+});
+
+test("card jupiter-build-budget-503: beside a window the own reads filled (their part and a page's last send), a device still sends its trade's first two builds at once (OTHER_DEVICES_ROOM), the third as the window frees", async () => {
+  const c = virtualTime();
+  const j = windowJupiter(c);
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep, log: () => {} });
+  const t0 = c.now();
+  await c.run(Promise.all([...Array.from({ length: 6 }, (_, i) => fill(p, `own${i}`)), page(p, "last")]).then(() => undefined));
+  assert.deepEqual(j.sent.map((s) => s.at - t0), Array(7).fill(0), "the own reads' six and a page's last send");
+  const three = await c.run(Promise.all([0, 1, 2].map((i) => p.handle("jupiter", "/swap/v2/build", `t=${i}`, "", "198.51.100.5", false, 15_000))));
+  assert.deepEqual(three.map((a) => a.status), [200, 200, 200]);
+  assert.deepEqual(j.sent.filter((s) => s.path === "/swap/v2/build").map((s) => s.at - t0), [0, 0, 10_000], "two at once, the third leaving the other devices their room");
+});

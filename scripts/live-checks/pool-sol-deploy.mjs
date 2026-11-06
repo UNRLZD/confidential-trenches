@@ -60,12 +60,28 @@ const { ed25519 } = req("@noble/curves/ed25519.js");
 export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 // Mainnet-beta's genesis hash (docs.anza.xyz/clusters/available); the deploy script refuses it.
 export const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
-// The two devnet RPCs, each its operator's, both answered getGenesisHash, getTransaction and getAccountInfo on
-// 2026-11-02 between 23:12 and 23:14Z: api.devnet.solana.com, the cluster's public RPC (docs.anza.xyz/clusters/available,
-// "RPC URL for Devnet: https://api.devnet.solana.com"), and OnFinality's public devnet endpoint, which rate-limits
-// bursts (a 429 is waited out below).
+// The devnet providers the live checks read, in order, each its operator's (card live-check-devnet-pair). A check reads
+// on the first two operators that answer (onTwoOperators below): a provider that is out moves the read to the next, and
+// fewer than two answering FAILs. Read 2026-11-06 10:53-10:56Z from the Mac (getGenesisHash, getAccountInfo of the pinned program and
+// its programdata, getTransaction at finalized of a 3 Nov deploy, deposit and release):
+//   - api.devnet.solana.com, the cluster's public RPC (docs.anza.xyz/clusters/available), answered every read;
+//   - the helper's /v1/rpc/solana-devnet, the page's own second (packages/signpage/src/pool-testnet.ts TESTNET_RPCS),
+//     whose keyed provider is another operator's (apps/helper/src/rpc/rpc.ts RPC_UPSTREAMS "solana-devnet"), answered
+//     the account and transaction reads and refused getGenesisHash (400 method_not_allowed), which this card adds to
+//     the route's list (apps/helper/src/rpc/methods.ts); a helper that still refuses it is out for a check that reads the
+//     genesis, which moves on;
+//   - OnFinality's public endpoint answers 1 request a second and 1000 a day per IP (x-ratelimit-limit-day 1000): on
+//     GitHub's shared runners it answered no result (sign live run 42201131294, 6 Nov 10:15Z), so it is the last spare.
+// Left out: devnet.rpcpool.com and explorer-api.devnet.solana.com are the same node as api.devnet.solana.com (x-rpc-node
+// sg140, 74.63.203.93); Tatum's gateway answers 5 reads and then 429 for 60 s; dRPC, Ankr, Alchemy, Helius, Chainstack
+// and Shyft answer only with a key.
+export const DEVNET_HELPER_RPC = "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet";
+export const DEVNET_PROVIDERS = Object.freeze(["https://api.devnet.solana.com", DEVNET_HELPER_RPC, "https://solana-devnet.api.onfinality.io/public"]);
+// The devnet deploy's own pair (contracts/pool-solana/scripts/deploy.mjs reads its second here: it needs getGenesisHash
+// and getProgramAccounts, which the helper's route refuses), read on 2026-11-02 between 23:12 and 23:14Z. The checks
+// read DEVNET_PROVIDERS; a deploy's printed --rpc pair is read through the same walk.
 export const RPCS = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"];
-export const OPERATORS = Object.freeze({ "api.devnet.solana.com": "solana", "solana-devnet.api.onfinality.io": "onfinality" });
+export const OPERATORS = Object.freeze({ "api.devnet.solana.com": "solana", "api.confidential.unrealized.trade": "the helper's devnet provider", "solana-devnet.api.onfinality.io": "onfinality" });
 // The two mainnet RPCs, each its operator's (card pool-sol-deploy-mainnet), both answering mainnet's genesis hash and the
 // same rents on 2026-11-05 at 14:35Z: the cluster's public RPC (docs.anza.xyz/clusters/available), first since it alone
 // answers getProgramAccounts (the deploy's buffer scan; PublicNode answered it "Indexed requests require a personal
@@ -261,17 +277,71 @@ const hostOf = (u) => {
   }
 };
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
-/** Two RPCs of two operators; on a local validator (the dry run, cluster "localnet") loopback hosts stand in. */
+/** A provider's operator on `cluster`, or null for a host none is known for; on a local validator (the dry run, cluster
+ * "localnet") each loopback URL stands in for one. */
+export function operatorOf(url, cluster) {
+  const h = hostOf(url);
+  if (cluster === "localnet") return LOOPBACK.has(h) ? url : null;
+  return (cluster === "mainnet" ? MAINNET_OPERATORS : OPERATORS)[h] ?? null;
+}
+/** The ordered list holds two operators or more, every provider a known operator's; on a local validator loopback
+ * hosts stand in. */
 export function operatorProblems(rpcs, cluster) {
-  const two = rpcs.slice(0, 2);
-  if (two.length < 2) return [`only ${two.length} RPC(s); want two of two operators`];
-  if (cluster === "localnet") return two.every((u) => LOOPBACK.has(hostOf(u))) ? [] : ["a localnet record read on a non-loopback RPC"];
-  const known = cluster === "mainnet" ? MAINNET_OPERATORS : OPERATORS;
-  const ops = new Set(two.map((u) => known[hostOf(u)]).filter(Boolean));
-  return ops.size < 2 ? [`only ${ops.size} known ${cluster === "mainnet" ? "mainnet" : "devnet"} operator(s) in ${two.join(", ")}; want two`] : [];
+  if (rpcs.length < 2) return [`only ${rpcs.length} RPC(s); want two of two operators`];
+  if (cluster === "localnet") return rpcs.every((u) => LOOPBACK.has(hostOf(u))) ? [] : ["a localnet record read on a non-loopback RPC"];
+  const net = cluster === "mainnet" ? "mainnet" : "devnet";
+  const ops = new Set(rpcs.map((u) => operatorOf(u, cluster)).filter(Boolean));
+  return [
+    ...(ops.size < 2 ? [`only ${ops.size} known ${net} operator(s) in ${rpcs.join(", ")}; want two`] : []),
+    ...rpcs.filter((u) => !operatorOf(u, cluster)).map((u) => `${u} is no known ${net} operator's`),
+  ];
 }
 
-export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep = sleepMs, mainnet = false }) {
+/** `fetchFn` as a walk's provider is read: a refusal (a non-2xx answer other than the 429 and 5xx rpc() retries) or a
+ * 2xx answer that is no JSON-RPC answer (neither a result nor an error: OnFinality's on GitHub's runners, sign live run
+ * 42201131294, which rpc() returned as undefined) throws, so rpc() tries it again and then throws `transient`. */
+const strictFetch = (fetchFn) => async (url, init) => {
+  const r = await fetchFn(url, init);
+  const j = await r.json().catch(() => null);
+  const retried = r.status === 429 || r.status >= 500;
+  if (!retried && (!r.ok || !j || typeof j !== "object" || !("result" in j || "error" in j))) {
+    throw new Error(`HTTP ${r.status}, ${r.ok ? "no JSON-RPC answer" : "refused"}: ${JSON.stringify(j?.error ?? j).slice(0, 80)}`);
+  }
+  return { ok: r.ok, status: r.status, json: async () => j };
+};
+
+/**
+ * `read(url, say, fetchFn)` on the first two operators of the ordered list `rpcs` that answer (card
+ * live-check-devnet-pair), each read through `fetchFn` held to JSON-RPC answers (strictFetch). A provider whose read
+ * throws `transient` (rpc() above: it failed through every try, refused or answered no JSON-RPC answer) is out: one info
+ * line, its lines dropped, and the read moves to the next provider of an operator not yet read. Any other throw is the
+ * caller's, and a provider's own answer (a result or a JSON-RPC error) is never moved past. Each answering provider's
+ * `say(pass, text)` lines are kept, so every assertion stands on both. Fewer than two operators answering FAILs: two
+ * stay required. { urls, values, lines: [[pass | null for info, text]] }.
+ */
+export async function onTwoOperators(rpcs, operatorOf, fetchFn, read) {
+  const strict = strictFetch(fetchFn);
+  const urls = [], values = [], lines = [], used = new Set();
+  for (const url of rpcs) {
+    if (urls.length === 2) break;
+    const op = operatorOf(url);
+    if (op === null || used.has(op)) continue;
+    const mine = [];
+    let value;
+    try {
+      value = await read(url, (pass, text) => mine.push([pass, text]), strict);
+    } catch (e) {
+      if (!e?.transient) throw e;
+      lines.push([null, `${url} is out, the read moves to the next operator: ${String(e.message).split("\n")[0]}`]);
+      continue;
+    }
+    used.add(op), urls.push(url), values.push(value), lines.push(...mine);
+  }
+  if (urls.length < 2) lines.push([false, `two operators answered: ${urls.length} (${urls.join(", ") || "none"}) of ${rpcs.join(", ")}`]);
+  return { urls, values, lines };
+}
+
+export async function check({ deployment: d, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep = sleepMs, mainnet = false }) {
   const lines = [];
   let ok = true;
   const say = (pass, text) => {
@@ -309,10 +379,11 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
     say(list.length === want.length && first < 0,
       `the record's table list is the kit's for this program (solanaPoolBuyTableAccounts, pages to entry 2,047), its 9 venue keys taken from the list: ${list.length} addresses, ${want.length} wanted${first < 0 ? "" : `, entry ${first} is ${list[first] ?? "missing"}, not ${want[first] ?? "none"}`}`);
   }
-  const bytesOn = { programdata: [], table: [] };
-  const foreignOn = []; // the wallets that only funded the run, as each RPC's reads sort them
-  for (const url of rpcs.slice(0, 2)) {
+  // on the first two operators that answer (onTwoOperators): each provider's programdata and table bytes and the wallets
+  // that only funded the run, as its reads sort them
+  const walk = await onTwoOperators(rpcs, (u) => operatorOf(u, mainnet ? "mainnet" : d.cluster), fetchFn, async (url, say, fetchFn) => {
     const at = `on ${url}`;
+    const own = { programdata: null, table: null, foreign: null };
     try {
       const g = await rpc(fetchFn, url, "getGenesisHash", [], sleep);
       say(g === genesis, `genesis ${g} is ${d.cluster}'s ${at}`);
@@ -323,7 +394,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
       if (!pd || pd.owner !== LOADER_V3 || pd.data.length < PROGRAMDATA_META || pd.data[0] !== 3) {
         say(false, `programdata ${pdaData} ${at}: ${pd ? `owner ${pd.owner}, ${pd.data.length} bytes, tag ${pd.data[0]}` : "missing"}`);
       } else {
-        bytesOn.programdata.push(hex(pd.data));
+        own.programdata = hex(pd.data);
         const auth = pd.data[12] === 0 ? null : b58encode(pd.data.subarray(13, 45));
         say(auth === null, `upgrade authority is none ${at}: ${auth ?? "none"}`);
         const code = pd.data.subarray(PROGRAMDATA_META);
@@ -343,7 +414,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
         const t = typeof d.table === "string" ? await account(fetchFn, url, d.table, sleep) : null;
         const td = t ? Buffer.from(t.data) : null;
         const shaped = !!t && t.owner === ALT_PROGRAM && td.length >= TABLE_META && (td.length - TABLE_META) % 32 === 0 && td.readUInt32LE(0) === 1;
-        if (shaped) bytesOn.table.push(hex(td));
+        if (shaped) own.table = hex(td);
         const tauth = !shaped ? "?" : td[21] === 0 ? null : b58encode(td.subarray(22, 54));
         const active = shaped && td.readBigUInt64LE(4) === 0xffff_ffff_ffff_ffffn;
         const got = shaped ? Array.from({ length: (td.length - TABLE_META) / 32 }, (_, i) => b58encode(td.subarray(TABLE_META + 32 * i, TABLE_META + 32 * i + 32))) : [];
@@ -376,23 +447,29 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
       // funded the run (each of its transactions one plain System Transfer into a run key) is a wallet whose balance is
       // its own, an info line; any other is a run key, and a run key holding a lamport FAILs
       const kinds = funders.some((f) => f !== d.funder) ? await payersOf(fetchFn, url, d, sleep) : { runKeys: funders, foreign: [] };
-      foreignOn.push(kinds.foreign.join(","));
+      own.foreign = kinds.foreign.join(",");
       for (const f of [...new Set([...funders, ...kinds.runKeys, ...kinds.foreign])]) {
         const b = (await rpc(fetchFn, url, "getBalance", [f, { commitment: "finalized" }], sleep))?.value;
-        if (kinds.foreign.includes(f)) lines.push(`info fee payer ${f} holds ${b} lamports ${at}: not a run key: each of its transactions in the record is one plain System Transfer into a run key (a funding from a wallet other than the return address ${d.return_to})`);
+        if (kinds.foreign.includes(f)) say(null, `fee payer ${f} holds ${b} lamports ${at}: not a run key: each of its transactions in the record is one plain System Transfer into a run key (a funding from a wallet other than the return address ${d.return_to})`);
         else say(b === 0, `funder ${f} holds 0 lamports ${at}: ${b}`);
       }
     } catch (e) {
+      if (e?.transient) throw e;
       say(false, `read ${at}: ${String(e.message).split("\n")[0]}`);
     }
-  }
+    return own;
+  });
+  for (const [pass, text] of walk.lines) pass === null ? lines.push(`info ${text}`) : say(pass, text);
+  const of = (k) => walk.values.map((v) => v[k]).filter((x) => x !== null);
+  const bytesOn = { programdata: of("programdata"), table: of("table") };
+  const foreignOn = of("foreign");
   if (foreignOn.length === 2 && foreignOn[0] !== foreignOn[1]) say(false, `the record's payers sort differently on the two RPCs: funding wallets ${foreignOn.map((f) => f || "none").join(" and ")}`);
   if (mainnet) {
     for (const [name, b] of Object.entries(bytesOn)) {
-      say(b.length === 2 && b[0] === b[1], `the ${name} reads the same bytes on ${rpcs.slice(0, 2).join(" and ")}: ${b.length === 2 ? b[0] === b[1] : `${b.length} read`}`);
+      say(b.length === 2 && b[0] === b[1], `the ${name} reads the same bytes on ${walk.urls.join(" and ")}: ${b.length === 2 ? b[0] === b[1] : `${b.length} read`}`);
     }
   }
-  return { ok, lines, foreign: foreignOn[0] ? foreignOn[0].split(",") : [] };
+  return { ok, lines, foreign: foreignOn[0] ? foreignOn[0].split(",") : [], urls: walk.urls };
 }
 
 export function recorder(fetchFn = fetch) {
@@ -465,14 +542,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const opt = (n, dflt) => (args.includes(n) ? args[args.indexOf(n) + 1] : dflt);
   try {
     const deployment = JSON.parse(readFileSync(opt("--deployment", DEPLOYMENT), "utf8"));
-    const rpcs = opt("--rpc") ? opt("--rpc").split(",") : RPCS;
+    const rpcs = opt("--rpc") ? opt("--rpc").split(",") : DEVNET_PROVIDERS;
     const rec = recorder();
     const r = await check({ deployment, rpcs, fetchFn: opt("--record") ? rec.fetchFn : fetch });
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify(rec.answers) + "\n");
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"}`);
     if (r.ok && args.includes("--write-record")) {
-      writeFileSync(RECORD, runRecord(deployment, rpcs, r.foreign));
+      writeFileSync(RECORD, runRecord(deployment, r.urls, r.foreign));
       console.log(`live-check ${KEY}: wrote ${path.relative(process.cwd(), RECORD)}`);
     }
     process.exit(r.ok ? 0 : 1);

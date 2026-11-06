@@ -23,7 +23,7 @@
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DEPLOYMENT, RPCS, account, check as deployCheck, pageAddress, poolAddress, programDataAddress, recorder, rpc } from "./pool-sol-deploy.mjs";
+import { DEPLOYMENT, DEVNET_PROVIDERS, account, check as deployCheck, onTwoOperators, operatorOf, pageAddress, poolAddress, programDataAddress, recorder, rpc } from "./pool-sol-deploy.mjs";
 
 const KEY = "signpage-pool-flow";
 /** SOL_POOLS.devnet in the testnet build, and the pool its program derives. */
@@ -110,9 +110,16 @@ function message(b) {
   return { signers, keys, programs, tables };
 }
 
-/** The run's reads: the table and the two transactions on both RPCs, and the helper's fee answer. */
+/** The run's reads: the table and the run's transactions on the first two devnet operators that answer
+ * (onTwoOperators: one that is out moves the read to the next, fewer than two FAILs), and the helper's fee answer. */
 async function checkRun({ table, fetchFn, rpcs, sleep, helper }, say) {
-  const reads = await Promise.all(rpcs.map((u) => account(fetchFn, u, table, sleep)));
+  const walk = await onTwoOperators(rpcs, (u) => operatorOf(u, "devnet"), fetchFn, async (u, _say, fetchFn) => {
+    const txs = {};
+    for (const [name, sig] of Object.entries(RUN)) txs[name] = await txOf(fetchFn, u, sig, sleep);
+    return { table: await account(fetchFn, u, table, sleep), txs };
+  });
+  for (const [pass, text] of walk.lines) say(pass, text);
+  const reads = walk.values.map((v) => v.table);
   const same = reads[0] && reads[1] && Buffer.from(reads[0].data).equals(Buffer.from(reads[1].data));
   const d = reads[0]?.data;
   const addrs = d && d.length >= 56 ? Array.from({ length: (d.length - 56) / 32 }, (_, i) => b58(d.subarray(56 + 32 * i, 88 + 32 * i))) : [];
@@ -122,8 +129,8 @@ async function checkRun({ table, fetchFn, rpcs, sleep, helper }, say) {
   say(reads.every((r) => r?.owner === ALT_PROGRAM) && same && active && need.every((a) => addrs.includes(a)), `table ${table}: the ALT program's, the same bytes on both RPCs, active, holding the pool and both first pages: ${reads.map((r) => r?.owner ?? "none").join(", ")}, ${addrs.length} addresses`);
   let w = null; // the buy's W: its second static key (the fee payer first)
   for (const [name, sig] of Object.entries(RUN)) {
-    const txs = await Promise.all(rpcs.map((u) => txOf(fetchFn, u, sig, sleep)));
-    const ok = txs.every((t) => t && t.err === null && t.calls.includes(PIN.program) && t.keys.includes(PIN.pool));
+    const txs = walk.values.map((v) => v.txs[name]);
+    const ok = txs.length === 2 && txs.every((t) => t && t.err === null && t.calls.includes(PIN.program) && t.keys.includes(PIN.pool));
     if (name === "buy") w = txs[0]?.keys[1] ?? null;
     const shape =
       name === "buy" ? txs.every((t) => t && t.payer === PIN.feePayer && t.tables.includes(PIN.table) && t.calls.includes(PUMP_PROGRAM) && t.keys[1] === w)
@@ -146,10 +153,10 @@ function b58(bytes) {
 }
 
 /** The verdict for `program` read through `fetchFn` (live, or a recorded answer replayed), and SIGN_HOST's read `sign`. */
-export async function check({ program = PIN.program, table = PIN.table, fetchFn = fetch, rpcs = RPCS, sleep, sign, helper } = {}) {
+export async function check({ program = PIN.program, table = PIN.table, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign, helper } = {}) {
   const record = JSON.parse(readFileSync(DEPLOYMENT, "utf8"));
   const lines = [];
-  const say = (pass, text) => lines.push(`${pass ? "ok  " : "BAD "} ${text}`);
+  const say = (pass, text) => lines.push(`${pass === null ? "info" : pass ? "ok  " : "BAD "} ${text}`);
   say(sign?.status === 200 && sign.bytes > 0 && Array.isArray(sign.found) && sign.found.length === 0, `SIGN_HOST's /app.js is the mainnet build, with no testnet pin or provider: ${sign ? `${sign.status}, ${sign.bytes} chars, carries [${sign.found.join(", ")}]` : "not read"}`);
   say(program === PIN.program, `the program read is the pin's: ${program}`);
   say(record.cluster === "devnet" && record.program_id === PIN.program && record.pool === PIN.pool, `the deployment record names the pin's program and pool: ${record.program_id}, ${record.pool}`);
@@ -173,7 +180,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const program = opt("--program") ?? PIN.program;
     const table = opt("--table") ?? PIN.table;
     const r = await check({ program, table, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign, helper });
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ program, table, rpcs: RPCS, at: new Date().toISOString(), sign, helper, answers: rec.answers })}\n`);
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ program, table, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, helper, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);
     process.exit(r.ok ? 0 : 1);
