@@ -15,7 +15,8 @@
 //     and snarkjs 0.7.5's groth16.verify accepts it with the pinned withdraw.vkey;
 //   - the browser fetched /prover-thread.js and no other worker script; no CSP or Trusted Types violation but the two
 //     the planted workers make.
-//   node scripts/live-checks/signpage-prover-threads.mjs [--browser webkit|chromium] [--proofs <n>] [--record <file>]
+//   node scripts/live-checks/signpage-prover-threads.mjs [--base <https url>] [--browser webkit|chromium] [--proofs <n>] [--record <file>]
+//     --base: a build's own address (a Pages preview) read as SIGN_HOST is, its own origin in place of SIGN_HOST's
 //   node scripts/live-checks/signpage-prover-threads.mjs --harness [--site <dir>] [...]
 //     the harness: SIGN_HOST answered from a build folder under its own _headers, every matching rule joined as Pages
 //     joins them (default: a fresh `deploy.mjs --dry-run` build, which passed the deploy gate); every other host refused.
@@ -34,6 +35,8 @@ import { browserLabel } from "../browsers.mjs";
 import { consoleLine } from "./console-errors.mjs";
 
 const KEY = "signpage-prover-threads";
+/** The address read live: SIGN_HOST, or with --base a build's own (a Pages preview), read the same way. */
+let ORIGIN = SIGN;
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 // ---------- pinned ----------
@@ -67,6 +70,15 @@ function snarkjs() {
  *  characters, then its address's origin and path through the shared collector (console-errors.mjs). */
 export function consoleLineOf(m) {
   return consoleLine(`${m.type()} ${m.text()}`.slice(0, 300), m.location()?.url ?? "");
+}
+
+/** What a FAIL prints after its verdict, for the reader of a red run (the judge reads none of it): every console line
+ *  the run kept (the page's and each worker's) and every worker script the browser asked for, in order. */
+export function failLines(rec) {
+  const pg = rec?.page ?? {};
+  const c = Array.isArray(pg.console) ? pg.console : [];
+  const w = Array.isArray(pg.workerScripts) ? pg.workerScripts : [];
+  return [...(c.length ? c.map((l) => `CONSOLE ${l}`) : ["CONSOLE none kept"]), `WORKER SCRIPTS ${JSON.stringify(w)}`];
 }
 
 export async function judge(rec, want = expected()) {
@@ -130,7 +142,7 @@ async function readThread(serve) {
   let status, headers, body;
   if (serve) ({ status, headers, body } = serve(THREAD_PATH));
   else {
-    const r = await fetch(`${SIGN}${THREAD_PATH}`, { redirect: "manual", headers: { "cache-control": "no-cache" } });
+    const r = await fetch(`${ORIGIN}${THREAD_PATH}`, { redirect: "manual", headers: { "cache-control": "no-cache" } });
     headers = {};
     for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
     status = r.status;
@@ -140,8 +152,8 @@ async function readThread(serve) {
 }
 
 // installed in SIGN_HOST's top page before its own script runs: every violation
-const INIT = `(() => {
-  if (location.origin !== ${JSON.stringify(SIGN)} || window.top !== window) return;
+const INIT = (origin) => `(() => {
+  if (location.origin !== ${JSON.stringify(origin)} || window.top !== window) return;
   const pt = (window.__pt = { violations: [] });
   document.addEventListener("securitypolicyviolation", (e) => pt.violations.push({ where: "page", directive: e.effectiveDirective, blocked: e.blockedURI }));
 })();`;
@@ -224,18 +236,23 @@ const RUN = `async ([input, pins, proofs]) => {
 async function readPage(serve, engine, proofs) {
   const { browser, ctx, close } = await openBrowser(engine, serve);
   try {
-    await ctx.addInitScript(INIT);
+    const origin = serve ? SIGN : ORIGIN;
+    await ctx.addInitScript(INIT(origin));
     const workerScripts = [];
     ctx.on("request", (r) => {
       const u = r.url();
-      if (/^(data|blob):/.test(u) || (new URL(u).origin === SIGN && /\.js$/.test(new URL(u).pathname) && new URL(u).pathname !== "/app.js")) workerScripts.push(u);
+      if (/^(data|blob):/.test(u) || (new URL(u).origin === origin && /\.js$/.test(new URL(u).pathname) && new URL(u).pathname !== "/app.js")) workerScripts.push(u);
     });
     const page = await ctx.newPage();
     const consoleLines = [];
     page.on("console", (m) => consoleLines.length < 50 && consoleLines.push(consoleLineOf(m)));
     page.on("pageerror", (e) => consoleLines.length < 50 && consoleLines.push(`pageerror ${e.message}`.slice(0, 300)));
-    page.on("worker", (w) => consoleLines.length < 50 && consoleLines.push(`worker ${w.url().slice(0, 120)}`));
-    await page.goto(`${SIGN}/`, { waitUntil: "load" });
+    page.on("worker", (w) => {
+      if (consoleLines.length < 50) consoleLines.push(`worker ${w.url().slice(0, 120)}`);
+      // a worker's own console (the prover worker's, a thread's), named by its worker's path
+      w.on("console", (m) => consoleLines.length < 50 && consoleLines.push(`in ${new URL(w.url(), origin).pathname}: ${consoleLineOf(m)}`));
+    });
+    await page.goto(`${origin}/`, { waitUntil: "load" });
     if (!(await page.evaluate(() => !!window.__pt))) throw new Error("the init script did not run on SIGN_HOST's page");
     const want = expected();
     const pins = { wasm: zkPath(PINS[0]), zkey: zkPath(PINS[1]) };
@@ -260,7 +277,7 @@ export async function collect({ harness = false, site, engine = "webkit", proofs
     }
     const thread = await readThread(serve);
     const run = await readPage(serve, engine, proofs);
-    return { source: harness ? `harness, SIGN_HOST from ${site ?? "a fresh deploy.mjs --dry-run build"}` : `live ${SIGN}`, at: new Date().toISOString(), browser: run.browser, files: { [THREAD_PATH]: thread }, page: run.page };
+    return { source: harness ? `harness, SIGN_HOST from ${site ?? "a fresh deploy.mjs --dry-run build"}` : `live ${ORIGIN}`, at: new Date().toISOString(), browser: run.browser, files: { [THREAD_PATH]: thread }, page: run.page };
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
@@ -271,17 +288,19 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined);
   let code = 2;
   try {
-    const valued = ["--site", "--record", "--browser", "--proofs"];
+    const valued = ["--site", "--record", "--browser", "--proofs", "--base"];
     const known = new Set(["--harness", ...valued]);
     const bad = a.filter((x, i) => x.startsWith("--") && !known.has(x) && !(i > 0 && valued.includes(a[i - 1])));
     const engine = opt("--browser") ?? "webkit";
     const proofs = Number(opt("--proofs") ?? 3);
-    if (bad.length || (opt("--site") && !a.includes("--harness")) || !["chromium", "webkit"].includes(engine) || !(Number.isInteger(proofs) && proofs > 0 && proofs <= 20))
-      throw new Error("usage: signpage-prover-threads.mjs [--harness [--site <dir>]] [--browser webkit|chromium] [--proofs <1-20>] [--record <file>]");
+    if (opt("--base")) ORIGIN = new URL(opt("--base")).origin;
+    if (bad.length || (opt("--site") && !a.includes("--harness")) || (opt("--base") && (a.includes("--harness") || !ORIGIN.startsWith("https://"))) || !["chromium", "webkit"].includes(engine) || !(Number.isInteger(proofs) && proofs > 0 && proofs <= 20))
+      throw new Error("usage: signpage-prover-threads.mjs [--harness [--site <dir>] | --base <https url>] [--browser webkit|chromium] [--proofs <1-20>] [--record <file>]");
     const rec = await collect({ harness: a.includes("--harness"), site: opt("--site"), engine, proofs });
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
     const { ok, lines } = await judge(rec);
     for (const l of lines) console.log(l);
+    if (!ok) for (const l of failLines(rec)) console.log(l);
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${rec.source}, ${rec.browser})`);
     code = ok ? 0 : 1;
   } catch (e) {
