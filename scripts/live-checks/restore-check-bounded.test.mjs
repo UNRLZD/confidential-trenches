@@ -25,8 +25,9 @@ test("the recorded good run passes, every network's line printed as it ends with
   assert.deepEqual(printed.map(([, l]) => l).sort(), [...r.lines].sort());
   assert.ok(printed.every(([ok]) => ok));
   for (const l of r.lines) assert.match(l, /; \d+ calls in \d+\.\d s(, \d+ refused: .+ x\d+)?\)/, l);
-  // the helper's Base route met its 1,000-block cap in the recorded run: its refusals' words are on its line
-  assert.match(r.lines[1], /^base: .*, \d+ refused: RPC error -32602: invalid params x\d+\)$/);
+  // the helper's Base route met its 1,000-block cap in the recorded run: its refusals' words are on its line, each kind
+  // with its count, "; " between kinds (the run recorded 6 Nov 08:47Z met a spare's 1,024-block words behind the route too)
+  assert.match(r.lines[1], /^base: .*, \d+ refused: RPC error -32602: invalid params x\d+(; .+ x\d+)*\)$/);
 });
 
 test("the bad run, a Base page no provider answers, fails at its deadline, naming the call: method, range, host and try", { timeout: 30_000 }, async () => {
