@@ -119,9 +119,10 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's thirty-one checks (signpage-shell runs four ways, kit-frame-version the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's thirty-two checks (signpage-shell runs four ways, wallet-deposit-follow the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 31);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 32);
+  assert.ok(sign.include.some((e) => e.key === "wallet-deposit-follow" && !e.chrome && e.args === ""), "wallet-deposit-follow runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-frame-version" && !e.chrome && e.args === ""), "kit-frame-version runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-deposit-calls" && !e.chrome && e.args === ""), "kit-deposit-calls runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "evm-pool-sync-wide-pages" && !e.chrome && e.args === ""), "evm-pool-sync-wide-pages runs after every sign deploy");
