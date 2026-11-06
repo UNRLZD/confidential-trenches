@@ -394,7 +394,35 @@ test("the wasm's NEP-330 metadata must name this repository at the commit, the p
 
 // ---- the source a deploy names (card vault-reproducible-build): a clean tree, a commit anyone can fetch, a marked record ----
 
-const PREV = execFileSync("git", ["-C", HERE, "rev-parse", "HEAD~1"], { encoding: "utf8" }).trim();
+// A branch tip this checkout does not hold: no test depends on the clone's depth or on this repository's history (CI
+// checks out one commit). Whether a held tip that is not a descendant counts is read on a repository the test makes.
+const UNFETCHED = "1".repeat(40);
+
+test("sourceProblems holds a commit only when a branch or tag tip of the repository descends from it", async () => {
+  const { sourceProblems } = await import(SCRIPT);
+  const dir = fresh();
+  const repo = path.join(dir, "repo");
+  const g = (...a) => execFileSync(REAL_GIT, ["-C", repo, ...a], { encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).trim();
+  mkdirSync(repo);
+  g("init", "-q");
+  g("commit", "-q", "--allow-empty", "-m", "a");
+  const a = g("rev-parse", "HEAD");
+  g("commit", "-q", "--allow-empty", "-m", "b");
+  const b = g("rev-parse", "HEAD");
+  const saved = { PATH: process.env.PATH, STUB_GIT_TIP: process.env.STUB_GIT_TIP };
+  process.env.PATH = `${gitStub(path.join(dir, "git-bin"))}${path.delimiter}${process.env.PATH}`;
+  try {
+    process.env.STUB_GIT_TIP = b;
+    assert.deepEqual(sourceProblems({ cwd: repo, commit: a }), []);
+    assert.deepEqual(sourceProblems({ cwd: repo, commit: b }), []);
+    process.env.STUB_GIT_TIP = a;
+    assert.match(sourceProblems({ cwd: repo, commit: b }).join(";"), new RegExp(`commit ${b} is on no branch or tag of`));
+    process.env.STUB_GIT_TIP = UNFETCHED;
+    assert.match(sourceProblems({ cwd: repo, commit: a }).join(";"), new RegExp(`commit ${a} is on no branch or tag of`));
+  } finally {
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
+});
 
 test("a testnet deploy refuses a tree with changes, before any build or send", () => {
   const dir = fresh();
@@ -409,7 +437,7 @@ test("a testnet deploy refuses a tree with changes, before any build or send", (
 
 test("a testnet deploy refuses a HEAD on no branch or tag of the repository, or a repository it cannot list, before any build", () => {
   for (const [env, want] of [
-    [{ STUB_GIT_TIP: PREV }, new RegExp(`commit ${HEAD} is on no branch or tag of https://github\\.com/UNRLZD/confidential-trenches: push it`)],
+    [{ STUB_GIT_TIP: UNFETCHED }, new RegExp(`commit ${HEAD} is on no branch or tag of https://github\\.com/UNRLZD/confidential-trenches: push it`)],
     [{ STUB_GIT_NO_REMOTE: "1" }, /git ls-remote https:\/\/github\.com\/UNRLZD\/confidential-trenches failed: fatal: stub: no remote/],
   ]) {
     const dir = fresh();
@@ -470,14 +498,14 @@ test("mainnet: a record marked non_reproducible, a wasm naming another commit, o
   assert.match(pinProblems(w, { ...unmarked, non_reproducible: "a host build" }, MAINNET_VAULT, pins).join(";"), /marked non_reproducible: a mainnet vault deploys a reproducible build only/);
   assert.match(pinProblems(w, unmarked, MAINNET_VAULT, pins).join(";"), /names neither source_commit/);
   assert.match(pinProblems(w, { ...good, non_reproducible: "x" }, MAINNET_VAULT, pins).join(";"), /names both/);
-  const other = mainnetWasm(ALL_EXPORTS, PREV);
+  const other = mainnetWasm(ALL_EXPORTS, UNFETCHED);
   const op = sha256hex(other);
-  assert.match(pinProblems(other, { ...good, wasm_sha256: op, wasm_builds_sha256: [op, op], code_hash: b58encode(Buffer.from(op, "hex")) }, MAINNET_VAULT, { [MAINNET_VAULT]: op }).join(";"), new RegExp(`source_code_snapshot is "git\\+https://github\\.com/UNRLZD/confidential-trenches\\?rev=${PREV}"`));
+  assert.match(pinProblems(other, { ...good, wasm_sha256: op, wasm_builds_sha256: [op, op], code_hash: b58encode(Buffer.from(op, "hex")) }, MAINNET_VAULT, { [MAINNET_VAULT]: op }).join(";"), new RegExp(`source_code_snapshot is "git\\+https://github\\.com/UNRLZD/confidential-trenches\\?rev=${UNFETCHED}"`));
   // the CLI's own run: the record's commit is on no branch of the repository
   const dir = fresh();
   const k = keyFile(dir, MAINNET_PARENT);
   const f = mainnetFiles(dir, w);
-  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), 10n ** 25n, { pins }, { STUB_GIT_TIP: PREV });
+  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), 10n ** 25n, { pins }, { STUB_GIT_TIP: UNFETCHED });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, new RegExp(`refused before any send: commit ${HEAD} is on no branch or tag of https://github\\.com/UNRLZD/confidential-trenches`));
   assert.deepEqual(methods(dir), [], "the run asked an RPC");
