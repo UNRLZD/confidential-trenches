@@ -29,7 +29,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const CHAINS = Object.freeze(["base-sepolia", "robinhood-testnet"]);
 export const deployFile = (c) => path.join(HERE, `${KEY}.${c}.json`);
 const RUN_RECORD = path.join(HERE, `${KEY}.md`);
-// The CO's fundings of the redeploys' run keys from wallet E (scripts/devwallet/devwallet-evm.mjs, research repo), each
+// The fundings of the redeploys' run keys from the team's testnet wallet E (scripts/devwallet/devwallet-evm.mjs,
+// research repo), each
 // read back as succeeded on both of its chain's RPCs, 6 Nov 17:04Z
 export const FUNDINGS = Object.freeze({
   "base-sepolia": "0xe8d66aff401710d088505b78efdaae4fc9c485f26b901cd08d0fa678e545c54c",
