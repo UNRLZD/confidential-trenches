@@ -107,6 +107,14 @@ export const EVM_POOL_TAG = "finalized";
 export const EVM_NEWEST_TAG = "latest";
 /** The first eth_getLogs page, in blocks; a range-cap error halves it for that RPC. */
 export const EVM_LOG_PAGE_BLOCKS = 10_000n;
+/** A read's ceiling (the smallest page size refused in it) holds for this many full pages in a row, then the page may
+ * double past it once more (card restore-check-bounded). The pager reads no cap's words, so a refusal under a provider's
+ * cap (no answer in time, a spare's own error behind the helper's route) sets a ceiling as a cap does; held for the
+ * whole read, each one halved the rest of it: the helper's Base route, capped at 1,000 blocks, ended CI's W reads of
+ * 50,000 blocks at 312, 78 and 624-block pages against the Mac's 625 (live runs 42125976095, 42143211092 and
+ * 42152968842, 5-6 Nov), 641 pages at the holdings pace of 1.5 s a page, and over 20 min in run 42146750370. At a true
+ * cap this costs one refused call per 9 pages; a refusal under it, at most 8 pages at half size. */
+export const EVM_LOG_CEILING_PAGES = 8;
 /** A throttled page (EVM_LOG_THROTTLE): tried this many times in all at its own size, then the read's failure. Its waits
  * (1, 2, 4, 8, 16 and 30 s, 61 s in all) outlast a provider's one-minute window: rpc.mainnet.chain.robinhood.com
  * answered 189 eth_getLogs in 59 s, then HTTP 429 "Too Many Requests" with no Retry-After, and again 5 s later (read
@@ -640,13 +648,16 @@ export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to:
  * (else 1 s doubled per try, at most EVM_LOG_THROTTLE_WAIT_MAX_MS), at most EVM_LOG_THROTTLE_TRIES tries, then the
  * read's failure (unread, never an empty list). Any other refusal of a page over one block (a provider's cap, in
  * whatever words, or no answer in time) halves its page; after a
- * full page reads, the page doubles again, up to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read,
- * so a cap lifted or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG) is a lag. A page of
+ * full page reads, the page doubles again, up to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read
+ * until EVM_LOG_CEILING_PAGES full pages in a row have read under it, so a cap lifted, a refusal under the cap or a page
+ * shrunk long ago comes back. A page past the provider's head (HEAD_LAG) is a lag. A page of
  * one block refused is the read's failure, with the provider's own error.
  */
 async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<E[]> {
   const out: E[] = [];
   let refused: bigint | null = null;
+  // full pages read in a row since the ceiling was set (EVM_LOG_CEILING_PAGES)
+  let held = 0;
   let tries = 0;
   for (let at = from; at <= to; ) {
     signal?.throwIfAborted();
@@ -669,6 +680,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       if (end > at) {
         refused = end - at + 1n;
         page[k] = refused / 2n;
+        held = 0;
         continue;
       }
       throw e;
@@ -676,6 +688,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     tries = 0;
     if (!Array.isArray(got)) throw new Error(`rpc ${k}: eth_getLogs ${at}..${end}: not a list`);
     out.push(...got.map((g, i) => decode(g, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
+    if (end - at + 1n === size && refused !== null && ++held >= EVM_LOG_CEILING_PAGES) refused = null;
     if (end - at + 1n === size && size * 2n <= EVM_LOG_PAGE_BLOCKS && (refused === null || size * 2n < refused)) page[k] = size * 2n;
     at = end + 1n;
   }

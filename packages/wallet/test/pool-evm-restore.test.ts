@@ -10,7 +10,7 @@ import { solanaJsonRpc, VaultTree, vaultLabelOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { refKey } from "../src/notes/store.ts";
-import { EVM_LAG_TRIES, EVM_LOG_PAGE_BLOCKS, EVM_LOG_THROTTLE_TRIES, EVM_LOG_THROTTLE_WAIT_MAX_MS, EVM_POOL_EVENTS, EVM_TRANSFER_RPCS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmTokensSentTo, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
+import { EVM_LAG_TRIES, EVM_LOG_PAGE_BLOCKS, EVM_LOG_THROTTLE_TRIES, EVM_LOG_THROTTLE_WAIT_MAX_MS, EVM_POOL_EVENTS, EVM_TRANSFER_RPCS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmTokensSentTo, evmTokensSentToOne, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
 import { evmRestore, evmRestoreNotes } from "../src/pool/evm-restore.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -1048,4 +1048,56 @@ test("M3 the helper's route that does not hold the restore's block (another fork
   assert.equal(r.notes.length, 10);
   assert.ok(r.wallets.every((w) => w.tokens === null && /does not hold block/.test(w.error ?? "")), JSON.stringify(r.wallets));
   assert.deepEqual(namedBy(seen), []);
+});
+
+// ---- card restore-check-bounded: a refusal under the cap never shrinks the rest of the read ----
+
+/** One reader of a W's Transfer logs (evmTokensSentToOne, as the helper's route is read) over 50,000 blocks, its
+ *  provider's cap 1,000 blocks as the route's Base provider answers it (-32602 "invalid params", read 6 Nov 02:53Z), and
+ *  `fault(n, size)` refusing the n-th page (1 first) under the cap when it answers an error: the eth_getLogs calls it
+ *  took, each page's size, and the pages answered tiling the span. */
+async function readW(fault: (n: number, size: number) => Error | undefined) {
+  const head = 1_050_000n, from = head - 50_000n;
+  const block = { number: q(head), hash: h32("head"), timestamp: q(T0) };
+  const sizes: number[] = [], read: [bigint, bigint][] = [];
+  const rpc: EvmRpc = async (method, params) => {
+    if (method === "eth_getBlockByNumber") return block;
+    if (method !== "eth_getLogs") throw new Error(`unexpected ${method}`);
+    const f = params[0] as { fromBlock: string; toBlock: string };
+    const a = BigInt(f.fromBlock), b = BigInt(f.toBlock), size = Number(b - a + 1n);
+    sizes.push(size);
+    if (size > 1_000) throw new Error("RPC error -32602: invalid params");
+    const e = fault(sizes.length, size);
+    if (e !== undefined) throw e;
+    read.push([a, b]);
+    return [];
+  };
+  const anchor = { number: head, hash: block.hash, timestamp: T0, baseFeePerGas: null };
+  const tokens = await evmTokensSentToOne(rpc, W(0n, 0), from, { fin: anchor, anchor }, [EVM_LOG_PAGE_BLOCKS], undefined, async () => {});
+  assert.deepEqual(tokens, []);
+  let at = from;
+  for (const [a, b] of read) {
+    assert.equal(a, at);
+    at = b + 1n;
+  }
+  assert.equal(at, head + 1n);
+  return sizes;
+}
+
+test("B1 refusals under the cap (no answer in time, an unknown error) never shrink the rest of a W's read: its pages stay within a few of the clean read's", async () => {
+  const clean = await readW(() => undefined);
+  // the clean read: the cap met in 4 refusals (10,000 to 1,250), then 80 pages of 625 blocks and a probe past the
+  // ceiling at most every 8 of them
+  assert.ok(clean.length <= 4 + 80 + 10, `clean: ${clean.length} calls`);
+  const faults = [10, 20, 30, 40, 50, 60];
+  for (const [name, err] of [["no answer in time", () => new DOMException("The operation timed out.", "TimeoutError")], ["an unknown error", () => new Error("RPC error -32603: internal error")]] as const) {
+    const sizes = await readW((n) => (faults.includes(n) ? err() : undefined));
+    // each refusal costs its own call, at most 8 pages at half size until the ceiling it set expires, and one probe
+    const bound = clean.length + faults.length * 10;
+    assert.ok(sizes.length <= bound, `${name}: ${sizes.length} calls, over ${bound} (the clean read's ${clean.length}); the last pages ${sizes.slice(-5)}`);
+    // the read ends on pages of the cap's size again (625, or 624 when a refusal at 625 halved it to 312), its probes past
+    // the cap aside
+    const last = sizes.slice(-12, -1).filter((n) => n <= 1_000);
+    assert.ok(last.length > 0 && last.every((n) => n >= 624), `${name}: the last pages ${sizes.slice(-12)}`);
+  }
 });
