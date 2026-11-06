@@ -1,20 +1,20 @@
 {
  "_note": {
-  "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at 347ec372, release-49",
-  "bad": "main 2e7ec335's build (mainnet): a failed provider read answers not_allowed, failed or quote_check_failed: FAIL",
-  "liveBefore": "SIGN_HOST read 2026-11-06T00:53Z, before this card's deploy (release-46): FAIL"
+  "good": "this card's SIGN_HOST build (mainnet) on main 2badbf7b: packages/signpage/index.html and public/app.js as build-app.mjs wrote them at 5996550c, release-49",
+  "bad": "main 2badbf7b's build (mainnet, release-47): a failed provider read answers not_allowed, failed or quote_check_failed: FAIL",
+  "liveBefore": "SIGN_HOST read 2026-11-06T01:07Z, before this card's deploy (release-46, 967c52d6, after the rollback): FAIL"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-LF/8KxtOQ51VbcHmPg7SoWRfv6raqYSduLCems/hysLFiMk7+IZGyG9CTXekG8uf\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-LF/8KxtOQ51VbcHmPg7SoWRfv6raqYSduLCems/hysLFiMk7+IZGyG9CTXekG8uf",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-KpFaLAgDzqqQDQfkj8enVBjAHmeAZGbZ68vUVp8fiSSEJTR3/sSQt0uSBr+eVAY4\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-KpFaLAgDzqqQDQfkj8enVBjAHmeAZGbZ68vUVp8fiSSEJTR3/sSQt0uSBr+eVAY4",
   "kinds": true,
   "flows": 3,
   "wire": true,
   "references": 2
  },
  "bad": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-r4bYFn2mpshJ4o+F4cum8Blbq4NYpmxirACjKaVJG4+QmI1ZnYc4OUTqy/5de7jY\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-r4bYFn2mpshJ4o+F4cum8Blbq4NYpmxirACjKaVJG4+QmI1ZnYc4OUTqy/5de7jY",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Pr7Z6E+8ECZneCCT5Fs6LdKp76ayP8/eJxm8sVikVU2NmzWbK2CBqtXvW2a77Z3c\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-Pr7Z6E+8ECZneCCT5Fs6LdKp76ayP8/eJxm8sVikVU2NmzWbK2CBqtXvW2a77Z3c",
   "kinds": false,
   "flows": 0,
   "wire": false,
