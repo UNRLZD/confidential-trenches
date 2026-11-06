@@ -13,8 +13,8 @@
 //   goes on meanwhile.
 // - Withdraw is drawn in every state and acts only when ready: it reads the note value and the fee bound again, checks
 //   both fields again (the address on both RPCs) and hands over only an answer equal to the one drawn. With no
-//   hand-off given (the wallet's withdraw path is not wired on this page yet) it is drawn and not offered
-//   (data-pending, as New account is on the sign-in choices).
+//   hand-off given (the page's network names no vault or relayer: ./handoff.ts) it is drawn and not offered
+//   (data-pending, as New account is on the sign-in choices); the hand-off's outcome is drawn as data-outcome.
 // - Every word is a draft until the owner picks it (data-draft-copy names its key in WITHDRAW_WORDS).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
@@ -46,8 +46,9 @@ export interface WithdrawFormDeps {
   available: () => Promise<bigint>;
   /** The device's own bound on the relay fee, in base units; a rejection leaves it unread. */
   fee: () => Promise<bigint>;
-  /** The wallet's withdraw path; absent until it is wired on this page. */
-  handoff?: (w: CheckedWithdraw) => void | Promise<void>;
+  /** The wallet's withdraw path; absent where the page's network names no vault or relayer. Its answer, when it gives
+   *  one, is the outcome's kind (landed, expired, unmatched), drawn as the form's data-outcome. */
+  handoff?: (w: CheckedWithdraw) => void | Promise<void | string>;
 }
 
 export type FormState = "empty" | "typing" | "refused" | "ready";
@@ -189,7 +190,8 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     loaded = load();
     const v = await check();
     if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.amount !== before.amount) return;
-    await deps.handoff(v.ready);
+    const outcome = await deps.handoff(v.ready);
+    if (typeof outcome === "string") form.dataset.outcome = outcome;
   }
   draw(view);
   return form;

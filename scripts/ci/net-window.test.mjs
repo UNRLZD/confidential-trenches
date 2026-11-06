@@ -112,6 +112,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-skeleton.mjs",
   "scripts/live-checks/signpage-solana-trade.mjs",
   "scripts/live-checks/signpage-withdraw-form.mjs",
+  "scripts/live-checks/signpage-withdraw-handoff.mjs",
   "scripts/live-checks/signpage-withdraw-own-spend.mjs",
   "scripts/live-checks/sol-buy-rent-back.mjs",
   "scripts/live-checks/sol-small-note-buys.mjs",

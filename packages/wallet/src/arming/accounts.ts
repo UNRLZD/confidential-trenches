@@ -130,6 +130,52 @@ export async function readArmingRegistration(
 }
 
 /**
+ * The token's storage_balance_bounds().min on `network`, read as readArmingRegistration reads it (both RPCs of the
+ * release pair, equal, at final blocks within HEIGHT_SPREAD_MAX), naming no account: the largest register_deposit any
+ * A_{l,j} can need (card signpage-withdraw-handoff). The withdraw form bounds the relayer's fee by the device's fee_max
+ * at this value before a note is picked, so no read names an A that the tap may not spend (two As read together would
+ * be linked); withdrawRequest then binds the picked A's own register_deposit and fee_max again.
+ */
+export async function readTokenStorageMin(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): Promise<bigint> {
+  if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new ArmingRegistrationRefused("input", `unknown network ${String(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new ArmingRegistrationRefused("input", nearPairRule(network));
+  const params = {
+    request_type: "call_function",
+    account_id: NEAR_NETWORKS[network].usdc,
+    method_name: "storage_balance_bounds",
+    args_base64: base64.encode(new TextEncoder().encode("{}")),
+    finality: "final",
+  };
+  const read = async (r: NearRpc): Promise<{ min: bigint; height: number }> => {
+    let a: unknown;
+    try {
+      a = await r.query(params);
+    } catch {
+      throw new ArmingRegistrationRefused("rpc", `${r.name} did not answer the bounds read`);
+    }
+    const res = isObj(a) && a.error === undefined && isObj(a.result) && a.result.error === undefined ? a.result : undefined;
+    const bytes = res?.result;
+    if (!res || !Array.isArray(bytes) || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) throw new ArmingRegistrationRefused("rpc", `${r.name}: the bounds read failed`);
+    let v: unknown;
+    try {
+      v = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes as number[])));
+    } catch {
+      throw new ArmingRegistrationRefused("rpc", `${r.name}: the bounds read is not JSON`);
+    }
+    const min = isObj(v) && typeof v.min === "string" && DIGITS.test(v.min) && BigInt(v.min) <= U128_MAX ? BigInt(v.min) : undefined;
+    if (min === undefined) throw new ArmingRegistrationRefused("rpc", `${r.name}: storage_balance_bounds has no min`);
+    const height = res.block_height;
+    if (typeof height !== "number" || !Number.isSafeInteger(height) || height <= 0) throw new ArmingRegistrationRefused("rpc", "a read has no block height");
+    return { min, height };
+  };
+  const [x, y] = await Promise.all(rpcs.map(read));
+  if (x!.min !== y!.min) throw new ArmingRegistrationRefused("disagree", "the two RPCs disagree on the token's storage minimum");
+  const spread = heightSpreadOver([x!.height, y!.height]);
+  if (spread !== null) throw new ArmingRegistrationRefused("disagree", spread);
+  return x!.min;
+}
+
+/**
  * withdrawRequest's registerDepositOf (withdraw/request.ts): A's register_deposit, read as readArmingRegistration. The
  * withdrawal's token must be the network's token, the one the read is made on; any other is refused before any read.
  */

@@ -31,6 +31,13 @@ test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no t
   assert.ok(!text.includes("__SIGN_NETWORK__"), "the network is folded at build time");
 });
 
+test("SIGN_HOST's policy lets the mainnet build reach no testnet NEAR RPC (card signpage-withdraw-handoff)", () => {
+  const headers = readFileSync(join(PKG, "public/_headers"), "utf8");
+  const connect = /connect-src ([^;]*);/.exec(headers)?.[1] ?? "";
+  for (const h of ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org", "https://near-testnet.drpc.org"]) assert.ok(!connect.split(" ").includes(h), `SIGN_HOST's connect-src names ${h}`);
+  for (const h of ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"]) assert.ok(connect.split(" ").includes(h), `SIGN_HOST's connect-src lacks ${h}`);
+});
+
 test("the testnet build carries the devnet pool's pins and the testnet providers", async () => {
   const text = (await bundle(undefined, { network: "testnet" })).js.toString("utf8");
   for (const s of TESTNET_ONLY) assert.ok(text.includes(s), `the testnet bundle lacks ${s}`);

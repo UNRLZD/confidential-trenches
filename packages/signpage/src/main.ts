@@ -52,8 +52,9 @@
 //   and Recovery code). Each opens the layer through openLayer(), which resets the activation guard (guard.shown()).
 //   Card signpage-withdraw-form adds withdraw.open: with a seed stored it draws the withdraw form (src/withdraw/), where
 //   the user types the address and the amount, refused before any proof when bad; a withdraw.open with a one-time id
-//   is refused until that way out is built. Withdraw is guarded like Sign out, and drawn not offered until the
-//   wallet's withdraw path, the note value and the device's fee bound are wired here (withdrawDeps, below). export.open stays refused until its card.
+//   is refused until that way out is built. Withdraw is guarded like Sign out; its note value, fee and hand-off are the
+//   build's network's (src/withdraw/handoff.ts, card signpage-withdraw-handoff), drawn not offered where that network
+//   names no vault or relayer. export.open stays refused until its card.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
@@ -67,15 +68,16 @@ import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
-import { readNotes, type NoteRecord } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, readNotes, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
-import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
+import { drawWithdrawForm } from "./withdraw/form.ts";
+import { PAGE_NETWORK, withdrawFormDeps } from "./withdraw/handoff.ts";
+import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
-import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
 import { testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
@@ -121,7 +123,10 @@ let shell: Shell | null = null;
 // top-level, on every build: the page network's pool flow, its settling and the next buy's proofs (src/pool-testnet.ts,
 // card signpage-pool-mainnet); with no pool pinned on the network it refuses every pool kind and reads nothing; the
 // store and the seed are opened when a run needs them
-const testnet = !framed ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }) : null;
+// the page's one prover (src/prover-host.ts: one prover-worker per page, the CSP allows no second), shared by the pool
+// flow's proofs and the withdraw form's hand-off (src/withdraw/handoff.ts), top-level only
+const prover = !framed ? proverHost() : null;
+const testnet = !framed && prover ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }, { prover }) : null;
 // the restore kind (src/pool-restore.ts, card pool-restore-wired): every pool the page's network pins read from the
 // words, what it finds written to the note store, the proof queue's pass after; top-level only, as the pool flow
 const restore = !framed
@@ -433,21 +438,10 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   root.replaceChildren(...parts);
 }
 
-// The withdraw form's reads. The page's network is mainnet: the release's hosts and SIGN_HOST's CSP name the mainnet
-// RPCs only. With no vault named there yet, no note can be in it: the note value is 0. Once a vault is named, the note
-// value (withdrawable over the note store), the fee bound (the device's own fee_max, LD5: card wallet-withdraw-feemax)
-// and the hand-off come with the wallet's withdraw path (VT-T02's integration); until then they stay unread and no
-// amount is ready. The note store is on the page for deposit naming (src/deposit-name.ts; the bundle keeps only what it
-// uses of the kit's entry, app.js 218 KB to 237 KB), not read by the withdraw form until then.
-const PAGE_NETWORK: NearNetwork = "mainnet";
-function withdrawDeps(): WithdrawFormDeps {
-  const net = NEAR_NETWORKS[PAGE_NETWORK];
-  return {
-    network: PAGE_NETWORK,
-    rpcs: [nearRpc(net.fastnear[0]), nearRpc(net.drpc)],
-    available: () => (vaultScope(PAGE_NETWORK) === null ? Promise.resolve(0n) : Promise.reject(new Error("notes: read with the withdraw path"))),
-    fee: () => Promise.reject(new Error("fee_max: read with the withdraw path (card wallet-withdraw-feemax)")),
-  };
+// The withdraw form's reads and hand-off on the build's network (src/withdraw/handoff.ts): the note value over the note
+// store, the relayer's fee bounded by the device's fee_max, and the wallet's withdraw path on this page's prover.
+function withdrawDeps() {
+  return withdrawFormDeps({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault });
 }
 
 // The account's public id from its entropy: entropy -> 12 words -> seed64 -> T_0 (wallet.md:47, :54, :68). seed64 is
