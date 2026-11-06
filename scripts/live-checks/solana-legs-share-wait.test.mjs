@@ -94,14 +94,16 @@ function mintB(change) {
 test("planted: provider B's mint read differs in supply only (a burn between the two reads): PASS, every leg passes S10", async () => {
   const r = await judge(mintB((d) => d.writeBigUInt64LE(d.readBigUInt64LE(36) - 559_661n, 36)));
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.match(r.lines.find((l) => l.includes(`mint ${A.good.mint}`)), /^ok {2}mint \S+ read equal on both providers/);
+  const supply = (d) => Buffer.from(d, "base64").readBigUInt64LE(36);
+  const s = supply(A.good.reads.accounts[A.good.mint][0].data);
+  assert.ok(r.lines.includes(`ok  mint ${A.good.mint} read on both providers, the same but for its supply (${s} / ${s - 559_661n}) or withheld fees, owner ${A.good.reads.accounts[A.good.mint][0].owner}`), r.lines.join("\n"));
 });
 
 test("planted: provider B's mint read differs in its freeze authority: FAIL, the mint and every leg refused S10", async () => {
   const r = await judge(mintB((d) => { d.writeUInt32LE(1, 46); d.fill(9, 50, 82); }));
   assert.equal(r.ok, false);
   const b = bad(r);
-  assert.match(b[0], /^BAD mint \S+ read equal on both providers/);
+  assert.equal(b[0], `BAD mint ${A.good.mint}: the providers disagree on the mint's freeze authority`);
   assert.equal(b.length, 1 + A.good.legs.length, r.lines.join("\n"));
-  for (const l of b.slice(1)) assert.match(l, /refused: S10 the providers disagree on the mint$/);
+  for (const l of b.slice(1)) assert.match(l, /refused: S10 the providers disagree on the mint's freeze authority$/);
 });

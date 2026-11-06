@@ -30,6 +30,7 @@ export const LIVE_CHECKS = [
   "helper-token-page-cold",
   "solana-jupiter-build",
   "solana-legs-share-wait",
+  "solana-mint-supply-moves",
   "wallet-per-buy",
   "helper-v4-hook-liquidity",
   "helper-robinhood-capacity",
