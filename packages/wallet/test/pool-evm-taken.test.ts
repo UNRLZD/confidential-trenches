@@ -13,7 +13,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore } from "../src/store/index.ts";
 import { evmPoolScopeOf, type EvmPoolEvent } from "../src/pool/evm.ts";
-import { evmClaimTaken, evmNextNote, evmRestore } from "../src/pool/evm-restore.ts";
+import { SECOND_GAP, evmClaimTaken, evmNextNote, evmRestore } from "../src/pool/evm-restore.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const SCOPE = evmPoolScopeOf("0x00000000000000000000000000000000b1f1f001", 84532n);
@@ -125,6 +125,40 @@ test("a stranger's Deposited above the finalized block is pending: passed over f
   // the next round, block 11 final: taken
   assert.deepEqual(evmNextNote(SEED, SCOPE, events, RET, 11n).taken.map((t) => refKey(t.ref)), [refKey(RET), refKey(Rn(0))]);
   assert.throws(() => evmNextNote(SEED, SCOPE, events, RET, -1n), /finalBlock/);
+});
+
+/** Deposited events at the given blocks, in log order. */
+const poolAt = (deps: readonly { pre: bigint; value: bigint; block: bigint }[]): EvmPoolEvent[] => pool(deps).map((e, k) => ({ ...e, block: deps[k]!.block }));
+const restored = (events: EvmPoolEvent[]) => evmRestore({ seed64: SEED, scope: SCOPE, events, gap: 2 }).notes.map((n) => refKey(n.ref));
+
+test("a pending take passed over, then reorged out: a restore from the words still finds the deposit signed on the next note", () => {
+  const before = poolAt([{ pre: P(U0), value: RUNG, block: 10n }, { pre: P(U0n(0)), value: MIN_DEPOSIT, block: 20n }]);
+  const got = evmNextNote(SEED, SCOPE, before, U0, 15n);
+  assert.deepEqual(got.pending.map(refKey), [refKey(U0n(0))]);
+  assert.deepEqual(got.next.ref, U0n(1), "signed past the pending take");
+  // the stranger's block is dropped; the user's rung on U 1 lands
+  const after = poolAt([{ pre: P(U0), value: RUNG, block: 10n }, { pre: P(U0n(1)), value: RUNG, block: 30n }]);
+  assert.deepEqual(restored(after), [refKey(U0), refKey(U0n(1))]);
+});
+
+test(`the restore's second-arrival walk reads past SECOND_GAP - 1 (${SECOND_GAP - 1}) empty notes and no more; evmNextNote never names a note past SECOND_GAP pending takes in a row`, () => {
+  const at = (n: number) => poolAt([{ pre: P(U0), value: RUNG, block: 10n }, { pre: P(U0n(n)), value: RUNG, block: 30n }]);
+  assert.deepEqual(restored(at(SECOND_GAP - 1)), [refKey(U0), refKey(U0n(SECOND_GAP - 1))]);
+  assert.deepEqual(restored(at(SECOND_GAP)), [refKey(U0)], "a note past the gap is not read");
+  const takes = (k: number) => poolAt([{ pre: P(U0), value: RUNG, block: 10n }, ...Array.from({ length: k }, (_, n) => ({ pre: P(U0n(n)), value: MIN_DEPOSIT, block: 20n }))]);
+  assert.deepEqual(evmNextNote(SEED, SCOPE, takes(SECOND_GAP - 1), U0, 15n).next.ref, U0n(SECOND_GAP - 1));
+  assert.throws(() => evmNextNote(SEED, SCOPE, takes(SECOND_GAP), U0, 15n), /pending takes in a row/);
+  // once those blocks are final the same chain is taken whole, and the next note named
+  assert.deepEqual(evmNextNote(SEED, SCOPE, takes(SECOND_GAP), U0, 20n).next.ref, U0n(SECOND_GAP));
+});
+
+test("a deposit note taken in a block not final yet is never passed over: its chain is found by that note alone", () => {
+  const events = poolAt([{ pre: P(U0), value: MIN_DEPOSIT, block: 20n }]);
+  assert.throws(() => evmNextNote(SEED, SCOPE, events, U0, 15n), /not final yet/);
+  assert.deepEqual(evmNextNote(SEED, SCOPE, events, U0, 20n).next.ref, U0n(0));
+  // a return note's chain is walked whatever its first note holds, so a pending take on it is passed over as any other
+  const sold = poolAt([{ pre: P(RET), value: MIN_DEPOSIT, block: 20n }]);
+  assert.deepEqual(evmNextNote(SEED, SCOPE, sold, RET, 15n).next.ref, Rn(0));
 });
 
 test("evmClaimTaken: a landed note held at another leaf than the taken one is refused, never kept quietly", async () => {

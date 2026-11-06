@@ -116,6 +116,18 @@ function depositLeaf(scope: bigint, events: readonly EvmPoolEvent[], ix: Deposit
   return { value: e.value, label: e.label, commitment: e.state, leafIndex: BigInt(d.at) };
 }
 
+/**
+ * Empty notes in a row a second-arrival walk reads past before it stops: the address gap limit of BIP-44, 20. A
+ * second arrival can be empty while a later one holds the user's deposit only through evmNextNote below, which names
+ * the next note past a take whose block is not final yet; if a reorg then drops that take, its note stays empty. So
+ * evmNextNote never names a note more than SECOND_GAP - 1 past the last note that is final, and this walk reads past up
+ * to SECOND_GAP - 1 empty notes, so a restore from the words finds every note the device signed. Solana's chains have
+ * no such gap: the page passes a taken note only once its mark is read at finalized on both RPCs (signpage
+ * pool-deposit.ts and pool-sell.ts markOf), and the store plans a second arrival only once the one before it has
+ * landed (../notes/store.ts addLocked).
+ */
+export const SECOND_GAP = 20;
+
 export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[] } {
   const { seed64, scope, events } = a;
   const ix = indexEvents(events);
@@ -139,8 +151,9 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
     put(ref, P, leaf);
     return true;
   };
+  // up to SECOND_GAP - 1 empty notes in a row read past: a pending take evmNextNote passed over, then reorged out
   const seconds = (id: SecondId): void => {
-    for (let n = 0; n <= U32 && asDeposit({ kind: "second", id, n }); n++);
+    for (let n = 0, miss = 0; n <= U32 && miss < SECOND_GAP; n++) miss = asDeposit({ kind: "second", id, n }) ? 0 : miss + 1;
   };
 
   for (let lane = 0; lane < RESTORE_LANES; lane++)
@@ -199,9 +212,10 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
  * Only a Deposited at or below `finalBlock` (the round's finalized anchor, evmTreeSync's `fin`) is `taken`, so a note
  * is stored only from a block that never moves; one in the tail above it is `pending`: passed over for `next`, never
  * written, and taken at a later round once its block is final (a reorg that drops it leaves the note as it was). If
- * that reorg drops it and nothing else lands on its precommitment, the chain holds a gap in the walk that a restore
- * from the words stops at (evmRestore's second arrivals); the device still holds every note, and its next call names
- * that empty note as `next`, so the next signature fills the gap.
+ * that reorg drops it and nothing else lands on its precommitment, the chain holds an empty note before the one signed
+ * next: evmRestore's second-arrival walk reads past SECOND_GAP - 1 of them, and this refuses to name a note past
+ * SECOND_GAP pending takes in a row (the next round, with those blocks final, names it), so a restore from the words
+ * never misses a signed note. The device also names that empty note as `next` at its next call, which fills the gap.
  */
 export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly EvmPoolEvent[], first: NoteRef, finalBlock: bigint): { taken: EvmRestoredNote[]; pending: NoteRef[]; next: { ref: NoteRef; precommitment: bigint } } {
   if (typeof finalBlock !== "bigint" || finalBlock < 0n) throw new Error("finalBlock: the round's finalized block number");
@@ -214,13 +228,25 @@ export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly 
   const ix = indexEvents(events);
   const taken: EvmRestoredNote[] = [];
   const pending: NoteRef[] = [];
+  let run = 0; // pending takes in a row: each may yet be dropped, an empty note before `next`
   for (let n = -1; n <= U32; n++) {
     const ref: NoteRef = n < 0 ? first : { kind: "second", id, n };
     const precommitment = noteSecrets(seed64, ref).precommitment;
     const leaf = depositLeaf(scope, events, ix, precommitment, refKey(ref));
-    if (leaf === null) return { taken, pending, next: { ref, precommitment } };
-    if (events[Number(leaf.leafIndex)]!.block > finalBlock) pending.push(ref);
-    else taken.push({ ref, scope, precommitment, leaf, state: "UNSPENT" });
+    if (leaf === null) {
+      if (run >= SECOND_GAP) throw new Error(`${refKey(ref)}: ${run} pending takes in a row before it, past the restore's gap of ${SECOND_GAP}: signed once they are final`);
+      return { taken, pending, next: { ref, precommitment } };
+    }
+    if (events[Number(leaf.leafIndex)]!.block > finalBlock) {
+      // a deposit index is found by its deposit note alone (walkLane), so an empty deposit note hides its whole chain:
+      // the one take never passed over while pending
+      if (n < 0 && first.kind === "deposit") throw new Error(`${refKey(ref)}: taken in a block not final yet; the deposit index is found by this note alone, so its chain is signed once that block is final`);
+      pending.push(ref);
+      run++;
+    } else {
+      taken.push({ ref, scope, precommitment, leaf, state: "UNSPENT" });
+      run = 0;
+    }
   }
   throw new Error("no second arrival left on this id");
 }
