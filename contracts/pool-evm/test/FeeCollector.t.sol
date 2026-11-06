@@ -96,16 +96,22 @@ contract FeeCollectorTest is Test {
     assertEq(SINK.balance, 8);
   }
 
-  function testFuzz_anyPaymentIsForwardedWhole(address _from, uint96 _value) public {
+  /// Any sender, any value, and ether already at the collector (sent by a SELFDESTRUCT or as a block reward, which
+  /// runs no code): Paid names the payment's own value, the sink gains exactly it, and what was there stays there
+  function testFuzz_anyPaymentIsForwardedWhole(address _from, uint96 _value, uint96 _pre) public {
     assumeNotForgeAddress(_from);
     vm.assume(_from != address(collector) && _from != SINK && uint160(_from) > 0xff);
+    vm.deal(address(collector), _pre);
     vm.deal(_from, _value);
     uint256 _before = SINK.balance;
-    vm.expectEmit(true, false, false, true, address(collector));
-    emit FeeCollector.Paid(_from, _value);
+    vm.recordLogs();
     assertTrue(_pay(_from, address(collector), _value));
+    (address[] memory _f, uint256[] memory _v) = _paid(vm.getRecordedLogs(), address(collector));
+    assertEq(_f.length, 1, 'one Paid');
+    assertEq(_f[0], _from, 'from the payer');
+    assertEq(_v[0], _value, 'the payment value, not the balance');
     assertEq(SINK.balance - _before, _value, 'the sink gains exactly the value');
-    assertEq(address(collector).balance, 0);
+    assertEq(address(collector).balance, _pre, 'what was there stays there');
   }
 
   function test_aSinkThatRevertsRevertsThePayment() public {

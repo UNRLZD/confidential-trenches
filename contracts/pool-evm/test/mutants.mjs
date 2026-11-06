@@ -257,6 +257,8 @@ export const MUTANTS = [
   [FEE, "emit Paid(msg.sender, msg.value);", "", "test_aPaymentEmitsPaidAndTheSinkReceivesIt"],
   [FEE, "emit Paid(msg.sender, msg.value);", "emit Paid(tx.origin, msg.value);", "test_aFeePaidToTheCollectorEmitsPaidFromW"],
   [FEE, "emit Paid(msg.sender, msg.value);", "emit Paid(msg.sender, msg.value + 1);", "testFuzz_anyPaymentIsForwardedWhole"],
+  [FEE, "emit Paid(msg.sender, msg.value);", "emit Paid(msg.sender, address(this).balance);", "testFuzz_anyPaymentIsForwardedWhole"],
+  [FEE, "(bool _sent,) = SINK.call{value: msg.value}('');", "(bool _sent,) = SINK.call{value: address(this).balance}('');", "testFuzz_anyPaymentIsForwardedWhole"],
   [FEE, "(bool _sent,) = SINK.call{value: msg.value}('');", "(bool _sent,) = SINK.call{value: msg.value / 2}('');", "test_aPaymentEmitsPaidAndTheSinkReceivesIt"],
   [FEE, "if (!_sent) revert ForwardFailed();", "", "test_aSinkThatRevertsRevertsThePayment"],
 ];
