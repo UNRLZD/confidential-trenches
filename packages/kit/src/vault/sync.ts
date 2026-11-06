@@ -68,7 +68,7 @@ export type VaultSyncList = (typeof VAULT_SYNC_LISTS)[number];
  * - labels: the same view code as leaves (lib.rs `labels` and `leaves` are both tree_page), so 750.
  * A page an RPC still refuses as too heavy (vaultViewTooHeavy) is read again at half its rows, down to one row.
  */
-export const VAULT_SYNC_PAGE: Readonly<Record<VaultSyncList, number>> = Object.freeze({ deposits: 450, spends: 250, leaves: 750, labels: 750 });
+export const VAULT_SYNC_PAGE: Readonly<Record<VaultSyncList, number>> = /* @__PURE__ */ Object.freeze({ deposits: 450, spends: 250, leaves: 750, labels: 750 });
 
 /**
  * Whether one RPC's answer to a view refuses it as too heavy, so the same rows read in a smaller page can pass:
