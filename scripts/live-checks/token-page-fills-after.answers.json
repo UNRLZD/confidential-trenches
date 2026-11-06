@@ -1,0 +1,125 @@
+{
+ "_note": "Recorded 6 Nov by token-page-fills-after.mjs --record on the PC box (heavy.sh): good = this card's build (--harness --build apps/terminal/dist, branch card/token-page-fills-after on a7e7300e), bad = the deployed APP_HOST before this card; both framed by the stand-in shell signed out, the token reads answered by the check (first the chain-named row, then the recorded answer).",
+ "good": {
+  "check": "token-page-fills-after",
+  "at": "2026-11-06T05:17:32.561Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell, the token reads answered by the check",
+  "browser": "156.0.8078.79",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "first": {
+     "ready": true,
+     "filling": "true",
+     "symbol": "DJT",
+     "priceLoading": true,
+     "price": null
+    },
+    "after": {
+     "ready": true,
+     "filling": "false",
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "$5.68"
+    },
+    "readsAt": [
+     0,
+     5007
+    ],
+    "errors": [],
+    "shots": {
+     "loading": "phone-loading.png",
+     "filled": "phone-filled.png"
+    }
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "first": {
+     "ready": true,
+     "filling": "true",
+     "symbol": "DJT",
+     "priceLoading": true,
+     "price": null
+    },
+    "after": {
+     "ready": true,
+     "filling": "false",
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "$5.68"
+    },
+    "readsAt": [
+     0,
+     5008
+    ],
+    "errors": [],
+    "shots": {
+     "loading": "desktop-loading.png",
+     "filled": "desktop-filled.png"
+    }
+   }
+  ]
+ },
+ "bad": {
+  "check": "token-page-fills-after",
+  "at": "2026-11-06T05:17:06.149Z",
+  "source": "live https://confidential.unrealized.trade, the stand-in shell, the token reads answered by the check",
+  "browser": "156.0.8078.79",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "first": {
+     "ready": true,
+     "filling": null,
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "—"
+    },
+    "after": {
+     "ready": true,
+     "filling": null,
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "—"
+    },
+    "readsAt": [
+     0
+    ],
+    "errors": [],
+    "shots": {
+     "loading": "phone-loading.png",
+     "filled": "phone-filled.png"
+    }
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "first": {
+     "ready": true,
+     "filling": null,
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "—"
+    },
+    "after": {
+     "ready": true,
+     "filling": null,
+     "symbol": "DJT",
+     "priceLoading": false,
+     "price": "—"
+    },
+    "readsAt": [
+     0
+    ],
+    "errors": [],
+    "shots": {
+     "loading": "desktop-loading.png",
+     "filled": "desktop-filled.png"
+    }
+   }
+  ]
+ }
+}
