@@ -3,7 +3,8 @@
 // and GeckoTerminal (the deployed helper has no /v1/market/token yet): PASS. bad_not_deployed: the deployed helper
 // before this card, 404 on all three: FAIL. Made from the good answer: a page missing a Risk field, a row with an extra
 // field, the authorities not from the chain, a holder row with a stray field, a bar off the hour grid, bars out of
-// order, another mint's page, a stale read and no CORS echo: each FAIL.
+// order, another mint's page, a stale read and no CORS echo: each FAIL. Card helper-restart-fresh: each answer judged by
+// its own read's time: one read late in a run, dated past 10 min of it, FAILs.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -29,6 +30,11 @@ const replay = (run) => async (url, init) => {
 const run = async (rec) => {
   const r = await read(undefined, undefined, replay(rec));
   r.readAt = rec.readAt; // the recorded read's own time, for the freshness windows
+  // each read's own time as recorded; a recording without one is judged against its start (the replay's are now)
+  for (const k of Object.keys(r.reads)) {
+    if (rec.reads[k]?.at === undefined) delete r.reads[k].at;
+    else Object.assign(r.reads[k], { at: rec.reads[k].at, ms: rec.reads[k].ms });
+  }
   return judge(r);
 };
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
@@ -113,5 +119,39 @@ test("made from the good answer: each fault FAILs on its own line", async () => 
     assert.equal(r.ok, false, line);
     assert.equal(bad(r).length, 1, `${line}\n${bad(r).join("\n")}`);
     assert.ok(bad(r)[0].startsWith(line), `${line}\n${bad(r)[0]}`);
+  }
+});
+
+test("card helper-restart-fresh: each answer is judged by its own read, not the run's start: a candles answer read late in a run, dated 10 min 5 s before its request, FAILs though it is within 10 min of the run's start; dated within 10 min of its own read it PASSES; dated after it arrived (past 2 s) it FAILs", async () => {
+  const times = (rec, sentAfterStart, fetchedBeforeSent) => {
+    const start = Date.parse(rec.readAt);
+    for (const [i, k] of Object.keys(READS).entries()) {
+      const sent = start + (k === "candles" ? sentAfterStart : i * 1_000);
+      rec.reads[k].at = new Date(sent).toISOString();
+      rec.reads[k].ms = 900;
+      if (k === "candles") rec.reads[k].headers = { ...rec.reads[k].headers, "x-fetched-at": new Date(sent - fetchedBeforeSent).toISOString() };
+      else rec.reads[k].headers = { ...rec.reads[k].headers, "x-fetched-at": new Date(sent + 500).toISOString() };
+    }
+    return rec;
+  };
+  // the candles sent 30 s into the run (a slow cold page and holders before them), dated 10 min 5 s before their request
+  const stale = await run(times(structuredClone(A.good), 30_000, 605_000));
+  assert.deepEqual(bad(stale).map((l) => l.split(":")[0]), ["BAD candles X-Fetched-At"], stale.lines.join("\n"));
+  const fresh = await run(times(structuredClone(A.good), 30_000, 595_000));
+  assert.deepEqual(bad(fresh), [], fresh.lines.join("\n"));
+  assert.ok(fresh.lines.some((l) => /^ok {2}candles X-Fetched-At: .*, within 10 min of its read at .* \(answered in 900 ms\)$/.test(l)), fresh.lines.join("\n"));
+  const ahead = await run(times(structuredClone(A.good), 30_000, -(900 + 3_000)));
+  assert.deepEqual(bad(ahead).map((l) => l.split(":")[0]), ["BAD candles X-Fetched-At"], ahead.lines.join("\n"));
+});
+
+test("card helper-restart-fresh: read() dates each answer by its own request", async () => {
+  const before = Date.now();
+  const r = await read(undefined, undefined, replay(A.good));
+  const after = Date.now();
+  let last = before;
+  for (const k of Object.keys(READS)) {
+    const t = Date.parse(r.reads[k].at);
+    assert.ok(t >= last && t <= after && Number.isSafeInteger(r.reads[k].ms), k);
+    last = t;
   }
 });
