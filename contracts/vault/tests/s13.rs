@@ -44,7 +44,10 @@ use near_workspaces::{Account, AccountId};
 use std::collections::BTreeMap;
 
 /// The `min_gas` an intents.near `ft_withdraw` into the vault signs, in Tgas: the rule on this file's worst case.
-const INTENTS_MIN_GAS: u64 = 180;
+/// Measured on the Linux x86_64 build (the box's and CI's), near-sandbox 2.13.4: the vault's `ft_on_transfer` at depth
+/// 32 burnt 94.027 Tgas on the mock token and 94.023 on the real USDC wasm; (94.027 × 1.059 + 30) × 1.2 = 155.489,
+/// rounded up to 156. It was 180 (vault.md 2.5.1, D) until this measure.
+const INTENTS_MIN_GAS: u64 = 156;
 /// testnet's trie-read margin over the sandbox (vault.md 2.5.1, G1 RESULT §3).
 const TESTNET_MARGIN: f64 = 1.059;
 /// What the token keeps of its `ft_transfer_call`'s gas (NCS `GAS_FOR_FT_TRANSFER_CALL`).
