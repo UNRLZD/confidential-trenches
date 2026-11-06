@@ -701,13 +701,13 @@ const paidLog = (w: string, value: bigint, collector = COLLECTOR) => ({ address:
 /** A sale's receipt once SellDelegate.sell paid its fee: status 1 and the collector's Paid log of the sent sale (from
  *  the tx's `to`, W, its value the calldata's fee), found among `calls`' sends by hash; null for a hash not sent there.
  *  `log` changes the log (a plant). */
-const provenOf = (calls: Calls, o: { gasUsed?: bigint; l1Fee?: bigint; log?: (l: ReturnType<typeof paidLog>, fee: bigint) => unknown } = {}) => (hash: string) => {
+const provenOf = (calls: Calls, o: { gasUsed?: bigint; price?: bigint; l1Fee?: bigint; log?: (l: ReturnType<typeof paidLog>, fee: bigint) => unknown } = {}) => (hash: string) => {
   const raw = sends(calls).find((r) => `0x${hex(keccak_256(unhex(r)))}` === hash);
   if (raw === undefined) return null;
   const tx = dec(unhex(raw).subarray(1)) as Rlp[];
   const fee = evmReadSell(tx[7] as Uint8Array).fee;
   const log = paidLog(`0x${hex(tx[5] as Uint8Array)}`, fee);
-  return { ...receiptOf("0x1", { l1Fee: o.l1Fee ?? L1, ...(o.gasUsed === undefined ? {} : { gasUsed: o.gasUsed }) }), logs: [o.log ? o.log(log, fee) : log] };
+  return { ...receiptOf("0x1", { l1Fee: o.l1Fee ?? L1, ...(o.gasUsed === undefined ? {} : { gasUsed: o.gasUsed }), ...(o.price === undefined ? {} : { price: o.price }) }), logs: [o.log ? o.log(log, fee) : log] };
 };
 /** A sale from a fresh W of `label`, its authorization at W's pending nonce (the mock answers 7 for any but W). */
 const freshBody = (label: string, o: { sell?: Partial<Sell>; fee?: bigint } = {}) => {
@@ -864,6 +864,21 @@ test("unpaid sell gas: reverting sales are held against the client, the token, W
   for (let i = 0; i < 60; i++) {
     assert.equal((await paid.sell(freshBody(`W-paid-${i}`), "203.0.113.10")).status, 200, `sale ${i}`);
     await tick();
+  }
+});
+
+// card helper-sender-fee-proof, review H6: the sender holds a landed sale's effectiveGasPrice to the maxFeePerGas it sent
+// the sale with; evmSaleUnpaid's own test cannot see which cap the sender passes it
+test("a proven sale one provider reads at effectiveGasPrice 10^30 stays paid: its price is held to the sale's sent maxFeePerGas, so the client's next sale is not 429", async () => {
+  const z: Calls = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(z, { receipt: provenOf(z, { price: 10n ** 30n }) }), rpc([], { receipt: provenOf(z) })], () => NOW);
+  assert.equal((await s.sell(freshBody("W-price-0"), "203.0.113.11")).status, 200);
+  for (let i = 0; i < 5; i++) await tick();
+  assert.ok(reads(z, "eth_getTransactionReceipt") > 0, "the sale's receipt was read");
+  for (let i = 1; i <= 3; i++) {
+    const next = await s.sell(freshBody(`W-price-${i}`), "203.0.113.11");
+    assert.equal(next.status, 200, `sale ${i}: ${JSON.stringify(next.body)}`);
+    for (let j = 0; j < 5; j++) await tick();
   }
 });
 
@@ -2123,7 +2138,7 @@ test("a hostile receipt's cost is held to what the sale can cost: gasUsed to EVM
       const r = unpaid(ra, rb, sale, worst);
       const cost = EVM_POOL_SELL_GAS * maxFeePerGas + ("l1Fee" in o && o.l1Fee === huge ? worst : L1);
       assert.deepEqual(r, { proven: true, paid: cost <= FEE, unpaid: cost > FEE ? cost - FEE : 0n }, `${name}: ${JSON.stringify(r, (_, v) => (typeof v === "bigint" ? v.toString() : v))}`);
-      assert.ok(r.unpaid <= 2n * worst, `${name}: at most twice the worst`);
+      assert.ok(r.unpaid < 2n * worst, `${name}: under twice the worst`);
     }
   }
 });

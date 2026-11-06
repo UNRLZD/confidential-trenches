@@ -176,6 +176,7 @@ export const MUTANTS = [
   [EVM, "  if (sellSender === sender) throw", "  if (false) throw", T, "the sell sender:"],
   [EVM, 'a("eth_getTransactionCount", [from, "pending"])', 'a("eth_getTransactionCount", [sender, "pending"])', T, "the sell sender:"],
   [EVM, "    const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), key);", "    const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), cfg.senderKey);", T, "a good sell:"],
+  [EVM, "landedSale(charge(keys, worst), s, w, maxFeePerGas, keys)", "landedSale(charge(keys, worst), s, w, 10n ** 30n, keys)", T, "a proven sale one provider reads at effectiveGasPrice 10^30"],
   [EVM, '      await a("eth_call", [{ from, to: w, data, gas:', '      await a("eth_call", [{ from: sender, to: w, data, gas:', T, "a good sell:"],
   [EVM, "pin.toLowerCase() !== s.sellSender)", "pin.toLowerCase() !== s.sender)", T2, "the EVM pool sell sender's address"],
   [EVM, '    if (sellKey !== "" && sellKey === key) throw', "    if (false) throw", T2, "the EVM pool sell sender's address"],

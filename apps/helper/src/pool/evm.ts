@@ -419,7 +419,7 @@ export function evmSalePaid(r: unknown, collector: string, w: string, fee: bigin
  * whole cost and paid nothing. The cost is the higher of the two receipts' gasUsed x effectiveGasPrice + l1Fee, each part
  * held to what the sale can cost (one provider's answer is hostile, and the higher one counts): gasUsed at most the gas
  * the sale is sent with (EVM_POOL_SELL_GAS), effectiveGasPrice at most its maxFeePerGas, and l1Fee at most `worst`, the
- * whole worst cost held at its send (so a lying provider charges one sale at most twice its worst, never an hour of
+ * whole worst cost held at its send (so a lying provider charges one sale under twice its worst, never an hour of
  * sells); a receipt whose cost cannot be read counts `worst`.
  */
 export function evmSaleUnpaid(ra: Record<string, unknown>, rb: Record<string, unknown>, sale: { collector: string; w: string; fee: bigint; maxFeePerGas: bigint }, worst: bigint): { proven: boolean; paid: boolean; unpaid: bigint } {
