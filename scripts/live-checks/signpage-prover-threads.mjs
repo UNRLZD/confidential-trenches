@@ -72,6 +72,15 @@ export function consoleLineOf(m) {
   return consoleLine(`${m.type()} ${m.text()}`.slice(0, 300), m.location()?.url ?? "");
 }
 
+/** What a FAIL prints after its verdict, for the reader of a red run (the judge reads none of it): every console line
+ *  the run kept (the page's and each worker's) and every worker script the browser asked for, in order. */
+export function failLines(rec) {
+  const pg = rec?.page ?? {};
+  const c = Array.isArray(pg.console) ? pg.console : [];
+  const w = Array.isArray(pg.workerScripts) ? pg.workerScripts : [];
+  return [...(c.length ? c.map((l) => `CONSOLE ${l}`) : ["CONSOLE none kept"]), `WORKER SCRIPTS ${JSON.stringify(w)}`];
+}
+
 export async function judge(rec, want = expected()) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -238,7 +247,11 @@ async function readPage(serve, engine, proofs) {
     const consoleLines = [];
     page.on("console", (m) => consoleLines.length < 50 && consoleLines.push(consoleLineOf(m)));
     page.on("pageerror", (e) => consoleLines.length < 50 && consoleLines.push(`pageerror ${e.message}`.slice(0, 300)));
-    page.on("worker", (w) => consoleLines.length < 50 && consoleLines.push(`worker ${w.url().slice(0, 120)}`));
+    page.on("worker", (w) => {
+      if (consoleLines.length < 50) consoleLines.push(`worker ${w.url().slice(0, 120)}`);
+      // a worker's own console (the prover worker's, a thread's), named by its worker's path
+      w.on("console", (m) => consoleLines.length < 50 && consoleLines.push(`in ${new URL(w.url(), origin).pathname}: ${consoleLineOf(m)}`));
+    });
     await page.goto(`${origin}/`, { waitUntil: "load" });
     if (!(await page.evaluate(() => !!window.__pt))) throw new Error("the init script did not run on SIGN_HOST's page");
     const want = expected();
@@ -287,6 +300,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
     const { ok, lines } = await judge(rec);
     for (const l of lines) console.log(l);
+    if (!ok) for (const l of failLines(rec)) console.log(l);
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${rec.source}, ${rec.browser})`);
     code = ok ? 0 : 1;
   } catch (e) {
