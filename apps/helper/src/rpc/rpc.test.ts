@@ -50,12 +50,25 @@ const code = (a: { body: string }) => JSON.parse(a.body).error?.code;
 test("the allowlist, batch size and body limit are the kit's (a change goes through packages/kit/src/helper/v1.ts)", () => {
   // the kit's chains, then the testnet build's second Solana provider (card pool-buy-send-fast) on the kit's Solana list
   assert.deepEqual([...RPC_CHAINS], [...Object.keys(HELPER_RPC_METHODS), "solana-devnet"]);
-  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], [...HELPER_RPC_METHODS[c === "solana-devnet" ? "solana" : c]], c);
+  // solana-devnet adds getGenesisHash alone (card live-check-devnet-pair)
+  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], c === "solana-devnet" ? [...HELPER_RPC_METHODS.solana, "getGenesisHash"] : [...HELPER_RPC_METHODS[c]], c);
   assert.equal(RPC_BATCH_MAX, HELPER_RPC_BATCH_MAX);
   const row = HELPER_V1_PATHS.find((p) => p.path === "/v1/rpc/{chain}");
   assert.equal(row?.limitBytes, RPC_BODY_MAX);
   assert.equal(row?.part, "proxy");
   assert.deepEqual(Object.keys(RPC_UPSTREAMS), [...RPC_CHAINS]);
+});
+
+test("card live-check-devnet-pair: solana-devnet forwards getGenesisHash to SOLANA_DEVNET_RPC_URL (the devnet live checks read the cluster on each provider); mainnet solana still refuses it before any call", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
+  seen.length = 0;
+  const a = await call(r, "solana-devnet", { jsonrpc: "2.0", id: 4, method: "getGenesisHash", params: [] });
+  assert.equal(a.status, 200);
+  assert.deepEqual([seen.length, seen[0]?.url], [1, "/devnet"]);
+  seen.length = 0;
+  const m = await call(r, "solana", { jsonrpc: "2.0", id: 4, method: "getGenesisHash", params: [] });
+  assert.deepEqual([m.status, code(m), seen.length], [400, "method_not_allowed", 0]);
 });
 
 test("an allowlisted call on each chain is forwarded to that chain's provider and its answer passed back", async () => {

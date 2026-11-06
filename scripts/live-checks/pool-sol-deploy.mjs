@@ -67,8 +67,9 @@ export const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 //   - api.devnet.solana.com, the cluster's public RPC (docs.anza.xyz/clusters/available), answered every read;
 //   - the helper's /v1/rpc/solana-devnet, the page's own second (packages/signpage/src/pool-testnet.ts TESTNET_RPCS),
 //     whose keyed provider is another operator's (apps/helper/src/rpc/rpc.ts RPC_UPSTREAMS "solana-devnet"), answered
-//     the account and transaction reads and refuses getGenesisHash (400 method_not_allowed), so a check that reads the
-//     genesis moves past it;
+//     the account and transaction reads and refused getGenesisHash (400 method_not_allowed), which this card adds to
+//     the route's list (apps/helper/src/rpc/methods.ts); a helper that still refuses it is out for a check that reads the
+//     genesis, which moves on;
 //   - OnFinality's public endpoint answers 1 request a second and 1000 a day per IP (x-ratelimit-limit-day 1000): on
 //     GitHub's shared runners it answered no result (sign live run 42201131294, 6 Nov 10:15Z), so it is the last spare.
 // Left out: devnet.rpcpool.com and explorer-api.devnet.solana.com are the same node as api.devnet.solana.com (x-rpc-node
