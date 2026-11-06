@@ -41,7 +41,7 @@ const proxyOn = (j: ReturnType<typeof jupiterFree>, dir?: string, id?: string): 
   return createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: j.clock.sleep, ...(dir && files ? { peers: files(dir, id!, j.clock.now) } : {}) } as never) as P;
 };
 /** One call: the helper's own reads (reserved) on even turns, a device's on odd ones. */
-const call = (p: P, tag: string, i: number) => p.handle("jupiter", PATH, `query=${tag}${i}`, "", i % 2 === 0 ? undefined : `198.51.100.${i % 250}`, i % 2 === 0, 0).then((a) => a.status);
+const call = (p: P, tag: string, i: number) => p.handle("jupiter", PATH, `query=${tag}${i}`, "", i % 2 === 0 ? undefined : `198.51.100.${i % 250}`, i % 2 === 0).then((a) => a.status);
 
 test("card helper-deploy-reads-fast: two helpers on one Jupiter key through a deploy's overlap, each asked a call a second, count each other's calls: Jupiter never answers 429, so neither holds; at e89cfae0 together they drew 2 a second against its 60 a minute", async () => {
   assert.equal(typeof (shared as Record<string, unknown>).callsFiles, "function", "proxy/shared-calls.ts callsFiles: the helpers count each other's calls");

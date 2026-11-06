@@ -284,7 +284,10 @@ test("fold 6 (R5b, R5d): Discover's Jupiter lists and curve reads draw on the he
   // the clock stands at AS_OF, so a wait the proxy takes (a caller's turn, a poll for room) reads the same now() after
   // it: the wait is a turn of the event loop, never real seconds (162 s of real sleep in a fresh run, card
   // fresh-run-margin), as crowd.test.ts's still clock does
+  // the minute's reserve alone (burstMs 0): the callers' part is spent at one instant, which Jupiter's 10 s window
+  // (proxy.ts PACED, card helper-page-jup-429) would spread
   const proxy = createProxy({}, {
+    burstMs: 0,
     now: () => t,
     sleep: async () => {},
     fetch: (async (url: string) => {

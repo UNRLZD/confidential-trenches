@@ -1050,6 +1050,18 @@ test("M3 the helper's route that does not hold the restore's block (another fork
   assert.deepEqual(namedBy(seen), []);
 });
 
+// card pool-restore-wired (review L2): the signing page keeps the notes alone, so its restore names no W to anyone
+test("W0 wallets: false reads the notes alone: no W named to any provider, no Transfer list or helper asked for, every note the full restore finds", async () => {
+  const { world } = seeded();
+  const full = await restore(pair(world, world), wpair(world));
+  const poolLog: NonNullable<Over["log"]> = [];
+  const r = await evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: pair(world, world, { log: poolLog }, { log: poolLog }), wallets: false, gap: 4, sleep: async () => {} });
+  assert.deepEqual(namedIn(poolLog), []);
+  assert.deepEqual(r.wallets, []);
+  assert.deepEqual(r.notes.map((n) => [refKey(n.ref), n.state]), full.notes.map((n) => [refKey(n.ref), n.state]));
+  assert.deepEqual(r.spends, full.spends);
+});
+
 // ---- card restore-check-bounded: a refusal under the cap never shrinks the rest of the read ----
 
 /** One reader of a W's Transfer logs (evmTokensSentToOne, as the helper's route is read) over 50,000 blocks, its

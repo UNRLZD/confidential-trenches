@@ -1,0 +1,152 @@
+{
+ "run": "card pool-restore-wired: two browsers, one set of 12 words, Solana devnet. Browser A sent no transaction of this card: its six are pool-buy-send-fast.md's, read on two RPCs by the money gate there; browser B reads only.",
+ "a_txs": [
+  "solana-devnet 2riHYB15aZBJfY7hA9NDPKPjQNwzZgRSjXvjNmWk3R4yVACfyMidz9rMfTnXN3EQUpjjC3k88EeXhnRgKyd3K2VW",
+  "solana-devnet 5kxqLebHVzimZaaLGXoTBFCbFsq8QGh46h3TnvwhxQSY2cV4RoqS2HwKeTkoBTBWvBRgZCrnzPG9mCcveAdAcybj",
+  "solana-devnet 21gB23hVW7YbCFJRNLJ5HWkhAtH5qR7FtvoqZuqiouNmorsWt8vHtwbRTQgSyXG6NMPupAWzNnZwaL11zpEmjfm9",
+  "solana-devnet 5wx8gEBh21CjpjKDm2KWdeqMTmwanZYTye7AQxoBQZEz9WaqZtX4T72b4Zm1ptv2SsGh27dHHSPhTFzYRKSLMCTb",
+  "solana-devnet 2krnbQqKdGjZ5Eto1gUHTsp9VBjNYtTUxitLHujMvK4E6XGorfay5SSgLdmMeNmHZSJ3f5fEme4VB7w8k7JPAstJ",
+  "solana-devnet 4WULVWEZdALXrfPMbCCSyzd5myGFaNVJiwoPGrpY2z2xWkqBS41QN8avkQ3gAzgoGHneEPkwbHQzGsPBVVtEQrDY"
+ ],
+ "record": [
+  "Two browsers, one set of 12 words, on Solana devnet.",
+  "Browser A is the run of packages/signpage/scripts/pool-flow-devnet.mjs on 6 Nov 2026, 01:46:33-01:47:51Z (pool-buy-send-fast.md): the page's own pool kinds deposited 0.01 SOL, bought at \"max\" and sold all W held, then the rent back tore W's token account down. The Tx lines above are its six transactions, in that order, each finalized on api.devnet.solana.com and the helper's /v1/rpc/solana-devnet. Its store ended with the deposit note SPENT at leaf 38, change 0 UNSPENT at leaf 39 (value 0: the buy spent the whole chunk), the return note of 3482099 UNSPENT at leaf 40, and W holding 3627456 lamports and no token account. The run kept its seed outside the repo (~/.ct-devnet-runs/run-2026-11-06T01-46-33-530Z.seed, 0600).",
+  "Browser B is packages/signpage/scripts/pool-restore-devnet.mjs at 6 Nov 04:08:59-04:09:41Z, on this card's code at 01a067ee (the review fold): a new wallet store (fake-indexeddb, empty), the same words signed in, and the page's restore run as main.ts runs it after a words sign-in (src/pool-restore.ts auto() on pagePools() of the testnet build: the devnet pool 5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ on the page's two devnet RPCs; no EVM pool is pinned). The store held 0 notes; the restore ended done in 39989 ms (83538 ms on the first run at 03:57Z, before the fold, with the same result), its op record \"done\". It wrote the same three notes, states, values and leaf indices as A's store: deposit SPENT 10000000 at 38, change UNSPENT 0 at 39, return UNSPENT 3482099 at 40. The SPENT note's W, derived from the words, is co4Njaq8gY25mqFMtGfGFkRVToSzAncpMEavxJfQAfc, which is the second key of A's buy transaction (21gB23h..., getTransaction at finalized on both RPCs: slot 519138620, err null). W reads 3627456 lamports and 0 token accounts at finalized on both api.devnet.solana.com (slot 519174244) and the helper's /v1/rpc/solana-devnet (slot 519174247): A's balance. The record is pool-restore-wired.run.json (addresses, values and leaf indices only). "
+ ],
+ "at": "2026-11-06T04:09:41.711Z",
+ "cluster": "devnet",
+ "pools": [
+  {
+   "chain": "solana",
+   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ"
+  }
+ ],
+ "before": 0,
+ "stage": "done",
+ "ms": 39989,
+ "ops": [
+  {
+   "id": "0e771d1d-45bc-432e-8bc7-dd12534d3156",
+   "kind": "restore",
+   "stage": "done",
+   "txs": [],
+   "created_ms": 1793938139686
+  }
+ ],
+ "notes": [
+  {
+   "ref": "deposit",
+   "state": "SPENT",
+   "value": "10000000",
+   "leafIndex": "38",
+   "label": "3200474172729628326463125717848828151928025882067197133045549097171052127537",
+   "j": null
+  },
+  {
+   "ref": "change",
+   "state": "UNSPENT",
+   "value": "0",
+   "leafIndex": "39",
+   "label": "3200474172729628326463125717848828151928025882067197133045549097171052127537",
+   "j": 1
+  },
+  {
+   "ref": "return",
+   "state": "UNSPENT",
+   "value": "3482099",
+   "leafIndex": "40",
+   "label": "5396292379962577567880052507470785670468193442322512475382790628692111211911",
+   "j": 0
+  }
+ ],
+ "wallets": [
+  {
+   "note": "deposit",
+   "w": "co4Njaq8gY25mqFMtGfGFkRVToSzAncpMEavxJfQAfc",
+   "reads": [
+    {
+     "rpc": "https://api.devnet.solana.com",
+     "slot": 519174244,
+     "lamports": "3627456",
+     "tokenAccounts": 0
+    },
+    {
+     "rpc": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+     "slot": 519174247,
+     "lamports": "3627456",
+     "tokenAccounts": 0
+    }
+   ]
+  }
+ ],
+ "again": {
+  "commit": "7c444300",
+  "note": "browser B run again on the page after the end-ordering fix: the same notes, states and W balance",
+  "at": "2026-11-06T04:26:37.493Z",
+  "cluster": "devnet",
+  "pools": [
+   {
+    "chain": "solana",
+    "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ"
+   }
+  ],
+  "before": 0,
+  "stage": "done",
+  "ms": 45693,
+  "ops": [
+   {
+    "id": "451cb78e-f103-4946-a0c4-d0a87b8785e9",
+    "kind": "restore",
+    "stage": "done",
+    "txs": [],
+    "created_ms": 1793939149796
+   }
+  ],
+  "notes": [
+   {
+    "ref": "deposit",
+    "state": "SPENT",
+    "value": "10000000",
+    "leafIndex": "38",
+    "label": "3200474172729628326463125717848828151928025882067197133045549097171052127537",
+    "j": null
+   },
+   {
+    "ref": "change",
+    "state": "UNSPENT",
+    "value": "0",
+    "leafIndex": "39",
+    "label": "3200474172729628326463125717848828151928025882067197133045549097171052127537",
+    "j": 1
+   },
+   {
+    "ref": "return",
+    "state": "UNSPENT",
+    "value": "3482099",
+    "leafIndex": "40",
+    "label": "5396292379962577567880052507470785670468193442322512475382790628692111211911",
+    "j": 0
+   }
+  ],
+  "wallets": [
+   {
+    "note": "deposit",
+    "w": "co4Njaq8gY25mqFMtGfGFkRVToSzAncpMEavxJfQAfc",
+    "reads": [
+     {
+      "rpc": "https://api.devnet.solana.com",
+      "slot": 519178496,
+      "lamports": "3627456",
+      "tokenAccounts": 0
+     },
+     {
+      "rpc": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+      "slot": 519178499,
+      "lamports": "3627456",
+      "tokenAccounts": 0
+     }
+    ]
+   }
+  ]
+ }
+}
