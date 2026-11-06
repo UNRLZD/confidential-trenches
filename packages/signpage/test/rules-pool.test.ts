@@ -443,8 +443,10 @@ const A_V3 = "0x000000000000000000000000000000000000ad03";
 const A_V4 = "0x000000000000000000000000000000000000ad04";
 const DELEGATE = "0x00000000000000000000000000000000000de1e9";
 const FEE_TO = "0x0000000000000000000000000000000000000fee";
+// the network's FeeCollector a Sell pays (card evm-testnet-delegate-review3), not the withdraw relayer's FEE_TO
+const COLLECTOR = "0x00000000000000000000000000000000000c011e";
 const pin = (v: EvmPoolVenue, o: Partial<EvmPoolVenue>): EvmPoolVenue => Object.freeze({ ...v, ...o });
-const VENUES = Object.freeze({ base: pin(B, { pool: EVM_POOL, adapters: Object.freeze({ v3: A_V3, v4: A_V4 }), sellDelegate: DELEGATE }) });
+const VENUES = Object.freeze({ base: pin(B, { pool: EVM_POOL, adapters: Object.freeze({ v3: A_V3, v4: A_V4 }), sellDelegate: DELEGATE, feeCollector: COLLECTOR }) });
 const evmCtx = (o: Partial<PoolContext> = {}): PoolContext => ({ nowMs: NOW, wallet: EVM_W, feeCap: 10n ** 15n, evm: { venues: VENUES, feeRecipient: FEE_TO }, ...o });
 const relay = (o: Partial<EvmRelayData> = {}): EvmRelayData => ({ recipient: EVM_W, feeRecipient: FEE_TO, feeCap: 10n ** 14n, deadlineMs: NOW + 120_000n, refundPrecommitment: 7n, salt: "0x" + "ab".repeat(16), ...o });
 const ctxOf = (r: EvmRelayData, pool = EVM_POOL) => evmPoolContextOf({ processooor: pool, relay: r }, evmPoolScopeOf(pool, BigInt(B.chainId)));
@@ -548,7 +550,7 @@ test("EVM sell and authorization: W's own Sell, built from the device's sell quo
   // the device's own sell quote on the kit's modelled chain (kit test/evm-sell-quote-fx.ts), W the page's
   const q = await sellQuoteWith(sellReq("base", { w: EVM_W }), [sellModel({ price: flat }), sellModel({ price: flat })], Date.now());
   const req = { amount: q.amountIn, minOut: q.minOut, feeCap: 10n ** 13n, deadline: t + 120n };
-  const built = evmQuotedSell(VENUES, q, { feeRecipient: FEE_TO, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }, Date.now());
+  const built = evmQuotedSell(VENUES, q, { feeRecipient: COLLECTOR, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }, Date.now());
   const X = q.token;
   const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: q.amountIn, slippageBps: 100, decimals: 18 };
   const ctx = { ...evmCtx({ nowMs: t * 1000n }), precommitment: 5n };
@@ -567,11 +569,13 @@ test("EVM sell and authorization: W's own Sell, built from the device's sell quo
     [() => checkEvmSell(built, ask, ctx, req.minOut + 1n), "min_out"],
     // the proceeds go into the pool under the device's own precommitment only, never another's note
     [() => checkEvmSell(built, ask, { ...ctx, precommitment: 6n }, 1n), "precommitment"],
-    // the fee goes to the relayer's fee recipient the page pins, as a release's does (card pool-review-3, L-1)
-    [() => checkEvmSell(evmQuotedSell(VENUES, q, { feeRecipient: other, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }, Date.now()), ask, ctx, 1n), "fee_recipient"],
-    [() => checkEvmSell(built, ask, { ...ctx, evm: { venues: VENUES, feeRecipient: other } }, 1n), "fee_recipient"],
+    // the fee goes to the Sell's signed recipient (card pool-review-3, L-1)
+    // the fee goes to the venue's pinned FeeCollector (card evm-testnet-delegate-review3): a sell paying another address
+    // (built under a list that pins it), or a page that pins another collector, is refused
+    [() => checkEvmSell(evmQuotedSell(Object.freeze({ base: pin(VENUES.base, { feeCollector: other }) }), q, { feeRecipient: other, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }, Date.now()), ask, ctx, 1n), "fee_recipient"],
+    [() => checkEvmSell(built, ask, { ...ctx, evm: { venues: Object.freeze({ base: pin(VENUES.base, { feeCollector: other }) }), feeRecipient: FEE_TO } }, 1n), "fee_recipient"],
     // the kit's unquoted pinned builder, of the same route and min out: not the device's quote
-    [() => checkEvmSell(pinnedBuildSell(VENUES, "base", { w: EVM_W, token: X, amount: q.amountIn, target: q.target, route: q.route, minOut: q.minOut, feeRecipient: FEE_TO, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }), ask, ctx, 1n), "not_quoted"],
+    [() => checkEvmSell(pinnedBuildSell(VENUES, "base", { w: EVM_W, token: X, amount: q.amountIn, target: q.target, route: q.route, minOut: q.minOut, feeRecipient: COLLECTOR, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }), ask, ctx, 1n), "not_quoted"],
   ] as const) {
     assert.throws(f, refusedAs(rule), rule);
   }
@@ -587,6 +591,32 @@ test("EVM sell and authorization: W's own Sell, built from the device's sell quo
   assert.throws(() => checkEvmAuthorization(ask, ctx, 4n, [4n, 5n]), refusedAs("nonce"));
   assert.throws(() => checkEvmAuthorization(ask, ctx, 3n, [4n, 4n]), refusedAs("nonce"));
   assert.throws(() => checkEvmAuthorization(ask, { ...ctx, evm: { venues: { base: pin(B, { pool: EVM_POOL }) }, feeRecipient: FEE_TO } }, 4n, [4n, 4n]), refusedAs("delegate_not_pinned"));
+});
+
+// card evm-testnet-delegate-review3: SellDelegate pays a sale's fee to the Sell's signed feeRecipient (pool-review-3, L-1)
+// and the helper sends only a Sell paying the network's FeeCollector (its Paid log proves the fee): the page holds a
+// sell's fee recipient to the venue's collector pin, never to the withdraw relayer's fee recipient a release binds
+test("card evm-testnet-delegate-review3: an EVM sell pays its fee only to the venue's FeeCollector pin: one paying the withdraw relayer's fee recipient is refused fee_recipient, one paying the collector passes; a venue with none is refused evm_not_pinned", async () => {
+  const t = BigInt(Math.floor(Date.now() / 1000));
+  const q = await sellQuoteWith(sellReq("base", { w: EVM_W }), [sellModel({ price: flat }), sellModel({ price: flat })], Date.now());
+  const COLL = "0x00000000000000000000000000000000000c011e";
+  const venues = Object.freeze({ base: pin(B, { pool: EVM_POOL, adapters: Object.freeze({ v3: A_V3, v4: A_V4 }), sellDelegate: DELEGATE, feeCollector: COLL }) });
+  const fields = (feeRecipient: string) => ({ feeRecipient, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n });
+  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: q.token, amount: q.amountIn, slippageBps: 100, decimals: 18 };
+  const ctx = { ...evmCtx({ nowMs: t * 1000n, evm: { venues, feeRecipient: FEE_TO } }), precommitment: 5n };
+  // the collector's sell passes and signs
+  const good = evmQuotedSell(venues, q, fields(COLL), Date.now());
+  assert.equal(checkEvmSell(good, ask, ctx, q.minOut).pool, EVM_POOL);
+  assert.equal(signEvmSell(EVM_SECRET, ctx, good).length, 65);
+  // a sell paying the withdraw relayer's fee recipient (the device's quote, built under a list that pins it as the
+  // collector): the page refuses it, so the helper's fee_recipient refusal is never the first to see it
+  const relayerPaid = evmQuotedSell(Object.freeze({ base: pin(venues.base, { feeCollector: FEE_TO }) }), q, fields(FEE_TO), Date.now());
+  assert.throws(() => checkEvmSell(relayerPaid, ask, ctx, q.minOut), refusedAs("fee_recipient"));
+  // the withdraw relayer's fee recipient is not a sell's: another one changes nothing
+  assert.equal(checkEvmSell(good, ask, { ...ctx, evm: { venues, feeRecipient: "0x2222222222222222222222222222222222222222" } }, q.minOut).pool, EVM_POOL);
+  // a venue that pins no collector takes no sell
+  const none = Object.freeze({ base: pin(B, { pool: EVM_POOL, adapters: Object.freeze({ v3: A_V3, v4: A_V4 }), sellDelegate: DELEGATE }) });
+  assert.throws(() => checkEvmSell(good, ask, { ...ctx, evm: { venues: none, feeRecipient: FEE_TO } }, q.minOut), refusedAs("evm_not_pinned"));
 });
 
 test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the agreed block's time, that time at most the device's clock; each planted attack is refused", async () => {
@@ -621,7 +651,7 @@ test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the a
   // a real sell (the kit's sell builder, into the pinned pool, live for 120 s), even one the sell check passed, is
   // refused by the sim check and by the sim signer
   const q = await sellQuoteWith(sellReq("base", { w: EVM_W }), [sellModel({ price: flat }), sellModel({ price: flat })], Date.now());
-  const real = evmQuotedSell(VENUES, q, { feeRecipient: FEE_TO, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n }, Date.now());
+  const real = evmQuotedSell(VENUES, q, { feeRecipient: COLLECTOR, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n }, Date.now());
   const realAsk: PoolAsk = { ...ask, token: q.token, amount: q.amountIn };
   assert.throws(() => checkEvmSellSim(real as never, t, realAsk, ctx), refusedAs("sim_pool"));
   assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));

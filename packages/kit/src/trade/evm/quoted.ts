@@ -11,9 +11,9 @@ import { EVM_QUOTE_MAX_AGE_MS, EvmQuoteError, evmIsDeviceQuote, evmIsDeviceSellQ
 /** What W adds to a device sell quote: the return note's precommitment, the deadline (unix seconds), W's sell nonce,
  *  the sender's fee cap: by default the quote's feeMax, the device's own fee rule (card evm-buy-hookdata-fee); a
  *  lower one may be named, a higher one is refused (bad_fee); and `feeRecipient`, the address SellDelegate pays the
- *  fee to (card pool-review-3, L-1): the relayer's fee recipient a release on that chain binds (packages/wallet
- *  pool/evm.ts EvmPoolPin.feeRecipient, the helper's fee answer's fee_recipient). The kit holds no such pin, so the
- *  caller passes the one its pin names; the builder refuses the zero address, W and the pool (bad_fee). */
+ *  fee to (card pool-review-3, L-1): the chain's pinned FeeCollector in the venue list (evmPoolVenues().feeCollector),
+ *  the one recipient the helper sends a Sell for; any other is refused not_pinned, and a chain that pins none
+ *  not_deployed (card evm-testnet-delegate-review3). */
 export type EvmPoolSellFields = { precommitment: bigint; feeCap?: bigint; feeRecipient: string; deadline: bigint; nonce: bigint };
 
 // Every buy and sell built here: a copy, a spread or a build made any other way is in neither

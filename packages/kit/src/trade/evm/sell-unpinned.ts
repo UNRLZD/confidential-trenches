@@ -28,9 +28,8 @@
 //   the device's own fee rule, evmPoolSellFeeMax: trade/evm/sell.ts);
 // - the fee recipient is an address, not the zero address, not W and not the pool: SellDelegate pays the fee to the
 //   recipient W signed, never to msg.sender, so whoever sends a signed Sell first cannot take its fee (card
-//   pool-review-3, finding L-1); it is the relayer's fee recipient a release on that chain binds (packages/wallet
-//   pool/evm.ts EvmPoolPin.feeRecipient, the helper's fee answer's fee_recipient), an input here since the kit holds
-//   no such pin;
+//   pool-review-3, finding L-1); the pinned builder (pinnedBuildSell) takes only the chain's pinned FeeCollector
+//   (evmPoolVenues().feeCollector), the one recipient the helper sends a Sell for (card evm-testnet-delegate-review3);
 // and returns the sell frozen, held in a module-private set.
 //
 // W signs Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,
@@ -76,7 +75,7 @@ export type EvmPoolSellErrorCode =
   | "not_built" // W signs only a sell evmPoolBuildSellUnpinned returned, for the chain it was built for
   | "bad_key" // W's key is not a key, or not W's
   | "not_deployed" // the chain has no pinned pool or sell delegate yet (pool-evm-deploy)
-  | "not_pinned"; // a pool other than the chain's pinned one
+  | "not_pinned"; // a pool, or a sell's fee recipient, other than the chain's pinned one
 export class EvmPoolSellError extends Error {
   readonly code: EvmPoolSellErrorCode;
   constructor(code: EvmPoolSellErrorCode, message: string) {
@@ -129,8 +128,8 @@ function venueOf(chain: EvmPoolChain) {
 }
 
 /** What W asks: sell `amount` of `token` through `target` along `route` for at least `minOut` wei, into the chain's
- *  pinned pool with `precommitment`, the sender's fee at most `feeCap` paid to `feeRecipient` (the relayer's fee
- *  recipient the chain's release binds, packages/wallet EvmPoolPin.feeRecipient: an input, the kit holds no such pin),
+ *  pinned pool with `precommitment`, the sender's fee at most `feeCap` paid to `feeRecipient` (the chain's pinned
+ *  FeeCollector, evmPoolVenues().feeCollector, which the pinned builder holds it to: card evm-testnet-delegate-review3),
  *  by `deadline` (unix seconds, checked against the device's clock), with W's sell nonce `nonce`. */
 export type EvmPoolSellRequest = {
   w: string;
@@ -567,20 +566,29 @@ function pinsOf(venues: EvmPoolVenueList, chain: EvmPoolChain): ReturnType<typeo
   return venuePins(venues, chain);
 }
 
-/** evmPoolBuildSellUnpinned into the chain's pinned pool. */
+/** evmPoolBuildSellUnpinned into the chain's pinned pool, its fee paid to the chain's pinned FeeCollector only. */
 export function pinnedBuildSell(venues: EvmPoolVenueList, chain: EvmPoolChain, req: EvmPoolSellRequest): EvmPoolSell {
-  const pool = pinsOf(venues, chain).pool;
+  const { pool, feeCollector } = pinsOf(venues, chain);
   if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);
+  // the helper sends only a Sell that pays the network's FeeCollector, whose Paid log proves the fee (card
+  // evm-testnet-delegate-review3): a chain that pins none takes no sale
+  if (feeCollector === undefined) return refuse("not_deployed", `${chain} has no pinned FeeCollector yet`);
   // a request that is not an object copies to { pool } alone, which the unpinned builder refuses (bad_route)
-  return evmPoolBuildSellUnpinned(chain, { ...req, pool });
+  const built = evmPoolBuildSellUnpinned(chain, { ...req, pool });
+  // the recipient the built Sell pays, read once by the builder's checks (an address, not zero, W or the pool)
+  if (lower(built.feeRecipient) !== lower(feeCollector)) return refuse("not_pinned", `the sell's fee recipient is not ${chain}'s pinned FeeCollector`);
+  return built;
 }
 
 /** evmPoolSignSellUnpinned of a sell into the chain's pinned pool only. */
 export function pinnedSignSell(venues: EvmPoolVenueList, secretKey: Uint8Array, chain: EvmPoolChain, built: EvmPoolSell): Uint8Array {
-  const pool = pinsOf(venues, chain).pool;
+  const { pool, feeCollector: collector } = pinsOf(venues, chain);
   if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool to sign a sell into yet`);
-  // a sell the builder did not return is left to the unpinned signer, which refuses it (not_built)
+  if (collector === undefined) return refuse("not_deployed", `${chain} has no pinned FeeCollector to sign a sell for yet`);
+  // a sell the builder did not return is left to the unpinned signer, which refuses it (not_built); one it built under
+  // another venue list is held to this list's pool and FeeCollector again
   if (BUILT.has(built) && lower(built.pool) !== lower(pool)) return refuse("not_pinned", `the sell's pool is not ${chain}'s pinned pool`);
+  if (BUILT.has(built) && lower(built.feeRecipient) !== lower(collector)) return refuse("not_pinned", `the sell's fee recipient is not ${chain}'s pinned FeeCollector`);
   return evmPoolSignSellUnpinned(secretKey, chain, built);
 }
 

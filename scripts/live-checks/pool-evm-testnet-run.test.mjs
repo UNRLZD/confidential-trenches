@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { replayer } from "./notes-per-pool-evm.mjs";
-import { CHAINS, TOPICS, VIEWS, check, recordFileOf, recordFiles, runRecord, sellTarget, spoil } from "./pool-evm-testnet-run.mjs";
+import { CHAINS, SELL_SELECTOR, SELL_SELECTOR_10, TOPICS, VIEWS, check, recordFileOf, recordFiles, runRecord, sellSelectorOf, sellTarget, spoil } from "./pool-evm-testnet-run.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-evm-testnet-run.answers.json", import.meta.url), "utf8"));
 const RECS = recordFiles().map((f) => JSON.parse(readFileSync(f, "utf8")));
@@ -151,3 +151,36 @@ test("a transaction the two RPCs answer apart in any field but blockTimestamp fa
   assert.equal(r.ok, false);
   assert.match(r.lines.at(-1), /the two RPCs answer/);
 });
+
+// the sell each recorded delegate dispatches comes from the build its code must be (pool-evm-deploy.build.json): the
+// current build's 11-field sell at card evm-testnet-delegate-review3's redeploys, the 10-field one at every address the
+// build file froze (card evm-sell-v4's and card evm-selldelegate-exact-debit's), never from a record's name
+test("each recorded SellDelegate's sell selector is its build's: 11 fields at the current build, 10 at a frozen one", () => {
+  const at = (key, chain) => JSON.parse(readFileSync(new URL(`./${key}.${chain}.json`, import.meta.url), "utf8")).contracts.SellDelegate.address;
+  for (const chain of ["base-sepolia", "robinhood-testnet"]) {
+    assert.equal(sellSelectorOf(chain, at("evm-testnet-delegate-review3", chain)), SELL_SELECTOR, chain);
+    for (const key of ["evm-sell-v4", "evm-selldelegate-exact-debit"]) assert.equal(sellSelectorOf(chain, at(key, chain)), SELL_SELECTOR_10, `${key} ${chain}`);
+    // a frozen address on the other chain is not frozen here: the current build
+    const other = chain === "base-sepolia" ? "robinhood-testnet" : "base-sepolia";
+    assert.equal(sellSelectorOf(chain, at("evm-selldelegate-exact-debit", other)), SELL_SELECTOR, chain);
+  }
+  assert.notEqual(SELL_SELECTOR, SELL_SELECTOR_10);
+});
+
+// the review of 14196e5c: once the pool-review-3 build is frozen (a later build current), its delegates still dispatch
+// the 11-field sell, which their own build entry names; a build that names no sell is refused, never given a guess
+test("a frozen 11-field SellDelegate build keeps its own sell selector; a build naming none is refused", () => {
+  const at = (key, chain) => JSON.parse(readFileSync(new URL(`./${key}.${chain}.json`, import.meta.url), "utf8")).contracts.SellDelegate.address;
+  const B = JSON.parse(readFileSync(new URL("./pool-evm-deploy.build.json", import.meta.url), "utf8"));
+  assert.equal(B.contracts.SellDelegate.sell, SELL_SELECTOR);
+  const review3 = { ...B.contracts.SellDelegate, contract: "SellDelegate", note: "a test's freeze", at: Object.fromEntries(["base-sepolia", "robinhood-testnet"].map((c) => [c, at("evm-testnet-delegate-review3", c)])) };
+  const later = { ...B, contracts: { ...B.contracts, SellDelegate: { ...B.contracts.SellDelegate, masked: "0x" + "12".repeat(32), sell: "0x12345678" } }, frozen: { ...B.frozen, "SellDelegate.review3": review3 } };
+  for (const chain of ["base-sepolia", "robinhood-testnet"]) {
+    assert.equal(sellSelectorOf(chain, at("evm-testnet-delegate-review3", chain), later), SELL_SELECTOR, chain);
+    assert.equal(sellSelectorOf(chain, at("evm-selldelegate-exact-debit", chain), later), SELL_SELECTOR_10, chain);
+    assert.equal(sellSelectorOf(chain, "0x" + "ab".repeat(20), later), "0x12345678", chain);
+    const none = { ...later, frozen: { ...later.frozen, "SellDelegate.review3": { ...review3, sell: undefined } } };
+    assert.throws(() => sellSelectorOf(chain, at("evm-testnet-delegate-review3", chain), none), /names no sell selector/, chain);
+  }
+});
+

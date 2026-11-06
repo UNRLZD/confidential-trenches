@@ -1,0 +1,62 @@
+{
+  "key": "pool-evm-testnet-run",
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "dryRun": false,
+  "at": "2026-11-06T18:59:31.340Z",
+  "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+  "coin": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+  "venues": [],
+  "asked": [
+    "v4"
+  ],
+  "relayer": "0x75cafd9315fcc8a68aa75c8437f381a4dfa51431",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "2065890000016656",
+  "restore": null,
+  "txs": [
+    {
+      "step": "deposit",
+      "hash": "0xe82facb9ba50db72fd5e95b7671d708fac117dff861fae5297b1b3be12151d88",
+      "from": "0x75cafd9315fcc8a68aa75c8437f381a4dfa51431",
+      "kind": "deposit",
+      "block": "55348016",
+      "gasUsed": "356747",
+      "commitment": "11051839326311084274814100206986851703955714048184680558882614845676521142518",
+      "label": "18825162952551950292023331627215217278373552400271934065997310635899849935339",
+      "value": "2000000000000000",
+      "precommitment": "11514750382565781876070684207723042861741901626912763236438553152379208851686"
+    },
+    {
+      "step": "withdraw",
+      "hash": "0x7782cd47b8a2ba2906cbf38dc4511e2561eeb898399c7fa3e5e671432f434df8",
+      "from": "0x75cafd9315fcc8a68aa75c8437f381a4dfa51431",
+      "kind": "withdraw",
+      "w": "0x220db5410b31db0ad1a296bd01ffb48b0644629e",
+      "nullifier": "14494992238876867229499289811631866412018622897689390827597705246105488647826",
+      "value": "2000000000000000",
+      "fee": "10000000000000",
+      "block": "55348475",
+      "gasUsed": "485519",
+      "newCommitment": "12711331042041384963369031501232900723944238804064710699669089040877361525165"
+    },
+    {
+      "step": "sweep (a W's ETH back)",
+      "hash": "0xc8f700879d975463f96d5cd38cf64260cae789a2b59ce6d142dc1c2a54e40e20",
+      "from": "0x220db5410b31db0ad1a296bd01ffb48b0644629e",
+      "kind": "sweep",
+      "w": "0x220db5410b31db0ad1a296bd01ffb48b0644629e",
+      "block": "55348499",
+      "gasUsed": "21000"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0xcb336c5d3154c17c079ed1e8f04e7ed6fdc3e74dbc03ba362d1012e24fd8aa23",
+      "from": "0x75cafd9315fcc8a68aa75c8437f381a4dfa51431",
+      "kind": "sweep",
+      "block": "55348512",
+      "gasUsed": "21000"
+    }
+  ],
+  "stopped": "Stopped by SIGTERM after its funding: its syncs read the pool from its deploy block through sepolia.base.org, which caps eth_getLogs at 200 blocks (read 6 Nov 18:44Z), so they held the pool only 2134 s after the start, and the stop was honoured only after them (testnet-run awaits the syncs through its stop since); its deposit landed, then its finally withdrew the deposit note to its W and swept that W and the run key back to E. The next runs read the pool on base-sepolia-rpc.publicnode.com and base-sepolia.gateway.tenderly.co."
+}

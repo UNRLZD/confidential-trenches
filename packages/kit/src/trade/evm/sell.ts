@@ -37,8 +37,8 @@ export type { EvmPoolSellFields } from "./quoted.ts";
 
 /** The sell a device quote holds (its chain, W, token, amount, route, target and minOut), into the chain's pinned pool,
  *  with `fields` (see sell-unpinned.ts evmPoolBuildSellUnpinned for every check): `fields.feeRecipient` is who the fee
- *  is paid to, the relayer's fee recipient the chain's release binds (packages/wallet EvmPoolPin.feeRecipient), an
- *  input since the kit holds no such pin. Only a quote evmPoolSellQuote
+ *  is paid to, the chain's pinned FeeCollector (evmPoolVenues().feeCollector) and no other address (not_pinned; card
+ *  evm-testnet-delegate-review3). Only a quote evmPoolSellQuote
  *  returned, whose block is at most 30 s behind the device's clock, is built, at a fee cap within the quote's feeMax
  *  (see quoted.ts evmQuotedSell). */
 export function evmPoolBuildSell(quote: EvmPoolSellQuote, fields: EvmPoolSellFields): EvmPoolSell {
