@@ -78,6 +78,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-evm-deploy.mjs",
   "scripts/live-checks/pool-read-down.mjs",
   "scripts/live-checks/pool-ready-no-flicker.mjs",
+  "scripts/live-checks/pool-sol-deploy-after-run.mjs",
   "scripts/live-checks/pool-sol-deploy-mainnet.mjs",
   "scripts/live-checks/pool-sol-deploy-sweep.mjs",
   "scripts/live-checks/pool-sol-deploy.mjs",
