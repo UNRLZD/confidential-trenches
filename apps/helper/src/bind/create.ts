@@ -2,17 +2,18 @@
 // M6: the relayer creates U, R and V by a plain Transfer, only after the delivery to that id). For one 64-hex id:
 //
 //   1. One run per id in this process: a second call while one runs shares its answer (the store's lock makes this
-//      process the only one). A delivery already spent on the id (below) reads nothing; one that read no_delivery,
+//      process the only one). A delivery already spent on the id (below) reads nothing, and so does any new one once the
+//      id has spent USED_MAX (failing closed: none is ever dropped); one that read no_delivery,
 //      under_min, unread or relayer_low is read again at most every REREAD_MS (its answer kept), a fresh one at once.
-//   2. The read-back first: while an earlier Transfer of ours to the id has no known outcome, the id's account is read
-//      (one that exists is never sent to) and that Transfer read again, its stored bytes sent again (one signed nonce
-//      lands at most once); nothing new goes out while it may still land. A Transfer known landed holds every later read
+//   2. The read-back first: while an earlier Transfer of ours to the id has no known outcome, it is read again by its
+//      hash before the id's state decides anything, its stored bytes sent again only while the id reads absent (one
+//      that exists is never sent to; one signed nonce lands at most once); nothing new goes out while it may still land. A Transfer known landed holds every later read
 //      below its receipt's height: no read older than it counts.
 //   3. The gate, read outside the relayer's queue (the deposits' queue: an answer that cannot create never takes a turn
 //      in it), then again inside it right before the Transfer is signed: at one final block, the same on both providers
 //      (fee.ts agreedBlock), the id is absent (UNKNOWN_ACCOUNT and an empty key list on both, so it has no key) and holds
 //      at least MIN_DEPOSIT of the vault's token (ft_balance_of, the same bytes on both). A read that fails or disagrees
-//      sends nothing.
+//      sends nothing. The gas account's floor is read the same way: outside, then again inside right before the signing.
 //   4. One Transfer of CREATE_YOCTO, the only action of its transaction. Its record, naming the delivery it is for, is
 //      written in one write before it is broadcast.
 //
@@ -177,11 +178,15 @@ export function createOnDelivery(id: string, deps: CreateDeps, key?: string): Pr
   return run;
 }
 
-/** The longest a record keeps its spent deliveries (newest kept): each one was a real 1Click swap to this id. */
+/**
+ * The most deliveries one id's record spends: each one was a real 1Click swap to this id. None is ever dropped (a
+ * dropped one could create again); once an id holds USED_MAX, every delivery not among them answers delivery_used.
+ */
 export const USED_MAX = 1_000;
 /** A delivery that read no_delivery, under_min, unread or relayer_low is read again at most this often (its answer
- *  kept meanwhile); a fresh one is read at once. */
-export const REREAD_MS = 5_000;
+ *  kept meanwhile), about one NEAR block, so a real deposit waits at most that on a read that came early; a fresh
+ *  delivery is read at once. The 1Click budget bounds how often a status is read at all. */
+export const REREAD_MS = 1_000;
 /** The most deliveries whose last answer is kept for REREAD_MS (the oldest dropped first). */
 export const PACED_MAX = 10_000;
 const PACED: ReadonlySet<CreateCode> = new Set(["no_delivery", "under_min", "unread", "relayer_low"]);
@@ -195,10 +200,11 @@ function pace(slot: string | null, a: CreateAnswer, now: number): CreateAnswer {
   return a;
 }
 
-/** The record with `key` spent on it (no key: as it is). */
+/** The record with `key` spent on it (no key: as it is). Never drops one: createOnce admits no new delivery past
+ *  USED_MAX, so the list grows past it only by the one pending Transfer's. */
 function spend(rec: CreationRecord, key: string | null | undefined): CreationRecord {
   if (key === undefined || key === null || rec.used.includes(key)) return rec;
-  return { ...rec, used: [...rec.used, key].slice(-USED_MAX) };
+  return { ...rec, used: [...rec.used, key] };
 }
 
 /** The outcome of a Transfer into its record: a landed one spends its delivery. */
@@ -216,7 +222,9 @@ async function createOnce(id: string, deps: CreateDeps, key?: string): Promise<C
   let rec: CreationRecord = store.creation(id) ?? { id, last: null, used: [] };
   // a delivery spent on this id reads nothing (a device polls its status many times); one run per id at a time
   // (createOnDelivery), so no other run writes this record meanwhile
-  if (key !== undefined && rec.used.includes(key)) return { code: "delivery_used", ...(rec.last ? { tx_hash: rec.last.tx_hash } : {}) };
+  // full (USED_MAX): a delivery not among them is refused too, failing closed (never one dropped to make room)
+  const pendingKey = rec.last !== null && rec.last.state === "pending" ? rec.last.delivery : null;
+  if (key !== undefined && (rec.used.includes(key) || (rec.used.length >= USED_MAX && key !== pendingKey))) return { code: "delivery_used", ...(rec.last ? { tx_hash: rec.last.tx_hash } : {}) };
   // paced by delivery: a call with no delivery (the sandbox's) reads each time
   const slot = key === undefined ? null : `${relayer.account}/${key}`;
   const held = slot === null ? undefined : paced.get(slot);
@@ -235,20 +243,25 @@ async function createOnce(id: string, deps: CreateDeps, key?: string): Promise<C
     }
   };
 
-  // 2. The read-back: an id that exists is never sent to, so its account is read first; a Transfer of ours that may
-  // still land is then read (its bytes sent again) before anything new.
+  // 2. The read-back: a Transfer of ours that may still land is read by its hash before the id's state decides
+  // anything; its stored bytes are sent again only while the id reads absent (an id that exists is never sent to).
+  // Not read: it stays pending (an id that exists answers exists meanwhile), and nothing new goes out.
   if (rec.last !== null && rec.last.state === "pending") {
     const d = await read();
     if ("code" in d) return d;
-    if (d.account.kind !== "absent") return exists(rec.last.tx_hash);
-    const out = await relayer.resolve(rec.last, { resend: true });
-    if (out.kind === "unknown") return { code: "in_flight", tx_hash: rec.last.tx_hash };
+    const absent = d.account.kind === "absent";
+    const out = await relayer.resolve(rec.last, { resend: absent });
+    if (out.kind === "unknown") return absent ? { code: "in_flight", tx_hash: rec.last.tx_hash } : exists(rec.last.tx_hash);
     const back = outcomeOf(rec, rec.last, out);
     rec = back;
     store.putCreation(back);
     const last = back.last!;
-    if (last.state === "landed") return key !== undefined && !back.used.includes(key) ? exists(last.tx_hash) : { code: "created", tx_hash: last.tx_hash };
-    if (last.state === "failed") return { code: "create_failed", tx_hash: last.tx_hash };
+    // this delivery's own Transfer: its answer; another delivery's goes on to the gate below, which holds reads under
+    // the receipt's height (landed) or reads afresh (failed, dropped)
+    if (key === undefined || key === last.delivery) {
+      if (last.state === "landed") return { code: "created", tx_hash: last.tx_hash };
+      if (last.state === "failed") return { code: "create_failed", tx_hash: last.tx_hash };
+    }
   }
   const landedAt = rec.last !== null && rec.last.state === "landed" && rec.last.landed_at !== null ? BigInt(rec.last.landed_at) : null;
 
@@ -268,6 +281,8 @@ async function createOnce(id: string, deps: CreateDeps, key?: string): Promise<C
   const out = await relayer.send<CreateCode>(
     { kind: "transfer", receiver: id, amount: CREATE_YOCTO },
     async () => {
+      // the floor again, right before the signing: the gas account may have paid for other sends since
+      if ((await relayer.balance()) < RELAYER_FLOOR_YOCTO + CREATE_YOCTO) return "relayer_low";
       try {
         return gate(await deps.delivery(id), landedAt);
       } catch (e) {

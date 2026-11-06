@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { CREATE_YOCTO, createOnDelivery, deliveryKey, deliveryOf, deliveryReads, onStatusAnswer, REREAD_MS, STATUS_ANSWER_MAX, type CreateDeps } from "./create.ts";
+import { CREATE_YOCTO, createOnDelivery, deliveryKey, deliveryOf, deliveryReads, onStatusAnswer, REREAD_MS, STATUS_ANSWER_MAX, USED_MAX, type CreateDeps } from "./create.ts";
 import { MIN_DEPOSIT, base58 } from "./checks.ts";
 import { RELAYER_FLOOR_YOCTO, RpcError, createFileStore, encodeAction, type DepositStore, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "./send.ts";
 import { hashOf } from "../../test/token-status/near.ts";
@@ -221,19 +221,21 @@ test("a Transfer whose outcome is not read: every later call reads it back (its 
   assert.equal(s.relayer.sent.length, 1);
 });
 
-test("a Transfer whose outcome a lookup never gives, while the id exists: exists, nothing resolved or sent", async () => {
+test("a Transfer whose outcome a lookup never gives, while the id exists: exists, read by its hash with nothing sent again, and it stays pending", async () => {
   const s = setup({}, { outcome: () => "unknown" });
   assert.equal((await createOnDelivery(s.id, s.deps())).code, "in_flight");
   assert.equal(s.store().creation(s.id)!.last!.state, "pending");
   s.w.account = [{ keys: ["ed25519:own"] }, { keys: ["ed25519:own"] }];
   const n = s.relayer.resolved.length;
   assert.deepEqual(await createOnDelivery(s.id, s.deps()), { code: "exists", tx_hash: s.relayer.sent[0]!.tx.tx_hash });
-  assert.equal(s.relayer.resolved.length, n);
+  assert.deepEqual(s.relayer.resolved.slice(n), [{ tx: s.relayer.sent[0]!.tx.tx_hash, resend: false }], "an id that exists is never sent to: its bytes are not sent again");
+  assert.equal(s.store().creation(s.id)!.last!.state, "pending");
   assert.equal(s.relayer.sent.length, 1);
   // a read-back whose read fails sends nothing and resolves nothing
   s.w.down = [true, false];
+  const m = s.relayer.resolved.length;
   assert.equal((await createOnDelivery(s.id, s.deps())).code, "unread");
-  assert.equal(s.relayer.resolved.length, n);
+  assert.equal(s.relayer.resolved.length, m);
 });
 
 test("a Transfer proved never applied (dropped): the next call reads the gate again and sends one afresh", async () => {
@@ -529,4 +531,94 @@ test("fold 6: the lag guard is the receipt's height, not the signing height: a r
   s.w.height = Number(signed) + 1;
   assert.equal((await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `b-${s.id}` }), nets(s.deps)))?.code, "in_flight");
   assert.equal(s.relayer.sent.length, 1);
+});
+
+// ---- The review's second round ----
+
+test("r2 fold 1: USED_MAX fails closed: USED_MAX + 1 deliveries to one id, then deletions and replays of the oldest with nothing new: no Transfer past the first, none dropped", async () => {
+  const s = setup();
+  const key = (i: number) => answer({ id: s.id, token: TOKEN, address: `k${i}-${s.id}` });
+  assert.equal((await onStatusAnswer(key(0), nets(s.deps)))?.code, "created");
+  for (let i = 1; i < USED_MAX; i++) assert.equal((await onStatusAnswer(key(i), nets(s.deps)))?.code, "exists");
+  assert.equal(s.store().creation(s.id)!.used.length, USED_MAX);
+  // full: the next delivery is refused before any read
+  const reads = s.w.reads;
+  assert.equal((await onStatusAnswer(key(USED_MAX), nets(s.deps)))?.code, "delivery_used");
+  assert.equal(s.w.reads, reads);
+  for (let round = 0; round < 5; round++) {
+    s.w.account = ["absent", "absent"];
+    s.w.height += 10;
+    for (const i of [0, 1, USED_MAX, USED_MAX + 1 + round]) assert.equal((await onStatusAnswer(key(i), nets(s.deps)))?.code, "delivery_used", `round ${round}, k${i}`);
+  }
+  assert.equal(s.relayer.sent.length, 1, "one Transfer for the one creation, no more");
+  const used = s.store().creation(s.id)!.used;
+  assert.equal(used.length, USED_MAX);
+  assert.ok([0, 1, USED_MAX - 1].every((i) => used.includes(deliveryKey(`k${i}-${s.id}`, ""))), "none dropped");
+});
+
+test("r2 fold 2: the floor is read again inside the queue: a balance that falls under it after the outside read sends nothing", async () => {
+  const s = setup();
+  let calls = 0;
+  s.relayer.balance = async () => (calls++ === 0 ? 10n ** 24n : 0n);
+  assert.equal((await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` }), nets(s.deps)))?.code, "relayer_low");
+  assert.equal(calls, 2);
+  assert.equal(s.relayer.sent.length, 0);
+});
+
+test("r2 fold 3: a real deposit read early waits about one block: no_delivery at 0 s, USDC final at 1 s, the poll at 1 s creates", async () => {
+  assert.equal(REREAD_MS, 1_000);
+  const s = setup({ balance: ["0", "0"] });
+  const body = answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` });
+  assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "no_delivery");
+  s.w.balance = [MIN_DEPOSIT.toString(), MIN_DEPOSIT.toString()];
+  s.clock.t += 1_000;
+  assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "created");
+  assert.equal(s.relayer.sent.length, 1);
+});
+
+test("r2 fold 4: a pending Transfer whose id reads existing is read by its hash: once its outcome is known it stops holding, and after the id's clean-up a new real delivery creates", async () => {
+  let kind: TxOutcome["kind"] = "unknown";
+  const s = setup({}, { outcome: () => kind });
+  const a1 = answer({ id: s.id, token: TOKEN, address: `a1-${s.id}` });
+  assert.equal((await onStatusAnswer(a1, nets(s.deps)))?.code, "in_flight");
+  // the Transfer applied; the lookup gives its outcome now
+  s.w.account = [{ keys: ["ed25519:own"] }, { keys: ["ed25519:own"] }];
+  s.w.height += 3;
+  kind = "final";
+  assert.equal((await onStatusAnswer(a1, nets(s.deps)))?.code, "created");
+  assert.equal(s.store().creation(s.id)!.last!.state, "landed");
+  assert.equal(s.relayer.resolved.at(-1)!.resend, false, "the id exists: its bytes are not sent again");
+  // the device cleans the id up; a second real swap to it later
+  s.w.account = ["absent", "absent"];
+  s.w.height += 100;
+  assert.equal((await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `a2-${s.id}` }), nets(s.deps)))?.code, "created");
+  assert.equal(s.relayer.sent.length, 2);
+});
+
+test("r2 fold 1: the one pending Transfer's delivery may take the list past USED_MAX, and still none is dropped: the oldest never creates again", async () => {
+  let kind: TxOutcome["kind"] = "final";
+  const s = setup({}, { outcome: () => kind });
+  const key = (i: number | string) => answer({ id: s.id, token: TOKEN, address: `k${i}-${s.id}` });
+  assert.equal((await onStatusAnswer(key(0), nets(s.deps)))?.code, "created");
+  s.w.account = [{ keys: ["ed25519:own"] }, { keys: ["ed25519:own"] }];
+  s.w.height += 3;
+  for (let i = 1; i < USED_MAX - 1; i++) assert.equal((await onStatusAnswer(key(i), nets(s.deps)))?.code, "exists");
+  assert.equal(s.store().creation(s.id)!.used.length, USED_MAX - 1);
+  // cleaned up; a new real delivery's Transfer goes out and its outcome is not known yet
+  s.w.account = ["absent", "absent"];
+  s.w.height += 10;
+  kind = "unknown";
+  assert.equal((await onStatusAnswer(key("p"), nets(s.deps)))?.code, "in_flight");
+  // it applied; meanwhile one more delivery reads the id existing and fills the list
+  s.w.account = [{ keys: ["ed25519:own"] }, { keys: ["ed25519:own"] }];
+  s.w.height += 3;
+  assert.equal((await onStatusAnswer(key("x"), nets(s.deps)))?.code, "exists");
+  assert.equal(s.store().creation(s.id)!.used.length, USED_MAX);
+  kind = "final";
+  assert.equal((await onStatusAnswer(key("p"), nets(s.deps)))?.code, "created");
+  assert.equal(s.store().creation(s.id)!.used.length, USED_MAX + 1);
+  s.w.account = ["absent", "absent"];
+  s.w.height += 10;
+  assert.equal((await onStatusAnswer(key(0), nets(s.deps)))?.code, "delivery_used");
+  assert.equal(s.relayer.sent.length, 2);
 });
