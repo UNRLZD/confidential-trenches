@@ -957,7 +957,7 @@ test("card helper-evm-range-cap-walk: a cap that names its span beats one that n
   assert.deepEqual(JSON.parse(a.body).error, CAP_ERRS[0]![0]);
 });
 
-test("card helper-evm-range-cap-walk: with the rest held for longer than the wait, a cap is never the caller's answer: a 429 with the hold's seconds, so the device asks again at its size", async () => {
+test("card helper-evm-range-cap-walk (review fold 4): with the rest held for longer than the wait, the cap is the caller's answer, safe to page on (a shape refusal stays a 429)", async () => {
   const { r, asked, holds } = shapeRig({
     "https://cfg.test/": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: CAP_ERRS[0]![0] }),
     "https://p1.test": () => jsonOk({}),
@@ -966,7 +966,8 @@ test("card helper-evm-range-cap-walk: with the rest held for longer than the wai
   });
   for (const u of ["https://p1.test", "https://p2.test", "https://p3.test"]) holds.hold(u, 30);
   const a = await call(r, "base", TRANSFERS(), JSON_T);
-  assert.equal(a.status, 429, a.body);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).error, CAP_ERRS[0]![0]);
   assert.deepEqual(asked, ["https://cfg.test/"]);
 });
 
@@ -989,4 +990,57 @@ test("card helper-evm-range-cap-walk: with the next provider out of its pace for
   assert.equal(a.status, 200, a.body);
   assert.deepEqual(JSON.parse(a.body).result, logs);
   assert.deepEqual(asked, ["https://cfg.test/", "https://cfg.test/", "https://p1.test"]);
+});
+
+// -- review fold 1: a cap or shape answer that holds the configured URL's key never reaches the caller, and never hides a
+// clean cap --------------------------------------------------------------------------------------------------------------
+
+// the configured URL with a path segment of 16 characters or more, a secret part by readUpstreams
+const SEGMENT = "projectsegment0123456789";
+const KEYED = `https://cfg.test/v2/${SEGMENT}`;
+function keyedRig(answers: Record<string, (b: { id: unknown }) => Response>) {
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), answers[url]!(JSON.parse(String(init.body))));
+  const t = { v: performance.timeOrigin + performance.now() };
+  const r = createRpc({ BASE_RPC_URL: KEYED }, { fetch: fetch as never, holds: providerHolds(() => t.v), pinned: { base: ["https://p1.test"] }, now: () => t.v });
+  return { r, asked };
+}
+const leakCap = (b: { id: unknown }) => jsonOk({ jsonrpc: "2.0", id: b.id, error: { code: 35, message: `ranges over 10000 blocks are not supported on free plan for ${KEYED}` } });
+
+test("card helper-evm-range-cap-walk (review fold 1): a cap echoing the configured URL's key never reaches the caller: 503 when it is the only answer", async () => {
+  const { r } = keyedRig({ [KEYED]: leakCap, "https://p1.test": () => new Response("down", { status: 503 }) });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.ok(!a.body.includes(SEGMENT), a.body);
+  assert.equal(a.status, 503, a.body);
+});
+
+test("card helper-evm-range-cap-walk (review fold 1): a leaking cap naming the largest span never hides a clean one: the clean cap answers", async () => {
+  const { r } = keyedRig({ [KEYED]: leakCap, "https://p1.test": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: CAP_ERRS[0]![0] }) });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.ok(!a.body.includes(SEGMENT), a.body);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).error, CAP_ERRS[0]![0]);
+});
+
+test("card helper-evm-range-cap-walk (review fold 1): a shape refusal echoing the key never reaches the caller", async () => {
+  const { r } = keyedRig({ [KEYED]: (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: { code: -32701, message: `Please specify an address (${KEYED})` } }), "https://p1.test": () => new Response("down", { status: 503 }) });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.ok(!a.body.includes(SEGMENT), a.body);
+  assert.equal(a.status, 503, a.body);
+});
+
+// -- review fold 5 (H5): a batch's span is the largest any of its errors names, never its first -------------------------
+test("card helper-evm-range-cap-walk (review fold 5): of two batches every provider caps, the one whose errors name the larger span answers, read across each batch", async () => {
+  const batchOf = (spans: { code: number; message: string }[]) => (b: unknown) => jsonOk((b as { id: unknown }[]).map((x, i) => ({ jsonrpc: "2.0", id: x.id, error: spans[i] })));
+  const { r } = shapeRig({
+    // its first error names 50, its second 10,000: the larger, 10,000, is its span
+    "https://cfg.test/": batchOf([CAP_ERRS[0]![0], CAP_ERRS[2]![0]]),
+    // 1,000 and 1,000
+    "https://p1.test": batchOf([CAP_ERRS[11]![0], CAP_ERRS[11]![0]]),
+    "https://p2.test": () => new Response("down", { status: 503 }),
+    "https://p3.test": () => new Response("down", { status: 503 }),
+  });
+  const a = await call(r, "base", [TRANSFERS(1), TRANSFERS(2)], JSON_T);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).map((x: { error: unknown }) => x.error), [CAP_ERRS[0]![0], CAP_ERRS[2]![0]]);
 });

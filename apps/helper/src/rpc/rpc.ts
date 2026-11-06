@@ -568,9 +568,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * or pace wait is waited out when it ends within HOLD_WAIT_MS (card helper-crowd-429's rule), and only past that does
    * the caller get a 429, with the soonest wait any of them names. The chain itself is never held here: a provider's
    * refusal holds that provider alone. A provider's range cap (evmRangeCap) or a refusal of the request's shape
-   * (evmShapeRefused) puts it out for this read alone: the next is asked, and only when no provider is left that may serve
-   * it (none held or out of room) is such an answer the caller's: the cap naming the largest span, so the device pages at
-   * the biggest any provider serves (card helper-evm-range-cap-walk), else the last shape refusal.
+   * (evmShapeRefused) puts it out for this read alone: the next is asked, and once the wait for a held one is spent the
+   * cap naming the largest span is the caller's, so the device pages at the biggest any provider serves (card
+   * helper-evm-range-cap-walk); a shape refusal only when no provider is held. An answer holding the provider's key is
+   * never kept.
    */
   async function callEvm(c: RpcChain, forward: string, methods: string[], client: string | undefined, reserved: boolean, holds: ProviderHolds): Promise<Answer> {
     // card helper-crowd-429's rule on this path too: a hold that ends within HOLD_WAIT_MS and by `deadline` is waited out
@@ -586,8 +587,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       let soonestMs = Infinity;
       let down = false;
       let sent = false;
-      let shaped: { status: number; body: string; secretForms: Buffer[] } | undefined;
-      let capped: { span: bigint; status: number; body: string; secretForms: Buffer[] } | undefined;
+      let shaped: { status: number; body: string } | undefined;
+      let capped: { span: bigint; status: number; body: string } | undefined;
       for (const url of list) {
         const secretForms = url === upstreams[c].url ? upstreams[c].forms : [];
         const h = holds.heldMs(url);
@@ -638,18 +639,23 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         }
         // a provider's range cap: out for this read alone (no hold: it serves smaller spans and every other read); the
         // largest span named is kept for the caller when every provider caps (card helper-evm-range-cap-walk)
+        // an answer that holds this provider's key in any form is that provider down for this read: never kept, so a
+        // clean cap or refusal from another still answers (review fold 1)
+        const leaks = secretForms.some((f) => Buffer.from(text, "utf8").includes(f));
         const span = evmCapSpan(c, answer);
         if (span !== null) {
-          if (capped === undefined || span > capped.span) capped = { span, status: r.status, body: text, secretForms };
+          if (leaks) down = true;
+          else if (capped === undefined || span > capped.span) capped = { span, status: r.status, body: text };
           continue;
         }
         // a provider that cannot serve this request's shape is out for it alone (no hold: its other requests still go to
         // it); the next is asked, and the last such answer is the caller's when every provider refuses it so
         if (evmShapeRefused(c, answer)) {
-          shaped = { status: r.status, body: text, secretForms };
+          if (leaks) down = true;
+          else shaped = { status: r.status, body: text };
           continue;
         }
-        if (secretForms.some((f) => Buffer.from(text, "utf8").includes(f))) return UPSTREAM();
+        if (leaks) return UPSTREAM();
         return { status: r.status, body: text };
       }
       // none could take it: the soonest provider's short hold or pace wait is waited out, and the read asked again (a
@@ -662,10 +668,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         if (again === 0) continue;
         return throttled(again, undefined, budget.refusedBy());
       }
-      // a provider still held may serve it: the caller's wait below, never the cap or the refusal (the device would page
-      // at the cap, or take the refusal as the read's answer)
-      const out = capped ?? shaped;
-      if (out !== undefined && soonestMs === Infinity) return out.secretForms.some((f) => Buffer.from(out.body, "utf8").includes(f)) ? UPSTREAM() : { status: out.status, body: out.body };
+      // the wait spent: the cap naming the largest span, safe to page on, even with a provider still held (review fold
+      // 4: a read with no spare, the mainnet W Transfer read, would otherwise end unread under repeated holds); a shape
+      // refusal only when no provider is held, else the caller's wait below (the device would take the refusal as the
+      // read's answer)
+      if (capped !== undefined) return { status: capped.status, body: capped.body };
+      if (shaped !== undefined && soonestMs === Infinity) return { status: shaped.status, body: shaped.body };
       // every provider failed (none held or out of room): upstream, so the device reads its own; else the soonest wait
       return down && soonestMs === Infinity ? UPSTREAM() : throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.max(1, Math.ceil(soonestMs / 1000)), undefined, `${c} every provider held`);
     }
