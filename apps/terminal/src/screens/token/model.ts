@@ -34,8 +34,9 @@ export function changeTile(bps: number | null | undefined): string {
   return `${sign}${(sign + body).length + 1 > 8 ? body.replace(/(\.\d)\d(?=[KMBT])/, "$1") : body}%`;
 }
 
-/** The page's values. A field is null while the row is still filling and has no value for it yet: the page draws its
- *  loading look there (card token-page-fills-after); once the row is Jupiter's, a value no source has is the dash. */
+/** The page's values. A field is null while the page is filling (the helper's `filling`: Jupiter's row still coming)
+ *  and has no value for it yet: the page draws its loading look there (card token-page-fills-after); otherwise a value
+ *  no source has is the dash. */
 export interface TokenView {
   token: string;
   symbol: string;
@@ -55,17 +56,15 @@ export interface TokenView {
   launchpad: string | null;
   chain: string;
   curve: Curve;
-  /** The row is the helper's named on chain before Jupiter's row (M384, the helper's src "chain"): its null fields are
-   *  still loading and the page reads again (source.ts followToken). */
+  /** The helper's `filling` (M384): Jupiter's row is still coming, so the null fields above are loading. */
   filling: boolean;
 }
 
-/** The row is the helper's named on chain before Jupiter's: its null fields are still loading. */
-export const rowFilling = (r: MarketRow): boolean => r.src === "chain";
+/** The row is the helper's named on chain (src "chain"), not Jupiter's: the page reads again (source.ts followToken). */
+export const chainNamed = (r: MarketRow): boolean => r.src === "chain";
 
-/** The page's values for one token. `nowMs` is the clock the age is drawn against. */
-export function tokenView(r: MarketRow, nowMs: number): TokenView {
-  const filling = rowFilling(r);
+/** The page's values for one token. `nowMs` is the clock the age is drawn against; `filling` is the helper's. */
+export function tokenView(r: MarketRow, nowMs: number, filling = false): TokenView {
   /** `drawn`, or null while the row fills and has no value for it. */
   const or = <T>(raw: unknown, drawn: T): T | null => (filling && (raw === null || raw === undefined) ? null : drawn);
   return {

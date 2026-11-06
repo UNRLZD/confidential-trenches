@@ -9,7 +9,9 @@
 // and passes only when each answers 200 JSON with X-Helper-Commit a full sha, its X-Helper-Source, X-Fetched-At an ISO
 // time within 10 minutes of the read and Access-Control-Allow-Origin echoing APP_HOST, and its body holds exactly the
 // frozen fields in their wire forms:
-//   - token: TokenPage {row, decimals, pool, risk, route}; `row` exactly the terminal's Row fields (read from
+//   - token: TokenPage {row, decimals, pool, risk, route}, then `filling` (a boolean, card token-page-fills-after: true
+//     only for a page named on chain whose Jupiter row is still coming, so never on a row of another source; a helper
+//     from before that card leaves it out); `row` exactly the terminal's Row fields (read from
 //     apps/terminal/src/screens/discover/fields.ts itself) for this mint on Solana; `risk` exactly 06b's 14 Risk fields,
 //     each a Field {v, src, as_of_ms}, the authorities and the tax read from the chain;
 //   - holders: Holders {holders, total, top_bps, src, as_of_ms}, at most 20 rows {addr, amt, bps[, kind]};
@@ -53,10 +55,12 @@ const bpsOrNull = (v) => v === null || (Number.isSafeInteger(v) && v >= 0 && v <
 
 /** The first thing wrong with a TokenPage for `mint`, or null. */
 export function pageFault(p, mint) {
-  if (!isObj(p) || !same(Object.keys(p), PAGE)) return `keys ${show(isObj(p) ? Object.keys(p) : p)}`;
+  if (!isObj(p) || !(same(Object.keys(p), PAGE) || same(Object.keys(p), [...PAGE, "filling"]))) return `keys ${show(isObj(p) ? Object.keys(p) : p)}`;
+  if ("filling" in p && typeof p.filling !== "boolean") return `filling ${show(p.filling)}`;
   if (!isObj(p.row) || !same(Object.keys(p.row), ROW)) return `row keys ${show(isObj(p.row) ? Object.keys(p.row) : p.row)}`;
   if (p.row.chain !== "solana" || p.row.token !== mint) return `row is ${show(p.row.chain)} ${show(p.row.token)}`;
   for (const f of ["symbol", "name", "src"]) if (typeof p.row[f] !== "string" || p.row[f] === "") return `row ${f} ${show(p.row[f])}`;
+  if (p.filling === true && p.row.src !== "chain") return `filling true on a ${show(p.row.src)} row`;
   for (const f of ROW.filter((f) => f.endsWith("_usd"))) if (p.row[f] !== null && !(typeof p.row[f] === "string" && /^-?\d+(\.\d+)?$/.test(p.row[f]))) return `row ${f} ${show(p.row[f])}`;
   if (!(Number.isInteger(p.decimals) && p.decimals >= 0 && p.decimals <= 255)) return `decimals ${show(p.decimals)}`;
   if (!(p.pool === null || (typeof p.pool === "string" && B58.test(p.pool) && p.pool !== mint))) return `pool ${show(p.pool)}`;

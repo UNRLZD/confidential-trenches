@@ -296,7 +296,7 @@ interface Ready {
 /** The box with the safety grid under it: the desktop column and the phone sheet draw the same. */
 function Ticket({ r }: { r: Ready }) {
   const { row, risk } = r.data;
-  return <TradeBox chain={row.chain} token={row.token} symbol={row.symbol} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} />} />;
+  return <TradeBox chain={row.chain} token={row.token} symbol={row.symbol} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />;
 }
 
 /** The strip's and the tiles' Tax: the token read's transfer fee as the safety grid draws it (trade/safety.ts). */
@@ -495,7 +495,7 @@ export function TokenPage({ data, nowMs, onRetry }: { data: TokenData; nowMs: nu
         {data.status === "error" && <button type="button" className="tkp-retry" onClick={onRetry}>{WORDS.retry.text}</button>}
       </section>
     );
-  const v = data.status === "ready" ? tokenView(data.row, nowMs) : null;
+  const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
   const c: ChartState = { sym: v?.symbol ?? null, tf, onTf: setTf, data: candles, retry };
   return (
