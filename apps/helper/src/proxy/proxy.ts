@@ -55,6 +55,11 @@ export const BURST_MS = 10_000;
 /** Of a PACED vendor's window, the sends a device's call and a background read each leave to a page a caller waits for
  *  (a cold page's search): no crowd of builds or of refreshes holds a page's turn. */
 export const OWN_ROOM = 1;
+/** Of a PACED vendor's window, the sends one device leaves to the other devices: Free's window of 10, less a page's 1
+ *  (OWN_ROOM) and these 2, lets one device's trade send 7 builds at once; another device arriving after them still
+ *  sends its first leg's build and its quote at once. A trade of more legs (up to 64, each up to 4 builds at once,
+ *  packages/kit/src/trade/solana/flow.ts:99 and :434) waits for the window past its 7, as the kit's legs wait for room. */
+export const OTHER_DEVICES_ROOM = 2;
 export const QUEUE_POLL_MS = 250;
 /** The most of one vendor's calls the other helpers may seed (card helper-deploy-reads-fast): a Developer key's 600 a minute
  *  and the second a counted minute spans, with room. */
@@ -268,8 +273,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
    * (Free: 10), every send counted. The calls waiting for a turn go callers first (a device's call, a page a caller
    * waits for), then the helper's background reads (the lists, a held page's refresh, each waiting up to a window), each
    * lane in order and each in its room (freeAt): a build and a background read leave the window's last OWN_ROOM to a
-   * page, and a device past its share leaves the other devices a share, so no crowd of builds holds a page or a first
-   * trade (fold 4) and none makes Discover stale (fold 5). A background read whose wait would end before the next turn
+   * page, and one device leaves the other devices OTHER_DEVICES_ROOM, so no crowd of builds holds a page or another
+   * device's first leg (fold 4) and none makes Discover stale (fold 5). A background read whose wait would end before the next turn
    * takes a caller's, never two turns running. A call whose turn would come past its `by` goes not ready, nothing sent. Each send
    * logs one line (logTurn).
    */
@@ -278,7 +283,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const queues = new Map<VendorName, Waiter[]>();
   /** Each paced vendor's newest sends, burstOf(vendor) at most, dated by the clock as read when each turn was given. */
   const sent = new Map<VendorName, number[]>();
-  /** Each device's sends in the window, so one device past its share leaves another device a share (fold 4). */
+  /** Each device's sends in the window, so one device leaves the others OTHER_DEVICES_ROOM (fold 4). */
   const sentByClient = new Map<VendorName, Map<string, number[]>>();
   /** When each paced vendor's pending wake (pump's sleep) ends: a call that arrives meanwhile still gets its turn at once
    *  when its room has one (a page past a queue of builds), and a sooner wake is set when one is needed. */
@@ -293,20 +298,21 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const sameLane = (a: Lane, b: Lane): boolean => a.caller === b.caller && a.own === b.own;
   /** When the turn `k` turns from now (0: the next) is free for a lane at a PACED vendor: the first moment at or after
    *  `t`, after the vendor's hold, with room in the BURST_MS before it, the turns before it counted as sent. A page a
-   *  caller waits for may fill the window; a background read and a device's call leave it OWN_ROOM, and a device past
-   *  its share leaves the other devices a share. */
+   *  caller waits for may fill the window; a background read and a device's call leave it OWN_ROOM, and one device's
+   *  calls leave the other devices OTHER_DEVICES_ROOM. */
   function freeAt(name: VendorName, t: number, w: Lane, k = 0): number {
     const times = [...(sent.get(name) ?? [])];
-    // a device past its share (limits.ts perClient) leaves a share of the window to the other devices, so a device new
-    // to it trades at once beside a heavy one (fold 4); past it, it waits for the window as lent (limits.ts lend)
-    const share = Number.isFinite(limits[name].perClient) ? limits[name].perClient : burstOf(name);
-    const mine = w.client === undefined ? 0 : (sentByClient.get(name)?.get(w.client) ?? []).filter((x) => x > t - burstMs).length;
-    const room = w.own && w.caller ? burstOf(name) : w.own ? Math.max(1, burstOf(name) - OWN_ROOM) : Math.max(1, burstOf(name) - OWN_ROOM - (mine >= share ? share : 0));
+    const room = w.own && w.caller ? burstOf(name) : Math.max(1, burstOf(name) - OWN_ROOM);
+    // one device's sends keep OTHER_DEVICES_ROOM of the window for the other devices (fold 4)
+    const mine = w.own || w.client === undefined ? null : [...(sentByClient.get(name)?.get(w.client) ?? [])];
+    const cap = Math.max(1, burstOf(name) - OWN_ROOM - OTHER_DEVICES_ROOM);
     let f = t;
     for (let i = 0; i <= k; i++) {
       f = Math.max(t, budget.heldUntil(name), times.length < room ? t : times[times.length - room]! + burstMs);
+      if (mine !== null && mine.length >= cap) f = Math.max(f, mine[mine.length - cap]! + burstMs);
       if (f < (recoverUntil.get(name) ?? -Infinity) && times.length > 0) f = Math.max(f, times.at(-1)! + burstMs / burstOf(name));
       times.push(f);
+      mine?.push(f);
     }
     return f;
   }

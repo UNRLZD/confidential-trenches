@@ -337,6 +337,7 @@ test("review F-D (proxy): at each vendor's published limit, no set of callers ca
 // at the last ms of each 10 s window and the first of the next (the most a sliding minute can hold under fixed windows),
 // with the helper's own Jupiter reads as deployed: Discover's three lists every 12 s through the 10 s cache
 // (data/solana/lists.ts) and one token search every 4 s (data/solana/token.ts JUP_GAP_MS).
+// card helper-page-jup-429: on the real default window (BURST_MS) and a moving clock, the minute budget still holds
 test("re-check F-D (sustained): at Jupiter Free's 60 a sliding minute, the helper's own reads and every caller together never make Jupiter throttle", async () => {
   let t = 1_800_000_000_000;
   const T0 = t;
@@ -652,25 +653,24 @@ test("card helper-page-jup-429 (a): a list refresh and a page search asked at on
   assert.deepEqual([l2.status, s2.status, k.refused()], [200, 200, 0]);
   assert.deepEqual(k.sent.slice(10).map((s) => [s.path, s.q, s.at - t1]), [["/tokens/v2/search", "?query=b", 10_000], ["/tokens/v2/recent", "?limit=100", 10_000]], "the page's search first, as the window frees");
 });
-test("card helper-page-jup-429 (b): six builds at once (one device's legs) go in order with no 429: its share and one more at once, the rest as the window frees; past the wait refused before any draw", async () => {
+test("card helper-page-jup-429 (b): nine builds at once (one device's legs) go in order with no 429: 7 at once (the window less a page's 1 and the other devices' 2), the rest as the window frees; past the wait refused before any draw", async () => {
   const c = virtualTime();
   const j = windowJupiter(c);
   const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep, log: () => {} });
   const t0 = c.now();
-  const all = await c.run(Promise.all([0, 1, 2, 3, 4, 5].map((i) => p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "198.51.100.1", false, 15_000))));
-  assert.deepEqual(all.map((a) => a.status), [200, 200, 200, 200, 200, 200]);
+  const all = await c.run(Promise.all(Array.from({ length: 9 }, (_, i) => p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "198.51.100.1", false, 15_000))));
+  assert.deepEqual(all.map((a) => a.status), Array(9).fill(200));
   assert.equal(j.refused(), 0, "Jupiter never answered 429");
-  assert.deepEqual(j.sent.map((s) => s.q), ["?n=0", "?n=1", "?n=2", "?n=3", "?n=4", "?n=5"], "in order");
-  assert.deepEqual(j.sent.map((s) => s.at - t0), [0, 0, 0, 0, 0, 10_000], "Free's 10 in 10 s: past its share (4) a device leaves the others a share and the pages one");
+  assert.deepEqual(j.sent.map((s) => s.q), Array.from({ length: 9 }, (_, i) => `?n=${i}`), "in order");
+  assert.deepEqual(j.sent.map((s) => s.at - t0), [0, 0, 0, 0, 0, 0, 0, 10_000, 10_000], "Free's 10 in 10 s: a device leaves a page 1 and the other devices 2");
   // the device route's own wait (QUEUE_WAIT_MS 3 s): the builds past it answer 503 naming the wait, and send nothing
   const c2 = virtualTime();
   const k = windowJupiter(c2);
   const q = createProxy(ENV, { fetch: k.fetch, now: c2.now, sleep: c2.sleep, log: () => {} });
-  const some = await c2.run(Promise.all([0, 1, 2, 3, 4, 5].map((i) => q.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "198.51.100.1"))));
-  assert.deepEqual(some.map((a) => a.status), [200, 200, 200, 200, 200, 503]);
-  const late = some[5]!;
-  assert.ok(causeIn(late) === "budget" && Number(late.headers["Retry-After"]) >= 1, `${late.timing} ${JSON.stringify(late.headers)}`);
-  assert.equal(k.sent.length, 5, "a refused turn sent nothing");
+  const some = await c2.run(Promise.all(Array.from({ length: 9 }, (_, i) => q.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "198.51.100.1"))));
+  assert.deepEqual(some.map((a) => a.status), [...Array(7).fill(200), 503, 503]);
+  for (const late of some.slice(7)) assert.ok(causeIn(late) === "budget" && Number(late.headers["Retry-After"]) >= 1, `${late.timing} ${JSON.stringify(late.headers)}`);
+  assert.equal(k.sent.length, 7, "a refused turn sent nothing");
 });
 test("card helper-page-jup-429 (c): a crowd of builds never holds a page, and the background reads still go (fold 5)", async () => {
   const c = virtualTime();

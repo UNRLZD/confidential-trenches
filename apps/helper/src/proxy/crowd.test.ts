@@ -33,27 +33,23 @@ function jupiterFree() {
   return { fetch, clock, stats: () => ({ throttled, peak }) };
 }
 
-// card helper-page-jup-429: Jupiter Free counts 10 sends in any 10 s (proxy.ts PACED), and a device past its share
-// leaves a share of them to the other devices (fold 4), so its second trade inside the same 10 s waits for the window:
-// a 503 naming the seconds, nothing sent, then served (the kit waits a Retry-After out)
-test("card helper-crowd-429: one device's 8 builds inside 10 s (two trades back to back): its share and one more at once, the rest served once the window has room, never a 429", async () => {
+// card helper-page-jup-429: Jupiter Free counts 10 sends in any 10 s (proxy.ts PACED). One device may take the window
+// less a page's 1 (OWN_ROOM) and the other devices' 2 (OTHER_DEVICES_ROOM): 7 builds at once
+test("card helper-crowd-429: one device's 7 builds go at once beside nothing; the 8th waits for the window; a second device arriving after them gets 2 at once", async () => {
   const j = jupiterFree();
-  const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: j.clock.sleep });
-  const answers = [];
-  for (let i = 0; i < 8; i++) {
-    let a = await p.handle("jupiter", BUILD, `n=${i}`, "", "198.51.100.7");
-    if (a.status === 503) {
-      assert.ok(Number(a.headers["Retry-After"]) >= 1 && /cause;desc="budget"/.test(String(a.timing)), `${a.why} ${a.timing}`);
-      j.clock.add(Number(a.headers["Retry-After"]) * 1000);
-      a = await p.handle("jupiter", BUILD, `n=${i}`, "", "198.51.100.7");
-    }
-    answers.push(a);
-    j.clock.add(1_100); // one build a second, as solana-jupiter-build and a device's retries go
-  }
-  assert.deepEqual(answers.map((a) => a.status), Array(8).fill(200), answers.map((a) => `${a.status} ${a.why ?? ""}`).join(", "));
+  const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: async () => {} });
+  const seven = await Promise.all(Array.from({ length: 7 }, (_, i) => p.handle("jupiter", BUILD, `n=${i}`, "", "198.51.100.7")));
+  assert.deepEqual(seven.map((a) => a.status), Array(7).fill(200));
+  const eighth = await p.handle("jupiter", BUILD, "n=7", "", "198.51.100.7");
+  assert.deepEqual([eighth.status, /cause;desc="budget"/.test(String(eighth.timing)), Number(eighth.headers["Retry-After"]) >= 1], [503, true, true], `${eighth.status} ${eighth.why} ${eighth.timing}`);
+  const other = await Promise.all([0, 1].map((i) => p.handle("jupiter", BUILD, `o=${i}`, "", "198.51.100.8")));
+  assert.deepEqual(other.map((a) => a.status), [200, 200], "another device's first leg and quote at once");
+  assert.equal((await p.handle("jupiter", BUILD, "o=2", "", "198.51.100.8")).status, 503, "the window less a page's 1 is spent");
+  // the window frees: the first device's 8th build goes
+  j.clock.add(10_000);
+  assert.equal((await p.handle("jupiter", BUILD, "n=7", "", "198.51.100.7")).status, 200);
   assert.equal(j.stats().throttled, 0);
 });
-
 test("card helper-crowd-429: solana-jupiter-build's own calls from one runner (a list read and four builds inside 10 s) get no 429", async () => {
   const j = jupiterFree();
   const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: j.clock.sleep });
@@ -119,7 +115,7 @@ test("card helper-crowd-429 fold 3: two heavy devices drawing Jupiter as fast as
   assert.ok(heavy > 0, `the heavy devices still lent what is left: ${heavy}`);
 });
 
-test("card helper-crowd-429 fold 4: one heavy device drawing Jupiter as fast as it is served for two minutes, beside a device trading inside its share, never makes a third, fourth or fifth first-time device wait or 429", async () => {
+test("card helper-crowd-429 fold 4: one heavy device drawing Jupiter as fast as it is served for two minutes, beside a device trading inside its share, never holds a third, fourth or fifth first-time device's first 2 builds, and never draws a 429", async () => {
   const j = jupiterFree();
   // a refused build's queue wait passes no time here (each poll counted), so the schedule below is the clock's own:
   // with the fake clock's sleep, every refused heavy build moved the clock 3 s and spread two minutes over half an hour
@@ -136,13 +132,16 @@ test("card helper-crowd-429 fold 4: one heavy device drawing Jupiter as fast as 
       if (ms < from || (ms - from) % every >= 4 * 200 || (every === Infinity && ms - from >= 4 * 200)) continue;
       const p0 = polls;
       const a = await p.handle("jupiter", BUILD, `l=${ip}-${ms}`, "", ip);
-      // card helper-page-jup-429: a build beside a heavy device's goes at once in the window (proxy.ts PACED), at most one
-      // sleep here (the still clock); any wait past it is the budget's queue
-      if (a.status !== 200 || polls - p0 > 1) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
+      // card helper-page-jup-429: Jupiter Free counts 10 sends in any 10 s and one device keeps the others 2 of them
+      // (proxy.ts OTHER_DEVICES_ROOM): a trade's first 2 builds go at once (at most one sleep here, the still clock); a
+      // later one is served or told the seconds to wait (the kit waits it out), never a 429 and never the budget's queue
+      const first2 = (ms - from) % every < 2 * 200;
+      const told = a.status === 503 && /cause;desc="budget"/.test(String(a.timing)) && Number(a.headers["Retry-After"]) >= 1;
+      if ((first2 && a.status !== 200) || (!first2 && a.status !== 200 && !told) || polls - p0 > 1) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
     }
     j.clock.add(200);
   }
-  assert.deepEqual(refused, [], "every build of the normal and the first-time devices served on its turn, never queued for the budget");
+  assert.deepEqual(refused, [], "every trade's first 2 builds served at once, the rest served or told the wait, never queued for the budget");
   assert.equal(j.stats().throttled, 0, "Jupiter never throttled");
   assert.ok(j.stats().peak <= 60, `peak ${j.stats().peak} in a sliding minute`);
   assert.ok(heavy > 0, `the heavy device still lent what is left: ${heavy}`);
