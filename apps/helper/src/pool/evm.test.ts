@@ -159,7 +159,7 @@ test("two callers and a restart get the same epoch fee; another epoch's base fee
   const restarted = await sender([], {}, [], c).fee(EPOCH);
   assert.deepEqual(a, b);
   assert.deepEqual(restarted, a);
-  assert.deepEqual(a, { chain: "evm", network: "base-sepolia", pool: POOL, fee_recipient: FEE_TO, sell_sender: null, epoch_ms: 60_000, epoch_start_ms: EPOCH, block: "0x1ae", fee: FEE.toString(), step: EVM_FEE_STEP.toString() });
+  assert.deepEqual(a, { chain: "evm", network: "base-sepolia", pool: POOL, fee_recipient: FEE_TO, sell_sender: null, fee_collector: null, epoch_ms: 60_000, epoch_start_ms: EPOCH, block: "0x1ae", fee: FEE.toString(), step: EVM_FEE_STEP.toString() });
   const next = await sender([], {}, [], c, EPOCH + 61_000).fee(EPOCH + 60_000); // 1,999,999,920 s: block 460, 3 gwei
   assert.equal(next!.fee, feeAt(3n * GWEI).toString());
   assert.equal(await s.fee(DEADLINE + 600_000), null, "no block in that epoch yet");

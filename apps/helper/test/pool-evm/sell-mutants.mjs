@@ -37,7 +37,7 @@ function movedAfter(line, after) {
   const find = EVM_TEXT.slice(i, j + after.length);
   return [find, find.slice(line.length) + line];
 }
-const FEE_TO_CHECK = '    // the fee goes only to the Sell\'s feeRecipient (SellDelegate.sol, L-1): this release\'s, as a withdraw\'s relay data\n    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient", `the Sell pays ${s.feeRecipient}, not ${feeRecipient}`);\n';
+const FEE_TO_CHECK = '    // the fee goes only to the Sell\'s feeRecipient (SellDelegate.sol, L-1): this network\'s fee collector, whose Paid log\n    // is the one proof of the fee (card helper-sender-fee-proof)\n    if (s.feeRecipient !== collector) return no(422, "fee_recipient", `the Sell pays ${s.feeRecipient}, not the fee collector ${collector}`);\n';
 
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
@@ -85,10 +85,17 @@ export const MUTANTS = [
   [EVM, "feeCap: t(7), feeRecipient: addr(t(8)),", "feeCap: t(8), feeRecipient: addr(t(7)),", T, "the helper reads SellDelegate.sell's 11-field Sell"],
   [EVM, "const SELL_TUPLE = 11;", "const SELL_TUPLE = 10;", T, "the helper reads SellDelegate.sell's 11-field Sell"],
   [EVM, "uint256,uint256,address,uint256,uint256),uint256,bytes)\";", "uint256,uint256,uint256,uint256),uint256,bytes)\";", T, "the helper reads SellDelegate.sell's 11-field Sell"],
-  // the fee goes only to this release's fee recipient (SellDelegate.sol, L-1)
-  [EVM, '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', '    if (false) return no(422, "fee_recipient"', T, "fee_recipient:"],
-  [EVM, '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sellSender) return no(422, "fee_recipient"', T, "fee_recipient:"],
-  [EVM, '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sender) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  // the fee goes only to this network's fee collector (SellDelegate.sol, L-1; card helper-sender-fee-proof)
+  [EVM, '    if (s.feeRecipient !== collector) return no(422, "fee_recipient"', '    if (false) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  [EVM, '    if (s.feeRecipient !== collector) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sellSender) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  [EVM, '    if (s.feeRecipient !== collector) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sender) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  [EVM, '    if (s.feeRecipient !== collector) return no(422, "fee_recipient"', '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  // no collector set: every sell refused (fail closed); a collector at the pool's or a sender's address refused at start
+  [EVM, '    if (feeCollector === undefined) return no(503, "not_configured", `no fee collector is set for ${cfg.network}`);\n', "", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(!ADDRESS.test(feeCollector) || feeCollector === sender || feeCollector === sellSender)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sellSender)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", T, "no fee collector set"],
   // its place: before the fee cap and before W's signature, so a sell paying another is refused as that whatever else
   [EVM, ...movedAfter(FEE_TO_CHECK, '    if (s.feeCap >= s.minOut) return no(422, "fee_over_cap", `feeCap ${s.feeCap} is not under minOut ${s.minOut}`);\n'), T, "fee_recipient:"],
   [EVM, ...movedAfter(FEE_TO_CHECK, '    if (signer !== w) return no(422, "bad_signature", `signed by ${signer ?? "no key"}, not W`);\n'), T, "fee_recipient:"],
@@ -306,23 +313,28 @@ export const MUTANTS = [
   [EVM, "      return { ...u, retryAfterS: Math.max(u.retryAfterS ?? 0, Math.max(1, Math.ceil((r.at + block - now()) / 1000))) };", "      return u;", T, "a hold read that fails"],
   [EVM, "Math.max(1, Math.ceil((r.at + block - now()) / 1000))", "Math.max(1, Math.floor((r.at + block - now()) / 1000))", T, "a hold read that fails"],
   // card helper-sender-fee-proof: a landed sale counts as paid only when both providers' receipts read status 1 and carry
-  // the pool's Deposited log of its Sell; one provider's receipt never clears a charge; the cost is the higher receipt's
+  // the fee collector's Paid log (from the collector, from W, value at least the fee); one provider's receipt never
+  // clears a charge; the cost is the higher receipt's
   [EVM, "  const ok = [ra, rb].every((r) =>", "  const ok = [ra, rb].some((r) =>", T, "one provider's receipt never clears a charge"],
   [EVM, "  const ok = [ra, rb].every((r) =>", "  const ok = [ra].every((r) =>", T, "one provider's receipt never clears a charge"],
   [EVM, "  const ok = [ra, rb].every((r) =>", "  const ok = [rb].every((r) =>", T, "one provider's receipt never clears a charge"],
-  [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSaleDeposited(r, sale.pool, sale.w, sale.precommitment));", "evmRpcHex(r.status) === \"0x1\");", T, "a sale that landed with status 1 but no Deposited log"],
-  [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSaleDeposited(r, sale.pool, sale.w, sale.precommitment));", "evmSaleDeposited(r, sale.pool, sale.w, sale.precommitment));", T, "one provider's receipt never clears a charge"],
+  [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmRpcHex(r.status) === \"0x1\");", T, "a sale that landed with status 1 but no Paid log"],
+  [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmSalePaid(r, sale.collector, sale.w, sale.fee));", T, "one provider's receipt never clears a charge"],
+  [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, 0n));", T, "each part of the Paid log is checked"],
   [EVM, "        if (seen[0] !== null && seen[1] !== null) return landed(seen[0], seen[1]);", "        return landed(seen[0] ?? seen[1]!, seen[1] ?? seen[0]!);", T, "one provider's receipt never clears a charge"],
   [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = ca;", T, "the cost is the higher of the two receipts'"],
   [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = cb;", T, "the cost is the higher of the two receipts'"],
-  [EVM, "    if (removed === true || evmRpcHex(address) !== pool ||", "    if (evmRpcHex(address) !== pool ||", T, "each part of the Deposited log is checked"],
-  [EVM, "    if (removed === true || evmRpcHex(address) !== pool ||", "    if (removed === true ||", T, "each part of the Deposited log is checked"],
-  [EVM, " || !Array.isArray(topics) || topics.length !== 2) return false;", " || !Array.isArray(topics)) return false;", T, "each part of the Deposited log is checked"],
-  [EVM, "    if (evmRpcHex(topics[0]) !== DEPOSITED_TOPIC || evmRpcHex(topics[1]) !== depositor) return false;", "    if (evmRpcHex(topics[1]) !== depositor) return false;", T, "each part of the Deposited log is checked"],
-  [EVM, "    if (evmRpcHex(topics[0]) !== DEPOSITED_TOPIC || evmRpcHex(topics[1]) !== depositor) return false;", "    if (evmRpcHex(topics[0]) !== DEPOSITED_TOPIC) return false;", T, "each part of the Deposited log is checked"],
-  [EVM, " && BigInt(`0x${d.slice(2 + 3 * 64)}`) === precommitment;", ";", T, "each part of the Deposited log is checked"],
-  [EVM, "    return d !== null && d.length === 2 + 4 * 64 && BigInt(", "    return d !== null && d.length >= 2 + 3 * 64 && BigInt(", T, "each part of the Deposited log is checked"],
-  [EVM, "\"Deposited(address,uint256,uint256,uint256,uint256)\"", "\"Deposited(address,uint256,uint256,uint256)\"", T, "the Deposited topic is the pool's"],
+  [EVM, "    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee }, held.wei);", "    const r = evmSaleUnpaid(ra, rb, { collector: s.pool, w, fee: s.fee }, held.wei);", T, "a paid landing is one in the window"],
+  [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (evmRpcHex(address) !== collector ||", T, "each part of the Paid log is checked"],
+  [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (removed === true ||", T, "each part of the Paid log is checked"],
+  [EVM, " || !Array.isArray(topics) || topics.length !== 2) return false;", " || !Array.isArray(topics)) return false;", T, "each part of the Paid log is checked"],
+  [EVM, "    if (evmRpcHex(topics[0]) !== PAID_TOPIC || evmRpcHex(topics[1]) !== from) return false;", "    if (evmRpcHex(topics[1]) !== from) return false;", T, "each part of the Paid log is checked"],
+  [EVM, "    if (evmRpcHex(topics[0]) !== PAID_TOPIC || evmRpcHex(topics[1]) !== from) return false;", "    if (evmRpcHex(topics[0]) !== PAID_TOPIC) return false;", T, "each part of the Paid log is checked"],
+  [EVM, "    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;", "    return d !== null && d.length === 2 + 64;", T, "each part of the Paid log is checked"],
+  [EVM, "    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;", "    return d !== null && d.length === 2 + 64 && BigInt(d) + 1n >= fee;", T, "each part of the Paid log is checked"],
+  [EVM, "    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;", "    return d !== null && d.length === 2 + 64 && BigInt(d) > fee;", T, "each part of the Paid log is checked"],
+  [EVM, "    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;", "    return d !== null && d.length >= 2 && BigInt(d) >= fee;", T, "each part of the Paid log is checked"],
+  [EVM, "\"Paid(address,uint256)\"", "\"Paid(address indexed,uint256)\"", T, "the Paid topic is FeeCollector's"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a
