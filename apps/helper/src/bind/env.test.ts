@@ -3,12 +3,12 @@
 // network under its own watch, is networks.test.ts's.
 import assert from "node:assert/strict";
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { base58 } from "./checks.ts";
-import { BIND_ENV, bindSenderFromEnv, MARGIN_K_ENV } from "./env.ts";
+import { BIND_ENV, bindSenderFromEnv, createLine, MARGIN_K_ENV } from "./env.ts";
 
 const keyOf = (fill: number) => {
   const seed = Buffer.alloc(32, fill);
@@ -74,4 +74,47 @@ test("one key on one account in both relayers is refused at start (two nonce cou
   assert.doesNotThrow(() => bindSenderFromEnv({ ...good(), ...withdraw, WITHDRAW_RELAYER_TESTNET: "relay.test.testnet", WITHDRAW_RELAYER_KEYS_TESTNET: key }, {}));
   // the other network's withdrawal keys are not this network's
   assert.doesNotThrow(() => bindSenderFromEnv({ ...good(), WITHDRAW_RELAYER_MAINNET: "bind.test.testnet", WITHDRAW_RELAYER_KEYS_MAINNET: key }, {}));
+});
+
+test("delivered (card helper-create-u): the recorded 1Click SUCCESS on mainnet USDC starts mainnet's creation, one on a token no network carries reads nothing; it returns at once and a failed start is logged, never thrown", async (t) => {
+  const recorded = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/oneclick-status.json"), "utf8")) as { answers: Record<string, unknown> };
+  const reads: string[] = [];
+  const fetchFn = (async (url: string) => {
+    reads.push(String(url));
+    throw new Error("provider down");
+  }) as unknown as typeof fetch;
+  const env = { BIND_VAULT_MAINNET: "vault.test.near", BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "benv-")) };
+  const logged: string[] = [];
+  t.mock.method(console, "error", (line: string) => void logged.push(line));
+  const s = bindSenderFromEnv(env, {}, fetchFn);
+  assert.ok(s.delivered);
+  assert.equal(s.delivered(JSON.stringify(recorded.answers.success_sol)), undefined);
+  assert.equal(s.delivered("not json"), undefined);
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.deepEqual(reads, [], "an answer that names no carried delivery reads nothing");
+  assert.equal(s.delivered(JSON.stringify(recorded.answers.success_usdc)), undefined);
+  for (let i = 0; i < 100 && logged.length === 0; i++) await new Promise((ok) => setTimeout(ok, 10));
+  assert.ok(reads.length > 0, "mainnet's start read its providers");
+  assert.deepEqual([...new Set(logged)], ["helper: create start_failed"]);
+  s.stop();
+});
+
+test("fold 4: a creation's log line names its code and our Transfer's hash only: no id, no address, no why or RPC text, for every code", () => {
+  const id = "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8";
+  const address = "a998c6585100ca4bccbc0e0bcceb9abd66e59666e87bd03b1d83bb9544f7ce2f";
+  const tx = "4Kb2sUpEofHZao7aRzhjNPvzxgLHoaG75Vg1BNM3mwnY";
+  const whys = [`view_account ${id}: the two providers disagree`, `RpcError query: UNKNOWN_ACCOUNT ${id} at ${address}`, `fetch failed ${address}`];
+  const lines: string[] = [];
+  for (const code of ["not_implicit", "no_delivery", "under_min", "exists", "created", "in_flight", "create_failed", "relayer_low", "unread", "delivery_used"]) {
+    for (const why of whys) for (const tx_hash of [tx, undefined, id, `${tx} ${id}`]) {
+      const l = createLine({ code, why, ...(tx_hash === undefined ? {} : { tx_hash }) } as { code: string; tx_hash?: string });
+      if (l !== null) lines.push(l);
+    }
+  }
+  assert.ok(lines.includes(`helper: create created ${tx}`) && lines.includes("helper: create unread") && lines.includes(`helper: create relayer_low`));
+  for (const l of lines) {
+    assert.ok(!l.includes(id) && !l.includes(address) && !/disagree|RpcError|fetch|UNKNOWN/.test(l), l);
+    assert.match(l, /^helper: create [a-z_]+( [1-9A-HJ-NP-Za-km-z]{43,44})?$/);
+  }
+  assert.equal(createLine(null), null);
 });

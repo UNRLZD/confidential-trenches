@@ -63,6 +63,8 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
+/** The proxy path whose answers create a delivered deposit's id (card helper-create-u, bind/create.ts). */
+const ONECLICK_STATUS = "oneclick/v0/status";
 const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL] = MOUNTED.relay;
@@ -493,7 +495,27 @@ export function handler(
               : proxy.handle(rest.slice(0, slash), rest.slice(slash), q === -1 ? "" : raw.slice(q + 1), body, clientOf(req)),
           )
           // card helper-page-jup-429: the call's waits and, on a 503, its cause (proxy.ts Cause), in Server-Timing
-          .then((a) => reply("timing" in a && Array.isArray(a.timing) ? { ...a, headers: { ...a.headers, "Server-Timing": (a.timing as string[]).join(", ") } } : a))
+          .then((a) => {
+            reply("timing" in a && Array.isArray(a.timing) ? { ...a, headers: { ...a.headers, "Server-Timing": (a.timing as string[]).join(", ") } } : a);
+            // card helper-create-u: a 1Click status the device was just answered goes to the deposit's creation, after
+            // the answer and off its path (bind/env.ts delivered); nothing it does reaches this call. It waits for the
+            // senders as /v1/bind does: the deposit store is the senders' holder's, and opening its lock while the
+            // helper this one replaces still holds it would stall the event loop. Not held in time: dropped (the
+            // device polls again).
+            if (a.status === 200 && rest === ONECLICK_STATUS && bind.delivered !== undefined) {
+              const body = a.body;
+              void heldWithin(senders).then((held) => {
+                if (!held) return;
+                setImmediate(() => {
+                  try {
+                    bind.delivered?.(body);
+                  } catch {
+                    // the answer went; a failed hook changes nothing
+                  }
+                });
+              });
+            }
+          })
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }

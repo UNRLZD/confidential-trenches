@@ -40,6 +40,11 @@
 //!   reads the key's changes at that block on the real node (`EXPERIMENTAL_changes`, single_access_key_changes), which
 //!   name the other transaction, not the prepay: the stored prepay is dropped by (a2), never on chain, and a fresh
 //!   prepay and the send land (200).
+//! - i. `create_after_delivery_usdc` (SB-05's creation case, wallet.md step 6): U a fresh 64-hex id with no account,
+//!   its USDC registered and paid while it does not exist; `node apps/helper/test/bind-send/create.ts` answers
+//!   no_delivery, then under_min below MIN_DEPOSIT, with no relayer transaction; at HELD, three concurrent asks make one
+//!   plain Transfer of 182 B x 1e19 and U holds only its own key; the relayer's balance before and after it (V SB run
+//!   (5)); a restart answers exists; then U's call, signed by U's key, lands its note.
 //!
 //! Each prints its gas table (the harness's, for the seeds; each relayer transaction's receipts) and the relayer's
 //! balance before and after: per (U, P) it falls by at most 0.010501 N (vault.md 2.10, a struck U's maximum) plus the
@@ -51,11 +56,12 @@ mod harness;
 use harness::{Harness, TokenKind, R, ONE_YOCTO, YOCTO_PER_BYTE};
 use near_sdk::json_types::Base64VecU8;
 use near_sdk::serde_json::{self, json, Value};
-use near_workspaces::types::{Gas, NearToken};
+use near_workspaces::types::{Gas, KeyType, NearToken, SecretKey};
 use near_workspaces::{Account, AccountId};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::str::FromStr;
 
 /// What each U and the seeder hold, and what each deposit moves (2 USDC; MIN_DEPOSIT is 1).
 const HELD: u128 = 10_000_000;
@@ -898,4 +904,118 @@ async fn overtaken(kind: TokenKind) -> R<()> {
 #[tokio::test]
 async fn overtaken_mock() -> R<()> {
     overtaken(TokenKind::Mock).await
+}
+
+// ---- i. SB-05's creation case: the relayer's Transfer creates U after the delivery, never before ----
+
+/// apps/helper/src/bind/create.ts CREATE_YOCTO: an implicit id's record and one key, 182 B x 1e19.
+const CREATE_YOCTO: u128 = 182 * YOCTO_PER_BYTE;
+
+/// One create.ts process: createOnDelivery for each of `ids` at once, on the relayer's store.
+async fn create_run(w: &World, ids: &[&str]) -> R<Value> {
+    let rpc = w.h.worker.rpc_addr();
+    let input = json!({
+        "rpc": [rpc, rpc], "vault": w.h.vault, "token": w.h.token,
+        "relayer": {"account_id": w.relayer.id(), "secret_key": w.relayer.secret_key().to_string()},
+        "store": w.store, "ids": ids,
+    });
+    let out = node(cli("create.ts")?, input).await?;
+    println!("create x{}: answers {} records {}", ids.len(), out["answers"], out["records"]);
+    Ok(out)
+}
+
+/// The id's account at final: None when it does not exist.
+async fn account_of(w: &World, id: &str) -> R<Option<Value>> {
+    let v = w.h.rpc("query", json!({"request_type": "view_account", "finality": "final", "account_id": id})).await?;
+    if v["result"]["code_hash"].is_string() {
+        return Ok(Some(v["result"].clone()));
+    }
+    if v["error"]["cause"]["name"] != "UNKNOWN_ACCOUNT" {
+        return Err(format!("view_account {id}: {v}").into());
+    }
+    Ok(None)
+}
+
+/// i. U a fresh 64-hex id with no account. Its token arrives before it exists: registered by storage_deposit and paid
+/// (the stand-in for 1Click's delivery, D51, D52), each read recorded. Nothing is created with no delivery or one under
+/// MIN_DEPOSIT; at MIN_DEPOSIT and above, three concurrent asks make one Transfer of CREATE_YOCTO, U then holds only
+/// its own key, and the relayer's balance change is the creation's cost (V SB run (5)). A restart asks again: nothing
+/// new. Then U's own call, signed by U's key as the device signs it, is carried and lands its note.
+async fn create_after_delivery(kind: TokenKind) -> R<()> {
+    let tag = "i";
+    cli("create.ts")?;
+    let w = World::new(kind, 3, tag).await?;
+    let sk = SecretKey::from_random(KeyType::ED25519);
+    let pk = near_crypto::SecretKey::from_str(&sk.to_string()).map_err(|e| format!("key: {e}"))?.public_key();
+    let id = hex(pk.key_data());
+    let uid: AccountId = id.parse()?;
+    let rn0 = w.relayer_nonce().await?;
+
+    // no delivery: not created
+    let out = create_run(&w, &[&id]).await?;
+    assert_eq!(out["answers"][0]["code"], "no_delivery", "{tag}: {out}");
+    assert!(account_of(&w, &id).await?.is_none(), "{tag}: U exists before any delivery");
+
+    // under MIN_DEPOSIT (registered on the token while U does not exist): not created
+    w.h.mint(&uid, 999_999).await?;
+    let reg = w.h.view(&w.h.token, "storage_balance_of", json!({"account_id": id})).await?;
+    println!("[{tag} {kind:?}] before U exists: storage_balance_of(U) {reg}, ft_balance_of(U) {}", w.h.token_balance(&uid).await?);
+    assert!(!reg.is_null(), "{tag}: U not registered on the token");
+    let out = create_run(&w, &[&id]).await?;
+    assert_eq!(out["answers"][0]["code"], "under_min", "{tag}: {out}");
+    assert!(account_of(&w, &id).await?.is_none(), "{tag}: U created under MIN_DEPOSIT");
+    assert_eq!(w.relayer_nonce().await?, rn0, "{tag}: the relayer sent a transaction before the delivery");
+
+    // the delivery reaches MIN_DEPOSIT and above: one Transfer under three concurrent asks
+    w.h.mint(&uid, HELD - 999_999).await?;
+    let rb0 = w.relayer_balance().await?;
+    let out = create_run(&w, &[&id, &id, &id]).await?;
+    let hash = s(&out["answers"][0]["tx_hash"])?;
+    for i in 0..3 {
+        assert_eq!(out["answers"][i]["code"], "created", "{tag}: ask {i}: {out}");
+        assert_eq!(out["answers"][i]["tx_hash"], hash.as_str(), "{tag}: ask {i}: another tx");
+    }
+    assert_eq!(w.relayer_nonce().await?, rn0 + 1, "{tag}: not exactly one relayer transaction");
+    let v = w.tx(&hash).await?;
+    let rb1 = w.relayer_balance().await?;
+    let t = &v["transaction"];
+    assert_eq!(t["receiver_id"], id.as_str(), "{tag}: tx {v}");
+    assert_eq!(t["actions"], json!([{"Transfer": {"deposit": CREATE_YOCTO.to_string()}}]), "{tag}: not one plain Transfer: {v}");
+    let a = account_of(&w, &id).await?.ok_or("U not created")?;
+    let keys = w.h.access_keys(&uid, "final").await?;
+    assert_eq!(keys.len(), 1, "{tag}: U's keys {keys:?}");
+    assert_eq!(keys[0]["public_key"], pk.to_string(), "{tag}: U's key is not its own");
+    assert_eq!(keys[0]["access_key"]["permission"], "FullAccess", "{tag}: {keys:?}");
+    let burnt: u128 = s(&v["transaction_outcome"]["outcome"]["tokens_burnt"])?.parse::<u128>()?
+        + v["receipts_outcome"].as_array().ok_or("no receipts")?.iter().map(|r| r["outcome"]["tokens_burnt"].as_str().unwrap_or("0").parse::<u128>().unwrap_or(0)).sum::<u128>();
+    println!(
+        "[{tag} {kind:?}] V SB run (5): the relayer's balance {rb0} -> {rb1}, down {} ({} yocto) for creating U: the Transfer's {} (back at U's clean-up) and {} burnt; U's amount {}, storage_usage {}",
+        near(rb0 - rb1), rb0 - rb1, near(CREATE_YOCTO), near(rb0 - rb1 - CREATE_YOCTO), a["amount"], a["storage_usage"]
+    );
+    println!("[{tag} {kind:?}] the Transfer's receipts burnt {} by their outcomes", near(burnt));
+    assert_eq!(a["amount"], CREATE_YOCTO.to_string(), "{tag}: U's NEAR");
+
+    // a restart asks again: U exists, nothing new
+    let out = create_run(&w, &[&id]).await?;
+    assert_eq!(out["answers"][0]["code"], "exists", "{tag}: {out}");
+    assert_eq!(w.relayer_nonce().await?, rn0 + 1, "{tag}: a second transaction");
+
+    // U's own call lands its note
+    let u = U { acct: Account::from_secret_key(uid, sk, &w.h.worker), id: id.clone() };
+    let p = "424242091";
+    let sd = w.sign(&u, p, None).await?;
+    let out = w.carry(&["ok"], &[&sd]).await?;
+    let (st, body) = answer(&out, 0);
+    assert_eq!(st, 200, "{tag}: U's call: {}", out["answers"][0]);
+    let rows = w.rows_for(p).await?;
+    assert_eq!(rows.len(), 1, "{tag}: P not in the pages once");
+    assert_eq!(rows[0]["depositor"], id.as_str(), "{tag}: {rows:?}");
+    println!("[{tag} {kind:?}] U created by {hash}, then U's call {} landed P {p} as a note", body["tx_hash"]);
+    w.h.i1().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_after_delivery_usdc() -> R<()> {
+    create_after_delivery(TokenKind::Usdc).await
 }
