@@ -1011,7 +1011,14 @@ test("G2 an X whose scan fails refuses the quote, as the token's own scan does: 
       return t.includes(tx) && t.some((x) => pair.includes(x as string)) ? { ...a, result: null } : a;
     });
   };
-  assert.deepEqual(await quoteOn([seeded(token), real, market], token, seededRoute(token), broken), { accepted: false, code: "rpc_error" });
+  // an answer short of the logs is asked as its halves of the same provider down to one block (review of 1277e8af): one
+  // that answers every range so ends at the quote's bound, here 1.5 s
+  evmScanBound?.(1_500);
+  try {
+    assert.deepEqual(await quoteOn([seeded(token), real, market], token, seededRoute(token), broken), { accepted: false, code: "rpc_error" });
+  } finally {
+    evmScanBound?.();
+  }
 });
 
 test("G3 the scan provider's head is read once per quote: an X scan that waits behind others reads to the same head", async () => {
