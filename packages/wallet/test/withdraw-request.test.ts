@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { after, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { vaultContextInput, vaultContextOf, ZK_SETUP_FILES, type VaultProver, type VaultSnarkjsProof } from "@blindfill/kit";
+import { VaultTree, vaultContextInput, vaultContextOf, vaultLabelOf, ZK_SETUP_FILES, type VaultProver, type VaultSnarkjsProof } from "@blindfill/kit";
 import { checkWithdraw } from "../../../apps/helper/src/withdraw/checks.ts";
 import { armingRegisterDepositOf } from "../src/arming/accounts.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../src/deposit/account.ts";
@@ -97,6 +97,36 @@ test("a real proof of the request passes the relayer's checks 1-4 as written, an
   }
   const theirs = await checkWithdraw(structuredClone(r.body), { ...CFG, feeRecipient: "other.near" }, feeMin());
   assert.equal(theirs.ok ? "ok" : theirs.code, "bad_fee_recipient");
+});
+
+// card vault-refund-precommit-reserve's pin: a stranger's deposit on our refund precommitment R (the vault takes it:
+// deposit.rs:109-110 refuses a repeated P among deposits only) costs the user nothing. With the stranger's larger leaf
+// on R in the tree, our refund note is picked and a real proof is made at our leaf, on our 7 USDC, so a request that
+// spent the stranger's leaf on R fails here. note-restore.test.ts's twin test holds the lookup by precommitment.
+test("our refund note is spendable after a stranger's deposit on its R: a real proof at our leaf, never the stranger's", async () => {
+  const v = await vaultWith([2_000_000n]);
+  const parent = v.notes[0]!;
+  const refund = { kind: "refund", l: parent.leaf!.label, j: 0 } as const;
+  const R = noteSecrets(SEED, refund).precommitment;
+  // the stranger's 50 USDC deposit on R, then settle's 7 USDC refund note on R, each with its own label
+  const theirLabel = vaultLabelOf(keccak_256, SCOPE, 2n);
+  const ourLabel = vaultLabelOf(keccak_256, SCOPE, 3n);
+  const theirs = noteCommitment(50_000_000n, theirLabel, R);
+  const ours = noteCommitment(7_000_000n, ourLabel, R);
+  const state = [...v.stateLeaves, theirs, ours];
+  const labels = [...v.labelLeaves, theirLabel, ourLabel];
+  const stateTree = new VaultTree(state);
+  const labelTree = new VaultTree(labels);
+  const note = await v.ns.add({ ref: refund, scope: SCOPE, precommitment: R, state: "UNSPENT", parent: parent.id, leaf: { value: 7_000_000n, label: ourLabel, commitment: ours, leafIndex: BigInt(state.length - 1) } });
+  assert.equal((await v.ns.get(parent.id))?.state, "SPENT");
+  const r = await withdrawRequest(argsFor(v, snarkProver(), { stateTree, labelTree, newestStateRoot: stateTree.root!, newestLabelRoot: labelTree.root! }));
+  const verdict = await checkWithdraw(structuredClone(r.body), CFG, feeMin());
+  assert.deepEqual(verdict.ok ? "ok" : verdict, "ok");
+  assert.equal(r.noteId, note.id);
+  assert.equal(r.changeValue, 7_000_000n - 3_000_000n - RELAY_FEE, "proved on our 7 USDC, not the stranger's 50");
+  assert.equal(r.body.public_signals[1], noteSecrets(SEED, refund).nullifierHash.toString());
+  assert.equal(r.body.public_signals[3], stateTree.root!.toString());
+  assert.deepEqual(r.change, { kind: "change", l: ourLabel, j: 0 });
 });
 
 test("WU-06: HELD is written before the proof, RESERVED after it and before the request is handed back", async () => {

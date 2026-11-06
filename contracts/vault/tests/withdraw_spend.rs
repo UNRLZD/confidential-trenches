@@ -30,7 +30,7 @@
 
 mod harness;
 
-use harness::{Harness, Outcome, TokenKind, R, YOCTO_PER_BYTE};
+use harness::{commitment_on, Harness, Outcome, TokenKind, R, YOCTO_PER_BYTE};
 use near_sdk::json_types::Base64VecU8;
 use near_sdk::serde_json::{self, json, Value};
 use near_workspaces::types::{Gas, NearToken};
@@ -284,6 +284,22 @@ async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused(kind: TokenKind) 
         "{r}"
     );
     println!("settle old_root: the refund note of {refund} on P is leaf {size}, after the stranger's deposit on P");
+    // card vault-refund-precommit-reserve's pin: both notes on P sit at their own leaves, each hashing from P, so the
+    // vault holds P twice by design (deposit.rs:109-110 refuses a repeated P among deposits only; settle writes no
+    // precommitments) and the device's note is never the stranger's. A vault that refused the deposit, refused the
+    // refund, or wrote the refund note on another precommitment fails here.
+    let deposits = h.view(&h.vault, "deposits", json!({"from": 0, "limit": 100})).await?;
+    let theirs = deposits.as_array().ok_or("deposits: not a list")?.iter().filter(|d| d["precommitment"] == pending).collect::<Vec<_>>();
+    assert_eq!(theirs.len(), 1, "one deposit row on P: {deposits}");
+    let d = theirs[0];
+    assert_eq!((d["depositor"].as_str(), d["value"].as_str()), (Some(stranger.id().as_str()), Some("1000000")), "{d}");
+    let hr = &h;
+    let at = |i: u64| async move { Ok::<String, String>(hr.view(&hr.vault, "leaves", json!({"from": i, "limit": 1})).await.map_err(|e| e.to_string())?[0].as_str().ok_or("leaf")?.to_string()) };
+    let theirs_leaf = d["leaf_index"].as_u64().ok_or("leaf_index")?;
+    assert_ne!(theirs_leaf, size, "the two notes on P share a leaf");
+    assert_eq!(at(theirs_leaf).await?, commitment_on("1000000", d["label"].as_str().ok_or("label")?, &pending), "the stranger's leaf is not its note on P");
+    assert_eq!(at(size).await?, commitment_on(&refund, r["refund_label"].as_str().ok_or("refund_label")?, &pending), "the refund leaf is not the refund note on P");
+    println!("both notes on P: the stranger's deposit at leaf {theirs_leaf}, the refund note at leaf {size}, each Poseidon(value, label, P)");
     // and the unchanged same_call lands after its refusals
     let o = withdraw(&h, &relayer, args("same_call", None)).await?;
     landed(&h, &o)?.map_err(|f| format!("same_call: {f}"))?;
