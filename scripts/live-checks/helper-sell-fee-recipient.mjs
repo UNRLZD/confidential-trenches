@@ -1,0 +1,106 @@
+#!/usr/bin/env node
+// Live check of card helper-sell-fee-recipient: HELPER_HOST reads SellDelegate's 11-field Sell (feeRecipient after
+// feeCap, contracts/pool-evm/src/SellDelegate.sol at pool review round 3) and sends a sale only when its fee goes to the
+// fee recipient its fee answer names (apps/helper/src/pool/evm.ts sellHeld, 422 fee_recipient), without sending
+// anything or moving money. For each testnet pool its deploy record names (helper-evm-sender.mjs evmPoolRecords) it
+// reads GET /v1/pool/fee?pool=<pool>, then POSTs three sells made by helper-evm-sender.mjs plantsOf (a throwaway W
+// key made at run time, W's authorization nonce 2^62, which no fresh W holds):
+//   - "pays_fee_recipient": the sell paying the fee answer's fee_recipient. It passes every static check, the 11-field
+//     shape and the fee recipient included, and stops at W's nonce read: 422 auth_nonce, nothing sent;
+//   - "pays_other": the same sell paying 0x...beef: 422 fee_recipient;
+//   - "pays_sell_sender": the same sell paying the fee answer's sell_sender (the helper's own sell key, not the
+//     release's fee recipient): 422 fee_recipient.
+// It passes only when the fee answer is 200 with fee_recipient and sell_sender two different addresses, every sell
+// answers its own status and code with no hash, and every answer carries a full-sha X-Helper-Commit.
+//   node scripts/live-checks/helper-sell-fee-recipient.mjs [--base <url>] [--record <file>]
+//   PASS exit 0, FAIL exit 1, error exit 2.
+import "../net-window.mjs";
+import { writeFileSync } from "node:fs";
+import { BASE, evmPoolRecords, feeRecipientOf, plantsOf } from "./helper-evm-sender.mjs";
+
+/** Each sell, the status and the code it must get. */
+export const SELLS = [
+  ["pays_fee_recipient", 422, "auth_nonce"],
+  ["pays_other", 422, "fee_recipient"],
+  ["pays_sell_sender", 422, "fee_recipient"],
+];
+export const OTHER = "0x000000000000000000000000000000000000beef";
+const ADDRESS = /^0x[0-9a-f]{40}$/;
+const SHA = /^[0-9a-f]{40}$/;
+const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
+const json = (t) => {
+  try {
+    return JSON.parse(t);
+  } catch {
+    return undefined;
+  }
+};
+
+/** The check on one recorded run: { base, pools: [{ network, pool, reads: [{ asked, status, headers, body }] }] }. */
+export function judge(run, records = evmPoolRecords()) {
+  const lines = [];
+  const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  const want = Object.entries(records);
+  const pools = run.pools ?? [];
+  say(want.length > 0, `pools with a deploy record: ${show(want.map(([n]) => n))}`);
+  say(pools.length === want.length && want.every(([n, pool]) => pools.some((p) => p.network === n && p.pool === pool)), `pools read: ${show(pools.map((p) => `${p.network} ${p.pool}`))}`);
+  for (const p of pools) {
+    const n = p.network;
+    const f = p.reads.find((r) => r.asked === "fee");
+    const b = json(f?.body ?? "");
+    const to = feeRecipientOf(f?.body);
+    const seller = typeof b?.sell_sender === "string" ? b.sell_sender.toLowerCase() : null;
+    say(f?.status === 200 && to !== null && seller !== null && ADDRESS.test(seller) && seller !== to, `[${n} fee] ${f?.status}: fee_recipient ${show(b?.fee_recipient)}, sell_sender ${show(b?.sell_sender)}, two addresses`);
+    for (const [asked, status, code] of SELLS) {
+      const r = p.reads.find((x) => x.asked === asked);
+      const e = json(r?.body ?? "");
+      say(r?.status === status && e?.error?.code === code && e?.hash === undefined, `[${n} ${asked}] POST /v1/pool/evm/sell answers ${r?.status} ${r?.body?.slice(0, 160)} (want ${status} ${code})`);
+    }
+    for (const r of p.reads) say(SHA.test(r.headers?.["x-helper-commit"] ?? ""), `[${n} ${r.asked}] X-Helper-Commit: ${show(r.headers?.["x-helper-commit"])}`);
+  }
+  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+}
+
+/** The three sells for `pool`, each paying `payee` of its own: the fee answer's fee_recipient, another, the sell sender. */
+export function sellsOf({ network, pool, feeRecipient, sellSender, nowMs = Date.now() }) {
+  const pays = { pays_fee_recipient: feeRecipient, pays_other: OTHER, pays_sell_sender: sellSender };
+  return Object.fromEntries(SELLS.map(([asked]) => [asked, plantsOf({ network, pool, feeRecipient: pays[asked], nowMs }).base]));
+}
+
+export async function read(base, fetchFn = fetch, records = evmPoolRecords()) {
+  const pools = [];
+  for (const [network, pool] of Object.entries(records)) {
+    const reads = [];
+    const get = async (asked, url, init = {}) => {
+      const r = await fetchFn(url, { ...init, redirect: "error", signal: AbortSignal.timeout(15_000) });
+      reads.push({ asked, readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(r.headers), body: (await r.text()).slice(0, 2_000) });
+    };
+    await get("fee", `${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`);
+    const b = json(reads[0].body);
+    const seller = typeof b?.sell_sender === "string" && ADDRESS.test(b.sell_sender.toLowerCase()) ? b.sell_sender.toLowerCase() : OTHER;
+    // built just before they are sent, so the deadlines are measured from now
+    const sells = sellsOf({ network, pool, feeRecipient: feeRecipientOf(reads[0].body) ?? OTHER, sellSender: seller });
+    for (const [asked] of SELLS) await get(asked, `${base}/v1/pool/evm/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sells[asked]) });
+    pools.push({ network, pool, reads });
+  }
+  return { base, pools };
+}
+
+if (import.meta.main) {
+  const args = process.argv.slice(2);
+  const opt = (key) => {
+    const i = args.indexOf(key);
+    return i < 0 ? undefined : args[i + 1];
+  };
+  try {
+    const run = await read(opt("--base") ?? BASE);
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
+    const r = judge(run);
+    for (const l of r.lines) console.log(l);
+    console.log(r.ok ? "PASS helper-sell-fee-recipient" : "FAIL helper-sell-fee-recipient");
+    process.exit(r.ok ? 0 : 1);
+  } catch (e) {
+    console.error(`helper-sell-fee-recipient: ${e.message}`);
+    process.exit(2);
+  }
+}

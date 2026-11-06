@@ -127,6 +127,8 @@ test("X-Helper-Commit missing or short on any answer, or a pool not read: FAIL",
 // ---- The plants against the helper's own checks ----
 
 const NOW = 1_800_000_000_000;
+/** The release's fee recipient the helper's fee answer names, the one each plant pays (card helper-sell-fee-recipient) */
+const FEE_TO = "0x000000000000000000000000000000000000fee1";
 /** A provider that records each call and answers none: a body that reaches it passed every static check. */
 const recording = (calls) => async (method, params) => {
   calls.push({ method, params });
@@ -138,8 +140,8 @@ test("plantsOf() builds what the helper's sell checks read: each plant its own s
   const records = evmPoolRecords();
   assert.deepEqual(Object.keys(records), ["base-sepolia", "robinhood-testnet"]);
   for (const [network, pool] of Object.entries(records)) {
-    const p = plantsOf({ network, pool, nowMs: NOW });
-    const sender = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey: randomKey(), floor: 10n ** 13n }, [recording(calls), recording(calls)], () => NOW);
+    const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW });
+    const sender = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey: randomKey(), feeRecipient: FEE_TO, floor: 10n ** 13n }, [recording(calls), recording(calls)], () => NOW);
     {
       const calls = [];
       const a = await sender(calls).sell(p.base);
@@ -173,8 +175,9 @@ test("each plant differs from the base sell in its one field (and the signature 
     route_other_target: ["sell.target", "sell.signature"],
   };
   for (const [network, pool] of Object.entries(evmPoolRecords())) {
-    const p = plantsOf({ network, pool, nowMs: NOW });
+    const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW });
     const base = read2(p.base);
+    assert.equal(base["sell.feeRecipient"], FEE_TO, "every plant pays the fee answer's fee recipient");
     const v = evmPoolVenues()[network];
     // the base's authorization is the kit's own, of the chain's pinned delegate
     const kit = evmPoolSignSellAuthorization(p.wKey, network, BigInt(p.base.authorization.nonce));
@@ -197,16 +200,18 @@ test("each plant differs from the base sell in its one field (and the signature 
     assert.ok(BigInt(p.base.authorization.nonce) > 0n && BigInt(p.base.authorization.nonce) < 2n ** 64n - 1n);
   }
   // a fresh W key each build
-  const [a, b] = [plantsOf({ network: "base-sepolia", pool: evmPoolRecords()["base-sepolia"], nowMs: NOW }), plantsOf({ network: "base-sepolia", pool: evmPoolRecords()["base-sepolia"], nowMs: NOW })];
+  const [a, b] = [plantsOf({ network: "base-sepolia", pool: evmPoolRecords()["base-sepolia"], feeRecipient: FEE_TO, nowMs: NOW }), plantsOf({ network: "base-sepolia", pool: evmPoolRecords()["base-sepolia"], feeRecipient: FEE_TO, nowMs: NOW })];
   assert.notEqual(a.base.w, b.base.w);
 });
 
-test("read() asks each record's pool for its fee, then posts every plant to the sell route (replayed helper)", async () => {
+test("read() asks each record's pool for its fee, then posts every plant to the sell route, each paying the fee answer's fee recipient (replayed helper)", async () => {
   const asked = [];
+  const paid = [];
   const fetchFn = async (url, init) => {
     const u = new URL(url);
     asked.push(`${init.method ?? "GET"} ${u.pathname}${u.search}`);
     const pool = u.searchParams.get("pool") ?? JSON.parse(init.body).pool;
+    if (init.body) paid.push([pool, evmReadSell(new Uint8Array(Buffer.from(JSON.parse(init.body).data.slice(2, JSON.parse(init.body).data.length % 64 === 10 ? undefined : -2), "hex"))).feeRecipient]);
     const p = A.good.pools.find((x) => x.pool === pool);
     const r = u.pathname === "/v1/pool/fee" ? p.reads[0] : p.reads.find((x) => x.asked === "fee_over_cap");
     return new Response(r.body, { status: r.status, headers: r.headers });
@@ -215,6 +220,9 @@ test("read() asks each record's pool for its fee, then posts every plant to the 
   const records = evmPoolRecords();
   assert.deepEqual(asked, Object.values(records).flatMap((pool) => [`GET /v1/pool/fee?pool=${pool}`, ...PLANTS.map(() => "POST /v1/pool/evm/sell")]));
   assert.deepEqual(run.pools.map((p) => [p.network, p.pool, p.reads.map((x) => x.asked)]), Object.entries(records).map(([n, pool]) => [n, pool, ["fee", ...PLANTS.map(([a]) => a)]]));
+  const named = Object.fromEntries(A.good.pools.map((p) => [p.pool, JSON.parse(p.reads[0].body).fee_recipient]));
+  assert.equal(paid.length, Object.keys(records).length * PLANTS.length);
+  for (const [pool, to] of paid) assert.equal(to, named[pool], `${pool}: the plant pays ${to}`);
 });
 
 // ---- The sells the helper sent ----
