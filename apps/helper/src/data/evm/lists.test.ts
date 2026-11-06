@@ -29,7 +29,7 @@ const MAKERS = JSON.parse(fx("maker-logs-base.json")) as { recorded_at: string; 
 const NOW = Date.parse(MAKERS.recorded_at);
 
 /** A fetch that answers GeckoTerminal's recorded lists and each provider's recorded eth_getLogs, by block. */
-function recorded(opts: { gt?: number; rpcFails?: number[]; tamper?: (which: number, logs: unknown) => unknown } = {}) {
+function recorded(opts: { gt?: number; rpcFails?: number[]; tamper?: (which: number, logs: unknown) => unknown; sparesAs?: number } = {}) {
   const calls: string[] = [];
   const f = async (url: string, init: RequestInit): Promise<Response> => {
     calls.push(url);
@@ -39,9 +39,11 @@ function recorded(opts: { gt?: number; rpcFails?: number[]; tamper?: (which: num
       assert.ok(body, `unrecorded GeckoTerminal read ${url}`);
       return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
     }
-    const which = MAKER_RPCS.base.indexOf(url as never);
-    assert.ok(which >= 0, `unknown provider ${url}`);
-    if (opts.rpcFails?.includes(which)) return new Response("bad gateway", { status: 502 });
+    const at = MAKER_RPCS.base.indexOf(url as never);
+    assert.ok(at >= 0, `unknown provider ${url}`);
+    if (opts.rpcFails?.includes(at)) return new Response("bad gateway", { status: 502 });
+    // `sparesAs`: a provider past the recorded three answers as that recorded one did (card evm-rpc-spare-list)
+    const which = at >= 3 && opts.sparesAs !== undefined ? opts.sparesAs : at;
     const reqs = JSON.parse(String(init.body)) as { id: number; params: [{ toBlock: string; fromBlock: string; address: string[]; topics: string[][] }] }[];
     assert.ok(reqs.length <= (BATCH_MAX[url] ?? 10), `${url}: a batch within its cap`);
     const out = reqs.map((r) => {
@@ -207,14 +209,17 @@ const REC = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/maker-records
 const REC_NOW = Date.parse(REC.recorded_at);
 /** The recorded Robinhood providers: each call answered as recorded, by provider, method and params; a call the
  *  recording lacks is an error, as a provider's would be. `down` providers answer 502; `lie` rewrites one answer. */
-function rhRecords(opts: { down?: number[]; lie?: (which: number, q: { method: string; params: unknown[] }, result: unknown) => unknown } = {}) {
+function rhRecords(opts: { down?: number[]; lie?: (which: number, q: { method: string; params: unknown[] }, result: unknown) => unknown; sparesAs?: number } = {}) {
   const methods: string[] = [];
-  const f = async (url: string, init: RequestInit): Promise<Response> => {
-    const which = MAKER_RPCS.robinhood.indexOf(url as never);
-    assert.ok(which >= 0, `unknown provider ${url}`);
-    if (opts.down?.includes(which)) return new Response("bad gateway", { status: 502 });
+  const f = async (asked: string, init: RequestInit): Promise<Response> => {
+    const at = MAKER_RPCS.robinhood.indexOf(asked as never);
+    assert.ok(at >= 0, `unknown provider ${asked}`);
+    if (opts.down?.includes(at)) return new Response("bad gateway", { status: 502 });
+    // `sparesAs`: a provider past the recorded three answers as that recorded one did (card evm-rpc-spare-list)
+    const which = at >= 3 && opts.sparesAs !== undefined ? opts.sparesAs : at;
+    const url = MAKER_RPCS.robinhood[which]!;
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
-    assert.ok(reqs.length <= (BATCH_MAX[url] ?? 10), `${url}: a batch within its cap`);
+    assert.ok(reqs.length <= (BATCH_MAX[asked] ?? 10), `${asked}: a batch within its cap`);
     return new Response(JSON.stringify(reqs.map((q) => {
       methods.push(q.method);
       const c = REC.calls.find((x) => x.url === url && x.method === q.method && JSON.stringify(x.params) === JSON.stringify(q.params));
@@ -496,7 +501,7 @@ test("providers that write hex in upper case: the recorded Robinhood makers come
 });
 
 test("card helper-rpc-hold-queued: a provider that refuses one batch of a read (its HTTP 429, a JSON-RPC -32005 or limit message) is sent none of the read's batches queued after it; they fail as refused reads, so the third provider answers", async () => {
-  const url = MAKER_RPCS.robinhood[0]; // rpc.mainnet.chain.robinhood.com: 10 calls a batch, 429s a burst (2026-11-04 18:55Z)
+  const url = MAKER_RPCS.robinhood[0]!; // rpc.mainnet.chain.robinhood.com: 10 calls a batch, 429s a burst (2026-11-04 18:55Z)
   const calls = Array.from({ length: 25 }, (_, i) => ({ method: "eth_getCode", params: [`0x${"1".repeat(40)}`, `0x${i.toString(16)}`] }));
   const refusals: [string, () => Response][] = [
     ["HTTP 429", () => new Response("{}", { status: 429, headers: { "retry-after": "1" } })],
@@ -520,4 +525,20 @@ test("card helper-rpc-hold-queued: a provider that refuses one batch of a read (
   const ok = await batch((async (_u: string, init: RequestInit) => (n++, Response.json((JSON.parse(String(init.body)) as { id: number }[]).map((r) => ({ jsonrpc: "2.0", id: r.id, result: "0x" }))))) as never, url, calls);
   assert.equal(n, 3);
   assert.deepEqual(ok, calls.map(() => "0x"));
+});
+
+// card evm-rpc-spare-list: the maker read walks the chain's whole list. Before, it stopped at three: with the first two
+// down, the third's answer alone settled nothing, and the tag stayed unread for as long as they were down.
+test("card evm-rpc-spare-list: with the first two maker providers down, the next two answering settle the tag; with the first three down, the fourth and fifth do", async () => {
+  const c = MAKERS.cases.find((x) => x.pad !== null && x.answers.every((a) => a.every((l) => l !== null)))!;
+  const ask = [{ token: c.address, createdS: c.created_s }];
+  assert.ok(MAKER_RPCS.base.length >= 5, `Base lists ${MAKER_RPCS.base.length} maker providers`);
+  for (const down of [[0, 1], [0, 1, 2]]) assert.equal((await readMakers("base", recorded({ rpcFails: down, sparesAs: 2 }).fetch, ask, NOW)).get(c.address), c.pad, `Base providers ${down} down`);
+  // one answering is one provider's word: nothing settles
+  assert.equal((await readMakers("base", recorded({ rpcFails: MAKER_RPCS.base.map((_, i) => i).filter((i) => i !== 4), sparesAs: 2 }).fetch, ask, NOW)).size, 0, "Base: only one answers");
+  const gs = later("GS");
+  const rh = [{ token: gs.address, createdS: gs.created_s }];
+  assert.ok(MAKER_RPCS.robinhood.length >= 5, `Robinhood lists ${MAKER_RPCS.robinhood.length} maker providers`);
+  for (const down of [[0, 1], [0, 1, 2]]) assert.equal((await readMakers("robinhood", rhRecords({ down, sparesAs: 2 }).fetch, rh, REC_NOW)).get(gs.address), "pons", `Robinhood providers ${down} down`);
+  assert.equal((await readMakers("robinhood", rhRecords({ down: [0, 1, 2, 3], sparesAs: 2 }).fetch, rh, REC_NOW)).size, 0, "Robinhood: only one answers");
 });
