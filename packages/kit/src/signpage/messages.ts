@@ -207,11 +207,15 @@ export interface StateEvent {
  *   W derived from the seed is the proof's recipient;
  * - `venue` and `pool`: the venue the quote was read on (on Solana "pump-curve" or "pumpswap") and its pool's address
  *   (the bonding curve's account or the AMM pool's), read on two RPCs and checked in the same step;
+ * - `tx` (card pool-buy-send-fast): the buy's transaction signature (base58 of 64 bytes), told once both RPCs read this
+ *   very transaction back under it, the moment the buy is sent. The answer names it too, but an answer that comes past
+ *   the client's SIGNPAGE_TIMEOUT_MS is dropped (a mainnet bundle that lands late); this event reaches the app whenever
+ *   it comes;
  * - `out`: the token amount W received, a decimal string in the token's whole units, read from the transaction itself
  *   on both RPCs, the two the same and at least the buy's min out. Absent when they differ: never made up.
- * Addresses and an amount only: never a key, the 12 words or a note.
+ * Addresses, an amount and a signature only: never a key, the 12 words or a note.
  */
-export type BuyRoute = { wallet: string } | { venue: string; pool: string } | { out: string };
+export type BuyRoute = { wallet: string } | { venue: string; pool: string } | { out: string } | { tx: string };
 
 /** The stage of a request still running, by its id. */
 export interface ProgressEvent {

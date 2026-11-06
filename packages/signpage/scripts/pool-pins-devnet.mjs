@@ -4,7 +4,7 @@
 // main.ts wires the testnet build), the proof queue's pass, then the state read main.ts makes: withPools over
 // PAGE_POOLS (the devnet pool from its pin), the queue's ready proofs (testnetPool's ready()), the page's own price
 // (src/pool-price.ts poolPrices) and the Solana tap spend from the Rent sysvar (src/pools.ts rentOnce, withSolanaRent),
-// all on main's devnet RPC pair (TESTNET_RPCS.solana, through the page's src/page-rpc.ts). main.ts's own glue around
+// all on main's devnet RPC pair (TESTNET_RPCS.solana, through the page's testnetRpc, src/pool-testnet.ts). main.ts's own glue around
 // these is test/main-testnet-pools.test.ts.
 //   node packages/signpage/scripts/pool-pins-devnet.mjs <out.json>
 // - A seed made in this run only (16 random bytes), never printed; written before U is asked for to
@@ -32,11 +32,10 @@ const { openNoteStore, readNotes } = await import("../../wallet/src/notes/store.
 const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
-const { pageRpc } = await import("../src/page-rpc.ts");
 const { readSolanaRent, solanaRentMin } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import("../src/pool-testnet.ts");
 const { PAGE_POOLS, rentOnce, withPools, withSolanaRent } = await import("../src/pools.ts");
 const { poolPrices } = await import("../src/pool-price.ts");
 const { stateOf } = await import("../src/state.ts");
@@ -50,7 +49,7 @@ const STATE_WAIT_MS = Number(process.env.STATE_WAIT_MS ?? 600_000);
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const big = (_k, v) => (typeof v === "bigint" ? String(v) : v);
-const rpcs = [pageRpc(TESTNET_RPCS.solana[0]), pageRpc(TESTNET_RPCS.solana[1])];
+const rpcs = [testnetRpc(TESTNET_RPCS.solana[0]), testnetRpc(TESTNET_RPCS.solana[1])];
 
 // the prover: snarkjs's fullProve in this process, on the release's pinned withdraw files
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);

@@ -180,6 +180,34 @@ test("a route event after the answer still fills its value, done or failed; anot
   assert.equal(routeEvent(IDLE, { t: "wallet", id: "b1", address: WALLET }), IDLE, "no strip before a tap");
 });
 
+// card pool-buy-send-fast: a buy whose answer came past the kit client's 10 s (a mainnet bundle landing late) is
+// dropped as client_timeout and its final stage comes as progress with no transaction; the page's route event { tx }
+// still names it, so the toast links it ("Filled with no link" before)
+test("the route's tx: after a client_timeout and a filled with no transaction, the route event gives the link's transaction; it never replaces one", () => {
+  const SIG = "48Xv1SNVzuNDAaB6FXW5MNUjCMW5LArZdeqJahVeQ3DrsXzBSPQQxiNjiV2wvuF5v58AXjSECU5LHuYfKb4nNBEv";
+  let r = fromOutcome(tap(), "b1", { ok: false, error: { code: "client_timeout" } });
+  const subs = new Set<(id: string, r: BuyRoute) => void>();
+  const route = liveRoute((fn) => (subs.add(fn), () => void subs.delete(fn)));
+  route((d) => void (r = routeEvent(r, d)));
+  for (const f of subs) f("b1", { tx: SIG } as BuyRoute);
+  r = fromStage(r, "b1", "filled");
+  assert.equal(r.k, "done");
+  assert.equal(r.tx, SIG);
+  // filled first, then the tx: the same link
+  let late = fromStage(tap(), "b1", "filled");
+  assert.equal(late.tx, null);
+  late = routeEvent(late, fromBuyRoute("b1", { tx: SIG } as BuyRoute)!);
+  assert.equal(late.tx, SIG);
+  assert.deepEqual(steps(late), ["done", "done", "done", "done"], "the tx checks nothing");
+  // the answer's transaction is kept; another buy's tx names nothing; an inherited tx is nothing
+  assert.equal(routeEvent(fromStage(tap(), "b1", "sent", "ans"), { t: "tx", id: "b1", tx: SIG }).tx, "ans");
+  assert.equal(routeEvent(late, { t: "tx", id: "b2", tx: "other" }).tx, SIG);
+  // review: another buy's tx names nothing on a strip with no tx yet, done or running
+  assert.equal(routeEvent(fromStage(tap(), "b1", "filled"), { t: "tx", id: "b2", tx: SIG }).tx, null);
+  assert.equal(routeEvent(tap(), { t: "tx", id: "b2", tx: SIG }).tx, null);
+  assert.equal(fromBuyRoute("b1", Object.create({ tx: SIG }) as BuyRoute), null);
+});
+
 // fold 1 (L3): the kit's own keys only: an inherited field names nothing, and nothing reaches the strip
 test("fromBuyRoute reads only the event's own keys: an inherited wallet, venue or out names nothing", () => {
   for (const proto of [{ wallet: WALLET }, { venue: "pump-curve", pool: POOL }, { out: "7" }]) {
