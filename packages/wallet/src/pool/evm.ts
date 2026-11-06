@@ -779,6 +779,9 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
   let tries = 0;
   // refusals in a row of a page no wider than its provider answered (EVM_LOG_REFUSED_AGAIN)
   let again = 0;
+  // the widest page this read answered in full: a named span under it is one backend's, never this provider's cap (a
+  // W's Transfer pager keeps no `answered`, review fold 3)
+  let widest: bigint | null = null;
   const ceiling = (size: bigint) => {
     hold = size === lastCeiling ? hold * 2 : pager.rules.ceilingPages;
     refused = lastCeiling = size;
@@ -812,11 +815,14 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       if (end > at && p.answered !== null && end - at + 1n <= p.answered && ++again <= EVM_LOG_REFUSED_AGAIN) continue;
       if (end > at) {
         again = 0;
-        // a cap that names its span under this page: that span at once, held as the read's ceiling just past it (card
-        // helper-evm-range-cap-walk: halving 10,000 to a named 50 took 8 refusals and paged at 39); never under a page
-        // this provider answered in full, where the words are one backend's, not its cap (Pocket's, 6 Nov 07:44Z)
+        // a cap that names its span at most half this page: that span at once, held as the read's ceiling just past it
+        // (card helper-evm-range-cap-walk: halving 10,000 to a named 50 took 8 refusals and paged at 39); a span named
+        // nearer the page is halved past, so no words step the page down a block a call (review fold 2); never under a
+        // page this provider or this read answered in full, where the words are one backend's, not its cap (Pocket's,
+        // 6 Nov 07:44Z; review fold 3)
         const named = capSpanOf(m);
-        if (named !== null && named >= 1n && named < end - at + 1n && (p.answered === null || named >= p.answered)) {
+        const floor = p.answered !== null && (widest === null || p.answered > widest) ? p.answered : widest;
+        if (named !== null && named >= 1n && named <= (end - at + 1n) / 2n && (floor === null || named >= floor)) {
           ceiling(named + 1n);
           p.size = named;
           continue;
@@ -833,6 +839,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     out.push(...got.map((g, i) => decode(g, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
     const full = end - at + 1n === size;
     if (full && (p.answered === null || size > p.answered)) p.answered = size;
+    if (full && (widest === null || size > widest)) widest = size;
     if (full && refused !== null && ++held >= hold) refused = null;
     if (full && size * 2n <= max && (refused === null || size * 2n < refused)) p.size = size * 2n;
     at = end + 1n;
