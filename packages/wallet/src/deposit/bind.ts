@@ -5,12 +5,20 @@
 // One call per note. The note is the store's (await planDeposit, or the store's add for a second arrival, before this
 // runs): its precommitment P is re-derived from the seed by its ref and must equal the record, and the note goes
 // PLANNED -> INCOMING before P first leaves the device inside U's signed call (../notes/store.ts caller rules).
-//   - The deposit is confirmed only from the vault's `deposits` pages, read on two RPCs at final and matched on the
-//     device (P, depositor U, value = amount): never from the relayer's answer, a tx read by hash or a prepaid read
-//     (W:419, V:674-675). One RPC holding P while the other does not confirms nothing: the device reads again.
-//   - Nothing landed (W:448-455, V:675-677): only once both RPCs' final heights are past max_block_height + 5, with P
-//     not held and U's key nonce unchanged, the device signs again, and at the same nonce, so at most one of the two
-//     calls can land (nearcore refuses a delegate nonce at or below the key nonce, actions.rs l.669).
+//   - The deposit is confirmed only from the vault's `deposits` pages, read through the kit's vaultSync (two RPCs, one
+//     block, byte for byte; card wallet-bind-on-sync) and matched on the device (P, depositor U, value = amount): never
+//     from the relayer's answer, a tx read by hash or a prepaid read (W:419, V:674-675). A sync that stops
+//     (VaultSyncStopped: one RPC behind, down or disagreeing) confirms nothing: the device reads again.
+//   - The search for P starts at 0 while the note holds no call: "no call" is only this store's word, and P comes from
+//     the seed, so another device on the seed (same lane) may have landed P anywhere (review H1). The first read runs to
+//     the pages' end before P leaves this device, and the note's first call records that count (searchFrom); every
+//     later read, a reload's too, starts there, since no row below it can hold P. A call written before notes held a
+//     start reads from 0. The note store's vault cursor gives the reads only its height (no older block than the last).
+//   - Nothing landed (W:448-455, V:675-677): P counts as absent only from a sync at a block past max_block_height + 5,
+//     a floor put in the sync's cursor.height so a lower block stops ("behind"); U's key nonce and USDC are read at
+//     that same block (block_id), so the pages and U are one state. With P not held and U's key nonce unchanged there,
+//     the device signs again, and at the same nonce, so at most one of the two calls can land (nearcore refuses a
+//     delegate nonce at or below the key nonce, actions.rs l.669).
 //   - Every re-sign, the lapse's and resign_needed's, is checked before anything is sent: a signed call whose nonce is
 //     not the earlier call's is refused and dropped (resignDeposit). The earlier call's nonce is free only once U's key
 //     nonce has moved past it.
@@ -29,7 +37,8 @@
 //     sender_struck there stops as R3); a hash the device cannot verify on both RPCs, or none, means keep reading
 //     and never sign (the money stays in U). These reads only hold the device back; the deposit itself is confirmed
 //     only by the pages.
-//   - prepay_open, R2 (W:459-460): wait until the pages hold U's previous note's P, then send the same signed bytes
+//   - prepay_open, R2 (W:459-460): wait until U's previous note has landed (its leaf, read from the pages, in the note
+//     store), then send the same signed bytes
 //     while their window is ahead, else as nothing landed. resign_needed, R4 (W:461): sign again at the same nonce
 //     with a new window. sender_struck, R3 (W:462-467): stop; nothing more is signed for U this session, and the
 //     outcome tells the caller to open the way out (withdraw.open, U's own plain ft_transfer; V 2.12 step 5).
@@ -40,7 +49,7 @@
 // the amount again on U's next second-arrival note.
 // Nothing here logs. No request carries a key, the words or a note's secret: the relayer gets the signed delegate
 // alone (sendDepositDelegate), and each read names U or the vault.
-import { HELPER_RPC_METHODS, VAULT_FIELD_P, VAULT_SYNC_BUSY_WAITS_MS, VAULT_SYNC_PAGE, vaultViewBusy, vaultViewTooHeavy } from "@blindfill/kit";
+import { HELPER_RPC_METHODS, type VaultDepositRow, vaultSync, type VaultSyncCursor, vaultSyncStart, VaultSyncStopped } from "@blindfill/kit";
 import { base58, base64 } from "@scure/base";
 import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
@@ -152,17 +161,21 @@ function resultOf(a: unknown): Obj | undefined {
   return typeof h === "number" && Number.isSafeInteger(h) && h > 0 ? r : undefined;
 }
 
-/** U's key nonce at final on each RPC, or null when either does not answer, lacks U's key or they disagree. */
+/**
+ * U's key nonce at final on each RPC, or at block `at` on both (a sync's height: every answer must be at that block),
+ * or null when either does not answer, lacks U's key or they disagree.
+ */
 export type URead = { nonce: bigint; heights: [bigint, bigint] };
-export async function readU(account: string, rpcs: readonly [NearRpc, NearRpc]): Promise<URead | null> {
+export async function readU(account: string, rpcs: readonly [NearRpc, NearRpc], at?: number): Promise<URead | null> {
   checkPair(undefined, rpcs, false);
   const publicKey = `ed25519:${base58.encode(Uint8Array.from(account.match(/../g)!, (h) => parseInt(h, 16)))}`;
+  const block = at === undefined ? { finality: "final" } : { block_id: at };
   const sides = await Promise.all(
     rpcs.map(async (r) => {
       try {
-        const res = resultOf(await r.query({ request_type: "view_access_key_list", account_id: account, finality: "final" }));
+        const res = resultOf(await r.query({ request_type: "view_access_key_list", account_id: account, ...block }));
         const keys = res?.keys;
-        if (res === undefined || !Array.isArray(keys)) return null;
+        if (res === undefined || !Array.isArray(keys) || (at !== undefined && res.block_height !== at)) return null;
         const own = keys.find((k) => isObj(k) && k.public_key === publicKey);
         const nonce = isObj(own) && isObj(own.access_key) ? own.access_key.nonce : undefined;
         if (typeof nonce !== "number" || !Number.isSafeInteger(nonce) || nonce < 0) return null;
@@ -177,103 +190,71 @@ export async function readU(account: string, rpcs: readonly [NearRpc, NearRpc]):
   return { nonce: a.nonce, heights: [a.height, b.height] };
 }
 
-/** One row of the vault's deposits view (contracts/vault/src/lib.rs DepositView). */
-export type DepositRow = { index: number; precommitment: bigint; label: bigint; value: bigint; leafIndex: bigint; depositor: string };
-
-function row(x: unknown, at: number): DepositRow {
-  const ok = isObj(x) && Object.keys(x).length === 6;
-  const { index, precommitment, label, value, leaf_index, depositor } = (ok ? x : {}) as Obj;
-  const dec = (v: unknown) => typeof v === "string" && DIGITS.test(v);
-  if (!ok || index !== at || !dec(precommitment) || !dec(label) || !dec(value) || typeof depositor !== "string" ||
-    typeof leaf_index !== "number" || !Number.isSafeInteger(leaf_index) || leaf_index < 0)
-    throw new Error("not a deposits row");
-  const r = { index: at, precommitment: BigInt(precommitment as string), label: BigInt(label as string), value: BigInt(value as string), leafIndex: BigInt(leaf_index), depositor };
-  if (r.precommitment >= VAULT_FIELD_P || r.label >= VAULT_FIELD_P || r.value >= 1n << 128n) throw new Error("not a deposits row");
-  return r;
+/** U's USDC (ft_balance_of on the network's token) at block `at` on both RPCs, equal, else null. */
+async function balanceAt(account: string, token: string, rpcs: readonly [NearRpc, NearRpc], at: number): Promise<bigint | null> {
+  const args = base64.encode(new TextEncoder().encode(JSON.stringify({ account_id: account })));
+  const sides = await Promise.all(
+    rpcs.map(async (r) => {
+      try {
+        const res = resultOf(await r.query({ request_type: "call_function", account_id: token, method_name: "ft_balance_of", args_base64: args, block_id: at }));
+        const bytes = res?.result;
+        if (res === undefined || res.block_height !== at || !Array.isArray(bytes) || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) return null;
+        const v: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes)));
+        return typeof v === "string" && DIGITS.test(v) ? BigInt(v) : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const [a, b] = sides;
+  return a === null || b === null || a !== b ? null : a;
 }
 
-/**
- * One RPC's pages from `from` to their end: the rows holding any of `ps`, and the count read up to. The kit's sync's
- * paging rule (review R-03): pages start at VAULT_SYNC_PAGE.deposits rows (about 125 Tgas a view); a page the RPC
- * refuses as too heavy (vaultViewTooHeavy) is read again at half its rows, and one of an eighth of the first refused
- * throws; a busy answer (vaultViewBusy) is asked again after each of VAULT_SYNC_BUSY_WAITS_MS, then throws.
- */
-async function scan(rpc: NearRpc, vault: string, ps: readonly bigint[], from: number, signal?: AbortSignal): Promise<{ found: Map<bigint, DepositRow>; end: number }> {
-  let limit = VAULT_SYNC_PAGE.deposits;
-  const floor = Math.floor(VAULT_SYNC_PAGE.deposits / 8);
-  const found = new Map<bigint, DepositRow>();
-  for (let at = from, busy = 0; ; ) {
-    signal?.throwIfAborted();
-    const args = base64.encode(new TextEncoder().encode(JSON.stringify({ from: at, limit })));
-    const answer = await rpc.query({ request_type: "call_function", account_id: vault, method_name: "deposits", args_base64: args, finality: "final" });
-    if (vaultViewBusy(answer)) {
-      const wait = VAULT_SYNC_BUSY_WAITS_MS[busy++];
-      if (wait === undefined) throw new Error(`${rpc.name}: busy ${busy} times`);
-      // the caller's stop ends the wait at once, as it ends the scan between pages (REVIEW K)
-      await new Promise<void>((ok, no) => {
-        const stop = () => (clearTimeout(t), no(signal!.reason));
-        const t = setTimeout(() => (signal?.removeEventListener("abort", stop), ok()), wait);
-        if (signal?.aborted) return stop();
-        signal?.addEventListener("abort", stop, { once: true });
-      });
-      continue;
-    }
-    busy = 0;
-    if (vaultViewTooHeavy(answer)) {
-      if (limit <= floor) throw new Error(`${rpc.name}: a deposits page of ${limit} rows is too heavy`);
-      limit = Math.floor(limit / 2);
-      continue;
-    }
-    const res = resultOf(answer);
-    const bytes = res?.result;
-    if (!Array.isArray(bytes) || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) throw new Error("no page");
-    const page = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes)));
-    if (!Array.isArray(page) || page.length > limit) throw new Error("not a page");
-    const rows = page.map((x, k) => row(x, at + k));
-    for (const r of rows) if (ps.includes(r.precommitment) && !found.has(r.precommitment)) found.set(r.precommitment, r);
-    if (rows.length < limit) return { found, end: at + rows.length };
-    at += limit;
-  }
-}
+/** One row of the vault's deposits view, as the kit's sync reads it (contracts/vault/src/lib.rs DepositView). */
+export type DepositRow = VaultDepositRow;
 
-export type PagesRead = { state: "held"; row: DepositRow } | { state: "absent" } | { state: "unsure" };
+/** A read of the pages: P held (its row), absent, or unsure; `height` is the block the sync read at. */
+export type PagesRead = { state: "held"; row: DepositRow; height: number } | { state: "absent"; height: number } | { state: "unsure" };
 
 /**
- * Whether the vault's deposits pages hold P, read at final on both RPCs: held only when both hold the same row,
- * absent only when neither does, else unsure (one RPC behind, down, or answering what is not a page). `also` is a
- * second precommitment read in the same pass (U's previous note's, for R2), its state in alsoState. The pages only
- * grow, so once every watched P is held or absent on both, the next read starts at the lower of the two counts: the
- * first read starts at 0 and runs before P leaves the device in this bind, and no later row below that count can hold
- * P (a P the device has not sent cannot be named by anyone else).
+ * Whether the vault's deposits pages hold P, read through the kit's vaultSync (both RPCs at one block, byte for byte)
+ * from `from`: held when the rows hold P, absent when they do not, unsure when the sync stops (VaultSyncStopped). With
+ * a floor, the sync's block must be at or above it (cursor.height), else it stops "behind": unsure, never absent. The
+ * pages only grow, so after each read the next starts at the count it reached; `from` must be a count taken before P
+ * first left the device (no row below it can hold P). Each read's cursor goes to `save` (the note store's vault cursor).
  */
 export class DepositsWatch {
-  private from = 0;
+  private cursor: VaultSyncCursor;
   readonly vault: string;
   readonly p: bigint;
-  readonly also: bigint | null;
   readonly rpcs: readonly [NearRpc, NearRpc];
-  alsoState: PagesRead = { state: "unsure" };
-  constructor(vault: string, p: bigint, rpcs: readonly [NearRpc, NearRpc], also: bigint | null = null) {
+  private readonly save: (c: VaultSyncCursor) => Promise<unknown>;
+  constructor(vault: string, p: bigint, rpcs: readonly [NearRpc, NearRpc], from?: VaultSyncCursor, save: (c: VaultSyncCursor) => Promise<unknown> = async () => {}) {
     checkPair(undefined, rpcs, false);
     this.vault = vault;
     this.p = p;
     this.rpcs = rpcs;
-    this.also = also;
+    this.cursor = from ?? vaultSyncStart(vault);
+    this.save = save;
   }
-  async read(signal?: AbortSignal): Promise<PagesRead> {
-    const ps = this.also === null || this.alsoState.state === "held" ? [this.p] : [this.p, this.also];
-    const sides = await Promise.all(this.rpcs.map((r) => scan(r, this.vault, ps, this.from, signal).catch(() => null)));
-    const [a, b] = sides;
-    if (!a || !b) return { state: "unsure" };
-    const of = (p: bigint): PagesRead => {
-      const [x, y] = [a.found.get(p), b.found.get(p)];
-      if (x && y) return (Object.keys(x) as (keyof DepositRow)[]).every((k) => x[k] === y[k]) ? { state: "held", row: x } : { state: "unsure" };
-      return x || y ? { state: "unsure" } : { state: "absent" };
-    };
-    const mine = of(this.p);
-    if (ps.length === 2) this.alsoState = of(this.also!);
-    if (mine.state === "absent" && (this.also === null || this.alsoState.state !== "unsure")) this.from = Math.min(a.end, b.end);
-    return mine;
+  /** The deposits row the next read starts at. */
+  get from(): number {
+    return this.cursor.deposits;
+  }
+  async read(signal?: AbortSignal, floor?: bigint): Promise<PagesRead> {
+    const height = floor === undefined ? this.cursor.height : Math.max(this.cursor.height, Number(floor));
+    let r;
+    try {
+      r = await vaultSync({ vault: this.vault, rpcs: this.rpcs, cursor: { ...this.cursor, height }, lists: ["deposits"], ...(signal ? { signal } : {}) });
+    } catch (e) {
+      if (e instanceof VaultSyncStopped) return { state: "unsure" };
+      throw e;
+    }
+    await this.save(r.cursor);
+    const row = r.deposits.find((x) => x.precommitment === this.p);
+    if (row !== undefined) return { state: "held", row, height: r.height };
+    this.cursor = r.cursor;
+    return { state: "absent", height: r.height };
   }
 }
 
@@ -283,21 +264,21 @@ export class DepositsWatch {
 export type EarlierCall = Pick<SignedDepositDelegate, "sender_id" | "nonce" | "max_block_height">;
 
 /**
- * Signs U's call again at the earlier call's nonce. For the lapse ("lapse") U is read first on two RPCs: both final
- * heights must be past max_block_height + LAPSE_MARGIN and U's key nonce still below the earlier nonce, else it is
- * refused ("early", "nonce"). For R4 ("resign_needed") the relayer never sent the call and the same nonce is the guard.
+ * Signs U's call again at the earlier call's nonce. For the lapse ("lapse") U is read first on two RPCs, at final or at
+ * block `at` (the sync's that read P absent): both heights must be past max_block_height + LAPSE_MARGIN and U's key
+ * nonce still below the earlier nonce, else it is refused ("early", "nonce"). For R4 ("resign_needed") the relayer never sent the call and the same nonce is the guard.
  * Either way a signed call at another nonce is refused and dropped, never returned.
  */
 export async function resignDeposit(
   seed64: Uint8Array, s: bigint, i: number, args: { network: NearNetwork; amount: bigint; precommitment: bigint; window?: number },
-  earlier: EarlierCall, why: "lapse" | "resign_needed", rpcs: readonly [NearRpc, NearRpc],
+  earlier: EarlierCall, why: "lapse" | "resign_needed", rpcs: readonly [NearRpc, NearRpc], at?: number,
 ): Promise<SignedDepositDelegate> {
   const nonce = earlier.nonce;
   const mbh = earlier.max_block_height;
   const sender = earlier.sender_id;
   if (typeof nonce !== "bigint" || typeof mbh !== "bigint") throw new DepositBindRefused("input", "the earlier call's nonce and max_block_height are bigints");
   if (why === "lapse") {
-    const u = await readU(sender, rpcs);
+    const u = await readU(sender, rpcs, at);
     if (u === null) throw new DepositBindRefused("early", "U's key nonce is not read on both RPCs");
     const low = u.heights[0] < u.heights[1] ? u.heights[0] : u.heights[1];
     if (low <= mbh + LAPSE_MARGIN) throw new DepositBindRefused("early", `final height ${low} is not past max_block_height ${mbh} + ${LAPSE_MARGIN}`);
@@ -470,9 +451,12 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const signal = deps.signal;
   const U = depositAccount(seed, own.s, own.i).account;
+  const token = NEAR_NETWORKS[own.network].usdc;
   if (struck.has(U)) throw new DepositBindRefused("struck", "the relayer struck U: its USDC leaves by withdraw.open");
   running.set(U, (running.get(U) ?? 0) + 1);
   try {
+    // The vault's cursor: its height, so no read is at an older block than the last one this device read.
+    const stored = await store.syncCursor(vault);
     // The note: in the store before P leaves, of U, and its P the one the seed gives its ref.
     let note = await store.get(own.noteId);
     if (note === undefined) throw new DepositBindRefused("note", "the note is not in the store: await planDeposit first");
@@ -482,8 +466,21 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     const prevRef = previousRef(note.ref);
     const previousP = prevRef === null ? null : noteSecrets(seed, prevRef).precommitment;
     const call = { network: own.network, amount: own.amount, precommitment: P, window: own.window };
-    // One watch for P and U's previous P (R2): its first read starts at 0, every later one at the count it reached.
-    const watch = new DepositsWatch(vault, P, rpcs, previousP);
+    // The watch for P: from 0 until a call is written (review H1), then from the note's own start (the count read
+    // before P first left; a call written before notes held a start: 0); every later read at the count it reached.
+    const watch = new DepositsWatch(vault, P, rpcs, { ...stored, deposits: note.searchFrom ?? 0 }, (c) => store.saveSyncCursor(c));
+    // P is absent only at a block past the call's window and margin: the floor of the sync's cursor.height.
+    const lapsed = (c: EarlierCall): bigint => c.max_block_height + LAPSE_MARGIN + 1n;
+    // R2: U's previous note has landed: its leaf (from the pages on both RPCs) in the note store, or its P read in the
+    // pages, as for a previous note marked TAKEN whose P another device on the seed landed (review L2). That P's own
+    // watch reads from 0 once, then on from the count it reached.
+    let previousWatch: DepositsWatch | null = null;
+    const previousLanded = async (): Promise<boolean> => {
+      if (previousP === null) return false;
+      if ((await store.list()).some((n) => n.precommitment === previousP && n.leaf !== undefined)) return true;
+      previousWatch ??= new DepositsWatch(vault, previousP, rpcs, { ...stored, deposits: 0 }, (c) => store.saveSyncCursor(c));
+      return (await previousWatch.read(signal)).state === "held";
+    };
     // The note's calls as last read (the store's, so a reload, a retry or another tab sees every call signed for it).
     let calls: readonly BindCall[] = [];
     const reread = async (): Promise<NoteRecord> => {
@@ -539,9 +536,10 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     // A signed call is written with the note before it leaves (one write under the notes lock; a failed write throws,
     // so nothing is sent). If another bind of the note wrote a call first, that call is followed and this one is
     // dropped, never sent: of two binds, only the first to write sends.
+    // The note's first call carries its search start: the watch's count, read before P leaves.
     const commit = async (c: SignedDepositDelegate): Promise<Step> => {
       const seen = calls.length;
-      const n = await store.addCall(own.noteId, { signed_delegate: c.signed_delegate, sender_id: c.sender_id, receiver_id: c.receiver_id, nonce: c.nonce, max_block_height: c.max_block_height, public_key: c.public_key, balance: c.balance }, seen);
+      const n = await store.addCall(own.noteId, { signed_delegate: c.signed_delegate, sender_id: c.sender_id, receiver_id: c.receiver_id, nonce: c.nonce, max_block_height: c.max_block_height, public_key: c.public_key, balance: c.balance }, seen, seen === 0 ? watch.from : undefined);
       calls = n.calls ?? [];
       const last = calls.at(-1);
       if (last === undefined || last.sender_id !== U) throw new DepositBindRefused("note", "the note holds no call of U");
@@ -589,11 +587,16 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
         return null;
       }
       const used = dead;
-      if ((await watch.read(signal)).state !== "absent") return null; // the pages once more, after the tx reads
+      const gone = await watch.read(signal, lapsed(out)); // the pages once more, after the tx reads
+      if (gone.state !== "absent") return null;
+      // U's USDC at that same block is back to what the dead call was signed from
+      if (ours) {
+        const balance = await balanceAt(U, token, rpcs, gone.height);
+        if (balance === null || balance < used.balance) return null;
+      }
       const c = await signing(async () => {
         const c = await depositDelegate(seed, own.s, own.i, call, rpcs);
         if (c.nonce <= out.nonce) throw new DepositBindRefused("nonce", "a new call must be past the dead one's nonce");
-        if (ours && c.balance < used.balance) throw new DepositBindRefused("early", "U's USDC is not back to what the dead call was signed from");
         return c;
       });
       return c === null ? null : commit(c);
@@ -601,21 +604,21 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
 
     // Settles a call that may be out: the pages hold P, or the call is dead (a lapse, or refused) and a next one is
     // signed and written. Returns the outcome, or the next call (to send, or another bind's to follow).
+    // P absent at a block past the window (the floor in the sync's cursor) and U's key nonce read at that block decide.
     const settle = async (out: SignedDepositDelegate): Promise<Step> => {
       for (;;) {
-        const pages = await watch.read(signal);
+        let pages = await watch.read(signal);
+        if (pages.state === "absent") pages = await watch.read(signal, lapsed(out));
         if (pages.state === "held") return land(pages.row);
         if (pages.state === "absent") {
-          const u = await readU(U, rpcs);
-          const low = u === null ? null : u.heights[0] < u.heights[1] ? u.heights[0] : u.heights[1];
-          if (u !== null && low !== null && low > out.max_block_height + LAPSE_MARGIN && (await watch.read(signal)).state === "absent") {
-            let next: Step | null = null;
-            if (u.nonce + 1n === out.nonce) {
-              const c = await signing(() => resignDeposit(seed, own.s, own.i, call, out, "lapse", rpcs)); // nothing landed: the same nonce
-              if (c !== null) next = await commit(c);
-            } else if (u.nonce >= out.nonce) next = await afterRefusal(out);
-            if (next !== null) return next;
-          }
+          const at = pages.height;
+          const u = await readU(U, rpcs, at);
+          let next: Step | null = null;
+          if (u !== null && u.nonce + 1n === out.nonce) {
+            const c = await signing(() => resignDeposit(seed, own.s, own.i, call, out, "lapse", rpcs, at)); // nothing landed: the same nonce
+            if (c !== null) next = await commit(c);
+          } else if (u !== null && u.nonce >= out.nonce) next = await afterRefusal(out);
+          if (next !== null) return next;
         }
         await pause();
       }
@@ -673,7 +676,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
           for (;;) {
             const mine = await watch.read(signal);
             if (mine.state === "held") return await land(mine.row);
-            if (watch.alsoState.state === "held") break;
+            if (await previousLanded()) break;
             await pause();
           }
         }
