@@ -1,19 +1,19 @@
-// node --test scripts/live-checks/relayer-fee-account.test.mjs: the live check replays recorded runs
-// (relayer-fee-account.answers.json). good: the deployed helper on 2026-11-06, mainnet answering 404 (no relayer quoted
+// node --test scripts/live-checks/vault-review-fixes-1.test.mjs: the live check replays recorded runs
+// (vault-review-fixes-1.answers.json). good: the deployed helper on 2026-11-06, mainnet answering 404 (no relayer quoted
 // there yet) and testnet quoting f-2b700409.bf-vt-20261102t071444.testnet, registered on the testnet token and not
 // blocklisted on FastNEAR and dRPC: PASS. bad: a stand-in helper quoting a fee account never registered, every RPC
 // answer the real testnet's: FAIL. Each block answer is recorded as its header's height and hash, the two fields
-// the check reads (relayer-fee-account.mjs recordedText). Made from the good run: the fee account blocklisted, the RPCs' bytes apart, a view
+// the check reads (vault-review-fixes-1.mjs recordedText). Made from the good run: the fee account blocklisted, the RPCs' bytes apart, a view
 // answered at another block, the quote not naming a fee_recipient, a 503, and no network quoted: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check } from "./relayer-fee-account.mjs";
+import { check } from "./vault-review-fixes-1.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const A = JSON.parse(readFileSync(path.join(HERE, "relayer-fee-account.answers.json"), "utf8"));
+const A = JSON.parse(readFileSync(path.join(HERE, "vault-review-fixes-1.answers.json"), "utf8"));
 
 // each request gets its recorded answer, by url and (for an RPC) its method and params; one never made is an error
 function replay(answers) {

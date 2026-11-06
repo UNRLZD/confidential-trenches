@@ -13,12 +13,12 @@
 //     relayer is quoted).
 //   - anything else: FAIL.
 // At least one network must be quoted. Every RPC read that fails or disagrees is a FAIL.
-//   node scripts/live-checks/relayer-fee-account.mjs [--base <url>] [--record <file>]
+//   node scripts/live-checks/vault-review-fixes-1.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
-const KEY = "relayer-fee-account";
+const KEY = "vault-review-fixes-1";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 export const TOKENS = { mainnet: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", testnet: "bf-usdc-20261101t022248.testnet" }; // gitleaks:allow (public account ids)
