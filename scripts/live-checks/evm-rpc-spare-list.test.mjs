@@ -13,6 +13,10 @@
 // spare past the second answering its chain id and that read; it passes. `badHistory` is a real run at 0d130f2f (main
 // before this half) against the deployed helper: the -32002 held on the first two is the caller's answer on both chains
 // and each maker list is three; it fails on each.
+// Card helper-evm-range-cap-walk: `good` is re-recorded on that card's branch at c0cc4d2b (a keyless helper started from it on
+// this Mac as --base, 2026-11-06 17:00Z), with its "cap" mode (the first two answering base-pokt.nodies.app's 50-block cap)
+// answered past them on each chain and Base's maker list of six (BlockPI dropped); it passes. Its bad answers are
+// replayed by helper-evm-range-cap-walk.test.mjs.
 //   node --test scripts/live-checks/evm-rpc-spare-list.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
