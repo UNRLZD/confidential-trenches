@@ -10,12 +10,16 @@
 // progress too, and says a deploy would refuse it. A testnet build is VITE_NEAR_NETWORK=testnet in the environment
 // (build/network.mjs). The upload is wrangler's `pages deploy`, at an exact version, run from an empty directory so no
 // functions/ folder can ride along (Pages applies no _headers rule to a Function's response). It needs
-// CLOUDFLARE_API_TOKEN (a Pages-only token) and CLOUDFLARE_ACCOUNT_ID in the environment; neither is printed.
+// CLOUDFLARE_API_TOKEN (a Pages-only token) and CLOUDFLARE_ACCOUNT_ID in the environment; neither is printed. A wrangler
+// exit 0 is not done: APP_HOST must then serve this build's / and main bundle (scripts/pages-readback.mjs, card
+// pages-deploy-readback), or it exits 1 naming both hashes and prints no next:.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ORIGINS } from "../../../scripts/live-checks/signpage-release.mjs";
+import { readBack } from "../../../scripts/pages-readback.mjs";
 import { TESTNET_RPCS } from "../build/network.mjs";
 import { checkDir } from "./check-deploy.ts";
 
@@ -53,7 +57,8 @@ export function build(env = process.env, run = spawnSync, repo = REPO) {
   return { dir, problems: [`the build failed (vite exit ${r.status ?? r.signal})${tail(r) ? `: ${tail(r)}` : ""}`] };
 }
 
-export function deploy(argv, env = process.env, run = spawnSync, make = () => build(env)) {
+/** The deploy: { code, out, err }. `net` is the read-back's fetch and sleep (scripts/pages-readback.mjs), a test's stand-ins. */
+export async function deploy(argv, env = process.env, run = spawnSync, make = () => build(env), net = {}) {
   const dryRun = argv.includes("--dry-run");
   const rest = argv.filter((a) => a !== "--dry-run");
   if (rest.length) return { code: 2, err: ["usage: node apps/terminal/scripts/deploy.mjs [--dry-run] (it takes no build folder: it builds HEAD itself)"] };
@@ -83,7 +88,10 @@ export function deploy(argv, env = process.env, run = spawnSync, make = () => bu
       stdio: "inherit",
     });
     if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-    return { code: 0, out: [`deployed HEAD ${sha} to ${PROJECT} on ${BRANCH}`, ...liveCommands(sha, networkOfBuild(dir))] };
+    // wrangler's exit 0 is its word, not the address's (6 Nov 09:21Z: "couldn't ascertain the final status", a Failure)
+    const back = await readBack(ORIGINS.APP_HOST, dir, net);
+    if (!back.ok) return { code: 1, err: [`uploaded HEAD ${sha} to ${PROJECT} on ${BRANCH}, but`, ...back.lines] };
+    return { code: 0, out: [`deployed HEAD ${sha} to ${PROJECT} on ${BRANCH}`, ...back.lines, ...liveCommands(sha, networkOfBuild(dir))] };
   } finally {
     if (!keep) rmSync(dir, { recursive: true, force: true });
   }
@@ -95,7 +103,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     console.log(JSON.stringify(liveList({ network: a.includes("--network") ? a[a.indexOf("--network") + 1] : "mainnet" })));
     process.exit(0);
   }
-  const r = deploy(process.argv.slice(2));
+  const r = await deploy(process.argv.slice(2));
   for (const l of r.out ?? []) console.log(`deploy: ${l}`);
   for (const l of r.err ?? []) console.error(`deploy: ${l}`);
   process.exit(r.code);

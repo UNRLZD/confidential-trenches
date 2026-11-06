@@ -183,7 +183,7 @@ const ENV = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
 test("deploy.mjs takes no build folder: it builds HEAD itself, so a folder built from another commit can never be uploaded", async () => {
   const { deploy } = await import("./deploy.mjs");
   const s = steps();
-  const r = deploy([copyOf(BUILD)], ENV, s.run, s.make);
+  const r = await deploy([copyOf(BUILD)], ENV, s.run, s.make);
   assert.equal(r.code, 2, r.out?.join("\n"));
   assert.match(r.err.join("\n"), /takes no build folder: it builds HEAD itself/);
   assert.deepEqual([s.made.length, s.uploads().length], [0, 0]);
@@ -192,7 +192,7 @@ test("deploy.mjs takes no build folder: it builds HEAD itself, so a folder built
 test("a failed build stops the deploy before a token is read or a byte is uploaded", async () => {
   const { deploy } = await import("./deploy.mjs");
   const s = steps({ problems: ["the build failed (vite exit 1): src/x.ts: Unexpected token"] });
-  const r = deploy([], {}, s.run, s.make);
+  const r = await deploy([], {}, s.run, s.make);
   assert.equal(r.code, 1, r.err?.join("\n"));
   assert.match(r.err.join("\n"), /REFUSED the build failed \(vite exit 1\)[\s\S]*nothing was uploaded/);
   assert.equal(s.uploads().length, 0);
@@ -201,18 +201,18 @@ test("a failed build stops the deploy before a token is read or a byte is upload
 test("an uncommitted tree or no HEAD is refused before the token: the upload is named by HEAD's commit, so it must be HEAD's build", async () => {
   const { deploy } = await import("./deploy.mjs");
   const dirty = steps({ status: " M packages/kit/src/index.ts\n" });
-  const r = deploy([], {}, dirty.run, dirty.make);
+  const r = await deploy([], {}, dirty.run, dirty.make);
   assert.equal(r.code, 1, r.out?.join("\n"));
   assert.match(r.err.join("\n"), /REFUSED the tree has uncommitted changes[\s\S]*packages\/kit\/src\/index\.ts[\s\S]*nothing was uploaded/);
   assert.deepEqual([dirty.installs().length, dirty.made.length, dirty.uploads().length], [0, 0, 0], "refused before the install and the build");
   const headless = steps({ head: "" });
-  const r2 = deploy([], ENV, headless.run, headless.make);
+  const r2 = await deploy([], ENV, headless.run, headless.make);
   assert.equal(r2.code, 1);
   assert.match(r2.err.join("\n"), /REFUSED no HEAD commit/);
   assert.equal(headless.uploads().length, 0);
   // --dry-run still builds and gates a work in progress, and says a deploy would refuse it
   const dry = steps({ status: " M apps/terminal/src/main.tsx\n" });
-  const d = deploy(["--dry-run"], {}, dry.run, dry.make);
+  const d = await deploy(["--dry-run"], {}, dry.run, dry.make);
   assert.equal(d.code, 0, d.err?.join("\n"));
   assert.match(d.out.join("\n"), /gate ok on [\s\S]*uncommitted changes: a deploy would refuse/);
 });
@@ -220,14 +220,14 @@ test("an uncommitted tree or no HEAD is refused before the token: the upload is 
 test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the repository root) after the tree reads and before the build", async () => {
   const { deploy } = await import("./deploy.mjs");
   const s = steps();
-  assert.equal(deploy([], ENV, s.run, s.make).code, 0);
+  assert.equal((await deploy([], ENV, s.run, s.make, appHost(s).net)).code, 0);
   assert.deepEqual(s.named().slice(0, 5), ["git -C " + s.calls[0]!.args[1] + " rev-parse", "git -C " + s.calls[0]!.args[1] + " status", "pnpm install --frozen-lockfile", "build", "pnpm dlx wrangler@4.151.1"]);
   const repo = s.calls[0]!.args[1]!;
   assert.equal(s.installs()[0]!.cwd, repo);
   assert.ok(existsSync(join(repo, "pnpm-lock.yaml")), repo);
   // --dry-run builds what a deploy would, so it installs too
   const d = steps();
-  assert.equal(deploy(["--dry-run"], {}, d.run, d.make).code, 0);
+  assert.equal((await deploy(["--dry-run"], {}, d.run, d.make)).code, 0);
   assert.deepEqual(d.named().slice(2, 4), ["pnpm install --frozen-lockfile", "build"]);
   rmSync(d.made[0]!, { recursive: true, force: true });
 });
@@ -235,12 +235,12 @@ test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the
 test("a failed install refuses before a token is read: no build, no upload", async () => {
   const { deploy } = await import("./deploy.mjs");
   const s = steps({ install: 1 });
-  const r = deploy([], {}, s.run, s.make);
+  const r = await deploy([], {}, s.run, s.make);
   assert.equal(r.code, 1, r.out?.join("\n"));
   assert.match(r.err.join("\n"), /REFUSED the install failed \(pnpm exit 1\): ERR_PNPM_OUTDATED_LOCKFILE[\s\S]*nothing was uploaded/);
   assert.deepEqual([s.made.length, s.uploads().length], [0, 0]);
   const d = steps({ install: 1 });
-  assert.equal(deploy(["--dry-run"], {}, d.run, d.make).code, 1);
+  assert.equal((await deploy(["--dry-run"], {}, d.run, d.make)).code, 1);
   assert.equal(d.made.length, 0);
 });
 
@@ -250,15 +250,15 @@ test("deploy.mjs runs the gate first: a refused build reaches no upload; a passi
   cpSync(BUILD, bad, { recursive: true });
   writeFileSync(join(bad, "_headers"), FILE.replace("script-src 'self';", "script-src 'self' 'wasm-unsafe-eval';"));
   const b = steps({ from: bad });
-  const r1 = deploy([], ENV, b.run, b.make);
+  const r1 = await deploy([], ENV, b.run, b.make);
   assert.equal(r1.code, 1);
   assert.match(r1.err.join("\n"), /REFUSED CSP script-src contains 'wasm-unsafe-eval'[\s\S]*nothing was uploaded/);
   assert.equal(b.uploads().length, 0);
   const s = steps();
-  assert.equal(deploy(["--dry-run"], ENV, s.run, s.make).code, 0);
-  assert.equal(deploy([], {}, s.run, s.make).code, 2);
+  assert.equal((await deploy(["--dry-run"], ENV, s.run, s.make)).code, 0);
+  assert.equal((await deploy([], {}, s.run, s.make)).code, 2);
   assert.equal(s.uploads().length, 0);
-  const r2 = deploy([], ENV, s.run, s.make);
+  const r2 = await deploy([], ENV, s.run, s.make, appHost(s).net);
   assert.equal(r2.code, 0, r2.err?.join("\n"));
   const up = s.uploads()[0]!;
   const dir = s.made.at(-1)!;
@@ -274,7 +274,7 @@ test("a fresh build at HEAD, by the terminal's own vite build, passes --dry-run"
   // the real git and vite build; the install alone is left out, since a test must not relink node_modules under the
   // other test files running beside it (the install's own place in the deploy is held above)
   const run = (cmd: string, args: string[], o: object) => (cmd === "pnpm" && args[0] === "install" ? { status: 0, stdout: "", stderr: "" } : spawnSync(cmd, args, o));
-  const r = deploy(["--dry-run"], process.env, run);
+  const r = await deploy(["--dry-run"], process.env, run);
   assert.equal(r.code, 0, r.err?.join("\n"));
   const dir = /gate ok on (\S+?);/.exec(r.out.join("\n"))![1]!;
   assert.ok(existsSync(join(dir, "index.html")) && existsSync(join(dir, "_headers")), dir);
@@ -284,7 +284,7 @@ test("a fresh build at HEAD, by the terminal's own vite build, passes --dry-run"
 test("deploy.mjs's live runs name every live check that reads APP_HOST, and its success line is the command that runs them on GitHub's runners", async () => {
   const { deploy, LIVE_CHECKS: CHECKS, liveRuns } = await import("./deploy.mjs");
   const s = steps();
-  const done = deploy([], ENV, s.run, s.make).out!;
+  const done = (await deploy([], ENV, s.run, s.make, appHost(s).net)).out!;
   assert.ok(done.includes("next: gh workflow run live.yml -f host=app -f commit=abc123"), done.join("\n"));
   assert.ok(done.includes("then: gh run watch --exit-status"), done.join("\n"));
   const out = CHECKS.flatMap((k: string) => liveRuns(k)).join("\n");
@@ -362,8 +362,54 @@ test("deploy.mjs refuses a build whose script bytes differ from their integrity:
   cpSync(BUILD, dir, { recursive: true });
   writeFileSync(join(dir, "assets/index-a1.js"), `${JS};`);
   const s = steps({ from: dir });
-  const r = deploy([], ENV, s.run, s.make);
+  const r = await deploy([], ENV, s.run, s.make);
   assert.equal(r.code, 1);
   assert.match(r.err.join("\n"), /REFUSED index\.html: script \/assets\/index-a1\.js: integrity [\s\S]*nothing was uploaded/);
   assert.equal(s.uploads().length, 0);
+});
+
+// card pages-deploy-readback: a stand-in for APP_HOST that serves the build wrangler was handed (what a deploy that
+// landed serves), with `old` answering some paths with other bytes (what a deploy that did not land serves); every read
+// is kept. The sleep between tries is a stand-in too, so the test does not wait the minute.
+const sha256 = (b: string | Buffer) => createHash("sha256").update(b).digest("hex");
+const appHost = (s: ReturnType<typeof steps>, old: Record<string, string> = {}) => {
+  const asked: string[] = [];
+  const slept: number[] = [];
+  const fetch = async (url: string) => {
+    asked.push(url);
+    const u = new URL(url);
+    const body = old[u.pathname] ?? readFileSync(join(s.made.at(-1)!, u.pathname === "/" ? "index.html" : u.pathname.slice(1)));
+    return new Response(body, { status: 200 });
+  };
+  return { asked, slept, net: { fetch, sleep: async (ms: number) => void slept.push(ms) } };
+};
+
+test("a deploy wrangler calls done while APP_HOST still serves the old bundle exits 1 with both hashes, and prints no next: line", async () => {
+  const { deploy } = await import("./deploy.mjs");
+  const s = steps();
+  const OLD = "console.log('release-57')\n";
+  const h = appHost(s, { "/assets/index-a1.js": OLD });
+  const r = await deploy([], ENV, s.run, s.make, h.net);
+  assert.equal(r.code, 1, r.out?.join("\n"));
+  const said = [...(r.out ?? []), ...(r.err ?? [])].join("\n");
+  assert.doesNotMatch(said, /next:/);
+  assert.match(said, new RegExp(`/assets/index-a1\\.js[^\\n]*${sha256(OLD)}[^\\n]*${sha256(JS)}`));
+  const tries = h.asked.filter((a) => new URL(a).pathname === "/assets/index-a1.js");
+  assert.ok(tries.length >= 3, `${tries.length} tries`);
+  assert.equal(new Set(tries.map((a) => new URL(a).search)).size, tries.length, "each try its own cache-buster");
+  for (const a of h.asked) assert.equal(new URL(a).origin, "https://confidential.unrealized.trade");
+  const waited = h.slept.reduce((a, b) => a + b, 0);
+  assert.ok(waited >= 45_000 && waited <= 90_000, `${waited} ms`);
+  assert.equal(existsSync(s.made.at(-1)!), false, "the build is removed");
+});
+
+test("a deploy whose APP_HOST serves exactly the build it uploaded (/ and its main bundle) prints next:", async () => {
+  const { deploy } = await import("./deploy.mjs");
+  const s = steps();
+  const h = appHost(s);
+  const r = await deploy([], ENV, s.run, s.make, h.net);
+  assert.equal(r.code, 0, r.err?.join("\n"));
+  assert.ok(r.out.includes("next: gh workflow run live.yml -f host=app -f commit=abc123"), r.out.join("\n"));
+  assert.deepEqual([...new Set(h.asked.map((a) => new URL(a).pathname))].sort(), ["/", "/assets/index-a1.js"]);
+  assert.ok(h.asked.every((a) => new URL(a).search), "every read carries a cache-buster");
 });
