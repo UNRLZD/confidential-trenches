@@ -296,14 +296,15 @@ interface Ready {
 /** The box with the safety grid under it: the desktop column and the phone sheet draw the same. */
 function Ticket({ r }: { r: Ready }) {
   const { row, risk } = r.data;
-  return <TradeBox chain={row.chain} token={row.token} symbol={row.symbol} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} />} />;
+  return <TradeBox chain={row.chain} token={row.token} symbol={row.symbol} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />;
 }
 
 /** The strip's and the tiles' Tax: the token read's transfer fee as the safety grid draws it (trade/safety.ts). */
 const taxOf = (r: Ready) => safetyCells(r.data.row, r.data.risk, r.nowMs).find((c) => c.id === "tax")!;
 
 function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartState }) {
-  const s = (x: string | undefined) => (v === null ? null : x!);
+  // null draws the tile's skeleton: the page is loading, or its row is still filling (card token-page-fills-after)
+  const s = (x: string | null | undefined) => (v === null ? null : (x ?? null));
   const tax = r ? taxOf(r) : null;
   return (
     <div className="tkp-desk">
@@ -323,7 +324,7 @@ function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartSt
                 <div className="tkp-meta">
                   {v.name && <span className="tkp-name" title={v.name}>{v.name}</span>}
                   {v.name && <span className="tkp-sep" aria-hidden="true">|</span>}
-                  <span className="tkp-num">{v.age}</span>
+                  {v.age === null ? <SkLine cls="tkp-num" w={28} /> : <span className="tkp-num">{v.age}</span>}
                   <span className="tkp-sep" aria-hidden="true">|</span>
                   <span className="tkp-num tkp-ca" title={v.token}>{v.token}</span>
                   <CopyBtn token={v.token} cls="tkp-copy" />
@@ -336,10 +337,10 @@ function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartSt
           <div className="tkp-strip">
             <div className="tkp-mc">
               <span className="tkp-lbl"><W id="mc" /></span>
-              {v ? <span className="tkp-mcval">{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
+              {v?.mc != null ? <span className="tkp-mcval">{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
             </div>
             <Tile k="price" label="price" value={s(v?.priceTile)} />
-            <Tile k="change" label="change" value={s(v?.chgTile)} dir={v?.chg.dir} />
+            <Tile k="change" label="change" value={s(v?.chgTile)} dir={v?.chg?.dir} />
             <Tile k="tax" label="tax" value={tax?.text ?? null} tone={tax?.tone} />
             <Tile k="vol" label="vol" value={s(v?.vol)} />
             <Tile k="liq" label={v?.curve.on ? "inCurve" : "liq"} value={s(v?.liq)} />
@@ -379,7 +380,7 @@ function TradeSheet({ v, r, onClose }: { v: TokenView; r: Ready; onClose: () => 
           <Avatar symbol={v.symbol} size={40} pad={v.launchpad} chain={v.chain} />
           <div className="tkp-stitle">
             <span className="tkp-ssym" title={v.symbol}>{v.symbol}</span>
-            <span className="tkp-sprice">{v.price}</span>
+            {v.price === null ? <SkLine cls="tkp-sprice" w={80} /> : <span className="tkp-sprice">{v.price}</span>}
           </div>
         </div>
         <Ticket r={r} />
@@ -405,7 +406,9 @@ function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartStat
   const [sheet, setSheet] = useState(false);
   const tax = r ? taxOf(r) : null;
   const cells = r ? safetyCells(r.data.row, r.data.risk, r.nowMs) : null;
-  const cell = (id: "top10" | "dev") => cells?.find((x) => x.id === id) ?? null;
+  // while the row fills, a holder share it has no value for yet is still loading (card token-page-fills-after)
+  const waits = (f: "top10_bps" | "dev_bps") => v?.filling === true && r !== null && r.data.row[f] == null;
+  const cell = (id: "top10" | "dev") => (waits(id === "top10" ? "top10_bps" : "dev_bps") ? null : (cells?.find((x) => x.id === id) ?? null));
   const open = () => setSheet(true);
   const close = useCallback(() => setSheet(false), []);
   return (
@@ -419,15 +422,15 @@ function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartStat
       </div>
       <div className="tkp-hero">
         <div className="tkp-pricerow">
-          {v ? <span className="tkp-price">{v.price}</span> : <SkLine cls="tkp-price" w={160} />}
-          {v && <span className="tkp-chg" data-dir={v.chg.dir}>{v.chg.text}</span>}
-          {v && <span className="tkp-h24"><W id="h24" /></span>}
+          {v?.price != null ? <span className="tkp-price">{v.price}</span> : <SkLine cls="tkp-price" w={160} />}
+          {v?.chg && <span className="tkp-chg" data-dir={v.chg.dir}>{v.chg.text}</span>}
+          {v?.chg && <span className="tkp-h24"><W id="h24" /></span>}
         </div>
         {v ? (
           <div className="tkp-meta">
             {v.name && <span className="tkp-name" title={v.name}>{v.name}</span>}
             {v.name && <span className="tkp-dot" aria-hidden="true" />}
-            <span className="tkp-num">{v.age}</span>
+            {v.age === null ? <SkLine cls="tkp-num" w={28} /> : <span className="tkp-num">{v.age}</span>}
             <span className="tkp-dot" aria-hidden="true" />
             <CopyBtn token={v.token} cls="tkp-mca">
               <span className="tkp-num tkp-ca">{v.token}</span>
@@ -455,7 +458,7 @@ function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartStat
         ).map(([k, label, value, tone]) => (
           <div key={k} className="tkp-mtile" data-k={k}>
             <span className="tkp-lbl"><W id={label} /></span>
-            {value !== undefined && v ? <span className="tkp-val" data-tone={tone}>{value}</span> : <SkLine cls="tkp-val" w={70} />}
+            {value != null && v ? <span className="tkp-val" data-tone={tone}>{value}</span> : <SkLine cls="tkp-val" w={70} />}
             <span className="tkp-viz" aria-hidden="true" />
           </div>
         ))}
@@ -492,11 +495,11 @@ export function TokenPage({ data, nowMs, onRetry }: { data: TokenData; nowMs: nu
         {data.status === "error" && <button type="button" className="tkp-retry" onClick={onRetry}>{WORDS.retry.text}</button>}
       </section>
     );
-  const v = data.status === "ready" ? tokenView(data.row, nowMs) : null;
+  const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
   const c: ChartState = { sym: v?.symbol ?? null, tf, onTf: setTf, data: candles, retry };
   return (
-    <section className="tkp" data-token-page={data.status} data-token={v?.token} aria-busy={v === null} aria-label={v === null ? WORDS.loading.text : undefined}>
+    <section className="tkp" data-token-page={data.status} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
       <Desktop v={v} r={ready} c={c} />
       <Phone v={v} r={ready} c={c} />
     </section>

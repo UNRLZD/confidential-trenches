@@ -30,17 +30,23 @@ function Mark({ icon }: { icon: Icon }) {
   );
 }
 
-export function SafetyGrid({ row, risk, nowMs }: { row: MarketRow; risk?: RiskRead | null; nowMs: number }) {
+/** `filling` (the token page's, card token-page-fills-after): Jupiter's row is still coming, so a cell with no value
+ *  draws the page's skeleton (token.css .tkp-sk, the token page's SkLine) instead of the dash. */
+export function SafetyGrid({ row, risk, nowMs, filling = false }: { row: MarketRow; risk?: RiskRead | null; nowMs: number; filling?: boolean }) {
   const cells = safetyCells(row, risk, nowMs);
   return (
     <div className="rg-grid" data-testid="safety-grid">
       {cells.map((c, i) => (
         <div key={c.id + i} className="rg-cell" data-tone={toneAt(i, c)} data-cell={c.id}>
           <span className="rg-label"><W id={c.id} /></span>
-          <span className="rg-value">
-            {c.icon && <Mark icon={c.icon} />}
-            {c.word ? <W id={c.word} /> : c.text}
-          </span>
+          {filling && c.tone === "unknown" ? (
+            <span className="rg-value tkp-sk" style={{ width: 40 }} aria-hidden="true">{"\u00a0"}</span>
+          ) : (
+            <span className="rg-value">
+              {c.icon && <Mark icon={c.icon} />}
+              {c.word ? <W id={c.word} /> : c.text}
+            </span>
+          )}
         </div>
       ))}
     </div>
