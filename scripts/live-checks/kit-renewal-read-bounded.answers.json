@@ -1,6 +1,6 @@
 {
  "good": {
-  "at": "2026-11-05T14:03:05.203Z",
+  "at": "2026-11-06T01:33:04.444Z",
   "source": "this checkout, packages/signpage",
   "pageStatus": 200,
   "js": [
@@ -18,7 +18,7 @@
     ]
    }
   ],
-  "note": "this card: packages/signpage as committed (index.html, public/app.js rebuilt by build-app.mjs on the fix, the fold and the review fold), read from disk"
+  "note": "card pool-read-down: packages/signpage as committed at 42278e1d (index.html, public/app.js rebuilt by build-app.mjs on the fold, the signer setting its signing flag), read from disk"
  },
  "bad": {
   "at": "2026-11-05T14:03:05.762Z",
