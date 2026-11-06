@@ -7,8 +7,9 @@
 // run time, each good but for one field. The sell they are made from passes every static check: W's Sell signed over
 // SellDelegate's digest, W's authorization of the kit's pinned sell delegate (evmPoolSignSellAuthorization), a swap the
 // kit's sell builder makes (one v4 hop through the PoolManager, read back by evmSellRouteOf), the pool the record
-// names, the fee answer's fee_recipient as the Sell's feeRecipient (card helper-sell-fee-recipient: the 11-field Sell
-// of SellDelegate at pool-review-3), fee <= feeCap < minOut, a deadline 300 s away. Its authorization nonce is 2^62, which no fresh W
+// names, the fee answer's fee_collector as the Sell's feeRecipient (card helper-sell-fee-recipient: the 11-field Sell
+// of SellDelegate at pool-review-3; card helper-sender-fee-proof: the network's FeeCollector, whose Paid log proves the
+// fee), fee <= feeCap < minOut, a deadline 300 s away. Its authorization nonce is 2^62, which no fresh W
 // holds, so a helper that skipped a static check still stops at auth_nonce, before any send.
 //   - "auth_chain_zero": the authorization signed with chainId 0 (bad_authorization);
 //   - "auth_other_delegate": the authorization of another delegate (bad_authorization);
@@ -21,7 +22,8 @@
 //   - "route_other_target": the swap's target 0x...dead, neither the PoolManager nor a listed router (bad_route).
 // It passes only when:
 //   - the fee answers 200 with exactly EvmFeeAnswer's fields, chain "evm", the network and pool asked, a sell_sender (an
-//     address, or null where no sell key is set) and a fee recipient address, a 60 s epoch on its grid, a block, a fee in wei and the 10^13 step; and where the kit pins a
+//     address, or null where no sell key is set), a fee recipient address and a fee collector address (null where none
+//     is set, which refuses every sell, so the plants fail here until it is set), a 60 s epoch on its grid, a block, a fee in wei and the 10^13 step; and where the kit pins a
 //     sell sender for the network (evmPoolVenues() sellSender), the sender is that pin (the device sims each sale from
 //     it, so a sale from any other key runs where the sim did not);
 //   - every plant answers its own status and code (PLANTS), so none was sent;
@@ -55,7 +57,7 @@ export const poolRecord = (network) => `pool-evm-deploy.${network}.json`;
 /** The fee answer's field naming the helper's sell sender: an address, or null where no sell key is set */
 export const SENDER_FIELD = "sell_sender";
 /** EvmFeeAnswer's fields (apps/helper/src/pool/evm.ts). */
-export const FIELDS = ["chain", "network", "pool", "fee_recipient", SENDER_FIELD, "epoch_ms", "epoch_start_ms", "block", "fee", "step"];
+export const FIELDS = ["chain", "network", "pool", "fee_recipient", SENDER_FIELD, "fee_collector", "epoch_ms", "epoch_start_ms", "block", "fee", "step"];
 /** Each plant, the status and the code it must get. */
 export const PLANTS = [
   ["auth_chain_zero", 422, "bad_authorization"],
@@ -120,6 +122,7 @@ export function judge(run, { records = evmPoolRecords(), venues = evmPoolVenues(
     const isAddress = typeof sender === "string" && ADDRESS.test(sender);
     say((sender === null || isAddress) && (pin === undefined || (isAddress && pin.toLowerCase() === sender)), `[${n} fee] ${SENDER_FIELD} ${show(sender)}, ${pin === undefined ? "the kit pins none for this network" : `the kit's pin ${pin}`}`);
     say(typeof b?.fee_recipient === "string" && ADDRESS.test(b.fee_recipient), `[${n} fee] fee recipient ${show(b?.fee_recipient)}`);
+    say(typeof b?.fee_collector === "string" && ADDRESS.test(b.fee_collector) && b.fee_collector !== b.pool && b.fee_collector !== sender, `[${n} fee] fee collector ${show(b?.fee_collector)}, not the pool or the sell sender`);
     say(b?.epoch_ms === 60_000 && Number.isSafeInteger(b?.epoch_start_ms) && b.epoch_start_ms > 0 && b.epoch_start_ms % 60_000 === 0, `[${n} fee] epoch ${show(b?.epoch_ms)} ms from ${show(b?.epoch_start_ms)}`);
     say(typeof b?.block === "string" && QUANTITY.test(b.block) && typeof b?.fee === "string" && DEC.test(b.fee) && b.fee !== "0" && b?.step === "10000000000000", `[${n} fee] block ${show(b?.block)}, fee ${show(b?.fee)} wei on its step ${show(b?.step)}`);
     for (const [asked, status, code] of PLANTS) {
@@ -303,6 +306,13 @@ export async function checkSells(runs, transportOf, senders) {
 // ---- The reads ----
 
 /** The fee recipient a fee answer's body names, lowercase, or null where it names no address */
+/** The fee answer's fee_collector, the address every Sell must pay (card helper-sender-fee-proof), or null. */
+export const feeCollectorOf = (body) => {
+  const b = json(body ?? "");
+  const a = typeof b?.fee_collector === "string" ? b.fee_collector.toLowerCase() : null;
+  return a !== null && ADDRESS.test(a) ? a : null;
+};
+
 export const feeRecipientOf = (body) => {
   const b = json(body ?? "");
   const a = typeof b?.fee_recipient === "string" ? b.fee_recipient.toLowerCase() : null;
@@ -330,8 +340,8 @@ export async function read(base, fetchFn = fetch) {
     };
     await get("fee", `${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`);
     // the plants are built just before they are sent, so the deadlines are measured from now; each pays the fee
-    // recipient the fee answer names (none named: another address, so the judge fails on the fee answer)
-    const { plants } = plantsOf({ network, pool, feeRecipient: feeRecipientOf(reads[0].body) ?? OTHER_ADDRESS });
+    // collector the fee answer names (none named: another address, so the judge fails on the fee answer)
+    const { plants } = plantsOf({ network, pool, feeRecipient: feeCollectorOf(reads[0].body) ?? OTHER_ADDRESS });
     for (const [asked] of PLANTS) await get(asked, `${base}/v1/pool/evm/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(plants[asked]) });
     pools.push({ network, pool, reads });
   }

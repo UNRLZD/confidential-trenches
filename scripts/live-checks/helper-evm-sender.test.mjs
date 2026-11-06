@@ -88,6 +88,10 @@ test("the fee answer: a field missing or added, another chain, network or pool, 
     }))).ok, false, `${k} missing`);
   }
   assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, extra: 1 })))).ok, false, "a field added");
+  // the fee collector (card helper-sender-fee-proof): none set, the pool's address, or the sell sender's: each FAIL
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: null })))).ok, false, "no fee collector");
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: b.pool })))).ok, false, "the collector is the pool");
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: b.sell_sender })))).ok, false, "the collector is the sell sender");
   assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, chain: "solana" })))).ok, false);
   assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, network: "base" })))).ok, false);
   assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, pool: OTHER })))).ok, false);
@@ -141,7 +145,7 @@ test("plantsOf() builds what the helper's sell checks read: each plant its own s
   assert.deepEqual(Object.keys(records), ["base-sepolia", "robinhood-testnet"]);
   for (const [network, pool] of Object.entries(records)) {
     const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW });
-    const sender = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey: randomKey(), feeRecipient: FEE_TO, floor: 10n ** 13n }, [recording(calls), recording(calls)], () => NOW);
+    const sender = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey: randomKey(), feeRecipient: FEE_TO, feeCollector: FEE_TO, floor: 10n ** 13n }, [recording(calls), recording(calls)], () => NOW);
     {
       const calls = [];
       const a = await sender(calls).sell(p.base);
@@ -177,7 +181,7 @@ test("each plant differs from the base sell in its one field (and the signature 
   for (const [network, pool] of Object.entries(evmPoolRecords())) {
     const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW });
     const base = read2(p.base);
-    assert.equal(base["sell.feeRecipient"], FEE_TO, "every plant pays the fee answer's fee recipient");
+    assert.equal(base["sell.feeRecipient"], FEE_TO, "every plant pays the fee answer's fee collector");
     const v = evmPoolVenues()[network];
     // the base's authorization is the kit's own, of the chain's pinned delegate
     const kit = evmPoolSignSellAuthorization(p.wKey, network, BigInt(p.base.authorization.nonce));
@@ -220,7 +224,7 @@ test("read() asks each record's pool for its fee, then posts every plant to the 
   const records = evmPoolRecords();
   assert.deepEqual(asked, Object.values(records).flatMap((pool) => [`GET /v1/pool/fee?pool=${pool}`, ...PLANTS.map(() => "POST /v1/pool/evm/sell")]));
   assert.deepEqual(run.pools.map((p) => [p.network, p.pool, p.reads.map((x) => x.asked)]), Object.entries(records).map(([n, pool]) => [n, pool, ["fee", ...PLANTS.map(([a]) => a)]]));
-  const named = Object.fromEntries(A.good.pools.map((p) => [p.pool, JSON.parse(p.reads[0].body).fee_recipient]));
+  const named = Object.fromEntries(A.good.pools.map((p) => [p.pool, JSON.parse(p.reads[0].body).fee_collector]));
   assert.equal(paid.length, Object.keys(records).length * PLANTS.length);
   for (const [pool, to] of paid) assert.equal(to, named[pool], `${pool}: the plant pays ${to}`);
 });

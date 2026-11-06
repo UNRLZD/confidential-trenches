@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 // Live check of card helper-sell-fee-recipient: HELPER_HOST reads SellDelegate's 11-field Sell (feeRecipient after
 // feeCap, contracts/pool-evm/src/SellDelegate.sol at pool review round 3) and sends a sale only when its fee goes to the
-// fee recipient its fee answer names (apps/helper/src/pool/evm.ts sellHeld, 422 fee_recipient), without sending
-// anything or moving money. For each testnet pool its deploy record names (helper-evm-sender.mjs evmPoolRecords) it
-// reads GET /v1/pool/fee?pool=<pool>, then POSTs three sells made by helper-evm-sender.mjs plantsOf (a throwaway W
-// key made at run time, W's authorization nonce 2^62, which no fresh W holds):
-//   - "pays_fee_recipient": the sell paying the fee answer's fee_recipient. It passes every static check, the 11-field
+// network's fee collector its fee answer names (card helper-sender-fee-proof: fee_collector, the FeeCollector whose Paid
+// log proves the fee; apps/helper/src/pool/evm.ts sellHeld, 422 fee_recipient), without sending anything or moving
+// money. For each testnet pool its deploy record names (helper-evm-sender.mjs evmPoolRecords) it reads
+// GET /v1/pool/fee?pool=<pool>, then POSTs four sells made by helper-evm-sender.mjs plantsOf (a throwaway W key made at
+// run time, W's authorization nonce 2^62, which no fresh W holds):
+//   - "pays_collector": the sell paying the fee answer's fee_collector. It passes every static check, the 11-field
 //     shape and the fee recipient included, and stops at W's nonce read: 422 auth_nonce, nothing sent;
+//   - "pays_fee_recipient": the same sell paying the fee answer's fee_recipient (a withdraw's, which leaves no proof of
+//     a sale's fee): 422 fee_recipient;
 //   - "pays_other": the same sell paying 0x...beef: 422 fee_recipient;
-//   - "pays_sell_sender": the same sell paying the fee answer's sell_sender (the helper's own sell key, not the
-//     release's fee recipient): 422 fee_recipient.
-// It passes only when the fee answer is 200 with fee_recipient and sell_sender two different addresses, every sell
-// answers its own status and code with no hash, and every answer carries a full-sha X-Helper-Commit.
+//   - "pays_sell_sender": the same sell paying the fee answer's sell_sender (the helper's own sell key): 422
+//     fee_recipient.
+// It passes only when the fee answer is 200 with fee_collector, fee_recipient and sell_sender three different addresses
+// (a network with no collector set refuses every sell, and fails here until its collector is set), every sell answers
+// its own status and code with no hash, and every answer carries a full-sha X-Helper-Commit.
 //   node scripts/live-checks/helper-sell-fee-recipient.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -20,7 +24,8 @@ import { BASE, evmPoolRecords, feeRecipientOf, plantsOf } from "./helper-evm-sen
 
 /** Each sell, the status and the code it must get. */
 export const SELLS = [
-  ["pays_fee_recipient", 422, "auth_nonce"],
+  ["pays_collector", 422, "auth_nonce"],
+  ["pays_fee_recipient", 422, "fee_recipient"],
   ["pays_other", 422, "fee_recipient"],
   ["pays_sell_sender", 422, "fee_recipient"],
 ];
@@ -50,7 +55,9 @@ export function judge(run, records = evmPoolRecords()) {
     const b = json(f?.body ?? "");
     const to = feeRecipientOf(f?.body);
     const seller = typeof b?.sell_sender === "string" ? b.sell_sender.toLowerCase() : null;
-    say(f?.status === 200 && to !== null && seller !== null && ADDRESS.test(seller) && seller !== to, `[${n} fee] ${f?.status}: fee_recipient ${show(b?.fee_recipient)}, sell_sender ${show(b?.sell_sender)}, two addresses`);
+    const coll = typeof b?.fee_collector === "string" ? b.fee_collector.toLowerCase() : null;
+    const three = [to, seller, coll];
+    say(f?.status === 200 && three.every((a) => a !== null && ADDRESS.test(a)) && new Set(three).size === 3, `[${n} fee] ${f?.status}: fee_collector ${show(b?.fee_collector)}, fee_recipient ${show(b?.fee_recipient)}, sell_sender ${show(b?.sell_sender)}, three addresses`);
     for (const [asked, status, code] of SELLS) {
       const r = p.reads.find((x) => x.asked === asked);
       const e = json(r?.body ?? "");
@@ -61,9 +68,10 @@ export function judge(run, records = evmPoolRecords()) {
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
-/** The three sells for `pool`, each paying `payee` of its own: the fee answer's fee_recipient, another, the sell sender. */
-export function sellsOf({ network, pool, feeRecipient, sellSender, nowMs = Date.now() }) {
-  const pays = { pays_fee_recipient: feeRecipient, pays_other: OTHER, pays_sell_sender: sellSender };
+/** The four sells for `pool`, each paying a payee of its own: the fee answer's fee_collector, its fee_recipient,
+ *  another, the sell sender. */
+export function sellsOf({ network, pool, feeCollector, feeRecipient, sellSender, nowMs = Date.now() }) {
+  const pays = { pays_collector: feeCollector, pays_fee_recipient: feeRecipient, pays_other: OTHER, pays_sell_sender: sellSender };
   return Object.fromEntries(SELLS.map(([asked]) => [asked, plantsOf({ network, pool, feeRecipient: pays[asked], nowMs }).base]));
 }
 
@@ -77,9 +85,10 @@ export async function read(base, fetchFn = fetch, records = evmPoolRecords()) {
     };
     await get("fee", `${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`);
     const b = json(reads[0].body);
-    const seller = typeof b?.sell_sender === "string" && ADDRESS.test(b.sell_sender.toLowerCase()) ? b.sell_sender.toLowerCase() : OTHER;
-    // built just before they are sent, so the deadlines are measured from now
-    const sells = sellsOf({ network, pool, feeRecipient: feeRecipientOf(reads[0].body) ?? OTHER, sellSender: seller });
+    const addr = (v) => (typeof v === "string" && ADDRESS.test(v.toLowerCase()) ? v.toLowerCase() : OTHER);
+    // built just before they are sent, so the deadlines are measured from now; a payee the answer does not name is
+    // OTHER, so the judge fails on the fee answer
+    const sells = sellsOf({ network, pool, feeCollector: addr(b?.fee_collector), feeRecipient: feeRecipientOf(reads[0].body) ?? OTHER, sellSender: addr(b?.sell_sender) });
     for (const [asked] of SELLS) await get(asked, `${base}/v1/pool/evm/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sells[asked]) });
     pools.push({ network, pool, reads });
   }

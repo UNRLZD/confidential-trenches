@@ -1,8 +1,10 @@
 // node --test scripts/live-checks/helper-sell-fee-recipient.test.mjs: the live check replays recorded runs
-// (helper-sell-fee-recipient.answers.json). good: a local helper at this card's commit with both EVM testnet pools:
-// PASS. bad_deployed: HELPER_HOST before the redeploy, which reads the 10-field Sell (400 bad_shape on each sell): FAIL.
-// Made from the good run: a sell paying the wrong address accepted (auth_nonce, or sent with a hash), the fee recipient
-// sell refused as fee_recipient, a fee answer naming one address for both or none, a missing commit or read: each FAIL.
+// (helper-sell-fee-recipient.answers.json). good: a local helper at card helper-sender-fee-proof's commit with both EVM
+// testnet pools and a fee collector stand-in: PASS. bad_fee_recipient: card helper-sell-fee-recipient's own good run (a
+// local helper at feb84e3a), which lets a Sell paying the withdraw's fee recipient through and names no collector: FAIL.
+// bad_deployed: HELPER_HOST before the redeploy, which reads the 10-field Sell (400 bad_shape on each sell): FAIL.
+// Made from the good run: a sell paying the wrong address accepted (auth_nonce, or sent with a hash), the collector's
+// sell refused as fee_recipient, a fee answer naming one address for two or none, a missing commit or read: each FAIL.
 // The sells are checked against the helper's own sell checks (apps/helper/src/pool/evm.ts), so each reaches the check
 // the live check names it for.
 import assert from "node:assert/strict";
@@ -20,16 +22,26 @@ const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (run, asked, f, network) => ({ ...run, pools: run.pools.map((p) => (network && p.network !== network ? p : { ...p, reads: p.reads.map((x) => (x.asked === asked ? f(x) : x)) })) });
 const body = (x, f) => ({ ...x, body: JSON.stringify(f(JSON.parse(x.body))) });
 
-test("recorded good run: a local helper at this card's commit refuses each sell paying another than its fee recipient, and lets the one paying it through to W's nonce read: PASS", () => {
+test("recorded good run: a local helper at card helper-sender-fee-proof's commit refuses each sell paying another than its fee collector, and lets the one paying it through to W's nonce read: PASS", () => {
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.deepEqual(A.good.pools.map((p) => p.network), Object.keys(evmPoolRecords()));
 });
 
+test("recorded bad run: a helper that takes a Sell paying the withdraw's fee recipient and names no fee collector: FAIL", () => {
+  const r = judge(A.bad_fee_recipient);
+  assert.equal(r.ok, false);
+  for (const p of A.bad_fee_recipient.pools) {
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD [${p.network} fee]`) && l.includes("fee_collector none")), bad(r).join("\n"));
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD [${p.network} pays_fee_recipient] POST /v1/pool/evm/sell answers 422`) && l.includes("auth_nonce")), bad(r).join("\n"));
+  }
+});
+
 test("recorded bad run: HELPER_HOST on the 10-field Sell answers 400 bad_shape to each sell: FAIL", () => {
   const r = judge(A.bad_deployed);
   assert.equal(r.ok, false);
-  for (const p of A.bad_deployed.pools) for (const [asked] of SELLS) assert.ok(bad(r).some((l) => l.startsWith(`BAD [${p.network} ${asked}] POST /v1/pool/evm/sell answers 400`)), bad(r).join("\n"));
+  // recorded before pays_collector was asked: each sell it read answers 400 bad_shape, and pays_collector is not read
+  for (const p of A.bad_deployed.pools) for (const [asked] of SELLS.filter(([a]) => a !== "pays_collector")) assert.ok(bad(r).some((l) => l.startsWith(`BAD [${p.network} ${asked}] POST /v1/pool/evm/sell answers 400`)), bad(r).join("\n"));
 });
 
 test("a sell paying the wrong address accepted, the right one refused, a sell sent, or another status: each FAIL, on each pool", () => {
@@ -53,6 +65,9 @@ test("the fee answer: not 200, no fee recipient, no sell sender, or one address 
   assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_recipient: null })))).ok, false);
   assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, sell_sender: null })))).ok, false);
   assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, sell_sender: b.fee_recipient })))).ok, false, "one address for both");
+  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: null })))).ok, false, "no collector");
+  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: b.fee_recipient })))).ok, false, "the collector is the fee recipient");
+  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: b.sell_sender })))).ok, false, "the collector is the sell sender");
   for (const asked of ["fee", ...SELLS.map(([a]) => a)]) {
     assert.equal(judge(edit(g, asked, (x) => ({ ...x, headers: Object.fromEntries(Object.entries(x.headers).filter(([k]) => k !== "x-helper-commit")) }))).ok, false, `${asked}: no commit`);
     assert.equal(judge(edit(g, asked, (x) => ({ ...x, headers: { ...x.headers, "x-helper-commit": x.headers["x-helper-commit"].slice(0, 7) } }))).ok, false, `${asked}: a short commit`);
@@ -65,27 +80,28 @@ test("the fee answer: not 200, no fee recipient, no sell sender, or one address 
 
 const NOW = 1_800_000_000_000;
 const FEE_TO = "0x000000000000000000000000000000000000fee1";
+const COLLECTOR = "0x000000000000000000000000000000000000c011";
 /** A provider that records each call and answers none: a body that reaches it passed every static check. */
 const recording = (calls) => async (method, params) => {
   calls.push({ method, params });
   throw new Error("HTTP 502");
 };
 
-test("sellsOf() builds what the helper reads: the 11-field Sell, each paying its own address; the fee recipient's reaches the RPC reads, the others are fee_recipient with no RPC call", async () => {
+test("sellsOf() builds what the helper reads: the 11-field Sell, each paying its own address; the collector's reaches the RPC reads, the others are fee_recipient with no RPC call", async () => {
   for (const [network, pool] of Object.entries(evmPoolRecords())) {
     const sellKey = randomKey();
-    const s = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey, feeRecipient: FEE_TO }, [recording(calls), recording(calls)], () => NOW);
+    const s = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey, feeRecipient: FEE_TO, feeCollector: COLLECTOR }, [recording(calls), recording(calls)], () => NOW);
     const seller = s([]).sellSender;
-    const sells = sellsOf({ network, pool, feeRecipient: FEE_TO, sellSender: seller, nowMs: NOW });
+    const sells = sellsOf({ network, pool, feeCollector: COLLECTOR, feeRecipient: FEE_TO, sellSender: seller, nowMs: NOW });
     assert.deepEqual(Object.keys(sells), SELLS.map(([a]) => a));
     const pays = Object.fromEntries(Object.entries(sells).map(([k, b]) => [k, evmReadSell(new Uint8Array(Buffer.from(b.data.slice(2), "hex"))).feeRecipient]));
-    assert.deepEqual(pays, { pays_fee_recipient: FEE_TO, pays_other: OTHER, pays_sell_sender: seller });
+    assert.deepEqual(pays, { pays_collector: COLLECTOR, pays_fee_recipient: FEE_TO, pays_other: OTHER, pays_sell_sender: seller });
     {
       const calls = [];
-      const a = await s(calls).sell(sells.pays_fee_recipient);
-      assert.ok(calls.length > 0, `${network}: the fee recipient's sell passes every static check (${JSON.stringify(a.body)})`);
+      const a = await s(calls).sell(sells.pays_collector);
+      assert.ok(calls.length > 0, `${network}: the collector's sell passes every static check (${JSON.stringify(a.body)})`);
     }
-    for (const asked of ["pays_other", "pays_sell_sender"]) {
+    for (const asked of ["pays_fee_recipient", "pays_other", "pays_sell_sender"]) {
       const calls = [];
       const a = await s(calls).sell(sells[asked]);
       assert.deepEqual([a.status, a.body?.error?.code], [422, "fee_recipient"], `${network} ${asked}: ${JSON.stringify(a.body)}`);
@@ -94,7 +110,7 @@ test("sellsOf() builds what the helper reads: the 11-field Sell, each paying its
   }
 });
 
-test("read() asks each pool for its fee, then posts the three sells, each paying the fee answer's fee recipient, another, and its sell sender (replayed helper)", async () => {
+test("read() asks each pool for its fee, then posts the four sells, each paying the fee answer's fee collector, its fee recipient, another, and its sell sender (replayed helper)", async () => {
   const asked = [];
   const paid = [];
   const fetchFn = async (url, init) => {
@@ -111,5 +127,5 @@ test("read() asks each pool for its fee, then posts the three sells, each paying
   assert.deepEqual(asked, Object.values(records).flatMap((pool) => [`GET /v1/pool/fee?pool=${pool}`, ...SELLS.map(() => "POST /v1/pool/evm/sell")]));
   assert.deepEqual(run.pools.map((p) => [p.network, p.reads.map((x) => x.asked)]), Object.keys(records).map((n) => [n, ["fee", ...SELLS.map(([a]) => a)]]));
   const fees = A.good.pools.map((p) => JSON.parse(p.reads[0].body));
-  assert.deepEqual(paid, fees.flatMap((f) => [f.fee_recipient, OTHER, f.sell_sender]));
+  assert.deepEqual(paid, fees.flatMap((f) => [f.fee_collector, f.fee_recipient, OTHER, f.sell_sender]));
 });
