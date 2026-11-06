@@ -7,7 +7,7 @@
 //   GET /v1/market/holders?chain=solana&token=<mint>
 //   GET /v1/market/candles?chain=solana&token=<mint>&tf=1h&limit=24
 // and passes only when each answers 200 JSON with X-Helper-Commit a full sha, its X-Helper-Source, X-Fetched-At an ISO
-// time within 10 minutes of the read and Access-Control-Allow-Origin echoing APP_HOST, and its body holds exactly the
+// time within 10 minutes of that answer's own read (freshAt) and Access-Control-Allow-Origin echoing APP_HOST, and its body holds exactly the
 // frozen fields in their wire forms:
 //   - token: TokenPage {row, decimals, pool, risk, route}, then `filling` (a boolean, card token-page-fills-after: true
 //     only for a page named on chain whose Jupiter row is still coming, so never on a row of another source; a helper
@@ -106,7 +106,21 @@ export function candlesFault(c) {
   return null;
 }
 
-/** The check on one recorded run { mint, readAt, reads: { token, holders, candles: { status, headers, body } } }. */
+/** The most an answer's X-Fetched-At may lie after the answer arrived: the helper's and the check's clocks apart (both
+ *  NTP-kept) [design: 2 s, as index-evm-swaps.mjs]. */
+const SKEW_MS = 2_000;
+/** Whether answer `r`'s X-Fetched-At `at` (ms) is within `bound` of its own read: of its request's time (r.at), and not
+ *  after it arrived (r.ms later) but for SKEW_MS; a run recorded before its reads carried their time, of the run's start.
+ *  Each read by its own time, never the run's start (card helper-restart-fresh, the same rule as index-evm-swaps.mjs
+ *  freshAt: a read late in a run was judged by when the run began). */
+function freshAt(r, at, runAt, bound) {
+  if (typeof r?.at !== "string" || !Number.isSafeInteger(r?.ms)) return { ok: Math.abs(runAt - at) <= bound, ref: `the read at ${new Date(runAt).toISOString()}` };
+  const sent = Date.parse(r.at);
+  return { ok: Math.abs(sent - at) <= bound && at - (sent + r.ms) <= SKEW_MS, ref: `its read at ${r.at} (answered in ${r.ms} ms)` };
+}
+
+/** The check on one recorded run { mint, readAt, reads: { token, holders, candles: { at, ms, status, headers, body } } }
+ *  (at: the read's request time). */
 export function judge(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -119,8 +133,8 @@ export function judge(run) {
     say(/^application\/json/i.test(h["content-type"] ?? ""), `${k} Content-Type: ${show(h["content-type"])}`);
     say(SHA.test(h["x-helper-commit"] ?? ""), `${k} X-Helper-Commit: ${show(h["x-helper-commit"])}`);
     say(SOURCE[k].includes(h["x-helper-source"]), `${k} X-Helper-Source: ${show(h["x-helper-source"])}`);
-    const at = Date.parse(h["x-fetched-at"] ?? "");
-    say(ISO.test(h["x-fetched-at"] ?? "") && Math.abs(readAt - at) <= 600_000, `${k} X-Fetched-At: ${show(h["x-fetched-at"])}, within 10 min of the read at ${run.readAt}`);
+    const fresh = freshAt(r, Date.parse(h["x-fetched-at"] ?? ""), readAt, 600_000);
+    say(ISO.test(h["x-fetched-at"] ?? "") && fresh.ok, `${k} X-Fetched-At: ${show(h["x-fetched-at"])}, within 10 min of ${fresh.ref}`);
     say(h["access-control-allow-origin"] === APP, `${k} Access-Control-Allow-Origin: ${show(h["access-control-allow-origin"])}`);
     let b;
     try {
@@ -135,12 +149,14 @@ export function judge(run) {
 }
 
 async function get(base, path, fetchFn) {
+  // the read's own time, which its X-Fetched-At is judged against (freshAt)
+  const at = new Date().toISOString();
   const t0 = performance.now();
   const r = await fetchFn(`${base.replace(/\/$/, "")}${path}`, { redirect: "manual", headers: { origin: APP, "cache-control": "no-cache" } });
   const headers = {};
   for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
   const body = await r.text();
-  return { ms: Math.round(performance.now() - t0), status: r.status, headers, body };
+  return { at, ms: Math.round(performance.now() - t0), status: r.status, headers, body };
 }
 
 export async function read(base = BASE, mint = MINT, fetchFn = fetch) {

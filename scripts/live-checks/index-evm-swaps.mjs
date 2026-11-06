@@ -7,8 +7,8 @@
 //   GET /v1/market/candles?chain=base&token=<t>&tf=1m&limit=60
 //   GET /v1/market/trades?chain=base&token=<t>&limit=50
 // and passes only when:
-//   - each answers 200 JSON with X-Helper-Commit a full sha, X-Fetched-At an ISO time within 15 s of the read and
-//     Access-Control-Allow-Origin echoing APP_HOST; X-Helper-Source is "chain" (our own reads) for the tape, and for the
+//   - each answers 200 JSON with X-Helper-Commit a full sha, X-Fetched-At an ISO time within 15 s of that answer's own
+//     read (freshAt) and Access-Control-Allow-Origin echoing APP_HOST; X-Helper-Source is "chain" (our own reads) for the tape, and for the
 //     candles "chain" or "chain,geckoterminal" (the vendor only before our first bar);
 //   - candles hold exactly the frozen fields tf, candles, src, own_from_s, as_of_ms; bars [t_s, o, h, l, c, vol_usd] on
 //     the 1m grid, oldest first, USD decimal strings, high >= open, close >= low, bars from our own reads start at
@@ -22,7 +22,7 @@
 //   - no swap is missing: every swap of that pool in the blocks the tape covers, up to 120 blocks (24 s) behind the
 //     providers' newest, is on the tape.
 // On Robinhood (--chain robinhood), which has no fixed block clock, a trade's time must be its block's own time and the
-// providers' newest block's time within 20 s of the read, each block time read on two providers that agree; its swaps
+// providers' newest block's time within 20 s of their read, each block time read on two providers that agree; its swaps
 // include the Pons v2 curve's CurveBuy and CurveSell, and its pool's logs are read in the 100-block spans its keyless
 // providers take.
 // With no --chain it checks both chains and passes only when both pass (the deployed helper's run).
@@ -146,9 +146,28 @@ const topicAddr = (t) => (typeof t === "string" && /^0x0{24}[0-9a-f]{40}$/.test(
 /** The pool key of a Swap log: its emitter, and for the PoolManager the pool id. */
 const poolKey = (l, net = "base") => (l.address === VENUES[net].poolManager ? `${l.address}:${l.topics[1]}` : l.address);
 
+/** The most an answer's X-Fetched-At may lie after the answer arrived: the helper's and the check's clocks apart (both
+ *  NTP-kept) [design: 2 s]. */
+export const SKEW_MS = 2_000;
 /**
- * The check on one run: { base, coin, readAt, reads: { candles, trades }, chain }, where chain is what `read` took from
- * the providers: { heads: [n..], decimals, receipts: { [tx]: receipt | null }, poolLogs: { key, from, to, logs } | null }.
+ * Whether answer `r`'s X-Fetched-At `at` (ms) is within `bound` ms of the answer's own read: of the time its request was
+ * sent (r.at), and not after the answer arrived (r.ms later) but for SKEW_MS. Each read is judged by its own time, never
+ * by the run's start (card helper-restart-fresh: in live run 42163488602, straight after a restart, the Base token judged
+ * was read 20.6 s into the run, after a cold token's 12 s not-ready 503 and ten quiet tokens, and its answers, dated 2.85 s
+ * after their request and 53 ms before they arrived, failed "within 15 s of the read"; judged by the run's start, an
+ * answer read late in a run could also be that much older than its own read and pass). A run recorded before its reads
+ * carried their time is judged against the run's start, as it was then. `ref`: what it is judged against, for the line.
+ */
+export function freshAt(r, at, runAt, bound) {
+  if (typeof r?.at !== "string" || !Number.isSafeInteger(r?.ms)) return { ok: Math.abs(runAt - at) <= bound, ref: `the read at ${new Date(runAt).toISOString()}` };
+  const sent = Date.parse(r.at);
+  return { ok: Math.abs(sent - at) <= bound && at - (sent + r.ms) <= SKEW_MS, ref: `its read at ${r.at} (answered in ${r.ms} ms)` };
+}
+
+/**
+ * The check on one run: { base, coin, readAt, reads: { candles, trades }, chain }, each read { at, ms, status, headers,
+ * body } (at: its request's time), and chain what `read` took from the providers: { heads: [n..], headsAt, decimals,
+ * receipts: { [tx]: receipt | null }, poolLogs: { key, from, to, logs } | null }.
  */
 export function judge(run) {
   const net = run.net ?? "base";
@@ -173,8 +192,8 @@ export function judge(run) {
     say(/^application\/json/i.test(h["content-type"] ?? ""), `${k} Content-Type: ${show(h["content-type"])}`);
     say(SHA.test(h["x-helper-commit"] ?? ""), `${k} X-Helper-Commit: ${show(h["x-helper-commit"])}`);
     say(source.includes(h["x-helper-source"]), `${k} X-Helper-Source: ${show(h["x-helper-source"])}, our own chain reads`);
-    const at = Date.parse(h["x-fetched-at"] ?? "");
-    say(ISO.test(h["x-fetched-at"] ?? "") && Math.abs(readAt - at) <= 15_000, `${k} X-Fetched-At: ${show(h["x-fetched-at"])}, within 15 s of the read at ${run.readAt}`);
+    const fresh = freshAt(r, Date.parse(h["x-fetched-at"] ?? ""), readAt, 15_000);
+    say(ISO.test(h["x-fetched-at"] ?? "") && fresh.ok, `${k} X-Fetched-At: ${show(h["x-fetched-at"])}, within 15 s of ${fresh.ref}`);
     say(h["access-control-allow-origin"] === APP, `${k} Access-Control-Allow-Origin: ${show(h["access-control-allow-origin"])}`);
     let b;
     try {
@@ -193,7 +212,9 @@ export function judge(run) {
   const heads = Array.isArray(c.heads) ? c.heads : [];
   say(heads.length === 2 && heads.every(Number.isSafeInteger) && Math.abs(heads[0] - heads[1]) <= LAG[net], `the chain: two providers' newest blocks ${show(heads)}`);
   const head = Math.min(...heads);
-  say(c.heads?.every((n) => Number.isSafeInteger(timeOf(n)) && Math.abs(timeOf(n) - readAt / 1000) <= 20), `the providers' newest block's time${net === "base" ? " is on Base's clock and" : ", read on two providers,"} within 20 s of the read`);
+  // the heads' time against their own read (c.headsAt; a run recorded before it, the run's start), as each answer's
+  const headsAt = c.headsAt === undefined ? readAt : Date.parse(c.headsAt);
+  say(c.heads?.every((n) => Number.isSafeInteger(timeOf(n)) && Math.abs(timeOf(n) - headsAt / 1000) <= 20), `the providers' newest block's time${net === "base" ? " is on Base's clock and" : ", read on two providers,"} within 20 s of their read${c.headsAt === undefined ? "" : ` at ${c.headsAt}`}`);
   say(Number.isSafeInteger(c.decimals), `token decimals read on chain: ${show(c.decimals)}`);
   const sample = trades.trades.slice(0, SAMPLE);
   const keys = [];
@@ -269,12 +290,14 @@ function withReads(run, lines) {
 }
 
 async function get(base, path, fetchFn) {
+  // the read's own time, which its X-Fetched-At is judged against (freshAt)
+  const at = new Date().toISOString();
   const t0 = performance.now();
   const r = await fetchFn(`${base.replace(/\/$/, "")}${path}`, { redirect: "manual", headers: { origin: APP, "cache-control": "no-cache" } });
   const headers = {};
   for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
   const body = await r.text();
-  return { ms: Math.round(performance.now() - t0), status: r.status, headers, body };
+  return { at, ms: Math.round(performance.now() - t0), status: r.status, headers, body };
 }
 
 /** One JSON-RPC call on one provider: the result, or undefined. */
@@ -373,6 +396,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     if (typeof n === "string") heads.push(Number.parseInt(n, 16));
   }
   run.chain.heads = heads;
+  run.chain.headsAt = new Date().toISOString();
   const dec = await agreed("eth_call", [{ to: t, data: "0x313ce567" }, "latest"], fetchFn, rpcs);
   run.chain.decimals = typeof dec === "string" && /^0x[0-9a-f]{64}$/.test(dec) ? Number.parseInt(dec, 16) : null;
   run.chain.receipts = {};
