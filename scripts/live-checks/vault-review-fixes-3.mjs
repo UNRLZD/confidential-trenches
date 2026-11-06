@@ -12,6 +12,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --account checks another account against the same record (the recorded bad answers). --record writes every RPC
 // answer the run read to <file>, so the check's test can replay it.
+// Runs: once, the read of testnet-v3's record, keys and code on two RPCs after its deploy; no host deploy changes it
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
