@@ -49,6 +49,14 @@
 //   note holds its calls from INCOMING on (a call is signed only for an INCOMING note) and keeps them once landed, so
 //   the clean-up gate reads every call U signed after a reload. Nothing in a call is secret: its signed bytes go to
 //   the relayer and the rest is on chain.
+// - The vault's deposits cursor (card wallet-bind-on-sync): per vault, the kit's VaultSyncCursor the last bind's sync
+//   returned (syncCursor, saveSyncCursor; meta "sync/<vault>"), so a bind searches the pages from where the last one
+//   stopped instead of from 0. It only moves forward: each field is the higher of the stored one and the one saved, and
+//   it is written only when a list's count moves (a new block alone writes nothing). A
+//   store with none (a new device, a restore) gives the cursor of a vault never read, every list from 0. Each note's
+//   own start (searchFrom) is written with its first call, before its P first leaves the device: no row below it can
+//   hold that P, so a reload searches from there however far the vault's cursor has moved since. Nothing in either
+//   is secret: a count of public rows and a block height.
 // - Attempt contexts (card wallet-withdraw-request; wallet.md l.214-217): the move UNSPENT -> HELD takes the attempt's
 //   withdrawal context (a decimal below p) and appends { context, deadlineMs } to the note's contexts in the same
 //   compare-and-set, so the context is stored before its proof starts. Only the moves HELD -> UNSPENT and HELD -> HELD
@@ -61,7 +69,7 @@
 //   context is in the list is this device's own (the check itself is the sync and arming cards'). The list stays
 //   small, as each new attempt needs the note freed or expired first. Nothing in it is secret: the context goes on
 //   chain with the proof, and the ops records, which the frame reads, never hold it.
-import { VAULT_FIELD_P } from "@blindfill/kit";
+import { VAULT_FIELD_P, vaultSyncStart, type VaultSyncCursor } from "@blindfill/kit";
 import { CHAINS } from "../derive/index.ts";
 import type { WalletStore } from "../store/index.ts";
 import { noteCommitment, type NoteRef } from "./secrets.ts";
@@ -112,6 +120,7 @@ export type NoteRecord = {
   attempt?: string; // HELD and RESERVED: the attempt whose proof holds it (not a secret)
   tab?: string; // HELD: the id of the tab whose proof holds it (not a secret)
   calls?: BindCall[]; // from INCOMING on: the deposit calls U signed for it, in the order written
+  searchFrom?: number; // with its calls: the deposits row its bind's search for P starts at, taken before P first left
   sends?: PoolSend[]; // from INCOMING on: each pool deposit tx U signed for it, written before it is sent
   contexts?: AttemptContext[]; // from its first HELD on: every attempt's context and deadline_ms, in the order written
 };
@@ -160,9 +169,14 @@ export interface NoteStore {
   move(id: string, from: NoteState, to: NoteState, fields?: MoveFields): Promise<NoteRecord>;
   /**
    * Writes a call U signed for an INCOMING note, before it is sent, when the note still holds `seen` calls (else
-   * nothing is written: another bind's call came first). Returns the note as stored.
+   * nothing is written: another bind's call came first). Returns the note as stored. The first call may carry the
+   * note's searchFrom (a deposits row count read before its P first leaves the device); no later one does.
    */
-  addCall(id: string, call: NewBindCall, seen: number): Promise<NoteRecord>;
+  addCall(id: string, call: NewBindCall, seen: number, searchFrom?: number): Promise<NoteRecord>;
+  /** The vault's deposits cursor as stored, or the cursor of a vault never read (a new device, a restore). */
+  syncCursor(vault: string): Promise<VaultSyncCursor>;
+  /** Moves the vault's stored cursor forward to `cursor`, field by field (never back). Returns the cursor as stored. */
+  saveSyncCursor(cursor: VaultSyncCursor): Promise<VaultSyncCursor>;
   /** Writes a tx hash the relayer gave for one of the note's calls (named by its nonce and max_block_height). */
   addCallTx(id: string, call: Pick<BindCall, "nonce" | "max_block_height">, txHash: string): Promise<NoteRecord>;
   /**
@@ -270,6 +284,24 @@ function u64(d: unknown, what: string): bigint {
   if (typeof d !== "bigint" || d <= 0n || d >= 1n << 64n) throw new Error(`${what} is a u64 bigint above 0`);
   return d;
 }
+// A row count or a block height as the kit's VaultSyncCursor holds them: a JSON number, whole, not below 0.
+function count(x: unknown, what: string): number {
+  if (typeof x !== "number" || !Number.isSafeInteger(x) || x < 0) throw new Error(`${what} is a whole number`);
+  return x;
+}
+const CURSOR_KEYS = ["vault", "height", "deposits", "spends", "leaves", "labels"] as const;
+const cursorKey = (vault: string): string => `sync/${vault}`;
+const VAULT_LISTS = ["deposits", "spends", "leaves", "labels"] as const;
+// A cursor as vaultSync takes it: this vault's, every count a whole number, nothing else in it.
+function checkCursor(c: unknown, vault: string): VaultSyncCursor {
+  if (c === null || typeof c !== "object" || Array.isArray(c)) throw new Error("a sync cursor is an object");
+  onlyKeys(c, CURSOR_KEYS, "a sync cursor");
+  const x = c as VaultSyncCursor;
+  if (x.vault !== vault) throw new Error("the sync cursor is another vault's");
+  for (const k of CURSOR_KEYS.slice(1) as readonly Exclude<(typeof CURSOR_KEYS)[number], "vault">[]) count(x[k], `cursor.${k}`);
+  return { vault: x.vault, height: x.height, deposits: x.deposits, spends: x.spends, leaves: x.leaves, labels: x.labels };
+}
+
 // A context as the vault and the relayer read it: one canonical decimal below p.
 function context(c: unknown, what: string): string {
   if (typeof c !== "string" || !/^(0|[1-9][0-9]{0,77})$/.test(c) || BigInt(c) >= VAULT_FIELD_P) throw new Error(`${what}: a context is a canonical decimal below p`);
@@ -346,7 +378,7 @@ function checkSends(sends: unknown, id: string): PoolSend[] {
 function checkRecord(id: string, r: unknown): NoteRecord {
   if (r === null || typeof r !== "object") throw new Error(`note ${id} is not a record`);
   const n = r as NoteRecord;
-  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "sends", "contexts"], `note ${id}`);
+  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "searchFrom", "sends", "contexts"], `note ${id}`);
   if (n.id !== id) throw new Error(`note ${id} names another id`);
   refKey(n.ref);
   field(n.scope, "scope");
@@ -366,6 +398,10 @@ function checkRecord(id: string, r: unknown): NoteRecord {
     if (n.ref.kind !== "deposit" && n.ref.kind !== "second") throw new Error(`note ${id}: only a deposit or second-arrival note has calls`);
     if (n.state === "PLANNED" || n.state === "TAKEN") throw new Error(`note ${id}: calls from INCOMING on`);
     checkCalls(n.calls, id);
+  }
+  if (n.searchFrom !== undefined) {
+    if (n.calls === undefined) throw new Error(`note ${id}: a search start only with its calls`);
+    count(n.searchFrom, `note ${id}: searchFrom`);
   }
   if (n.sends !== undefined) {
     if (n.ref.kind !== "deposit" && n.ref.kind !== "second" && n.ref.kind !== "return") throw new Error(`note ${id}: only a deposit, return or second-arrival note has sends`);
@@ -391,6 +427,7 @@ function record(n: NoteRecord): NoteRecord {
   if (n.attempt !== undefined) out.attempt = n.attempt;
   if (n.tab !== undefined) out.tab = n.tab;
   if (n.calls !== undefined) out.calls = n.calls;
+  if (n.searchFrom !== undefined) out.searchFrom = n.searchFrom;
   if (n.sends !== undefined) out.sends = n.sends;
   if (n.contexts !== undefined) out.contexts = n.contexts;
   return out;
@@ -589,16 +626,39 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     return n;
   }
 
-  async function addCallLocked(id: string, call: NewBindCall, seen: number): Promise<NoteRecord> {
+  async function addCallLocked(id: string, call: NewBindCall, seen: number, searchFrom?: number): Promise<NoteRecord> {
     const c = checkCall(call, "a new call", false);
     if (!Number.isSafeInteger(seen) || seen < 0) throw new Error("seen is a count of calls");
+    if (searchFrom !== undefined) {
+      if (seen !== 0) throw new Error("a search start is written with the note's first call only");
+      count(searchFrom, "searchFrom");
+    }
     const cur = (await settle()).find((n) => n.id === id);
     if (cur === undefined) throw new Error(`no note ${id}`);
     if (cur.state !== "INCOMING") throw new Error(`note ${id} is ${cur.state}: a call is signed only for an INCOMING note`);
     const calls = cur.calls ?? [];
     if (calls.length !== seen) return cur; // another bind's call came first: this one is not written, so never sent
     const next: NoteRecord = { ...cur, calls: checkCalls([...calls, { ...c, tx_hashes: [] }], id) };
+    if (searchFrom !== undefined) next.searchFrom = searchFrom;
     await write(next);
+    return next;
+  }
+  async function syncCursorLocked(vault: string): Promise<VaultSyncCursor> {
+    const start = vaultSyncStart(vault); // the kit's own check of the vault's id
+    const r = await store.get("meta", cursorKey(start.vault));
+    return r === undefined ? start : checkCursor(r, start.vault);
+  }
+  async function saveSyncCursorLocked(cursor: VaultSyncCursor): Promise<VaultSyncCursor> {
+    const vault = vaultSyncStart((cursor as { vault?: string } | null)?.vault as string).vault;
+    const c = checkCursor(cursor, vault);
+    const cur = await syncCursorLocked(vault);
+    const next = { ...cur };
+    for (const k of CURSOR_KEYS.slice(1) as readonly Exclude<(typeof CURSOR_KEYS)[number], "vault">[]) next[k] = Math.max(cur[k], c[k]);
+    // written only when a list's count moves: a height alone rides along with the next such write, so a bind's polls
+    // between deposits write nothing
+    if (VAULT_LISTS.every((k) => next[k] === cur[k])) return cur;
+    if (closed) throw new Error("the note store is closed");
+    await store.put("meta", cursorKey(vault), next);
     return next;
   }
   async function addSendLocked(id: string, send: PoolSend, seen: number): Promise<NoteRecord> {
@@ -639,7 +699,9 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     list: () => locked(settle),
     add: (note) => locked(() => addLocked(note)),
     move: (id, from, to, fields) => locked(() => moveLocked(id, from, to, fields)),
-    addCall: (id, call, seen) => locked(() => addCallLocked(id, call, seen)),
+    addCall: (id, call, seen, searchFrom) => locked(() => addCallLocked(id, call, seen, searchFrom)),
+    syncCursor: (vault) => locked(() => syncCursorLocked(vault)),
+    saveSyncCursor: (cursor) => locked(() => saveSyncCursorLocked(cursor)),
     addCallTx: (id, call, txHash) => locked(() => addCallTxLocked(id, call, txHash)),
     addSend: (id, send, seen) => locked(() => addSendLocked(id, send, seen)),
     close: () => {

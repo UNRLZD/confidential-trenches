@@ -654,3 +654,40 @@ test("bind calls: a planted record with calls on a PLANNED note is refused when 
   await t.w.put("notes", n.id, { ...n, calls: [{ ...aCall(5n, 100n), tx_hashes: [] }] });
   await assert.rejects(t.ns.get(n.id), /calls from INCOMING on/);
 });
+
+// ---------- the vault's deposits cursor and a note's search start (card wallet-bind-on-sync) ----------
+const VAULT_ID = "vault.blindfill-test.testnet";
+test("sync cursor: none stored reads from 0; it moves only forward, field by field, one put a move, and only this vault's", async () => {
+  const t = await tab();
+  const start = { vault: VAULT_ID, height: 0, deposits: 0, spends: 0, leaves: 0, labels: 0 };
+  assert.deepEqual(await t.ns.syncCursor(VAULT_ID), start);
+  const p0 = t.puts();
+  assert.deepEqual(await t.ns.saveSyncCursor({ ...start, height: 100, deposits: 7 }), { ...start, height: 100, deposits: 7 });
+  assert.equal(t.puts() - p0, 1);
+  // an older cursor (a lower height, fewer deposits) moves nothing back, and a newer block alone writes nothing
+  assert.deepEqual(await t.ns.saveSyncCursor({ ...start, height: 90, deposits: 3, spends: 2 }), { ...start, height: 100, deposits: 7, spends: 2 });
+  await t.ns.saveSyncCursor({ ...start, height: 90, deposits: 3 });
+  await t.ns.saveSyncCursor({ ...start, height: 200, deposits: 7 });
+  assert.equal(t.puts() - p0, 2);
+  assert.deepEqual(await t.ns.syncCursor(VAULT_ID), { ...start, height: 100, deposits: 7, spends: 2 });
+  // another tab on the same database reads it
+  const other = await tab(t.idb);
+  assert.equal((await other.ns.syncCursor(VAULT_ID)).deposits, 7);
+  assert.deepEqual(await t.ns.syncCursor("other.testnet"), { ...start, vault: "other.testnet" });
+  for (const bad of [{ ...start, deposits: -1 }, { ...start, height: 1.5 }, { ...start, extra: 1 }, { ...start, vault: "Not An Id" }])
+    await assert.rejects(t.ns.saveSyncCursor(bad as typeof start));
+});
+
+test("search start: written with a note's first call only, a whole number, kept with its calls", async () => {
+  const t = await tab();
+  const n = await t.ns.move((await t.ns.planDeposit(scopes++, pc)).id, "PLANNED", "INCOMING");
+  await assert.rejects(t.ns.addCall(n.id, aCall(5n, 100n), 0, -1), /whole number/);
+  const one = await t.ns.addCall(n.id, aCall(5n, 100n), 0, 12);
+  assert.equal(one.searchFrom, 12);
+  await assert.rejects(t.ns.addCall(n.id, aCall(5n, 200n), 1, 13), /first call only/);
+  const two = await t.ns.addCall(n.id, aCall(5n, 200n), 1);
+  assert.equal(two.searchFrom, 12);
+  assert.equal((await t.ns.get(n.id))!.searchFrom, 12);
+  const landed = await t.ns.move(n.id, "INCOMING", "UNSPENT", { leaf: leafOf(n.precommitment) });
+  assert.equal(landed.searchFrom, 12);
+});

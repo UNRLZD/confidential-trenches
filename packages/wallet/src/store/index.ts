@@ -51,6 +51,8 @@ export type WalletMetaKey = "seed" | "settings" | `owed/${string}`;
  *  every wallet when SIGN_HOST rolls back to a release that opens version 1 exactly). */
 export const WALLET_OWED_PREFIX = "owed/";
 const OWED_KEY = /^owed\/[^/]{1,200}$/;
+// the note store's vault cursor, one per vault (../notes/store.ts syncCursor, card wallet-bind-on-sync)
+const SYNC_KEY = /^sync\/[^/]{1,200}$/;
 // "closed": this store's own connection was closed by another tab's delete or upgrade (versionchange); open it again
 // "changed" names the key a caller's put, update or delete wrote (`key`; none for the store's own seed and counter
 // writes), so a listener can tell an owed send's write (meta owed/<op id>) from a seed change
@@ -198,7 +200,7 @@ function checkKey(store: WalletStoreName, key: string): void {
 function checkCallerKey(store: WalletStoreName, key: string): void {
   checkKey(store, key);
   if (store === "counters") throw new Error("counters only grow, through reserveDepositIndex");
-  if (store === "meta" && key !== "seed" && key !== "settings" && !OWED_KEY.test(key)) throw new Error(`meta key ${key} is the store's own`);
+  if (store === "meta" && key !== "seed" && key !== "settings" && !OWED_KEY.test(key) && !SYNC_KEY.test(key)) throw new Error(`meta key ${key} is the store's own`);
   // the seed record holds the only copy of a no-PRF account's 12 words: it is written by insertSeed only, changed by
   // setCodeSaved only, and goes only with signOut
   if (store === "meta" && key === "seed") throw new Error("the seed record is written by insertSeed and setCodeSaved only");
