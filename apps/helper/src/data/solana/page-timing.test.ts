@@ -94,7 +94,7 @@ test("card helper-ready-page-warm: GET /v1/market/token sends the read's entries
   assert.ok(dur(st, "total") >= 25, st);
 });
 
-test("card helper-ready-page-warm slice 2: Jupiter's search names the proxy's part of its time: the budget's wait, Jupiter's hold or turn, each 429 it answered and the send (helper live run 42087160851: jup;dur=3618 on a search, and a cold connection from the helper box is 75 ms, so the 3.5 s was inside the proxy, unnamed)", async () => {
+test("card helper-ready-page-warm slice 2, card helper-page-jup-429: a page whose search outlasts its wait names it late; the search's own parts are named in the proxy's turn lines (a 429, then the send), and the next read has its row", async () => {
   let calls = 0;
   const fetch = async (url: string) => {
     calls++;
@@ -102,13 +102,21 @@ test("card helper-ready-page-warm slice 2: Jupiter's search names the proxy's pa
     const mints = new URL(url).searchParams.get("query")!.split(",");
     return new Response(JSON.stringify(mints.map(rowOf)), { status: 200, headers: { "content-type": "application/json" } });
   };
-  const proxy = (await import("../../proxy/proxy.ts")).createProxy({ PROXY_BUDGET_JUPITER: "120,30", PROXY_BUDGET_RELAY: "120,30", PROXY_BUDGET_LIFI: "120,30", PROXY_BUDGET_ONECLICK: "120,30" }, { fetch: fetch as never });
+  const lines: string[] = [];
+  const proxy = (await import("../../proxy/proxy.ts")).createProxy({ PROXY_BUDGET_JUPITER: "120,30", PROXY_BUDGET_RELAY: "120,30", PROXY_BUDGET_LIFI: "120,30", PROXY_BUDGET_ONECLICK: "120,30" }, { fetch: fetch as never, log: (l: string) => lines.push(l) });
   const tok = T.createSolanaToken(proxy as never, rpc as never);
+  const t0 = Date.now();
   const a = await tok.page(mint(3));
   assert.equal(a.status, 200, (a as { body: string }).body);
+  assert.ok(Date.now() - t0 < 1_000, `the page within 1 s: ${Date.now() - t0} ms`);
   const h = (a as { timing?: string }).timing ?? "";
-  assert.deepEqual(entries(h), ["lists", "rpc-wait", "rpc", "jup-wait", "jup-budget", "jup-turn", "jup-429", "jup-send", "jup", "launch", "read"], h);
-  assert.ok(dur(h, "jup-turn") >= 900, `Jupiter's 1 s hold waited out: ${h}`);
-  assert.match(h, /jup-429;desc="1"/);
-  assert.ok(dur(h, "jup") >= dur(h, "jup-turn") + dur(h, "jup-send"), h);
+  assert.deepEqual(entries(h), ["lists", "rpc-wait", "rpc", "jup", "launch", "read"], h);
+  assert.match(h, new RegExp(`jup;desc="late";dur=${T.JUP_PAGE_WAIT_MS}`));
+  for (let i = 0; i < 40 && calls < 2; i++) await sleep(50);
+  await sleep(50);
+  const turns = lines.filter((l) => l.startsWith("jupiter turn:"));
+  assert.equal(turns.length, 2, turns.join("\n"));
+  assert.match(turns[0]!, /answered 429/);
+  assert.match(turns[1]!, /answered 200/);
+  assert.equal(JSON.parse((await tok.page(mint(3))).body).row.src, "jupiter", "the next read has the row");
 });
