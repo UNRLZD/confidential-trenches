@@ -10,7 +10,7 @@
 //   node scripts/live-checks/pool-evm-deploy-resume-safe.mjs [--deployment <file>[,<file>]] [--rpc <url>,<url>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read to <file>, for the test's replay (pool-evm-deploy-resume-safe.answers.json).
-// Runs: after every EVM pool deploy (testnet or mainnet) and its --sweep-kept; no host deploy changes it
+// Runs: once, a contract deploy's read-back (each EVM pool deploy record, testnet or mainnet, after its run and any --sweep-kept); no host deploy changes it
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
