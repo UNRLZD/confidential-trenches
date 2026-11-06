@@ -191,7 +191,8 @@ async function launch({ harness, site }) {
   writeFileSync(path.join(app, "index.html"), APP_STAND_IN);
   writeFileSync(path.join(app, "_headers"), readFileSync(path.join(REPO, "apps/terminal/public/_headers"), "utf8"));
   const cert = makeCert([SIGN_HOST, APP_HOST]);
-  const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root }, [APP_HOST]: { root: app, spa: true } } });
+  // both as served: a path with no file is the index (Pages with no 404.html), so /favicon.ico answers 200 here too
+  const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root, spa: true }, [APP_HOST]: { root: app, spa: true } } });
   const map = [SIGN_HOST, APP_HOST].map((h) => `MAP ${h} 127.0.0.1:${server.port}`).join(", ");
   const browser = await launchBrowser("chromium", { args: [`--host-resolver-rules=${map}, MAP * ~NOTFOUND`, `--ignore-certificate-errors-spki-list=${cert.spki}`] });
   return {
