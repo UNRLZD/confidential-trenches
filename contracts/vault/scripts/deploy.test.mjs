@@ -443,6 +443,22 @@ test("a deploy record names exactly one source: source_commit or non_reproducibl
   }
 });
 
+test("the record a deploy writes names its source, so --verify-records can check it: a build here its commit, a --wasm file non_reproducible, mainnet the --deployment record's", async () => {
+  const { deploySource, recordSourceProblems } = await import(SCRIPT);
+  const sha = "ab".repeat(32);
+  const written = (src) => ({ network: "testnet", version: "blindfill-vault 0.1.0 testnet", wasm_sha256: sha, code_hash: b58encode(Buffer.from(sha, "hex")), ...src });
+  assert.deepEqual(deploySource({ network: "testnet", commit: HEAD }), { source_commit: HEAD });
+  assert.deepEqual(recordSourceProblems(written(deploySource({ network: "testnet", commit: HEAD }))), []);
+  assert.deepEqual(recordSourceProblems(written(deploySource({ network: "sandbox", commit: HEAD }))), []);
+  const given = deploySource({ network: "sandbox", wasmFile: "/tmp/x/vault.wasm" });
+  assert.match(given.non_reproducible, /--wasm vault\.wasm/);
+  assert.deepEqual(recordSourceProblems(written(given)), []);
+  assert.deepEqual(deploySource({ network: "mainnet", wasmFile: "/tmp/x/vault.wasm" }), {});
+  // both records the run writes (the partial one at the send, the whole one after the read-back) carry it
+  const src = readFileSync(SCRIPT, "utf8");
+  assert.equal(src.match(/\.\.\.\(network === "mainnet" \? record : \{\}\),\s*\.\.\.source,/g)?.length, 2, "a record write without ...source");
+});
+
 test("mainnet: a record marked non_reproducible, a wasm naming another commit, or a record commit on no branch of the repository is refused before any send", async () => {
   const { pinProblems } = await import(SCRIPT);
   const w = mainnetWasm();

@@ -385,6 +385,15 @@ export async function reproducibleBuild({ flavor, buildDir, crate = CRATE, log =
   return { file, wasm: out[0].wasm, sha: out[0].sha, shas: out.map((o) => o.sha), commit, build: `${shown} (${near}, image ${REPRODUCIBLE.image}@${REPRODUCIBLE.image_digest}, on ${os.platform()} ${os.arch()}), at ${commit}` };
 }
 
+// What a record this run writes says of its wasm's source (recordSourceProblems): a build made here names its commit;
+// a sandbox --wasm file was not built by this run, so it is marked non_reproducible; a mainnet record keeps the
+// --deployment record's own source_commit (spread in whole), so nothing is added.
+export function deploySource({ network, wasmFile, commit }) {
+  if (network === "mainnet") return {};
+  if (wasmFile) return { non_reproducible: `a wasm file given to the run (--wasm ${path.basename(wasmFile)}), not built by it` };
+  return { source_commit: commit };
+}
+
 // The vault deploy records in `dir`: each *.json with a code_hash and a blindfill-vault version (a token's record or a
 // run record is neither).
 export function vaultRecords(dir = path.join(CRATE, "deployments")) {
@@ -766,7 +775,7 @@ async function main() {
   }
 
   // 1-2. the wasm: built twice here, or (sandbox only) the file given; refused before any send if it breaks a rule
-  let wasm, build, shas;
+  let wasm, build, shas, commit;
   if (o.wasm) {
     wasm = readFileSync(o.wasm);
     build = `given: ${o.wasm}`;
@@ -776,9 +785,11 @@ async function main() {
     wasm = b.wasm;
     build = b.build;
     shas = b.shas;
+    commit = b.commit;
     console.log(`reproducible: both builds sha256 ${b.sha}`);
   }
   const sha = sha256(wasm);
+  const source = deploySource({ network, wasmFile: o.wasm, commit });
   const problems = [...deployProblems(wasm, network), ...(network === "mainnet" ? pinProblems(wasm, record, vault) : [])];
   if (problems.length) throw new Error(`refused before any send: ${problems.join("; ")}`);
   if (network === "mainnet") {
@@ -819,7 +830,7 @@ async function main() {
   const d = await send(url, tx, privateKey, "the recipe");
   // the deploy is on chain from here: its record is written before any read that could stop the run
   mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
-  writeFileSync(out, JSON.stringify({ ...(network === "mainnet" ? record : {}), network, account_id: vault, parent, tx_hash: d.hash, stage: "deployed: the read-back and the registration are not recorded yet", wasm_sha256: sha, deployed_at: new Date().toISOString() }, null, 2) + "\n");
+  writeFileSync(out, JSON.stringify({ ...(network === "mainnet" ? record : {}), ...source, network, account_id: vault, parent, tx_hash: d.hash, stage: "deployed: the read-back and the registration are not recorded yet", wasm_sha256: sha, deployed_at: new Date().toISOString() }, null, 2) + "\n");
   console.log(`deployed: tx ${d.hash}; partial record ${out}`);
   const config = JSON.parse(Buffer.from(d.r.status.SuccessValue, "base64").toString("utf8"));
   if (network === "testnet" && (config.asset !== TESTNET_TOKEN || !TESTNET_VERSION.test(config.version))) throw new Error(`deployed, but config() names asset ${config.asset}, version ${config.version}: not the testnet build`);
@@ -868,6 +879,7 @@ async function main() {
 
   const doc = {
     ...(network === "mainnet" ? record : {}),
+    ...source,
     network,
     account_id: vault,
     parent,
