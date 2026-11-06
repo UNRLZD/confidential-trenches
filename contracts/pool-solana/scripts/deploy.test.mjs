@@ -260,7 +260,7 @@ test("the resume refuses a program another loader owns, programdata another prog
 });
 
 // ---- the cleanup's keys and the two-transaction --final (review of bc57e12) ----
-import { buildOf, chainOps, chainRecord, ciCode, main } from "./deploy.mjs";
+import { buildOf, chainOps, chainRecord, ciCode, main, plainTransferTo } from "./deploy.mjs";
 import { existsSync, mkdtempSync, readdirSync as ls, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -343,9 +343,18 @@ test("the cleanup reads the authority at confirmed: a deploy whose SetAuthority 
   await assert.rejects(down.upgradeableByFunder(), /node behind/);
 });
 
+/** An upgradeable-loader account of `tag` (1 a buffer, 3 a programdata) whose authority (the Option at `at`) is
+ * `authority`, as getAccountInfo answers it: what a getProgramAccounts hit is read back as. */
+const loaderAcc = (tag, authority) => {
+  const at = tag === 1 ? 4 : 12;
+  const d = Buffer.alloc(at + 33);
+  d.writeUInt32LE(tag, 0);
+  if (authority) (d[at] = 1), Buffer.from(b58decode(authority)).copy(d, at + 1);
+  return { owner: "BPFLoaderUpgradeab1e11111111111111111111111", executable: false, lamports: 1, data: [d.toString("base64"), "base64"] };
+};
 test("what is left keeps the keys: a lamport on either RPC, a buffer or programdata under the funder", async () => {
   const funder = newKey();
-  const run = async ({ bal = {}, gpa = {} }) => {
+  const run = async ({ bal = {}, gpa = {}, own = (tag) => loaderAcc(tag, funder.id) }) => {
     const fetchFn = async (url, init) => {
       const { method, params } = JSON.parse(init.body);
       const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
@@ -355,7 +364,11 @@ test("what is left keeps the keys: a lamport on either RPC, a buffer or programd
         assert.equal(f[1].memcmp.bytes, (await import("../../../scripts/live-checks/pool-sol-deploy.mjs")).b58encode(Uint8Array.from([1, ...funder.pub])));
         return ok(gpa[f[1].memcmp.offset] ?? []);
       }
-      if (method === "getAccountInfo") return ok({ value: null });
+      if (method === "getAccountInfo") {
+        // a listed account's own read: its bytes as `own` gives them
+        const hit = Object.entries(gpa).find(([, l]) => l.some((x) => x.pubkey === params[0]));
+        return ok({ value: hit ? own(hit[0] === "4" ? 1 : 3) : null });
+      }
       throw new Error(`unexpected ${method}`);
     };
     return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, now: vnow() }).leftovers();
@@ -364,6 +377,10 @@ test("what is left keeps the keys: a lamport on either RPC, a buffer or programd
   assert.match((await run({ bal: { b: 1 } })).join(), /holds 1 lamports on b/);
   assert.match((await run({ gpa: { 4: [{ pubkey: "Buf1" }] } })).join(), /buffer Buf1/);
   assert.match((await run({ gpa: { 12: [{ pubkey: "Pd1" }] } })).join(), /upgradeable program's data Pd1/);
+  // a listed account whose own read is gone, or names another authority or none, is not left: the list lagged it
+  for (const own of [() => null, (tag) => loaderAcc(tag, null), (tag) => loaderAcc(tag, newKey().id)]) {
+    assert.deepEqual(await run({ gpa: { 4: [{ pubkey: "Buf1" }], 12: [{ pubkey: "Pd1" }] }, own }), []);
+  }
 });
 
 test("the record from chain reads: the programdata's SetAuthority gets a line, funders are the fee payers, slot order", async () => {
@@ -1982,6 +1999,7 @@ test("review a763 1 (89a6 H1): a buffer close the CLI reports 'Failed to close b
       const buffer = params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(1, 0, 0, 0));
       return okR(buffer && !closedOn.has(url) ? [{ pubkey: BUF, account: {} }] : []);
     }
+    if (method === "getAccountInfo" && params[0] === BUF) return okR({ value: closedOn.has(url) ? null : loaderAcc(1, funder.id) });
     throw new Error(`unexpected ${method}`);
   };
   let closes = 0;
@@ -2006,7 +2024,11 @@ test("review a763 1: --sweep-kept whose buffer close fails (exit 0, 'Failed to c
   const k = keptRun(c);
   const BUF = newKey().id;
   c.io.cli = (args) => ({ status: 0, stdout: "", stderr: args[1] === "close" && args[2] === "--buffers" ? `Failed to close buffer ${BUF}: Transaction simulation failed` : "" });
-  wrap(c, (url, { method, params }, real) => (method === "getProgramAccounts" && params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(1, 0, 0, 0)) ? okR([{ pubkey: BUF, account: {} }]) : real()));
+  wrap(c, (url, { method, params }, real) => {
+    if (method === "getProgramAccounts" && params[1].filters[0].memcmp.bytes === b58(Uint8Array.of(1, 0, 0, 0))) return okR([{ pubkey: BUF, account: {} }]);
+    if (method === "getAccountInfo" && params[0] === BUF) return okR({ value: loaderAcc(1, k.funder.id) });
+    return real();
+  });
   try {
     await runAt(c, path.join(k.w, "x.json"), [], LOCAL_SWEEP(k.journal));
     assert.equal(c.bal.get(k.funder.id), CLEANUP_RESERVE, "the funder keeps the reserve for a later close");
@@ -2617,10 +2639,11 @@ test("review 7c83 M1: a --prior-only resume finds the first run's key from its o
 // The run's own SetAuthority to none landed (5EtRdefa, slot 466033710) and both RPCs read the program final at
 // finalized, yet the cleanup's getProgramAccounts on --url (the upgradeable loader's accounts whose authority is
 // Some(funder), at confirmed) still listed the programdata: the reserve stayed in the funder and the keys were kept for
-// an owner's --sweep-kept. `lag` answers that read the way a node behind the run's last write does, then as one that has
-// it: "honest" is a node that keeps minContextSlot (-32016 while behind it) and gives the old list when none is asked;
-// "ignores" gives the old list with its own context slot below the one asked; "index" gives it at a context slot past
-// the run's writes (a list that lags its own slot), which only the account's own read shows wrong.
+// an owner's --sweep-kept. `lag` answers that read, and the programdata's own read right after it, the way a node behind
+// the run's last write does, then as one that has it: "honest" keeps minContextSlot (-32016 while behind it) and gives
+// the old bytes when none is asked; "ignores" gives the old bytes with its own context slot, below the one asked;
+// "index" gives the old list at the tip's context slot (a list that lags its own slot), which only the programdata's
+// own read shows wrong.
 async function staleAfterSetAuthority(lag) {
   const c = asMainnet(cluster());
   const code = recordedCode();
@@ -2646,6 +2669,8 @@ async function staleAfterSetAuthority(lag) {
   const slotOf = new Map([[DEPLOY_SIG, tip]]);
   let authSlot = null;
   let stale = 0; // the stale programdata lists answered
+  let staleRead = false; // the programdata's own read after that list: answered by the node behind too (not "index")
+  const behindErr = () => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32016, message: "Minimum context slot has not been reached", data: { contextSlot: authSlot - 1 } } }) });
   const TAG3 = b58(Uint8Array.of(3, 0, 0, 0));
   wrap(c, async (url, { method, params }, real) => {
     const cfg = params?.[1] ?? {};
@@ -2675,11 +2700,17 @@ async function staleAfterSetAuthority(lag) {
     if (method === "getProgramAccounts" && url === MAIN_URL && authSlot !== null && params[1].filters[0].memcmp.bytes === TAG3 && stale === 0) {
       // the node behind the SetAuthority: the programdata still under the funder
       stale++;
+      staleRead = lag !== "index";
       const behind = authSlot - 1;
       const list = [{ pubkey: programDataAddress(ids.program), account: { owner: LOADER, executable: false, lamports: 1, data: ["", "base64"] } }];
-      if (lag === "honest" && min > behind) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32016, message: "Minimum context slot has not been reached", data: { contextSlot: behind } } }) };
-      const at = lag === "index" ? tip + 5 : behind;
+      if (lag === "honest" && min > behind) return behindErr();
+      const at = lag === "index" ? tip : behind;
       return okR(cfg.withContext ? { context: { slot: at }, value: list } : list);
+    }
+    if (method === "getAccountInfo" && url === MAIN_URL && staleRead && params[0] === programDataAddress(ids.program)) {
+      staleRead = false;
+      if (lag === "honest" && min > authSlot - 1) return behindErr();
+      return okR({ context: { slot: authSlot - 1 }, value: pdAcc(ids.funder) });
     }
     // every other read answers at the tip, with its context when one is asked (getBalance and getAccountInfo always
     // carry it on a real node; getProgramAccounts with withContext)
@@ -2713,3 +2744,80 @@ for (const lag of ["honest", "ignores", "index"]) {
     assert.ok(!r.said.some((l) => /kept \d+ lamports in the funder/.test(l)), r.said.join("\n"));
   });
 }
+
+// ---- paste 2: a stranger's dust on the funder (3qRUcXSY, 07:56:27Z) ----
+// mainnet's own answer for it (contracts/pool-solana/fixtures/dust-3qRUcXSY.json): jvfZAHpy… pays and sends 1 lamport to
+// each of 18 addresses in 18 System Transfers, the funder 7Y7omJGV… (key 6) among them.
+const DUST = JSON.parse(readFileSync(path.join(REPO, "contracts/pool-solana/fixtures/dust-3qRUcXSY.json"), "utf8"));
+const P2 = JSON.parse(readFileSync(path.join(REPO, "contracts/pool-solana/deployments/mainnet.json"), "utf8"));
+const P2_FUNDER = "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB";
+/** The dust's exact message with the funder's key (index 6) swapped for `funder`. */
+const dustFor = (funder) => {
+  const a = structuredClone(DUST.answer);
+  assert.equal(a.transaction.message.accountKeys[6], P2_FUNDER);
+  a.transaction.message.accountKeys[6] = funder;
+  return a;
+};
+
+test("paste 2 dust: the record leaves out a stranger's 18-way dust send (its exact mainnet shape) and its payer is no funder", async () => {
+  const m = DUST.answer.transaction.message;
+  assert.equal(m.instructions.length, 18);
+  assert.ok(m.instructions.every((i) => m.accountKeys[i.programIdIndex] === SYSTEM_ID && i.accounts[0] === 0 && b58decode(i.data).length === 12));
+  assert.ok(m.instructions.some((i) => m.accountKeys[i.accounts[1]] === P2_FUNDER), "one of its transfers is into the funder");
+  assert.equal(plainTransferTo(DUST.answer), null);
+  // the owner's funding beside it: one System Transfer from its payer (the return address) into the funder
+  const fund = { slot: 466032982, meta: { err: null }, transaction: { message: { accountKeys: [P2.return_to, P2_FUNDER, SYSTEM_ID], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: b58(Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(new BigUint64Array([449137520n]).buffer)])) }] } } };
+  assert.equal(plainTransferTo(fund), P2_FUNDER);
+  // and the run's own sweep back, paid by the funder
+  const sweep = { slot: 466033758, meta: { err: null }, transaction: { message: { accountKeys: [P2_FUNDER, P2.return_to, SYSTEM_ID], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: fund.transaction.message.instructions[0].data }] } } };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR([]);
+    if (method === "getTransaction") return okR({ [DUST.signature]: DUST.answer, fund, sweep }[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const said = [];
+  const r = await chainRecord(fetchFn, "u", { programdata: P2.programdata, return_to: P2.return_to, funder: P2_FUNDER, table: P2.table,
+    txs: [{ step: "funding (to the funder)", signature: "fund" }, { step: "funding (to the funder)", signature: DUST.signature }, { step: "sweep (the funder's rest back)", signature: "sweep" }] }, { say: (l) => said.push(l) });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "sweep"]);
+  assert.deepEqual(r.funders, [P2_FUNDER], "the dust's payer jvfZAHpy… is not a funder of the run");
+  assert.ok(said.some((l) => l.includes(DUST.signature) && /left out of the record/.test(l)), said.join("\n"));
+  // the committed record agrees: no dust line, its one funder the run's
+  assert.ok(!P2.txs.some((t) => t.signature === DUST.signature));
+  assert.deepEqual(P2.funders, [P2_FUNDER]);
+});
+
+test("paste 2 dust: the run's journal names a stranger's dust on the funder as not a funding, and --sweep-kept never takes its payer for a sender", async () => {
+  const c = cluster();
+  wrap(c, async (url, { method, params }, real) => {
+    if (method === "getSignaturesForAddress" && params[0] === c.funder) {
+      const r = await (await real()).json();
+      return okR([{ signature: DUST.signature, err: null }, ...r.result]);
+    }
+    if (method === "getTransaction" && params[0] === DUST.signature) return okR(dustFor(c.funder));
+    return real();
+  });
+  const r = await runOn(c, ["--fail-after", "funding"]);
+  assert.match(String(r.error?.message), /planted failure after funding/);
+  const steps = new Map(r.journal.txs.map((t) => [t.signature, t.step]));
+  assert.equal(steps.get(FUND_SIG), "funding (to the funder)");
+  assert.equal(steps.get(DUST.signature), `another payer's transaction naming the funder (${DUST.answer.transaction.message.accountKeys[0]}): not a funding`);
+  // --sweep-kept: --return set to the dust's payer is refused (it is no sender of a funding)
+  const c2 = cluster();
+  const k = keptRun(c2);
+  c2.bal.set(k.funder.id, 10_000_000n);
+  wrap(c2, async (url, { method, params }, real) => {
+    if (method === "getSignaturesForAddress" && params[0] === k.funder.id) {
+      const r2 = await (await real()).json();
+      return okR([{ signature: DUST.signature, err: null }, ...r2.result]);
+    }
+    if (method === "getTransaction" && params[0] === DUST.signature) return okR(dustFor(k.funder.id));
+    return real();
+  });
+  try {
+    const s = await runAt(c2, path.join(k.w, "x.json"), [], [...LOCAL_SWEEP(k.journal), "--return", DUST.answer.transaction.message.accountKeys[0]]);
+    assert.match(String(s.error?.message), /is neither a sender to/, s.said.join("\n"));
+  } finally {
+    k.done();
+  }
+});
