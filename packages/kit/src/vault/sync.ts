@@ -61,8 +61,8 @@ export type VaultSyncList = (typeof VAULT_SYNC_LISTS)[number];
  *   gave the same cap: social's get with K copies of one empty key passed at K = 15,412 to 15,429 and stopped at
  *   15,451 to 15,546 on every one, testnet and mainnet (read 2026-11-06 05:48-05:49Z). So none of them caps below
  *   the others. The lowest cap any nearcore has had is 200 Tgas, so 125 Tgas leaves over a third of it spare.
- * The gas per page was measured with the release build in near-sandbox 2.13.4, with each list's largest rows
- * (contracts/vault/tests/review_viewgas.rs, review R-03):
+ * The gas per page was measured with the release build in near-sandbox 2.13.4, with each list's largest rows, by vault
+ * review R-03 (its probe stays with the review; contracts/vault/tests/s12.rs measures every view per row in the tree):
  * - spends: 250 rows 125.135 Tgas, measured (500 rows 249.148, 1,000 rows 497.053), so 250;
  * - deposits: 1,000 rows 276.385 Tgas, at most 0.277 a row with the call's own cost in it, so 450 (at most 124.4);
  * - leaves: 1,000 rows 162.548 Tgas, at most 0.163 a row, so 750 (at most 121.9);
