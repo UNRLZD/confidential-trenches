@@ -18,7 +18,7 @@
 // and carries exactly one Paid(W, value) from the collector, value equal to that fee. A row naming a chain with no
 // collector record fails, unless --deployment left that chain out (the rows left out are printed). None listed is
 // "0 sells listed", ok: no EVM sell lands until the
-// testnets run the 11-field SellDelegate (card evm-testnet-delegate-review3, which lists the first real sells and makes
+// testnets run the 11-field SellDelegate (card evm-testnet-delegate-review3, which lists its real sells and makes
 // one per chain required).
 //   node scripts/live-checks/evm-fee-collector.mjs [--deployment <file>[,<file>]] [--rpc <url>,<url>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2. With no --deployment it reads both chains' records; --rpc applies to a
