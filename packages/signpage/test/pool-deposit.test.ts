@@ -28,6 +28,7 @@ import { solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { POOL_DEPOSIT_READS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
+import { pairDown } from "./outage.ts";
 
 type Acc = { owner: string; lamports: number; data: Uint8Array };
 const FIX = JSON.parse(readFileSync(new URL("./fixtures/pool-devnet.json", import.meta.url), "utf8")) as {
@@ -893,3 +894,35 @@ test("a pool.deposit refused (U holds the rung but not its costs: not_funded) re
   assert.deepEqual(r.stages, ["refused"]);
   assert.equal(c.sent.length, 0);
 });
+
+// Card pool-read-down: one provider down past the page's own retry, from each of its calls in turn. Before U signs, the
+// deposit answers "down" (api.ts RETRY_CODES: the same request again runs again), never failed or not_allowed, with
+// nothing sent and the note still PLANNED; the other provider's word alone is never taken. From U's first send on, it
+// is never "down".
+for (const p of [0, 1] as const) {
+  test(`card pool-read-down: provider ${p} down past the page's retry answers down before U signs; after the send, sent or the read-back's verdict, never failed, down or a throw`, async () => {
+    let before = 0;
+    let after = 0;
+    for (let from = 0; ; from++) {
+      const c = chain();
+      const ns = await notes();
+      const u = await plannedU(ns);
+      c.fund(u.address, Number(RUNG) + COST);
+      const d = pairDown([c.rpc(), c.rpc()] as const, p, from);
+      // a throw past the send would reach poolDepositKind's catch as failed while the tx may land
+      const a = await runPoolDeposit(host(c, ns, { rpcs: d.rpcs }), ask(RUNG)).catch((e: unknown) => ({ thrown: String(e) }));
+      if (!d.fired()) break;
+      if (c.sent.length === 0) {
+        before++;
+        assert.deepEqual(a, { error: "down" }, `from call ${from}`);
+        assert.deepEqual((await ours(ns)).map((n) => n.state), ["PLANNED"], `from call ${from}`);
+      } else {
+        after++;
+        assert.ok("stage" in a, `from call ${from}: ${JSON.stringify(a)}`);
+        if (a.stage === "sent") assert.deepEqual(a.txs.map((t) => t.hash), [c.sent[0]!], `from call ${from}`);
+        else assert.ok(["filled", "not_landed"].includes(a.stage), `from call ${from}: ${a.stage}`);
+      }
+    }
+    assert.ok(before > 0 && after > 0, `${before} before, ${after} after`);
+  });
+}

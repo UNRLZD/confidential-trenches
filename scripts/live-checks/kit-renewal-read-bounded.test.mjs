@@ -78,6 +78,32 @@ test("the markers match the bundle's own minified lines and not the bundle befor
   assert.doesNotMatch("function Sp(e,t){let n=t-e;return n<=2e4?null:`checks: the reference is ${n} ms`}", MARKERS["the age rule"]);
 });
 
+// Card pool-read-down: the page's signer sets its signing flag, then passes straight through, as before; nothing else
+// may sit in the arrow, and the kept list is still replaced by the signed transactions' hashes alone.
+test("the page's signer with its signing flag holds the kept-signatures marker; an extra call, an early return or an extra hash fails it", () => {
+  const re = MARKERS["the page names only kept signatures"];
+  const kept = "onSigned:e=>{h.splice(0,h.length,...e.map(e=>({chain:`solana`,hash:e.signature})))},onProgress:v})";
+  const line = (arrow, onSigned = kept) => `y=await t(n,{...e.deps,reference:(t,n)=>e.deps.reference(t,n),sign:${arrow},${onSigned}`;
+  assert.match(line("(e,t,n)=>(_=!0,p.sign(e,t,n))"), re, "the flag, then the signer");
+  assert.match(line("(e,t,n)=>p.sign(e,t,n)"), re, "the signer alone (main's bundle)");
+  for (const arrow of [
+    "(e,t,n)=>(_=!0,x(e),p.sign(e,t,n))", // an extra call
+    "(e,t,n)=>(x(e),p.sign(e,t,n))",
+    "(e,t,n)=>(_=!0,f.push(t),p.sign(e,t,n))",
+    "(e,t,n)=>{_=!0;return p.sign(e,t,n)}", // a body, where an early return could sit
+    "(e,t,n)=>_?null:p.sign(e,t,n)", // an early return
+    "(e,t,n)=>(_=!0,p.sign(e,e,n))", // its arguments not passed through
+  ])
+    assert.doesNotMatch(line(arrow), re, arrow);
+  for (const onSigned of [
+    "onSigned:e=>{h.splice(0,h.length,...e.map(e=>({chain:`solana`,hash:e.signature})),{chain:`solana`,hash:d})},onProgress:v})", // an extra hash
+    "onSigned:e=>{h.splice(0,h.length,...r.map(e=>({chain:`solana`,hash:e.signature})))},onProgress:v})", // another list than the kit's
+    "onSigned:e=>{h.splice(0,0,...e.map(e=>({chain:`solana`,hash:e.signature})))},onProgress:v})", // added, not replaced
+    "onSigned:e=>{h.splice(0,h.length,...e.map(t=>({chain:`solana`,hash:d.signature})))},onProgress:v})", // not each kept one's hash
+  ])
+    assert.doesNotMatch(line("(e,t,n)=>(_=!0,p.sign(e,t,n))", onSigned), re, onSigned);
+});
+
 test("the committed bundle holds every marker", () => {
   const js = readFileSync(path.join(HERE, "../../packages/signpage/public/app.js"), "utf8");
   for (const [name, re] of Object.entries(MARKERS)) assert.match(js, re, name);

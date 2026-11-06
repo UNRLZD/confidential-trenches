@@ -55,7 +55,7 @@ import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { readSolanaRent, solanaPoolPage, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { depositId } from "../../wallet/src/derive/keys.ts";
@@ -92,7 +92,7 @@ export type PoolDepositHost = {
 };
 
 /** What a run answers: the trade stage with the deposits that landed (or, not landed, were sent), or a code. */
-export type PoolDepositAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "failed" };
+export type PoolDepositAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "failed" | "down" };
 
 /** Verdict reads a note gets in one run, a second apart: about two finalizations and a blockhash's life (~60 to 90 s). */
 export const POOL_DEPOSIT_READS = 120;
@@ -216,6 +216,8 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
   const keys: Uint8Array[] = [];
   const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   let rent: SolanaRent | null = null;
+  // from U's first signature on, a provider that fails is never "down" (a transaction may land)
+  let signing = false;
   try {
     const uKey = (u: { s: bigint; i: number }): { address: string; secretKey: Uint8Array } => {
       if (u.s !== scope) throw new Refused("not_allowed");
@@ -274,6 +276,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       // unsigned: an RPC cannot send what it simulates
       const sims = await both(h, async (r) => ((await r("simulateTransaction", [base64.encode(wire), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "confirmed" }])) as { value?: { err?: unknown } })?.value);
       if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return { simulation: "failed" };
+      signing = true;
       const signature = signSolana(u.secretKey, wire);
       const signed = wire.slice();
       signed.set(signature, 1);
@@ -506,8 +509,16 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     }
     return { stage: "filled", txs: landedTxs };
   } catch (e) {
+    // the read-back's own verdicts (not landed, taken, stuck), each from reads that answered
     if (e instanceof Refused) return e.code === "not_landed" ? { stage: "not_landed", txs: sentTxs } : landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "not_allowed" };
+    // any other fault past U's send (a provider down after its retry): the transaction may land, so the answer is
+    // never failed. What landed is part filled; else "sent" with its signature, and the note, INCOMING, settles at the
+    // next load or run (as pool-sell answers; card pool-read-down)
+    if (landedTxs.length) return { stage: "part_filled", txs: landedTxs };
+    if (sentTxs.length) return { stage: "sent", txs: sentTxs };
+    // a provider read that still fails after the page's own retry, before U signs: "not now" (card pool-read-down)
+    if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
     throw e;
   } finally {
     for (const k of keys) k.fill(0);

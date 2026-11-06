@@ -10,7 +10,8 @@
 //   not recorded, and every quote names that same index until money reaches it (W:355-358).
 // - The answer is a Deferred (./api.ts): the helper's round trip takes up to DEPOSIT_QUOTE_TIMEOUT_MS. Its codes are the
 //   rule's: ok, above_max, busy, down, quote_check_failed, not_allowed (not_available for any other helper status).
-//   busy and down are not kept for the id (./api.ts RETRY_CODES), so the same request again runs again.
+//   busy and down are not kept for the id (./api.ts RETRY_CODES), so the same request again runs again. A read here
+//   that throws is down too (card pool-read-down): not_allowed comes only from a rule.
 // - The records are read again once the quote is back: when the seed's records changed in the wait (a sign out, another
 //   account, the index moved, the vault's scope not the record's) the address is dropped and the answer is not_allowed.
 // - Refused before anything leaves the device: signed out, no record yet, a record of another scope than the release's
@@ -73,7 +74,11 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       const now = usable(await deps.read(scope), deps.scope());
       if (!now || !same(now.deposit, before.deposit)) return;
       out = { result: got.result };
-    })();
+    })().catch(() => {
+      // a read that threw (the records not answering) is no rule's refusal: "not now" (card pool-read-down), which
+      // RETRY_CODES does not keep, so the same request again runs again
+      out = { error: "down" };
+    });
     return { after, answer: () => out };
   };
 }

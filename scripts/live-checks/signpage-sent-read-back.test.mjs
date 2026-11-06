@@ -4,7 +4,9 @@
 // that hook `sent` (the app told the helper's word before any read-back): FAIL. badM2..badM5: this card's testnet build
 // with src/pool-buy.ts planted (the review fold's mutants): sent right after named, after one RPC's read, before the read
 // loop, with no once flag: each FAIL. Planted on the good one: another /app.js, no pin, the hook `sent`, no hook or two
-// found, facts not read, the stretch not read: each FAIL.
+// found, facts not read, the stretch not read: each FAIL. routeTx: SIGN_HOST's build at 2badbf7b (card
+// pool-buy-send-fast), the route's tx told inside sent's guard: PASS; badTxBefore: that tree planted to tell it before
+// the guard: FAIL; planted on routeTx: the tell twice, with another argument, another call in the guard: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -44,6 +46,34 @@ for (const [k, name, line] of MUTANTS) {
     assert.deepEqual(v.lines, [line]);
   });
 }
+
+// card pool-buy-send-fast: the route's tx told inside sent's guard (the sign live run 42137740517 failed this check on
+// 2badbf7b's bundle, whose guard reads !D&&E[0]&&E[1]&&(D=!0,u(w),await e.sent?.(w)))
+test("recorded routeTx answer: 2badbf7b's SIGN_HOST build tells the route's tx inside sent's guard, with sent's signature, once: PASS", () => {
+  const v = judge(ANSWERS.routeTx);
+  assert.equal(v.ok, true, v.lines.join("\n"));
+  assert.deepEqual(v.lines, []);
+});
+
+test("recorded bad answer badTxBefore: the same tree planted to tell the tx before the guard: FAIL, that fact named", () => {
+  const v = judge(ANSWERS.badTxBefore);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, ["BAD the bundle's route tx is not told inside sent's guard with sent's own signature: the app may be linked a transaction the chain has not read as its own"]);
+});
+
+test("planted on the routeTx answer: the tell twice, with another argument, before named with another value, another call in the guard, an unread tell: each FAIL", () => {
+  const g = ANSWERS.routeTx;
+  const guard = "(D=!0,u(w),await e.sent?.(w))";
+  assert.ok(g.stretch.includes(guard) && g.head.includes("u(n.mine)"), "the shapes the plants edit");
+  const at = (k, from, to) => judge({ ...g, [k]: g[k].replace(from, to) });
+  assert.deepEqual(at("stretch", guard, "(D=!0,u(w),await e.sent?.(w)),u(w)").lines, ["BAD the bundle tells the route tx 2 times after named: once, inside sent's guard, is the rule"]);
+  assert.equal(at("stretch", guard, "(D=!0,u(x),await e.sent?.(w))").ok, false, "another argument");
+  assert.equal(at("stretch", guard, "(D=!0,v(w),await e.sent?.(w))").ok, false, "another call in the guard");
+  assert.equal(at("head", "u(n.mine)", "u(n)").ok, false, "before named with something but a spend's own");
+  assert.equal(at("head", "s.tell({tx:e})", "s.tell({tx:e,x:1})").ok, false, "a tell the check cannot read");
+  // an answer of the old shape (no head, no tell) with a call in the guard
+  assert.equal(judge({ ...ANSWERS.good, stretch: ANSWERS.good.stretch.replace(/\(([\w$]+)=!0,await/, "($1=!0,u(w),await") }).ok, false, "a call in the guard of a bundle with no route tell");
+});
 
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;

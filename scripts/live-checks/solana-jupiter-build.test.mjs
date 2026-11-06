@@ -1,6 +1,13 @@
 // node --test scripts/live-checks/solana-jupiter-build.test.mjs: the live check replays recorded runs
 // (solana-jupiter-build.answers.json), each a real read of HELPER_HOST and two public Solana RPCs, through the kit's own
 // fetchSolanaJupiterBuildThatFits, the cap search a device's trade builds with (card solana-uncapped-fits).
+// - good_found (2026-11-06 00:52Z, card jupiter-check-token-shape): the no-route token 8sjupmtp…sZxu found at run time
+//   after four candidates passed over (three route at 40, Jupiter refuses one), its buy and sell asked once each, 40
+//   no route then 48, which fit: PASS.
+// - fixed_mint (00:53Z): 1znxCqDU…qyNd, the token the check met on 2026-11-06, named: its sell routes at 40: FAIL.
+// - no_shape: good_found's real answers with its token of the shape left out: NO-SHAPE, never a PASS.
+// read() itself runs on markets made of the good run's answers: one that answers a second ask differently, one with no
+// token of the shape, one whose first candidate Jupiter refuses.
 // - good (2026-11-05 05:37Z, the pace and the probe of folds 3 and 4): the listed token CniPCE4b…pump at 40; the
 //   no-route token 3cn1tDL4…WhcV probed on both sides (no route at 40, fits at 48 on the device's assembly; the sell of
 //   what the buy quoted out), its buy and sell asked 40 (no route) then 48, which fit; 14 Jupiter calls, at most 8 in a
@@ -22,7 +29,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { JUPITER_PER_MINUTE, PACE_MS, base58, judge, mostIn } from "./solana-jupiter-build.mjs";
+import { JUPITER_PER_MINUTE, PACE_MS, base58, judge, mostIn, read } from "./solana-jupiter-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "solana-jupiter-build.answers.json"), "utf8"));
@@ -214,4 +221,170 @@ test("made from the shared-route run: the listed token's mint charges a transfer
   assert.equal(r.ok, false);
   assert.deepEqual(shapeBad(r).map((l) => l.split(":")[0]), [`BAD ${NAMES[0]}`, `BAD ${NAMES[2]}`]);
   for (const [i, l] of shapeBad(r).entries()) assert.match(l, new RegExp(`; refused: S6 program ${i === 0 ? "destination" : "source"} account \\w+ is Jupiter's authority's account of the Token-2022 mint ${g.mints.listed}: the mint charges a transfer fee \\(TransferFeeConfig\\)$`));
+});
+
+// Card jupiter-check-token-shape: the no-route token is found at run time and its asks are its shapes.
+// A market for read() made of the good run's real answers, served by mint pair and cap in the order asked; a pair and
+// cap the market does not hold answers "No routes found". `twice` answers a second ask differently, as Jupiter did on
+// 2026-11-06 (live run 42135737951: the probe's buy fit, the same buy a minute later had no route at 40, 48 or 60).
+const NO_ROUTE = JSON.stringify({ error: "No routes found" });
+const unB58 = (s) => {
+  let n = 0n;
+  for (const ch of s) n = n * 58n + BigInt("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".indexOf(ch));
+  const out = [];
+  while (n > 0n) { out.unshift(Number(n & 255n)); n >>= 8n; }
+  for (const ch of s) { if (ch !== "1") break; out.unshift(0); }
+  return Uint8Array.from(out);
+};
+const pairOf = (url) => { const q = new URL(url).searchParams; return `${q.get("inputMint")}|${q.get("outputMint")}|${q.get("maxAccounts")}`; };
+function market(t, { lists, answers, accounts = {} }) {
+  const g = A.good;
+  const reads = { ...g.reads.accounts, ...accounts };
+  const asked = new Map();
+  // the run's taker is the good run's (its answers name it); every other random read stays random
+  const random = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  let taken = false;
+  t.mock.method(globalThis.crypto, "getRandomValues", (a) => { if (taken || a.length !== 32) return random(a); taken = true; a.set(unB58(g.wallet)); return a; });
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const u = String(url);
+    if (u.endsWith("/v1/market/lists?chain=solana")) return new Response(JSON.stringify({ lists }), { status: 200 });
+    const rpc = g.reads.rpcs.findIndex((x) => u.startsWith(x));
+    if (rpc >= 0) {
+      const { id, method, params } = JSON.parse(init.body);
+      const ctx = { slot: g.blockhash.slot ?? 1 };
+      const result = method === "getLatestBlockhash"
+        ? { context: ctx, value: { blockhash: g.blockhash.blockhash, lastValidBlockHeight: g.blockhash.lastValidBlockHeight } }
+        : { context: ctx, value: params[0].map((k) => { const a = reads[k]?.[rpc]; return a ? { owner: a.owner, data: [a.data, "base64"], lamports: 1, executable: false, rentEpoch: 0 } : null; }) };
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), { status: 200 });
+    }
+    const k = pairOf(u);
+    const n = asked.get(k) ?? 0;
+    asked.set(k, n + 1);
+    const list = answers[k];
+    const c = list?.[Math.min(n, list.length - 1)];
+    return c ? new Response(c.body, { status: c.status, headers: { "content-type": "application/json" } }) : new Response(NO_ROUTE, { status: 400 });
+  });
+  return asked;
+}
+// the good run's answers by mint pair and cap
+const SOL = "So11111111111111111111111111111111111111112";
+const recorded = () => {
+  const m = {};
+  for (const s of A.good.shapes) for (const c of s.calls) (m[pairOf(c.url)] ??= []).push(c);
+  return m;
+};
+const clock = () => { let t = Date.parse("2026-11-06T01:00:00Z"); return { now: () => t, sleep: async (ms) => { t += ms; } }; };
+const LISTED = { token: A.good.mints.listed, launchpad: "pump.fun", liq_usd: 1e6 };
+const SHAPED = { token: A.good.mints.noRoute };
+
+test("read() on a market whose no-route token answers a second ask differently: the shapes are the candidate's own asks, never asked again: PASS", async (t) => {
+  const answers = recorded();
+  const buy40 = `${SOL}|${A.good.mints.noRoute}|40`;
+  const buy48 = `${SOL}|${A.good.mints.noRoute}|48`;
+  // asked again, the buy at 40 routes (the 48 answer, at 40): a run that asks the shape again is not on the retry path
+  answers[buy40] = [answers[buy40][0], { ...answers[buy48][0] }];
+  const asked = market(t, { lists: { trending_1h: [LISTED], new: [SHAPED] }, answers });
+  const r = await read({ ...clock() });
+  const v = await judge(r);
+  assert.equal(asked.get(buy40), 1, "the no-route buy at 40 asked once");
+  assert.equal(v.verdict, "PASS", v.lines.join("\n"));
+  assert.equal(r.mints.noRoute, A.good.mints.noRoute);
+  assert.deepEqual(r.probes, [{ mint: A.good.mints.noRoute, chosen: true }]);
+  for (const name of [NAMES[1], NAMES[3]]) assert.ok(v.lines.some((l) => l.startsWith(`ok  ${name}: `) && l.includes(", caps 40 no route, 48 fits, ")), name);
+});
+
+test("read() on a market where the first candidate routes at 40 and the second has no route anywhere: NO-SHAPE, never a PASS, each candidate held to its answers", async (t) => {
+  const answers = recorded();
+  // the listed token's answers again for another mint: a candidate that routes at 40
+  const other = "DABCynB9Ft9gg9oewK3nyjfag467CsALsXtMm9f1tgcf";
+  answers[`${SOL}|${other}|40`] = answers[`${SOL}|${A.good.mints.listed}|40`];
+  for (const cap of [40, 48]) { delete answers[`${SOL}|${A.good.mints.noRoute}|${cap}`]; delete answers[`${A.good.mints.noRoute}|${SOL}|${cap}`]; }
+  // its mint read as the listed token's (the assembly needs the mint's program)
+  market(t, { lists: { trending_1h: [LISTED], new: [{ token: other }, SHAPED] }, answers, accounts: { [other]: A.good.reads.accounts[A.good.mints.listed] } });
+  const r = await read({ ...clock() });
+  const v = await judge(r);
+  assert.equal(v.verdict, "NO-SHAPE", v.lines.join("\n"));
+  assert.equal(v.ok, false);
+  assert.equal(r.mints.noRoute, null);
+  assert.ok(v.lines.includes("NONE no token with no route at 40 and a fitting one within the search's reach, buy and sell, among 2 candidates"), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.startsWith(`ok  candidate ${other}: buy 40 fits: routes at 40, passed over`)), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.startsWith(`ok  candidate ${A.good.mints.noRoute}: buy no_route: no route (40 no_route, 48 no_route, 60 no_route): no fitting route within the search's reach, passed over`)), v.lines.join("\n"));
+  // the no-shape record with a passed-over candidate's answers made into the shape's: FAIL, a token of the shape passed over
+  const g = copy(r);
+  const shaped = recorded();
+  const p = g.probes[1];
+  p.buy.calls = [...shaped[`${SOL}|${A.good.mints.noRoute}|40`], ...shaped[`${SOL}|${A.good.mints.noRoute}|48`]];
+  p.sell = { amount: A.good.amounts.noRoute.sell, calls: [...shaped[`${A.good.mints.noRoute}|${SOL}|40`], ...shaped[`${A.good.mints.noRoute}|${SOL}|48`]], market: [] };
+  g.reads.accounts = { ...A.good.reads.accounts, ...g.reads.accounts };
+  const w = await judge(g);
+  assert.equal(w.verdict, "FAIL");
+  assert.ok(bad(w).some((l) => l.startsWith(`BAD candidate ${A.good.mints.noRoute}: buy 40 no route, 48 fits; sell 40 no route, 48 fits: the token has the shape, yet it was passed over`)), w.lines.join("\n"));
+});
+
+test("made from the good run: the search stops at 40 with no route where the check's own ask at 48 fits: FAIL, the retry path is broken", async () => {
+  const g = copy(A.good);
+  const s = g.shapes[1];
+  s.market = [s.calls[1]];
+  s.calls = [s.calls[0]];
+  const r = await judge(g);
+  assert.equal(r.verdict, "FAIL");
+  assert.equal(shapeBad(r).length, 1);
+  assert.match(shapeBad(r)[0], /^BAD S-1 buy, a token with no route at 40: .*; maxAccounts=48 answers a route that fits in \d{3,4} bytes: the retry path is broken$/);
+});
+
+test("read() on a market whose first candidate Jupiter refuses (its own 400, not \"No routes found\"): passed over, the next candidate's asks are the shapes: PASS", async (t) => {
+  const answers = recorded();
+  const fresh = "5Lh3doWDujeqfNPbGNPKboGeDJLaS9h8xbGPs91xpump";
+  // the answer read 2026-11-06 00:51Z for a mint minutes old
+  answers[`${SOL}|${fresh}|40`] = [{ status: 400, body: JSON.stringify({ error: `500: {"error":"Missing token program for ${fresh}"}` }) }];
+  market(t, { lists: { trending_1h: [LISTED], new: [{ token: fresh }, SHAPED] }, answers, accounts: { [fresh]: A.good.reads.accounts[A.good.mints.noRoute] } });
+  const r = await read({ ...clock() });
+  const v = await judge(r);
+  assert.equal(v.verdict, "PASS", v.lines.join("\n"));
+  assert.equal(r.mints.noRoute, A.good.mints.noRoute);
+  assert.ok(v.lines.some((l) => l.startsWith(`ok  candidate ${fresh}: buy upstream: HTTP 400 500: `) && l.endsWith(": Jupiter refuses the token, passed over")), v.lines.join("\n"));
+  // the helper's own 503 on a candidate is no refusal: that candidate's shapes FAIL
+  const busy = recorded();
+  busy[`${SOL}|${fresh}|40`] = [{ status: 503, body: '{"error":{"code":"upstream"}}' }];
+  t.mock.restoreAll();
+  market(t, { lists: { trending_1h: [LISTED], new: [{ token: fresh }, SHAPED] }, answers: busy, accounts: { [fresh]: A.good.reads.accounts[A.good.mints.noRoute] } });
+  const w = await judge(await read({ ...clock() }));
+  assert.equal(w.verdict, "FAIL");
+  assert.ok(bad(w).some((l) => l.startsWith("BAD S-1 buy, a token with no route at 40: upstream: HTTP 503")), w.lines.join("\n"));
+});
+
+test("recorded good_found run (2026-11-06 00:52Z): the no-route token found at run time, its asks its shapes, never asked again: PASS", async () => {
+  const g = A.good_found;
+  const r = await judge(g);
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.equal(g.mints.noRoute, "8sjupmtpnfWCwSBDpnQAiUAfgWDaUurqtpbvwQmxsZxu");
+  assert.deepEqual(g.probes.at(-1), { mint: g.mints.noRoute, chosen: true });
+  // four candidates passed over, each held to its own answers: three route at 40, Jupiter refuses one
+  assert.equal(r.lines.filter((l) => /^ok {2}candidate \w+: buy 40 fits: routes at 40, passed over$/.test(l)).length, 3);
+  assert.equal(r.lines.filter((l) => l.startsWith("ok  candidate ") && l.endsWith(": Jupiter refuses the token, passed over")).length, 1);
+  for (const name of [NAMES[1], NAMES[3]]) assert.ok(r.lines.some((l) => l.startsWith(`ok  ${name}: `) && l.includes(", caps 40 no route, 48 fits, ")), name);
+  // each no-route ask once: no Jupiter call of the token's twice
+  const urls = g.shapes.flatMap((s) => s.calls.map((c) => c.url));
+  assert.equal(new Set(urls).size, urls.length);
+  assert.ok(r.lines.includes("ok  the run's 10 Jupiter calls, at most 8 in a counted minute (the helper lends 8 on the total alone)"), r.lines.join("\n"));
+});
+
+test("recorded fixed_mint run (00:53Z, --no-route-token 1znxCqDU…qyNd, the mint the check met on 2026-11-06): its sell routes at 40, so not the retry path: FAIL", async () => {
+  const r = await judge(A.fixed_mint);
+  assert.equal(r.verdict, "FAIL");
+  assert.deepEqual(bad(r).map((l) => l.replace(/\(.*\)/, "(…)")), ["BAD S-2 sell, a token with no route at 40: the token routes at 40 (…), so this is not the retry path"]);
+});
+
+test("recorded no_shape run (good_found's real answers with its token of the shape left out): NO-SHAPE, never a PASS", async () => {
+  const r = await judge(A.no_shape);
+  assert.equal(r.verdict, "NO-SHAPE", r.lines.join("\n"));
+  assert.equal(r.ok, false);
+  assert.deepEqual(bad(r), []);
+  assert.ok(r.lines.includes("NONE no token with no route at 40 and a fitting one within the search's reach, buy and sell, among 4 candidates"));
+  // a candidate's answers dropped: the no-shape verdict has nothing to stand on: FAIL
+  const g = copy(A.no_shape);
+  delete g.probes[0].buy;
+  const w = await judge(g);
+  assert.equal(w.verdict, "FAIL");
+  assert.deepEqual(bad(w), [`BAD candidate ${g.probes[0].mint}: no recorded answers`]);
 });
