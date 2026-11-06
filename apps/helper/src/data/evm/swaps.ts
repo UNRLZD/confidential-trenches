@@ -232,7 +232,8 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
 // Read again 2026-11-05 19:0x-19:2xZ from the Mac (card helper-ready-page-warm), after Base went to 200 ms blocks: one
 // 1,000-block `eth_getLogs` answered by base-rpc.publicnode.com (130-300 ms; 429 past about 6 a second),
 // base.gateway.tenderly.co (350-600 ms, 2.5 a second sequential none refused) and base.public.blockpi.network's public
-// endpoint (380-1,200 ms, 3.6 a second none refused), each log with its blockTimestamp; base.drpc.org now refuses 250
+// endpoint (380-1,200 ms, 3.6 a second none refused; out from about 16:00Z 6 Nov, HTTP 521 on every chain, still at
+// 18:44Z, so it left the list, card helper-evm-range-cap-walk), each log with its blockTimestamp; base.drpc.org now refuses 250
 // blocks and more (code 35 "ranges over 10000 blocks are not supported on free plan") and 429s bursts; base-pokt.nodies.app
 // takes 50 blocks at most (-32001) and 429s bursts; 1rpc.io, base.meowrpc.com, base.llamarpc.com, base.lava.build,
 // base.api.onfinality.io, api.zan.top, endpoints.omniatech.io and base.blockpi.network (no key) refused or failed every read.
@@ -240,8 +241,12 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // base.drpc.org is left out: it answers none of the reads' ranges (250 blocks and more) and 429s about one a second.
   // mainnet.base.org, Base's own, answers the heads, calls and the traders' lookups (20 eth_getTransactionByHash a
   // second none refused, 19:3xZ) and is sent no log read (limits.ts LOGS_REFUSED): with the three above alone a cold
-  // tape's 50 lookups waited on their paces and its traders answered null (index-evm-swaps on a local build, 19:30Z)
-  base: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co", "https://base.public.blockpi.network/v1/rpc/public", "https://base-pokt.nodies.app", "https://mainnet.base.org"],
+  // tape's 50 lookups waited on their paces and its traders answered null (index-evm-swaps on a local build, 19:30Z).
+  // base.api.pocket.network took blockpi's place (card helper-evm-range-cap-walk, 6 Nov 18:48-18:50Z from the Mac): one
+  // pool's 1,000-block eth_getLogs in 0.9-1.0 s, each log with its blockTimestamp; single reads at 2, 3, 4, 6 and 10 a
+  // second for 6 s and batches of 3, 4, 6 and 10 a second none throttled; 4 of 150 reads and 5 of 24 batches met one of its
+  // backends' -32602 "block range exceeds maximum 500", a read it does not answer (null), which the next provider takes
+  base: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://base-pokt.nodies.app", "https://mainnet.base.org"],
   // Robinhood, 2026-11-03 19:2xZ, `eth_getLogs` of the v4 PoolManager: robinhood.daybreak-rpc.network up to 2,000 blocks
   // (batches of 10), robinhood.drpc.org up to 101 blocks (batches of 3), api.blockvectra.com up to 100 blocks (no
   // batches); each of the three fills a log's `blockTimestamp`. rpc.mainnet.chain.robinhood.com answers 5,000 blocks but
@@ -313,12 +318,12 @@ const WIDE_SPAN: Readonly<Record<string, number>> = {
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
  *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ);
  *  a paced provider's at most its burst (limits.ts PROVIDER_PACE), so a batch never asks more than its bucket holds
- *  (publicnode 6, Tenderly 3, blockpi 4: its public endpoint refused batches of 5, 2026-11-05 19:2xZ). */
+ *  (publicnode 6, Tenderly 3; Pocket 10: batches of 10 a second answered 6 of 6, 6 Nov 18:50Z). */
 const BATCH_SIZE: Readonly<Record<string, number>> = {
   ...BATCH_MAX,
   "https://base-rpc.publicnode.com": 6,
   "https://base.gateway.tenderly.co": 3,
-  "https://base.public.blockpi.network/v1/rpc/public": 4,
+  "https://base.api.pocket.network": 10,
   "https://api.blockvectra.com/v1/robinhood_mainnet/public": 1,
 };
 

@@ -173,8 +173,12 @@ export type Pace = { perS: number; burst: number; unit: "post" | "call"; infligh
  *     Paced at 3 calls a second, 6 at once.
  *   - base.gateway.tenderly.co: 2 a second none refused, 4 a second refused 2 of 24 at once; batches of 3 a second refused
  *     1 of 18. Paced at 2 calls a second, 3 at once.
- *   - base.public.blockpi.network's public endpoint: 4 a second none refused; batches of 5 a second refused 7 of 30
- *     (-32000 "Max messages exceeded (Limit: 5)"). Paced at 3 calls a second, 4 at once.
+ *   - base.api.pocket.network (in blockpi's place, card helper-evm-range-cap-walk: blockpi answered HTTP 521 on every
+ *     chain from about 16:00Z 6 Nov): x-ratelimit-limit 1200, its reset 60 s ahead, a count of its own apart from
+ *     Robinhood's (read 6 Nov 18:49-18:50Z); single 1,000-block eth_getLogs at 10 a second for 6 s and batches of 10 a
+ *     second none throttled, 3 batches of 10 eth_call at once 18 of 18 answered (18:47Z); about 75 calls a second for
+ *     40 s, past the minute's 1,200, answered 429 (18:45Z). Paced at 10 calls a second, 30 at once: at most 630 in any
+ *     minute.
  */
 export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
@@ -184,7 +188,7 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://rpc.mainnet.chain.robinhood.com": { perS: 1, burst: 2, unit: "post" },
   "https://base-rpc.publicnode.com": { perS: 3, burst: 6, unit: "call" },
   "https://base.gateway.tenderly.co": { perS: 2, burst: 3, unit: "call" },
-  "https://base.public.blockpi.network/v1/rpc/public": { perS: 3, burst: 4, unit: "call" },
+  "https://base.api.pocket.network": { perS: 10, burst: 30, unit: "call" },
   // mainnet.base.org, Base's own and /v1/rpc/base's first: 5 eth_getTransactionByHash posts a second for 5 s and
   // batches of 10 at 2 a second (20 calls a second) none refused (2026-11-05 19:3xZ, from the Mac). Paced at 10 calls a
   // second, 20 at once. It refuses every eth_getLogs (LOGS_REFUSED).

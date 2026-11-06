@@ -115,7 +115,18 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Mac): publicnode (Allnodes) p50/p95 146/207 ms; Blast 315/476, served by Alchemy (its answers carry
       // x-alchemy-trace-id, 18:56Z); mainnet.base.org (Coinbase) 863/1,380, behind QuickNode's request filter (eth_nope:
       // -32611 "rejected due to request filter settings", 18:56Z); BlockPI 816/1,549. All four sit behind Cloudflare
-      // (server: cloudflare and cf-ray on every answer, 18:55Z). bloXroute's base.rpc.blxrbdn.com left the list (card
+      // (server: cloudflare and cf-ray on every answer, 18:55Z). BlockPI's base.public.blockpi.network answered HTTP 521
+      // to every read on every chain from about 16:00Z 6 Nov, still at 18:44Z, so Pocket (base.api.pocket.network) took
+      // its place (card helper-evm-range-cap-walk, 6 Nov 18:42-19:00Z from this Mac): its preflight from the app's origin
+      // and from the signing page's answers 204 with that origin allowed and content-type, and its POST the same;
+      // eth_call at the newest block hash equal to publicnode's 30 of 30 (p50/p95 212/319 ms), and in batches of 10, 3 at
+      // once, 116 equal, none different, 4 "block not found: canonical hash" (a lag, never a value); a state read 600 s
+      // back (3,000 blocks) equal to publicnode's; the pool's eth_getLogs over 2,000 and 100,000 blocks at the head
+      // answered (0.2-0.3 s); its count is 1,200 a minute (x-ratelimit-limit), 429 past it. Some of its backends decline a
+      // request over about 32 kB (-32602 "request declined ... request 32264 bytes exceeds the endpoint request-size
+      // limit", a 500-slot extsload call): a call's error, never a value, so the quote asks its next provider; with it
+      // fourth, evm-quote-warm-round passed (base-hook warm p50/p95 526/797 ms, base-partial-v4 594/828, 18:58-19:00Z).
+      // Its "10 of 60 answers differed" below was 4 Nov's read; at 6 Nov's none differed. bloXroute's base.rpc.blxrbdn.com left the list (card
       // base-rpc-list-fix): its preflight answers 204 with access-control-allow-origin *, but its POST carries none (live
       // check evm-quote-warm-round, run 42114981904, 2026-11-05 21:42-21:50Z; its POST from the app's origin answered HTTP
       // 503 with none, 2026-11-06 00:44Z), so a browser quote that reaches it fails, as base-public.nodies.app's would
@@ -123,14 +134,14 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // POSTs every listed provider. Passed over:
       // base.drpc.org and Tenderly's gateway (429 on 6 batches at once, again 18:56Z), meowrpc, zan, onfinality, 1rpc,
       // thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), base.api.pocket.network (10 of 60
-      // answers differed), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
+      // answers differed, 4 Nov; listed since 6 Nov, above), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
       // third-party proxies of unknown operators are not listed.
       // What the list holds against a lie: a quote decides on two that agree, and a value any provider asked contradicts
       // is used only where more than half of these four gave it (review of bc189de, M-1). Left, as the device has always
       // had it on two providers: two that collude and agree, each answering more than the hedge (EVM_HEDGE_MS, 400 ms)
       // sooner than the honest provider they are asked beside, decide before its answer lands (re-review of fd9dd16,
       // Q10).
-      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
+      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.api.pocket.network"]),
       // all five then listed kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
@@ -194,8 +205,8 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // answers -32602 "block range extends beyond current head block", a block past it null; the scan's own 4-call
       // batch answered; at 3 at once, 164 of 164 batches of 1,000 blocks answered with the block in 15.3 s (p50 249 ms,
       // p95 395 ms, 10,715 blocks/s). Passed over at the same reads: BlockPI's base.public.blockpi.network (5,000
-      // blocks, then 429 and a Cloudflare block after 24 batches at 4 at once, and a quote provider above, whose reads
-      // its limit would cut), thirdweb (1,000 blocks, 4 of 1,000 answered at 3 at once, the rest 429), dRPC (-32602
+      // blocks, then 429 and a Cloudflare block after 24 batches at 4 at once; HTTP 521 on every read since 6 Nov),
+      // thirdweb (1,000 blocks, 4 of 1,000 answered at 3 at once, the rest 429), dRPC (-32602
       // "ranges over 10000 blocks are not supported on free plan" at 1,000), tatum (100 blocks, 5 requests a minute),
       // zan and onfinality (429), base.publicnode.com (the first's operator), Envio's HyperRPC (a token).
       scan: bare({
