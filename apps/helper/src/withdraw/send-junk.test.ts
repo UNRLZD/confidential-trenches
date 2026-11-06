@@ -40,6 +40,7 @@ function provider(ms: bigint): Rpc {
       else if (p.method_name === "storage_balance_bounds") v = { min: "1250000000000000000000", max: "1250000000000000000000" };
       else if (p.method_name === "is_known_state_root" || p.method_name === "is_known_label_root") v = false;
       else if (p.method_name === "totals") v = { deposited: "1000000000000", spent: "0", returned: "0" };
+      else if (p.method_name === "is_blocklisted") v = false; // check 7b: the fee account, not blocklisted
       else throw new Error(`no view ${String(p.method_name)}`);
       return { result: [...Buffer.from(JSON.stringify(v))], block_height: Number(p.block_id), block_hash: hashOf(Number(p.block_id)), logs: [] };
     }

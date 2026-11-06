@@ -65,6 +65,7 @@ function fakeNear() {
     is_known_label_root: true,
     totals: { deposited: "1000000000000", spent: "0", returned: "0" },
     deposits: [],
+    is_blocklisted: false, // check 7b: the fee account, not blocklisted
   };
   const fetchFn = (async (url: string, init: { body: string }) => {
     const { method, params } = JSON.parse(init.body) as { method: string; params: Record<string, unknown> };
@@ -90,7 +91,10 @@ function fakeNear() {
     }
     else if (method === "send_tx") result = { final_execution_status: "NONE" };
     else if (method === "query" && params.request_type === "call_function" && String(params.method_name) in views) {
-      result = { result: [...Buffer.from(JSON.stringify(views[String(params.method_name)]))], logs: [], ...at(h) };
+      const args = JSON.parse(Buffer.from(String(params.args_base64), "base64").toString("utf8")) as { account_id?: string };
+      // check 7b: the fee account is registered on the token; the recipient is not (register_deposit the minimum)
+      const v = params.method_name === "storage_balance_of" && args.account_id !== W.recipient ? { total: W.register_deposit, available: "0" } : views[String(params.method_name)];
+      result = { result: [...Buffer.from(JSON.stringify(v))], logs: [], ...at(h) };
     } else if (method === "query" && params.request_type === "view_account") {
       const relayer = [RELAYER, BIND_RELAYER, "relay.test.near", BIND_RELAYER_MAINNET].includes(String(params.account_id));
       result = { amount: relayer ? (10n ** 25n).toString() : A_STORE_YOCTO.toString(), locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 182, ...at(h) };
