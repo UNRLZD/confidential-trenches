@@ -14,7 +14,9 @@
 // And each sell in evm-fee-collector.sells.json ({ sells: [{ chain, hash, w, fee }] }), on the same two RPCs: the
 // transaction is a type 4 sell sent to W, its receipt succeeded and carries exactly one Paid(W, value) from the chain's
 // collector, with value at least the sell's fee. At least one sell must be listed.
-//   node scripts/live-checks/evm-fee-collector.mjs [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
+//   node scripts/live-checks/evm-fee-collector.mjs [--deployment <file>[,<file>]] [--rpc <url>,<url>] [--record <file>]
+//     PASS exit 0, FAIL exit 1, error exit 2. With no --deployment it reads both chains' records; --rpc applies to a
+//     single record (a dry run's loopback fork), and its sells are read there too.
 // --record writes { notes, rpcs, deployments, sells, good } to <file> (evm-fee-collector.answers.json): every RPC answer
 // read, the shape evm-fee-collector.test.mjs replays.
 // Runs: once, a contract deploy and a sell's receipt read back on chain (the fee collector on two EVM testnets); no host deploy changes them
@@ -148,17 +150,19 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const args = process.argv.slice(2);
   const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
   try {
-    const ds = Object.keys(CHAINS).map((c) => {
-      if (!existsSync(recordFile(c))) throw new Error(`no record ${path.basename(recordFile(c))}`);
-      return JSON.parse(readFileSync(recordFile(c), "utf8"));
+    const files = opt("--deployment") ? opt("--deployment").split(",") : Object.keys(CHAINS).map(recordFile);
+    const ds = files.map((f) => {
+      if (!existsSync(f)) throw new Error(`no record ${path.basename(f)}`);
+      return JSON.parse(readFileSync(f, "utf8"));
     });
+    const rpcOpt = opt("--rpc") && ds.length === 1 ? opt("--rpc").split(",") : undefined;
     const sells = existsSync(SELLS_FILE) ? JSON.parse(readFileSync(SELLS_FILE, "utf8")).sells : [];
     const rec = recorder();
     const fetchFn = opt("--record") ? rec.fetchFn : fetch;
     const out = { notes: [], rpcs: {}, deployments: {}, sells, good: {} };
     let ok = true;
     for (const d of ds) {
-      const rpcs = CHAINS[d.chain].rpcs;
+      const rpcs = rpcOpt ?? CHAINS[d.chain]?.rpcs ?? [];
       const from = rec.answers.length;
       const r = await check({ deployment: d, rpcs, fetchFn });
       for (const l of r.lines) console.log(`live-check ${KEY} ${d.chain}: ${l}`);
@@ -169,7 +173,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     }
     const from = rec.answers.length;
     const collectors = Object.fromEntries(ds.map((d) => [d.chain, d.contracts?.FeeCollector?.address]));
-    const r = await checkSells({ sells, collectors, fetchFn });
+    const r = await checkSells({ sells: sells.filter((s) => Object.hasOwn(collectors, s.chain)), collectors, fetchFn, ...(rpcOpt ? { rpcsOf: () => rpcOpt } : {}) });
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     ok &&= r.ok;
     out.good.sells = rec.answers.slice(from);

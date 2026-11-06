@@ -14,13 +14,13 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "node:test";
 import { CHAINS, DUST, MAINNETS, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { MAINNET_INIT, MAX_FEE_CAP, ORDER, RPC_TRIES, addressOf, createAddress, deployedElsewhere, initProblems, main, outflowOf } from "../script/deploy.mjs";
+import { BUILT, MAINNET_INIT, MAX_FEE_CAP, ORDER, RPC_TRIES, sinkOf, addressOf, createAddress, deployedElsewhere, initProblems, main, outflowOf } from "../script/deploy.mjs";
 
 const OUT_DIR = new URL("../out/", import.meta.url);
 const runtime = (name) => JSON.parse(readFileSync(new URL(`${name}.sol/${name}.json`, OUT_DIR), "utf8")).deployedBytecode.object;
 const init = (name) => JSON.parse(readFileSync(new URL(`${name}.sol/${name}.json`, OUT_DIR), "utf8")).bytecode.object;
 /** the contract a create transaction's data deploys: the one whose init code it starts with */
-const createdBy = (data) => ORDER.find((n) => data.startsWith(init(n)));
+const createdBy = (data) => BUILT.find((n) => data.startsWith(init(n)));
 const E = "0x49f2425b7f33f3a10912de8add6839226ce663a2"; // a stand-in return address with no code
 const TMP = mkdtempSync(path.join(tmpdir(), "pool-evm-run-"));
 
@@ -318,6 +318,31 @@ test("--only SellDelegate deploys the delegate alone at nonce 0, constructed wit
   assert.ok(c.logs.some((l) => /^deploy: done\. Next: node scripts\/live-checks\/evm-selldelegate-exact-debit\.mjs --deployment /.test(l)), why(c));
 });
 
+test("--only FeeCollector deploys the fee collector alone beside the chain's set (card evm-fee-collector), constructed with the sell sender the kit pins; its record names it and its sink; the sweep lands", OPTS, async (t) => {
+  const { evmPoolVenues } = await import("../../../packages/kit/src/index.ts");
+  for (const name of ["base-sepolia", "robinhood-testnet"]) {
+    const sink = evmPoolVenues()[name].sellSender.toLowerCase();
+    assert.match(sink, /^0x[0-9a-f]{40}$/, `the kit pins ${name}'s sell sender`);
+    assert.equal(CHAINS[name].contracts.includes("FeeCollector"), false, "beside the 3 Nov set, not in it");
+    assert.equal(await sinkOf(name), sink);
+  }
+  const c = chain();
+  const r = await run(t, c, { args: ["--only", "FeeCollector"] });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  const sink = (await sinkOf("base-sepolia"));
+  assert.deepEqual(r.record.contracts, { FeeCollector: { address: createAddress(r.record.deployer, 0), sink } });
+  assert.deepEqual(r.record.txs.map((x) => x.step), ["deploy FeeCollector", "sweep (the run key's rest back)"]);
+  assert.deepEqual(c.created, [init("FeeCollector") + sink.slice(2).padStart(64, "0")]);
+  assert.ok(c.logs.some((l) => /^deploy: done\. Next: node scripts\/live-checks\/evm-fee-collector\.mjs --deployment /.test(l)), why(c));
+  // a chain whose sell sender the kit does not pin gets no collector: refused before a key is made
+  await assert.rejects(sinkOf("base"), /the kit pins no sell sender on base, the FeeCollector's sink: nothing was sent/);
+  const c2 = chain();
+  const r2 = await run(t, c2, { args: ["--only", "FeeCollector"], io: { sinkOf: async () => { throw new Error("the kit pins no sell sender on base-sepolia, the FeeCollector's sink: nothing was sent"); } } });
+  assert.match(String(r2.error?.message), /the kit pins no sell sender/);
+  assert.equal(c2.created.length, 0, "nothing deployed");
+});
+
 test("--only takes the sell delegate alone: any other contract, or none named, is refused before a key is made", OPTS, async (t) => {
   for (const only of ["UniswapV4Adapter", "PrivacyPoolSimple", "--no-build", undefined]) {
     const c = chain();
@@ -477,8 +502,8 @@ test("mainnet: a stopped run whose key still holds ETH keeps it; a new run is re
 });
 
 test("mainnet: each contract's init code is pinned in deploy.mjs (forge's out/ is the pin; one byte off is refused)", OPTS, async () => {
-  assert.deepEqual(Object.keys(MAINNET_INIT), ORDER);
-  for (const n of ORDER) {
+  assert.deepEqual(Object.keys(MAINNET_INIT), BUILT);
+  for (const n of BUILT) {
     const code = init(n);
     assert.equal(initProblems(n, code), null, n);
     const off = code.slice(0, -2) + (code.endsWith("00") ? "01" : "00");
