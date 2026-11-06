@@ -69,8 +69,9 @@ export function matches(file, paths = PATHS) {
 // ragequit 45, deposit_msg 42, settle 41, tree_prop 29, real_token 27, relayer_withdraw 27, smoke 25, s01 20,
 // lib 12, withdraw_context 12, prepay 10, groth16 6, the rest under 1). Each target adds about 8 s of compile and
 // link, so shard 4, with ten, ran longest: prepay moves to shard 2, for about 337, 348, 339 and 345.
+// s13 (VT-S13, both tokens) ran 35 s on the box (2026-11-06) and joins shard 1, then the lightest at 337.
 export const SHARDS = [
-  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14"],
+  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13"],
   ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay"],
   ["payouts", "s20", "s02", "withdraw_vectors", "s15"],
   ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw"],
