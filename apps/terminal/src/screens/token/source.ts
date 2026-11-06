@@ -5,12 +5,18 @@
 // (Discover's own read, ../discover/data.ts), the first row of the Trending column as Discover orders it (columnRows),
 // then the same token read for that mint. Display only: nothing here feeds a signature. A failed or wrong read is the
 // error state, never another token; an empty column is the empty state. The page (TokenPage.tsx) takes `TokenData`.
+//
+// Card token-page-fills-after (M384): a cold page's row may be the helper's row named on chain (src "chain", helper
+// card helper-page-jup-429), its symbol and name read from the mint and its Jupiter fields null until the helper holds
+// Jupiter's row. That row is the page, its null fields still loading (model.ts rowFilling); the page reads again every
+// FILL_MS until the row is Jupiter's, or the page closes.
 import { HELPER_FETCH_INIT } from "@blindfill/kit";
 import { useCallback, useEffect, useState } from "react";
 import { readLists } from "../discover/data.ts";
 import type { MarketChain, MarketRow } from "../discover/fields.ts";
 import { columnRows } from "../discover/model.ts";
 import type { RiskRead } from "../trade/safety.ts";
+import { rowFilling } from "./model.ts";
 
 /** `risk` is the token read's own `risk` part, which the safety grid draws (what the row lacks: insiders, tax, LP, honeypot). */
 export type TokenData = { status: "loading" } | { status: "error" } | { status: "empty" } | { status: "ready"; row: MarketRow; risk?: RiskRead };
@@ -58,24 +64,72 @@ export async function loadTopToken(fetchFn: typeof fetch = fetch): Promise<Token
   }
 }
 
+/** How often a page whose row is still filling reads again (M384). */
+export const FILL_MS = 5_000;
+
+/** The row is the helper's named on chain before Jupiter's: its null fields are still loading. */
+export const filling = (d: TokenData): boolean => d.status === "ready" && rowFilling(d.row);
+
+export interface FillDeps {
+  /** Runs `fn` after `ms`; returns its cancel. */
+  later?: (fn: () => void, ms: number) => () => void;
+  /** The page is out of sight (document.hidden): no read is made until it is back. */
+  hidden?: () => boolean;
+}
+
+const laterReal = (fn: () => void, ms: number): (() => void) => {
+  const t = setTimeout(fn, ms);
+  return () => clearTimeout(t);
+};
+
+/** Reads once and hands the answer to `onData`; while the answer is a filling row, reads again every FILL_MS and hands
+ *  on each ready answer of the same token, until one is not filling. A failed read again (or another token's, as /
+ *  could pick if its Trending column moved) keeps the row drawn and tries FILL_MS later. One read at a time; a hidden
+ *  page reads nothing. Returns the stop. */
+export function followToken(load: () => Promise<TokenData>, onData: (d: TokenData) => void, deps: FillDeps = {}): () => void {
+  const later = deps.later ?? laterReal;
+  const hidden = deps.hidden ?? (() => typeof document !== "undefined" && document.hidden);
+  let stopped = false;
+  let token: string | null = null;
+  let cancel: () => void = () => undefined;
+  const again = () => {
+    if (!stopped) cancel = later(() => void step(), FILL_MS);
+  };
+  async function step(): Promise<void> {
+    if (hidden()) return again();
+    const d = await load();
+    if (stopped) return;
+    if (d.status !== "ready" || d.row.token !== token) return again();
+    onData(d);
+    if (filling(d)) again();
+  }
+  void load().then((d) => {
+    if (stopped) return;
+    if (d.status === "ready") token = d.row.token;
+    onData(d);
+    if (filling(d)) again();
+  });
+  return () => {
+    stopped = true;
+    cancel();
+  };
+}
+
 type Loaded = { data: TokenData; nowMs: number; retry: () => void };
 
-/** The data and the clock of one read: loading until it ends; `retry` reads again from loading. The caller keys the
- *  component by what it reads, so a read never outlives its token. */
+/** The data and the clock of one read: loading until it ends, then read again while its row fills (followToken);
+ *  `retry` reads again from loading. The caller keys the component by what it reads, so a read never outlives its
+ *  token. */
 function useLoaded(load: () => Promise<TokenData>): Loaded {
   const [data, setData] = useState<TokenData>({ status: "loading" });
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    let live = true;
-    void load().then((d) => {
-      if (!live) return;
+    const stop = followToken(load, (d) => {
       setNowMs(Date.now());
       setData(d);
     });
-    return () => {
-      live = false;
-    };
+    return stop;
     // `load` is fixed for this component's life: its caller keys the component by what it reads
   }, [attempt]);
   const retry = useCallback(() => {

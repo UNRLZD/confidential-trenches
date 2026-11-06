@@ -34,45 +34,57 @@ export function changeTile(bps: number | null | undefined): string {
   return `${sign}${(sign + body).length + 1 > 8 ? body.replace(/(\.\d)\d(?=[KMBT])/, "$1") : body}%`;
 }
 
+/** The page's values. A field is null while the row is still filling and has no value for it yet: the page draws its
+ *  loading look there (card token-page-fills-after); once the row is Jupiter's, a value no source has is the dash. */
 export interface TokenView {
   token: string;
   symbol: string;
   /** Empty when it repeats the symbol. */
   name: string;
-  price: string;
+  price: string | null;
   /** `price` cut to the strip tile's width. */
-  priceTile: string;
-  mc: string;
-  vol: string;
-  liq: string;
-  holders: string;
-  age: string;
-  chg: { text: string; dir: Dir };
+  priceTile: string | null;
+  mc: string | null;
+  vol: string | null;
+  liq: string | null;
+  holders: string | null;
+  age: string | null;
+  chg: { text: string; dir: Dir } | null;
   /** `chg.text` cut to the strip tile's width. */
-  chgTile: string;
+  chgTile: string | null;
   launchpad: string | null;
   chain: string;
   curve: Curve;
+  /** The row is the helper's named on chain before Jupiter's row (M384, the helper's src "chain"): its null fields are
+   *  still loading and the page reads again (source.ts followToken). */
+  filling: boolean;
 }
+
+/** The row is the helper's named on chain before Jupiter's: its null fields are still loading. */
+export const rowFilling = (r: MarketRow): boolean => r.src === "chain";
 
 /** The page's values for one token. `nowMs` is the clock the age is drawn against. */
 export function tokenView(r: MarketRow, nowMs: number): TokenView {
+  const filling = rowFilling(r);
+  /** `drawn`, or null while the row fills and has no value for it. */
+  const or = <T>(raw: unknown, drawn: T): T | null => (filling && (raw === null || raw === undefined) ? null : drawn);
   return {
     token: r.token,
     symbol: r.symbol,
     name: r.name && r.name !== r.symbol ? r.name : "",
-    price: price(r.price_usd),
-    priceTile: priceTile(r.price_usd),
-    mc: usdTile(r.mc_usd),
-    vol: usdTile(r.vol_24h_usd),
-    liq: usdTile(r.liq_usd),
-    holders: count(r.holders),
-    age: age(r.created_s, nowMs),
-    chg: change24(r.chg_24h_bps),
-    chgTile: changeTile(r.chg_24h_bps),
+    price: or(r.price_usd, price(r.price_usd)),
+    priceTile: or(r.price_usd, priceTile(r.price_usd)),
+    mc: or(r.mc_usd, usdTile(r.mc_usd)),
+    vol: or(r.vol_24h_usd, usdTile(r.vol_24h_usd)),
+    liq: or(r.liq_usd, usdTile(r.liq_usd)),
+    holders: or(r.holders, count(r.holders)),
+    age: or(r.created_s, age(r.created_s, nowMs)),
+    chg: or(r.chg_24h_bps, change24(r.chg_24h_bps)),
+    chgTile: or(r.chg_24h_bps, changeTile(r.chg_24h_bps)),
     launchpad: r.launchpad ?? null,
     chain: r.chain,
     curve: curve(r),
+    filling,
   };
 }
 
