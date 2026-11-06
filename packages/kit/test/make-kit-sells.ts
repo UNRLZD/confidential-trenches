@@ -40,8 +40,9 @@ const FORK = {
   base: { sells: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", fee: 500, amount: 903370169n, quote: 399600103610838585n, ts: 1793669347, wNonce: 3442025n },
   robinhood: { sells: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 100, amount: 903193966n, quote: 399920003955851420n, ts: 1793669311, wNonce: 1885n },
 } as const;
-// the venue list with the fork's pool and delegate pinned
-const pinned = (v: EvmPoolVenue): EvmPoolVenue => Object.freeze({ ...v, pool: POOL, sellDelegate: DELEGATE });
+// the venue list with the fork's pool and delegate pinned, and SENDER as the FeeCollector the pinned builder pays (card
+// evm-testnet-delegate-review3)
+const pinned = (v: EvmPoolVenue): EvmPoolVenue => Object.freeze({ ...v, pool: POOL, sellDelegate: DELEGATE, feeCollector: FEE_TO });
 const VENUES = Object.freeze({ base: pinned(evmPoolVenues().base), robinhood: pinned(evmPoolVenues().robinhood) });
 
 type Fork = (typeof FORK)[keyof typeof FORK];
@@ -76,7 +77,7 @@ for (const [chain, f, k] of SELLS) {
   const minOut = (f.quote * 99n) / 100n;
   const built = at(f.ts, () => k.build(chain, {
     w: W, token: f.sells, amount: f.amount, target: v.routers[0]!, route: { venue: "uniswap-v3", tokens: [f.sells, v.weth], fees: [f.fee] },
-    minOut, precommitment: 0x5e11n, feeCap: 5n * 10n ** 14n, feeRecipient: FEE_TO, deadline: BigInt(f.ts + 300), nonce: 0n,
+    minOut, precommitment: 0x5e11n, feeCap: 5n * 10n ** 14n, feeRecipient: k === KIT ? v.feeCollector! : FEE_TO, deadline: BigInt(f.ts + 300), nonce: 0n,
   }));
   const a = k.auth(W_KEY, chain, f.wNonce);
   out[chain] = {

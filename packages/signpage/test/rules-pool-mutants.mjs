@@ -37,6 +37,7 @@ const ONRH = "EVM onward send: on Robinhood";
 const ONF = "EVM onward send: a max fee under";
 const ONS = "EVM onward send: signs as W";
 const ESIM = "EVM sim sell:";
+const EFEE = "card evm-testnet-delegate-review3: an EVM sell pays";
 
 // [text, replacement, the test that must fail, its file when not rules-pool.test.ts]
 export const MUTANTS = [
@@ -137,7 +138,11 @@ export const MUTANTS = [
   ['if (lower(built.token) !== lower(ask.token ?? "")) return refuse("token");\n  if (built.amount', "if (built.amount", ESELL],
   ['if (built.amount !== ask.amount) return refuse("amount");', "", ESELL],
   ['if (built.feeCap > ctx.feeCap) return refuse("fee_cap_over_device_cap");', "", ESELL],
-  ['if (lower(built.feeRecipient) !== lower(pins.feeRecipient)) return refuse("fee_recipient");', "", ESELL],
+  // a sell's fee only to the venue's pinned FeeCollector, never the withdraw relayer's (card evm-testnet-delegate-review3)
+  ['if (lower(built.feeRecipient) !== lower(pins.feeCollector)) return refuse("fee_recipient");', "", ESELL],
+  ['if (lower(built.feeRecipient) !== lower(pins.feeCollector)) return refuse("fee_recipient");', "", EFEE],
+  ['if (lower(built.feeRecipient) !== lower(pins.feeCollector)) return refuse("fee_recipient");', 'if (lower(built.feeRecipient) !== lower(pins.feeRecipient)) return refuse("fee_recipient");', EFEE],
+  ['if (pins.feeCollector === undefined) return refuse("evm_not_pinned");', "", EFEE],
   ['if (built.deadline * 1000n <= ctx.nowMs) return refuse("deadline_past");', "", ESELL],
   ['if (nonceReads[0] !== nonceReads[1] || nonce !== nonceReads[0]) return refuse("nonce");', "", ESELL],
   ['if (pins.sellDelegate === undefined) return refuse("delegate_not_pinned");', "", ESELL],
