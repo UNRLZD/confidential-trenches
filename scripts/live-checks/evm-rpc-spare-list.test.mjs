@@ -89,8 +89,8 @@ test("card base-rpc-list-fix: Base's list of three, or a fourth whose POST names
 // helper at 6adacd73), the same FAIL lines as host=helper live run 42302023037: each held Robinhood quote ends rpc_error
 // (the warm quote kept USDG, which the warm-up's prune dropped, and scanned all its pools over the whole depth: about
 // 5,000 requests of 2,000 blocks on Pocket, which answers about 400 and then 429 with Retry-After 59), and BlockPI's
-// Base maker spare answers Cloudflare's 521 page. `goodSpare` is a real run on this card's branch (this Mac, against the
-// same deployed helper; nothing it reads needs the branch's helper deployed): every held Robinhood quote ends ok with
+// Base maker spare answers Cloudflare's 521 page. `goodSpare` is a real run on this card's branch (aa8728ba, this Mac, 23:05-23:07Z,
+// against the same deployed helper; nothing it reads needs the branch's helper deployed): every held Robinhood quote ends ok with
 // Pocket asked for logs, and the Base maker list of six answers on every spare.
 test("card evm-spare-list-green: the bad answer at 6adacd73 fails: each held Robinhood quote ends rpc_error, and BlockPI's maker spare answers a Cloudflare page", () => {
   const r = check(A.badSpare);
