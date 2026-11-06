@@ -1,0 +1,46 @@
+{
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ctawgndxRV3sac2/vhLeMVszo7UvsBcUYax9Ts8c8YTScWBeY4xaa8l0dEJn1s8u\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ctawgndxRV3sac2/vhLeMVszo7UvsBcUYax9Ts8c8YTScWBeY4xaa8l0dEJn1s8u",
+  "maps": [
+   {
+    "quote_checked": "quote_checked",
+    "waiting": "waiting",
+    "in_transit": "in_transit",
+    "into_vault": "into_vault",
+    "done": "done",
+    "refunded": "refunded",
+    "held": "held",
+    "halted": "halted",
+    "failed": "halted",
+    "short": "halted",
+    "expired": "quote_checked",
+    "refund_move": "refunded"
+   }
+  ],
+  "keys": [
+   [
+    "release",
+    "api",
+    "signed_in",
+    "way",
+    "code_saved",
+    "signin_failed",
+    "vault_balance",
+    "wallets",
+    "positions",
+    "orders",
+    "held",
+    "ops"
+   ]
+  ],
+  "hello": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-3AiaXoHZZZPztfVU6l2AM+6GVfeK5xynH7RgNbaxwpY8EpHpJ+BcZgqTFpPRSfFj\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-3AiaXoHZZZPztfVU6l2AM+6GVfeK5xynH7RgNbaxwpY8EpHpJ+BcZgqTFpPRSfFj",
+  "maps": [],
+  "keys": [],
+  "hello": false
+ }
+}

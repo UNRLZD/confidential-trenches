@@ -196,6 +196,25 @@ export interface ReadyEvent {
   api: 1;
 }
 
+/**
+ * The kit version this client names to the signing page (card kit-frame-version): the tag it is cut as, kit-v<version>.
+ * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
+ * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
+ */
+export const SIGNPAGE_KIT_VERSION = "1.5";
+
+/**
+ * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
+ * handshake `state` request, so the page knows what this client reads before it sends a state. It has no id: the page
+ * answers nothing to it, and a page of an earlier release drops it unread (a message with no request id gets no
+ * answer). A client that posts none (kit-v1 to kit-v1.4) is read as kit-v1.4.
+ */
+export interface HelloMessage {
+  v: 1;
+  type: "hello";
+  kit: string;
+}
+
 /** Posted on every change of the state. */
 export interface StateEvent {
   v: 1;
@@ -303,7 +322,8 @@ export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
 /**
  * One request's operation in state.ops, by its id: the id of the request that started it. A deposit's op id is its
  * deposit.quote request's id (card kit-deposit-calls): the app finds the deposit it asked for in state.ops under the id
- * it sent, and a retry, which reuses the id, names the same op.
+ * it sent, and a retry, which reuses the id, names the same op. The client drops an op it cannot read and keeps the
+ * rest of the state (card kit-frame-version; kit-v1.4 and earlier refuse the whole state for one such op).
  */
 export type Operation =
   | ({ id: string; kind: "deposit"; stage: DepositStage; txs: TxRef[] } & DepositFacts)

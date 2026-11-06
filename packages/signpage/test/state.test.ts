@@ -10,6 +10,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords } from "@blindfill/wallet/derive";
 import { openWalletStore, openWalletStoreReader, WALLET_CHANNEL, type WalletStore, type WalletStoreReader } from "@blindfill/wallet/store";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
+import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import { APP_ORIGIN, RELEASE, signedOutState, startApi, type IncomingMessage } from "../src/api.ts";
 import { ANSWER_ROOM, frameState, opOf, pickOps, stateOf, type ChannelListen, type FrameState, type OpRow } from "../src/state.ts";
 
@@ -53,6 +54,8 @@ async function setup() {
   const parent = { postMessage: (msg: unknown, to: string) => void (to === APP_ORIGIN && posted.push(msg)) };
   let listener: ((e: IncomingMessage) => void) | null = null;
   const api = startApi({ parent, listen: (fn) => (listener = fn), state: fs.state, watch: fs.watch });
+  // the app on this kit names its version first, as the kit's client does (card kit-frame-version)
+  listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION } });
   /** Asks `state` as the app does and returns the answer's result. */
   const ask = async () => {
     const id = crypto.randomUUID();

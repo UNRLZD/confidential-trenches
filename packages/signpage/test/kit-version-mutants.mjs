@@ -1,0 +1,108 @@
+// Weakens what the page sends a kit-v1.4 client (card kit-frame-version: src/kit-version.ts and its use in src/api.ts),
+// one mutant at a time, and runs test/kit-version.test.ts on each: it passes on the code as it is and fails on every
+// mutant. Each later deposit stage's mapping is mutated to every other kit-v1.4 stage, so a mapping that tells an older
+// app another place for its money (a refund move read as done, a failed deposit read as moving) is caught. A mutant is
+// written to a copy of src/api.ts and src/kit-version.ts in packages/.kit-version-mutant-<pid>/src/ (the same depth, so
+// their ../../kit/src imports resolve), run by a copy of the test and its kit-v1.4 fixture beside it, all removed after,
+// so the sources are never changed and a test run beside the sweep never reads a mutant. Exits 1 when the test fails on
+// the code as it is, passes on a mutant, or a mutant's text is not in its file exactly once.
+// test/kit-version-mutants.test.mjs runs it in the package's test:mutants.
+//   node packages/signpage/test/kit-version-mutants.mjs
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { runSync } from "../../../scripts/group-run.mjs";
+
+const PKG = fileURLToPath(new URL("../", import.meta.url));
+const COPY = fileURLToPath(new URL(`../../.kit-version-mutant-${process.pid}/`, import.meta.url));
+const FILES = { api: "src/api.ts", kit: "src/kit-version.ts" };
+const TEST = "test/kit-version.test.ts";
+
+const V1_4 = ["quote_checked", "waiting", "in_transit", "into_vault", "done", "refunded", "held", "halted"];
+const MAPPED = { failed: "halted", short: "halted", expired: "quote_checked", refund_move: "refunded" };
+
+// [file, text, replacement]
+export const MUTANTS = [
+  // every later deposit stage, mapped to each other stage kit-v1.4 has
+  ...Object.entries(MAPPED).flatMap(([from, to]) =>
+    V1_4.filter((s) => s !== to).map((s) => ["kit", `  ${from}: "${to}",`, `  ${from}: "${s}",`]),
+  ),
+  // an old stage moved
+  ["kit", '  refunded: "refunded",', '  refunded: "done",'],
+  ["kit", '  halted: "halted",', '  halted: "held",'],
+  // a client with no hello read as current, and a version before 1.5 read as current
+  ["kit", 'export const KIT_DEFAULT: KitLevel = "1.4";', 'export const KIT_DEFAULT: KitLevel = "current";'],
+  ["kit", "const CURRENT_FROM = [1, 5] as const;", "const CURRENT_FROM = [1, 4] as const;"],
+  ["kit", "minor >= CURRENT_FROM[1]", "minor > CURRENT_FROM[1]"],
+  ["kit", 'if (!v) return KIT_DEFAULT;', 'if (!v) return "current";'],
+  // the hello's exact shape
+  ["kit", "keys.length !== 3 || ", ""],
+  ["kit", 'h.v !== 1 || ', ""],
+  // pools, deposit_wallets or a deposit's facts kept
+  ["kit", "  if (level === \"current\") return s;\n", "  if (level === \"current\" || s.pools === undefined) return s;\n"],
+  ["kit", '"orders", "held", "ops"]);', '"orders", "held", "ops", "pools"]);'],
+  ["kit", '"orders", "held", "ops"]);', '"orders", "held", "ops", "deposit_wallets"]);'],
+  ["kit", 'out[k] = k === "ops" ? s.ops.map(opV1_4).filter((o) => o !== null) : s[k as keyof SignpageState];', "out[k] = s[k as keyof SignpageState];"],
+  ['kit', 'if (V1_4_STATE_KEYS.has(k)) out[k]', 'if (k !== "pools") out[k]'],
+  ["kit", 'return { id: op.id, kind: "deposit", stage: V1_4_DEPOSIT_STAGE[op.stage], txs: op.txs };', 'return { ...op, stage: V1_4_DEPOSIT_STAGE[op.stage] };'],
+  ["kit", "if (kind === \"deposit.confirm\") return { stage: V1_4_DEPOSIT_STAGE[(result as { stage: DepositStage }).stage] };", "if (kind === \"deposit.confirm\") return { ...(result as object), stage: V1_4_DEPOSIT_STAGE[(result as { stage: DepositStage }).stage] };"],
+  // an op it cannot read sent anyway
+  ["kit", "!V1_4_OP_STAGES[op.kind].includes(op.stage)) return null;", "false) return null;"],
+  // a progress stage not mapped, a route event sent
+  ["kit", "  return own(V1_4_DEPOSIT_STAGE, stage) ? V1_4_DEPOSIT_STAGE[stage as DepositStage] : null;", "  return stage;"],
+  ["api", 'if (!("stage" in msg)) return level === "current" ? msg : null;', 'if (!("stage" in msg)) return msg;'],
+  // the level not read, not reset on a ready, an answer's kind not passed, a replay not shaped
+  ["api", "if (kit !== null) return void (level = kitLevel(kit));", "if (kit !== null) return;"],
+  ["api", "    queue = queue.then(() => void (level = KIT_DEFAULT));\n", ""],
+  ["api", "    post(answer, kind);", "    post(answer);"],
+  ["api", "first.answer ? post(first.answer, first.kind)", "first.answer ? post(first.answer)"],
+  ["api", "    sent = JSON.stringify(stateFor(level, s));", "    sent = JSON.stringify(s);"],
+];
+
+// a child test run must not inherit this process's own node --test context
+const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
+// a run past 5 min is killed, its process group with it, and counts as a fail (scripts/group-run.mjs)
+const RUN_MS = 300_000;
+/** "pass", "fail" or "none" (no test ran) of the test file at `root`. */
+const run = (root) => {
+  const r = runSync(process.execPath, ["--test", "--test-timeout=60000", `${root}${TEST}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: CHILD_ENV, timeoutMs: RUN_MS });
+  if (r.status !== 0) return "fail";
+  return /ℹ pass [1-9]/.test(r.stdout) ? "pass" : "none";
+};
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const original = Object.fromEntries(Object.entries(FILES).map(([k, f]) => [k, readFileSync(`${PKG}${f}`, "utf8")]));
+  process.on("exit", () => rmSync(COPY, { recursive: true, force: true }));
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => process.exit(130));
+  mkdirSync(`${COPY}src`, { recursive: true });
+  mkdirSync(`${COPY}test/fixtures`, { recursive: true });
+  cpSync(`${PKG}${TEST}`, `${COPY}${TEST}`);
+  cpSync(`${PKG}test/fixtures/kit-v1.4`, `${COPY}test/fixtures/kit-v1.4`, { recursive: true });
+  const write = (mut) => {
+    for (const [k, f] of Object.entries(FILES)) writeFileSync(`${COPY}${f}`, mut?.[0] === k ? original[k].replace(mut[1], () => mut[2]) : original[k]);
+  };
+  let bad = 0;
+  write(null);
+  const asIs = run(COPY);
+  if (asIs !== "pass") {
+    console.log(`BAD  kit-version.test.ts ${asIs === "none" ? "runs nothing" : "fails on the code as it is"}`);
+    process.exit(1);
+  }
+  for (const mut of MUTANTS) {
+    const [k, text] = mut;
+    const n = original[k].split(text).length - 1;
+    if (n !== 1) {
+      console.log(`BAD  mutant text ${n} times in ${FILES[k]}, not once: ${text}`);
+      bad++;
+      continue;
+    }
+    write(mut);
+    const r = run(COPY);
+    if (r !== "fail") {
+      console.log(`LIVE kit-version.test.ts ${r === "pass" ? "passes" : "runs nothing"} with ${FILES[k]}: ${text} -> ${mut[2]}`);
+      bad++;
+    } else console.log(`killed  ${FILES[k]}: ${text.trim()} -> ${mut[2].trim()}`);
+  }
+  for (const [k, f] of Object.entries(FILES)) if (readFileSync(`${PKG}${f}`, "utf8") !== original[k]) throw new Error(`${f} changed under the sweep`);
+  console.log(bad === 0 ? `all ${MUTANTS.length} mutants killed` : `${bad} problem(s)`);
+  process.exit(bad === 0 ? 0 : 1);
+}
