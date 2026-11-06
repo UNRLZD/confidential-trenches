@@ -463,8 +463,9 @@ test("a request's id is known at once and is the id posted, so progress events c
   assert.deepEqual(seen, [[id, "filled"]]);
 });
 
-// ---------------------------------------------------------------------------------------------- the twenty-one kinds
-test("every kind of the twenty-one has a fixture, and only the twenty-one do", () => {
+// -------------------------------------------------------------------------------------------- the twenty-three kinds
+test("every kind of the twenty-three has a fixture, and only the twenty-three do", () => {
+  assert.equal(SIGNPAGE_KINDS.length, 23);
   assert.deepEqual(Object.keys(FIXTURES).sort(), [...SIGNPAGE_KINDS].sort());
 });
 
@@ -531,7 +532,53 @@ test("the pool kinds (card signpage-pool-kinds): each builds from its own fields
   }
 });
 
-test("a kind not in the twenty-one cannot be built", () => {
+test("the deposit sheet's reads (card kit-deposit-assets-dry): deposit.assets takes no field, deposit.dry an asset and a decimal amount only, never an address", () => {
+  assert.deepEqual(C.signpageBuildRequest("deposit.assets", {}, "id"), { v: 1, id: "id", type: "deposit.assets" });
+  assert.deepEqual(C.signpageBuildRequest("deposit.dry", { origin_asset: "nep141:usdc", amount: "25" }, "id"), { origin_asset: "nep141:usdc", amount: "25", v: 1, id: "id", type: "deposit.dry" });
+  for (const b of [{ recipient: "x" }, { origin_asset: "nep141:usdc" }]) assert.throws(() => C.signpageBuildRequest("deposit.assets", b, "id"), TypeError, JSON.stringify(b));
+  for (const b of [{ origin_asset: "nep141:usdc" }, { amount: "25" }, { origin_asset: "nep141:usdc", amount: "1e5" }, { origin_asset: "nep141:usdc", amount: 25 },
+    { origin_asset: "nep141:usdc", amount: "25", recipient: "x" }, { origin_asset: "nep141:usdc", amount: "25", refundTo: "x" }])
+    assert.throws(() => C.signpageBuildRequest("deposit.dry", b, "id"), TypeError, JSON.stringify(b));
+});
+
+test("the deposit sheet's reads: an asset list or dry quote the device cannot have made is dropped, each check on its own", async () => {
+  const A = FIXTURES["deposit.assets"].result.assets[0];
+  const D = FIXTURES["deposit.dry"].result;
+  const bad = [
+    ["deposit.assets", { assets: [{ ...A, min: "0" }] }, "a minimum of 0"],
+    ["deposit.assets", { assets: [{ ...A, min: "1.0000001" }] }, "a minimum finer than the asset's decimals"],
+    ["deposit.assets", { assets: [{ ...A, decimals: 37 }] }, "decimals over 36"],
+    ["deposit.assets", { assets: [{ ...A, decimals: 1.5 }] }, "decimals not whole"],
+    ["deposit.assets", { assets: [{ ...A, chain: "ethereum" }] }, "a chain the kit does not have"],
+    ["deposit.assets", { assets: [{ ...A, max_usd: "-1" }] }, "a max that is not a decimal"],
+    ["deposit.assets", { assets: [{ ...A, max_usd: "0" }] }, "a max of 0"],
+    ["deposit.assets", { assets: [{ ...A, max_usd: "0.000" }] }, "a max of 0.000"],
+    ["deposit.assets", { assets: [A, { ...A, chain: "base" }] }, "one asset twice"],
+    ["deposit.assets", { assets: [{ ...A, deposit_address: "dep1" }] }, "an address on an asset"],
+    ["deposit.dry", { ...D, min_amount_out_usd: "24.9400001" }, "a min out above the amount out"],
+    ["deposit.dry", { ...D, time_estimate_s: -1 }, "a negative time"],
+    ["deposit.dry", { ...D, time_estimate_s: 1.5 }, "a time not whole"],
+    ["deposit.dry", { ...D, fee_usd: "-0.06" }, "a fee that is not a decimal"],
+    ["deposit.dry", { ...D, deposit_address: "dep1" }, "an address on a dry quote"],
+  ];
+  for (const [kind, result, why] of bad) {
+    const { h, c } = await readyClient();
+    const { id, settled } = await open(h, c, kind);
+    h.post(answer(id, result));
+    await flush();
+    assert.equal(settled(), false, why);
+    assert.equal(c.dropped().shape, 1, why);
+  }
+  // the edges that are the device's own: a min out equal to the amount out, no asset at all, a time of 0
+  for (const [kind, result] of [["deposit.dry", { ...D, min_amount_out_usd: D.amount_out_usd, time_estimate_s: 0 }], ["deposit.assets", { assets: [] }]]) {
+    const { h, c } = await readyClient();
+    const { id, p } = await open(h, c, kind);
+    h.post(answer(id, result));
+    assert.deepEqual(await p, { ok: true, result });
+  }
+});
+
+test("a kind not in the twenty-three cannot be built", () => {
   for (const k of ["sign", "eth_sendTransaction", "ready", "", "__proto__"]) {
     assert.throws(() => C.signpageBuildRequest(k, {}, "id"), TypeError, k);
   }
@@ -1044,6 +1091,8 @@ test("each kind's timeout is the table's (app.md §2.1 item 3); restore has none
     "export.open": 5_000, signout: 5_000, restore: null, state: 5_000, nav: 5_000, reload: 5_000,
     // the pool kinds (card signpage-pool-kinds): a trade's time, the withdraw screen an open's
     "pool.deposit": 10_000, "pool.buy": 10_000, "pool.sell": 10_000, "pool.withdraw": 5_000,
+    // the deposit sheet's reads (card kit-deposit-assets-dry): the helper's 1Click round trips, as deposit.quote
+    "deposit.assets": 15_000, "deposit.dry": 15_000,
   });
 });
 

@@ -85,6 +85,10 @@ export const SIGNPAGE_TIMEOUT_MS = {
   "pool.buy": 10_000,
   "pool.sell": 10_000,
   "pool.withdraw": 5_000,
+  // the deposit sheet's reads (card kit-deposit-assets-dry): each waits for the helper's 1Click round trips, as
+  // deposit.quote does (deposit.assets asks the token list, then one dry quote per asset at once)
+  "deposit.assets": 15_000,
+  "deposit.dry": 15_000,
 } as const satisfies Record<SignpageKind, number | null>;
 
 /** After one of these times out, the client asks `state` again (a new `state` request); the kind itself is never re-sent. */

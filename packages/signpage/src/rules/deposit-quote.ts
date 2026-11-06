@@ -15,19 +15,24 @@
 // (./deposit.ts), so no quote is asked above it either, or the money would sit in U. A USDC amount is compared
 // exactly; another asset at its higher price read against the destination's lower one, before anything is sent; and
 // the signed amountOut once more after the check, in case 1Click priced it above the device's reads. All "above_max".
-// A refusal carries a code and nothing else: "not_allowed" for a request no rule allows (the gate, an asset the device
-// cannot price, a bad amount), "quote_check_failed" for an answer that fails a check (W:888: nothing shown), "busy" and
-// "down" for a helper that is rate-limited or not answering, "not_available" for any other helper status.
+// The vault's least deposit (card kit-deposit-assets-dry; ./deposit-dry.ts): a USDC amount under the minimum a zero
+// withdraw fee leaves is refused "below_min" before anything is sent, and an answer that clears every check but the
+// vault's MIN_DEPOSIT is refused "below_min" too, read off the verified answer, never "quote_check_failed".
+// A refusal carries a code and nothing else (messages.ts DepositRefusal): "not_allowed" for a request no rule allows
+// (the gate, an asset the device cannot price, a bad amount), "quote_check_failed" for an answer that fails a check
+// (W:888: nothing shown), "busy" and "down" for a helper that is rate-limited or not answering, "not_available" for any
+// other helper status.
 //
 // The backup gate is the wallet store's one predicate, backupFirst, as sign out and the deposit quote rule ask it.
 // Not here: the postMessage wiring (src/deposit-wire.ts, with U from the store's public record) and the deposit's op
 // record; the price reads for an asset other than USDC (the caller's `priced`).
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../../kit/src/checks/oneclick.ts";
-import type { ErrorCode, SignpageResults } from "../../../kit/src/signpage/messages.ts";
+import type { DepositRefusal, SignpageResults } from "../../../kit/src/signpage/messages.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
 import { askDepositQuote, depositQuoteRequest } from "../../../wallet/src/deposit/quote.ts";
 import { backupFirst } from "../../../wallet/src/store/index.ts";
 import { checkDepositQuote, DepositRuleRefused, type DepositQuoteContext } from "./deposit.ts";
+import { DEPOSIT_ANSWERED, DEPOSIT_QUOTE_PATH, belowDepositBound, shortOnlyOfMinimum } from "./deposit-dry.ts";
 
 /** USDC's decimals on every chain the release lists it (kit ONECLICK_USDC_ASSETS); the vault's asset is one of them. */
 export const USDC_DECIMALS = 6;
@@ -51,10 +56,10 @@ export interface DepositQuoteKindContext {
 
 export type DepositQuoteKindAnswer =
   | { ok: true; result: SignpageResults["deposit.quote"] }
-  | { ok: false; code: ErrorCode };
+  | { ok: false; code: DepositRefusal };
 
 const DEC = /^[0-9]+(\.[0-9]+)?$/;
-const no = (code: ErrorCode): DepositQuoteKindAnswer => ({ ok: false, code });
+const no = (code: DepositRefusal): DepositQuoteKindAnswer => ({ ok: false, code });
 
 /** A decimal in base units at `decimals`, exactly; null when it has more fraction digits or is not a decimal. */
 function units(v: unknown, decimals: number): bigint | null {
@@ -111,6 +116,7 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   const over = aboveCap(amount, decimalsIn, pricing);
   if (over === null) return no("not_allowed");
   if (over) return no("above_max");
+  if (usdc && belowDepositBound(origin, amount)) return no("below_min");
 
   // 3. The request to U, through the helper.
   const now = ctx.now ?? Date.now;
@@ -128,19 +134,19 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   }
   if (reply.status === 429) return no("busy");
   if (reply.status === 503) return no("down");
-  if (reply.status !== 200) return no("not_available");
+  // 1Click answers a quote 201 (wallet.md D52), as the helper passes it on; 200 too
+  if (!DEPOSIT_ANSWERED.has(reply.status)) return no("not_available");
 
   // 4. The answer, checked against the device's own request, at the time it came back.
   let checked;
+  const check = { path: DEPOSIT_QUOTE_PATH, pricing, decimalsIn, decimalsOut: USDC_DECIMALS, now: now() } as const;
   try {
-    checked = checkDepositQuote(request, reply.body, {
-      seed: ctx.seed,
-      depositId: ctx.depositId,
-      check: { path: "partner", pricing, decimalsIn, decimalsOut: USDC_DECIMALS, now: now() },
-    });
+    checked = checkDepositQuote(request, reply.body, { seed: ctx.seed, depositId: ctx.depositId, check });
   } catch (e) {
-    // the rule's own refusals are of the request; the kit's (OneClickQuoteError) and anything else are of the answer
-    return no(e instanceof DepositRuleRefused ? "not_allowed" : "quote_check_failed");
+    // the rule's own refusals are of the request; the kit's (OneClickQuoteError) and anything else are of the answer,
+    // but an answer short of the vault's least deposit alone, which says the amount is below the minimum
+    if (e instanceof DepositRuleRefused) return no("not_allowed");
+    return no(shortOnlyOfMinimum(e, request, reply.body, check) ? "below_min" : "quote_check_failed");
   }
   if (checked.amountOut > HELPER_BIND_DEPOSIT_CAP) return no("above_max");
   // A live answer always carries both (the kit refuses one without); its timeEstimate is signed, handed back unchecked.

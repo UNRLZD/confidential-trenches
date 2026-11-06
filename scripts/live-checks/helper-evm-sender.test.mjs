@@ -88,6 +88,10 @@ test("the fee answer: a field missing or added, another chain, network or pool, 
     }))).ok, false, `${k} missing`);
   }
   assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, extra: 1 })))).ok, false, "a field added");
+  // the fee collector (card helper-sender-fee-proof): none set, the pool's address, or the sell sender's: each FAIL
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: null })))).ok, false, "no fee collector");
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: b.pool })))).ok, false, "the collector is the pool");
+  assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: b.sell_sender })))).ok, false, "the collector is the sell sender");
   assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, chain: "solana" })))).ok, false);
   assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, network: "base" })))).ok, false);
   assert.equal(judgeL(edit(g, "fee", (x) => body(x, (b) => ({ ...b, pool: OTHER })))).ok, false);
@@ -136,12 +140,30 @@ const recording = (calls) => async (method, params) => {
 };
 const codeOf = (a) => a.body?.error?.code ?? "sent";
 
+// card helper-sender-fee-proof, review M1: the fee answer's collector is the kit's pin, not just an address
+test("the fee answer's fee_collector off the kit's pin (a stand-in, the other testnet's) or where the kit pins none: FAIL", () => {
+  const venues = LOCAL();
+  for (const p of A.good.pools) {
+    const other = A.good.pools.find((x) => x.network !== p.network).network;
+    for (const coll of ["0x00000000000000000000000000000000c011ec70", venues[other].feeCollector]) {
+      const run = { ...A.good, pools: A.good.pools.map((x) => (x.network !== p.network ? x : { ...x, reads: x.reads.map((r) => (r.asked === "fee" ? { ...r, body: JSON.stringify({ ...JSON.parse(r.body), fee_collector: coll }) } : r)) })) };
+      const r = judgeL(run);
+      assert.ok(!r.ok && r.lines.some((l) => l.startsWith(`BAD [${p.network} fee] fee collector`)), `${p.network} ${coll}`);
+    }
+    const none = { ...venues, [p.network]: Object.fromEntries(Object.entries(venues[p.network]).filter(([k]) => k !== "feeCollector")) };
+    const r = judge(A.good, { venues: none });
+    assert.ok(!r.ok && r.lines.some((l) => l.startsWith(`BAD [${p.network} fee] fee collector`) && l.includes("the kit pins none")), p.network);
+  }
+});
+
 test("plantsOf() builds what the helper's sell checks read: each plant its own status and code with no RPC call; the sell it is made from reaches the RPC reads", async () => {
   const records = evmPoolRecords();
   assert.deepEqual(Object.keys(records), ["base-sepolia", "robinhood-testnet"]);
   for (const [network, pool] of Object.entries(records)) {
     const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW });
-    const sender = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey: randomKey(), feeRecipient: FEE_TO, floor: 10n ** 13n }, [recording(calls), recording(calls)], () => NOW);
+    // the plants pay FEE_TO, so it is the collector here; the release's fee recipient is the sender's own address, since
+    // the collector is never the fee recipient (card helper-sender-fee-proof, review L2)
+    const sender = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey: randomKey(), feeCollector: FEE_TO, floor: 10n ** 13n }, [recording(calls), recording(calls)], () => NOW);
     {
       const calls = [];
       const a = await sender(calls).sell(p.base);
@@ -177,7 +199,7 @@ test("each plant differs from the base sell in its one field (and the signature 
   for (const [network, pool] of Object.entries(evmPoolRecords())) {
     const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW });
     const base = read2(p.base);
-    assert.equal(base["sell.feeRecipient"], FEE_TO, "every plant pays the fee answer's fee recipient");
+    assert.equal(base["sell.feeRecipient"], FEE_TO, "every plant pays the fee answer's fee collector");
     const v = evmPoolVenues()[network];
     // the base's authorization is the kit's own, of the chain's pinned delegate
     const kit = evmPoolSignSellAuthorization(p.wKey, network, BigInt(p.base.authorization.nonce));
@@ -220,7 +242,7 @@ test("read() asks each record's pool for its fee, then posts every plant to the 
   const records = evmPoolRecords();
   assert.deepEqual(asked, Object.values(records).flatMap((pool) => [`GET /v1/pool/fee?pool=${pool}`, ...PLANTS.map(() => "POST /v1/pool/evm/sell")]));
   assert.deepEqual(run.pools.map((p) => [p.network, p.pool, p.reads.map((x) => x.asked)]), Object.entries(records).map(([n, pool]) => [n, pool, ["fee", ...PLANTS.map(([a]) => a)]]));
-  const named = Object.fromEntries(A.good.pools.map((p) => [p.pool, JSON.parse(p.reads[0].body).fee_recipient]));
+  const named = Object.fromEntries(A.good.pools.map((p) => [p.pool, JSON.parse(p.reads[0].body).fee_collector]));
   assert.equal(paid.length, Object.keys(records).length * PLANTS.length);
   for (const [pool, to] of paid) assert.equal(to, named[pool], `${pool}: the plant pays ${to}`);
 });

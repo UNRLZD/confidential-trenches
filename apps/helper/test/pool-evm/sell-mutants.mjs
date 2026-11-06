@@ -37,7 +37,7 @@ function movedAfter(line, after) {
   const find = EVM_TEXT.slice(i, j + after.length);
   return [find, find.slice(line.length) + line];
 }
-const FEE_TO_CHECK = '    // the fee goes only to the Sell\'s feeRecipient (SellDelegate.sol, L-1): this release\'s, as a withdraw\'s relay data\n    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient", `the Sell pays ${s.feeRecipient}, not ${feeRecipient}`);\n';
+const FEE_TO_CHECK = '    // the fee goes only to the Sell\'s feeRecipient (SellDelegate.sol, L-1): this network\'s fee collector, whose Paid log\n    // is the one proof of the fee (card helper-sender-fee-proof)\n    if (s.feeRecipient !== collector) return no(422, "fee_recipient", `the Sell pays ${s.feeRecipient}, not the fee collector ${collector}`);\n';
 
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
@@ -85,10 +85,17 @@ export const MUTANTS = [
   [EVM, "feeCap: t(7), feeRecipient: addr(t(8)),", "feeCap: t(8), feeRecipient: addr(t(7)),", T, "the helper reads SellDelegate.sell's 11-field Sell"],
   [EVM, "const SELL_TUPLE = 11;", "const SELL_TUPLE = 10;", T, "the helper reads SellDelegate.sell's 11-field Sell"],
   [EVM, "uint256,uint256,address,uint256,uint256),uint256,bytes)\";", "uint256,uint256,uint256,uint256),uint256,bytes)\";", T, "the helper reads SellDelegate.sell's 11-field Sell"],
-  // the fee goes only to this release's fee recipient (SellDelegate.sol, L-1)
-  [EVM, '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', '    if (false) return no(422, "fee_recipient"', T, "fee_recipient:"],
-  [EVM, '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sellSender) return no(422, "fee_recipient"', T, "fee_recipient:"],
-  [EVM, '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sender) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  // the fee goes only to this network's fee collector (SellDelegate.sol, L-1; card helper-sender-fee-proof)
+  [EVM, '    if (s.feeRecipient !== collector) return no(422, "fee_recipient"', '    if (false) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  [EVM, '    if (s.feeRecipient !== collector) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sellSender) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  [EVM, '    if (s.feeRecipient !== collector) return no(422, "fee_recipient"', '    if (s.feeRecipient !== sender) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  [EVM, '    if (s.feeRecipient !== collector) return no(422, "fee_recipient"', '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', T, "fee_recipient:"],
+  // no collector set: every sell refused (fail closed); a collector at the pool's or a sender's address refused at start
+  [EVM, '    if (feeCollector === undefined) return no(503, "not_configured", `no fee collector is set for ${cfg.network}`);\n', "", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(!ADDRESS.test(feeCollector) || feeCollector === sender || feeCollector === sellSender)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sellSender)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", T, "no fee collector set"],
   // its place: before the fee cap and before W's signature, so a sell paying another is refused as that whatever else
   [EVM, ...movedAfter(FEE_TO_CHECK, '    if (s.feeCap >= s.minOut) return no(422, "fee_over_cap", `feeCap ${s.feeCap} is not under minOut ${s.minOut}`);\n'), T, "fee_recipient:"],
   [EVM, ...movedAfter(FEE_TO_CHECK, '    if (signer !== w) return no(422, "bad_signature", `signed by ${signer ?? "no key"}, not W`);\n'), T, "fee_recipient:"],
@@ -141,7 +148,8 @@ export const MUTANTS = [
   // fold 1, M3 (b): one provider refusing the send still sends, and the next sale takes nonce + 1
   [EVM, "    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);\n    const until = Number(s.deadline)", "    if (why.length > 0) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);\n    const until = Number(s.deadline)", T, "one provider refusing the send:"],
   // the fee answer
-  [EVM, "fee_recipient: feeRecipient, sell_sender: sellSender, epoch_ms", "fee_recipient: feeRecipient, sell_sender: sender, epoch_ms", T, "the fee answer names"],
+  [EVM, "fee_recipient: feeRecipient, sell_sender: sellSender, fee_collector", "fee_recipient: feeRecipient, sell_sender: sender, fee_collector", T, "the fee answer names"],
+  [EVM, "fee_collector: feeCollector ?? null, epoch_ms", "fee_collector: feeRecipient, epoch_ms", T, "the fee answer names"],
   // fold 1, H1: a sale that did not land frees its (W, nonce), on both providers' reads, capped per W
   [EVM, '    if (status.includes("0x0")) return "reverted";', '    if (false) return "reverted";', T, "a sale that reverted or was dropped"],
   [EVM, '    if (status.includes("0x1")) return "waiting";', "", T, "a sale that reverted or was dropped"],
@@ -156,8 +164,8 @@ export const MUTANTS = [
   [EVM, "      evmSellRouteOf(sellChain, { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data });", "      void { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data };", T, "bad_route:"],
   // fold 1, H2.2: the unpaid-gas caps
   [EVM, "    const capped = overCap(keys, worst);\n    if (capped !== null) return capped;", "", T, "unpaid sell gas:"],
-  [EVM, "    held.wei = ok ? (cost > fee ? cost - fee : 0n) : cost;", "    held.wei = cost;", T, "unpaid sell gas:"],
-  [EVM, "    held.wei = ok ? (cost > fee ? cost - fee : 0n) : cost;", "    held.wei = 0n;", T, "unpaid sell gas:"],
+  [EVM, "unpaid: ok ? (cost > sale.fee ? cost - sale.fee : 0n) : cost };", "unpaid: cost };", T, "unpaid sell gas:"],
+  [EVM, "unpaid: ok ? (cost > sale.fee ? cost - sale.fee : 0n) : cost };", "unpaid: 0n };", T, "unpaid sell gas:"],
   [EVM, '["all", `w:${w}`, `t:${token}`, ...(client === undefined ? [] : [`c:${client}`])]', '["all", `w:${w}`, `t:${token}`]', T, "unpaid sell gas:"],
   [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '["all", `w:${w}`, ...(client', T, "unpaid sell gas:"],
   [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '["all", `t:${token}`, ...(client', T, "unpaid sell gas:"],
@@ -168,6 +176,7 @@ export const MUTANTS = [
   [EVM, "  if (sellSender === sender) throw", "  if (false) throw", T, "the sell sender:"],
   [EVM, 'a("eth_getTransactionCount", [from, "pending"])', 'a("eth_getTransactionCount", [sender, "pending"])', T, "the sell sender:"],
   [EVM, "    const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), key);", "    const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), cfg.senderKey);", T, "a good sell:"],
+  [EVM, "landedSale(charge(keys, worst), s, w, maxFeePerGas, keys)", "landedSale(charge(keys, worst), s, w, 10n ** 30n, keys)", T, "a proven sale one provider reads at effectiveGasPrice 10^30"],
   [EVM, '      await a("eth_call", [{ from, to: w, data, gas:', '      await a("eth_call", [{ from: sender, to: w, data, gas:', T, "a good sell:"],
   [EVM, "pin.toLowerCase() !== s.sellSender)", "pin.toLowerCase() !== s.sender)", T2, "the EVM pool sell sender's address"],
   [EVM, '    if (sellKey !== "" && sellKey === key) throw', "    if (false) throw", T2, "the EVM pool sell sender's address"],
@@ -250,8 +259,8 @@ export const MUTANTS = [
   [EVM, "      if (known && k.startsWith(\"t:\")) continue;", "", T, "a paid landing frees its caller of the token's cap only"],
   [EVM, "(k.startsWith(\"w:\") || k.startsWith(\"c:\")) && (paid.get(k) ?? -Infinity) > t - EVM_SELL_UNPAID_WINDOW_MS", "(k.startsWith(\"w:\") || k.startsWith(\"c:\")) && paid.has(k)", T, "a paid landing is one in the window that paid its cost"],
   [EVM, "(k.startsWith(\"w:\") || k.startsWith(\"c:\")) && (paid.get(k)", "k.startsWith(\"w:\") && (paid.get(k)", T, "a paid landing frees its caller of the token's cap only"],
-  [EVM, "    if (!ok || cost > fee) return;", "    if (!ok) return;", T, "a paid landing is one in the window that paid its cost"],
-  [EVM, "    if (!ok || cost > fee) return;", "    return;", T, "a paid landing frees its caller of the token's cap only"],
+  [EVM, "paid: ok && cost <= sale.fee,", "paid: ok,", T, "a paid landing is one in the window that paid its cost"],
+  [EVM, "    if (!r.paid) return;", "    return;", T, "a paid landing frees its caller of the token's cap only"],
   // fold 2, L-poll: the receipt watch backs off
   [EVM, "      every = Math.min(every * 2, first * EVM_RECEIPT_POLL_BACKOFF);", "", T, "the receipt watch backs off"],
   // fold 2, L-pin: a chain with no pin starts with sales off
@@ -261,7 +270,7 @@ export const MUTANTS = [
   [EVM, "    const prior = old === undefined ? [] : [...old.prior, ...(old.hash === hash ? [] : [old.hash])].slice(-EVM_LANE_PRIOR_MAX);", "    const prior: string[] = [];", T, "a replaced sale that mined is counted"],
   [EVM, "    const prior = old === undefined ? [] : [...old.prior, ...(old.hash === hash ? [] : [old.hash])]", "    const prior = old === undefined ? [] : [...old.prior]", T, "a replaced sale that mined is counted"],
   [EVM, "        if (await usedAt(old!)) {", "        if (false) {", T, "a stuck replacement whose earlier send mined"],
-  [EVM, "        lane.sent.delete(nonce); // a receipt for any send at the nonce: it is used", "        if (lane.sent.get(nonce) === mine) lane.sent.delete(nonce);", T, "a sale that mines as its replacement goes"],
+  [EVM, "        if (!used) lane.sent.delete(nonce); // a receipt for any send at the nonce: it is used", "        if (!used && lane.sent.get(nonce) === mine) lane.sent.delete(nonce);", T, "a sale that mines as its replacement goes"],
   // fold 6, M2: a held answer whose tend sent something waits one block
   [EVM, "    const wait = sent > 0 ? EVM_LANE_SENT_RETRY_S : Math.max(", "    const wait = sent > 0 ? EVM_LANE_RETRY_S : Math.max(", T, "a held answer whose tend sent something"],
   [EVM, "    const wait = sent > 0 ? EVM_LANE_SENT_RETRY_S : Math.max(1, Math.ceil((Math.min(nextTend, mined) - now()) / 1000));", "    const wait = sent > 0 ? EVM_LANE_SENT_RETRY_S : EVM_LANE_RETRY_S;", T, "callers obeying Retry-After through a heal"],
@@ -305,6 +314,29 @@ export const MUTANTS = [
   [EVM, "      r.low.catch(() => {}); // a failed read is shared too: its whole block answers from it", "      r.low.catch(() => {\n        if (lane.heldRead === r) lane.heldRead = null;\n      });", T, "a hold read that fails"],
   [EVM, "      return { ...u, retryAfterS: Math.max(u.retryAfterS ?? 0, Math.max(1, Math.ceil((r.at + block - now()) / 1000))) };", "      return u;", T, "a hold read that fails"],
   [EVM, "Math.max(1, Math.ceil((r.at + block - now()) / 1000))", "Math.max(1, Math.floor((r.at + block - now()) / 1000))", T, "a hold read that fails"],
+  // card helper-sender-fee-proof: a landed sale counts as paid only when both providers' receipts read status 1 and carry
+  // the fee collector's Paid log (from the collector, from W, value at least the fee); one provider's receipt never
+  // clears a charge; the cost is the higher receipt's
+  [EVM, "  const ok = [ra, rb].every((r) =>", "  const ok = [ra, rb].some((r) =>", T, "one provider's receipt never clears a charge"],
+  [EVM, "  const ok = [ra, rb].every((r) =>", "  const ok = [ra].every((r) =>", T, "one provider's receipt never clears a charge"],
+  [EVM, "  const ok = [ra, rb].every((r) =>", "  const ok = [rb].every((r) =>", T, "one provider's receipt never clears a charge"],
+  [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmRpcHex(r.status) === \"0x1\");", T, "a sale that landed with status 1 but no Paid log"],
+  [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmSalePaid(r, sale.collector, sale.w, sale.fee));", T, "one provider's receipt never clears a charge"],
+  [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, 0n));", T, "each part of the Paid log is checked"],
+  [EVM, "        if (seen[0] !== null && seen[1] !== null) return landed(seen[0], seen[1]);", "        return landed(seen[0] ?? seen[1]!, seen[1] ?? seen[0]!);", T, "one provider's receipt never clears a charge"],
+  [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = ca;", T, "the cost is the higher of the two receipts'"],
+  [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = cb;", T, "the cost is the higher of the two receipts'"],
+  [EVM, "    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee, maxFeePerGas }, held.wei);", "    const r = evmSaleUnpaid(ra, rb, { collector: s.pool, w, fee: s.fee, maxFeePerGas }, held.wei);", T, "the same sale proven on both providers holds nothing"],
+  [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (evmRpcHex(address) !== collector ||", T, "each part of the Paid log is checked"],
+  [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (removed === true ||", T, "each part of the Paid log is checked"],
+  [EVM, " || !Array.isArray(topics) || topics.length !== 2) return false;", " || !Array.isArray(topics)) return false;", T, "each part of the Paid log is checked"],
+  [EVM, "    if (evmRpcHex(topics[0]) !== PAID_TOPIC || evmRpcHex(topics[1]) !== from) return false;", "    if (evmRpcHex(topics[1]) !== from) return false;", T, "each part of the Paid log is checked"],
+  [EVM, "    if (evmRpcHex(topics[0]) !== PAID_TOPIC || evmRpcHex(topics[1]) !== from) return false;", "    if (evmRpcHex(topics[0]) !== PAID_TOPIC) return false;", T, "each part of the Paid log is checked"],
+  [EVM, "    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;", "    return d !== null && d.length === 2 + 64;", T, "each part of the Paid log is checked"],
+  [EVM, "    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;", "    return d !== null && d.length === 2 + 64 && BigInt(d) + 1n >= fee;", T, "each part of the Paid log is checked"],
+  [EVM, "    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;", "    return d !== null && d.length === 2 + 64 && BigInt(d) > fee;", T, "each part of the Paid log is checked"],
+  [EVM, "    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;", "    return d !== null && d.length >= 2 && BigInt(d) >= fee;", T, "each part of the Paid log is checked"],
+  [EVM, "\"Paid(address,uint256)\"", "\"Paid(address indexed,uint256)\"", T, "the Paid topic is FeeCollector's"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a

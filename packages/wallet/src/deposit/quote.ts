@@ -83,9 +83,17 @@ export async function askDepositQuote(request: OneClickRequest, fetchFn: typeof 
   return { status: res.status, body };
 }
 
+/** An answer refused for its size, declared or streamed (readCapped). */
+export class DepositAnswerTooLarge extends Error {
+  constructor(max: number) {
+    super(`deposit quote: an answer over ${max} B`);
+    this.name = "DepositAnswerTooLarge";
+  }
+}
+
 /** The body's bytes, refused once they pass `max` (declared or streamed), without reading the rest. */
-async function readCapped(res: Response, max: number): Promise<Uint8Array> {
-  if (Number(res.headers.get("content-length") ?? "0") > max) throw new Error(`deposit quote: an answer over ${max} B`);
+export async function readCapped(res: Response, max: number): Promise<Uint8Array> {
+  if (Number(res.headers.get("content-length") ?? "0") > max) throw new DepositAnswerTooLarge(max);
   if (res.body === null) return new Uint8Array(0);
   const reader = res.body.getReader();
   const parts: Uint8Array[] = [];
@@ -96,7 +104,7 @@ async function readCapped(res: Response, max: number): Promise<Uint8Array> {
     total += value.length;
     if (total > max) {
       await reader.cancel();
-      throw new Error(`deposit quote: an answer over ${max} B`);
+      throw new DepositAnswerTooLarge(max);
     }
     parts.push(value);
   }

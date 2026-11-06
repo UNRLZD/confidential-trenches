@@ -4,9 +4,9 @@
 // every file index.ts re-exports (followed through each file's own relative `export ... from`), and checks:
 //   - the exports map's keys are exactly ".", "./core" and "./package.json", "." and "./core" point at
 //     ./src/index.ts and ./src/core.ts (types and default), with no build;
-//   - SIGNPAGE_KINDS, and the keys of SignpageParams and SignpageResults, are exactly the twenty-one kinds: the fifteen
-//     of wallet.md §7 item 4, the shell's nav and reload (card signpage-shell) and the four pool kinds added after
-//     kit-v1 (card signpage-pool-kinds), pinned below, as the public repo carries no papers;
+//   - SIGNPAGE_KINDS, and the keys of SignpageParams and SignpageResults, are exactly the twenty-three kinds: the fifteen
+//     of wallet.md §7 item 4, the shell's nav and reload (card signpage-shell), the four pool kinds added after
+//     kit-v1 (card signpage-pool-kinds) and the deposit sheet's two reads (card kit-deposit-assets-dry), pinned below, as the public repo carries no papers;
 //   - SIGNPAGE_EVENTS holds only the handshake events ready, state and progress;
 //   - OrderRecord, and ORDER_RECORD_FIELDS, are exactly the twelve fields of the order record (wallet.md §7 item 3 in
 //     markets.md H5.1's shape, decided 2026-11-01 00:35Z), its `variants` holds 1 to 3 signed variants, and
@@ -33,6 +33,8 @@ export const KINDS = [
   "nav", "reload",
   // the pools (card signpage-pool-kinds, plan v2 W4): additive, every kind before them unchanged
   "pool.deposit", "pool.buy", "pool.sell", "pool.withdraw",
+  // the deposit sheet's reads before any address (card kit-deposit-assets-dry): additive, every kind before them unchanged
+  "deposit.assets", "deposit.dry",
 ];
 // app.md §7 ask P1 (app.md:1669-1672): the only names allowed beside the kinds
 export const EVENTS = ["ready", "state", "progress"];
@@ -159,8 +161,8 @@ export async function check({ read }) {
   const kOk = !!kinds && sameSet(kinds, KINDS);
   const pOk = !!params && sameSet(params, KINDS);
   const rOk = !!results && sameSet(results, KINDS);
-  const b = say(kOk && pOk && rOk, `the kinds: SIGNPAGE_KINDS ${kOk ? "is the twenty-one" : diff(kinds, KINDS)}; SignpageParams ${pOk ? "is the twenty-one" : diff(params, KINDS)}; ` +
-    `SignpageResults ${rOk ? "is the twenty-one" : diff(results, KINDS)}`);
+  const b = say(kOk && pOk && rOk, `the kinds: SIGNPAGE_KINDS ${kOk ? "is the twenty-three" : diff(kinds, KINDS)}; SignpageParams ${pOk ? "is the twenty-three" : diff(params, KINDS)}; ` +
+    `SignpageResults ${rOk ? "is the twenty-three" : diff(results, KINDS)}`);
 
   const events = arrays.get("SIGNPAGE_EVENTS") ?? [];
   const eOk = new Set(events).size === events.length && events.every((x) => EVENTS.includes(x));

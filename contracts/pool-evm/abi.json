@@ -1,0 +1,127 @@
+{
+  "about": "contracts/pool-evm's ABI as forge v1.7.1 compiles it (solc 0.8.28), written by script/abi-snapshot.mjs --write; test/abi-snapshot.test.mjs holds it to the build, test/abi-tie.test.mjs holds the helper's, the kit's, the wallet's and the signing page's strings to it",
+  "PrivacyPoolSimple": {
+    "functions": {
+      "ASSET()": "4800d97f",
+      "MAX_RELAY_FEE_BPS()": "c072c05c",
+      "MAX_TREE_DEPTH()": "e38df5f0",
+      "MIN_DEPOSIT()": "e1e158a5",
+      "SCOPE()": "33d09200",
+      "WITHDRAWAL_VERIFIER()": "8735eb2b",
+      "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)": "3edadd79",
+      "currentLabelRoot()": "50f3e219",
+      "currentLabelTreeDepth()": "33fd7edb",
+      "currentLabelTreeSize()": "4181445b",
+      "currentRoot()": "fdab463d",
+      "currentTreeDepth()": "4a2b75c8",
+      "currentTreeSize()": "a8f0f95a",
+      "deposit(uint256,uint256)": "e2bbb158",
+      "labelRootTimes(uint256)": "bbfaea22",
+      "nonce()": "affed0e0",
+      "nullifierHashes(uint256)": "1f79a1e9",
+      "stateRootTimes(uint256)": "4b278d9c",
+      "usedPrecommitments(uint256)": "a1cc748b",
+      "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)": "94374b2b"
+    },
+    "events": {
+      "Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)": "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d",
+      "Deposited(address,uint256,uint256,uint256,uint256)": "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+      "LabelInserted(uint256,uint256,uint256)": "0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489",
+      "LeafInserted(uint256,uint256,uint256)": "0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221",
+      "Withdrawn(address,address,uint256,uint256,uint256,uint256)": "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a"
+    },
+    "errors": {
+      "ContextMismatch()": "ef6daeb0",
+      "DeadlineExpired()": "1ab7da6b",
+      "FailedToSendNativeAsset()": "d58db962",
+      "FeeOverCap()": "c1bd8845",
+      "InsufficientValue()": "11011294",
+      "InvalidDepositValue()": "428243e2",
+      "InvalidMinOut()": "6bfbde47",
+      "InvalidPrecommitment()": "9d6fd1b7",
+      "InvalidProcessooor()": "1a7c48e5",
+      "InvalidProof()": "09bde339",
+      "InvalidRecipient()": "9c8d2cd2",
+      "InvalidRelayData()": "caf9ddf2",
+      "InvalidSignature()": "8baa579f",
+      "InvalidTreeDepth()": "c21cc8e2",
+      "InvalidWithdrawalAmount()": "9abc7491",
+      "LeafAlreadyExists()": "258a195a",
+      "LeafCannotBeZero()": "29691be2",
+      "LeafGreaterThanSnarkScalarField()": "c380a82e",
+      "MaxTreeDepthReached()": "221f4041",
+      "MinOutNotMet()": "81efc143",
+      "MinimumDepositAmount()": "b0ab7ae4",
+      "NullifierAlreadySpent()": "b115d857",
+      "PrecommitmentAlreadyUsed()": "da85277b",
+      "Reentrancy()": "ab143c06",
+      "RelayFeeGreaterThanMax()": "dfa294c6",
+      "UnexpectedCode(address)": "fdac7418",
+      "UnknownLabelRoot()": "8d6aa80f",
+      "UnknownStateRoot()": "fd3d3c4c",
+      "ZeroAddress()": "d92e233d"
+    },
+    "types": {
+      "Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)": "0x6db421958ea7f1f2118d0d1cc341e667075d404be0f2372eed30589186881646",
+      "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)": "0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f",
+      "Withdraw(uint256 nullifier,uint256 context,uint256 value)": "0x9aeacc3e49b45b56bda1f163291b1c468acf0ab6f5e4bad7166d6956d1b3e077"
+    },
+    "domain": {
+      "name": "Blindfill",
+      "nameHash": "0xa4a578b3a036619444ef9643c65d5272b9adf12ccc0e45a6a0f3a15e0ee6de1f",
+      "version": "1",
+      "versionHash": "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6"
+    }
+  },
+  "SellDelegate": {
+    "functions": {
+      "POOL_MANAGER()": "62308e85",
+      "WETH()": "ad5c4648",
+      "nonce()": "affed0e0",
+      "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)": "0c2cb9ca",
+      "unlockCallback(bytes)": "91dd7346"
+    },
+    "events": {},
+    "errors": {
+      "ApproveFailed()": "3e3f8f73",
+      "DeadlineExpired()": "1ab7da6b",
+      "DebitNotExact()": "94bdcb04",
+      "FailedToSendNativeAsset()": "d58db962",
+      "FeeOverCap()": "c1bd8845",
+      "InvalidFeeRecipient()": "768dc598",
+      "InvalidMinOut()": "6bfbde47",
+      "InvalidNonce()": "756688fe",
+      "InvalidRoute()": "84e505d2",
+      "InvalidSignature()": "8baa579f",
+      "LeftoverApproval()": "493a4e84",
+      "MinOutNotMet()": "81efc143",
+      "NotInSell()": "b541e795",
+      "NotPoolManager()": "ae18210a",
+      "PartialFill()": "d964f528",
+      "Reentrancy()": "ab143c06",
+      "TransferFailed()": "90b8ec18"
+    },
+    "types": {
+      "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)": "0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f",
+      "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)": "0x7964e18e540efb8e58098ce102bf5d1c94cc5fd69638a343b633d8b9d3767aa7"
+    },
+    "domain": {
+      "name": "Blindfill",
+      "nameHash": "0xa4a578b3a036619444ef9643c65d5272b9adf12ccc0e45a6a0f3a15e0ee6de1f",
+      "version": "1",
+      "versionHash": "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6"
+    }
+  },
+  "FeeCollector": {
+    "functions": {},
+    "events": {
+      "Paid(address,uint256)": "0x737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc489"
+    },
+    "errors": {
+      "ForwardFailed()": "096dc0e1",
+      "ZeroSink()": "5a75c1a8"
+    },
+    "types": {},
+    "domain": null
+  }
+}
