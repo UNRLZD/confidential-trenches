@@ -609,6 +609,55 @@ test("R2b: a refund of value on a refund precommitment that is not refundNote(l,
   assert.equal(restorePages(SEED, SCOPE, pagesOf(v), { gap: TEST_GAP }).notes.length, 2);
 });
 
+// card vault-refund-precommit-reserve's pin: the vault holds a precommitment twice by design (deposit.rs:109-110
+// refuses a repeated P among deposits only; settle writes no precommitments), so a stranger can put a note on a P the
+// pages show: a deposit on a pending spend's refund_precommitment R, or a spend of their own naming our deposit P as
+// its refund. Their note hashes from our P but is theirs to lose. The restore never stops on one and never takes it on:
+// our notes stay at their own leaves. A restore that read byP for refund refs, took refund leaves by precommitment from
+// every spend row, or stopped on a P seen in both a deposit row and a spend row fails here.
+test("twins from a stranger: a deposit on our pending refund R and a refund on our deposit P are ignored; restore never stops", () => {
+  for (const settle of [false, true]) {
+    const v = new Vault();
+    const leaf0 = v.deposit(sec(dep0).precommitment, 50_000_000n, hex64("U0"))!;
+    const dep1: NoteRef = { kind: "deposit", s: SCOPE, i: 1 };
+    const leaf1 = v.deposit(sec(dep1).precommitment, 30_000_000n, hex64("U1"))!;
+    // our withdrawal of 20 USDC from deposit 0 bounces: refund_pending on R = refund(l, 0)
+    const change = { P: sec({ kind: "change", l: leaf0.label, j: 0 }).precommitment, value: 30_000_000n, label: leaf0.label };
+    const R = sec({ kind: "refund", l: leaf0.label, j: 0 }).precommitment;
+    const ours = v.withdraw(sec(dep0).nullifierHash, 20_000_000n, change, R, 77n);
+    v.payout(ours.spend, 20_000_000n);
+    // the stranger reads R off the pending spend and deposits on it (the model vault, as main's, takes it)
+    const theirsOnR = v.deposit(R, 1_000_000n, hex64("stranger"));
+    assert.ok(theirsOnR, "the vault takes a deposit on a pending spend's refund precommitment");
+    // the stranger spends a note of their own naming our deposit 1's P as its refund, and it bounces and settles
+    const own = { kind: "deposit", s: SCOPE, i: 0 } as const;
+    const theirLeaf = v.deposit(noteSecrets(OTHER, own).precommitment, 5_000_000n, hex64("stranger"))!;
+    const theirs = v.withdraw(noteSecrets(OTHER, own).nullifierHash, 5_000_000n, { P: noteSecrets(OTHER, { kind: "change", l: theirLeaf.label, j: 0 }).precommitment, value: 0n, label: theirLeaf.label }, sec(dep1).precommitment, 78n);
+    v.payout(theirs.spend, 5_000_000n);
+    const onP = v.settle(theirs.spend)!;
+    const refundLeaf = settle ? v.settle(ours.spend)! : null;
+    const r = restorePages(SEED, SCOPE, pagesOf(v), { gap: TEST_GAP });
+    const at = (ref: NoteRef) => r.notes.find((n) => refKey(n.ref) === refKey(ref));
+    // our deposits at their own leaves, never the stranger's on the same P
+    assert.equal(at(dep0)?.state, "SPENT");
+    assert.equal(at(dep1)?.leaf.leafIndex, leaf1.leafIndex);
+    assert.equal(at(dep1)?.leaf.value, 30_000_000n);
+    assert.notEqual(onP.leafIndex, leaf1.leafIndex);
+    const refund = at({ kind: "refund", l: leaf0.label, j: 0 });
+    if (settle) {
+      assert.deepEqual(refund?.leaf, refundLeaf, "our refund note at the leaf our spend names");
+      assert.notEqual(refund?.leaf.leafIndex, theirsOnR!.leafIndex);
+      assert.deepEqual(r.pendingRefunds, []);
+    } else {
+      assert.equal(refund, undefined, "a pending refund is no note yet, and the stranger's deposit on R is not it");
+      assert.deepEqual(r.pendingRefunds.map((x) => x.spend.index), [ours.spend]);
+    }
+    // ours only: deposit 0 (SPENT), its change, deposit 1, and the refund once settled
+    assert.deepEqual(r.notes.map((n) => [n.ref.kind, n.state]).sort(), [["change", "UNSPENT"], ["deposit", "SPENT"], ["deposit", "UNSPENT"], ...(settle ? [["refund", "UNSPENT"]] : [])].sort(), settle ? "settled" : "pending");
+    assert.ok(!r.notes.some((n) => n.leaf.leafIndex === theirsOnR!.leafIndex || n.leaf.leafIndex === onP.leafIndex), "a stranger's leaf taken on");
+  }
+});
+
 test("the walk handed in from outside (the proof pool's workers) gives the same restore; another lane's index is refused", async () => {
   const w = verifierOrder(rng(5));
   const v = w.v.views();
