@@ -122,8 +122,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // (its preflight names no allow-origin; review of bc189de, L-5); the live check evm-quote-warm-round preflights and
       // POSTs every listed provider. Passed over:
       // base.drpc.org and Tenderly's gateway (429 on 6 batches at once, again 18:56Z), meowrpc, zan, onfinality, 1rpc,
-      // thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), base.api.pocket.network (10 of 60
-      // answers differed), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
+      // thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
       // third-party proxies of unknown operators are not listed.
       // What the list holds against a lie: a quote decides on two that agree, and a value any provider asked contradicts
       // is used only where more than half of these four gave it (review of bc189de, M-1). Left, as the device has always
@@ -132,12 +131,18 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Q10).
       // BlockPI left the list (card evm-spare-list-green): base.public.blockpi.network answered Cloudflare's 521 (its
       // origin down) to every read in the helper live runs from 17:36Z to 22:14Z on 6 Nov and to three eth_chainId at
-      // 22:42Z, and a held Base quote ended rpc_error on it (live run 42263101671, 17:36Z). Sentio's rpc.sentio.xyz/base
-      // took its place: its preflight from the app's origin answers 200, allow-origin the app's origin, content-type
-      // allowed, and its POST the same; asked first beside publicnode, 5 of 5 base-hook quotes ended ok, every read the
-      // two agreeing, its posts p50/p95 285/501 ms of 40 (22:44Z from this Mac); it takes batches of 5 calls at most
-      // ("JSON-RPC batch exceeds the maximum of 5 requests"), above CALLS_PER_BATCH.
-      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://rpc.sentio.xyz/base"]),
+      // 22:42Z, and a held Base quote ended rpc_error on it (live run 42263101671, 17:36Z). This list is also the wallet's
+      // Base pool-sync list (packages/wallet/src/pool/evm.ts), so its place takes a provider that answers eth_call,
+      // pages eth_getLogs over 5,000 blocks and more, and allows the app's origin: Pocket's base.api.pocket.network,
+      // read 2026-11-06 23:30-23:32Z from this Mac: preflight 204 and POST with allow-origin the app's origin,
+      // content-type allowed; a batch of 3 eth_call answered; the PoolManager's Initialize logs over 5,000, 10,000 and
+      // 50,000 blocks at the head and 5,000 blocks 1M back answered (389 ms to 3.4 s); asked first beside publicnode,
+      // 12 of 12 base-hook quotes ended ok, every read the two agreeing, its posts p50/p95 226/1,118 ms of 95 (its
+      // answers differed on 10 of 60 on 4 Nov; none of 95 here). Every other keyless Base endpoint read then failed one
+      // of the three: Sentio and thirdweb cap eth_getLogs at 1,000 blocks (Sentio as HTTP 429, a throttle to the pager),
+      // Tenderly at 1,000, base.drpc.org refuses any range (code 35), nodies at 50, meowrpc 429s and has no eth_getLogs,
+      // llamarpc 525, omniatech 521, lava 410, therpc 403.
+      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.api.pocket.network"]),
       // all five then listed kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
