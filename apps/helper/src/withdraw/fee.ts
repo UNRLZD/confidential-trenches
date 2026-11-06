@@ -7,12 +7,13 @@
 //   S_w     = B_w × 1e19 + register_deposit + G_settle × gp + A_fund + G_arm × gp
 //
 // - G_w = 92.505 Tgas: the whole withdraw transaction with its payouts at depth 32, a new recipient (the G1 vault gas
-//   proof, research proofs/g1-vault-gas/RESULT.md l.57, the top of M:1077's 87.993-92.505). B_w = 858 B (710 + 148, a
-//   tree that grows a level, M:1069), G_settle = 104.475 Tgas (a settle writing a refund note, M:1082), G_arm = 100
-//   Tgas (A's relayed call, capped until G1 measures it) and A_fund = 182 B × 1e19 + 0.007 N (W:742): every withdrawal
-//   pays an A_{l,j} (W:671), and the relayer cannot know at the quote whether a tree grows. They are the device's own
-//   cap terms halved (feemax.ts: S_cap = 2 × S_w, G_cap = 2 × G_w), so an honest quote is at most half its fee_max at
-//   the same reads (P1, M:3010): 1.2 / 3 on the withdraw gas, 1 / 2 on every other term.
+//   proof, research proofs/g1-vault-gas/RESULT.md l.57, the top of M:1077's 87.993-92.505). B_w = 939 B (791 + 148, a
+//   tree that grows a level, M:1069; 791 = 710 + the refund precommitment's precommitments row 81), G_settle =
+//   104.475 Tgas (a settle writing a refund note, M:1082), G_arm = 100 Tgas (A's relayed call, capped until G1
+//   measures it) and A_fund = 182 B × 1e19 + 0.007 N (W:742): every withdrawal pays an A_{l,j} (W:671), and the
+//   relayer cannot know at the quote whether a tree grows. They are the device's own cap terms halved (feemax.ts:
+//   S_cap = 2 × S_w, G_cap = 2 × G_w), so an honest quote is at most half its fee_max at the same reads (P1, M:3010):
+//   1.2 / 3 on the withdraw gas, 1 / 2 on every other term.
 // - register_deposit: at the quote, the token's storage_balance_bounds().min, the one a fresh A pays (H3.4 check 7,
 //   M:1380); on POST, the request's own (check 7 refuses any other value later).
 // - gp and px are read as the device reads them (LD1; feemax.ts): gp is the gas_price of one final block both of the
@@ -48,8 +49,8 @@ import { MAX_FINAL_AGE_MS } from "./index.ts";
 
 /** Gas a withdrawal burns: 92.505 Tgas, depth 32, a new recipient (G1, RESULT.md l.57). */
 export const FEE_G_W = 92_505_000_000_000n;
-/** Bytes a withdraw writes, a tree that grows a level: 710 + 148 (M:1069). */
-export const FEE_B_W = 858n;
+/** Bytes a withdraw writes, a tree that grows a level: 791 + 148 (M:1069, with the refund precommitment's row). */
+export const FEE_B_W = 939n;
 /** NEAR's storage price, yocto per byte. */
 export const STORAGE_YOCTO_PER_BYTE = 10_000_000_000_000_000_000n;
 /** A settle that writes a refund note: 101.475 + 3 Tgas (M:1082, E). */

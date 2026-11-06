@@ -80,10 +80,10 @@ export const PINNED = {
     "TOKEN is not halted, and its code hash equals VAULT_TOKEN_CODE_HASH",
   ],
   VAULT_CONTEXT_FIELDS: [["processor", "account"], ["recipient", "account"], ["register_deposit", "u128"], ["fee_recipient", "account"], ["relay_fee", "u128"], ["refund_precommitment", "u256be"], ["deadline_ms", "u64"], ["salt", "bytes16"]],
-  VAULT_WITHDRAW: { method: "withdraw", args: ["withdrawal", "proof", "public_signals"], storage_bytes: 710, tree_growth_bytes: 148, gas_tgas: 300 },
+  VAULT_WITHDRAW: { method: "withdraw", args: ["withdrawal", "proof", "public_signals"], storage_bytes: 791, tree_growth_bytes: 148, gas_tgas: 300 },
   VAULT_ON_PAYOUT: { method: "on_payout", args: ["spend_index", "to_recipient", "fee"], private: true, results: ["payout"] },
   VAULT_SETTLE: { method: "settle", args: ["nullifier_hash"], caller: "anyone" },
-  VAULT_RAGEQUIT: { method: "ragequit", args: ["proof", "public_signals", "register_deposit", "refund_precommitment"], caller: "the deposit's depositor", storage_bytes: 475 },
+  VAULT_RAGEQUIT: { method: "ragequit", args: ["proof", "public_signals", "register_deposit", "refund_precommitment"], caller: "the deposit's depositor", storage_bytes: 556 },
   VAULT_WITHDRAW_SIGNALS: ["newCommitmentHash", "existingNullifierHash", "withdrawnValue", "stateRoot", "stateTreeDepth", "ASPRoot", "ASPTreeDepth", "context"],
   VAULT_RAGEQUIT_SIGNALS: ["commitment", "nullifierHash", "value", "label"],
   VAULT_EVENT_STANDARD: "blindfill-vault",
@@ -171,12 +171,16 @@ const threw = (r) => "t" in r;
 const is = (want) => (r) => !threw(r) && canon(r.v) === canon(want);
 const nonEmpty = (r) => !threw(r) && Array.isArray(r.v) && r.v.length > 0;
 /**
- * The pins the vault reviews moved after the kit-v1 freeze (Nov 1 06:00Z): each with its review item and the value
- * kit-v1 holds. main is held to PINNED; kit-v1 to PINNED with these put back (pinsFor, fixedCalls).
+ * The pins the vault reviews and cards moved after the kit-v1 freeze (Nov 1 06:00Z): each with its review item or card
+ * and the value kit-v1 holds. main is held to PINNED; kit-v1 to PINNED with these put back (pinsFor, fixedCalls).
  */
 export const MOVED_SINCE_KIT_V1 = {
+  // (in PINNED's order) withdraw reserves its refund precommitment in precommitments: 81 B more
+  VAULT_WITHDRAW: { card: "vault-refund-precommit-reserve", value: { method: "withdraw", args: ["withdrawal", "proof", "public_signals"], storage_bytes: 710, tree_growth_bytes: 148, gas_tgas: 300 } },
   // A-01: the vault pays out in one receipt on the token, all or none, so on_payout reads one result
   VAULT_ON_PAYOUT: { review: "A-01", value: { method: "on_payout", args: ["spend_index", "to_recipient", "fee"], private: true, results: ["recipient part", "fee part"] } },
+  // ragequit reserves its refund precommitment too (card vault-refund-precommit-reserve)
+  VAULT_RAGEQUIT: { card: "vault-refund-precommit-reserve", value: { method: "ragequit", args: ["proof", "public_signals", "register_deposit", "refund_precommitment"], caller: "the deposit's depositor", storage_bytes: 475 } },
 };
 /** The fixed call moved after kit-v1 (R-01: the vault refuses precommitment 0), by its name on main. */
 export const R01_CALL = "vaultDepositMessage refuses 0 (vault review R-01)";
@@ -190,6 +194,9 @@ function fixedCalls(ref = "main") {
   const now = 1_793_750_000_000;
   const w = { recipient: "bob.near", register_deposit: "0", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "30000", refund_precommitment: "7", deadline_ms: now + 600_000, salt: "0".repeat(32) };
   const snark = { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"] };
+  // the attached NEAR from the ref's own pins (kit-v1: 710 and 475; main: 791 and 556, card vault-refund-precommit-reserve)
+  const withdrawBytes = BigInt(pinsFor(ref).VAULT_WITHDRAW.storage_bytes);
+  const ragequitBytes = BigInt(pinsFor(ref).VAULT_RAGEQUIT.storage_bytes);
   const out = [
     ["vaultDepositMessage writes the two fields", "vaultDepositMessage", [B(5n), u], is(`{"precommitment":"5","depositor":"${u}"}`)],
     ["vaultDepositMessage refuses p", "vaultDepositMessage", [B(P), u], threw],
@@ -198,9 +205,9 @@ function fixedCalls(ref = "main") {
       : [R01_CALL, "vaultDepositMessage", [B(0n), u], threw],
     ["vaultPrepayYocto", "vaultPrepayYocto", [false], is(756n * E19)],
     ["vaultPrepayYocto", "vaultPrepayYocto", [true], is(904n * E19)],
-    ["vaultWithdrawYocto", "vaultWithdrawYocto", [B(0n), B(0n), false], is((710n + 389n) * E19 + 1n)],
-    ["vaultWithdrawYocto", "vaultWithdrawYocto", [B(5n), B(1n), true], is((710n + 389n + 148n) * E19 + 5n + 2n)],
-    ["vaultRagequitYocto", "vaultRagequitYocto", [B(3n)], is((475n + 389n) * E19 + 3n + 1n)],
+    ["vaultWithdrawYocto", "vaultWithdrawYocto", [B(0n), B(0n), false], is((withdrawBytes + 389n) * E19 + 1n)],
+    ["vaultWithdrawYocto", "vaultWithdrawYocto", [B(5n), B(1n), true], is((withdrawBytes + 389n + 148n) * E19 + 5n + 2n)],
+    ["vaultRagequitYocto", "vaultRagequitYocto", [B(3n)], is((ragequitBytes + 389n) * E19 + 3n + 1n)],
     ["vaultRelayFeeWithinBackstop", "vaultRelayFeeWithinBackstop", [B(50n), B(100n)], is(true)],
     ["vaultRelayFeeWithinBackstop", "vaultRelayFeeWithinBackstop", [B(51n), B(100n)], is(false)],
     ["vaultRelayFeeWithinBackstop", "vaultRelayFeeWithinBackstop", [B(U128 / 2n), B(U128)], is(true)],

@@ -206,11 +206,14 @@ export function vaultContextInput(processor: string, w: VaultWithdrawal): VaultC
   };
 }
 
-/** withdraw's attached NEAR: (710 + 389 (+ 148 when a tree may grow)) × 1e19 + register_deposit + 1 yocto per ft_transfer. */
+/**
+ * withdraw's attached NEAR: (791 + 389 (+ 148 when a tree may grow)) × 1e19 + register_deposit + 1 yocto per
+ * ft_transfer. 791 B: the spend's records (710 at 64-byte ids) and its refund precommitment's precommitments row (81).
+ */
 export const VAULT_WITHDRAW = {
   method: "withdraw",
   args: ["withdrawal", "proof", "public_signals"],
-  storage_bytes: 710,
+  storage_bytes: 791,
   tree_growth_bytes: 148,
   gas_tgas: 300,
 } as const;
@@ -291,8 +294,11 @@ export const VAULT_RAGEQUIT = {
   method: "ragequit",
   args: ["proof", "public_signals", "register_deposit", "refund_precommitment"],
   caller: "the deposit's depositor",
-  /** spent 81 + spends 394 (2.3); with the refund reserve, as withdraw's storage rule */
-  storage_bytes: 475,
+  /**
+   * spent 81 + spends 394 (2.3) + the refund precommitment's precommitments row 81; with the refund reserve, as
+   * withdraw's storage rule
+   */
+  storage_bytes: 556,
 } as const;
 export type VaultRagequitArgs = {
   proof: VaultProof;
@@ -301,7 +307,7 @@ export type VaultRagequitArgs = {
   refund_precommitment: string;
 };
 
-/** ragequit's attached NEAR: (475 + 389) × 1e19 + register_deposit + 1 yocto (one ft_transfer). */
+/** ragequit's attached NEAR: (556 + 389) × 1e19 + register_deposit + 1 yocto (one ft_transfer). */
 export function vaultRagequitYocto(registerDeposit: bigint): bigint {
   return BigInt(VAULT_RAGEQUIT.storage_bytes + VAULT_CONSTANTS.REFUND_RESERVE_BYTES) * VAULT_STORAGE_BYTE_COST + registerDeposit + 1n;
 }

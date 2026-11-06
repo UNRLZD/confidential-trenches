@@ -32,7 +32,7 @@ const GP = 100_000_000n;
 
 test("the formula's figures: LD5's constants, and fee_max at the recorded gas price and pool", () => {
   assert.equal(FEE_G_CAP, 2n * 92_505_000_000_000n); // 2 × 92.505 Tgas
-  assert.equal(FEE_B_CAP, 710n + 148n);
+  assert.equal(FEE_B_CAP, 791n + 148n); // withdraw's 710 B + its refund precommitment's precommitments row 81, + a level
   assert.equal(FEE_G_SETTLE_CAP, 101_475_000_000_000n + 3_000_000_000_000n);
   assert.equal(FEE_G_ARM_CAP, 100_000_000_000_000n);
   assert.equal(FEE_A_FUND, 8_820_000_000_000_000_000_000n); // 182 B × 1e19 + 0.007 N
@@ -45,16 +45,16 @@ test("the formula's figures: LD5's constants, and fee_max at the recorded gas pr
     for (const s of ["a", "b"] as const) assert.equal((FEE_READS.answers[net].at[s].json as { result: { header: { gas_price: string } } }).result.header.gas_price, "100000000");
   const tok = BigInt(POOL.amounts[0]);
   const near = BigInt(POOL.amounts[1]);
-  // (G_cap × gp × 1.5 + S_cap) yocto, by hand: 0.0277515 N + 2 × (0.00858 + 0.00125 + 0.0104475 + 0.01882) N = 0.1059465 N
-  const yocto = 27_751_500_000_000_000_000_000n + 2n * (8_580_000_000_000_000_000_000n + REGISTER_DEPOSIT + 10_447_500_000_000_000_000_000n + 18_820_000_000_000_000_000_000n);
-  assert.equal(yocto, 105_946_500_000_000_000_000_000n);
+  // (G_cap × gp × 1.5 + S_cap) yocto, by hand: 0.0277515 N + 2 × (0.00939 + 0.00125 + 0.0104475 + 0.01882) N = 0.1075665 N
+  const yocto = 27_751_500_000_000_000_000_000n + 2n * (9_390_000_000_000_000_000_000n + REGISTER_DEPOSIT + 10_447_500_000_000_000_000_000n + 18_820_000_000_000_000_000_000n);
+  assert.equal(yocto, 107_566_500_000_000_000_000_000n);
   const want = (yocto * tok + near - 1n) / near;
   assert.equal(want, FEE_MAX);
-  assert.equal(withdrawFeeMax({ gasPrice: GP, poolToken: tok, poolNear: near, registerDeposit: REGISTER_DEPOSIT }), FEE_MAX); // about $0.43
-  assert.equal(withdrawFeeMax({ gasPrice: GP, poolToken: tok, poolNear: near, registerDeposit: 0n }), 423_234n);
+  assert.equal(withdrawFeeMax({ gasPrice: GP, poolToken: tok, poolNear: near, registerDeposit: REGISTER_DEPOSIT }), FEE_MAX); // about $0.44
+  assert.equal(withdrawFeeMax({ gasPrice: GP, poolToken: tok, poolNear: near, registerDeposit: 0n }), 429_862n);
   // rounds up: one base unit more for any remainder
-  assert.equal(withdrawFeeMax({ gasPrice: GP, poolToken: 1n, poolNear: 105_946_500_000_000_000_000_000n, registerDeposit: REGISTER_DEPOSIT }), 1n);
-  assert.equal(withdrawFeeMax({ gasPrice: GP, poolToken: 1n, poolNear: 105_946_499_999_999_999_999_999n, registerDeposit: REGISTER_DEPOSIT }), 2n);
+  assert.equal(withdrawFeeMax({ gasPrice: GP, poolToken: 1n, poolNear: 107_566_500_000_000_000_000_000n, registerDeposit: REGISTER_DEPOSIT }), 1n);
+  assert.equal(withdrawFeeMax({ gasPrice: GP, poolToken: 1n, poolNear: 107_566_499_999_999_999_999_999n, registerDeposit: REGISTER_DEPOSIT }), 2n);
   for (const bad of [{ gasPrice: 0n }, { poolToken: 0n }, { poolNear: 0n }, { registerDeposit: -1n }, { gasPrice: 1n << 128n }, { gasPrice: 1 as unknown as bigint }])
     assert.throws(() => withdrawFeeMax({ gasPrice: GP, poolToken: tok, poolNear: near, registerDeposit: 0n, ...bad }), (e: FeeMaxRefused) => e.code === "input");
 });
@@ -216,7 +216,7 @@ test("the pool's shape: exactly [USDC, wNEAR] and two amounts; its USDC side at 
   await refused(withEdit("mainnet", both((p) => (p.amounts = [...(p.amounts as string[]), "1"]))), "pool", /amounts/);
   await refused(withEdit("mainnet", both((p) => ((p.amounts as string[])[0] = "249999999999"))), "pool", /floor/);
   const at = await withEdit("mainnet", both((p) => ((p.amounts as string[])[0] = "250000000000")));
-  assert.equal(at, (105_946_500_000_000_000_000_000n * 250_000_000_000n + BigInt(POOL.amounts[1]) - 1n) / BigInt(POOL.amounts[1]));
+  assert.equal(at, (107_566_500_000_000_000_000_000n * 250_000_000_000n + BigInt(POOL.amounts[1]) - 1n) / BigInt(POOL.amounts[1]));
 });
 
 test("a bound read in one place: the deposit, arming, bind and fee reads share heightSpreadOver", async () => {

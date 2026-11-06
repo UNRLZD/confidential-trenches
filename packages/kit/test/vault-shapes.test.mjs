@@ -234,9 +234,9 @@ test("attached NEAR and the fee backstop follow 2.3 and 2.5.2 rows 8 and 14", ()
   const e19 = 10n ** 19n;
   assert.equal(S.vaultPrepayYocto(false), 756n * e19);
   assert.equal(S.vaultPrepayYocto(true), 904n * e19);
-  assert.equal(S.vaultWithdrawYocto(0n, 0n, false), 1099n * e19 + 1n);
-  assert.equal(S.vaultWithdrawYocto(5n, 1n, true), 1247n * e19 + 5n + 2n);
-  assert.equal(S.vaultRagequitYocto(3n), 864n * e19 + 3n + 1n);
+  assert.equal(S.vaultWithdrawYocto(0n, 0n, false), 1180n * e19 + 1n);
+  assert.equal(S.vaultWithdrawYocto(5n, 1n, true), 1328n * e19 + 5n + 2n);
+  assert.equal(S.vaultRagequitYocto(3n), 945n * e19 + 3n + 1n);
   assert.equal(S.vaultRelayFeeWithinBackstop(50n, 100n), true);
   assert.equal(S.vaultRelayFeeWithinBackstop(51n, 100n), false);
   assert.equal(S.vaultRelayFeeWithinBackstop(U128 / 2n, U128), true);

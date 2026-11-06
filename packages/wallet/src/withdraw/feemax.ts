@@ -6,9 +6,10 @@
 //   fee_max = ceil((G_cap × gp × 1.5 + S_cap) × px)
 //   S_cap   = 2 × (B_cap × 1e19 + register_deposit + G_settle_cap × gp + A_cap),  A_cap = A_fund + G_arm_cap × gp
 //
-// - G_cap = 2 × 92.505 Tgas (the depth-32 withdraw with its payouts, the G1 gas proof), B_cap = 858 B (710 + 148, a tree
-//   that grows a level), G_settle_cap = 104.475 Tgas (101.475 + 3), G_arm_cap = 100 Tgas, A_fund = A_store + NEAR's
-//   0.007 N account creation charge, A_store = 182 B × 1e19 (W:742). A_cap counts on every withdrawal: the kit's
+// - G_cap = 2 × 92.505 Tgas (the depth-32 withdraw with its payouts, the G1 gas proof), B_cap = 939 B (791 + 148, a tree
+//   that grows a level; 791 = 710 + the refund precommitment's precommitments row 81), G_settle_cap = 104.475 Tgas
+//   (101.475 + 3), G_arm_cap = 100 Tgas, A_fund = A_store + NEAR's 0.007 N account creation charge, A_store = 182 B ×
+//   1e19 (W:742). A_cap counts on every withdrawal: the kit's
 //   recipient is always this note's A_{l,j} (request.ts), so every withdrawal pays an A (W:671; WM-06).
 // - gp is the gas_price in the header of one final block, the same block (height and hash) on both of the network's
 //   release RPCs, and the same price on both (LD1: two providers, never through the helper; nearPairNetwork). Two
@@ -24,8 +25,8 @@ import { heightSpreadOver, NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nea
 
 /** Gas a withdrawal may burn, capped: 2 × 92.505 Tgas. */
 export const FEE_G_CAP = 185_010_000_000_000n;
-/** Bytes a withdraw writes at most (a tree that grows a level): 710 + 148. */
-export const FEE_B_CAP = 858n;
+/** Bytes a withdraw writes at most (a tree that grows a level): 791 + 148. */
+export const FEE_B_CAP = 939n;
 /** NEAR's storage price, yocto per byte. */
 export const STORAGE_YOCTO_PER_BYTE = 10_000_000_000_000_000_000n;
 /** A settle that writes a refund note, capped: 101.475 + 3 Tgas. */
@@ -43,7 +44,7 @@ export const FEE_POOL_TOKENS = [NEAR_NETWORKS.mainnet.usdc, "wrap.near"] as cons
  * no relayed withdrawal (fail closed). On a constant-product pool, raising the read price k-fold in one block takes
  * swapping in USDC (sqrt(k) - 1) x its USDC side [derived]: doubling it at the floor takes about 103,600 USDC in, at
  * 0.3 % pool fee (total_fee 30) about 311 USDC lost each way, and arbitrage reversing the move takes about 30,300 USDC
- * more, x (k^1/4 - k^-1/4)^2 with x the USDC side, while the cap it doubles is about 0.43 USDC per withdrawal.
+ * more, x (k^1/4 - k^-1/4)^2 with x the USDC side, while the cap it doubles is about 0.44 USDC per withdrawal.
  * The floor stops a drained pool only. A hostile upgrade of Ref's contract could still report 250,000 USDC or more
  * against a few yocto of NEAR and raise the price: a residual risk that needs Ref's owner and the relayer both bad,
  * and the vault's MAX_RELAY_FEE_BPS backstop (50 % of the withdrawn amount) still holds.

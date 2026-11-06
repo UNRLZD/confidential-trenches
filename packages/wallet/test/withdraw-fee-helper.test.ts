@@ -41,7 +41,7 @@ test("askWithdrawFee takes the helper's recorded answers, mainnet and testnet, f
 test("the same answer with its fee as a rate, as a number, or from another relayer: refused", async () => {
   const cases: [Record<string, unknown>, string][] = [
     [{ relay_fee: "0.0005" }, "answer"],
-    [{ relay_fee: 207609 }, "answer"],
+    [{ relay_fee: 210959 }, "answer"],
     [{ fee_recipient: "thief.near" }, "relayer"],
     [{ relayer_account: "thief.near" }, "relayer"],
   ];
@@ -63,12 +63,12 @@ function inputsAt(token: string) {
   return { gasPrice: BigInt(header.gas_price), poolToken: BigInt(poolToken), poolNear: BigInt(poolNear), registerDeposit: BigInt(bytes(bounds).min as string) };
 }
 
-test("P1 at the helper's recorded reads: the device's fee_max is 438,172, the quote 207,609 at most half of it, on both networks", () => {
+test("P1 at the helper's recorded reads: the device's fee_max is 444,872, the quote 210,959 at most half of it, on both networks", () => {
   for (const network of ["mainnet", "testnet"] as const) {
     const max = withdrawFeeMax(inputsAt(NEAR_NETWORKS[network].usdc));
     const fee = BigInt(REC.answers[network].relay_fee as string);
-    assert.equal(max, 438_172n);
-    assert.equal(fee, 207_609n);
+    assert.equal(max, 444_872n);
+    assert.equal(fee, 210_959n);
     assert.ok(2n * fee <= max, `${network}: 2 x ${fee} > ${max}`);
   }
 });

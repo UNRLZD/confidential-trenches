@@ -91,22 +91,22 @@ test("recorded reads (mainnet and testnet, 2026-11-02): the quote is the recorde
     assert.equal(a.g_w, FEE_G_W.toString());
     assert.ok(Buffer.byteLength(JSON.stringify(a)) <= HELPER_V1_PATHS.find((p) => p.path === "/v1/withdraw/fee")!.limitBytes!);
   }
-  assert.equal(m.relay_fee, "207609");
+  assert.equal(m.relay_fee, "210959");
   assert.equal(m.px, "4.135781763845");
   assert.equal(m.valid_until_block, 222699486 + FEE_QUOTE_WINDOW_BLOCKS);
-  assert.equal(t.relay_fee, "207609", "testnet is priced as the mainnet USDC its token copies, at the same gas price");
+  assert.equal(t.relay_fee, "210959", "testnet is priced as the mainnet USDC its token copies, at the same gas price");
   assert.equal(t.valid_until_block, 275879066 + FEE_QUOTE_WINDOW_BLOCKS);
 });
 
-test("P1 at the recorded reads: fee_min 207,609 (0.207609 USDC) is 0.4738 of the device's fee_max 438,172, at most half", () => {
+test("P1 at the recorded reads: fee_min 210,959 (0.210959 USDC) is 0.4742 of the device's fee_max 444,872, at most half", () => {
   const { amounts } = poolOf(REC);
   const i = { gasPrice: 100_000_000n, poolToken: BigInt(amounts[0]), poolNear: BigInt(amounts[1]), registerDeposit: 1_250_000_000_000_000_000_000n };
   assert.deepEqual(amounts, ["1023068829135", "247370119496778966130420997292"]);
   const feeMin = withdrawFeeMin(i);
-  assert.equal(feeMin, 207_609n);
+  assert.equal(feeMin, 210_959n);
   // the device's withdrawFeeMax at these inputs (packages/wallet/src/withdraw/feemax.ts), recomputed there by
   // packages/wallet/test/withdraw-fee-helper.test.ts from this same fixture
-  const deviceFeeMax = 438_172n;
+  const deviceFeeMax = 444_872n;
   assert.ok(2n * feeMin <= deviceFeeMax);
 });
 
@@ -141,7 +141,7 @@ test("the P1 table: 200 seeded rows, each fee_min equal to withdrawFeeMin of its
 test("the formula: G_w at 1.2, every S_w term once, rounded up; px shown in whole tokens per NEAR", () => {
   // 1 USDC per NEAR: poolToken 1e6 base units per 1e24 yocto
   const i = { gasPrice: 100_000_000n, poolToken: 1_000_000_000_000n, poolNear: 1_000_000n * 10n ** 24n, registerDeposit: 0n };
-  const yocto = (FEE_G_W * 100_000_000n * 12n) / 10n + 858n * 10n ** 19n + 104_475_000_000_000n * 100_000_000n + FEE_A_FUND + 100_000_000_000_000n * 100_000_000n;
+  const yocto = (FEE_G_W * 100_000_000n * 12n) / 10n + 939n * 10n ** 19n + 104_475_000_000_000n * 100_000_000n + FEE_A_FUND + 100_000_000_000_000n * 100_000_000n;
   assert.equal(withdrawFeeMin(i), (yocto + 10n ** 18n - 1n) / 10n ** 18n);
   assert.equal(pxOf(1_000_000_000_000n, 1_000_000n * 10n ** 24n), "1");
   assert.equal(pxOf(1n, 3n * 10n ** 24n), "0.000000333333");
@@ -215,9 +215,9 @@ const refused = async (world: World, why: RegExp) => {
   await assert.rejects(quoterOn(() => world).quote(USDC), (e: Error) => e instanceof FeeReadRefused && why.test(e.message));
 };
 
-test("the world as recorded quotes 207,609, naming the relayer and its fee recipient each in its own field", async () => {
+test("the world as recorded quotes 210,959, naming the relayer and its fee recipient each in its own field", async () => {
   const a = await quoterOn(base).quote(USDC);
-  assert.equal(a.relay_fee, "207609");
+  assert.equal(a.relay_fee, "210959");
   assert.equal(a.relayer_account, RELAYER.relayer_account);
   assert.equal(a.fee_recipient, RELAYER.fee_recipient);
 });
@@ -230,7 +230,7 @@ test("the quote holds while the fee account is not ready: unregistered or blockl
   await refused({ ...base(), feeListed: true }, /relayer fee account not ready/);
   await refused({ ...base(), feeListed: "false" }, /is_blocklisted\(fee_recipient\)/);
   await refused({ ...base(), plant: (who, m, p, r) => (who === 1 && p.method_name === "is_blocklisted" ? { ...r, result: [...Buffer.from("true")] } : r) }, /is_blocklisted at block \d+: the providers' bytes differ/);
-  assert.equal((await quoterOn(base).quote(USDC)).relay_fee, "207609");
+  assert.equal((await quoterOn(base).quote(USDC)).relay_fee, "210959");
 });
 
 test("the relayer's accounts are checked when the quoter is made", () => {
@@ -314,7 +314,7 @@ const fixture = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/with
 fixture.request.token = USDC;
 const CFG: WithdrawConfig = { vault: fixture.vault, token: USDC, scope: BigInt(fixture.scope), feeRecipient: fixture.fee_recipient };
 
-test("POST at the recorded mainnet reads: the real Withdraw(32) request's relay_fee 30,000 is under fee_min 207,609: fee_too_low", async () => {
+test("POST at the recorded mainnet reads: the real Withdraw(32) request's relay_fee 30,000 is under fee_min 210,959: fee_too_low", async () => {
   const v = await checkWithdraw(structuredClone(fixture.request), CFG, recorded().reads("mainnet"));
   assert.deepEqual(v, { ok: false, code: "fee_too_low", why: "relay_fee: under fee_min" });
 });
@@ -325,7 +325,7 @@ test("the window: a quote is held for FEE_QUOTE_WINDOW_BLOCKS after its block, t
   let clock = NOW;
   const q = quoterOn(() => w, () => clock);
   const quote = await q.quote(USDC);
-  assert.equal(quote.relay_fee, "25100");
+  assert.equal(quote.relay_fee, "25505");
   assert.equal(quote.valid_until_block, base().height + FEE_QUOTE_WINDOW_BLOCKS);
   const reads = q.reads("mainnet");
   const at = (height: number) => {
@@ -334,12 +334,12 @@ test("the window: a quote is held for FEE_QUOTE_WINDOW_BLOCKS after its block, t
   };
 
   at(base().height + 50); // the price doubled, the quote's window open
-  assert.equal((await checkWithdraw(structuredClone(fixture.request), CFG, reads)).ok, true, "30,000 >= the held 25,100");
+  assert.equal((await checkWithdraw(structuredClone(fixture.request), CFG, reads)).ok, true, "30,000 >= the held 25,505");
   at(base().height + FEE_QUOTE_WINDOW_BLOCKS); // its last block
   assert.equal((await checkWithdraw(structuredClone(fixture.request), CFG, reads)).ok, true);
-  at(base().height + FEE_QUOTE_WINDOW_BLOCKS + 1); // past it: fee_min now is 50,199
+  at(base().height + FEE_QUOTE_WINDOW_BLOCKS + 1); // past it: fee_min now is 51,009
   assert.deepEqual(await checkWithdraw(structuredClone(fixture.request), CFG, reads), { ok: false, code: "fee_too_low", why: "relay_fee: under fee_min" });
-  assert.equal(await reads.feeMin({ register_deposit: 1_250_000_000_000_000_000_000n } as never), 50_199n);
+  assert.equal(await reads.feeMin({ register_deposit: 1_250_000_000_000_000_000_000n } as never), 51_009n);
 });
 
 test("the window: a quote no longer counts once past, and a lower price now wins over a held quote", async () => {
@@ -369,11 +369,11 @@ const RD_MIN = 1_250_000_000_000_000_000_000n;
 const body = (rd: bigint) => ({ register_deposit: rd }) as never;
 const LOW: [string, string] = ["300000000000", "600000000000000000000000000000"]; // NEAR at 0.5 USDC
 
-test("a held quote covers only a body whose register_deposit it was priced at or under: 4 N under an open 25,100 quote is priced now", async () => {
+test("a held quote covers only a body whose register_deposit it was priced at or under: 4 N under an open 25,505 quote is priced now", async () => {
   let w: World = { ...base(), pool: LOW };
   let clock = NOW;
   const q = quoterOn(() => w, () => clock);
-  assert.equal((await q.quote(USDC)).relay_fee, "25100");
+  assert.equal((await q.quote(USDC)).relay_fee, "25505");
   clock += 2_000;
   w = { ...base(), height: base().height + 10, ms: BigInt(clock - 1_000), pool: ["300000000000", "300000000000000000000000000000"] }; // NEAR at 1 USDC
   const reads = q.reads("mainnet");
@@ -381,28 +381,28 @@ test("a held quote covers only a body whose register_deposit it was priced at or
   const fresh = withdrawFeeMin({ gasPrice: 100_000_000n, poolToken: 300_000_000_000n, poolNear: 300_000n * 10n ** 24n, registerDeposit: fourN });
   assert.equal(await reads.feeMin(body(fourN)), fresh);
   assert.ok(fresh > 4_000_000n, "4 N at 1 USDC is over 4 USDC");
-  assert.equal(await reads.feeMin(body(RD_MIN)), 25_100n, "at the minimum it priced, the quote holds");
-  assert.equal(await reads.feeMin(body(0n)), 25_100n);
+  assert.equal(await reads.feeMin(body(RD_MIN)), 25_505n, "at the minimum it priced, the quote holds");
+  assert.equal(await reads.feeMin(body(0n)), 25_505n);
 });
 
 test("POST prices the body's own register_deposit: 0 and the minimum give two fee_mins", async () => {
   const reads = quoterOn(base).reads("mainnet");
-  assert.equal(await reads.feeMin(body(RD_MIN)), 207_609n);
-  assert.ok((await reads.feeMin(body(0n))) < 207_609n);
+  assert.equal(await reads.feeMin(body(RD_MIN)), 210_959n);
+  assert.ok((await reads.feeMin(body(0n))) < 210_959n);
 });
 
 test("two quotes in one block keep the lower: a higher quote after it never raises the held fee", async () => {
   let w: World = { ...base(), pool: LOW };
   let clock = NOW;
   const q = quoterOn(() => w, () => clock);
-  assert.equal((await q.quote(USDC)).relay_fee, "25100");
+  assert.equal((await q.quote(USDC)).relay_fee, "25505");
   clock += 2_000;
   w = { ...base(), ms: BigInt(clock - 1_000), pool: ["300000000000", "400000000000000000000000000000"] }; // same block, NEAR at 0.75
   const higher = BigInt((await q.quote(USDC)).relay_fee);
-  assert.ok(higher > 25_100n);
+  assert.ok(higher > 25_505n);
   clock += 2_000;
   w = { ...base(), height: base().height + 5, ms: BigInt(clock - 1_000), pool: ["300000000000", "300000000000000000000000000000"] };
-  assert.equal(await q.reads("mainnet").feeMin(body(RD_MIN)), 25_100n);
+  assert.equal(await q.reads("mainnet").feeMin(body(RD_MIN)), 25_505n);
 });
 
 test("one read per network at a time, its answer served for FEE_CACHE_MS: concurrent and repeated quotes share it", async () => {
@@ -443,7 +443,7 @@ test("a pending read is shared however long it takes; a refusal is served as a r
   await assert.rejects(q.quote(USDC), FeeReadRefused, "the refusal is served within FEE_CACHE_MS");
   assert.equal(calls.n, one);
   clock += 501;
-  assert.equal((await q.quote(USDC)).relay_fee, "207609", "then read again");
+  assert.equal((await q.quote(USDC)).relay_fee, "210959", "then read again");
 });
 
 test("the open quotes outlive a restart in the durable store, and are pruned once past", async (t) => {
@@ -451,13 +451,13 @@ test("the open quotes outlive a restart in the durable store, and are pruned onc
   let w: World = { ...base(), pool: LOW };
   let clock = NOW;
   const first = openDurableDir(dir, nodeFs, (d) => d);
-  assert.equal((await quoterOn(() => w, () => clock, first).quote(USDC)).relay_fee, "25100");
+  assert.equal((await quoterOn(() => w, () => clock, first).quote(USDC)).relay_fee, "25505");
   first.close(); // the restart
   const again = openDurableDir(dir, nodeFs, (d) => d);
   clock += 2_000;
   w = { ...base(), height: base().height + 50, ms: BigInt(clock - 1_000), pool: ["300000000000", "300000000000000000000000000000"] };
   const q = quoterOn(() => w, () => clock, again);
-  assert.equal(await q.reads("mainnet").feeMin(body(RD_MIN)), 25_100n, "the restarted relayer holds to its quote");
+  assert.equal(await q.reads("mainnet").feeMin(body(RD_MIN)), 25_505n, "the restarted relayer holds to its quote");
   // and only for a register_deposit it was priced at: 4 N is priced now, as before the restart
   const fourN = 4n * 10n ** 24n;
   assert.equal(await q.reads("mainnet").feeMin(body(fourN)), withdrawFeeMin({ gasPrice: 100_000_000n, poolToken: 300_000_000_000n, poolNear: 300_000n * 10n ** 24n, registerDeposit: fourN }));
@@ -474,7 +474,7 @@ test("the open quotes outlive a restart in the durable store, and are pruned onc
   torn.replace("fee-quotes-mainnet.json", "{not json");
   clock += 2_000;
   w = { ...base(), height: base().height + 400, ms: BigInt(clock - 1_000), pool: ["300000000000", "300000000000000000000000000000"] };
-  assert.ok((await quoterOn(() => w, () => clock, torn).reads("mainnet").feeMin(body(RD_MIN))) > 25_100n, "an unreadable file holds no quote");
+  assert.ok((await quoterOn(() => w, () => clock, torn).reads("mainnet").feeMin(body(RD_MIN))) > 25_505n, "an unreadable file holds no quote");
   torn.close();
 });
 
@@ -486,7 +486,7 @@ test("a loaded quote further ahead than any window can reach is pruned (a testne
     const store = openDurableDir(tempDir(t), nodeFs, (d) => d);
     store.replace("fee-quotes-mainnet.json", JSON.stringify([{ until: String(h + ahead), fee: "1", register_min: RD_MIN.toString() }]));
     const fee = await quoterOn(base, () => NOW, store).reads("mainnet").feeMin(body(RD_MIN));
-    assert.equal(fee, held ? 1n : 207_609n, `until = height + ${ahead}`);
+    assert.equal(fee, held ? 1n : 210_959n, `until = height + ${ahead}`);
     store.close();
   }
 });

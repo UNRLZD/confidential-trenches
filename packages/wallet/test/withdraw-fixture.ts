@@ -113,7 +113,7 @@ export function feeReplay(net: "mainnet" | "testnet", edit: FeeEdit = (_r, _s, j
   return [one("a"), one("b")];
 }
 /** The fixture's fee_max: LD5 at the recorded reads (gas price 1e8, Ref pool 4512) and REGISTER_DEPOSIT. */
-export const FEE_MAX = 433_462n;
+export const FEE_MAX = 440_090n;
 
 /** The ids registerDepositOf was asked about, in order (the request asks for its A_{l,j} only). */
 export const registerAsked: string[] = [];

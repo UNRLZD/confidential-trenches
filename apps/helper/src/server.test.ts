@@ -221,7 +221,7 @@ test("/v1/rpc forwards an allowlisted call to the configured provider and passes
 });
 
 test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another token, two tokens or none 404 not_found; reads refused 503 upstream; POST 405", async (t) => {
-  const ANSWER = { relayer_account: "relayer.confidential.unrlzd.near", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "207609", gp: "100000000", px: "4.135781763845", g_w: "92505000000000", valid_until_block: 222699586 };
+  const ANSWER = { relayer_account: "relayer.confidential.unrlzd.near", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "210959", gp: "100000000", px: "4.135781763845", g_w: "92505000000000", valid_until_block: 222699586 };
   let failing = false;
   const fee: FeeQuoter = {
     networkOf: (t) => (t === "carried.near" ? "mainnet" : null),

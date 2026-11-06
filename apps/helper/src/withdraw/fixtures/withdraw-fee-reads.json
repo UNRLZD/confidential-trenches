@@ -19,7 +19,7 @@
   "mainnet": {
    "relayer_account": "relayer.confidential.unrlzd.near",
    "fee_recipient": "relayer.confidential.unrlzd.near",
-   "relay_fee": "207609",
+   "relay_fee": "210959",
    "gp": "100000000",
    "px": "4.135781763845",
    "g_w": "92505000000000",
@@ -28,7 +28,7 @@
   "testnet": {
    "relayer_account": "relayer.confidential.unrlzd.near",
    "fee_recipient": "relayer.confidential.unrlzd.near",
-   "relay_fee": "207609",
+   "relay_fee": "210959",
    "gp": "100000000",
    "px": "4.135781763845",
    "g_w": "92505000000000",

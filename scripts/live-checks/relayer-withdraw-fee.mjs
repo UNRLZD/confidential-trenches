@@ -38,7 +38,7 @@ const SPREAD = 30;
 // The device's fee_max (wallet src/withdraw/feemax.ts withdrawFeeMax; its constants, held by this check's test to the
 // device's figures): ceil((G_cap × gp × 1.5 + S_cap) × poolToken / poolNear).
 const G_CAP = 185_010_000_000_000n;
-const B_CAP = 858n;
+const B_CAP = 939n;
 const YOCTO_PER_BYTE = 10n ** 19n;
 const G_SETTLE_CAP = 104_475_000_000_000n;
 const G_ARM_CAP = 100_000_000_000_000n;

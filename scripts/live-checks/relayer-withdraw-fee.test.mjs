@@ -44,9 +44,9 @@ test("made from the good run: another relayer, a fee over fee_max, a closed wind
 
 test("the check's copy of the device's fee_max equals the device's figures", () => {
   const at = (gasPrice, poolToken, poolNear, registerDeposit) => deviceFeeMax({ gasPrice, poolToken, poolNear, registerDeposit });
-  assert.equal(at(100_000_000n, 1_023_068_829_135n, 247_370_119_496_778_966_130_420_997_292n, 1_250_000_000_000_000_000_000n), 438_172n);
-  assert.equal(at(10_000_000_000n, 250_000_000_000n, 5_000_000_000_000_000_000_000_000_000n, 0n), 344_972_500n);
-  assert.equal(at(123_456_789n, 50_000_000_000_000n, 10n ** 30n, 1_250_000_000_000_000_000_000n), 6_102_439n);
+  assert.equal(at(100_000_000n, 1_023_068_829_135n, 247_370_119_496_778_966_130_420_997_292n, 1_250_000_000_000_000_000_000n), 444_872n);
+  assert.equal(at(10_000_000_000n, 250_000_000_000n, 5_000_000_000_000_000_000_000_000_000n, 0n), 345_053_500n);
+  assert.equal(at(123_456_789n, 50_000_000_000_000n, 10n ** 30n, 1_250_000_000_000_000_000_000n), 6_183_439n);
   assert.deepEqual(relayerArg("a.near,b.near"), { relayer_account: "a.near", fee_recipient: "b.near" });
   assert.deepEqual(relayerArg("a.near"), { relayer_account: "a.near", fee_recipient: "a.near" });
 });
