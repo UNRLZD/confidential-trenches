@@ -881,6 +881,9 @@ async function tokenPagesThen(pages: number, then: (port: number) => Promise<num
     const h = own(createServer(handler(COMMIT, proxy, rpc, undefined, lists, undefined, undefined, undefined, undefined, null, new Map(), new Map())));
     await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
     const port = (h.address() as AddressInfo).port;
+    // Discover's lists built first, as the server's warm() has them: their three Jupiter reads now go one a second
+    // (card helper-page-jup-429, proxy.ts PACED), so the pages below are read at once, not behind the lists' first build
+    await lists.get();
     const opened = Array.from({ length: pages }, () => getAs(port, `/v1/market/token?chain=solana&token=${b58encode(randomBytes(32))}`, "198.51.100.77"));
     await new Promise((r) => setTimeout(r, 300));
     const st = await then(port);

@@ -98,11 +98,13 @@ test("card helper-crowd-429 fold 3: two heavy devices drawing Jupiter as fast as
       if (ms < from || (ms - from) % 60_000 >= 4 * 200) continue;
       const p0 = polls;
       const a = await p.handle("jupiter", BUILD, `l=${ip}-${ms}`, "", ip);
-      if (a.status !== 200 || polls !== p0) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
+      // card helper-page-jup-429: Jupiter's calls go one a second (proxy.ts PACED), so a build beside a heavy device's
+      // waits its one turn (one sleep here, the still clock); any wait past it is the budget's queue
+      if (a.status !== 200 || polls - p0 > 1) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
     }
     j.clock.add(200);
   }
-  assert.deepEqual(refused, [], "every build of the third and fourth device served at once");
+  assert.deepEqual(refused, [], "every build of the third and fourth device served on its turn, never queued for the budget");
   assert.equal(j.stats().throttled, 0, "Jupiter never throttled");
   assert.ok(j.stats().peak <= 60, `peak ${j.stats().peak} in a sliding minute`);
   assert.ok(heavy > 0, `the heavy devices still lent what is left: ${heavy}`);
@@ -125,11 +127,13 @@ test("card helper-crowd-429 fold 4: one heavy device drawing Jupiter as fast as 
       if (ms < from || (ms - from) % every >= 4 * 200 || (every === Infinity && ms - from >= 4 * 200)) continue;
       const p0 = polls;
       const a = await p.handle("jupiter", BUILD, `l=${ip}-${ms}`, "", ip);
-      if (a.status !== 200 || polls !== p0) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
+      // card helper-page-jup-429: Jupiter's calls go one a second (proxy.ts PACED), so a build beside a heavy device's
+      // waits its one turn (one sleep here, the still clock); any wait past it is the budget's queue
+      if (a.status !== 200 || polls - p0 > 1) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
     }
     j.clock.add(200);
   }
-  assert.deepEqual(refused, [], "every build of the normal and the first-time devices served at once");
+  assert.deepEqual(refused, [], "every build of the normal and the first-time devices served on its turn, never queued for the budget");
   assert.equal(j.stats().throttled, 0, "Jupiter never throttled");
   assert.ok(j.stats().peak <= 60, `peak ${j.stats().peak} in a sliding minute`);
   assert.ok(heavy > 0, `the heavy device still lent what is left: ${heavy}`);

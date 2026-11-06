@@ -68,6 +68,14 @@ async function run(t: TestContext, ms: number) {
   }
   await flush();
 }
+/** `p` settled, the mocked clock moved on 10 ms at a time until it is (card helper-page-jup-429: every Jupiter call
+ *  takes its turn, one a second, so a call awaited here waits on the mocked clock). */
+async function settle<T>(t: TestContext, p: Promise<T>): Promise<T> {
+  let done = false;
+  p.then(() => (done = true), () => (done = true));
+  for (let i = 0; !done && i < 1_000; i++) await run(t, 10);
+  return p;
+}
 /** A page read, answered with its status and the mocked ms it took. */
 type Timed = { status: number; ms: number; retryAfterS?: number };
 function ask(tok: ReturnType<typeof T.createSolanaToken>, m: string): { done: Timed | null; p: Promise<Timed> } {
@@ -251,10 +259,10 @@ test("card helper-token-page-cold: page searches at their limit leave a swap bui
   });
   const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
   // Discover's lists at their most in the counted minute (lists.ts: 3 reads a 12 s refresh, 6 refreshes in 61 s)
-  for (let i = 0; i < 18; i++) assert.equal((await proxy.handle("jupiter", "/tokens/v2/recent", `limit=${i + 1}`, "", undefined, true)).status, 200);
+  for (let i = 0; i < 18; i++) assert.equal((await settle(t, proxy.handle("jupiter", "/tokens/v2/recent", `limit=${i + 1}`, "", undefined, true))).status, 200);
   // callers' swap builds: all of their part but one
   const callers = PROXY_BUDGETS.jupiter.total - PROXY_RESERVE.jupiter;
-  for (let i = 0; i < callers - 1; i++) assert.equal((await proxy.handle("jupiter", "/swap/v2/build", `q=${i}`, "", `198.51.100.${Math.floor(i / 4)}`)).status, 200, `build ${i}`);
+  for (let i = 0; i < callers - 1; i++) assert.equal((await settle(t, proxy.handle("jupiter", "/swap/v2/build", `q=${i}`, "", `198.51.100.${Math.floor(i / 4)}`))).status, 200, `build ${i}`);
   // a new cold mint every 400 ms for 60 s: the pages search as much as they may
   const pages: ReturnType<typeof ask>[] = [];
   for (let n = 0; n < 150; n++) {
@@ -264,7 +272,7 @@ test("card helper-token-page-cold: page searches at their limit leave a swap bui
   assert.equal(searches.length, SEARCH_PER_SPAN, "the page searches at their limit, and no more");
   assert.ok(SEARCH_PER_SPAN + 18 <= PROXY_RESERVE.jupiter, "inside the helper's own reserve with the lists");
   // still in the counted minute of every draw above: the last caller build goes
-  const build = await proxy.handle("jupiter", "/swap/v2/build", "q=last", "", "198.51.100.200");
+  const build = await settle(t, proxy.handle("jupiter", "/swap/v2/build", "q=last", "", "198.51.100.200"));
   assert.equal(build.status, 200, `a swap build is not refused behind token pages (${build.body})`);
   await run(t, 5_000);
   // card helper-crowd-429 fold 6: a page past Jupiter's room is not ready (503 upstream), never our 429

@@ -354,12 +354,18 @@ test("re-check F-D (sustained): at Jupiter Free's 60 a sliding minute, the helpe
   let q = 0;
   let own = 0;
   let asked = 0;
+  // each event at its own time; a wait the proxy takes (Jupiter's turn, card helper-page-jup-429) moves the clock on,
+  // and it never goes back, so an event due meanwhile runs as soon as the wait ends
+  const events: [number, () => Promise<void>][] = [];
   for (let ms = 0; ms < 180_000; ms += 1) {
-    t = T0 + ms;
     if (ms === 9_999 || (ms >= 10_000 && ms % 10_000 === 0))
-      for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) await p.handle("jupiter", "/swap/v2/build", `q=${q++}`, "", `198.51.100.${a}`);
-    if (ms % 12_000 === 0) for (const l of ["/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"]) (asked++, (await p.handle("jupiter", l, "limit=100", "", undefined, true)).status === 200 && own++);
-    if (ms % 4_000 === 0) (asked++, (await p.handle("jupiter", "/tokens/v2/search", `query=m${ms}`, "", undefined, true)).status === 200 && own++);
+      events.push([ms, async () => { for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) await p.handle("jupiter", "/swap/v2/build", `q=${q++}`, "", `198.51.100.${a}`); }]);
+    if (ms % 12_000 === 0) events.push([ms, async () => { for (const l of ["/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"]) (asked++, (await p.handle("jupiter", l, "limit=100", "", undefined, true)).status === 200 && own++); }]);
+    if (ms % 4_000 === 0) events.push([ms, async () => void (asked++, (await p.handle("jupiter", "/tokens/v2/search", `query=m${ms}`, "", undefined, true)).status === 200 && own++)]);
+  }
+  for (const [ms, run] of events) {
+    t = Math.max(t, T0 + ms);
+    await run();
   }
   console.log(`  [F-D sustained] jupiter Free 3 min, 20 addresses at full draw + own reads: vendor peak ${peak}/60 s, vendor 429s ${refused}, own reads served ${own}/${asked}`);
   assert.equal(refused, 0, "Jupiter never answered 429");
@@ -584,4 +590,90 @@ test("card helper-page-jup-429: a draw the vendor's total refuses past the wait 
   assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "c")).status, 200);
   const b = await p.handle("relay", "/quote/v2", "", "{}", "b");
   assert.deepEqual([b.status, causeIn(b)], [503, "budget"]);
+});
+
+// card helper-page-jup-429 (pacing): Jupiter Free is one call a second (owner decision "Stay on Free"); at c1525df5 a
+// call with nothing to wait for went at once, so the lists' three reads, a page's search and a build in one second drew
+// Jupiter's 429 and a 1-4 s reset that held a cold page (live run 42137763380). Every Jupiter call now takes a turn, one
+// a second, callers ahead of the helper's background reads.
+/** Virtual time (as legs-wait.test.ts): sleep parks until the clock reaches it; run() moves the clock to the next timer
+ *  whenever every task is parked, so a call granted a turn sends before the next turn's wait begins. */
+function virtualTime(t0 = 1_800_000_000_000) {
+  let t = t0;
+  const timers: { at: number; go: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((go) => void timers.push({ at: t + Math.max(ms, 0), go }));
+  const idle = async () => { for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r)); };
+  async function run<T>(done: Promise<T>): Promise<T> {
+    let settled = false;
+    done.then(() => (settled = true), () => (settled = true));
+    for (;;) {
+      await idle();
+      if (settled) return done;
+      timers.sort((a, b) => a.at - b.at);
+      const next = timers.shift();
+      if (!next) throw new Error("stuck: no timer and not done");
+      t = Math.max(t, next.at);
+      next.go();
+    }
+  }
+  return { now: () => t, sleep, run };
+}
+/** A fake Jupiter Free that answers 429 to a call within 1 s of the one before, and keeps each call's time and path. */
+function onePerSecond(c: { now: () => number }) {
+  const sent: { at: number; path: string; q: string }[] = [];
+  let refused = 0;
+  const fetch = async (url: string) => {
+    const u = new URL(url);
+    const last = sent.at(-1);
+    sent.push({ at: c.now(), path: u.pathname, q: u.search });
+    if (last !== undefined && c.now() - last.at < 1_000) return (refused++, json({ e: "slow" }, 429, { "retry-after": "4" }));
+    return json([]);
+  };
+  return { fetch, sent, refused: () => refused };
+}
+test("card helper-page-jup-429 (a): a list refresh and a page search asked in the same second send Jupiter one call that second, the search first", async () => {
+  const c = virtualTime();
+  const j = onePerSecond(c);
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep });
+  assert.equal((await c.run(p.handle("jupiter", "/tokens/v2/toptrending/1h", "limit=100", "", undefined, true))).status, 200, "a list read just went");
+  const t0 = j.sent[0]!.at;
+  const [list, search] = await c.run(Promise.all([
+    p.handle("jupiter", "/tokens/v2/recent", "limit=100", "", undefined, true),
+    p.handle("jupiter", "/tokens/v2/search", "query=a", "", undefined, true, 5_000, true),
+  ]));
+  assert.deepEqual([list.status, search.status, j.refused()], [200, 200, 0], JSON.stringify(j.sent.map((s) => [s.path, s.at - t0])) + list.timing + search.timing);
+  assert.deepEqual(j.sent.map((s) => [s.path, s.at - t0]), [["/tokens/v2/toptrending/1h", 0], ["/tokens/v2/search", 1_000], ["/tokens/v2/recent", 2_000]], "one a second, the caller's search ahead of the list");
+});
+test("card helper-page-jup-429 (b): a burst of 5 caller builds goes in order, one a second, with no 429; past the wait a build is refused before it draws, naming its turn", async () => {
+  const c = virtualTime();
+  const j = onePerSecond(c);
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep });
+  const all = await c.run(Promise.all([0, 1, 2, 3, 4].map((i) => p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", `198.51.100.${i}`, false, 5_000))));
+  assert.deepEqual(all.map((a) => a.status), [200, 200, 200, 200, 200]);
+  assert.equal(j.refused(), 0, "Jupiter never answered 429");
+  assert.deepEqual(j.sent.map((s) => s.q), ["?n=0", "?n=1", "?n=2", "?n=3", "?n=4"], "in order");
+  assert.deepEqual(j.sent.slice(1).map((s, i) => s.at - j.sent[i]!.at), [1_000, 1_000, 1_000, 1_000]);
+  // the device route's own wait (QUEUE_WAIT_MS 3 s): the turns past it answer 503 naming the turn's seconds, and send nothing
+  const c2 = virtualTime();
+  const k = onePerSecond(c2);
+  const q = createProxy(ENV, { fetch: k.fetch, now: c2.now, sleep: c2.sleep });
+  const some = await c2.run(Promise.all([0, 1, 2, 3, 4, 5].map((i) => q.handle("jupiter", "/swap/v2/build", `n=${i}`, "", `198.51.100.${i}`))));
+  const late = some.filter((a) => a.status === 503);
+  assert.ok(late.length > 0 && late.every((a) => causeIn(a) === "budget" && Number(a.headers["Retry-After"]) >= 1), some.map((a) => `${a.status} ${a.timing}`).join(" | "));
+  assert.equal(k.sent.length, some.filter((a) => a.status === 200).length, "a refused turn sent nothing");
+  assert.equal(k.refused(), 0);
+});
+test("card helper-page-jup-429 (c): a background read never delays a caller past one turn, and the background reads still go", async () => {
+  const c = virtualTime();
+  const j = onePerSecond(c);
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep });
+  const bg = ["/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"].map((l) => p.handle("jupiter", l, "limit=100", "", undefined, true));
+  const caller = p.handle("jupiter", "/swap/v2/build", "n=device", "", "198.51.100.9");
+  const answers = await c.run(Promise.all([...bg, caller]));
+  assert.deepEqual(answers.map((a) => a.status), [200, 200, 200, 200]);
+  assert.equal(j.refused(), 0);
+  const order = j.sent.map((s) => s.path);
+  assert.deepEqual(order, ["/tokens/v2/recent", "/swap/v2/build", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"], "the caller's build ahead of the two queued lists");
+  const at = (path: string) => j.sent.find((s) => s.path === path)!.at;
+  assert.ok(at("/swap/v2/build") - at("/tokens/v2/recent") <= 1_000, "one turn behind the list already out, no more");
 });

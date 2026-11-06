@@ -1,22 +1,42 @@
 {
- "_about": "helper-page-jup-429.mjs --record. good: this branch's proxy (apps/helper/src/proxy/proxy.ts with server.ts handler) on the Mac at 2026-11-06 02:08Z, reading Jupiter itself with no key. bad_deployed: the deployed helper at c1525df5, read the same minute: a 200 with no Server-Timing. bad_bare_503: the answer live run 42143211092 recorded at 01:21Z for the no-route buy (HTTP 503 upstream, no header naming a cause), as this check reads it; readAt is the job's start and its time was not kept.",
+ "_about": "helper-page-jup-429.mjs --record, each part a real read unless named here. good: the build is this branch's proxy (proxy.ts with server.ts handler) on the Mac at 2026-11-06 02:08Z, reading Jupiter with no key; the cold page is the deployed helper's at c1525df5, read at 02:40Z (a page Jupiter did not answer 429 reads the same before this card and after it). bad_deployed: the deployed helper at c1525df5 at 02:40Z, build and page: the build's 200 has no Server-Timing. bad_bare_503: the build as live run 42143211092 recorded it at 01:21Z for the no-route buy (HTTP 503 upstream, no header naming a cause; readAt is the job's start, its time not kept), with good's page. bad_page_429: good's build, with the cold page live run 42137763380 job 127630261651 read at +13.5 s (its status, mint and Server-Timing as logged; sentAt and jupAt are set 4.05 s apart to stand for the log's 'read cold', not read). bad_page_held: this branch's helper on the Mac with no Jupiter key at 02:39Z: Jupiter's keyless plan held the page's search (503 search-held).",
  "good": {
-  "base": "http://127.0.0.1:8789",
-  "readAt": "2026-11-06T02:08:39.474Z",
+  "base": "https://api.confidential.unrealized.trade",
+  "readAt": "2026-11-06T02:40:07.116Z",
   "ms": 259,
   "status": 200,
   "timing": "budget;dur=0, turn;dur=0, send;dur=237",
   "retryAfter": null,
-  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\""
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"",
+  "page": {
+   "mint": "8i51XNNpGaKaj4G4nDdmQh95v4FKAxw8mhtaRoKd9tE8",
+   "listsStatus": 200,
+   "poolSize": 4019,
+   "sentAt": 1793932809795,
+   "status": 200,
+   "timing": "lists;dur=2, rpc;dur=25;desc=\"solana\", jup-wait;dur=1, jup-budget;dur=1, jup-turn;dur=0, jup-send;dur=13, jup;dur=14, launch;dur=28, read;dur=55, total;dur=55",
+   "src": "jupiter",
+   "jupAt": 1793932809901
+  }
  },
  "bad_deployed": {
   "base": "https://api.confidential.unrealized.trade",
-  "readAt": "2026-11-06T02:08:14.359Z",
-  "ms": 800,
+  "readAt": "2026-11-06T02:40:07.116Z",
+  "ms": 762,
   "status": 200,
   "timing": null,
   "retryAfter": null,
-  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\""
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"",
+  "page": {
+   "mint": "8i51XNNpGaKaj4G4nDdmQh95v4FKAxw8mhtaRoKd9tE8",
+   "listsStatus": 200,
+   "poolSize": 4019,
+   "sentAt": 1793932809795,
+   "status": 200,
+   "timing": "lists;dur=2, rpc;dur=25;desc=\"solana\", jup-wait;dur=1, jup-budget;dur=1, jup-turn;dur=0, jup-send;dur=13, jup;dur=14, launch;dur=28, read;dur=55, total;dur=55",
+   "src": "jupiter",
+   "jupAt": 1793932809901
+  }
  },
  "bad_bare_503": {
   "base": "https://api.confidential.unrealized.trade",
@@ -25,6 +45,54 @@
   "status": 503,
   "timing": null,
   "retryAfter": null,
-  "body": "{\"error\":{\"code\":\"upstream\"}}"
+  "body": "{\"error\":{\"code\":\"upstream\"}}",
+  "page": {
+   "mint": "8i51XNNpGaKaj4G4nDdmQh95v4FKAxw8mhtaRoKd9tE8",
+   "listsStatus": 200,
+   "poolSize": 4019,
+   "sentAt": 1793932809795,
+   "status": 200,
+   "timing": "lists;dur=2, rpc;dur=25;desc=\"solana\", jup-wait;dur=1, jup-budget;dur=1, jup-turn;dur=0, jup-send;dur=13, jup;dur=14, launch;dur=28, read;dur=55, total;dur=55",
+   "src": "jupiter",
+   "jupAt": 1793932809901
+  }
+ },
+ "bad_page_429": {
+  "base": "https://api.confidential.unrealized.trade",
+  "readAt": null,
+  "ms": 259,
+  "status": 200,
+  "timing": "budget;dur=0, turn;dur=0, send;dur=237",
+  "retryAfter": null,
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"",
+  "page": {
+   "mint": "XsvjomvQRsCAXR3bTNAPNQEZNs8NY88Aakcyejyq3CF",
+   "listsStatus": 200,
+   "poolSize": 4014,
+   "sentAt": 1793000000000,
+   "status": 200,
+   "timing": "lists;dur=0, rpc;dur=34;desc=\"solana\", jup-wait;dur=1, jup-budget;dur=0, jup-turn;dur=4001, jup-429;desc=\"1\", jup-send;dur=15, jup;dur=4047, launch;dur=24, read;dur=4072, total;dur=4073",
+   "src": "jupiter",
+   "jupAt": 1793000004050
+  }
+ },
+ "bad_page_held": {
+  "base": "http://127.0.0.1:8790",
+  "readAt": "2026-11-06T02:39:41.840Z",
+  "ms": 302,
+  "status": 200,
+  "timing": "budget;dur=0, turn;dur=0, send;dur=280",
+  "retryAfter": null,
+  "body": "{\"inputMint\":\"So11111111111111111111111111111111111111112\",\"outputMint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"",
+  "page": {
+   "mint": "7yZFFUhq9ac7DY4WobLL539pJEUbMnQ5AGQQuuEMpump",
+   "listsStatus": 200,
+   "poolSize": 4020,
+   "sentAt": 1793932787014,
+   "status": 503,
+   "timing": "search-held;desc=\"jupiter held\"",
+   "src": null,
+   "jupAt": null
+  }
  }
 }
