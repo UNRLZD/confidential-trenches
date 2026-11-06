@@ -43,7 +43,7 @@ export type EvmPoolVenue = {
   /** The helper's EVM pool sender (apps/helper pool/evm.ts), which sends each sale to W: the sim of a sale runs from it
    *  (checks/evm/quote.ts simRule, card evm-quote-exec-sim), so a hook sees the sim as it sees the sale. A kit pin, never
    *  read from the helper; the helper refuses to start a sender whose key is not the pin (evmPoolSendersFromEnv). A
-   *  chain with none sims no sale ("keep-min"): the testnets pin theirs, the mainnets none until their sell keys. */
+   *  chain with none sims no sale ("keep-min"): every chain pins its own (the mainnets' since card evm-mainnet-senders). */
   readonly sellSender?: string;
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
@@ -96,6 +96,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Uniswap v3 SwapRouter02 (test/SellFork.t.sol, BuyFork.t.sol); eth_getCode on mainnet.base.org and
       // base-rpc.publicnode.com: the same 24,498 bytes, codehash 0x38bd640f…124e4 (2026-11-03)
       routers: Object.freeze(["0x2626664c2603336E57B271c5C0b26F421741e481"]),
+      // the helper's sell sender (POOL_EVM_SELL_KEY_BASE, made on the helper box by the research repo's
+      // scripts/deploy/evm-sender-key.mjs, which printed only this address, 6 Nov; card evm-mainnet-senders): the sink of
+      // the FeeCollector the owner's paste deploys (deploy.mjs sinkOf); the helper does not start with any other sell key
+      sellSender: "0x2139756ab61ad861b4e25a009f092683e7454ee9",
       // Uniswap's QuoterV2 and V4Quoter (contracts/pool-evm/test/BuyFork.t.sol, BuyV4Fork.t.sol); eth_getCode on
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
@@ -207,6 +211,9 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Uniswap v3 SwapRouter02 (test/SellFork.t.sol, BuyFork.t.sol); eth_getCode on rpc.mainnet.chain.robinhood.com
       // and robinhood.drpc.org: the same 24,498 bytes, codehash 0x6f36c378…b25dc (2026-11-03)
       routers: Object.freeze(["0xCaf681a66D020601342297493863E78C959E5cb2"]),
+      // the helper's sell sender (POOL_EVM_SELL_KEY_ROBINHOOD, made as on Base, 6 Nov; card evm-mainnet-senders): the
+      // FeeCollector's sink, as on Base
+      sellSender: "0x92874bbc2638f644872d911d8b72d734978e24ae",
       // Uniswap's QuoterV2 and V4Quoter (BuyFork.t.sol, BuyV4Fork.t.sol); eth_getCode on rpc.mainnet.chain.robinhood.com
       // and robinhood.drpc.org, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak 0x3db0868d…96a28, and
       // 6,118 bytes, keccak 0xd707b1da…868f6

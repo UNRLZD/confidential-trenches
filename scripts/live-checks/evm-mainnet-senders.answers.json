@@ -1,7 +1,7 @@
 {
  "notes": [
-  "good: constructed pins (two fresh random addresses) until the CO makes the four mainnet keys; the reads are real; recorded 2026-11-06T15:11:33.384Z on each chain's two MAINNETS RPCs",
-  "bad_code: constructed pins: each chain's WETH, an address with code; the reads are real; recorded 2026-11-06T15:11:34.362Z on each chain's two MAINNETS RPCs",
+  "good: the kit's real pins (the helper box's mainnet sell senders, card evm-mainnet-senders), at the plan as MAINNETS has it, before either paste; the reads are real; recorded 2026-11-06T15:43:31.605Z on each chain's two MAINNETS RPCs",
+  "bad_code: constructed pins: each chain's WETH, an address with code; the reads are real; recorded 2026-11-06T15:43:32.354Z on each chain's two MAINNETS RPCs",
   "bad_today: the kit and the paste's plan at f99ba2df (no mainnet sell sender pinned, no FeeCollector in either mainnet set): nothing is read on chain; the test replays it from the kit and plan as they were"
  ],
  "rpcs": {
@@ -16,15 +16,15 @@
  },
  "good": {
   "pins": {
-   "base": "0xe70c6e0350f72840e6c6f52a364dd7055421a600",
-   "robinhood": "0xa07bcac8ef400e11882a8617f7eabfb92409370d"
+   "base": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
+   "robinhood": "0x92874bbc2638f644872d911d8b72d734978e24ae"
   },
   "answers": [
    {
     "url": "https://mainnet.base.org",
     "method": "eth_getCode",
     "params": [
-     "0xe70c6e0350f72840e6c6f52a364dd7055421a600",
+     "0x2139756ab61ad861b4e25a009f092683e7454ee9",
      "latest"
     ],
     "status": 200,
@@ -38,7 +38,7 @@
     "url": "https://base-rpc.publicnode.com",
     "method": "eth_getCode",
     "params": [
-     "0xe70c6e0350f72840e6c6f52a364dd7055421a600",
+     "0x2139756ab61ad861b4e25a009f092683e7454ee9",
      "latest"
     ],
     "status": 200,
@@ -52,7 +52,7 @@
     "url": "https://rpc.mainnet.chain.robinhood.com",
     "method": "eth_getCode",
     "params": [
-     "0xa07bcac8ef400e11882a8617f7eabfb92409370d",
+     "0x92874bbc2638f644872d911d8b72d734978e24ae",
      "latest"
     ],
     "status": 200,
@@ -66,7 +66,7 @@
     "url": "https://robinhood-rpc.publicnode.com",
     "method": "eth_getCode",
     "params": [
-     "0xa07bcac8ef400e11882a8617f7eabfb92409370d",
+     "0x92874bbc2638f644872d911d8b72d734978e24ae",
      "latest"
     ],
     "status": 200,

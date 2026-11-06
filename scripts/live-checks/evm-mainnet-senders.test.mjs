@@ -1,6 +1,6 @@
-// Replays evm-mainnet-senders.answers.json through the live check. `good`: two pins with no code on Base's and
-// Robinhood's two RPCs (constructed pins, fresh random addresses, until the CO makes the four mainnet keys; the reads are
-// real) with the paste's plan as pool-evm-deploy.mjs MAINNETS has it: PASS. `bad_today`: the kit and the plan at
+// Replays evm-mainnet-senders.answers.json through the live check. `good`: the kit's two mainnet pins, the helper
+// box's sell senders, with no code on Base's and Robinhood's two RPCs (real reads, before either paste), with the
+// paste's plan as pool-evm-deploy.mjs MAINNETS has it: PASS. `bad_today`: the kit and the plan at
 // f99ba2df (no mainnet pin, no FeeCollector in either set): FAIL. `bad_code`: each chain's WETH as the pin, real reads
 // of its code: FAIL. Made from good: one pin on both mainnets, a testnet's pin, a plan without FeeCollector: FAIL. After
 // the paste (constructed records): a collector whose runtime is the Base Sepolia collector's real code with the pin
