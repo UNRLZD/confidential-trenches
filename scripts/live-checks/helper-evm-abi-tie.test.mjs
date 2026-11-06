@@ -1,6 +1,6 @@
 // Replays helper-evm-abi-tie.answers.json through the live check (card helper-evm-abi-tie). good: the chain reads are
-// real; the helper's answers are constructed, this branch's evmPoolSender().carry run in-process (the fix is not
-// deployed), so the run passes. bad: a real run against the deployed helper at f21d4be2, which carries the
+// real; the helper's answers are constructed, this branch's evmPoolSender() run in-process (fee() on the kit's fee
+// providers, carry()), since the fix is not deployed, so the run passes; once it is, the host's real run replaces it. bad: a real run against the deployed helper at f21d4be2, which carries the
 // three-argument withdraw: it refuses the withdraw that landed (bad_shape) and takes the three-argument form, so it
 // fails. Each plant changes the good run in one place and fails too.
 //   node --test scripts/live-checks/helper-evm-abi-tie.test.mjs
@@ -59,6 +59,15 @@ test("planted: a landed withdraw that failed or went elsewhere, a helper answer 
   const one = copy();
   one.pools.pop();
   assert.ok(bad(one).some((l) => l.includes("pools read")));
+});
+
+test("planted: a run whose reads name two helper commits fails, each full sha alone", () => {
+  const mixed = copy();
+  mixed.pools[1].reads.find((r) => r.asked === "landed_withdraw").headers["x-helper-commit"] = "f21d4be2cd160f6971170913178961f5674fd38e";
+  assert.deepEqual(bad(mixed).map((l) => l.slice(0, 40)), ["BAD one X-Helper-Commit across the run: "]);
+  const fee = copy();
+  fee.pools[0].reads.find((r) => r.asked === "fee").headers["x-helper-commit"] = "0".repeat(40);
+  assert.ok(bad(fee).some((l) => l.includes("one X-Helper-Commit")));
 });
 
 test("the bodies: the landed calldata with the fee answer's recipient, its three-argument form, and one byte more", () => {

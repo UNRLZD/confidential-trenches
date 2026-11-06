@@ -111,5 +111,17 @@
       "version": "1",
       "versionHash": "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6"
     }
+  },
+  "FeeCollector": {
+    "functions": {},
+    "events": {
+      "Paid(address,uint256)": "0x737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc489"
+    },
+    "errors": {
+      "ForwardFailed()": "096dc0e1",
+      "ZeroSink()": "5a75c1a8"
+    },
+    "types": {},
+    "domain": null
   }
 }

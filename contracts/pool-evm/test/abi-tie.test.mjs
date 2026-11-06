@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const SNAP = JSON.parse(readFileSync(path.join(REPO, "contracts/pool-evm/abi.json"), "utf8"));
@@ -31,11 +32,15 @@ for (const c of CONTRACTS) {
   for (const k of ["functions", "events", "errors"]) for (const s of Object.keys(SNAP[c][k])) add(abiStrings, s);
   for (const s of Object.keys(SNAP[c].types)) add(typeStrings, s);
 }
-const domains = new Set(CONTRACTS.map((c) => JSON.stringify([SNAP[c].domain.name, SNAP[c].domain.version])));
+const domains = new Set(CONTRACTS.filter((c) => SNAP[c].domain !== null).map((c) => JSON.stringify([SNAP[c].domain.name, SNAP[c].domain.version])));
 assert.equal(domains.size, 1, "the pool and the sell delegate sign in one EIP-712 domain name and version");
 const [DOMAIN_NAME, DOMAIN_VERSION] = JSON.parse([...domains][0]);
 
-/** A string that is not the build's, named on purpose: a recorded run's ABI it replays, or one a check refuses; each with why. */
+/**
+ * A string that starts with a contract's name and "(" but is not the build's, named on purpose, each with why: a recorded
+ * run's ABI a check replays, one a check refuses, or words in a refusal or a check line. A template's substitutions are
+ * written ${…}, as stringsOf writes them.
+ */
 const HISTORICAL = Object.freeze([
   {
     file: "scripts/live-checks/pool-evm-testnet-run.mjs",
@@ -47,33 +52,88 @@ const HISTORICAL = Object.freeze([
     string: "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)",
     why: "the helper's withdraw before this card, which the check reads no pool dispatches and the helper refuses",
   },
+  {
+    file: "packages/wallet/src/pool/evm.ts",
+    string: "SCOPE(): not the scope of ${…} on ${…}",
+    why: "a refusal's words, naming the read",
+  },
+  {
+    file: "packages/wallet/src/pool/evm.ts",
+    string: "stateRootTimes(root)",
+    why: "a read's label in its refusal, the root it asked",
+  },
+  {
+    file: "packages/wallet/src/pool/evm.ts",
+    string: "labelRootTimes(root)",
+    why: "a read's label in its refusal, the root it asked",
+  },
+  {
+    file: "scripts/live-checks/pool-evm-testnet-run.mjs",
+    string: "stateRootTimes(${…}) is 0: not a root the pool recorded",
+    why: "a check line's words",
+  },
+  {
+    file: "scripts/live-checks/pool-evm-testnet-run.mjs",
+    string: "nullifierHashes(${…}) is not set on both: a spend the pool did not mark",
+    why: "a check line's words",
+  },
+  {
+    file: "scripts/live-checks/pool-evm-testnet-run.mjs",
+    string: "usedPrecommitments(${…}) is not set on both",
+    why: "a check line's words",
+  },
 ]);
 
-const ABI_TYPE = /^(u?int(8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?|address|bool|string|bytes([1-9]|[12][0-9]|3[0-2])?)$/;
-/** True when `inner` (between a literal's outer parentheses) is a list of ABI types only, tuples and arrays included. */
-const typesOnly = (inner) => inner.split(/[(),]+/).filter((t) => t !== "").every((t) => ABI_TYPE.test(t.replace(/(\[\d*\])+$/, "")));
+/** Selectors the contracts compiled before and no longer do: one written as hex is drift too, unless listed below. */
+const OLD_SELECTORS = Object.freeze({
+  "8a3bff22": "withdraw with no signature, the helper's before this card",
+  bea5695c: "the ten-field sell, before card helper-sell-fee-recipient",
+});
+const BUILD = new Map([...abiStrings, ...typeStrings].flatMap(([, set]) => [...set].map((s) => [s, typeStrings.has(s.slice(0, s.indexOf("("))) && /\w \w/.test(s) ? "type" : "abi"])));
+const NAMES = new Set([...abiStrings.keys(), ...typeStrings.keys()]);
+const SUB = "${…}";
 
-/** Every ABI or EIP-712 string literal in `text` named after one of the contracts' names. */
-export function literalsOf(text) {
+/**
+ * Every string `text` (the file `file`, read by the TypeScript parser, so a comment is never one) holds: each string
+ * literal, each template with each substitution written ${…}, and each number literal's text, for the hex check.
+ */
+export function stringsOf(file, text) {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, /\.tsx$/.test(file) ? ts.ScriptKind.TSX : /\.ts$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS);
   const out = [];
-  for (const m of text.matchAll(/(["'`])([A-Za-z_]\w*)\(([^"'`\n]*)\)\1/g)) {
-    const [, , name, inner] = m;
-    const s = `${name}(${inner})`;
-    if (typeStrings.has(name) && /\w \w/.test(inner)) out.push({ kind: "type", s });
-    else if (abiStrings.has(name) && typesOnly(inner)) out.push({ kind: "abi", s });
-  }
+  const walk = (n) => {
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) out.push({ s: n.text });
+    else if (ts.isTemplateExpression(n)) out.push({ s: n.head.text + n.templateSpans.map((t) => SUB + t.literal.text).join("") });
+    else if (ts.isNumericLiteral(n)) out.push({ s: n.getText(sf), number: true });
+    ts.forEachChild(n, walk);
+  };
+  walk(sf);
   return out;
 }
 
-/** Each refusal `text` (the file `file`) earns: a string the contracts do not compile, or a domain they do not sign in. */
+/** The build's strings `text` names, each once, with its kind. */
+export function literalsOf(file, text) {
+  return stringsOf(file, text).filter(({ s, number }) => !number && BUILD.has(s)).map(({ s }) => ({ kind: BUILD.get(s), s }));
+}
+
+/**
+ * Each refusal `text` (the file `file`) earns: a string that starts with one of the contracts' names and "(" (after a
+ * function, event or error keyword, if any) and is not the build's string, however it is written (a template, a
+ * concatenation's first part, spaces, other types); an old selector's hex; or an EIP-712 domain hashed without the
+ * contracts' name and version. A string HISTORICAL lists for the file is not drift.
+ */
 export function driftOf(file, text) {
   const bad = [];
-  for (const { kind, s } of literalsOf(text)) {
-    const known = (kind === "type" ? typeStrings : abiStrings).get(s.slice(0, s.indexOf("(")));
-    if (known.has(s) || HISTORICAL.some((h) => h.file === file && h.string === s)) continue;
-    bad.push(`${file}: ${s} is not the build's (${[...known].join(" | ")})`);
+  const listed = (s) => HISTORICAL.some((h) => h.file === file && h.string === s);
+  for (const { s, number } of stringsOf(file, text)) {
+    for (const [sel, why] of Object.entries(OLD_SELECTORS)) {
+      if (new RegExp(`(^|[^0-9a-f])(0x)?${sel}($|[^0-9a-f])`, "i").test(s) && !listed(s)) bad.push(`${file}: ${JSON.stringify(s.slice(0, 80))} holds the old selector ${sel} (${why})`);
+    }
+    if (number) continue;
+    const m = /^\s*(?:(?:function|event|error)\s+)?([A-Za-z_]\w*)\s*\(/.exec(s);
+    if (!m || !NAMES.has(m[1]) || BUILD.has(s) || listed(s)) continue;
+    bad.push(`${file}: ${JSON.stringify(s.slice(0, 160))} is not the build's (${[...(abiStrings.get(m[1]) ?? []), ...(typeStrings.get(m[1]) ?? [])].join(" | ")})`);
   }
-  if (literalsOf(text).some(({ s }) => s.startsWith("EIP712Domain("))) {
+  if (literalsOf(file, text).some(({ s }) => s.startsWith("EIP712Domain("))) {
     for (const v of [DOMAIN_NAME, DOMAIN_VERSION]) if (!new RegExp(`\\(["'\`]${v}["'\`]\\)`).test(text)) bad.push(`${file}: hashes the EIP-712 domain but not the contracts' "${v}"`);
   }
   return bad;
@@ -92,6 +152,7 @@ const read = (f) => readFileSync(path.join(REPO, f), "utf8");
 const MONEY_PATHS = {
   "apps/helper/src/pool/evm.ts": [
     "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+    "Paid(address,uint256)",
     "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
     "currentTreeDepth()",
     "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)",
@@ -133,7 +194,7 @@ test("every pool-evm string in the helper, the kit, the wallet, the signing page
 test("the money paths name the pool by exactly the listed strings", () => {
   const got = {};
   for (const f of FILES.filter((f) => MONEY_DIRS.some((d) => f.startsWith(`${d}/`)))) {
-    const found = [...new Set(literalsOf(read(f)).map(({ s }) => s))].sort();
+    const found = [...new Set(literalsOf(f, read(f)).map(({ s }) => s))].sort();
     if (found.length > 0) got[f] = found;
   }
   assert.deepEqual(got, MONEY_PATHS);
@@ -141,7 +202,7 @@ test("the money paths name the pool by exactly the listed strings", () => {
 
 test("each historical string is still read where it is listed, and is not the build's", () => {
   for (const h of HISTORICAL) {
-    assert.ok(literalsOf(read(h.file)).some(({ s }) => s === h.string), `${h.file} still names ${h.string}`);
+    assert.ok(stringsOf(h.file, read(h.file)).some(({ s }) => s === h.string), `${h.file} still names ${h.string}`);
     assert.equal(abiStrings.get(h.string.slice(0, h.string.indexOf("(")))?.has(h.string), false, `${h.string} is not the build's: drop it from HISTORICAL once the build has it`);
   }
 });
@@ -166,6 +227,15 @@ test("planted: a changed withdraw, sell, event, view, error, EIP-712 type or dom
     ["packages/wallet/src/pool/evm.ts", '"Withdrawn(address,address,uint256,uint256,uint256,uint256)"', '"Withdrawn(address,uint256,uint256,uint256,uint256)"'],
     ["packages/wallet/src/pool/evm.ts", '"stateRootTimes(uint256)"', '"stateRootTimes(uint128)"'],
     ["contracts/pool-evm/script/testnet-run-lib.mjs", '"FeeOverCap()"', '"FeeOverCap(uint256)"'],
+    // the fee collector's Paid, the helper's proof a sale's fee was paid
+    ["apps/helper/src/pool/evm.ts", '"Paid(address,uint256)"', '"Paid(address,uint128)"'],
+    // the same withdraw written other ways: a template, a concatenation, a space, a keyword, the old selector as hex
+    ["apps/helper/src/pool/evm.ts", '"withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)"', "`withdraw(${W},(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)`"],
+    ["apps/helper/src/pool/evm.ts", '"withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)"', '"withdraw((address,bytes)," + PROOF + ",uint256,bytes)"'],
+    ["apps/helper/src/pool/evm.ts", '"withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)"', '"withdraw((address, bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)"'],
+    ["apps/helper/src/pool/evm.ts", '"withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)"', '"function withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)"'],
+    ["apps/helper/src/pool/evm.ts", "export const WITHDRAW_SELECTOR = selectorOf(WITHDRAW_SIGNATURE);", 'export const WITHDRAW_SELECTOR = "8a3bff22";'],
+    ["apps/helper/src/pool/evm.ts", "export const WITHDRAW_SELECTOR = selectorOf(WITHDRAW_SIGNATURE);", "export const WITHDRAW_SELECTOR = 0x8a3bff22;"],
   ];
   for (const [file, from, to] of cases) assert.ok(plant(file, from, to).length > 0, `${file}: ${from} -> ${to}`);
 });

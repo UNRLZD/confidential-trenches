@@ -13,12 +13,15 @@
 //     past, so a helper that reads the pool's withdraw answers 422 epoch_off before any RPC call (and its nullifier is
 //     spent, so nothing could land); the same request in the three-argument encoding (no signature): 400 bad_shape;
 //     the landed calldata and one byte more: 400 bad_shape.
-// It passes only when every read above holds and every helper answer carries a full-sha X-Helper-Commit. The selectors
+// It passes only when every read above holds and every helper answer carries one full-sha X-Helper-Commit, the same on
+// every read of the run (one helper answered all of it, never two builds behind one host). The selectors
 // are this file's strings, which contracts/pool-evm/test/abi-tie.test.mjs holds to contracts/pool-evm/abi.json.
 //   node scripts/live-checks/helper-evm-abi-tie.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
-// --in-process answers the three POSTs from this checkout's apps/helper/src/pool/evm.ts evmPoolSender().carry, with
-// providers that throw, instead of the host: a constructed answer, marked so in the record, for a helper not deployed.
+// --in-process answers the fee read and the three POSTs from this checkout's apps/helper/src/pool/evm.ts
+// evmPoolSender() (fee() on the kit's feeProviders, carry()), with a throwaway sender key holding nothing and the host's
+// fee recipient, instead of the host: a constructed answer, marked so in the record, for a helper not deployed. Once the
+// fix is deployed, `node scripts/live-checks/helper-evm-abi-tie.mjs --record <file>` records the host's real run.
 import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -103,6 +106,8 @@ export function judge(run, { venues = evmPoolVenues() } = {}) {
     }
     for (const r of p.reads ?? []) say(SHA.test(r.headers?.["x-helper-commit"] ?? ""), `[${n} ${r.asked}] X-Helper-Commit: ${show(r.headers?.["x-helper-commit"])}`);
   }
+  const commits = [...new Set(pools.flatMap((p) => (p.reads ?? []).map((r) => r.headers?.["x-helper-commit"] ?? null)))];
+  say(commits.length === 1, `one X-Helper-Commit across the run: ${show(commits)}`);
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -132,12 +137,17 @@ async function collect(base, inProcess) {
     const hash = landedOf(network);
     p.landed = { hash, reads: await Promise.all(RPCS[network].map(async (url) => { const tx = await rpc(url, "eth_getTransactionByHash", [hash]); const rc = await rpc(url, "eth_getTransactionReceipt", [hash]); return { url, to: tx.to, input: tx.input, status: rc.status }; })) };
     const get = await fetch(`${base}/v1/pool/fee?pool=${v.pool}`, { signal: AbortSignal.timeout(20_000) });
-    const feeBody = await get.text();
-    p.reads.push({ asked: "fee", status: get.status, headers: { "x-helper-commit": get.headers.get("x-helper-commit") }, body: feeBody });
-    const fee = json(feeBody);
+    const hostFee = { status: get.status, headers: { "x-helper-commit": get.headers.get("x-helper-commit") }, body: await get.text() };
+    const feeTo = json(hostFee.body)?.fee_recipient ?? `0x${"0".repeat(40)}`;
     const epoch = Math.floor(Date.now() / 60_000) * 60_000;
-    const bodies = bodiesOf(p.landed.reads[0].input, v.pool, fee?.fee_recipient ?? `0x${"0".repeat(40)}`, epoch);
-    const sender = carryOf?.({ network, pool: v.pool, senderKey: new Uint8Array(32).fill(7), feeRecipient: fee?.fee_recipient }, [async () => { throw new Error("no RPC in-process"); }, async () => { throw new Error("no RPC in-process"); }]);
+    const bodies = bodiesOf(p.landed.reads[0].input, v.pool, feeTo, epoch);
+    // in-process: the branch's sender on the kit's fee providers, a throwaway key (no gas: nothing it signs could land)
+    const sender = carryOf?.({ network, pool: v.pool, senderKey: new Uint8Array(32).fill(7), feeRecipient: feeTo }, v.feeProviders.map((url) => (method, params) => rpc(url, method, params)));
+    if (sender) {
+      p.feeRecipientFrom = { base, ...hostFee };
+      const a = await sender.fee(Date.now());
+      p.reads.push({ asked: "fee", status: a === null ? 503 : 200, headers: { "x-helper-commit": commit }, body: JSON.stringify(a) });
+    } else p.reads.push({ asked: "fee", ...hostFee });
     for (const [asked] of PLANTS) {
       if (sender) {
         const a = await sender.carry(bodies[asked]);

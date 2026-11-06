@@ -1,7 +1,7 @@
 // The EVM pool's ABI as it compiles (card helper-evm-abi-tie): for each contract the helper, the kit, the wallet and the
 // signing page call or read, the functions, events and errors forge emits (forge inspect methodIdentifiers, events,
 // errors), and the EIP-712 strings it signs over (each keccak256('...') constant in its source, with the domain's name
-// and version), each with its selector, topic or hash. contracts/pool-evm/abi.json is this, committed:
+// and version, where it has a domain), each with its selector, topic or hash. contracts/pool-evm/abi.json is this, committed:
 // test/abi-snapshot.test.mjs fails when the build and the file differ, and test/abi-tie.test.mjs fails when a string in
 // the helper, the kit, the wallet or the signing page differs from the file. Needs forge (Foundry) on the PATH.
 //   node contracts/pool-evm/script/abi-snapshot.mjs           print the build's snapshot
@@ -21,27 +21,42 @@ export const SNAPSHOT = path.join(ROOT, "abi.json");
 export const CONTRACTS = Object.freeze({
   PrivacyPoolSimple: ["src/PrivacyPool.sol", "src/PrivacyPoolSimple.sol"],
   SellDelegate: ["src/SellDelegate.sol"],
+  // the address a sell pays the server's fee to; its Paid log is the helper's proof of payment (card evm-fee-collector)
+  FeeCollector: ["src/FeeCollector.sol"],
 });
 
 const keccakHex = (s) => `0x${Buffer.from(keccak_256(new TextEncoder().encode(s))).toString("hex")}`;
 const inspect = (contract, what) => execFileSync("forge", ["inspect", contract, what, "--json"], { cwd: ROOT, encoding: "utf8" });
 const sorted = (o) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 
-/** The strings a contract's EIP-712 hashes are made of, read from its source (comments left out). */
-export function typedStringsOf(files) {
-  const src = files.map((f) => readFileSync(path.join(ROOT, f), "utf8").replace(/\/\/[^\n]*/g, "")).join("\n");
+/**
+ * The strings a contract's EIP-712 hashes are made of, read from its source `src` (comments left out): each
+ * `bytes32 [internal|private|public] constant NAME = keccak256('...')` (either quote). A keccak256 of a string literal
+ * anywhere else, or of one this does not know, throws, so no hashed string goes unread. NAME_HASH and VERSION_HASH
+ * are the domain's name and version; a contract with neither has no domain (FeeCollector), one with only one throws.
+ */
+export function typedStringsOfText(src, label) {
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
   const types = new Set();
   const domain = {};
-  for (const m of src.matchAll(/bytes32\s+internal\s+constant\s+(\w+)\s*=\s*keccak256\(\s*'([^']*)'\s*\)/g)) {
-    const [, name, value] = m;
+  const read = new Set();
+  for (const m of code.matchAll(/bytes32\s+(?:(?:internal|private|public)\s+)?constant\s+(\w+)\s*=\s*(keccak256\(\s*(['"])([^'"]*)\3\s*\))/g)) {
+    const [, name, , , value] = m;
+    read.add(m.index + m[0].indexOf(m[2]));
     if (name === "NAME_HASH") domain.name = value;
     else if (name === "VERSION_HASH") domain.version = value;
     else if (/^[A-Z]\w*\([^)]*\)$/.test(value)) types.add(value);
-    else throw new Error(`${name}: a keccak256 constant this snapshot does not know`);
+    else throw new Error(`${label}: ${name} is a keccak256 constant this snapshot does not know`);
   }
-  if (domain.name === undefined || domain.version === undefined) throw new Error(`${files}: no EIP-712 domain name and version`);
-  return { types: sorted(Object.fromEntries([...types].map((t) => [t, keccakHex(t)]))), domain: { name: domain.name, nameHash: keccakHex(domain.name), version: domain.version, versionHash: keccakHex(domain.version) } };
+  for (const m of code.matchAll(/keccak256\(\s*['"]/g)) if (!read.has(m.index)) throw new Error(`${label}: a keccak256 of a string outside a bytes32 constant: ${code.slice(m.index, m.index + 60)}`);
+  if ((domain.name === undefined) !== (domain.version === undefined)) throw new Error(`${label}: an EIP-712 domain name with no version, or a version with no name`);
+  if (domain.name === undefined && types.size > 0) throw new Error(`${label}: EIP-712 types with no domain`);
+  return {
+    types: sorted(Object.fromEntries([...types].map((t) => [t, keccakHex(t)]))),
+    domain: domain.name === undefined ? null : { name: domain.name, nameHash: keccakHex(domain.name), version: domain.version, versionHash: keccakHex(domain.version) },
+  };
 }
+export const typedStringsOf = (files) => typedStringsOfText(files.map((f) => readFileSync(path.join(ROOT, f), "utf8")).join("\n"), files.join(", "));
 
 /** The snapshot of the build forge makes now. */
 export function snapshotOf() {
