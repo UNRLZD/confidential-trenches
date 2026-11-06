@@ -56,7 +56,7 @@ import { DepositAccountRefused, depositAccount, heightSpreadOver, NEAR_NETWORKS,
 import { type BindDeps, bindDeposit, DepositBindRefused, type BindOutcome, type BindRpc, bindRpc, DepositsWatch, POLL_MS } from "./bind.ts";
 
 /** The helper's 1Click proxy for status (apps/helper/src/proxy/vendors.ts: oneclick, /v0/status read upstream by GET). */
-export const DEPOSIT_STATUS_URL = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/status";
+export const DEPOSIT_STATUS_URL = "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/status";
 export const DEPOSIT_STATUS_TIMEOUT_MS = 10_000;
 /** A status answer is the quote and a few hashes: a few KB. */
 export const DEPOSIT_STATUS_ANSWER_MAX = 65_536;
