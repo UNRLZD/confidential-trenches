@@ -16,11 +16,11 @@ import { armKey, type ArmRecord } from "@blindfill/wallet/arming/records";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { SOLANA_TOKEN_PROGRAM, solanaAta } from "../../kit/src/checks/solana/index.ts";
 import type { SolanaTradeDeps, SolanaTradeRecord, SolanaTradeRequest } from "../../kit/src/trade/solana/flow.ts";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { RELEASE_HELPER } from "../../wallet/src/withdraw/relay.ts";
 import { readFileSync } from "node:fs";
-import { TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, tradeKind } from "../src/trade.ts";
+import { SOLANA_PROVIDER_A, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, tradeKind } from "../src/trade.ts";
 
 // the skeleton check's pinned policy (an .mjs with no types: imported by a plain string)
 const SKELETON: string = "../../../scripts/live-checks/signpage-skeleton.mjs";
@@ -97,6 +97,11 @@ type Script = {
   late?: readonly number[];
   /** each dropped signature, as the signer gave it */
   dropped?: string[];
+  /** the reference read as the kit makes it (card pool-read-down): its first read, which a fault ends the run at; its
+   * renewal's, which refuses every leg on a fault; or one after the legs are signed */
+  read?: "first" | "renewal" | "signed";
+  /** the page's reference read fails past its retry */
+  referenceDown?: boolean;
 };
 /** runSolanaTrade's stand-in: signs each leg (or `signAs`) through deps.sign, hands the kept signatures to onSigned, then
  * signed, sent and the final stage. */
@@ -105,6 +110,13 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
     script.atStart?.();
     calls.push(req);
     const legs: SolanaTradeRecord["legs"] = req.legs.map((l) => ({ wallet: l.wallet, amount: l.amount, expectedOut: 1n, minOut: 1n }));
+    const reference = () => deps.reference({ side: req.side, token: req.token, amount: 1n, amounts: [1n] }, deps.providers);
+    if (script.read === "first") await reference();
+    if (script.read === "renewal" && (await reference().then(() => null, (e: unknown) => String(e))) !== null) {
+      legs.forEach((l) => (l.refused = "renewal: error: the read failed"));
+      deps.onProgress?.("refused");
+      return { side: req.side, token: req.token, reference: 1n, blockhash: null, legs };
+    }
     if (script.refuse) {
       legs.forEach((l) => (l.refused = script.refuse));
       deps.onProgress?.("refused");
@@ -119,6 +131,7 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
         l.refused = "checks: the reference is 25000 ms old at the signature, past the 20000 ms limit";
       } else l.signature = base58.encode(sig);
     }
+    if (script.read === "signed") await reference();
     const kept = legs.filter((l) => l.signature);
     deps.onSigned?.(kept.map((l) => ({ wallet: l.wallet, signature: l.signature! })));
     deps.onProgress?.("signed");
@@ -144,7 +157,15 @@ function page(s: ReturnType<typeof store>, script: Script, providers: readonly [
   const handler = tradeKind({
     store: async () => s,
     seed64: () => (opened++, seed64()),
-    deps: { helper: "https://api.confidential.unrealized.trade", providers, reference: async () => ({ expectedOut: 1n }), paths: [] },
+    deps: {
+      helper: "https://api.confidential.unrealized.trade",
+      providers,
+      reference: async () => {
+        if (script.referenceDown) throw new SolanaRpcTransportError("http_429", "HTTP 429", 4, "provider.down.example");
+        return { expectedOut: 1n };
+      },
+      paths: [],
+    },
     run: standIn(script, calls) as never,
     now: () => 1_700_000_000_000,
     locks: tab.locks,
@@ -711,4 +732,47 @@ test("a buy refused (no ready set) reaches the app as progress refused after its
   const run = await throughApi("buy", page(s, { refuse: "checks: S12 the simulated out is under the bar" }).handler, buy("10"));
   assert.deepEqual((run.answer as { error: unknown }).error, { code: "quote_check_failed" });
   assert.deepEqual(run.stages, ["refused"]);
+});
+
+// Card pool-read-down: the release's reference read (releaseTradeDeps) on either provider down past the page's retry is
+// that fault, never "no reference pool" (quote_check_failed); the trade is then "down" before a leg is signed, never after.
+for (const p of [0, 1] as const) {
+  test(`card pool-read-down: provider ${p} down past its retry: the release's reference read rejects with the fault, never null`, async () => {
+    const real = globalThis.fetch;
+    const deps = releaseTradeDeps();
+    const downOrigin = p === 0 ? new URL(SOLANA_PROVIDER_A).origin : new URL(TRADE_HELPER).origin;
+    globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+      if (new URL(u instanceof Request ? u.url : String(u)).origin === downOrigin) return new Response("", { status: 429, headers: { "retry-after": "0" } });
+      const { id } = JSON.parse(String(init?.body)) as { id: string };
+      return Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: null } });
+    }) as typeof fetch;
+    try {
+      const got = await deps.reference({ side: "buy", token: MINT, amount: 10_000_000n, amounts: [10_000_000n] }, deps.providers).then(
+        (r) => ({ resolved: r }),
+        (e: unknown) => ({ rejected: e }),
+      );
+      assert.ok("rejected" in got && got.rejected instanceof SolanaRpcTransportError, JSON.stringify(got, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
+      assert.equal(got.rejected.host, new URL(downOrigin).host);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+}
+
+test("card pool-read-down: a reference read down before any leg is signed answers down (its first read or the renewal's), never after a signature", async () => {
+  for (const read of ["first", "renewal"] as const) {
+    const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) });
+    const p = page(s, { read, referenceDown: true });
+    const out = await throughApi("buy", p.handler, buy("10"));
+    assert.deepEqual((out.answer as { error: unknown }).error, { code: "down" }, read);
+    assert.deepEqual(out.stages, ["refused"], read);
+    assert.equal(p.opened(), 0, `${read}: the seed is never opened`);
+    assert.equal(mark(s, 0), undefined, `${read}: the wallet's mark goes`);
+  }
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) });
+  const signed = await page(s, { read: "signed", referenceDown: true }).ask(buy("10"));
+  assert.deepEqual(signed.answer, { error: "failed" });
+  // the reference up: the run's other refusals keep their own codes
+  const up = await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { read: "renewal" }).ask(buy("10"));
+  assert.ok(up.answer && "result" in up.answer, JSON.stringify(up.answer));
 });

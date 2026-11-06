@@ -79,10 +79,10 @@ import {
   type SolanaPoolRelease,
   type SolanaRent,
 } from "../../kit/src/trade/solana/pool-buy.ts";
-import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
+import { pageReference } from "./page-rpc.ts";
 import { solanaDecodeLookupTable, type SolanaLookupTable } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_CU_PRICE_MAX, SOLANA_JITO_TIP_MIN } from "../../kit/src/checks/solana/checks.ts";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof } from "../../kit/src/vault/shapes.ts";
 import type { BuyRoute, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_ROUTE_OUT } from "../../kit/src/signpage/schema.ts";
@@ -135,7 +135,7 @@ export type PoolBuyHost = {
   pick?: (n: number) => number;
 };
 
-export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" };
+export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down" };
 
 /** The helper's busy answer to a send (its 429: rate_limited when a pool provider throttled a read, in_flight when this
  *  caller holds too many sends open, or its per-caller throttle), with the wait its Retry-After names. The send is
@@ -416,6 +416,8 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
   let claim: string | null = null;
+  // from here on W signs: a provider that fails past this is never "down" (the transaction may land)
+  let signing = false;
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   const tell = (x: BuyRoute): void => {
     try {
@@ -452,7 +454,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
           roots.set(rootKey(tree, root), await rootIndex(h, tree, size, dec(root)).catch((e) => (e instanceof Refused ? null : Promise.reject(e))));
         }
       // last, the reads the quote's age counts from: the reference, its venue, then the device's blockhash and slot
-      const ref = await readSolanaReference(h.rpcs, { side: "buy", token, amount: ask.amount });
+      const ref = await pageReference(h.rpcs, { side: "buy", token, amount: ask.amount });
       const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
       if (!ref || !best) return no("quote_check_failed");
       const venue: SolanaPoolBuyVenue = await readSolanaPoolBuyVenue(h.rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : []));
@@ -484,6 +486,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: r.wallet.address, feeCap, solana: h.pin };
       checkSolanaBuy(built.wire, ask, ctx, release, venue, req, { blockhash: bh.blockhash, slot: bh.slot, tables, stateSize: sizes.stateSize, rent, reference: { amount: ask.amount, ref, slippageBps: ask.slippageBps } });
       // W, from the seed, right before it signs: it must be the proof's recipient the bytes were built and checked for
+      signing = true;
       seed = await h.seed64();
       const w = freshWallet(seed, "sol", r.wallet.l, r.wallet.j);
       key = w.secretKey;
@@ -502,6 +505,8 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
+    // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
+    if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
     return { error: "failed" };
   } finally {
     seed?.fill(0);

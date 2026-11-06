@@ -24,6 +24,7 @@ import { SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_
 import { readSolanaPoolBuyVenue, solanaPoolAccount, solanaPoolFee, solanaPoolPage, solanaPoolSellNeed, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { pairDown } from "./outage.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -1696,3 +1697,29 @@ test("the sweep's read finds an account the plan keeps: no sweep built, kept", a
   assert.equal(w.told.at(-1)?.state, "kept", JSON.stringify(w.told));
   assert.match(w.told.at(-1)!.detail, new RegExp(amm));
 });
+
+// Card pool-read-down: one provider down past the page's own retry, from each of its calls in turn (the devnet run at
+// 967c52d6). Before W signs, the sell answers "down" (api.ts RETRY_CODES: the same request again runs again), never
+// failed or not_allowed: the seed never read for W's key, nothing signed or sent, no note written; the other provider's
+// word alone is never taken. From W's signature on, it is never "down": the transaction may land.
+for (const p of [0, 1] as const) {
+  test(`card pool-read-down: provider ${p} down past the page's retry answers down before W signs, and never down after`, async () => {
+    let before = 0;
+    let after = 0;
+    for (let from = 0; ; from++) {
+      const w = await world();
+      const d = pairDown(w.host.rpcs, p, from);
+      const a = await runPoolSell({ ...w.host, rpcs: d.rpcs }, ASK);
+      if (!d.fired()) break;
+      if (w.sent.length === 0 && !w.c.log.some((x) => x.endsWith("sendTransaction"))) {
+        before++;
+        assert.deepEqual(a, { error: "down" }, `from call ${from}`);
+        assert.deepEqual(await ours(w.ns), [], `from call ${from}: no note written`);
+      } else {
+        after++;
+        assert.notDeepEqual(a, { error: "down" }, `from call ${from}`);
+      }
+    }
+    assert.ok(before > 0 && after > 0, `${before} before, ${after} after`);
+  });
+}

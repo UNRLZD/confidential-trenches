@@ -158,3 +158,37 @@ test("params the kit's schema does not allow never reach the handler: not_allowe
   assert.equal(p.reads(), 0);
   assert.ok(p.posted.slice(1).every((m) => (m as { error?: { code: string } }).error?.code === "not_allowed"));
 });
+
+// Card pool-read-down: not_allowed comes only from a rule. A read of the page's records that throws (the store not
+// answering) is "down", which api.ts RETRY_CODES does not keep, so the same request again runs again; nothing is asked
+// of the helper on it.
+test("card pool-read-down: a records read that throws answers down, not kept for its id, and no quote is asked", async () => {
+  let throws = true;
+  let reads = 0;
+  const deps: DepositWireDeps = {
+    scope: () => SCOPE,
+    read: async () => {
+      reads++;
+      if (throws) throw new Error("the store did not answer");
+      return SAVED;
+    },
+    fetch: (() => Promise.reject(new Error("no quote is asked"))) as typeof fetch,
+    now: () => NOW,
+  };
+  const posted: unknown[] = [];
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  const api = startApi({ parent, listen: (fn) => (listener = fn), state: () => signedOutState(), kinds: { "deposit.quote": depositQuoteHost(deps) } });
+  const q = quote();
+  listener!({ origin: APP_ORIGIN, source: parent, data: q });
+  await api.idle();
+  assert.deepEqual(posted.at(-1), refused(q.id, "down"));
+  assert.equal(reads, 1);
+  // asked again: it runs again (a kept answer would be posted again with no read); the helper is down here too (the
+  // fetch rejects), so it answers down once more, from the rule
+  throws = false;
+  listener!({ origin: APP_ORIGIN, source: parent, data: q });
+  await api.idle();
+  assert.ok(reads >= 2, "read again");
+  assert.deepEqual(posted.at(-1), refused(q.id, "down"));
+});

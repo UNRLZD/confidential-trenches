@@ -4232,3 +4232,22 @@ test("SL5 a lone scan provider whose logs backend lags its head by more than a s
   assert.deepEqual(await lone(scanner(5_020_010, realAt(token, 5_007_000), asked), 5_020_010), below);
   assert.ok(asked.some(([a, b]) => a <= 5_007_000 && b >= 5_007_000), `block 5,007,000 was not asked again: ${JSON.stringify(asked)}`);
 });
+
+test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and its third answering no logs: the fourth carries it", { timeout: 60_000 }, async () => {
+  // live run 42135737951 (2026-11-06 00:18:43Z, GitHub's runner): with the first two held (HTTP 503), the third,
+  // base.api.pocket.network, answered a held quote's request with no logs in 570 ms, and the quote ended rpc_error: it
+  // was the last of Base's list
+  let k = 0;
+  for (const down of [refusing, answering503]) {
+    const token = "0x00000000000000000000000000000000005c462" + (++k).toString(16);
+    await triQuote(token, [scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
+    const inner = scanner(5_000_010, realAt(token, 5_000_005));
+    const noLogs: EvmRpc = async (calls) => (await inner(calls)).map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32000, message: "no logs" } } : o));
+    const asked: [number, number][] = [];
+    const t = performance.now();
+    const v = await triQuote(token, [down("one.sl6.test"), down("two.sl6.test"), noLogs, scanner(5_000_010, realAt(token, 5_000_005), asked)], "base", 5_000_010);
+    assert.deepEqual(v, below, down.name);
+    assert.ok(performance.now() - t < 5_000, `${down.name}: the warm quote took ${Math.round(performance.now() - t)} ms`);
+    assert.ok(asked.some(([a, b]) => a <= 5_000_005 && b >= 5_000_005), `${down.name}: block 5,000,005 not asked of the fourth: ${JSON.stringify(asked)}`);
+  }
+});
