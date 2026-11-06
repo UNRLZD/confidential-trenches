@@ -65,7 +65,7 @@ test("the recorded good answers pass: both collectors on both RPCs, no sell list
     assert.ok(A.deployments[chain].txs.some((t) => t.step.startsWith("sweep")), "the run swept");
     assert.equal(A.deployments[chain].dryRun, false, "a real deploy");
   }
-  assert.deepEqual(A.sells, [], "no real sell yet (evm-testnet-delegate-review3 lists the first)");
+  assert.deepEqual(A.sells, [], "no real sell yet (evm-testnet-delegate-review3 lists its real sells)");
   const none = await sells(A.good.sells, A.sells);
   assert.equal(none.ok, true, none.lines.join("\n"));
   assert.deepEqual(none.lines, ["ok   0 sells listed"]);

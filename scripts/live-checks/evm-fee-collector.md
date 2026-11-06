@@ -13,4 +13,4 @@ robinhood-testnet (chain id 46630), contracts/pool-evm/script/deploy.mjs --only 
 FeeCollector 0xb174f0e859f00a7b593baca38394327e3d6bf638, its sink 0xd12d83097671d731df2db731e973ad9a07673607 (the sell sender the kit pins); its code is the build's and its immutable the sink, read by node scripts/live-checks/evm-fee-collector.mjs on https://rpc.testnet.chain.robinhood.com and https://robinhood-sepolia-rpc.publicnode.com. No owner, no admin, no function but receive().
 Deployer 0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c, a run key that lived only in the run, funded with 3137520000000 wei (the printed need) and swept back to 0x49f2425b7f33f3a10912de8add6839226ce663a2.
 
-No sell has paid a collector yet: the first real sells come with card evm-testnet-delegate-review3 (evm-fee-collector.sells.json).
+No sell has paid a collector yet: its real sells come with card evm-testnet-delegate-review3 (evm-fee-collector.sells.json).
