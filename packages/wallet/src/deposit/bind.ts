@@ -209,7 +209,13 @@ async function scan(rpc: NearRpc, vault: string, ps: readonly bigint[], from: nu
     if (vaultViewBusy(answer)) {
       const wait = VAULT_SYNC_BUSY_WAITS_MS[busy++];
       if (wait === undefined) throw new Error(`${rpc.name}: busy ${busy} times`);
-      await new Promise((ok) => setTimeout(ok, wait));
+      // the caller's stop ends the wait at once, as it ends the scan between pages (REVIEW K)
+      await new Promise<void>((ok, no) => {
+        const stop = () => (clearTimeout(t), no(signal!.reason));
+        const t = setTimeout(() => (signal?.removeEventListener("abort", stop), ok()), wait);
+        if (signal?.aborted) return stop();
+        signal?.addEventListener("abort", stop, { once: true });
+      });
       continue;
     }
     busy = 0;

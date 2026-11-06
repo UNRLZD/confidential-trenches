@@ -994,6 +994,15 @@ test("R-03: deposits pages an RPC refuses as too heavy are read again at half th
     const busyRpc = [capped(0, 0, DRPC_TIMEOUT, always), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
     assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, busyRpc).read(), { state: "unsure" });
     assert.deepEqual(always, [450, 450, 450, 450]);
+    // the caller's stop mid-wait ends the read at once (the waits total 1,750 ms), with no ask after it
+    const mid: number[] = [];
+    const ac = new AbortController();
+    const midRpc = [capped(0, 0, DRPC_TIMEOUT, mid), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
+    setTimeout(() => ac.abort(new Error("caller stopped")), 50);
+    const t0 = Date.now();
+    assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, midRpc).read(ac.signal), { state: "unsure" });
+    assert.ok(Date.now() - t0 < 200, `stopped after ${Date.now() - t0} ms`);
+    assert.deepEqual(mid, [450]);
   }
   // any other error is not a cap: the read is unsure at once, with no smaller page asked
   const other = { jsonrpc: "2.0", id: "x", result: { ...GAS_CAP.result, error: "wasm execution failed with error: MethodResolveError(MethodNotFound)" } };
