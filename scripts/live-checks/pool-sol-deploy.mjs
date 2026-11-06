@@ -370,7 +370,7 @@ export function runRecord(d, rpcs) {
     "Money path: yes",
     ...d.txs.map((t) => `Tx: ${chain} ${t.signature}`),
     "",
-    `The run: contracts/pool-solana/scripts/deploy.mjs on Solana devnet, ${d.at}. Its steps, in the order of the Tx lines above: ${d.txs.map((t) => t.step).join(", ")}.`,
+    `The run: contracts/pool-solana/scripts/deploy.mjs on Solana devnet, ${d.at}. Its steps, in the order of the Tx lines above: ${stepsOf(d.txs)}.`,
     `Program ${d.program_id}, programdata ${d.programdata}, pool ${d.pool}; code ${d.so_len} bytes, sha256 ${d.so_sha256} (${d.build}).`,
     `Upgrade authority: none. --final is two transactions, the deploy and then a SetAuthority to none, both in the Tx lines above; this live check reads the authority none on ${rpcs.join(" and ")}.`,
     `Test deposit: ${d.deposit.value} lamports (0.01 SOL), nonce ${d.deposit.nonce}, precommitment ${d.deposit.precommitment}. Its note's secrets lived only in the run, so the 0.01 SOL stays in the pool as a test deposit.`,
@@ -379,6 +379,11 @@ export function runRecord(d, rpcs) {
   ].join("\n");
 }
 
+/** A record's steps line: each step's label without the address some carry (a sweep's destination, named on the
+ * Funders line), since the money gate reads every tx-shaped word on a line that names the Tx lines as a transaction
+ * (a 43-44 character address has a NEAR hash's shape: paste 2's --sweep-kept step, 6 Nov). */
+export const stepsOf = (txs) => txs.map((t) => t.step.replace(/ [1-9A-HJ-NP-Za-km-z]{32,44}/g, "")).join(", ");
+
 /** The mainnet run record (card pool-sol-deploy-mainnet): every tx of the owner's paste, mainnet, money path. */
 export function mainnetRunRecord(d, rpcs, attempts = []) {
   return [
@@ -386,7 +391,7 @@ export function mainnetRunRecord(d, rpcs, attempts = []) {
     "Money path: yes",
     ...d.txs.map((t) => `Tx: solana ${t.signature}`),
     "",
-    `The run: the owner's paste contracts/pool-solana/scripts/mainnet-deploy.sh (deploy.mjs --mainnet) on Solana mainnet, ${d.at}. Its steps, in the order of the Tx lines above: ${d.txs.map((t) => t.step).join(", ")}.`,
+    `The run: the owner's paste contracts/pool-solana/scripts/mainnet-deploy.sh (deploy.mjs --mainnet) on Solana mainnet, ${d.at}. Its steps, in the order of the Tx lines above: ${stepsOf(d.txs)}.`,
     `Program ${d.program_id}, programdata ${d.programdata}, pool ${d.pool}; code ${d.so_len} bytes, sha256 ${d.so_sha256} (${d.build}).`,
     `Upgrade authority: none, read on ${rpcs.join(" and ")}. No test deposit on mainnet.`,
     `The pool buy's lookup table ${d.table}: ${d.table_addresses.length} addresses, authority none (frozen), read the same bytes on both RPCs.`,
