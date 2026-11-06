@@ -23,6 +23,8 @@
 # and the record is committed right after (a paste in another clone is refused too, once main holds the record or the
 # kit pins the pool); a run stopped before its last deploy writes no record, and the same paste in the same folder
 # resumes it with its kept key, reusing every contract it made, asking only for what the key lacks.
+# After a resume, send only the amount the resume newly asks for (its ask replaces the first run's), and before any
+# --sweep-kept wait until both of the chain's RPCs show that transfer landed.
 # Nothing is typed in: no seed phrase or key is asked for. The run key is made in memory and kept in a 0700 folder
 # (~/.local/state/pool-evm-deploy) only until both RPCs read it empty; every transaction it signs is journaled
 # beside the record before it is sent. Ctrl-C or a closed terminal stops the run at its next step and the sweep sends

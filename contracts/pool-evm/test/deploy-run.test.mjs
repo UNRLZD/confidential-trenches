@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { CHAINS, DUST, MAINNETS, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { MAINNET_INIT, MAX_FEE_CAP, ORDER, RPC_TRIES, addressOf, createAddress, deployedElsewhere, initProblems, main } from "../script/deploy.mjs";
+import { MAINNET_INIT, MAX_FEE_CAP, ORDER, RPC_TRIES, addressOf, createAddress, deployedElsewhere, initProblems, main, outflowOf } from "../script/deploy.mjs";
 
 const OUT_DIR = new URL("../out/", import.meta.url);
 const runtime = (name) => JSON.parse(readFileSync(new URL(`${name}.sol/${name}.json`, OUT_DIR), "utf8")).deployedBytecode.object;
@@ -74,14 +74,16 @@ function chain(on = {}) {
       c.pool.shift();
       const used = t.to ? 21000n : (t.gas * 10n) / 12n;
       const price = c.base + (t.tip < t.maxFee - c.base ? t.tip : t.maxFee - c.base);
-      const fee = used * price + l1Of(t.len);
+      // on.arb: an Arbitrum-shaped receipt, the L1 part paid as gas inside gasUsed (gasUsedForL1), with no l1Fee
+      const l1Gas = on.arb ? (l1Of(t.len) + price - 1n) / price : 0n;
+      const fee = on.arb ? (used + l1Gas) * price : used * price + l1Of(t.len);
       if (g(c.bal, c.deployer) < t.value + fee) continue; // dropped: it cannot pay at execution
       c.bal.set(c.deployer, g(c.bal, c.deployer) - t.value - fee);
       let ca = null;
       if (t.to) c.bal.set(t.to, g(c.bal, t.to) + t.value);
       else c.code.set((ca = createAddress(c.deployer, t.nonce)), runtime(createdBy(t.data))), c.created.push(t.data);
       c.nonce.set(c.deployer, t.nonce + 1n);
-      c.receipts.set(hash, { status: "0x1", contractAddress: ca, gasUsed: "0x" + used.toString(16), effectiveGasPrice: "0x" + price.toString(16), l1Fee: "0x" + l1Of(t.len).toString(16), from: c.deployer });
+      c.receipts.set(hash, { status: "0x1", contractAddress: ca, effectiveGasPrice: "0x" + price.toString(16), from: c.deployer, ...(on.arb ? { gasUsed: "0x" + (used + l1Gas).toString(16), gasUsedForL1: "0x" + l1Gas.toString(16) } : { gasUsed: "0x" + used.toString(16), l1Fee: "0x" + l1Of(t.len).toString(16) }) });
       on.afterMine?.(c, t);
     }
   };
@@ -923,9 +925,9 @@ test("mainnet review 3: a settled run's final record reads no receipt over RPC: 
   assert.equal(d.txs.length, Number(c.nonce.get(c.deployer)), "the record lists every transaction of the key" + why(c));
 });
 
-test("mainnet review 4: a funding-wait key that held part of its need and sent it back is removed once the rest lands and is swept, and kept on every pass before", OPTS, async (t) => {
+const partFunded = async (t, on = {}) => {
   const m = room(t);
-  const c = mainnet();
+  const c = mainnet(on);
   let snap = null;
   let keyFile = null;
   let key = null;
@@ -937,7 +939,7 @@ test("mainnet review 4: a funding-wait key that held part of its need and sent i
   });
   const j = JSON.parse(snap);
   const need = BigInt(j.need);
-  const c2 = mainnet();
+  const c2 = mainnet(on);
   c2.deployer = j.deployer;
   c2.bal.set(j.deployer.toLowerCase(), need / 2n);
   c2.fundAt = 1e9;
@@ -960,4 +962,57 @@ test("mainnet review 4: a funding-wait key that held part of its need and sent i
   const jj = JSON.parse(readFileSync(m.journal, "utf8"));
   assert.equal(jj.keys.state, "removed");
   assert.equal(jj.funded, true);
+};
+test("mainnet review 4: a funding-wait key that held part of its need and sent it back is removed once the rest lands and is swept, and kept on every pass before", OPTS, (t) => partFunded(t));
+test("mainnet review 5: the same on Arbitrum-shaped receipts (the L1 part inside gasUsed, no l1Fee)", OPTS, (t) => partFunded(t, { arb: true }));
+
+test("mainnet review 5: a stopped run's sweep that lands after the resume read its nonce never counts as sent since the resume's wait: --sweep-kept keeps the key while the asked transfer may land", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  const j1 = JSON.parse(readFileSync(m.journal, "utf8"));
+  const top = j1.txs.reduce((x, s) => (BigInt(s.nonce) + 1n > x ? BigInt(s.nonce) + 1n : x), 0n);
+  const sweep1 = j1.txs.find((s) => s.step.startsWith("sweep"));
+  assert.ok(sweep1 && BigInt(sweep1.nonce) === top - 1n, "the stopped run's last transaction is its sweep");
+  // the resume's latest and pending nonce reads come from a replica a block behind, before that sweep
+  let stale = 2;
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (stale > 0 && method === "eth_getTransactionCount" && params[0].toLowerCase() === c.deployer) {
+      stale--;
+      return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x" + (top - 1n).toString(16) }) };
+    }
+    return fetch0(u, init);
+  };
+  await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => l.startsWith("deploy: send exactly") && process.emit("SIGTERM", "SIGTERM") });
+  c.fetch = fetch0;
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "kept");
+  const r3 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(r3.error, null, String(r3.error?.message) + why(c));
+  assert.notEqual(c.fundAt, null, "the asked transfer has not landed");
+  assert.equal(folders(m.keys).length, 1, "the key is kept while the asked transfer may land" + why(c));
+});
+
+test("mainnet review 5: outflowOf counts what a receipt says the key paid, on each receipt shape", () => {
+  const me = "0x264c8ff331fe18ae69bb01cc66732e391c1e758d";
+  const other = "0x1da00622b51c37bf321bed40659f56adfa79f828";
+  // Base mainnet's receipt of 0x995a24c2...e754 (read 6 Nov 02:36Z): an OP stack (Jovian) self-send, gasUsed x price + l1Fee
+  const base = { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x4c4b40", l1Fee: "0x280ab79d", daFootprintGasScalar: "0x94", from: me, to: me };
+  const fee = 0x5208n * 0x4c4b40n + 0x280ab79dn;
+  assert.equal(outflowOf({ value: 7n, to: me }, base, me), fee, "a send to itself keeps its value");
+  assert.equal(outflowOf({ value: 7n, to: other }, base, me), fee + 7n);
+  // Robinhood mainnet's receipt of 0x38fc62f4...05c1 (read 6 Nov 02:36Z): Arbitrum, the L1 part inside gasUsed, no l1Fee
+  const arb = { status: "0x1", gasUsed: "0x6866", gasUsedForL1: "0x0", effectiveGasPrice: "0x14b7390", from: me, to: other };
+  assert.equal(outflowOf({ value: 5n, to: other }, arb, me), 0x6866n * 0x14b7390n + 5n);
+  assert.equal(outflowOf({ value: 5n, to: other }, { ...arb, gasUsedForL1: "0x100" }, me), 0x6866n * 0x14b7390n + 5n, "gasUsedForL1 is inside gasUsed, never added");
+  // a failed transaction pays its fee, never its value
+  assert.equal(outflowOf({ value: 9n, to: other }, { ...arb, status: "0x0" }, me), 0x6866n * 0x14b7390n);
+  // OP operator fee: Isthmus (scalar / 1e6) and, once receipts carry daFootprintGasScalar, Jovian (scalar x 100)
+  const op = { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x10", l1Fee: "0x0", operatorFeeScalar: "0x3e8", operatorFeeConstant: "0x5" };
+  assert.equal(outflowOf({ value: 0n, to: other }, op, me), 0x5208n * 0x10n + (0x5208n * 1000n) / 1_000_000n + 5n);
+  assert.equal(outflowOf({ value: 0n, to: other }, { ...op, daFootprintGasScalar: "0x0" }, me), 0x5208n * 0x10n + 0x5208n * 1000n * 100n + 5n);
+  // what the receipt or the journal does not say is no count
+  assert.equal(outflowOf({ value: 1n, to: other }, { ...arb, effectiveGasPrice: undefined }, me), null);
+  assert.equal(outflowOf({ to: other }, arb, me), null);
 });
