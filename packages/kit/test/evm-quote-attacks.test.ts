@@ -1463,6 +1463,31 @@ test("card rh-cold-quote: a first that answers HTTP 413 to a request holding the
   assert.equal(c.spared(), 0);
 });
 
+test("card rh-cold-quote: a first that answers -32602 to every getLogs refuses rpc_error within an honest split's requests, under 5 s, never the spare's word (review of 1265bd94)", { timeout: 30_000 }, async () => {
+  // 2 x ceil(65,536 / 10,000) x ceil(log2(10M)) = 336 halving requests at most, past the scan's own 2 (the depth and
+  // its newest 2,000 blocks); the bound at 10 s, so a scan that ran to it shows here
+  const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f15";
+  let batches = 0;
+  const c = rcFirst(coin, (inner) => async (calls, s) => {
+    const out = await inner(calls, s);
+    if (!calls.some((x) => x.method === "eth_getLogs")) return out;
+    batches++;
+    return out.map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32602, message: "invalid params" } } : o));
+  });
+  evmScanBound?.(10_000);
+  const t = performance.now();
+  try {
+    assert.deepEqual(await c.run(), { accepted: false, code: "rpc_error" });
+  } finally {
+    evmScanBound?.();
+  }
+  const ms = Math.round(performance.now() - t);
+  console.log(`a first answering errors: ${batches} getLogs batches, ${ms} ms`);
+  assert.ok(batches <= 2 + 2 * Math.ceil(65_536 / 10_000) * Math.ceil(Math.log2(10_000_000)), String(batches));
+  assert.ok(ms < 5_000, `${ms} ms`);
+  assert.equal(c.spared(), 0);
+});
+
 test("card rh-cold-quote: one block holding more pools than the first answers refuses too_many_pools, never the spare's word", { timeout: 60_000 }, async () => {
   const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f21";
   // in Tenderly's words, its cause in data alone

@@ -917,6 +917,15 @@ const SCAN_SPLITS = 3;
  *  real pool had a seeded route pass; review of 1277e8af, MEDIUM-B: 100,000, Robinhood's OR span, where 1M handed a
  *  cached scan's 500,000-block gap to the spare). */
 const SCAN_ALONE = 100_000;
+/** The most halving requests one level of a scan's halves asks, where a provider's answers are short of the logs only
+ *  where a range holds SCAN_MAX_LOGS of them or more: those ranges of one level are apart, and a quote reads at most
+ *  EVM_QUOTE_MAX_KEYS pools (past them it refuses too_many_pools), so at most ceil(EVM_QUOTE_MAX_KEYS / SCAN_MAX_LOGS)
+ *  ranges a level split, each into 2 requests. A scan's halves run ceil(log2(span)) levels at most, from a request of
+ *  its first provider's span down to one block; past SCAN_SHORT_LEVEL times that many, the provider is answering errors
+ *  no honest chain explains, and the scan refuses (rpc_error) rather than hold the quote to its bound (review of
+ *  1265bd94: a first that answered every range with an error held each cold quote 60 s). Robinhood: 14 x 24 = 336;
+ *  Base: 14 x 14 = 196. */
+const SCAN_SHORT_LEVEL = 2 * Math.ceil(EVM_QUOTE_MAX_KEYS / SCAN_MAX_LOGS);
 /** The most currencies one getLogs request names: an OR of topics, so the currencies of a quote's scan cost the
  *  requests of one. */
 const SCAN_OR = 256;
@@ -1188,6 +1197,9 @@ async function scanPools(
   let pin: Block | null = null;
   type Job = { part: Each[]; a: number; b: number; on: ScanOn };
   const jobs: Job[] = [];
+  // the halving requests asked for answers short of the logs, and the most an honest chain needs (SCAN_SHORT_LEVEL)
+  let shorts = 0;
+  const shortMax = SCAN_SHORT_LEVEL * Math.ceil(Math.log2(first.span));
   const jobsOf = (g: Each[], from: number, to: number, on = first, into = jobs): void => {
     // where the blocks up to the head are more than the next provider's span, their newest span of it is a request of
     // its own (reviews of 9c962b6d and 1277e8af): a backend a block or two behind its head answers null for that
@@ -1271,7 +1283,11 @@ async function scanPools(
     // too_many_pools. One block whose logs its provider still does not answer refuses too_many_pools: no request can
     // read that block's pools. A long run of halves ends at the quote's bound (rpc_error).
     const short = () => {
-      if (b > a) return halves(splits);
+      if (b > a) {
+        shorts += 2;
+        if (shorts > shortMax) throw new ScanStop("rpc_error", "the scan provider answered errors past an honest split");
+        return halves(splits);
+      }
       throw new ScanStop("too_many_pools", `the scan provider answers no logs of block ${a}: it holds more pools than a request returns`);
     };
     // a transport failure (HTTP 5xx, a refused connection, a timeout, a lag) of a cold request of more than SCAN_ALONE
