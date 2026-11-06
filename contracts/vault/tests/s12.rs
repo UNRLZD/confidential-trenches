@@ -335,11 +335,12 @@ async fn vt_s12_direct() -> R<()> {
                 one.insert(method, t);
             }
             n => {
-                // per row, then a full page of PAGE_MAX rows (E)
+                // per row on these rows (ids of 11-18 B), and a page of PAGE_MAX rows of them (E); no bound on it: the
+                // largest rows cost more, and the kit's page sizes (packages/kit/src/vault/sync.ts VAULT_SYNC_PAGE) rest
+                // on review_viewgas.rs, which measures them
                 let per = (t - one[method]) / (n - 1) as f64;
                 let page = one[method] + per * (PAGE_MAX - 1) as f64;
-                println!("VT-S12 direct | view {method} | {per:.4} Tgas per row | {page:.3} Tgas at PAGE_MAX {PAGE_MAX} rows | E (the per-row fit) | {} | {} | {}", m.build, m.sandbox, m.platform);
-                assert!(page < LIMIT_TGAS, "view {method}: {page:.3} Tgas at a full page, not under {LIMIT_TGAS}");
+                println!("VT-S12 direct | view {method} | {per:.4} Tgas per row of these | {page:.3} Tgas at PAGE_MAX {PAGE_MAX} such rows | E (the per-row fit) | {} | {} | {}", m.build, m.sandbox, m.platform);
             }
         }
     }
