@@ -142,7 +142,7 @@ export type Cause = "429" | "held" | "budget" | "5xx" | "timeout" | "send" | "ke
  *  build's wait is QUEUE_WAIT_MS]. */
 export const SENDS_429 = 3;
 /** The wait before the one retry of a GET the vendor failed (5xx) or that never reached it [design: a quarter second,
- *  the industry's first backoff step; a GET is a read, so its retry is safe; a POST is never sent twice]. */
+ *  a common opening backoff step; a GET is a read, so its retry is safe; a POST is never sent twice]. */
 export const RETRY_FAILED_MS = 250;
 /** The 503 upstream with its cause, the call's own waits before it (`timing`) and, for the refusal log, `why`. */
 const UPSTREAM = (cause: Cause, why?: string, timing: string[] = []): ProxyAnswer => ({ ...error(503, "upstream"), timing: [...timing, `cause;desc="${cause}"`], ...(why === undefined ? {} : { why }) });
