@@ -108,7 +108,24 @@ const withStrings = (bytes, ...strings) => {
   return Buffer.concat([Buffer.from(bytes), Buffer.from([0, ...len]), body]);
 };
 
-// Stub cargo and rustc in <dir>/bin, and the planted wasm files; the env a run needs.
+// A `git` stub in `bin` in front of the real one: `ls-remote` answers one branch whose tip is STUB_GIT_TIP (HEAD unless
+// a test plants another; STUB_GIT_NO_REMOTE makes it fail), `status` answers clean unless STUB_GIT_DIRTY names a path;
+// everything else runs the real git. So no run reads GitHub, and the worktree's own state never decides a test.
+const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+function gitStub(bin) {
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(
+    path.join(bin, "git"),
+    `#!/bin/sh\nfor a in "$@"; do case "$a" in\n` +
+      `  ls-remote) [ -n "$STUB_GIT_NO_REMOTE" ] && { echo "fatal: stub: no remote" >&2; exit 128; }; printf '%s\\trefs/heads/main\\n' "\${STUB_GIT_TIP:-${HEAD}}"; exit 0;;\n` +
+      `  status) [ -n "$STUB_GIT_DIRTY" ] && printf ' M %s\\n' "$STUB_GIT_DIRTY"; exit 0;;\n` +
+      `esac; done\nexec ${JSON.stringify(REAL_GIT)} "$@"\n`,
+  );
+  chmodSync(path.join(bin, "git"), 0o755);
+  return bin;
+}
+
+// Stub cargo, rustc and git in <dir>/bin, and the planted wasm files; the env a run needs.
 function stubs(dir, a, b = a) {
   const bin = path.join(dir, "bin");
   mkdirSync(bin);
@@ -135,17 +152,20 @@ function stubs(dir, a, b = a) {
   writeFileSync(path.join(bin, "rustc"), '#!/bin/sh\necho "rustc 1.96.0 (stub)"\n');
   chmodSync(path.join(bin, "cargo"), 0o755);
   chmodSync(path.join(bin, "rustc"), 0o755);
+  gitStub(bin);
   return { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, STUB_WASM_A: fa, STUB_WASM_B: fb };
 }
 
 // deploy.mjs with `args`, fetch blocked; with `chains` ({ url: chain_id }), `status` alone answers, with that chain id,
 // and every method asked is appended to <dir>/methods.log
-function run(dir, args, env = process.env, chains = null) {
+// (the default env puts only the git stub in front)
+const gitEnv = (dir) => ({ ...process.env, PATH: `${gitStub(path.join(dir, "git-bin"))}${path.delimiter}${process.env.PATH}` });
+function run(dir, args, env = gitEnv(dir), chains = null) {
   return spawnSync(process.execPath, ["--import", pathToFileURL(net(dir, chains)).href, SCRIPT, ...args], { encoding: "utf8", timeout: 30_000, env });
 }
 // the same run, not waited for: { c, done } where done resolves { code, signal, output }; `chains` false lets the
 // run reach the network (a test's own local servers only)
-function start(dir, args, env = process.env, chains = null) {
+function start(dir, args, env = gitEnv(dir), chains = null) {
   const c = spawn(process.execPath, [...(chains === false ? [] : ["--import", pathToFileURL(net(dir, chains)).href]), SCRIPT, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   c.stdout.on("data", (x) => (output += x));
@@ -370,6 +390,115 @@ test("the wasm's NEP-330 metadata must name this repository at the commit, the p
   assert.equal(metadataProblems(withStrings(wasm(), JSON.stringify({ version: "0.1.0", standards: [{ standard: "nep330", version: "1.3.0" }] })), { commit: HEAD, flavor: "mainnet" }).length, 5);
   assert.match(one(wasm(), { commit: HEAD, flavor: "mainnet" }), /holds no single NEP-330/);
   assert.match(one(withStrings(wasm(), JSON.stringify(meta()), JSON.stringify(meta())), { commit: HEAD, flavor: "mainnet" }), /holds no single NEP-330/);
+});
+
+// ---- the source a deploy names (card vault-reproducible-build): a clean tree, a commit anyone can fetch, a marked record ----
+
+const PREV = execFileSync("git", ["-C", HERE, "rev-parse", "HEAD~1"], { encoding: "utf8" }).trim();
+
+test("a testnet deploy refuses a tree with changes, before any build or send", () => {
+  const dir = fresh();
+  const k = keyFile(dir);
+  const buildDir = path.join(dir, "build");
+  const r = run(dir, testnet(dir, k.file, buildDir), { ...stubs(dir, wasm()), STUB_GIT_DIRTY: "contracts/vault/src/lib.rs" });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /the tree has 1 changed or untracked path\(s\) \( M contracts\/vault\/src\/lib\.rs\): build from a clean checkout: nothing was built or sent/);
+  assert.equal(existsSync(path.join(buildDir, "cargo-args.log")), false, "a build ran");
+  neverSent(r);
+});
+
+test("a testnet deploy refuses a HEAD on no branch or tag of the repository, or a repository it cannot list, before any build", () => {
+  for (const [env, want] of [
+    [{ STUB_GIT_TIP: PREV }, new RegExp(`commit ${HEAD} is on no branch or tag of https://github\\.com/UNRLZD/confidential-trenches: push it`)],
+    [{ STUB_GIT_NO_REMOTE: "1" }, /git ls-remote https:\/\/github\.com\/UNRLZD\/confidential-trenches failed: fatal: stub: no remote/],
+  ]) {
+    const dir = fresh();
+    const k = keyFile(dir);
+    const buildDir = path.join(dir, "build");
+    const r = run(dir, testnet(dir, k.file, buildDir), { ...stubs(dir, wasm()), ...env });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, want);
+    assert.match(r.stderr, /: nothing was built or sent/);
+    assert.equal(existsSync(path.join(buildDir, "cargo-args.log")), false, "a build ran");
+    neverSent(r);
+  }
+});
+
+test("a deploy record names exactly one source: source_commit or non_reproducible, never both; the earlier vault records are marked", async () => {
+  const { recordSourceProblems, vaultRecords } = await import(SCRIPT);
+  const sha = "ab".repeat(32);
+  const rec = { wasm_sha256: sha, code_hash: b58encode(Buffer.from(sha, "hex")), source_commit: HEAD };
+  assert.deepEqual(recordSourceProblems(rec), []);
+  assert.deepEqual(recordSourceProblems({ non_reproducible: "an earlier host build" }), []);
+  assert.match(recordSourceProblems({ ...rec, non_reproducible: "x" }).join(";"), /names both source_commit and non_reproducible/);
+  assert.match(recordSourceProblems({ wasm_sha256: sha }).join(";"), /names neither source_commit/);
+  assert.match(recordSourceProblems({ non_reproducible: " " }).join(";"), /gives no reason/);
+  assert.match(recordSourceProblems({ ...rec, source_commit: "main" }).join(";"), /source_commit "main" is not a 40-hex commit/);
+  assert.match(recordSourceProblems({ ...rec, code_hash: "x" }).join(";"), /code_hash x is not the base58/);
+  const records = vaultRecords();
+  assert.deepEqual(records.map((r) => r.name), ["mainnet-test.json", "testnet-skeleton.json", "testnet-v1.json"]);
+  for (const { name, record } of records) {
+    assert.deepEqual(recordSourceProblems(record), [], name);
+    assert.ok(Object.hasOwn(record, "non_reproducible"), `${name} is not marked`);
+  }
+});
+
+test("mainnet: a record marked non_reproducible, a wasm naming another commit, or a record commit on no branch of the repository is refused before any send", async () => {
+  const { pinProblems } = await import(SCRIPT);
+  const w = mainnetWasm();
+  const pin = sha256hex(w);
+  const good = { network: "mainnet", account_id: MAINNET_VAULT, wasm_sha256: pin, wasm_builds_sha256: [pin, pin], code_hash: b58encode(Buffer.from(pin, "hex")), source_commit: HEAD };
+  const pins = { [MAINNET_VAULT]: pin };
+  assert.deepEqual(pinProblems(w, good, MAINNET_VAULT, pins), []);
+  const { source_commit, ...unmarked } = good;
+  assert.match(pinProblems(w, { ...unmarked, non_reproducible: "a host build" }, MAINNET_VAULT, pins).join(";"), /marked non_reproducible: a mainnet vault deploys a reproducible build only/);
+  assert.match(pinProblems(w, unmarked, MAINNET_VAULT, pins).join(";"), /names neither source_commit/);
+  assert.match(pinProblems(w, { ...good, non_reproducible: "x" }, MAINNET_VAULT, pins).join(";"), /names both/);
+  const other = mainnetWasm(ALL_EXPORTS, PREV);
+  const op = sha256hex(other);
+  assert.match(pinProblems(other, { ...good, wasm_sha256: op, wasm_builds_sha256: [op, op], code_hash: b58encode(Buffer.from(op, "hex")) }, MAINNET_VAULT, { [MAINNET_VAULT]: op }).join(";"), new RegExp(`source_code_snapshot is "git\\+https://github\\.com/UNRLZD/confidential-trenches\\?rev=${PREV}"`));
+  // the CLI's own run: the record's commit is on no branch of the repository
+  const dir = fresh();
+  const k = keyFile(dir, MAINNET_PARENT);
+  const f = mainnetFiles(dir, w);
+  const r = runMainnet(dir, mainnetArgs(dir, k.file, f), 10n ** 25n, { pins }, { STUB_GIT_TIP: PREV });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, new RegExp(`refused before any send: commit ${HEAD} is on no branch or tag of https://github\\.com/UNRLZD/confidential-trenches`));
+  assert.deepEqual(methods(dir), [], "the run asked an RPC");
+});
+
+test("--verify-records: a non-reproducible record is a NOTE, a reproducible one is rebuilt at its own commit and must be its code hash, an unmarked one is refused", async () => {
+  const { verifyRecords } = await import(SCRIPT);
+  const dir = fresh();
+  const env = stubs(dir, wasm({ strings: [MAINNET_USDC], exports: ALL_EXPORTS }));
+  const built = readFileSync(env.STUB_WASM_A);
+  const sha = sha256hex(built);
+  const recs = path.join(dir, "records");
+  mkdirSync(recs);
+  const write = (name, r) => writeFileSync(path.join(recs, name), JSON.stringify({ network: "mainnet", account_id: `${name}.near`, version: "blindfill-vault 0.1.0 mainnet", ...r }));
+  const saved = { PATH: process.env.PATH, STUB_WASM_A: process.env.STUB_WASM_A, STUB_WASM_B: process.env.STUB_WASM_B };
+  Object.assign(process.env, { PATH: env.PATH, STUB_WASM_A: env.STUB_WASM_A, STUB_WASM_B: env.STUB_WASM_B });
+  const lines = [];
+  try {
+    write("a-old.json", { wasm_sha256: "cd".repeat(32), code_hash: "x", non_reproducible: "an earlier host build" });
+    write("b-repro.json", { wasm_sha256: sha, code_hash: b58encode(Buffer.from(sha, "hex")), source_commit: HEAD });
+    writeFileSync(path.join(recs, "c-token.json"), JSON.stringify({ network: "testnet", code_hash: "y" })); // not a vault record
+    const done = await verifyRecords({ dir: recs, buildDir: path.join(dir, "v1"), log: (l) => lines.push(l) });
+    assert.deepEqual(done.map((d) => [d.name, d.sha ?? "note"]), [["a-old.json", "note"], ["b-repro.json", sha]]);
+    assert.ok(lines.some((l) => /^NOTE: a-old\.json \(a-old\.json\.near, code hash x\) was made by a non-reproducible build and is not compared: an earlier host build$/.test(l)), lines.join("\n"));
+    assert.ok(lines.some((l) => l === `b-repro.json: the rebuild of ${HEAD} is sha256 ${sha}, the record's code hash ${b58encode(Buffer.from(sha, "hex"))}`), lines.join("\n"));
+    // the build ran in a clone of the record's commit, not in this checkout
+    assert.ok(lines.some((l) => l.includes(`(in ${path.join(dir, "v1", "b-repro.json.src", "contracts", "vault")})`)), lines.join("\n"));
+    assert.equal(existsSync(path.join(dir, "v1", "b-repro.json.src")), false, "the clone is left");
+    // a rebuild that is not the record's code hash, and an unmarked record
+    const wrong = "ef".repeat(32);
+    write("b-repro.json", { wasm_sha256: wrong, code_hash: b58encode(Buffer.from(wrong, "hex")), source_commit: HEAD });
+    await assert.rejects(verifyRecords({ dir: recs, buildDir: path.join(dir, "v2"), log: () => {} }), new RegExp(`b-repro\\.json: the rebuild of ${HEAD} is sha256 ${sha}, the record's is ${wrong}`));
+    write("b-repro.json", { wasm_sha256: sha, code_hash: b58encode(Buffer.from(sha, "hex")) });
+    await assert.rejects(verifyRecords({ dir: recs, buildDir: path.join(dir, "v3"), log: () => {} }), /b-repro\.json: the record names neither source_commit/);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
 });
 
 test("the wasm refusal is fail-closed: any wasmProblems field but functionExports and promiseImports refuses when not empty", () => {
@@ -600,7 +729,7 @@ function mainnetFiles(dir, w, pin = sha256hex(w)) {
   const file = path.join(dir, "mainnet.wasm");
   writeFileSync(file, w);
   const record = path.join(dir, "mainnet-test.json");
-  writeFileSync(record, JSON.stringify({ network: "mainnet", account_id: MAINNET_VAULT, parent: MAINNET_PARENT, wasm_sha256: pin, wasm_builds_sha256: [pin, pin], code_hash: b58encode(Buffer.from(pin, "hex")), build: "test" }));
+  writeFileSync(record, JSON.stringify({ network: "mainnet", account_id: MAINNET_VAULT, parent: MAINNET_PARENT, wasm_sha256: pin, wasm_builds_sha256: [pin, pin], code_hash: b58encode(Buffer.from(pin, "hex")), source_commit: HEAD, build: "test" }));
   return { file, record };
 }
 const mainnetArgs = (dir, key, f) => ["--network", "mainnet", "--parent", MAINNET_PARENT, "--vault", MAINNET_VAULT, "--key-file", key, "--wasm", f.file, "--deployment", f.record, "--out", path.join(dir, "out.json")];
@@ -634,8 +763,9 @@ function mainnetNet(dir, amount, { pins, mutateRecipe = false } = {}) {
   );
   return f;
 }
-const runMainnet = (dir, args, amount, o) => spawnSync(process.execPath, ["--import", pathToFileURL(mainnetNet(dir, amount, o)).href, SCRIPT, ...args], { encoding: "utf8", timeout: 30_000 });
-const mainnetWasm = (exports = ALL_EXPORTS) => wasm({ strings: [MAINNET_USDC], exports });
+const runMainnet = (dir, args, amount, o, env = {}) => spawnSync(process.execPath, ["--import", pathToFileURL(mainnetNet(dir, amount, o)).href, SCRIPT, ...args], { encoding: "utf8", timeout: 30_000, env: { ...gitEnv(dir), ...env } });
+// a reproducible mainnet build of HEAD: its NEP-330 metadata names HEAD
+const mainnetWasm = (exports = ALL_EXPORTS, commit = HEAD) => withStrings(wasm({ strings: [MAINNET_USDC], exports }), JSON.stringify(meta({ commit })));
 
 test("mainnet (a): a wasm whose sha256 is not the record's pin is refused before any send", () => {
   const dir = fresh();
@@ -651,7 +781,7 @@ test("mainnet (a): a record whose builds disagree, or that is another vault's or
   const { pinProblems } = await import(SCRIPT);
   const w = mainnetWasm();
   const pin = sha256hex(w);
-  const good = { network: "mainnet", account_id: MAINNET_VAULT, wasm_sha256: pin, wasm_builds_sha256: [pin, pin], code_hash: b58encode(Buffer.from(pin, "hex")) };
+  const good = { network: "mainnet", account_id: MAINNET_VAULT, wasm_sha256: pin, wasm_builds_sha256: [pin, pin], code_hash: b58encode(Buffer.from(pin, "hex")), source_commit: HEAD };
   const pins = { [MAINNET_VAULT]: pin };
   assert.deepEqual(pinProblems(w, good, MAINNET_VAULT, pins), []);
   assert.match(pinProblems(w, { ...good, wasm_builds_sha256: [pin] }, MAINNET_VAULT, pins).join(";"), /builds do not all agree/);

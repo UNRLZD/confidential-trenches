@@ -10,7 +10,10 @@
 //    image pinned by its digest), `rustc +1.96.0` must be 1.96.0 and `cargo +1.96.0 near --version` exactly CARGO_NEAR.
 //    Two different builds, or a wasm whose metadata is not this repository at HEAD built by the pinned image and
 //    command, stop the run before anything is sent. Both out dirs are removed on every exit, a SIGINT or SIGTERM
-//    included; the wasm stays at <build-dir>/blindfill_vault.wasm.
+//    included; the wasm stays at <build-dir>/blindfill_vault.wasm. Builds run from a clone or the main checkout: from
+//    a worktree inside the main checkout, cargo-near takes the outer repository and the commit check refuses the build.
+//    A testnet deploy first refuses a tree with changes and a HEAD on no branch or tag of REPO (sourceProblems), so the
+//    commit its metadata names is one anyone can fetch and rebuild.
 // 2. Static checks on the wasm: every problem list scripts/live-checks/vault-skeleton.mjs wasmProblems returns is empty
 //    (fail-closed: a field it adds later refuses here too; today none of 2.8's banned imports, promise imports inside
 //    the seven, exports inside 2.5.7's list); every function body at most 196,608 B
@@ -42,6 +45,15 @@
 // not exist, and the signed batch must be exactly the recipe (recipeProblems: no AddKey), else nothing is sent. Then
 // the read-back on both RPCs at final and the registration on mainnet USDC. The record --out keeps the pre-deploy
 // record's fields and adds the deploy's. Testnet's and the sandbox's rules are unchanged by any of this.
+// Since the reproducible build (card vault-reproducible-build), the record must name the commit the wasm was built at
+// (source_commit, recordSourceProblems), on a branch or tag of REPO, and the wasm's NEP-330 metadata must name that
+// commit; a record marked non_reproducible is never deployed again.
+//
+// Records (--verify-records): every vault deploy record in deployments/ (a code_hash and a blindfill-vault version)
+// names exactly one of source_commit (a reproducible build: the commit is cloned, rebuilt twice in the pinned image and
+// its sha256 must be the record's wasm_sha256 and code_hash) or non_reproducible (an earlier build, with its reason:
+// printed as a NOTE, never compared). The wasm's metadata names its own commit, so no record can pin the build of the
+// commit that holds it: a record is checked at its own commit, never at HEAD.
 //
 // The signer's key comes from --key-file, a path given at run time: the near CLI's keychain file
 // (~/.near-credentials/<network>/<parent>.json) or any file holding {account_id, public_key, private_key}. A path inside
@@ -50,6 +62,7 @@
 // Sandbox runs use the sandbox's own genesis key.
 //
 //   node contracts/vault/scripts/deploy.mjs --build-only [--flavor testnet|mainnet] [--build-dir <new dir>]
+//   node contracts/vault/scripts/deploy.mjs --verify-records [--build-dir <new dir>]
 //   node contracts/vault/scripts/deploy.mjs --network testnet --parent <name>.testnet --key-file <path>
 //     [--vault <label>.<parent>] [--build-dir <new dir>] [--out <file>]
 //   node contracts/vault/scripts/deploy.mjs --network sandbox --rpc <url> --parent <id> --key-file <path>
@@ -240,6 +253,48 @@ export function metadataProblems(wasm, { commit, flavor }) {
 
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 
+// What keeps a deploy record from saying where its wasm came from: exactly one of source_commit (the 40-hex commit a
+// reproducible build was made at, with wasm_sha256 and its base58 code_hash) and non_reproducible (why it was not).
+export function recordSourceProblems(record) {
+  const has = (k) => Object.hasOwn(record ?? {}, k);
+  if (has("source_commit") && has("non_reproducible")) return ["the record names both source_commit and non_reproducible: a reproducible record can never carry the non_reproducible mark"];
+  if (has("non_reproducible")) return typeof record.non_reproducible === "string" && record.non_reproducible.trim() ? [] : ["the record's non_reproducible mark gives no reason"];
+  if (!has("source_commit")) return ["the record names neither source_commit (a reproducible build's commit) nor non_reproducible"];
+  const p = [];
+  if (!/^[0-9a-f]{40}$/.test(record.source_commit)) p.push(`the record's source_commit ${JSON.stringify(record.source_commit)} is not a 40-hex commit`);
+  if (!/^[0-9a-f]{64}$/.test(record.wasm_sha256 ?? "")) p.push(`the record pins no wasm_sha256: ${JSON.stringify(record.wasm_sha256 ?? null)}`);
+  else if (record.code_hash !== b58encode(Buffer.from(record.wasm_sha256, "hex"))) p.push(`the record's code_hash ${record.code_hash} is not the base58 of its wasm_sha256`);
+  return p;
+}
+
+// What keeps `commit` from being a source anyone can rebuild: with `clean`, a tree with changes or untracked files at
+// `cwd`; and a commit on no branch or tag of REPO (git ls-remote, then merge-base --is-ancestor against each tip this
+// clone holds: a tip it has not fetched counts as not holding it, so fetch first).
+export function sourceProblems({ cwd = CRATE, commit, clean = true } = {}) {
+  const git = (...a) => execFileSync("git", ["-C", cwd, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const p = [];
+  if (clean) {
+    const changed = git("status", "--porcelain").split("\n").filter(Boolean);
+    if (changed.length) p.push(`the tree has ${changed.length} changed or untracked path(s) (${changed.slice(0, 3).join(", ")}): build from a clean checkout`);
+  }
+  let tips;
+  try {
+    tips = git("ls-remote", "--heads", "--tags", REPO).split("\n").filter(Boolean).map((l) => l.split("\t")[0]);
+  } catch (e) {
+    return [...p, `git ls-remote ${REPO} failed: ${String(e.stderr || e.message).trim().split("\n")[0]}`];
+  }
+  const held = tips.some((t) => {
+    try {
+      execFileSync("git", ["-C", cwd, "merge-base", "--is-ancestor", commit, t], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!held) p.push(`commit ${commit} is on no branch or tag of ${REPO}: push it (then git fetch) so anyone can rebuild it`);
+  return p;
+}
+
 // The pinned tools, read before any build: rustc of the pinned toolchain and exactly CARGO_NEAR. Returns their version
 // lines, or throws naming what is not pinned.
 export function toolVersions() {
@@ -276,14 +331,14 @@ export const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
 // the handler stops the build's process group, the build then fails, and the finally removes the dirs. The handlers
 // stay on until the dirs are gone and one more turn of the event loop has run, so a signal that arrives while the
 // script is busy (reading build b's wasm, or removing a dir) is still seen, and the run stops before any send.
-export async function reproducibleBuild({ flavor, buildDir, log = console.log }) {
+export async function reproducibleBuild({ flavor, buildDir, crate = CRATE, log = console.log }) {
   buildDir = path.resolve(buildDir);
   if (existsSync(buildDir) && readdirSync(buildDir).length) throw new Error(`--build-dir ${buildDir} is not empty: each build starts from a new target dir`);
-  const rp = reproducibleProblems(readFileSync(path.join(CRATE, "Cargo.toml"), "utf8"));
+  const rp = reproducibleProblems(readFileSync(path.join(crate, "Cargo.toml"), "utf8"));
   if (rp.length) throw new Error(`${rp.join("; ")}: nothing was built`);
   const { near } = toolVersions();
   // the commit cargo-near builds (it clones HEAD), which the wasm's metadata must name
-  const commit = execFileSync("git", ["-C", CRATE, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const commit = execFileSync("git", ["-C", crate, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   mkdirSync(buildDir, { recursive: true });
   // the command as printed and recorded: the out dir is <out-dir>, never this machine's path
   const shown = `${buildCommand({ flavor, outDir: "<out-dir>" }).flat().join(" ")}`;
@@ -307,8 +362,8 @@ export async function reproducibleBuild({ flavor, buildDir, log = console.log })
     for (const name of ["a", "b"]) {
       const target = path.join(buildDir, name);
       const [cmd, args] = buildCommand({ flavor, outDir: target });
-      log(`build ${name}: ${cmd} ${args.join(" ")} (in ${CRATE})`);
-      const r = await runBuild(cmd, args, { cwd: CRATE, env }, children);
+      log(`build ${name}: ${cmd} ${args.join(" ")} (in ${crate})`);
+      const r = await runBuild(cmd, args, { cwd: crate, env }, children);
       if (interrupted) throw Object.assign(new Error(`interrupted by ${interrupted}: the build target dirs were removed, nothing was sent`), { signal: interrupted });
       if (r.status !== 0) throw new Error(`build ${name} failed (exit ${r.status ?? r.signal}): ${r.output.split("\n").slice(-15).join("\n")}`);
       const wasm = readFileSync(path.join(target, "blindfill_vault.wasm"));
@@ -328,6 +383,47 @@ export async function reproducibleBuild({ flavor, buildDir, log = console.log })
   }
   if (interrupted) throw Object.assign(new Error(`interrupted by ${interrupted}`), { signal: interrupted });
   return { file, wasm: out[0].wasm, sha: out[0].sha, shas: out.map((o) => o.sha), commit, build: `${shown} (${near}, image ${REPRODUCIBLE.image}@${REPRODUCIBLE.image_digest}, on ${os.platform()} ${os.arch()}), at ${commit}` };
+}
+
+// The vault deploy records in `dir`: each *.json with a code_hash and a blindfill-vault version (a token's record or a
+// run record is neither).
+export function vaultRecords(dir = path.join(CRATE, "deployments")) {
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".json"))
+    .sort()
+    .map((name) => ({ name, record: JSON.parse(readFileSync(path.join(dir, name), "utf8")) }))
+    .filter(({ record }) => Object.hasOwn(record, "code_hash") && /^blindfill-vault /.test(record.version ?? ""));
+}
+
+// Every vault deploy record checked at its own commit (see the header, Records). Throws on the first record that is
+// not marked, or whose rebuild is not its code hash; returns { name, sha | note } per record.
+export async function verifyRecords({ dir, buildDir, log = console.log }) {
+  buildDir = path.resolve(buildDir);
+  if (existsSync(buildDir) && readdirSync(buildDir).length) throw new Error(`--build-dir ${buildDir} is not empty`);
+  const top = execFileSync("git", ["-C", CRATE, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+  const done = [];
+  for (const { name, record } of vaultRecords(dir)) {
+    const p = recordSourceProblems(record);
+    if (p.length) throw new Error(`${name}: ${p.join("; ")}`);
+    if (Object.hasOwn(record, "non_reproducible")) {
+      log(`NOTE: ${name} (${record.account_id}, code hash ${record.code_hash}) was made by a non-reproducible build and is not compared: ${record.non_reproducible}`);
+      done.push({ name, note: record.non_reproducible });
+      continue;
+    }
+    const src = path.join(buildDir, `${name}.src`);
+    try {
+      execFileSync("git", ["clone", "--quiet", "--no-checkout", top, src], { stdio: ["ignore", "pipe", "pipe"] });
+      execFileSync("git", ["-C", src, "checkout", "--quiet", "--detach", record.source_commit], { stdio: ["ignore", "pipe", "pipe"] });
+      const flavor = record.network === "mainnet" ? "mainnet" : "testnet";
+      const b = await reproducibleBuild({ flavor, buildDir: path.join(buildDir, name), crate: path.join(src, CONTRACT_PATH), log });
+      if (b.sha !== record.wasm_sha256) throw new Error(`${name}: the rebuild of ${record.source_commit} is sha256 ${b.sha}, the record's is ${record.wasm_sha256} (code hash ${record.code_hash})`);
+      log(`${name}: the rebuild of ${record.source_commit} is sha256 ${b.sha}, the record's code hash ${record.code_hash}`);
+      done.push({ name, sha: b.sha });
+    } finally {
+      rmSync(src, { recursive: true, force: true });
+    }
+  }
+  return done;
 }
 
 // The size of every function body in a wasm module's code section (section 10).
@@ -409,6 +505,9 @@ export function pinProblems(wasm, record, vault, pins = MAINNET_PINS) {
   if (record.code_hash !== b58encode(Buffer.from(record.wasm_sha256, "hex"))) p.push(`the record's code_hash ${record.code_hash} is not the base58 of its pin`);
   if (record.network !== "mainnet") p.push(`the record is a ${record.network} record, not mainnet`);
   if (vault !== undefined && record.account_id !== vault) p.push(`the record is ${record.account_id}'s, not ${vault}'s`);
+  p.push(...recordSourceProblems(record));
+  if (Object.hasOwn(record, "non_reproducible")) p.push(`the record is marked non_reproducible: a mainnet vault deploys a reproducible build only`);
+  else if (/^[0-9a-f]{40}$/.test(record.source_commit ?? "")) p.push(...metadataProblems(wasm, { commit: record.source_commit, flavor: "mainnet" }));
   return p;
 }
 
@@ -587,8 +686,8 @@ async function send(url, tx, privateKey, what) {
 }
 
 function parseArgs(argv) {
-  const known = new Set(["--build-only", "--flavor", "--build-dir", "--network", "--rpc", "--parent", "--key-file", "--vault", "--wasm", "--out", "--deployment"]);
-  const flags = new Set(["--build-only"]);
+  const known = new Set(["--build-only", "--verify-records", "--flavor", "--build-dir", "--network", "--rpc", "--parent", "--key-file", "--vault", "--wasm", "--out", "--deployment"]);
+  const flags = new Set(["--build-only", "--verify-records"]);
   const o = {};
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
@@ -606,6 +705,12 @@ async function main() {
   const o = parseArgs(process.argv.slice(2));
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "t").toLowerCase();
   const buildDir = o["build-dir"] ? path.resolve(o["build-dir"]) : path.join(os.tmpdir(), `blindfill-vault-build-${stamp}-${process.pid}`);
+
+  if (o["verify-records"]) {
+    const done = await verifyRecords({ buildDir });
+    console.log(`records: ${done.filter((d) => d.sha).length} rebuilt to their code hash, ${done.filter((d) => d.note).length} noted as non-reproducible`);
+    return;
+  }
 
   if (o["build-only"]) {
     const b = await reproducibleBuild({ flavor: o.flavor ?? "testnet", buildDir });
@@ -646,6 +751,19 @@ async function main() {
   // the parent's key, read and checked before the build so a wrong key costs no build
   const { pub, privateKey } = loadKey(o["key-file"], parent);
   const pubText = `ed25519:${b58encode(pub)}`;
+
+  // a public chain's vault names its source: testnet builds HEAD here, so the tree is clean and HEAD is on REPO;
+  // mainnet deploys the record's build, so the record's commit is on REPO (pinProblems holds the rest). The sandbox is
+  // this machine's own chain, with nothing anyone else rebuilds.
+  if (network === "testnet") {
+    const head = execFileSync("git", ["-C", CRATE, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const sp = sourceProblems({ commit: head });
+    if (sp.length) throw new Error(`${sp.join("; ")}: nothing was built or sent`);
+  }
+  if (network === "mainnet" && /^[0-9a-f]{40}$/.test(record.source_commit ?? "")) {
+    const sp = sourceProblems({ commit: record.source_commit, clean: false });
+    if (sp.length) throw new Error(`refused before any send: ${sp.join("; ")}`);
+  }
 
   // 1-2. the wasm: built twice here, or (sandbox only) the file given; refused before any send if it breaks a rule
   let wasm, build, shas;
