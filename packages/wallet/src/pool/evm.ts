@@ -386,6 +386,15 @@ export const EVM_SPARE_REST_MS = 60_000;
  * on two. thirdweb's keyless daily quota answered every chain HTTP 429 with Retry-After 26,741,000 ms (5 Nov 16:28Z):
  * the kit's client ends that call at once, and with no spare it was the pair's failure. A seat's `url` is its
  * provider's now.
+ * A range cap walks too (card helper-evm-range-cap-walk, the helper's rule in rpc.ts callEvm): an eth_getLogs refused in
+ * words that name a span (CAP_SPANS) under the span asked, and no smaller than the widest that provider answered (a
+ * smaller one is one backend's, the pager's to ask again), moves the seat to the next provider in the list, not the
+ * other seat's and not resting, whose cap is not known to be under the span asked, and the call is made there at once;
+ * with none, to the provider of the largest cap named, whose own refusal goes up so the pager pages at that cap. The
+ * capped provider is not rested: it still answers the seat's other reads when a later move seats it. Which two
+ * providers sit changes, never that two read and agree. Read live: the kit's Base list seats blastapi second, which
+ * caps a getLogs at 10 blocks (evm-transfer-rpc-spares), and sepolia.base.org answers HTTP 413 "eth_getLogs is limited
+ * to a 200 range" (6 Nov 18:51Z), where publicnode takes 50,000 and Pocket 100,000.
  */
 export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   if (!Array.isArray(list) || list.length < 2 || list.some((r) => typeof r !== "function")) throw new Error(`${what}: two or more`);
@@ -406,15 +415,53 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
     }
     return best !== null && restUntil[best]! <= restUntil[at[k]!]! ? best : null;
   };
+  // each provider's eth_getLogs cap as its words named it (null: none known), and the widest span it answered
+  const capOf: (bigint | null)[] = list.map(() => null);
+  const answered: (bigint | null)[] = list.map(() => null);
+  // the provider a capped seat k moves to for a page of `span` blocks: the next one in list order, not the other seat's
+  // and not resting, with no cap known under `span`; else the one (the seat's own too) with the largest cap named
+  const wider = (k: number, span: bigint): number => {
+    let best = at[k]!;
+    for (let s = 1; s < list.length; s++) {
+      const i = (at[k]! + s) % list.length;
+      if (i === at[1 - k] || restUntil[i]! > Date.now()) continue;
+      const c = capOf[i]!;
+      if (c === null || c >= span) return i;
+      if (c > (capOf[best] ?? 0n)) best = i;
+    }
+    return best;
+  };
+  const spanOf = (params: readonly unknown[]): bigint | null => {
+    const f = params[0] as { fromBlock?: unknown; toBlock?: unknown } | null;
+    if (typeof f?.fromBlock !== "string" || typeof f.toBlock !== "string") return null;
+    try {
+      return BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n;
+    } catch {
+      return null;
+    }
+  };
   const seat = (k: number): EvmRpc => {
     const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+      const span = method === "eth_getLogs" ? spanOf(params) : null;
       for (;;) {
         if (restUntil[at[k]!]! > Date.now()) at[k] = next(k, true) ?? at[k]!;
         const i = at[k]!;
         try {
-          return await list[i]!(method, params);
+          const r = await list[i]!(method, params);
+          if (span !== null && (answered[i] === null || span > answered[i]!)) answered[i] = span;
+          if (span !== null && capOf[i] !== null && span > capOf[i]!) capOf[i] = null;
+          return r;
         } catch (e) {
           const t = throttled(e);
+          const cap = span !== null && t === null ? capSpanOf(String((e as Error)?.message ?? e)) : null;
+          if (span !== null && cap !== null && cap >= 1n && cap < span && (answered[i] === null || cap >= answered[i]!)) {
+            if (capOf[i] === null || cap > capOf[i]!) capOf[i] = cap;
+            if (at[k] !== i) continue; // another call on this seat moved it already
+            const n = wider(k, span);
+            if (n === i) throw e;
+            at[k] = n;
+            continue;
+          }
           if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
           restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
           named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;

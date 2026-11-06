@@ -853,6 +853,83 @@ test("card helper-evm-range-cap-walk: sepolia.base.org's HTTP 413 \"limited to a
   assert.ok(pageSizes(la).length <= Math.ceil(span / 50_000) + 10, `the 50,000 cap: ${pageSizes(la).length} pages`);
 });
 
+// ---- card helper-evm-range-cap-walk: a seat whose provider caps a page under the span asked walks to the list's next ----
+
+/** Each provider's cap as its own words (read live: publicnode 3 Nov 05:35Z, blastapi as evm-transfer-rpc-spares
+ *  recorded it, Pocket 6 Nov 07:31Z, sepolia.base.org 6 Nov 18:51Z, nodies 6 Nov 15:19Z), every eth_getLogs counted;
+ *  past CALLS_GUARD in all the read answers no list, so a pager that never moves on fails its test instead of hanging. */
+const CALLS_GUARD = 5_000;
+const capped = (url: string, cap: number | null, words: (size: number) => string, count: { n: number }, log: string[], extra?: () => void): Over => ({
+  url,
+  log,
+  getLogs: ({ from, to }) => {
+    if (++count.n > CALLS_GUARD) throw new Error("RPC error -32603: the test's call guard");
+    extra?.();
+    if (cap !== null && to - from + 1 > cap) throw new Error(words(to - from + 1));
+  },
+});
+const PUBLICNODE_WORDS = () => "HTTP 400: RPC error -32701: exceed maximum block range: 50000";
+const BLAST_WORDS = () => "HTTP 400: RPC error -32600: You can make eth_getLogs requests with up to a 10 block range. Based on your parameters, this block range should work: [0x33437f9, 0x3343802]";
+const POCKET_WORDS = () => "HTTP 400: RPC error -32602: query exceeds max block range 100000";
+
+test("card helper-evm-range-cap-walk: the kit's Base list (blastapi's 10-block cap seated second, mainnet.base.org 429 on every getLogs) syncs 1.5M blocks on publicnode and Pocket in a few dozen calls", async () => {
+  const span = 1_500_000;
+  const c = longChain([...deps(PP, [10, 700_000, 1_499_000])], span);
+  const count = { n: 0 };
+  const lp: string[] = [], lb: string[] = [], lo: string[] = [], lk: string[] = [];
+  const list = [
+    rpc(c, capped("https://base-rpc.publicnode.com", 50_000, PUBLICNODE_WORDS, count, lp)),
+    rpc(c, capped("https://base-mainnet.public.blastapi.io", 10, BLAST_WORDS, count, lb)),
+    rpc(c, capped("https://mainnet.base.org", null, () => "", count, lo, () => { throw HTTP_429(); })),
+    rpc(c, capped("https://base.api.pocket.network", 100_000, POCKET_WORDS, count, lk)),
+  ];
+  const r = await evmTreeSync({ rpcs: list, pin: PIN, sleep: async () => {} }).events();
+  assert.equal(r.events.length, 3);
+  const [p, b, o, k] = [lp, lb, lo, lk].map(pageSizes);
+  // blastapi asked once (its 100,000 refused), mainnet.base.org at most once (its 429), the span read on the other two
+  assert.ok(b.length <= 2 && o.length <= 2, `blastapi ${b}, mainnet.base.org ${o}`);
+  assert.ok(count.n <= 80, `${count.n} eth_getLogs in all: publicnode ${p.length}, Pocket ${k.length}`);
+  assert.ok(k.filter((n) => n <= 100_000).reduce((a, n) => a + n, 0) >= span - 100_000, `Pocket's pages ${k}`);
+});
+
+test("card helper-evm-range-cap-walk: sepolia.base.org's 200 cap walks its seat to the list's next provider, which reads the span in wide pages", async () => {
+  const span = 1_500_000;
+  const c = longChain([...deps(PP, [10, 700_000, 1_499_000])], span);
+  const count = { n: 0 };
+  const la: string[] = [], lb: string[] = [], lc: string[] = [];
+  const list = [
+    rpc(c, capped("https://base-sepolia-rpc.publicnode.com", 50_000, PUBLICNODE_WORDS, count, la)),
+    rpc(c, capped("https://sepolia.base.org", 200, () => "HTTP 413: RPC error -32614: eth_getLogs is limited to a 200 range", count, lb)),
+    rpc(c, capped("https://base-sepolia.gateway.tenderly.co", null, () => "", count, lc)),
+  ];
+  const r = await evmTreeSync({ rpcs: list, pin: PIN, sleep: async () => {} }).events();
+  assert.equal(r.events.length, 3);
+  const [a, b, t] = [la, lb, lc].map(pageSizes);
+  assert.equal(b.length, 1, `sepolia.base.org's pages ${b}`);
+  assert.ok(t.length > 0 && t.length <= 10, `the next provider's pages ${t}`);
+  assert.ok(count.n <= 60, `${count.n} eth_getLogs in all: ${a.length}, ${b.length}, ${t.length}`);
+});
+
+test("card helper-evm-range-cap-walk: with every provider of the list capping, the seats sit on the two largest caps and each pages at its own", async () => {
+  const span = 100_000;
+  const c = longChain([...deps(PP, [10, 40_000, 99_000])], span);
+  const count = { n: 0 };
+  const la: string[] = [], lb: string[] = [], lc: string[] = [];
+  const nodies = (cap: number) => () => `RPC error -32001: Block range too large: maximum allowed is ${cap} blocks on your current plan`;
+  const list = [
+    rpc(c, capped("https://a.example", 10, nodies(10), count, la)),
+    rpc(c, capped("https://b.example", 200, () => "HTTP 413: RPC error -32614: eth_getLogs is limited to a 200 range", count, lb)),
+    rpc(c, capped("https://c.example", 50, nodies(50), count, lc)),
+  ];
+  const r = await evmTreeSync({ rpcs: list, pin: PIN, sleep: async () => {} }).events();
+  assert.equal(r.events.length, 3);
+  const [a, b, x] = [la, lb, lc].map(pageSizes);
+  assert.equal(a.length, 1, `the 10 cap's pages ${a}`);
+  const at = (pages: number[], cap: number) => pages.filter((n) => n <= cap);
+  assert.ok(at(b, 200).slice(0, -1).every((n) => n === 200) && at(b, 200).reduce((s, n) => s + n, 0) >= span - 200, `the 200 cap's pages ${[...new Set(b)]}`);
+  assert.ok(at(x, 50).slice(0, -1).every((n) => n === 50) && at(x, 50).reduce((s, n) => s + n, 0) >= span - 50, `the 50 cap's pages ${[...new Set(x)]}`);
+});
+
 test("card evm-pool-sync-wide-pages: a refusal halves only that provider's page; a 429 or no answer in time halves none, and a spare in a seat pages at its own size", async () => {
   const c = longChain([...deps(PP, [10, 400_000, 990_000])], 1_000_000);
   const la: string[] = [], lb: string[] = [];
