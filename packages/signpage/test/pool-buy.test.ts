@@ -21,6 +21,7 @@ import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhe
 import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import type { TxRef } from "../../kit/src/signpage/messages.ts";
+import { pairDown } from "./outage.ts";
 import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
 import type { IncomingMessage } from "../src/api.ts";
 
@@ -848,3 +849,30 @@ test("a pool.buy whose end is its answer (dropped tx: not_landed) posts that sta
   assert.deepEqual((r.answer as { result: { stage: string } }).result.stage, "not_landed");
   assert.deepEqual(r.stages, ["not_landed"]);
 });
+
+// Card pool-read-down: one provider down past the page's own retry, from each of its calls in turn. Before W signs, the
+// buy answers "down" (api.ts RETRY_CODES: the same request again runs again), never failed or not_allowed, with
+// nothing taken, signed or sent; the other provider's word alone is never taken. From the take on (W signed), it is
+// never "down": the transaction may land, and the read-back rules decide.
+for (const p of [0, 1] as const) {
+  test(`card pool-read-down: provider ${p} down past the page's retry answers down before W signs, and never down after`, async () => {
+    let before = 0;
+    let after = 0;
+    for (let from = 0; ; from++) {
+      const w = await world();
+      const d = pairDown(w.host.rpcs, p, from);
+      const a = await runPoolBuy({ ...w.host, rpcs: d.rpcs }, ASK);
+      if (!d.fired()) break;
+      if (!w.log.some((x) => x.startsWith("take"))) {
+        before++;
+        assert.deepEqual(a, { error: "down" }, `from call ${from}`);
+        assert.equal(w.state(), "HELD", `from call ${from}`);
+        assert.ok(!w.log.includes("send"), `from call ${from}: nothing sent`);
+      } else {
+        after++;
+        assert.notDeepEqual(a, { error: "down" }, `from call ${from}`);
+      }
+    }
+    assert.ok(before > 0 && after > 0, `${before} before, ${after} after`);
+  });
+}
