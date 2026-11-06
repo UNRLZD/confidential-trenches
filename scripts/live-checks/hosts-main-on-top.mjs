@@ -8,6 +8,11 @@
 //     to A records;
 //   - no name under SIGN_HOST answers: api., app., sign. (the old helper's and signing page's names) and a random label
 //     each answer NXDOMAIN (status 3), so there is no child record of any type and no wildcard;
+//   - nor does any name under SIGN_HOST the certificate transparency logs hold: WebAuthn runs only on https, so a child
+//     that could claim SIGN_HOST's passkeys has a certificate in them. Two sources are read (crt.sh's JSON and
+//     certspotter's issuances, every page), at least one must answer, and a source that does not is said so on its
+//     line; every name found must be NXDOMAIN on both resolvers now. The old sign. and api. are in the logs and are the
+//     fixed labels' own lines, which fail until their records are deleted (the switch's last DNS step);
 //   - APP_HOST, ct-app.unrealized.trade, answers by a CNAME to the terminal's Pages project
 //     (confidential-trenches-app.pages.dev), and HELPER_HOST, ct-api.unrealized.trade, answers the helper server's
 //     primary IP (apps/helper/deploy/create-server.mjs PRIMARY_IP): siblings, which cannot claim SIGN_HOST.
@@ -34,6 +39,30 @@ export const RESOLVERS = [
   { name: "cloudflare", url: (n) => `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(n)}&type=A`, headers: { accept: "application/dns-json" } },
   { name: "google", url: (n) => `https://dns.google/resolve?name=${encodeURIComponent(n)}&type=A`, headers: {} },
 ];
+// The CT log sources: each url(after) is a page (after: the last id read, or null for the first), names(json) its names,
+// next(json) the next page's after, or null when there is none. A source answers a whole list only when it names its
+// canary, a name with a certificate logged for good: crt.sh keeps expired certificates (it has an exclude=expired
+// option, off here), so the old sign.'s (certspotter issuance 18096830193, 2026-10-31) stays in it; certspotter's list
+// holds SIGN_HOST itself, whose certificate Pages keeps renewing. crt.sh answered [] for the name and for SIGN_HOST
+// alone on 2026-11-07 while certspotter named three children, so an answer without its canary is unread.
+export const CT_SOURCES = [
+  {
+    name: "crt.sh",
+    canary: `sign.${SIGN_HOST}`,
+    url: () => `https://crt.sh/?q=${encodeURIComponent(`%.${SIGN_HOST}`)}&output=json`,
+    names: (j) => j.flatMap((c) => [c?.common_name, ...String(c?.name_value ?? "").split("\n")]),
+    next: () => null,
+  },
+  {
+    name: "certspotter",
+    canary: SIGN_HOST,
+    url: (after) => `https://api.certspotter.com/v1/issuances?domain=${SIGN_HOST}&include_subdomains=true&expand=dns_names${after ? `&after=${after}` : ""}`,
+    names: (j) => j.flatMap((c) => (Array.isArray(c?.dns_names) ? c.dns_names : [])),
+    next: (j) => (j.length ? String(j.at(-1).id) : null),
+  },
+];
+// past this many pages a source counts as unread: its list may go on
+export const CT_PAGES_MAX = 20;
 const TIMEOUT_MS = 10_000;
 const A = 1;
 const CNAME = 5;
@@ -59,9 +88,64 @@ export function parse(body) {
   };
 }
 
-// fetchFn(url, init) as fetch; the names read, each from every resolver
+/** The fixed names: SIGN_HOST, the child labels and the random one, the siblings. */
+const fixed = (label) => [SIGN_HOST, ...[...LABELS, label].map((l) => `${l}.${SIGN_HOST}`), APP_HOST, HELPER_HOST];
+
+/** One CT source's pages as read: { source, pages: [{ url, status, body } | { url, error }] }. */
+async function readCt(src, fetchFn) {
+  const pages = [];
+  let after = null;
+  for (let i = 0; i < CT_PAGES_MAX; i++) {
+    const url = src.url(after);
+    try {
+      const res = await fetchFn(url, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(TIMEOUT_MS * 3) });
+      pages.push({ url, status: res.status, body: await res.text() });
+    } catch (e) {
+      pages.push({ url, error: String(e?.cause?.code ?? e?.name ?? e?.message) });
+      break;
+    }
+    const got = ctPage(src, pages.at(-1));
+    if (got.error || !(after = src.next(got.json))) break;
+  }
+  return { source: src.name, pages };
+}
+
+/** One page: { json } or { error }. */
+function ctPage(src, p) {
+  if (p.error) return { error: p.error };
+  if (p.status !== 200) return { error: `HTTP ${p.status}` };
+  let json;
+  try {
+    json = JSON.parse(p.body);
+  } catch {
+    return { error: "not JSON" };
+  }
+  return Array.isArray(json) ? { json } : { error: "not a list" };
+}
+
+/** A source's names under SIGN_HOST, lowercased and sorted: { names } or { error }. */
+export function ctNames(rec, name) {
+  const src = CT_SOURCES.find((s) => s.name === name);
+  const read = rec.ct?.find((c) => c.source === name);
+  if (!src || !read?.pages?.length) return { error: "not read" };
+  const all = new Set();
+  for (const [i, p] of read.pages.entries()) {
+    const got = ctPage(src, p);
+    if (got.error) return { error: got.error };
+    for (const n of src.names(got.json)) all.add(bare(String(n ?? "").trim()));
+    if (i === read.pages.length - 1 && src.next(got.json)) return { error: `more than ${CT_PAGES_MAX} pages` };
+  }
+  if (!all.has(src.canary)) return { error: `the list does not name ${src.canary}, whose certificate is logged, so it is not whole` };
+  return { names: [...all].filter((n) => n.endsWith(`.${SIGN_HOST}`)).sort() };
+}
+
+// fetchFn(url, init) as fetch; the CT logs first, then the names read, each from every resolver: the fixed ones and
+// every child the logs name
 export async function read({ fetchFn = fetch, label = `x${randomBytes(8).toString("hex")}` } = {}) {
-  const names = [SIGN_HOST, ...[...LABELS, label].map((l) => `${l}.${SIGN_HOST}`), APP_HOST, HELPER_HOST];
+  const ct = [];
+  for (const src of CT_SOURCES) ct.push(await readCt(src, fetchFn));
+  const names = fixed(label);
+  for (const src of CT_SOURCES) for (const n of ctNames({ ct }, src.name).names ?? []) if (!names.includes(n)) names.push(n);
   const answers = [];
   for (const name of names) {
     for (const r of RESOLVERS) {
@@ -74,7 +158,7 @@ export async function read({ fetchFn = fetch, label = `x${randomBytes(8).toStrin
       }
     }
   }
-  return { label, answers };
+  return { label, ct, answers };
 }
 
 export function judge(rec) {
@@ -103,6 +187,23 @@ export function judge(rec) {
     const g = of(name);
     const what = l === rec.label ? "a random label (no wildcard)" : `${l}.`;
     add(g.every((x) => !x.error && x.status === NXDOMAIN), `${name}, ${what}: NXDOMAIN on both: ${g.map(say).join("; ")}`);
+  }
+  // the CT logs: each source's line, then every child they name past the fixed ones
+  const fixedNames = fixed(rec.label);
+  const found = new Set();
+  const read = CT_SOURCES.map((src) => [src.name, ctNames(rec, src.name)]);
+  for (const [name, got] of read) {
+    if (got.error) {
+      lines.push(`--  ${name}: unread (${got.error}), so its names are not judged`);
+      continue;
+    }
+    for (const n of got.names) found.add(n);
+    lines.push(`--  ${name}: ${got.names.length} name(s) under ${SIGN_HOST}${got.names.length ? `: ${got.names.join(", ")}` : ""}`);
+  }
+  add(read.some(([, got]) => !got.error), `the CT logs are read: ${read.filter(([, g]) => !g.error).map(([n]) => n).join(", ") || "no source answered"}`);
+  for (const name of [...found].filter((n) => !fixedNames.includes(n)).sort()) {
+    const g = of(name);
+    add(g.every((x) => !x.error && x.status === NXDOMAIN), `${name}, in the CT logs: NXDOMAIN on both: ${g.map(say).join("; ")}`);
   }
   const app = of(APP_HOST);
   add(app.every((g) => !g.error && g.status === NOERROR && g.cnames[0] === APP_TARGET && g.as.length > 0), `${APP_HOST} is the terminal's project ${APP_TARGET}: ${app.map(say).join("; ")}`);

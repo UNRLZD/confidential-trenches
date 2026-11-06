@@ -34,8 +34,9 @@ export const ALLOWED = {
   "scripts/live-checks/kit-freeze-helper-api.mjs": [`sign.${SIGN_HOST}`],
   // this gate names the allowed children above
   "scripts/ci/host-children.mjs": ["sign.${SIGN_HOST}", "${l}.${SIGN_HOST}"],
-  // the live check asks DNS for children of SIGN_HOST to prove each has no record
-  "scripts/live-checks/hosts-main-on-top.mjs": ["${l}.${SIGN_HOST}"],
+  // the live check asks DNS for children of SIGN_HOST to prove each has no record, and reads the old sign.'s logged
+  // certificate as proof that a CT log source's list is whole
+  "scripts/live-checks/hosts-main-on-top.mjs": ["${l}.${SIGN_HOST}", "sign.${SIGN_HOST}"],
 };
 
 /** True for a file this gate does not read: prose, written release lists, recorded runs, test data and tests. */
@@ -68,6 +69,7 @@ export function refusals(file, text) {
   for (const m of text.matchAll(BUILT_TEMPLATE)) {
     // the label before the dot, read backward: letters, digits, hyphens, wildcards and interpolations
     const label = text.slice(Math.max(0, m.index - 253), m.index).match(/(?:[a-z0-9*-]|\$\{[^{}\n]*\})*$/i)[0];
+    if (!label) continue; // the suffix alone (a test that a name ends in it), no label
     at(m.index - label.length, `${label}${m[0].replace(/\s+/g, "")}`);
   }
   for (const m of text.matchAll(BUILT_ADDED)) {

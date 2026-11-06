@@ -39,7 +39,7 @@ const run = (dir) => {
 
 const GOOD = {
   // SIGN_HOST and URLs built on it, not children of it
-  "packages/wallet/src/derive/constants.ts": `export const SIGN_HOST = "${SIGN_HOST}";\nexport const U = \`https://\${SIGN_HOST}/\`;\nexport const V = "https://" + SIGN_HOST;\nexport const W = [SIGN_HOST, "json"].join(".");\n`,
+  "packages/wallet/src/derive/constants.ts": `export const SIGN_HOST = "${SIGN_HOST}";\nexport const U = \`https://\${SIGN_HOST}/\`;\nexport const V = "https://" + SIGN_HOST;\nexport const W = [SIGN_HOST, "json"].join(".");\nexport const child = (n) => n.endsWith(\`.\${SIGN_HOST}\`);\n`,
   "apps/terminal/public/_headers": `/*\n  Content-Security-Policy: connect-src 'self' https://${HELPER} https://${SIGN_HOST}; frame-ancestors https://${SIGN_HOST}\n`,
   "apps/helper/deploy/Caddyfile": `{$HELPER_SITE:${HELPER}} {\n}\n`,
   // a name that only ends like ours, and SIGN_HOST's parent, are not children
