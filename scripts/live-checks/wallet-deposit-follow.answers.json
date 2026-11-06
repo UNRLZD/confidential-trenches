@@ -1,8 +1,8 @@
 {
  "good": {
-  "note": "this card's SIGN_HOST build (packages/signpage/index.html and public/app.js at the card's branch) and the helper's live POST answer, read 2026-11-06T20:29:27.750Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-vSDihTcovBvjq2axkaqLB1Dt/LaXnFWfPKP1c2JwRPg5Gkx4lxNWfBVy2PFhHBtX\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-vSDihTcovBvjq2axkaqLB1Dt/LaXnFWfPKP1c2JwRPg5Gkx4lxNWfBVy2PFhHBtX",
+  "note": "this card's SIGN_HOST build (packages/signpage/index.html and public/app.js at the card's branch, r3 fold) and the helper's live POST answer, read 2026-11-06T20:29:27.750Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ej6waI7rKM6GdWf801StZ+QsFmyn29dufFfBcgkEvpvT++tpy+8VGhcS/zvKmV/Q\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ej6waI7rKM6GdWf801StZ+QsFmyn29dufFfBcgkEvpvT++tpy+8VGhcS/zvKmV/Q",
   "status_url": true,
   "lock": true,
   "helper": {

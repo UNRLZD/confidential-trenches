@@ -17,10 +17,16 @@
 // - done: U's money is one sum, never split between its ops (two quotes before a payment name one U, wallet.md:353-361).
 //   An op is done once its own status read SUCCESS and the USDC bound into the vault from U (its notes whose leaf the
 //   pages on both RPCs hold for U, whatever their state now: a withdraw may have begun) is at least the sum of the
-//   checked min_amount_out of every op of U whose own status read SUCCESS. Each done op shows its part of U's sum, oldest
-//   first (what 1Click says it delivered, at least its min, the later ones keeping theirs; the last one the rest), shown
-//   again as the sum grows. With deps.untilFinal (SIGN_HOST) a done op is followed on until its quote's deadline is past
-//   on both RPCs (FollowRecord.final), so an older quote's late send to U is bound and counted.
+//   checked min_amount_out of every op of U whose own status read SUCCESS. A held op whose status read SUCCESS joins that
+//   sum once U's bound USDC covers its min on top of the rest: it is no longer held and is done like any other. Each
+//   done op shows its part of U's sum, oldest first (what 1Click says it delivered, at least its min, the later ones
+//   keeping theirs; the last one the rest), shown again as the sum grows. With deps.untilFinal (SIGN_HOST) a done op is
+//   followed on until its quote's deadline is past on both RPCs (FollowRecord.final) on a round with nothing left to
+//   bind (U's USDC under MIN_DEPOSIT on both, no call out), so an older quote's late send to U is bound and counted.
+// - A known limit: 1Click's status comes through the helper, so a hostile helper that forges SUCCESS for a quote never
+//   paid can show it done with another op's money of U, or keep a paid op of U from done until U's sum covers both
+//   (review r3 D2, D2b). The per-U sum bounds it: no op shows done past what U bound into the vault, and nothing is
+//   stranded, every credit to U is bound as U's notes either way.
 // - held: the relayer struck U or refused the call, the bind refused (USDC's code hash moved, a note with another leaf,
 //   the seed not U's), or the pages do not hold a note's leaf. halted while the bind waits on a halt, cleared by the next
 //   bind phase that waits on none.
@@ -626,8 +632,15 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     }
     const total = [...ours.values()].reduce((a, b) => a + b, 0n);
     const all = await opsOfU();
-    const paid = all.filter(([, op]) => op.stage !== "held" && needOf(op) !== null);
-    const need = paid.reduce((a, [, op]) => a + needOf(op)!, 0n);
+    // the ops in U's sum: every op not held whose need is known; then each held one whose own status read SUCCESS (or
+    // whose refund came back), oldest first, once U's sum covers it on top of those: it is no longer held and counts
+    // like any other. A held op whose money never bound never stands in another op's way.
+    const base = all.filter(([, op]) => op.stage !== "held" && needOf(op) !== null);
+    let need = base.reduce((a, [, op]) => a + needOf(op)!, 0n);
+    const lifted = new Set<string>();
+    if (total >= need)
+      for (const [id, op] of all) if (op.stage === "held" && needOf(op) !== null && total >= need + needOf(op)!) (lifted.add(id), (need += needOf(op)!));
+    const paid = all.filter(([id]) => lifted.has(id) || base.some(([b]) => b === id));
     // an op is done once its own status read SUCCESS (or its refund came back) and U's bound sum covers every such op's
     // need: a gift only adds to the sum, a status alone binds nothing. The sum shown per op, oldest first: what 1Click
     // says it delivered (at least its min) while the later ones keep their min, the last one the rest; shown again as
@@ -642,7 +655,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
         const want = op.follow.delivered !== undefined && BigInt(op.follow.delivered) > own ? BigInt(op.follow.delivered) : own;
         const take = k === paid.length - 1 ? rest : want < rest - later ? want : rest - later;
         rest -= take;
-        await write(id, "done", { ...(op.refunded ? { refunded: true } : {}), since_ms: op.since_ms ?? now(), amount_usd: usdOf(take) }, { notes, bound: take.toString() }, txs);
+        await write(id, "done", { ...(op.refunded ? { refunded: true } : {}), since_ms: op.since_ms ?? now(), amount_usd: usdOf(take) }, { notes, bound: take.toString(), why: undefined }, txs);
       }
     }
     return { held: false, unsure, free: total > need };
@@ -668,8 +681,11 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     const counted = await count();
     if (counted.held) return false;
     if (counted.unsure) fast = true;
-    // a done op is followed until its quote's deadline is past on both RPCs: a send to it after that cannot come
-    if (deps.untilFinal)
+    // a done op is followed until its quote's deadline is past on both RPCs: a send to it after that cannot come. It is
+    // marked final only on a round with nothing left to bind: U's USDC read on both RPCs under MIN_DEPOSIT, no note with
+    // its call out, every landed note read on both (a credit or a call still out is bound first)
+    const idle = out === undefined && c !== null && c < VAULT_CONSTANTS.MIN_DEPOSIT && !counted.unsure;
+    if (deps.untilFinal && idle)
       for (const [id, op] of await opsOfU()) if (op.stage === "done" && op.follow.final !== true && (await pastOnBoth(rpcs, op.follow.deadline_ms))) await write(id, "done", factsOf(op), { final: true });
     // what U holds inside intents.near, for an op whose own status read REFUNDED: its origin asset and NEAR USDC (1Click
     // refunds there, refundType INTENTS). refunded is a stage, no end: U's USDC is still bound each round

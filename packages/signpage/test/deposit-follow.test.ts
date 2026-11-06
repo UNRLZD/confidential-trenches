@@ -342,7 +342,8 @@ test("G2 and the body: a throw that is no refusal pauses before the op's next tr
   f.signedOut();
   await f.idle();
   assert.ok(reads > 0, "followed once the store reads");
-  assert.deepEqual(sleeps.slice(0, 4), [1_000, 1_000, 2_000, 4_000], `the pauses: ${sleeps.slice(0, 6).join()}`);
+  // the dead store's pause, then the op's next tries on the new one, the pace kept across the re-follow
+  assert.deepEqual(sleeps.slice(0, 4), [1_000, 2_000, 4_000, 8_000], `the pauses: ${sleeps.slice(0, 6).join()}`);
 });
 
 test("G3: a refusal of the follow (an op naming no valid deposit) ends that op's follow: no retry", async () => {
@@ -365,8 +366,9 @@ test("a done op is followed until its quote's deadline is past on both RPCs, the
   const note = await ns.planDeposit(9n, () => 123n);
   await w.put("ops", "dq-1", { kind: "deposit", stage: "done", txs: [], created_ms: 1, since_ms: 5, amount_usd: "2", follow: { ...FOLLOW, status: "SUCCESS", sent: true, delivered: "2000000", notes: [note.id], bound: "2000000" } });
   let blockMs = FOLLOW.deadline_ms - 60_000;
+  // U's USDC reads 0 on both RPCs at one block: nothing left to bind, so final waits only on the deadline
   const rpcs = (): readonly [FollowRpc, FollowRpc] => {
-    const one = (name: string): FollowRpc => ({ name, query: async () => ({}), tx: async () => ({}), block: async () => ({ result: { header: { timestamp_nanosec: (BigInt(blockMs) * 1_000_000n).toString() } } }) });
+    const one = (name: string): FollowRpc => ({ name, query: async (p) => (p.method_name === "ft_balance_of" ? { result: { block_height: 100, result: [...Buffer.from(JSON.stringify("0"))] } } : {}), tx: async () => ({}), block: async () => ({ result: { header: { timestamp_nanosec: (BigInt(blockMs) * 1_000_000n).toString() } } }) });
     return [one(NEAR_NETWORKS.testnet.fastnear[0]), one(NEAR_NETWORKS.testnet.drpc)];
   };
   const f = depositFollows({ network: () => "testnet", store: async () => w, seed64: async () => Uint8Array.from(SEED), rpcs, fetch: (async () => status("SUCCESS")) as unknown as typeof fetch, sleep: () => pause(5) as Promise<void>, locks: () => null, now: () => 1_762_400_000_000 });
@@ -475,4 +477,28 @@ test("G2b: a sign out ends a follow in its retry pause at once, so U's lock goes
   assert.ok(ended, "the stopped follow waited out its pause");
   await pause(20);
   assert.ok(!(await navigator.locks.query()).held!.some((l) => l.name === `${FOLLOW_LOCK}testnet/${U}`), "U's lock is still held");
+});
+
+test("G2c: a note store that never opens is retried at a pace that doubles across the op's re-follows, to the cap, never every second", async () => {
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  closers.push(() => w.close());
+  await w.put("ops", "dq-1", { kind: "deposit", stage: "in_transit", txs: [], created_ms: 1, follow: { ...FOLLOW, sent: true } });
+  let opens = 0;
+  const sleeps: number[] = [];
+  const f = depositFollows({
+    network: () => "testnet",
+    // settle's read is the first; every open of U's note store after it fails
+    store: async () => (++opens === 1 ? w : Promise.reject(new Error("open blocked"))),
+    seed64: async () => Uint8Array.from(SEED),
+    rpcs: RPCS,
+    fetch: (async () => status("PROCESSING")) as unknown as typeof fetch,
+    // nine pauses, then a sign out; each pause a turn of the event loop, as a timer is
+    sleep: async (ms) => (sleeps.push(ms), sleeps.length >= 9 && f.signedOut(), await new Promise<void>((ok) => setImmediate(ok))),
+    locks: () => null,
+    now: () => 1_762_400_000_000,
+  });
+  await f.settle();
+  for (let k = 0; k < 200 && sleeps.length < 9; k++) await pause(5);
+  await f.idle();
+  assert.deepEqual(sleeps.slice(0, 9), [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000, 60_000], `the pauses: ${sleeps.slice(0, 9).join()}`);
 });

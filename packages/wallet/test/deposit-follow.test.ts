@@ -1109,3 +1109,119 @@ test("F5e: a forged REFUNDED with nothing under U inside intents, and a 1 USDC g
   assert.notEqual(op.stage, "done");
   assert.deepEqual(t.binds.map((b) => b.amount), [VAULT_MIN], "the gift is bound all the same");
 });
+
+// ---------- r3: a held op whose money binds later, final with nothing left to bind ----------
+test("D3b: a held op whose money binds later is no longer held: it counts like any SUCCESS op, each op shows its own money", async () => {
+  const t = await setup(["PENDING_DEPOSIT"]);
+  const BADDR = "b".repeat(64);
+  const B = { ...t.args, opId: "dq-B", address: BADDR };
+  const CB = 5_000_000n;
+  const scripts: Record<string, (OneClickStatus | [OneClickStatus, bigint])[]> = { [ADDR]: [["SUCCESS", CREDIT]], [BADDR]: ["PENDING_DEPOSIT"] };
+  const p = perAddress(t.u, scripts);
+  const spy = t.deps.bind!;
+  let calls = 0;
+  // B's first bind is refused (B held, U's money waits under U); the next round binds it
+  const bind: typeof bindDeposit = async (s, a, dps) => (++calls === 2 ? ({ kind: "refused", code: "deposit_failed" } as BindOutcome) : spy(s, a, dps));
+  t.chain.credit(CREDIT);
+  const ac = new AbortController();
+  const deps = { ...t.deps, fetchFn: p.fetchFn, signal: ac.signal, untilFinal: true, bind };
+  const a = settled(followDeposit(t.args, deps));
+  const b = settled(followDeposit(B, deps));
+  t.onTick.fn = (n) => {
+    if (n === 3) scripts[BADDR]!.splice(0, 1, ["SUCCESS", CB]); // B's SUCCESS reads before its money reaches U
+    if (n === 5) t.chain.credit(CB);
+    if (n >= 20) ac.abort(new Error("stop"));
+  };
+  const rb = await b;
+  await a;
+  const opA = await opOf(t.w);
+  const opB = await opOf(t.w, "dq-B");
+  assert.deepEqual(rb.ok && rb.v, { kind: "held", why: "deposit_failed" }, "B's follow ended held when its bind was refused");
+  assert.equal(calls, 3);
+  assert.deepEqual(t.binds.map((x) => x.amount), [CREDIT, CB]);
+  assert.equal(t.chain.a.balance, 0n);
+  assert.equal(opB.stage, "done", `B stays ${opB.stage} with its money in the vault`);
+  assert.equal(opB.amount_usd, usdOf(CB));
+  assert.equal(opB.held_id, undefined);
+  assert.equal(opB.follow.why, undefined);
+  assert.equal(opA.amount_usd, usdOf(CREDIT), `A shows ${opA.amount_usd}, B's money as its own`);
+});
+
+test("D3c: a held op whose money never bound never stands in another op's way: A is done with its own money, the held op stays held", async () => {
+  const t = await setup(["SUCCESS"]);
+  // B: its status read SUCCESS, then the relayer struck U before its money bound; it is older than A
+  await t.w.put("ops", "dq-B", { kind: "deposit", stage: "held", held_id: t.u, since_ms: NOW, txs: [], created_ms: NOW - 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: "b".repeat(64), deadline_ms: DEADLINE, origin: ORIGIN, min_out: MIN_OUT, sent: true, status: "SUCCESS", delivered: "0", why: "sender_struck" } });
+  // A's SUCCESS reads first, then its money reaches U: U's sum covers A, not A and B
+  t.onTick.fn = (n) => n === 2 && t.chain.credit(CREDIT);
+  const out = await followDeposit(t.args, { ...t.deps, signal: stop(t, 30) });
+  const opA = await opOf(t.w);
+  const opB = await opOf(t.w, "dq-B");
+  assert.equal(out.kind, "done");
+  assert.equal(opA.amount_usd, usdOf(CREDIT));
+  assert.equal(opB.stage, "held");
+  assert.equal(opB.follow.why, "sender_struck");
+});
+
+/** A bind call as the note store keeps it (only its shape is read here). */
+const callOf = (u: string, balance: bigint) => ({ signed_delegate: "AAAA", sender_id: u, receiver_id: NET.usdc, nonce: 1n, max_block_height: 1n, public_key: publicKeyOf(u), balance });
+
+test("D4: with untilFinal, final is never written while U holds a credit not yet bound: a late 1.5 USDC is bound before the follow ends", async () => {
+  const t = await setup(["SUCCESS"]);
+  t.chain.credit(CREDIT);
+  const LATE = 1_500_000n;
+  const spy = t.deps.bind!;
+  let calls = 0;
+  // the late credit's first phase ends on a wait (one RPC behind); the next round binds it
+  const bind: typeof bindDeposit = async (s, a, dps) => (++calls === 2 && (await dps.onWait?.("rpc")), spy(s, a, dps));
+  let doneAt = 0;
+  t.onTick.fn = (n) => {
+    if (doneAt === 0 && t.stages.at(-1) === "done") {
+      doneAt = n;
+      t.chain.credit(LATE); // a late credit to U (a gift, an older quote's late send)
+      t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1; // and the quote's deadline passes on both
+    }
+  };
+  const out = await followDeposit(t.args, { ...t.deps, bind, untilFinal: true, signal: stop(t, 40) });
+  const op = await opOf(t.w);
+  assert.equal(out.kind, "done");
+  assert.equal(op.follow.final, true);
+  assert.equal(t.chain.a.balance, 0n, `the follow ended final with ${t.chain.a.balance} unbound in U`);
+  assert.deepEqual(t.binds.map((x) => x.amount), [CREDIT, LATE]);
+  assert.equal(op.amount_usd, usdOf(CREDIT + LATE));
+});
+
+test("D4b: with untilFinal, final is never written while a note's call is out (U's USDC gone with it, the relayer's tx not seen yet)", async () => {
+  const t = await setup(["SUCCESS"]);
+  t.chain.credit(CREDIT);
+  const LATE = 1_500_000n;
+  const spy = t.deps.bind!;
+  let calls = 0;
+  const bind: typeof bindDeposit = async (s, a, dps) => {
+    calls++;
+    if (calls === 2) {
+      // the late credit's call is written and sent: U's USDC goes with it, and the phase waits on the relayer's tx
+      if ((await t.store.get(a.noteId))!.state === "PLANNED") await t.store.move(a.noteId, "PLANNED", "INCOMING");
+      await t.store.addCall(a.noteId, callOf(t.u, a.amount), 0);
+      t.chain.credit(0n);
+      await dps.onWait?.("rpc");
+    }
+    if (calls === 3) await dps.onWait?.("rpc"); // still not seen: U reads 0, the call is out
+    return spy(s, a, dps);
+  };
+  let doneAt = 0;
+  t.onTick.fn = (n) => {
+    if (doneAt === 0 && t.stages.at(-1) === "done") {
+      doneAt = n;
+      t.chain.credit(LATE);
+      t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1;
+    }
+  };
+  const out = await followDeposit(t.args, { ...t.deps, bind, untilFinal: true, signal: stop(t, 40) });
+  const op = await opOf(t.w);
+  const notes = await t.store.list();
+  assert.equal(out.kind, "done");
+  assert.equal(op.follow.final, true);
+  assert.equal(calls, 4, "the call out was settled before the follow ended");
+  assert.ok(notes.every((n) => n.leaf !== undefined), `a note still in flight: ${notes.filter((n) => n.leaf === undefined).map((n) => n.state)}`);
+  assert.equal(op.amount_usd, usdOf(CREDIT + LATE));
+});

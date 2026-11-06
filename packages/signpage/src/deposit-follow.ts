@@ -56,6 +56,11 @@ export function depositFollows(h: FollowHost) {
   // each op's follow and the signal it runs under: one that is stopping (a sign out, a closed store) is never handed back
   const running = new Map<string, { p: Promise<void>; signal: AbortSignal }>();
   const listeners = new Map<string, Set<(s: DepositStage) => void>>();
+  // each op's next retry pause, kept across its re-follows (a note store that never opens is retried at the capped
+  // pace, never every second); a follow that returns clean drops it
+  const waits = new Map<string, number>();
+  const RETRY_MIN_MS = 1_000;
+  const RETRY_MAX_MS = 60_000;
   let abort = new AbortController();
   const rpcs = h.rpcs ?? (() => [followRpc(NEAR_NETWORKS[h.network()].fastnear[0]), followRpc(NEAR_NETWORKS[h.network()].drpc)] as const);
   const locks = h.locks ?? (() => (typeof navigator !== "undefined" ? (navigator.locks ?? null) : null));
@@ -116,8 +121,9 @@ export function depositFollows(h: FollowHost) {
     // a throw that is no refusal (the store, a read) pauses and runs again; only the sign out's signal ends it
     let again = false;
     const one = async () => {
-      for (let wait = 1_000; ; wait = Math.min(wait * 2, 60_000)) {
+      for (let wait = waits.get(id) ?? RETRY_MIN_MS; ; wait = Math.min(wait * 2, RETRY_MAX_MS)) {
         if (signal.aborted) return;
+        waits.set(id, Math.min(wait * 2, RETRY_MAX_MS));
         try {
           let notes: NoteStore;
           try {
@@ -131,7 +137,7 @@ export function depositFollows(h: FollowHost) {
           }
           const ops = await h.store();
           const now = await ops.get("ops", id);
-          if (!isDepositOp(now) || followEnded(now)) return;
+          if (!isDepositOp(now) || followEnded(now)) return void waits.delete(id);
           await followDeposit({ opId: id, network: f.network, s: BigInt(f.s), i: f.i, u: f.u, address: f.address, deadline_ms: f.deadline_ms, origin: f.origin, min_out: f.min_out }, {
             ops,
             store: notes,
@@ -145,9 +151,10 @@ export function depositFollows(h: FollowHost) {
             ...(h.now ? { now: h.now } : {}),
             onStage: (s, _f, opId) => listeners.get(opId)?.forEach((fn) => fn(s)),
           });
-          return;
+          return void waits.delete(id);
         } catch (e) {
-          if (signal.aborted || e instanceof DepositFollowRefused) return;
+          if (signal.aborted) return;
+          if (e instanceof DepositFollowRefused) return void waits.delete(id);
           await sleep(wait, signal);
         }
       }
