@@ -31,6 +31,7 @@
 // - An abort ends the sync at once, even inside a read an RPC never answers; the signal goes to the RPC's query too.
 // The kit names no provider: the caller passes two RPCs of different operators (the wallet's NEAR_NETWORKS pair).
 import { VAULT_CONSTANTS, VAULT_FIELD_P, vaultAccountId, vaultDecimal, type VaultSpendStatus } from "./shapes.ts";
+import { deepFreeze } from "../freeze.ts";
 
 /**
  * A NEAR JSON-RPC provider's `query` method: the params of one query, its whole JSON-RPC answer. The signal is the
@@ -48,7 +49,7 @@ export interface VaultSyncRpc {
 export const VAULT_SYNC_LAG_MAX = 120;
 
 /** The lists the vault pages (2.5.6). */
-export const VAULT_SYNC_LISTS = ["deposits", "spends", "leaves", "labels"] as const;
+export const VAULT_SYNC_LISTS = deepFreeze(["deposits", "spends", "leaves", "labels"] as const);
 export type VaultSyncList = (typeof VAULT_SYNC_LISTS)[number];
 
 /**

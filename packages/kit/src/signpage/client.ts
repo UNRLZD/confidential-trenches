@@ -45,6 +45,7 @@ import {
   signpageReadySchema,
   signpageStateEventSchema,
 } from "./schema.ts";
+import { deepFreeze } from "../freeze.ts";
 
 export { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_MAX_DEPTH, SIGNPAGE_MAX_REQUEST_BYTES } from "./schema.ts";
 
@@ -60,7 +61,7 @@ const RETRY_FIRST_MS = 1_000;
 const LOAD_GRACE_MS = 1_000;
 
 /** How long the client waits for each kind's answer (app.md §2.1 item 3's table); null: no timeout. */
-export const SIGNPAGE_TIMEOUT_MS = {
+export const SIGNPAGE_TIMEOUT_MS = deepFreeze({
   "deposit.quote": 15_000,
   "deposit.confirm": 15_000,
   arm: 5_000,
@@ -89,13 +90,13 @@ export const SIGNPAGE_TIMEOUT_MS = {
   // deposit.quote does (deposit.assets asks the token list, then one dry quote per asset at once)
   "deposit.assets": 15_000,
   "deposit.dry": 15_000,
-} as const satisfies Record<SignpageKind, number | null>;
+} as const satisfies Record<SignpageKind, number | null>);
 
 /** After one of these times out, the client asks `state` again (a new `state` request); the kind itself is never re-sent. */
 const REASK_STATE: ReadonlySet<SignpageKind> = new Set(["deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return", "pool.deposit", "pool.buy", "pool.sell"]);
 
 /** The hidden iframe's attributes (app.md §2.1 item 2; AX-06, app.md:1386). */
-export const SIGNPAGE_IFRAME_ATTRIBUTES = {
+export const SIGNPAGE_IFRAME_ATTRIBUTES = deepFreeze({
   sandbox: "allow-scripts allow-same-origin",
   allow: "",
   referrerpolicy: "no-referrer",
@@ -103,10 +104,10 @@ export const SIGNPAGE_IFRAME_ATTRIBUTES = {
   tabindex: "-1",
   width: "0",
   height: "0",
-} as const;
+} as const);
 
 /** The codes the client itself answers with, never the page. */
-export const SIGNPAGE_CLIENT_CODES = { timeout: "client_timeout", down: "signpage_down" } as const;
+export const SIGNPAGE_CLIENT_CODES = deepFreeze({ timeout: "client_timeout", down: "signpage_down" } as const);
 
 /** "update": the page speaks an `api` this client does not (CH-146); money stays off until a reload. */
 export type SignpageClientStatus = "connecting" | "ready" | "down" | "update";

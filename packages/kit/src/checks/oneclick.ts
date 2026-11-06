@@ -164,8 +164,11 @@ function signedMessage(qr: Record<string, unknown>, q: Record<string, unknown>, 
   return new TextEncoder().encode(base58.encode(sha256(new TextEncoder().encode(json))));
 }
 
+// A key is taken only as "ed25519:" and its base58, the one form the pinned set and SIGN_HOST's deploy gate name (review
+// low 1): a bare base58 key, wherever it came from, verifies nothing.
 function keyBytes(k: string): Uint8Array {
-  return base58.decode(k.startsWith("ed25519:") ? k.slice(8) : k);
+  if (typeof k !== "string" || !k.startsWith("ed25519:")) throw new Error("a 1Click key is ed25519:<base58>");
+  return base58.decode(k.slice(8));
 }
 
 function verifiesUnder(keys: readonly string[], answer: Record<string, unknown>): boolean {

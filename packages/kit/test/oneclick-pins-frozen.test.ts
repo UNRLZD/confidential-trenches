@@ -7,6 +7,7 @@
 // address, so no file is written): the walk names exactly that pin.
 //   node --test test/oneclick-pins-frozen.test.ts      (from packages/kit)
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
 import * as ONECLICK from "../src/checks/oneclick.ts";
@@ -112,4 +113,41 @@ test("the walk itself: a Set, a Map, a nested writable object or a writable arra
   const nested = Object.freeze({ a: Object.freeze([1]), b: { c: 1 } });
   assert.deepEqual(unfrozen({ S: new Set([1]), M: new Map(), N: nested, A: [1], f: () => 1, n: 1, s: "x" }),
     ["S: a Set stays writable when frozen", "M: a Map stays writable when frozen", "N.b", "A"]);
+});
+
+// Review low 1: the check took a key with or without its "ed25519:" prefix, so a bare base58 key (the review's plant
+// P5, added at the verify call) verified while SIGN_HOST's gate, which reads "ed25519:" literals, saw nothing. The key
+// set here is loaded in the kit's place (a ?bare address: oneclick.ts reads oneclick-keys.ts?bare, which holds 1Click's
+// own key without its prefix), and 1Click's real signed live quote (test/fixtures/oneclick-quotes.json) must be refused
+// on its signature under it, while the pinned set still passes it.
+const BARE = "export const ONECLICK_SIGNING_KEYS = Object.freeze([\"reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc\"]);\n";
+const KEYS_IMPORT = 'import { ONECLICK_SIGNING_KEYS } from "./oneclick-keys.ts";';
+registerHooks({
+  load(url, context, next) {
+    const u = new URL(url);
+    if (u.searchParams.get("bare") === null) return next(url, context);
+    if (u.pathname.endsWith("/oneclick-keys.ts")) return { format: "module", source: BARE, shortCircuit: true };
+    const r = next(url, context);
+    const src = String(r.source);
+    if (src.split(KEYS_IMPORT).length !== 2) throw new Error(`${url}: the key set's import moved; update this test`);
+    return { ...r, source: src.replace(KEYS_IMPORT, KEYS_IMPORT.replace("oneclick-keys.ts", "oneclick-keys.ts?bare")) };
+  },
+});
+
+test("a key without its ed25519: prefix verifies nothing: 1Click's real live quote is refused on its signature under it", async () => {
+  type Answer = { quoteRequest: Record<string, unknown>; quote: Record<string, unknown>; timestamp: string } & Record<string, unknown>;
+  const fx = JSON.parse(readFileSync(new URL("./fixtures/oneclick-quotes.json", import.meta.url), "utf8")) as { live: { answer: Answer } };
+  const qr = fx.live.answer.quoteRequest;
+  const req = { dry: false, swapType: "EXACT_INPUT", slippageTolerance: qr.slippageTolerance, originAsset: qr.originAsset,
+    depositType: qr.depositType, destinationAsset: qr.destinationAsset, amount: qr.amount, refundTo: qr.refundTo,
+    refundType: qr.refundType, recipient: qr.recipient, recipientType: qr.recipientType, deadline: qr.deadline } as ONECLICK.OneClickRequest;
+  const opts: ONECLICK.OneClickCheckOptions = { path: "partner", pricing: { in: ["4.442323", "4.45"], out: ["1", "1"] }, decimalsIn: 24,
+    decimalsOut: 6, intoVault: false, now: Date.parse(fx.live.answer.timestamp) + 1_000 };
+  // the pinned set, "ed25519:" and all, passes the real quote
+  assert.equal(ONECLICK.checkOneClickQuote(req, structuredClone(fx.live.answer), opts).amountIn, BigInt(req.amount));
+  const bareSpec = "../src/checks/oneclick.ts?bare"; // a variable: the type check reads no ?bare module
+  const bare = (await import(bareSpec)) as typeof ONECLICK;
+  assert.deepEqual([...bare.ONECLICK_SIGNING_KEYS], ["reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc"]);
+  assert.throws(() => bare.checkOneClickQuote(req, structuredClone(fx.live.answer), opts),
+    (e: unknown) => e instanceof bare.OneClickQuoteError && e.check === "signature");
 });
