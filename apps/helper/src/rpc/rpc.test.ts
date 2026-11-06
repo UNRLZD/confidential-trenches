@@ -839,12 +839,13 @@ test("card evm-rpc-spare-list: with the rest held for longer than the wait, a -3
 // read stopped there although the list's next providers keep those blocks.
 
 /** History refusals read live: blockmachine (-32002, 2026-11-05 19:48Z), blockvectra (-32011, 2026-11-04 14:4xZ),
- *  PublicNode's archive refusal and its state refusal (card evm-quote-warm-round fold 8, 2026-11-05 01:15Z). */
+ *  PublicNode's archive refusal, daybreak's state refusal and blockmachine's (a state read 600 s back, 2026-11-06 12:40Z). */
 const HISTORY_ERRS = [
   { code: -32002, message: "keyless requests are served for the most recent 5000 blocks only" },
   { code: -32011, message: "block reference is outside the public history window", data: { reason: "state_window", retryable: false } },
   { code: -32602, message: "Archive requests require a personal token. Get yours at https://www.allnodes.com/publicnode" },
-  { code: -32000, message: "historical state 0xabc is not available" },
+  { code: -32000, message: "historical state 475cc231cbd3eb500d20ea718cb62c5432a04bb085fa5dbac39912ae52aa4590 is not available" },
+  { code: -32000, message: "missing trie node" },
 ];
 for (const error of HISTORY_ERRS) {
   test(`card evm-rpc-spare-list: with the configured provider and the first pinned one refusing the read's blocks (${error.code} ${error.message.slice(0, 40)}), the next provider's answer reaches the caller, and neither is held`, async () => {

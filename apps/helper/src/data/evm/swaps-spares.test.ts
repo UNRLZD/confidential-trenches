@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { fakeChain, ICNT, open, REC } from "../../../test/evm-swaps/base.ts";
 
 const FOUR = ["https://a.test", "https://b.test", "https://c.test", "https://d.test"];
-type Down = "503" | "refused";
+type Down = "503" | "refused" | "history";
 
 /** The fake chain behind four providers. `onlyFor` says which methods the dead providers fail ("head": the head read;
  *  "reads": the logs and calls, their head answering). The first two providers asked such a method are the dead ones, so
@@ -25,6 +25,12 @@ function rig(how: Down, onlyFor: "head" | "reads") {
     if (kind && dead.size < 2) dead.add(url);
     if (kind && dead.has(url)) {
       if (how === "refused") throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+      // a provider that keeps only its newest blocks (rpc-robinhood.blockmachine.io, read 2026-11-05 19:48Z): each call
+      // of the batch answered with its -32002, HTTP 200
+      if (how === "history") {
+        const ids = (JSON.parse(String(init.body)) as { id: unknown }[]).map((r) => r.id);
+        return new Response(JSON.stringify(ids.map((id) => ({ jsonrpc: "2.0", id, error: { code: -32002, message: "keyless requests are served for the most recent 5000 blocks only" } }))), { status: 200, headers: { "content-type": "application/json" } });
+      }
       return new Response("down", { status: 503 });
     }
     return chain.fetch(url, init);
@@ -55,6 +61,19 @@ for (const how of ["503", "refused"] as const) {
 
 test("guard: with the first two providers asked for logs and calls down (their head answering), the logs and calls are read from the third and fourth and the tape answers 200", async () => {
   const { s, dead, asked } = rig("503", "reads");
+  try {
+    const r = await s.trades(ICNT, 50);
+    assert.equal(dead.size, 2);
+    const live = FOUR.filter((u) => !dead.has(u));
+    for (const u of live) assert.ok(asked.some((a) => a.startsWith(u) && /eth_getLogs|eth_call/.test(a)), `${u} was never asked for logs or calls: ${asked.join(" | ")}`);
+    assert.equal(r.status, 200, r.body);
+  } finally {
+    s.stop();
+  }
+});
+
+test("card evm-rpc-spare-list, 6 Nov: with the first two providers asked for logs and calls refusing their blocks (-32002, a keyless provider's history cap), the logs and calls are read from the third and fourth and the tape answers 200", async () => {
+  const { s, dead, asked } = rig("history", "reads");
   try {
     const r = await s.trades(ICNT, 50);
     assert.equal(dead.size, 2);
