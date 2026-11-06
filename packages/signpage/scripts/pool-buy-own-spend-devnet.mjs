@@ -34,11 +34,10 @@ const { openNoteStore, refKey } = await import("../../wallet/src/notes/store.ts"
 const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { solanaRestoreNotes } = await import("../../wallet/src/pool/solana-restore.ts");
-const { pageRpc } = await import("../src/page-rpc.ts");
 const { readSolanaRent, solanaRentMin } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import("../src/pool-testnet.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
 if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
@@ -62,7 +61,7 @@ const logged = (rpc) => {
   p.url = rpc.url; // the kit tells two providers apart by their URL
   return p;
 };
-const rpcs = [logged(pageRpc(TESTNET_RPCS.solana[0])), logged(pageRpc(TESTNET_RPCS.solana[1]))];
+const rpcs = [logged(testnetRpc(TESTNET_RPCS.solana[0])), logged(testnetRpc(TESTNET_RPCS.solana[1]))];
 
 // the prover: snarkjs's fullProve in this process, on the release's pinned withdraw files
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);

@@ -22,7 +22,7 @@ const HEX = /^0x[0-9a-f]+$/;
 
 /** Per chain: one allowlisted read with the check on its result, and one method off the list. */
 export const CASES = [
-  { chain: "solana", listed: { method: "getBlockHeight", params: [] }, ok: (r) => Number.isSafeInteger(r) && r > 0, unlisted: "getProgramAccounts" },
+  { chain: "solana", listed: { method: "getBlockHeight", params: [] }, ok: (r) => Number.isSafeInteger(r) && r > 0, unlisted: "requestAirdrop" },
   { chain: "base", listed: { method: "eth_blockNumber", params: [] }, ok: (r) => typeof r === "string" && HEX.test(r) && BigInt(r) > 0n, unlisted: "debug_traceTransaction" },
   { chain: "robinhood", listed: { method: "eth_blockNumber", params: [] }, ok: (r) => typeof r === "string" && HEX.test(r) && BigInt(r) > 0n, unlisted: "eth_accounts" },
   // gas_price, not block: a block answer carries chunk signatures that read as key-shaped strings in a recorded file
