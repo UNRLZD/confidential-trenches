@@ -924,7 +924,12 @@ const SCAN_ALONE = 100_000;
  *  its first provider's span down to one block; past SCAN_SHORT_LEVEL times that many, the provider is answering errors
  *  no honest chain explains, and the scan refuses (rpc_error) rather than hold the quote to its bound (review of
  *  1265bd94: a first that answered every range with an error held each cold quote 60 s). Robinhood: 14 x 24 = 336;
- *  Base: 14 x 14 = 196. */
+ *  Base: 14 x 14 = 196. Each request a scan starts with may also be short once for reasons of its own (a query timeout
+ *  answered inside a 200, a provider's range cut below its pinned span) and is answered by its halves, so each one's
+ *  first split, 2 requests, is the scan's beside these: the budget is 2 x the scan's starting requests (its jobs, the
+ *  newest span's and a catch-up's among them, and those a next provider takes) + SCAN_SHORT_LEVEL x ceil(log2(span))
+ *  (review of ac6db348, MEDIUM: a cold Base scan starts with about 101 requests, past the 196 alone, so one honest error
+ *  on each refused every cold Base quote). */
 const SCAN_SHORT_LEVEL = 2 * Math.ceil(EVM_QUOTE_MAX_KEYS / SCAN_MAX_LOGS);
 /** The most currencies one getLogs request names: an OR of topics, so the currencies of a quote's scan cost the
  *  requests of one. */
@@ -1199,7 +1204,8 @@ async function scanPools(
   const jobs: Job[] = [];
   // the halving requests asked for answers short of the logs, and the most an honest chain needs (SCAN_SHORT_LEVEL)
   let shorts = 0;
-  const shortMax = SCAN_SHORT_LEVEL * Math.ceil(Math.log2(first.span));
+  // 2 x the starting requests, added as each set of them is built, + the levels' share (SCAN_SHORT_LEVEL)
+  let shortMax = SCAN_SHORT_LEVEL * Math.ceil(Math.log2(first.span));
   const jobsOf = (g: Each[], from: number, to: number, on = first, into = jobs): void => {
     // where the blocks up to the head are more than the next provider's span, their newest span of it is a request of
     // its own (reviews of 9c962b6d and 1277e8af): a backend a block or two behind its head answers null for that
@@ -1223,6 +1229,7 @@ async function scanPools(
     }
   };
   for (const g of groups.values()) for (const [a, b] of g[0]!.gaps) jobsOf(g, a, b);
+  shortMax += 2 * jobs.length;
   // a scan the second carries whole, in one round of its requests (a warm one): each provider with another behind it
   // has EVM_SCAN_HOLD_MS a request before the next takes it (scanGateOf)
   const fast = second !== undefined && jobs.reduce((n, j) => n + Math.ceil((j.b - j.a + 1) / second.span), 0) <= second.parallel;
@@ -1346,6 +1353,7 @@ async function scanPools(
       for (const g of got) if (g.part === j.part && g.a >= j.a && g.b <= j.b) done = withSpan(done, g.a, g.b);
       const rest: Job[] = [];
       for (const [a, b] of gapsOf(done, j.a, j.b)) jobsOf(j.part, a, b, next, rest);
+      shortMax += 2 * rest.length;
       await settle(rest.map(run));
     });
   const kept = new Set<object>();
@@ -1390,6 +1398,7 @@ async function scanPools(
     pin = agreedAt;
     jobs.length = 0;
     jobsOf(each, head + 1, end);
+    shortMax += 2 * jobs.length;
     await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
   }
   function found({ part, a, b, logs }: (typeof got)[number]) {

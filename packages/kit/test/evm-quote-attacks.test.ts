@@ -1466,8 +1466,8 @@ test("card rh-cold-quote: a first that answers HTTP 413 to a request holding the
 });
 
 test("card rh-cold-quote: a first that answers -32602 to every getLogs refuses rpc_error within an honest split's requests, under 5 s, never the spare's word (review of 1265bd94)", { timeout: 30_000 }, async () => {
-  // 2 x ceil(65,536 / 10,000) x ceil(log2(10M)) = 336 halving requests at most, past the scan's own 2 (the depth and
-  // its newest 2,000 blocks); the bound at 10 s, so a scan that ran to it shows here
+  // 2 x the scan's 2 starting requests (the depth and its newest 2,000 blocks) + 2 x ceil(65,536 / 10,000) x
+  // ceil(log2(10M)) = 340 halving requests at most, past those 2; the bound at 10 s, so a scan that ran to it shows here
   const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f15";
   let batches = 0;
   const c = rcFirst(coin, (inner) => async (calls, s) => {
@@ -1485,9 +1485,33 @@ test("card rh-cold-quote: a first that answers -32602 to every getLogs refuses r
   }
   const ms = Math.round(performance.now() - t);
   console.log(`a first answering errors: ${batches} getLogs batches, ${ms} ms`);
-  assert.ok(batches <= 2 + 2 * Math.ceil(65_536 / 10_000) * Math.ceil(Math.log2(10_000_000)), String(batches));
+  assert.ok(batches <= 2 + 2 * 2 + 2 * Math.ceil(65_536 / 10_000) * Math.ceil(Math.log2(10_000_000)), String(batches));
   assert.ok(ms < 5_000, `${ms} ms`);
   assert.equal(c.spared(), 0);
+});
+
+test("card rh-cold-quote: a cold Base scan whose first answers each of its starting requests once with an error, then answers its halves, lands: each request's first split is the scan's own (review of ac6db348)", { timeout: 30_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000ba5f1";
+  const pools = [seeded(token), real(token)];
+  const seen = new Set<string>();
+  let errs = 0;
+  const inner = scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }]);
+  // a query timeout inside a 200, once for each request of the scan's span (10,000 blocks), never for its halves
+  const first: EvmRpc = async (calls, s) => {
+    const out = await inner(calls, s);
+    const l = calls.find((c) => c.method === "eth_getLogs");
+    if (l === undefined) return out;
+    const f = l.params[0] as { fromBlock: string; toBlock: string };
+    const k = `${f.fromBlock}-${f.toBlock}`;
+    if (Number(f.toBlock) - Number(f.fromBlock) + 1 < 9_000 || seen.has(k)) return out;
+    seen.add(k);
+    errs++;
+    return out.map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32000, message: "query timeout exceeded" } } : o));
+  };
+  const v = await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), chain(pools, 1)], NOW, first));
+  assert.deepEqual(v, below);
+  // their first splits alone pass the levels' share on Base, 2 x ceil(65,536 / 10,000) x ceil(log2(10,000)) = 196
+  assert.ok(2 * errs > 196, `${errs} requests answered an error once`);
 });
 
 test("card rh-cold-quote: one block holding more pools than the first answers refuses too_many_pools, never the spare's word", { timeout: 60_000 }, async () => {
