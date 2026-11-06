@@ -40,7 +40,7 @@
 // the amount again on U's next second-arrival note.
 // Nothing here logs. No request carries a key, the words or a note's secret: the relayer gets the signed delegate
 // alone (sendDepositDelegate), and each read names U or the vault.
-import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_FIELD_P } from "@blindfill/kit";
+import { HELPER_RPC_METHODS, VAULT_FIELD_P, VAULT_SYNC_PAGE, vaultViewTooHeavy } from "@blindfill/kit";
 import { base58, base64 } from "@scure/base";
 import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
@@ -192,14 +192,24 @@ function row(x: unknown, at: number): DepositRow {
   return r;
 }
 
-/** One RPC's pages from `from` to their end: the rows holding any of `ps`, and the count read up to. */
+/**
+ * One RPC's pages from `from` to their end: the rows holding any of `ps`, and the count read up to. Pages start at the
+ * kit's VAULT_SYNC_PAGE.deposits rows (at most 125 Tgas a view, review R-03); a page the RPC refuses as too heavy
+ * (the kit's vaultViewTooHeavy) is read again at half its rows, and one row refused throws.
+ */
 async function scan(rpc: NearRpc, vault: string, ps: readonly bigint[], from: number, signal?: AbortSignal): Promise<{ found: Map<bigint, DepositRow>; end: number }> {
-  const limit = VAULT_CONSTANTS.PAGE_MAX;
+  let limit = VAULT_SYNC_PAGE.deposits;
   const found = new Map<bigint, DepositRow>();
-  for (let at = from; ; at += limit) {
+  for (let at = from; ; ) {
     signal?.throwIfAborted();
     const args = base64.encode(new TextEncoder().encode(JSON.stringify({ from: at, limit })));
-    const res = resultOf(await rpc.query({ request_type: "call_function", account_id: vault, method_name: "deposits", args_base64: args, finality: "final" }));
+    const answer = await rpc.query({ request_type: "call_function", account_id: vault, method_name: "deposits", args_base64: args, finality: "final" });
+    if (vaultViewTooHeavy(answer)) {
+      if (limit === 1) throw new Error("one row is too heavy");
+      limit = Math.floor(limit / 2);
+      continue;
+    }
+    const res = resultOf(answer);
     const bytes = res?.result;
     if (!Array.isArray(bytes) || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) throw new Error("no page");
     const page = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes)));
@@ -207,6 +217,7 @@ async function scan(rpc: NearRpc, vault: string, ps: readonly bigint[], from: nu
     const rows = page.map((x, k) => row(x, at + k));
     for (const r of rows) if (ps.includes(r.precommitment) && !found.has(r.precommitment)) found.set(r.precommitment, r);
     if (rows.length < limit) return { found, end: at + rows.length };
+    at += limit;
   }
 }
 

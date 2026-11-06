@@ -13,6 +13,9 @@
 //   the kit's rule.
 // - The vault is the release's: the testnet vault's deploy record (contracts/vault/deployments/testnet-v1.json,
 //   account_id); mainnet has none until the vault is deployed there, and the tool reads nothing on it until then.
+// - Pages any public RPC serves: the kit's read starts each list at a page of at most 125 Tgas and halves it when an
+//   RPC refuses it as too heavy (review R-03, the kit's VAULT_SYNC_PAGE and vaultViewTooHeavy), so a long list reads
+//   whole on both RPCs.
 // - Current state only (view calls at the final block), so no archive node is needed.
 import {
   nearPairNetwork,
@@ -47,8 +50,10 @@ export class ExitRpcRefused extends Error {
 }
 
 /**
- * A public NEAR RPC by URL: one JSON-RPC `query` per call, its whole answer back. A status other than 200, a body that
- * is not JSON or no answer in `timeoutMs` throws, which the read turns into a stop.
+ * A public NEAR RPC by URL: one JSON-RPC `query` per call, its whole answer back. A status other than 200 or 408, a
+ * body that is not JSON or no answer in `timeoutMs` throws, which the read turns into a stop. A 408's JSON body is the
+ * answer: dRPC's free plan stops a slow view that way (code 30), and the kit's read halves its page on it (as the
+ * kit's nearRpc does, packages/kit/src/near/networks.ts).
  */
 export function exitRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = EXIT_RPC_TIMEOUT_MS): VaultSyncRpc {
   return {
@@ -63,7 +68,7 @@ export function exitRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = 
         credentials: "omit",
         referrerPolicy: "no-referrer",
       });
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+      if (res.status !== 200 && res.status !== 408) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     },
   };

@@ -698,8 +698,8 @@ test("REVIEW K (expect FAIL on 971d252): the caller's AbortSignal stops a scan t
   const ac = new AbortController();
   let pages = 0;
   let afterAbort = 0;
-  const full = (from: number) =>
-    Array.from({ length: 1000 }, (_, k) => ({ index: from + k, precommitment: "1", label: "1", value: "1000000", leaf_index: from + k, depositor: "x.testnet" }));
+  const full = (from: number, limit: number) =>
+    Array.from({ length: limit }, (_, k) => ({ index: from + k, precommitment: "1", label: "1", value: "1000000", leaf_index: from + k, depositor: "x.testnet" }));
   const rpcs = t.deps.rpcs.map((r) => ({
     name: r.name,
     tx: r.tx,
@@ -707,8 +707,8 @@ test("REVIEW K (expect FAIL on 971d252): the caller's AbortSignal stops a scan t
       if (p.method_name === "deposits") {
         if (++pages === 10) ac.abort(new Error("caller stopped"));
         if (ac.signal.aborted && ++afterAbort > 200) throw new Error("test cap");
-        const { from } = JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString());
-        return { jsonrpc: "2.0", id: "x", result: { block_height: 275753808, logs: [], result: [...Buffer.from(JSON.stringify(full(from)))] } };
+        const { from, limit } = JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString());
+        return { jsonrpc: "2.0", id: "x", result: { block_height: 275753808, logs: [], result: [...Buffer.from(JSON.stringify(full(from, limit)))] } };
       }
       return r.query(p);
     },
@@ -940,6 +940,51 @@ test("a deposits page with a leading byte-order mark is not a page: unsure, the 
   assert.equal((await new DepositsWatch(VAULT, t.note.precommitment, t.deps.rpcs).read()).state, "held");
   for (const rpcs of [[bom(0), t.deps.rpcs[1]], [t.deps.rpcs[0], bom(1)]])
     assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, rpcs as unknown as [BindRpc, BindRpc]).read(), { state: "unsure" });
+});
+
+// R-03: an RPC that caps a view's gas below a full page. The answers are the RPCs' own (read 2026-11-06 05:47-05:49Z):
+// nearcore's gas cap at HTTP 200 on all six listed RPCs, dRPC's free-plan timeout at HTTP 408.
+const GAS_CAP = { jsonrpc: "2.0", id: "x", result: { block_hash: "11111111111111111111111111111111", block_height: 1, error: "wasm execution failed with error: HostError(GasLimitExceeded)", logs: [] } };
+const DRPC_TIMEOUT = { id: "x", jsonrpc: "2.0", error: { message: "Request timeout on the free plan, please upgrade to paid plan", code: 30 } };
+test("R-03: deposits pages an RPC refuses as too heavy are read again at half the rows; P on a later page is held, the halving counted", async () => {
+  const t = await setup();
+  for (let i = 0; i < 300; i++) t.chain.addRow(BigInt(7_000 + i), { depositor: "x.testnet" });
+  t.chain.addRow(t.note.precommitment);
+  const capped = (k: number, n: number, refusal: unknown, asked: number[]) => {
+    const r = t.deps.rpcs[k];
+    return {
+      name: r.name,
+      tx: r.tx,
+      query: async (p: Record<string, unknown>) => {
+        if (p.method_name === "deposits") {
+          const { limit } = JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString());
+          asked.push(limit);
+          if (limit > n) return structuredClone(refusal);
+        }
+        return r.query(p);
+      },
+    };
+  };
+  for (const refusal of [GAS_CAP, DRPC_TIMEOUT]) {
+    const asked: number[] = [];
+    const rpcs = [capped(0, 100, refusal, asked), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
+    const got = await new DepositsWatch(VAULT, t.note.precommitment, rpcs).read();
+    assert.equal(got.state, "held");
+    assert.equal(got.state === "held" && got.row.index, 300);
+    // 301 rows: 450 and 225 and 112 refused, then pages of 56 (5 full, one of 21)
+    assert.deepEqual(asked, [450, 225, 112, 56, 56, 56, 56, 56, 56]);
+  }
+  // any other error is not a cap: the read is unsure at once, with no smaller page asked
+  const other = { jsonrpc: "2.0", id: "x", result: { ...GAS_CAP.result, error: "wasm execution failed with error: FunctionCallError(MethodResolveError(MethodNotFound))" } };
+  const asked: number[] = [];
+  const rpcs = [capped(0, 0, other, asked), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
+  assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, rpcs).read(), { state: "unsure" });
+  assert.deepEqual(asked, [450]);
+  // a cap even at one row: unsure after the halvings run out
+  const one: number[] = [];
+  const all = [capped(0, 0, GAS_CAP, one), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
+  assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, all).read(), { state: "unsure" });
+  assert.deepEqual(one, [450, 225, 112, 56, 28, 14, 7, 3, 1]);
 });
 
 test("F2 (M47): a lapse whose nonce moves between the device's read and the signer's: no call at another nonce is sent", async () => {

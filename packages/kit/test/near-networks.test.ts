@@ -44,3 +44,15 @@ test("exactly one FastNEAR URL and the network's dRPC, in either order, is a pai
   assert.match(near.nearPairRule(), /^the RPCs must be one of .* exactly$/);
   assert.ok(near.nearPairRule("testnet").includes(drpc));
 });
+
+test("R-03: nearRpc gives back a 408's JSON body (dRPC's free-plan timeout), the kit's page reads halve on it; any other status throws", async () => {
+  // near.drpc.org and near-testnet.drpc.org, HTTP 408, read 2026-11-06 05:47Z
+  const timeout = { id: "x", jsonrpc: "2.0", error: { message: "Request timeout on the free plan, please upgrade to paid plan", code: 30 } };
+  const answer = (status: number, body: string) => (async () => new Response(body, { status })) as unknown as typeof fetch;
+  const a = await near.nearRpc(near.NEAR_NETWORKS.mainnet.drpc, answer(408, JSON.stringify(timeout))).query({});
+  assert.deepEqual(a, timeout);
+  const { vaultViewTooHeavy } = await import("@blindfill/kit");
+  assert.equal(vaultViewTooHeavy(a), true);
+  await assert.rejects(near.nearRpc(near.NEAR_NETWORKS.mainnet.drpc, answer(408, "Request Timeout")).query({}));
+  for (const status of [429, 500, 503]) await assert.rejects(near.nearRpc(near.NEAR_NETWORKS.mainnet.drpc, answer(status, JSON.stringify(timeout))).query({}), new RegExp(`HTTP ${status}`));
+});
