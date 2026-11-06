@@ -271,10 +271,13 @@ export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze
  * Each answers a W's Transfer read (eth_getLogs, Transfer's topic, topic 2 = the W, no address) at the chain's head and
  * 2,000,000 blocks back, and a CORS preflight from https://sign.confidential.unrealized.trade (POST, content-type)
  * with 204 or 200 and that origin or *. testnet-run takes these too; evmRestoreNotes never names a W to a provider of
- * the pool's own list, so one that is (Robinhood testnet's own, below) is dropped from the W reads there. None is an
- * operator of the kit's providers (evmPoolVenues) but two, each named by the independence test:
- * rpc.testnet.chain.robinhood.com and robinhood-testnet.drpc.org, since no other keyless operator answers every read on
- * Robinhood testnet (below).
+ * the pool's own list, so one that is (Robinhood testnet's own and Base Sepolia's Pocket, below) is dropped from the W
+ * reads there, and thirdweb takes its seat. None is an operator of the kit's providers (evmPoolVenues) but two, each
+ * named by the independence test: rpc.testnet.chain.robinhood.com, since no other keyless operator answers every read
+ * on Robinhood testnet (below), and base-testnet.api.pocket.network (card notes-per-pool-evm-base-hang): the pool's
+ * pair there must page its logs wide, and of Base Sepolia's keyless operators only PublicNode, Pocket and Tenderly do
+ * (sepolia.base.org's 200-block pages were about 8,250 for the pool's life at 200 ms blocks, 6 Nov 04:27-04:35Z), and
+ * PublicNode answers no W's read.
  * The reads, 5 Nov 17:29-17:33Z (W 0x809286a1…078e; 1,000 blocks at the head and 2,000,000 back, then 20 pages):
  * - base-sepolia: base-sepolia.gateway.tenderly.co 1,000 blocks 338 and 447 ms, CORS 204 *;
  *   base-testnet.api.pocket.network 1,000 blocks 190 and 288 ms, 20 x 1,000 p50 213 ms all answered, CORS 204 the origin.

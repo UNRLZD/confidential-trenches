@@ -1111,9 +1111,10 @@ test("EVM_TRANSFER_RPCS: the testnets only (a Base or Robinhood W is read on the
     // thirdweb's keyless quota runs out for the day on every chain at once (5 Nov 16:28Z): a spare, never a seat
     assert.ok(urls.slice(0, 2).every((u) => operator(u) !== "thirdweb.com"), `${net}: thirdweb seated`);
   }
-  // the exceptions, each the doc comment's: Robinhood testnet's own and dRPC (no other keyless operator answers every
-  // read there: Pocket and Tenderly have no Robinhood testnet, PublicNode refuses a filter with no address)
-  const shared: Record<string, string[]> = { "base-sepolia": [], "robinhood-testnet": ["drpc.org", "robinhood.com"] };
+  // the exceptions, each the doc comment's: Robinhood testnet's own (no other keyless operator answers every read there:
+  // Pocket and Tenderly have no Robinhood testnet, PublicNode refuses a filter with no address), and Base Sepolia's
+  // Pocket, of the pool's pair that pages its logs wide (card notes-per-pool-evm-base-hang)
+  const shared: Record<string, string[]> = { "base-sepolia": ["pocket.network"], "robinhood-testnet": ["robinhood.com"] };
   for (const chain of Object.keys(EVM_TRANSFER_RPCS) as (keyof typeof EVM_TRANSFER_RPCS)[]) {
     const kit = evmPoolVenues()[chain].providers ?? assert.fail(`${chain}: the kit pins no providers`);
     const both = EVM_TRANSFER_RPCS[chain].map(operator).filter((o) => kit.some((p) => operator(p) === o));
