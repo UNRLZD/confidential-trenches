@@ -92,9 +92,12 @@ const LOGS_MAX = 2_000;
 // getLogs), base-pokt.nodies.app and 1rpc.io (50 blocks), base.meowrpc.com (no eth_getLogs), base.llamarpc.com (525),
 // rpc-robinhood.blockmachine.io (-32002 past its newest 5,000 blocks; "missing trie node" 600 s back),
 // api.blockvectra.com (-32011 outside its history window), robinhood.rpc.blxrbdn.com (-32601 eth_getLogs), daybreak and
-// globalstake (5 s and more, a timeout at 500,000 back; no state 600 s back).
+// globalstake (5 s and more, a timeout at 500,000 back; no state 600 s back). BlockPI left the Base list (card
+// evm-spare-list-green): Cloudflare's 521, its origin down, to every read from 17:36Z to 22:42Z on 6 Nov (live check
+// evm-rpc-spare-list "chain id <!DOCTYPE html>", runs 42263101671, 42268627326 and 42302023037; three eth_chainId from
+// this Mac at 22:42Z); six stay, the floor five.
 export const MAKER_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
-  base: ["https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://rpc.sentio.xyz/base", "https://base.public.blockpi.network/v1/rpc/public"],
+  base: ["https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://rpc.sentio.xyz/base"],
   robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://4663.rpc.thirdweb.com"],
 };
 

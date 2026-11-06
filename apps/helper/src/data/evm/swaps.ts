@@ -241,7 +241,11 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // mainnet.base.org, Base's own, answers the heads, calls and the traders' lookups (20 eth_getTransactionByHash a
   // second none refused, 19:3xZ) and is sent no log read (limits.ts LOGS_REFUSED): with the three above alone a cold
   // tape's 50 lookups waited on their paces and its traders answered null (index-evm-swaps on a local build, 19:30Z)
-  base: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co", "https://base.public.blockpi.network/v1/rpc/public", "https://base-pokt.nodies.app", "https://mainnet.base.org"],
+  // BlockPI's public endpoint left (card evm-spare-list-green): Cloudflare's 521, its origin down, to every read from
+  // 17:36Z to 22:42Z on 6 Nov (the helper live runs and this Mac). rpc.sentio.xyz/base took its place: single 1,000-block
+  // `eth_getLogs` of the PoolManager at 2, 4 and 6 a second for 6 s, all 72 answered, p50 750-895 ms; batches of 5
+  // answered, of 10 refused (code 8 "JSON-RPC batch exceeds the maximum of 5 requests"), 22:45Z from the Mac.
+  base: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co", "https://rpc.sentio.xyz/base", "https://base-pokt.nodies.app", "https://mainnet.base.org"],
   // Robinhood, 2026-11-03 19:2xZ, `eth_getLogs` of the v4 PoolManager: robinhood.daybreak-rpc.network up to 2,000 blocks
   // (batches of 10), robinhood.drpc.org up to 101 blocks (batches of 3), api.blockvectra.com up to 100 blocks (no
   // batches); each of the three fills a log's `blockTimestamp`. rpc.mainnet.chain.robinhood.com answers 5,000 blocks but
@@ -313,12 +317,12 @@ const WIDE_SPAN: Readonly<Record<string, number>> = {
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
  *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ);
  *  a paced provider's at most its burst (limits.ts PROVIDER_PACE), so a batch never asks more than its bucket holds
- *  (publicnode 6, Tenderly 3, blockpi 4: its public endpoint refused batches of 5, 2026-11-05 19:2xZ). */
+ *  (publicnode 6, Tenderly 3; Sentio 5, its own most, 2026-11-06 22:45Z). */
 const BATCH_SIZE: Readonly<Record<string, number>> = {
   ...BATCH_MAX,
   "https://base-rpc.publicnode.com": 6,
   "https://base.gateway.tenderly.co": 3,
-  "https://base.public.blockpi.network/v1/rpc/public": 4,
+  "https://rpc.sentio.xyz/base": 5,
   "https://api.blockvectra.com/v1/robinhood_mainnet/public": 1,
 };
 

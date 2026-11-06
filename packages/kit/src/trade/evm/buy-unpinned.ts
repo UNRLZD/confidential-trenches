@@ -130,7 +130,14 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // had it on two providers: two that collude and agree, each answering more than the hedge (EVM_HEDGE_MS, 400 ms)
       // sooner than the honest provider they are asked beside, decide before its answer lands (re-review of fd9dd16,
       // Q10).
-      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
+      // BlockPI left the list (card evm-spare-list-green): base.public.blockpi.network answered Cloudflare's 521 (its
+      // origin down) to every read in the helper live runs from 17:36Z to 22:14Z on 6 Nov and to three eth_chainId at
+      // 22:42Z, and a held Base quote ended rpc_error on it (live run 42263101671, 17:36Z). Sentio's rpc.sentio.xyz/base
+      // took its place: its preflight from the app's origin answers 200, allow-origin the app's origin, content-type
+      // allowed, and its POST the same; asked first beside publicnode, 5 of 5 base-hook quotes ended ok, every read the
+      // two agreeing, its posts p50/p95 285/501 ms of 40 (22:44Z from this Mac); it takes batches of 5 calls at most
+      // ("JSON-RPC batch exceeds the maximum of 5 requests"), above CALLS_PER_BATCH.
+      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://rpc.sentio.xyz/base"]),
       // all five then listed kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
